@@ -4,14 +4,27 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
-import type { CommentTriggerPreviewAgent } from "@multica/core/types";
+import { parseMentions } from "@multica/core/issues/comment-trigger-outcomes";
+import type { CommentTriggerPreviewAgent, CommentTriggerOutcome } from "@multica/core/types";
 
 const COMMENT_TRIGGER_PREVIEW_DEBOUNCE_MS = 300;
-const MENTION_RE = /\[@?(.+?)\]\(mention:\/\/(member|agent|squad|issue|all)\/([0-9a-fA-F-]+|all)\)/g;
 const NOTE_COMMAND_RE = /^\/note(?:$|\s)/i;
 
 export interface UseCommentTriggerPreviewResult {
   agents: CommentTriggerPreviewAgent[];
+  // Explicit @agent / @squad mentions that will NOT trigger if posted as-is
+  // (MUL-4525 §2), so the composer can warn before sending.
+  blocked: CommentTriggerOutcome[];
+  // A structured @all mention is a member broadcast, but never starts agents
+  // by itself. This is static mention semantics, not a delivery guarantee:
+  // edits do not notify, and a new comment may have no eligible recipients.
+  hasAllMembersMention: boolean;
+  /**
+   * Whether `agents` answers the draft's current mentions. While a changed
+   * @mention is still debouncing or loading, the previous answer is shown;
+   * nothing destructive may act on it.
+   */
+  isCurrent: boolean;
 }
 
 export function isNoteCommentDraft(content: string): boolean {
@@ -23,10 +36,8 @@ export function commentTriggerPreviewSignature(content: string): string {
 
   const seen = new Set<string>();
   const tokens: string[] = [];
-  for (const match of content.matchAll(MENTION_RE)) {
-    const type = match[2];
-    const id = match[3];
-    if (!type || !id || type === "issue") continue;
+  for (const { type, id } of parseMentions(content)) {
+    if (type === "issue") continue;
     const token = `${type}:${id}`;
     if (seen.has(token)) continue;
     seen.add(token);
@@ -82,6 +93,10 @@ export function useCommentTriggerPreview({
   content: string;
 }): UseCommentTriggerPreviewResult {
   const signature = useMemo(() => commentTriggerPreviewSignature(content), [content]);
+  const hasAllMembersMention = useMemo(
+    () => parseMentions(content).some(({ type, id }) => type === "all" && id === "all"),
+    [content],
+  );
   const debouncedSignature = useDebouncedSignature(signature);
   const contentRef = useRef(content);
   const parentKey = parentId ?? "";
@@ -113,8 +128,13 @@ export function useCommentTriggerPreview({
   // Loading and errors intentionally surface as "no agents": the preview is
   // an enhancement, and the composer renders nothing for an empty list.
   if (signature === "empty" || debouncedSignature === "empty") {
-    return { agents: [] };
+    return { agents: [], blocked: [], hasAllMembersMention, isCurrent: signature === "empty" };
   }
 
-  return { agents: previewQuery.data?.agents ?? [] };
+  return {
+    agents: previewQuery.data?.agents ?? [],
+    blocked: previewQuery.data?.blocked ?? [],
+    hasAllMembersMention,
+    isCurrent: signature === debouncedSignature && previewQuery.isSuccess && !previewQuery.isPlaceholderData,
+  };
 }

@@ -3,6 +3,48 @@ description: Report a bug — something that's broken, crashes, or behaves incor
 title: "[Bug]: "
 labels: ["bug"]
 body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Problem
+      description: What went wrong, and how does it affect what you are trying to do?
+      placeholder: |
+        When I ..., the app ..., so I cannot ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Describe the actions that led to the problem. If it is intermittent, include how often it happens and what you tried.
+      placeholder: |
+        1. Go to ...
+        2. Do ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or logs (optional)
+      description: Attach screenshots or recordings, or paste the relevant error message or log excerpt.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Environment (optional)
+      description: Include the affected app or CLI version, operating system, and browser if relevant.
+
   - type: dropdown
     id: deployment
     attributes:
@@ -14,37 +56,27 @@ body:
     validations:
       required: true
 
-  - type: textarea
-    id: description
+  - type: dropdown
+    id: area
     attributes:
-      label: What happened?
-      description: Describe the bug and what you expected instead. Screenshots, error messages, or screen recordings are welcome.
-      placeholder: |
-        When I do X, Y happens. I expected Z instead.
+      label: Area
+      description: >-
+        Which part of Multica is this about? Areas marked community-maintained are
+        looked after by volunteer maintainers — see
+        https://multica.ai/docs/community-maintained. Please do not @-mention a
+        maintainer directly; we route reports from here.
+      options:
+        - Web app
+        - Desktop app
+        - Mobile app (iOS)
+        - CLI
+        - Agents and runtimes
+        - Issues, projects and workspaces
+        - Chat integration — Feishu / Lark or Slack
+        - Chat integration — DingTalk (community-maintained)
+        - Chat integration — WeCom (community-maintained)
+        - Chat integration — Telegram (community-maintained)
+        - Self-hosting and deployment
+        - Other / not sure
     validations:
       required: true
-
-  - type: textarea
-    id: reproduction
-    attributes:
-      label: Steps to reproduce
-      description: How can we trigger this bug?
-      placeholder: |
-        1. Go to '...'
-        2. Click on '...'
-        3. See error
-    validations:
-      required: true
-
-  - type: textarea
-    id: screenshots
-    attributes:
-      label: Screenshots (optional)
-      description: If applicable, add screenshots or screen recordings to help explain the problem.
-
-  - type: textarea
-    id: context
-    attributes:
-      label: Additional context (optional)
-      description: Environment info, logs, or anything else that might help.
-      render: shell

@@ -120,6 +120,25 @@ var (
 		"other":      "other",
 	}
 
+	knownWebhookRateLimitGates = map[string]string{
+		"absolute_ip":       "absolute_ip",
+		"bad_credential_ip": "bad_credential_ip",
+		"worker_trigger":    "worker_trigger",
+		"other":             "other",
+	}
+
+	knownEmailRateLimitActions = map[string]string{
+		"workspace_invitation": "workspace_invitation",
+		"other":                "other",
+	}
+
+	knownEmailRateLimitGates = map[string]string{
+		"actor":     "actor",
+		"workspace": "workspace",
+		"recipient": "recipient",
+		"other":     "other",
+	}
+
 	knownGithubEventKinds = map[string]string{
 		"pull_request":              "pull_request",
 		"pull_request_review":       "pull_request_review",
@@ -197,6 +216,14 @@ var (
 		"general": "general",
 		"praise":  "praise",
 		"other":   "other",
+	}
+
+	// Evidence kinds for multica_chat_output_local_path_total (MUL-4899). A
+	// closed allowlist is what keeps the offending path out of Prometheus: the
+	// caller passes a classification, never a fragment of the reply.
+	knownChatOutputLocalPathKinds = map[string]string{
+		"file_url":     "file_url",
+		"workdir_path": "workdir_path",
 	}
 
 	knownContactSalesSources = map[string]string{
@@ -328,6 +355,18 @@ func NormalizeWebhookDeliveryStatus(value string) string {
 	return normalizeFromAllowList(value, knownWebhookDeliveryStatuses, "other")
 }
 
+func NormalizeWebhookRateLimitGate(value string) string {
+	return normalizeFromAllowList(value, knownWebhookRateLimitGates, "other")
+}
+
+func NormalizeEmailRateLimitAction(value string) string {
+	return normalizeFromAllowList(value, knownEmailRateLimitActions, "other")
+}
+
+func NormalizeEmailRateLimitGate(value string) string {
+	return normalizeFromAllowList(value, knownEmailRateLimitGates, "other")
+}
+
 func NormalizeGithubEventKind(value string) string {
 	return normalizeFromAllowList(value, knownGithubEventKinds, "other")
 }
@@ -368,21 +407,6 @@ func NormalizeCloudRuntimeStatus(value string) string {
 	return "error"
 }
 
-// CloudRuntimeStatusForCode maps an HTTP status code to its bucket label.
-// Used by cloudruntime client instrumentation.
-func CloudRuntimeStatusForCode(code int) string {
-	switch {
-	case code >= 200 && code < 400:
-		return "ok"
-	case code >= 400 && code < 500:
-		return "4xx"
-	case code >= 500 && code < 600:
-		return "5xx"
-	default:
-		return "error"
-	}
-}
-
 func NormalizeDaemonWSKind(value string) string {
 	return normalizeFromAllowList(value, knownDaemonWSKinds, "other")
 }
@@ -393,4 +417,8 @@ func NormalizeFeedbackKind(value string) string {
 
 func NormalizeContactSalesSource(value string) string {
 	return normalizeFromAllowList(value, knownContactSalesSources, "other")
+}
+
+func NormalizeChatOutputLocalPathKind(value string) string {
+	return normalizeFromAllowList(value, knownChatOutputLocalPathKinds, "other")
 }

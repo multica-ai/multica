@@ -1,0 +1,250 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { isEditableShortcutTarget } from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
+import type { InboxItem } from "@multica/core/types";
+import type { InboxView } from "./inbox-view";
+import { InboxListItem } from "./inbox-list-item";
+import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
+import { useT } from "../../i18n";
+
+// Sizing only (like the board's card estimate): the seed's trailing spacer
+// and Virtuoso's defaultItemHeight share this value so the scroller's height
+// is truthful from the first frame and a restored offset sticks. A row is
+// two text lines (body + caption) plus py-2.5.
+const INBOX_ROW_ESTIMATED_HEIGHT = 58;
+
+/**
+ * Scrollable, virtualized inbox notification list.
+ *
+ * Owns the scroll container so both the mobile and desktop layouts render an
+ * identical scroller. Rows are virtualized via react-virtuoso so only the
+ * visible window (plus a small overscan) is mounted — the notification list
+ * can grow long and every row otherwise carries an avatar + hover card, so
+ * mounting all of them inflates the tab-switch commit (MUL-4474).
+ *
+ * Virtualization changes exactly one thing: whether an off-screen row is in
+ * the DOM. Selection, hover, archive, and scroll semantics are unchanged —
+ * the row component and the callbacks are the same as the non-virtualized
+ * list. `customScrollParent` keeps Virtuoso reading/writing the existing
+ * `overflow-y-auto` element (same pattern as the issue-detail timeline), so
+ * scroll position behaves exactly as before.
+ *
+ * Known virtualization tradeoff: keyboard Tab only reaches currently-mounted
+ * rows; a keyboard-only user must scroll to bring off-screen rows into the
+ * tab order. Arrow-key navigation (below) covers off-screen rows, because it
+ * walks the data rather than the DOM.
+ */
+export function InboxList({
+  items,
+  view,
+  selectedKey,
+  onLoadMore,
+  loadingMore = false,
+  loadMoreError = false,
+  onSelect,
+  onAction,
+  emptyLabel,
+  emptyAction,
+  scrollRestoration = true,
+}: {
+  items: InboxItem[];
+  view: InboxView;
+  selectedKey: string;
+  onLoadMore?: () => void;
+  loadingMore?: boolean;
+  loadMoreError?: boolean;
+  onSelect: (item: InboxItem) => void;
+  onAction: (id: string) => void;
+  emptyLabel?: string;
+  emptyAction?: ReactNode;
+  /**
+   * Off for a preview rendered over another route, which must neither read
+   * nor be captured as that route's `list` scroll offset.
+   */
+  scrollRestoration?: boolean;
+}) {
+  const { t } = useT("inbox");
+  // Virtuoso's `customScrollParent` wants the actual HTMLElement, not a ref.
+  // A callback ref into state hands the element over once it mounts and
+  // triggers the re-render that lets Virtuoso attach to it.
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  // Pull-based scroll restoration (MUL-4741): assign the saved offset at
+  // ref-attach (the seed's estimate spacer gives the container a truthful
+  // height on the first commit, so the assignment sticks pre-paint) and feed
+  // the same offset into the Virtuoso as its initial position.
+  const savedScrollTop = useRestoredScrollOffset("list");
+  const restoreScrollRef = useRestoredScrollRef("list");
+  const restoredScrollTop = scrollRestoration ? savedScrollTop : undefined;
+  const attachScrollEl = useCallback(
+    (el: HTMLDivElement | null) => {
+      setScrollEl(el);
+      if (scrollRestoration) restoreScrollRef(el);
+    },
+    [restoreScrollRef, scrollRestoration],
+  );
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const isArchivedView = view === "archived";
+
+  // Keyboard focus for the list lives on the scroll container, not on a row:
+  // virtualization unmounts the row the user clicked as soon as it scrolls
+  // out, and focus falling back to <body> would silently stop the next arrow
+  // key from reaching this handler. `preventScroll` because focusing a box
+  // scrolls every scrollable ancestor to reveal it, which on desktop shoves
+  // the shell around (#3929).
+  const focusList = useCallback(() => {
+    scrollEl?.focus({ preventScroll: true });
+  }, [scrollEl]);
+
+  const selectItem = useCallback(
+    (item: InboxItem) => {
+      // Safari does not focus a clicked row control, so the container has to
+      // be focused explicitly or the arrow keys would stay dead after a click.
+      focusList();
+      onSelect(item);
+    },
+    [focusList, onSelect],
+  );
+
+  // Arrow keys move the selection instead of scrolling the container — what
+  // every mail-style list does (MUL-5622). Bound to the scroll container
+  // rather than the document so it only fires while focus is inside the list:
+  // pressing Down while reading the issue detail must not swap the row out
+  // from under the reader.
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    // A menu, editor, or text field that already acted on the arrow key owns
+    // it; so does an IME candidate list mid-composition.
+    if (event.defaultPrevented || isImeComposing(event)) return;
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+    if (isEditableShortcutTarget(event.target)) return;
+
+    // Claim the key even at the ends of the list: falling through to the
+    // native scroll there would move the viewport away from the selected row.
+    event.preventDefault();
+    focusList();
+
+    const current = items.findIndex(
+      (item) => (item.issue_id ?? item.id) === selectedKey,
+    );
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    // Nothing selected yet: Down enters the list at the top, Up at the bottom.
+    const nextIndex =
+      current < 0
+        ? step === 1
+          ? 0
+          : items.length - 1
+        : Math.min(Math.max(current + step, 0), items.length - 1);
+    if (nextIndex === current) return;
+    const nextItem = items[nextIndex];
+    if (!nextItem) return;
+
+    // Virtuoso's own scrollIntoView, never the DOM element's: the target row
+    // may not be mounted, and the native call scrolls ancestors too. It is a
+    // no-op while the row is already fully visible, so a selection moving
+    // inside the viewport does not scroll the list.
+    virtuosoRef.current?.scrollIntoView({ index: nextIndex });
+    onSelect(nextItem);
+  };
+
+  const loadMore = useCallback(() => {
+    if (!loadingMore && !loadMoreError) onLoadMore?.();
+  }, [loadingMore, loadMoreError, onLoadMore]);
+  useEffect(() => {
+    if (items.length === 0) loadMore();
+  }, [items.length, loadMore]);
+  // Virtuoso remounts `components.Footer` whenever its identity changes, so
+  // it is memoized to keep the load-more button's focus across renders.
+  const Footer = useCallback(() => <>
+    {isArchivedView && onLoadMore && (
+      <div className="flex flex-col items-center gap-2 py-3">
+        {loadMoreError && <p role="alert" className="text-caption text-destructive">{t(($) => $.errors.archived_load_failed)}</p>}
+        <button type="button" disabled={loadingMore} onClick={onLoadMore}
+          className="rounded-md px-3 py-2 text-caption text-muted-foreground hover:bg-accent/50 focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50">
+          {loadingMore ? t(($) => $.list.loading_more) : loadMoreError ? t(($) => $.list.retry) : t(($) => $.list.load_more)}
+        </button>
+      </div>
+    )}
+  </>, [isArchivedView, onLoadMore, loadingMore, loadMoreError, t]);
+
+  if (items.length === 0) {
+    return (
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {/* On the column title's edge, like Chat's empty list. The detail
+            pane beside it carries the large empty state. */}
+        {!onLoadMore && <div className="px-5 pt-2.5 pb-1.5 text-caption text-muted-foreground">
+          <p>
+            {emptyLabel ??
+              (isArchivedView
+                ? t(($) => $.list.archived_empty)
+                : t(($) => $.list.empty))}
+          </p>
+          {emptyAction && <div className="mt-3">{emptyAction}</div>}
+        </div>}
+        <div className="px-2"><Footer /></div>
+      </div>
+    );
+  }
+
+  const computeItemKey = (_index: number, item: InboxItem) => item.id;
+  const itemContent = (_index: number, item: InboxItem) => (
+    <InboxListItem
+      item={item}
+      view={view}
+      isSelected={(item.issue_id ?? item.id) === selectedKey}
+      onClick={() => selectItem(item)}
+      onAction={() => onAction(item.id)}
+    />
+  );
+
+  // While the callback ref hasn't handed the scroll element over yet (the first
+  // render after a remount), seed a bounded slice of real rows so the list
+  // never paints blank; once it's set, mount the Virtuoso with a matching
+  // `initialItemCount` so the measurement frame keeps those rows (MUL-4750).
+  return (
+    <div
+      ref={attachScrollEl}
+      data-tab-scroll-root={scrollRestoration ? "list" : undefined}
+      // Programmatically focusable only: the rows already carry their own tab
+      // stops, so a tabbable container would just add a redundant one.
+      tabIndex={-1}
+      onKeyDown={handleKeyDown}
+      className="flex-1 min-h-0 overflow-y-auto outline-none"
+    >
+      <div className="px-2 py-1">
+        {scrollEl ? (
+          <Virtuoso
+            ref={virtuosoRef}
+            customScrollParent={scrollEl}
+            data={items}
+            endReached={loadMore}
+            computeItemKey={computeItemKey}
+            initialScrollTop={restoredScrollTop}
+            initialItemCount={Math.min(items.length, VIRTUOSO_SEED_COUNT)}
+            defaultItemHeight={INBOX_ROW_ESTIMATED_HEIGHT}
+            increaseViewportBy={{ top: 400, bottom: 400 }}
+            itemContent={itemContent}
+            components={{ Footer }}
+          />
+        ) : (
+          <VirtuosoSeed
+            data={items}
+            itemContent={itemContent}
+            computeItemKey={computeItemKey}
+            estimatedItemHeight={INBOX_ROW_ESTIMATED_HEIGHT}
+          />
+        )}
+      </div>
+    </div>
+  );
+}

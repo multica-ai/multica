@@ -1,4 +1,5 @@
 import type { TimelineEntry } from "@multica/core/types";
+import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 
 /**
@@ -32,6 +33,25 @@ export function collectThreadReplies(
 }
 
 /**
+ * Unique member and agent authors, root first, followed by all nested replies.
+ * A deleted comment's author no longer takes part in the thread.
+ */
+export function collectThreadParticipants(
+  root: TimelineEntry,
+  replies: readonly TimelineEntry[],
+): TimelineEntry[] {
+  const seen = new Set<string>();
+  return [root, ...replies].filter((entry) => {
+    if (entry.actor_type !== "member" && entry.actor_type !== "agent") return false;
+    if (isDeletedComment(entry)) return false;
+    const key = `${entry.actor_type}:${entry.actor_id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
  * A thread's resolution, derived purely from `resolved_at`. Two user actions
  * write the same field:
  *   - "Resolve thread" sets resolved_at on the ROOT → whole thread folds.
@@ -59,4 +79,43 @@ export function deriveThreadResolution(
     if (!chosen || reply.resolved_at > chosen.resolved_at!) chosen = reply;
   }
   return chosen ? { kind: "reply", resolutionId: chosen.id } : { kind: "none" };
+}
+
+/**
+ * IDs of every thread root (top-level comment) in a timeline — the units the
+ * per-comment collapse store folds. Same root/reply split as issue-detail's
+ * `timelineView` grouping: a comment is a root iff it has no `parent_id`.
+ */
+export function rootCommentIds(entries: readonly TimelineEntry[]): string[] {
+  return entries
+    .filter((e) => e.type === "comment" && !e.parent_id)
+    .map((e) => e.id);
+}
+
+/**
+ * IDs of thread roots that carry a resolution (on the root itself or on a
+ * reply) — the threads that render folded behind a bar until expanded via
+ * `useResolvedExpandStore`. Unresolved roots are excluded on purpose: seeding
+ * them into the expand set would keep them expanded through a later resolve.
+ */
+export function resolvedThreadRootIds(entries: readonly TimelineEntry[]): string[] {
+  const roots: TimelineEntry[] = [];
+  const repliesByParent = new Map<string, TimelineEntry[]>();
+  for (const e of entries) {
+    if (e.type !== "comment") continue;
+    if (!e.parent_id) {
+      roots.push(e);
+    } else {
+      const list = repliesByParent.get(e.parent_id) ?? [];
+      list.push(e);
+      repliesByParent.set(e.parent_id, list);
+    }
+  }
+  return roots
+    .filter(
+      (root) =>
+        deriveThreadResolution(root, collectThreadReplies(root.id, repliesByParent)).kind !==
+        "none",
+    )
+    .map((root) => root.id);
 }

@@ -1,15 +1,36 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } from "electron";
+import {
+  app,
+  autoUpdater as nativeAutoUpdater,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  nativeImage,
+  Notification,
+  screen,
+} from "electron";
 import { homedir } from "os";
 import { join } from "path";
+import { pathToFileURL } from "url";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
-import { setupAutoUpdater } from "./updater";
-import { setupDaemonManager } from "./daemon-manager";
+import { createElectronBusyInstallPrompt, setupAutoUpdater } from "./updater";
+import {
+  prepareDaemonForUpdateInstall,
+  resumeDaemonAfterAbortedUpdateInstall,
+  setupDaemonManager,
+} from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { setupThemeFolder } from "./theme-folder";
+import { setupVoiceInput } from "./voice";
+import { configureLinuxFileDialogs } from "./linux-file-dialog";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
+import { devToolbarPreferencesPath, installDevToolbarToggle } from "./dev-toolbar-toggle";
 import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
+import { installNavigationGuard } from "./navigation-guard";
+import { installWindowForegroundEvents, windowForeground } from "./window-foreground";
+import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -23,18 +44,81 @@ import {
   installRendererRecoveryHandlers,
   type RendererRecoveryWindow,
 } from "./renderer-recovery";
+import { createBestEffortDevLog } from "./dev-log";
+import { ignoreBrokenStdio } from "./stdio-guard";
+import { appendMissingPathDirs } from "./path-fallback";
 import {
   writeFreezeBreadcrumb,
-  readAndClearFreezeBreadcrumb,
+  readFreezeBreadcrumb,
+  ackFreezeBreadcrumb,
   clearFreezeBreadcrumb,
 } from "./freeze-breadcrumb";
+import {
+  loadWindowSession,
+  resolveWindowOptions,
+  saveWindowSessionToFile,
+  snapshotWindowState,
+  windowStateFilePath,
+  type WindowState,
+} from "./window-state";
+import {
+  encodeIssueWindowArgument,
+  parseIssueWindowRequest,
+  type IssueWindowContext,
+} from "../shared/issue-window";
+import {
+  encodeWorkspaceWindowArgument,
+  FOCUS_WORKSPACE_WINDOW_CHANNEL,
+  OPEN_WORKSPACE_WINDOW_CHANNEL,
+  OTHER_WINDOW_WORKSPACES_CHANNEL,
+  parseWorkspaceSlug,
+  parseWorkspaceWindowPath,
+  WINDOW_WORKSPACE_REPORT_CHANNEL,
+} from "../shared/workspace-window";
+import {
+  AUTH_SESSION_STATE_CHANNEL,
+  parseAuthSessionUserId,
+} from "../shared/auth-session";
+import {
+  MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
+  MainRendererMessageQueue,
+  NEW_WINDOW_SHORTCUT_CHANNEL,
+  parseMainRendererChannelState,
+  TAB_SELECTION_SHORTCUT_CHANNEL,
+  WORKSPACE_OPEN_PATH_CHANNEL,
+  type MainRendererMessageChannel,
+} from "../shared/main-renderer-messages";
+import { AuthSessionCoordinator } from "./auth-session-coordinator";
+import { MainWindowRegistry } from "./main-window-registry";
+import {
+  NotificationGate,
+  parseNativeNotificationPayload,
+} from "./notification-gate";
+
+configureLinuxFileDialogs(app.commandLine);
+
+// Guards against registering the will-download handler more than once on the
+// same session. window.webContents.session is shared, and createMainWindow() can
+// be called again on macOS (app "activate" after all windows are closed).
+const downloadDialogSessions = new WeakSet<Electron.Session>();
+
+function installDownloadSaveDialogHandler(window: BrowserWindow): void {
+  const { session } = window.webContents;
+  if (downloadDialogSessions.has(session)) return;
+  downloadDialogSessions.add(session);
+  session.on("will-download", (_event, item) => {
+    item.setSaveDialogOptions({
+      defaultPath: join(app.getPath("downloads"), item.getFilename()),
+    });
+  });
+}
 
 // Bundled icon used for dock/taskbar branding. macOS/Windows production
 // builds let the OS pick up the icon from the .app bundle / .exe resources,
 // but Linux production needs an explicit BrowserWindow `icon` — AppImage
 // direct-launch doesn't register the .desktop entry, so GNOME has no path
 // from the running window to the hicolor icon and falls back to the
-// theme default. Consumed in createWindow() (all platforms in dev, Linux
+// theme default. Consumed in createMainWindow() (all platforms in dev, Linux
 // in prod) and the macOS dev dock branch.
 //
 // `asarUnpack: resources/**` in electron-builder.yml extracts the icon to
@@ -54,22 +138,28 @@ const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
 // Run the user's login shell once to recover the real PATH so the bundled
 // multica CLI can find agent binaries like claude/codex/opencode. Must run
 // before any child_process.spawn / execFile call in the main process —
-// ES module imports are hoisted, so this block executes before createWindow
+// ES module imports are hoisted, so this block executes before createMainWindow
 // or any daemon-manager spawn.
 if (process.platform !== "win32") {
   fixPath();
-  // Fallback: prepend common install locations in case fix-path came up
-  // short (broken shell rc, non-interactive $SHELL, missing entries). Safe
-  // to duplicate — PATH lookups short-circuit on first match.
-  const fallbackPaths = [
+  // Fallback: ensure common install locations are on PATH when fix-path came
+  // up short (broken shell rc, non-interactive $SHELL, missing entries).
+  // Append only missing dirs — never prepend. Prepending /usr/local/bin over
+  // a recovered login PATH shadows nvm/fnm Node with a stale system binary
+  // (e.g. Node 12), which breaks shebang CLIs (`#!/usr/bin/env node`) such as
+  // CodeBuddy and OpenClaw during daemon --version probes.
+  process.env.PATH = appendMissingPathDirs(process.env.PATH ?? "", [
     "/opt/homebrew/bin",
     "/usr/local/bin",
     join(homedir(), ".local/bin"),
-  ];
-  process.env.PATH = `${fallbackPaths.join(":")}:${process.env.PATH ?? ""}`;
+  ]);
 }
 
+// Before anything can log: release builds write to stdout/stderr too.
+ignoreBrokenStdio();
+
 const PROTOCOL = "multica";
+const devLog = is.dev ? createBestEffortDevLog() : undefined;
 
 // Where the main process parks a freeze/crash breadcrumb until the next
 // renderer boot flushes it to telemetry. Lives in userData so it survives a
@@ -78,14 +168,155 @@ function freezeBreadcrumbPath(): string {
   return join(app.getPath("userData"), "last-client-failure.json");
 }
 
-let mainWindow: BrowserWindow | null = null;
-let latestRendererRouteContext: RendererRouteContext | null = null;
+const mainWindows = new MainWindowRegistry<BrowserWindow>();
+const issueWindows = new Set<BrowserWindow>();
+const authSessionCoordinator = new AuthSessionCoordinator<BrowserWindow>(
+  (window) => {
+    issueWindows.delete(window);
+    if (!window.isDestroyed()) window.close();
+  },
+);
+const notificationGate = new NotificationGate();
+const mainRendererMessages = new MainRendererMessageQueue<BrowserWindow>(
+  (window, channel, payload) => {
+    if (!window.isDestroyed()) window.webContents.send(channel, payload);
+  },
+  (window) => !window.isDestroyed() && mainWindows.has(window),
+);
+const unreadBadgeCounts = new Map<BrowserWindow, number>();
+let desktopInitialized = false;
+let authSessionGeneration = 0;
+const rendererRouteContexts = new WeakMap<
+  Electron.WebContents,
+  RendererRouteContext
+>();
+
 let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
 };
 
 // --- Deep link helpers ---------------------------------------------------
+
+function focusWindow(window: BrowserWindow): void {
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+function windowStateFile(): string {
+  return windowStateFilePath(app.getPath("userData"));
+}
+
+/** The main window that app-level requests land in, created on demand. */
+function ensureMainWindow(): BrowserWindow | null {
+  if (!desktopInitialized || !app.isReady()) return null;
+  return (
+    mainWindows.mostRecent() ??
+    createMainWindow(loadWindowSession(windowStateFile())[0])
+  );
+}
+
+/**
+ * Deliver to `target` when given (a window that shows a specific workspace,
+ * or the window a shortcut came from), else to the most recently focused
+ * main window — creating one when none is open.
+ */
+function dispatchToMainRenderer(
+  channel: MainRendererMessageChannel,
+  payload: unknown,
+  target: BrowserWindow | null = null,
+): void {
+  const window =
+    target && !target.isDestroyed() && mainWindows.has(target)
+      ? target
+      : ensureMainWindow();
+  mainRendererMessages.enqueue(window, channel, payload);
+  if (window) focusWindow(window);
+}
+
+/** Shortcuts from a dedicated issue window go to the most recent main window. */
+function mainWindowFor(window: BrowserWindow): BrowserWindow | null {
+  return mainWindows.has(window) ? window : null;
+}
+
+/**
+ * Give a workspace request from `source` to the other main window showing
+ * that workspace: open `path` there when the request has one, else focus it.
+ * Returns false when no other window shows the workspace.
+ */
+function handOffToWorkspaceWindow(
+  source: BrowserWindow | null,
+  request: unknown,
+): boolean {
+  if (!source || !mainWindows.has(source)) return false;
+  if (!request || typeof request !== "object") return false;
+  const { workspaceSlug: rawSlug, path: rawPath, navigate } = request as Record<
+    string,
+    unknown
+  >;
+  const workspaceSlug = parseWorkspaceSlug(rawSlug);
+  if (!workspaceSlug) return false;
+  const path =
+    rawPath === undefined ? null : parseWorkspaceWindowPath(workspaceSlug, rawPath);
+  if (rawPath !== undefined && !path) return false;
+  const target = mainWindows.findByWorkspace(workspaceSlug, source);
+  if (!target || target.isDestroyed()) return false;
+  if (path) {
+    dispatchToMainRenderer(
+      WORKSPACE_OPEN_PATH_CHANNEL,
+      { path, navigate: navigate === true },
+      target,
+    );
+  } else {
+    focusWindow(target);
+  }
+  return true;
+}
+
+// --- Main-window session --------------------------------------------------
+
+// Every main window's geometry and workspace, restored on the next launch.
+// Frozen once a real quit starts: windows close one by one on the way out,
+// and saving after each close would leave only the last one in the file.
+let windowSessionFrozen = false;
+let windowSessionTimer: ReturnType<typeof setTimeout> | null = null;
+
+function saveWindowSession(): void {
+  if (windowSessionTimer) {
+    clearTimeout(windowSessionTimer);
+    windowSessionTimer = null;
+  }
+  if (windowSessionFrozen || mainWindows.size === 0) return;
+  const windows: WindowState[] = [];
+  for (const window of mainWindows.all()) {
+    const snapshot = snapshotWindowState(window);
+    if (!snapshot) continue;
+    const workspaceSlug = mainWindows.workspaceOf(window);
+    windows.push(workspaceSlug ? { ...snapshot, workspaceSlug } : snapshot);
+  }
+  if (windows.length > 0) saveWindowSessionToFile(windowStateFile(), windows);
+}
+
+function scheduleWindowSessionSave(): void {
+  if (windowSessionTimer) clearTimeout(windowSessionTimer);
+  windowSessionTimer = setTimeout(saveWindowSession, 400);
+}
+
+function freezeWindowSession(): void {
+  saveWindowSession();
+  windowSessionFrozen = true;
+}
+
+function applyUnreadBadge(): void {
+  let count = 0;
+  for (const value of unreadBadgeCounts.values()) count += value;
+  if (process.platform === "darwin") {
+    app.dock?.setBadge(count === 0 ? "" : count > 99 ? "99+" : String(count));
+  } else {
+    app.setBadgeCount(count);
+  }
+}
 
 function handleDeepLink(url: string): void {
   try {
@@ -95,9 +326,7 @@ function handleDeepLink(url: string): void {
     // multica://auth/callback?token=<jwt>
     if (parsed.hostname === "auth" && parsed.pathname === "/callback") {
       const token = parsed.searchParams.get("token");
-      if (token && mainWindow) {
-        mainWindow.webContents.send("auth:token", token);
-      }
+      if (token) dispatchToMainRenderer("auth:token", token);
       return;
     }
 
@@ -107,10 +336,14 @@ function handleDeepLink(url: string): void {
     // route persistence, so deep-linking the same invite twice stays safe.
     if (parsed.hostname === "invite") {
       const id = parsed.pathname.replace(/^\//, "");
-      if (id && mainWindow) {
-        mainWindow.webContents.send("invite:open", decodeURIComponent(id));
-      }
+      if (id) dispatchToMainRenderer("invite:open", decodeURIComponent(id));
       return;
+    }
+
+    if (parsed.hostname === "open" && parsed.pathname === "/issue") {
+      // Keep the source instance in the payload. The authenticated renderer
+      // validates it against runtime config before opening a workspace tab.
+      dispatchToMainRenderer("issue:open", url);
     }
   } catch {
     // Ignore malformed URLs
@@ -130,7 +363,83 @@ function getSystemLocale(): string {
   return app.getPreferredSystemLanguages()[0] ?? "en";
 }
 
-function createWindow(): void {
+function loadRenderer(window: BrowserWindow): void {
+  installWindowForegroundEvents(window);
+  const rendererEntry = join(__dirname, "../renderer/index.html");
+  const rendererURL =
+    is.dev && process.env["ELECTRON_RENDERER_URL"]
+      ? process.env["ELECTRON_RENDERER_URL"]
+      : pathToFileURL(rendererEntry).toString();
+
+  // Installed before the load so the very first navigation is already covered.
+  // Both the main window and every issue window load through here, so guarding
+  // this one site covers both — see navigation-guard.ts for what is and is not
+  // in scope (it is origin hardening; in-app routing never reaches it).
+  installNavigationGuard(window, rendererURL);
+
+  if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
+    void window.loadURL(process.env["ELECTRON_RENDERER_URL"]);
+  } else {
+    void window.loadFile(rendererEntry);
+  }
+}
+
+function installLocaleRefresh(window: BrowserWindow): void {
+  // Electron has no dedicated OS-language event. Check whenever any Multica
+  // window regains focus, then broadcast so all open windows remain aligned.
+  window.on("focus", () => {
+    const current = getSystemLocale();
+    if (current === lastKnownSystemLocale) return;
+    lastKnownSystemLocale = current;
+    for (const target of BrowserWindow.getAllWindows()) {
+      if (!target.isDestroyed()) {
+        target.webContents.send("locale:system-changed", current);
+      }
+    }
+  });
+}
+
+function installWindowShortcutHandler(window: BrowserWindow): void {
+  window.webContents.on("before-input-event", (event, input) => {
+    const result = handleAppShortcut(input, window.webContents);
+    if (result === "close-tab") {
+      event.preventDefault();
+      window.webContents.send("tab:close-active");
+    } else if (result === "open-settings") {
+      event.preventDefault();
+      // Settings is a tab, so it can only live in a tabbed main window.
+      // Routing through the queue means the chord also works from a
+      // dedicated issue window — and from one that outlived every main
+      // window, which is recreated and only then handed the request.
+      dispatchToMainRenderer("settings:open", null, mainWindowFor(window));
+    } else if (typeof result === "object" && result.action === "select-tab") {
+      event.preventDefault();
+      // Product tabs only exist in main windows. Route there even when the
+      // chord came from a dedicated issue window, matching Settings behavior.
+      dispatchToMainRenderer(
+        TAB_SELECTION_SHORTCUT_CHANNEL,
+        result.key,
+        mainWindowFor(window),
+      );
+    } else if (result === "new-window") {
+      event.preventDefault();
+      dispatchToMainRenderer(
+        NEW_WINDOW_SHORTCUT_CHANNEL,
+        null,
+        mainWindowFor(window),
+      );
+    } else if (result) {
+      event.preventDefault();
+    }
+  });
+}
+
+/**
+ * A tabbed main window. `saved.workspaceSlug` pins the workspace it opens on;
+ * without one (first launch, or a pre-multi-window state file) the renderer
+ * falls back to its persisted active workspace.
+ */
+function createMainWindow(saved: WindowState = {}): BrowserWindow {
   // Pass the OS-preferred language to the renderer via additionalArguments
   // instead of a sync IPC call. process.argv is available to the preload
   // script before the first network request, so the renderer's i18next
@@ -138,13 +447,26 @@ function createWindow(): void {
   const systemLocale = getSystemLocale();
   lastKnownSystemLocale = systemLocale;
 
-  mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+  // Restore prior size/position/maximized/fullscreen (#5244), constraining
+  // bounds to the work area of the display the window will land on.
+  const windowOpts = resolveWindowOptions(
+    saved,
+    screen.getAllDisplays().map((d) => d.workArea),
+    screen.getPrimaryDisplay().workArea,
+  );
+  const workspaceSlug = saved.workspaceSlug ?? null;
+
+  const window = new BrowserWindow({
+    width: windowOpts.width,
+    height: windowOpts.height,
+    ...(windowOpts.x != null && windowOpts.y != null
+      ? { x: windowOpts.x, y: windowOpts.y }
+      : {}),
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 17 },
+    // Center the native controls in the main window's 40px tab toolbar.
+    trafficLightPosition: { x: 16, y: 13 },
     show: false,
     autoHideMenuBar: true,
     // Windows/Linux pick up the window/taskbar icon from this option.
@@ -155,42 +477,33 @@ function createWindow(): void {
     ...(is.dev || process.platform === "linux"
       ? { icon: BUNDLED_ICON_PATH }
       : {}),
-    webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
-      sandbox: false,
-      webSecurity: false,
-      // Required for the Chromium PDF viewer (PDFium) to activate inside
-      // iframes — used by the attachment preview modal for application/pdf
-      // files. Default is false in Electron; without it <iframe src=*.pdf>
-      // renders blank.
-      //
-      // Security trade-off, accepted intentionally:
-      //   1. This window already runs with `webSecurity: false` + `sandbox: false`,
-      //      so `plugins: true` does NOT meaningfully widen the renderer's
-      //      attack surface beyond what is already accepted.
-      //   2. The only PDFs that reach an iframe here are signed CloudFront URLs
-      //      we ourselves issued (see useDownloadAttachment); user-supplied URLs
-      //      are routed through `setWindowOpenHandler` → `openExternalSafely` and
-      //      cannot land in this renderer.
-      //   3. Chromium's PDFium plugin is itself sandboxed inside its own process
-      //      and only handles the `application/pdf` MIME — it does not expose
-      //      Flash, Java, or other historical plugin surfaces.
-      //
-      // If we ever tighten `webSecurity` / `sandbox`, revisit this by hosting
-      // the PDF viewer in a dedicated BrowserView with `plugins: true` scoped
-      // to that view, keeping the main renderer plugin-free.
-      plugins: true,
-      additionalArguments: [`--multica-locale=${systemLocale}`],
-    },
+    webPreferences: createRendererWebPreferences(
+      join(__dirname, "../preload/index.js"),
+      systemLocale,
+      workspaceSlug ? [encodeWorkspaceWindowArgument(workspaceSlug)] : [],
+    ),
   });
-  const window = mainWindow;
-  latestRendererRouteContext = null;
+  mainWindows.add(window, workspaceSlug);
+  authSessionCoordinator.registerMainWindow(window);
+
+  // Persist bounds on resize/move (debounced) so the next launch restores
+  // size/position and max/fullscreen flags. getNormalBounds is used so
+  // maximized/fullscreen still saves the restore size.
+  window.on("focus", () => mainWindows.focus(window));
+  window.on("resize", scheduleWindowSessionSave);
+  window.on("move", scheduleWindowSessionSave);
+  window.on("close", () => {
+    // Closing the last window keeps it in the file, so the next launch (or a
+    // macOS Dock click) reopens it; closing any other window forgets it.
+    if (mainWindows.size === 1) saveWindowSession();
+  });
 
   window.on("closed", () => {
-    if (mainWindow === window) {
-      mainWindow = null;
-      latestRendererRouteContext = null;
-    }
+    mainWindows.remove(window);
+    authSessionCoordinator.unregisterMainWindow(window);
+    mainRendererMessages.release(window, mainWindows.mostRecent());
+    if (unreadBadgeCounts.delete(window)) applyUnreadBadge();
+    if (mainWindows.size > 0) saveWindowSession();
   });
 
   // Strip Origin header from WebSocket upgrade requests so the server's
@@ -204,60 +517,45 @@ function createWindow(): void {
   );
 
   window.on("ready-to-show", () => {
+    // Restore max/fullscreen after normal bounds are applied.
+    if (windowOpts.isFullScreen) {
+      window.setFullScreen(true);
+    } else if (windowOpts.isMaximized) {
+      window.maximize();
+    }
     window.show();
   });
 
-  // Detect OS language changes while the app is running. Electron has no
-  // dedicated event for this on any platform, so we poll on focus regain —
-  // catches the common case where users switch System Settings → Language
-  // and bring the app back. The renderer decides whether to act (it ignores
-  // the signal when the user has an explicit Settings choice).
-  window.on("focus", () => {
-    const current = getSystemLocale();
-    if (current === lastKnownSystemLocale) return;
-    lastKnownSystemLocale = current;
-    window.webContents.send("locale:system-changed", current);
-  });
+  installLocaleRefresh(window);
+
+  installDownloadSaveDialogHandler(window);
 
   window.webContents.setWindowOpenHandler((details) => {
     openExternalSafely(details.url);
     return { action: "deny" };
   });
 
-  // Window-level keyboard shortcuts. Calling preventDefault here prevents
-  // both the renderer keydown AND the application menu accelerator, so
-  // anything we own here (reload-block, zoom, tab-close) is the sole handler
-  // for that combination — no double-fire with the macOS default View menu.
-  window.webContents.on("before-input-event", (event, input) => {
-    const result = handleAppShortcut(input, window.webContents);
-    if (result === "close-tab") {
-      event.preventDefault();
-      window.webContents.send("tab:close-active");
-    } else if (result) {
-      event.preventDefault();
-    }
-  });
+  // Calling preventDefault in the shared shortcut handler prevents both the
+  // renderer keydown and the application-menu accelerator from double-firing.
+  installWindowShortcutHandler(window);
 
   // Dev-mode renderer diagnostics. When the renderer crashes hard enough
   // that DevTools can't be opened (white screen with no clickable surface),
   // the only way to recover the actual JS error is to forward it from the
-  // main process to the terminal running `make dev`. Without these, the
+  // main process to the dev launcher log. Without these, the
   // user sees only the daemon-manager polling noise (`Render frame was
   // disposed before WebFrameMain could be accessed`) which is a downstream
   // symptom, not the cause.
   //
-  // Gated by `is.dev` to keep production stderr clean — packaged builds
-  // don't have a terminal anyway, and we ship to crash-reporting separately.
-  if (is.dev) {
-    const log = (tag: string, ...args: unknown[]) =>
-      process.stderr.write(`[renderer ${tag}] ${args.map(String).join(" ")}\n`);
-
+  // Gated by `is.dev` to keep production logs clean — packaged builds ship
+  // failures to crash-reporting separately.
+  if (devLog) {
     // Forward every renderer-side console.* call. The detail object also
     // carries source URL + line — included so a thrown stack trace from
     // window.onerror is traceable back to a file.
     window.webContents.on("console-message", (details) => {
       const { level, message, sourceId, lineNumber } = details;
-      log(level, `${message} (${sourceId}:${lineNumber})`);
+      devLog(level, `${message} (${sourceId}:${lineNumber})`);
     });
 
     // Fires when loadURL / loadFile can't reach its target (dev server
@@ -267,13 +565,12 @@ function createWindow(): void {
       "did-fail-load",
       (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
         if (errorCode === -3) return;
-        log(
+        devLog(
           "did-fail-load",
           `code=${errorCode} desc=${errorDescription} url=${validatedURL} mainFrame=${isMainFrame}`,
         );
       },
     );
-
   }
 
   installRendererRecoveryHandlers(window as unknown as RendererRecoveryWindow, {
@@ -281,12 +578,13 @@ function createWindow(): void {
     showReloadPrompt: createElectronReloadPrompt((options) =>
       dialog.showMessageBox(window, options),
     ),
-    getDiagnosticContext: () => ({
-      windowUrl: window.webContents.getURL(),
-      ...(latestRendererRouteContext
-        ? { desktopRoute: latestRendererRouteContext }
-        : {}),
-    }),
+    getDiagnosticContext: () => {
+      // No `windowUrl`: it is an absolute install path (`/Users/<name>/...`
+      // when installed per-user) and the bucketed route below already says
+      // which page the window was on, which is the part we can act on.
+      const routeContext = rendererRouteContexts.get(window.webContents);
+      return routeContext ? { desktopRoute: routeContext } : {};
+    },
     // Only persist in production: a true hang/crash can't report itself, so we
     // write a breadcrumb and the next renderer boot flushes it to PostHog. Dev
     // is excluded to keep field telemetry clean.
@@ -294,6 +592,7 @@ function createWindow(): void {
       ? undefined
       : (payload) =>
           writeFreezeBreadcrumb(freezeBreadcrumbPath(), {
+            ownerId: `main:${window.id}`,
             kind: payload.kind,
             context: payload.context,
             ts: Date.now(),
@@ -301,17 +600,100 @@ function createWindow(): void {
           }),
     clearBreadcrumb: is.dev
       ? undefined
-      : () => clearFreezeBreadcrumb(freezeBreadcrumbPath()),
+      : () =>
+          clearFreezeBreadcrumb(freezeBreadcrumbPath(), `main:${window.id}`),
+    log: devLog,
   });
 
   installContextMenu(window.webContents);
   installNavigationGestures(window);
 
-  if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
-    window.loadURL(process.env["ELECTRON_RENDERER_URL"]);
-  } else {
-    window.loadFile(join(__dirname, "../renderer/index.html"));
+  loadRenderer(window);
+  return window;
+}
+
+function createIssueWindow(context: IssueWindowContext): void {
+  const systemLocale = getSystemLocale();
+  lastKnownSystemLocale = systemLocale;
+
+  const window = new BrowserWindow({
+    width: 960,
+    height: 760,
+    minWidth: 720,
+    minHeight: 520,
+    title: context.title,
+    titleBarStyle: "hiddenInset",
+    // Center the native controls in the issue page's 48px header, which is
+    // this window's title bar.
+    trafficLightPosition: { x: 16, y: 17 },
+    show: false,
+    autoHideMenuBar: true,
+    ...(is.dev || process.platform === "linux"
+      ? { icon: BUNDLED_ICON_PATH }
+      : {}),
+    webPreferences: createRendererWebPreferences(
+      join(__dirname, "../preload/index.js"),
+      systemLocale,
+      [encodeIssueWindowArgument(context)],
+    ),
+  });
+
+  issueWindows.add(window);
+  authSessionCoordinator.registerIssueWindow(window);
+  window.on("closed", () => {
+    issueWindows.delete(window);
+    authSessionCoordinator.unregisterIssueWindow(window);
+  });
+
+  window.on("ready-to-show", () => window.show());
+  installLocaleRefresh(window);
+  installDownloadSaveDialogHandler(window);
+
+  window.webContents.setWindowOpenHandler((details) => {
+    void openExternalSafely(details.url);
+    return { action: "deny" };
+  });
+  installWindowShortcutHandler(window);
+
+  const initialRouteContext = sanitizeRendererRouteContext({
+    surface: "tab",
+    path: context.path,
+    workspaceSlug: context.workspaceSlug,
+  });
+  if (initialRouteContext) {
+    rendererRouteContexts.set(window.webContents, initialRouteContext);
   }
+  installRendererRecoveryHandlers(window as unknown as RendererRecoveryWindow, {
+    isDev: is.dev,
+    showReloadPrompt: createElectronReloadPrompt((options) =>
+      dialog.showMessageBox(window, options),
+    ),
+    getDiagnosticContext: () => {
+      // No `windowUrl`: it is an absolute install path (`/Users/<name>/...`
+      // when installed per-user) and the bucketed route below already says
+      // which page the window was on, which is the part we can act on.
+      const routeContext = rendererRouteContexts.get(window.webContents);
+      return routeContext ? { desktopRoute: routeContext } : {};
+    },
+    persistBreadcrumb: is.dev
+      ? undefined
+      : (payload) =>
+          writeFreezeBreadcrumb(freezeBreadcrumbPath(), {
+            ownerId: `issue:${window.id}`,
+            kind: payload.kind,
+            context: payload.context,
+            ts: Date.now(),
+            version: getAppVersion(),
+          }),
+    clearBreadcrumb: is.dev
+      ? undefined
+      : () =>
+          clearFreezeBreadcrumb(freezeBreadcrumbPath(), `issue:${window.id}`),
+    log: devLog,
+  });
+
+  installContextMenu(window.webContents);
+  loadRenderer(window);
 }
 
 // --- Dev / production isolation -------------------------------------------
@@ -361,23 +743,47 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
+  // Register before `ready`: macOS can deliver a cold-start URL while runtime
+  // config is still loading. handleDeepLink queues the payload until both the
+  // main window and its matching React listener exist.
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    handleDeepLink(url);
+  });
+
   // Windows/Linux: second instance passes deep link via argv
   app.on("second-instance", (_event, argv) => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+    const window = ensureMainWindow();
+    if (window) focusWindow(window);
 
     // On Windows the deep link URL is the last argv entry
     const deepLinkUrl = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
     if (deepLinkUrl) handleDeepLink(deepLinkUrl);
   });
 
+  // Windows/Linux cold-start deep links are safe to parse now. Delivery is
+  // queued because desktopInitialized remains false until runtime config and
+  // IPC handlers are ready.
+  const coldStartDeepLink = process.argv.find((arg) =>
+    arg.startsWith(`${PROTOCOL}://`),
+  );
+  if (coldStartDeepLink) handleDeepLink(coldStartDeepLink);
+
+  // scripts/dev-env.sh starts a managed dev Desktop signed in by handing it
+  // the token a browser login would deliver. An environment variable rather
+  // than argv keeps the token out of other users' `ps`; it is removed before
+  // any child process (the daemon, agent CLIs) can inherit it. Packaged builds
+  // never read it.
+  const devAuthToken = is.dev ? process.env.MULTICA_DEV_AUTH_TOKEN : undefined;
+  delete process.env.MULTICA_DEV_AUTH_TOKEN;
+  if (devAuthToken) dispatchToMainRenderer("auth:token", devAuthToken);
+
   app.whenReady().then(async () => {
     const viteEnv = import.meta.env as ImportMetaEnv & {
       readonly VITE_API_URL?: string;
       readonly VITE_WS_URL?: string;
       readonly VITE_APP_URL?: string;
+      readonly VITE_DEV_TOOLBAR?: string;
     };
 
     runtimeConfigResult = await loadRuntimeConfig({
@@ -411,23 +817,37 @@ if (!gotTheLock) {
     // IPC: open URL in default browser (used by renderer for Google login).
     // All scheme-allowlist enforcement lives in openExternalSafely — this
     // is the single audit point for renderer-controlled URLs reaching the
-    // OS shell under the app's intentional webSecurity: false + sandbox:
-    // false configuration.
+    // OS shell under the app's intentional webSecurity: false configuration
+    // (the renderer itself runs sandboxed).
     ipcMain.handle("shell:openExternal", (_event, url: string) => {
       return openExternalSafely(url);
     });
 
-    // Renderer requests window close (e.g. Cmd+W on last tab).
-    ipcMain.on("window:close", () => {
-      mainWindow?.close();
+    // Renderer requests its own window close (e.g. Cmd+W on the last main
+    // tab, or Cmd+W anywhere in a dedicated issue window).
+    ipcMain.on("window:close", (event) => {
+      BrowserWindow.fromWebContents(event.sender)?.close();
     });
 
-    ipcMain.handle("file:download-url", (_event, url: string) => {
-      if (!mainWindow) {
-        console.warn("[download] ignored file:download-url — mainWindow torn down");
+    ipcMain.handle("window:open-issue", (event, request: unknown) => {
+      if (!BrowserWindow.fromWebContents(event.sender)) {
+        return { ok: false, reason: "invalid_request" } as const;
+      }
+      const context = parseIssueWindowRequest(request);
+      if (!context) {
+        return { ok: false, reason: "invalid_request" } as const;
+      }
+      createIssueWindow(context);
+      return { ok: true } as const;
+    });
+
+    ipcMain.handle("file:download-url", (event, url: string) => {
+      const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+      if (!sourceWindow) {
+        console.warn("[download] ignored file:download-url — source window torn down");
         return;
       }
-      downloadURLSafely(mainWindow, url);
+      downloadURLSafely(sourceWindow, url);
     });
 
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so
@@ -445,7 +865,16 @@ if (!gotTheLock) {
     // reported when it happened — the renderer was hung or gone). Read-and-
     // clear so a failure reports exactly once.
     ipcMain.on("freeze:get-last", (event) => {
-      event.returnValue = readAndClearFreezeBreadcrumb(freezeBreadcrumbPath());
+      event.returnValue = readFreezeBreadcrumb(freezeBreadcrumbPath());
+    });
+
+    // The renderer got its breadcrumb event to posthog — retire that exact
+    // payload. A newer failure recorded since the read keeps its own ts and
+    // survives to be reported on the next boot.
+    ipcMain.on("freeze:ack", (event, ts: unknown) => {
+      if (!BrowserWindow.fromWebContents(event.sender)) return;
+      if (typeof ts !== "number" || !Number.isFinite(ts)) return;
+      ackFreezeBreadcrumb(freezeBreadcrumbPath(), ts);
     });
 
     // Sync IPC: preload exposes the validated runtime config before renderer
@@ -455,106 +884,240 @@ if (!gotTheLock) {
       event.returnValue = runtimeConfigResult;
     });
 
+    installDevToolbarToggle({
+      enabled: is.dev && Boolean(viteEnv.VITE_DEV_TOOLBAR),
+      preferencesPath: devToolbarPreferencesPath(app.getPath("userData")),
+    });
+
     ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) return;
+      if (!BrowserWindow.fromWebContents(event.sender)) return;
       const sanitized = sanitizeRendererRouteContext(context);
       if (!sanitized) return;
-      latestRendererRouteContext = sanitized;
+      rendererRouteContexts.set(event.sender, sanitized);
+    });
+
+    // Preload announces each listener only after it has been installed by a
+    // main renderer. Ignore issue-window senders so they can never drain a
+    // payload intended for a tabbed application window.
+    ipcMain.on(
+      MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
+      (event, state: unknown) => {
+        const window = BrowserWindow.fromWebContents(event.sender);
+        if (!window || !mainWindows.has(window)) return;
+        const parsed = parseMainRendererChannelState(state);
+        if (!parsed) return;
+        mainRendererMessages.setReady(window, parsed.channel, parsed.ready);
+      },
+    );
+
+    // Each main window reports the workspace it shows, so routing by
+    // workspace and the restored session follow in-window switches.
+    ipcMain.on(WINDOW_WORKSPACE_REPORT_CHANNEL, (event, value: unknown) => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (!window || !mainWindows.has(window)) return;
+      const workspaceSlug = value === null ? null : parseWorkspaceSlug(value);
+      if (value !== null && !workspaceSlug) return;
+      if (mainWindows.setWorkspace(window, workspaceSlug)) {
+        scheduleWindowSessionSave();
+      }
+    });
+
+    // Sync IPC: the renderer reads this while deciding where a workspace
+    // link goes, inside a click handler, so it must answer synchronously.
+    ipcMain.on(OTHER_WINDOW_WORKSPACES_CHANNEL, (event) => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      event.returnValue =
+        window && mainWindows.has(window)
+          ? mainWindows.otherWorkspaces(window)
+          : [];
+    });
+
+    // Sync IPC: returns whether another main window took the request, so
+    // the caller only falls back to switching its own workspace when not.
+    // Assigning returnValue sends the reply, so it is assigned exactly once.
+    ipcMain.on(FOCUS_WORKSPACE_WINDOW_CHANNEL, (event, request: unknown) => {
+      event.returnValue = handOffToWorkspaceWindow(
+        BrowserWindow.fromWebContents(event.sender),
+        request,
+      );
+    });
+
+    // A workspace lives in at most one window: focus the window that already
+    // shows it, else open a new one cascaded from the requesting window.
+    ipcMain.handle(OPEN_WORKSPACE_WINDOW_CHANNEL, (event, value: unknown) => {
+      const source = BrowserWindow.fromWebContents(event.sender);
+      const workspaceSlug = parseWorkspaceSlug(value);
+      if (!source || !mainWindows.has(source) || !workspaceSlug) {
+        return { ok: false } as const;
+      }
+      const existing = mainWindows.findByWorkspace(workspaceSlug);
+      if (existing) {
+        focusWindow(existing);
+        return { ok: true } as const;
+      }
+      const bounds = source.getNormalBounds();
+      createMainWindow({
+        x: bounds.x + 28,
+        y: bounds.y + 28,
+        width: bounds.width,
+        height: bounds.height,
+        workspaceSlug,
+      });
+      return { ok: true } as const;
+    });
+
+    // Account identity is the only cross-renderer auth signal. Main remains
+    // authoritative and closes windows instead of copying credentials.
+    ipcMain.on(AUTH_SESSION_STATE_CHANNEL, (event, value: unknown) => {
+      const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+      const userId = parseAuthSessionUserId(value);
+      if (!sourceWindow || userId === undefined) return;
+
+      if (mainWindows.has(sourceWindow)) {
+        const accountInvalidated = authSessionCoordinator.reportMain(
+          sourceWindow,
+          userId,
+        );
+        if (accountInvalidated) {
+          authSessionGeneration += 1;
+          mainRendererMessages.clear("inbox:open");
+        }
+        return;
+      }
+      if (issueWindows.has(sourceWindow)) {
+        authSessionCoordinator.reportIssue(sourceWindow, userId);
+      }
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen
     // modals (e.g. create-workspace) can place UI in the top-left corner
     // without fighting the native window controls' hit-test.
-    ipcMain.handle("window:setImmersive", (_event, immersive: boolean) => {
+    ipcMain.handle("window:setImmersive", (event, immersive: boolean) => {
       if (process.platform !== "darwin") return;
-      mainWindow?.setWindowButtonVisibility(!immersive);
+      BrowserWindow.fromWebContents(event.sender)?.setWindowButtonVisibility(
+        !immersive,
+      );
     });
 
-    // IPC: show a native OS notification for a new inbox item. The renderer
-    // only fires this when the app is unfocused (it gates on
-    // `document.hasFocus()`), so we don't fight macOS foreground suppression
-    // here. Clicking the banner focuses the main window and routes to the
-    // inbox item via a renderer-side listener.
-    ipcMain.on(
-      "notification:show",
-      (
-        _event,
-        {
-          slug,
-          itemId,
-          issueKey,
-          title,
-          body,
-        }: {
-          slug: string;
-          itemId: string;
-          issueKey: string;
-          title: string;
-          body: string;
-        },
-      ) => {
-        if (!Notification.isSupported()) return;
-        const notification = new Notification({ title, body });
-        notification.on("click", () => {
-          if (!mainWindow) return;
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.show();
-          mainWindow.focus();
-          // Ship the full context back — the renderer pins the route to the
-          // source workspace (slug), marks the row read (itemId), and uses
-          // issueKey as the ?issue=<…> selector.
-          mainWindow.webContents.send("inbox:open", {
-            slug,
-            itemId,
-            issueKey,
-          });
-        });
-        notification.show();
-      },
+    ipcMain.handle("window:foreground", (event) =>
+      windowForeground(BrowserWindow.fromWebContents(event.sender)),
     );
+
+    // Main owns foreground detection and item-level dedupe. Every renderer
+    // has its own WebSocket and `document.hasFocus()` only describes that one
+    // window, so renderer-only gating can emit N duplicate system banners.
+    ipcMain.on("notification:show", (event, value: unknown) => {
+      const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+      if (!sourceWindow) return;
+      if (mainWindows.has(sourceWindow)) {
+        if (!authSessionCoordinator.hasActiveMainSession(sourceWindow)) return;
+      } else if (
+        !issueWindows.has(sourceWindow) ||
+        !authSessionCoordinator.isCurrentIssueSession(sourceWindow)
+      ) {
+        return;
+      }
+
+      const payload = parseNativeNotificationPayload(value);
+      if (!payload || !Notification.isSupported()) return;
+      const anyWindowFocused = BrowserWindow.getAllWindows().some(windowForeground);
+      if (!notificationGate.shouldShow(payload.itemId, anyWindowFocused)) {
+        return;
+      }
+
+      const notification = new Notification({
+        title: payload.title,
+        body: payload.body,
+      });
+      const notificationSessionGeneration = authSessionGeneration;
+      notification.on("click", () => {
+        // A banner emitted for user A must not navigate after the main window
+        // logs out or switches to user B.
+        if (notificationSessionGeneration !== authSessionGeneration) return;
+        // Prefer the window that shows the item's workspace. Recreate a main
+        // window when an issue-only window outlived them all, then wait for
+        // the inbox listener before delivering the navigation.
+        dispatchToMainRenderer(
+          "inbox:open",
+          {
+            slug: payload.slug,
+            itemId: payload.itemId,
+            ...(payload.chatSessionId
+              ? { chatSessionId: payload.chatSessionId }
+              : { issueKey: payload.issueKey }),
+          },
+          mainWindows.findByWorkspace(payload.slug),
+        );
+      });
+      notification.on("failed", (_event, error) => {
+        console.warn("Native notification delivery failed:", error);
+      });
+      notification.on("show", () => console.info("Native notification displayed"));
+      notification.show();
+    });
 
     // IPC: update the dock / taskbar unread badge. Values above 99 render as
     // "99+". macOS is the primary target (user-visible dock badge); Linux
     // Unity launchers also respect `setBadgeCount`. Windows' taskbar overlay
     // needs a pre-rendered PNG and is deferred — the OS notification + the
-    // in-app inbox sidebar cover the core UX there for now.
-    ipcMain.on("badge:set", (_event, rawCount: number) => {
-      const count = Math.max(0, Math.floor(rawCount));
-      if (process.platform === "darwin") {
-        const label = count === 0 ? "" : count > 99 ? "99+" : String(count);
-        app.dock?.setBadge(label);
-      } else {
-        app.setBadgeCount(count);
-      }
+    // in-app inbox sidebar cover the core UX there for now. Each main window
+    // counts its own workspace's unread items; the badge shows the total.
+    ipcMain.on("badge:set", (event, rawCount: unknown) => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (!window || !mainWindows.has(window)) return;
+      const count =
+        typeof rawCount === "number" && Number.isFinite(rawCount)
+          ? Math.max(0, Math.floor(rawCount))
+          : 0;
+      unreadBadgeCounts.set(window, count);
+      applyUnreadBadge();
     });
 
-    createWindow();
+    desktopInitialized = true;
+    for (const saved of loadWindowSession(windowStateFile())) {
+      createMainWindow(saved);
+    }
 
-    setupAutoUpdater(() => mainWindow);
-    setupDaemonManager(() => mainWindow);
-    setupLocalDirectory(() => mainWindow);
-
-    // macOS: deep link arrives via open-url event
-    app.on("open-url", (_event, url) => {
-      if (mainWindow) {
-        if (mainWindow.isMinimized()) mainWindow.restore();
-        mainWindow.focus();
-      }
-      handleDeepLink(url);
+    // Register first so the update quit gate can block daemon autoStop.
+    setupAutoUpdater(() => mainWindows.all(), {
+      // Windows only (the updater ignores it elsewhere): stop the bundled
+      // daemon before the installer runs so multica.exe is replaced. #8823
+      daemonGate: {
+        prepare: prepareDaemonForUpdateInstall,
+        resumeAfterAbortedInstall: resumeDaemonAfterAbortedUpdateInstall,
+        confirmInstallWhileBusy: createElectronBusyInstallPrompt((options) => {
+          const parent = mainWindows.mostRecent();
+          return parent && !parent.isDestroyed()
+            ? dialog.showMessageBox(parent, options)
+            : dialog.showMessageBox(options);
+        }),
+      },
     });
+    setupDaemonManager(
+      () => mainWindows.mostRecent(),
+      () => mainWindows.all(),
+    );
+    setupLocalDirectory(() => mainWindows.mostRecent());
+    setupThemeFolder();
+    setupVoiceInput();
+
+    // Registered after the updater and daemon gates, so a quit they hold
+    // (busy daemon, pending install) leaves the session writable; only the
+    // quit that actually proceeds freezes it.
+    app.on("before-quit", (event) => {
+      if (event.defaultPrevented) return;
+      freezeWindowSession();
+    });
+    // macOS quitAndInstall closes every window before before-quit fires.
+    if (process.platform === "darwin") {
+      nativeAutoUpdater.on("before-quit-for-update", freezeWindowSession);
+    }
 
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      const window = ensureMainWindow();
+      if (window) focusWindow(window);
     });
   });
-
-  // Check argv for deep link on cold start (Windows/Linux)
-  const deepLinkArg = process.argv.find((arg) =>
-    arg.startsWith(`${PROTOCOL}://`),
-  );
-  if (deepLinkArg) {
-    app.whenReady().then(() => handleDeepLink(deepLinkArg));
-  }
 }
 
 app.on("window-all-closed", () => {

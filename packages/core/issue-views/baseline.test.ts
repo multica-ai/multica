@@ -1,0 +1,134 @@
+// @vitest-environment node
+import { describe, expect, it } from "vitest";
+import { baselineFromQuery, issueViewFilterCount } from "./baseline";
+import { propertyFilterValueKey } from "../types";
+
+// The property-filter branch of baselineFromQuery: saved-view members must
+// survive a round-trip as-is when the client can represent them, and drop
+// silently when it cannot (hand-edited blob, operator a future client added).
+describe("baselineFromQuery property filters", () => {
+  const textId = "prop-note";
+  const numId = "prop-estimate";
+
+  it("passes strings and known operator objects through untouched", () => {
+    const members = [
+      "hello",
+      "__none__",
+      { op: "contains", value: "foo" },
+      { op: "gte", value: "3.5" },
+    ];
+    const baseline = baselineFromQuery({
+      propertyFilters: { [textId]: members },
+    });
+
+    expect(baseline.raw.propertyFilters[textId]).toEqual(members);
+    // Membership keys: strings are their own key; operators get their
+    // canonical key so Set lookups agree with the store.
+    expect([...baseline.property.get(textId)!]).toEqual(
+      members.map((m) => propertyFilterValueKey(m as never)),
+    );
+  });
+
+  it("drops members the store cannot represent", () => {
+    const baseline = baselineFromQuery({
+      propertyFilters: {
+        [textId]: [
+          "keep",
+          { op: "regex", value: "x" }, // unknown op
+          { op: 42, value: "x" }, // non-string op
+          { op: "contains", value: 7 }, // non-string value
+          { nope: true }, // not an operator shape
+          7, // not a string
+          null,
+        ],
+        [numId]: [{ op: "regex", value: "x" }], // everything dropped
+      },
+    });
+
+    expect(baseline.raw.propertyFilters[textId]).toEqual(["keep"]);
+    // A definition with no representable members is not a filter at all.
+    expect(baseline.raw.propertyFilters[numId]).toBeUndefined();
+    expect(baseline.property.has(numId)).toBe(false);
+  });
+
+  it("treats a non-array member list as no filter", () => {
+    const baseline = baselineFromQuery({
+      propertyFilters: { [textId]: "hello" },
+    });
+    expect(baseline.raw.propertyFilters).toEqual({});
+    expect(baseline.property.size).toBe(0);
+  });
+});
+
+// Saved views predate the project-status dimension, so every read path has to
+// treat a missing key as "no filter" rather than as a value.
+describe("baselineFromQuery project status filters", () => {
+  it("keeps known project statuses", () => {
+    const baseline = baselineFromQuery({
+      projectStatusFilters: ["in_progress", "completed"],
+    });
+    expect(baseline.raw.projectStatusFilters).toEqual(["in_progress", "completed"]);
+    expect(baseline.projectStatus.has("in_progress")).toBe(true);
+  });
+
+  it("treats a view saved before the dimension existed as no filter", () => {
+    const baseline = baselineFromQuery({ projectFilters: ["p-1"] });
+    expect(baseline.raw.projectStatusFilters).toEqual([]);
+    expect(baseline.projectStatus.size).toBe(0);
+  });
+
+  it("drops values the store cannot represent", () => {
+    const baseline = baselineFromQuery({
+      // "backlog" is an issue status; the project lifecycle has no such value.
+      projectStatusFilters: ["in_progress", "backlog", 7, null],
+    });
+    expect(baseline.raw.projectStatusFilters).toEqual(["in_progress"]);
+  });
+});
+
+describe("issueViewFilterCount", () => {
+  it("counts constrained dimensions, not values", () => {
+    expect(issueViewFilterCount({})).toBe(0);
+    expect(
+      issueViewFilterCount({
+        statusFilters: ["todo", "in_progress"],
+        includeNoAssignee: true,
+        labelFilters: [],
+        propertyFilters: { p1: ["a"], p2: [] },
+      }),
+    ).toBe(3);
+  });
+
+  it("ignores values the store cannot represent", () => {
+    expect(issueViewFilterCount({ priorityFilters: ["bogus"], projectStatusFilters: ["nope"] })).toBe(0);
+  });
+});
+
+describe("baselineFromQuery agent running", () => {
+  it("fixes the filter only when the view saved it as true", () => {
+    expect(baselineFromQuery({ agentRunningFilter: true }).agentRunning).toBe(true);
+    expect(baselineFromQuery({ agentRunningFilter: true }).raw.agentRunningFilter).toBe(true);
+    expect(baselineFromQuery({ agentRunningFilter: "yes" }).agentRunning).toBe(false);
+    expect(baselineFromQuery({}).raw.agentRunningFilter).toBe(false);
+  });
+
+  it("counts as one condition in the view summary", () => {
+    expect(issueViewFilterCount({ agentRunningFilter: true, statusFilters: ["todo"] })).toBe(2);
+    expect(issueViewFilterCount({ agentIdleFilter: true, statusFilters: ["todo"] })).toBe(2);
+    expect(baselineFromQuery({ agentIdleFilter: true }).agentIdle).toBe(true);
+    expect(baselineFromQuery({ agentIdleFilter: true, agentRunningFilter: true }).agentIdle).toBe(false);
+  });
+});
+
+describe("baselineFromQuery unread", () => {
+  it("fixes the filter only when the view saved it as true", () => {
+    expect(baselineFromQuery({ unreadFilter: true }).unread).toBe(true);
+    expect(baselineFromQuery({ unreadFilter: true }).raw.unreadFilter).toBe(true);
+    expect(baselineFromQuery({ unreadFilter: "yes" }).unread).toBe(false);
+    expect(baselineFromQuery({}).raw.unreadFilter).toBe(false);
+  });
+
+  it("counts as one condition in the view summary", () => {
+    expect(issueViewFilterCount({ unreadFilter: true, statusFilters: ["todo"] })).toBe(2);
+  });
+});

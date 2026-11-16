@@ -3,6 +3,14 @@ export interface Attachment {
   workspace_id: string;
   issue_id: string | null;
   comment_id: string | null;
+  /**
+   * Origin of a comment file, from the issue attachment list only: the
+   * comment's author and time. Absent on description files, on other
+   * endpoints, and from servers older than this field.
+   */
+  comment_author_type?: string;
+  comment_author_id?: string;
+  comment_created_at?: string;
   chat_session_id: string | null;
   chat_message_id: string | null;
   uploader_type: string;
@@ -10,6 +18,14 @@ export interface Attachment {
   filename: string;
   url: string;
   download_url: string;
+  /**
+   * Forced-attachment ("download button") URL: credential-free and, unlike
+   * `download_url` (load-intent, serves media inline for preview), always
+   * Content-Disposition: attachment across every storage mode. Short-lived —
+   * never persist it. Optional: a server older than this field omits it, and
+   * download callers fall back to `download_url` / the stable endpoint.
+   */
+  attachment_download_url?: string;
   /**
    * Durable URL the client persists into markdown bodies.
    *
@@ -38,4 +54,10 @@ export interface Attachment {
   content_type: string;
   size_bytes: number;
   created_at: string;
+  /**
+   * An image's displayed pixel size, so a body can reserve its box before the
+   * image loads. Absent for other files and for older uploads.
+   */
+  width?: number;
+  height?: number;
 }

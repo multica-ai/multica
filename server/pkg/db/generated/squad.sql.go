@@ -267,6 +267,59 @@ func (q *Queries) ListAllSquads(ctx context.Context, workspaceID pgtype.UUID) ([
 	return items, nil
 }
 
+const listInvolvedSquadIDs = `-- name: ListInvolvedSquadIDs :many
+SELECT sm.squad_id
+  FROM squad_member sm
+  JOIN squad s ON s.id = sm.squad_id
+ WHERE s.workspace_id = $1
+   AND sm.member_type = 'member'
+   AND sm.member_id   = $2
+UNION
+SELECT s.id
+  FROM squad s
+  JOIN agent a ON a.id = s.leader_id
+ WHERE s.workspace_id = $1
+   AND a.workspace_id = $1
+   AND a.owner_id     = $2
+UNION
+SELECT sm.squad_id
+  FROM squad_member sm
+  JOIN squad s ON s.id = sm.squad_id
+  JOIN agent a ON a.id = sm.member_id
+ WHERE s.workspace_id = $1
+   AND sm.member_type = 'agent'
+   AND a.workspace_id = $1
+   AND a.owner_id     = $2
+`
+
+type ListInvolvedSquadIDsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Squads whose issues count as the user's agents' work: the user is a member,
+// or an agent they own leads or is a member. Must match the squad branch of
+// issueTableInvolvedPredicate.
+func (q *Queries) ListInvolvedSquadIDs(ctx context.Context, arg ListInvolvedSquadIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listInvolvedSquadIDs, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var squad_id pgtype.UUID
+		if err := rows.Scan(&squad_id); err != nil {
+			return nil, err
+		}
+		items = append(items, squad_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSquadMemberPreviewRows = `-- name: ListSquadMemberPreviewRows :many
 SELECT
     sm.squad_id,
@@ -410,10 +463,12 @@ type ListSquadMemberStatusRowsRow struct {
 }
 
 // Per-row join used to build the squad-members status view. One row per
-// (squad_member × active_task); members with no active task return a
+// (squad_member × in_flight_task); members with no in-flight task return a
 // single row with NULL task_* columns. Human members and agent members
 // with no agent row also return one row with NULL agent_/runtime_ columns.
-// The handler aggregates rows by member_id.
+// waiting_local_directory stays in the row set so its issue remains visible,
+// but the handler only treats dispatched/running rows as working because the
+// squad status vocabulary has no queued bucket.
 func (q *Queries) ListSquadMemberStatusRows(ctx context.Context, squadID pgtype.UUID) ([]ListSquadMemberStatusRowsRow, error) {
 	rows, err := q.db.Query(ctx, listSquadMemberStatusRows, squadID)
 	if err != nil {
@@ -563,6 +618,75 @@ func (q *Queries) ListSquadsByMember(ctx context.Context, arg ListSquadsByMember
 	return items, nil
 }
 
+const lockSquadForAutopilotAssignment = `-- name: LockSquadForAutopilotAssignment :one
+SELECT id, workspace_id, name, description, leader_id, creator_id, created_at, updated_at, archived_at, archived_by, avatar_url, instructions FROM squad
+WHERE id = $1 AND workspace_id = $2
+FOR SHARE
+`
+
+type LockSquadForAutopilotAssignmentParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Stabilizes the squad-to-leader resolution while an active Autopilot is
+// created, retargeted, or resumed. FOR SHARE conflicts with an ordinary
+// leader_id update, so the caller subsequently locks the same leader Agent
+// whose row Runtime teardown serializes against.
+func (q *Queries) LockSquadForAutopilotAssignment(ctx context.Context, arg LockSquadForAutopilotAssignmentParams) (Squad, error) {
+	row := q.db.QueryRow(ctx, lockSquadForAutopilotAssignment, arg.ID, arg.WorkspaceID)
+	var i Squad
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.LeaderID,
+		&i.CreatorID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.AvatarUrl,
+		&i.Instructions,
+	)
+	return i, err
+}
+
+const lockSquadForUpdate = `-- name: LockSquadForUpdate :one
+SELECT id, workspace_id, name, description, leader_id, creator_id, created_at, updated_at, archived_at, archived_by, avatar_url, instructions FROM squad
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockSquadForUpdateParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Squad leader changes take the exclusive side of the same lock used by
+// Autopilot assignment. The handler then locks the proposed leader Agent and
+// pauses active squad Autopilots when that Agent is unbound.
+func (q *Queries) LockSquadForUpdate(ctx context.Context, arg LockSquadForUpdateParams) (Squad, error) {
+	row := q.db.QueryRow(ctx, lockSquadForUpdate, arg.ID, arg.WorkspaceID)
+	var i Squad
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.LeaderID,
+		&i.CreatorID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.AvatarUrl,
+		&i.Instructions,
+	)
+	return i, err
+}
+
 const removeSquadMember = `-- name: RemoveSquadMember :execrows
 DELETE FROM squad_member
 WHERE squad_id = $1 AND member_type = $2 AND member_id = $3
@@ -583,7 +707,7 @@ func (q *Queries) RemoveSquadMember(ctx context.Context, arg RemoveSquadMemberPa
 }
 
 const transferSquadAssignees = `-- name: TransferSquadAssignees :exec
-UPDATE issue SET assignee_type = 'agent', assignee_id = $2, updated_at = now()
+UPDATE issue SET assignee_type = 'agent', assignee_id = $2, revision = revision + 1, updated_at = now()
 WHERE assignee_type = 'squad' AND assignee_id = $1
 `
 

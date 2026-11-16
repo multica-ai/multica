@@ -12,25 +12,25 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
-// This file is the Slack ResolverSet: the platform-specific seams the
-// channel-agnostic engine.Router runs the inbound pipeline through. It mirrors
-// the Feishu ResolverSet but is built entirely on the generic channel_* queries
-// (no new query, no schema change) plus the shared engine.ChatSession — so
-// "adding Slack" stays "implement Channel + register a ResolverSet".
+// Slack resolvers connect the channel-agnostic inbound pipeline to Slack
+// installation routing, identity binding, deduplication, session persistence,
+// auditing, reactions, replies, and attachment ingestion. They store shared
+// channel state through the generic channel tables.
 
 // originSlackChat is the issue.origin_type label for issues created via the
 // Slack /issue command.
 const originSlackChat = "slack_chat"
 
-// NewSlackResolverSet assembles the Slack ResolverSet over the generated
-// queries + a tx starter (for the shared session service). Replier/Typing are
-// left nil for now: the outbound binding-prompt / notice path is a later step
-// (the inbound pipeline — route, identity, dedup, session, /issue, run trigger
-// — is fully functional without them).
-func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter) engine.ResolverSet {
-	return engine.ResolverSet{
+// NewSlackResolverSet assembles the Slack implementation of each inbound
+// pipeline stage. The replier sends binding and status notices, typing manages
+// the processing reaction, and media stores inbound attachments. Each optional
+// dependency may be nil to disable only that capability while preserving normal
+// Slack message ingestion.
+func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, typing *TypingIndicatorManager, media engine.MediaResolver) engine.ResolverSet {
+	set := engine.ResolverSet{
 		Installation: &installationResolver{q: q},
 		Identity:     &identityResolver{q: q},
 		Dedup:        &deduper{q: q},
@@ -40,8 +40,16 @@ func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter) engine.ResolverSet 
 			Fallback: "Slack chat",
 		})},
 		Audit:      &auditor{q: q},
+		Media:      media,
+		Replier:    replier,
 		OriginType: originSlackChat,
 	}
+	// Assign the interface only for a concrete manager. A typed nil would make
+	// the interface compare non-nil and fail when the pipeline invokes it.
+	if typing != nil {
+		set.Typing = &slackTypingNotifier{mgr: typing}
+	}
+	return set
 }
 
 var (
@@ -50,6 +58,7 @@ var (
 	_ engine.Deduper              = (*deduper)(nil)
 	_ engine.SessionBinder        = (*sessionBinder)(nil)
 	_ engine.Auditor              = (*auditor)(nil)
+	_ engine.TypingNotifier       = (*slackTypingNotifier)(nil)
 )
 
 // slackBindingConfig is the opaque outbound routing persisted on the chat
@@ -80,6 +89,11 @@ func slackSessionRouting(msg channel.InboundMessage) (bindingKey string, config 
 	if msg.Source.ChatType == channel.ChatTypeP2P {
 		return chatID, cfg, msg.Source.ThreadID
 	}
+	// The thread root is the inbound thread_ts when the @mention is a reply
+	// inside an existing thread, else the message's own ts (a top-level mention
+	// becomes the root the bot threads its reply under). Either way the root is
+	// recoverable later from the binding (channel_chat_id suffix / last_thread_id),
+	// which is what the history reader uses to read the thread.
 	threadRoot := msg.Source.ThreadID
 	if threadRoot == "" {
 		threadRoot = msg.MessageID
@@ -105,6 +119,27 @@ func nullText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
 }
 
+// installTeamID reads the real Slack team id from a stored installation config,
+// or "" if absent/undecodable. Unlike decodeCredentials / DecodePublicConfig it
+// does NOT fall back to app_id: team routing and identity reuse must match the
+// actual Slack workspace, and app_id != team_id for BYO apps.
+func installTeamID(installConfigJSON json.RawMessage) string {
+	var cfg installConfig
+	_ = json.Unmarshal(installConfigJSON, &cfg)
+	return cfg.TeamID
+}
+
+// installationServesTeam reports whether an installation (its stored config) may
+// serve events from eventTeamID. Inbound routing keys on api_app_id, which
+// identifies the Slack APP, not the Slack workspace: a BYO app distributed /
+// installed into another Slack workspace emits events carrying the SAME app id.
+// So we additionally require the event's team to match the team the installed
+// bot belongs to. An installation with no recorded team (legacy) is permissive.
+func installationServesTeam(installConfigJSON json.RawMessage, eventTeamID string) bool {
+	teamID := installTeamID(installConfigJSON)
+	return teamID == "" || teamID == eventTeamID
+}
+
 // ---- installation routing ----
 
 type installationResolver struct{ q *db.Queries }
@@ -116,13 +151,20 @@ func (r *installationResolver) ResolveInstallation(ctx context.Context, msg chan
 	}
 	inst, err := r.q.GetChannelInstallationByAppID(ctx, db.GetChannelInstallationByAppIDParams{
 		ChannelType: string(TypeSlack),
-		AppID:       raw.TeamID, // Slack team_id is stored in the routing-key slot
+		// Route by the event's api_app_id: each BYO installation stores its real
+		// Slack app id in the routing-key slot (config->>'app_id'), and the
+		// per-installation Socket Mode connection only ever delivers events for
+		// its own app, so api_app_id uniquely identifies the installation.
+		AppID: raw.APIAppID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return engine.ResolvedInstallation{}, engine.ErrInstallationNotFound
 		}
 		return engine.ResolvedInstallation{}, err
+	}
+	if !installationServesTeam(inst.Config, raw.TeamID) {
+		return engine.ResolvedInstallation{}, engine.ErrInstallationNotFound
 	}
 	return engine.ResolvedInstallation{
 		ID:              inst.ID,
@@ -136,30 +178,104 @@ func (r *installationResolver) ResolveInstallation(ctx context.Context, msg chan
 
 // ---- identity ----
 
-type identityResolver struct{ q *db.Queries }
+// identityQueries is the slice of generated queries the identityResolver needs.
+// It is an interface (not *db.Queries) so the cross-installation reuse path is
+// unit-tested with fakes, mirroring slashQueries. *db.Queries satisfies it.
+type identityQueries interface {
+	GetChannelUserBindingByUserID(ctx context.Context, arg db.GetChannelUserBindingByUserIDParams) (db.ChannelUserBinding, error)
+	FindReusableChannelUserBinding(ctx context.Context, arg db.FindReusableChannelUserBindingParams) (db.ChannelUserBinding, error)
+	GetMemberByUserAndWorkspace(ctx context.Context, arg db.GetMemberByUserAndWorkspaceParams) (db.Member, error)
+	CreateChannelUserBinding(ctx context.Context, arg db.CreateChannelUserBindingParams) (db.ChannelUserBinding, error)
+}
+
+type identityResolver struct{ q identityQueries }
 
 func (r *identityResolver) ResolveSender(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) (engine.ResolvedIdentity, error) {
+	senderID := msg.Source.SenderID
 	binding, err := r.q.GetChannelUserBindingByUserID(ctx, db.GetChannelUserBindingByUserIDParams{
 		InstallationID: inst.ID,
-		ChannelUserID:  msg.Source.SenderID,
+		ChannelUserID:  senderID,
 	})
+	reused := false
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return engine.ResolvedIdentity{}, err
+		}
+		// Not linked to THIS installation. Before prompting, reuse a link the same
+		// Slack user already made to another installation of the same team in this
+		// workspace (MUL-3911): one link per Slack workspace, not per app.
+		cand, ok, ferr := r.reusableBinding(ctx, inst, senderID)
+		if ferr != nil {
+			return engine.ResolvedIdentity{}, ferr
+		}
+		if !ok {
 			return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
 		}
-		return engine.ResolvedIdentity{}, err
+		binding, reused = cand, true
 	}
-	// Binding existence no longer proves membership (no FK); re-check.
+	// Binding existence no longer proves membership (no FK); re-check. For a
+	// reused link this also gates materialization: we never persist a binding for
+	// a user who has since left the workspace.
 	if _, err := r.q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      binding.MulticaUserID,
 		WorkspaceID: inst.WorkspaceID,
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			if reused {
+				// Same human, no longer a member: prompt a fresh link rather than
+				// surface "not a member" for an app they never linked.
+				return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
+			}
 			return engine.ResolvedIdentity{}, engine.ErrSenderNotMember
 		}
 		return engine.ResolvedIdentity{}, err
 	}
+	if reused {
+		// Materialize the reused link as a binding on THIS installation so later
+		// messages resolve on the fast per-installation path and are pruned with
+		// the member like any other. Idempotent via ON CONFLICT; a concurrent
+		// first message that already wrote it returns the same row.
+		if _, err := r.q.CreateChannelUserBinding(ctx, db.CreateChannelUserBindingParams{
+			WorkspaceID:    inst.WorkspaceID,
+			MulticaUserID:  binding.MulticaUserID,
+			InstallationID: inst.ID,
+			ChannelType:    string(TypeSlack),
+			ChannelUserID:  senderID,
+			Config:         []byte(`{}`),
+		}); err != nil {
+			return engine.ResolvedIdentity{}, fmt.Errorf("materialize reused slack binding: %w", err)
+		}
+	}
 	return engine.ResolvedIdentity{UserID: binding.MulticaUserID}, nil
+}
+
+// reusableBinding looks for a link the same Slack user already made to ANOTHER
+// installation of the SAME workspace + SAME Slack team, so a second app in one
+// Slack workspace need not re-prompt (MUL-3911). ok=false (nil error) means "no
+// reuse — prompt to link": the installation records no team (legacy), its
+// Platform is not a ChannelInstallation, or no matching binding exists.
+func (r *identityResolver) reusableBinding(ctx context.Context, inst engine.ResolvedInstallation, senderID string) (db.ChannelUserBinding, bool, error) {
+	ci, ok := inst.Platform.(db.ChannelInstallation)
+	if !ok {
+		return db.ChannelUserBinding{}, false, nil
+	}
+	teamID := installTeamID(ci.Config)
+	if teamID == "" {
+		return db.ChannelUserBinding{}, false, nil
+	}
+	cand, err := r.q.FindReusableChannelUserBinding(ctx, db.FindReusableChannelUserBindingParams{
+		WorkspaceID:   inst.WorkspaceID,
+		ChannelType:   string(TypeSlack),
+		ChannelUserID: senderID,
+		TeamID:        teamID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.ChannelUserBinding{}, false, nil
+		}
+		return db.ChannelUserBinding{}, false, err
+	}
+	return cand, true, nil
 }
 
 // ---- dedup ----
@@ -215,18 +331,58 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 	})
 }
 
+func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionParams) (engine.StartSessionResult, error) {
+	bindingKey, config, replyThread := slackSessionRouting(p.Message)
+	result, err := r.session.StartSession(ctx, engine.StartSessionInput{
+		EnsureSessionInput: engine.EnsureSessionInput{
+			WorkspaceID: p.Installation.WorkspaceID, AgentID: p.Installation.AgentID,
+			InstallationID: p.Installation.ID, Sender: p.Creator,
+			BindingKey: bindingKey, BindingConfig: config, ChatType: p.Message.Source.ChatType,
+		},
+		Initiator: p.Sender,
+		Body:      p.Message.Text, CommandText: p.Message.CommandText, MessageID: p.Message.MessageID, ThreadID: replyThread,
+		ClaimToken: p.ClaimToken, MediaPendingSeconds: p.MediaPendingSeconds,
+		PersistMessage: p.PersistMessage, HistoryBoundaryPending: p.HistoryBoundaryPending,
+		BeforeCommit: p.BeforeCommit,
+	})
+	return engine.StartSessionResult{SessionID: result.SessionID, BindingID: result.BindingID, RouteRevision: result.RouteRevision, Append: result.Append}, err
+}
+
+func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error {
+	return r.session.MarkPendingFresh(ctx, sessionID, messageID)
+}
+
 func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
 	_, _, replyThread := slackSessionRouting(p.Message)
+	commandText := p.Message.CommandText
+	if commandText == "" {
+		commandText = p.Message.Text
+	}
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
-		SessionID:      p.SessionID,
-		Sender:         p.Sender,
-		InstallationID: p.InstallationID,
-		Body:           p.Message.Text,
-		// Slack text is not enriched, so the command source is the body itself.
-		CommandText: p.Message.Text,
-		MessageID:   p.Message.MessageID,
-		ThreadID:    replyThread,
-		ClaimToken:  p.ClaimToken,
+		SessionID:           p.SessionID,
+		Sender:              p.Sender,
+		InstallationID:      p.InstallationID,
+		Body:                p.Message.Text,
+		CommandText:         commandText,
+		MessageID:           p.Message.MessageID,
+		ThreadID:            replyThread,
+		ClaimToken:          p.ClaimToken,
+		MediaPendingSeconds: p.MediaPendingSeconds,
+		ForceFresh:          p.Message.ForceFresh,
+	})
+}
+
+func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) (engine.BindMediaResult, error) {
+	return r.session.BindMediaRefsWithResult(ctx, engine.BindMediaInput{
+		MessageID:            p.MessageID,
+		SessionID:            p.SessionID,
+		WorkspaceID:          p.WorkspaceID,
+		Sender:               p.Sender,
+		IssueID:              p.IssueID,
+		IssueDescriptionBase: p.IssueDescriptionBase,
+		IssueCommandText:     p.IssueCommandText,
+		Body:                 p.Body,
+		MediaRefs:            p.MediaRefs,
 	})
 }
 
@@ -237,6 +393,7 @@ type auditor struct{ q *db.Queries }
 func (r *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason engine.DropReason) error {
 	raw, _ := decodeSlackRaw(msg) // event_type is best-effort; a decode miss still audits the drop
 	return r.q.RecordChannelInboundDrop(ctx, db.RecordChannelInboundDropParams{
+		ID:               dbid.NewV7(),
 		ChannelType:      string(TypeSlack),
 		EventType:        raw.EventType,
 		DropReason:       string(reason),
@@ -245,4 +402,28 @@ func (r *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channe
 		ChannelEventID:   nullText(msg.EventID),
 		ChannelMessageID: nullText(msg.MessageID),
 	})
+}
+
+// ---- typing indicator ----
+
+type slackTypingNotifier struct{ mgr *TypingIndicatorManager }
+
+// OnIngested fires when a Slack message is successfully ingested. It reacts to
+// the user's message (channel = Source.ChatID, ts = MessageID) so the user sees
+// the bot is processing it. The resolved installation carries the bot token in
+// its Config blob — the InstallationResolver stashed the db.ChannelInstallation
+// row in Platform, the documented adapter boundary the core never reads.
+func (n *slackTypingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, chatMessageID pgtype.UUID) {
+	ci, ok := inst.Platform.(db.ChannelInstallation)
+	if !ok {
+		return
+	}
+	n.mgr.Add(ctx, ci, sessionID, msg.Source.ChatID, msg.MessageID)
+}
+
+// OnSettled clears the reaction when the run trigger enqueued no task (agent
+// offline / archived, or an enqueue failure) — the bus-driven clear on
+// chat-done / task-failed never fires for those, so without this the 👀 sticks.
+func (n *slackTypingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID, scope engine.TypingSettlement) {
+	n.mgr.Clear(ctx, sessionID)
 }

@@ -1,83 +1,143 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useDefaultLayout } from "react-resizable-panels";
 import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
+import {
+  Check,
   Cloud,
-  Monitor,
+  Download,
+  Laptop,
+  Loader2,
   Plus,
-  Search,
   Server,
-} from "lucide-react";
+  SquareTerminal,
+} from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
-import { useUpdatableRuntimeIds } from "@multica/core/runtimes/hooks";
-import { useWSEvent } from "@multica/core/realtime";
-import { agentListOptions } from "@multica/core/workspace/queries";
-import { memberListOptions } from "@multica/core/workspace/queries";
-import { Button } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
 import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@multica/ui/components/ui/resizable";
-import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+  memberNeedsMikaSetup,
+  useBootstrapMika,
+} from "@multica/core/onboarding";
+import { MIKA_PLACEHOLDER_EMOJI } from "../../onboarding/components/mika-intro";
+import {
+  useRequiredWorkspaceSlug,
+  useWorkspacePaths,
+} from "@multica/core/paths";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { runtimeProfileListOptions } from "@multica/core/runtimes";
+import {
+  runtimeListOptions,
+  runtimeKeys,
+} from "@multica/core/runtimes/queries";
+import { useWSEvent } from "@multica/core/realtime";
+import {
+  agentListOptions,
+  memberListOptions,
+} from "@multica/core/workspace/queries";
+import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
+import type { QoderConnection } from "@multica/core/runtimes/qoder";
+import { Badge } from "@multica/ui/components/ui/badge";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@multica/ui/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import {
+  MikaRuntimeChoice,
+  type MikaRuntimeSelection,
+} from "./mika-runtime-choice";
+import {
+  CollectionCreateButton,
+  CollectionNoMatches,
+  CollectionPageHeader,
+  CollectionScopeItems,
+} from "../../layout/collection-page";
+import {
+  CollectionEmptyValue,
+  CollectionList,
+  CollectionNameCell,
+  CollectionTag,
+  type CollectionColumn,
+  type CollectionGroup,
+} from "../../layout/collection-list";
 import { cn } from "@multica/ui/lib/utils";
-import { PageHeader } from "../../layout/page-header";
+import { useNavigation } from "../../navigation";
+import { getMikaOnboarding, pickContentLang } from "../../onboarding/templates";
+import { qoderOptions } from "@multica/core/runtimes/qoder";
+import { QODER_RUNTIME_LOCATOR } from "./qoder-detail-page";
+import { RemoteRuntimeDialog } from "./remote-runtime-dialog";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
-import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
+import { RuntimesIntro } from "./runtimes-intro";
+import { pendingRuntimeFromProfile } from "./pending-runtime";
+import { buildRuntimeMachines, type RuntimeMachine } from "./runtime-machines";
 import {
-  pendingRuntimesForProfiles,
-  type PendingRuntimeProfile,
-} from "./pending-runtime";
-import {
-  buildRuntimeMachines,
-  filterRuntimeMachines,
-  runtimeMachineCounts,
-  type RuntimeMachine,
-  type RuntimeMachineFilter,
-} from "./runtime-machines";
-import { HealthDot, HealthIcon, useHealthLabel } from "./shared";
-import { useT } from "../../i18n";
+  HealthIcon,
+  ProviderIconStack,
+  machineIcon,
+  useHealthLabel,
+} from "./shared";
+import { useT, useTimeAgo } from "../../i18n";
 
-const MACHINE_FILTERS: RuntimeMachineFilter[] = ["all", "online", "issues"];
-
-interface RuntimesPageProps {
-  /** Desktop-only daemon id used to mark the row for this Mac. */
+export interface RuntimesPageProps {
+  /** Desktop-only daemon id used to identify this device. */
   localDaemonId?: string | null;
   /** Desktop-only friendly device name for the local daemon. */
   localMachineName?: string | null;
-  /** Desktop-only controls shown when the local machine is selected. */
-  localMachineActions?: React.ReactNode;
-  /**
-   * Desktop-only signal: this host always owns a local machine, even
-   * when no runtime is currently registered (daemon stopped, not yet
-   * started, or runtime GC'd). When true, a placeholder local row is
-   * synthesized so `localMachineActions` (the daemon Start button) is
-   * always reachable. Web omits this.
-   */
+  /** Keep the local device visible even before its first runtime registers. */
   hasLocalMachine?: boolean;
-  /**
-   * Desktop-only signal: the bundled daemon is still booting / hasn't
-   * registered with the server yet. Forwarded so the empty state can show
-   * a "starting" indicator instead of the static "register a runtime" hint
-   * during the boot window. Web omits this.
-   */
+  /** The bundled daemon is starting but has not registered yet. */
   bootstrapping?: boolean;
-  /** Web SaaS-only Cloud Runtime entrypoint. Defaults off for self-hosted builds. */
+  /** Web SaaS-only Cloud Runtime entrypoint. */
   cloudRuntimeEnabled?: boolean;
 }
 
-// Re-render every 30s so derived health (recently_lost → offline transitions)
-// catches up even when no underlying query data has changed.
+type StatusFilter = "all" | "online" | "offline";
+const STATUS_FILTERS: StatusFilter[] = ["all", "online", "offline"];
+
+const COMING_SOON_SERVICES = [
+  { provider: "cursor", name: "Cursor Cloud Agents", vendor: "Cursor" },
+  { provider: "claude", name: "Claude Managed Agents", vendor: "Anthropic" },
+];
+
+type RuntimeRow =
+  | { kind: "machine"; id: string; machine: RuntimeMachine; agentCount: number }
+  | { kind: "qoder"; id: string; connection: QoderConnection; agentCount: number }
+  | { kind: "coming-soon"; id: string; provider: string; name: string; vendor: string }
+  | {
+      kind: "action";
+      id: string;
+      icon: typeof Server;
+      title: string;
+      description: string;
+      action: ReactNode;
+    };
+
+type QoderStatus = "stopped" | "online" | "error" | "offline" | "starting";
+
 function useNowTick(intervalMs = 30_000): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -87,112 +147,89 @@ function useNowTick(intervalMs = 30_000): number {
   return now;
 }
 
+function qoderIsOnline(connection: QoderConnection): boolean {
+  return (
+    connection.configured &&
+    connection.enabled &&
+    connection.status === "online"
+  );
+}
+
+function qoderStatus(connection: QoderConnection): QoderStatus {
+  if (!connection.enabled) return "stopped";
+  if (connection.status === "online") return "online";
+  if (connection.status === "error") return "error";
+  if (connection.status === "offline") return "offline";
+  return "starting";
+}
+
+const QODER_DOT: Record<QoderStatus, string> = {
+  online: "bg-success",
+  error: "bg-destructive",
+  starting: "bg-warning",
+  offline: "bg-muted-foreground/40",
+  stopped: "bg-muted-foreground/40",
+};
+
 export function RuntimesPage({
   localDaemonId,
   localMachineName,
-  localMachineActions,
   hasLocalMachine,
   bootstrapping,
   cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
-  const isLoading = useAuthStore((s) => s.isLoading);
   const { t } = useT("runtimes");
-  const pendingMachineName = t(($) => $.machine.pending_custom_runtimes);
-  const currentUserId = useAuthStore((s) => s.user?.id);
+  const isAuthLoading = useAuthStore((state) => state.isLoading);
+  const currentUserId = useAuthStore((state) => state.user?.id);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
-  const [machineFilter, setMachineFilter] =
-    useState<RuntimeMachineFilter>("all");
-  const [machineSearch, setMachineSearch] = useState("");
-  const [selectedMachineId, setSelectedMachineId] = useState<string | null>(
-    null,
-  );
-  // Tracks whether the user has explicitly picked a machine. Until then,
-  // auto-default keeps preferring the Local section (which on desktop may
-  // appear later than remotes — `localDaemonId` is fetched async).
-  const userSelectedRef = useRef(false);
-  const handleSelectMachine = useCallback((id: string) => {
-    userSelectedRef.current = true;
-    setSelectedMachineId(id);
-  }, []);
+  const paths = useWorkspacePaths();
+  const { data: qoderConnection, isLoading: qoderLoading } = useQuery(qoderOptions(wsId));
+  const navigation = useNavigation();
+  const [qoderDialogOpen, setQoderDialogOpen] = useState(false);
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
-  const [pendingProfiles, setPendingProfiles] = useState<PendingRuntimeProfile[]>(
-    [],
-  );
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
-    id: "multica_runtimes_layout",
-  });
-  const isMobile = useIsMobile();
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
-  const { data: runtimes = [], isLoading: fetching } = useQuery(
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
     runtimeListOptions(wsId),
   );
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const { data: runtimeProfiles = [], isLoading: profilesLoading } = useQuery(
+    runtimeProfileListOptions(wsId),
+  );
+  const { data: agents = [], isLoading: agentsLoading } = useQuery(
+    agentListOptions(wsId),
+  );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-
-  // Custom runtime management is an admin-only affordance, gated the same
-  // way the runtime list gates delete: workspace owner/admin role.
-  const currentMember = currentUserId
-    ? members.find((m) => m.user_id === currentUserId)
-    : null;
-  const canManageProfiles =
-    currentMember?.role === "owner" || currentMember?.role === "admin";
-  const [showProfilesDialog, setShowProfilesDialog] = useState(false);
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  // The Mika entrypoint is per member, not per workspace: the agent alone does
+  // not say whether *this* member's conversation was ever opened and kicked
+  // off. See memberNeedsMikaSetup.
+  const { data: chatSessions = [], isLoading: chatSessionsLoading } = useQuery(
+    chatSessionsOptions(wsId),
+  );
 
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
   }, [qc, wsId]);
   useWSEvent("daemon:register", handleDaemonEvent);
 
-  const updatableIds = useUpdatableRuntimeIds(wsId);
-  const now = useNowTick();
-
-  useEffect(() => {
-    if (pendingProfiles.length === 0) return;
-    const registeredProfileIds = new Set(
-      runtimes
-        .map((runtime) => runtime.profile_id)
-        .filter((profileId): profileId is string => !!profileId),
-    );
-    if (registeredProfileIds.size === 0) return;
-    setPendingProfiles((current) => {
-      const next = current.filter(
-        ({ profile }) => !registeredProfileIds.has(profile.id),
-      );
-      return next.length === current.length ? current : next;
-    });
-  }, [pendingProfiles.length, runtimes]);
-
-  const visibleRuntimes = useMemo(
-    () =>
-      pendingRuntimesForProfiles({
-        pendingProfiles,
-        runtimes,
-        ownerId: currentUserId,
-        localDaemonId,
-        localMachineName,
-        fallbackMachineName: pendingMachineName,
-      }),
-    [
-      pendingProfiles,
-      runtimes,
-      currentUserId,
-      localDaemonId,
-      localMachineName,
-      pendingMachineName,
-    ],
-  );
-
   const workloadIndex = useMemo(
     () => buildWorkloadIndex(agents, snapshot),
     [agents, snapshot],
   );
-
+  const agentCountByRuntime = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const agent of agents) {
+      if (!agent.runtime_id) continue;
+      counts.set(agent.runtime_id, (counts.get(agent.runtime_id) ?? 0) + 1);
+    }
+    return counts;
+  }, [agents]);
+  const now = useNowTick();
   const machines = useMemo(
     () =>
-      buildRuntimeMachines(visibleRuntimes, {
+      buildRuntimeMachines(runtimes, {
         now,
         localDaemonId,
         localMachineName,
@@ -201,7 +238,7 @@ export function RuntimesPage({
         ensureLocalMachine: hasLocalMachine,
       }),
     [
-      visibleRuntimes,
+      runtimes,
       now,
       localDaemonId,
       localMachineName,
@@ -210,668 +247,807 @@ export function RuntimesPage({
       hasLocalMachine,
     ],
   );
+  const orphanProfileRuntimes = useMemo(() => {
+    if (machines.some((machine) => machine.mode === "local")) return [];
+    return runtimeProfiles.map((profile) => {
+      const createdAt = Date.parse(profile.created_at);
+      return pendingRuntimeFromProfile({
+        profile,
+        createdAt: Number.isFinite(createdAt) ? createdAt : 0,
+        fallbackMachineName: "Unassigned",
+      });
+    });
+  }, [machines, runtimeProfiles]);
 
-  const machineCounts = useMemo(() => runtimeMachineCounts(machines), [machines]);
+  // The header, toolbar and column headers render through loading; only the
+  // rows wait, so nothing above them moves when the list lands.
+  const listLoading = isAuthLoading || runtimesLoading || profilesLoading;
 
-  const filteredMachines = useMemo(
-    () => filterRuntimeMachines(machines, machineSearch, machineFilter),
-    [machines, machineSearch, machineFilter],
+  const isDesktop = hasLocalMachine === true;
+  const qoder = qoderConnection ?? null;
+  const qoderHref = paths.runtimeDetail(QODER_RUNTIME_LOCATOR);
+  // Qoder's runtime registers like a machine, but it is listed once, as a
+  // cloud service — never as a machine, even when this server cannot run
+  // Qoder and the cloud row is hidden.
+  const machineList = machines.filter(
+    (machine) =>
+      !(
+        machine.runtimes.length > 0 &&
+        machine.runtimes.every((runtime) => runtime.provider === "qoder_cloud")
+      ),
+  );
+  const qoderAgentCount = agents.filter((agent) =>
+    runtimes.some(
+      (runtime) =>
+        runtime.id === agent.runtime_id && runtime.provider === "qoder_cloud",
+    ),
+  ).length;
+  const localMachine = machineList.find((machine) => machine.isCurrent);
+
+  const filtering = statusFilter !== "all";
+  const matchesStatus = (online: boolean) =>
+    statusFilter === "all" || (statusFilter === "online") === online;
+
+  const visibleMachines = machineList.filter((machine) =>
+    matchesStatus(machine.health === "online"),
+  );
+  const qoderConfigured = qoder?.configured === true;
+  const showQoderRow =
+    qoder !== null &&
+    (statusFilter === "all" ||
+      (qoderConfigured && matchesStatus(qoderIsOnline(qoder))));
+  const visibleComingSoon = statusFilter === "all" ? COMING_SOON_SERVICES : [];
+  const showThisComputerRow =
+    !filtering && !isDesktop && machineList.length === 0;
+  const showAddMachineRow = !filtering && machineList.length === 0;
+  const showIntro =
+    !listLoading &&
+    !qoderLoading &&
+    !filtering &&
+    !isDesktop &&
+    machineList.length === 0 &&
+    !qoderConfigured &&
+    orphanProfileRuntimes.length === 0;
+  const nothingMatches =
+    filtering &&
+    visibleMachines.length === 0 &&
+    !showQoderRow &&
+    visibleComingSoon.length === 0;
+
+  const configuredCloudCount = qoderConfigured ? 1 : 0;
+  const totalCount = machineList.length + configuredCloudCount;
+  const onlineCount =
+    machineList.filter((machine) => machine.health === "online").length +
+    (qoder && qoderIsOnline(qoder) ? 1 : 0);
+  const statusCounts: Record<StatusFilter, number> = {
+    all: totalCount,
+    online: onlineCount,
+    offline: totalCount - onlineCount,
+  };
+
+  const scopeLabels: Record<StatusFilter, string> = {
+    all: t(($) => $.page.filters.all),
+    online: t(($) => $.page.filters.online),
+    offline: t(($) => $.page.filters.offline),
+  };
+
+  const openQoder = () =>
+    qoderConfigured ? navigation.push(qoderHref) : setQoderDialogOpen(true);
+  const addMenuProps = {
+    isDesktop,
+    localMachineName: localMachineName ?? localMachine?.title ?? null,
+    qoder,
+    cloudRuntimeEnabled,
+    onAddMachine: () => setShowConnectDialog(true),
+    onQoder: openQoder,
+    onCloudRuntime: () => setShowCloudRuntimeDialog(true),
+  };
+
+  const columns = useMemo<CollectionColumn<RuntimeRow>[]>(
+    () => [
+      {
+        key: "name",
+        header: t(($) => $.page.columns.name),
+        cell: (row) => (
+          <RuntimeNameCell
+            row={row}
+            currentUserId={currentUserId ?? null}
+            members={members}
+            onConnectQoder={() => setQoderDialogOpen(true)}
+          />
+        ),
+      },
+      {
+        key: "harness",
+        header: t(($) => $.page.columns.harness),
+        width: 112,
+        cell: (row) =>
+          row.kind === "machine" ? (
+            <ProviderIconStack providers={row.machine.providerNames} />
+          ) : row.kind === "qoder" ? (
+            <CollectionEmptyValue />
+          ) : null,
+      },
+      {
+        key: "agents",
+        header: t(($) => $.page.columns.agents),
+        width: 56,
+        align: "end",
+        className: "tabular-nums",
+        cell: (row) =>
+          row.kind === "machine" || (row.kind === "qoder" && row.connection.configured)
+            ? row.agentCount
+            : row.kind === "qoder"
+              ? <CollectionEmptyValue />
+              : null,
+      },
+      {
+        key: "workload",
+        header: t(($) => $.page.columns.workload),
+        width: 112,
+        cell: (row) => <RuntimeWorkloadCell row={row} />,
+      },
+      {
+        key: "status",
+        header: t(($) => $.page.columns.status),
+        width: 136,
+        core: true,
+        cell: (row) => <RuntimeStatusCell row={row} bootstrapping={bootstrapping} />,
+      },
+    ],
+    [t, currentUserId, members, bootstrapping],
   );
 
-  useEffect(() => {
-    if (filteredMachines.length === 0) {
-      if (selectedMachineId !== null) setSelectedMachineId(null);
-      return;
-    }
-    const stillValid =
-      !!selectedMachineId &&
-      filteredMachines.some((m) => m.id === selectedMachineId);
-    // Honor an explicit user pick. Otherwise re-evaluate the default so the
-    // Local machine wins as soon as it shows up, even if a remote was the
-    // first-paint default.
-    if (userSelectedRef.current && stillValid) return;
-    const local = filteredMachines.find((m) => m.section === "local");
-    const nextId = local?.id ?? filteredMachines[0]?.id ?? null;
-    if (nextId !== selectedMachineId) setSelectedMachineId(nextId);
-  }, [filteredMachines, selectedMachineId]);
-
-  const selectedMachine =
-    machines.find((machine) => machine.id === selectedMachineId) ??
-    filteredMachines[0] ??
-    null;
-
-  if (isLoading || fetching) return <RuntimesPageSkeleton />;
-
-  const totalCount = visibleRuntimes.length;
-  // Desktop always has a synthesized local machine row, so the
-  // "register a runtime" empty state would hide the Start button.
-  const showEmpty = totalCount === 0 && !bootstrapping && !hasLocalMachine;
+  const machineRows: RuntimeRow[] = visibleMachines.map((machine) => ({
+    kind: "machine",
+    id: machine.id,
+    machine,
+    agentCount: machine.runtimes.reduce(
+      (sum, runtime) => sum + (agentCountByRuntime.get(runtime.id) ?? 0),
+      0,
+    ),
+  }));
+  if (showThisComputerRow) {
+    machineRows.push({
+      kind: "action",
+      id: "action:this-computer",
+      icon: Laptop,
+      title: t(($) => $.page.rows.this_computer_title),
+      description: t(($) => $.page.rows.this_computer_hint),
+      action: (
+        <a
+          href="/download"
+          target="_blank"
+          rel="noreferrer"
+          className={buttonVariants({ variant: "outline", size: "xs" })}
+        >
+          <Download aria-hidden="true" className="size-3.5" />
+          {t(($) => $.page.rows.download_desktop)}
+        </a>
+      ),
+    });
+  }
+  if (showAddMachineRow) {
+    machineRows.push({
+      kind: "action",
+      id: "action:add-machine",
+      icon: SquareTerminal,
+      title: t(($) => $.page.rows.add_machine_title),
+      description: t(($) => $.page.rows.add_machine_hint),
+      action: (
+        <Button variant="outline" size="xs" onClick={() => setShowConnectDialog(true)}>
+          {t(($) => $.page.rows.view_commands)}
+        </Button>
+      ),
+    });
+  }
+  const cloudRows: RuntimeRow[] = [];
+  if (showQoderRow && qoder) {
+    cloudRows.push({
+      kind: "qoder",
+      id: "qoder",
+      connection: qoder,
+      agentCount: qoderAgentCount,
+    });
+  }
+  for (const service of visibleComingSoon) {
+    cloudRows.push({ kind: "coming-soon", id: `soon:${service.provider}`, ...service });
+  }
+  const groups: CollectionGroup<RuntimeRow>[] = nothingMatches
+    ? []
+    : [
+        {
+          key: "machines",
+          label: t(($) => $.page.groups.machines.title),
+          count: machineList.length,
+          rows: machineRows,
+        },
+        {
+          key: "cloud",
+          label: t(($) => $.page.groups.cloud.title),
+          count: configuredCloudCount,
+          rows: cloudRows,
+        },
+      ];
+  const rowHref = (row: RuntimeRow) =>
+    row.kind === "machine"
+      ? paths.runtimeDetail(row.machine.id)
+      : row.kind === "qoder" && row.connection.configured
+        ? qoderHref
+        : null;
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeaderBar
-        totalCount={totalCount}
-        onConnectRemote={() => setShowConnectDialog(true)}
-        cloudRuntimeEnabled={cloudRuntimeEnabled}
-        onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
-        canManageProfiles={canManageProfiles}
-        onAddRuntime={() => setShowProfilesDialog(true)}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <CollectionPageHeader
+        icon={Server}
+        title={scopeLabels[statusFilter]}
+        menu={
+          <CollectionScopeItems
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={STATUS_FILTERS.map((filter) => ({
+              value: filter,
+              label: scopeLabels[filter],
+              count: statusCounts[filter],
+            }))}
+          />
+        }
+        actions={<AddRuntimeMenu {...addMenuProps} />}
       />
 
-      {showEmpty ? (
-        <div className="flex flex-1 items-center justify-center p-6">
-          <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
-        </div>
-      ) : isMobile ? (
-        <div className="flex min-h-0 flex-1 flex-col bg-background">
-          <MachineSidebar
-            machines={filteredMachines}
-            totalMachines={machines.length}
-            counts={machineCounts}
-            selectedMachineId={selectedMachine?.id ?? null}
-            search={machineSearch}
-            setSearch={setMachineSearch}
-            filter={machineFilter}
-            setFilter={setMachineFilter}
-            onSelect={handleSelectMachine}
-          />
-          <MachineDetail
-            machine={selectedMachine}
-            updatableIds={updatableIds}
-            now={now}
-            bootstrapping={bootstrapping}
-            actions={
-              selectedMachine?.isCurrent ? localMachineActions : undefined
+      {showIntro ? (
+        <RuntimesIntro
+          cloudRuntimeEnabled={cloudRuntimeEnabled}
+          action={
+            <AddRuntimeMenu
+              {...addMenuProps}
+              align="start"
+              trigger={
+                <Button>
+                  <Plus aria-hidden="true" />
+                  {t(($) => $.page.add)}
+                </Button>
+              }
+            />
+          }
+        />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <CollectionList
+            embedded
+            pageShortcuts
+            label={scopeLabels[statusFilter]}
+            columns={columns}
+            groups={groups}
+            loading={listLoading}
+            getRowId={(row) => row.id}
+            getRowHref={rowHref}
+            getRowTitle={(row) =>
+              row.kind === "machine"
+                ? row.machine.title
+                : row.kind === "qoder"
+                  ? t(($) => $.qoder.cloud_title)
+                  : undefined
+            }
+            empty={
+              <CollectionNoMatches
+                title={t(($) => $.page.rows.no_matches)}
+                onReset={() => setStatusFilter("all")}
+                hasFilters={filtering}
+              />
             }
           />
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1 bg-background">
-          <ResizablePanelGroup
-            orientation="horizontal"
-            className="min-h-0 flex-1"
-            defaultLayout={defaultLayout}
-            onLayoutChanged={onLayoutChanged}
-          >
-            <ResizablePanel
-              id="machines"
-              defaultSize={300}
-              minSize={240}
-              maxSize={420}
-              groupResizeBehavior="preserve-pixel-size"
-            >
-              <MachineSidebar
-                machines={filteredMachines}
-                totalMachines={machines.length}
-                counts={machineCounts}
-                selectedMachineId={selectedMachine?.id ?? null}
-                search={machineSearch}
-                setSearch={setMachineSearch}
-                filter={machineFilter}
-                setFilter={setMachineFilter}
-                onSelect={handleSelectMachine}
-                className="h-full border-b-0 border-r"
-              />
-            </ResizablePanel>
-            <ResizableHandle />
-            <ResizablePanel id="detail" minSize="45%">
-              <MachineDetail
-                machine={selectedMachine}
-                updatableIds={updatableIds}
+          <div className="flex flex-col gap-6 px-6 pt-6 pb-16 empty:hidden">
+            {!agentsLoading &&
+              !chatSessionsLoading &&
+              memberNeedsMikaSetup(agents, chatSessions) &&
+              runtimes.some((runtime) => runtime.provider !== "qoder_cloud") && (
+                <MikaSetupCard
+                  workspaceId={wsId}
+                  runtimes={runtimes.filter(
+                    (runtime) => runtime.provider !== "qoder_cloud",
+                  )}
+                  runtimesLoading={runtimesLoading}
+                  currentUserId={currentUserId ?? null}
+                />
+              )}
+            {orphanProfileRuntimes.length > 0 && (
+              <OrphanRuntimeProfiles
+                runtimes={orphanProfileRuntimes}
                 now={now}
-                bootstrapping={bootstrapping}
-                actions={
-                  selectedMachine?.isCurrent ? localMachineActions : undefined
-                }
               />
-            </ResizablePanel>
-          </ResizablePanelGroup>
+            )}
+          </div>
         </div>
       )}
 
+      {qoderDialogOpen && (
+        <RemoteRuntimeDialog onClose={() => setQoderDialogOpen(false)} />
+      )}
       {showConnectDialog && (
         <ConnectRemoteDialog onClose={() => setShowConnectDialog(false)} />
       )}
       {cloudRuntimeEnabled && showCloudRuntimeDialog && (
         <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
       )}
-      {canManageProfiles && showProfilesDialog && (
-        <RuntimeProfilesDialog
-          wsId={wsId}
-          onProfileCreated={(profile) =>
-            setPendingProfiles((current) => [
-              ...current.filter((item) => item.profile.id !== profile.id),
-              { profile, createdAt: Date.now() },
-            ])
-          }
-          onClose={() => setShowProfilesDialog(false)}
-        />
-      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Header bar — minimal: only icon + title + count, matching Skills.
-// Page-level actions (Search, scope, filter) live in the card below.
-// ---------------------------------------------------------------------------
-
-function PageHeaderBar({
-  totalCount,
-  onConnectRemote,
+function AddRuntimeMenu({
+  isDesktop,
+  localMachineName,
+  qoder,
   cloudRuntimeEnabled,
-  onOpenCloudRuntime,
-  canManageProfiles,
-  onAddRuntime,
+  onAddMachine,
+  onQoder,
+  onCloudRuntime,
+  trigger,
+  align = "end",
 }: {
-  totalCount: number;
-  onConnectRemote: () => void;
+  isDesktop: boolean;
+  localMachineName: string | null;
+  qoder: QoderConnection | null;
   cloudRuntimeEnabled: boolean;
-  onOpenCloudRuntime: () => void;
-  canManageProfiles: boolean;
-  onAddRuntime: () => void;
+  onAddMachine: () => void;
+  onQoder: () => void;
+  onCloudRuntime: () => void;
+  trigger?: ReactElement;
+  align?: "start" | "end";
 }) {
   const { t } = useT("runtimes");
   return (
-    <PageHeader className="justify-between px-5">
-      <div className="flex items-center gap-2">
-        <Server className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
-        {totalCount > 0 && (
-          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-            {totalCount}
-          </span>
-        )}
-      </div>
-      {/* Quiet chrome buttons (outline, icon-only below md) — primary is
-          reserved for the empty state's CTA. All three share the same
-          dimensions, padding, and responsive icon-only behavior so the
-          header reads as a single, consistent action group. */}
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-        {canManageProfiles && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-            aria-label={t(($) => $.profiles.cta)}
-            onClick={onAddRuntime}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">
-              {t(($) => $.profiles.cta)}
-            </span>
-          </Button>
-        )}
-        {cloudRuntimeEnabled && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-            aria-label={t(($) => $.cloud_runtime.action)}
-            onClick={onOpenCloudRuntime}
-          >
-            <Cloud className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">
-              {t(($) => $.cloud_runtime.action)}
-            </span>
-          </Button>
-        )}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.connect_remote)}
-          onClick={onConnectRemote}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">
-            {t(($) => $.page.connect_remote)}
-          </span>
-        </Button>
-      </div>
-    </PageHeader>
-  );
-}
-
-function MachineSidebar({
-  machines,
-  totalMachines,
-  counts,
-  selectedMachineId,
-  search,
-  setSearch,
-  filter,
-  setFilter,
-  onSelect,
-  className,
-}: {
-  machines: RuntimeMachine[];
-  totalMachines: number;
-  counts: { all: number; online: number; issues: number };
-  selectedMachineId: string | null;
-  search: string;
-  setSearch: (value: string) => void;
-  filter: RuntimeMachineFilter;
-  setFilter: (value: RuntimeMachineFilter) => void;
-  onSelect: (id: string) => void;
-  className?: string;
-}) {
-  const { t } = useT("runtimes");
-  const sections = [
-    {
-      key: "local" as const,
-      label: t(($) => $.machine.section_local),
-      machines: machines.filter((machine) => machine.section === "local"),
-    },
-    {
-      key: "remote" as const,
-      label: t(($) => $.machine.section_remote),
-      machines: machines.filter((machine) => machine.section === "remote"),
-    },
-    {
-      key: "cloud" as const,
-      label: t(($) => $.machine.section_cloud),
-      machines: machines.filter((machine) => machine.section === "cloud"),
-    },
-  ].filter((section) => section.machines.length > 0);
-
-  return (
-    <aside
-      className={cn(
-        "flex min-h-0 shrink-0 flex-col border-b bg-muted/20",
-        className,
-      )}
-    >
-      <div className="shrink-0 border-b bg-background p-3">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder={t(($) => $.machine.search_placeholder)}
-            className="h-9 pl-8 text-sm"
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={trigger ?? <CollectionCreateButton label={t(($) => $.page.add)} />}
+      />
+      <DropdownMenuContent align={align} className="w-80">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{t(($) => $.page.add_menu.machines)}</DropdownMenuLabel>
+          {isDesktop ? (
+            <AddMenuItem
+              icon={<Laptop className="size-4 text-muted-foreground" />}
+              title={t(($) => $.page.add_menu.this_computer)}
+              description={
+                localMachineName
+                  ? t(($) => $.page.add_menu.this_computer_connected, {
+                      name: localMachineName,
+                    })
+                  : undefined
+              }
+              trailing={<Check className="size-4 text-muted-foreground" />}
+              disabled
+            />
+          ) : (
+            <AddMenuItem
+              icon={<Laptop className="size-4 text-muted-foreground" />}
+              title={t(($) => $.page.add_menu.this_computer)}
+              description={t(($) => $.page.add_menu.this_computer_download)}
+              render={<a href="/download" target="_blank" rel="noreferrer" />}
+            />
+          )}
+          <AddMenuItem
+            icon={<SquareTerminal className="size-4 text-muted-foreground" />}
+            title={t(($) => $.page.add_menu.other_machine)}
+            description={t(($) => $.page.add_menu.other_machine_hint)}
+            onClick={onAddMachine}
           />
-        </div>
-        <div className="mt-2 flex items-center gap-1.5 overflow-x-auto">
-          {MACHINE_FILTERS.map((key) => (
-            <MachineFilterChip
-              key={key}
-              active={filter === key}
-              onClick={() => setFilter(key)}
-              label={t(($) => $.machine.filters[key])}
-              count={counts[key]}
-              tone={key}
+        </DropdownMenuGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{t(($) => $.page.add_menu.cloud_services)}</DropdownMenuLabel>
+          {qoder && (
+            <AddMenuItem
+              icon={<ProviderLogo provider="qoder_cloud" className="size-4" />}
+              title={t(($) => $.qoder.cloud_title)}
+              description={
+                qoder.configured
+                  ? t(($) => $.page.add_menu.qoder_manage_hint)
+                  : t(($) => $.page.rows.provided_by, { vendor: "Qoder" })
+              }
+              trailing={
+                qoder.configured ? (
+                  <Check className="size-4 text-muted-foreground" />
+                ) : undefined
+              }
+              onClick={onQoder}
+            />
+          )}
+          {cloudRuntimeEnabled && (
+            <AddMenuItem
+              icon={<Cloud className="size-4 text-muted-foreground" />}
+              title={t(($) => $.cloud_runtime.action)}
+              description={t(($) => $.page.add_menu.cloud_runtime_hint)}
+              onClick={onCloudRuntime}
+            />
+          )}
+          {COMING_SOON_SERVICES.map((service) => (
+            <AddMenuItem
+              key={service.provider}
+              icon={<ProviderLogo provider={service.provider} className="size-4" />}
+              title={service.name}
+              description={t(($) => $.page.rows.provided_by, {
+                vendor: service.vendor,
+              })}
+              trailing={
+                <Badge variant="secondary" className="shrink-0">
+                  {t(($) => $.page.groups.cloud.coming_soon)}
+                </Badge>
+              }
+              disabled
             />
           ))}
-        </div>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-auto py-2">
-        {sections.length > 0 ? (
-          sections.map((section) => (
-            <div key={section.key} className="mb-3 last:mb-0">
-              <div className="mb-1 flex items-center gap-2 px-4 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                <span>{section.label}</span>
-                <span className="h-px flex-1 bg-border" />
-              </div>
-              <div>
-                {section.machines.map((machine) => (
-                  <MachineRow
-                    key={machine.id}
-                    machine={machine}
-                    active={machine.id === selectedMachineId}
-                    onClick={() => onSelect(machine.id)}
-                  />
-                ))}
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-            <Search className="h-8 w-8 text-muted-foreground/40" />
-            <p className="mt-3 text-sm font-medium">
-              {t(($) => $.machine.no_matches_title)}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {totalMachines > 0
-                ? t(($) => $.machine.no_matches_hint)
-                : t(($) => $.page.bootstrapping.hint)}
-            </p>
-          </div>
-        )}
-      </div>
-    </aside>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-function MachineFilterChip({
-  active,
-  onClick,
-  label,
-  count,
-  tone,
+function AddMenuItem({
+  icon,
+  title,
+  description,
+  trailing,
+  ...props
 }: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  count: number;
-  tone: RuntimeMachineFilter;
-}) {
-  const dotClass =
-    tone === "online"
-      ? "bg-success"
-      : tone === "issues"
-        ? "bg-warning"
-        : "bg-muted-foreground/40";
+  icon: ReactNode;
+  title: string;
+  description?: string;
+  trailing?: ReactNode;
+} & Omit<React.ComponentProps<typeof DropdownMenuItem>, "children" | "title">) {
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={onClick}
-      className={cn(
-        "h-7 gap-1.5 px-2 text-xs",
-        active
-          ? "bg-accent text-accent-foreground hover:bg-accent/80"
-          : "bg-background text-muted-foreground",
-      )}
-    >
-      {tone !== "all" && <span className={cn("h-1.5 w-1.5 rounded-full", dotClass)} />}
-      <span>{label}</span>
-      <span className="font-mono tabular-nums text-muted-foreground/70">
-        {count}
+    <DropdownMenuItem className="gap-2.5 px-2 py-1.5" {...props}>
+      <span className="flex size-7 shrink-0 items-center justify-center rounded-md border bg-background">
+        {icon}
       </span>
-    </Button>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-body font-medium">{title}</span>
+        {description && (
+          <span className="truncate text-caption text-muted-foreground">
+            {description}
+          </span>
+        )}
+      </span>
+      {trailing}
+    </DropdownMenuItem>
   );
 }
 
-function MachineRow({
-  machine,
-  active,
-  onClick,
+function RuntimeNameCell({
+  row,
+  currentUserId,
+  members,
+  onConnectQoder,
 }: {
-  machine: RuntimeMachine;
-  active: boolean;
-  onClick: () => void;
+  row: RuntimeRow;
+  currentUserId: string | null;
+  members: MemberWithUser[];
+  onConnectQoder: () => void;
 }) {
   const { t } = useT("runtimes");
-  const Icon = machine.section === "cloud" ? Cloud : Monitor;
-  const busyCount = machine.runningCount + machine.queuedCount;
-  const runtimeCount = t(($) => $.machine.runtime_count, {
-    count: machine.runtimes.length,
-  });
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "group flex w-full min-w-0 items-start gap-3 px-4 py-2.5 text-left transition-colors",
-        active ? "bg-accent" : "hover:bg-accent/50",
-      )}
-    >
-      <span className="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md border bg-background">
-        <Icon className="h-3.5 w-3.5 text-muted-foreground" />
-        <HealthDot
-          health={machine.health}
-          className="absolute -bottom-0.5 -right-0.5 ring-2 ring-background"
+  switch (row.kind) {
+    case "machine": {
+      const { machine } = row;
+      const Icon = machineIcon(machine);
+      const ownerId = machine.runtimes[0]?.owner_id ?? null;
+      const owner =
+        ownerId && ownerId === currentUserId
+          ? t(($) => $.page.rows.owner_you)
+          : (members.find((member) => member.user_id === ownerId)?.name ?? null);
+      const description =
+        [machine.deviceSummary, owner].filter(Boolean).join(" · ") ||
+        (machine.section === "cloud"
+          ? t(($) => $.machine.metrics.cloud_worker)
+          : t(($) => $.machine.metrics.local_daemon));
+      return (
+        <CollectionNameCell
+          icon={<Icon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />}
+          title={machine.title}
+          badges={
+            machine.isCurrent ? (
+              <CollectionTag>{t(($) => $.machine.this_machine)}</CollectionTag>
+            ) : undefined
+          }
+          description={description}
         />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span
-            className="truncate text-sm font-medium"
-            title={
-              machine.daemonId
-                ? `daemon ${machine.daemonId}`
-                : (machine.subtitle ?? undefined)
-            }
-          >
-            {machine.title}
-          </span>
-          {machine.isCurrent && (
-            <span className="shrink-0 rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background">
-              {t(($) => $.machine.this_machine)}
+      );
+    }
+    case "qoder": {
+      const { connection } = row;
+      const byQoder = t(($) => $.page.rows.provided_by, { vendor: "Qoder" });
+      const error =
+        connection.configured &&
+        qoderStatus(connection) === "error" &&
+        connection.lastError;
+      return (
+        <CollectionNameCell
+          icon={<ProviderLogo provider="qoder_cloud" className="size-4 shrink-0" />}
+          title={t(($) => $.qoder.cloud_title)}
+          description={error || byQoder}
+          trailing={
+            connection.configured ? undefined : (
+              <Button variant="outline" size="xs" onClick={onConnectQoder}>
+                {t(($) => $.page.rows.connect)}
+              </Button>
+            )
+          }
+        />
+      );
+    }
+    case "coming-soon":
+      return (
+        <CollectionNameCell
+          icon={
+            <span className="shrink-0 opacity-60">
+              <ProviderLogo provider={row.provider} className="size-4" />
             </span>
-          )}
-        </span>
-        <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
-          <ProviderIconStack providers={machine.providerNames} />
-          {busyCount > 0 ? (
-            <span className="ml-auto shrink-0 text-xs font-medium text-primary">
-              {t(($) => $.machine.busy_count, { count: busyCount })}
+          }
+          title={row.name}
+          description={t(($) => $.page.rows.provided_by, { vendor: row.vendor })}
+          muted
+        />
+      );
+    case "action": {
+      const Icon = row.icon;
+      return (
+        <CollectionNameCell
+          icon={
+            <span className="flex size-5 shrink-0 items-center justify-center rounded-sm border border-dashed text-muted-foreground">
+              <Icon aria-hidden="true" className="size-3" />
             </span>
-          ) : (
-            <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-              {runtimeCount}
-            </span>
-          )}
-        </span>
-      </span>
-    </button>
-  );
+          }
+          title={row.title}
+          description={row.description}
+          trailing={<span className="shrink-0">{row.action}</span>}
+        />
+      );
+    }
+  }
 }
 
-function ProviderIconStack({ providers }: { providers: string[] }) {
-  const visible = providers.slice(0, 4);
-  const extra = providers.length - visible.length;
+function WorkloadText({
+  running,
+  queued,
+}: {
+  running: number;
+  queued: number;
+}) {
+  const { t } = useT("runtimes");
+  if (running + queued === 0) return <>{t(($) => $.machine.metrics.workload_idle)}</>;
   return (
-    <span className="flex min-w-0 items-center -space-x-1">
-      {visible.map((provider) => (
-        <span
-          key={provider}
-          className="inline-flex h-5 w-5 items-center justify-center rounded bg-background ring-1 ring-border"
-        >
-          <ProviderLogo provider={provider} className="h-3.5 w-3.5" />
-        </span>
-      ))}
-      {extra > 0 && (
-        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground ring-1 ring-border">
-          +{extra}
-        </span>
-      )}
+    <span className="truncate tabular-nums text-foreground">
+      {t(($) => $.machine.metrics.workload_hint, { running, queued })}
     </span>
   );
 }
 
-function MachineDetail({
-  machine,
-  updatableIds,
-  now,
+function RuntimeWorkloadCell({ row }: { row: RuntimeRow }) {
+  if (row.kind === "machine") {
+    return row.machine.health === "online" ? (
+      <WorkloadText running={row.machine.runningCount} queued={row.machine.queuedCount} />
+    ) : (
+      <CollectionEmptyValue />
+    );
+  }
+  if (row.kind === "qoder") {
+    return row.connection.configured && qoderStatus(row.connection) === "online" ? (
+      <WorkloadText running={row.connection.activeRuns} queued={row.connection.queuedRuns} />
+    ) : (
+      <CollectionEmptyValue />
+    );
+  }
+  return null;
+}
+
+function RuntimeStatusCell({
+  row,
   bootstrapping,
-  actions,
 }: {
-  machine: RuntimeMachine | null;
-  updatableIds: Set<string>;
-  now: number;
+  row: RuntimeRow;
   bootstrapping?: boolean;
-  actions?: React.ReactNode;
 }) {
   const { t } = useT("runtimes");
   const healthLabel = useHealthLabel();
-
-  if (!machine) {
-    return (
-      <main className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-        {bootstrapping ? (
+  const timeAgo = useTimeAgo();
+  switch (row.kind) {
+    case "machine": {
+      const { machine } = row;
+      if (machine.isCurrent && bootstrapping && machine.runtimes.length === 0) {
+        return (
           <>
-            <Server className="h-8 w-8 animate-pulse text-muted-foreground/40" />
-            <p className="mt-3 text-sm text-muted-foreground">
-              {t(($) => $.page.bootstrapping.title)}
-            </p>
-            <p className="mt-1 max-w-xs text-xs text-muted-foreground/70">
-              {t(($) => $.page.bootstrapping.hint)}
-            </p>
+            <Loader2 aria-hidden="true" className="size-3 shrink-0 animate-spin" />
+            <span className="truncate">{t(($) => $.page.bootstrapping.title)}</span>
           </>
-        ) : (
-          <>
-            <Monitor className="h-8 w-8 text-muted-foreground/40" />
-            <p className="mt-3 text-sm text-muted-foreground">
-              {t(($) => $.machine.select_machine)}
-            </p>
-          </>
-        )}
-      </main>
-    );
+        );
+      }
+      const online = machine.health === "online";
+      return (
+        <>
+          <HealthIcon health={machine.health} />
+          <span className={cn("truncate", online && "text-foreground")}>
+            {healthLabel(machine.health)}
+            {!online && machine.lastSeenAt ? ` · ${timeAgo(machine.lastSeenAt)}` : ""}
+          </span>
+        </>
+      );
+    }
+    case "qoder": {
+      if (!row.connection.configured) {
+        return (
+          <Badge variant="secondary" className="bg-warning/10 text-warning">
+            {t(($) => $.page.rows.not_connected)}
+          </Badge>
+        );
+      }
+      const status = qoderStatus(row.connection);
+      return (
+        <>
+          <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", QODER_DOT[status])} />
+          <span
+            className={cn(
+              "truncate",
+              status === "online" && "text-foreground",
+              status === "error" && "text-destructive",
+            )}
+          >
+            {t(($) => $.qoder[status])}
+          </span>
+        </>
+      );
+    }
+    case "coming-soon":
+      return <Badge variant="secondary">{t(($) => $.page.groups.cloud.coming_soon)}</Badge>;
+    case "action":
+      return null;
   }
+}
 
-  const runtimeTotal = machine.runtimes.length;
-  const busyCount = machine.runningCount + machine.queuedCount;
-  const workloadLabel =
-    busyCount > 0
-      ? t(($) => $.machine.metrics.workload_hint, {
-          running: machine.runningCount,
-          queued: machine.queuedCount,
-        })
-      : t(($) => $.machine.metrics.workload_idle);
-  const runtimesMeta = t(($) => $.machine.metrics.runtimes_hint, {
-    count: machine.onlineCount,
-  });
-  // Single inline meta strip replaces the old 4-card grid. Health is already
-  // shown as a chip in the title row; CLI / daemon id are scanning-grade
-  // info, not headline numbers — they belong in muted secondary text.
-  const metaParts: React.ReactNode[] = [
-    <span key="runtimes">
-      <span className="font-medium tabular-nums text-foreground">
-        {t(($) => $.machine.runtime_count, { count: runtimeTotal })}
-      </span>
-      {runtimeTotal > 0 && <> · {runtimesMeta}</>}
-    </span>,
-    <span key="workload" className={busyCount > 0 ? "text-primary" : undefined}>
-      {workloadLabel}
-    </span>,
-  ];
-  if (machine.cliVersion) {
-    metaParts.push(
-      <span key="cli" className="font-mono">
-        {machine.cliVersion}
-      </span>,
-    );
-  }
-  if (machine.subtitle) {
-    metaParts.push(
-      <span key="subtitle" className="truncate font-mono">
-        {machine.subtitle}
-      </span>,
-    );
-  }
+/**
+ * Entry point for creating Mika once a runtime exists.
+ *
+ * The action opens a picker rather than provisioning straight away. It used to
+ * take `runtimes.find(online) ?? runtimes[0]` and create Mika on it silently —
+ * but one machine commonly exposes every agent CLI it has installed (nine, on
+ * the box this was reported from), so "the first online one" is arbitrary and
+ * could well be a CLI the member never intended to run their Chief of Staff
+ * on. Onboarding already makes this an explicit choice; this is the same
+ * decision reached from a different entry point, so it asks the same way and
+ * reuses the same two controls.
+ */
+function MikaSetupCard({
+  workspaceId,
+  runtimes,
+  runtimesLoading,
+  currentUserId,
+}: {
+  workspaceId: string;
+  runtimes: AgentRuntime[];
+  runtimesLoading?: boolean;
+  currentUserId: string | null;
+}) {
+  const { t, i18n } = useT("runtimes");
+  const navigation = useNavigation();
+  const paths = useWorkspacePaths();
+  const wsSlug = useRequiredWorkspaceSlug();
+  const bootstrapMika = useBootstrapMika(workspaceId);
+
+  const [open, setOpen] = useState(false);
+  // Seeded with the old heuristic so the dialog opens on a sensible default;
+  // the point is that it is now visible and changeable, not that it is unset.
+  const defaultRuntimeId =
+    runtimes.find((runtime) => runtime.status === "online")?.id ??
+    runtimes[0]?.id ??
+    "";
+  const [choice, setChoice] = useState<MikaRuntimeSelection | null>(null);
+
+  const value: MikaRuntimeSelection = choice ?? {
+    runtimeId: defaultRuntimeId,
+    model: "",
+  };
+  const runtimeId = value.runtimeId;
+
+  const handleStart = async () => {
+    if (!runtimeId || bootstrapMika.isPending) return;
+    const lang = pickContentLang(i18n.language);
+    try {
+      const result = await bootstrapMika.mutateAsync({
+        workspaceSlug: wsSlug,
+        runtimeId,
+        model: value.model || undefined,
+        ...getMikaOnboarding(lang),
+      });
+      setOpen(false);
+      navigation.push(paths.chatSession(result.chatSession.id));
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t(($) => $.mika_setup.failed),
+      );
+    }
+  };
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <div className="shrink-0 border-b bg-background px-5 py-4">
-        <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <h2 className="truncate text-xl font-semibold tracking-tight">
-                {machine.title}
-              </h2>
-              <span className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-xs text-muted-foreground">
-                <HealthIcon health={machine.health} />
-                {healthLabel(machine.health)}
-              </span>
-              {machine.isCurrent && (
-                <span className="rounded-md bg-foreground px-2 py-0.5 text-xs font-medium text-background">
-                  {t(($) => $.machine.local_badge)}
-                </span>
-              )}
-            </div>
-            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              {metaParts.map((part, idx) => (
-                <React.Fragment key={idx}>
-                  {idx > 0 && (
-                    <span className="text-muted-foreground/40">·</span>
-                  )}
-                  {part}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-          {actions && <div className="shrink-0">{actions}</div>}
+    <>
+      <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center">
+        <span
+          role="img"
+          aria-label={t(($) => $.mika_setup.title)}
+          className="flex size-10 shrink-0 select-none items-center justify-center rounded-full bg-muted text-title-lg leading-none"
+        >
+          {MIKA_PLACEHOLDER_EMOJI}
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-body font-semibold">
+            {t(($) => $.mika_setup.title)}
+          </h2>
+          <p className="mt-1 text-body leading-relaxed text-muted-foreground">
+            {t(($) => $.mika_setup.description)}
+          </p>
         </div>
+        <Button className="shrink-0" onClick={() => setOpen(true)}>
+          {t(($) => $.mika_setup.action)}
+        </Button>
       </div>
 
-      <RuntimeList
-        runtimes={machine.runtimes}
-        updatableIds={updatableIds}
-        now={now}
-      />
-    </main>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-[480px]">
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.mika_setup.dialog_title)}</DialogTitle>
+          </DialogHeader>
+
+          <MikaRuntimeChoice
+            runtimes={runtimes}
+            runtimesLoading={runtimesLoading}
+            currentUserId={currentUserId}
+            value={value}
+            onChange={setChoice}
+            disabled={bootstrapMika.isPending}
+          />
+
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setOpen(false)}
+              disabled={bootstrapMika.isPending}
+            >
+              {t(($) => $.mika_setup.cancel)}
+            </Button>
+            <Button
+              onClick={handleStart}
+              disabled={!runtimeId || bootstrapMika.isPending}
+            >
+              {bootstrapMika.isPending && (
+                <Loader2 aria-hidden className="size-4 animate-spin" />
+              )}
+              {t(($) => $.mika_setup.action)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Empty state — shown when zero runtimes have ever registered in this
-// workspace.
-// ---------------------------------------------------------------------------
-
-function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
+function OrphanRuntimeProfiles({
+  runtimes,
+  now,
+}: {
+  runtimes: ReturnType<typeof pendingRuntimeFromProfile>[];
+  now: number;
+}) {
   const { t } = useT("runtimes");
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-        <Server className="h-6 w-6 text-muted-foreground" />
+    <section>
+      <div className="mb-3">
+        <h2 className="text-body font-semibold">
+          {t(($) => $.profiles.unassigned_title)}
+        </h2>
+        <p className="mt-1 text-caption text-muted-foreground">
+          {t(($) => $.profiles.unassigned_description)}
+        </p>
       </div>
-      <h2 className="mt-4 text-base font-semibold">{t(($) => $.page.empty.title)}</h2>
-      <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        {t(($) => $.page.empty.hint)}
-      </p>
-      <Button
-        type="button"
-        size="sm"
-        onClick={onConnectRemote}
-        className="mt-5"
-      >
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.connect_remote)}
-      </Button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Loading skeleton — laid out like the split runtime page so the layout
-// does not jump on first paint.
-// ---------------------------------------------------------------------------
-
-function RuntimesPageSkeleton() {
-  return (
-    <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="justify-between px-5">
-        <Skeleton className="h-4 w-24" />
-      </PageHeader>
-      <div className="flex min-h-0 flex-1">
-        <div className="hidden w-[300px] shrink-0 border-r p-3 md:block">
-          <Skeleton className="h-9 w-full rounded-md" />
-          <div className="mt-3 flex gap-2">
-            <Skeleton className="h-7 w-16 rounded-md" />
-            <Skeleton className="h-7 w-20 rounded-md" />
-            <Skeleton className="h-7 w-20 rounded-md" />
-          </div>
-          <div className="mt-5 space-y-2">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-20 w-full rounded-lg" />
-            ))}
-          </div>
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div className="border-b p-5">
-            <Skeleton className="h-6 w-64 rounded-md" />
-            <Skeleton className="mt-3 h-4 w-full max-w-md rounded-md" />
-          </div>
-          <div className="h-12 border-b px-4 py-2">
-            <Skeleton className="h-8 w-40 rounded-full" />
-          </div>
-          <div className="space-y-2 p-4">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-14 w-full rounded-md" />
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
+      <RuntimeList runtimes={runtimes} now={now} />
+    </section>
   );
 }
 
 export default RuntimesPage;
-export type { RuntimesPageProps };

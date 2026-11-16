@@ -3,6 +3,7 @@ import { api } from "../api";
 
 export const autopilotKeys = {
   all: (wsId: string) => ["autopilots", wsId] as const,
+  usage: (wsId: string) => [...autopilotKeys.all(wsId), "usage"] as const,
   list: (wsId: string) => [...autopilotKeys.all(wsId), "list"] as const,
   detail: (wsId: string, id: string) =>
     [...autopilotKeys.all(wsId), "detail", id] as const,
@@ -14,7 +15,19 @@ export const autopilotKeys = {
     [...autopilotKeys.all(wsId), "deliveries", id] as const,
   delivery: (wsId: string, autopilotId: string, deliveryId: string) =>
     [...autopilotKeys.all(wsId), "deliveries", autopilotId, deliveryId] as const,
+  cronPreview: (wsId: string, expr: string, tz: string) =>
+    [...autopilotKeys.all(wsId), "cron-preview", expr, tz] as const,
 };
+
+export function autopilotQuotaUsageOptions(wsId: string) {
+  return queryOptions({
+    queryKey: autopilotKeys.usage(wsId),
+    queryFn: () => api.getAutopilotQuotaUsage(),
+    enabled: wsId.length > 0,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
 
 export function autopilotListOptions(wsId: string) {
   return queryOptions({
@@ -85,5 +98,24 @@ export function autopilotDeliveryOptions(
     queryKey: autopilotKeys.delivery(wsId, autopilotId, deliveryId),
     queryFn: () => api.getAutopilotDelivery(autopilotId, deliveryId),
     enabled: options?.enabled ?? true,
+  });
+}
+
+// cronPreviewOptions backs the schedule editor's next-run preview. The server
+// owns cron/timezone evaluation, so the editor never approximates it locally.
+export function cronPreviewOptions(
+  wsId: string,
+  expr: string,
+  tz: string,
+  options?: { enabled?: boolean },
+) {
+  return queryOptions({
+    queryKey: autopilotKeys.cronPreview(wsId, expr, tz),
+    queryFn: () => api.cronPreview({ expr, tz }),
+    enabled: options?.enabled ?? true,
+    staleTime: 30_000,
+    // A 400 (invalid expression/timezone) is a stable answer for this input,
+    // not a transient failure — retrying would only delay the inline error.
+    retry: false,
   });
 }

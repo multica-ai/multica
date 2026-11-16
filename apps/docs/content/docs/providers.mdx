@@ -1,137 +1,131 @@
 ---
-title: AI coding tools matrix
-description: Multica supports 13 AI coding tools; they implement the same interface, but the capability details diverge significantly.
+title: AI coding tools comparison
+description: Compare the AI coding tools Multica supports, and how models, MCP, sessions, and skills differ.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { ProviderPickerDemo } from "@/components/demos/provider-picker-demo";
 
-Multica ships with built-in support for **13 AI coding tools**. They all implement the same interface — queue, dispatch, execute, return results — so you can drive any of them from the same Multica board. **But the capability details diverge significantly**: whether session resumption actually works, whether MCP is supported, where skill files live, how models are selected. This page is the full matrix.
+Multica does not replace the AI coding tool you use: a runtime invokes the tool already installed and signed in on the computer, then writes progress and results back to the issue. If you already use one of these tools, you can usually keep it. If you have not picked one yet, weigh four things:
 
-For guidance on picking a tool when creating an agent, see [Creating and configuring agents](/agents-create).
+- whether it is already installed on the computer;
+- which models your account can use;
+- whether Multica needs to configure MCP for it;
+- which skills the team wants to reuse.
 
-## Capability matrix
+Install steps are in [Install AI coding tools](/install-agent-runtime).
 
-| Tool | Vendor | Session resumption | MCP | Skill injection path | Model selection |
-|---|---|---|---|---|---|
-| **Antigravity** | Google | ✅ (`--conversation <id>`) | ❌ | `.agents/skills/` | Dynamic discovery (`agy models`) |
-| **Claude Code** | Anthropic | ✅ | ✅ | `.claude/skills/` | Static + flag |
-| **CodeBuddy** | Tencent | ✅ | ✅ | `.claude/skills/` | Dynamic discovery |
-| **Codex** | OpenAI | ✅ | ✅ | `$CODEX_HOME/skills/` | Static |
-| **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
-| **Cursor** | Anysphere | ✅ | ✅ | `.cursor/skills/` | Dynamic discovery |
-| **Hermes** | Nous Research | ✅ | ✅ | `.agent_context/skills/` (fallback) | Dynamic discovery |
-| **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | Dynamic discovery |
-| **Kiro CLI** | Amazon | ✅ | ✅ | `.kiro/skills/` | Dynamic discovery |
-| **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | Dynamic discovery + variants |
-| **OpenClaw** | Open source | ✅ | ✅ | `.agent_context/skills/` (fallback) | Bound to the agent, can't be switched per task |
-| **Pi** | Inflection AI | ✅ (session is a file path) | ❌ | `.pi/skills/` | Dynamic discovery |
-| **Qoder** | Alibaba | ✅ | ✅ | `.qoder/skills/` | Dynamic discovery |
+## Supported tools
 
-## What each tool is for
+<ProviderPickerDemo />
 
-### Antigravity
+| Tool | Detected command | Session resumption | Multica-managed MCP | Model picked in Multica | Skill injection path |
+|---|---|---:|---:|---:|---|
+| Antigravity | `agy` | ✓ | — | ✓ | `.agents/skills/` |
+| Claude Code | `claude` | ✓ | ✓ | ✓ | `.claude/skills/` |
+| CodeBuddy | `codebuddy` | ✓ | ✓ | ✓ | `.codebuddy/skills/` |
+| CodeArts | `codearts` | ✓ | ✓ | ✓ | `.codeartsdoer/skills/` |
+| Codex | `codex` | ✓ | ✓ | ✓ | `$CODEX_HOME/skills/` |
+| GitHub Copilot CLI | `copilot` | ✓ | — | ✓ | `.github/skills/` |
+| Cursor Agent | `cursor-agent` | ✓ | ✓ | ✓ | `.cursor/skills/` |
+| DeepSeek Harness | `dsh` | ✓ | ✓ | ✓ | `.dsh/skills/` |
+| DevEco Code | `deveco` | ✓ | — | ✓ | `.deveco/skills/` |
+| Grok | `grok` | ✓ | ✓ | ✓ | `.grok/skills/` |
+| Hermes | `hermes` | ✓ | ✓ | ✓ | per-run `HERMES_HOME/skills/` |
+| Kimi CLI | `kimi` | ✓ | ✓ | ✓ | `.kimi/skills/` |
+| Kiro CLI | `kiro-cli` | ✓ | ✓ | ✓ | `.kiro/skills/` |
+| MiniMax Code | `mcode` | — | ✓ | — | `.minimax/skills/` |
+| Muse Code | `muse` | ✓ | — | ✓ | `.agents/skills/` |
+| Devin CLI | `devin` | ✓ | ✓ | ✓ | `.devin/skills/` |
+| OpenClaw | `openclaw` | ✓ | ✓ | ✓ | `skills/` |
+| OpenCode | `opencode` | ✓ | ✓ | ✓ | `.opencode/skills/` |
+| Pi | `pi` | ✓ | ✓ | ✓ | `.pi/skills/` |
+| Oh-My-Pi | `omp` | ✓ | ✓ | ✓ | `.omp/skills/` |
+| Qoder CLI | `qodercli` | ✓ | ✓ | ✓ | `.qoder/skills/` |
+| Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
+| Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
+| QwenPaw | `qwenpaw` | ✓ | ✓ | — | per-run workspace `skills/` |
+| Amp | `amp` | ✓ | — | Mode | `.agents/skills/` |
+| Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
+| Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
+| Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
+| Dim | `dim` | ✓ | ✓ | ✓ | — |
+| ZeroClaw | `zeroclaw` | ✓ | — | — | — |
+| ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
-From Google. CLI binary name is `agy`. Pairs with Google's Antigravity service and ships with a Gemini-backed default model. **Session resumption works** via `--conversation <id>`; the daemon captures the conversation UUID from the CLI's log file because stdout is plain text rather than a structured event stream. **Model selection works** via the `--model` flag (added in agy 1.0.6): the daemon enumerates the catalog with `agy models` and ships the chosen value verbatim. Note these are human display strings such as `Claude Opus 4.6 (Thinking)`, not `provider/model` slugs — and agy silently no-ops on a value it doesn't recognise, so prefer picking from the discovered list over typing a custom one. Skills land in `.agents/skills/` (the CLI inherits Gemini CLI's workspace skill layout — see [Antigravity migration docs](https://antigravity.google/docs/gcli-migration)).
+For Amp, the model field selects an Amp **mode**, such as `high`, rather than an underlying model ID. Leave it empty to use Amp’s default.
 
-### Claude Code
+Amp also requires `AMP_API_KEY` in the daemon or agent environment; a saved interactive login alone is not enough.
 
-From Anthropic. **First choice for new users** — the most complete feature set: session resumption actually works, it reads MCP configuration, and it supports fine-tuning flags like `--max-turns` and `--append-system-prompt`. Requires an Anthropic API key.
+"Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. The column only says whether Multica can configure it for you, not whether the tool has other ways to configure MCP.
 
-### CodeBuddy
+Tools with — under "Model picked in Multica" take their model from their own configuration; see [Model sources](#model-sources).
 
-From Tencent. A Claude Code–compatible CLI agent — Multica drives it with the same stream-json protocol as Claude Code, so session resumption works (via `--resume`), MCP config is passed through `--mcp-config`, and skills use Claude Code's `.claude/skills/` layout. Models are discovered dynamically.
+Devin supports stdio MCP servers; HTTP/SSE entries are passed only if the CLI advertises support. Devin skills are imported from `$XDG_CONFIG_HOME/devin/skills` (default `~/.config/devin/skills`) or `%APPDATA%\devin\skills` on Windows, then the legacy `cognition/skills` root, then `~/.codeium/<channel>/skills` (`windsurf`, `windsurf-next`, `windsurf-insiders`, in that order), and finally `~/.agents/skills`. On duplicate skill keys, the first root wins for both listing and import.
 
-### Codex
+## Model sources
 
-From OpenAI. Uses JSON-RPC 2.0, has stronger statefulness, and a finer-grained approve mechanism (manual approval for `exec_command` and `patch_apply`). MCP config is materialized into the per-task `$CODEX_HOME/config.toml`. **Session resumption works** through Codex app-server `thread/resume`; if the saved thread is missing or stale, Multica falls back to a fresh thread so the task can still run.
+When you create an agent, the model list comes from the corresponding runtime. Some tools expose a fixed set of model names; others return available models based on local configuration, the signed-in account, and subscription entitlements.
 
-### Copilot
+If you do not pick a model, Multica uses the tool's own default. If the list is empty, confirm the runtime is online and the tool is signed in, then refresh the model list.
 
-From GitHub. Model routing goes through your GitHub account entitlement — the tool doesn't select a model itself; GitHub decides which model you get. Placing skills in `.github/skills/` is GitHub CLI's native discovery mechanism.
+For Kiro CLI, the **Thinking** picker in agent creation and settings lists the effort levels advertised for the selected model. The choice applies to new and resumed sessions. Leave it unset to use Kiro's own effort setting. Models or CLI versions that return no effort options keep the picker hidden.
 
-### Cursor
+Devin's picker lists the model choices advertised by its ACP session. Choose a canonical model ID, an unambiguous session model name or catalog family slug/alias (such as `opus`), or leave the model empty for the CLI default. Family aliases that require `devin models list` can still require a saved CLI login; if alias resolution fails, select a model ID from the picker. Multica confirms the actual session model before sending the prompt; a fallback to another family is rejected. Ambiguous names, arbitrary partial names, or unavailable variants require a canonical ID rather than a guessed match. Usage is attributed to the reported model, not the launch flag. Adaptive usage stays under the reported Adaptive routing ID, not an inferred underlying model.
 
-From Anysphere, the CLI counterpart to the Cursor editor. **Session resumption works** with current Cursor Agent releases: the stream-json event includes a `session_id`, and Multica passes it back with `--resume <id>` on the next run. MCP config is materialized into the task workspace's `.cursor/mcp.json`, with Cursor's project approval file written under a per-task `CURSOR_DATA_DIR` so managed MCP servers do not depend on the user's global Cursor approvals.
+Devin reads `WINDSURF_API_KEY` when set, otherwise the login saved by `devin auth login`; unknown ACP auth methods do not block that stored login. Model discovery uses the daemon user's credentials: a key set only in an agent's custom environment is unavailable to the runtime model picker. An empty session model list prompts you to check those credentials and your team's model allowlist. Multica preserves Devin's configured session mode rather than raising permissions. If it defaults to `plan`, switch to an editing mode in Devin before dispatching work that must change files.
 
-### Hermes
+QwenPaw, MiniMax Code, and ZeroClaw are exceptions: they do not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in the tool's own configuration instead. An empty model list for these tools is expected and does not mean the runtime is offline.
 
-From Nous Research. Uses the ACP protocol (shares a transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. But the **skill injection path is the generic fallback** (`.agent_context/skills/`), not a dedicated one — if the Hermes CLI itself doesn't read this path, skills may not take effect. Verify by testing.
+DeepSeek Harness advertises its model catalog from the runtime itself (`dsh --profile multica --list-models`). Its model ids use the `provider/model` form (for example `deepseek-official/deepseek-chat`), so select the full id from the list.
 
-**Selecting a Hermes profile.** To launch Hermes under a specific profile, set the agent's `custom_args` to the profile flag and the profile name as two separate entries — for example, for a profile named `research`:
-
-```json
-["-p", "research"]
-```
-
-Don't combine them into one string like `"-p research"`; Multica passes each array item as a separate argv entry. `custom_args` is configured per agent — see [Creating and configuring agents](/agents-create).
-
-### Kimi
-
-From Moonshot, aimed at the Chinese market. Shares the ACP protocol with Hermes, including MCP config through ACP `mcpServers`, but the skill path `.kimi/skills/` is Kimi CLI's native discovery mechanism — different from Hermes's fallback.
-
-### Kiro CLI
-
-From Amazon. Uses ACP over stdio via `kiro-cli acp`. Session resumption works through ACP `session/load`, MCP config is passed through ACP `mcpServers`, model selection works through `session/set_model`, and skills are copied into `.kiro/skills/` for native project-level discovery.
-
-### OpenCode
-
-From SST, open source. Dynamically discovers available models and model variants (scans the CLI's configuration file). Session resumption works, and it consumes the agent's `mcp_config` field — Multica injects it inline through the `OPENCODE_CONFIG_CONTENT` environment variable, so the agent's MCP servers reach OpenCode without writing anything into the task workdir's `opencode.json` (the agent or the user keep ownership of that file). When a model exposes variants, Multica shows them as the agent thinking selector and passes the selected value through `opencode run --variant`. **Suitable for tinkerers who want to customize their model catalog.**
-
-### OpenClaw
-
-Open-source project, a CLI agent orchestrator. MCP config is materialized through Multica's per-task OpenClaw config wrapper. **Model is bound at the agent layer** (`openclaw agents add --model`) — it can't be overridden per task. Configuration is strictly controlled: users can't pass `--model` or `--system-prompt`; the agent-registration config decides.
-
-### Pi
-
-From Inflection AI, minimalist. **Session resumption is unusual** — the session ID is a file path on disk (`~/.pi/...`) rather than a string ID. In other tools, the resume id is a string returned by the CLI; in Pi, the resume id is the session file itself.
-
-### Qoder
-
-From Alibaba. An agentic coding CLI. Uses the ACP protocol over stdio (shares a transport with Hermes, Kimi, and Kiro CLI). Session resumption works through ACP `session/resume`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically, and skills are copied into `.qoder/skills/` for native discovery.
-
-## Session resumption: who really supports it
-
-The session resumption mechanism is covered in [Tasks](/tasks#can-a-task-continue-from-the-previous-context). **Every supported tool resumes sessions** — pass the resume id and the task continues from the previous context. The one quirk is Pi, whose resume id is a session file path on disk rather than a string id (see [Pi](#pi) above).
-
-## MCP configuration: provider-specific support
-
-**Of the 13 tools, ten consume `mcp_config`: Claude Code, CodeBuddy, Codex, Cursor, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Qoder**. The other three accept the field but **ignore it** — no error, no warning, the config just has no effect.
-
-The runtime paths are provider-specific: Claude Code and CodeBuddy receive it through `--mcp-config` paired with `--strict-mcp-config`; Codex writes a daemon-managed `mcp_servers` block into the per-task `$CODEX_HOME/config.toml`; Cursor writes `.cursor/mcp.json` plus per-task project approvals under `CURSOR_DATA_DIR`; Hermes, Kimi, Kiro CLI, and Qoder receive ACP `mcpServers`; OpenCode receives inline config through `OPENCODE_CONFIG_CONTENT`; OpenClaw receives `mcp.servers` through Multica's per-task config wrapper. OpenCode's path does **not** rewrite the project's `opencode.json`.
-
-<Callout type="warning">
-If you set `mcp_config` in an agent configuration but pick a tool not marked ✅ in the MCP column, your MCP servers have **no effect** on that agent. MCP integration is provider-specific.
+<Callout type="info">
+Model names are not shared across tools. After switching AI coding tools, the previous model value is invalid in the new tool and needs to be selected again.
 </Callout>
 
-## Where skill files go
+## Session resumption
 
-Each tool uses **its own** skill discovery path. Before a task runs, the Multica daemon copies the workspace's skill files into the corresponding path:
+Tools marked ✓ can continue an existing session in a later run, provided the original session still exists and the run is executed by a runtime that can reach it. MiniMax Code 0.1.2 advertises no session-loading capability over ACP, so Multica starts a fresh MCode session for a later run.
 
-| Tool | Path | Native discovery? |
-|---|---|---|
-| Claude Code | `.claude/skills/` | ✅ Native |
-| CodeBuddy | `.claude/skills/` | ✅ Native |
-| Codex | `$CODEX_HOME/skills/` | ✅ Native |
-| Copilot | `.github/skills/` | ✅ Native |
-| Cursor | `.cursor/skills/` | ✅ Native |
-| Kimi | `.kimi/skills/` | ✅ Native |
-| Kiro CLI | `.kiro/skills/` | ✅ Native |
-| OpenCode | `.opencode/skills/` | ✅ Native |
-| Pi | `.pi/skills/` | ✅ Native |
-| Qoder | `.qoder/skills/` | ✅ Native |
-| Antigravity | `.agents/skills/` | ✅ Native (inherits Gemini CLI's workspace layout — see [Antigravity docs](https://antigravity.google/docs/gcli-migration)) |
-| Hermes | `.agent_context/skills/` | ⚠️ Generic fallback |
-| OpenClaw | `.agent_context/skills/` | ⚠️ Generic fallback |
+Multica stores the session identifier the tool returns. The next time work continues on the same issue, the runtime tries to resume that session; if it cannot, it starts a new session and keeps going. Pi stores a local session file path, so it depends more on the original computer and file.
 
-Whether a fallback-path tool actually reads this directory depends on the tool's own documentation — no guarantees. If your skills aren't taking effect for Hermes / OpenClaw, check this first.
+Retry and session-resumption rules are in [Runs](/tasks#manual-retry).
 
-For native project-level paths, repo-scoped discovery is expected: if the checked-out repository already contains a matching directory, the underlying tool can discover those committed skills on its own. You do not need to import those repo skills into Multica just to use them in that repo. Multica keeps the repo files intact. If a workspace skill has the same natural directory name, the daemon writes the workspace copy to a collision-free sibling such as `review-helper-multica`.
+## MCP configuration
 
-For creating and using skills, see [Skills](/skills).
+Amp, Factory Droid, Antigravity, GitHub Copilot CLI, DevEco Code, Muse Code, and ZeroClaw do not read the MCP configuration on an agent yet, so the field is not shown when creating agents for them.
 
-## Next
+Managed MCP delivery for Pi requires Pi 0.99.0 or later. Older Pi versions continue to run agents that have no MCP configuration.
 
-- [Creating and configuring agents](/agents-create) — pick a tool for your agent
-- [Tasks](/tasks) — task lifecycle and session-resumption mechanics
-- [Daemon and runtimes](/daemon-runtimes) — where the tools run and how they connect to Multica
-- [Install an agent runtime](/install-agent-runtime) — installation and authentication for each of the 13 supported tools
+<Callout type="warning">
+MCP server commands, arguments, and environment variables are saved server-side with the agent configuration. Do not write local credentials you have no need to share into the configuration.
+</Callout>
+
+Servers already configured on the runtime's machine are merged with the agent's configuration on that machine; see [Local MCP configuration](/daemon-runtimes#local-mcp).
+
+## Skill injection
+
+Before a run starts, Multica writes the skills bound to the agent into the paths in the table above, where each tool discovers them through its own native mechanism.
+
+Skills that already exist in the repository are never overwritten. On a name collision, Multica uses a different directory name for the injected copy; after the run, it cleans up only the files it created.
+
+Codex, Hermes, and OpenClaw are handled slightly differently:
+
+- Codex uses a per-run `CODEX_HOME`, so skills are never written into the system-level Codex directory.
+- Hermes uses a per-run `HERMES_HOME`. Existing local configuration is still readable, but bound skills and session data are isolated per run. This isolation kicks in only when the agent has skills bound; runs without bound skills use the machine's original Hermes home.
+- OpenClaw uses `skills/` under the current run's working directory, and the per-run configuration sets that directory as the workspace.
+
+For creating and binding skills, see [Skills](/skills).
+
+## Next steps
+
+- [Create and configure an agent](/agents-create) — model and thinking-effort settings.
+- [Install AI coding tools](/install-agent-runtime) — install and detection steps.
+- [Daemon and runtimes](/daemon-runtimes) — runtime registration and concurrency.
+
+## ZCode
+
+ZCode uses its native NDJSON `app-server` protocol for session creation, resumption, cancellation, model discovery, thinking levels, and MCP. Tasks run in yolo mode without interactive tool approval. Reasoning choices come from the runtime model catalog; creating an agent preserves the selected model's default level.
+
+On macOS the daemon also discovers ZCode Desktop's bundled CLI; Node.js must be installed. On Linux it discovers ZCode Desktop and runs the bundled CLI without opening a desktop window; no separate Node.js installation or manual environment configuration is needed. Enabled desktop API-key/Coding Plan connections are imported into a process-private temporary provider configuration, which is removed on exit without changing the original files. Start Plan identity tokens are not API keys and this account-authentication path is not supported. Configure a working API connection in ZCode Desktop if discovery returns no models.
+

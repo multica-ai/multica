@@ -1,0 +1,184 @@
+#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const usage = `Usage: scripts/pr-shots [--repo OWNER/REPO] [--replace OLD_URL] PR FILE...
+
+Upload screenshots or recordings to an existing GitHub PR and print attachment
+Markdown to stdout. Diagnostics go to stderr. PR may be a number or GitHub URL.
+Requires Node.js 22+ and gh 2.103.2+ with repository write access.
+
+  scripts/pr-shots --repo multica-ai/multica 123 ./before.png ./after.png ./demo.mp4
+  scripts/pr-shots --repo multica-ai/multica --replace https://example.com/old.png 123 ./after.png
+
+--replace replaces existing standalone inline image references, keeping their
+alt text and surrounding prose; it accepts exactly one file. Without it, new
+attachments are appended. Identical content already marked in this PR is reused.
+Run only one uploader per PR at a time; avoid editing its body during upload.
+`;
+
+function parseArgs(args) {
+  const options = { files: [], repo: "", replace: "", pr: "" };
+  let positional = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (!positional && (arg === "--help" || arg === "-h")) return { help: true };
+    if (!positional && arg === "--") { positional = true; continue; }
+    if (!positional && (arg === "--repo" || arg === "-R" || arg === "--replace")) {
+      const value = args[++i];
+      if (!value || value.startsWith("-")) throw new Error(`Missing value for ${arg}`);
+      options[arg === "--replace" ? "replace" : "repo"] = value;
+    } else if (!positional && arg.startsWith("-")) {
+      throw new Error(`Unknown option: ${arg}`);
+    } else if (!options.pr) options.pr = arg;
+    else options.files.push(arg);
+  }
+  if (!options.pr || !options.files.length) throw new Error(usage);
+  if (!/^[1-9]\d*$/.test(options.pr) && !/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9]\d*$/.test(options.pr)) {
+    throw new Error("PR must be a positive number or a github.com pull request URL");
+  }
+  if (options.repo && !/^[\w.-]+\/[\w.-]+$/.test(options.repo)) throw new Error("--repo must be OWNER/REPO");
+  if (options.replace && (options.files.length !== 1 || !/^https:\/\/[^\s<>]+$/.test(options.replace))) {
+    throw new Error("--replace requires an HTTPS URL and exactly one file");
+  }
+  return options;
+}
+
+function runGh(args) {
+  const result = spawnSync("gh", args, { encoding: "utf8", timeout: 120_000, maxBuffer: 4 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+  return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.error?.message ?? result.stderr ?? "" };
+}
+
+function checkedGh(gh, args) {
+  const result = gh(args);
+  if (result.status !== 0) throw new Error(result.stderr.trim() || `gh ${args.slice(0, 2).join(" ")} failed`);
+  return result.stdout;
+}
+
+function checkVersion(gh) {
+  const match = checkedGh(gh, ["--version"]).match(/^gh version (\d+)\.(\d+)\.(\d+)/);
+  const [major, minor, patch] = match ? match.slice(1).map(Number) : [];
+  if (!(major > 2 || (major === 2 && (minor > 103 || (minor === 103 && patch >= 2))))) {
+    throw new Error("Upgrade GitHub CLI to gh 2.103.2 or newer");
+  }
+}
+
+function snapshot(file) {
+  const path = resolve(file);
+  const extension = extname(path).slice(1).toLowerCase();
+  const video = ["mp4", "mov", "webm"].includes(extension);
+  if (!video && !["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(extension)) {
+    throw new Error(`${file}: unsupported image/video extension`);
+  }
+  const info = statSync(path);
+  const limit = (video ? 100 : 10) * 1024 * 1024;
+  if (!info.isFile() || info.size === 0 || info.size > limit) throw new Error(`${file}: expected a nonempty file up to ${video ? 100 : 10} MB`);
+  const bytes = readFileSync(path);
+  return { path, extension, video, bytes, hash: createHash("sha256").update(bytes).digest("hex") };
+}
+
+function marker(hash) { return `<!-- pr-shots:sha256=${hash} -->`; }
+function escapeRegex(value) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+function escapeAlt(value) { return value.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]").replace(/[\r\n]/g, " "); }
+
+function nativeUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "github.com" && /^\/user-attachments\/assets\/[\w-]+$/.test(url.pathname);
+  } catch { return false; }
+}
+
+function savedAttachment(body, hash) {
+  const pattern = new RegExp(`${escapeRegex(marker(hash))}[ \\t]*\\r?\\n(?:[ \\t]*\\r?\\n)*([^\\r\\n]+)`, "g");
+  for (const match of body.matchAll(pattern)) {
+    const markdown = match[1].trim();
+    const image = markdown.match(/^!\[(?:\\.|[^\]\\])*\]\((https:\/\/[^\s)]+)\)$/);
+    const url = image ? image[1] : markdown;
+    if (nativeUrl(url)) return { markdown, url };
+  }
+  return null;
+}
+
+function replaceImage(body, oldUrl, newUrl, hash) {
+  const pattern = new RegExp(`^(!\\[(?:\\\\.|[^\\]\\\\])*\\]\\()${escapeRegex(oldUrl)}(\\))[ \\t]*$`, "gm");
+  let count = 0;
+  const next = body.replace(pattern, (_match, before, after) => {
+    count++;
+    return `${marker(hash)}\n\n${before}${newUrl}${after}`;
+  });
+  if (!count) throw new Error("--replace URL must match an existing image on its own line; the PR was not changed");
+  return next;
+}
+
+export function runPrShots(args, { gh = runGh, out = (text) => process.stdout.write(text), log = (text) => process.stderr.write(`${text}\n`) } = {}) {
+  let directory;
+  try {
+    const options = parseArgs(args);
+    if (options.help) { out(usage); return 0; }
+    // Snapshot every input before the first remote mutation, including paths with #.
+    const files = [...new Map(options.files.map((file) => {
+      const asset = snapshot(file);
+      return [asset.hash, asset];
+    })).values()];
+    if (options.replace && files[0].video) throw new Error("--replace supports images; append recordings instead");
+    checkVersion(gh);
+    const readPr = (target, repo = "") => {
+      const flags = repo ? ["--repo", repo] : [];
+      const pr = JSON.parse(checkedGh(gh, ["pr", "view", target, ...flags, "--json", "body,url"]));
+      if (typeof pr.body !== "string" || !/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9]\d*$/.test(pr.url)) {
+        throw new Error("Expected a GitHub.com PR body and canonical URL");
+      }
+      return pr;
+    };
+    const target = readPr(options.pr, options.repo).url;
+    directory = mkdtempSync(join(tmpdir(), "pr-shots-"));
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const pr = readPr(target);
+        const existing = savedAttachment(pr.body, file.hash);
+        if (existing && (!options.replace || !pr.body.includes(options.replace))) {
+          log(`Reused ${basename(file.path)}`);
+          out(`${existing.markdown}\n\n`);
+          continue;
+        }
+        const staged = join(directory, `${file.hash}.${file.extension}`);
+        writeFileSync(staged, file.bytes, { mode: 0o600 });
+        const destination = existing?.url ?? staged;
+        const markdown = file.video ? `![](${destination})` : `![${escapeAlt(basename(file.path))}](${destination})`;
+        const body = options.replace
+          ? replaceImage(pr.body, options.replace, destination, file.hash)
+          : `${pr.body}${pr.body ? "\n\n" : ""}${marker(file.hash)}\n\n${markdown}\n`;
+        const bodyFile = join(directory, "body.md");
+        writeFileSync(bodyFile, body, { mode: 0o600 });
+        const attach = existing ? [] : ["--attach", staged];
+        const result = gh(["pr", "edit", target, "--body-file", bodyFile, ...attach]);
+        // A nonzero exit can follow a successful write: read back before retrying.
+        const saved = savedAttachment(readPr(target).body, file.hash);
+        if (!saved) throw new Error(result.stderr.trim() || "Upload was not confirmed in the PR body; inspect the PR before retrying");
+        out(`${saved.markdown}\n\n`);
+        log(`Saved ${basename(file.path)}`);
+        if (result.status !== 0) throw new Error(`Attachment saved, but gh exited ${result.status}: ${result.stderr.trim()}`);
+      } catch (error) {
+        log(`Failed ${basename(file.path)}: ${error.message}`);
+        if (i + 1 < files.length) log(`Not attempted: ${files.slice(i + 1).map((file) => basename(file.path)).join(", ")}`);
+        log("Earlier confirmed attachments remain saved. Re-run the same command to reuse them.");
+        return 1;
+      }
+    }
+    return 0;
+  } catch (error) {
+    log(error.message);
+    return 1;
+  } finally {
+    if (directory) rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  process.exitCode = runPrShots(process.argv.slice(2));
+}

@@ -1,0 +1,12 @@
+DROP TRIGGER IF EXISTS trg_plugin_binding_append_only ON plugin_binding;
+DROP TRIGGER IF EXISTS trg_plugin_grant_append_only ON plugin_grant;
+DROP TRIGGER IF EXISTS trg_plugin_contribution_append_only ON plugin_contribution;
+DROP TRIGGER IF EXISTS trg_plugin_release_immutable ON plugin_release;
+DROP FUNCTION IF EXISTS reject_plugin_append_only_update();
+DROP FUNCTION IF EXISTS enforce_plugin_release_immutable();
+DROP TABLE IF EXISTS plugin_binding;
+DROP TABLE IF EXISTS plugin_grant;
+DROP TABLE IF EXISTS plugin_installation;
+DROP TABLE IF EXISTS plugin_contribution;
+DROP TABLE IF EXISTS plugin_release;
+DROP TABLE IF EXISTS plugin_identity;

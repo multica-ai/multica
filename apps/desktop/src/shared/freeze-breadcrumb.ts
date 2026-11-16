@@ -5,6 +5,8 @@
  * read/write logic and the rationale.
  */
 export interface FreezeBreadcrumb {
+  /** Window instance that owns this pending write (optional for old clients). */
+  ownerId?: string;
   /** "unresponsive" (hang) or "render-process-gone" (crash). */
   kind: string;
   /** Diagnostic context captured at failure time (route, window url, …). */

@@ -1,0 +1,2 @@
+ALTER TABLE channel_media_pending_object
+    ADD CONSTRAINT channel_media_pending_object_pkey PRIMARY KEY USING INDEX channel_media_pending_object_storage_key_uidx;

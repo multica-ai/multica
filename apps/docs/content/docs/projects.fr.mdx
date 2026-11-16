@@ -1,0 +1,137 @@
+---
+title: Projets
+description: Organisez les tâches liées en projets et donnez-leur un objectif, un plan et un contexte d'exécution communs.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { ProjectDemo } from "@/components/demos/project-demo";
+
+Les projets organisent un travail qui nécessite plusieurs [tâches](/issues) — un lancement de produit, une migration ou une fonctionnalité livrée par étapes.
+
+Un travail qu'une seule tâche suffit à décrire n'a pas besoin de projet. Les projets conviennent à un ensemble de travaux qui partagent un objectif, dont l'avancement doit être suivi globalement, ou qui ont besoin de dépôts et de répertoires de travail partagés.
+
+## Composantes d'un projet
+
+| Élément | Rôle |
+|---|---|
+| **Nom, icône et description** | Objectif, périmètre et exigences durables ; la description entre dans le contexte d'exécution des agents qui travaillent dans le projet. |
+| **Statut** | `planned` (Planifié), `in_progress` (En cours), `paused` (En pause), `completed` (Terminé) ou `cancelled` (Annulé). |
+| **Priorité** | `urgent` (Urgente), `high` (Haute), `medium` (Moyenne), `low` (Basse) ou `none` (Aucune priorité). |
+| **Responsable** | Un membre ou un agent — la personne ou l'agent qui coordonne le projet. |
+| **Accès** | Tout l'espace de travail, ou seulement les membres du projet. Voir [Projets privés](#private-projects). |
+| **Dates de début et d'échéance** | La période prévue du projet. |
+| **Tâches et avancement** | Le travail du projet et la part déjà terminée. |
+| **Ressources** | Dépôts GitHub rattachés ou répertoires locaux sur des ordinateurs précis. |
+| **Workflow** | Les étapes des tâches et qui prend le relais à chacune. |
+
+## Parcourir les projets
+
+Ouvrez **Tous les projets** et choisissez **Grille** ou **Tableau** dans le menu d'affichage. Les deux dispositions proposent la recherche et des filtres par statut, priorité et responsable. Regroupez les projets selon ces mêmes champs, ou gardez la grille sans regroupement. Dans le tableau, déplacer un projet vers une autre colonne modifie le champ correspondant.
+
+La grille peut afficher les dates de début et d'échéance, la progression et la dernière activité. Triez par ces champs, par nom, statut, priorité ou date de création. La disposition, le regroupement, le tri, les colonnes visibles et les filtres sont enregistrés par utilisateur et espace de travail, et synchronisés entre appareils. Le texte de recherche n'est pas enregistré.
+
+## Projets et tâches
+
+Un projet peut contenir un nombre quelconque de tâches ; une tâche appartient à un projet au plus. Créez des tâches directement dans le projet, ou choisissez ou changez le projet depuis les propriétés de la tâche.
+
+L'avancement du projet est calculé automatiquement à partir des tâches liées :
+
+```text
+avancement = tâches dont le statut appartient à la catégorie done ou closed ÷ toutes les tâches du projet
+```
+
+Parmi les statuts intégrés, ce sont `done` et `cancelled` ; les statuts personnalisés rangés dans ces deux catégories comptent de la même façon. `cancelled` signifie que ce travail a été retiré du périmètre du projet, il compte donc dans l'avancement.
+
+Le statut du projet et celui des tâches sont indépendants : terminer toutes les tâches ne fait pas passer le projet à `completed`, et modifier le statut du projet ne touche pas à ses tâches.
+
+<ProjectDemo />
+
+## Description du projet et contexte d'exécution
+
+Lorsqu'un agent traite une tâche d'un projet, le nom et la description du projet sont ajoutés au contexte de cette exécution. Placez dans la description ce que toutes les exécutions liées doivent savoir : l'objectif, les limites techniques, les conventions de livraison. Une exigence propre à une seule tâche s'écrit dans cette tâche.
+
+## Ajouter des ressources
+
+Les ressources du projet indiquent aux agents quel code et quels répertoires de travail utiliser :
+
+- **Dépôts GitHub** : fournissez un dépôt que le runtime peut récupérer (checkout), avec une ref facultative.
+- **Répertoires locaux** : permettez au runtime d'un ordinateur précis d'utiliser un répertoire existant ; l'agent le modifie directement ou travaille dans un worktree isolé de ce répertoire.
+
+Voir [Ressources de projet](/project-resources) pour savoir comment choisir et connaître les limites de sécurité.
+
+## Choisir un workflow
+
+Le **Workflow** du projet définit les colonnes du tableau et qui prend le relais à chaque étape. Le développement peut ainsi aller à un agent, la revue à un autre et la validation à un membre. Sans autre choix, le projet utilise **Default** : tous les statuts sont disponibles et rien n’est confié automatiquement. Voir [Workflows](/workflows) pour la configuration et le changement d’un projet existant.
+
+## Responsable du projet
+
+Le responsable peut être un membre ou un agent ; un membre responsable peut aussi changer le workflow du projet. Désigner un responsable ne lui assigne aucune tâche et ne lance aucun travail. Pour lui confier une étape, choisissez **Responsable du projet** pour cette étape dans le workflow.
+
+## Projets privés [#private-projects]
+
+L'**Accès** d'un projet est soit **Tout l’espace de travail**, soit **Membres du projet uniquement**. Un projet privé, avec ses tâches, commentaires et pièces jointes, n'est visible que des personnes inscrites sur sa liste de membres. Pour les autres, il n'apparaît ni dans les listes ni dans la recherche, et un lien vers lui s'ouvre comme introuvable.
+
+### Qui voit un projet privé
+
+- **Les personnes de la liste des membres, et personne d'autre.** Un rôle dans l'espace de travail n'ouvre rien : un `owner` ou un `admin` absent de la liste ne voit pas le projet. Il y est ajouté comme n'importe qui, et peut en être retiré.
+- **Les agents** suivent les personnes pour qui ils travaillent. Une exécution d'agent ne voit un projet privé que si la personne qui l'a déclenchée et le propriétaire de l'agent sont tous deux sur la liste. Une tâche d'un projet privé ne peut être assignée qu'à un agent dont le propriétaire est sur la liste.
+- Un membre qui quitte l'espace de travail quitte aussi tous ses projets privés.
+
+<Callout type="info">
+Si vous êtes `owner` ou `admin` et qu'un projet privé n'apparaît plus, vous n'êtes pas sur sa liste de membres. Demandez au membre qui gère son accès de vous ajouter ; le propriétaire de l'espace de travail peut aussi le rejoindre depuis les paramètres (voir [Reprise par le propriétaire de l'espace de travail](#workspace-owner-recovery)).
+</Callout>
+
+### Qui gère la liste des membres
+
+Gérer l'accès, c'est ajouter et retirer des membres, changer le responsable du projet et rendre le projet à nouveau visible de tout l'espace de travail. Peuvent le faire :
+
+- les `owner` et `admin` qui sont sur la liste ;
+- un membre que le projet désigne comme gestionnaire de l'accès, signalé par **Gère l’accès** dans la boîte de dialogue **Accès** : le responsable, si c'est une personne sur la liste ; sinon le créateur, s'il est sur la liste ; sinon le membre présent sur la liste depuis le plus longtemps.
+
+Le responsable d'un projet privé peut être un membre, un agent ou personne, comme pour tout projet. Le gestionnaire de l'accès n'est pas enregistré : il est déduit à chaque fois du responsable, du créateur et de la liste, et change donc quand le responsable change ou quand quelqu'un part. Désigner une personne comme responsable l'ajoute à la liste ; pour retirer le responsable actuel de la liste, changez d'abord de responsable. Les autres membres voient la liste mais ne peuvent pas la modifier. Les agents ne peuvent modifier l'accès d'aucun projet.
+
+### Créer un projet privé ou rendre un projet privé
+
+- **Nouveau projet** : dans la boîte de dialogue de création, ouvrez **Accès**, choisissez **Membres du projet uniquement** et ajoutez des membres. Vous êtes toujours sur la liste, tout comme la personne que vous désignez comme responsable.
+- **Projet existant** : cliquez sur **Accès** dans les propriétés du projet et choisissez **Membres du projet uniquement**. Rendre privé un projet visible de tout l'espace de travail demande d'être `owner` ou `admin` ; la personne qui le fait est ajoutée à la liste, ainsi que le responsable si c'est une personne.
+- **CLI** : ajoutez `--visibility private` à `project create` ou `project update`, avec `--member` (un nom, un e-mail ou un ID utilisateur ; répétable) pour la liste initiale. Gérez ensuite la liste avec `project member list|add|remove`.
+
+```bash
+multica project create --title "Pricing revamp" --visibility private --member alice@example.com --member Bob
+multica project update <project-id> --visibility private --member alice@example.com
+multica project member add <project-id> carol@example.com
+```
+
+Rendre un projet privé à **Tout l’espace de travail** permet à tous les membres de l'espace de travail de voir le projet, ses tâches, ses commentaires et ses pièces jointes. L'application demande une confirmation avant d'enregistrer ; `multica project update --visibility workspace` applique le changement immédiatement.
+
+### Reprise par le propriétaire de l'espace de travail [#workspace-owner-recovery]
+
+Un projet privé peut n'avoir aucun `owner` ni `admin` sur sa liste, voire plus aucun membre. Le `owner` de l'espace de travail peut intervenir depuis **Paramètres → Général → Projets privés**, une section visible des seuls propriétaires (pas des `admin`). Elle liste chaque projet privé avec son nom et ses membres, et rien d'autre : les tâches, commentaires et pièces jointes restent masqués tant que vous ne l'avez pas rejoint.
+
+Cliquez sur **Rejoindre** et confirmez pour vous ajouter à la liste des membres. Vous y apparaissez comme n'importe quel membre, les membres existants reçoivent une notification dans leur boîte de réception et, en tant que propriétaire sur la liste, vous pouvez gérer l'accès du projet. Rejoindre un projet ne change pas son responsable. Un projet dont tous les membres sont partis se récupère de la même façon : rejoignez-le, puis gérez-le ou supprimez-le depuis la page du projet.
+
+## Épingler à la barre latérale
+
+Un projet épinglé apparaît dans votre barre latérale. L'épinglage est une préférence personnelle et n'affecte pas les autres membres.
+
+Dans les réglages de la section Projets, **Icônes par défaut uniquement** remplace les icônes personnalisées par le dossier par défaut dans cette section. Cette option est désactivée par défaut et ne modifie pas les icônes des projets eux-mêmes.
+
+## Archiver et restaurer
+
+Choisissez **Archiver le projet** dans son menu, ou **Archiver** dans la liste des projets. Toute personne pouvant modifier le projet peut aussi l'archiver ou le restaurer. L'archivage le masque des listes et sélecteurs habituels et empêche d'y créer ou d'y déplacer des tâches. Les tâches existantes, l'historique et les réglages restent conservés ; les tâches restent consultables et modifiables. Le statut du projet ne change pas.
+
+Les automatisations actives qui créent des tâches dans ce projet sont mises en pause. Pour le restaurer, ouvrez le menu du titre de la liste, choisissez **Projets archivés**, puis **Restaurer**, ou utilisez **Restaurer le projet** sur sa page. La restauration ne réactive pas les automatisations ; réactivez-les séparément lorsque vous êtes prêt.
+
+## Créer, modifier et supprimer
+
+Tout membre de l'espace de travail peut créer et modifier des projets. Les membres peuvent supprimer les projets qu'ils ont créés ou créés par un agent dont ils sont actuellement propriétaires ; les agents ne peuvent supprimer que leurs propres projets. Les membres humains `owner` et `admin` peuvent supprimer tout projet, y compris les anciens projets dont le créateur est inconnu. Seules les personnes inscrites sur la liste des membres d'un projet privé peuvent le modifier ou le supprimer : un `owner` ou un `admin` doit donc d'abord y figurer.
+
+<Callout type="warning">
+Supprimer un projet ne supprime pas ses tâches : elles sont détachées et restent dans l'espace de travail. La description, le statut et les ressources du projet sont définitivement supprimés.
+</Callout>
+
+## Étapes suivantes
+
+- [Ressources de projet](/project-resources) — rattachez des dépôts GitHub ou des répertoires locaux.
+- [Tâches](/issues) — créez et organisez le travail concret d'un projet.
+- [Agents](/agents) — découvrez l'identité, la configuration et l'Accès des agents.

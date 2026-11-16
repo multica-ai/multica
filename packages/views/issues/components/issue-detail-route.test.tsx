@@ -1,0 +1,272 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { setApiInstance } from "@multica/core/api";
+import { ApiError } from "@multica/core/api/client";
+import type { ApiClient } from "@multica/core/api/client";
+import { NavigationProvider } from "../../navigation";
+import type { NavigationAdapter } from "../../navigation";
+import { IssueDetail, IssueDetailSkeleton } from "./issue-detail";
+import {
+  IssueDetailRoute,
+  parseAppRequestHighlightHash,
+  parseCommentHighlightHash,
+  useCanonicalIssueUrl,
+} from "./issue-detail-route";
+
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("@multica/core/paths", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/paths")>(
+    "@multica/core/paths",
+  );
+  return {
+    ...actual,
+    useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
+    useWorkspacePaths: () => actual.paths.workspace("acme"),
+  };
+});
+
+const replace = vi.fn();
+const push = vi.fn();
+
+function wrapper({ children }: { children: ReactNode }) {
+  const adapter: NavigationAdapter = {
+    push,
+    replace,
+    back: vi.fn(),
+    pathname: "/acme/issues/x",
+    searchParams: new URLSearchParams(),
+    hash: "",
+    getShareableUrl: (p: string) => `https://app.multica.com${p}`,
+  };
+  return <NavigationProvider value={adapter}>{children}</NavigationProvider>;
+}
+
+describe("useCanonicalIssueUrl", () => {
+  beforeEach(() => {
+    replace.mockClear();
+    push.mockClear();
+  });
+
+  it("rewrites a UUID URL to the identifier once the issue resolves", () => {
+    const { rerender } = renderHook(
+      ({ identifier }: { identifier?: string }) =>
+        useCanonicalIssueUrl("cb240efb-154c-42a8-ae92-42b02676feca", identifier),
+      { wrapper, initialProps: {} },
+    );
+
+    // Nothing to rewrite to while the issue is still loading.
+    expect(replace).not.toHaveBeenCalled();
+
+    rerender({ identifier: "TRS-134" });
+    expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134");
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("leaves an already-canonical URL alone", () => {
+    renderHook(() => useCanonicalIssueUrl("TRS-134", "TRS-134"), { wrapper });
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  // `useWorkspacePaths()` returns a fresh object per call, so the effect's
+  // dependencies change identity on every commit. Without the ref guard this
+  // re-fired the replace forever.
+  it("rewrites once, not on every render", () => {
+    const { rerender } = renderHook(
+      () => useCanonicalIssueUrl("cb240efb-154c-42a8-ae92-42b02676feca", "TRS-134"),
+      { wrapper },
+    );
+
+    rerender();
+    rerender();
+    expect(replace).toHaveBeenCalledTimes(1);
+  });
+
+  // A lowercase key resolves server-side, so the URL must still be normalized
+  // to the issue's real identifier rather than left as typed.
+  it("normalizes a differently-cased identifier segment", () => {
+    renderHook(() => useCanonicalIssueUrl("trs-134", "TRS-134"), { wrapper });
+    expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134");
+  });
+
+  it("preserves a source-comment deep link while canonicalizing a UUID", () => {
+    renderHook(
+      () => useCanonicalIssueUrl(
+        "cb240efb-154c-42a8-ae92-42b02676feca",
+        "TRS-134",
+        "#comment-comment-7",
+      ),
+      { wrapper },
+    );
+    expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134#comment-comment-7");
+  });
+
+  it("keeps a deliverable link's tail while canonicalizing a UUID", () => {
+    renderHook(
+      () => useCanonicalIssueUrl(
+        "cb240efb-154c-42a8-ae92-42b02676feca",
+        "TRS-134",
+        "",
+        "调研 报告.html",
+      ),
+      { wrapper },
+    );
+    expect(replace).toHaveBeenCalledWith(
+      "/acme/issues/TRS-134/deliverables/%E8%B0%83%E7%A0%94%20%E6%8A%A5%E5%91%8A.html",
+    );
+  });
+
+  it("leaves a canonical deliverable link alone", () => {
+    renderHook(() => useCanonicalIssueUrl("TRS-134", "TRS-134", "", "report.html"), { wrapper });
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  // The deliverable argument is optional: every existing caller passes the
+  // hash alone, and its comment deep link must come out exactly as before.
+  it("still keeps only the comment hash when no deliverable is named", () => {
+    renderHook(
+      () => useCanonicalIssueUrl("trs-134", "TRS-134", "#comment-c1", undefined),
+      { wrapper },
+    );
+    expect(replace).toHaveBeenCalledWith("/acme/issues/TRS-134#comment-c1");
+  });
+});
+
+describe("parseCommentHighlightHash", () => {
+  it.each([
+    ["#comment-01a02814-f098-7309-8286-0b249c66884d", "01a02814-f098-7309-8286-0b249c66884d"],
+    ["#comment-comment_7", "comment_7"],
+    ["#activity", undefined],
+    ["#comment-", undefined],
+    ["#comment-unsafe/value", undefined],
+  ])("maps %s to %s", (hash, expected) => {
+    expect(parseCommentHighlightHash(hash)).toBe(expected);
+  });
+});
+
+describe("parseAppRequestHighlightHash", () => {
+  it.each([
+    ["#app-request-01a02814-f098-7309-8286-0b249c66884d", "01a02814-f098-7309-8286-0b249c66884d"],
+    ["#comment-c1", undefined],
+    ["#app-request-", undefined],
+  ])("maps %s to %s", (hash, expected) => {
+    expect(parseAppRequestHighlightHash(hash)).toBe(expected);
+  });
+});
+
+describe("IssueDetailRoute with an identifier that names no issue", () => {
+  // Regression: the route used to fall through to IssueDetail with the raw
+  // identifier. IssueDetail mounted a second observer on the query that had
+  // just failed, `retryOnMount` refetched it, the route flipped back to its
+  // skeleton and unmounted IssueDetail, then remounted it when the refetch
+  // failed — an unbounded request loop that never reached "not found".
+  // Retry is off so any count above 1 can only be a remount refetch.
+  it("settles on not-found without looping requests", async () => {
+    expect(vi.isMockFunction(IssueDetail)).toBe(false);
+    replace.mockClear();
+    push.mockClear();
+    const getIssue = vi.fn().mockRejectedValue(new ApiError("issue not found", 404, "Not Found"));
+    setApiInstance({ getIssue } as unknown as ApiClient);
+    const qc = new QueryClient({
+      defaultOptions: { queries: { staleTime: Infinity, retry: false } },
+    });
+
+    const { rerender } = render(
+      <QueryClientProvider client={qc}>
+        <NavigationProvider
+          value={{
+            push,
+            replace,
+            back: vi.fn(),
+            pathname: "/acme/issues/ZZZ-134",
+            searchParams: new URLSearchParams(),
+            hash: "",
+            getShareableUrl: (p: string) => `https://app.multica.com${p}`,
+          }}
+        >
+          <IssueDetailRoute routeId="ZZZ-134" />
+        </NavigationProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(getIssue).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(getIssue).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <QueryClientProvider client={qc}>
+        <NavigationProvider
+          value={{
+            push,
+            replace,
+            back: vi.fn(),
+            pathname: "/acme/issues/ZZZ-134",
+            searchParams: new URLSearchParams(),
+            hash: "",
+            getShareableUrl: (p: string) => `https://app.multica.com${p}`,
+          }}
+        >
+          <IssueDetailRoute routeId="ZZZ-134" />
+        </NavigationProvider>
+      </QueryClientProvider>,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(getIssue).toHaveBeenCalledTimes(1);
+
+    // A failed resolve must never rewrite the URL.
+    expect(replace).not.toHaveBeenCalled();
+    qc.clear();
+  });
+});
+
+describe("IssueDetailRoute loading sidebar layout", () => {
+  it.each([
+    [undefined, true],
+    [{ content: 80, sidebar: 20 }, true],
+    [{ content: 100, sidebar: 0 }, false],
+  ])("respects saved layout %j while resolving", (layout, sidebarVisible) => {
+    const storageKey = "react-resizable-panels:multica_issue_detail_layout";
+    if (layout) localStorage.setItem(storageKey, JSON.stringify(layout));
+    else localStorage.removeItem(storageKey);
+    const getIssue = vi.fn(() => new Promise<never>(() => {}));
+    setApiInstance({ getIssue } as unknown as ApiClient);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    const view = render(
+      <QueryClientProvider client={qc}>
+        {wrapper({ children: <IssueDetailRoute routeId="TES-1" /> })}
+      </QueryClientProvider>,
+    );
+    expect(!!view.container.querySelector(".w-80.border-l")).toBe(sidebarVisible);
+    expect(getIssue).toHaveBeenCalledTimes(1);
+    view.unmount();
+    qc.clear();
+    localStorage.removeItem(storageKey);
+  });
+});
+
+describe("IssueDetailSkeleton embedded layouts", () => {
+  it("reads the host layout without borrowing the page layout", () => {
+    const pageKey = "react-resizable-panels:multica_issue_detail_layout";
+    const hostKey = "react-resizable-panels:embedded-detail";
+    localStorage.setItem(pageKey, JSON.stringify({ content: 80, sidebar: 20 }));
+    localStorage.setItem(hostKey, JSON.stringify({ content: 100, sidebar: 0 }));
+    const view = render(wrapper({ children: <IssueDetailSkeleton layoutId="embedded-detail" /> }));
+    expect(view.container.querySelector(".w-80.border-l")).toBeNull();
+    view.unmount();
+    localStorage.removeItem(pageKey);
+    localStorage.removeItem(hostKey);
+  });
+
+  it("keeps sidebar-free surfaces clear even when the saved layout is open", () => {
+    const storageKey = "react-resizable-panels:multica_issue_detail_layout";
+    localStorage.setItem(storageKey, JSON.stringify({ content: 80, sidebar: 20 }));
+    const view = render(wrapper({ children: <IssueDetailSkeleton sidebar={false} /> }));
+    expect(view.container.querySelector(".w-80.border-l")).toBeNull();
+    view.unmount();
+    localStorage.removeItem(storageKey);
+  });
+});

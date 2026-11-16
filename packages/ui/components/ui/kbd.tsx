@@ -5,7 +5,9 @@ function Kbd({ className, ...props }: React.ComponentProps<"kbd">) {
     <kbd
       data-slot="kbd"
       className={cn(
-        "pointer-events-none inline-flex h-5 w-fit min-w-5 items-center justify-center gap-1 rounded-sm bg-muted px-1 font-sans text-xs font-medium text-muted-foreground select-none in-data-[slot=tooltip-content]:bg-background/20 in-data-[slot=tooltip-content]:text-background dark:in-data-[slot=tooltip-content]:bg-background/10 [&_svg:not([class*='size-'])]:size-3",
+        // In a tooltip the keycap is a translucent light fill: the solid muted
+        // fill sits below the tooltip surface's lightness in dark mode.
+        "pointer-events-none inline-flex h-5 w-fit min-w-5 items-center justify-center gap-1 rounded-sm bg-muted px-1 font-sans text-caption font-medium text-muted-foreground select-none in-data-[slot=tooltip-content]:bg-foreground/12 [&_svg:not([class*='size-'])]:size-3",
         className
       )}
       {...props}

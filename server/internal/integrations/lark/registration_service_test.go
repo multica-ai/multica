@@ -88,6 +88,33 @@ func TestBotNamePreset(t *testing.T) {
 	}
 }
 
+// The service's own MemoryInstallSessionStore stands in for Redis here —
+// it implements the same InstallSessionStore contract, so these tests
+// exercise the real production type rather than a bespoke fake. The
+// behaviour that only Redis can prove (cross-client sharing, TTL, SetNX
+// first-writer-wins) is covered in install_session_store_test.go against
+// a real server.
+
+// plantSession registers a pending session and returns the in-memory
+// handle the polling goroutine would have held.
+func plantSession(t *testing.T, s *RegistrationService, id string, ws pgtype.UUID, expiresAt time.Time) *registrationSession {
+	t.Helper()
+	if err := s.sessionStore.Create(context.Background(), InstallSessionState{
+		ID:          id,
+		WorkspaceID: ws,
+		InitiatorID: ws,
+		Status:      RegistrationStatusPending,
+		ExpiresAt:   expiresAt,
+	}, time.Hour); err != nil {
+		t.Fatalf("plant session: %v", err)
+	}
+	sess := &registrationSession{id: id, workspaceID: ws, expiresAt: expiresAt}
+	s.mu.Lock()
+	s.sessions[id] = sess
+	s.mu.Unlock()
+	return sess
+}
+
 // TestRegistrationGetSessionNotFound pins both halves of the
 // not-found path: unknown session id, and (the security-critical one)
 // known session id but from a different workspace. Both must surface
@@ -96,28 +123,21 @@ func TestBotNamePreset(t *testing.T) {
 // workspaces.
 func TestRegistrationGetSessionNotFound(t *testing.T) {
 	s := newRegistrationServiceForTest(t)
+	ctx := context.Background()
 	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
 	otherWs := uuidFromStringSvc(t, "22222222-2222-2222-2222-222222222222")
 
-	if _, err := s.GetSession(ws, "nope"); !errors.Is(err, ErrRegistrationSessionNotFound) {
+	if _, err := s.GetSession(ctx, ws, "nope"); !errors.Is(err, ErrRegistrationSessionNotFound) {
 		t.Errorf("unknown session: want ErrRegistrationSessionNotFound, got %v", err)
 	}
 
-	// Plant a session by hand for the cross-workspace test (BeginInstall
-	// requires a live DB; we are only exercising the lookup boundary).
-	s.mu.Lock()
-	s.sessions["plant-1"] = &registrationSession{
-		id:          "plant-1",
-		workspaceID: ws,
-		status:      RegistrationStatusPending,
-	}
-	s.mu.Unlock()
+	plantSession(t, s, "plant-1", ws, s.cfg.Now().Add(time.Hour))
 
-	if _, err := s.GetSession(otherWs, "plant-1"); !errors.Is(err, ErrRegistrationSessionNotFound) {
+	if _, err := s.GetSession(ctx, otherWs, "plant-1"); !errors.Is(err, ErrRegistrationSessionNotFound) {
 		t.Errorf("cross-workspace lookup: want ErrRegistrationSessionNotFound, got %v", err)
 	}
 
-	state, err := s.GetSession(ws, "plant-1")
+	state, err := s.GetSession(ctx, ws, "plant-1")
 	if err != nil {
 		t.Fatalf("same-workspace lookup: %v", err)
 	}
@@ -126,84 +146,120 @@ func TestRegistrationGetSessionNotFound(t *testing.T) {
 	}
 }
 
-// TestRegistrationGetSessionGCsExpiredEntries pins that a session
-// whose gcAfter is in the past is dropped on the next lookup, so the
-// in-memory map cannot grow unbounded across restarts of long-lived
-// servers.
-func TestRegistrationGetSessionGCsExpiredEntries(t *testing.T) {
-	clock := &fakeClockSvc{now: time.Unix(1_700_000_000, 0)}
-	s := newRegistrationServiceForTest(t)
-	s.cfg.Now = clock.Now
+// TestRegistrationGetSessionServesSessionOwnedByAnotherProcess is the
+// MUL-7340 regression at the unit level: the status read must resolve
+// entirely from the shared store, with NOTHING in this process's session
+// map. When the map was the source of truth, a poll that landed on any
+// other replica 404'd and the dialog showed "安装会话已失效或丢失" about
+// 5s after the QR rendered.
+func TestRegistrationGetSessionServesSessionOwnedByAnotherProcess(t *testing.T) {
+	shared := NewMemoryInstallSessionStore()
+
+	// Two services sharing one store — the stand-in for two replicas
+	// pointed at the same Redis.
+	instanceA := newRegistrationServiceForTest(t)
+	instanceA.sessionStore = shared
+	instanceB := newRegistrationServiceForTest(t)
+	instanceB.sessionStore = shared
+
+	ctx := context.Background()
 	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
 
-	s.mu.Lock()
-	s.sessions["expired"] = &registrationSession{
-		id:          "expired",
-		workspaceID: ws,
-		status:      RegistrationStatusError,
-		gcAfter:     clock.Now().Add(-1 * time.Minute),
-	}
-	s.sessions["live"] = &registrationSession{
-		id:          "live",
-		workspaceID: ws,
-		status:      RegistrationStatusSuccess,
-		gcAfter:     clock.Now().Add(10 * time.Minute),
-	}
-	s.mu.Unlock()
+	// A serves begin; B has never seen this session.
+	plantSession(t, instanceA, "owned-elsewhere", ws, instanceA.cfg.Now().Add(time.Hour))
 
-	// Lookup of any id triggers gcExpiredLocked — the expired one
-	// disappears, the live one stays.
-	if _, err := s.GetSession(ws, "live"); err != nil {
-		t.Errorf("live session lookup: %v", err)
+	instanceB.mu.Lock()
+	mapped := len(instanceB.sessions)
+	instanceB.mu.Unlock()
+	if mapped != 0 {
+		t.Fatalf("precondition: instance B must hold no in-process session, got %d", mapped)
 	}
-	if _, err := s.GetSession(ws, "expired"); !errors.Is(err, ErrRegistrationSessionNotFound) {
-		t.Errorf("expired session lookup: want not-found, got %v", err)
+
+	state, err := instanceB.GetSession(ctx, ws, "owned-elsewhere")
+	if err != nil {
+		t.Fatalf("status read on the instance that did not serve begin: %v", err)
 	}
-	s.mu.Lock()
-	_, expiredExists := s.sessions["expired"]
-	s.mu.Unlock()
-	if expiredExists {
-		t.Errorf("GC should have dropped the expired session from the map")
+	if state.Status != RegistrationStatusPending {
+		t.Errorf("Status: got %q want pending", state.Status)
 	}
 }
 
-// TestRegistrationSessionMarkErrorIsIdempotent guards against a
-// double-fire race between the expiry timer and a Poll-driven terminal
-// error: whichever fires first wins, and the second mark must NOT
-// clobber the first reason (the user already saw it).
-func TestRegistrationSessionMarkErrorIsIdempotent(t *testing.T) {
-	sess := &registrationSession{
-		id:     "x",
-		status: RegistrationStatusPending,
+// TestRegistrationGetSessionReportsExpiryFromTimestamp pins the other
+// half of cross-process correctness: if the process that owned the
+// polling goroutine died, nobody ever records the terminal outcome. The
+// status read must derive expiry from ExpiresAt rather than reporting
+// 'pending' forever.
+func TestRegistrationGetSessionReportsExpiryFromTimestamp(t *testing.T) {
+	clock := &fakeClockSvc{now: time.Unix(1_700_000_000, 0)}
+	s := newRegistrationServiceForTest(t)
+	s.cfg.Now = clock.Now
+	store := NewMemoryInstallSessionStore()
+	store.now = clock.Now
+	s.sessionStore = store
+	ctx := context.Background()
+	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
+
+	plantSession(t, s, "stranded", ws, clock.Now().Add(-time.Minute))
+
+	state, err := s.GetSession(ctx, ws, "stranded")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
 	}
-	deadline := time.Unix(1_700_001_000, 0)
-	sess.markError(RegistrationReasonAccessDenied, "user denied", deadline)
-	sess.markError(RegistrationReasonExpired, "qr expired", deadline) // second mark — should no-op
-	st := sess.snapshot()
+	if state.Status != RegistrationStatusError {
+		t.Fatalf("Status: got %q want error", state.Status)
+	}
+	if state.ErrorReason != RegistrationReasonExpired {
+		t.Errorf("ErrorReason: got %q want %q", state.ErrorReason, RegistrationReasonExpired)
+	}
+}
+
+// TestRegistrationMarkErrorIsIdempotent guards against a double-fire
+// race between the expiry timer and a Poll-driven terminal error:
+// whichever fires first wins, and the second mark must NOT clobber the
+// first reason (the user already saw it). The guard now lives in the
+// UPDATE's `status = 'pending'` predicate rather than a mutex.
+func TestRegistrationMarkErrorIsIdempotent(t *testing.T) {
+	s := newRegistrationServiceForTest(t)
+	ctx := context.Background()
+	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
+
+	sess := plantSession(t, s, "x", ws, s.cfg.Now().Add(time.Hour))
+	s.markError(sess, RegistrationReasonAccessDenied, "user denied")
+	s.markError(sess, RegistrationReasonExpired, "qr expired") // second mark — must no-op
+
+	st, err := s.GetSession(ctx, ws, "x")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
 	if st.ErrorReason != RegistrationReasonAccessDenied {
 		t.Errorf("first reason should win; got %q", st.ErrorReason)
 	}
 }
 
-// TestRegistrationSessionStateSnapshotIsValueCopy pins that the
-// snapshot does not return a pointer alias of the internal session —
-// a leaked alias would let the handler's serializer race the polling
-// goroutine on field reads. The snapshot is value-copied so the
-// caller can read it without holding the session mutex.
-func TestRegistrationSessionStateSnapshotIsValueCopy(t *testing.T) {
-	sess := &registrationSession{
-		id:     "x",
-		status: RegistrationStatusPending,
+// TestRegistrationMarkDropsInProcessSession pins that a terminated
+// session releases its in-memory working state (which holds the
+// device_code) while the durable row survives for the dialog to read.
+func TestRegistrationMarkDropsInProcessSession(t *testing.T) {
+	s := newRegistrationServiceForTest(t)
+	ctx := context.Background()
+	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
+
+	sess := plantSession(t, s, "done", ws, s.cfg.Now().Add(time.Hour))
+	s.markSuccess(sess, uuidFromStringSvc(t, "33333333-3333-3333-3333-333333333333"))
+
+	s.mu.Lock()
+	_, stillMapped := s.sessions["done"]
+	s.mu.Unlock()
+	if stillMapped {
+		t.Errorf("terminated session must be dropped from the in-process map")
 	}
-	s1 := sess.snapshot()
-	deadline := time.Unix(1_700_001_000, 0)
-	sess.markSuccess(uuidFromStringSvc(t, "33333333-3333-3333-3333-333333333333"), deadline)
-	if s1.Status != RegistrationStatusPending {
-		t.Errorf("snapshot must be a value copy; got mutated to %q", s1.Status)
+
+	st, err := s.GetSession(ctx, ws, "done")
+	if err != nil {
+		t.Fatalf("durable row must outlive the goroutine: %v", err)
 	}
-	s2 := sess.snapshot()
-	if s2.Status != RegistrationStatusSuccess {
-		t.Errorf("second snapshot should reflect new state; got %q", s2.Status)
+	if st.Status != RegistrationStatusSuccess {
+		t.Errorf("Status: got %q want success", st.Status)
 	}
 }
 
@@ -312,8 +368,11 @@ func (fakeTxStarter) Begin(_ context.Context) (pgx.Tx, error) {
 func newRegistrationServiceForTest(t *testing.T) *RegistrationService {
 	t.Helper()
 	return &RegistrationService{
-		cfg:      RegistrationServiceConfig{}.withDefaults(),
-		sessions: make(map[string]*registrationSession),
+		cfg: RegistrationServiceConfig{}.withDefaults(),
+		// Same default the constructor installs — every service needs a
+		// session store, so building one by struct literal must not skip it.
+		sessionStore: NewMemoryInstallSessionStore(),
+		sessions:     make(map[string]*registrationSession),
 	}
 }
 
@@ -335,4 +394,138 @@ func (c *fakeClockSvc) Now() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.now
+}
+
+// rotatingCredsAPIClient records the order of the two calls
+// finishSuccess makes before it touches the database, so the test can
+// assert the cache is dropped BEFORE a token is minted with the new
+// credentials.
+type rotatingCredsAPIClient struct {
+	APIClient // unused methods; the test only drives the two below
+
+	mu    sync.Mutex
+	calls []string
+	creds InstallationCredentials
+}
+
+func (c *rotatingCredsAPIClient) InvalidateTokenCache(appID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, "invalidate:"+appID)
+}
+
+func (c *rotatingCredsAPIClient) GetBotInfo(_ context.Context, creds InstallationCredentials) (BotInfo, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls = append(c.calls, "botinfo:"+creds.AppID)
+	c.creds = creds
+	// Fail so finishSuccess returns before the database work; the
+	// ordering assertion below is what this test is about.
+	return BotInfo{}, errors.New("bot info unavailable")
+}
+
+// TestFinishSuccess_DropsCachedTokenBeforeMintingWithRotatedCreds covers
+// credential rotation (#7611): a re-registration issues a new
+// client_secret under the SAME client_id, so Lark revokes every token
+// minted from the old one while the in-process cache — keyed by app_id —
+// keeps looking valid. Nothing recovers on its own if the stale entry
+// survives into the first call made with the new credentials.
+func TestFinishSuccess_DropsCachedTokenBeforeMintingWithRotatedCreds(t *testing.T) {
+	api := &rotatingCredsAPIClient{}
+	svc := &RegistrationService{
+		cfg: RegistrationServiceConfig{}.withDefaults(),
+		api: api,
+		// finishSuccess records a terminal status on the bot-info failure
+		// this test forces, so the store seam has to be present.
+		sessionStore: NewMemoryInstallSessionStore(),
+		sessions:     make(map[string]*registrationSession),
+	}
+	sess := &registrationSession{id: "sess-rotate"}
+
+	svc.finishSuccess(context.Background(), sess, &PollResult{
+		ClientID:     "cli_rotated",
+		ClientSecret: "secret_new",
+	}, RegionFeishu)
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	want := []string{"invalidate:cli_rotated", "botinfo:cli_rotated"}
+	if len(api.calls) != len(want) || api.calls[0] != want[0] || api.calls[1] != want[1] {
+		t.Fatalf("call order = %v, want %v", api.calls, want)
+	}
+	if api.creds.AppSecret != "secret_new" {
+		t.Errorf("bot info credentials carried app_secret %q, want the rotated one", api.creds.AppSecret)
+	}
+}
+
+// flakyTerminalStore fails the first n MarkTerminal calls, then delegates.
+type flakyTerminalStore struct {
+	InstallSessionStore
+	remainingFailures int
+	calls             int
+}
+
+func (s *flakyTerminalStore) MarkTerminal(ctx context.Context, id string, outcome InstallSessionOutcome, ttl time.Duration) error {
+	s.calls++
+	if s.remainingFailures > 0 {
+		s.remainingFailures--
+		return errors.New("injected store outage")
+	}
+	return s.InstallSessionStore.MarkTerminal(ctx, id, outcome, ttl)
+}
+
+// TestRegistrationTerminalWriteSurvivesTransientStoreFailure covers the
+// review finding on #8376: by the time markSuccess runs, the installation
+// and the installer binding are already committed in Postgres. Logging the
+// store failure and walking away discarded that completion permanently —
+// the browser kept reading `pending` until the QR expired and then showed
+// a failure, for a bind that had actually succeeded.
+func TestRegistrationTerminalWriteSurvivesTransientStoreFailure(t *testing.T) {
+	shared := NewMemoryInstallSessionStore()
+	flaky := &flakyTerminalStore{InstallSessionStore: shared, remainingFailures: 2}
+
+	// Instance A owns the polling goroutine and hits the outage; instance
+	// B is the replica the browser happens to poll.
+	instanceA := newRegistrationServiceForTest(t)
+	instanceA.sessionStore = flaky
+	instanceB := newRegistrationServiceForTest(t)
+	instanceB.sessionStore = shared
+
+	ctx := context.Background()
+	ws := uuidFromStringSvc(t, "11111111-1111-1111-1111-111111111111")
+	installationID := uuidFromStringSvc(t, "33333333-3333-3333-3333-333333333333")
+
+	sess := plantSession(t, instanceA, "retry-1", ws, instanceA.cfg.Now().Add(time.Hour))
+	instanceA.markSuccess(sess, installationID)
+
+	if flaky.calls < 3 {
+		t.Errorf("expected the write to be retried past the outage, got %d call(s)", flaky.calls)
+	}
+
+	state, err := instanceB.GetSession(ctx, ws, "retry-1")
+	if err != nil {
+		t.Fatalf("GetSession: %v", err)
+	}
+	if state.Status != RegistrationStatusSuccess {
+		t.Fatalf("Status: got %q want success — a committed bind must not be lost to a transient store failure", state.Status)
+	}
+	if state.InstallationID != installationID {
+		t.Errorf("InstallationID: got %v want %v", state.InstallationID, installationID)
+	}
+}
+
+// A session that has already expired out of the store cannot be repaired
+// by retrying, so the loop must stop on the first not-found rather than
+// spending its whole budget sleeping.
+func TestRegistrationTerminalWriteStopsWhenSessionIsGone(t *testing.T) {
+	s := newRegistrationServiceForTest(t)
+	counting := &flakyTerminalStore{InstallSessionStore: NewMemoryInstallSessionStore()}
+	s.sessionStore = counting
+
+	// Never planted, so the store reports it gone.
+	s.markError(&registrationSession{id: "absent"}, RegistrationReasonExpired, "qr expired")
+
+	if counting.calls != 1 {
+		t.Errorf("want a single attempt for a session that no longer exists, got %d", counting.calls)
+	}
 }

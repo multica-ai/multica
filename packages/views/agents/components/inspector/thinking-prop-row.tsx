@@ -1,14 +1,20 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import type { RuntimeModel } from "@multica/core/types";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
-import { PropRow } from "../../../common/prop-row";
+import { ObjectProperty } from "../../../layout/object-page";
+import { SettingsRow } from "../../../settings/components/settings-layout";
 import { useT } from "../../../i18n";
 import { ThinkingPicker } from "./thinking-picker";
+import {
+  findModelCapabilityEntry,
+  thinkingLevelRequiredForProvider,
+} from "./model-capability";
 
 /**
- * Thinking row for the agent inspector. Hidden when the active model has
+ * Thinking row for the agent properties panel. Hidden when the active model has
  * no `supported_levels` advertised AND nothing is persisted, so providers
  * that don't expose reasoning never surface an empty row. If the agent
  * already has a `thinking_level` saved (model swap into a non-thinking
@@ -20,14 +26,15 @@ import { ThinkingPicker } from "./thinking-picker";
  * state honestly.
  *
  * Reuses the shared runtime-models query so it hits the same 60s cache
- * as the model picker; no extra round-trip on the inspector's hot path.
+ * as the model picker; no extra round-trip on the panel's hot path.
  * The sibling ModelPicker mounts unconditionally next to this row, so
- * the shared query subscription is established by the inspector mount
+ * the shared query subscription is established by the panel mount
  * itself — returning null here does NOT cancel discovery.
  */
 export function ThinkingPropRow({
   runtimeId,
   runtimeOnline,
+  provider,
   model,
   value,
   canEdit,
@@ -35,6 +42,9 @@ export function ThinkingPropRow({
 }: {
   runtimeId: string | null;
   runtimeOnline: boolean;
+  /** Runtime provider type (e.g. "codex", "claude"). Used to decide whether an
+   *  empty model can safely preview a default model's effort catalog. */
+  provider: string;
   model: string;
   value: string;
   canEdit: boolean;
@@ -46,26 +56,87 @@ export function ThinkingPropRow({
   );
 
   const models = modelsQuery.data?.models ?? [];
-  const entry = pickModelEntry(models, model);
+  const entry = pickModelEntry(models, model, provider);
   const levels = entry?.thinking?.supported_levels ?? [];
   if (levels.length === 0 && !value) return null;
 
   return (
-    <PropRow label={t(($) => $.inspector.prop_thinking)} interactive={false}>
+    <ObjectProperty label={t(($) => $.inspector.prop_thinking)}>
       <ThinkingPicker
         value={value}
         levels={levels}
         canEdit={canEdit}
+        allowClear={levels.length === 0 || !thinkingLevelRequiredForProvider(provider)}
         onChange={onChange}
       />
-    </PropRow>
+    </ObjectProperty>
+  );
+}
+
+/** Full-width counterpart used by the General settings form. */
+export function ThinkingSettingField({
+  label,
+  runtimeId,
+  runtimeOnline,
+  provider,
+  model,
+  value,
+  canEdit,
+  onChange,
+}: {
+  label: ReactNode;
+  runtimeId: string | null;
+  runtimeOnline: boolean;
+  provider: string;
+  model: string;
+  value: string;
+  canEdit: boolean;
+  onChange: (next: string) => Promise<void> | void;
+}) {
+  const modelsQuery = useQuery(
+    runtimeModelsOptions(runtimeOnline ? runtimeId : null),
+  );
+  const models = modelsQuery.data?.models ?? [];
+  const entry = pickModelEntry(models, model, provider);
+  const levels = entry?.thinking?.supported_levels ?? [];
+
+  if (levels.length === 0 && !value) return null;
+
+  return (
+    <SettingsRow label={label} size="select-wide">
+      <ThinkingPicker
+        variant="field"
+        showLabel={false}
+        value={value}
+        levels={levels}
+        canEdit={canEdit}
+        allowClear={levels.length === 0 || !thinkingLevelRequiredForProvider(provider)}
+        onChange={onChange}
+      />
+    </SettingsRow>
   );
 }
 
 function pickModelEntry(
   models: RuntimeModel[],
   model: string,
+  provider: string,
 ): RuntimeModel | undefined {
-  if (model) return models.find((m) => m.id === model);
+  if (model) return findModelCapabilityEntry(models, model, provider);
+  // Empty model = "follow the runtime's own default". For codex that default
+  // comes from the local config.toml and can be any installed model, so we
+  // must NOT preview the flagged Default entry's effort catalog — gpt-5.6-sol
+  // alone advertises `ultra`, which the actually-configured model may not
+  // support. Fail closed (no preview): the row hides unless a stale level is
+  // persisted, in which case it still renders so the orphan can be cleared.
+  // Mirrors the backend ValidateThinkingLevel. (MUL-4347)
+  //
+  // omp is fenced off for the same reason with a different cause: its
+  // `omp models --json` catalog marks no default at all and sorts by
+  // provider/id, so `models[0]` is arbitrary — and at task time omp resolves
+  // its own default role model, then clamps the level to what that model
+  // supports. Previewing any entry here would offer a level the real model may
+  // silently lower. (MUL-7412)
+  if (provider === "codex" || provider === "omp") return undefined;
   return models.find((m) => m.default) ?? models[0];
 }

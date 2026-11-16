@@ -1,20 +1,77 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/spf13/cobra"
 )
 
 func TestMain(m *testing.M) {
-	os.Unsetenv("MULTICA_AGENT_ID")
-	os.Unsetenv("MULTICA_TASK_ID")
-	os.Unsetenv("MULTICA_TOKEN")
-	os.Exit(m.Run())
+	for _, key := range []string{
+		"MULTICA_AGENT_ID",
+		"MULTICA_TASK_ID",
+		"MULTICA_TOKEN",
+		"MULTICA_DAEMON_PORT",
+		"MULTICA_WORKSPACE_ID",
+		"MULTICA_SERVER_URL",
+		"MULTICA_TASK_CONFIG_ROOT",
+		"MULTICA_TASK_WORKSPACES_ROOT",
+		"MULTICA_AGENT_NAME",
+		devEnvHomeEnv,
+		devEnvNameEnv,
+	} {
+		os.Unsetenv(key)
+	}
+
+	// Redirect both home environment variables to one scratch directory for the
+	// whole binary. On Windows os.UserHomeDir reads USERPROFILE, not HOME, so a
+	// test that redirects only HOME still resolves ~/.multica against the real
+	// home — which is how a full-suite run wrote SaveCLIConfig fixtures over a
+	// real default-profile config.json. Process-wide redirection isolates tests
+	// that forget their own redirect on every platform; per-test t.Setenv
+	// overrides still take precedence.
+	scratchHome, err := testutil.IsolateUserHome("multica-cli-tests-home-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "isolate cmd/multica test home: %v\n", err)
+		os.Exit(1)
+	}
+
+	// The daemon-task marker lookup walks up from the working directory. Run
+	// from a checkout inside an agent task workdir, the package directory sits
+	// below that task's real marker, and every API, config and daemon path
+	// refuses. Tests that need a marker create one and t.Chdir into it.
+	testLaunchDir, err = os.Getwd()
+	if err == nil {
+		err = os.Chdir(scratchHome)
+	}
+	if err != nil {
+		_ = os.RemoveAll(scratchHome)
+		fmt.Fprintf(os.Stderr, "move cmd/multica tests into scratch home: %v\n", err)
+		os.Exit(1)
+	}
+
+	code := m.Run()
+	// Windows cannot remove the current working directory.
+	_ = os.Chdir(os.TempDir())
+	_ = os.RemoveAll(scratchHome)
+	os.Exit(code)
 }
+
+// testLaunchDir is the working directory the test binary started in, before
+// TestMain moved it into the scratch home. A helper process whose parent set
+// exec.Cmd.Dir reads its fixtures from there.
+var testLaunchDir string
+
+var redirectTestHome = testutil.RedirectUserHome
 
 // testCmd returns a minimal cobra.Command with the --profile persistent flag
 // registered, matching the rootCmd setup used in production.
@@ -54,7 +111,7 @@ func TestResolveCallbackBinding(t *testing.T) {
 	}
 	failing := func(string) net.IP { return nil }
 
-	cases := []struct {
+	type bindingCase struct {
 		name         string
 		flagHost     string
 		serverURL    string
@@ -62,7 +119,17 @@ func TestResolveCallbackBinding(t *testing.T) {
 		detect       func(string) net.IP
 		wantCallback string
 		wantBind     string
-	}{
+		wantError    bool
+	}
+	cases := []bindingCase{
+		{
+			name:         "IPv6 app URL uses a supported loopback callback",
+			appURL:       "http://[fd00::1]:3000",
+			detect:       failing,
+			wantCallback: "localhost",
+			wantBind:     "127.0.0.1",
+		},
+
 		{
 			name:         "public app URL stays on loopback",
 			appURL:       "https://multica.ai",
@@ -105,19 +172,35 @@ func TestResolveCallbackBinding(t *testing.T) {
 		},
 		{
 			name:         "--callback-host flag overrides everything",
-			flagHost:     "cli.internal.example",
+			flagHost:     "10.0.0.5",
 			appURL:       "https://multica.ai",
 			serverURL:    "https://api.multica.ai",
 			detect:       fixed("10.0.0.5"),
-			wantCallback: "cli.internal.example",
+			wantCallback: "10.0.0.5",
 			wantBind:     "0.0.0.0",
 		},
+	}
+
+	for _, host := range []string{"198.18.0.1", "8.8.8.8", "100.64.0.1", "169.254.1.1", "::1", "fd00::1", "::ffff:192.168.0.1", "cli.internal.example", "localhost:1234", "127.0.0.1@evil.example"} {
+		cases = append(cases, bindingCase{name: "unsupported explicit host " + host, flagHost: host, wantError: true})
+	}
+	for _, ip := range []string{"198.18.0.1", "8.8.8.8", "100.64.0.1", "169.254.1.1"} {
+		cases = append(cases, bindingCase{name: "unsupported outbound IP " + ip, appURL: "http://192.168.0.28:3000", detect: fixed(ip), wantError: true})
 	}
 
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			gotCallback, gotBind := resolveCallbackBinding(tc.flagHost, tc.serverURL, tc.appURL, tc.detect)
+			gotCallback, gotBind, err := resolveCallbackBinding(tc.flagHost, tc.serverURL, tc.appURL, tc.detect)
+			if tc.wantError {
+				if err == nil || !strings.Contains(err.Error(), "--callback-host") {
+					t.Fatalf("expected actionable callback error, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
 			if gotCallback != tc.wantCallback {
 				t.Errorf("callback host = %q, want %q", gotCallback, tc.wantCallback)
 			}
@@ -188,6 +271,47 @@ func TestLoginTokenFlagWiring(t *testing.T) {
 	}
 	if tokenFlag.NoOptDefVal != tokenPromptSentinel {
 		t.Fatalf("loginCmd --token NoOptDefVal = %q, want %q (legacy `multica login --token` prompt mode would break)", tokenFlag.NoOptDefVal, tokenPromptSentinel)
+	}
+}
+
+// TestLoginTokenHelpOutputRendersCleanly renders loginCmd's flag help through
+// the same pflag path `multica login -h` uses (FlagUsagesWrapped) and locks the
+// user-visible help contract that regressed. The original bug had two causes,
+// both invisible to the flag-wiring/parsing tests above:
+//   - The NoOptDefVal sentinel was "\x00prompt". pflag renders NoOptDefVal
+//     verbatim into the flag column AND uses "\x00" as its own column-alignment
+//     marker, so the split-at-first-NUL logic mispadded the line and printed a
+//     raw NUL to the terminal.
+//   - The usage string wrapped the PAT example in backticks, so pflag's
+//     UnquoteUsage hijacked it as the flag's value placeholder and stripped a
+//     backtick pair from the description.
+//
+// A comment can't prevent either from recurring; only rendering the real output
+// and asserting on it can. This is the regression guard for that output.
+func TestLoginTokenHelpOutputRendersCleanly(t *testing.T) {
+	help := loginCmd.Flags().FlagUsages()
+
+	// No control byte may reach the terminal. pflag emits only spaces and
+	// newlines for layout, so any other sub-0x20 rune (notably the NUL the old
+	// "\x00prompt" sentinel leaked) means the help rendering is corrupted.
+	for _, r := range help {
+		if r < 0x20 && r != '\n' && r != '\t' {
+			t.Fatalf("login help contains control byte %#x; rendered flag usage:\n%q", r, help)
+		}
+	}
+
+	// The --token line must show the standard optional-value form. This single
+	// assertion pins both root causes: the placeholder is `string` (backticks
+	// removed, so UnquoteUsage no longer hijacks the PAT example) and the
+	// optional value is the printable `prompt` (no NUL-prefixed sentinel).
+	if want := `--token string[="prompt"]`; !strings.Contains(help, want) {
+		t.Fatalf("login help missing %q; rendered flag usage:\n%q", want, help)
+	}
+
+	// The description must survive intact — a swallowed backtick pair used to
+	// truncate it, so assert the tail of the sentence is still present.
+	if want := "to be prompted interactively."; !strings.Contains(help, want) {
+		t.Fatalf("login help missing description tail %q; rendered flag usage:\n%q", want, help)
 	}
 }
 
@@ -275,6 +399,145 @@ func TestLoginTokenFlagParsing(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunAuthStatusTaskContextDoesNotPrintCredential(t *testing.T) {
+	const fakeTaskToken = "mat_task_status_sentinel"
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", fakeTaskToken)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/me" {
+			http.NotFound(w, r)
+			return
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+fakeTaskToken {
+			t.Errorf("Authorization = %q, want fake task token", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"name": "Task Agent", "email": "task@example.test"})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	stderr := captureStderr(t)
+	if err := runAuthStatus(testCmd(), nil); err != nil {
+		stderr.restore()
+		t.Fatalf("runAuthStatus: %v", err)
+	}
+	out := stderr.read()
+	for _, forbidden := range []string{fakeTaskToken, fakeTaskToken[:12], "Token:"} {
+		if strings.Contains(out, forbidden) {
+			t.Fatalf("auth status exposed credential material %q:\n%s", forbidden, out)
+		}
+	}
+	for _, want := range []string{"Server:", "Task Agent", "task@example.test"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("auth status output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRunAuthStatusTaskContextRequiresTaskToken(t *testing.T) {
+	ownerHome := t.TempDir()
+	redirectTestHome(t, ownerHome)
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	ownerPath := filepath.Join(ownerHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ownerBytes := []byte("{\n  \"server_url\": \"https://owner.invalid\",\n  \"token\": \"mul_owner_sentinel\"\n}\n")
+	if err := os.WriteFile(ownerPath, ownerBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	requestCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requestCount++
+		_ = json.NewEncoder(w).Encode(map[string]string{"name": "Unexpected", "email": "unexpected@example.test"})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	for _, tc := range []struct {
+		name  string
+		token string
+	}{
+		{name: "missing token", token: ""},
+		{name: "human token", token: "mul_owner_sentinel"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("MULTICA_TOKEN", tc.token)
+			requestCount = 0
+			stderr := captureStderr(t)
+			err := runAuthStatus(testCmd(), nil)
+			stderr.restore()
+			out := stderr.read()
+			if err == nil || !strings.Contains(err.Error(), "task-scoped mat_ token") {
+				t.Fatalf("runAuthStatus error = %v, want task token requirement", err)
+			}
+			if requestCount != 0 {
+				t.Fatalf("auth status made %d request(s) without a task token", requestCount)
+			}
+			for _, forbidden := range []string{tc.token, "Token:"} {
+				if forbidden != "" && strings.Contains(out, forbidden) {
+					t.Fatalf("auth status exposed credential material %q: %s", forbidden, out)
+				}
+			}
+		})
+	}
+
+	after, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(ownerBytes) {
+		t.Fatalf("owner config content changed: got %q", after)
+	}
+}
+
+func TestHumanAuthCommandsFailClosedInTaskContext(t *testing.T) {
+	ownerHome := t.TempDir()
+	redirectTestHome(t, ownerHome)
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TOKEN", "mat_task_sentinel")
+	t.Setenv("MULTICA_SERVER_URL", "https://task.invalid")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	ownerPath := filepath.Join(ownerHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(ownerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ownerBytes := []byte("{\n  \"server_url\": \"https://owner.invalid\",\n  \"token\": \"mul_owner_sentinel\"\n}\n")
+	if err := os.WriteFile(ownerPath, ownerBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loginCmd := testCmd()
+	loginCmd.Flags().String("token", "mul_fake_login", "")
+	_ = loginCmd.Flags().Set("token", "mul_fake_login")
+	for name, run := range map[string]func() error{
+		"login":  func() error { return runAuthLogin(loginCmd, nil) },
+		"logout": func() error { return runAuthLogout(testCmd(), nil) },
+	} {
+		err := run()
+		if err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+			t.Fatalf("%s error = %v, want task-context guard", name, err)
+		}
+	}
+	after, err := os.ReadFile(ownerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(ownerBytes) {
+		t.Fatalf("owner config content changed: got %q", after)
 	}
 }
 

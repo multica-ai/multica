@@ -3,6 +3,7 @@ package lark
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 )
 
@@ -83,10 +84,16 @@ type APIClient interface {
 	GetMessage(ctx context.Context, creds InstallationCredentials, messageID string) ([]LarkMessage, error)
 
 	// ListChatMessages fetches the most recent messages in a single chat
-	// via GET /open-apis/im/v1/messages?container_id_type=chat. It powers
-	// the group-context prefetch: when a user @-mentions the Bot in a busy
-	// group, the enricher pulls a bounded window of surrounding messages
-	// so the agent sees the conversation, not just the one @-ed line.
+	// via GET /open-apis/im/v1/messages. It powers the group-context
+	// prefetch: when a user @-mentions the Bot in a busy group, the
+	// enricher pulls a bounded window of surrounding messages so the agent
+	// sees the conversation, not just the one @-ed line.
+	//
+	// When p.ThreadID is set the request is scoped to a single Lark topic
+	// (话题) via container_id_type=thread, so a @-mention inside a topic
+	// only ever sees that topic's messages — sibling topics in the same
+	// chat share one chat_id but must stay isolated (#5835). Empty ThreadID
+	// keeps the chat-level container_id_type=chat window.
 	//
 	// Results come back newest-first (sort_type=ByCreateTimeDesc), capped
 	// at p.PageSize (Lark hard-caps a page at 50); the caller orders and
@@ -95,6 +102,12 @@ type APIClient interface {
 	// stays a single round-trip. Like GetMessage, this is a thin transport
 	// adapter: flattening and block assembly are the enricher's job.
 	ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error)
+
+	// DownloadMessageResource downloads one binary resource attached to a
+	// message via GET /open-apis/im/v1/messages/{message_id}/resources/{file_key}.
+	// Type is the Open Platform resource class ("image" for image_key,
+	// "file" for file_key-backed video/file/audio).
+	DownloadMessageResource(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResource, error)
 
 	// BatchGetUsers resolves a set of user open_ids to their display names
 	// via GET /open-apis/contact/v3/users/batch. The enricher uses it to
@@ -118,13 +131,49 @@ type APIClient interface {
 	DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error
 }
 
+// TokenCacheInvalidator is implemented by an APIClient that caches
+// tenant_access_token in-process, so credential rotation can tell it to
+// forget what it holds. Rotation is invisible otherwise: re-registering
+// a Bot issues a new app_secret under the SAME app_id, Lark revokes
+// every token minted from the old one, and the cache key does not
+// change.
+//
+// It is deliberately separate from APIClient rather than a method on it:
+// only the real HTTP client holds a cache, and the stub / fakes have
+// nothing to forget. Callers type-assert and skip when it is absent.
+type TokenCacheInvalidator interface {
+	InvalidateTokenCache(appID string)
+}
+
+// ReactionLister is implemented by an APIClient that can list the reactions
+// already sitting on a message (GET /im/v1/messages/{message_id}/reactions).
+// The typing-indicator sweep uses it to find and delete the bot's own Typing
+// reactions without consulting any in-process state, which is what keeps the
+// badge removable after a restart or on another replica.
+//
+// It is deliberately separate from APIClient rather than a method on it,
+// mirroring TokenCacheInvalidator: only clients that can read Lark implement
+// it, and fakes that only exercise the add/delete pair are not forced to grow
+// list plumbing. Callers type-assert and skip the sweep when it is absent.
+type ReactionLister interface {
+	ListMessageReactions(ctx context.Context, p ListMessageReactionsParams) ([]MessageReaction, error)
+}
+
 // ListMessagesParams selects a bounded, recent window of messages in a
 // single Lark chat for the group-context prefetch. Only the fields the
-// enricher needs today are exposed (ChatID, PageSize, EndTime);
+// enricher needs today are exposed (ChatID, ThreadID, PageSize, EndTime);
 // start_time and page_token are intentionally omitted until a caller
 // needs them.
 type ListMessagesParams struct {
 	ChatID ChatID
+	// ThreadID, when non-empty, scopes the list to a single Lark topic
+	// (话题): the client sends container_id_type=thread with the thread id
+	// as container_id instead of the chat container. This keeps a
+	// @-mention inside a topic from ever seeing sibling topics' messages
+	// (#5835). Lark's thread container does NOT accept end_time, so EndTime
+	// is ignored on this path — the caller anchors the window client-side.
+	// Empty keeps the chat-level container.
+	ThreadID string
 	// PageSize is how many of the most-recent messages to fetch. The
 	// client clamps it into Lark's valid 1..50 range.
 	PageSize int
@@ -132,8 +181,29 @@ type ListMessagesParams struct {
 	// this Unix timestamp in SECONDS (Lark's end_time is second-, not
 	// millisecond-, granularity). The enricher sets it to the trigger
 	// message's time so the prefetch is anchored to the @-mention moment
-	// rather than whatever is newest by the time the fetch runs.
+	// rather than whatever is newest by the time the fetch runs. Ignored
+	// when ThreadID is set (the thread container rejects end_time).
 	EndTime int64
+}
+
+type DownloadResourceParams struct {
+	MessageID string
+	FileKey   string
+	Type      string
+}
+
+type DownloadedResource struct {
+	Data        []byte
+	ContentType string
+	Filename    string
+	SizeBytes   int64
+}
+
+type DownloadedResourceStream struct {
+	Body        io.ReadCloser
+	ContentType string
+	Filename    string
+	SizeBytes   int64
 }
 
 // LarkMessage is the normalized slice of an IM v1 message item the
@@ -149,6 +219,7 @@ type LarkMessage struct {
 	CreateTime     string // epoch milliseconds, as Lark returns it (a string)
 	ParentID       string
 	RootID         string
+	ThreadID       string // Lark topic (话题) id; empty for messages outside a thread
 	UpperMessageID string // the merge_forward parent a child hangs under
 	Deleted        bool
 	Mentions       []LarkMessageMention
@@ -287,6 +358,26 @@ type DeleteReactionParams struct {
 	ReactionID     string
 }
 
+// ListMessageReactionsParams is the input shape for listing the reactions
+// already on a message. EmojiType filters server-side (Lark's
+// reaction_type query parameter); empty lists every reaction.
+type ListMessageReactionsParams struct {
+	InstallationID InstallationCredentials
+	MessageID      string
+	EmojiType      string
+}
+
+// MessageReaction is one reaction on a message as Lark lists it. OperatorType
+// is "app" when the installed bot added it and "user" when a human did — the
+// distinction that lets the typing-indicator sweep delete only the badges the
+// bot itself put on.
+type MessageReaction struct {
+	ReactionID   string
+	OperatorType string
+	OperatorID   string
+	EmojiType    string
+}
+
 // InstallationCredentials is the per-installation transport context the
 // client needs to authenticate against Lark on behalf of a workspace's
 // bot. Passing these explicitly to each call (rather than constructing
@@ -381,6 +472,11 @@ func (s *stubAPIClient) GetMessage(ctx context.Context, creds InstallationCreden
 func (s *stubAPIClient) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
 	s.log.Warn("lark stub client: ListChatMessages called", "chat_id", string(p.ChatID))
 	return nil, ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) DownloadMessageResource(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResource, error) {
+	s.log.Warn("lark stub client: DownloadMessageResource called", "message_id", p.MessageID)
+	return DownloadedResource{}, ErrAPIClientNotConfigured
 }
 
 func (s *stubAPIClient) BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error) {

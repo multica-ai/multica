@@ -1,3 +1,4 @@
+// @vitest-environment node
 import type { BrowserWindow } from "electron";
 import { describe, expect, it, vi } from "vitest";
 import { NAVIGATION_GESTURE_CHANNEL } from "../shared/navigation-gestures";

@@ -1,11 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -85,7 +90,7 @@ func subscriberCount(t *testing.T, queries *db.Queries, issueID string) int {
 func TestSubscriberIssueCreated_CreatorSubscribed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
@@ -120,7 +125,7 @@ func TestSubscriberIssueCreated_CreatorSubscribed(t *testing.T) {
 func TestSubscriberIssueCreated_CreatorAndAssignee(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	assigneeEmail := "subscriber-assignee-test@multica.ai"
 	assigneeID := createTestUser(t, assigneeEmail)
@@ -164,7 +169,7 @@ func TestSubscriberIssueCreated_CreatorAndAssignee(t *testing.T) {
 func TestSubscriberIssueCreated_SelfAssign(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
@@ -201,10 +206,86 @@ func TestSubscriberIssueCreated_SelfAssign(t *testing.T) {
 	}
 }
 
+func TestSubscriberDescriptionMentionsSkipNonRecipients(t *testing.T) {
+	fixture := testutil.New(testPool, testWorkspaceID, testUserID)
+	memberID := fixture.User(t, "Mentioned member", "subscriber-description-mentions@multica.ai")
+	fixture.Member(t, testWorkspaceID, memberID, "member")
+	agentID := fixture.Agent(t, "Mentioned agent", "")
+	squadID := fixture.Squad(t, "Mentioned squad", agentID)
+	queries := db.New(testPool)
+
+	for _, eventType := range []string{protocol.EventIssueCreated, protocol.EventIssueUpdated} {
+		t.Run(eventType, func(t *testing.T) {
+			for _, mentionType := range []string{"issue", "squad", "all"} {
+				t.Run(mentionType, func(t *testing.T) {
+					issueID := fixture.Issue(t, "Description with mixed mentions")
+					mentionID := map[string]string{"issue": issueID, "squad": squadID, "all": "all"}[mentionType]
+					description := fmt.Sprintf(
+						"[Reference](mention://%s/%s) [@Member](mention://member/%s) [@Agent](mention://agent/%s)",
+						mentionType, mentionID, memberID, agentID,
+					)
+					bus := events.New()
+					registerSubscriberListeners(bus, testPool)
+					var added []events.Event
+					bus.Subscribe(protocol.EventSubscriberAdded, func(e events.Event) { added = append(added, e) })
+
+					var logs bytes.Buffer
+					previousLogger := slog.Default()
+					slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelError})))
+					defer slog.SetDefault(previousLogger)
+
+					bus.Publish(events.Event{
+						Type:        eventType,
+						WorkspaceID: testWorkspaceID,
+						ActorType:   "member",
+						ActorID:     testUserID,
+						Payload: map[string]any{
+							"issue": handler.IssueResponse{
+								ID:          issueID,
+								WorkspaceID: testWorkspaceID,
+								Title:       "Description with mixed mentions",
+								Status:      "todo",
+								CreatorType: "member",
+								CreatorID:   testUserID,
+								Description: &description,
+							},
+							"description_changed": true,
+						},
+					})
+
+					// The database rejects non-recipient rows even before the fix;
+					// capture errors so a failed insert cannot make this test pass.
+					for _, line := range strings.Split(logs.String(), "\n") {
+						if strings.Contains(line, "issue_id="+issueID) {
+							t.Errorf("unexpected subscriber error: %s", line)
+						}
+					}
+					if !isSubscribed(t, queries, issueID, "member", memberID) {
+						t.Error("member after the non-recipient mention was not subscribed")
+					}
+					if !isSubscribed(t, queries, issueID, "agent", agentID) {
+						t.Error("agent after the non-recipient mention was not subscribed")
+					}
+					want := 2
+					if eventType == protocol.EventIssueCreated {
+						want++ // The creator also subscribes on creation.
+					}
+					if count := subscriberCount(t, queries, issueID); count != want {
+						t.Errorf("subscriber count = %d, want %d", count, want)
+					}
+					if len(added) != want {
+						t.Errorf("subscriber:added events = %d, want %d", len(added), want)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestSubscriberIssueUpdated_AssigneeChanged(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	assigneeEmail := "subscriber-new-assignee-test@multica.ai"
 	assigneeID := createTestUser(t, assigneeEmail)
@@ -243,7 +324,7 @@ func TestSubscriberIssueUpdated_AssigneeChanged(t *testing.T) {
 func TestSubscriberIssueUpdated_NoAssigneeChange(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
@@ -278,7 +359,7 @@ func TestSubscriberIssueUpdated_NoAssigneeChange(t *testing.T) {
 func TestSubscriberCommentCreated_CommenterSubscribed(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	commenterEmail := "subscriber-commenter-test@multica.ai"
 	commenterID := createTestUser(t, commenterEmail)
@@ -310,9 +391,8 @@ func TestSubscriberCommentCreated_CommenterSubscribed(t *testing.T) {
 }
 
 func TestSubscriberAddedEventPublished(t *testing.T) {
-	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
@@ -365,7 +445,7 @@ func TestSubscriberAddedEventPublished(t *testing.T) {
 func TestSubscriberIssueCreated_AutopilotMapPayload(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, testPool)
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
@@ -391,27 +471,4 @@ func TestSubscriberIssueCreated_AutopilotMapPayload(t *testing.T) {
 	if !isSubscribed(t, queries, issueID, "member", testUserID) {
 		t.Fatal("expected creator to be subscribed when autopilot publishes map payload")
 	}
-}
-
-// Verify parseUUID is consistent — the local helper should agree with util.MustParseUUID
-// for valid input, and panic on invalid input (the silent-zero behavior was removed
-// after #1661 to prevent silent SQL writes against a zero UUID).
-func TestParseUUIDConsistency(t *testing.T) {
-	uuid := "550e8400-e29b-41d4-a716-446655440000"
-	local := parseUUID(uuid)
-	utilResult := util.MustParseUUID(uuid)
-	if local != utilResult {
-		t.Fatalf("parseUUID inconsistency: local=%v, util=%v", local, utilResult)
-	}
-	if !local.Valid {
-		t.Fatal("expected valid UUID")
-	}
-
-	// Invalid input (empty string) must panic now — never silently return a zero UUID.
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("expected parseUUID(\"\") to panic, but it returned normally")
-		}
-	}()
-	_ = parseUUID("")
 }

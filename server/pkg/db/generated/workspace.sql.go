@@ -14,7 +14,7 @@ import (
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspace (name, slug, description, context, issue_prefix)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed
 `
 
 type CreateWorkspaceParams struct {
@@ -47,24 +47,193 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.IssuePrefix,
 		&i.IssueCounter,
 		&i.AvatarUrl,
+		&i.AttributionFailClosed,
 	)
 	return i, err
 }
 
 const deleteWorkspace = `-- name: DeleteWorkspace :exec
-WITH deleted_pending_check_suites AS (
+WITH ws_installations AS (
+    SELECT id FROM channel_installation WHERE workspace_id = $1
+),
+ws_sessions AS (
+    SELECT id FROM chat_session WHERE workspace_id = $1
+),
+ws_agents AS (
+    SELECT id FROM agent WHERE workspace_id = $1
+),
+ws_skills AS (
+    SELECT id FROM skill WHERE workspace_id = $1
+),
+cleared_agent_label_assignments AS (
+    DELETE FROM agent_to_label WHERE agent_id IN (SELECT id FROM ws_agents)
+),
+cleared_skill_label_assignments AS (
+    DELETE FROM skill_to_label WHERE skill_id IN (SELECT id FROM ws_skills)
+),
+cleared_channel_task_deliveries AS (
+    DELETE FROM channel_task_delivery WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_channel_outbound_messages AS (
+    DELETE FROM channel_outbound_message WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_channel_reply_deliveries AS (
+    DELETE FROM channel_reply_delivery WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
+    RETURNING chat_session_id
+),
+cleared_chat_contexts AS (
+    DELETE FROM channel_chat_context_generation
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+       OR chat_session_id IN (SELECT id FROM ws_sessions)
+),
+cleared_outbound_cards AS (
+    -- channel_outbound_card_message is keyed by chat_session_id (no FK); its own
+    -- chat_session rows cascade away with the workspace, so reach the cards through
+    -- the just-removed chat-session bindings, which still carry the id.
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+),
+cleared_chat_submission_receipts AS (
+    DELETE FROM chat_submission_receipt WHERE chat_submission_receipt.workspace_id = $1
+),
+cleared_draft_restores AS (
+    -- chat_draft_restore is keyed by chat_session_id with no FK (MUL-3515) and has
+    -- no reaper, while its chat_session rows cascade away with the workspace. Reach
+    -- them directly through chat_session (unlike the cards above, this is not
+    -- limited to channel-bound sessions) or every pending restore — each holding a
+    -- user's prompt text — would outlive the workspace permanently (#5219).
+    --
+    -- This sweep only sees restores committed before the statement's snapshot, so
+    -- the caller must already hold LockChatSessionsByWorkspace: that lock is what
+    -- keeps FinalizeDeferredCancelledChat from inserting one behind it.
+    DELETE FROM chat_draft_restore
+    WHERE chat_session_id IN (SELECT id FROM chat_session WHERE workspace_id = $1)
+),
+cleared_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
+),
+cleared_audit AS (
+    -- Purge, don't detach: the workspace is gone and channel_inbound_audit has no
+    -- workspace_id and no reaper, so a detached (NULL) row would be permanently
+    -- unattributable. (Reclaim, where the workspace survives, still detaches.)
+    DELETE FROM channel_inbound_audit WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_user_bindings AS (
+    DELETE FROM channel_user_binding WHERE workspace_id = $1
+),
+cleared_binding_tokens AS (
+    DELETE FROM channel_binding_token WHERE workspace_id = $1
+),
+cleared_installations AS (
+    DELETE FROM channel_installation WHERE workspace_id = $1
+),
+cleared_issue_properties AS (
+    DELETE FROM issue_property WHERE workspace_id = $1
+),
+cleared_quick_actions AS (
+    DELETE FROM quick_action WHERE workspace_id = $1
+),
+ws_mcp_servers AS (
+    SELECT id FROM workspace_mcp_server WHERE workspace_id = $1
+),
+cleared_agent_mcp_bindings AS (
+    -- agent_mcp_server carries no FK in either direction, so sweep it from
+    -- both sides: the workspace's own servers, and any binding held by an
+    -- agent that is about to be removed with the workspace.
+    DELETE FROM agent_mcp_server
+    WHERE server_id IN (SELECT id FROM ws_mcp_servers)
+       OR agent_id IN (SELECT id FROM ws_agents)
+),
+cleared_workspace_mcp_servers AS (
+    DELETE FROM workspace_mcp_server WHERE workspace_id = $1
+),
+deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
+),
+ws_github_prs AS (
+    SELECT id FROM github_pull_request WHERE workspace_id = $1
+),
+cleared_github_pr_check_runs AS (
+    -- github_pull_request_check_run intentionally has no FK. Remove its rows
+    -- before the workspace delete cascades away the parent PR mirrors.
+    DELETE FROM github_pull_request_check_run
+    WHERE pr_id IN (SELECT id FROM ws_github_prs)
+),
+ws_vcs_prs AS (
+    SELECT id FROM vcs_pull_request WHERE workspace_id = $1
+),
+ws_vcs_connections AS (
+    SELECT id FROM vcs_connection WHERE workspace_id = $1
+),
+cleared_vcs_pr_links AS (
+    DELETE FROM issue_vcs_pull_request
+    WHERE pull_request_id IN (SELECT id FROM ws_vcs_prs)
+),
+cleared_vcs_commit_statuses AS (
+    DELETE FROM vcs_commit_status
+    WHERE connection_id IN (SELECT id FROM ws_vcs_connections)
+),
+cleared_vcs_prs AS (
+    DELETE FROM vcs_pull_request WHERE workspace_id = $1
+),
+cleared_vcs_connections AS (
+    DELETE FROM vcs_connection WHERE workspace_id = $1
+),
+cleared_client_usage_workspace AS (
+    UPDATE client_usage_daily SET workspace_id = NULL WHERE workspace_id = $1
 )
-DELETE FROM workspace WHERE id = $1
+DELETE FROM workspace WHERE workspace.id = $1
 `
 
+// The channel_* tables (MUL-3515 §4), resource-label junctions, custom issue
+// property definitions, and quick actions carry NO FK to workspace, so — unlike the CASCADE-backed
+// tables the DELETE below sweeps — they are not cleaned up implicitly. Remove
+// their workspace-owned rows here so they commit or roll back atomically with
+// the workspace row.
+// VCS tables (migration 213) carry no FK to workspace, so they are not cascaded
+// away by the DELETE below. Sweep the workspace's connections, mirrored PRs,
+// their issue links, and CI statuses here. issue_vcs_pull_request has no
+// workspace_id, so reach it through the workspace's PRs; vcs_commit_status has
+// none either, so reach it through the workspace's connections.
 func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspace, id)
 	return err
 }
 
+const getDaemonWorkspace = `-- name: GetDaemonWorkspace :one
+SELECT id, name
+FROM workspace
+WHERE id = $1
+`
+
+type GetDaemonWorkspaceRow struct {
+	ID   pgtype.UUID `json:"id"`
+	Name string      `json:"name"`
+}
+
+// Workspace-scoped daemon tokens do not carry a user ID. This narrow lookup
+// lets them use the same endpoint without widening their token scope.
+func (q *Queries) GetDaemonWorkspace(ctx context.Context, id pgtype.UUID) (GetDaemonWorkspaceRow, error) {
+	row := q.db.QueryRow(ctx, getDaemonWorkspace, id)
+	var i GetDaemonWorkspaceRow
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
 const getWorkspace = `-- name: GetWorkspace :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed FROM workspace
 WHERE id = $1
 `
 
@@ -84,12 +253,27 @@ func (q *Queries) GetWorkspace(ctx context.Context, id pgtype.UUID) (Workspace, 
 		&i.IssuePrefix,
 		&i.IssueCounter,
 		&i.AvatarUrl,
+		&i.AttributionFailClosed,
 	)
 	return i, err
 }
 
+const getWorkspaceAttributionFailClosed = `-- name: GetWorkspaceAttributionFailClosed :one
+SELECT attribution_fail_closed FROM workspace
+WHERE id = $1
+`
+
+// Lean read of the fail-closed attribution policy for the enqueue hot path
+// (MUL-4302 §3.5), avoiding a full workspace-row fetch.
+func (q *Queries) GetWorkspaceAttributionFailClosed(ctx context.Context, id pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceAttributionFailClosed, id)
+	var attribution_fail_closed bool
+	err := row.Scan(&attribution_fail_closed)
+	return attribution_fail_closed, err
+}
+
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url FROM workspace
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed FROM workspace
 WHERE slug = $1
 `
 
@@ -109,7 +293,48 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 		&i.IssuePrefix,
 		&i.IssueCounter,
 		&i.AvatarUrl,
+		&i.AttributionFailClosed,
 	)
+	return i, err
+}
+
+const healIssueCounter = `-- name: HealIssueCounter :one
+WITH target AS (
+    SELECT w.id, w.issue_counter,
+           (SELECT COALESCE(MAX(i.number), 0)::int FROM issue i WHERE i.workspace_id = w.id) AS max_number
+    FROM workspace w
+    WHERE w.id = $1
+)
+UPDATE workspace w SET issue_counter = t.max_number
+FROM target t
+WHERE w.id = t.id AND w.issue_counter < t.max_number
+RETURNING w.issue_counter AS issue_counter,
+          t.issue_counter AS previous_counter,
+          t.max_number AS max_number
+`
+
+type HealIssueCounterRow struct {
+	IssueCounter    int32 `json:"issue_counter"`
+	PreviousCounter int32 `json:"previous_counter"`
+	MaxNumber       int32 `json:"max_number"`
+}
+
+// Operator-shaped repair for a workspace whose issue_counter sits below
+// MAX(issue.number): something persisted a numbered issue row without this
+// counter ever being advanced for it. Deliberately a separate statement from
+// IncrementIssueCounter so a healthy create pays nothing for it, and scoped to
+// one workspace.
+//
+// The WHERE guard is what makes a retry meaningful: no row is updated, and sqlc
+// returns no row, unless the counter really is behind — so a collision caused by
+// anything else is never retried against the same taken number. It returns the
+// value it wrote, the value it replaced and the highest number the workspace
+// holds, so a repair can be logged with its before and after instead of leaving
+// no trace for whoever debugs the next occurrence.
+func (q *Queries) HealIssueCounter(ctx context.Context, id pgtype.UUID) (HealIssueCounterRow, error) {
+	row := q.db.QueryRow(ctx, healIssueCounter, id)
+	var i HealIssueCounterRow
+	err := row.Scan(&i.IssueCounter, &i.PreviousCounter, &i.MaxNumber)
 	return i, err
 }
 
@@ -126,25 +351,79 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 	return issue_counter, err
 }
 
-const listWorkspaces = `-- name: ListWorkspaces :many
-SELECT w.id, w.name, w.slug, w.description, w.settings,
-       w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url
+const listDaemonWorkspaces = `-- name: ListDaemonWorkspaces :many
+SELECT w.id, w.name
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
-ORDER BY w.created_at ASC
+ORDER BY w.id ASC
 `
 
-func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Workspace, error) {
+type ListDaemonWorkspacesRow struct {
+	ID   pgtype.UUID `json:"id"`
+	Name string      `json:"name"`
+}
+
+// Daemons only need the membership set and display name to discover which
+// workspaces should have local runtimes. Keep this projection intentionally
+// narrow so the periodic consistency check never reads UI-only JSON/text
+// columns such as settings, repos, or context.
+func (q *Queries) ListDaemonWorkspaces(ctx context.Context, userID pgtype.UUID) ([]ListDaemonWorkspacesRow, error) {
+	rows, err := q.db.Query(ctx, listDaemonWorkspaces, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDaemonWorkspacesRow{}
+	for rows.Next() {
+		var i ListDaemonWorkspacesRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaces = `-- name: ListWorkspaces :many
+SELECT w.id, w.name, w.slug, w.description, w.settings,
+       w.created_at, w.updated_at, w.context, w.repos,
+       w.issue_prefix, w.issue_counter, w.avatar_url, w.attribution_fail_closed, m.pinned_at
+FROM member m
+JOIN workspace w ON w.id = m.workspace_id
+WHERE m.user_id = $1
+ORDER BY m.pinned_at DESC NULLS LAST, w.created_at ASC
+`
+
+type ListWorkspacesRow struct {
+	ID                    pgtype.UUID        `json:"id"`
+	Name                  string             `json:"name"`
+	Slug                  string             `json:"slug"`
+	Description           pgtype.Text        `json:"description"`
+	Settings              []byte             `json:"settings"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	Context               pgtype.Text        `json:"context"`
+	Repos                 []byte             `json:"repos"`
+	IssuePrefix           string             `json:"issue_prefix"`
+	IssueCounter          int32              `json:"issue_counter"`
+	AvatarUrl             pgtype.Text        `json:"avatar_url"`
+	AttributionFailClosed bool               `json:"attribution_fail_closed"`
+	PinnedAt              pgtype.Timestamptz `json:"pinned_at"`
+}
+
+func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]ListWorkspacesRow, error) {
 	rows, err := q.db.Query(ctx, listWorkspaces, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Workspace{}
+	items := []ListWorkspacesRow{}
 	for rows.Next() {
-		var i Workspace
+		var i ListWorkspacesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
@@ -158,6 +437,8 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.IssuePrefix,
 			&i.IssueCounter,
 			&i.AvatarUrl,
+			&i.AttributionFailClosed,
+			&i.PinnedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -169,37 +450,68 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 	return items, nil
 }
 
-const listWorkspacesWithRepos = `-- name: ListWorkspacesWithRepos :many
-SELECT id, repos FROM workspace
-WHERE repos IS NOT NULL AND repos <> '[]'::jsonb
-ORDER BY id
+const lockWorkspaceForChatSessionCreate = `-- name: LockWorkspaceForChatSessionCreate :one
+SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE
 `
 
-type ListWorkspacesWithReposRow struct {
-	ID    pgtype.UUID `json:"id"`
-	Repos []byte      `json:"repos"`
+// The creator half of the workspace delete/create protocol (#5219). Every
+// production path that inserts a chat_session takes this FOR KEY SHARE lock on the
+// parent workspace row, inside its transaction, before CreateChatSession. It
+// conflicts with DeleteWorkspace's FOR UPDATE (so a create is blocked while a
+// delete is in progress, and vice versa) but not with other creators (FOR KEY
+// SHARE locks share), so concurrent session creation stays unserialized. This
+// makes the mutual exclusion explicit rather than leaning on the workspace FK's
+// implicit FOR KEY SHARE, which would vanish if that FK is dropped.
+func (q *Queries) LockWorkspaceForChatSessionCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockWorkspaceForChatSessionCreate, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
-// Workspaces with a non-empty repo registry, to route a webhook to the repo's
-// owning workspace. ORDER BY id keeps the resolver's tie-break stable on replay.
-func (q *Queries) ListWorkspacesWithRepos(ctx context.Context) ([]ListWorkspacesWithReposRow, error) {
-	rows, err := q.db.Query(ctx, listWorkspacesWithRepos)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListWorkspacesWithReposRow{}
-	for rows.Next() {
-		var i ListWorkspacesWithReposRow
-		if err := rows.Scan(&i.ID, &i.Repos); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+const lockWorkspaceForDelete = `-- name: LockWorkspaceForDelete :one
+SELECT id FROM workspace WHERE id = $1 FOR UPDATE
+`
+
+// Taken first by DeleteWorkspace, before it enumerates the workspace's chat
+// sessions. LockChatSessionsByWorkspace only covers sessions that exist when it
+// runs; a CreateChatSession committing during the delete window would add one
+// the lock set never saw, and a finalizer could then insert a restore for it
+// after the sweep's snapshot — orphaning the prompt (#5219).
+//
+// The delete window is held closed against new sessions by an EXPLICIT protocol,
+// not the chat_session.workspace_id FK: every session creator takes
+// LockWorkspaceForChatSessionCreate (FOR KEY SHARE) on this row first, and this
+// FOR UPDATE conflicts with it. Keeping the bar in the app layer means it does
+// not silently break if that FK is ever dropped (the codebase is moving FK
+// relationships into the application layer, MUL-3515). Lock order is
+// workspace -> chat_session -> agent_task_queue; the finalizer never touches
+// workspace, so this cannot deadlock against it.
+func (q *Queries) LockWorkspaceForDelete(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockWorkspaceForDelete, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
+const setWorkspacePinned = `-- name: SetWorkspacePinned :one
+UPDATE member
+SET pinned_at = CASE WHEN $1::bool THEN COALESCE(pinned_at, now()) ELSE NULL END
+WHERE workspace_id = $2 AND user_id = $3
+RETURNING pinned_at
+`
+
+type SetWorkspacePinnedParams struct {
+	Pinned      bool        `json:"pinned"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) SetWorkspacePinned(ctx context.Context, arg SetWorkspacePinnedParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, setWorkspacePinned, arg.Pinned, arg.WorkspaceID, arg.UserID)
+	var pinned_at pgtype.Timestamptz
+	err := row.Scan(&pinned_at)
+	return pinned_at, err
 }
 
 const updateWorkspace = `-- name: UpdateWorkspace :one
@@ -213,7 +525,7 @@ UPDATE workspace SET
     avatar_url = COALESCE($8, avatar_url),
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url
+RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed
 `
 
 type UpdateWorkspaceParams struct {
@@ -252,6 +564,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.IssuePrefix,
 		&i.IssueCounter,
 		&i.AvatarUrl,
+		&i.AttributionFailClosed,
 	)
 	return i, err
 }

@@ -1,0 +1,100 @@
+---
+title: Agents
+description: Un agent est un ensemble réutilisable d'identité, de capacités et de configuration d'exécution au sein d'un espace de travail.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { AgentAccessDemo } from "@/components/demos/agent-access-demo";
+
+Un agent est un collaborateur d'un [espace de travail Multica](/workspaces). Vous pouvez lui assigner des tâches, le @mentionner dans des commentaires ou discuter directement avec lui. Il pilote un outil de codage IA via le runtime auquel il est associé, et renvoie son avancement et ses résultats dans l'espace de travail.
+
+Un agent ne tourne pas en permanence en arrière-plan. Il conserve une identité et une configuration réutilisables, et ne produit des [exécutions](/tasks) concrètes que lorsque du travail arrive.
+
+## Configuration d'un agent
+
+| Paramètre | Rôle |
+|---|---|
+| **Nom, avatar et description** | Indiquent à l'équipe qui est l'agent et dans quoi il excelle. La description sert uniquement à l'affichage et n'entre jamais dans le prompt d'exécution. |
+| **Instructions** | Définissent ses responsabilités, sa façon de travailler, ses limites et ses exigences de livraison. Utilisées à chaque exécution. |
+| **Amorces de conversation** | Proposent jusqu'à trois exemples propres à l'agent, affichés lorsqu'une personne ouvre une nouvelle discussion avec lui. En sélectionner une remplit le champ de saisie sans envoyer le message. |
+| **Skills** | Fournissent des méthodes réutilisables, des documents de référence et des fichiers d'appui. |
+| **Runtime, modèle et niveau de réflexion** | Déterminent le runtime, l'outil de codage IA et le modèle utilisés ; certains outils (comme Codex) proposent aussi un niveau de service (**Vitesse**). |
+| **Accès** | Détermine quels membres peuvent l'exécuter. |
+| **Paramètres d'exécution** | Comprennent la limite de parallélisme, les variables d'environnement, les arguments CLI, MCP et les intégrations externes. |
+
+Changer de modèle ou modifier les instructions ne crée pas de nouvel agent, et l'historique des tâches, des commentaires et des exécutions n'est pas perdu.
+
+## Agents, runtimes et exécutions
+
+| Concept | Responsabilité |
+|---|---|
+| **Agent** | Décide qui fait le travail et comment |
+| **Runtime** | Décide quel ordinateur et quel outil de codage IA l'exécutent |
+| **Exécution** | Enregistre le déroulement et le résultat d'une exécution |
+
+Un runtime peut héberger plusieurs agents, et un agent peut mener à bien de nombreuses exécutions au fil du temps. Lorsque le runtime est hors ligne, l'identité et l'historique de l'agent sont conservés, mais les nouvelles exécutions attendent le retour du runtime.
+
+## Comment un agent participe
+
+- **Prendre en charge une tâche** — définissez l'agent comme assigné ; il démarre dès que l'exécution est mise en file d'attente.
+- **Traiter un commentaire** — @mentionnez l'agent dans un commentaire sans changer l'assigné de la tâche.
+- **Poursuivre une discussion** — répondez au commentaire de l'agent ; les nouvelles informations alimentent les exécutions suivantes.
+- **Discuter directement** — démarrez une discussion qui n'est rattachée à aucune tâche.
+- **Rejoindre des projets et des squads** — un agent peut être responsable d'un projet, chef d'un squad ou membre d'un squad.
+- **S'exécuter via des automatisations** — déclenchez un travail prédéfini selon une planification ou à partir d'événements externes, ou lancez-le manuellement.
+
+Les agents peuvent créer des tâches, publier des commentaires et changer le statut du travail, mais ils n'ont pas de boîte de réception et ne reçoivent pas `@all`. Une @mention d'un agent est un déclencheur d'exécution, pas une notification.
+
+## Permissions et accès
+
+Chaque agent a un propriétaire et un paramètre **Accès**. L'Accès détermine qui peut exécuter l'agent, c'est-à-dire lui assigner des tâches, le @mentionner dans un commentaire ou discuter avec lui :
+
+| Accès | Qui peut l'exécuter |
+|---|---|
+| **Moi uniquement** | Uniquement le propriétaire de l'agent. |
+| **Tout l'espace de travail** | Tous les membres de l'espace de travail. |
+| **Personnes précises** | Le propriétaire de l'agent et les membres sélectionnés. |
+
+Les nouveaux agents sont par défaut en **Moi uniquement**. La démo ci-dessous part de Moi uniquement, passe tour à tour aux deux autres options et montre ce que chaque membre obtient alors dans le sélecteur d'assigné et le menu des @mentions.
+
+<AgentAccessDemo />
+
+<Callout type="info">
+Les `owner` et les `admin` de l'espace de travail peuvent voir et gérer tous les agents, mais ne peuvent pas contourner l'Accès pour exécuter l'agent « Moi uniquement » de quelqu'un d'autre.
+</Callout>
+
+Les autres opérations se répartissent ainsi :
+
+| Opération | Qui peut |
+|---|---|
+| Voir l'agent dans la liste et les sélecteurs | Le propriétaire de l'agent, les `owner` et `admin` de l'espace de travail, et les membres autorisés par l'Accès |
+| Modifier sa configuration | Le propriétaire de l'agent, les `owner` et `admin` de l'espace de travail |
+| Modifier l'Accès | Le propriétaire de l'agent uniquement |
+
+Les éléments de configuration susceptibles de contenir des identifiants, comme les variables d'environnement et MCP, obéissent à des règles de lecture plus strictes : voir [Créer et configurer un agent](/agents-create#variables-denvironnement-et-identifiants).
+
+## En ligne, hors ligne et charge
+
+La liste des agents affiche deux types de statut côte à côte :
+
+- La **Disponibilité** provient du runtime — en ligne, hors ligne ou instable.
+- La **Charge** provient des exécutions — au travail, en file d'attente ou au repos.
+
+« Hors ligne » ne signifie pas que l'agent a été supprimé. Les exécutions déjà en file d'attente attendent le rétablissement du runtime ; seul « archivé » signifie qu'il ne peut plus recevoir de nouveau travail.
+
+## Archiver et restaurer
+
+Les agents que vous n'utilisez plus peuvent être archivés. Un agent archivé n'apparaît plus dans les sélecteurs et ne peut plus être assigné ni @mentionné ; son historique est conservé et il peut être restauré plus tard.
+
+<Callout type="warning">
+L'archivage annule toutes les exécutions non terminées de l'agent, y compris celles en file d'attente et en cours.
+</Callout>
+
+Le propriétaire de l'agent ainsi que les `owner` et les `admin` de l'espace de travail peuvent archiver ou restaurer un agent.
+
+## Étapes suivantes
+
+- [Créer et configurer un agent](/agents-create) — remplissez la configuration vous-même, ou laissez l'IA en rédiger un brouillon.
+- [Skills](/skills) — ajoutez des méthodes et des documents réutilisables à un agent.
+- [Squads](/squads) — laissez un chef choisir le membre le plus adapté au travail.
+- [Daemon et runtimes](/daemon-runtimes) — là où les agents s'exécutent réellement.

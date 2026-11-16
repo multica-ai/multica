@@ -14,6 +14,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -88,7 +90,7 @@ type LocalSkillListStore interface {
 	// never start a claim they might have to abort.
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillListRequest, error)
-	Complete(ctx context.Context, id string, skills []RuntimeLocalSkillSummary, supported bool) error
+	Complete(ctx context.Context, id string, skills []RuntimeLocalSkillSummary, supported bool, mcpServers []RuntimeLocalMcpServerSummary, mcpSupported bool) error
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
@@ -121,7 +123,7 @@ type LocalSkillImportStore interface {
 	// transitions them to running. Used by the heartbeat handler to deliver
 	// multiple imports per heartbeat cycle.
 	PopPendingBatch(ctx context.Context, runtimeID string, limit int) ([]*RuntimeLocalSkillImportRequest, error)
-	Complete(ctx context.Context, id string, skill SkillResponse) error
+	Complete(ctx context.Context, id string, skill SkillWithFilesResponse) error
 	// Conflict transitions a request to the terminal RuntimeLocalSkillConflict
 	// state, attaching structured conflict metadata for the caller to act on.
 	Conflict(ctx context.Context, id string, info LocalSkillImportConflict) error
@@ -178,12 +180,25 @@ type RuntimeLocalSkillSummary struct {
 	SourcePath  string `json:"source_path"`
 	Provider    string `json:"provider"`
 	// Root classifies the discovery root the daemon found this skill under:
-	// "provider" (the runtime's own skill directory, e.g. ~/.claude/skills)
-	// or "universal" (the cross-tool ~/.agents/skills fallback). Daemons
+	// "provider" (the runtime's own skill directory, e.g. ~/.claude/skills),
+	// "universal" (the cross-tool ~/.agents/skills fallback), or "plugin"
+	// for a skill contributed by an enabled runtime plugin. Daemons
 	// that predate multi-root discovery omit it; an empty value means
 	// "unknown" and the UI should not assert either origin.
-	Root      string `json:"root,omitempty"`
-	FileCount int    `json:"file_count"`
+	Root       string `json:"root,omitempty"`
+	Plugin     string `json:"plugin,omitempty"`
+	CanDisable bool   `json:"can_disable,omitempty"`
+	FileCount  int    `json:"file_count"`
+}
+
+// RuntimeLocalMcpServerSummary is deliberately non-secret. The daemon only
+// reports the configured server name, transport, and config scope; command
+// arguments, URLs, headers, and environment values never leave the machine.
+type RuntimeLocalMcpServerSummary struct {
+	Name      string `json:"name"`
+	Transport string `json:"transport,omitempty"`
+	Source    string `json:"source,omitempty"`
+	Enabled   bool   `json:"enabled"`
 }
 
 type RuntimeLocalSkillListRequest struct {
@@ -192,6 +207,8 @@ type RuntimeLocalSkillListRequest struct {
 	Status       RuntimeLocalSkillRequestStatus `json:"status"`
 	Skills       []RuntimeLocalSkillSummary     `json:"skills,omitempty"`
 	Supported    bool                           `json:"supported"`
+	McpServers   []RuntimeLocalMcpServerSummary `json:"mcp_servers,omitempty"`
+	McpSupported bool                           `json:"mcp_supported"`
 	Error        string                         `json:"error,omitempty"`
 	CreatedAt    time.Time                      `json:"created_at"`
 	UpdatedAt    time.Time                      `json:"updated_at"`
@@ -211,7 +228,7 @@ type RuntimeLocalSkillImportRequest struct {
 	// the new `conflict` status and the legacy `failed` behavior.
 	SupportsConflict bool                           `json:"supports_conflict,omitempty"`
 	Status           RuntimeLocalSkillRequestStatus `json:"status"`
-	Skill            *SkillResponse                 `json:"skill,omitempty"`
+	Skill            *SkillWithFilesResponse        `json:"skill,omitempty"`
 	Conflict         *LocalSkillImportConflict      `json:"conflict,omitempty"`
 	Error            string                         `json:"error,omitempty"`
 	CreatedAt        time.Time                      `json:"created_at"`
@@ -304,7 +321,7 @@ func (s *InMemoryLocalSkillListStore) PopPending(_ context.Context, runtimeID st
 	return oldest, nil
 }
 
-func (s *InMemoryLocalSkillListStore) Complete(_ context.Context, id string, skills []RuntimeLocalSkillSummary, supported bool) error {
+func (s *InMemoryLocalSkillListStore) Complete(_ context.Context, id string, skills []RuntimeLocalSkillSummary, supported bool, mcpServers []RuntimeLocalMcpServerSummary, mcpSupported bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -312,6 +329,8 @@ func (s *InMemoryLocalSkillListStore) Complete(_ context.Context, id string, ski
 		req.Status = RuntimeLocalSkillCompleted
 		req.Skills = skills
 		req.Supported = supported
+		req.McpServers = mcpServers
+		req.McpSupported = mcpSupported
 		req.UpdatedAt = time.Now()
 	}
 	return nil
@@ -450,7 +469,7 @@ func (s *InMemoryLocalSkillImportStore) PopPendingBatch(_ context.Context, runti
 	return result, nil
 }
 
-func (s *InMemoryLocalSkillImportStore) Complete(_ context.Context, id string, skill SkillResponse) error {
+func (s *InMemoryLocalSkillImportStore) Complete(_ context.Context, id string, skill SkillWithFilesResponse) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -526,31 +545,39 @@ func runtimeLocalSkillRequestTerminal(status RuntimeLocalSkillRequestStatus) boo
 		status == RuntimeLocalSkillTimeout || status == RuntimeLocalSkillConflict
 }
 
-func (h *Handler) requireRuntimeLocalSkillAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (runtimeIDAndWorkspace, bool) {
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+// requireRuntimeCapabilityReadAccess applies the runtime read gate to
+// capability discovery (local skills + the redacted MCP inventory). Private
+// machines remain owner-only even for admins; public runtimes are readable by
+// workspace members. Flows that copy skill files off the owner's machine add
+// the stricter owner-only check in requireRuntimeLocalSkillAccess.
+func (h *Handler) requireRuntimeCapabilityReadAccess(w http.ResponseWriter, r *http.Request, source, runtimeID string) (runtimeIDAndWorkspace, db.Member, bool) {
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, source, runtimeID)
 	if !ok {
-		return runtimeIDAndWorkspace{}, false
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return runtimeIDAndWorkspace{}, false
+		return runtimeIDAndWorkspace{}, db.Member{}, false
 	}
 
 	wsID := uuidToString(rt.WorkspaceID)
-	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
+
+	return runtimeIDAndWorkspace{
+		runtimeID:   uuidToString(rt.ID),
+		workspaceID: wsID,
+		provider:    rt.Provider,
+		status:      rt.Status,
+		ownerID:     uuidToString(rt.OwnerID),
+	}, member, true
+}
+
+// requireRuntimeLocalSkillAccess additionally requires the caller to own the
+// runtime. Import reads full skill file contents from the owner's machine, so
+// it stays owner-only even for workspace owners/admins.
+func (h *Handler) requireRuntimeLocalSkillAccess(w http.ResponseWriter, r *http.Request, source, runtimeID string) (runtimeIDAndWorkspace, bool) {
+	rt, member, ok := h.requireRuntimeCapabilityReadAccess(w, r, source, runtimeID)
 	if !ok {
 		return runtimeIDAndWorkspace{}, false
 	}
 
-	if rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID) {
-		return runtimeIDAndWorkspace{
-			runtimeID:   uuidToString(rt.ID),
-			workspaceID: wsID,
-			provider:    rt.Provider,
-			status:      rt.Status,
-		}, true
+	if rt.ownerID != "" && rt.ownerID == uuidToString(member.UserID) {
+		return rt, true
 	}
 
 	writeError(w, http.StatusForbidden, "insufficient permissions")
@@ -562,11 +589,12 @@ type runtimeIDAndWorkspace struct {
 	workspaceID string
 	provider    string
 	status      string
+	ownerID     string
 }
 
 func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID)
+	rt, _, ok := h.requireRuntimeCapabilityReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
 	if !ok {
 		return
 	}
@@ -577,7 +605,15 @@ func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request
 
 	req, err := h.LocalSkillListStore.Create(r.Context(), rt.runtimeID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to enqueue local skills request: "+err.Error())
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
+		slog.Warn("enqueue local skills request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue local skills request")
+		return
+	}
+	h.requestDaemonPendingWork(rt.runtimeID, protocol.PendingWorkKindLocalSkills)
+	if writeRequestCancellation(w, r, r.Context().Err()) {
 		return
 	}
 	writeJSON(w, http.StatusOK, req)
@@ -585,7 +621,7 @@ func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request
 
 func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID)
+	rt, _, ok := h.requireRuntimeCapabilityReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeLocalSkillPoll, runtimeID)
 	if !ok {
 		return
 	}
@@ -593,7 +629,11 @@ func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Reques
 	requestID := chi.URLParam(r, "requestId")
 	req, err := h.LocalSkillListStore.Get(r.Context(), requestID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
+		slog.Warn("load request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load request")
 		return
 	}
 	if req == nil || req.RuntimeID != rt.runtimeID {
@@ -601,12 +641,15 @@ func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if writeRequestCancellation(w, r, r.Context().Err()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, req)
 }
 
 func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID)
+	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
 	if !ok {
 		return
 	}
@@ -661,15 +704,17 @@ func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Reques
 		SupportsConflict: req.SupportsConflict || req.Action == LocalSkillImportActionOverwrite,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to enqueue local skill import: "+err.Error())
+		slog.Warn("enqueue local skill import failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue local skill import")
 		return
 	}
+	h.requestDaemonPendingWork(rt.runtimeID, protocol.PendingWorkKindLocalSkillImport)
 	writeJSON(w, http.StatusOK, importReq)
 }
 
 func (h *Handler) GetLocalSkillImportRequest(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID)
+	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeLocalSkillImportPoll, runtimeID)
 	if !ok {
 		return
 	}
@@ -677,7 +722,8 @@ func (h *Handler) GetLocalSkillImportRequest(w http.ResponseWriter, r *http.Requ
 	requestID := chi.URLParam(r, "requestId")
 	req, err := h.LocalSkillImportStore.Get(r.Context(), requestID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		slog.Warn("load request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load request")
 		return
 	}
 	if req == nil || req.RuntimeID != rt.runtimeID {
@@ -697,7 +743,8 @@ func (h *Handler) ReportLocalSkillListResult(w http.ResponseWriter, r *http.Requ
 	requestID := chi.URLParam(r, "requestId")
 	req, err := h.LocalSkillListStore.Get(r.Context(), requestID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		slog.Warn("load request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load request")
 		return
 	}
 	if req == nil || req.RuntimeID != runtimeID {
@@ -711,10 +758,12 @@ func (h *Handler) ReportLocalSkillListResult(w http.ResponseWriter, r *http.Requ
 	}
 
 	var body struct {
-		Status    string                     `json:"status"`
-		Skills    []RuntimeLocalSkillSummary `json:"skills"`
-		Supported *bool                      `json:"supported"`
-		Error     string                     `json:"error"`
+		Status       string                         `json:"status"`
+		Skills       []RuntimeLocalSkillSummary     `json:"skills"`
+		Supported    *bool                          `json:"supported"`
+		McpServers   []RuntimeLocalMcpServerSummary `json:"mcp_servers"`
+		McpSupported *bool                          `json:"mcp_supported"`
+		Error        string                         `json:"error"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -726,7 +775,11 @@ func (h *Handler) ReportLocalSkillListResult(w http.ResponseWriter, r *http.Requ
 		if body.Supported != nil {
 			supported = *body.Supported
 		}
-		if err := h.LocalSkillListStore.Complete(r.Context(), requestID, body.Skills, supported); err != nil {
+		mcpSupported := false
+		if body.McpSupported != nil {
+			mcpSupported = *body.McpSupported
+		}
+		if err := h.LocalSkillListStore.Complete(r.Context(), requestID, body.Skills, supported, body.McpServers, mcpSupported); err != nil {
 			// Surface the store failure as 5xx so the daemon can retry instead
 			// of swallowing the report (leaves the request stuck in running
 			// until the server-side timeout, which is exactly the "looks OK but
@@ -757,7 +810,8 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	requestID := chi.URLParam(r, "requestId")
 	req, err := h.LocalSkillImportStore.Get(r.Context(), requestID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		slog.Warn("load request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load request")
 		return
 	}
 	if req == nil || req.RuntimeID != runtimeID {
@@ -849,19 +903,19 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 			Files:         files,
 		})
 		if oerr != nil {
-			failMsg := oerr.Error()
 			switch {
 			case errors.Is(oerr, errSkillOverwriteNotFound):
-				failMsg = "target skill no longer exists"
+				h.failLocalSkillImport(w, r, requestID, "target skill no longer exists")
 			case errors.Is(oerr, errSkillOverwriteForbidden):
-				failMsg = "you no longer have permission to overwrite this skill"
+				h.failLocalSkillImport(w, r, requestID, "you no longer have permission to overwrite this skill")
 			case errors.Is(oerr, errSkillOverwriteNameMismatch):
-				failMsg = "target skill name no longer matches the imported skill"
+				h.failLocalSkillImport(w, r, requestID, "target skill name no longer matches the imported skill")
+			default:
+				h.failLocalSkillImportInternal(w, r, requestID, "failed to overwrite skill", oerr)
 			}
-			h.failLocalSkillImport(w, r, requestID, failMsg)
 			return
 		}
-		if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp.SkillResponse); err != nil {
+		if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp); err != nil {
 			// The overwrite already committed; unlike the create path we must
 			// NOT delete the skill to "roll back" (that would destroy a
 			// pre-existing skill and its agent bindings). Surface 5xx so the
@@ -882,7 +936,7 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	// can offer overwrite / rename / skip; older clients keep the legacy
 	// `failed` behavior (see resolveLocalSkillConflict).
 	if existing, found, lerr := h.lookupSkillByName(r.Context(), rt.WorkspaceID, sanitizeNullBytes(name)); lerr != nil {
-		h.failLocalSkillImport(w, r, requestID, "failed to check for existing skill: "+lerr.Error())
+		h.failLocalSkillImportInternal(w, r, requestID, "failed to check for existing skill", lerr)
 		return
 	} else if found {
 		h.resolveLocalSkillConflict(w, r, req, existing)
@@ -890,13 +944,14 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 	}
 
 	resp, err := h.createSkillWithFiles(r.Context(), skillCreateInput{
-		WorkspaceID: rt.WorkspaceID,
-		CreatorID:   creatorUUID,
-		Name:        name,
-		Description: description,
-		Content:     body.Skill.Content,
-		Config:      config,
-		Files:       files,
+		VersionSource: skillVersionSourceImport,
+		WorkspaceID:   rt.WorkspaceID,
+		CreatorID:     creatorUUID,
+		Name:          name,
+		Description:   description,
+		Content:       body.Skill.Content,
+		Config:        config,
+		Files:         files,
 	})
 	if err != nil {
 		// A unique-violation here means another import won the race between our
@@ -911,11 +966,11 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 			h.failLocalSkillImport(w, r, requestID, "a skill with this name already exists")
 			return
 		}
-		h.failLocalSkillImport(w, r, requestID, err.Error())
+		h.failLocalSkillImportInternal(w, r, requestID, "failed to create skill", err)
 		return
 	}
 
-	if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp.SkillResponse); err != nil {
+	if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp); err != nil {
 		// We already wrote the Skill to Postgres. If the store-side Complete
 		// fails we can't leave that Skill orphaned: the daemon will retry on
 		// 5xx and re-create it, which blows up on the unique-name constraint
@@ -947,6 +1002,14 @@ func (h *Handler) failLocalSkillImport(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// failLocalSkillImportInternal keeps infrastructure details in server logs and
+// stores only stable copy in the user-polled import result.
+func (h *Handler) failLocalSkillImportInternal(w http.ResponseWriter, r *http.Request, requestID, publicMsg string, cause error) {
+	slog.Warn("runtime local skill import failed", append(logger.RequestAttrs(r),
+		"error", cause, "import_request_id", requestID, "public_message", publicMsg)...)
+	h.failLocalSkillImport(w, r, requestID, publicMsg)
 }
 
 // resolveLocalSkillConflict terminates a same-name create import. Clients that

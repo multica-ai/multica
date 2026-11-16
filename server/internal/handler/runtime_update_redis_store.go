@@ -18,9 +18,9 @@ import (
 // shared storage.
 
 const (
-	updateKeyPrefix          = "mul:update:req:"
-	updatePendingPrefix      = "mul:update:pending:"
-	updateActivePrefix       = "mul:update:active:"
+	updateKeyPrefix          = "mul:" + runtimePendingRedisHashTag + ":update:req:"
+	updatePendingPrefix      = "mul:" + runtimePendingRedisHashTag + ":update:pending:"
+	updateActivePrefix       = "mul:" + runtimePendingRedisHashTag + ":update:active:"
 	updateRedisPopMaxRetries = 5
 )
 
@@ -36,22 +36,23 @@ return 0
 `)
 
 type RedisUpdateStore struct {
-	rdb *redis.Client
+	rdb redis.UniversalClient
 }
 
-func NewRedisUpdateStore(rdb *redis.Client) *RedisUpdateStore {
+func NewRedisUpdateStore(rdb redis.UniversalClient) *RedisUpdateStore {
 	return &RedisUpdateStore{rdb: rdb}
 }
 
-func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion string) (*UpdateRequest, error) {
+func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion, initiatorUserID string) (*UpdateRequest, error) {
 	now := time.Now()
 	req := &UpdateRequest{
-		ID:            randomID(),
-		RuntimeID:     runtimeID,
-		Status:        UpdatePending,
-		TargetVersion: targetVersion,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:              randomID(),
+		RuntimeID:       runtimeID,
+		InitiatorUserID: initiatorUserID,
+		Status:          UpdatePending,
+		TargetVersion:   targetVersion,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	data, err := s.marshalRequest(req)
 	if err != nil {
@@ -67,7 +68,12 @@ func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion 
 		return nil, errUpdateInProgress
 	}
 
-	pipe := s.rdb.TxPipeline()
+	// The active reservation above provides the concurrency guarantee this
+	// write needs. Use a plain pipeline so managed Redis deployments that allow
+	// SET/ZADD but deny MULTI can still create update requests. Exec failures
+	// remain safe because the compensation below removes every partially
+	// written key and releases the reservation.
+	pipe := s.rdb.Pipeline()
 	pipe.Set(ctx, updateKey(req.ID), data, updateStoreRetention)
 	pipe.ZAdd(ctx, updatePendingKey(runtimeID), redis.Z{
 		Score:  float64(now.UnixNano()),
@@ -123,12 +129,17 @@ func (s *RedisUpdateStore) persistRequest(ctx context.Context, req *UpdateReques
 }
 
 type redisUpdateEnvelope struct {
-	Public       *UpdateRequest `json:"r"`
-	RunStartedAt *time.Time     `json:"s,omitempty"`
+	Public          *UpdateRequest `json:"r"`
+	RunStartedAt    *time.Time     `json:"s,omitempty"`
+	InitiatorUserID string         `json:"u,omitempty"`
 }
 
 func (s *RedisUpdateStore) marshalRequest(req *UpdateRequest) ([]byte, error) {
-	env := redisUpdateEnvelope{Public: req, RunStartedAt: req.RunStartedAt}
+	env := redisUpdateEnvelope{
+		Public:          req,
+		RunStartedAt:    req.RunStartedAt,
+		InitiatorUserID: req.InitiatorUserID,
+	}
 	data, err := json.Marshal(env)
 	if err != nil {
 		return nil, fmt.Errorf("marshal update request: %w", err)
@@ -145,6 +156,7 @@ func (s *RedisUpdateStore) unmarshalRequest(raw []byte) (*UpdateRequest, error) 
 		return nil, fmt.Errorf("decode update request: missing payload")
 	}
 	env.Public.RunStartedAt = env.RunStartedAt
+	env.Public.InitiatorUserID = env.InitiatorUserID
 	return env.Public, nil
 }
 

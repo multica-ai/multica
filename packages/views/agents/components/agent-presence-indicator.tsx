@@ -13,6 +13,9 @@ interface PresenceIndicatorProps {
   detail: AgentPresenceDetail | null | undefined;
   // Compact = dot only, no label / no workload chip. Used in dense rows.
   compact?: boolean;
+  // Drops the running / queued counts, for surfaces that list the runs
+  // themselves next to the label.
+  hideCounts?: boolean;
 }
 
 /**
@@ -33,13 +36,14 @@ interface PresenceIndicatorProps {
 export function AgentPresenceIndicator({
   detail,
   compact,
+  hideCounts,
 }: PresenceIndicatorProps) {
   const { t } = useT("agents");
   if (!detail) {
     return compact ? (
       <Skeleton className="h-1.5 w-1.5 rounded-full" />
     ) : (
-      <Skeleton className="h-3 w-24 rounded" />
+      <Skeleton className="h-3 w-24 rounded-xs" />
     );
   }
 
@@ -49,7 +53,9 @@ export function AgentPresenceIndicator({
   const workloadLabel = t(($) => $.workload[detail.workload]);
   const isWorking = detail.workload === "working";
   const isQueued = detail.workload === "queued";
-  const showQueueBadge = isWorking && detail.queuedCount > 0;
+  const showWorkingCount = !hideCounts && isWorking;
+  const showQueuedCount = !hideCounts && isQueued;
+  const showQueueBadge = showWorkingCount && detail.queuedCount > 0;
   // Queued's amber comes from workloadConfig as the *severe* tone — meant
   // for "stuck on offline runtime", which is the dominant cause. But on a
   // healthy runtime, queued is just a brief race between enqueue and the
@@ -75,7 +81,7 @@ export function AgentPresenceIndicator({
       {/* Availability — dot + label. Single dimension, single colour. */}
       <span className="inline-flex items-center gap-1.5">
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${av.dotClass}`} />
-        <span className={`text-xs ${av.textClass}`}>{availabilityLabel}</span>
+        <span className={`text-caption ${av.textClass}`}>{availabilityLabel}</span>
       </span>
 
       {/* Workload — separator + label, with counts when working/queued.
@@ -86,29 +92,29 @@ export function AgentPresenceIndicator({
           "Archived" already says everything; "Archived · Idle" is noise. */}
       {detail.availability !== "archived" && (
       <span className="inline-flex items-center gap-1">
-        <span className="text-xs text-muted-foreground">·</span>
+        <span className="text-caption text-muted-foreground">·</span>
         <span
-          className={`text-xs ${
+          className={`text-caption ${
             isQueued ? queuedTone : wl.textClass
           }`}
         >
           {workloadLabel}
         </span>
-        {isWorking && (
-          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+        {showWorkingCount && (
+          <span className="font-mono text-caption tabular-nums text-muted-foreground">
             {detail.runningCount} / {detail.capacity}
           </span>
         )}
         {showQueueBadge && (
-          <span className="rounded-md bg-muted px-1 py-0 text-xs font-medium text-muted-foreground">
+          <span className="rounded-md bg-muted px-1 py-0 text-caption font-medium text-muted-foreground">
             {t(($) => $.presence.queue_badge, { count: detail.queuedCount })}
           </span>
         )}
         {/* Queued (no running) — show the queued count directly, since
             there's no running/capacity ratio to anchor on. Honestly
             surfaces "stuck" on offline runtimes. */}
-        {isQueued && (
-          <span className="font-mono text-xs tabular-nums text-muted-foreground">
+        {showQueuedCount && (
+          <span className="font-mono text-caption tabular-nums text-muted-foreground">
             {detail.queuedCount}
           </span>
         )}

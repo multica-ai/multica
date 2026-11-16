@@ -7,13 +7,18 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/storage"
 )
 
 type AppConfig struct {
 	CdnDomain string `json:"cdn_domain"`
+	// The origin used for durable private-attachment Markdown links. Clients
+	// use it only to recognize links belonging to this deployment.
+	AttachmentPublicURL string `json:"attachment_public_url,omitempty"`
 	// CdnSigned tells clients that the CDN domain above serves PRIVATE
-	// content through time-bounded signed URLs (CloudFront signing is
-	// enabled). When true, a raw storage URL on the CDN domain is NOT
+	// content through authenticated downloads or time-bounded signed URLs.
+	// When true, a raw storage URL on the CDN domain is NOT
 	// publicly fetchable — renderers must not pick it as a native
 	// <img>/<video> source and should fall back to the per-attachment
 	// API endpoint or a freshly signed download_url instead (MUL-3254).
@@ -35,6 +40,24 @@ type AppConfig struct {
 	// with the operator's own domains instead of Multica Cloud defaults.
 	DaemonServerURL string `json:"daemon_server_url,omitempty"`
 	DaemonAppURL    string `json:"daemon_app_url,omitempty"`
+	// Explicit even when URLs are omitted, so clients never infer Cloud from
+	// missing self-host configuration. Older clients ignore this additive field.
+	DaemonSetupTarget string `json:"daemon_setup_target"`
+
+	// VCSIntegrationAvailable mirrors the MULTICA_VCS_INTEGRATION_ENABLED
+	// deployment switch so the Settings UI can hide the whole self-hosted Git
+	// provider section on deployments where it is off (the managed cloud),
+	// instead of rendering it and surfacing an operator-only "missing
+	// MULTICA_VCS_SECRET_KEY" hint a cloud user cannot resolve. Omitted when
+	// false so the managed-cloud response keeps its previous shape; the UI
+	// defaults absent to false (hidden).
+	VCSIntegrationAvailable bool `json:"vcs_integration_available,omitempty"`
+
+	// ThemeStoreEnabled tells the app it can browse and install community
+	// themes through /api/theme-store. Omitted when the store could not start
+	// (an invalid MULTICA_THEME_REGISTRY_URL), and older servers omit it too,
+	// so the app shows no Browse entry and makes no store requests.
+	ThemeStoreEnabled bool `json:"theme_store_enabled,omitempty"`
 
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
@@ -44,6 +67,58 @@ type AppConfig struct {
 	PosthogKey           string `json:"posthog_key"`
 	PosthogHost          string `json:"posthog_host"`
 	AnalyticsEnvironment string `json:"analytics_environment"`
+
+	// FeatureFlags exposes only frontend-safe boolean decisions. Do not dump
+	// raw rules here: /api/config is public and may be called anonymously.
+	FeatureFlags map[string]bool `json:"feature_flags,omitempty"`
+
+	// LocalWorktreeSupported tells clients this server understands
+	// local_directory `execution_mode` and enforces the worktree capability
+	// gate when a resource is saved.
+	//
+	// Load-bearing for CLIENTS, not for this server. Releases before v0.4.25
+	// unmarshalled the ref into a struct without the field and re-marshalled
+	// it, so `execution_mode: "worktree"` was silently DROPPED and answered
+	// 201 — the resource then ran in_place, editing the working copy the user
+	// asked to isolate, with no gate anywhere to catch it. A new client cannot
+	// tell that from success, so it has to ask first, and absent has to read as
+	// "cannot honour it": every release that drops the field also omits this
+	// one. Releases between that fix and this signal do gate the save but say
+	// nothing, so they are treated the same way — the client cannot distinguish
+	// them, and only one of the two guesses is safe.
+	LocalWorktreeSupported bool `json:"local_worktree_supported"`
+
+	// AgentConversationStartersSupported tells independently deployed clients
+	// that agent create/update persists conversation_starters. Older handlers
+	// ignored the unknown JSON field and still returned success, so clients
+	// must fail closed when this declaration is absent.
+	AgentConversationStartersSupported bool `json:"agent_conversation_starters_supported"`
+
+	// IssueCreatePropertiesSupported tells independently deployed clients that
+	// POST /api/issues validates and persists the optional properties bag.
+	// Older handlers silently ignore unknown fields, so clients with values must
+	// fail closed when this declaration is absent.
+	IssueCreatePropertiesSupported bool `json:"issue_create_properties_supported"`
+
+	// CommentDeleteKeepRepliesSupported tells clients that deleting a comment
+	// removes only that comment and keeps its replies (#8296), and that
+	// DELETE /api/comments/{id}/keep-replies exists. Older servers deleted the
+	// replies too and omit this, so clients must promise nothing about
+	// replies unless it is declared.
+	CommentDeleteKeepRepliesSupported bool `json:"comment_delete_keep_replies_supported"`
+
+	// IssueBatchOpsSupported tells clients that batch update accepts labels,
+	// properties and dry_run, and that batch update and delete return
+	// per-issue results. Older handlers ignore those fields — a dry run there
+	// would write — so clients must fail closed when this is absent.
+	IssueBatchOpsSupported bool `json:"issue_batch_ops_supported"`
+
+	// ServerVersion is the running API build version, so self-hosted
+	// operators can confirm what's deployed and include it in bug reports.
+	// Only emitted on self-hosted deployments — omitted on the managed cloud,
+	// which is continuously deployed so its users can't act on the version —
+	// and empty for dev builds that aren't stamped via -X main.version.
+	ServerVersion string `json:"server_version,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -52,15 +127,38 @@ type AppConfig struct {
 // to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
-		AllowSignup:               os.Getenv("ALLOW_SIGNUP") != "false",
-		GoogleClientID:            os.Getenv("GOOGLE_CLIENT_ID"),
-		WorkspaceCreationDisabled: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
+		// A property of this build, not of the deployment: if this code is
+		// running, the save gate is running with it.
+		LocalWorktreeSupported:             true,
+		AgentConversationStartersSupported: true,
+		IssueCreatePropertiesSupported:     true,
+		CommentDeleteKeepRepliesSupported:  true,
+		IssueBatchOpsSupported:             true,
+		AllowSignup:                        os.Getenv("ALLOW_SIGNUP") != "false",
+		GoogleClientID:                     os.Getenv("GOOGLE_CLIENT_ID"),
+		WorkspaceCreationDisabled:          os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
 	}
 	if h.Storage != nil {
 		config.CdnDomain = h.Storage.CdnDomain()
 	}
+	config.AttachmentPublicURL = h.cfg.PublicURL
 	config.CdnSigned = h.CFSigner != nil
+	if _, local := h.Storage.(*storage.LocalStorage); local {
+		config.CdnSigned = true
+	}
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
+	config.DaemonSetupTarget = "self_host"
+	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
+	config.ThemeStoreEnabled = h.ThemeStore != nil
+	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
+	// Only surface the build version on self-hosted deployments. The managed
+	// cloud is continuously deployed and its users can't choose the build, so
+	// the Help popover's version row would just be noise there (MUL-4108).
+	if !isOfficialCloudDeployment() {
+		config.ServerVersion = h.cfg.ServerVersion
+	} else {
+		config.DaemonSetupTarget = "cloud"
+	}
 
 	// Re-read from env on every request so operators can rotate keys via
 	// secret refresh without a server restart.
@@ -77,11 +175,11 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func daemonSetupURLsFromEnv() (string, string) {
-	serverURL := normalizePublicURL(os.Getenv("MULTICA_PUBLIC_URL"))
-	appURL := normalizePublicURL(os.Getenv("MULTICA_APP_URL"))
-	if appURL == "" {
-		appURL = normalizePublicURL(os.Getenv("FRONTEND_ORIGIN"))
+	serverURL := normalizePublicURL(os.Getenv("MULTICA_DAEMON_SERVER_URL"))
+	if serverURL == "" {
+		serverURL = normalizePublicURL(os.Getenv("MULTICA_PUBLIC_URL"))
 	}
+	appURL := resolveFrontendAppURL()
 	if appURL == "" {
 		return "", ""
 	}
@@ -95,13 +193,25 @@ func daemonSetupURLsFromEnv() (string, string) {
 	return serverURL, appURL
 }
 
+// resolveFrontendAppURL returns the operator-configured frontend origin
+// (MULTICA_APP_URL, falling back to FRONTEND_ORIGIN), normalized. Shared by
+// the daemon-setup URLs and the managed-cloud detection so both read the same
+// signal.
+func resolveFrontendAppURL() string {
+	appURL := normalizePublicURL(os.Getenv("MULTICA_APP_URL"))
+	if appURL == "" {
+		appURL = normalizePublicURL(os.Getenv("FRONTEND_ORIGIN"))
+	}
+	return appURL
+}
+
 func normalizePublicURL(raw string) string {
 	return strings.TrimRight(strings.TrimSpace(raw), "/")
 }
 
 // isOfficialCloudDaemonConfig reports whether this deployment is the official
-// Multica Cloud, identified by its frontend host alone (multica.ai /
-// app.multica.ai). The daemon setup for the managed cloud is always
+// Multica Cloud, identified by its frontend host alone (multica.ai). The
+// daemon setup for the managed cloud is always
 // `multica setup` (which hardcodes api.multica.ai), so the per-deployment URLs
 // must be omitted from /api/config even when MULTICA_PUBLIC_URL is unset or
 // misconfigured. Previously this also required serverURL==api.multica.ai, so a
@@ -109,7 +219,16 @@ func normalizePublicURL(raw string) string {
 // `setup self-host --server-url https://multica.ai` command — pointing the
 // daemon's backend at the frontend (no /health, no WebSocket proxy).
 func isOfficialCloudDaemonConfig(appURL string) bool {
-	return urlHostEquals(appURL, "multica.ai") || urlHostEquals(appURL, "app.multica.ai")
+	return urlHostEquals(appURL, "multica.ai")
+}
+
+// isOfficialCloudDeployment reports whether this server is the official Multica
+// Cloud, reusing the same frontend-host signal as the daemon setup (multica.ai).
+// Managed-cloud-only behavior — such as suppressing the Help popover's
+// server-version row, which only matters to self-hosted operators — is gated on
+// this.
+func isOfficialCloudDeployment() bool {
+	return isOfficialCloudDaemonConfig(resolveFrontendAppURL())
 }
 
 func urlHostEquals(raw, want string) bool {

@@ -2,10 +2,31 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 )
+
+func TestWriteFeatureDisabledIsNonRetryable(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeFeatureDisabled(rec, "feature_disabled", "feature is disabled")
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	if retryAfter := rec.Header().Get("Retry-After"); retryAfter != "" {
+		t.Fatalf("Retry-After = %q, want empty", retryAfter)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["code"] != "feature_disabled" {
+		t.Fatalf("code = %q, want feature_disabled", body["code"])
+	}
+}
 
 // TestWriteMeasuredJSONByteIdenticalToWriteJSON locks the load-bearing assumption
 // behind the F2 claim-observability patch: swapping writeJSON for writeMeasuredJSON
@@ -48,8 +69,8 @@ func TestWriteMeasuredJSONByteIdenticalToWriteJSON(t *testing.T) {
 			ID:   "11111111-2222-3333-4444-555555555555",
 			Name: "agent <CC> & friends",
 			Skills: []skill{
-				{Name: "multica-working-on-issues", Description: "do work <safely> & well", Files: map[string]string{"SKILL.md": "# Title\n<b>x</b> & y"}},
-				{Name: "multica-mentioning", Description: "ping people", Files: map[string]string{"SKILL.md": "line1\nline2"}},
+				{Name: "multica-platform", Description: "do work <safely> & well", Files: map[string]string{"SKILL.md": "# Title\n<b>x</b> & y"}},
+				{Name: "team-conventions", Description: "ping people", Files: map[string]string{"SKILL.md": "line1\nline2"}},
 			},
 			Args: []string{"--flag", "a<b", "c&d"},
 		}}},
@@ -95,5 +116,60 @@ func TestWriteMeasuredJSONByteIdenticalToWriteJSON(t *testing.T) {
 	writeJSON(rec, http.StatusOK, map[string]string{"x": "<&>"})
 	if bytes.ContainsRune(rec.Body.Bytes(), '<') {
 		t.Fatalf("expected '<' to be HTML-escaped out of the body, got %q", rec.Body.String())
+	}
+}
+
+// TestWriteJSONSetsContentLength verifies that the JSON response writers advertise
+// an accurate Content-Length header. Encoding straight into the ResponseWriter after
+// WriteHeader forces net/http into chunked transfer encoding (no Content-Length), so
+// both writeJSON and writeMeasuredJSON buffer the body first and set the header
+// explicitly. The value must equal the exact number of bytes written on the wire.
+func TestWriteJSONSetsContentLength(t *testing.T) {
+	cases := []struct {
+		name string
+		v    any
+	}{
+		{"empty_map", map[string]any{}},
+		{"simple", map[string]string{"hello": "world"}},
+		{"html_escapable", map[string]any{"s": `a<b> & "c" <script>`}},
+		{"unicode", map[string]any{"s": "héllo 世界 🚀"}},
+		{"nested", map[string]any{"a": []any{1, "two", true, nil}}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			writeJSON(rec, http.StatusOK, tc.v)
+
+			got := rec.Header().Get("Content-Length")
+			if got == "" {
+				t.Fatalf("writeJSON did not set Content-Length header")
+			}
+			cl, err := strconv.Atoi(got)
+			if err != nil {
+				t.Fatalf("Content-Length %q is not an integer: %v", got, err)
+			}
+			if cl != rec.Body.Len() {
+				t.Fatalf("Content-Length = %d, want %d (actual body length)", cl, rec.Body.Len())
+			}
+
+			// writeMeasuredJSON must set the same, accurate Content-Length.
+			recMeasured := httptest.NewRecorder()
+			n, err := writeMeasuredJSON(recMeasured, http.StatusOK, tc.v)
+			if err != nil {
+				t.Fatalf("writeMeasuredJSON returned error: %v", err)
+			}
+			gotMeasured := recMeasured.Header().Get("Content-Length")
+			clMeasured, err := strconv.Atoi(gotMeasured)
+			if err != nil {
+				t.Fatalf("writeMeasuredJSON Content-Length %q is not an integer: %v", gotMeasured, err)
+			}
+			if clMeasured != recMeasured.Body.Len() || clMeasured != n {
+				t.Fatalf("writeMeasuredJSON Content-Length = %d, body = %d, reported = %d; all must match", clMeasured, recMeasured.Body.Len(), n)
+			}
+			if got != gotMeasured {
+				t.Fatalf("Content-Length differs: writeJSON=%q writeMeasuredJSON=%q", got, gotMeasured)
+			}
+		})
 	}
 }

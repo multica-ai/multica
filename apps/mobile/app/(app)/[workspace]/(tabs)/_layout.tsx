@@ -30,9 +30,10 @@ import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import {
   useInboxUnreadCount,
-  useChatUnreadSessionCount,
+  useChatUnreadMessageCount,
 } from "@/lib/unread-counts";
 import { MoreTabDropdownAnchor } from "@/components/nav/more-tab-dropdown";
+import { useT } from "@/lib/i18n";
 
 // Only override backgroundColor — @react-navigation/elements Badge internally
 // sets borderRadius = size/2, height = size, minWidth = size, so a single
@@ -45,19 +46,19 @@ const BADGE_STYLE = {
 
 export default function TabsLayout() {
   const { colorScheme } = useColorScheme();
-  const t = THEME[colorScheme];
+  const theme = THEME[colorScheme];
+  const { t } = useT("navigation");
 
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const inboxUnread = useInboxUnreadCount(wsId);
-  const chatUnread = useChatUnreadSessionCount(wsId);
+  const chatUnread = useChatUnreadMessageCount(wsId);
 
-  // Truncation aligned with web: inbox 99+, chat 9+ (matches sidebar +
-  // ChatFab respectively). `undefined` makes React Navigation hide the
-  // badge, so zero-count is a free no-op.
+  // Truncation aligned with web's sidebar badges: 99+ for both. `undefined`
+  // makes React Navigation hide the badge, so zero-count is a free no-op.
   const inboxBadge =
     inboxUnread > 0 ? (inboxUnread > 99 ? "99+" : String(inboxUnread)) : undefined;
   const chatBadge =
-    chatUnread > 0 ? (chatUnread > 9 ? "9+" : String(chatUnread)) : undefined;
+    chatUnread > 0 ? (chatUnread > 99 ? "99+" : String(chatUnread)) : undefined;
 
   // Imperative handle into the More tab's dropdown — listeners.tabPress
   // calls .open(); the @rn-primitives Trigger measures itself inside
@@ -69,23 +70,22 @@ export default function TabsLayout() {
       <Tabs
         screenOptions={{
           headerShown: false,
-          tabBarActiveTintColor: t.foreground,
-          tabBarInactiveTintColor: t.mutedForeground,
-          tabBarStyle: { backgroundColor: t.background },
+          tabBarActiveTintColor: theme.foreground,
+          tabBarInactiveTintColor: theme.mutedForeground,
+          tabBarStyle: { backgroundColor: theme.background },
           tabBarLabelStyle: { fontSize: 11 },
         }}
       >
         <Tabs.Screen
           name="inbox"
           options={{
-            title: "Inbox",
+            title: t("tabs.inbox"),
             tabBarBadge: inboxBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
               <Image
                 source={focused ? "sf:tray.fill" : "sf:tray"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+                style={{ width: size, height: size, color }}
               />
             ),
           }}
@@ -93,12 +93,11 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="my-issues"
           options={{
-            title: "My Issues",
+            title: t("tabs.my_issues"),
             tabBarIcon: ({ color, size, focused }) => (
               <Image
                 source={focused ? "sf:checklist" : "sf:checklist.unchecked"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+                style={{ width: size, height: size, color }}
               />
             ),
           }}
@@ -106,14 +105,13 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="chat"
           options={{
-            title: "Chat",
+            title: t("tabs.chat"),
             tabBarBadge: chatBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
               <Image
                 source={focused ? "sf:bubble.left.fill" : "sf:bubble.left"}
-                tintColor={color}
-                style={{ width: size, height: size }}
+                style={{ width: size, height: size, color }}
               />
             ),
           }}
@@ -121,12 +119,11 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="more"
           options={{
-            title: "More",
+            title: t("tabs.more"),
             tabBarIcon: ({ color, size }) => (
               <Image
                 source="sf:ellipsis"
-                tintColor={color}
-                style={{ width: size, height: size }}
+                style={{ width: size, height: size, color }}
               />
             ),
           }}

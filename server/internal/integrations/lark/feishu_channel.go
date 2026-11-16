@@ -98,20 +98,24 @@ func (c *feishuChannel) Capabilities() channel.Capability {
 }
 
 func (c *feishuChannel) installationCredentials() (InstallationCredentials, error) {
-	if c.creds == nil {
+	return installationCredentialsFor(c.inst, c.creds)
+}
+
+func installationCredentialsFor(inst Installation, resolver CredentialsResolver) (InstallationCredentials, error) {
+	if resolver == nil {
 		return InstallationCredentials{}, errors.New("lark: credentials resolver missing")
 	}
-	secret, err := c.creds.DecryptAppSecret(c.inst)
+	secret, err := resolver.DecryptAppSecret(inst)
 	if err != nil {
 		return InstallationCredentials{}, fmt.Errorf("decrypt app_secret: %w", err)
 	}
 	creds := InstallationCredentials{
-		AppID:     c.inst.AppID,
+		AppID:     inst.AppID,
 		AppSecret: secret,
-		Region:    RegionOrDefault(c.inst.Region),
+		Region:    RegionOrDefault(inst.Region),
 	}
-	if c.inst.TenantKey.Valid {
-		creds.TenantKey = c.inst.TenantKey.String
+	if inst.TenantKey.Valid {
+		creds.TenantKey = inst.TenantKey.String
 	}
 	return creds, nil
 }
@@ -119,7 +123,8 @@ func (c *feishuChannel) installationCredentials() (InstallationCredentials, erro
 // channelMessageFromLark normalizes a decoded Feishu InboundMessage into the
 // cross-platform channel.InboundMessage. The original struct is stashed in Raw
 // so the Feishu resolvers can read the platform-specific fields (app_id,
-// event_type, command body, create time) the envelope does not carry.
+// event_type, create time) the envelope does not carry. CommandBody maps to
+// the normalized CommandText field because command classification is shared.
 func channelMessageFromLark(lm InboundMessage) channel.InboundMessage {
 	raw, _ := json.Marshal(lm)
 	var reply *channel.ReplyCtx
@@ -127,13 +132,15 @@ func channelMessageFromLark(lm InboundMessage) channel.InboundMessage {
 		reply = &channel.ReplyCtx{MessageID: lm.ParentID, RootID: lm.RootID}
 	}
 	return channel.InboundMessage{
-		EventID:        lm.EventID,
-		MessageID:      lm.MessageID,
-		Type:           channelMsgType(lm.MessageType),
-		Text:           lm.Body,
-		ReplyTo:        reply,
-		AddressedToBot: lm.AddressedToBot,
-		ForceFresh:     lm.ForceFreshSession,
+		EventID:            lm.EventID,
+		MessageID:          lm.MessageID,
+		Type:               channelMsgType(lm.MessageType),
+		Text:               lm.Body,
+		CommandText:        lm.CommandBody,
+		HasSelectedContext: lm.HasSelectedContext,
+		ReplyTo:            reply,
+		AddressedToBot:     lm.AddressedToBot,
+		ForceFresh:         lm.ForceFreshSession,
 		Source: channel.Source{
 			ChannelType: channel.TypeFeishu,
 			ChatID:      string(lm.ChatID),
@@ -205,8 +212,9 @@ func newFeishuFactory(deps FeishuChannelDeps) channel.Factory {
 		// cfg.Raw is the per-installation config blob (the channel_installation
 		// .config JSONB): app_id, encrypted app_secret, tenant_key, region, ….
 		// We build a credentials-only Installation from it; the workspace /
-		// agent identity is resolved per message by the Router, not needed here.
+		// agent identity is resolved per message by the Router; ID also scopes receipt verification.
 		inst, err := installationFromRow(db.ChannelInstallation{
+			ID:          cfg.ID,
 			ChannelType: channelTypeFeishu,
 			Config:      cfg.Raw,
 		})
@@ -235,9 +243,16 @@ type channelInstallationStore struct {
 	q *db.Queries
 }
 
+// ChannelInstallationStore exposes both PostgreSQL seams used by the engine:
+// durable installation discovery and the explicit rollback lease backend.
+type ChannelInstallationStore interface {
+	engine.InstallationStore
+	engine.LeaseStore
+}
+
 // NewChannelInstallationStore builds the engine.InstallationStore backed by the
 // generalized channel_* tables.
-func NewChannelInstallationStore(q *db.Queries) engine.InstallationStore {
+func NewChannelInstallationStore(q *db.Queries) ChannelInstallationStore {
 	return &channelInstallationStore{q: q}
 }
 
@@ -258,7 +273,23 @@ func (s *channelInstallationStore) ListActiveInstallations(ctx context.Context) 
 	return out, nil
 }
 
-func (s *channelInstallationStore) AcquireWSLease(ctx context.Context, arg engine.AcquireLeaseParams) error {
+// PostgreSQL remains an explicit rollback/self-host lease backend. Its sweep
+// optimization returns no known holders, so the SQL CAS remains authoritative
+// and each unowned installation is attempted once per poll (never in a blind
+// per-installation loop).
+func (s *channelInstallationStore) ListHeldWSLeases(_ context.Context, _ []pgtype.UUID) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+func (s *channelInstallationStore) TryAcquireWSLease(ctx context.Context, arg engine.AcquireLeaseParams) error {
+	return s.acquireOrRenewWSLease(ctx, arg)
+}
+
+func (s *channelInstallationStore) RenewWSLease(ctx context.Context, arg engine.AcquireLeaseParams) error {
+	return s.acquireOrRenewWSLease(ctx, arg)
+}
+
+func (s *channelInstallationStore) acquireOrRenewWSLease(ctx context.Context, arg engine.AcquireLeaseParams) error {
 	_, err := s.q.AcquireChannelWSLease(ctx, db.AcquireChannelWSLeaseParams{
 		NewToken:     pgtype.Text{String: arg.Token, Valid: true},
 		NewExpiresAt: pgtype.Timestamptz{Time: arg.ExpiresAt, Valid: true},
@@ -280,16 +311,29 @@ func (s *channelInstallationStore) ReleaseWSLease(ctx context.Context, arg engin
 	})
 }
 
+var _ engine.InstallationStore = (*channelInstallationStore)(nil)
+var _ engine.LeaseStore = (*channelInstallationStore)(nil)
+
 // rowFingerprint condenses the credential-bearing config of a
 // channel_installation row into an opaque string. Any change to the platform
 // config (Feishu rotates app_id / app_secret / region on re-install) flips the
 // fingerprint and the Supervisor restarts the connection. The config JSONB
-// carries only the secret ciphertext (never plaintext), so hashing it is safe
-// and channel-agnostic — no platform field is read directly.
+// carries only the secret ciphertext (never plaintext). Feishu receipt
+// evidence is excluded because it does not change
+// credentials or routing.
 func rowFingerprint(row db.ChannelInstallation) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(row.ChannelType))
 	_, _ = h.Write([]byte{0})
-	_, _ = h.Write(row.Config)
+	config := row.Config
+	// Receipt evidence must not rotate an otherwise healthy connection.
+	if row.ChannelType == channelTypeFeishu {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(config, &fields) == nil {
+			delete(fields, "first_message_received_at")
+			config, _ = json.Marshal(fields)
+		}
+	}
+	_, _ = h.Write(config)
 	return hex.EncodeToString(h.Sum(nil))
 }

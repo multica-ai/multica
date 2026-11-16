@@ -2,11 +2,16 @@ package lark
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 // larkMsgTypeMergeForward is the msg_type of a "merged & forwarded"
@@ -28,21 +33,36 @@ const defaultMaxForwardChildren = 100
 // guaranteed rendered count — the trigger message itself and any quoted
 // parent are filtered out of the result, so the <recent_context> block
 // usually renders one or two fewer lines. 10 keeps the agent's prompt
-// meaningfully contextual without bloating it or straining the inbound
-// ACK budget (one list call, page_size 10).
+// meaningfully contextual without bloating it or straining the bounded
+// context-read budget (one list call, page_size 10).
 const DefaultRecentContextSize = 10
+
+const (
+	recentContextEndpoint         = "im/v1/messages.list"
+	recentContextMaxFetchAttempts = 2
+
+	recentContextFailureUnknown          = "unknown"
+	recentContextFailureChannelUnbound   = "channel_unbound"
+	recentContextFailureTimeout          = "timeout"
+	recentContextFailurePermissionDenied = "permission_denied"
+	recentContextFailureMessageDeleted   = "message_deleted"
+	recentContextFailureRateLimited      = "rate_limited"
+	recentContextFailureTokenExpired     = "token_expired"
+	recentContextFailureTemporary        = "temporary"
+)
+
+var errRecentContextChannelUnbound = errors.New("lark enricher: missing chat_id for recent context")
 
 // Enricher expands an inbound message's body with context the user
 // EXPLICITLY attached — a quoted reply or a merged-and-forwarded bundle
-// — by calling back into Lark's IM API. It runs after the (fast,
-// HTTP-free) decoder and before the dispatcher, turning a bare
+// — by calling back into Lark's IM API. It runs inline under the connector's enrichment deadline, turning a bare
 // "@bot 总结一下" into a body that already carries the referenced
 // conversation inline.
 //
 // It is best-effort by contract: every fetch failure degrades to a
-// visible placeholder block and Enrich NEVER returns an error or blocks
-// ingestion. A message with nothing to expand (no parent_id, not a
-// merge_forward) is returned untouched without any network call.
+// readable note or placeholder and Enrich NEVER returns an error or
+// blocks ingestion. A message with nothing to expand (no parent_id, not
+// a merge_forward) is returned untouched without any network call.
 type Enricher interface {
 	Enrich(ctx context.Context, msg InboundMessage, creds InstallationCredentials) InboundMessage
 }
@@ -105,16 +125,20 @@ func NewInboundEnricher(client APIClient, cfg InboundEnricherConfig) Enricher {
 // addressed to the Bot, and only when RecentContextSize > 0 — it answers
 // MUL-3084 (the Bot saw only the single @-ed line, never the surrounding
 // conversation). It is the one fetch here NOT triggered by something the
-// user explicitly attached.
+// user explicitly attached. When the @-mention arrives inside a Lark topic
+// (话题) the window is scoped to that topic, so a topic's context never
+// includes a sibling topic's messages (#5835 — see fetchRecentItems).
 //
 // In group chats, every speaker across ALL blocks (recent + quoted +
 // forwarded) and the sender who @-mentioned the Bot are resolved to real
 // display names via ONE Contact batch call, so the agent reads
 // "[Alice]: …" rather than "[User 1]: …" and knows who addressed it. This
 // is why the quote/forward items are fetched up front (Phase 1) before
-// names are resolved (Phase 2). Unresolved senders fall back to positional
-// "User N"; resolution is best-effort and never blocks. p2p chats keep
-// positional labels (identity is unambiguous in a 1:1).
+// names are resolved (Phase 2). A sender the Contact lookup misses is still
+// named when an @-mention in the fetched messages carries its id; the rest
+// fall back to positional "User N". Resolution is best-effort and never
+// blocks. In p2p chats only quoted and forwarded speakers are resolved; the
+// trigger sender stays unlabeled (identity is unambiguous in a 1:1).
 //
 // Persistence note: like the quoted/forwarded blocks, the rewritten Body
 // is persisted into the addressed turn's chat_message.content downstream
@@ -125,18 +149,36 @@ func NewInboundEnricher(client APIClient, cfg InboundEnricherConfig) Enricher {
 // never creates its own session row, and is only ever surfaced as read-
 // context attached to a turn a workspace member explicitly directed at
 // the Bot.
-func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds InstallationCredentials) InboundMessage {
+func (e *inboundEnricher) selectContext(msg InboundMessage) (InboundMessage, bool) {
 	freshSource := msg.CommandBody
 	if freshSource == "" {
 		freshSource = msg.Body
 	}
-	if cmd, ok := parseFreshSessionCommand(freshSource); ok {
-		msg.ForceFreshSession = true
-		msg.Body = cmd.Body
+	startChat := false
+	bareFresh := false
+	if control, ok := engine.ParseControlCommand(freshSource); ok {
+		msg.Body = control.Body
+		switch control.Kind {
+		case engine.ControlCommandFreshSession:
+			msg.ForceFreshSession = true
+			// A bare reset records intent for the next turn. Automatic history
+			// must not turn it into model input; explicit context/media still can.
+			bareFresh = control.Body == "" && msg.ParentID == "" && msg.MessageType != larkMsgTypeMergeForward && len(currentMediaResources(msg)) == 0
+		case engine.ControlCommandNewChat:
+			// A new Chat must not inherit adapter-generated recent context from
+			// the route's previous Chat. Explicit quote/forward context is still
+			// expanded below because the user attached it to this command.
+			startChat = true
+		}
 	}
 
+	wantRecent := !startChat && !bareFresh && e.recentContextSize > 0 && msg.ChatType == ChatTypeGroup && msg.AddressedToBot
+	return msg, wantRecent
+}
+
+func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds InstallationCredentials) InboundMessage {
+	msg, wantRecent := e.selectContext(msg)
 	isForward := msg.MessageType == larkMsgTypeMergeForward
-	wantRecent := e.recentContextSize > 0 && msg.ChatType == ChatTypeGroup && msg.AddressedToBot
 	if msg.ParentID == "" && !isForward && !wantRecent {
 		// Nothing to expand and no group prefetch wanted — no network call.
 		return msg
@@ -153,78 +195,115 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	// fetch up front (rather than fetch-and-render per block) so Phase 2
 	// can resolve display names for EVERY speaker across ALL blocks in a
 	// single Contact batch — otherwise a quoted/forwarded sender that
-	// isn't in the recent window would fall back to "User N".
+	// isn't in the recent window would fall back to "User N". Start the
+	// independent reads together: a slow history call must not consume
+	// the metadata budget before an explicit quote/forward even starts. Keep
+	// the same shared deadline and join every read before rendering.
 	var recentItems []LarkMessage
 	var recentErr error
+	var fetches sync.WaitGroup
 	if wantRecent {
-		recentItems, recentErr = e.fetchRecentItems(ctx, creds, msg)
+		fetches.Add(1)
+		go func() {
+			defer fetches.Done()
+			recentItems, recentErr = e.fetchRecentItems(ctx, creds, msg)
+		}()
 	}
 	var quotedItems []LarkMessage
 	var quotedErr error
 	if msg.ParentID != "" {
-		quotedItems, quotedErr = e.client.GetMessage(ctx, creds, msg.ParentID)
+		fetches.Add(1)
+		go func() {
+			defer fetches.Done()
+			quotedItems, quotedErr = e.client.GetMessage(ctx, creds, msg.ParentID)
+		}()
 	}
 	var forwardItems []LarkMessage
 	var forwardErr error
 	if isForward {
-		forwardItems, forwardErr = e.client.GetMessage(ctx, creds, msg.MessageID)
+		fetches.Add(1)
+		go func() {
+			defer fetches.Done()
+			forwardItems, forwardErr = e.client.GetMessage(ctx, creds, msg.MessageID)
+		}()
 	}
+	fetches.Wait()
 
 	// Phase 2 — resolve display names for every speaker we're about to
-	// render (recent + quoted + forwarded) plus the sender who @-mentioned
-	// the Bot, in one batch. Group chats only; p2p keeps positional labels
-	// (identity is unambiguous in a 1:1). Unresolved ids fall back to
-	// "User N" per speakerLabeler.
-	var names map[string]string
-	if msg.ChatType == ChatTypeGroup {
-		ids := senderOpenIDs(recentItems)
-		ids = append(ids, senderOpenIDs(quotedItems)...)
-		ids = append(ids, senderOpenIDs(forwardItems)...)
-		if msg.SenderOpenID != "" {
-			ids = append(ids, string(msg.SenderOpenID))
-		}
-		names = e.resolveNames(ctx, creds, ids)
+	// render (recent + quoted + forwarded), plus in groups the sender who
+	// @-mentioned the Bot, in one batch. A p2p trigger sender needs no label
+	// (identity is unambiguous in a 1:1), but a quoted or forwarded message
+	// there can come from anyone. Unresolved ids fall back to "User N" per
+	// speakerLabeler.
+	isGroup := msg.ChatType == ChatTypeGroup
+	ids := senderOpenIDs(recentItems)
+	ids = append(ids, senderOpenIDs(quotedItems)...)
+	ids = append(ids, senderOpenIDs(forwardItems)...)
+	if isGroup && msg.SenderOpenID != "" {
+		ids = append(ids, string(msg.SenderOpenID))
 	}
+	names := e.resolveNames(ctx, creds, ids)
+	// The Contact lookup only covers users inside the app's contact scope,
+	// which is often just a few people. Mentions in the fetched messages
+	// carry open_ids and display names, so user speakers can still be
+	// matched exactly when someone @-mentioned them.
+	names = addMentionNames(names, recentItems, quotedItems, forwardItems)
 
 	// Phase 3 — render broadest-to-narrowest with the complete name map.
-	var b strings.Builder
-	if wantRecent {
-		if recentErr != nil {
-			b.WriteString(recentContextErrorBlock())
-		} else if len(recentItems) > 0 {
-			b.WriteString(e.renderRecentContextBlock(recentItems, names))
-		}
+	if msg.ParentID != "" || isForward {
+		msg.HasSelectedContext = true
 	}
-	if msg.ParentID != "" {
-		if b.Len() > 0 {
+	render := func(media *contextMedia) string {
+		var b strings.Builder
+		if wantRecent {
+			if recentErr != nil {
+				b.WriteString(recentContextUnavailableLine(classifyRecentContextFetchError(recentErr).category))
+			} else if len(recentItems) > 0 {
+				b.WriteString(e.renderRecentContextBlock(recentItems, names))
+			}
+		}
+		if msg.ParentID != "" {
+			if b.Len() > 0 {
+				b.WriteString("\n\n")
+			}
+			b.WriteString(e.renderQuotedBlock(msg.ParentID, quotedItems, quotedErr, names, media))
+		}
+
+		var core string
+		if isForward {
+			if forwardErr != nil {
+				e.logger.Warn("lark enricher: forward fetch failed", "message_id", msg.MessageID, "err", forwardErr)
+				core = forwardedErrorBlock()
+			} else {
+				core = e.renderForwardedItems(forwardItems, msg.MessageID, names, media)
+			}
+		} else {
+			core = msg.Body
+			// Label the user's own message with their real name so the agent
+			// knows WHO @-mentioned it — not just what they said. Only when the
+			// name resolved (group path); otherwise the body passes through.
+			if name := names[string(msg.SenderOpenID)]; isGroup && name != "" {
+				core = fmt.Sprintf("[%s]: %s", name, msg.Body)
+			}
+		}
+		if b.Len() > 0 && core != "" {
 			b.WriteString("\n\n")
 		}
-		b.WriteString(e.renderQuotedBlock(msg.ParentID, quotedItems, quotedErr, names))
+		b.WriteString(core)
+		return b.String()
+	}
+	media := &contextMedia{}
+	body := render(media)
+	if media.collides(body) {
+		// Include the complete rendered text: original bodies, rich-text spans,
+		// names, filenames and wrappers. Choose markers absent from that text,
+		// then render the same selected messages without another API fetch.
+		media = &contextMedia{occupied: body}
+		body = render(media)
 	}
 
-	var core string
-	if isForward {
-		if forwardErr != nil {
-			e.logger.Warn("lark enricher: forward fetch failed", "message_id", msg.MessageID, "err", forwardErr)
-			core = forwardedErrorBlock()
-		} else {
-			core = e.renderForwardedItems(forwardItems, msg.MessageID, names)
-		}
-	} else {
-		core = msg.Body
-		// Label the user's own message with their real name so the agent
-		// knows WHO @-mentioned it — not just what they said. Only when the
-		// name resolved (group path); otherwise the body passes through.
-		if name := names[string(msg.SenderOpenID)]; name != "" {
-			core = fmt.Sprintf("[%s]: %s", name, msg.Body)
-		}
-	}
-	if b.Len() > 0 && core != "" {
-		b.WriteString("\n\n")
-	}
-	b.WriteString(core)
-
-	msg.Body = b.String()
+	msg.Body = body
+	msg.ContextMedia = media.items
 	return msg
 }
 
@@ -258,7 +337,7 @@ func (e *inboundEnricher) resolveNames(ctx context.Context, creds InstallationCr
 		seen[id] = true
 		uniq = append(uniq, id)
 	}
-	if len(uniq) == 0 {
+	if len(uniq) == 0 || ctx.Err() != nil {
 		return nil
 	}
 	names, err := e.client.BatchGetUsers(ctx, creds, uniq)
@@ -269,37 +348,135 @@ func (e *inboundEnricher) resolveNames(ctx context.Context, creds InstallationCr
 	return names
 }
 
+// addMentionNames fills missing open_ids with display names carried by
+// @-mentions in msgs, and returns the (possibly new) map. Mention open_ids
+// match user sender ids; app senders use app_ids and remain "Bot".
+// Contact-resolved names are never overwritten.
+func addMentionNames(names map[string]string, batches ...[]LarkMessage) map[string]string {
+	for _, msgs := range batches {
+		for _, m := range msgs {
+			for _, mn := range m.Mentions {
+				if mn.ID == "" || mn.Name == "" || names[mn.ID] != "" {
+					continue
+				}
+				if names == nil {
+					names = make(map[string]string)
+				}
+				names[mn.ID] = mn.Name
+			}
+		}
+	}
+	return names
+}
+
 // fetchRecentItems pulls the recent group window and returns the
 // messages to render — the trigger message itself and the directly-quoted
 // parent (which gets its own <quoted_message> block) filtered out, sorted
-// oldest-first. The window is anchored to the trigger message's time so
-// it captures the conversation up to the @-mention rather than whatever
-// is newest by the time this fetch runs. A fetch failure is returned to
-// the caller (which renders the documented placeholder); it never blocks
-// ingestion.
+// oldest-first. A fetch failure is returned to the caller (which renders a
+// safe, readable degradation note); it never blocks ingestion.
+//
+// When the trigger arrived inside a Lark topic (msg.ThreadID != ""), the
+// window is scoped to that topic (container_id_type=thread) so sibling
+// topics that share the chat_id can't leak into this topic's context or
+// its persisted turn (#5835). Because the thread container rejects
+// end_time, the topic path anchors to the trigger time CLIENT-side; it
+// also fail-closes on thread_id — any returned item whose thread_id is
+// missing or does not match is dropped rather than trusted. A topic fetch
+// failure degrades exactly like the chat path and NEVER falls back to a
+// chat-wide fetch (that would re-open the leak). Outside a topic the chat
+// path is unchanged: anchored to the trigger time via end_time.
 func (e *inboundEnricher) fetchRecentItems(ctx context.Context, creds InstallationCredentials, msg InboundMessage) ([]LarkMessage, error) {
-	items, err := e.client.ListChatMessages(ctx, creds, ListMessagesParams{
+	if msg.ChatID == "" {
+		classified := classifyRecentContextFetchError(errRecentContextChannelUnbound)
+		e.logRecentContextFetchFailure(msg, errRecentContextChannelUnbound, classified, 0)
+		return nil, errRecentContextChannelUnbound
+	}
+
+	// Lark sends create_time as epoch millis; a missing/unparseable time
+	// yields 0. The chat path converts it to seconds for end_time; the
+	// thread path uses the raw millis for the client-side anchor below.
+	triggerMillis := parseLarkMillis(msg.CreateTime)
+	params := ListMessagesParams{
 		ChatID:   msg.ChatID,
 		PageSize: e.recentContextSize,
-		// Lark sends create_time as epoch millis; end_time wants seconds. A
-		// missing/unparseable time yields 0, which the client treats as
-		// "no end_time" (newest N).
-		EndTime: parseLarkMillis(msg.CreateTime) / 1000,
-	})
-	if err != nil {
-		e.logger.Warn("lark enricher: recent context fetch failed",
-			"chat_id", string(msg.ChatID), "err", err)
-		return nil, err
+	}
+	if msg.ThreadID != "" {
+		// Topic-scoped fetch: no end_time (the thread container rejects it);
+		// the window is anchored client-side below.
+		params.ThreadID = msg.ThreadID
+	} else {
+		// 0 tells the client "no end_time" (newest N).
+		params.EndTime = triggerMillis / 1000
+	}
+	var items []LarkMessage
+	var err error
+	for attempt := 1; attempt <= recentContextMaxFetchAttempts; attempt++ {
+		items, err = e.client.ListChatMessages(ctx, creds, params)
+		if err == nil {
+			if attempt > 1 {
+				e.logger.Info("lark enricher: recent context fetch recovered after retry",
+					"layer", "lark_inbound_enricher",
+					"endpoint", recentContextEndpoint,
+					"status", "recovered",
+					"attempts", attempt,
+					"chat_id", string(msg.ChatID),
+					"message_id", msg.MessageID)
+			}
+			break
+		}
+		classified := classifyRecentContextFetchError(err)
+		// A retry only helps while the shared enrichment budget still has
+		// time left. Both attempts reuse the same bounded metadata-read
+		// context, so once it is done a second
+		// call fails immediately — degrade now instead of burning a doomed
+		// request. This is why a first-attempt deadline never "recovers".
+		if !classified.retryable || attempt == recentContextMaxFetchAttempts || ctx.Err() != nil {
+			e.logRecentContextFetchFailure(msg, err, classified, attempt)
+			return nil, err
+		}
+		e.logger.Warn("lark enricher: recent context fetch failed; retrying",
+			"layer", "lark_inbound_enricher",
+			"endpoint", recentContextEndpoint,
+			"status", "retrying",
+			"category", classified.category,
+			"retryable", classified.retryable,
+			"attempt", attempt,
+			"next_attempt", attempt+1,
+			"chat_id", string(msg.ChatID),
+			"message_id", msg.MessageID,
+			"err", err)
 	}
 
 	exclude := map[string]bool{msg.MessageID: true}
 	if msg.ParentID != "" {
 		exclude[msg.ParentID] = true
 	}
+	inThread := msg.ThreadID != ""
 	kept := make([]LarkMessage, 0, len(items))
 	for _, it := range items {
 		if exclude[it.MessageID] {
 			continue
+		}
+		// The Bot's markdown replies are sent as schema-2.0 interactive
+		// cards, which flatten to a zero-signal "[interactive card]"
+		// placeholder — drop them rather than render noise (#5835).
+		if it.SenderType == "app" && it.MessageType == "interactive" {
+			continue
+		}
+		if inThread {
+			// Fail-closed topic isolation: the thread container should only
+			// return this topic's messages, but if Lark ever returns an item
+			// with a missing or mismatched thread_id, drop it rather than
+			// risk leaking a sibling topic's content into this topic.
+			if it.ThreadID != msg.ThreadID {
+				continue
+			}
+			// The thread container ignores end_time, so anchor client-side:
+			// drop anything created strictly after the @-mention moment. A
+			// zero trigger time (unparseable) disables the anchor.
+			if triggerMillis > 0 && parseLarkMillis(it.CreateTime) > triggerMillis {
+				continue
+			}
 		}
 		kept = append(kept, it)
 	}
@@ -310,6 +487,19 @@ func (e *inboundEnricher) fetchRecentItems(ctx context.Context, creds Installati
 		return parseLarkMillis(kept[i].CreateTime) < parseLarkMillis(kept[j].CreateTime)
 	})
 	return kept, nil
+}
+
+func (e *inboundEnricher) logRecentContextFetchFailure(msg InboundMessage, err error, classified recentContextFetchClassification, attempts int) {
+	e.logger.Warn("lark enricher: recent context fetch failed",
+		"layer", "lark_inbound_enricher",
+		"endpoint", recentContextEndpoint,
+		"status", "failed",
+		"category", classified.category,
+		"retryable", classified.retryable,
+		"attempts", attempts,
+		"chat_id", string(msg.ChatID),
+		"message_id", msg.MessageID,
+		"err", err)
 }
 
 // renderRecentContextBlock renders the surrounding conversation as a
@@ -337,8 +527,98 @@ func (e *inboundEnricher) renderRecentContextBlock(kept []LarkMessage, names map
 		len(kept), strings.Join(lines, "\n"))
 }
 
-func recentContextErrorBlock() string {
-	return "<recent_context type=\"error\">[unable to fetch recent context]</recent_context>"
+type recentContextFetchClassification struct {
+	category  string
+	retryable bool
+}
+
+func classifyRecentContextFetchError(err error) recentContextFetchClassification {
+	if err == nil {
+		return recentContextFetchClassification{category: recentContextFailureUnknown}
+	}
+	if errors.Is(err, errRecentContextChannelUnbound) {
+		return recentContextFetchClassification{category: recentContextFailureChannelUnbound}
+	}
+	// A Lark business code names the failure exactly, so prefer it over
+	// the text heuristics below — read through larkErrorCodeMsg it is
+	// found in either shape that carries one: the 2xx envelope a call
+	// site rejected (*APIError) and the non-2xx reply the HTTP client
+	// returns. Only a code that resolves to a real category short-
+	// circuits; anything else falls through, so a status-only signal
+	// like "http 403" still classifies on the error text.
+	if code, msg, ok := larkErrorCodeMsg(err); ok {
+		if cls := classifyRecentContextAPIError(code, msg); cls.category != recentContextFailureUnknown {
+			return cls
+		}
+	}
+	var netErr net.Error
+	if errors.Is(err, context.DeadlineExceeded) ||
+		(errors.As(err, &netErr) && netErr.Timeout()) {
+		return recentContextFetchClassification{category: recentContextFailureTimeout, retryable: true}
+	}
+
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "missing chat_id") || strings.Contains(msg, "missing chat id"):
+		return recentContextFetchClassification{category: recentContextFailureChannelUnbound}
+	case containsAny(msg, "code=99991002", "code=230001", "no permission", "permission denied", "insufficient permissions", "forbidden", "http 403"):
+		return recentContextFetchClassification{category: recentContextFailurePermissionDenied}
+	case containsAny(msg, "code=230110", "code=230011", "code=230050", "deleted", "recalled", "not visible", "invisible"):
+		return recentContextFetchClassification{category: recentContextFailureMessageDeleted}
+	case containsAny(msg, "code=99991663", "code=99991664"):
+		return recentContextFetchClassification{category: recentContextFailureTokenExpired, retryable: true}
+	case containsAny(msg, "code=230020", "rate limit", "rate_limit", "http 429"):
+		// Not retryable: the client drops Retry-After, and an immediate
+		// second call within the same budget almost always re-hits the
+		// limit while doubling list load on an already-throttled tenant.
+		return recentContextFetchClassification{category: recentContextFailureRateLimited}
+	case containsAny(msg, "deadline exceeded", "timeout", "timed out"):
+		return recentContextFetchClassification{category: recentContextFailureTimeout, retryable: true}
+	case containsAny(msg, "http 500", "http 502", "http 503", "http 504", "connection reset", "connection refused", "temporary"):
+		return recentContextFetchClassification{category: recentContextFailureTemporary, retryable: true}
+	default:
+		return recentContextFetchClassification{category: recentContextFailureUnknown}
+	}
+}
+
+func classifyRecentContextAPIError(code int, msg string) recentContextFetchClassification {
+	switch {
+	case code == 99991002 || code == 230001:
+		return recentContextFetchClassification{category: recentContextFailurePermissionDenied}
+	case code == 230110 || code == 230011 || code == 230050:
+		return recentContextFetchClassification{category: recentContextFailureMessageDeleted}
+	case isTokenError(code):
+		return recentContextFetchClassification{category: recentContextFailureTokenExpired, retryable: true}
+	case code == 230020:
+		// See classifyRecentContextFetchError: rate limits degrade rather
+		// than retry, since the client drops Retry-After.
+		return recentContextFetchClassification{category: recentContextFailureRateLimited}
+	}
+	return classifyRecentContextFetchError(errors.New(msg))
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func recentContextUnavailableLine(category string) string {
+	switch category {
+	case recentContextFailureChannelUnbound:
+		return "[Recent Lark context unavailable: chat binding is missing. Continuing with the latest message.]"
+	case recentContextFailurePermissionDenied:
+		return "[Recent Lark context unavailable: the bot cannot read this chat history. Continuing with the latest message.]"
+	case recentContextFailureMessageDeleted:
+		return "[Recent Lark context unavailable: the referenced chat history is deleted or no longer visible. Continuing with the latest message.]"
+	case recentContextFailureTimeout, recentContextFailureRateLimited, recentContextFailureTokenExpired, recentContextFailureTemporary:
+		return "[Recent Lark context temporarily unavailable; continuing with the latest message.]"
+	default:
+		return "[Recent Lark context unavailable; continuing with the latest message.]"
+	}
 }
 
 // renderQuotedBlock renders a <quoted_message> block from the already-
@@ -348,7 +628,7 @@ func recentContextErrorBlock() string {
 // sentinel and its children). A fetch error / empty / deleted parent
 // degrades to the documented error block. Speakers are labeled from
 // `names` (the shared, already-resolved map), falling back to "User N".
-func (e *inboundEnricher) renderQuotedBlock(parentID string, items []LarkMessage, err error, names map[string]string) string {
+func (e *inboundEnricher) renderQuotedBlock(parentID string, items []LarkMessage, err error, names map[string]string, media *contextMedia) string {
 	if err != nil || len(items) == 0 {
 		e.logger.Warn("lark enricher: quoted parent fetch failed",
 			"parent_id", parentID, "items", len(items), "err", err)
@@ -363,10 +643,10 @@ func (e *inboundEnricher) renderQuotedBlock(parentID string, items []LarkMessage
 	sender := labeler.label(parent)
 
 	if parent.MessageType == larkMsgTypeMergeForward {
-		inner := e.renderForwardedItems(items, parentID, names)
+		inner := e.renderForwardedItems(items, parentID, names, media)
 		return wrapQuoted(parentID, sender, larkMsgTypeMergeForward, inner)
 	}
-	text := e.flattenMessage(parent)
+	text := e.flattenContextMessage(parent, media, "")
 	if text == "" {
 		text = "[empty message]"
 	}
@@ -377,8 +657,8 @@ func (e *inboundEnricher) renderQuotedBlock(parentID string, items []LarkMessage
 // record id is forwardID. Children are time-ordered, capped, and each
 // rendered as "[<speaker>]: <text>"; a child that is itself a forward is
 // not recursed into (it gets a manual-expand placeholder) so the HTTP
-// fan-out on the ACK-latency-sensitive inbound path stays bounded.
-func (e *inboundEnricher) renderForwardedItems(items []LarkMessage, forwardID string, names map[string]string) string {
+// fan-out within the inbound enrichment budget stays bounded.
+func (e *inboundEnricher) renderForwardedItems(items []LarkMessage, forwardID string, names map[string]string, media *contextMedia) string {
 	// The verified contract is that GetMessage(forward_id) returns one
 	// level of bundling: [sentinel, direct-children…]. We therefore
 	// treat every non-sentinel item as a direct child. We filter by id
@@ -418,7 +698,7 @@ func (e *inboundEnricher) renderForwardedItems(items []LarkMessage, forwardID st
 		case c.MessageType == larkMsgTypeMergeForward:
 			text = "[nested merge_forward, expand manually]"
 		default:
-			text = e.flattenMessage(c)
+			text = e.flattenContextMessage(c, media, forwardID)
 			if text == "" {
 				text = "[empty message]"
 			}
@@ -486,11 +766,11 @@ func parseLarkMillis(s string) int64 {
 // speakerLabeler assigns stable, human-readable labels to the senders
 // within one rendered block. Lark message items carry only a sender id
 // (no display name in the payload), so the enricher resolves real names
-// out of band via the Contact API and passes them in as a sender-id ->
-// name map. A sender present in that map is labeled with their real
-// name; one that is not (restricted contact scope, deactivated user,
-// name lookup failed) falls back to "User 1", "User 2", … in
-// first-appearance order. App senders are always "Bot".
+// out of band via the Contact API or fetched @-mentions and passes them
+// in as an open_id -> name map. A user present in that map is labeled
+// with their real name; one that is not (restricted contact scope,
+// deactivated user, name lookup failed) falls back to "User 1", "User 2",
+// … in first-appearance order. App senders are always "Bot".
 type speakerLabeler struct {
 	names map[string]string // resolved open_id -> display name (may be nil)
 	seen  map[string]string

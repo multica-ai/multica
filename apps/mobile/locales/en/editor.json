@@ -1,0 +1,21 @@
+{
+  "a11y": {
+    "mention_someone": "Mention someone",
+    "bullet_list": "Bullet list",
+    "checklist": "Checklist",
+    "code_block": "Code block",
+    "quote": "Quote",
+    "attach_image": "Attach image",
+    "attach_file": "Attach file"
+  },
+  "code": {
+    "copied": "Code copied",
+    "copy": "Copy code"
+  },
+  "upload": {
+    "file_too_large_title": "File too large",
+    "file_too_large_message": "Files must be smaller than 100 MB.",
+    "failed": "Upload failed",
+    "error": "Unknown error"
+  }
+}

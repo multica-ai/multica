@@ -2,12 +2,22 @@ package handler
 
 import (
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func msg(role, content string) db.ChatMessage {
 	return db.ChatMessage{Role: role, Content: content}
+}
+
+func mediaPendingMsg(content string, until time.Time) db.ChatMessage {
+	return db.ChatMessage{
+		Role:                     "user",
+		Content:                  content,
+		ChannelMediaPendingUntil: pgtype.Timestamptz{Time: until, Valid: true},
+	}
 }
 
 func contents(msgs []db.ChatMessage) []string {
@@ -75,6 +85,23 @@ func TestTrailingUserMessages(t *testing.T) {
 			name: "single user message",
 			in:   []db.ChatMessage{msg("user", "hi")},
 			want: []string{"hi"},
+		},
+		{
+			name: "stops before media that is still pending",
+			in: []db.ChatMessage{
+				msg("user", "ready"),
+				mediaPendingMsg("[Image]", time.Now().Add(time.Minute)),
+				msg("user", "after image"),
+			},
+			want: []string{"ready"},
+		},
+		{
+			name: "expired media placeholder is ready",
+			in: []db.ChatMessage{
+				mediaPendingMsg("[Image]", time.Now().Add(-time.Minute)),
+				msg("user", "after image"),
+			},
+			want: []string{"[Image]", "after image"},
 		},
 	}
 	for _, tc := range cases {

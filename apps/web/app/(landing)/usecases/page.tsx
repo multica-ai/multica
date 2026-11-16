@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import Link from "@/features/landing/components/landing-link";
 import Image from "next/image";
-import { LandingHeader } from "@/features/landing/components/landing-header";
-import { LandingFooter } from "@/features/landing/components/landing-footer";
+import { SiteHeader } from "@/features/landing/site/site-header";
+import { SiteFooter } from "@/features/landing/site/site-footer";
 import { getUseCasePagesForLocale } from "@/lib/use-cases-source";
 import { getUseCaseLocale, useCaseText } from "@/lib/use-cases-i18n";
+import { SHARE_IMAGE } from "@/features/landing/share-image";
+import { landingAlternates, localizeHref } from "@/lib/landing-locale-path";
+import { liveMetadata, requireLiveRoute } from "@/features/landing/site/sitemap";
 
 type ExtraFrontmatter = {
   category?: string;
@@ -15,21 +18,24 @@ type ExtraFrontmatter = {
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getUseCaseLocale();
   const text = useCaseText[locale];
-  return {
+  return liveMetadata("/usecases", {
     title: text.indexMetadataTitle,
     description: text.indexMetadataDescription,
     openGraph: {
+      images: [SHARE_IMAGE],
       title: text.indexMetadataTitle,
       description: text.indexMetadataDescription,
-      url: "/usecases",
+      url: localizeHref(locale, "/usecases"),
     },
     alternates: {
-      canonical: "/usecases",
+      canonical: localizeHref(locale, "/usecases"),
+      languages: landingAlternates("/usecases"),
     },
-  };
+  });
 }
 
 export default async function UseCasesIndexPage() {
+  requireLiveRoute("/usecases");
   const locale = await getUseCaseLocale();
   const text = useCaseText[locale];
   const pages = getUseCasePagesForLocale(locale)
@@ -45,14 +51,14 @@ export default async function UseCasesIndexPage() {
 
   return (
     <>
+      <SiteHeader />
       <div className="relative">
-        <LandingHeader variant="dark" />
         <section className="relative overflow-hidden bg-[#05070b] text-white">
           <div className="relative z-10 mx-auto max-w-[1120px] px-4 pb-20 pt-32 text-center sm:px-6 sm:pt-40 lg:px-8 lg:pb-24">
-            <h1 className="mx-auto max-w-[880px] font-[family-name:var(--font-serif)] text-[3rem] leading-[1.02] tracking-[-0.035em] drop-shadow-[0_10px_34px_rgba(0,0,0,0.32)] sm:text-[4rem] lg:text-[5rem]">
+            <h1 className="mx-auto max-w-[880px] font-site-display text-site-display drop-shadow-[0_10px_34px_rgba(0,0,0,0.32)]">
               {text.indexTitle}
             </h1>
-            <p className="mx-auto mt-6 max-w-[620px] text-[15px] leading-7 text-white/84 sm:text-[17px]">
+            <p className="mx-auto mt-6 max-w-[620px] text-body-lg leading-7 text-white/84 sm:text-title">
               {text.indexSubtitle}
             </p>
           </div>
@@ -85,19 +91,19 @@ export default async function UseCasesIndexPage() {
                     ) : null}
                   </div>
                   {category ? (
-                    <div className="mt-5 text-[12px] uppercase tracking-[0.14em] text-[#0a0d12]/50">
+                    <div className="mt-5 text-caption uppercase tracking-[0.14em] text-[#0a0d12]/50">
                       {category}
                     </div>
                   ) : null}
-                  <h3 className="mt-2 text-[18px] font-semibold leading-[1.35] text-[#0a0d12] sm:text-[20px]">
+                  <h3 className="mt-2 text-title font-semibold leading-[1.35] text-[#0a0d12] sm:text-title-lg">
                     {page.data.title}
                   </h3>
                   {page.data.description ? (
-                    <p className="mt-2 text-[14px] leading-[1.6] text-[#0a0d12]/60">
+                    <p className="mt-2 text-body leading-[1.6] text-[#0a0d12]/60">
                       {page.data.description}
                     </p>
                   ) : null}
-                  <span className="mt-3 text-[13px] text-[#0a0d12]/70 transition-colors group-hover:text-[#0a0d12]">
+                  <span className="mt-3 text-label text-[#0a0d12]/70 transition-colors group-hover:text-[#0a0d12]">
                     {text.cardReadMore}
                   </span>
                 </Link>
@@ -107,7 +113,7 @@ export default async function UseCasesIndexPage() {
         </div>
       </section>
 
-      <LandingFooter />
+      <SiteFooter />
     </>
   );
 }

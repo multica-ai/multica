@@ -16,7 +16,17 @@ func newLabelCreateTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "create"}
 	cmd.Flags().String("name", "", "")
 	cmd.Flags().String("color", "", "")
+	cmd.Flags().String("resource-type", "issue", "")
+	cmd.Flags().String("description", "", "")
 	cmd.Flags().String("output", "json", "")
+	return cmd
+}
+
+func newLabelListTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "list"}
+	cmd.Flags().String("resource-type", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().Bool("full-id", false, "")
 	return cmd
 }
 
@@ -151,5 +161,91 @@ func TestRunLabelCreateRequiresNameAndColor(t *testing.T) {
 	_ = cmd.Flags().Set("name", "Bug")
 	if err := runLabelCreate(cmd, nil); err == nil || !strings.Contains(err.Error(), "--color is required") {
 		t.Fatalf("runLabelCreate error = %v, want missing color", err)
+	}
+}
+
+func TestRunLabelCreateWithResourceType(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/labels" {
+			t.Fatalf("path = %q, want /api/labels", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":            testLabelUUID,
+			"name":          body["name"],
+			"resource_type": body["resource_type"],
+			"color":         body["color"],
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newLabelCreateTestCmd()
+	_ = cmd.Flags().Set("name", "mattpocock")
+	_ = cmd.Flags().Set("color", "#3b82f6")
+	_ = cmd.Flags().Set("resource-type", "skill")
+
+	out, err := captureStdout(t, func() error { return runLabelCreate(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runLabelCreate: %v", err)
+	}
+	if body["name"] != "mattpocock" || body["color"] != "#3b82f6" || body["resource_type"] != "skill" {
+		t.Fatalf("body = %#v, want name/color/resource_type", body)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode stdout JSON: %v\n%s", err, out)
+	}
+	if got["resource_type"] != "skill" || got["name"] != "mattpocock" {
+		t.Fatalf("stdout = %#v, want created skill label", got)
+	}
+}
+
+func TestRunLabelListWithResourceType(t *testing.T) {
+	var queryResource string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/labels" {
+			t.Fatalf("path = %q, want /api/labels", r.URL.Path)
+		}
+		queryResource = r.URL.Query().Get("resource_type")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"labels": []map[string]any{
+				{
+					"id":            testLabelUUID,
+					"name":          "frontend",
+					"resource_type": queryResource,
+					"color":         "#3b82f6",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+
+	cmd := newLabelListTestCmd()
+	_ = cmd.Flags().Set("resource-type", "skill")
+
+	out, err := captureStdout(t, func() error { return runLabelList(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runLabelList: %v", err)
+	}
+	if queryResource != "skill" {
+		t.Fatalf("queryResource = %q, want skill", queryResource)
+	}
+	var got []map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode stdout JSON: %v\n%s", err, out)
+	}
+	if len(got) != 1 || got[0]["resource_type"] != "skill" {
+		t.Fatalf("stdout = %#v, want skill label list", got)
 	}
 }

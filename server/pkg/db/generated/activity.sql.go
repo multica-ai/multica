@@ -60,8 +60,8 @@ func (q *Queries) CountAssigneeChangesByActor(ctx context.Context, arg CountAssi
 
 const createActivity = `-- name: CreateActivity :one
 INSERT INTO activity_log (
-    workspace_id, issue_id, actor_type, actor_id, action, details
-) VALUES ($1, $2, $3, $4, $5, $6)
+    workspace_id, issue_id, actor_type, actor_id, action, details, id
+) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::uuid, gen_random_uuid()))
 RETURNING id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at
 `
 
@@ -72,6 +72,7 @@ type CreateActivityParams struct {
 	ActorID     pgtype.UUID `json:"actor_id"`
 	Action      string      `json:"action"`
 	Details     []byte      `json:"details"`
+	ID          pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) (ActivityLog, error) {
@@ -82,6 +83,7 @@ func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) 
 		arg.ActorID,
 		arg.Action,
 		arg.Details,
+		arg.ID,
 	)
 	var i ActivityLog
 	err := row.Scan(
@@ -118,6 +120,27 @@ func (q *Queries) GetActivity(ctx context.Context, id pgtype.UUID) (ActivityLog,
 	return i, err
 }
 
+const getLastIssueStatusChange = `-- name: GetLastIssueStatusChange :one
+SELECT actor_type, actor_id FROM activity_log
+WHERE issue_id = $1 AND action = 'status_changed'
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLastIssueStatusChangeRow struct {
+	ActorType pgtype.Text `json:"actor_type"`
+	ActorID   pgtype.UUID `json:"actor_id"`
+}
+
+// Who last changed an issue's status, and to what: names the mover when an
+// agent's status change is refused because the issue left its step (MUL-7420).
+func (q *Queries) GetLastIssueStatusChange(ctx context.Context, issueID pgtype.UUID) (GetLastIssueStatusChangeRow, error) {
+	row := q.db.QueryRow(ctx, getLastIssueStatusChange, issueID)
+	var i GetLastIssueStatusChangeRow
+	err := row.Scan(&i.ActorType, &i.ActorID)
+	return i, err
+}
+
 const hasSquadLeaderNoActionEvaluationForTask = `-- name: HasSquadLeaderNoActionEvaluationForTask :one
 SELECT EXISTS (
   SELECT 1
@@ -145,10 +168,13 @@ func (q *Queries) HasSquadLeaderNoActionEvaluationForTask(ctx context.Context, a
 }
 
 const listActivitiesForIssue = `-- name: ListActivitiesForIssue :many
-SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
-WHERE issue_id = $1
+SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM (
+    SELECT id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at FROM activity_log
+    WHERE issue_id = $1
+    ORDER BY created_at DESC, id DESC
+    LIMIT $2
+) AS recent
 ORDER BY created_at ASC, id ASC
-LIMIT $2
 `
 
 type ListActivitiesForIssueParams struct {
@@ -156,8 +182,21 @@ type ListActivitiesForIssueParams struct {
 	Limit   int32       `json:"limit"`
 }
 
-// All activities for an issue in chronological order, capped at $2 (DB safety
-// net to bound the response).
+// The NEWEST $2 activities for an issue, returned in chronological order.
+//
+// The cap has to bite at the OLD end, not the new one. The inner query takes
+// the window with the keyset ordering (created_at DESC, id DESC), which
+// idx_activity_log_issue_keyset (migration 068) satisfies without a sort step —
+// it is not an index-only scan, since the index does not cover the columns
+// SELECT * needs, so the heap is still read for the rows in the window. The
+// outer query re-sorts ascending so every caller keeps the chronological
+// contract it already had.
+//
+// Capping with ORDER BY created_at ASC instead discards the newest rows, which
+// made a busy issue's timeline appear to stop at some point in the past with no
+// indication anything was missing. Activity is machine-paced (description
+// autosave, every agent run, status/assignee changes), so this was reachable in
+// normal use, not only on pathological issues (MUL-5492).
 func (q *Queries) ListActivitiesForIssue(ctx context.Context, arg ListActivitiesForIssueParams) ([]ActivityLog, error) {
 	rows, err := q.db.Query(ctx, listActivitiesForIssue, arg.IssueID, arg.Limit)
 	if err != nil {

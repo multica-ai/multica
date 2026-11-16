@@ -50,9 +50,15 @@ type APIClient struct {
 	BaseURL     string
 	WorkspaceID string
 	Token       string
-	AgentID     string // When set, requests are attributed to this agent instead of the user.
-	TaskID      string // When set, sent as X-Task-ID for agent-task validation.
-	HTTPClient  *http.Client
+	// AgentID / TaskID travel as X-Agent-ID / X-Task-ID execution context.
+	// They are NOT what makes the server treat a request as the agent's: the
+	// server strips both headers on entry and re-stamps them from the bound
+	// mat_ task token, so attribution follows the token, not these fields
+	// (MUL-3428). The CLI only sets them inside a daemon-managed task, where
+	// MULTICA_TOKEN is that mat_ token.
+	AgentID    string
+	TaskID     string
+	HTTPClient *http.Client
 
 	// Identity overrides. Empty values fall back to the package-level
 	// ClientPlatform / ClientVersion / ClientOS.
@@ -61,16 +67,36 @@ type APIClient struct {
 	OS       string
 }
 
+// TaskTokenPrefix marks a task-scoped agent token, as minted by
+// internal/auth.NewAgentTaskToken. A 401 on one is not the "your login
+// expired" that a 401 on a member credential is: the token belongs to a single
+// run and there is no sign-in that brings it back. Why it was rejected is not
+// something the CLI can see — a terminal task is the usual cause, but a
+// malformed token, one sent to the wrong server, and one dropped by an
+// unrelated cleanup all look identical from here.
+const TaskTokenPrefix = "mat_"
+
 type HTTPError struct {
 	Method     string
 	Path       string
 	StatusCode int
 	Body       string
+	// TaskScoped records that the failing request actually carried a
+	// task-scoped `mat_` token. It changes nothing about the request; it only
+	// lets FormatError tell a 401 worth signing in again for from one where
+	// the right move is to stop (GH #7522).
+	TaskScoped bool
 }
 
 func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s returned %d: %s", e.Method, e.Path, e.StatusCode, strings.TrimSpace(e.Body))
 }
+
+// maxErrorBodyBytes caps how much of an error response is kept. It must hold
+// a whole structured error: a workflow's 409 status mapping plan lists one row
+// per status in use (up to 50) and runs past 4 KiB, and a truncated body no
+// longer parses as JSON. Only --debug prints the raw body.
+const maxErrorBodyBytes = 64 << 10
 
 // newHTTPError builds a *HTTPError from an error response (status >= 400),
 // reading a capped slice of the body. Every Multica API helper funnels its
@@ -78,13 +104,31 @@ func (e *HTTPError) Error() string {
 // classify the failure via errors.As(err, **HTTPError) regardless of which
 // HTTP verb the command used.
 func newHTTPError(method, path string, resp *http.Response) *HTTPError {
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	return &HTTPError{
 		Method:     method,
 		Path:       path,
 		StatusCode: resp.StatusCode,
 		Body:       strings.TrimSpace(string(data)),
+		TaskScoped: RequestUsedTaskToken(resp),
 	}
+}
+
+// RequestUsedTaskToken reports whether the request that produced resp actually
+// sent a task token.
+//
+// Reading the client's own Token field would be wrong twice over. DownloadFile
+// deliberately sends no Authorization header for an absolute signed URL, so a
+// 401 from object storage would be reported as a rejected task token purely
+// because the client happened to hold a `mat_` token. And Go strips Authorization
+// across a cross-host redirect, so the request that was sent is not always the
+// one the caller built. resp.Request is the request that actually went out,
+// after redirects, which is the only thing this claim can honestly rest on.
+func RequestUsedTaskToken(resp *http.Response) bool {
+	if resp == nil || resp.Request == nil {
+		return false
+	}
+	return strings.HasPrefix(resp.Request.Header.Get("Authorization"), "Bearer "+TaskTokenPrefix)
 }
 
 // defaultHTTPTimeout is the per-request timeout for the CLI's HTTP client.
@@ -161,7 +205,23 @@ func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 	}
 }
 
+// clientCapabilities is the X-Client-Capabilities value every CLI request
+// advertises. It is a protocol detail, not a user-visible flag: the CLI always
+// knows how to handle these response shapes, so there is nothing for a caller
+// to opt into.
+//
+// stable_attachment_urls asks bulk responses to return the stable
+// /api/attachments/{id}/download path instead of a ~800-char CloudFront
+// signature that is re-minted on every request (MUL-5372 / GitHub #5999). The
+// CLI never hands an attachment URL to a native loader — `multica attachment
+// download <id>` fetches a fresh signature from the single-attachment endpoint,
+// which keeps signing regardless of this capability — so the signature in list
+// payloads was pure cost: raw bytes, a per-attachment RSA sign, and bytes that
+// differ on every read and therefore defeat agent prompt caching.
+const clientCapabilities = "stable_attachment_urls"
+
 func (c *APIClient) setHeaders(req *http.Request) {
+	req.Header.Set("X-Client-Capabilities", clientCapabilities)
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
@@ -225,7 +285,7 @@ func (c *APIClient) GetJSON(ctx context.Context, path string, out any) error {
 	if out == nil {
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
 }
 
 // GetJSONWithHeaders performs a GET request, decodes the JSON response, and
@@ -250,7 +310,7 @@ func (c *APIClient) GetJSONWithHeaders(ctx context.Context, path string, out any
 	}
 	if out != nil {
 		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-			return resp.Header, err
+			return resp.Header, wrapBodyRead(req, err)
 		}
 	}
 	return resp.Header, nil
@@ -280,7 +340,7 @@ func (c *APIClient) DeleteJSONResponse(ctx context.Context, path string, out any
 		return newHTTPError(http.MethodDelete, path, resp)
 	}
 	if out != nil {
-		return json.NewDecoder(resp.Body).Decode(out)
+		return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
 	}
 	return nil
 }
@@ -338,7 +398,7 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 	if out == nil {
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
 }
 
 // PutJSON performs a PUT request with a JSON body.
@@ -368,7 +428,7 @@ func (c *APIClient) PutJSON(ctx context.Context, path string, body any, out any)
 	if out == nil {
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
 }
 
 // PatchJSON performs a PATCH request with a JSON body.
@@ -398,7 +458,7 @@ func (c *APIClient) PatchJSON(ctx context.Context, path string, body any, out an
 	if out == nil {
 		return nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
 }
 
 // AttachmentResponse mirrors the server's upload-file response.
@@ -406,6 +466,9 @@ type AttachmentResponse struct {
 	ID          string `json:"id"`
 	URL         string `json:"url"`
 	DownloadURL string `json:"download_url"`
+	// MarkdownURL is the durable, persistable URL to embed in markdown bodies
+	// (chat replies, comments). Unlike DownloadURL it never carries a TTL.
+	MarkdownURL string `json:"markdown_url"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
@@ -415,55 +478,142 @@ type AttachmentResponse struct {
 // UploadFile uploads a file via multipart form to /api/upload-file.
 // It returns the attachment ID from the server response.
 func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename string, issueID string) (string, error) {
+	att, err := c.UploadIssueAttachment(ctx, fileData, filename, issueID)
+	if err != nil {
+		return "", err
+	}
+	return att.ID, nil
+}
+
+// UploadIssueAttachment uploads a file via multipart form to /api/upload-file
+// and returns the full AttachmentResponse. An empty issueID leaves the row
+// unbound, which is what `issue create` needs: the file is uploaded before the
+// issue exists, its `markdown_url` goes into the description, and the create
+// call binds it via `attachment_ids`.
+func (c *APIClient) UploadIssueAttachment(ctx context.Context, fileData []byte, filename string, issueID string) (AttachmentResponse, error) {
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 
 	part, err := writer.CreateFormFile("file", filepath.Base(filename))
 	if err != nil {
-		return "", fmt.Errorf("create form file: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("create form file: %w", err)
 	}
 	if _, err := part.Write(fileData); err != nil {
-		return "", fmt.Errorf("write file data: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("write file data: %w", err)
 	}
 
 	if issueID != "" {
 		if err := writer.WriteField("issue_id", issueID); err != nil {
-			return "", fmt.Errorf("write issue_id field: %w", err)
+			return AttachmentResponse{}, fmt.Errorf("write issue_id field: %w", err)
 		}
 	}
 
 	if err := writer.Close(); err != nil {
-		return "", fmt.Errorf("close multipart writer: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("close multipart writer: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/upload-file", &body)
 	if err != nil {
-		return "", err
+		return AttachmentResponse{}, err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	c.setHeaders(req)
 
-	resp, err := c.HTTPClient.Do(req)
+	// Honor a longer context deadline for large files: callers widen the
+	// context for uploads, which the default client timeout would shadow.
+	// Same shape as UploadChatAttachment / UploadFileWithURL.
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > httpClient.Timeout {
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
+		}
+	}
+
+	resp, err := httpClient.Do(req)
 	err = wrapTransport(req, err)
 	if err != nil {
-		return "", err
+		return AttachmentResponse{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return "", newHTTPError(http.MethodPost, "/api/upload-file", resp)
+		return AttachmentResponse{}, newHTTPError(http.MethodPost, "/api/upload-file", resp)
 	}
 
-	var result map[string]any
+	var result AttachmentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("decode upload response: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("decode upload response: %w", wrapBodyRead(req, err))
+	}
+	if result.ID == "" {
+		return AttachmentResponse{}, fmt.Errorf("upload response missing attachment id")
+	}
+	return result, nil
+}
+
+// UploadChatAttachment uploads a file via multipart form to /api/upload-file
+// tagged with a chat task (task_id). The server binds the row to the assistant
+// reply that task produces on completion. Returns the full AttachmentResponse
+// (id + markdown_url) so the agent can embed the image inline in its reply.
+func (c *APIClient) UploadChatAttachment(ctx context.Context, fileData []byte, filename, taskID string) (AttachmentResponse, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	part, err := writer.CreateFormFile("file", filepath.Base(filename))
+	if err != nil {
+		return AttachmentResponse{}, fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := part.Write(fileData); err != nil {
+		return AttachmentResponse{}, fmt.Errorf("write file data: %w", err)
+	}
+	if taskID != "" {
+		if err := writer.WriteField("task_id", taskID); err != nil {
+			return AttachmentResponse{}, fmt.Errorf("write task_id field: %w", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return AttachmentResponse{}, fmt.Errorf("close multipart writer: %w", err)
 	}
 
-	id, _ := result["id"].(string)
-	if id == "" {
-		return "", fmt.Errorf("upload response missing attachment id")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/upload-file", &body)
+	if err != nil {
+		return AttachmentResponse{}, err
 	}
-	return id, nil
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setHeaders(req)
+
+	// Honor a longer context deadline for large images, same as UploadFileWithURL.
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > httpClient.Timeout {
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
+		}
+	}
+
+	resp, err := httpClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return AttachmentResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return AttachmentResponse{}, newHTTPError(http.MethodPost, "/api/upload-file", resp)
+	}
+
+	var result AttachmentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return AttachmentResponse{}, fmt.Errorf("decode upload response: %w", wrapBodyRead(req, err))
+	}
+	if result.ID == "" {
+		return AttachmentResponse{}, fmt.Errorf("upload response missing attachment id")
+	}
+	return result, nil
 }
 
 // UploadFileWithURL uploads a file via multipart form to /api/upload-file
@@ -518,7 +668,7 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 
 	var result AttachmentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", "", fmt.Errorf("decode upload response: %w", err)
+		return "", "", fmt.Errorf("decode upload response: %w", wrapBodyRead(req, err))
 	}
 	if result.URL == "" {
 		return "", "", fmt.Errorf("upload response missing attachment url")
@@ -527,6 +677,102 @@ func (c *APIClient) UploadFileWithURL(ctx context.Context, fileData []byte, file
 	// S3 upload succeeded but the attachment DB record failed. The file
 	// is still usable via its URL.
 	return result.ID, result.URL, nil
+}
+
+// ImportSkillFile imports a skill from a local archive (.skill / .zip) by
+// POSTing it as multipart/form-data to /api/skills/import, alongside the
+// on_conflict strategy. The structured import result is decoded into out.
+func (c *APIClient) ImportSkillFile(ctx context.Context, fileData []byte, filename, onConflict string, out any) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	part, err := writer.CreateFormFile("file", filepath.Base(filename))
+	if err != nil {
+		return fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := part.Write(fileData); err != nil {
+		return fmt.Errorf("write file data: %w", err)
+	}
+	if onConflict != "" {
+		if err := writer.WriteField("on_conflict", onConflict); err != nil {
+			return fmt.Errorf("write on_conflict field: %w", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/skills/import", &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setHeaders(req)
+
+	// Respect a longer context deadline for slow uploads, mirroring
+	// UploadFileWithURL: the default client timeout would otherwise shadow it.
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > httpClient.Timeout {
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
+		}
+	}
+
+	resp, err := httpClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return newHTTPError(http.MethodPost, "/api/skills/import", resp)
+	}
+	if out == nil {
+		return nil
+	}
+	return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
+}
+
+// UploadPrivatePlugin installs workspace-private Plugin archive bytes. The
+// filename is transport metadata only; the Server derives source identity from
+// validated manifest content and digests.
+func (c *APIClient) UploadPrivatePlugin(ctx context.Context, path string, archive []byte, filename string, out any) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("artifact", filepath.Base(filename))
+	if err != nil {
+		return fmt.Errorf("create Plugin artifact form file: %w", err)
+	}
+	if _, err := part.Write(archive); err != nil {
+		return fmt.Errorf("write Plugin artifact: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close Plugin artifact upload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setHeaders(req)
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return newHTTPError(http.MethodPost, path, resp)
+	}
+	if out == nil {
+		return nil
+	}
+	return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
 }
 
 // DownloadFile downloads a file from the given URL and returns the response body.
@@ -568,30 +814,6 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 	}
 
 	const maxDownloadSize = 100 << 20 // 100 MB
-	return io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
-}
-
-// HealthCheck hits the /health endpoint and returns the response body.
-func (c *APIClient) HealthCheck(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := c.HTTPClient.Do(req)
-	err = wrapTransport(req, err)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode >= 400 {
-		return "", &HTTPError{
-			Method:     http.MethodGet,
-			Path:       "/health",
-			StatusCode: resp.StatusCode,
-			Body:       strings.TrimSpace(string(data)),
-		}
-	}
-	return strings.TrimSpace(string(data)), nil
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
+	return data, wrapBodyRead(req, err)
 }

@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Trash2 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Dialog,
   DialogContent,
@@ -134,7 +135,7 @@ export function CustomPricingDialog({ open, onOpenChange, unmappedModels }: Prop
 
         <div className="max-h-[60vh] space-y-4 overflow-y-auto">
           {rows.length === 0 ? (
-            <p className="py-4 text-center text-xs text-muted-foreground">
+            <p className="py-4 text-center text-caption text-muted-foreground">
               {t(($) => $.usage.custom_pricing.empty)}
             </p>
           ) : (
@@ -144,18 +145,17 @@ export function CustomPricingDialog({ open, onOpenChange, unmappedModels }: Prop
               return (
                 <div key={key} className="space-y-2 rounded-md border p-3">
                   <div className="flex items-center justify-between gap-2">
-                    <code className="truncate font-mono text-xs">{key}</code>
+                    <code className="truncate font-mono text-caption">{key}</code>
                     {hasOverride && (
-                      <Button
+                      <IconButton
                         type="button"
                         variant="ghost"
                         size="icon-xs"
                         onClick={() => removeCustomPricing(key)}
-                        aria-label={t(($) => $.usage.custom_pricing.remove_aria)}
-                        title={t(($) => $.usage.custom_pricing.remove_aria)}
+                        label={t(($) => $.usage.custom_pricing.remove_aria)}
                       >
                         <Trash2 />
-                      </Button>
+                      </IconButton>
                     )}
                   </div>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -184,7 +184,7 @@ export function CustomPricingDialog({ open, onOpenChange, unmappedModels }: Prop
               );
             })
           )}
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             {t(($) => $.usage.custom_pricing.unit_hint)}
           </p>
         </div>
@@ -213,7 +213,7 @@ function PriceField({
 }) {
   return (
     <div className="space-y-1">
-      <Label className="text-[11px] text-muted-foreground">{label}</Label>
+      <Label className="text-micro text-muted-foreground">{label}</Label>
       <Input
         type="number"
         inputMode="decimal"

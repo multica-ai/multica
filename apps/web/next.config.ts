@@ -1,14 +1,28 @@
 import type { NextConfig } from "next";
 import { config } from "dotenv";
 import { resolve } from "path";
-import { resolveRemoteApiUrl } from "./config/runtime-urls";
+import {
+  resolveDevDocsUrl,
+  resolveDevRemoteApiUrl,
+  resolveDocsUrl,
+  resolveRemoteApiUrl,
+} from "./config/runtime-urls";
 import { createMDX } from "fumadocs-mdx/next";
 
-// Load root .env so REMOTE_API_URL is available to next.config.ts
+// Load root .env so local next.config.ts rewrites see REMOTE_API_URL / DOCS_URL.
+// Production requests use proxy.ts runtime rewrites, which read process.env
+// when the Next.js server runs instead of baking these URLs at build time.
 config({ path: resolve(__dirname, "../../.env") });
 
-const remoteApiUrl = resolveRemoteApiUrl(process.env);
-const docsUrl = process.env.DOCS_URL || "http://localhost:4000";
+// `next dev` falls back to the conventional localhost upstreams; builds use
+// the strict resolvers so prebuilt images keep unset upstreams unproxied.
+const isDev = process.env.NODE_ENV === "development";
+const remoteApiUrl = isDev
+  ? resolveDevRemoteApiUrl(process.env)
+  : resolveRemoteApiUrl(process.env);
+const docsUrl = isDev
+  ? resolveDevDocsUrl(process.env)
+  : resolveDocsUrl(process.env);
 
 // Parse hostnames from CORS_ALLOWED_ORIGINS so that Next.js dev server
 // allows cross-origin HMR / webpack requests (e.g. from Tailscale IPs).
@@ -33,48 +47,56 @@ const nextConfig: NextConfig = {
   images: {
     formats: ["image/avif", "image/webp"],
     qualities: [75, 80, 85],
+    localPatterns: [
+      { pathname: "/images/**", search: "" },
+      { pathname: "/usecases/**", search: "" },
+    ],
   },
   async rewrites() {
     return {
       // Run before file-system routes so /docs isn't shadowed by the
       // [workspaceSlug] dynamic segment.
-      beforeFiles: [
-        {
-          source: "/docs",
-          destination: `${docsUrl}/docs`,
-        },
-        {
-          source: "/docs/:path*",
-          destination: `${docsUrl}/docs/:path*`,
-        },
-      ],
-      afterFiles: [
-        {
-          source: "/api/:path*",
-          destination: `${remoteApiUrl}/api/:path*`,
-        },
-        {
-          source: "/ws",
-          destination: `${remoteApiUrl}/ws`,
-        },
-        {
-          source: "/auth/:path*",
-          destination: `${remoteApiUrl}/auth/:path*`,
-        },
-        {
-          source: "/uploads/:path*",
-          destination: `${remoteApiUrl}/uploads/:path*`,
-        },
-      ],
+      beforeFiles: docsUrl
+        ? [
+            {
+              source: "/docs",
+              destination: `${docsUrl}/docs`,
+            },
+            {
+              source: "/docs/:path*",
+              destination: `${docsUrl}/docs/:path*`,
+            },
+          ]
+        : [],
+      afterFiles: remoteApiUrl
+        ? [
+            {
+              source: "/v1/:path*",
+              destination: `${remoteApiUrl}/v1/:path*`,
+            },
+            {
+              source: "/api/:path*",
+              destination: `${remoteApiUrl}/api/:path*`,
+            },
+            {
+              source: "/ws",
+              destination: `${remoteApiUrl}/ws`,
+            },
+            {
+              source: "/health",
+              destination: `${remoteApiUrl}/health`,
+            },
+            {
+              source: "/auth/:path*",
+              destination: `${remoteApiUrl}/auth/:path*`,
+            },
+          ]
+        : [],
       fallback: [],
     };
   },
 };
 
-// fumadocs-mdx@12 is incompatible with Next 16's Turbopack: its loader fails to
-// dynamic-import `.source/source.config.mjs` under the Turbopack Node evaluator
-// (see fumadocs#2658). `dev`/`build` scripts pass `--webpack` to opt out.
-// Drop the flag once fumadocs-mdx ships a Turbopack-compatible loader.
-const withMDX = createMDX() as (config: NextConfig) => NextConfig;
+const withMDX = createMDX();
 
 export default withMDX(nextConfig);

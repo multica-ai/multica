@@ -17,10 +17,12 @@ function Harness({
   restoreKey,
   ready = true,
   disabled = false,
+  overrideTop,
 }: {
   restoreKey: string;
   ready?: boolean;
   disabled?: boolean;
+  overrideTop?: number;
 }) {
   const [scrollContainerEl, setScrollContainerEl] =
     useState<HTMLDivElement | null>(null);
@@ -30,6 +32,7 @@ function Harness({
     scrollContainerEl,
     ready,
     disabled,
+    overrideTop,
   });
 
   return (
@@ -95,6 +98,22 @@ describe("useIssueDetailScrollRestore", () => {
     rerender(<Harness restoreKey={issueA} />);
     flushNextAnimationFrame();
     expect(scroller.scrollTop).toBe(500);
+  });
+
+  it("keeps positions when navigating through a page that unmounts issue detail", () => {
+    const issueA = nextKey("issue-a");
+    const issueB = nextKey("issue-b");
+
+    const firstPage = render(<Harness restoreKey={issueA} />);
+    setScroll(firstPage.getByTestId("scroller"), 610);
+    firstPage.unmount();
+
+    const secondPage = render(<Harness restoreKey={issueB} />);
+    expect(secondPage.getByTestId("scroller").scrollTop).toBe(0);
+    secondPage.unmount();
+
+    const returnedPage = render(<Harness restoreKey={issueA} />);
+    expect(returnedPage.getByTestId("scroller").scrollTop).toBe(610);
   });
 
   it("waits until the page is ready before restoring a saved scrollTop", () => {
@@ -191,6 +210,29 @@ describe("useIssueDetailScrollRestore", () => {
     expect(scroller.scrollTop).toBe(480);
   });
 
+  it("restores again when a virtualized timeline resets scroll after the initial write", () => {
+    const issueA = nextKey("issue-a");
+    const issueB = nextKey("issue-b");
+
+    const { getByTestId, rerender } = render(<Harness restoreKey={issueA} />);
+    const scroller = getByTestId("scroller") as HTMLElement;
+
+    setScroll(scroller, 520);
+
+    rerender(<Harness restoreKey={issueB} />);
+    expect(scroller.scrollTop).toBe(0);
+
+    rerender(<Harness restoreKey={issueA} />);
+    expect(scroller.scrollTop).toBe(520);
+
+    // Virtuoso initializes after the parent's layout effect and can reset a
+    // successful synchronous restore before the next animation frame.
+    scroller.scrollTop = 0;
+    flushNextAnimationFrame();
+
+    expect(scroller.scrollTop).toBe(520);
+  });
+
   it("cancels a pending restore retry when the issue key changes", () => {
     const issueA = nextKey("issue-a");
     const issueB = nextKey("issue-b");
@@ -244,6 +286,28 @@ describe("useIssueDetailScrollRestore", () => {
     rerender(<Harness restoreKey={issueA} />);
     flushNextAnimationFrame();
     expect(scroller.scrollTop).toBe(500);
+  });
+
+  it("restores the memento override over its own map when both exist", () => {
+    // The module map only hears scroll events, so it can hold an older
+    // visit's offset; the platform memento is captured from the live DOM at
+    // leave time and must win.
+    const issueA = nextKey("issue-a");
+    const issueB = nextKey("issue-b");
+
+    const { getByTestId, rerender } = render(<Harness restoreKey={issueA} />);
+    const scroller = getByTestId("scroller") as HTMLElement;
+    flushNextAnimationFrame();
+
+    setScroll(scroller, 500);
+
+    rerender(<Harness restoreKey={issueB} />);
+    flushNextAnimationFrame();
+    expect(scroller.scrollTop).toBe(0);
+
+    rerender(<Harness restoreKey={issueA} overrideTop={340} />);
+    flushNextAnimationFrame();
+    expect(scroller.scrollTop).toBe(340);
   });
 
   it("does not yank scroll to top when a same-issue comment highlight clears", () => {

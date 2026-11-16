@@ -1,6 +1,6 @@
 // Frontend analytics glue. Thin wrapper over posthog-js.
 //
-// The source-of-truth event catalog is `docs/analytics.md`. This module only
+// The source-of-truth event catalog is `server/internal/analytics/events.go`. This module only
 // handles the two things the backend can't do itself: attribution capture on
 // first anonymous pageview, and person-identity merge on login. Every funnel
 // event (signup, workspace_created, runtime_registered, issue_executed,
@@ -41,24 +41,18 @@ let initialized = false;
 let pendingIdentify: { userId: string; props?: Record<string, unknown> } | null = null;
 let currentUserId: string | null = null;
 let analyticsEnvironment = "dev";
-// Likewise pageviews: the initial "/" pageview is the anchor of the
-// acquisition funnel, and the Next.js router fires it on mount before the
-// config fetch resolves. We keep the first pending pageview so that step
-// doesn't silently drop.
-let pendingPageview: string | undefined | null = null;
-// Last $pageview path actually emitted (already section-normalized). Used to
-// collapse consecutive views of the same section so navigating between
-// resources under one section doesn't fire a billed event per resource. See
-// capturePageview / normalizePageviewPath. Cleared on reset so a fresh
-// session re-emits its first pageview.
-let lastCapturedPath: string | null = null;
 // Frontend-emitted events (captureEvent) and person-property updates
 // (setPersonProperties) can also arrive before init — same config-race as
 // identify/pageview. We replay them in order once init succeeds. These
 // only ever carry user-triggered signals on identified users, so the
 // buffer stays small (~one step-transition worth).
 type PendingOp =
-  | { kind: "event"; name: string; props?: Record<string, unknown> }
+  | {
+      kind: "event";
+      name: string;
+      props?: Record<string, unknown>;
+      options?: CaptureEventOptions;
+    }
   | { kind: "set"; props: Record<string, unknown> }
   | { kind: "exception"; error: unknown; props?: Record<string, unknown> };
 const pendingOps: PendingOp[] = [];
@@ -67,20 +61,6 @@ const pendingOps: PendingOp[] = [];
 // switch silently drops client_type + app_version from every subsequent
 // event until a full reload.
 let superProperties: Record<string, unknown> = {};
-
-export {
-  captureDownloadIntent,
-  captureDownloadPageViewed,
-  captureDownloadInitiated,
-  type DownloadIntentSource,
-  type DownloadDetectPayload,
-  type DownloadInitiatedPayload,
-} from "./download";
-
-export {
-  captureFeedbackOpened,
-  type FeedbackOpenedSource,
-} from "./feedback";
 
 export interface AnalyticsConfig {
   key: string;
@@ -137,7 +117,7 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     // our funnel is set up: signup is the first real funnel step.
     person_profiles: "identified_only",
     // Turn off every on-by-default auto-capture surface. Our funnel is
-    // narrow and explicit (the events in docs/analytics.md + a manual
+    // narrow and explicit (the events in server/internal/analytics/events.go + a manual
     // $pageview). Autocapture floods the Activity view with anonymous
     // "clicked button" / "clicked link" noise, burns the billed event
     // budget, and risks capturing user-typed content in input values.
@@ -204,12 +184,6 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     posthog.identify(pendingIdentify.userId, pendingIdentify.props);
     pendingIdentify = null;
   }
-  // And any first pageview we captured while config was loading.
-  if (pendingPageview !== null) {
-    posthog.capture("$pageview", pendingPageview ? { $current_url: pendingPageview } : undefined);
-    lastCapturedPath = pendingPageview ?? null;
-    pendingPageview = null;
-  }
   // Replay buffered events / person-property updates in their original
   // order — funnel correctness depends on sequence (e.g. a user submits
   // the questionnaire and then finishes onboarding within the same
@@ -217,7 +191,7 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
   while (pendingOps.length > 0) {
     const op = pendingOps.shift()!;
     if (op.kind === "event") {
-      posthog.capture(op.name, withClientEventProperties(op.props));
+      captureNow(op.name, op.props, op.options);
     } else if (op.kind === "exception") {
       posthog.captureException(op.error, withClientEventProperties(op.props));
     } else {
@@ -252,8 +226,6 @@ export function identify(userId: string, userProperties?: Record<string, unknown
 export function resetAnalytics(): void {
   currentUserId = null;
   pendingIdentify = null;
-  pendingPageview = null;
-  lastCapturedPath = null;
   pendingOps.length = 0;
   if (!initialized) return;
   posthog.reset();
@@ -275,15 +247,53 @@ export function resetAnalytics(): void {
  * Calls before initAnalytics() buffer in order so a late-arriving config
  * doesn't silently swallow a step transition.
  */
+export interface CaptureEventOptions {
+  /**
+   * Bypass posthog-js's batching timer and put the event on the wire now.
+   * Batching is a JS timer in the same thread that is about to freeze or be
+   * killed, so a failure report queued normally can be lost exactly when it
+   * matters (MUL-4115: three deterministic hangs, zero events delivered).
+   * Reserve this for failure telemetry — routine events should batch.
+   */
+  sendInstantly?: boolean;
+  /**
+   * Fired once the event has been handed to posthog.capture.
+   *
+   * This is HAND-OFF, not delivery: the request may still be in flight, and
+   * posthog-js exposes no delivery callback to wait on. Never treat it as
+   * permission to discard the only copy of something — a caller that deletes
+   * persisted state here loses it whenever the app dies between hand-off and
+   * the wire (see freeze-flush.ts, which waits out a grace window instead).
+   *
+   * It also never fires on a build with analytics disabled, so anything
+   * waiting on it needs an expiry path of its own.
+   */
+  onCaptured?: () => void;
+}
+
 export function captureEvent(
   name: string,
   props?: Record<string, unknown>,
+  options?: CaptureEventOptions,
 ): void {
   if (!initialized) {
-    pendingOps.push({ kind: "event", name, props });
+    pendingOps.push({ kind: "event", name, props, options });
     return;
   }
-  posthog.capture(name, withClientEventProperties(props));
+  captureNow(name, props, options);
+}
+
+function captureNow(
+  name: string,
+  props?: Record<string, unknown>,
+  options?: CaptureEventOptions,
+): void {
+  posthog.capture(
+    name,
+    withClientEventProperties(props),
+    options?.sendInstantly ? { send_instantly: true } : undefined,
+  );
+  options?.onCaptured?.();
 }
 
 /**
@@ -373,62 +383,8 @@ function normalizeEnvironment(value: string | undefined): string {
   }
 }
 
-// A UUID or an issue key (e.g. MUL-123) appearing as a path segment
-// identifies a single resource. Resource-level granularity carries no
-// aggregate funnel signal and explodes $pageview volume — every distinct
-// issue / agent / project navigated to would fire its own billed event.
-const UUID_SEGMENT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const ISSUE_KEY_SEGMENT = /^[A-Z][A-Z0-9]*-\d+$/;
-
 /**
- * Normalize a raw path to its section route for $pageview reporting:
- * `/acme/issues/8d5c…` and `/acme/issues/MUL-12` both collapse to
- * `/acme/issues`. We strip the query string / hash (volatile filter / sort /
- * search state, and occasionally OAuth `code` / `state`) and drop any
- * resource-id segment after the first. The leading segment — the workspace
- * slug or a top-level route word like `login` — is always kept, so a slug
- * that happens to look like an id (`team-1`) is never dropped.
- *
- * Exported for unit testing; callers should go through capturePageview.
- */
-export function normalizePageviewPath(path?: string): string | undefined {
-  if (!path) return path ?? undefined;
-  const clean = path.split(/[?#]/)[0] ?? "";
-  const segments = clean.split("/").filter((s) => s.length > 0);
-  const kept = segments.filter(
-    (seg, i) => i === 0 || !(UUID_SEGMENT.test(seg) || ISSUE_KEY_SEGMENT.test(seg)),
-  );
-  return "/" + kept.join("/");
-}
-
-/**
- * Capture a page view. Call once per client-side navigation. We disable
- * posthog's automatic pageview tracking in init() so this module owns the
- * event shape.
- *
- * The path is normalized to its section route (see normalizePageviewPath) and
- * consecutive views of the same section are collapsed — both keep PostHog at
- * section granularity instead of paying for a billed event per resource and
- * per query-string change. Callers can therefore pass the raw path freely.
- *
- * Calls before initAnalytics() buffer the most-recent path so the first
- * pageview isn't dropped on slow /api/config fetches. Subsequent pre-init
- * pageviews overwrite the buffer; after init flushes, every navigation
- * captures synchronously as expected.
- */
-export function capturePageview(path?: string): void {
-  const normalized = normalizePageviewPath(path);
-  if (!initialized) {
-    pendingPageview = normalized ?? "";
-    return;
-  }
-  if (normalized && normalized === lastCapturedPath) return;
-  lastCapturedPath = normalized ?? null;
-  posthog.capture("$pageview", normalized ? { $current_url: normalized } : undefined);
-}
-
-/**
- * On the very first anonymous pageview in a browser session, read UTM +
+ * On the very first anonymous page load in a browser session, read UTM +
  * referrer and stash them in a cookie that the backend reads during signup.
  *
  * Never use raw `document.referrer` as attribution — it can leak OAuth

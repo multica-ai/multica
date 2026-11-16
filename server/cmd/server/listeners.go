@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,25 +13,118 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// internalOnlyPayloadKeys lists payload keys that exist purely for in-process
+// listeners and must never be serialized to a WebSocket client.
+//
+// `issue:updated` carries prev_description and prev_title so the in-process
+// listeners can diff against the new values: subscriber_listeners.go adds newly
+// @mentioned users, notification_listeners.go builds mention notifications, and
+// activity_listeners.go records the title change. Those all run on
+// bus.Subscribe, which Publish dispatches BEFORE the SubscribeAll forwarder
+// below, so removing the keys on the way out cannot affect them.
+//
+// No client reads either key — IssueUpdatedPayload in
+// packages/core/types/events.ts does not declare them. They reached the wire
+// only because the forwarder reuses the producer's payload map verbatim, which
+// meant every description autosave broadcast TWO full copies of the description
+// (the new one inside `issue`, plus prev_description) to every connection in the
+// workspace, including users who did not have the issue open. The DB write is
+// O(1); the fanout was O(workspace connections × description size) (MUL-5492).
+//
+// This is a table rather than an `if` on one event type because the bug was
+// structural, not a typo: the next large field added to a published payload
+// inherits the same cost silently. Keeping the list declarative puts the
+// internal/external payload boundary in one reviewable place.
+var internalOnlyPayloadKeys = map[string][]string{
+	protocol.EventIssueUpdated: {"prev_description", "prev_title"},
+	// task:failed error text is consumed synchronously by channel outbounds.
+	// It may contain provider/runtime detail that belongs in the originating
+	// chat transcript, not in the workspace-wide realtime fanout.
+	protocol.EventTaskFailed: {"error"},
+}
+
+// projectOutbound returns payload with the event type's internal-only keys
+// removed, ready to serialize for external consumers.
+//
+// The input map is never mutated. In-process listeners have already run by the
+// time this is called, but the producer still owns the map and a second
+// forwarder may yet read it, so mutating it in place would be a landmine.
+func projectOutbound(eventType string, payload any) any {
+	keys := internalOnlyPayloadKeys[eventType]
+	if len(keys) == 0 {
+		return payload
+	}
+	m, ok := payload.(map[string]any)
+	if !ok {
+		return payload
+	}
+	projected := make(map[string]any, len(m))
+	for k, v := range m {
+		projected[k] = v
+	}
+	for _, k := range keys {
+		delete(projected, k)
+	}
+	return projected
+}
+
+// isChatPrivateEvent reports whether e carries chat session content that only
+// the session's creator may receive. Every chat:* event qualifies, including
+// ones added later. Of the task events only task:message does: it streams the
+// agent's transcript. Chat-task lifecycle events (task:queued, task:completed,
+// ...) keep workspace fanout because every member's agent presence and
+// workload views depend on them; they carry ids and status, and task:failed
+// has its error text stripped by projectOutbound.
+func isChatPrivateEvent(e events.Event) bool {
+	if strings.HasPrefix(e.Type, "chat:") {
+		return true
+	}
+	return e.Type == protocol.EventTaskMessage && e.ChatSessionID != ""
+}
+
+// memberPrivateEvents never leave their member, so one published without
+// MemberPrivateUserID is dropped instead of reaching the workspace.
+var memberPrivateEvents = map[string]bool{
+	protocol.EventIssueViewPreferenceChanged: true,
+	protocol.EventPinCreated:                 true,
+	protocol.EventPinDeleted:                 true,
+	protocol.EventPinReordered:               true,
+}
+
 // registerListeners wires up event bus listeners for WS broadcasting.
 // Personal events (inbox, invites) are sent only to the target user via
-// SendToUser. All other events are broadcast to the workspace room.
+// SendToUser, chat content only to the chat session's creator, and
+// member-private events only to that member's connections to the workspace.
+// All other events are broadcast to the workspace room.
 //
 // The broadcaster parameter is intentionally typed as the realtime.Broadcaster
 // interface (not *realtime.Hub) so that this layer can later be swapped out
 // for a Redis-backed relay or a feature-flagged dual-write implementation
 // without touching any of the event listeners below. This is Phase 0 of the
 // horizontal-scaling plan tracked in MUL-1138.
-func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
+//
+// audience, when given, narrows events about private projects (MUL-8472) to
+// their members; see privateProjectAudience.
+func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...privateProjectAudience) {
+	var projectAudience privateProjectAudience
+	if len(audience) > 0 {
+		projectAudience = audience[0]
+	}
+
 	// Personal events should NOT be broadcast to the whole workspace.
 	personalEvents := map[string]bool{
 		protocol.EventInboxNew:           true,
 		protocol.EventInboxRead:          true,
 		protocol.EventInboxArchived:      true,
+		protocol.EventInboxUnarchived:    true,
+		protocol.EventInboxDeleted:       true,
 		protocol.EventInboxBatchRead:     true,
 		protocol.EventInboxBatchArchived: true,
+		protocol.EventInboxSnoozed:       true,
+		protocol.EventInboxUnsnoozed:     true,
 		protocol.EventInvitationCreated:  true,
 		protocol.EventInvitationRevoked:  true,
+		protocol.EventIssueUnreadChanged: true,
 	}
 
 	// Helper: marshal event and send to a specific user.
@@ -38,7 +132,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		if recipientID == "" {
 			return
 		}
-		data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID, "actor_type": e.ActorType})
+		data, err := json.Marshal(map[string]any{"type": e.Type, "payload": projectOutbound(e.Type, e.Payload), "actor_id": e.ActorID, "actor_type": e.ActorType})
 		if err != nil {
 			return
 		}
@@ -60,11 +154,29 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		sendToRecipient(b, e, recipientID)
 	})
 
-	// inbox:read, inbox:archived, inbox:batch-read, inbox:batch-archived
-	// — extract recipient from top-level payload
+	// inbox:snoozed — a snooze names its recipient at the top level; a row
+	// written into a snooze carries it on the nested item, like inbox:new.
+	bus.Subscribe(protocol.EventInboxSnoozed, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		recipientID, _ := payload["recipient_id"].(string)
+		if item, ok := payload["item"].(map[string]any); ok && recipientID == "" {
+			recipientID, _ = item["recipient_id"].(string)
+		}
+		sendToRecipient(b, e, recipientID)
+	})
+
+	// inbox:read, inbox:archived, inbox:unarchived, inbox:batch-read,
+	// inbox:batch-archived, issue_unread:changed — extract recipient from
+	// top-level payload
 	for _, eventType := range []string{
-		protocol.EventInboxRead, protocol.EventInboxArchived,
+		protocol.EventInboxRead, protocol.EventInboxArchived, protocol.EventInboxUnarchived,
+		protocol.EventInboxDeleted,
 		protocol.EventInboxBatchRead, protocol.EventInboxBatchArchived,
+		protocol.EventInboxUnsnoozed,
+		protocol.EventIssueUnreadChanged,
 	} {
 		bus.Subscribe(eventType, func(e events.Event) {
 			payload, ok := e.Payload.(map[string]any)
@@ -87,7 +199,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 			// Fallback for map encoding.
 			if invMap, ok := payload["invitation"].(map[string]any); ok {
 				if uid, _ := invMap["invitee_user_id"].(*string); uid != nil && *uid != "" {
-					data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID, "actor_type": e.ActorType})
+					data, err := json.Marshal(map[string]any{"type": e.Type, "payload": projectOutbound(e.Type, e.Payload), "actor_id": e.ActorID, "actor_type": e.ActorType})
 					if err != nil {
 						return
 					}
@@ -98,7 +210,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 			return
 		}
 		if inv.InviteeUserID != nil && *inv.InviteeUserID != "" {
-			data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID, "actor_type": e.ActorType})
+			data, err := json.Marshal(map[string]any{"type": e.Type, "payload": projectOutbound(e.Type, e.Payload), "actor_id": e.ActorID, "actor_type": e.ActorType})
 			if err != nil {
 				return
 			}
@@ -118,6 +230,30 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 			sendToRecipient(b, e, *uid)
 		}
 	})
+
+	// invitation:accepted / invitation:declined — also send to the invitee so
+	// their pending list updates. The actor is the invitee on every producer
+	// path, but they are usually NOT in the workspace room yet: a client binds
+	// its socket to the workspace it currently has open, so a user concluding
+	// an invitation with no workspace open (or a different one open) never
+	// receives the broadcast below and their stale pending row survives until
+	// restart (#8432). Pass excludeWorkspace so clients already in the room
+	// (reached via BroadcastToWorkspace in SubscribeAll) don't get it twice.
+	// invitation:revoked keeps its invitee_user_id routing above: its actor is
+	// the revoking admin, not the affected invitee.
+	for _, eventType := range []string{protocol.EventInvitationAccepted, protocol.EventInvitationDeclined} {
+		bus.Subscribe(eventType, func(e events.Event) {
+			if e.ActorID == "" {
+				return
+			}
+			data, err := json.Marshal(map[string]any{"type": e.Type, "payload": projectOutbound(e.Type, e.Payload), "actor_id": e.ActorID, "actor_type": e.ActorType})
+			if err != nil {
+				return
+			}
+			realtime.M.RecordEvent(e.Type)
+			b.SendToUser(e.ActorID, data, e.WorkspaceID)
+		})
+	}
 
 	// member:added — also send to the invited user so they discover the new workspace.
 	// Pass excludeWorkspace so clients already in the target room (reached via
@@ -139,7 +275,7 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		if userID == "" {
 			return
 		}
-		data, err := json.Marshal(map[string]any{"type": e.Type, "payload": e.Payload, "actor_id": e.ActorID, "actor_type": e.ActorType})
+		data, err := json.Marshal(map[string]any{"type": e.Type, "payload": projectOutbound(e.Type, e.Payload), "actor_id": e.ActorID, "actor_type": e.ActorType})
 		if err != nil {
 			return
 		}
@@ -154,9 +290,33 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 			return
 		}
 
+		// A chat session is creator-private: its events and its tasks'
+		// transcript go only to the creator's connections bound to the
+		// session's workspace. Not the whole user scope: a connection to
+		// another workspace is authorized against that workspace, so it would
+		// keep receiving this content after the creator is removed from this
+		// one. The scope is joined at connect time, so this needs no client
+		// subscribe frame. Without a known owner and workspace the event is
+		// dropped, never widened.
+		if isChatPrivateEvent(e) {
+			if e.ChatSessionOwnerID == "" || e.WorkspaceID == "" {
+				slog.Warn("realtime: dropping chat event without session owner",
+					"event_type", e.Type, "chat_session_id", e.ChatSessionID, "task_id", e.TaskID)
+				return
+			}
+			data, err := json.Marshal(map[string]any{"type": e.Type, "payload": projectOutbound(e.Type, e.Payload), "actor_id": e.ActorID, "actor_type": e.ActorType})
+			if err != nil {
+				slog.Error("failed to marshal event", "event_type", e.Type, "error", err)
+				return
+			}
+			realtime.M.RecordEvent(e.Type)
+			b.BroadcastToScope(realtime.ScopeWorkspaceMember, realtime.WorkspaceMemberScopeID(e.WorkspaceID, e.ChatSessionOwnerID), data)
+			return
+		}
+
 		msg := map[string]any{
 			"type":       e.Type,
-			"payload":    e.Payload,
+			"payload":    projectOutbound(e.Type, e.Payload),
 			"actor_id":   e.ActorID,
 			"actor_type": e.ActorType,
 		}
@@ -164,6 +324,33 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		if err != nil {
 			slog.Error("failed to marshal event", "event_type", e.Type, "error", err)
 			return
+		}
+
+		if e.MemberPrivateUserID != "" || memberPrivateEvents[e.Type] {
+			if e.MemberPrivateUserID == "" || e.WorkspaceID == "" {
+				slog.Warn("realtime: dropping member-private event without recipient", "event_type", e.Type)
+				return
+			}
+			realtime.M.RecordEvent(e.Type)
+			b.BroadcastToScope(realtime.ScopeWorkspaceMember, realtime.WorkspaceMemberScopeID(e.WorkspaceID, e.MemberPrivateUserID), data)
+			return
+		}
+
+		if projectAudience != nil && e.WorkspaceID != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), audienceResolveTimeout)
+			recipients, private, err := projectAudience.Audience(ctx, e)
+			cancel()
+			if err != nil {
+				logAudienceFailure(e, err)
+				return
+			}
+			if private {
+				realtime.M.RecordEvent(e.Type)
+				for _, userID := range recipients {
+					b.BroadcastToScope(realtime.ScopeWorkspaceMember, realtime.WorkspaceMemberScopeID(e.WorkspaceID, userID), data)
+				}
+				return
+			}
 		}
 
 		// Phase 1 (MUL-1138): the per-resource scope routing for high-frequency
@@ -176,11 +363,12 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		// every chat/task message on the floor, breaking the live chat
 		// timeline, chat unread badges, and pending-task UI.
 		//
-		// Until the client lands its scope-subscription PR, we keep
-		// task/chat events on workspace fanout (same behavior as before this
-		// PR). The `Event.TaskID` / `Event.ChatSessionID` hints are still
-		// populated by producers so that flipping the switch later is a
-		// one-line change here. See review on PR #1429 for context.
+		// Until the client lands its scope-subscription PR, task events stay
+		// on workspace fanout, except chat-task transcripts, which take the
+		// creator-only user-scope route above. The `Event.TaskID` /
+		// `Event.ChatSessionID` hints are still populated by producers so
+		// that flipping the switch later is a one-line change here. See
+		// review on PR #1429 for context.
 
 		if e.WorkspaceID != "" {
 			realtime.M.RecordEvent(e.Type)

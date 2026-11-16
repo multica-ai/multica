@@ -4,12 +4,24 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+type runtimeLocalSkillPendingWorkRecorder struct {
+	hints []string
+}
+
+func (r *runtimeLocalSkillPendingWorkRecorder) NotifyPendingWork(runtimeID, kind string) {
+	r.hints = append(r.hints, runtimeID+":"+kind)
+}
 
 func newRequestAsUser(userID, method, path string, body any) *http.Request {
 	var buf bytes.Buffer
@@ -119,11 +131,14 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 		"supported": true,
 		"skills": []map[string]any{
 			{
-				"key":         "review-helper",
-				"name":        "Review Helper",
+				"key":         "paper-desktop:review-helper",
+				"name":        "paper-desktop:review-helper",
 				"description": "Review PRs",
-				"source_path": "~/.claude/skills/review-helper",
+				"source_path": "~/.claude/plugins/cache/paper/skills/review-helper",
 				"provider":    "claude",
+				"root":        "plugin",
+				"plugin":      "paper-desktop@paper",
+				"can_disable": true,
 				"file_count":  2,
 			},
 		},
@@ -137,7 +152,7 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 		t.Fatalf("unmarshal report body: %v", err)
 	}
 
-	if err := store.Complete(ctx, req.ID, parsed.Skills, true); err != nil {
+	if err := store.Complete(ctx, req.ID, parsed.Skills, true, nil, false); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 	got, err := store.Get(ctx, req.ID)
@@ -150,11 +165,17 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 	if len(got.Skills) != 1 {
 		t.Fatalf("expected 1 skill, got %d", len(got.Skills))
 	}
-	if got.Skills[0].SourcePath != "~/.claude/skills/review-helper" {
+	if got.Skills[0].SourcePath != "~/.claude/plugins/cache/paper/skills/review-helper" {
 		t.Fatalf("source_path = %q", got.Skills[0].SourcePath)
+	}
+	if got.Skills[0].Root != "plugin" || got.Skills[0].Plugin != "paper-desktop@paper" {
+		t.Fatalf("plugin origin = %#v", got.Skills[0])
 	}
 	if got.Skills[0].FileCount != 2 {
 		t.Fatalf("file_count = %d", got.Skills[0].FileCount)
+	}
+	if !got.Skills[0].CanDisable {
+		t.Fatal("can_disable capability was not preserved")
 	}
 }
 
@@ -214,7 +235,146 @@ func TestInMemoryLocalSkillImportStore_TimesOutRunningRequests(t *testing.T) {
 	}
 }
 
-func TestInitiateListLocalSkills_RequiresRuntimeOwner(t *testing.T) {
+func TestFailLocalSkillImportInternalRedactsCause(t *testing.T) {
+	ctx := context.Background()
+	store := NewInMemoryLocalSkillImportStore()
+	req, err := store.Create(ctx, LocalSkillImportRequestInput{
+		RuntimeID: "runtime-xyz",
+		CreatorID: "user-1",
+		SkillKey:  "review-helper",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	h := Handler{LocalSkillImportStore: store}
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/daemon/local-skills/import/result", nil)
+	const leak = "postgres://secret@internal.example/skills"
+	h.failLocalSkillImportInternal(w, r, req.ID, "failed to create skill", errors.New(leak))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if strings.Contains(w.Body.String(), leak) {
+		t.Fatalf("daemon response leaked internal error: %s", w.Body.String())
+	}
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected stored import result")
+	}
+	if got.Error != "failed to create skill" {
+		t.Fatalf("stored error = %q, want stable public message", got.Error)
+	}
+	if strings.Contains(got.Error, leak) {
+		t.Fatalf("stored error leaked internal cause: %q", got.Error)
+	}
+}
+
+// Capability discovery (list + poll) is readable by workspace members only
+// after the runtime owner shares the machine with the workspace.
+func TestListLocalSkills_AllowsNonOwnerForPublicRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	memberUserID := createRuntimeLocalSkillTestMember(t, "member")
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent_runtime SET visibility = 'public' WHERE id = $1`, runtimeID); err != nil {
+		t.Fatalf("make runtime public: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := withURLParams(
+		newRequestAsUser(memberUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills", nil),
+		"runtimeId", runtimeID,
+	)
+
+	testHandler.InitiateListLocalSkills(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var initResp RuntimeLocalSkillListRequest
+	if err := json.NewDecoder(w.Body).Decode(&initResp); err != nil {
+		t.Fatalf("decode initiate response: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	pollReq := withURLParams(
+		newRequestAsUser(memberUserID, http.MethodGet, "/api/runtimes/"+runtimeID+"/local-skills/"+initResp.ID, nil),
+		"runtimeId", runtimeID,
+		"requestId", initResp.ID,
+	)
+
+	testHandler.GetLocalSkillListRequest(w, pollReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestInitiateListLocalSkills_WakesDaemon(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	recorder := &runtimeLocalSkillPendingWorkRecorder{}
+	h := *testHandler
+	h.DaemonPendingWork = recorder
+
+	w := httptest.NewRecorder()
+	req := withURLParams(
+		newRequestAsUser(testUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills", nil),
+		"runtimeId", runtimeID,
+	)
+
+	h.InitiateListLocalSkills(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	want := runtimeID + ":" + protocol.PendingWorkKindLocalSkills
+	if len(recorder.hints) != 1 || recorder.hints[0] != want {
+		t.Fatalf("pending-work hints = %v, want [%s]", recorder.hints, want)
+	}
+}
+
+func TestListLocalSkills_RejectsNonMember(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+
+	var outsiderID string
+	email := fmt.Sprintf("runtime-local-skills-outsider-%d@multica.ai", time.Now().UnixNano())
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO "user" (name, email)
+		VALUES ('Runtime Local Skills Outsider', $1)
+		RETURNING id
+	`, email).Scan(&outsiderID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, outsiderID)
+	})
+
+	w := httptest.NewRecorder()
+	req := withURLParams(
+		newRequestAsUser(outsiderID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills", nil),
+		"runtimeId", runtimeID,
+	)
+
+	testHandler.InitiateListLocalSkills(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestInitiateImportLocalSkill_RequiresRuntimeOwner(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -224,13 +384,58 @@ func TestInitiateListLocalSkills_RequiresRuntimeOwner(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := withURLParams(
-		newRequestAsUser(adminUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills", nil),
+		newRequestAsUser(adminUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
+			"skill_key": "review-helper",
+		}),
 		"runtimeId", runtimeID,
 	)
 
-	testHandler.InitiateListLocalSkills(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	testHandler.InitiateImportLocalSkill(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestInitiateImportLocalSkill_WakesDaemonAfterValidEnqueue(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	recorder := &runtimeLocalSkillPendingWorkRecorder{}
+	h := *testHandler
+	h.DaemonPendingWork = recorder
+
+	w := httptest.NewRecorder()
+	req := withURLParams(
+		newRequestAsUser(testUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
+			"skill_key": "review-helper",
+		}),
+		"runtimeId", runtimeID,
+	)
+
+	h.InitiateImportLocalSkill(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	want := runtimeID + ":" + protocol.PendingWorkKindLocalSkillImport
+	if len(recorder.hints) != 1 || recorder.hints[0] != want {
+		t.Fatalf("pending-work hints = %v, want [%s]", recorder.hints, want)
+	}
+
+	w = httptest.NewRecorder()
+	req = withURLParams(
+		newRequestAsUser(testUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
+			"skill_key": "",
+		}),
+		"runtimeId", runtimeID,
+	)
+	h.InitiateImportLocalSkill(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(recorder.hints) != 1 {
+		t.Fatalf("rejected enqueue must not send another hint, got %v", recorder.hints)
 	}
 }
 
@@ -258,8 +463,8 @@ func TestGetLocalSkillImportRequest_RequiresRuntimeOwner(t *testing.T) {
 	)
 
 	testHandler.GetLocalSkillImportRequest(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -290,9 +495,9 @@ func TestRuntimeLocalSkillImportFlow_EndToEnd(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	heartbeatReq := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+	heartbeatReq := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id": runtimeID,
-	}, testWorkspaceID, "runtime-local-skills-daemon")
+	})
 	testHandler.DaemonHeartbeat(w, heartbeatReq)
 	if w.Code != http.StatusOK {
 		t.Fatalf("DaemonHeartbeat: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -321,7 +526,7 @@ func TestRuntimeLocalSkillImportFlow_EndToEnd(t *testing.T) {
 
 	w = httptest.NewRecorder()
 	reportReq := withURLParams(
-		newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/local-skills/import/"+importReq.ID+"/result", map[string]any{
+		newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/local-skills/import/"+importReq.ID+"/result", map[string]any{
 			"status": "completed",
 			"skill": map[string]any{
 				"name":        "Original Review Helper",
@@ -336,7 +541,7 @@ func TestRuntimeLocalSkillImportFlow_EndToEnd(t *testing.T) {
 					},
 				},
 			},
-		}, testWorkspaceID, "runtime-local-skills-daemon"),
+		}),
 		"runtimeId", runtimeID,
 		"requestId", importReq.ID,
 	)
@@ -371,6 +576,12 @@ func TestRuntimeLocalSkillImportFlow_EndToEnd(t *testing.T) {
 	}
 	if completed.Skill.Description != "Imported description" {
 		t.Fatalf("imported description = %q", completed.Skill.Description)
+	}
+	if len(completed.Skill.Files) != 1 {
+		t.Fatalf("expected poll response to include 1 imported file, got %d", len(completed.Skill.Files))
+	}
+	if completed.Skill.Files[0].Path != "templates/check.md" || completed.Skill.Files[0].Content != "body" {
+		t.Fatalf("unexpected imported file in poll response: %+v", completed.Skill.Files[0])
 	}
 	if got := countSkillFiles(t, completed.Skill.ID); got != 1 {
 		t.Fatalf("expected 1 imported file, got %d", got)
@@ -408,10 +619,10 @@ func TestBatchImportViaHeartbeat(t *testing.T) {
 
 	// Single heartbeat should return all 5 via the plural field.
 	w := httptest.NewRecorder()
-	heartbeatReq := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+	heartbeatReq := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id":            runtimeID,
 		"supports_batch_import": true,
-	}, testWorkspaceID, "runtime-local-skills-daemon")
+	})
 	testHandler.DaemonHeartbeat(w, heartbeatReq)
 	if w.Code != http.StatusOK {
 		t.Fatalf("DaemonHeartbeat: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -457,10 +668,10 @@ func TestBatchImportViaHeartbeat(t *testing.T) {
 
 	// Second heartbeat should return nothing (all were claimed).
 	w = httptest.NewRecorder()
-	heartbeatReq2 := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+	heartbeatReq2 := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id":            runtimeID,
 		"supports_batch_import": true,
-	}, testWorkspaceID, "runtime-local-skills-daemon")
+	})
 	testHandler.DaemonHeartbeat(w, heartbeatReq2)
 	if w.Code != http.StatusOK {
 		t.Fatalf("DaemonHeartbeat: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -511,7 +722,7 @@ func TestReportLocalSkillImportResult_IgnoresTimedOutRequests(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	reportReq := withURLParams(
-		newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/local-skills/import/"+importReq.ID+"/result", map[string]any{
+		newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/local-skills/import/"+importReq.ID+"/result", map[string]any{
 			"status": "completed",
 			"skill": map[string]any{
 				"name":        "Original Review Helper",
@@ -520,7 +731,7 @@ func TestReportLocalSkillImportResult_IgnoresTimedOutRequests(t *testing.T) {
 				"source_path": "~/.claude/skills/review-helper",
 				"provider":    "claude",
 			},
-		}, testWorkspaceID, "runtime-local-skills-daemon"),
+		}),
 		"runtimeId", runtimeID,
 		"requestId", importReq.ID,
 	)

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { forwardRef, memo, useCallback, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   CircleHelp,
@@ -9,22 +9,20 @@ import {
   MessageSquare,
   Workflow,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
+import { Virtuoso, type ListProps } from "react-virtuoso";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { useQueries, useQuery } from "@tanstack/react-query";
-import type {
-  Agent,
-  AgentTask,
-  Issue,
-  TaskFailureReason,
-} from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { cn } from "@multica/ui/lib/utils";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import type { Agent, AgentTask } from "@multica/core/types";
 import {
-  type AgentActivity,
   agentTaskSnapshotOptions,
   agentTasksOptions,
   summarizeActivityWindow,
@@ -35,44 +33,92 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { AppLink } from "../../../navigation";
-import { TranscriptButton } from "../../../common/task-transcript";
+import { TranscriptButton, type TimelineItem } from "../../../common/task-transcript";
+import { VirtuosoSeed } from "../../../common/virtuoso-seed";
+import { AttributionBadge } from "../../../issues/components/attribution-badge";
+import {
+  ObjectSection,
+  ObjectSectionAction,
+  ObjectSectionCard,
+} from "../../../layout/object-page";
 import { taskStatusConfig } from "../../config";
-import { failureReasonLabel } from "./task-failure";
+import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
 
-const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
-// Recent work pagination: small initial cohort to keep the section
-// scannable, then "Show more" reveals 20 at a time. Tasks are already
-// fully cached client-side (one listAgentTasks for the whole agent), so
-// "more" is a pure state flip — zero extra fetches.
-const RECENT_INITIAL = 5;
+// Reveal cached rows in small batches and fetch another page only on demand.
+const RECENT_INITIAL = 10;
 const RECENT_PAGE = 20;
+const RECENT_ROW_HEIGHT = 41;
+const RECENT_SCROLL_SEEK = {
+  enter: (velocity: number) => Math.abs(velocity) > 2000,
+  exit: (velocity: number) => Math.abs(velocity) < 300,
+};
+const RecentWorkList = forwardRef<HTMLDivElement, ListProps>(function RecentWorkList(
+  { children, style, "data-testid": testId },
+  ref,
+) {
+  return (
+    <div ref={ref} style={style} data-testid={testId} className="divide-y">
+      {children}
+    </div>
+  );
+});
+const RECENT_LIST_COMPONENTS = {
+  List: RecentWorkList,
+  ScrollSeekPlaceholder: RecentWorkScrollPlaceholder,
+};
+const recentTaskKey = (_index: number, task: AgentTask) => task.id;
 
-interface ActivityTabProps {
-  agent: Agent;
-}
+// Placeholder rows shown while the lazily-loaded per-agent task list is
+// still in flight, so first paint is a skeleton rather than the "nothing
+// finished yet" empty state (which reads as a wrong answer).
+const RECENT_SKELETON_ROWS = 4;
+// Row actions are 22px for a pointer; on touch they need a fingertip-sized
+// target.
+const TOUCH_ACTION_CLASS = "[@media(hover:none)]:p-2";
 
 /**
- * Right-pane Activity tab on the agent detail page. Three sections framed
- * around the user's three diagnostic questions, in scan order:
+ * The agent page's two work sections, in scan order: Now (what is it doing
+ * this second?) and Recent work (what did it just finish?).
  *
- *   Now           — what's it doing right this second?
- *   Last 7 days   — how has it been doing in aggregate?
- *   Recent work   — what did it just finish?
- *
- * All three read from caches the rest of the page already fills (the
- * workspace task snapshot for "Now", per-agent task list for "Recent",
- * the workspace 7d activity buckets for the trend), so opening this tab
- * adds no extra fetches once the page is hydrated.
+ * "Now" reads the workspace task snapshot. Recent work loads bounded history
+ * pages on demand; opening the page never fetches all runs.
  */
-export function ActivityTab({ agent }: ActivityTabProps) {
+export function AgentWorkSections({
+  agent,
+  onViewAll,
+  scrollParent,
+}: {
+  agent: Agent;
+  scrollParent: HTMLElement | null;
+  /** Opens every issue assigned to this agent. */
+  onViewAll: () => void;
+}) {
   const wsId = useWorkspaceId();
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
-  const { data: agentTasks = [] } = useQuery(agentTasksOptions(wsId, agent.id));
-  const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
-  const activity = activityMap.get(agent.id);
+  // `isLoading` (pending + fetching, no cached data) is true only on the
+  // very first fetch. Once this cache is hydrated the section opens
+  // straight into data with no skeleton flash.
+  const {
+    data,
+    isLoading: isLoadingRecent,
+    hasNextPage,
+    fetchNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+  } = useInfiniteQuery(agentTasksOptions(wsId, agent.id));
+  const agentTasks = useMemo(() => {
+    const tasks = new Map<string, AgentTask>();
+    for (const page of data?.pages ?? []) {
+      for (const task of page.tasks) tasks.set(task.id, task);
+    }
+    return [...tasks.values()];
+  }, [data]);
+  const { byAgent: activityMap, loading: activityLoading } =
+    useWorkspaceActivityMap(wsId);
+  const weekRuns = summarizeActivityWindow(activityMap.get(agent.id), 7).totalRuns;
 
   const [recentDisplayLimit, setRecentDisplayLimit] = useState(RECENT_INITIAL);
 
@@ -83,14 +129,27 @@ export function ActivityTab({ agent }: ActivityTabProps) {
   const isWorkflowTask = (t: AgentTask) => !t.chat_session_id;
 
   const activeTasks = useMemo(() => {
-    return snapshot.filter(
-      (t) =>
-        t.agent_id === agent.id &&
-        isWorkflowTask(t) &&
-        (t.status === "running" ||
-          t.status === "queued" ||
-          t.status === "dispatched"),
-    );
+    const statusRank: Partial<Record<AgentTask["status"], number>> = {
+      running: 0,
+      dispatched: 1,
+      waiting_local_directory: 2,
+      queued: 3,
+    };
+    return snapshot
+      .filter(
+        (t) =>
+          t.agent_id === agent.id &&
+          isWorkflowTask(t) &&
+          (t.status === "running" ||
+            t.status === "queued" ||
+            t.status === "dispatched" ||
+            t.status === "waiting_local_directory"),
+      )
+      .sort(
+        (a, b) =>
+          (statusRank[a.status] ?? 99) - (statusRank[b.status] ?? 99) ||
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+      );
   }, [snapshot, agent.id]);
 
   // Most recent terminal tasks. Includes cancelled — users searching
@@ -117,274 +176,337 @@ export function ActivityTab({ agent }: ActivityTabProps) {
     () => recentTasksAll.slice(0, recentDisplayLimit),
     [recentTasksAll, recentDisplayLimit],
   );
-  const hasMoreRecent = recentTasksAll.length > recentTasks.length;
-
-  const avgDurationMs = useMemo(
-    () => deriveAvgDurationLast30d(agentTasks, Date.now()),
-    [agentTasks],
-  );
-
-  // Resolve issue identifiers + titles for any task we'll render. Going
-  // through `issueDetailOptions` is the same lookup the rest of the app
-  // uses, so the cache is shared and we don't pay for a duplicate request.
-  const displayedTasks = useMemo(
-    () => [...activeTasks, ...recentTasks],
-    [activeTasks, recentTasks],
-  );
-  const issueIds = useMemo(
-    () =>
-      Array.from(
-        new Set(displayedTasks.map((t) => t.issue_id).filter((id) => id !== "")),
-      ),
-    [displayedTasks],
-  );
-  const issueQueries = useQueries({
-    queries: issueIds.map((id) => issueDetailOptions(wsId, id)),
-  });
-  const issueMap = useMemo(() => {
-    const m = new Map<string, Issue>();
-    issueQueries.forEach((q, i) => {
-      const id = issueIds[i]!;
-      if (q.data) m.set(id, q.data);
-    });
-    return m;
-  }, [issueQueries, issueIds]);
+  const hasMoreRecent = recentTasksAll.length > recentTasks.length || hasNextPage;
 
   return (
-    <div className="flex flex-col gap-4 p-6">
-      <NowSection tasks={activeTasks} issueMap={issueMap} agent={agent} />
-      <Last30dSection activity={activity} avgDurationMs={avgDurationMs} />
+    <>
+      <NowSection tasks={activeTasks} agent={agent} />
       <RecentWorkSection
         tasks={recentTasks}
-        totalCount={recentTasksAll.length}
+        weekRuns={activityLoading ? null : weekRuns}
         hasMore={hasMoreRecent}
-        onShowMore={() =>
-          setRecentDisplayLimit((n) => n + RECENT_PAGE)
-        }
-        issueMap={issueMap}
+        loading={isLoadingRecent}
+        fetchingMore={isFetchingNextPage}
+        fetchMoreFailed={isFetchNextPageError}
+        onShowMore={() => {
+          if (recentDisplayLimit < recentTasksAll.length) {
+            setRecentDisplayLimit((n) => n + RECENT_PAGE);
+          } else if (hasNextPage && !isFetchingNextPage) {
+            void fetchNextPage({ cancelRefetch: false }).then((result) => {
+              if (!result.isFetchNextPageError) {
+                setRecentDisplayLimit((n) => n + RECENT_PAGE);
+              }
+            });
+          }
+        }}
+        onViewAll={onViewAll}
+        scrollParent={scrollParent}
         agent={agent}
+      />
+    </>
+  );
+}
+
+/** The 30-day performance numbers for the properties panel. Kept apart from
+ * the work sections so metrics never outrank current tasks or failures. */
+export function AgentPerformanceSummary({ agent }: { agent: Agent }) {
+  const { t } = useT("agents");
+  const wsId = useWorkspaceId();
+  const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
+  const activity = activityMap.get(agent.id);
+  const summary = summarizeActivityWindow(activity, 30);
+  const avgDurationMs = activity?.avgDurationMs ?? 0;
+
+  if (summary.totalRuns === 0) {
+    return (
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.tab_body.activity.empty_30d)}
+      </p>
+    );
+  }
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        <Metric
+          value={String(summary.totalRuns)}
+          label={t(($) => $.tab_body.activity.runs, {
+            count: summary.totalRuns,
+          })}
+        />
+        <Metric
+          value={<SuccessRate rate={summary.successRate} />}
+          label={t(($) => $.tab_body.activity.success_label)}
+        />
+        <Metric
+          value={avgDurationMs > 0 ? formatDurationMs(avgDurationMs) : "—"}
+          label={t(($) => $.tab_body.activity.avg_duration_label)}
+        />
+        <Metric
+          value={String(summary.totalFailed)}
+          label={t(($) => $.tab_body.activity.failed_label)}
+          destructive={summary.totalFailed > 0}
+        />
+      </div>
+      {summary.totalCancelled > 0 && (
+        <p className="mt-2 text-caption text-muted-foreground">
+          {t(($) => $.tab_body.activity.cancelled_count, {
+            count: summary.totalCancelled,
+          })}
+        </p>
+      )}
+      <Sparkline
+        buckets={summary.buckets}
+        width={250}
+        height={36}
+        className="mt-4 h-9 w-full"
       />
     </div>
   );
 }
 
+function Metric({
+  value,
+  label,
+  destructive = false,
+}: {
+  value: ReactNode;
+  label: string;
+  destructive?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <div
+        className={`text-title font-semibold tabular-nums ${
+          destructive ? "text-destructive" : "text-foreground"
+        }`}
+      >
+        {value}
+      </div>
+      <div className="truncate text-micro text-muted-foreground">{label}</div>
+    </div>
+  );
+}
+
+/** A success rate with the tooltip that says what it counts. */
+export function SuccessRate({
+  rate,
+  labelled = false,
+}: {
+  rate: number | null;
+  labelled?: boolean;
+}) {
+  const { t } = useT("agents");
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span tabIndex={0} />}>
+        {rate === null
+          ? "—"
+          : labelled
+            ? t(($) => $.tab_body.activity.success_pct, { percent: rate })
+            : `${rate}%`}
+      </TooltipTrigger>
+      <TooltipContent>
+        {rate === null
+          ? t(($) => $.tab_body.activity.success_unavailable)
+          : t(($) => $.tab_body.activity.success_hint)}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function NowSection({
   tasks,
-  issueMap,
   agent,
 }: {
   tasks: AgentTask[];
-  issueMap: Map<string, Issue>;
   agent: Agent;
 }) {
   const { t } = useT("agents");
   return (
-    <Section
+    <ObjectSection
       title={t(($) => $.tab_body.activity.section_now)}
-      subtitle={
-        tasks.length === 0
-          ? t(($) => $.tab_body.activity.subtitle_no_active)
-          : t(($) => $.tab_body.activity.subtitle_active, { count: tasks.length })
+      count={
+        tasks.length > 0
+          ? t(($) => $.sections.runs_count, { count: tasks.length })
+          : undefined
       }
     >
       {tasks.length === 0 ? (
-        <EmptyText>{t(($) => $.tab_body.activity.empty_now)}</EmptyText>
+        <p className="text-body text-muted-foreground">
+          {t(($) => $.tab_body.activity.empty_now)}
+        </p>
       ) : (
-        <TaskList
-          tasks={tasks}
-          issueMap={issueMap}
-          timeMode="active"
-          agent={agent}
-        />
+        <ObjectSectionCard>
+          {tasks.map((task) => (
+            <LiveTaskRow key={task.id} task={task} agent={agent} />
+          ))}
+        </ObjectSectionCard>
       )}
-    </Section>
-  );
-}
-
-function Last30dSection({
-  activity,
-  avgDurationMs,
-}: {
-  activity: AgentActivity | undefined;
-  avgDurationMs: number;
-}) {
-  const { t } = useT("agents");
-  const summary = summarizeActivityWindow(activity, 30);
-  const { totalRuns, totalFailed } = summary;
-  const successPct =
-    totalRuns > 0
-      ? Math.round(((totalRuns - totalFailed) / totalRuns) * 100)
-      : 100;
-
-  return (
-    <Section title={t(($) => $.tab_body.activity.section_last_30d)} subtitle={t(($) => $.tab_body.activity.subtitle_performance)}>
-      {totalRuns === 0 ? (
-        <EmptyText>{t(($) => $.tab_body.activity.empty_30d)}</EmptyText>
-      ) : (
-        <div className="flex items-end justify-between gap-5">
-          <div className="flex min-w-0 flex-col gap-1">
-            <div className="flex items-baseline gap-1.5">
-              <span className="text-3xl font-bold leading-none tabular-nums">
-                {totalRuns}
-              </span>
-              <span className="text-sm text-muted-foreground">
-                {t(($) => $.tab_body.activity.runs, { count: totalRuns })}
-              </span>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {t(($) => $.tab_body.activity.success_pct, { percent: successPct })}
-              {avgDurationMs > 0 && (
-                <>
-                  <Sep />
-                  <span>{t(($) => $.tab_body.activity.avg_duration, { value: formatDurationMs(avgDurationMs) })}</span>
-                </>
-              )}
-              {totalFailed > 0 && (
-                <>
-                  <Sep />
-                  <span className="text-destructive">
-                    {t(($) => $.tab_body.activity.failed_count, { count: totalFailed })}
-                  </span>
-                </>
-              )}
-            </div>
-          </div>
-          {/* Garnish, not hero — small enough that a sparse 30-day series
-              doesn't read as visually broken. Bottom-aligned with the
-              number so the dense end of the bars sits on the same
-              baseline as the digits. */}
-          <Sparkline
-            buckets={summary.buckets}
-            width={120}
-            height={32}
-            className="shrink-0"
-          />
-        </div>
-      )}
-    </Section>
+    </ObjectSection>
   );
 }
 
 function RecentWorkSection({
   tasks,
-  totalCount,
+  weekRuns,
   hasMore,
+  loading,
   onShowMore,
-  issueMap,
+  fetchingMore,
+  fetchMoreFailed,
+  onViewAll,
   agent,
+  scrollParent,
 }: {
+  scrollParent: HTMLElement | null;
   tasks: AgentTask[];
-  totalCount: number;
+  /** Runs in the last 7 days; `null` until the activity window has loaded. */
+  weekRuns: number | null;
   hasMore: boolean;
+  loading: boolean;
   onShowMore: () => void;
-  issueMap: Map<string, Issue>;
+  fetchingMore: boolean;
+  fetchMoreFailed: boolean;
+  onViewAll: () => void;
   agent: Agent;
 }) {
   const { t } = useT("agents");
-  const subtitle =
-    tasks.length === 0
-      ? t(($) => $.tab_body.activity.subtitle_no_recent)
-      : totalCount > tasks.length
-        ? t(($) => $.tab_body.activity.subtitle_recent_progress, { shown: tasks.length, total: totalCount })
-        : t(($) => $.tab_body.activity.subtitle_recent_latest, { count: tasks.length });
+  const [transcript, setTranscript] = useState<{
+    task: AgentTask;
+    items: TimelineItem[];
+    fromKeyboard: boolean;
+  } | null>(null);
+  const openTranscript = useCallback((task: AgentTask, items: TimelineItem[], fromKeyboard: boolean) => {
+    setTranscript({ task, items, fromKeyboard });
+  }, []);
+  const closeTranscript = useCallback((open: boolean) => {
+    if (!open) setTranscript(null);
+  }, []);
+  const renderRow = useCallback((_index: number, task: AgentTask) => (
+    <RecentTaskRow task={task} agentName={agent.name} onOpenTranscript={openTranscript} />
+  ), [agent.name, openTranscript]);
   return (
-    <Section title={t(($) => $.tab_body.activity.section_recent)} subtitle={subtitle}>
-      {tasks.length === 0 ? (
-        <EmptyText>{t(($) => $.tab_body.activity.empty_recent)}</EmptyText>
+    <ObjectSection
+      title={t(($) => $.tab_body.activity.section_recent)}
+      count={
+        weekRuns === null
+          ? undefined
+          : t(($) => $.sections.recent_this_week, { count: weekRuns })
+      }
+      action={
+        <ObjectSectionAction icon={ArrowUpRight} onClick={onViewAll}>
+          {t(($) => $.sections.view_all)}
+        </ObjectSectionAction>
+      }
+    >
+      {loading ? (
+        <RecentWorkSkeleton />
+      ) : tasks.length === 0 ? (
+        hasMore ? null : (
+          <p className="text-body text-muted-foreground">
+            {t(($) => $.tab_body.activity.empty_recent)}
+          </p>
+        )
       ) : (
-        <>
-          <TaskList
-            tasks={tasks}
-            issueMap={issueMap}
-            timeMode="completed"
-            agent={agent}
-          />
-          {hasMore && (
-            <button
-              type="button"
-              onClick={onShowMore}
-              className="mt-2 self-start rounded text-xs text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {t(($) => $.tab_body.activity.show_more)}
-            </button>
+        <ObjectSectionCard>
+          {scrollParent ? (
+            <Virtuoso
+              data={tasks}
+              customScrollParent={scrollParent}
+              defaultItemHeight={RECENT_ROW_HEIGHT}
+              initialItemCount={Math.min(RECENT_INITIAL, tasks.length)}
+              increaseViewportBy={200}
+              components={RECENT_LIST_COMPONENTS}
+              scrollSeekConfiguration={RECENT_SCROLL_SEEK}
+              computeItemKey={recentTaskKey}
+              itemContent={renderRow}
+            />
+          ) : (
+            <VirtuosoSeed
+              data={tasks}
+              count={RECENT_INITIAL}
+              estimatedItemHeight={RECENT_ROW_HEIGHT}
+              computeItemKey={recentTaskKey}
+              itemContent={renderRow}
+            />
           )}
-        </>
+        </ObjectSectionCard>
       )}
-    </Section>
+      {transcript && (
+        <TranscriptButton
+          task={transcript.task}
+          agentName={agent.name}
+          items={transcript.items}
+          renderButton={false}
+          open
+          finalFocus={transcript.fromKeyboard}
+          onOpenChange={closeTranscript}
+        />
+      )}
+      {!loading && hasMore && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={onShowMore}
+          disabled={fetchingMore}
+          aria-busy={fetchingMore}
+          className="text-muted-foreground"
+        >
+          {fetchMoreFailed ? t(($) => $.detail.try_again) : t(($) => $.tab_body.activity.show_more)}
+        </Button>
+      )}
+    </ObjectSection>
   );
 }
 
-function TaskList({
-  tasks,
-  issueMap,
-  timeMode,
-  agent,
-}: {
-  tasks: AgentTask[];
-  issueMap: Map<string, Issue>;
-  timeMode: "active" | "completed";
-  agent: Agent;
-}) {
+function RecentWorkScrollPlaceholder({ height }: { height: number }) {
   return (
-    <div className="space-y-1.5">
-      {tasks.map((task) => (
-        <TaskRow
-          key={task.id}
-          task={task}
-          issueMap={issueMap}
-          timeMode={timeMode}
-          agent={agent}
-        />
-      ))}
+    <div style={{ height }} aria-hidden="true" className="flex items-center gap-3 px-3">
+      <div className="size-4 shrink-0 rounded-full bg-muted" />
+      <div className="h-3 w-3/5 rounded-xs bg-muted" />
+      <div className="ml-auto h-3 w-24 rounded-xs bg-muted" />
     </div>
   );
 }
 
-function TaskRow({
-  task,
-  issueMap,
-  timeMode,
-  agent,
-}: {
-  task: AgentTask;
-  issueMap: Map<string, Issue>;
-  timeMode: "active" | "completed";
-  agent: Agent;
-}) {
+/**
+ * Loading placeholder for the Recent work list. Mirrors the card and the
+ * one-line row rhythm so the skeleton settles into the real rows without a
+ * layout jump. Widths are staggered per row so it reads as content rather
+ * than a solid block.
+ */
+function RecentWorkSkeleton() {
+  const titleWidths = ["w-3/5", "w-4/5", "w-1/2", "w-2/3"];
+  return (
+    <ObjectSectionCard className="bg-transparent">
+      <div aria-hidden="true" className="divide-y">
+        {Array.from({ length: RECENT_SKELETON_ROWS }).map((_, i) => (
+          <div key={i} className="flex h-10 items-center gap-3 px-3">
+            <Skeleton className="size-4 shrink-0 rounded-full" />
+            <Skeleton className={`h-3.5 ${titleWidths[i % titleWidths.length]}`} />
+            <Skeleton className="ml-auto h-3 w-20" />
+          </div>
+        ))}
+      </div>
+    </ObjectSectionCard>
+  );
+}
+
+type AgentsT = ReturnType<typeof useT<"agents">>["t"];
+type TimeAgoFn = (dateStr: string) => string;
+
+/** What every task row shows, whichever section it sits in. */
+function useTaskRowModel(task: AgentTask) {
   const { t } = useT("agents");
-  const timeAgo = useTimeAgo();
-  const paths = useWorkspacePaths();
-  const [cancelling, setCancelling] = useState(false);
   const cfg = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
-  const Icon = cfg.icon;
   const hasIssue = task.issue_id !== "";
-  const issue = hasIssue ? issueMap.get(task.issue_id) : undefined;
-  const isRunning = task.status === "running";
-  // Queued tasks have no messages yet — hiding the transcript button avoids
-  // a guaranteed "No execution data recorded." dialog open.
-  const showTranscript = task.status !== "queued";
-  // Cancel only makes sense for the three active states. Terminal rows
-  // (completed / failed / cancelled) hide the button entirely.
-  const showCancel =
-    timeMode === "active" &&
-    (task.status === "queued" ||
-      task.status === "dispatched" ||
-      task.status === "running");
-
-  const handleCancel = async () => {
-    if (cancelling) return;
-    setCancelling(true);
-    try {
-      await api.cancelTaskById(task.id);
-      // No manual invalidate needed — the task:cancelled WS event flows
-      // through useRealtimeSync's `task:` prefix path which already
-      // invalidates snapshot + per-agent + per-issue task lists.
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.activity.cancel_failed_toast));
-      setCancelling(false);
-    }
-  };
-
+  const wsId = useWorkspaceId();
+  const { data: issue } = useQuery({
+    ...issueDetailOptions(wsId, task.issue_id),
+    enabled: hasIssue,
+  });
   const isTerminalStatus =
     task.status === "completed" ||
     task.status === "failed" ||
@@ -400,7 +522,6 @@ function TaskRow({
           ? t(($) => $.tab_body.activity.source_autopilot_run)
           : t(($) => $.tab_body.activity.source_untracked)
     : null;
-
   const SourceIcon = hasIssue
     ? Hash
     : task.chat_session_id
@@ -415,130 +536,164 @@ function TaskRow({
       : task.autopilot_run_id
         ? t(($) => $.tab_body.activity.source_autopilot)
         : t(($) => $.tab_body.activity.source_untracked);
-
-  const timeText =
-    timeMode === "active"
-      ? activeTaskTimeText(task, t, timeAgo)
-      : task.completed_at
-        ? timeAgo(task.completed_at)
-        : "—";
-
+  const title =
+    issue?.title ??
+    (hasIssue
+      ? t(($) => $.tab_body.activity.issue_short_fallback, { prefix: task.issue_id.slice(0, 8) })
+      : (sourceFallback ?? t(($) => $.tab_body.activity.source_untracked)));
   // Failure reason. The back-end emits "" on non-failed tasks (omitempty
-  // strips it on the wire) so the truthy guard is the right shape; the
-  // cast is safe because the back-end only emits one of the enum values.
+  // strips it on the wire) so the truthy guard is the right shape.
+  // failureReasonLabel takes the raw open string because the taxonomy grows,
+  // so there is no enum to cast to. Cancelled rows get a label only when the
+  // SERVER cancelled them for a persisted reason (worktree claim gate,
+  // preserved-work delivery); a user's own cancel stays a plain "Cancelled".
   const failureLabel =
-    task.status === "failed" && task.failure_reason
-      ? failureReasonLabel[task.failure_reason as TaskFailureReason]
-      : null;
+    task.status === "failed"
+      ? failureReasonLabel(task.failure_reason, t)
+      : cancelReasonLabel(task, t);
+  const statusLabel = cancellationActorLabel(task, t) ?? taskStatusLabel(task.status, t);
+  return {
+    cfg,
+    hasIssue,
+    issue,
+    title,
+    SourceIcon,
+    sourceLabel,
+    sourceFallback,
+    failureLabel,
+    statusLabel,
+  };
+}
 
-  // Only show duration for terminal rows. An active row's duration is
-  // inferred from the timeText already ("Started 2m ago") and adding a
-  // second time bubble next to it just clutters the line.
-  let durationText: string | null = null;
-  if (timeMode === "completed" && task.started_at && task.completed_at) {
-    const dur =
-      new Date(task.completed_at).getTime() -
-      new Date(task.started_at).getTime();
-    if (dur > 0) durationText = formatDurationMs(dur);
+/** The task title; hovering it says why the task ran. */
+function TaskTitle({ task, title }: { task: AgentTask; title: string }) {
+  const { t } = useT("agents");
+  if (!task.trigger_summary) {
+    return <span className="min-w-0 truncate text-body">{title}</span>;
   }
+  // The snapshot lets the row stay anchored on issue.title while the user
+  // can still dwell to see the trigger context — the same pattern as GitHub
+  // Actions surfacing the commit message on hover.
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<span className="min-w-0 truncate text-body">{title}</span>}
+      />
+      <TooltipContent className="max-w-md">
+        <div className="text-micro font-medium uppercase tracking-wider text-muted-foreground">
+          {t(($) => $.tab_body.activity.triggered_by)}
+        </div>
+        <div className="mt-0.5 whitespace-pre-wrap text-caption">
+          {task.trigger_summary}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
-  const rowClass = `group flex items-center gap-3 rounded-md border px-3 py-2.5 ${
-    isRunning ? "border-brand/40 bg-brand/5" : ""
-  }`;
+function OpenIssueIconLink({ issueId }: { issueId: string }) {
+  const { t } = useT("agents");
+  const paths = useWorkspacePaths();
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<AppLink href={paths.issueDetail(issueId)} />}
+        aria-label={t(($) => $.tab_body.activity.open_issue_aria)}
+        className={`flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground ${TOUCH_ACTION_CLASS}`}
+      >
+        <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+      </TooltipTrigger>
+      <TooltipContent>{t(($) => $.tab_body.activity.open_issue_tooltip)}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+// The rows are intentionally non-clickable so neither destination is
+// privileged — issue detail and transcript are equally valid follow-ups.
+// focus-within keeps the action slot reachable for keyboard users; touch
+// screens have no hover, so there the slot stays visible.
+const HOVER_ACTIONS_CLASS =
+  "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100";
+
+/** A run in progress: what it is working on, for how long, and a way in. */
+function LiveTaskRow({
+  task,
+  agent,
+}: {
+  task: AgentTask;
+  agent: Agent;
+}) {
+  const { t } = useT("agents");
+  const timeAgo = useTimeAgo();
+  const paths = useWorkspacePaths();
+  const [cancelling, setCancelling] = useState(false);
+  const { cfg, hasIssue, issue, title, SourceIcon, sourceLabel, sourceFallback, statusLabel } =
+    useTaskRowModel(task);
+  const Icon = cfg.icon;
+  const isRunning = task.status === "running";
+  // Queued tasks have no messages yet — hiding the transcript button avoids
+  // a guaranteed "No execution data recorded." dialog open.
+  const showTranscript = task.status !== "queued";
+  const showCancel =
+    task.status === "queued" ||
+    task.status === "dispatched" ||
+    task.status === "running";
+
+  const handleCancel = async () => {
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await api.cancelTaskById(task.id);
+      // No manual invalidate needed — the task:cancelled WS event flows
+      // through useRealtimeSync's `task:` prefix path which already
+      // invalidates snapshot + per-agent + per-issue task lists.
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.tab_body.activity.cancel_failed_toast));
+      setCancelling(false);
+    }
+  };
 
   return (
-    <div className={rowClass}>
-      <Icon
-        className={`h-4 w-4 shrink-0 ${cfg.color} ${
-          isRunning ? "animate-spin" : ""
-        }`}
-      />
+    <div className="group flex items-center gap-3 px-3 py-2.5">
+      <span
+        className={cn(
+          "flex size-8 shrink-0 items-center justify-center rounded-md",
+          isRunning ? "bg-brand/10" : "bg-muted",
+        )}
+      >
+        <Icon
+          className={cn(
+            "size-4",
+            cfg.color,
+            isRunning && "animate-spin motion-reduce:animate-none",
+          )}
+          aria-hidden="true"
+        />
+      </span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <SourceIcon
-            className="h-3 w-3 shrink-0 text-muted-foreground/70"
-            aria-label={sourceLabel}
-          />
-          {issue && (
-            <span className="shrink-0 font-mono text-xs text-muted-foreground">
-              {issue.identifier}
-            </span>
-          )}
-          {task.trigger_summary ? (
-            // Hover surfaces "why this task ran" — the snapshot lets the
-            // agent-side row stay anchored on issue.title (the
-            // identification axis here) while still letting the user
-            // dwell to see the trigger context. Same pattern as
-            // GitHub Actions surfacing the commit message on hover.
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="truncate text-sm">
-                    {issue?.title ??
-                      (hasIssue
-                        ? t(($) => $.tab_body.activity.issue_short_fallback, { prefix: task.issue_id.slice(0, 8) })
-                        : (sourceFallback ?? t(($) => $.tab_body.activity.source_untracked)))}
-                  </span>
-                }
-              />
-              <TooltipContent className="max-w-md">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
-                  {t(($) => $.tab_body.activity.triggered_by)}
-                </div>
-                <div className="mt-0.5 whitespace-pre-wrap text-xs">
-                  {task.trigger_summary}
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            <span className="truncate text-sm">
-              {issue?.title ??
-                (hasIssue
-                  ? t(($) => $.tab_body.activity.issue_short_fallback, { prefix: task.issue_id.slice(0, 8) })
-                  : (sourceFallback ?? t(($) => $.tab_body.activity.source_untracked)))}
-            </span>
-          )}
+        <div className="flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
+          <SourceIcon className="size-3 shrink-0 text-faint-foreground" aria-label={sourceLabel} />
+          <span className={cn("shrink-0", issue && "font-mono")}>
+            {issue?.identifier ?? sourceFallback ?? sourceLabel}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span className={cn("truncate", cfg.color)}>{statusLabel}</span>
         </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-          <span>{timeText}</span>
-          {durationText && (
-            <>
-              <Sep />
-              <span>{durationText}</span>
-            </>
-          )}
-          {failureLabel && (
-            <>
-              <Sep />
-              <span className="text-destructive">{failureLabel}</span>
-            </>
-          )}
+        <div className="flex min-w-0">
+          <TaskTitle task={task} title={title} />
         </div>
       </div>
-
-      {/* Hover-only actions. The row is intentionally non-clickable so
-          neither destination is privileged — issue detail and transcript
-          are equally valid follow-ups. focus-within keeps the slot
-          reachable for keyboard users. */}
-      <div className="ml-2 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
-        {hasIssue && (
-          <Tooltip>
-            <TooltipTrigger
-              render={<AppLink href={paths.issueDetail(task.issue_id)} />}
-              aria-label={t(($) => $.tab_body.activity.open_issue_aria)}
-              className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-            >
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </TooltipTrigger>
-            <TooltipContent>{t(($) => $.tab_body.activity.open_issue_tooltip)}</TooltipContent>
-          </Tooltip>
-        )}
+      <span className="hidden shrink-0 text-caption text-muted-foreground sm:inline">
+        {activeTaskTimeText(task, t, timeAgo)}
+      </span>
+      <div className={HOVER_ACTIONS_CLASS}>
         {showTranscript && (
           <TranscriptButton
             task={task}
             agentName={agent.name}
             isLive={isRunning}
             title={t(($) => $.tab_body.activity.transcript_tooltip)}
+            className={TOUCH_ACTION_CLASS}
           />
         )}
         {showCancel && (
@@ -552,9 +707,9 @@ function TaskRow({
                   aria-label={t(($) => $.tab_body.activity.cancel_task_aria)}
                 />
               }
-              className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50"
+              className={`flex items-center justify-center rounded-xs p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:cursor-not-allowed disabled:opacity-50 ${TOUCH_ACTION_CLASS}`}
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3.5 w-3.5" aria-hidden="true" />
             </TooltipTrigger>
             <TooltipContent>
               {cancelling ? t(($) => $.tab_body.activity.cancelling_tooltip) : t(($) => $.tab_body.activity.cancel_task_tooltip)}
@@ -562,45 +717,120 @@ function TaskRow({
           </Tooltip>
         )}
       </div>
+      {hasIssue && (
+        <Button
+          variant="outline"
+          size="sm"
+          render={<AppLink href={paths.issueDetail(task.issue_id)} />}
+          nativeButton={false}
+        >
+          {t(($) => $.sections.open)}
+        </Button>
+      )}
     </div>
   );
 }
 
-function Section({
-  title,
-  subtitle,
-  children,
+/** A finished run on one line: outcome, what it was, and when. */
+const RecentTaskRow = memo(function RecentTaskRow({
+  task,
+  agentName,
+  onOpenTranscript,
 }: {
-  title: string;
-  subtitle: string;
-  children: ReactNode;
+  task: AgentTask;
+  agentName: string;
+  onOpenTranscript: (task: AgentTask, items: TimelineItem[], fromKeyboard: boolean) => void;
 }) {
-  return (
-    <section className="flex flex-col gap-3 rounded-lg border bg-background p-5">
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {title}
-        </h3>
-        <span className="text-[11px] text-muted-foreground/70">{subtitle}</span>
-      </div>
-      {children}
-    </section>
-  );
-}
+  const { t } = useT("agents");
+  const timeAgo = useTimeAgo();
+  const { cfg, hasIssue, issue, title, SourceIcon, sourceLabel, failureLabel, statusLabel } =
+    useTaskRowModel(task);
+  const Icon = cfg.icon;
 
-function EmptyText({ children }: { children: ReactNode }) {
-  return <p className="text-xs italic text-muted-foreground/60">{children}</p>;
-}
+  let durationText: string | null = null;
+  if (task.started_at && task.completed_at) {
+    const dur =
+      new Date(task.completed_at).getTime() -
+      new Date(task.started_at).getTime();
+    if (dur > 0) durationText = formatDurationMs(dur);
+  }
+
+  return (
+    <div className="group flex min-h-10 items-center gap-3 px-3 py-2 transition-colors hover:bg-accent/40">
+      <Icon className={cn("size-4 shrink-0", cfg.color)} aria-hidden="true" />
+      {issue ? (
+        <span className="shrink-0 font-mono text-caption text-muted-foreground">
+          {issue.identifier}
+        </span>
+      ) : (
+        <SourceIcon className="size-3 shrink-0 text-faint-foreground" aria-label={sourceLabel} />
+      )}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <TaskTitle task={task} title={title} />
+        {/* The localized reason is the whole user-facing explanation here;
+            the raw `task.error` (untranslated, with absolute paths, #7411)
+            lives in the transcript's Run details instead. */}
+        {failureLabel && (
+          <span className="hidden shrink-0 text-caption text-destructive sm:inline">
+            {failureLabel}
+          </span>
+        )}
+      </div>
+      {/* Accountable member (MUL-4302 §9): whose behalf this run is on. */}
+      {task.attribution?.initiator && (
+        <AttributionBadge attribution={task.attribution} variant="avatar" />
+      )}
+      <span className="shrink-0 text-caption text-muted-foreground">
+        <span className={cfg.color}>{statusLabel}</span>
+        <Sep />
+        {task.completed_at ? timeAgo(task.completed_at) : "—"}
+        {durationText && (
+          <span className="hidden sm:inline">
+            <Sep />
+            {durationText}
+          </span>
+        )}
+      </span>
+      <div className={HOVER_ACTIONS_CLASS}>
+        {hasIssue && <OpenIssueIconLink issueId={task.issue_id} />}
+        <TranscriptButton
+          task={task}
+          agentName={agentName}
+          isLive={false}
+          onOpenTranscript={(items, fromKeyboard) => onOpenTranscript(task, items, fromKeyboard)}
+          title={t(($) => $.tab_body.activity.transcript_tooltip)}
+          className={TOUCH_ACTION_CLASS}
+        />
+      </div>
+    </div>
+  );
+});
 
 function Sep() {
   // mx-1 puts visible whitespace around the dot; without it inline JSX
-  // collapses neighbouring tokens to "100% success·avg 30s" which reads
-  // as "successdotavg" at a glance.
-  return <span className="mx-1 text-muted-foreground/40">·</span>;
+  // collapses neighbouring tokens into one word at a glance.
+  return <span className="mx-1 text-faint-foreground">·</span>;
 }
 
-type AgentsT = ReturnType<typeof useT<"agents">>["t"];
-type TimeAgoFn = (dateStr: string) => string;
+function taskStatusLabel(status: AgentTask["status"], t: AgentsT): string {
+  switch (status) {
+    case "queued":
+    case "deferred":
+      return t(($) => $.tab_body.activity.status.queued);
+    case "dispatched":
+      return t(($) => $.tab_body.activity.status.dispatched);
+    case "waiting_local_directory":
+      return t(($) => $.tab_body.activity.status.waiting_local_directory);
+    case "running":
+      return t(($) => $.tab_body.activity.status.running);
+    case "completed":
+      return t(($) => $.tab_body.activity.status.completed);
+    case "failed":
+      return t(($) => $.tab_body.activity.status.failed);
+    case "cancelled":
+      return t(($) => $.tab_body.activity.status.cancelled);
+  }
+}
 
 function activeTaskTimeText(task: AgentTask, t: AgentsT, timeAgo: TimeAgoFn): string {
   if (task.status === "running" && task.started_at) {
@@ -610,32 +840,6 @@ function activeTaskTimeText(task: AgentTask, t: AgentsT, timeAgo: TimeAgoFn): st
     return t(($) => $.tab_body.activity.dispatched_prefix, { when: timeAgo(task.dispatched_at) });
   }
   return t(($) => $.tab_body.activity.queued_prefix, { when: timeAgo(task.created_at) });
-}
-
-/**
- * Average wall-clock duration of completed/failed tasks whose completion
- * lands in the last 30 days. Pure function so callers can pass a
- * deterministic `now` in tests.
- */
-export function deriveAvgDurationLast30d(
-  tasks: readonly AgentTask[],
-  now: number,
-): number {
-  let sum = 0;
-  let count = 0;
-  for (const t of tasks) {
-    if (!t.completed_at || !t.started_at) continue;
-    const completedAt = new Date(t.completed_at).getTime();
-    if (Number.isNaN(completedAt)) continue;
-    if (now - completedAt > THIRTY_DAYS_MS) continue;
-    const startedAt = new Date(t.started_at).getTime();
-    const dur = completedAt - startedAt;
-    if (Number.isFinite(dur) && dur > 0) {
-      sum += dur;
-      count += 1;
-    }
-  }
-  return count > 0 ? Math.round(sum / count) : 0;
 }
 
 /**

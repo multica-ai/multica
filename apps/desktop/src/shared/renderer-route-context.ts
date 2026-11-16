@@ -2,11 +2,15 @@ export const RENDERER_ROUTE_CONTEXT_CHANNEL = "renderer:route-context";
 
 export type RendererRouteSurface = "login" | "overlay" | "tab";
 
+// This context exists only to be attached to a freeze/crash report, and those
+// reports leave the machine. Every field here must therefore be safe to ship:
+// route TEMPLATES (`/:slug/issues/:id`), never a workspace slug, tab id, or any
+// other raw identifier. Keeping the raw values out at the source is what makes
+// the egress side impossible to get wrong.
 export type RendererRouteContextInput = {
   surface: RendererRouteSurface;
+  /** Bucketed route template. Must not contain slugs or resource ids. */
   path: string;
-  workspaceSlug?: string;
-  tabId?: string;
 };
 
 export type RendererRouteContext = RendererRouteContextInput & {
@@ -27,14 +31,11 @@ export function sanitizeRendererRouteContext(
   const path = sanitizeString(input.path);
   if (!path) return null;
 
-  const workspaceSlug = sanitizeString(input.workspaceSlug);
-  const tabId = sanitizeString(input.tabId);
-
+  // Explicit construction, not a spread of `input`: an unknown key sent by a
+  // renderer (a stale build, a future field) must never survive into a report.
   return {
     surface: input.surface,
     path,
-    ...(workspaceSlug ? { workspaceSlug } : {}),
-    ...(tabId ? { tabId } : {}),
     reportedAt: reportedAt.toISOString(),
   };
 }

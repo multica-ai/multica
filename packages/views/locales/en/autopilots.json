@@ -1,8 +1,6 @@
 {
   "page": {
-    "title": "Autopilot",
     "new_autopilot": "New autopilot",
-    "start_blank": "Start from scratch",
     "table": {
       "name": "Name",
       "agent": "Agent",
@@ -16,18 +14,15 @@
       "created": "Created"
     },
     "last_run_empty": "--",
-    "empty": {
-      "title": "No autopilots yet",
-      "hint": "Schedule recurring tasks for your AI agents. Pick a template or start from scratch."
-    },
-    "scope_all": "All",
     "no_matches": "No automations match",
     "retry": "Retry"
   },
   "status": {
     "active": "Active",
     "paused": "Paused",
-    "archived": "Archived"
+    "paused_runtime_required": "Paused — the assignee needs a runtime",
+    "archived": "Archived",
+    "paused_project_archived": "Paused — its project is archived"
   },
   "execution_mode": {
     "create_issue": "Create Issue",
@@ -67,26 +62,48 @@
   },
   "detail": {
     "not_found": "Autopilot not found",
+    "not_found_description": "It may have been deleted or you may not have access.",
+    "back_to_list": "All autopilots",
     "pause_aria": "Pause autopilot",
     "activate_aria": "Activate autopilot",
+    "paused_runtime_required": "Paused because the assignee lost its runtime. Bind a runtime, then reactivate this autopilot.",
+    "bind_runtime": "Bind runtime",
     "edit": "Edit",
     "run_now": "Run now",
     "running": "Running...",
     "toast_triggered": "Autopilot triggered",
     "toast_trigger_failed": "Failed to trigger autopilot",
-    "section_properties": "Properties",
+    "run_blocked_invocation_not_allowed": "Not triggered — you don't have permission to use this autopilot's agent",
+    "run_blocked_runtime_offline": "Not triggered — the agent's runtime is offline",
+    "run_blocked_agent_runtime_required": "Not triggered — the agent has no runtime; bind one to run it",
+    "run_blocked_runtime_access_denied": "Not triggered — the agent can't run on its private runtime; make it public or rebind/copy the agent",
+    "run_blocked_target_unavailable": "Not triggered — the agent is unavailable",
+    "run_blocked_attribution": "Not triggered — the run couldn't be attributed to a responsible member",
+    "run_blocked_already_active": "Not triggered — a recent run already covers this",
+    "run_blocked_quota_exceeded": "Not triggered — the run limit for this period has been reached",
+    "run_blocked_issue_limit_reached": "Not triggered — the workspace has reached its issue limit",
+    "run_blocked_generic": "Not triggered — the run was blocked",
     "section_triggers": "Triggers",
-    "section_run_history": "Run History",
-    "section_danger": "Danger Zone",
+    "section_run_history": "Run history",
     "field_agent": "Agent",
     "field_created_by": "Created by",
-    "field_output_mode": "Output Mode",
+    "field_output_mode": "Output mode",
     "field_project": "Project",
     "no_project": "No project",
     "project_unavailable": "Project unavailable",
     "field_prompt": "Prompt",
     "field_subscribers": "Subscribers",
     "field_subscribers_none": "None",
+    "no_prompt": "No prompt yet.",
+    "copy_link": "Copy link",
+    "link_copied": "Link copied",
+    "link_copy_failed": "Couldn't copy the link",
+    "open_project": "Open project",
+    "summary": {
+      "create_issue": "{{agent}} creates an issue each run",
+      "run_only": "{{agent}} runs it without creating an issue",
+      "with_trigger": "{{trigger}} · {{action}}"
+    },
     "add_trigger": "Add trigger",
     "no_triggers": "No triggers configured. Add a schedule to run automatically.",
     "no_runs": "No runs yet. Click \"Run now\" to trigger manually.",
@@ -99,7 +116,22 @@
       "cancel": "Cancel",
       "confirm": "Delete",
       "deleting": "Deleting..."
-    }
+    },
+    "paused_project_archived": "Paused because its project was archived. Restore the project, then reactivate this autopilot."
+  },
+  "access": {
+    "title": "Manage access",
+    "description": "Members you add can edit, run, and manage this autopilot's triggers and webhooks.",
+    "current_label": "With access",
+    "add": "Add member",
+    "search_placeholder": "Search members…",
+    "no_results": "No members found",
+    "remove_tooltip": "Remove access",
+    "empty": "No one has been granted access yet.",
+    "toast_granted": "Access granted",
+    "toast_revoked": "Access removed",
+    "toast_failed": "Couldn't update access",
+    "owner_note": "The creator and workspace admins always have access."
   },
   "run_status": {
     "issue_created": "Issue Created",
@@ -117,6 +149,8 @@
   "run": {
     "issue_linked": "Issue linked",
     "view_log": "View execution log",
+    "stop": "Stop run",
+    "stop_failed": "Could not stop the run.",
     "skipped_group": {
       "label": "Skipped",
       "summary": "{{count}} skipped runs"
@@ -143,9 +177,13 @@
     "deprecated_badge": "Deprecated",
     "next_label": "Next: {{date}}",
     "webhook_url_label": "Webhook URL",
+    "show_url": "Show URL",
+    "hide_url": "Hide URL",
+    "hidden_url_aria": "Webhook URL hidden — click to show",
     "copy_url": "Copy URL",
     "url_copied": "Webhook URL copied",
     "url_copy_failed": "Failed to copy",
+    "edit_schedule": "Edit schedule",
     "rotate_url": "Rotate URL",
     "rotate_confirm_title": "Rotate webhook URL",
     "rotate_confirm_description": "The current URL will stop working immediately. Any external systems calling it must be updated with the new URL. Continue?",
@@ -165,7 +203,7 @@
     }
   },
   "deliveries": {
-    "section_title": "Webhook Deliveries",
+    "section_title": "Webhook deliveries",
     "empty": "No webhook deliveries yet. Send a POST to the webhook URL to see entries here.",
     "row": {
       "attempts": "{{count}}× attempts",
@@ -189,6 +227,8 @@
       "received_at": "Received",
       "last_attempt_at": "Last attempt",
       "attempt_count": "Attempts",
+      "dispatch_attempts": "Dispatch attempts",
+      "available_at": "Next dispatch",
       "response_status": "Response",
       "dedupe_key": "Dedupe key",
       "dedupe_source": "Dedupe source",
@@ -223,12 +263,22 @@
     "toast_added_webhook": "Webhook trigger added",
     "toast_add_failed": "Failed to add trigger"
   },
+  "edit_trigger_dialog": {
+    "title": "Edit schedule",
+    "label_field": "Label (optional)",
+    "label_placeholder": "e.g. Weekday morning",
+    "enabled_label": "Enabled",
+    "submit": "Save",
+    "submitting": "Saving...",
+    "toast_updated": "Schedule updated",
+    "toast_update_failed": "Failed to update schedule"
+  },
   "dialog": {
     "sr_create": "New Autopilot",
     "sr_edit": "Edit Autopilot",
     "header_create": "New autopilot",
     "header_edit": "Edit autopilot",
-    "subtitle": "A recurring AI task",
+    "subtitle": "Recurring AI work",
     "expand": "Expand",
     "collapse": "Collapse",
     "close": "Close",
@@ -255,6 +305,7 @@
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
     "section_project": "Project",
+    "project_hint": "Also sets where runs execute — the project's repository or local directory",
     "no_project": "No project",
     "section_output_mode": "Output mode",
     "section_subscribers": "Subscribers",
@@ -279,9 +330,14 @@
     "event_filter_docs_link_label": "Learn how event filters work",
     "event_filter_event_placeholder": "e.g. workflow_run",
     "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_add": "Add",
+    "event_filter_remove_label": "Remove filter",
     "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
-    "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
-    "next_run_label": "Next run:",
+    "schedule_multiple_notice": "This autopilot has {{count}} schedules. Close this dialog and edit each one under Triggers below.",
+    "schedule_empty": "No schedule — this autopilot only runs when triggered manually.",
+    "schedule_add": "Add schedule",
+    "error_title_required": "Enter a name for this autopilot.",
+    "error_assignee_required": "Choose the agent or squad that will run this autopilot.",
     "output_modes": {
       "create_issue": {
         "label": "Create issue",
@@ -291,32 +347,20 @@
         "label": "Run only",
         "description": "Silent run, no issue created"
       }
-    },
-    "frequency_long": {
-      "hourly": "Every hour",
-      "daily": "Every day",
-      "weekdays": "Every weekday",
-      "weekly": "Every week",
-      "custom": "Custom cron"
-    },
-    "days": {
-      "sunday": "Sunday",
-      "monday": "Monday",
-      "tuesday": "Tuesday",
-      "wednesday": "Wednesday",
-      "thursday": "Thursday",
-      "friday": "Friday",
-      "saturday": "Saturday"
     }
   },
-  "trigger_config": {
-    "frequencies": {
-      "hourly": "Hourly",
-      "daily": "Daily",
-      "weekdays": "Weekdays",
-      "weekly": "Days",
-      "custom": "Custom"
-    },
+  "schedule_editor": {
+    "time_label": "Time",
+    "time_at": "At a time",
+    "time_every": "At an interval",
+    "every_prefix": "Every",
+    "unit_hours": "hours",
+    "unit_minutes": "minutes",
+    "days_label": "Days",
+    "days_every": "Every day",
+    "days_weekly": "Days of week",
+    "days_monthly": "Day of month",
+    "monthly_short_month_hint": "Months without day {{day}} are skipped.",
     "days_short": {
       "sun": "Sun",
       "mon": "Mon",
@@ -326,32 +370,69 @@
       "fri": "Fri",
       "sat": "Sat"
     },
-    "cron_label": "Cron Expression",
-    "cron_hint": "Standard 5-field cron (min hour dom month dow)",
-    "minute_label": "Minute",
-    "time_label": "Time",
     "timezone_label": "Timezone",
-    "days_label": "Days",
-    "summary": {
-      "hourly": "Hourly · :{{min}}",
-      "daily": "Daily {{time}}",
-      "weekdays": "Weekdays {{time}}",
-      "weekly": "{{days}} {{time}}",
-      "custom": "Custom cron",
-      "no_days": "—"
-    },
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "click to edit",
+    "cron_hint": "Standard 5-field cron (min hour dom month dow)",
+    "cron_invalid": "This cron expression isn't valid.",
+    "timezone_invalid": "This timezone isn't recognized by the server.",
+    "advanced_hint": "This expression uses features the visual editor can't represent. Edit the cron text directly, or simplify it to re-enable the controls.",
+    "advanced_unverified": "The server couldn't be reached to check this expression, so the controls stay off. Make sure the cron text is right before saving.",
+    "advanced_checking": "Checking this expression with the server. The controls stay off until it answers.",
+    "next_runs_label": "Next runs",
+    "next_in": "in {{countdown}}",
+    "preview_unavailable": "Next runs unavailable right now.",
+    "no_upcoming_runs": "This expression has no upcoming runs.",
     "describe": {
-      "hourly": "Runs every hour at :{{min}}",
-      "daily": "Runs daily at {{time}} {{offset}}",
-      "weekdays": "Runs weekdays at {{time}} {{offset}}",
-      "weekly": "Runs every {{days}} at {{time}} {{offset}}",
-      "custom": "Custom schedule: {{cron}}"
+      "days_every": "Every day",
+      "days_monthly": "Day {{day}} of the month",
+      "days_long": {
+        "sun": "Sun",
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat"
+      },
+      "days_range": "{{from}}–{{to}}",
+      "days_join": ", ",
+      "time_at": "At {{time}}",
+      "time_every_hour": "Every hour at :{{minute}}",
+      "time_every_hours": "Every {{interval}} hours at :{{minute}}",
+      "time_every_hour_window": "Every hour",
+      "time_every_hours_window": "Every {{interval}} hours",
+      "time_every_minute": "Every minute",
+      "time_every_minutes": "Every {{interval}} minutes",
+      "window": "{{from}}–{{to}}"
     },
     "countdown": {
-      "days_hours": "{{days}}d {{hours}}h",
+      "days_hours": "{{days}}d {{hours}}h {{minutes}}m",
       "hours_minutes": "{{hours}}h {{minutes}}m",
       "minutes": "{{minutes}}m",
       "less_than_minute": "<1m"
+    },
+    "a11y": {
+      "fixed_hour": "Hour",
+      "fixed_minute": "Minute",
+      "interval": "Interval",
+      "interval_unit": "Interval unit",
+      "window_start_hour": "Window start hour",
+      "window_start_minute": "Window start minute",
+      "window_end_hour": "Window end hour",
+      "window_end_minute": "Window end minute",
+      "day_pattern": "Day pattern",
+      "day_of_month": "Day of month",
+      "timezone": "Timezone",
+      "days_full": {
+        "sun": "Sunday",
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday"
+      }
     }
   },
   "agent_picker": {
@@ -359,35 +440,24 @@
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
     "agents_group": "Agents",
-    "squads_group": "Squads"
+    "squads_group": "Squads",
+    "agent_runtime_required": "Bind a runtime before selecting this agent",
+    "squad_runtime_required": "Bind a runtime to this squad's leader before selecting it"
   },
   "timezone_picker": {
     "search_placeholder": "Search timezone..."
   },
   "toolbar": {
-    "result_count_title": "Matching automations / all automations",
-    "filter_label": "Filter",
-    "filter_active_count_one": "{{count}} filter",
-    "filter_active_count_other": "{{count}} filters",
-    "clear_filters": "Clear filters",
     "section_assignee": "Assignee",
     "section_mode": "Mode",
     "section_trigger": "Trigger",
-    "section_creator": "Created by",
-    "display": "Display",
-    "sort_by": "Sort by",
-    "direction_asc": "Ascending",
-    "direction_desc": "Descending",
-    "section_columns": "Columns"
+    "section_creator": "Created by"
   },
   "actions": {
     "row_menu": "Automation actions",
     "pause": "Pause",
     "resume": "Resume",
     "delete": "Delete",
-    "selected_one": "{{count}} selected",
-    "selected_other": "{{count}} selected",
-    "clear_selection": "Clear selection",
     "delete_dialog": {
       "title": "Delete automation?",
       "description_one": "This will permanently delete \"{{name}}\" and its run history.",
@@ -397,5 +467,112 @@
       "confirm": "Delete permanently",
       "deleting": "Deleting…"
     }
+  },
+  "wakeups": {
+    "title": "Issue wakeups",
+    "issue": "Issue",
+    "trigger": "Trigger",
+    "enabled": "Enabled",
+    "all_triggers": "All triggers",
+    "event": "Event",
+    "at": "One-time",
+    "recurring": "Recurring",
+    "all_agents": "All agents",
+    "running": "Running",
+    "active_runs": "{{count}} active runs",
+    "issue_closed": "Issue closed",
+    "read_only": "Only the creator or a workspace admin can manage this wakeup",
+    "select_row": "Select {{issue}}, {{agent}}",
+    "select_page": "Select all enabled wakeups",
+    "load_error": "Could not load wakeups",
+    "loading": "Loading wakeups…",
+    "disable_selected": "Turn off selected",
+    "confirm_title": "Turn off {{count}} wakeups?",
+    "confirm_body": "Future wakeups will stop. Runs still queued and not handed to an agent will be withdrawn. Dispatched runs will continue; stop them from the execution log.",
+    "cancel": "Cancel",
+    "confirm": "Turn off",
+    "disabling": "Turning off…",
+    "batch_result": "Turned off: {{succeeded}}. Failed: {{failed}}.",
+    "scopes": {
+      "active": "Waiting or executing",
+      "all": "All wakeups",
+      "disabled": "Turned off",
+      "ended": "Ended",
+      "paused": "Paused"
+    },
+    "target_agent": "Wake agent",
+    "empty_filtered": "No matching wakeups",
+    "batch_success": "Turned off {{count}} wakeup rules",
+    "batch_partial": "Turned off {{succeeded}}; {{failed}} failed. Failed items remain selected for retry.",
+    "source": "Source",
+    "sources": {
+      "all": "All sources",
+      "member": "Members",
+      "agent": "Agents",
+      "system": "System"
+    },
+    "runs_7d": "Runs (7 days)",
+    "ends": "Ends",
+    "until_issue_ends": "Until the issue ends",
+    "fires_once": "Triggers once",
+    "assignee_target": "Assignee · {{name}}",
+    "no_target": "No agent assignee",
+    "banner_one": "{{count}} wakeup was paused automatically: {{issue}} “{{condition}}” — {{reason}}",
+    "banner_other": "{{count}} wakeups were paused automatically. Latest: {{issue}} “{{condition}}” — {{reason}}",
+    "banner_view": "View",
+    "create": "New wakeup",
+    "create_pick_issue": "Choose the issue to add a wakeup to",
+    "create_pick_issue_description": "The wakeup belongs to this issue and ends with it.",
+    "intro": {
+      "title": "Bring agents back at the right moment",
+      "description": "Wakeups live on issues: when a PR merges, someone replies, or the time comes, the agent comes back to pick up the work. When the issue ends, its wakeups stop.",
+      "slides": {
+        "event": {
+          "title": "Wait for something to happen",
+          "description": "No need to keep an agent spinning while it waits. When the condition is met, Multica wakes it up."
+        },
+        "time": {
+          "title": "Or pick a time",
+          "description": "A one-time wakeup suits \"check again tomorrow afternoon\"; a recurring one suits a daily check."
+        },
+        "ends": {
+          "title": "Stops when the issue ends",
+          "description": "Wakeups belong to their issue. Once it's done or cancelled they turn off, so no stray rules are left behind."
+        }
+      },
+      "art": {
+        "issue_inbox": "Empty state for inbox groups",
+        "issue_board": "Resizable board columns",
+        "issue_paste": "Paste images into comments",
+        "reply": "\"The PR is merged. Updating the docs and closing the issue.\"",
+        "event_examples": "PR merged, new comment"
+      }
+    },
+    "defaults": {
+      "title": "When sub-issues finish",
+      "description": "Wakes the parent's assignee when a stage finishes and a later stage is waiting, and once more when every sub-issue is closed. A member assignee gets an inbox notification instead.",
+      "badge": "Workspace default",
+      "enabled": "On by default",
+      "instruction": "Default instruction",
+      "instruction_hint": "Sent to the woken agent. Leave empty to use the built-in instruction below.",
+      "instruction_placeholder": "Leave empty to use the built-in instruction",
+      "builtin": "Built-in instruction",
+      "instruction_invalid": "Keep the instruction within 4,000 bytes.",
+      "save": "Save",
+      "saving": "Saving…",
+      "save_error": "Could not save the default.",
+      "customized_one": "{{count}} open issue has its own setting and ignores this default.",
+      "customized_other": "{{count}} open issues have their own setting and ignore this default.",
+      "admin_only": "Only owners and admins can change these defaults.",
+      "load_error": "Could not load wakeup defaults.",
+      "edit_instruction": "Edit default instruction",
+      "view_instruction": "View default instruction"
+    }
+  },
+  "intro": {
+    "label": "Autopilot",
+    "title": "Let agents start work on their own",
+    "description": "Set a schedule or a webhook. Each time it fires, Multica creates an issue for an agent, or runs the agent directly. Pick a template and adjust it.",
+    "templates": "Start from a template"
   }
 }

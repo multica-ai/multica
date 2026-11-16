@@ -48,7 +48,7 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 
-	createIssue := func(title, assigneeType, assigneeID string, position float64) string {
+	createIssue := func(title, assigneeType, assigneeID string, position float64, startDate *time.Time, stage *int32) string {
 		t.Helper()
 		var number int32
 		if err := testPool.QueryRow(ctx, `
@@ -68,11 +68,11 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 			INSERT INTO issue (
 				workspace_id, title, description, status, priority,
 				assignee_type, assignee_id, creator_type, creator_id,
-				position, number
+				position, number, start_date, stage
 			)
-			VALUES ($1, $2, NULL, 'todo', 'none', $3, $4, 'member', $5, $6, $7)
+			VALUES ($1, $2, NULL, 'todo', 'none', $3, $4, 'member', $5, $6, $7, $8, $9)
 			RETURNING id
-		`, testWorkspaceID, title, assigneeType, assigneeID, testUserID, position, number).Scan(&id); err != nil {
+		`, testWorkspaceID, title, assigneeType, assigneeID, testUserID, position, number, startDate, stage).Scan(&id); err != nil {
 			t.Fatalf("create issue %q: %v", title, err)
 		}
 		t.Cleanup(func() {
@@ -81,10 +81,12 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 		return id
 	}
 
-	createIssue("Grouped member one", "member", assigneeID, 1)
-	createIssue("Grouped member two", "member", assigneeID, 2)
-	createIssue("Grouped member three", "member", assigneeID, 3)
-	createIssue("Grouped agent one", "agent", agentID, 1)
+	stageTwo := int32(2)
+	startDate := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	createIssue("Grouped member one", "member", assigneeID, 1, &startDate, &stageTwo)
+	createIssue("Grouped member two", "member", assigneeID, 2, nil, nil)
+	createIssue("Grouped member three", "member", assigneeID, 3, nil, nil)
+	createIssue("Grouped agent one", "agent", agentID, 1, nil, nil)
 
 	path := fmt.Sprintf(
 		"/api/issues/grouped?workspace_id=%s&group_by=assignee&statuses=todo&limit=2&assignee_filters=member:%s,agent:%s",
@@ -119,6 +121,12 @@ func TestListGroupedIssuesAssigneePaginatesPerGroup(t *testing.T) {
 	}
 	if memberGroup.Issues[0].Title != "Grouped member one" || memberGroup.Issues[1].Title != "Grouped member two" {
 		t.Fatalf("member group order mismatch: %#v", memberGroup.Issues)
+	}
+	if memberGroup.Issues[0].Stage == nil || *memberGroup.Issues[0].Stage != stageTwo {
+		t.Fatalf("member group first issue stage = %#v, want %d", memberGroup.Issues[0].Stage, stageTwo)
+	}
+	if memberGroup.Issues[0].StartDate == nil || *memberGroup.Issues[0].StartDate != "2026-03-01" {
+		t.Fatalf("member group first issue start_date = %#v, want 2026-03-01", memberGroup.Issues[0].StartDate)
 	}
 
 	agentGroup, ok := groups[agentGroupID]

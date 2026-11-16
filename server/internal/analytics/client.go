@@ -1,15 +1,9 @@
-// Package analytics ships product telemetry events to an external analytics
-// backend (PostHog). Events feed the acquisition → activation → expansion
-// funnel — see docs/analytics.md for the event contract.
+// Package analytics provides a buffered PostHog client.
+// Product events go through metrics.RecordEvent; current server events are
+// metrics-only. The client remains available for non-metrics-only events.
 //
-// Design:
-//   - Capture is non-blocking. Request handlers must never wait on analytics
-//     network I/O, so we enqueue into a bounded channel and a background
-//     worker flushes to PostHog in batches.
-//   - When the queue is full events are dropped (and counted). A broken
-//     analytics backend must never degrade the product.
-//   - When POSTHOG_API_KEY is empty the package runs a no-op client, which
-//     keeps local dev and self-hosted instances friction-free.
+// Capture never blocks request handlers: a bounded queue drops excess events,
+// and a worker sends batches. Empty POSTHOG_API_KEY selects a no-op client.
 package analytics
 
 import (

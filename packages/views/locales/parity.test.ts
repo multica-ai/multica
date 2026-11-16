@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
@@ -40,7 +41,7 @@ function flattenKeys(obj: unknown, prefix = ""): string[] {
 }
 
 function normalizePlural(key: string): string {
-  return key.replace(/_(one|other)$/, "_count");
+  return key.replace(/_(one|few|many|other)$/, "_count");
 }
 
 function keySet(bundle: Record<string, unknown>): Set<string> {
@@ -83,5 +84,74 @@ describe("locale bundle parity", () => {
         expect(extra).toEqual([]);
       });
     }
+  }
+});
+
+// Dead plural-key guard: a locale whose CLDR plural rules have no `one`
+// category (e.g. ja/ko/zh-Hans) resolves only `_other`, so any `_one` key in
+// it is dead weight i18next never renders. Left unchecked these accumulate and
+// hide bugs — a missing `_other` silently falls back while the orphan `_one`
+// looks like coverage. i18next resolves plurals via Intl.PluralRules, so we
+// gate on the same source of truth.
+describe("dead plural-key guard", () => {
+  for (const locale of translatedLocales) {
+    const categories = new Intl.PluralRules(locale).resolvedOptions()
+      .pluralCategories;
+    if (categories.includes("one")) continue;
+
+    const bundle = RESOURCES[locale as keyof typeof RESOURCES];
+    it(`${locale} ships no dead _one keys (plural categories: ${categories.join("/")})`, () => {
+      const offenders = Object.keys(bundle).flatMap((ns) =>
+        flattenKeys(bundle[ns])
+          .filter((key) => key.endsWith("_one"))
+          .map((key) => `${ns}:${key}`),
+      );
+      expect(offenders).toEqual([]);
+    });
+  }
+});
+
+// Missing plural-form guard: the mirror of the check above. i18next picks the
+// suffix from Intl.PluralRules, so a plural set without a category the locale
+// needs (e.g. ru `_few` for 2–4, `_many` for 5–20) does not fall back to the
+// locale's `_other` — it falls back to the English string. Parity cannot catch
+// this because it normalizes every suffix away.
+describe("missing plural-form guard", () => {
+  for (const locale of translatedLocales) {
+    // Only categories that everyday counts reach: fr `many` exists in CLDR but
+    // fires only for millions, so requiring it would be noise.
+    const rules = new Intl.PluralRules(locale);
+    const categories = [
+      ...new Set(
+        [...Array.from({ length: 1001 }, (_, n) => n), 1.5].map((n) =>
+          rules.select(n),
+        ),
+      ),
+    ].sort();
+
+    const bundle = RESOURCES[locale as keyof typeof RESOURCES];
+    it(`${locale} plural sets cover every category (${categories.join("/")})`, () => {
+      const offenders = Object.keys(bundle).flatMap((ns) => {
+        const keys = new Set(flattenKeys(bundle[ns]));
+        const bases = new Set(
+          [...keys]
+            .filter((key) => /_(zero|one|two|few|many|other)$/.test(key))
+            .map((key) => key.replace(/_(zero|one|two|few|many|other)$/, "")),
+        );
+        // EN may omit `_one` when the UI handles 1 separately. Russian still
+        // needs it for counts such as 21 and 31.
+        const enKeys = new Set(flattenKeys(en[ns] ?? {}));
+        return [...bases].flatMap((base) =>
+          categories
+            .filter(
+              (category) =>
+                locale === "ru" || category !== "one" || enKeys.has(`${base}_one`),
+            )
+            .filter((category) => !keys.has(`${base}_${category}`))
+            .map((category) => `${ns}:${base}_${category}`),
+        );
+      });
+      expect(offenders).toEqual([]);
+    });
   }
 });

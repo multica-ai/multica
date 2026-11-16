@@ -104,16 +104,17 @@ func (s *BindingTokenService) Mint(ctx context.Context, workspaceID, installatio
 	hash := hashToken(raw)
 	expiresAt := s.now().Add(BindingTokenTTL)
 
-	if _, err := s.queries.CreateLarkBindingToken(ctx, CreateBindingTokenParams{
+	row, err := s.queries.CreateLarkBindingToken(ctx, CreateBindingTokenParams{
 		TokenHash:      hash,
 		WorkspaceID:    workspaceID,
 		InstallationID: installationID,
 		ChannelUserID:  string(openID),
 		ExpiresAt:      pgtype.Timestamptz{Time: expiresAt, Valid: true},
-	}); err != nil {
+	})
+	if err != nil {
 		return BindingToken{}, fmt.Errorf("persist token: %w", err)
 	}
-	return BindingToken{Raw: raw, ExpiresAt: expiresAt}, nil
+	return BindingToken{Raw: raw, ExpiresAt: row.ExpiresAt.Time}, nil
 }
 
 // RedeemAndBind atomically consumes a raw token and writes the

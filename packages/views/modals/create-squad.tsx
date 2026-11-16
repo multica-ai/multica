@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, UserPlus, X } from "lucide-react";
+import { ChevronDown, UserPlus, X } from "@multica/ui/icons";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -20,7 +20,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from "@multica/ui/components/ui/dialog";
 import {
   Popover,
@@ -30,11 +29,12 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { toast } from "sonner";
 
 import { useNavigation } from "../navigation";
 import { ActorAvatar } from "../common/actor-avatar";
-import { AvatarPicker } from "../agents/components/avatar-picker";
+import { AvatarUploadControl } from "../common/avatar-upload-control";
 import { CharCounter } from "../agents/components/char-counter";
 import {
   PickerEmpty,
@@ -142,25 +142,28 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-2xl !h-[85vh]">
+      <DialogContent className="p-0 gap-0 flex flex-col overflow-hidden !top-1/2 !left-1/2 !-translate-x-1/2 !-translate-y-1/2 !w-full !max-w-2xl !h-[85%]">
         <DialogHeader className="border-b px-5 py-3 space-y-0">
-          <DialogTitle className="text-base font-semibold">
+          <DialogTitle className="text-title-sm font-semibold">
             {t(($) => $.create_squad.title)}
           </DialogTitle>
-          <DialogDescription className="mt-1 text-xs">
-            {t(($) => $.create_squad.description)}
-          </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-4 min-w-0">
-            {/* Identity row mirrors CreateAgentDialog so the two creates read
-                as siblings — avatar (left) + name/description stack (right). */}
+            {/* Identity row: avatar (left) + name/description stack (right). */}
             <div className="flex items-start gap-4">
-              <AvatarPicker value={avatarUrl} onChange={setAvatarUrl} size={64} />
+              <AvatarUploadControl
+                variant="squad"
+                value={avatarUrl}
+                name={name}
+                size={64}
+                onUploaded={setAvatarUrl}
+                onClear={() => setAvatarUrl(null)}
+              />
               <div className="flex-1 min-w-0 space-y-3">
                 <div>
-                  <Label className="text-xs text-muted-foreground">
+                  <Label className="text-caption text-muted-foreground">
                     {t(($) => $.create_squad.name_label)}
                   </Label>
                   <Input
@@ -178,7 +181,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
                 </div>
 
                 <div>
-                  <Label className="text-xs text-muted-foreground">
+                  <Label className="text-caption text-muted-foreground">
                     {t(($) => $.create_squad.description_label)}
                   </Label>
                   <Input
@@ -217,7 +220,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        {/* Inline footer — see CreateAgentDialog: shadcn DialogFooter applies
+        {/* Inline footer: shadcn DialogFooter applies
             negative margins assuming a padded DialogContent. Our content is
             p-0, so a plain bordered row is the right call. */}
         <div className="flex items-center justify-end gap-2 border-t bg-background px-5 py-3">
@@ -235,11 +238,9 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // LeaderPicker — single-select agent picker, grouped "My Agents" first then
 // "Workspace Agents". Empty workspaces render a disabled trigger that points
 // the user at agent creation.
-// ---------------------------------------------------------------------------
 function LeaderPicker({
   agents,
   currentUserId,
@@ -278,15 +279,15 @@ function LeaderPicker({
 
   return (
     <div>
-      <Label className="text-xs text-muted-foreground">
+      <Label className="text-caption text-muted-foreground">
         {t(($) => $.create_squad.leader_label)}
       </Label>
-      <p className="mt-0.5 mb-1.5 text-xs text-muted-foreground">
+      <p className="mt-0.5 mb-1.5 text-caption text-muted-foreground">
         {t(($) => $.create_squad.leader_hint)}
       </p>
 
       {noAgents ? (
-        <div className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2 rounded-lg border border-dashed bg-muted/30 px-3 py-2.5 text-body text-muted-foreground">
           {t(($) => $.create_squad.no_agents)}
         </div>
       ) : (
@@ -297,9 +298,9 @@ function LeaderPicker({
             if (!v) setFilter("");
           }}
         >
-          <PopoverTrigger className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted">
+          <PopoverTrigger className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left text-body transition-colors hover:bg-muted">
             {selected ? (
-              <ActorAvatar actorType="agent" actorId={selected.id} size={20} showStatusDot />
+              <ActorAvatar actorType="agent" actorId={selected.id} size="sm" showStatusDot />
             ) : (
               <UserPlus className="h-4 w-4 shrink-0 text-muted-foreground" />
             )}
@@ -308,7 +309,7 @@ function LeaderPicker({
                 {selected?.name ?? t(($) => $.create_squad.leader_placeholder)}
               </div>
               {selected?.description && (
-                <div className="truncate text-xs text-muted-foreground">
+                <div className="truncate text-caption text-muted-foreground">
                   {selected.description}
                 </div>
               )}
@@ -327,7 +328,7 @@ function LeaderPicker({
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder={t(($) => $.create_squad.picker_search_placeholder)}
-                className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+                className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
               />
             </div>
             <div className="max-h-72 overflow-y-auto p-1">
@@ -343,7 +344,7 @@ function LeaderPicker({
                         setFilter("");
                       }}
                     >
-                      <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                      <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                       <span className="truncate">{a.name}</span>
                     </PickerItem>
                   ))}
@@ -361,7 +362,7 @@ function LeaderPicker({
                         setFilter("");
                       }}
                     >
-                      <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                      <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                       <span className="truncate">{a.name}</span>
                     </PickerItem>
                   ))}
@@ -378,12 +379,10 @@ function LeaderPicker({
   );
 }
 
-// ---------------------------------------------------------------------------
 // AdditionalMembersPicker — multi-select agents + workspace members. The
 // trigger shows up to 3 chips inline; the rest collapse into "+N". The popup
 // stays open while the user toggles selections so they can pick multiple
 // without re-opening it.
-// ---------------------------------------------------------------------------
 function AdditionalMembersPicker({
   agents,
   members,
@@ -449,13 +448,13 @@ function AdditionalMembersPicker({
 
   return (
     <div>
-      <Label className="text-xs text-muted-foreground">
+      <Label className="text-caption text-muted-foreground">
         {t(($) => $.create_squad.members_label)}{" "}
-        <span className="text-muted-foreground/60">
+        <span className="text-muted-foreground">
           {t(($) => $.create_squad.members_optional)}
         </span>
       </Label>
-      <p className="mt-0.5 mb-1.5 text-xs text-muted-foreground">
+      <p className="mt-0.5 mb-1.5 text-caption text-muted-foreground">
         {t(($) => $.create_squad.members_hint)}
       </p>
 
@@ -471,6 +470,7 @@ function AdditionalMembersPicker({
             nesting interactive content. Base UI injects click/keyboard/ARIA
             wiring into the rendered element. */}
         <PopoverTrigger
+          nativeButton={false}
           render={
             <div
               role="combobox"
@@ -478,7 +478,7 @@ function AdditionalMembersPicker({
               aria-expanded={open}
               aria-controls="squad-member-listbox"
               tabIndex={0}
-              className="flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+              className="flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left text-body transition-colors hover:bg-muted focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             >
               {value.length === 0 ? (
                 <>
@@ -497,7 +497,7 @@ function AdditionalMembersPicker({
                     />
                   ))}
                   {value.length > CHIP_DISPLAY_LIMIT && (
-                    <span className="rounded-md bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground tabular-nums">
+                    <span className="rounded-md bg-muted px-1.5 py-0.5 text-caption font-medium text-muted-foreground tabular-nums">
                       {t(($) => $.create_squad.members_more_count, {
                         count: value.length - CHIP_DISPLAY_LIMIT,
                       })}
@@ -521,7 +521,7 @@ function AdditionalMembersPicker({
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder={t(($) => $.create_squad.picker_search_placeholder)}
-              className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+              className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
             />
           </div>
           <div id="squad-member-listbox" role="listbox" className="max-h-72 overflow-y-auto p-1">
@@ -535,7 +535,7 @@ function AdditionalMembersPicker({
                       toggle({ type: "agent", id: a.id, name: a.name })
                     }
                   >
-                    <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                    <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                     <span className="truncate">{a.name}</span>
                   </PickerItem>
                 ))}
@@ -551,7 +551,7 @@ function AdditionalMembersPicker({
                       toggle({ type: "agent", id: a.id, name: a.name })
                     }
                   >
-                    <ActorAvatar actorType="agent" actorId={a.id} size={18} showStatusDot />
+                    <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                     <span className="truncate">{a.name}</span>
                   </PickerItem>
                 ))}
@@ -567,7 +567,7 @@ function AdditionalMembersPicker({
                       toggle({ type: "member", id: m.user_id, name: m.name })
                     }
                   >
-                    <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
+                    <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
                     <span className="truncate">{m.name}</span>
                   </PickerItem>
                 ))}
@@ -590,21 +590,23 @@ function MemberChip({
 }) {
   const { t } = useT("modals");
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border bg-background px-1.5 py-0.5 text-xs">
-      <ActorAvatar actorType={m.type} actorId={m.id} size={14} />
+    <span className="inline-flex items-center gap-1 rounded-md border bg-background px-1.5 py-0.5 text-caption">
+      <ActorAvatar actorType={m.type} actorId={m.id} size="xs" />
       <span className="max-w-[120px] truncate">{m.name}</span>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          onRemove();
-        }}
-        aria-label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}
-        className="rounded-full text-muted-foreground hover:text-foreground"
-      >
-        <X className="h-3 w-3" />
-      </button>
+      <TooltipHint label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onRemove();
+          }}
+          aria-label={t(($) => $.create_squad.members_remove_aria, { name: m.name })}
+          className="rounded-sm text-muted-foreground hover:text-foreground"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </TooltipHint>
     </span>
   );
 }

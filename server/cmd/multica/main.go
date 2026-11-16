@@ -2,18 +2,23 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime"
 
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 var (
 	version = "dev"
 	commit  = "unknown"
 	date    = "unknown"
+	// Separate full revision metadata from the existing display commit.
+	buildCommit = "unknown"
 )
 
 // debugFlag is bound to the persistent --debug flag and, when set, makes
@@ -44,14 +49,19 @@ func init() {
 
 	// Core commands
 	issueCmd.GroupID = groupCore
+	issueStatusCatalogCmd.GroupID = groupCore
 	projectCmd.GroupID = groupCore
+	workflowCmd.GroupID = groupCore
 	labelCmd.GroupID = groupCore
+	propertyCmd.GroupID = groupCore
+	viewCmd.GroupID = groupCore
 	agentCmd.GroupID = groupCore
 	autopilotCmd.GroupID = groupCore
 	workspaceCmd.GroupID = groupCore
 	repoCmd.GroupID = groupCore
 	skillCmd.GroupID = groupCore
 	squadCmd.GroupID = groupCore
+	chatCmd.GroupID = groupCore
 
 	// Runtime commands
 	daemonCmd.GroupID = groupRuntime
@@ -68,14 +78,20 @@ func init() {
 	versionCmd.GroupID = groupAdditional
 
 	rootCmd.AddCommand(issueCmd)
+	rootCmd.AddCommand(issueStatusCatalogCmd)
 	rootCmd.AddCommand(projectCmd)
+	rootCmd.AddCommand(workflowCmd)
 	rootCmd.AddCommand(labelCmd)
+	rootCmd.AddCommand(propertyCmd)
+	rootCmd.AddCommand(viewCmd)
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(autopilotCmd)
 	rootCmd.AddCommand(workspaceCmd)
 	rootCmd.AddCommand(repoCmd)
+	rootCmd.AddCommand(environmentCmd)
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(squadCmd)
+	rootCmd.AddCommand(chatCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(runtimeCmd)
 	rootCmd.AddCommand(authCmd)
@@ -91,6 +107,18 @@ func init() {
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == execenv.PreparationHelperArg {
+		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+		if err := execenv.RunPreparationHelper(os.Stdin, os.Stdout, logger); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == agent.CursorHookHelperArg {
+		agent.RunCursorHookRelay(os.Stdin, os.Stdout, os.Getenv)
+		return
+	}
 	cli.CleanupStaleUpdateArtifacts()
 	if err := rootCmd.Execute(); err != nil {
 		if err != errSilent {

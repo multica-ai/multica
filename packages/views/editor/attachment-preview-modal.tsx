@@ -1,68 +1,137 @@
 "use client";
 
 /**
- * AttachmentPreviewModal — full-screen inline preview for an attachment.
+ * Shared full-window attachment viewer and standalone preview page.
+ * Media uses signed download URLs; text uses the authenticated content endpoint
+ * to avoid storage CORS and attachment-disposition restrictions.
  *
- * Single modal for every previewable kind. Handles 7 PreviewKinds:
- *
- *   - image : <img className="object-contain"> centered in the modal frame.
- *             Replaces the previous standalone ImageLightbox.
- *   - pdf   : <iframe src={download_url}> — relies on Chromium's PDFium
- *             plugin. On desktop, requires webPreferences.plugins=true
- *             (see apps/desktop/src/main/index.ts).
- *   - video : <video controls src={download_url}>
- *   - audio : <audio controls src={download_url}>
- *
- *   - markdown : fetch text via api.getAttachmentTextContent, render via
- *                the existing ReadonlyContent (full mention/mermaid/katex
- *                pipeline included).
- *   - html     : fetch text, hand to <iframe srcdoc={text}
- *                sandbox="allow-scripts">. The iframe runs in an opaque
- *                origin: scripts execute (chart libraries / vanilla SVG
- *                JS work), but cookie / localStorage / parent access /
- *                top-navigation / popups / forms stay blocked because
- *                `allow-same-origin` is intentionally NOT included.
- *   - text     : fetch text, highlight with lowlight if the extension
- *                maps to a known hljs language; otherwise plain <pre>.
- *
- * Media types load directly from the CloudFront signed `download_url`.
- * Text types go through `/api/attachments/{id}/content` to sidestep
- * CloudFront CORS (not configured) + Content-Disposition: attachment.
+ * HTML runs in a sandboxed opaque-origin iframe: allow scripts for interactive
+ * artifacts, but do not add allow-same-origin, navigation, popup, or form privileges.
+ * Desktop PDF previews require the Chromium PDF plugin to be enabled.
  */
 
 import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@multica/core/appearance";
+import { toast } from "sonner";
 import {
   PreviewTooLargeError,
   PreviewUnsupportedError,
 } from "@multica/core/api";
-import { Download, ExternalLink, FileText, Loader2, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Code,
+  Copy,
+  Download,
+  Ellipsis,
+  ExternalLink,
+  File,
+  FileAudio,
+  FileCode,
+  FileSpreadsheet,
+  FileText,
+  FileVideo,
+  ImageIcon,
+  LayoutGrid,
+  Link2,
+  ListTree,
+  Loader2,
+  Maximize2,
+  MessageSquareText,
+  Monitor,
+  PanelRight,
+  RotateCw,
+  Smartphone,
+  Tablet,
+  WrapText,
+  X,
+  type IconComponent,
+} from "@multica/ui/icons";
 import type { Attachment } from "@multica/core/types";
+import {
+  attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+  attachmentIdFromStorageURL,
+} from "@multica/core/types/attachment-url";
+import { useConfigStore } from "@multica/core/config";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
+import { createShortcutChord } from "@multica/core/shortcuts";
+import { cn } from "@multica/ui/lib/utils";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import { copyImage, copyText } from "@multica/ui/lib/clipboard";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { openExternal } from "../platform";
+import { isDesktopShell } from "../platform/local-directory";
+import { useImmersiveMode } from "../platform/use-immersive-mode";
 import { ReadonlyContent } from "./readonly-content";
 import {
+  canOpenPreview,
   extensionToLanguage,
+  fileTypeLabel,
   getPreviewKind,
+  structuredFormat,
+  tableDelimiter,
+  wrapsByDefault,
   type PreviewKind,
 } from "./utils/preview";
+import { parseStructured } from "./utils/parse-structured";
+import { formatBytes } from "../common/format-bytes";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useDownloadAttachment } from "./use-download-attachment";
+import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
+import {
+  useFreshStreamedMediaURL,
+  useResignedInlineMedia,
+} from "./hooks/use-inline-media-url";
+import { useZoomCanvas, type ZoomCanvasApi } from "./hooks/use-zoom-canvas";
+import { ZoomCanvas, ZoomControls } from "./zoom-canvas";
+import type { Size } from "./utils/zoom-transform";
 import { HtmlPreviewBody } from "./html-preview-body";
+import { HtmlPreviewAddress } from "./html-preview-address";
+import {
+  useHtmlPreviewLocation,
+  type HtmlPreviewLocation,
+} from "./hooks/use-html-preview-location";
 import { CodeBlockStatic } from "./code-block-static";
+import { TablePreview } from "./table-preview";
+import { StructuredTree } from "./structured-tree";
+import {
+  HTML_VIEWPORTS,
+  HtmlViewportFrame,
+  type HtmlViewport,
+} from "./html-viewport-frame";
+import { withWidthBridge } from "./utils/iframe-width-bridge";
 
-// ---------------------------------------------------------------------------
 // Preview source — full attachment, or URL-only (media types only)
-// ---------------------------------------------------------------------------
 //
 // `full` carries the resolved Attachment record and supports every PreviewKind
 // (text types require the attachment id to call /api/attachments/{id}/content).
@@ -76,11 +145,22 @@ import { CodeBlockStatic } from "./code-block-static";
 
 export type PreviewSource =
   | { kind: "full"; attachment: Attachment }
-  | { kind: "url"; url: string; filename: string };
-
-// PreviewKinds that can render from a URL-only source. Text-based kinds
-// (markdown / html / text) need the /content proxy which is ID-keyed.
-const URL_ONLY_KINDS = new Set<PreviewKind>(["image", "pdf", "video", "audio"]);
+  | {
+      kind: "url";
+      url: string;
+      filename: string;
+      /**
+       * What the call site already knows this source to be. A URL-only source
+       * has no content-type, so without it the modal can only re-derive the
+       * kind from `filename` — and for a body image that "filename" is the
+       * markdown caption, which is prose, not a file name. `![报告图表](…png)`
+       * then reads as an extension-less unknown and the reader is told the
+       * image can't be previewed (MUL-7518). Callers that know the slot is
+       * definitionally an image (markdown `![]()`, the Tiptap image node, any
+       * member of an image sequence) pass it through instead of guessing.
+       */
+      forceKind?: PreviewKind;
+    };
 
 // Normalized view used everywhere downstream of `useAttachmentPreview`.
 // `attachmentId === null` signals URL-only mode (download falls back to
@@ -90,6 +170,15 @@ interface PreviewState {
   contentType: string;
   mediaUrl: string;
   attachmentId: string | null;
+  /** 0 when unknown (URL-only source). */
+  sizeBytes: number;
+  /**
+   * The kind every consumer dispatches on — resolved once, here, so the
+   * tryOpen gate and the rendered panel can never disagree about what the
+   * source is. A URL-only source's `forceKind` wins over autodetect; a full
+   * attachment always has server metadata to detect from.
+   */
+  kind: PreviewKind | null;
 }
 
 function resolvePreviewMediaUrl(attachment: Attachment): string {
@@ -113,29 +202,90 @@ function normalize(source: PreviewSource): PreviewState {
       contentType: source.attachment.content_type,
       mediaUrl: resolvePreviewMediaUrl(source.attachment),
       attachmentId: source.attachment.id,
+      sizeBytes: source.attachment.size_bytes,
+      kind: getPreviewKind(
+        source.attachment.content_type,
+        source.attachment.filename,
+      ),
     };
   }
   return {
     filename: source.filename,
     contentType: "",
     mediaUrl: resolvePublicFileUrl(source.url) ?? source.url,
-    attachmentId: null,
+    attachmentId:
+      attachmentIdFromDownloadURL(source.url) ??
+      attachmentIdFromLocalUploadURL(source.url) ?? null,
+    sizeBytes: 0,
+    kind: source.forceKind ?? getPreviewKind("", source.filename),
   };
 }
 
-// ---------------------------------------------------------------------------
 // Public props
-// ---------------------------------------------------------------------------
+
+/**
+ * Position of this preview inside a surface's image sequence (MUL-5752).
+ *
+ * `onPrev` / `onNext` are undefined AT the boundaries — the sequence does not
+ * wrap, so first/last simply disable the corresponding control. Supplied only
+ * by `ImageSequenceProvider`; a standalone preview leaves this unset and
+ * renders exactly as before.
+ */
+export interface PreviewSequence {
+  /** 0-based. Rendered as `index + 1` of `total`. */
+  index: number;
+  total: number;
+  onPrev?: () => void;
+  onNext?: () => void;
+}
+
+/** "Show where this was posted" — labelled by the host, which knows where. */
+export interface PreviewLocateAction {
+  label: string;
+  onSelect: () => void;
+}
+
+/**
+ * Copy a link to the file on screen — labelled by the host, which knows what
+ * the link points at (for an issue deliverable, its newest version).
+ */
+export interface PreviewCopyLinkAction {
+  label: string;
+  onSelect: () => void;
+}
+
+/** The info panel beside the stage (MUL-7649). Its open state outlives the file. */
+export interface PreviewInfoPanel {
+  content: ReactNode;
+  open: boolean;
+  onToggle: () => void;
+}
 
 interface AttachmentPreviewModalProps {
   source: PreviewSource;
   open: boolean;
   onClose: () => void;
+  sequence?: PreviewSequence;
+  /** Fired when the image kind fails to load — lets a gallery skip the frame. */
+  onImageError?: () => void;
+  /**
+   * The image failed and the host is staying on it: show the failure on the
+   * stage (with a download) instead of a broken frame.
+   */
+  imageFailed?: boolean;
+  /** Rendered after the file name, e.g. a version switcher. */
+  titleAccessory?: ReactNode;
+  /** Adds the info button and `I`. */
+  info?: PreviewInfoPanel;
+  /** Adds "show where this was posted": the caller closes the viewer and scrolls. */
+  locate?: PreviewLocateAction;
+  /** Adds a "copy link" button for the file on screen. */
+  copyLink?: PreviewCopyLinkAction;
+  /** Adds the overview button and `G`. */
+  onOpenOverview?: () => void;
 }
 
-// ---------------------------------------------------------------------------
 // Hook — local state + ready-to-mount modal JSX
-// ---------------------------------------------------------------------------
 //
 // Why no React context / provider: packages/views/ cannot mount a Context.Provider
 // inside CoreProvider (in packages/core/), and threading a new provider through
@@ -162,79 +312,259 @@ export interface AttachmentPreviewHandle {
 
 export function useAttachmentPreview(): AttachmentPreviewHandle {
   const [current, setCurrent] = useState<PreviewSource | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
-  const open = useCallback((source: PreviewSource) => setCurrent(source), []);
-  const tryOpen = useCallback((source: PreviewSource) => {
-    const state = normalize(source);
-    const kind = getPreviewKind(state.contentType, state.filename);
-    if (!kind) return false;
-    // URL-only sources cannot drive text kinds — the /content proxy is ID-keyed.
-    if (source.kind === "url" && !URL_ONLY_KINDS.has(kind)) return false;
+  const open = useCallback((source: PreviewSource) => {
     setCurrent(source);
+    setPreviewOpen(true);
+  }, []);
+  const tryOpen = useCallback((source: PreviewSource) => {
+    const { kind } = normalize(source);
+    // URL-only sources cannot drive text kinds — the /content proxy is ID-keyed.
+    if (!canOpenPreview(kind, source.kind === "full")) return false;
+    setCurrent(source);
+    setPreviewOpen(true);
     return true;
   }, []);
 
-  const modal = current ? (
-    <AttachmentPreviewModal
-      source={current}
-      open
-      onClose={() => setCurrent(null)}
-    />
-  ) : null;
+  const modal = useMemo(
+    () =>
+      current ? (
+        <AttachmentPreviewModal
+          source={current}
+          open={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          onExitComplete={() => setCurrent(null)}
+        />
+      ) : null,
+    [current, previewOpen],
+  );
 
   return useMemo(() => ({ open, tryOpen, modal }), [open, tryOpen, modal]);
 }
 
-// ---------------------------------------------------------------------------
-// Modal — frame + dispatch
-// ---------------------------------------------------------------------------
+// Image swap without a blank frame
+
+// Returns the last image URL that finished decoding, holding the previous one
+// on screen while the next downloads. Swapping `<img src>` (or remounting the
+// panel) the moment navigation happens blanks the canvas for the full
+// network+decode gap; decode-then-swap is the standard lightbox fix.
+//
+// Only a URL that actually decoded as an image is ever held. The panel is
+// reused across kinds, so arriving at an image from a PDF or a document has no
+// previous frame: the image shows as itself and loads in place — handing the
+// PDF's URL to <img> would fail and be blamed on the image being opened.
+//
+// On load failure the hook reports the error and keeps the last good frame —
+// when the whole remaining sequence is broken the reader stays on the last
+// image that worked (with the "unavailable" toast) instead of a broken glyph.
+//
+// Engines without `Image.decode()` (jsdom in tests) swap immediately: the old
+// pre-MUL-5752 behaviour, traded back for correctness there.
+function useSettledImageURL(
+  targetUrl: string,
+  enabled: boolean,
+  onLoadError?: () => void,
+): string {
+  const [settled, setSettled] = useState<string | null>(null);
+  const onErrorRef = useRef(onLoadError);
+  onErrorRef.current = onLoadError;
+
+  useEffect(() => {
+    if (!enabled) {
+      setSettled(null);
+      return;
+    }
+    // Nothing loadable yet (the URL is still being re-signed): keep holding
+    // whatever frame is up.
+    if (!targetUrl) return;
+    let cancelled = false;
+    const probe = new window.Image();
+    if (typeof probe.decode !== "function") {
+      setSettled(targetUrl);
+      return;
+    }
+    probe.src = targetUrl;
+    probe.decode().then(
+      () => {
+        if (!cancelled) setSettled(targetUrl);
+      },
+      () => {
+        // Rejection covers both load failure and undecodable bytes.
+        if (!cancelled) onErrorRef.current?.();
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [targetUrl, enabled]);
+
+  return enabled && settled !== null ? settled : targetUrl;
+}
+
+// Warms the browser cache for a sequence neighbour so paging to it swaps
+// without a visible wait: runs the same URL re-sign the panel itself would,
+// then fetches the bytes through a detached <img>. Renders nothing.
+export function PreviewImagePrefetch({ source }: { source: PreviewSource }) {
+  const state = normalize(source);
+  const { url, pending } = useResignedInlineMedia(
+    state.attachmentId ?? undefined,
+    state.mediaUrl,
+    true,
+  );
+
+  useEffect(() => {
+    if (!url || pending) return;
+    const probe = new window.Image();
+    probe.src = url;
+  }, [url, pending]);
+
+  return null;
+}
+
+// Viewer — frame + dispatch
+
+// Desktop window chrome. The viewer covers the whole window, including the
+// top bar's drag region, so it declares its own: the viewer is `no-drag`
+// (a drag region underneath would otherwise swallow clicks on its controls),
+// its top bar drags the window, and the controls in that bar opt back out.
+// Chromium-only CSS; browsers ignore it.
+const NO_DRAG = { WebkitAppRegion: "no-drag" } as CSSProperties;
+const DRAG = { WebkitAppRegion: "drag" } as CSSProperties;
+
+// A focused player or field owns its arrow keys (seek, caret) — the sequence
+// only takes them when nothing else would.
+function ownsArrowKeys(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return target.closest("input, textarea, select, video, audio") !== null;
+}
+
+// Letter shortcuts stand down only where the reader could be typing.
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  return target.closest("input, textarea, select") !== null;
+}
 
 export function AttachmentPreviewModal({
   source,
   open,
   onClose,
-}: AttachmentPreviewModalProps) {
-  const { t } = useT("editor");
+  onExitComplete,
+  sequence,
+  onImageError,
+  imageFailed,
+  titleAccessory,
+  info,
+  locate,
+  copyLink,
+  onOpenOverview,
+}: AttachmentPreviewModalProps & { onExitComplete?: () => void }) {
   const download = useDownloadAttachment();
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
+  const shouldReduceMotion = useReducedMotion();
   const state = normalize(source);
   // useWorkspaceSlug (not useWorkspacePaths) — returns null outside a
   // workspace route instead of throwing, so the new-tab button just hides.
   const slug = useWorkspaceSlug();
   const navigation = useNavigation();
+  // The html kind's current address, for "Open in new tab". Tagged with its
+  // file so one document's address never follows the reader to the next.
+  const htmlAddressRef = useRef<{ attachmentId: string; address: string } | null>(
+    null,
+  );
+  const handleHtmlAddressChange = useCallback(
+    (attachmentId: string, address: string) => {
+      htmlAddressRef.current = { attachmentId, address };
+    },
+    [],
+  );
+
+  const onPrev = sequence?.onPrev;
+  const onNext = sequence?.onNext;
+  const onToggleInfo = info?.onToggle;
+
+  // macOS desktop: hide the traffic lights while the viewer is up — its top
+  // bar starts at the window's top-left corner, where they would sit on the
+  // file name. No-op on web and other platforms.
+  useImmersiveMode(open);
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      // A menu opened from the chrome (the version switcher) owns its keys:
+      // Escape closes the menu, not the viewer, and arrows move its focus.
+      if (e.target instanceof Element && e.target.closest('[role="menu"]')) return;
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Arrow navigation only when this preview is part of a sequence. The
+      // zoom canvas gives its horizontal arrows up in that case (see
+      // `horizontalArrowPan` below), so exactly one of the two responds.
+      // Modified presses stay with the browser / OS.
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      if (!e.repeat && !isTypingTarget(e.target)) {
+        // Claimed with preventDefault so the app's own single-key shortcuts
+        // (which skip handled events) don't also fire behind the viewer.
+        const letter = e.key.toLowerCase();
+        if (letter === "g" && onOpenOverview) {
+          e.preventDefault();
+          onOpenOverview();
+          return;
+        }
+        if (letter === "i" && onToggleInfo) {
+          e.preventDefault();
+          onToggleInfo();
+          return;
+        }
+      }
+      if (ownsArrowKeys(e.target)) return;
+      if (e.key === "ArrowLeft" && onPrev) {
+        e.preventDefault();
+        onPrev();
+      } else if (e.key === "ArrowRight" && onNext) {
+        e.preventDefault();
+        onNext();
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [open, onClose]);
+  }, [open, onClose, onPrev, onNext, onOpenOverview, onToggleInfo]);
 
-  const kind = getPreviewKind(state.contentType, state.filename);
+  const kind = state.kind;
 
   // Download dispatcher: re-sign through `getAttachment` when an id is
-  // available; otherwise fall back to opening the (possibly stale) URL
-  // externally — same tradeoff as the file-card NodeView's download path.
+  // available (from the record, or parsed out of a CDN storage URL that
+  // didn't resolve to a record); otherwise fall back to opening the
+  // (possibly stale) URL externally — same tradeoff as the file-card
+  // NodeView's download path.
   const handleDownload = () => {
-    if (state.attachmentId) {
-      download(state.attachmentId);
-    } else {
-      openExternal(state.mediaUrl);
+    const attachmentId =
+      state.attachmentId ?? attachmentIdFromStorageURL(state.mediaUrl, cdnDomain);
+    if (attachmentId) {
+      return download(attachmentId);
     }
+    return openExternal(state.mediaUrl);
   };
 
-  // Open-in-new-tab mirrors HtmlAttachmentPreview's inline toolbar: only the
-  // `html` kind has a dedicated full-page route (/attachments/{id}/preview).
-  // Gated on slug + attachmentId for the same reason — URL-only sources
-  // can't address the /content proxy the page relies on.
-  const canOpenInNewTab = kind === "html" && !!slug && !!state.attachmentId;
+  // Open-in-new-tab: the full-page route (/attachments/{id}/preview) shows
+  // every previewable kind, but loads the file by id — a URL-only source has
+  // none, and a file the viewer cannot show gains nothing from a tab.
+  const canOpenInNewTab = kind !== null && !!slug && !!state.attachmentId;
   const handleOpenInNewTab = () => {
     if (!slug || !state.attachmentId) return;
-    const nameQuery = state.filename
-      ? `?name=${encodeURIComponent(state.filename)}`
-      : "";
-    const path = `${paths.workspace(slug).attachmentPreview(state.attachmentId)}${nameQuery}`;
+    const address =
+      htmlAddressRef.current?.attachmentId === state.attachmentId
+        ? htmlAddressRef.current.address
+        : "";
+    const params = [
+      state.filename ? `name=${encodeURIComponent(state.filename)}` : "",
+      address ? `loc=${encodeURIComponent(address)}` : "",
+    ].filter(Boolean);
+    const query = params.length > 0 ? `?${params.join("&")}` : "";
+    const path = `${paths.workspace(slug).attachmentPreview(state.attachmentId)}${query}`;
     if (navigation.openInNewTab) {
       navigation.openInNewTab(path, state.filename, { activate: true });
     } else {
@@ -244,93 +574,1061 @@ export function AttachmentPreviewModal({
     onClose();
   };
 
-  if (!open || typeof document === "undefined") return null;
+  if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={state.filename}
-    >
-      {/* Larger than the create-issue dialog (max-w-4xl, manualDialogContentClass)
-          because PDF / video previews want more room. Capped to viewport
-          minus the surrounding p-4 (1rem each side) so it never overflows
-          the screen on small displays / split panes. */}
-      <div
-        className="flex h-[min(90vh,calc(100vh-2rem))] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-background shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
-          <FileText className="size-4 shrink-0 text-muted-foreground" />
-          <p className="truncate text-sm font-medium">{state.filename}</p>
-          <span className="ml-1 shrink-0 text-xs text-muted-foreground">
-            {state.contentType || "—"}
-          </span>
-          <div className="ml-auto flex items-center gap-1">
-            {canOpenInNewTab && (
-              <button
-                type="button"
-                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                title={t(($) => $.attachment.open_in_new_tab)}
-                aria-label={t(($) => $.attachment.open_in_new_tab)}
-                onClick={handleOpenInNewTab}
-              >
-                <ExternalLink className="size-4" />
-              </button>
-            )}
-            <button
-              type="button"
-              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              title={t(($) => $.image.download)}
-              aria-label={t(($) => $.image.download)}
-              onClick={handleDownload}
-            >
-              <Download className="size-4" />
-            </button>
-            <button
-              type="button"
-              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              title={t(($) => $.attachment.close)}
-              aria-label={t(($) => $.attachment.close)}
-              onClick={onClose}
-            >
-              <X className="size-4" />
-            </button>
-          </div>
-        </div>
-        <div className="min-h-0 flex-1 overflow-auto bg-background">
-          <PreviewContent
+    <AnimatePresence onExitComplete={onExitComplete}>
+      {open && (
+        <motion.div
+          // Blurred as well as dimmed: at any opacity that still reads as a
+          // backdrop, the page's text shows through behind the top bar. The
+          // backdrop runs to the screen edge; the controls stay in the safe area.
+          className="fixed inset-0 z-50 flex flex-col bg-black/95 pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] backdrop-blur-xl"
+          // Only a click that lands on the backdrop itself closes. A pan that
+          // starts on the zoom canvas and releases out here retargets its
+          // click through pointer capture, but this makes the intent explicit
+          // instead of relying on that.
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onClose();
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={state.filename}
+          style={NO_DRAG}
+          initial={{ opacity: 0 }}
+          animate={{
+            opacity: 1,
+            transition: {
+              duration: UI_MOTION_DURATION.fast,
+              ease: UI_EASE_OUT,
+            },
+          }}
+          exit={{
+            opacity: 0,
+            transition: {
+              duration: UI_MOTION_DURATION.fast,
+              ease: UI_EASE_OUT,
+            },
+          }}
+        >
+          {/* Below the `open &&` gate on purpose: the panel's zoom state is
+              destroyed on close, so every open re-fits instead of restoring
+              a stale zoom from the last time this image was viewed.
+
+              Deliberately NOT keyed on the file: remounting the panel on
+              sequence navigation blanks the canvas for the whole
+              network+decode gap. The panel persists and swaps the image
+              only once the next one has decoded (`useSettledImageURL`).
+              Zoom still resets per image — `natural` passes through null on
+              every swap, so the canvas re-fits even across a run of
+              same-resolution screenshots. */}
+          <PreviewPanel
+            surface="viewer"
             kind={kind}
             source={source}
             state={state}
+            onClose={onClose}
             onDownload={handleDownload}
+            onOpenInNewTab={canOpenInNewTab ? handleOpenInNewTab : undefined}
+            sequence={sequence}
+            onImageError={onImageError}
+            imageFailed={imageFailed}
+            reduceMotion={shouldReduceMotion}
+            titleAccessory={titleAccessory}
+            info={info}
+            locate={locate}
+            copyLink={copyLink}
+            onOpenOverview={onOpenOverview}
+            onHtmlAddressChange={handleHtmlAddressChange}
           />
-        </div>
-      </div>
-    </div>,
+        </motion.div>
+      )}
+    </AnimatePresence>,
     document.body,
   );
 }
 
-// ---------------------------------------------------------------------------
-// Dispatch
-// ---------------------------------------------------------------------------
+// Panel — top bar + stage
 
-// Dispatch on PreviewKind. New cases go here; remember that the modal frame
-// (header, close, Download CTA, ESC handling) is shared — sub-renderers only
-// own the content area.
+const KIND_ICONS: Record<PreviewKind, IconComponent> = {
+  image: ImageIcon,
+  pdf: FileText,
+  video: FileVideo,
+  audio: FileAudio,
+  markdown: FileText,
+  html: FileCode,
+  table: FileSpreadsheet,
+  structured: FileCode,
+  text: FileCode,
+};
+
+type StructuredView = "tree" | "raw";
+
+const VIEWPORT_ICONS: Record<HtmlViewport, IconComponent> = {
+  fill: Maximize2,
+  desktop: Monitor,
+  tablet: Tablet,
+  phone: Smartphone,
+};
+
+/**
+ * Renders an HTML attachment's iframe, loaded at the address bar's address
+ * (`location`, see useHtmlPreviewLocation). The viewer's is plain; the
+ * full-page preview's also reports its scroll position to the desktop tab
+ * restorer.
+ */
+export type HtmlFrameRenderer = (props: {
+  html: string;
+  title: string;
+  location: HtmlPreviewLocation;
+}) => ReactNode;
+
+const renderViewerHtmlFrame: HtmlFrameRenderer = ({ html, title, location }) => (
+  <HtmlPreviewBody
+    html={html}
+    title={title}
+    location={location}
+    className="h-full w-full"
+    iframeClassName="rounded-none border-0"
+  />
+);
+
+// The parsed body of a `structured` file. Parsed here, above the stage,
+// because the top bar needs the outcome too: a file that does not parse has
+// no tree to switch to. Shares the stage's query, so nothing is fetched twice.
+function useStructuredParse(state: PreviewState, enabled: boolean) {
+  const format = enabled ? structuredFormat(state.contentType, state.filename) : null;
+  const query = useAttachmentHtmlText(format ? state.attachmentId : null);
+  const text = query.data?.text;
+  return useMemo(
+    () => (format && text !== undefined ? parseStructured(text, format) : null),
+    [format, text],
+  );
+}
+
+// Top bar and stage live together because some kinds' controls sit in the
+// bar while what they drive is on the stage — the image's zoom, a document's
+// line wrapping, an HTML file's viewport: one owner for that shared state,
+// mounted and destroyed with the open viewer.
+//
+// `surface` is where it is mounted: the viewer overlay, or the "open in new
+// tab" page, which has no close, no sequence and no window drag region.
+function PreviewPanel({
+  surface,
+  kind,
+  source,
+  state,
+  onClose,
+  onDownload,
+  onOpenInNewTab,
+  sequence,
+  onImageError,
+  imageFailed,
+  reduceMotion,
+  titleAccessory,
+  info,
+  locate,
+  copyLink,
+  onOpenOverview,
+  renderHtmlFrame = renderViewerHtmlFrame,
+  initialHtmlAddress = "",
+  onHtmlAddressChange,
+}: {
+  surface: "viewer" | "page";
+  kind: PreviewKind | null;
+  source: PreviewSource;
+  state: PreviewState;
+  onClose?: () => void;
+  onDownload: () => void | Promise<unknown>;
+  onOpenInNewTab?: () => void;
+  sequence?: PreviewSequence;
+  onImageError?: () => void;
+  imageFailed?: boolean;
+  reduceMotion: boolean;
+  titleAccessory?: ReactNode;
+  info?: PreviewInfoPanel;
+  locate?: PreviewLocateAction;
+  copyLink?: PreviewCopyLinkAction;
+  onOpenOverview?: () => void;
+  renderHtmlFrame?: HtmlFrameRenderer;
+  /** Query and fragment an HTML file opens at. */
+  initialHtmlAddress?: string;
+  /** Reports an HTML file's address as the reader or the document moves it. */
+  onHtmlAddressChange?: (attachmentId: string, address: string) => void;
+}) {
+  const { t } = useT("editor");
+
+  const { downloading, handleDownload } = useAttachmentDownloadState(
+    onDownload,
+    state.attachmentId ?? state.mediaUrl,
+  );
+
+  // How the file is shown. Held here rather than in the stage so a choice
+  // carries over as the reader pages through the sequence: the next HTML
+  // file opens at the same width, the next log wraps the same way. Wrapping
+  // follows the file until the reader picks.
+  const [wrapChoice, setWrapChoice] = useState<boolean | null>(null);
+  const wrap = wrapChoice ?? wrapsByDefault(state.filename);
+  const toggleWrap = () => setWrapChoice(!wrap);
+  const [htmlViewport, setHtmlViewport] = useState<HtmlViewport>("fill");
+  const [htmlSource, setHtmlSource] = useState(false);
+  // An HTML file's address: shown in the top bar, loaded by the stage. Held
+  // here, per file, so it survives the source view, which unmounts the frame.
+  const htmlLocation = useHtmlPreviewLocation(
+    initialHtmlAddress,
+    state.attachmentId ?? "",
+  );
+  const htmlAddress = htmlLocation.address;
+  useEffect(() => {
+    if (kind === "html" && state.attachmentId) {
+      onHtmlAddressChange?.(state.attachmentId, htmlAddress);
+    }
+  }, [kind, state.attachmentId, htmlAddress, onHtmlAddressChange]);
+  const [structuredChoice, setStructuredChoice] = useState<StructuredView>("tree");
+  const structuredParse = useStructuredParse(state, kind === "structured");
+  const treeAvailable = structuredParse?.ok !== false;
+  const structuredView: StructuredView = treeAvailable ? structuredChoice : "raw";
+  const view: StageView = {
+    wrap,
+    htmlViewport,
+    htmlSource,
+    structuredView,
+    structuredParse,
+    renderHtmlFrame,
+    htmlLocation,
+  };
+
+  // Gallery navigation hands this panel an attachment the reader never
+  // clicked, so — unlike the click-through path, where <Attachment> had
+  // already upgraded the URL — the viewer has to run the re-sign itself. A
+  // no-op for URLs that are already loadable (signed CDN, public storage).
+  const resigned = useResignedInlineMedia(
+    state.attachmentId ?? undefined,
+    state.mediaUrl,
+    kind === "image",
+  );
+  // Until that upgrade lands the picked URL may be one this client cannot
+  // load natively (desktop, split-origin web); handed to <img> it would fail
+  // and, in a sequence, read as a broken image to skip. Hold the previous
+  // frame — or show loading — instead.
+  const targetUrl = resigned.pending ? "" : resigned.url;
+  // The previous image stays on the canvas until this one has decoded — the
+  // swap itself is what used to flash. Also absorbs the re-sign URL upgrade
+  // (raw -> signed) without a second visible load.
+  const mediaUrl = useSettledImageURL(targetUrl, kind === "image", onImageError);
+  // A load error from the <img> belongs to the file being opened only when
+  // that is what it shows — a frame held from the previous image never
+  // reports against the next one.
+  const imageLoadError =
+    mediaUrl !== "" && mediaUrl === targetUrl ? onImageError : undefined;
+
+  // Video, audio and PDF stream straight from a URL the reader has never
+  // loaded, so they get a freshly signed one rather than the record's.
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
+  const streamed = useFreshStreamedMediaURL(
+    state.attachmentId ??
+      attachmentIdFromLocalUploadURL(state.mediaUrl) ??
+      attachmentIdFromStorageURL(state.mediaUrl, cdnDomain),
+    state.mediaUrl,
+    kind === "video" || kind === "audio" || kind === "pdf",
+    kind === "pdf",
+  );
+  const streamUrl = streamed.pending ? "" : streamed.url;
+
+  // Copying reads the image's bytes from script. The desktop renderer can
+  // read any origin; web script can't read the storage CDN (it sends no CORS
+  // headers), and there the browser's own context menu has Copy image. Copies
+  // the frame on screen, which during a sequence swap is still the last one.
+  const canCopyImage = kind === "image" && isDesktopShell();
+  const canCopyText =
+    kind !== null && TEXT_BACKED_KINDS.has(kind) && (kind !== "html" || htmlSource);
+  const copyContent = useAttachmentHtmlText(canCopyText ? state.attachmentId : null);
+  const handleCopyText = async () => {
+    if (!copyContent.data || copyContent.isError) return;
+    if (await copyText(copyContent.data.text)) {
+      toast.success(t(($) => $.attachment.contents_copied));
+    } else {
+      toast.error(t(($) => $.attachment.copy_failed));
+    }
+  };
+  const handleCopyImage = async () => {
+    if (await copyImage(mediaUrl)) {
+      toast.success(t(($) => $.image.image_copied));
+    } else {
+      toast.error(t(($) => $.image.copy_image_failed));
+    }
+  };
+
+  // Natural size is carried with the URL it was measured from, so a panel
+  // reused for a different attachment can never fit the new image against the
+  // old one's dimensions.
+  const [measured, setMeasured] = useState<{ url: string; size: Size } | null>(
+    null,
+  );
+  const natural =
+    kind === "image" && measured?.url === mediaUrl ? measured.size : null;
+  // Left / right arrows belong to the sequence when there is one; the canvas
+  // keeps them for panning otherwise. Vertical arrows always pan, and a
+  // zoomed image still pans horizontally by drag / wheel.
+  const canvas = useZoomCanvas({
+    content: natural,
+    horizontalArrowPan: !sequence,
+  });
+
+  const handleNaturalSize = useCallback(
+    (url: string, size: Size) => {
+      setMeasured((previous) =>
+        previous?.url === url &&
+        previous.size.width === size.width &&
+        previous.size.height === size.height
+          ? previous
+          : { url, size },
+      );
+    },
+    [],
+  );
+
+  // What the reader wants to know about the file at a glance — type, pixel
+  // size, weight. Not the MIME type: `image/png` says nothing `PNG` doesn't.
+  const meta = [
+    fileTypeLabel(state.filename),
+    natural ? `${natural.width} × ${natural.height}` : "",
+    state.sizeBytes > 0 ? formatBytes(state.sizeBytes) : "",
+  ].filter(Boolean);
+  const KindIcon = kind ? KIND_ICONS[kind] : File;
+
+  // The stage's own padding — the gutters around the content — counts as
+  // backdrop: clicking there closes, clicking the content never does.
+  const closeOnBackdrop = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget) onClose?.();
+  };
+
+  const wrapButton = (enabled: boolean) => (
+    <ChromeButton
+      className="hidden @3xl:flex"
+      label={t(($) => $.attachment.wrap_lines)}
+      pressed={enabled && wrap}
+      disabled={!enabled}
+      onClick={toggleWrap}
+    >
+      <WrapText className="size-4" />
+    </ChromeButton>
+  );
+  const viewportLabels: Record<HtmlViewport, string> = {
+    fill: t(($) => $.attachment.viewport_fill),
+    desktop: t(($) => $.attachment.viewport_desktop),
+    tablet: t(($) => $.attachment.viewport_tablet),
+    phone: t(($) => $.attachment.viewport_phone),
+  };
+  const overflowTriggerRef = useRef<HTMLButtonElement>(null);
+  const restoreOverflowFocus = useRef(false);
+  const overflowActionMovesFocus = useRef(false);
+  const navigateFromOverflow = (navigate: () => void) => {
+    overflowActionMovesFocus.current = true;
+    navigate();
+  };
+  const showZoomControls = kind === "image" && !!(natural || sequence);
+  const hasViewControls = showZoomControls || kind === "html" || kind === "structured" || kind === "text";
+  const hasOverflowActions = hasViewControls || !!(locate || copyLink || onOpenInNewTab || onOpenOverview || info);
+  const canWrap = kind === "text" || (kind === "html" && htmlSource) || (kind === "structured" && structuredView === "raw");
+
+  return (
+    <>
+      <header
+        className="dark @container grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-4 pl-3 pr-2 text-foreground"
+        style={surface === "viewer" ? DRAG : undefined}
+      >
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="hidden size-8 shrink-0 items-center justify-center rounded-md bg-secondary text-muted-foreground @3xl:flex">
+            <KindIcon className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2" style={titleAccessory ? NO_DRAG : undefined}>
+              {kind === "html" && !htmlSource ? (
+                <HtmlPreviewAddress
+                  filename={state.filename}
+                  address={htmlLocation.address}
+                  onNavigate={htmlLocation.navigate}
+                  style={NO_DRAG}
+                />
+              ) : (
+                <p className="truncate text-body font-medium">{state.filename}</p>
+              )}
+              {titleAccessory}
+            </div>
+            {meta.length > 0 && (
+              <p className="truncate text-caption text-muted-foreground tabular-nums">
+                {meta.join(" · ")}
+              </p>
+            )}
+          </div>
+        </div>
+        <div
+          className="flex items-center justify-self-end gap-0.5"
+          style={NO_DRAG}
+        >
+          {/* Standalone preview keeps the original gate — no controls until
+              the image is measured, and none at all for content that has no
+              intrinsic size to drive. In a sequence they stay mounted
+              (disabled while un-measured) instead: `natural` passes through
+              null on every swap, and controls that vanish and reappear shift
+              the buttons to their right on every navigation. */}
+          {showZoomControls && (
+            <>
+              <ZoomControls className="hidden @3xl:flex" canvas={canvas} disabled={!natural} />
+              <ChromeDivider />
+            </>
+          )}
+          {/* View controls stay mounted, disabled where they do not apply —
+              toggling the source view must not shift the button just pressed. */}
+          {kind === "html" && (
+            <>
+              <ChromeButton
+                className="hidden @3xl:flex"
+                label={t(($) => $.attachment.reload)}
+                disabled={htmlSource}
+                onClick={htmlLocation.reload}
+              >
+                <RotateCw className="size-4" />
+              </ChromeButton>
+              <ChromeSegmented
+                className="hidden @3xl:flex"
+                label={t(($) => $.attachment.viewport)}
+                value={htmlViewport}
+                disabled={htmlSource}
+                options={HTML_VIEWPORTS.map((viewport) => ({
+                  value: viewport,
+                  label: viewportLabels[viewport],
+                  icon: VIEWPORT_ICONS[viewport],
+                }))}
+                onChange={setHtmlViewport}
+              />
+              <ChromeButton
+                label={t(($) => $.attachment.view_source)}
+                pressed={htmlSource}
+                onClick={() => setHtmlSource((shown) => !shown)}
+              >
+                <Code className="size-4" />
+              </ChromeButton>
+              {wrapButton(htmlSource)}
+              <ChromeDivider />
+            </>
+          )}
+          {kind === "structured" && (
+            <>
+              <ChromeSegmented
+                className="hidden @3xl:flex"
+                label={t(($) => $.attachment.view_mode)}
+                value={structuredView}
+                disabled={!treeAvailable}
+                options={[
+                  {
+                    value: "tree",
+                    label: t(($) => $.attachment.view_tree),
+                    icon: ListTree,
+                  },
+                  {
+                    value: "raw",
+                    label: t(($) => $.attachment.view_raw),
+                    icon: Code,
+                  },
+                ]}
+                onChange={setStructuredChoice}
+              />
+              {wrapButton(structuredView === "raw")}
+              <ChromeDivider />
+            </>
+          )}
+          {kind === "text" && (
+            <>
+              {wrapButton(true)}
+              <ChromeDivider />
+            </>
+          )}
+          {locate && (
+            <ChromeButton className="hidden @3xl:flex" label={locate.label} onClick={locate.onSelect}>
+              <MessageSquareText className="size-4" />
+            </ChromeButton>
+          )}
+          {/* Reserve the HTML copy slot so switching source never moves its toggle. */}
+          {(canCopyText || kind === "html") && (
+            <div className="size-11 shrink-0 @3xl:size-8">
+              {canCopyText && (
+                <ChromeButton
+                  label={t(($) => $.attachment.copy_contents)}
+                  disabled={!copyContent.data || copyContent.isError}
+                  onClick={() => void handleCopyText()}
+                >
+                  <Copy className="size-4" />
+                </ChromeButton>
+              )}
+            </div>
+          )}
+          {copyLink && (
+            <ChromeButton className="hidden @3xl:flex" label={copyLink.label} onClick={copyLink.onSelect}>
+              <Link2 className="size-4" />
+            </ChromeButton>
+          )}
+          {onOpenInNewTab && (
+            <ChromeButton
+              className="hidden @3xl:flex"
+              label={t(($) => $.attachment.open_in_new_tab)}
+              onClick={onOpenInNewTab}
+            >
+              <ExternalLink className="size-4" />
+            </ChromeButton>
+          )}
+          {canCopyImage && (
+            <ChromeButton
+              label={t(($) => $.image.copy_image)}
+              disabled={!mediaUrl}
+              onClick={() => void handleCopyImage()}
+            >
+              <Copy className="size-4" />
+            </ChromeButton>
+          )}
+          <ChromeButton
+            label={t(($) => $.image.download)}
+            onClick={handleDownload}
+            disabled={downloading}
+            busy={downloading}
+          >
+            {downloading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Download className="size-4" />
+            )}
+          </ChromeButton>
+          {hasOverflowActions && (
+            <div className="@3xl:hidden">
+              <DropdownMenu
+                onOpenChange={(open, details) => {
+                  if (open) {
+                    restoreOverflowFocus.current = false;
+                    overflowActionMovesFocus.current = false;
+                  } else if (details.reason !== "trigger-hover") {
+                    // Hover dismissal can follow item selection or Escape during exit.
+                    restoreOverflowFocus.current = details.reason === "escape-key" ||
+                      (details.reason === "item-press" && !overflowActionMovesFocus.current);
+                  }
+                }}
+                onOpenChangeComplete={(open) => {
+                  if (!open && restoreOverflowFocus.current) {
+                    restoreOverflowFocus.current = false;
+                    overflowTriggerRef.current?.focus({ preventScroll: true });
+                  }
+                }}
+              >
+                <DropdownMenuTrigger
+                  ref={overflowTriggerRef}
+                  render={
+                    <button
+                      type="button"
+                      aria-label={t(($) => $.attachment.more_actions)}
+                      className="flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    >
+                      <Ellipsis className="size-4" />
+                    </button>
+                  }
+                />
+                <DropdownMenuContent
+                  align="end"
+                  className="dark w-72 max-w-[calc(100vw-1rem)] [&_[role^=menuitem]]:min-h-11"
+                >
+                  {kind === "html" && (
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>{t(($) => $.attachment.viewport)}</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        className="grid grid-cols-2 gap-0.5"
+                        value={htmlViewport}
+                        onValueChange={(value) => setHtmlViewport(value as HtmlViewport)}
+                      >
+                        {HTML_VIEWPORTS.map((viewport) => (
+                          <DropdownMenuRadioItem key={viewport} value={viewport} disabled={htmlSource}>
+                            {viewportLabels[viewport]}
+                          </DropdownMenuRadioItem>
+                        ))}
+                      </DropdownMenuRadioGroup>
+                      <DropdownMenuItem onClick={htmlLocation.reload} disabled={htmlSource}>
+                        <RotateCw className="size-4" />
+                        {t(($) => $.attachment.reload)}
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                  )}
+                  {kind === "structured" && (
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>{t(($) => $.attachment.view_mode)}</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        value={structuredView}
+                        onValueChange={(value) => setStructuredChoice(value as StructuredView)}
+                      >
+                        <DropdownMenuRadioItem value="tree" disabled={!treeAvailable}>
+                          <ListTree className="size-4" />
+                          {t(($) => $.attachment.view_tree)}
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="raw" disabled={!treeAvailable}>
+                          <Code className="size-4" />
+                          {t(($) => $.attachment.view_raw)}
+                        </DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuGroup>
+                  )}
+                  {(kind === "html" || kind === "structured" || kind === "text") && (
+                    <DropdownMenuCheckboxItem checked={canWrap && wrap} disabled={!canWrap} closeOnClick={false} onCheckedChange={setWrapChoice}>
+                      <WrapText className="size-4" />
+                      {t(($) => $.attachment.wrap_lines)}
+                    </DropdownMenuCheckboxItem>
+                  )}
+                  {showZoomControls && (
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>{canvas.zoomPercent}%</DropdownMenuLabel>
+                      <DropdownMenuItem onClick={canvas.zoomOut} disabled={!natural || !canvas.canZoomOut}>
+                        {t(($) => $.canvas.zoom_out)}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={canvas.zoomIn} disabled={!natural || !canvas.canZoomIn}>
+                        {t(($) => $.canvas.zoom_in)}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={canvas.fit} disabled={!natural}>
+                        {t(($) => $.canvas.zoom_fit)}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={canvas.zoomToActualSize} disabled={!natural}>
+                        {t(($) => $.canvas.zoom_actual)}
+                      </DropdownMenuItem>
+                    </DropdownMenuGroup>
+                  )}
+                  {hasViewControls && (locate || copyLink || onOpenInNewTab || onOpenOverview || info) && <DropdownMenuSeparator />}
+                  {locate && (
+                    <DropdownMenuItem onClick={() => navigateFromOverflow(locate.onSelect)}>
+                      <MessageSquareText className="size-4" />
+                      {locate.label}
+                    </DropdownMenuItem>
+                  )}
+                  {copyLink && (
+                    <DropdownMenuItem onClick={copyLink.onSelect}>
+                      <Link2 className="size-4" />
+                      {copyLink.label}
+                    </DropdownMenuItem>
+                  )}
+                  {onOpenInNewTab && (
+                    <DropdownMenuItem onClick={() => navigateFromOverflow(onOpenInNewTab)}>
+                      <ExternalLink className="size-4" />
+                      {t(($) => $.attachment.open_in_new_tab)}
+                    </DropdownMenuItem>
+                  )}
+                  {onOpenOverview && (
+                    <DropdownMenuItem onClick={() => navigateFromOverflow(onOpenOverview)}>
+                      <LayoutGrid className="size-4" />
+                      {t(($) => $.attachment.overview)}
+                    </DropdownMenuItem>
+                  )}
+                  {info && (
+                    <DropdownMenuCheckboxItem checked={info.open} closeOnClick onCheckedChange={info.onToggle}>
+                      <PanelRight className="size-4" />
+                      {t(($) => $.attachment.info)}
+                    </DropdownMenuCheckboxItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
+          {(onOpenOverview || info) && <ChromeDivider />}
+          {onOpenOverview && (
+            <ChromeButton
+              className="hidden @3xl:flex"
+              label={t(($) => $.attachment.overview)}
+              shortcut="G"
+              onClick={onOpenOverview}
+            >
+              <LayoutGrid className="size-4" />
+            </ChromeButton>
+          )}
+          {info && (
+            <ChromeButton
+              className="hidden @3xl:flex"
+              label={t(($) => $.attachment.info)}
+              shortcut="I"
+              pressed={info.open}
+              onClick={info.onToggle}
+            >
+              <PanelRight className="size-4" />
+            </ChromeButton>
+          )}
+          {onClose && (
+            <>
+              <ChromeDivider />
+              <ChromeButton label={t(($) => $.attachment.close)} onClick={onClose}>
+                <X className="size-4" />
+              </ChromeButton>
+            </>
+          )}
+        </div>
+      </header>
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <motion.div
+            className="min-h-0 flex-1 px-4"
+            onClick={closeOnBackdrop}
+            initial={{ transform: reduceMotion ? "scale(1)" : "scale(0.97)" }}
+            animate={{
+              transform: "scale(1)",
+              transition: {
+                duration: UI_MOTION_DURATION.standard,
+                ease: UI_EASE_OUT,
+              },
+            }}
+          >
+            {kind === "image" && imageFailed ? (
+              <UnsupportedFallback
+                message={t(($) => $.attachment.preview_failed)}
+                onDownload={handleDownload}
+                downloading={downloading}
+              />
+            ) : kind === "image" ? (
+              <ImagePreview
+                state={state}
+                mediaUrl={mediaUrl}
+                canvas={canvas}
+                natural={natural}
+                onNaturalSize={handleNaturalSize}
+                onError={imageLoadError}
+              />
+            ) : (
+              <PreviewContent
+                kind={kind}
+                source={source}
+                state={state}
+                streamUrl={streamUrl}
+                streamFailed={streamed.failed}
+                onStreamError={streamed.refreshIfExpired}
+                view={view}
+                onDownload={handleDownload}
+                downloading={downloading}
+                onBackdropClick={closeOnBackdrop}
+              />
+            )}
+          </motion.div>
+          {sequence && <SequencePager sequence={sequence} />}
+        </div>
+        {info?.open && (
+          // A column beside the stage rather than a layer over it: the file
+          // re-fits into what is left instead of hiding under the panel.
+          <aside
+            className="dark w-80 max-w-[45vw] shrink-0 overflow-y-auto border-l border-border bg-background/40 text-foreground"
+            aria-label={t(($) => $.attachment.info)}
+          >
+            {info.content}
+          </aside>
+        )}
+      </div>
+    </>
+  );
+}
+
+// Chrome controls
+
+// Top-bar icon button. Sits inside the `dark` header, so the semantic tokens
+// resolve to the dark set whatever the app theme is.
+function ChromeButton({
+  className,
+  label,
+  shortcut,
+  pressed,
+  disabled,
+  busy,
+  onClick,
+  children,
+}: {
+  className?: string;
+  label: string;
+  /** Single-key shortcut, shown in the tooltip and announced to AT. */
+  shortcut?: string;
+  /** Toggle buttons pass their state; plain actions leave it unset. */
+  pressed?: boolean;
+  disabled?: boolean;
+  busy?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <TooltipHint
+      label={label}
+      shortcut={
+        shortcut ? (
+          <ShortcutKeycaps shortcut={createShortcutChord(shortcut)} decorative className="ml-1.5" />
+        ) : undefined
+      }
+      side="bottom"
+    >
+      <button
+        type="button"
+        className={cn(
+          "flex size-11 shrink-0 items-center justify-center rounded-md transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40 @3xl:size-8",
+          pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
+          className,
+        )}
+        aria-label={label}
+        aria-keyshortcuts={shortcut}
+        aria-pressed={pressed}
+        aria-busy={busy}
+        disabled={disabled}
+        onClick={onClick}
+      >
+        {children}
+      </button>
+    </TooltipHint>
+  );
+}
+
+// A one-of-several choice in the top bar (viewport width, tree / raw). Same
+// pressed look as the toggle buttons beside it. Labels show once the bar has
+// room for them; below that the icons carry the choice, named by tooltip.
+function ChromeSegmented<T extends string>({
+  className,
+  label,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  className?: string;
+  label: string;
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string; icon: IconComponent }>;
+  disabled?: boolean;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div role="group" aria-label={label} className={cn("flex items-center gap-0.5", className)}>
+      {options.map((option) => {
+        const pressed = option.value === value;
+        const Icon = option.icon;
+        return (
+          <TooltipHint key={option.value} label={option.label} side="bottom">
+            <button
+              type="button"
+              className={cn(
+                "flex h-8 min-w-8 items-center justify-center gap-1.5 rounded-md px-2 text-label transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40",
+                pressed ? "bg-secondary text-foreground" : "text-muted-foreground",
+              )}
+              aria-label={option.label}
+              aria-pressed={pressed}
+              disabled={disabled}
+              onClick={() => onChange(option.value)}
+            >
+              <Icon className="size-4 shrink-0" />
+              <span className="hidden @7xl:inline" aria-hidden>
+                {option.label}
+              </span>
+            </button>
+          </TooltipHint>
+        );
+      })}
+    </div>
+  );
+}
+
+function ChromeDivider() {
+  return <span className="mx-1.5 hidden h-4 w-px bg-input @3xl:block" aria-hidden />;
+}
+
+// Prev / next with the position between them, centered under the stage. The
+// strip is not backdrop: a click that misses a button must not close the
+// viewer. The counter's min width keeps the buttons still as digits change.
+function SequencePager({ sequence }: { sequence: PreviewSequence }) {
+  const { t } = useT("editor");
+  return (
+    <div className="dark flex h-12 shrink-0 items-center justify-center gap-1 text-foreground">
+      <SequenceButton
+        side="prev"
+        label={t(($) => $.attachment.previous)}
+        onClick={sequence.onPrev}
+      />
+      <span
+        className="min-w-16 select-none text-center text-label tabular-nums text-muted-foreground"
+        aria-live="polite"
+      >
+        {t(($) => $.attachment.sequence_position, {
+          index: sequence.index + 1,
+          total: sequence.total,
+        })}
+      </span>
+      <SequenceButton
+        side="next"
+        label={t(($) => $.attachment.next)}
+        onClick={sequence.onNext}
+      />
+    </div>
+  );
+}
+
+const SEQUENCE_KEYS = {
+  prev: { chord: createShortcutChord("Left"), aria: "ArrowLeft", Icon: ChevronLeft },
+  next: { chord: createShortcutChord("Right"), aria: "ArrowRight", Icon: ChevronRight },
+} as const;
+
+// `onClick` undefined means "boundary reached": the button stays mounted but
+// disabled, so the reader can see they are at one end instead of the control
+// vanishing. `enabled:hover` so the disabled state gets no hover feedback.
+function SequenceButton({
+  side,
+  label,
+  onClick,
+}: {
+  side: "prev" | "next";
+  label: string;
+  onClick?: () => void;
+}) {
+  const { chord, aria, Icon } = SEQUENCE_KEYS[side];
+  return (
+    <TooltipHint
+      label={label}
+      shortcut={<ShortcutKeycaps shortcut={chord} decorative className="ml-1.5" />}
+    >
+      <button
+        type="button"
+        className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors enabled:hover:bg-secondary enabled:hover:text-foreground disabled:opacity-40"
+        aria-label={label}
+        aria-keyshortcuts={aria}
+        disabled={!onClick}
+        onClick={onClick}
+      >
+        <Icon className="size-4" />
+      </button>
+    </TooltipHint>
+  );
+}
+
+// Image — zoom canvas
+
+function ImagePreview({
+  state,
+  mediaUrl,
+  canvas,
+  natural,
+  onNaturalSize,
+  onError,
+}: {
+  state: PreviewState;
+  mediaUrl: string;
+  canvas: ZoomCanvasApi;
+  natural: Size | null;
+  onNaturalSize: (url: string, size: Size) => void;
+  onError?: () => void;
+}) {
+  const { t } = useT("editor");
+  const url = mediaUrl;
+
+  const readNaturalSize = useCallback(
+    (image: HTMLImageElement | null) => {
+      // naturalWidth is 0 for an image that hasn't decoded yet, and also for
+      // an SVG that declares only a viewBox — Chromium gives those no
+      // intrinsic size at all. Both fall back to the letterboxed branch;
+      // the first recovers on load, the second stays there.
+      if (!image || image.naturalWidth <= 0 || image.naturalHeight <= 0) return;
+      onNaturalSize(url, {
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+      });
+    },
+    [onNaturalSize, url],
+  );
+
+  if (!url) {
+    return (
+      <div className="dark flex h-full items-center justify-center gap-2 text-body text-muted-foreground">
+        <Loader2 className="size-4 animate-spin" />
+        {t(($) => $.attachment.preview_loading)}
+      </div>
+    );
+  }
+
+  // A flex column: the canvas sizes itself with `flex: 1 1 auto` and its
+  // content is absolutely positioned, so in a plain block parent it would
+  // collapse to zero height and show nothing. It clips and handles its own
+  // wheel events.
+  return (
+    <div className="flex h-full flex-col py-4">
+      <ZoomCanvas
+        canvas={canvas}
+        content={natural}
+        label={t(($) => $.image.canvas_label)}
+        autoFocus
+      >
+        <img
+          // A cached image is already `complete` before React attaches onLoad,
+          // so that event never fires — measure from the ref as well.
+          ref={readNaturalSize}
+          onLoad={(e) => readNaturalSize(e.currentTarget)}
+          onError={onError}
+          src={url}
+          alt={state.filename}
+          className={cn(
+            "select-none",
+            natural
+              ? "block size-full"
+              : "max-h-full max-w-full rounded-lg object-contain",
+          )}
+          // Native image dragging would hijack the pan gesture.
+          draggable={false}
+        />
+      </ZoomCanvas>
+    </div>
+  );
+}
+
+// Dispatch
+
+// What the top bar decided about how the file shows — see PreviewPanel.
+interface StageView {
+  wrap: boolean;
+  htmlViewport: HtmlViewport;
+  htmlSource: boolean;
+  structuredView: StructuredView;
+  /** The `structured` kind's parse, once its body has loaded. */
+  structuredParse: ReturnType<typeof parseStructured> | null;
+  renderHtmlFrame: HtmlFrameRenderer;
+  htmlLocation: HtmlPreviewLocation;
+}
+
+const TEXT_BACKED_KINDS: ReadonlySet<PreviewKind> = new Set<PreviewKind>([
+  "markdown",
+  "html",
+  "table",
+  "structured",
+  "text",
+]);
+
+// Dispatch on PreviewKind. New cases go here; remember that the viewer frame
+// (top bar, close, Download CTA, ESC handling) is shared — sub-renderers only
+// own the stage. `image` is handled by PreviewPanel itself because its
+// toolbar and canvas share zoom state.
+//
+// Layout per kind: pages (PDF, HTML, tables) fill the stage; video letterboxes
+// on it; Markdown, code and data scroll on a centered sheet in the app's own
+// theme; anything else that sits directly on the stage wears `dark`.
 function PreviewContent({
   kind,
   source,
   state,
+  streamUrl,
+  streamFailed,
+  onStreamError,
+  view,
   onDownload,
+  downloading,
+  onBackdropClick,
 }: {
-  kind: PreviewKind | null;
+  kind: Exclude<PreviewKind, "image"> | null;
   source: PreviewSource;
   state: PreviewState;
+  /** Where video, audio and PDF load from; empty while it is being signed. */
+  streamUrl: string;
+  streamFailed: boolean;
+  onStreamError: () => Promise<boolean>;
+  view: StageView;
   onDownload: () => void;
+  downloading: boolean;
+  onBackdropClick: (e: React.MouseEvent) => void;
 }) {
   const { t } = useT("editor");
 
@@ -339,6 +1637,7 @@ function PreviewContent({
       <UnsupportedFallback
         message={t(($) => $.attachment.preview_unsupported)}
         onDownload={onDownload}
+        downloading={downloading}
       />
     );
   }
@@ -348,64 +1647,72 @@ function PreviewContent({
   // be defensive — a direct mount of <AttachmentPreviewModal> with a URL
   // source whose filename later resolves to a text kind would otherwise
   // crash on a null id.
-  if (
-    (kind === "markdown" || kind === "html" || kind === "text") &&
-    !state.attachmentId
-  ) {
+  if (TEXT_BACKED_KINDS.has(kind) && !state.attachmentId) {
     return (
       <UnsupportedFallback
         message={t(($) => $.attachment.preview_unsupported)}
         onDownload={onDownload}
+        downloading={downloading}
       />
     );
   }
 
+  const code = (text: string, language: string | undefined) => (
+    <DocumentSheet width="code" onBackdropClick={onBackdropClick}>
+      <CodeBlockStatic
+        language={language}
+        body={text}
+        lineNumbers
+        wrap={view.wrap}
+        className="min-h-full"
+      />
+    </DocumentSheet>
+  );
+
+  if (kind === "pdf" && streamFailed) {
+    return <UnsupportedFallback message={t(($) => $.attachment.preview_failed)} onDownload={onDownload} downloading={downloading} />;
+  }
+  if ((kind === "pdf" || kind === "video" || kind === "audio") && !streamUrl) {
+    return <PreviewLoading />;
+  }
+
   switch (kind) {
-    case "image":
-      return (
-        <div className="flex h-full w-full items-center justify-center bg-black/40 p-4">
-          <img
-            src={state.mediaUrl}
-            alt={state.filename}
-            className="h-full w-full rounded-lg object-contain"
-          />
-        </div>
-      );
     case "pdf":
       return (
-        <iframe
-          src={state.mediaUrl}
-          className="h-full w-full bg-background"
-          title={state.filename}
-        />
-      );
-    case "video":
-      return (
-        <div className="flex h-full w-full items-center justify-center bg-black">
-          <video
-            src={state.mediaUrl}
-            controls
-            className="h-full w-full object-contain"
+        <div className="h-full pb-4">
+          <iframe
+            src={streamUrl}
+            className="h-full w-full rounded-lg bg-background"
+            title={state.filename}
           />
         </div>
       );
+    case "video":
     case "audio":
       return (
-        <div className="flex h-full w-full items-center justify-center p-8">
-          <audio src={state.mediaUrl} controls className="w-full max-w-xl" />
-        </div>
+        <MediaPlayer
+          key={state.attachmentId ?? state.mediaUrl}
+          kind={kind}
+          src={streamUrl}
+          onExpired={onStreamError}
+          onDownload={onDownload}
+          downloading={downloading}
+        />
       );
     case "markdown":
       return (
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
           render={(text) => (
-            <ReadonlyContent
-              content={text}
-              className="px-6 py-4"
-              attachments={source.kind === "full" ? [source.attachment] : []}
-            />
+            <DocumentSheet width="prose" onBackdropClick={onBackdropClick}>
+              <ReadonlyContent
+                content={text}
+                className="px-10 py-8"
+                attachments={source.kind === "full" ? [source.attachment] : []}
+              />
+            </DocumentSheet>
           )}
         />
       );
@@ -414,14 +1721,72 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
+          downloading={downloading}
+          render={(text) =>
+            view.htmlSource ? (
+              code(text, "xml")
+            ) : (
+              <HtmlViewportFrame viewport={view.htmlViewport}>
+                {view.renderHtmlFrame({
+                  html: withWidthBridge(text),
+                  title: state.filename,
+                  location: view.htmlLocation,
+                })}
+              </HtmlViewportFrame>
+            )
+          }
+        />
+      );
+    case "table":
+      return (
+        <TextBackedPreview
+          attachmentId={state.attachmentId!}
+          onDownload={onDownload}
+          downloading={downloading}
           render={(text) => (
-            <HtmlPreviewBody
-              source={{ kind: "inline", html: text }}
-              title={state.filename}
-              className="h-full w-full"
-              iframeClassName="rounded-none border-0"
+            // Keyed on the file: sort order and column widths belong to it.
+            <TablePreview
+              key={state.attachmentId}
+              text={text}
+              delimiter={tableDelimiter(state.contentType, state.filename)}
             />
           )}
+        />
+      );
+    case "structured":
+      return (
+        <TextBackedPreview
+          attachmentId={state.attachmentId!}
+          onDownload={onDownload}
+          downloading={downloading}
+          render={(text) => {
+            const parse = view.structuredParse;
+            if (parse?.ok && view.structuredView === "tree") {
+              return (
+                <DocumentSheet width="code" onBackdropClick={onBackdropClick}>
+                  <div className="px-4 py-4">
+                    <StructuredTree key={state.attachmentId} value={parse.value} />
+                  </div>
+                </DocumentSheet>
+              );
+            }
+            return (
+              <div className="flex h-full flex-col">
+                {parse && !parse.ok && (
+                  <p
+                    className="dark mx-auto mb-2 w-full max-w-5xl shrink-0 text-body text-muted-foreground"
+                    role="status"
+                  >
+                    {t(($) => $.attachment.structured_parse_failed)}{" "}
+                    <span className="font-mono text-caption">{parse.message}</span>
+                  </p>
+                )}
+                <div className="min-h-0 flex-1">
+                  {code(text, extensionToLanguage(state.filename))}
+                </div>
+              </div>
+            );
+          }}
         />
       );
     case "text":
@@ -429,21 +1794,41 @@ function PreviewContent({
         <TextBackedPreview
           attachmentId={state.attachmentId!}
           onDownload={onDownload}
-          render={(text) => (
-            <CodeBlockStatic
-              language={extensionToLanguage(state.filename)}
-              body={text}
-              className="px-6 py-4"
-            />
-          )}
+          downloading={downloading}
+          render={(text) => code(text, extensionToLanguage(state.filename))}
         />
       );
   }
 }
 
-// ---------------------------------------------------------------------------
+// A read-not-looked-at document: a centered sheet in the app's theme that
+// scrolls with the stage. Prose keeps a reading measure; code gets the room
+// long lines need. The scroll container spans the whole stage, so the wheel
+// works anywhere and its empty sides still count as backdrop.
+function DocumentSheet({
+  width,
+  onBackdropClick,
+  children,
+}: {
+  width: "prose" | "code";
+  onBackdropClick: (e: React.MouseEvent) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="h-full overflow-y-auto" onClick={onBackdropClick}>
+      <div
+        className={cn(
+          "mx-auto min-h-full w-full rounded-t-lg bg-background text-foreground",
+          width === "prose" ? "max-w-3xl" : "max-w-5xl",
+        )}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // Text-backed preview — fetches body once, then hands to the render prop
-// ---------------------------------------------------------------------------
 
 // React Query owns server state per the project convention; re-opening the
 // same attachment hits the cache instead of re-fetching. Query is keyed on
@@ -452,29 +1837,25 @@ function PreviewContent({
 function TextBackedPreview({
   attachmentId,
   onDownload,
+  downloading,
   render,
 }: {
   attachmentId: string;
   onDownload: () => void;
+  downloading: boolean;
   render: (text: string) => ReactNode;
 }) {
   const { t } = useT("editor");
   const query = useAttachmentHtmlText(attachmentId);
 
-  if (query.isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" />
-        {t(($) => $.attachment.preview_loading)}
-      </div>
-    );
-  }
+  if (query.isLoading) return <PreviewLoading />;
   if (query.error) {
     if (query.error instanceof PreviewTooLargeError) {
       return (
         <UnsupportedFallback
           message={t(($) => $.attachment.preview_too_large)}
           onDownload={onDownload}
+          downloading={downloading}
         />
       );
     }
@@ -483,6 +1864,7 @@ function TextBackedPreview({
         <UnsupportedFallback
           message={t(($) => $.attachment.preview_unsupported)}
           onDownload={onDownload}
+          downloading={downloading}
         />
       );
     }
@@ -490,6 +1872,7 @@ function TextBackedPreview({
       <UnsupportedFallback
         message={t(($) => $.attachment.preview_failed)}
         onDownload={onDownload}
+        downloading={downloading}
       />
     );
   }
@@ -497,30 +1880,170 @@ function TextBackedPreview({
   return <>{render(query.data.text)}</>;
 }
 
-// ---------------------------------------------------------------------------
-// Fallback — used for 413 / 415 / unknown kinds
-// ---------------------------------------------------------------------------
+function PreviewLoading() {
+  const { t } = useT("editor");
+  return (
+    <div className="dark flex h-full items-center justify-center gap-2 text-body text-muted-foreground">
+      <Loader2 className="size-4 animate-spin" />
+      {t(($) => $.attachment.preview_loading)}
+    </div>
+  );
+}
+
+// Video and audio — the browser's own player. A file it cannot play (an
+// unsupported container or codec, a URL that stopped working) would otherwise
+// leave an empty player with no explanation.
+function MediaPlayer({
+  kind,
+  src,
+  onExpired,
+  onDownload,
+  downloading,
+}: {
+  kind: "video" | "audio";
+  src: string;
+  onExpired: () => Promise<boolean>;
+  onDownload: () => void;
+  downloading: boolean;
+}) {
+  const { t } = useT("editor");
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const mediaRef = useRef<HTMLMediaElement | null>(null);
+  const resumeRef = useRef<{ currentTime: number; paused: boolean; playbackRate: number } | null>(null);
+
+  useEffect(() => {
+    const media = mediaRef.current;
+    if (!media || media.getAttribute("src") === src) return;
+    // Replacing an expired capability reloads the native player. Snapshot
+    // before assigning src so renewal preserves both the seek and play state.
+    const { currentTime, paused, playbackRate } = resumeRef.current ?? media;
+    const restore = () => {
+      media.currentTime = currentTime;
+      media.playbackRate = playbackRate;
+      if (!paused) void media.play().catch(() => {});
+      resumeRef.current = null;
+    };
+    media.addEventListener("loadedmetadata", restore, { once: true });
+    media.src = src;
+    return () => media.removeEventListener("loadedmetadata", restore);
+  }, [src]);
+
+  const handleError = async () => {
+    const media = mediaRef.current;
+    if (media) resumeRef.current = { currentTime: media.currentTime, paused: media.paused, playbackRate: media.playbackRate };
+    if (!(await onExpired())) setFailedSrc(src);
+  };
+
+  if (failedSrc === src) {
+    return (
+      <UnsupportedFallback
+        message={t(($) => $.attachment.preview_failed)}
+        onDownload={onDownload}
+        downloading={downloading}
+      />
+    );
+  }
+  if (kind === "audio") {
+    return (
+      <div className="dark flex h-full w-full items-center justify-center p-8">
+        <audio
+          ref={(element) => { mediaRef.current = element; }}
+          controls
+          className="w-full max-w-xl"
+          onError={handleError}
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-full w-full items-center justify-center pb-4">
+      <video
+        ref={(element) => { mediaRef.current = element; }}
+        controls
+        className="h-full w-full object-contain"
+        onError={handleError}
+      />
+    </div>
+  );
+}
+
+// Fallback — used for 413 / 415 / unknown kinds. Sits on the stage, so dark.
 
 function UnsupportedFallback({
   message,
   onDownload,
+  downloading,
 }: {
   message: string;
   onDownload: () => void;
+  downloading: boolean;
 }) {
   const { t } = useT("editor");
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+    <div className="dark flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
       <FileText className="size-8 text-muted-foreground" />
-      <p className="text-sm text-muted-foreground">{message}</p>
+      <p className="text-body text-muted-foreground">{message}</p>
       <button
         type="button"
-        className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-sm transition-colors hover:bg-muted"
+        className="inline-flex items-center gap-2 rounded-md border border-input bg-secondary px-3 py-1.5 text-body text-foreground transition-colors hover:bg-muted"
         onClick={onDownload}
+        disabled={downloading}
+        aria-busy={downloading}
       >
-        <Download className="size-4" />
+        {downloading ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Download className="size-4" />
+        )}
         {t(($) => $.image.download)}
       </button>
+    </div>
+  );
+}
+
+// Standalone — the viewer's top bar and stage as a page of their own
+
+/**
+ * The "Open in new tab" destination: the same bar and stage as the viewer,
+ * on the same dark ground, filling its host instead of overlaying the app.
+ * No close, sequence or window drag region — the tab is the frame.
+ */
+export function AttachmentPreviewStandalone({
+  attachment,
+  renderHtmlFrame,
+  initialHtmlAddress,
+  onHtmlAddressChange,
+}: {
+  attachment: Attachment;
+  renderHtmlFrame?: HtmlFrameRenderer;
+  /** Query and fragment an HTML file opens at. */
+  initialHtmlAddress?: string;
+  onHtmlAddressChange?: (address: string) => void;
+}) {
+  const download = useDownloadAttachment();
+  const source = useMemo<PreviewSource>(
+    () => ({ kind: "full", attachment }),
+    [attachment],
+  );
+  const state = normalize(source);
+  const handleHtmlAddressChange = useCallback(
+    (_attachmentId: string, address: string) => onHtmlAddressChange?.(address),
+    [onHtmlAddressChange],
+  );
+
+  return (
+    <div className="flex h-full w-full flex-col bg-black/95">
+      <PreviewPanel
+        surface="page"
+        kind={state.kind}
+        source={source}
+        state={state}
+        onDownload={() => download(attachment.id)}
+        reduceMotion
+        renderHtmlFrame={renderHtmlFrame}
+        initialHtmlAddress={initialHtmlAddress}
+        onHtmlAddressChange={handleHtmlAddressChange}
+      />
     </div>
   );
 }

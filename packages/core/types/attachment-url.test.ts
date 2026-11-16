@@ -1,15 +1,53 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+  attachmentIdFromStorageURL,
   contentReferencesAttachment,
+  stripChannelMediaMarkers,
 } from "./attachment-url";
 
 const ID = "11111111-2222-3333-4444-555555555555";
+const LOCAL_URL = `/uploads/workspaces/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/${ID}.png`;
+
+describe("legacy local attachment URLs", () => {
+  it.each([LOCAL_URL, `${LOCAL_URL}?exp=1&sig=old#image`, `https://old.example${LOCAL_URL}`])(
+    "extracts the attachment identity from %s",
+    (url) => expect(attachmentIdFromLocalUploadURL(url)).toBe(ID),
+  );
+
+  it.each(["/uploads/users/user/avatar.png", `${LOCAL_URL}.meta.json`, "/uploads/workspaces/ws/file.png", `//other.example${LOCAL_URL}`])(
+    "does not treat %s as an attachment",
+    (url) => expect(attachmentIdFromLocalUploadURL(url)).toBeUndefined(),
+  );
+
+  it("deduplicates historical body references after the response URL changes", () => {
+    expect(contentReferencesAttachment(`![image](${LOCAL_URL})`, {
+      id: ID, url: attachmentDownloadPath(ID),
+    })).toBe(true);
+  });
+});
 
 describe("attachmentDownloadPath", () => {
   it("returns the stable per-attachment download path", () => {
     expect(attachmentDownloadPath(ID)).toBe(`/api/attachments/${ID}/download`);
+  });
+});
+
+describe("stripChannelMediaMarkers", () => {
+  it("removes provenance while retaining the visible channel image", () => {
+    const image = `![](${attachmentDownloadPath(ID)})`;
+    const marker = `<!-- multica:channel-media:${ID} -->`;
+
+    expect(stripChannelMediaMarkers(`${image}\n\n${marker}`)).toBe(`${image}\n\n`);
+  });
+
+  it("leaves unrelated HTML comments untouched", () => {
+    expect(stripChannelMediaMarkers("before <!-- user note --> after")).toBe(
+      "before <!-- user note --> after",
+    );
   });
 });
 
@@ -67,7 +105,12 @@ describe("attachmentIdFromDownloadURL", () => {
 });
 
 describe("contentReferencesAttachment", () => {
-  const att = { id: ID, url: "/uploads/workspaces/ws/legacy.png" };
+  const att = {
+    id: ID,
+    url: "/uploads/workspaces/ws/legacy.png",
+    download_url: "https://cdn.example.com/workspaces/ws/file.png?Signature=fresh",
+    markdown_url: `https://multica-api.copilothub.ai/api/attachments/${ID}/download`,
+  };
 
   it("matches when the markdown uses the stable download path", () => {
     const md = `body\n\n![file](${attachmentDownloadPath(ID)})\n`;
@@ -76,6 +119,22 @@ describe("contentReferencesAttachment", () => {
 
   it("matches when the markdown uses the legacy storage URL", () => {
     const md = `body\n\n![file](${att.url})\n`;
+    expect(contentReferencesAttachment(md, att)).toBe(true);
+  });
+
+  it("matches when the markdown uses the response download_url", () => {
+    const md = `body\n\n![file](${att.download_url})\n`;
+    expect(contentReferencesAttachment(md, att)).toBe(true);
+  });
+
+  it("matches when the markdown uses an older signed download_url for the same object", () => {
+    const stale = "https://cdn.example.com/workspaces/ws/file.png?Signature=stale";
+    const md = `body\n\n![file](${stale})\n`;
+    expect(contentReferencesAttachment(md, att)).toBe(true);
+  });
+
+  it("matches when the markdown uses the server-provided markdown_url", () => {
+    const md = `body\n\n![file](${att.markdown_url})\n`;
     expect(contentReferencesAttachment(md, att)).toBe(true);
   });
 
@@ -111,11 +170,39 @@ describe("contentReferencesAttachment", () => {
   // absolute-host download URL via its stable-path substring, so the
   // attachment now binds the same way comments do.
   it("matches the absolute-host markdown_url the editor actually persists", () => {
-    const markdownUrl = `https://multica-api.copilothub.ai/api/attachments/${ID}/download`;
-    const md = `body\n\n![pasted](${markdownUrl})\n`;
+    const md = `body\n\n![pasted](${att.markdown_url})\n`;
     // The raw storage url is NOT present in the body — the old
     // `md.includes(a.url)` check would have returned false here.
     expect(md.includes(att.url)).toBe(false);
     expect(contentReferencesAttachment(md, att)).toBe(true);
+  });
+});
+
+describe("attachmentIdFromStorageURL", () => {
+  const WS = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+  const CDN = "static.multica.ai";
+
+  it("extracts the attachment id from a workspace object on the CDN", () => {
+    expect(attachmentIdFromStorageURL(`https://${CDN}/workspaces/${WS}/${ID}.jpg`, CDN)).toBe(ID);
+  });
+
+  it("accepts an object without an extension and ignores query strings", () => {
+    expect(attachmentIdFromStorageURL(`https://${CDN}/workspaces/${WS}/${ID}?x=1`, CDN)).toBe(ID);
+  });
+
+  it("ignores URLs on another host", () => {
+    expect(
+      attachmentIdFromStorageURL(`https://example.com/workspaces/${WS}/${ID}.jpg`, CDN),
+    ).toBeUndefined();
+  });
+
+  it("ignores non-workspace paths and an unset CDN domain", () => {
+    expect(
+      attachmentIdFromStorageURL(`https://${CDN}/users/${WS}/${ID}.jpg`, CDN),
+    ).toBeUndefined();
+    expect(
+      attachmentIdFromStorageURL(`https://${CDN}/workspaces/${WS}/${ID}.jpg`, ""),
+    ).toBeUndefined();
+    expect(attachmentIdFromStorageURL(`/workspaces/${WS}/${ID}.jpg`, CDN)).toBeUndefined();
   });
 });

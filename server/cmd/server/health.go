@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -35,6 +37,14 @@ type serverHealth struct {
 	cacheTTL           time.Duration
 	refreshMu          sync.Mutex
 	cache              atomic.Pointer[cachedReadiness]
+	// startedAt and pid identify the process answering /health. A 200 alone
+	// only proves something is listening on the port: when a restart fails to
+	// bind, the previous instance keeps serving and every readiness check
+	// still passes, so a caller can configure or test the wrong build without
+	// any visible error. Local tooling compares started_at against its own
+	// launch time to prove the answer came from the process it just started.
+	startedAt time.Time
+	pid       int
 }
 
 type cachedReadiness struct {
@@ -44,7 +54,10 @@ type cachedReadiness struct {
 }
 
 type liveResponse struct {
-	Status string `json:"status"`
+	Status    string `json:"status"`
+	PID       int    `json:"pid,omitempty"`
+	Commit    string `json:"commit,omitempty"`
+	StartedAt string `json:"started_at,omitempty"`
 }
 
 type readinessResponse struct {
@@ -64,11 +77,17 @@ func newServerHealth(pool *pgxpool.Pool) *serverHealth {
 		requiredMigrations: requiredMigrations,
 		initErr:            err,
 		cacheTTL:           readinessCacheTTL,
+		startedAt:          time.Now().UTC(),
+		pid:                os.Getpid(),
 	}
 }
 
 func (h *serverHealth) liveHandler(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, liveResponse{Status: "ok"})
+	resp := liveResponse{Status: "ok", PID: h.pid, Commit: commit}
+	if !h.startedAt.IsZero() {
+		resp.StartedAt = h.startedAt.Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *serverHealth) readyHandler(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +182,17 @@ func (h *serverHealth) computeReadiness(parent context.Context) (readinessRespon
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	// Buffer the payload so we can emit an accurate Content-Length; encoding
+	// straight into the ResponseWriter after WriteHeader would force chunked
+	// transfer encoding and drop the header.
+	body, err := json.Marshal(v)
+	if err != nil {
+		body = []byte(`{"error":"failed to encode response"}`)
+		status = http.StatusInternalServerError
+	}
+	body = append(body, '\n')
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(body)
 }

@@ -1,5 +1,16 @@
 import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
-import { app, type BrowserWindow, ipcMain } from "electron";
+import { app, type BrowserWindow, type MessageBoxOptions, ipcMain } from "electron";
+import type {
+  ManualUpdateCheckResult,
+  UpdaterPreferences,
+} from "../shared/updater-types";
+import {
+  DEFAULT_UPDATER_PREFERENCES,
+  loadUpdaterPreferences,
+  saveUpdaterPreferences,
+  updaterPreferencesPath,
+} from "./updater-preferences";
+import type { DaemonInstallPrep } from "./update-install-gate";
 
 // Silent background updates: electron-updater downloads on its own as soon
 // as `update-available` fires; we only surface UI when the package is fully
@@ -17,17 +28,70 @@ if (process.platform === "win32" && process.arch === "arm64") {
   autoUpdater.channel = "latest-arm64";
 }
 
+interface ChannelConfigurableUpdater {
+  channel: string | null;
+  allowDowngrade: boolean;
+}
+
+export function configureMacX64UpdateChannel(
+  updater: ChannelConfigurableUpdater,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): void {
+  if (platform !== "darwin" || arch !== "x64") return;
+
+  // AppUpdater.channel enables allowDowngrade as a side effect. This channel
+  // isolates a CPU architecture, not a release train, so preserve normal
+  // monotonic version behavior after selecting the architecture feed.
+  updater.channel = "latest-x64";
+  updater.allowDowngrade = false;
+}
+
+// electron-builder does not architecture-suffix macOS update metadata.
+// package.mjs publishes macOS x64 as `latest-x64-mac.yml`; the established
+// arm64 feed and runtime path remain unchanged.
+configureMacX64UpdateChannel(autoUpdater);
+
 const STARTUP_CHECK_DELAY_MS = 5_000;
 const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+// quitAndInstall only quits once the installer has been spawned. If the app is
+// still running this long afterwards, the install bailed and the daemon we
+// stopped for it must be brought back.
+const INSTALL_QUIT_WATCHDOG_MS = 10_000;
 
-export type ManualUpdateCheckResult =
-  | {
-      ok: true;
-      currentVersion: string;
-      latestVersion: string;
-      available: boolean;
-    }
-  | { ok: false; error: string };
+// Injected so the updater does not own the daemon manager's state.
+export interface UpdaterDaemonGate {
+  prepare: (options: {
+    interruptActiveTasks: boolean;
+  }) => Promise<DaemonInstallPrep>;
+  resumeAfterAbortedInstall: () => void;
+  confirmInstallWhileBusy: (activeTasks: number) => Promise<boolean>;
+}
+
+export interface SetupAutoUpdaterOptions {
+  daemonGate?: UpdaterDaemonGate;
+  platform?: NodeJS.Platform;
+}
+
+export function createElectronBusyInstallPrompt(
+  showMessageBox: (
+    options: MessageBoxOptions,
+  ) => Promise<{ response: number }>,
+): (activeTasks: number) => Promise<boolean> {
+  return async (activeTasks) => {
+    const tasks = activeTasks === 1 ? "1 agent task is" : `${activeTasks} agent tasks are`;
+    const { response } = await showMessageBox({
+      type: "question",
+      buttons: ["Install now", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      title: "Install update",
+      message: `${tasks} running on this computer.`,
+      detail: "Installing now stops the local runtime and interrupts these tasks.",
+    });
+    return response === 0;
+  };
+}
 
 type RendererChannel =
   | "updater:update-available"
@@ -84,24 +148,154 @@ function checkForUpdatesOnce(): Promise<unknown> {
   return p;
 }
 
-export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
+export function setupAutoUpdater(
+  getMainWindows: () => readonly BrowserWindow[],
+  options: SetupAutoUpdaterOptions = {},
+): void {
+  // Every main window mounts the update banner, so each one hears progress.
+  const broadcast = (channel: RendererChannel, payload: unknown) => {
+    for (const win of getMainWindows()) sendToLiveRenderer(win, channel, payload);
+  };
+  const platform = options.platform ?? process.platform;
+  // Only Windows locks a running executable against replacement; macOS and
+  // Linux keep their existing update path untouched.
+  const daemonGate = platform === "win32" ? (options.daemonGate ?? null) : null;
+  const preferencesFilePath = updaterPreferencesPath(app.getPath("userData"));
+  let automaticUpdatesEnabled =
+    DEFAULT_UPDATER_PREFERENCES.automaticUpdates;
+  let startupCheckElapsed = false;
+  let startupTimer: ReturnType<typeof setTimeout> | null = null;
+  let periodicTimer: ReturnType<typeof setInterval> | null = null;
+  const preferencesReady = loadUpdaterPreferences(preferencesFilePath).then(
+    (preferences) => {
+      automaticUpdatesEnabled = preferences.automaticUpdates;
+      return preferences;
+    },
+  );
+
+  const runAutomaticCheck = (errorMessage: string): void => {
+    void preferencesReady
+      .then(() => {
+        if (!automaticUpdatesEnabled) return;
+        return checkForUpdatesOnce();
+      })
+      .catch((err) => {
+        console.error(errorMessage, err);
+      });
+  };
+
+  // Arm the startup + periodic background checks. Idempotent: an already-armed
+  // timer is left in place so re-enabling never stacks duplicate schedules.
+  const scheduleBackgroundChecks = (): void => {
+    if (startupTimer === null && !startupCheckElapsed) {
+      // Initial check shortly after startup so we don't block boot.
+      startupTimer = setTimeout(() => {
+        startupTimer = null;
+        startupCheckElapsed = true;
+        runAutomaticCheck("Failed to check for updates:");
+      }, STARTUP_CHECK_DELAY_MS);
+    }
+    if (periodicTimer === null) {
+      // Background poll so long-running sessions still pick up new releases
+      // without requiring the user to restart the app.
+      periodicTimer = setInterval(() => {
+        runAutomaticCheck("Periodic update check failed:");
+      }, PERIODIC_CHECK_INTERVAL_MS);
+    }
+  };
+
+  // Tear down the scheduled checks outright when automatic updates are turned
+  // off. Relying only on an in-callback preference guard leaves the timers
+  // running and lets a tick that races the preference flip still fire a check;
+  // clearing them makes "disabled" mean no future background work, full stop.
+  const cancelBackgroundChecks = (): void => {
+    if (startupTimer !== null) {
+      clearTimeout(startupTimer);
+      startupTimer = null;
+    }
+    if (periodicTimer !== null) {
+      clearInterval(periodicTimer);
+      periodicTimer = null;
+    }
+  };
+
+  let updateReadyToInstall = false;
+  let installFlow: Promise<void> | null = null;
+  let quitRequested = false;
+  let finishing = false;
+  let appQuitting = false;
+
+  const finish = (install: boolean, manual: boolean): void => {
+    finishing = true;
+    const previousAutoInstall = autoUpdater.autoInstallOnAppQuit;
+    if (!install) autoUpdater.autoInstallOnAppQuit = false;
+    setTimeout(() => {
+      if (appQuitting) return;
+      finishing = false;
+      quitRequested = false;
+      autoUpdater.autoInstallOnAppQuit = previousAutoInstall;
+      daemonGate?.resumeAfterAbortedInstall();
+    }, INSTALL_QUIT_WATCHDOG_MS);
+    if (install && manual) autoUpdater.quitAndInstall(false, true);
+    else app.quit();
+  };
+
+  // All entry points join this promise. Once stopping starts, nobody cancels
+  // or replaces its PID wait, and no other flow can resume the daemon.
+  const installWithDaemonGate = (manual: boolean): Promise<void> => {
+    if (installFlow) return installFlow;
+    if (finishing || !daemonGate) return Promise.resolve();
+    installFlow = (async () => {
+      let install = true;
+      try {
+        const prep = await daemonGate.prepare({ interruptActiveTasks: false });
+        if (prep.kind === "busy") {
+          install = manual && await daemonGate.confirmInstallWhileBusy(prep.activeTasks);
+          if (install) await daemonGate.prepare({ interruptActiveTasks: true });
+        }
+      } catch (err) {
+        // Preserve the existing installer fallback if preparation fails.
+        console.error("[updater] daemon preparation failed; installing anyway:", err);
+      }
+      if (install) finish(true, manual);
+      else {
+        daemonGate.resumeAfterAbortedInstall();
+        if (quitRequested) finish(false, false);
+      }
+    })().finally(() => { installFlow = null; });
+    return installFlow;
+  };
+
+  if (daemonGate) {
+    app.on("will-quit", () => { appQuitting = true; });
+    app.on("before-quit", (event) => {
+      if (finishing || !updateReadyToInstall || !autoUpdater.autoInstallOnAppQuit) return;
+      event.preventDefault();
+      quitRequested = true;
+      void installWithDaemonGate(false).catch((err) => {
+        console.error("[updater] quit-time installation failed:", err);
+      });
+    });
+  }
+
   autoUpdater.on("update-available", (info) => {
     // Forwarded for renderer-side state tracking only; the notification UI
     // does not render an "available" affordance with autoDownload=true.
-    sendToLiveRenderer(getMainWindow(), "updater:update-available", {
+    broadcast("updater:update-available", {
       version: info.version,
       releaseNotes: info.releaseNotes,
     });
   });
 
   autoUpdater.on("download-progress", (progress) => {
-    sendToLiveRenderer(getMainWindow(), "updater:download-progress", {
+    broadcast("updater:download-progress", {
       percent: progress.percent,
     });
   });
 
   autoUpdater.on("update-downloaded", (info: UpdateDownloadedEvent) => {
-    sendToLiveRenderer(getMainWindow(), "updater:update-downloaded", {
+    updateReadyToInstall = true;
+    broadcast("updater:update-downloaded", {
       version: info.version,
       releaseNotes: info.releaseNotes,
     });
@@ -117,9 +311,49 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     return autoUpdater.downloadUpdate();
   });
 
-  ipcMain.handle("updater:install", () => {
-    autoUpdater.quitAndInstall(false, true);
+  ipcMain.handle("updater:install", async () => {
+    if (!daemonGate) {
+      autoUpdater.quitAndInstall(false, true);
+      return;
+    }
+    await installWithDaemonGate(true);
   });
+
+  ipcMain.handle(
+    "updater:get-preferences",
+    async (): Promise<UpdaterPreferences> => {
+      await preferencesReady;
+      return { automaticUpdates: automaticUpdatesEnabled };
+    },
+  );
+
+  ipcMain.handle(
+    "updater:set-automatic-updates",
+    async (_event, enabled: unknown): Promise<UpdaterPreferences> => {
+      if (typeof enabled !== "boolean") {
+        throw new TypeError("automaticUpdates must be a boolean");
+      }
+
+      await preferencesReady;
+      const wasEnabled = automaticUpdatesEnabled;
+      const preferences = { automaticUpdates: enabled };
+      await saveUpdaterPreferences(preferencesFilePath, preferences);
+      automaticUpdatesEnabled = enabled;
+
+      if (!enabled) {
+        cancelBackgroundChecks();
+      } else if (!wasEnabled) {
+        // If the startup check has already passed while the preference was off,
+        // enabling it should take effect now instead of waiting up to one hour.
+        if (startupCheckElapsed) {
+          runAutomaticCheck("Failed to check for updates:");
+        }
+        scheduleBackgroundChecks();
+      }
+
+      return preferences;
+    },
+  );
 
   ipcMain.handle("updater:check", async (): Promise<ManualUpdateCheckResult> => {
     try {
@@ -147,18 +381,8 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     }
   });
 
-  // Initial check shortly after startup so we don't block boot.
-  setTimeout(() => {
-    checkForUpdatesOnce().catch((err) => {
-      console.error("Failed to check for updates:", err);
-    });
-  }, STARTUP_CHECK_DELAY_MS);
-
-  // Background poll so long-running sessions still pick up new releases
-  // without requiring the user to restart the app.
-  setInterval(() => {
-    checkForUpdatesOnce().catch((err) => {
-      console.error("Periodic update check failed:", err);
-    });
-  }, PERIODIC_CHECK_INTERVAL_MS);
+  // Initial check shortly after startup so we don't block boot, plus a
+  // background poll for long-running sessions. Both are torn down when the
+  // user disables automatic updates and re-armed when they turn them back on.
+  scheduleBackgroundChecks();
 }

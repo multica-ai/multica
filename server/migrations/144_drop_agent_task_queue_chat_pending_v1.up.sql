@@ -1,0 +1,12 @@
+-- Drop the superseded partial index from migration 040 (MUL-4159).
+--
+-- idx_agent_task_queue_chat_pending_v2 (migration 143) covers all four
+-- in-flight statuses and the same (chat_session_id, created_at DESC) column
+-- list, so it fully serves both GetPendingChatTask and
+-- ListPendingChatTasksByCreator. The old three-status index is now dead weight
+-- on the write path and can be removed once 143 is verified via EXPLAIN.
+--
+-- Split into its own migration so this file holds a single CONCURRENTLY
+-- statement (repo convention); CREATE/DROP INDEX CONCURRENTLY cannot run inside
+-- a transaction or multi-command string.
+DROP INDEX CONCURRENTLY IF EXISTS idx_agent_task_queue_chat_pending;

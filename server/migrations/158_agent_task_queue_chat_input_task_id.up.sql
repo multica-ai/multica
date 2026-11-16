@@ -1,0 +1,17 @@
+-- Direct-chat input ownership (MUL-4351).
+--
+-- chat_input_task_id makes each web/mobile direct-chat task the immutable owner
+-- of the user-message batch it must consume. A fresh direct-send task sets this
+-- to its own id in the same transaction that creates the user message
+-- (chat_message.task_id = task.id), so a later claim loads exactly that batch
+-- instead of scanning "trailing user messages after the last assistant row".
+--
+-- An auto-retry child inherits its parent's chat_input_task_id, so the whole
+-- retry chain keeps consuming the original root input batch and never re-reads
+-- a message that arrived after the batch was sealed.
+--
+-- NULL means "legacy row or channel (Slack/Lark) task": those keep using the
+-- trailing-message selector, so a rolling deploy never replays channel history
+-- and pre-migration direct rows behave exactly as before. No FK / cascade — the
+-- application layer owns this reference, matching the repo's no-FK rule.
+ALTER TABLE agent_task_queue ADD COLUMN IF NOT EXISTS chat_input_task_id UUID;

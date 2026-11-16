@@ -8,15 +8,19 @@
  *
  *   - image  → ImageAttachmentView (figure + hover toolbar + lightbox via
  *              the shared AttachmentPreviewModal)
- *   - html   → HtmlAttachmentPreview (inline iframe + hover toolbar)
- *   - others → AttachmentCard (icon + filename + Eye/Download row)
+ *   - others → AttachmentCard (icon + filename + Eye/Download row), or
+ *              AttachmentFileCard in the card layout
+ *
+ * An HTML file is a file like any other (MUL-7649): it shows as a card and
+ * opens in the viewer. HTML meant to be read in place is written as a
+ * ```html block in the body, which renders as a dynamic block.
  *
  * Call sites:
  *   - extensions/file-card.tsx FileCardView (Tiptap NodeView)
  *   - extensions/image-view.tsx ImageView (Tiptap NodeView)
- *   - readonly-content.tsx (markdown img + fileCard div renderers)
+ *   - rich-content/rich-content.tsx (markdown img + fileCard div renderers,
+ *     serving Chat, Issue descriptions and Comments through one renderer)
  *   - issues/components/comment-card.tsx AttachmentList (standalone fallback)
- *   - common/markdown.tsx (chat / skill viewer Markdown wrapper)
  *
  * The component owns its own preview modal and download dispatcher — callers
  * just pass `attachment` and (for editor surfaces) optional editor chrome
@@ -25,30 +29,44 @@
 
 import {
   Download,
+  Eye,
+  Loader2,
   Link as LinkIcon,
   Maximize2,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
+import { useCallback, useState, type CSSProperties, type ReactNode } from "react";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
-import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
-import { attachmentIdFromDownloadURL } from "@multica/core/types/attachment-url";
+import {
+  attachmentDownloadPath,
+  attachmentIdFromDownloadURL,
+  attachmentIdFromLocalUploadURL,
+  attachmentIdFromStorageURL,
+} from "@multica/core/types/attachment-url";
 import { useT } from "../i18n";
+import { DeferredTooltip } from "../common/deferred-tooltip";
+import { useContextMenuScope } from "../common/context-menu-scope";
 import { useAttachmentDownloadResolver } from "./attachment-download-context";
 import { useAttachmentPreview } from "./attachment-preview-modal";
+import { usePreviewSequence } from "./preview-sequence-context";
+import {
+  isObjectURL,
+  useResignedInlineMedia,
+} from "./hooks/use-inline-media-url";
 import { useDownloadAttachment } from "./use-download-attachment";
-import { AttachmentCard } from "./attachment-card";
-import { HtmlAttachmentPreview } from "./html-attachment-preview";
-import { getPreviewKind, type PreviewKind } from "./utils/preview";
+import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
+import { InstallThemeButton, canBeThemeZip } from "./install-theme-button";
+import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
+import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
+import { imageDimensions } from "./utils/image-metadata";
 import "./styles/attachment.css";
 
-// ---------------------------------------------------------------------------
 // Public API
-// ---------------------------------------------------------------------------
 
 export type AttachmentInput =
   // Server response in hand — full record. Used by AttachmentList and any
@@ -92,6 +110,14 @@ export interface AttachmentProps {
   selected?: boolean;
   /** Editor hint — wired to Tiptap deleteNode(). */
   onDelete?: () => void;
+  /**
+   * "block" (default) renders each kind at full width, as a body renders it.
+   * "card" is the form a list of standalone attachments lays out: an image
+   * keeps its full size up to a height cap, any other file becomes a card.
+   */
+  layout?: "block" | "card";
+  /** Card layout only — rendered after the file name, e.g. a version badge. */
+  badge?: ReactNode;
   className?: string;
 }
 
@@ -104,6 +130,17 @@ interface Normalized {
   uploading: boolean;
   width?: number;
   height?: number;
+}
+
+function recordImageFields(
+  record: AttachmentRecord | undefined,
+): Pick<Normalized, "width" | "height"> {
+  if (!record) return {};
+  const dims = imageDimensions(record);
+  return {
+    width: dims?.width,
+    height: dims?.height,
+  };
 }
 
 function normalize(
@@ -122,9 +159,12 @@ function normalize(
       attachmentId: input.attachment.id,
       record: input.attachment,
       uploading: false,
+      ...recordImageFields(input.attachment),
     };
   }
   const record = input.url ? resolve(input.url) : undefined;
+  const fromRecord = recordImageFields(record);
+  const ownSize = input.width !== undefined || input.height !== undefined;
   return {
     filename: input.filename || record?.filename || "",
     contentType: input.contentType || record?.content_type || "",
@@ -155,8 +195,8 @@ function normalize(
     attachmentId: record?.id,
     record,
     uploading: !!input.uploading,
-    width: input.width,
-    height: input.height,
+    width: ownSize ? input.width : fromRecord.width,
+    height: ownSize ? input.height : fromRecord.height,
   };
 }
 
@@ -191,58 +231,14 @@ function absolutizeMediaURL(rawUrl: string): string {
   return `${baseUrl}${rawUrl}`;
 }
 
-// pickInlineMediaURL returns the URL most likely to load successfully
-// inside a native <img>/<video>/<iframe> resource fetch — i.e. without
-// the calling client attaching an Authorization header.
+// pickInlineMediaURL chooses a URL usable by native media loads, which cannot
+// attach the API client's Authorization header. Signed download URLs are suitable
+// for rendering but must not replace durable Markdown references.
 //
-// The metadata response carries three URL fields per attachment row,
-// each with a different lifetime / accessibility:
-//
-//   - `record.download_url` — this-response click-time URL. In
-//                             CloudFront-signed mode this is the
-//                             signed redirect (works as a native img
-//                             src for the duration of the TTL); in
-//                             other modes it's the bare API endpoint
-//                             (`/api/attachments/<id>/download`) which
-//                             requires per-request auth and does NOT
-//                             load as a native img on a non-same-site
-//                             origin like Desktop's file://.
-//   - `record.markdown_url` — the durable URL the server picked for
-//                             persistence (MUL-3192 / `buildMarkdownURL`):
-//                             public CDN passthrough when the storage is
-//                             public-readable, or `MULTICA_PUBLIC_URL +
-//                             /api/attachments/<id>/download` for
-//                             private-bucket modes. Aligned with the
-//                             server-side policy by construction, so it
-//                             beats `record.url` whenever both exist.
-//   - `record.url`          — raw storage URL. May be private (S3 /
-//                             CloudFront-signed, R2, MinIO) and unable
-//                             to load directly. Last-resort fallback
-//                             for legacy responses that omit
-//                             `markdown_url`.
-//
-// Order:
-//
-//  1. Signed `download_url` — when CloudFront has minted a signed
-//     redirect for THIS response, use it; the TTL means the signed URL
-//     beats `markdown_url` on first paint (no extra hop through the
-//     API endpoint), and the renderer doesn't persist it so the TTL is
-//     not a problem.
-//  2. Known CDN `record.url` — when `/api/config` exposes the same CDN
-//     host as the attachment record, the browser can load the object
-//     directly (public CDN, or CloudFront cookie mode). Prefer it over
-//     an API-shaped `markdown_url` so the rendered `<img src>` and Copy
-//     Link affordance expose the CDN URL while the persisted markdown
-//     can remain the stable attachment endpoint. Skipped when the server
-//     reports `cdn_signed` — in CloudFront signed-URL mode the same
-//     domain serves PRIVATE content and a raw (unsigned) storage URL is
-//     a guaranteed 403 (MUL-3254).
-//  3. `record.markdown_url` — the durable, server-policy-aligned URL.
-//     Beats raw `record.url` because it never points at a private
-//     bucket (must-fix 2 from MUL-3192 review).
-//  4. `record.url` — legacy fallback for responses that omit
-//     `markdown_url` (a backend old enough to predate MUL-3192).
-//  5. The input URL — when there's no record at all.
+// Use known public/CDN URLs directly only when cdn_signed is false; unsigned URLs
+// on a private CDN fail even when the domain matches. Historical local uploads
+// use the authenticated API. Otherwise prefer the server's markdown_url,
+// then legacy storage URLs, then the original input.
 function pickInlineMediaURL(
   record: AttachmentRecord,
   fallback: string,
@@ -256,6 +252,7 @@ function pickInlineMediaURL(
   ) {
     return dl;
   }
+  if (attachmentIdFromLocalUploadURL(record.url)) return attachmentDownloadPath(record.id);
   if (!cdnSigned && storageURLMatchesCdnDomain(record.url, cdnDomain)) return record.url;
   if (record.markdown_url) return record.markdown_url;
   if (record.url) return record.url;
@@ -292,87 +289,27 @@ function hasExpiringSignatureQuery(q: URLSearchParams): boolean {
   return false;
 }
 
-// ---------------------------------------------------------------------------
-// Inline media re-sign (MUL-3254)
-// ---------------------------------------------------------------------------
-
-// Keep refetches well inside the server's signed-URL TTL (30 min default,
-// server/internal/handler/file.go) so a re-render never serves an expired
-// signature from the query cache.
-const RESIGN_STALE_MS = 20 * 60 * 1000;
-
-// useResignedInlineMediaURL upgrades an auth-gated media URL to a freshly
-// signed one for clients that cannot load `/api/attachments/<id>/download`
-// natively.
-//
-// The picked inline URL can end up being the stable per-attachment API
-// endpoint (e.g. a reopened issue draft, whose persisted record deliberately
-// strips the short-lived signed `download_url`). That endpoint needs
-// credentials: web loads it because the session cookie rides on the <img>
-// request (same-site), but Desktop's file:// renderer and the mobile webview
-// are cross-site — no cookie is attached and the Bearer token cannot be put
-// on a native resource fetch, so the image 401s. Those clients are exactly
-// the ones with a non-empty `api.getBaseUrl()` (no same-origin /api proxy),
-// which is the existing platform signal `absolutizeMediaURL` keys off.
-//
-// For them, fetch fresh attachment metadata through the authenticated API —
-// the same re-sign the click-time download path already does — and swap in
-// the response's signed `download_url`. When the server has no signed URL to
-// offer (non-CloudFront deployments return the API path again), keep the
-// original URL rather than looping.
-function useResignedInlineMediaURL(
-  attachmentId: string | undefined,
-  pickedUrl: string,
-): string {
-  const idFromPickedUrl = attachmentIdFromDownloadURL(pickedUrl);
-  const resignAttachmentId = attachmentId ?? idFromPickedUrl;
-  const needsResign =
-    !!resignAttachmentId &&
-    !!pickedUrl &&
-    idFromPickedUrl !== undefined &&
-    (api.getBaseUrl?.() ?? "") !== "";
-
-  const { data: fresh } = useQuery({
-    queryKey: ["attachment-inline-resign", resignAttachmentId],
-    queryFn: () => api.getAttachment(resignAttachmentId as string),
-    enabled: needsResign,
-    staleTime: RESIGN_STALE_MS,
-    gcTime: RESIGN_STALE_MS,
-  });
-
-  if (!needsResign) return pickedUrl;
-  const dl = fresh?.download_url ?? "";
-  // Accept the fresh URL only when it is an actual upgrade — absolute and no
-  // longer the auth-gated API shape (i.e. a signed storage URL the renderer
-  // can load natively).
-  if (/^https?:\/\//i.test(dl) && attachmentIdFromDownloadURL(dl) === undefined) {
-    return dl;
-  }
-  return pickedUrl;
-}
-
-// ---------------------------------------------------------------------------
 // Dispatcher
-// ---------------------------------------------------------------------------
 
 export function Attachment({
   attachment,
   editable,
   selected,
   onDelete,
+  layout = "block",
+  badge,
   className,
 }: AttachmentProps) {
+  const { t } = useT("editor");
+  const copyLink = useCopyAttachmentLink();
   const { resolveAttachment, openByUrl } = useAttachmentDownloadResolver();
   const cdnDomain = useConfigStore((s) => s.cdnDomain);
   const cdnSigned = useConfigStore((s) => s.cdnSigned);
   const download = useDownloadAttachment();
   const preview = useAttachmentPreview();
+  const sequence = usePreviewSequence();
 
   const state = normalize(attachment, resolveAttachment, cdnDomain, cdnSigned);
-  // The picked URL may still be the auth-gated API endpoint (reopened drafts
-  // whose persisted record has no signed download_url). Upgrade it to a
-  // freshly signed URL on clients that can't load the endpoint natively.
-  const mediaUrl = useResignedInlineMediaURL(state.attachmentId, state.url);
   const forceKind =
     attachment.kind === "url" ? attachment.forceKind : undefined;
   const kind =
@@ -380,8 +317,33 @@ export function Attachment({
     (state.filename || state.contentType
       ? getPreviewKind(state.contentType, state.filename)
       : null);
+  // The picked URL may still be the auth-gated API endpoint (reopened drafts
+  // whose persisted record has no signed download_url). Upgrade it to a
+  // freshly signed URL on clients that can't load the endpoint natively, or —
+  // on deployments that have no signed URL to give — to an object URL built
+  // from the authenticated byte fetch. Only the image branch renders a native
+  // resource load, so only it opts into that byte fetch.
+  const { url: mediaUrl } = useResignedInlineMedia(
+    state.attachmentId,
+    state.url,
+    kind === "image",
+  );
+  // Object URLs are session-local, so anything that hands a URL to the user or
+  // to another surface keeps the durable pick instead.
+  const shareUrl = isObjectURL(mediaUrl) ? state.url : mediaUrl;
+
+  // Identity this attachment has in the surrounding surface's sequence: the
+  // attachment id once the URL resolves to a record, otherwise the URL as the
+  // renderer received it — the same pair `collectAttachmentSequence` keys on.
+  const sequenceKey =
+    state.attachmentId ?? (attachment.kind === "url" ? attachment.url : "");
 
   const openPreview = () => {
+    // Inside an issue / chat, a file opens the surface's shared viewer at its
+    // real position so the reader can page through the rest. Anything the
+    // sequence doesn't know — a composer's in-flight upload, a surface with no
+    // provider — falls through to the single-file preview below.
+    if (kind && sequence.openAt(sequenceKey)) return;
     if (state.record) {
       preview.tryOpen({
         kind: "full",
@@ -395,25 +357,72 @@ export function Attachment({
     if (mediaUrl) {
       preview.tryOpen({
         kind: "url",
-        url: mediaUrl,
+        url: isObjectURL(mediaUrl) ? state.url : mediaUrl,
         filename: state.filename,
+        // This dispatcher has already decided what the slot is — from the
+        // call site's `forceKind`, or from a content-type the modal's
+        // URL-only source doesn't carry. Hand that answer over instead of
+        // letting the modal re-guess from `filename`, which for a body image
+        // is the markdown caption (MUL-7518).
+        forceKind: kind ?? undefined,
       });
     }
   };
 
   const handleDownload = () => {
-    if (state.attachmentId) {
-      download(state.attachmentId);
-      return;
+    // A CDN storage URL that didn't resolve against this surface's
+    // attachments (e.g. an image quoted from another comment) still names
+    // its attachment id, so re-sign it instead of opening the bare URL,
+    // which a signed CDN rejects outside the app.
+    const attachmentId =
+      state.attachmentId ??
+      attachmentIdFromDownloadURL(shareUrl) ??
+      attachmentIdFromLocalUploadURL(shareUrl) ??
+      attachmentIdFromStorageURL(shareUrl, cdnDomain);
+    if (attachmentId) {
+      return download(attachmentId);
     }
-    if (mediaUrl) openByUrl(mediaUrl);
+    if (shareUrl) return openByUrl(shareUrl);
   };
+
+  const canPreview =
+    kind === "image"
+      ? !!mediaUrl
+      : !!shareUrl && canOpenPreview(kind, !!state.attachmentId);
+  const canDownload = !!shareUrl || !!state.attachmentId;
+  // Read-only content offers these on right-click too; an editor keeps its
+  // edit menu.
+  const scopeRef = useContextMenuScope(() => {
+    if (editable || state.uploading) return null;
+    const contentActions = [
+      canPreview && {
+        key: "preview",
+        icon: <Eye className="size-3.5" />,
+        label: t(($) => $.attachment.preview),
+        onSelect: openPreview,
+      },
+      canDownload && {
+        key: "download",
+        icon: <Download className="size-3.5" />,
+        label: t(($) => $.image.download),
+        onSelect: () => void handleDownload(),
+      },
+      shareUrl && {
+        key: "copy-link",
+        icon: <LinkIcon className="size-3.5" />,
+        label: t(($) => $.image.copy_link),
+        onSelect: () => void copyLink(shareUrl),
+      },
+    ].filter((item) => !!item);
+    return { contentActions };
+  }, { content: !editable });
 
   if (kind === "image") {
     return (
       <>
         <ImageAttachmentView
           src={mediaUrl}
+          linkUrl={shareUrl}
           alt={state.filename}
           uploading={state.uploading}
           width={state.width}
@@ -423,22 +432,36 @@ export function Attachment({
           onView={openPreview}
           onDownload={handleDownload}
           onDelete={onDelete}
-          className={className}
+          scopeRef={scopeRef}
+          className={cn(layout === "card" && "image-standalone", className)}
         />
         {preview.modal}
       </>
     );
   }
 
-  if (kind === "html" && state.attachmentId && !state.uploading) {
+  const themeAction =
+    !editable && !state.uploading && state.attachmentId && canBeThemeZip(state.filename, state.record?.size_bytes) ? (
+      <InstallThemeButton attachmentId={state.attachmentId} filename={state.filename} />
+    ) : undefined;
+
+  if (layout === "card") {
     return (
       <>
-        <HtmlAttachmentPreview
-          attachmentId={state.attachmentId}
+        <AttachmentFileCard
           filename={state.filename}
+          contentType={state.contentType}
+          sizeBytes={state.record?.size_bytes}
+          // Same gate as the row's Eye button: text kinds need the record.
+          canPreview={canPreview}
+          canDownload={canDownload}
+          scopeRef={scopeRef}
+          uploading={state.uploading}
+          badge={badge}
           onPreview={openPreview}
           onDownload={handleDownload}
           onDelete={editable ? onDelete : undefined}
+          action={themeAction}
         />
         {preview.modal}
       </>
@@ -451,20 +474,31 @@ export function Attachment({
         filename={state.filename}
         contentType={state.contentType}
         attachmentId={state.attachmentId}
-        href={mediaUrl || undefined}
+        href={shareUrl || undefined}
         uploading={state.uploading}
         onPreview={openPreview}
         onDownload={handleDownload}
         onDelete={editable ? onDelete : undefined}
+        action={themeAction}
+        scopeRef={scopeRef}
       />
       {preview.modal}
     </>
   );
 }
 
-// ---------------------------------------------------------------------------
+function useCopyAttachmentLink() {
+  const { t } = useT("editor");
+  return async (url: string) => {
+    if (await copyText(url)) {
+      toast.success(t(($) => $.image.link_copied));
+    } else {
+      toast.error(t(($) => $.image.copy_link_failed));
+    }
+  };
+}
+
 // ImageAttachmentView — inline image with hover toolbar
-// ---------------------------------------------------------------------------
 //
 // DOM and styling are intentionally a direct port of the original
 // extensions/image-view.tsx <figure> structure. Shared visual styles live in
@@ -474,6 +508,12 @@ export function Attachment({
 
 interface ImageAttachmentViewProps {
   src: string;
+  /**
+   * URL handed to the user by Copy Link. Splits from `src` only when `src` is
+   * a session-local object URL (proxy-mode byte fallback) — pasting a `blob:`
+   * URL anywhere outside this renderer resolves to nothing.
+   */
+  linkUrl: string;
   alt: string;
   uploading: boolean;
   width?: number;
@@ -481,13 +521,16 @@ interface ImageAttachmentViewProps {
   editable?: boolean;
   selected?: boolean;
   onView: () => void;
-  onDownload: () => void;
+  onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
+  /** Registers the image with the right-click menu. */
+  scopeRef?: (element: HTMLElement | null) => void;
   className?: string;
 }
 
 function ImageAttachmentView({
   src,
+  linkUrl,
   alt,
   uploading,
   width,
@@ -497,17 +540,13 @@ function ImageAttachmentView({
   onView,
   onDownload,
   onDelete,
+  scopeRef,
   className,
 }: ImageAttachmentViewProps) {
   const { t } = useT("editor");
-
-  const handleCopyLink = async () => {
-    if (await copyText(src)) {
-      toast.success(t(($) => $.image.link_copied));
-    } else {
-      toast.error(t(($) => $.image.copy_link_failed));
-    }
-  };
+  const { downloading, handleDownload } = useAttachmentDownloadState(onDownload);
+  const copyLink = useCopyAttachmentLink();
+  const handleCopyLink = () => copyLink(linkUrl);
 
   // Click on figure opens the preview only in non-editor / non-uploading
   // surfaces — inside the editor we let ProseMirror own the click for
@@ -516,12 +555,30 @@ function ImageAttachmentView({
   // cursor: zoom-in }` keys off this same flag for the cursor affordance.
   const clickable = !editable && !uploading;
 
+  // An image that has not loaded has no size of its own (the figure shrinks
+  // to it), so its box is reserved up front: from its pixel size when known,
+  // otherwise as a fixed-ratio placeholder. Once anything has painted the box
+  // follows the image.
+  const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const loaded = !!src && loadedSrc === src;
+  const imgRef = useCallback((img: HTMLImageElement | null) => {
+    if (img?.complete && img.naturalWidth > 0) setLoadedSrc(src);
+  }, [src]);
+  const sized = !!width && !!height;
+  const pending = !loaded && !sized && !uploading;
+  const sizeStyle = sized
+    ? ({
+        "--image-width": `${width}px`,
+        "--image-aspect": `${width! / height!}`,
+      } as CSSProperties)
+    : undefined;
+
   // DOM mirrors the original ReadonlyImage (span-only chain so it stays
   // valid HTML5 when rendered inside a markdown <p>). In editor surfaces
   // the NodeViewWrapper still emits its own outer .image-node div around
   // this — the duplicate `image-node` class is harmless.
   return (
-    <span className="image-node">
+    <span ref={scopeRef} className="image-node">
       <span
         className={cn(
           "image-figure",
@@ -529,36 +586,76 @@ function ImageAttachmentView({
           className,
         )}
         data-clickable={clickable || undefined}
+        data-sized={sized || undefined}
+        data-pending={pending || undefined}
+        style={sizeStyle}
         contentEditable={false}
         onClick={clickable ? onView : undefined}
       >
         <img
+          ref={imgRef}
           src={src || undefined}
           alt={alt}
           width={width}
           height={height}
+          loading="lazy"
+          decoding="async"
+          data-loaded={loaded || undefined}
           className={cn("image-content", uploading && "image-uploading")}
           draggable={false}
+          onLoad={() => setLoadedSrc(src)}
+          onError={() => setLoadedSrc(src)}
         />
         {!uploading && src && (
           <span
             className="image-toolbar"
+            style={downloading ? { opacity: 1 } : undefined}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => e.stopPropagation()}
           >
-            <button type="button" onClick={onView} title={t(($) => $.image.view)}>
-              <Maximize2 className="size-3.5" />
-            </button>
-            <button type="button" onClick={onDownload} title={t(($) => $.image.download)}>
-              <Download className="size-3.5" />
-            </button>
-            <button type="button" onClick={handleCopyLink} title={t(($) => $.image.copy_link)}>
-              <LinkIcon className="size-3.5" />
-            </button>
+            <DeferredTooltip
+              content={t(($) => $.image.view)}
+              trigger={
+                <button type="button" onClick={onView} aria-label={t(($) => $.image.view)}>
+                  <Maximize2 className="size-3.5" />
+                </button>
+              }
+            />
+            <DeferredTooltip
+              content={t(($) => $.image.download)}
+              trigger={
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  aria-busy={downloading}
+                  aria-label={t(($) => $.image.download)}
+                >
+                  {downloading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Download className="size-3.5" />
+                  )}
+                </button>
+              }
+            />
+            <DeferredTooltip
+              content={t(($) => $.image.copy_link)}
+              trigger={
+                <button type="button" onClick={handleCopyLink} aria-label={t(($) => $.image.copy_link)}>
+                  <LinkIcon className="size-3.5" />
+                </button>
+              }
+            />
             {editable && onDelete && (
-              <button type="button" onClick={onDelete} title={t(($) => $.image.delete)}>
-                <Trash2 className="size-3.5" />
-              </button>
+              <DeferredTooltip
+                content={t(($) => $.image.delete)}
+                trigger={
+                  <button type="button" onClick={onDelete} aria-label={t(($) => $.image.delete)}>
+                    <Trash2 className="size-3.5" />
+                  </button>
+                }
+              />
             )}
           </span>
         )}

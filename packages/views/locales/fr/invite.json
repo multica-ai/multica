@@ -1,0 +1,35 @@
+{
+  "header": {
+    "back": "Retour",
+    "log_out": "Se déconnecter"
+  },
+  "list": {
+    "title": "Vous avez été invité",
+    "subtitle": "En rejoignant un espace de travail, vous y serez redirigé. Les autres invitations restent en attente.",
+    "workspace_fallback": "Espace de travail",
+    "inviter_fallback": "Quelqu'un",
+    "invited_admin": "{{inviter}} vous a invité en tant qu'administrateur",
+    "invited_member": "{{inviter}} vous a invité en tant que membre",
+    "accept": "Rejoindre",
+    "joining": "Adhésion...",
+    "decline": "Refuser",
+    "declining": "Refus...",
+    "skip": "Ignorer et configurer mon propre espace de travail"
+  },
+  "empty": {
+    "title": "Aucune invitation en attente",
+    "hint": "Poursuivez pour configurer votre propre espace de travail.",
+    "continue": "Passer à la configuration",
+    "go_to_dashboard": "Aller au tableau de bord"
+  },
+  "linked": {
+    "not_found": "Cette invitation a peut-être expiré, été révoquée, ou n'appartient pas à votre compte.",
+    "accepted": "Cette invitation a déjà été acceptée.",
+    "declined": "Cette invitation a déjà été refusée.",
+    "expired": "Cette invitation a expiré."
+  },
+  "errors": {
+    "accept_failed": "Échec de l'acceptation de l'invitation",
+    "decline_failed": "Échec du refus de l'invitation"
+  }
+}

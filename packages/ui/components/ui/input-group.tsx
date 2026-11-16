@@ -6,7 +6,9 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@multica/ui/lib/utils"
 import { Button } from "@multica/ui/components/ui/button"
 import { Input } from "@multica/ui/components/ui/input"
+import { SelectTrigger } from "@multica/ui/components/ui/select"
 import { Textarea } from "@multica/ui/components/ui/textarea"
+import { TimeInput } from "@multica/ui/components/ui/time-input"
 
 function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
   return (
@@ -23,7 +25,7 @@ function InputGroup({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 const inputGroupAddonVariants = cva(
-  "flex h-auto cursor-text items-center justify-center gap-2 py-1.5 text-sm font-medium text-muted-foreground select-none group-data-[disabled=true]/input-group:opacity-50 [&>kbd]:rounded-[calc(var(--radius)-5px)] [&>svg:not([class*='size-'])]:size-4",
+  "flex h-auto cursor-text items-center justify-center gap-2 py-1.5 text-body font-medium text-muted-foreground select-none group-data-[disabled=true]/input-group:opacity-50 [&>kbd]:rounded-[calc(var(--radius)-5px)] [&>svg:not([class*='size-'])]:size-4",
   {
     variants: {
       align: {
@@ -54,6 +56,15 @@ function InputGroupAddon({
       data-slot="input-group-addon"
       data-align={align}
       className={cn(inputGroupAddonVariants({ align }), className)}
+      onMouseDown={(e) => {
+        if ((e.target as HTMLElement).closest("button")) {
+          return
+        }
+        // The addon acts as part of the input, so a click on it must not move
+        // focus: the blur would land before the click below could focus back,
+        // and the input's blur handlers (commit, close) would already have run.
+        e.preventDefault()
+      }}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("button")) {
           return
@@ -66,7 +77,7 @@ function InputGroupAddon({
 }
 
 const inputGroupButtonVariants = cva(
-  "flex items-center gap-2 text-sm shadow-none",
+  "flex items-center gap-2 text-body shadow-none",
   {
     variants: {
       size: {
@@ -108,7 +119,7 @@ function InputGroupText({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
       className={cn(
-        "flex items-center gap-2 text-sm text-muted-foreground [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4",
+        "flex items-center gap-2 text-body text-muted-foreground [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
@@ -125,6 +136,50 @@ function InputGroupInput({
       data-slot="input-group-control"
       className={cn(
         "flex-1 rounded-none border-0 bg-transparent shadow-none ring-0 focus-visible:ring-0 disabled:bg-transparent aria-invalid:ring-0 dark:bg-transparent dark:disabled:bg-transparent",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+/** A Select that shares the group's box instead of bringing its own.
+ *
+ *  The group lights its border from `[data-slot=input-group-control]:focus-visible`,
+ *  and a trigger that kept its own slot would leave the box dark while the select
+ *  it contains is the very thing focused — so the trigger takes that slot. Its
+ *  border, ring and background are the group's now; what it keeps is its own
+ *  content width, so the control ends where its longest option does. */
+function InputGroupSelectTrigger({
+  className,
+  ...props
+}: React.ComponentProps<typeof SelectTrigger>) {
+  return (
+    <SelectTrigger
+      data-slot="input-group-control"
+      className={cn(
+        "h-full rounded-none border-0 bg-transparent shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent dark:hover:bg-transparent",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+/** A TimeInput that shares the group's box instead of bringing its own.
+ *
+ *  The slot goes on the segments rather than on the field: the group lights its
+ *  border from the control that has focus, and what has focus here is an hour or
+ *  a minute, never their wrapper. */
+function InputGroupTimeInput({
+  className,
+  ...props
+}: React.ComponentProps<typeof TimeInput>) {
+  return (
+    <TimeInput
+      segmentSlot="input-group-control"
+      className={cn(
+        "h-full min-w-0 flex-1 justify-center rounded-none border-0 bg-transparent focus-within:border-transparent focus-within:ring-0 dark:bg-transparent",
         className
       )}
       {...props}
@@ -154,5 +209,7 @@ export {
   InputGroupButton,
   InputGroupText,
   InputGroupInput,
+  InputGroupSelectTrigger,
   InputGroupTextarea,
+  InputGroupTimeInput,
 }

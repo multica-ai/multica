@@ -17,6 +17,33 @@ export interface Workspace {
   avatar_url: string | null;
   created_at: string;
   updated_at: string;
+  pinned_at?: string | null;
+}
+
+/**
+ * One MCP server in the workspace's library.
+ *
+ * This is the WHOLE read shape: the stored configuration is write-only, so
+ * urls, commands, headers, and env never leave the server for any role. UI
+ * that needs to change an entry sends a replacement rather than editing what
+ * it read back.
+ *
+ * `enabled` is only present on an AGENT's assignment list, where it is the
+ * per-agent toggle; the workspace library listing has no binding to report.
+ */
+export interface WorkspaceMcpServer {
+  id: string;
+  workspace_id: string;
+  name: string;
+  transport: string;
+  enabled?: boolean;
+  /**
+   * Live agents the entry is assigned to. Only the workspace library listing
+   * carries it, and servers older than this field omit it.
+   */
+  agent_count?: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface Member {
@@ -40,14 +67,6 @@ export interface User {
    * returns an object (defaults to `{}`), never null.
    */
   onboarding_questionnaire: Record<string, unknown>;
-  /**
-   * Legacy column from the removed starter-content dialog. The column is
-   * still written to (always 'imported' for new accounts after the
-   * mark-onboarded paths run) so older desktop builds — which still render
-   * the dialog on NULL — don't show it to anyone created on a newer server.
-   * Kept as `string | null` for forward compatibility.
-   */
-  starter_content_state: string | null;
   /** Preferred UI language. null means "follow client/system". */
   language: string | null;
   /**
@@ -59,6 +78,19 @@ export interface User {
   profile_description: string;
   /** Pinned IANA tz; null means "use browser-detected tz at render time". */
   timezone: string | null;
+  /**
+   * Newest release whose What's new highlights the user has dismissed.
+   * null = never dismissed; undefined = the server predates read tracking,
+   * so the client must not auto-open the card (it would reappear forever).
+   */
+  whats_new_seen_version?: string | null;
+  /**
+   * "Star us on GitHub" prompt bookkeeping. An undefined count means the
+   * server predates it, so the client must never show the prompt.
+   */
+  star_prompt_shown_count?: number;
+  star_prompt_last_shown_at?: string | null;
+  star_prompt_starred_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -88,4 +120,26 @@ export interface Invitation {
   inviter_name?: string;
   inviter_email?: string;
   workspace_name?: string;
+}
+
+export interface ShareLink {
+  id: string;
+  workspace_id: string;
+  code: string;
+  created_by: string;
+  role: MemberRole;
+  expires_at: string | null;
+  max_uses: number | null;
+  use_count: number;
+  is_active: boolean;
+  created_at: string;
+  creator_name?: string;
+  creator_email?: string;
+}
+
+export interface ShareLinkInfo {
+  workspace_name: string;
+  workspace_slug: string;
+  creator_name?: string;
+  role: MemberRole;
 }

@@ -229,6 +229,37 @@ func TestListComments_RootsOnlyWithSinceReturnsNewTopLevelComments(t *testing.T)
 	}
 }
 
+// TestListComments_TimestampParamsAcceptSecondPrecision pins that RFC3339
+// timestamps without fractional seconds still parse after the single
+// RFC3339Nano parse, and that malformed values keep their 400 responses.
+func TestListComments_TimestampParamsAcceptSecondPrecision(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	v := url.Values{}
+	v.Set("roots_only", "true")
+	v.Set("since", fx.Base.Add(5*time.Minute).UTC().Format(time.RFC3339))
+	w, rows := listComments(t, fx.IssueID, v.Encode())
+	if w.Code != http.StatusOK {
+		t.Fatalf("second-precision since: status %d body %s", w.Code, w.Body.String())
+	}
+	eqIDs(t, ids(rows), []string{fx.Root2}, "second-precision since")
+
+	for _, tc := range []struct {
+		name, query, wantMessage string
+	}{
+		{"since", "since=2026-01-02+03:04:05", "invalid since parameter"},
+		{"before", cursorQuery(1, "2026-01-02T03:04", fx.Root1), "invalid before parameter"},
+	} {
+		w, _ := listComments(t, fx.IssueID, tc.query)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.wantMessage) {
+			t.Fatalf("invalid %s: status %d body %s", tc.name, w.Code, w.Body.String())
+		}
+	}
+}
+
 // TestListComments_RootsOnlyReturnsThreadStats pins the orientation metadata:
 // each root returned by roots_only carries reply_count (recursive descendant
 // count) and last_activity_at (MAX created_at over the subtree), so an agent
@@ -260,6 +291,46 @@ func TestListComments_RootsOnlyReturnsThreadStats(t *testing.T) {
 			t.Fatalf("default list leaked roots-only stats on %s (reply_count=%v last_activity=%v)", r.ID, r.ReplyCount, r.LastActivityAt)
 		}
 	}
+}
+
+// TestListComments_RootAndThreadViewsPreserveAttributionFields guards explicit
+// SQL projections from drifting behind the comment table. Both fields affect
+// UI rendering and task lineage, so silently zeroing them changes behavior.
+func TestListComments_RootAndThreadViewsPreserveAttributionFields(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	sourceTaskID := "11111111-2222-3333-4444-555555555555"
+	quickActionID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	for _, commentID := range []string{fx.Root1, fx.R1a} {
+		if _, err := testPool.Exec(context.Background(), `
+			UPDATE comment
+			SET source_task_id = $1, quick_action_id = $2
+			WHERE id = $3
+		`, sourceTaskID, quickActionID, commentID); err != nil {
+			t.Fatalf("stamp attribution fields on %s: %v", commentID, err)
+		}
+	}
+
+	assertFields := func(label string, row CommentResponse) {
+		t.Helper()
+		if row.SourceTaskID == nil || *row.SourceTaskID != sourceTaskID {
+			t.Errorf("%s source_task_id = %v, want %s", label, row.SourceTaskID, sourceTaskID)
+		}
+		if row.QuickActionID == nil || *row.QuickActionID != quickActionID {
+			t.Errorf("%s quick_action_id = %v, want %s", label, row.QuickActionID, quickActionID)
+		}
+	}
+
+	_, roots := listComments(t, fx.IssueID, "roots_only=true")
+	assertFields("roots-only root", byID(roots)[fx.Root1])
+
+	_, thread := listComments(t, fx.IssueID, "thread="+fx.R1a)
+	threadByID := byID(thread)
+	assertFields("thread root", threadByID[fx.Root1])
+	assertFields("thread reply", threadByID[fx.R1a])
 }
 
 func assertRootStat(t *testing.T, c CommentResponse, label string, wantReplies int, wantLastActivity time.Time) {
@@ -488,6 +559,29 @@ func TestListComments_ThreadAnchorErrors(t *testing.T) {
 			t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 		}
 	})
+}
+
+// TestListComments_ThreadRootWalkFailsClosedAcrossIssueBoundary constructs the
+// anomalous shape the schema permits: a local reply whose parent belongs to
+// another issue. Every recursive root-walk level must keep the issue predicate,
+// so the foreign root is neither returned nor used to open a thread.
+func TestListComments_ThreadRootWalkFailsClosedAcrossIssueBoundary(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	foreignIssueID := createIssueForTimeline(t, "foreign thread root issue")
+	issueID := createIssueForTimeline(t, "local thread reply issue")
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	foreignRootID := seedCommentRow(t, foreignIssueID, base, "foreign root", nil, nil)
+	localReplyID := seedCommentRow(t, issueID, base.Add(time.Second), "local anomalous reply", &foreignRootID, nil)
+
+	w, rows := listComments(t, issueID, "thread="+localReplyID)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-issue root walk status = %d, want 404: %s", w.Code, w.Body.String())
+	}
+	if rows != nil {
+		t.Fatalf("cross-issue root walk returned rows: %v", ids(rows))
+	}
 }
 
 // TestListComments_RecentReturnsMostRecentlyActiveThreads pins the
@@ -1307,19 +1401,6 @@ func TestListComments_ThreadTailNotFoundReturns404(t *testing.T) {
 	_ = fx
 }
 
-// resolveCommentRow marks a comment resolved directly in the DB (test helper —
-// the public path goes through ResolveComment, but for list-filter tests we
-// just need the column set).
-func resolveCommentRow(t *testing.T, commentID string) {
-	t.Helper()
-	if _, err := testPool.Exec(context.Background(),
-		`UPDATE comment SET resolved_at = now(), resolved_by_type = 'member', resolved_by_id = $2 WHERE id = $1`,
-		commentID, testUserID,
-	); err != nil {
-		t.Fatalf("resolve comment row: %v", err)
-	}
-}
-
 // TestCountNewCommentsSince_IssueWideExcludesAgentOwnAndTrigger pins the
 // claim-side count query: it counts comments created after the given anchor
 // ACROSS THE WHOLE ISSUE (every thread, not just the triggering one), excludes
@@ -1435,5 +1516,107 @@ func TestCreateCommentPreservesDirectParent(t *testing.T) {
 	nested := create(reply.ID, "nested")
 	if nested.ParentID == nil || *nested.ParentID != reply.ID {
 		t.Fatalf("reply-to-reply parent_id: want direct parent %s, got %v (root was %s)", reply.ID, nested.ParentID, root.ID)
+	}
+}
+
+// TestListComments_RootsOnlyReturnsThreadResolution pins the roots-only
+// resolution projection: unresolved threads carry none of the new fields, a
+// resolved root closes its own thread (thread_resolved only), and otherwise
+// the latest-resolved reply — at any nesting depth — is the conclusion.
+func TestListComments_RootsOnlyReturnsThreadResolution(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires DB")
+	}
+	fx := newCommentListFixture(t)
+	base := fx.Base
+
+	// Baseline: nothing resolved — no new fields anywhere.
+	w, rows := listComments(t, fx.IssueID, "roots_only=true")
+	for _, key := range []string{"thread_resolved", "resolution_id", "resolution_content", "resolution_content_truncated"} {
+		if strings.Contains(w.Body.String(), "\""+key+"\"") {
+			t.Fatalf("unresolved roots_only response must not contain %q", key)
+		}
+	}
+
+	// Root1 resolves on its nested reply r1b1 (depth 2); Root2 has two
+	// resolved replies, the newer (r2b) must win.
+	setCommentResolvedAt(t, fx.R1b1, base.Add(20*time.Minute))
+	setCommentResolvedAt(t, fx.R2a, base.Add(21*time.Minute))
+	setCommentResolvedAt(t, fx.R2b, base.Add(22*time.Minute))
+
+	_, rows = listComments(t, fx.IssueID, "roots_only=true")
+	m := byID(rows)
+
+	r1 := m[fx.Root1]
+	if r1.ThreadResolved == nil || !*r1.ThreadResolved || r1.ResolutionID == nil || *r1.ResolutionID != fx.R1b1 {
+		t.Fatalf("nested reply resolution: got resolved=%v id=%v want %s", r1.ThreadResolved, r1.ResolutionID, fx.R1b1)
+	}
+	if r1.ResolutionContent == nil || *r1.ResolutionContent != "r1b1" {
+		t.Fatalf("nested reply resolution content got=%v want r1b1", r1.ResolutionContent)
+	}
+
+	if r2 := m[fx.Root2]; r2.ResolutionID == nil || *r2.ResolutionID != fx.R2b {
+		t.Fatalf("latest resolved_at must win: resolution_id got=%v want=%s", r2.ResolutionID, fx.R2b)
+	}
+
+	// A resolved root ignores resolutions on its replies: thread_resolved
+	// only, no resolution_id/content.
+	setCommentResolvedAt(t, fx.Root2, base.Add(30*time.Minute))
+	_, rows = listComments(t, fx.IssueID, "roots_only=true")
+	if rr := byID(rows)[fx.Root2]; rr.ThreadResolved == nil || !*rr.ThreadResolved || rr.ResolutionID != nil || rr.ResolutionContent != nil {
+		t.Fatalf("root-resolved thread: want thread_resolved only, got %+v", rr)
+	}
+
+	// The default (non-roots) list must not leak the new fields.
+	_, all := listComments(t, fx.IssueID, "")
+	for _, c := range all {
+		if c.ResolutionID != nil || c.ResolutionContent != nil || c.ResolutionContentTruncated != nil {
+			t.Fatalf("default list leaked resolution fields on %s", c.ID)
+		}
+	}
+}
+
+// TestListComments_RootsOnlyResolutionSinceAndSummary covers the two allowed
+// compositions: --roots-only --since still reports a returned root's thread
+// resolution, and --roots-only --summary clips resolution_content like
+// content with resolution_content_truncated set.
+func TestListComments_RootsOnlyResolutionSinceAndSummary(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires DB")
+	}
+	fx := newCommentListFixture(t)
+	base := fx.Base
+
+	setCommentResolvedAt(t, fx.R1b1, base.Add(20*time.Minute)) // short conclusion
+	setCommentResolvedAt(t, fx.R2b, base.Add(21*time.Minute))
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE comment SET content = $1 WHERE id = $2`, strings.Repeat("y", 500), fx.R2b,
+	); err != nil {
+		t.Fatalf("lengthen r2b: %v", err)
+	}
+
+	// since between the two roots: only Root2 returns, with its resolution.
+	v := url.Values{}
+	v.Set("roots_only", "true")
+	v.Set("since", base.Add(5*time.Minute).UTC().Format(time.RFC3339Nano))
+	_, rows := listComments(t, fx.IssueID, v.Encode())
+	if len(rows) != 1 || rows[0].ID != fx.Root2 {
+		t.Fatalf("roots_only+since: want only %s, got %v", fx.Root2, ids(rows))
+	}
+	if rows[0].ResolutionID == nil || *rows[0].ResolutionID != fx.R2b {
+		t.Fatalf("roots_only+since: resolution_id got=%v want=%s", rows[0].ResolutionID, fx.R2b)
+	}
+
+	_, rows = listComments(t, fx.IssueID, "roots_only=true&summary=true")
+	m := byID(rows)
+	l := m[fx.Root2]
+	if l.ResolutionContentTruncated == nil || !*l.ResolutionContentTruncated {
+		t.Fatalf("summary: long resolution should be truncated, got %v", l.ResolutionContentTruncated)
+	}
+	if rc := utf8.RuneCountInString(*l.ResolutionContent); rc != summaryContentRunes+1 {
+		t.Fatalf("summary: clipped resolution rune count got=%d want=%d", rc, summaryContentRunes+1)
+	}
+	if s := m[fx.Root1]; s.ResolutionContentTruncated == nil || *s.ResolutionContentTruncated || *s.ResolutionContent != "r1b1" {
+		t.Fatalf("summary: short resolution should be untruncated, got %v %v", s.ResolutionContentTruncated, s.ResolutionContent)
 	}
 }

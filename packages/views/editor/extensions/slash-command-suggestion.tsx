@@ -11,6 +11,7 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
+import { closeHistory } from "@tiptap/pm/history";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
 import { getCurrentWsId } from "@multica/core/platform";
@@ -19,7 +20,14 @@ import { isImeComposing } from "@multica/core/utils";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
-import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
+import {
+  createSuggestionPopupRender,
+} from "./suggestion-popup";
+import {
+  isPickerAcceptKey,
+  pickerNavigationDirection,
+} from "../../common/picker-keys";
+import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 
 const MAX_ITEMS = 20;
 
@@ -85,14 +93,13 @@ export const SlashCommandList = forwardRef<
   useImperativeHandle(ref, () => ({
     onKeyDown: ({ event }) => {
       if (isImeComposing(event)) return false;
-      if (event.key === "ArrowUp") {
+      // Arrow keys plus the Ctrl+N/J/P/K aliases the command bar accepts —
+      // see pickerNavigationDirection.
+      const direction = pickerNavigationDirection(event);
+      if (direction !== null) {
         if (items.length === 0) return false;
-        setSelectedIndex((i) => (i + items.length - 1) % items.length);
-        return true;
-      }
-      if (event.key === "ArrowDown") {
-        if (items.length === 0) return false;
-        setSelectedIndex((i) => (i + 1) % items.length);
+        const delta = direction === "next" ? 1 : items.length - 1;
+        setSelectedIndex((i) => (i + delta) % items.length);
         return true;
       }
       // Enter is the canonical accept; plain Tab is an additive alias (see
@@ -109,7 +116,7 @@ export const SlashCommandList = forwardRef<
   if (items.length === 0) {
     if (hideOnEmpty) return null;
     return (
-      <div className="rounded-md border bg-popover p-2 text-xs text-muted-foreground shadow-md">
+      <div className="rounded-md border bg-popover p-2 text-caption text-muted-foreground shadow-md">
         {t(($) =>
           query.trim()
             ? $.slash_command.no_results
@@ -127,7 +134,15 @@ export const SlashCommandList = forwardRef<
       : item.description;
 
   return (
-    <div className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[300px] overflow-y-auto">
+    // Height budget clamps to min(design max, viewport-aware
+    // `--suggestion-available-height` from suggestion-popup.tsx's size
+    // middleware), falling back to the design max when rendered standalone.
+    // Single height authority — mirrors MentionList.
+    <div
+      data-mc="editor-menu"
+      data-kind="slash"
+      className="rounded-md border bg-popover py-1 shadow-md w-72 max-h-[min(300px,var(--suggestion-available-height,300px))] overflow-y-auto"
+    >
       {items.map((item, index) => {
         const description = describe(item);
         return (
@@ -136,7 +151,7 @@ export const SlashCommandList = forwardRef<
             ref={(el) => {
               itemRefs.current[index] = el;
             }}
-            className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-xs transition-colors ${
+            className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left text-caption transition-colors ${
               selectedIndex === index ? "bg-accent" : "hover:bg-accent/50"
             }`}
             onClick={() => selectItem(index)}
@@ -153,6 +168,34 @@ export const SlashCommandList = forwardRef<
     </div>
   );
 });
+
+const NO_MATCH = 4;
+
+/** Returns the match tier: exact name, prefix, substring, then description. */
+function skillMatchRank(
+  skill: { name: string; description?: string },
+  q: string,
+): number {
+  const name = skill.name.toLowerCase();
+  if (name === q) return 0;
+  if (name.startsWith(q)) return 1;
+  if (name.includes(q)) return 2;
+  if ((skill.description ?? "").toLowerCase().includes(q)) return 3;
+  return NO_MATCH;
+}
+
+/** Ranks matches by relevance while preserving configured order within each tier. */
+function rankSkillMatches<T extends { name: string; description?: string }>(
+  skills: T[],
+  q: string,
+): T[] {
+  if (!q) return skills;
+  return skills
+    .map((skill) => ({ skill, rank: skillMatchRank(skill, q) }))
+    .filter((entry) => entry.rank !== NO_MATCH)
+    .sort((a, b) => a.rank - b.rank)
+    .map((entry) => entry.skill);
+}
 
 function buildItems(qc: QueryClient, query: string): SlashCommandItem[] {
   const wsId = getCurrentWsId();
@@ -178,13 +221,7 @@ function buildItems(qc: QueryClient, query: string): SlashCommandItem[] {
     null;
 
   const q = query.toLowerCase();
-  return (activeAgent?.skills ?? [])
-    .filter(
-      (s) =>
-        !q ||
-        s.name.toLowerCase().includes(q) ||
-        (s.description ?? "").toLowerCase().includes(q),
-    )
+  return rankSkillMatches(activeAgent?.skills ?? [], q)
     .slice(0, MAX_ITEMS)
     .map((s) => ({ id: s.id, label: s.name, description: s.description ?? "" }));
 }
@@ -198,6 +235,9 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
   return {
     char: "/",
     pluginKey,
+    // Only open over a `/` the user actually typed, so a pasted path
+    // (`/usr/local/bin`) never opens the skill picker (MUL-5429).
+    shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
     items: ({ query }) => buildItems(qc, query),
     command: ({ editor, range, props }) => {
       const nodeAfter = editor.view.state.selection.$to.nodeAfter;
@@ -237,9 +277,7 @@ export function createSlashCommandSuggestion(qc: QueryClient): Omit<
   };
 }
 
-// ---------------------------------------------------------------------------
 // Built-in command menu (issue comments)
-// ---------------------------------------------------------------------------
 
 /**
  * Built-in slash commands offered in the issue comment composer. Unlike the
@@ -252,25 +290,82 @@ export const BUILTIN_COMMANDS: SlashCommandItem[] = [
   { id: "note", label: "note", descriptionKey: "note" },
 ];
 
+/** Marks a menu entry as a configured quick action rather than a built-in. */
+export const QUICK_ACTION_ITEM_PREFIX = "quick-action:";
+
+export function isQuickActionItem(item: SlashCommandItem): boolean {
+  return item.id.startsWith(QUICK_ACTION_ITEM_PREFIX);
+}
+
+export function quickActionIdFromItem(item: SlashCommandItem): string {
+  return item.id.slice(QUICK_ACTION_ITEM_PREFIX.length);
+}
+
 // Match on the command label as a prefix only — the description is for display,
 // not search. With a single command this keeps the menu predictable (typing
 // `/no` surfaces `note`; an unrelated `/deploy` shows nothing).
-export function buildBuiltinCommandItems(query: string): SlashCommandItem[] {
+export function buildBuiltinCommandItems(
+  query: string,
+  quickActions: { id: string; name: string; description?: string }[] = [],
+): SlashCommandItem[] {
   const q = query.toLowerCase();
-  return BUILTIN_COMMANDS.filter((c) => c.label.toLowerCase().startsWith(q));
+  // Quick actions lead: on an issue they are the reason a user reaches for
+  // `/`, and `/note` is a rarely-used escape hatch.
+  const actionItems: SlashCommandItem[] = quickActions.map((a) => ({
+    id: `${QUICK_ACTION_ITEM_PREFIX}${a.id}`,
+    label: a.name,
+    description: a.description || undefined,
+  }));
+  return [...actionItems, ...BUILTIN_COMMANDS]
+    .filter((c) => c.label.toLowerCase().startsWith(q))
+    .slice(0, MAX_ITEMS);
 }
 
-export function createBuiltinCommandSuggestion(): Omit<
-  SuggestionOptions<SlashCommandItem>,
-  "editor"
-> {
+export interface BuiltinCommandSuggestionOptions {
+  /**
+   * Configured quick actions offered alongside the built-ins. Read lazily on
+   * every keystroke and catalog notification without remounting the editor.
+   */
+  getQuickActions?: () => { id: string; name: string; description?: string }[];
+  subscribeQuickActions?: (refresh: () => void) => () => void;
+  /**
+   * Builds draft text synchronously from the cached catalog. Returning ""
+   * leaves the composer untouched when an action or its target is unavailable.
+   */
+  getQuickActionContent?: (quickActionId: string) => string;
+}
+
+export function createBuiltinCommandSuggestion(
+  options: BuiltinCommandSuggestionOptions = {},
+): Omit<SuggestionOptions<SlashCommandItem>, "editor"> {
   const pluginKey = new PluginKey("builtinCommandSuggestion");
 
   return {
     char: "/",
     pluginKey,
-    items: ({ query }) => buildBuiltinCommandItems(query),
+    // Only open over a `/` the user actually typed, so a pasted path
+    // (`/usr/local/bin`) never opens the command menu (MUL-5429).
+    shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
+    items: ({ query }) => buildBuiltinCommandItems(query, options.getQuickActions?.() ?? []),
     command: ({ editor, range, props }) => {
+      if (isQuickActionItem(props)) {
+        const content = options.getQuickActionContent?.(quickActionIdFromItem(props));
+        if (!content) return;
+        editor
+          .chain()
+          .focus()
+          .command(({ tr }) => {
+            // Undoing a synchronous pick must preserve the preceding draft.
+            closeHistory(tr);
+            return true;
+          })
+          // Parse the mention markup into a node, rather than literal text.
+          .insertContentAt(range, content, { contentType: "markdown" })
+          .run();
+        window.getSelection()?.collapseToEnd();
+        return;
+      }
+
       // Insert the plain-text prefix (e.g. "/note ") rather than a rich node,
       // so a menu selection and a hand-typed command are byte-identical and the
       // backend can detect the marker with a simple prefix match. The trailing
@@ -286,8 +381,11 @@ export function createBuiltinCommandSuggestion(): Omit<
     render: createSuggestionPopupRender<SlashCommandItem, SlashCommandItem, SlashCommandListRef, SlashCommandListProps>({
       pluginKey,
       component: SlashCommandList,
+      subscribe: options.subscribeQuickActions,
       getProps: (props) => ({
-        items: props.items,
+        // Read the current catalog even when Tiptap finishes an older items
+        // request after a catalog notification.
+        items: buildBuiltinCommandItems(props.query, options.getQuickActions?.() ?? []),
         query: props.query,
         command: props.command,
         hideOnEmpty: true,

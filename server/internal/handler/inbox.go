@@ -14,22 +14,37 @@ import (
 )
 
 type InboxItemResponse struct {
-	ID            string          `json:"id"`
-	WorkspaceID   string          `json:"workspace_id"`
-	RecipientType string          `json:"recipient_type"`
-	RecipientID   string          `json:"recipient_id"`
-	Type          string          `json:"type"`
-	Severity      string          `json:"severity"`
-	IssueID       *string         `json:"issue_id"`
-	Title         string          `json:"title"`
-	Body          *string         `json:"body"`
-	Read          bool            `json:"read"`
-	Archived      bool            `json:"archived"`
-	CreatedAt     string          `json:"created_at"`
-	IssueStatus   *string         `json:"issue_status"`
-	ActorType     *string         `json:"actor_type"`
-	ActorID       *string         `json:"actor_id"`
-	Details       json.RawMessage `json:"details"`
+	ID            string  `json:"id"`
+	WorkspaceID   string  `json:"workspace_id"`
+	RecipientType string  `json:"recipient_type"`
+	RecipientID   string  `json:"recipient_id"`
+	Type          string  `json:"type"`
+	Severity      string  `json:"severity"`
+	IssueID       *string `json:"issue_id"`
+	Title         string  `json:"title"`
+	Body          *string `json:"body"`
+	Read          bool    `json:"read"`
+	Archived      bool    `json:"archived"`
+	CreatedAt     string  `json:"created_at"`
+	IssueStatus   *string `json:"issue_status"`
+	IssuePriority *string `json:"issue_priority"`
+	// Issue fields the inbox filters match on. List rows always carry them
+	// (an empty label list included), which is how a client tells a server
+	// that supports those filters from an older one.
+	IssueProjectID    *string         `json:"issue_project_id"`
+	IssueAssigneeType *string         `json:"issue_assignee_type"`
+	IssueAssigneeID   *string         `json:"issue_assignee_id"`
+	IssueDueDate      *string         `json:"issue_due_date"`
+	IssueLabelIDs     []string        `json:"issue_label_ids"`
+	ActorType         *string         `json:"actor_type"`
+	ActorID           *string         `json:"actor_id"`
+	Details           json.RawMessage `json:"details"`
+	// When the issue comes back from a snooze (MUL-9333). In the list it is
+	// always past: the issue came back on its own at that time.
+	SnoozedUntil *string `json:"snoozed_until,omitempty"`
+	// When that snooze began; the issue's rows written after it arrived
+	// while it was away.
+	SnoozedAt *string `json:"snoozed_at,omitempty"`
 }
 
 func inboxToResponse(i db.InboxItem) InboxItemResponse {
@@ -49,28 +64,109 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 		ActorType:     textToPtr(i.ActorType),
 		ActorID:       uuidToPtr(i.ActorID),
 		Details:       json.RawMessage(i.Details),
+		SnoozedUntil:  timestampToPtr(i.SnoozedUntil),
+		SnoozedAt:     timestampToPtr(i.SnoozedAt),
 	}
 }
 
+// inboxListBodyPreviewLimit caps, in characters, the body a comment
+// notification carries in the inbox LIST responses. The ellipsis counts
+// toward it.
+//
+// A comment notification stores the full comment it was raised for, and the
+// list shipped that verbatim — a several-thousand-character agent reply went
+// over the wire, through JSON parsing and into the client cache, only for
+// every client to render it as a single truncated line. 200 leaves ample room
+// for that one line at any width or script, while bounding what each row can
+// cost.
+const inboxListBodyPreviewLimit = 200
+
+// inboxListBody returns the body a notification carries in the inbox list:
+// comment notifications on an issue get a bounded preview, everything else is
+// returned as stored. The database keeps the full text.
+//
+// Scoped to exactly the rows whose full body no client ever reads from the
+// list. Opening an issue-backed notification renders the issue itself, and the
+// comment it points at is found through `details.comment_id`, which is left
+// intact — on every client already installed, so none needs to change. Other
+// notification types are NOT shortened: issue-less notifications render their
+// body in the detail pane straight from the list cache, and Quick Create
+// failures refill the composer from `details` — cutting those would lose
+// content, not just bytes.
+//
+// Truncation is by code point, so a multi-byte character is never split into
+// invalid UTF-8. A grapheme cluster (an emoji sequence, a letter with a
+// combining mark) can still be cut at the boundary; that lands ~200 characters
+// in, far past the single line any client shows.
+//
+// One pass that stops at the limit, rather than counting or converting the
+// whole string: the work per row stays bounded by the preview, not by however
+// long the comment happens to be.
+func inboxListBody(notifType string, issueID pgtype.UUID, body pgtype.Text) *string {
+	full := textToPtr(body)
+	if full == nil || notifType != "new_comment" || !issueID.Valid {
+		return full
+	}
+	// `range` yields the byte offset where each character starts. `cut` ends
+	// up where the ellipsis goes: after limit-1 characters.
+	cut, seen := 0, 0
+	for offset := range *full {
+		if seen == inboxListBodyPreviewLimit-1 {
+			cut = offset
+		}
+		if seen++; seen > inboxListBodyPreviewLimit {
+			preview := (*full)[:cut] + "…"
+			return &preview
+		}
+	}
+	return full
+}
+
+// inboxRowToResponse maps a LIST row — the main inbox and, through
+// archivedInboxRowToResponse, the archived view. Single-item responses go
+// through inboxToResponse and keep the full body.
 func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 	return InboxItemResponse{
-		ID:            uuidToString(r.ID),
-		WorkspaceID:   uuidToString(r.WorkspaceID),
-		RecipientType: r.RecipientType,
-		RecipientID:   uuidToString(r.RecipientID),
-		Type:          r.Type,
-		Severity:      r.Severity,
-		IssueID:       uuidToPtr(r.IssueID),
-		Title:         r.Title,
-		Body:          textToPtr(r.Body),
-		Read:          r.Read,
-		Archived:      r.Archived,
-		CreatedAt:     timestampToString(r.CreatedAt),
-		IssueStatus:   textToPtr(r.IssueStatus),
-		ActorType:     textToPtr(r.ActorType),
-		ActorID:       uuidToPtr(r.ActorID),
-		Details:       json.RawMessage(r.Details),
+		ID:                uuidToString(r.ID),
+		WorkspaceID:       uuidToString(r.WorkspaceID),
+		RecipientType:     r.RecipientType,
+		RecipientID:       uuidToString(r.RecipientID),
+		Type:              r.Type,
+		Severity:          r.Severity,
+		IssueID:           uuidToPtr(r.IssueID),
+		Title:             r.Title,
+		Body:              inboxListBody(r.Type, r.IssueID, r.Body),
+		Read:              r.Read,
+		Archived:          r.Archived,
+		CreatedAt:         timestampToString(r.CreatedAt),
+		IssueStatus:       textToPtr(r.IssueStatus),
+		IssuePriority:     textToPtr(r.IssuePriority),
+		IssueProjectID:    uuidToPtr(r.IssueProjectID),
+		IssueAssigneeType: textToPtr(r.IssueAssigneeType),
+		IssueAssigneeID:   uuidToPtr(r.IssueAssigneeID),
+		IssueDueDate:      dateToPtr(r.IssueDueDate),
+		IssueLabelIDs:     inboxLabelIDs(r.IssueLabelIds),
+		ActorType:         textToPtr(r.ActorType),
+		ActorID:           uuidToPtr(r.ActorID),
+		Details:           json.RawMessage(r.Details),
+		SnoozedUntil:      timestampToPtr(r.SnoozedUntil),
+		SnoozedAt:         timestampToPtr(r.SnoozedAt),
 	}
+}
+
+func inboxLabelIDs(ids []string) []string {
+	if ids == nil {
+		return []string{}
+	}
+	return ids
+}
+
+// ListArchivedInboxItemsRow carries the same columns as ListInboxItemsRow (both
+// queries select `inbox_item.*` plus the joined issue projections), so the archived
+// row converts to the active one and reuses its mapper. If either query's
+// column list drifts, this conversion stops compiling — which is the point.
+func archivedInboxRowToResponse(r db.ListArchivedInboxItemsRow) InboxItemResponse {
+	return inboxRowToResponse(db.ListInboxItemsRow(r))
 }
 
 func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemResponse, issueID pgtype.UUID) InboxItemResponse {
@@ -81,6 +177,19 @@ func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemRespons
 	if err == nil {
 		s := issue.Status
 		resp.IssueStatus = &s
+		p := issue.Priority
+		resp.IssuePriority = &p
+		resp.IssueProjectID = uuidToPtr(issue.ProjectID)
+		resp.IssueAssigneeType = textToPtr(issue.AssigneeType)
+		resp.IssueAssigneeID = uuidToPtr(issue.AssigneeID)
+		resp.IssueDueDate = dateToPtr(issue.DueDate)
+		labels, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
+		if err == nil {
+			resp.IssueLabelIDs = make([]string, len(labels))
+			for i, label := range labels {
+				resp.IssueLabelIDs[i] = uuidToString(label.ID)
+			}
+		}
 	}
 	return resp
 }
@@ -96,10 +205,18 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Notifications about private-project issues are not written for
+	// outsiders (CreateInboxItem); this read filter also drops older rows once
+	// the reader loses access.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
 	items, err := h.Queries.ListInboxItems(r.Context(), db.ListInboxItemsParams{
-		WorkspaceID:   wsUUID,
-		RecipientType: "member",
-		RecipientID:   parseUUID(userID),
+		WorkspaceID:      wsUUID,
+		RecipientType:    "member",
+		RecipientID:      parseUUID(userID),
+		HiddenProjectIds: hidden.Param(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list inbox")
@@ -114,6 +231,52 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// ListArchivedInbox returns the recipient's archived notifications, backing the
+// inbox's "Archived" sub-view. Kept as its own endpoint rather than a flag on
+// ListInbox so installed clients keep their current contract, and so the
+// unbounded archive never rides along with the main list.
+//
+// The query drops any issue that also has an active row, keeping this list and
+// the main inbox mutually exclusive per issue group. It selects at most 200
+// groups and returns only each group's newest row plus its optional comment
+// anchor — see the query comment for both the bound and the grouping contract.
+func (h *Handler) ListArchivedInbox(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	items, err := h.Queries.ListArchivedInboxItems(r.Context(), db.ListArchivedInboxItemsParams{
+		WorkspaceID:      wsUUID,
+		RecipientType:    "member",
+		RecipientID:      parseUUID(userID),
+		HiddenProjectIds: hidden.Param(),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list archived inbox")
+		return
+	}
+
+	resp := make([]InboxItemResponse, len(items))
+	for i, item := range items {
+		resp[i] = archivedInboxRowToResponse(item)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// MarkInboxRead reads the item and, when it belongs to an issue, every other
+// unread active item the caller has on that issue: selecting a row in the inbox
+// opens the whole issue (MUL-8618, see the query comment).
 func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	prev, ok := h.loadInboxItemForUser(w, r, id)
@@ -135,6 +298,61 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 
 	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// MarkInboxUnread flips a notification back to unread, the inverse of
+// MarkInboxRead. It exists so a user can park something they opened but did not
+// act on: the inbox auto-marks an item read the moment it is selected, which
+// otherwise makes "opened" and "handled" the same signal.
+//
+// Scope is the single item, the newest one the row shows, unlike MarkInboxRead
+// — see the query comment.
+func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	prev, ok := h.loadInboxItemForUser(w, r, id)
+	if !ok {
+		return
+	}
+	item, err := h.Queries.MarkInboxUnread(r.Context(), prev.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark unread")
+		return
+	}
+
+	userID := requestUserID(r)
+	workspaceID := uuidToString(item.WorkspaceID)
+	h.publish(protocol.EventInboxUnread, workspaceID, "member", userID, map[string]any{
+		"item_id":      uuidToString(item.ID),
+		"recipient_id": uuidToString(item.RecipientID),
+	})
+
+	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) DeleteInboxItem(w http.ResponseWriter, r *http.Request) {
+	item, ok := h.loadInboxItemForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	if !h.requireIssueIDVisible(w, r, uuidToString(item.WorkspaceID), item.IssueID, http.StatusNotFound, "inbox item not found") {
+		return
+	}
+	count, err := h.Queries.DeleteInboxGroup(r.Context(), db.DeleteInboxGroupParams{
+		ID:          item.ID,
+		WorkspaceID: item.WorkspaceID,
+		RecipientID: item.RecipientID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete notification")
+		return
+	}
+	h.publish(protocol.EventInboxDeleted, uuidToString(item.WorkspaceID), "member", requestUserID(r), map[string]any{
+		"item_id":      uuidToString(item.ID),
+		"recipient_id": uuidToString(item.RecipientID),
+		"count":        count,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
 func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +389,48 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// UnarchiveInboxItem restores an archived notification to the main inbox. It is
+// the inverse of ArchiveInboxItem and mirrors its issue-level scope: archiving
+// one item archives every sibling for the same issue, so restoring brings the
+// whole group back.
+//
+// `read` is untouched on purpose. An item archived while unread comes back
+// unread, which raises the unread badge again — the badge only ever counted
+// non-archived items, so restoring one is a real addition, not a bug.
+func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	prev, ok := h.loadInboxItemForUser(w, r, id)
+	if !ok {
+		return
+	}
+	item, err := h.Queries.UnarchiveInboxItem(r.Context(), prev.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to unarchive")
+		return
+	}
+
+	// Restore all sibling inbox items for the same issue (issue-level restore).
+	if item.IssueID.Valid {
+		h.Queries.UnarchiveInboxByIssue(r.Context(), db.UnarchiveInboxByIssueParams{
+			WorkspaceID:   item.WorkspaceID,
+			RecipientType: item.RecipientType,
+			RecipientID:   item.RecipientID,
+			IssueID:       item.IssueID,
+		})
+	}
+
+	userID := requestUserID(r)
+	workspaceID := uuidToString(item.WorkspaceID)
+	h.publish(protocol.EventInboxUnarchived, workspaceID, "member", userID, map[string]any{
+		"item_id":      uuidToString(item.ID),
+		"issue_id":     uuidToPtr(item.IssueID),
+		"recipient_id": uuidToString(item.RecipientID),
+	})
+
+	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -182,10 +442,15 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
 	count, err := h.Queries.CountUnreadInbox(r.Context(), db.CountUnreadInboxParams{
-		WorkspaceID:   wsUUID,
-		RecipientType: "member",
-		RecipientID:   parseUUID(userID),
+		WorkspaceID:      wsUUID,
+		RecipientType:    "member",
+		RecipientID:      parseUUID(userID),
+		HiddenProjectIds: hidden.Param(),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to count unread inbox")
@@ -193,6 +458,42 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]int64{"count": count})
+}
+
+// InboxWorkspaceUnreadResponse is one workspace's unread inbox count in the
+// cross-workspace summary.
+type InboxWorkspaceUnreadResponse struct {
+	WorkspaceID string `json:"workspace_id"`
+	Count       int64  `json:"count"`
+}
+
+// UnreadInboxSummary returns per-workspace unread inbox counts across every
+// workspace the user belongs to. The sidebar uses it to light a dot on the
+// workspace switcher when a workspace OTHER than the active one has unread
+// items, without fetching each workspace's full inbox list. It is
+// account-level by nature: it ignores the active workspace and keys only on
+// the authenticated user.
+func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.CountUnreadInboxByWorkspace(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to summarize unread inbox")
+		return
+	}
+
+	resp := make([]InboxWorkspaceUnreadResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = InboxWorkspaceUnreadResponse{
+			WorkspaceID: uuidToString(row.WorkspaceID),
+			Count:       row.Count,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
@@ -220,6 +521,50 @@ func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
 		"recipient_id": userID,
 		"count":        count,
 	})
+
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
+}
+
+// MarkIssueInboxRead marks every unread active notification the caller has on
+// one issue read (see MarkInboxReadByIssue). The client calls it while the
+// issue is on screen outside the inbox, so reading an issue anywhere also
+// reads it in the inbox (MUL-8588). The update
+// is scoped to the caller's own rows, so an issue id from another workspace
+// matches nothing.
+func (h *Handler) MarkIssueInboxRead(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	issueUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "issueId"), "issue id")
+	if !ok {
+		return
+	}
+
+	count, err := h.Queries.MarkInboxReadByIssue(r.Context(), db.MarkInboxReadByIssueParams{
+		WorkspaceID: wsUUID,
+		RecipientID: parseUUID(userID),
+		IssueID:     issueUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark issue inbox read")
+		return
+	}
+
+	// Opening an issue with nothing unread is the common case. It changes no
+	// row, so it must not make every open client refetch its inbox.
+	if count > 0 {
+		h.publish(protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
+			"recipient_id": userID,
+			"count":        count,
+			"issue_id":     uuidToString(issueUUID),
+		})
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
@@ -293,9 +638,15 @@ func (h *Handler) ArchiveCompletedInbox(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	terminalStatusKeys, err := h.terminalIssueStatusKeys(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
+		return
+	}
 	count, err := h.Queries.ArchiveCompletedInbox(r.Context(), db.ArchiveCompletedInboxParams{
-		WorkspaceID: wsUUID,
-		RecipientID: parseUUID(userID),
+		WorkspaceID:        wsUUID,
+		RecipientID:        parseUUID(userID),
+		TerminalStatusKeys: terminalStatusKeys,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to archive completed inbox")

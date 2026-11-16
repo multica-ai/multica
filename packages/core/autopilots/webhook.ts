@@ -41,3 +41,21 @@ function stripTrailingSlash(s: string | undefined): string {
   if (!s) return "";
   return s.endsWith("/") ? s.slice(0, -1) : s;
 }
+
+/** Fixed-width run — never derived from the token, so the mask leaks no length. */
+const WEBHOOK_URL_MASK = "••••••••••••";
+
+/**
+ * Mask the secret part of a webhook URL for display.
+ *
+ * Only the trailing token segment is a credential: anyone holding it can fire
+ * the autopilot. The origin and the `/api/webhooks/autopilots/` prefix carry no
+ * secret, so they stay readable and the value is still recognizable as this
+ * trigger's URL while hidden. Falls back to the bare mask when the URL has no
+ * separable last segment.
+ */
+export function maskAutopilotWebhookUrl(url: string): string {
+  const cut = url.lastIndexOf("/");
+  if (cut < 0 || cut === url.length - 1) return WEBHOOK_URL_MASK;
+  return url.slice(0, cut + 1) + WEBHOOK_URL_MASK;
+}

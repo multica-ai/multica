@@ -2,13 +2,16 @@
 
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import type { AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
+import enUsage from "../../locales/en/usage.json";
 
-const TEST_RESOURCES = { en: { common: enCommon, runtimes: enRuntimes } };
+const TEST_RESOURCES = {
+  en: { common: enCommon, runtimes: enRuntimes, usage: enUsage },
+};
 
 // The viewer's tz (Viewing layer) drives both the trend and the heatmap.
 const VIEWER_TZ = "Asia/Tokyo";
@@ -41,15 +44,29 @@ vi.mock("@multica/core/hooks", () => ({
 
 // custom-pricing-store is consumed two ways: usage-section reads the store
 // hook, and runtimes/utils reads getCustomPricing(). The hook must be both
-// callable and expose getState(), mirroring a real Zustand store.
+// callable and expose getState(), mirroring a real Zustand store. Backed by
+// a mutable holder so a test can seed saved overrides — with a hard-coded
+// empty store, `collectUnmappedModels` can never see an override and the
+// "saved rates stay editable" path below would be untestable.
+const pricingState = vi.hoisted(() => ({
+  pricings: {} as Record<string, unknown>,
+}));
+
 vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
-  const state = { pricings: {} as Record<string, unknown> };
   const useCustomPricingStore = Object.assign(
-    (sel?: (s: typeof state) => unknown) => (sel ? sel(state) : state),
-    { getState: () => state },
+    (sel?: (s: typeof pricingState) => unknown) =>
+      sel ? sel(pricingState) : pricingState,
+    { getState: () => pricingState },
   );
-  return { useCustomPricingStore, getCustomPricing: () => undefined };
+  return {
+    useCustomPricingStore,
+    getCustomPricing: (model: string) => pricingState.pricings[model],
+  };
 });
+
+// Lets a test swap in its own usage rows (e.g. an unpriced model) without
+// re-mocking the whole query layer. `null` keeps the default fixture.
+const usageOverride = vi.hoisted(() => ({ rows: null as unknown[] | null }));
 
 // useQuery is mocked so the component renders synchronously with canned
 // data — the `kind` tag on each query-options object routes the response.
@@ -58,13 +75,28 @@ vi.mock("@tanstack/react-query", async () => {
     await vi.importActual<typeof import("@tanstack/react-query")>(
       "@tanstack/react-query",
     );
+  const dateDaysAgo = (days: number) => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() - days);
+    return date.toISOString().slice(0, 10);
+  };
   const usageRows = [
     {
       runtime_id: "r-1",
-      date: "2026-05-19",
+      date: dateDaysAgo(0),
       provider: "anthropic",
       model: "claude-sonnet-4-6",
       input_tokens: 1_000,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    },
+    {
+      runtime_id: "r-1",
+      date: dateDaysAgo(15),
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      input_tokens: 2_000,
       output_tokens: 0,
       cache_read_tokens: 0,
       cache_write_tokens: 0,
@@ -73,7 +105,7 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useQuery: (opts: { kind?: string }) => ({
-      data: opts?.kind === "usage" ? usageRows : [],
+      data: opts?.kind === "usage" ? (usageOverride.rows ?? usageRows) : [],
       isLoading: false,
     }),
   };
@@ -145,5 +177,257 @@ describe("UsageSection — Viewing timezone wiring", () => {
     fireEvent.click(screen.getByRole("button", { name: "Heatmap" }));
 
     expect(screen.getByTestId("heatmap-tz").textContent).toBe(VIEWER_TZ);
+  });
+
+  it("renders KPI values with NumberFlow and updates them when the period changes", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    const flows = Array.from(document.querySelectorAll("number-flow-react"));
+    expect(flows).toHaveLength(3);
+    expect(flows.at(-1)).toHaveAttribute("aria-label", "3K");
+    expect(
+      flows.every(
+        (flow) =>
+          (flow as HTMLElement & { respectMotionPreference?: boolean })
+            .respectMotionPreference === true,
+      ),
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "7d" }));
+
+    expect(flows.at(-1)).toHaveAttribute("aria-label", "1K");
+  });
+});
+
+describe("UsageSection — period and grain", () => {
+  beforeEach(() => {
+    usageOverride.rows = null;
+  });
+
+  const periodGroup = () => screen.getByRole("group", { name: "Period" });
+  const dimGroup = () => screen.queryByRole("group", { name: "Dimension" });
+
+  it("offers every period up front, so 180d is one click", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    for (const label of ["7d", "30d", "90d", "180d"]) {
+      expect(
+        within(periodGroup()).getByRole("button", { name: label }),
+      ).toBeInTheDocument();
+    }
+
+    fireEvent.click(within(periodGroup()).getByRole("button", { name: "180d" }));
+
+    expect(screen.getByText("Cost · 180D")).toBeInTheDocument();
+    expect(screen.getByTestId("weekly-cost-chart")).toBeInTheDocument();
+    // 180d allows only the weekly grain — a one-option toggle is not shown.
+    expect(dimGroup()).toBeNull();
+  });
+
+  it("switching the grain never changes the period", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    fireEvent.click(within(dimGroup()!).getByRole("button", { name: "Weekly" }));
+
+    expect(screen.getByTestId("weekly-cost-chart")).toBeInTheDocument();
+    expect(screen.getByText("Cost · 30D")).toBeInTheDocument();
+    expect(
+      within(periodGroup()).getByRole("button", { name: "30d" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("draws 7d daily without forgetting the reader's weekly choice", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    // Tokens, because the 7d fixture's cost rounds to $0 and would render
+    // the empty state instead of a chart.
+    fireEvent.click(screen.getByRole("button", { name: "Tokens" }));
+    fireEvent.click(within(dimGroup()!).getByRole("button", { name: "Weekly" }));
+    fireEvent.click(within(periodGroup()).getByRole("button", { name: "7d" }));
+
+    expect(screen.getByTestId("daily-tokens-chart")).toBeInTheDocument();
+    expect(dimGroup()).toBeNull();
+
+    fireEvent.click(within(periodGroup()).getByRole("button", { name: "30d" }));
+
+    expect(screen.getByTestId("weekly-tokens-chart")).toBeInTheDocument();
+  });
+
+  it("hides the grain toggle while the heatmap is on", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    fireEvent.click(screen.getByRole("button", { name: "Heatmap" }));
+
+    expect(dimGroup()).toBeNull();
+  });
+});
+
+describe("UsageSection — cache hit rate", () => {
+  beforeEach(() => {
+    usageOverride.rows = null;
+  });
+
+  it("includes cache writes in the denominator", () => {
+    usageOverride.rows = [
+      {
+        runtime_id: "r-1",
+        date: new Date().toISOString().slice(0, 10),
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 72_000,
+        cache_write_tokens: 28_000,
+      },
+    ];
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(screen.getByText(/72% hit/)).toBeInTheDocument();
+  });
+
+  it("shows an unavailable rate when no input-side tokens were reported", () => {
+    usageOverride.rows = [
+      {
+        runtime_id: "r-1",
+        date: new Date().toISOString().slice(0, 10),
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        input_tokens: 0,
+        output_tokens: 1_000,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+      },
+    ];
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.queryByText(/0% hit/)).not.toBeInTheDocument();
+  });
+});
+
+describe("UsageSection — custom-pricing entry point", () => {
+  // A model that no maintained row prices, so it lands in the unmapped
+  // diagnostic. `collectUnmappedModels` keys it by provider, so the saved
+  // override below must use the same `acme/…` key the dialog would store.
+  const UNPRICED_KEY = "acme/made-up-model-9";
+  const unpricedRows = [
+    {
+      runtime_id: "r-1",
+      date: new Date().toISOString().slice(0, 10),
+      provider: "acme",
+      model: "made-up-model-9",
+      input_tokens: 1_000,
+      output_tokens: 500,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    },
+  ];
+
+  beforeEach(() => {
+    usageOverride.rows = null;
+    pricingState.pricings = {};
+  });
+
+  it("stays hidden when every model resolves and nothing is overridden", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(
+      screen.queryByRole("button", { name: "Set custom prices" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Edit custom prices" }),
+    ).toBeNull();
+  });
+
+  it("warns and offers the dialog while a model is unpriced", () => {
+    usageOverride.rows = unpricedRows;
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(UNPRICED_KEY);
+    expect(
+      screen.getByRole("button", { name: "Set custom prices" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the dialog reachable after the last override is saved", () => {
+    // Regression: a saved override makes the model resolve, so the window
+    // has nothing unmapped left. Gating the bar on "something is unmapped"
+    // used to remove the only entry point here, stranding the user with
+    // rates they could no longer edit or delete.
+    usageOverride.rows = unpricedRows;
+    pricingState.pricings = {
+      [UNPRICED_KEY]: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1 },
+    };
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Edit custom prices" }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("UsageSection — KPI row layout", () => {
+  // Regression (#7836): the KPI row was a hard `grid-cols-3`. At a 390px
+  // viewport each column is ~110px, and `KpiCard`'s p-5 leaves ~70px for a
+  // 36px `text-display` value. A compact token total ("960.1M") is a single
+  // unbreakable token, so it painted past the card's right edge rather than
+  // wrapping. The Analytics Usage/Errors tabs already stack their identical
+  // KPI rows below `sm`; this row is the one that never got it.
+  it("stacks below sm instead of forcing three columns", () => {
+    const { container } = render(<UsageSection runtime={RUNTIME} />, {
+      wrapper: Wrapper,
+    });
+
+    // Walk up from a KPI value to the row that lays the three cards out.
+    const row = container
+      .querySelector("number-flow-react")
+      ?.closest("div.grid");
+    expect(row).not.toBeNull();
+
+    const classes = row!.className;
+    expect(classes).toContain("grid-cols-1");
+    expect(classes).toContain("sm:grid-cols-3");
+    // The unprefixed `grid-cols-3` is the defect itself: it applies at every
+    // width. `sm:grid-cols-3` must not be mistaken for it.
+    expect(classes.split(/\s+/)).not.toContain("grid-cols-3");
+    // The separator has to follow the orientation, or the stacked cards run
+    // together with a vertical rule floating between columns that no longer
+    // exist.
+    expect(classes).toContain("divide-y");
+    expect(classes).toContain("sm:divide-x");
+    expect(classes).toContain("sm:divide-y-0");
+  });
+});
+
+describe("UsageSection — cost-by-model label truncation", () => {
+  it("renders model keys as block elements so long provider-qualified ids truncate before the spend bar", () => {
+    usageOverride.rows = [
+      {
+        runtime_id: "r-1",
+        date: new Date().toISOString().slice(0, 10),
+        provider: "antigravity",
+        model: "claude-opus-5-5-high",
+        input_tokens: 1_000,
+        output_tokens: 500,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+      },
+    ];
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "By model" }));
+
+    const label = screen.getByText("antigravity/claude-opus-5-5-high");
+    // `truncate` (`overflow: hidden; text-overflow: ellipsis`) is inert on an
+    // inline `<span>` inside the non-flex `div.min-w-0` cell, letting long
+    // provider-qualified keys bleed beneath the `relative` spend bar next to them.
+    expect(label.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["block", "truncate"]),
+    );
   });
 });

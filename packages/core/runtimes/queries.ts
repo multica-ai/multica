@@ -12,7 +12,6 @@ export const runtimeKeys = {
   // by-hour now follows the viewer's tz, like the other reports.
   usageByHour: (rid: string, days: number, tz: string) =>
     ["runtimes", "usage", "by-hour", rid, days, tz] as const,
-  latestVersion: () => ["runtimes", "latestVersion"] as const,
 };
 
 // `tz` is the viewer's IANA name — all reports follow the viewer's tz.
@@ -48,31 +47,15 @@ export function runtimeUsageByHourOptions(runtimeId: string, days: number, tz: s
   });
 }
 
-export function runtimeListOptions(wsId: string, owner?: "me") {
+/**
+ * `wsSlug` targets a workspace other than the active one. The server resolves
+ * the workspace from the slug header before the `workspace_id` param, so the
+ * param alone cannot reach a workspace the app has not navigated to — which is
+ * exactly the create-workspace flow's situation.
+ */
+export function runtimeListOptions(wsId: string, owner?: "me", wsSlug?: string) {
   return queryOptions({
     queryKey: owner === "me" ? runtimeKeys.listMine(wsId) : runtimeKeys.list(wsId),
-    queryFn: () => api.listRuntimes({ workspace_id: wsId, owner }),
-  });
-}
-
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases/latest";
-
-export function latestCliVersionOptions() {
-  return queryOptions({
-    queryKey: runtimeKeys.latestVersion(),
-    queryFn: async (): Promise<string | null> => {
-      try {
-        const resp = await fetch(GITHUB_RELEASES_URL, {
-          headers: { Accept: "application/vnd.github+json" },
-        });
-        if (!resp.ok) return null;
-        const data = await resp.json();
-        return (data.tag_name as string) ?? null;
-      } catch {
-        return null;
-      }
-    },
-    staleTime: 10 * 60 * 1000, // 10 minutes
+    queryFn: () => api.listRuntimes({ workspace_id: wsId, owner }, wsSlug),
   });
 }

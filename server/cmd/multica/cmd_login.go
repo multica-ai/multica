@@ -44,10 +44,18 @@ var loginCmd = &cobra.Command{
 // "prompt me interactively", preserving the legacy `multica login --token`
 // no-value form alongside the documented `--token mul_...` / `--token mcn_...`
 // value form.
-const tokenPromptSentinel = "\x00prompt"
+//
+// The sentinel must be printable: pflag renders NoOptDefVal verbatim in help
+// output ("--token string[=\"prompt\"]") and uses "\x00" internally as its
+// column-alignment marker, so a NUL-prefixed sentinel corrupts `login -h`.
+// Colliding with a user literally typing `--token prompt` is harmless — that
+// string is never a valid PAT, and prompting is a reasonable response.
+const tokenPromptSentinel = "prompt"
 
 func init() {
-	loginCmd.Flags().String("token", "", "Authenticate using a personal access token (`mul_...` user PAT or `mcn_...` Cloud Node PAT). Pass `--token mul_...` / `--token mcn_...` to supply it inline, or `--token` alone to be prompted interactively.")
+	// No backticks in the usage string: pflag's UnquoteUsage treats the first
+	// backquoted segment as the flag's value placeholder in help output.
+	loginCmd.Flags().String("token", "", "Authenticate using a personal access token (mul_... user PAT or mcn_... Cloud Node PAT). Pass --token mul_... / --token mcn_... to supply it inline, or --token alone to be prompted interactively.")
 	// NoOptDefVal lets `--token` (no value) keep its old prompt-mode behavior
 	// while `--token mul_...` / `--token mcn_...` and the `=value` form
 	// consume the value normally.
@@ -56,6 +64,9 @@ func init() {
 }
 
 func runLogin(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("login"); err != nil {
+		return err
+	}
 	// Run the standard auth login flow.
 	if err := runAuthLogin(cmd, args); err != nil {
 		return err
@@ -73,13 +84,23 @@ func runLogin(cmd *cobra.Command, args []string) error {
 }
 
 func autoWatchWorkspaces(cmd *cobra.Command) error {
-	serverURL := resolveServerURL(cmd)
-	token := resolveToken(cmd)
-	if token == "" {
+	// runLogin has already passed the human/local command guard and saved the
+	// newly authenticated profile. Read that exact profile here rather than the
+	// general task-safe resolvers, which intentionally fail closed on a lone
+	// MULTICA_DAEMON_PORT signal.
+	profile := resolveProfile(cmd)
+	cfg, err := cli.LoadCLIConfigForProfile(profile)
+	if err != nil {
+		return err
+	}
+	if cfg.Token == "" {
 		return fmt.Errorf("not authenticated")
 	}
+	if cfg.ServerURL == "" {
+		return fmt.Errorf("server URL not configured")
+	}
 
-	client := cli.NewAPIClient(serverURL, "", token)
+	client := cli.NewAPIClient(normalizeAPIBaseURL(cfg.ServerURL), "", cfg.Token)
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
@@ -101,12 +122,6 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 			fmt.Fprintln(os.Stderr, "\nNo workspaces found.")
 			return nil
 		}
-	}
-
-	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err != nil {
-		return err
 	}
 
 	// Set default workspace if not set.

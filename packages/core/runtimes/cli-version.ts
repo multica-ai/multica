@@ -11,6 +11,7 @@
  * "your daemon needs an upgrade" before they hit submit.
  */
 export const MIN_QUICK_CREATE_CLI_VERSION = "0.2.21";
+export const MIN_QUICK_CREATE_FIELDS_CLI_VERSION = "0.4.3";
 
 export type CliVersionState = "ok" | "too_old" | "missing";
 
@@ -52,23 +53,128 @@ function lessThan(a: [number, number, number], b: [number, number, number]) {
  * itself is the shared signal, so frontend and server agree by construction.
  */
 export function checkQuickCreateCliVersion(detected: string | undefined | null): CliVersionCheck {
+  return checkCliVersion(detected, MIN_QUICK_CREATE_CLI_VERSION);
+}
+
+/** Capability gate for explicit quick-create priority and due-date fields. */
+export function checkQuickCreateFieldsCliVersion(
+  detected: string | undefined | null,
+): CliVersionCheck {
+  return checkCliVersion(detected, MIN_QUICK_CREATE_FIELDS_CLI_VERSION);
+}
+
+function checkCliVersion(
+  detected: string | undefined | null,
+  minimum: string,
+): CliVersionCheck {
   const current = (detected ?? "").trim();
   if (DEV_DESCRIBE_RE.test(current)) {
-    return { state: "ok", current, min: MIN_QUICK_CREATE_CLI_VERSION };
+    return { state: "ok", current, min: minimum };
   }
   const parsed = current ? parseSemver(current) : null;
   if (!parsed) {
-    return { state: "missing", current, min: MIN_QUICK_CREATE_CLI_VERSION };
+    return { state: "missing", current, min: minimum };
   }
-  const min = parseSemver(MIN_QUICK_CREATE_CLI_VERSION)!;
+  const min = parseSemver(minimum)!;
   if (lessThan(parsed, min)) {
-    return { state: "too_old", current, min: MIN_QUICK_CREATE_CLI_VERSION };
+    return { state: "too_old", current, min: minimum };
   }
-  return { state: "ok", current, min: MIN_QUICK_CREATE_CLI_VERSION };
+  return { state: "ok", current, min: minimum };
 }
 
 /** Pull `cli_version` off a runtime row's loosely-typed metadata bag. */
 export function readRuntimeCliVersion(metadata: Record<string, unknown> | undefined): string {
   const v = metadata?.cli_version;
   return typeof v === "string" ? v : "";
+}
+
+/**
+ * First release whose daemon renders the chat session's project context
+ * (description + resources) into the run brief (PR #5765, ships in v0.4.10).
+ * Older daemons still receive and honor the project's repos — the server
+ * pre-extracts those into the generic `repos` claim field — but silently skip
+ * the Project Context section, so the durable description never reaches the
+ * agent. SOFT gate: selecting a project always works; the UI only warns.
+ *
+ * Frontend-only constant: there is no server preview endpoint computing this,
+ * so there is no server twin to keep in lockstep with.
+ */
+export const MIN_CHAT_PROJECT_CONTEXT_CLI_VERSION = "0.4.10";
+
+/**
+ * Whether a daemon-reported CLI version is new enough to inject a chat
+ * session's project description into the run brief. Missing / unparsable /
+ * below-minimum are `false`; dev-built daemons (git-describe shape) always pass.
+ */
+export function chatProjectContextSupported(detected: string | undefined | null): boolean {
+  return meetsMinCliVersion(detected, MIN_CHAT_PROJECT_CONTEXT_CLI_VERSION);
+}
+
+function meetsMinCliVersion(detected: string | undefined | null, minimum: string): boolean {
+  const current = (detected ?? "").trim();
+  if (!current) return false;
+  if (DEV_DESCRIBE_RE.test(current)) return true;
+  const parsed = parseSemver(current);
+  if (!parsed) return false;
+  return !lessThan(parsed, parseSemver(minimum)!);
+}
+
+/**
+ * Capability a daemon advertises when it implements worktree mode for
+ * local_directory resources. Mirrors `DaemonCapabilityLocalWorktreeV1` in
+ * `server/pkg/protocol/messages.go`.
+ */
+export const LOCAL_WORKTREE_CAPABILITY = "local-worktree-v1";
+
+/** Minimal runtime shape this module needs; keeps callers from importing types. */
+type RuntimeCapabilityRow = {
+  daemon_id?: string | null;
+  last_seen_at?: string | null;
+  metadata?: unknown;
+};
+
+/**
+ * Whether the machine behind `daemonId` has ADVERTISED worktree support, judged
+ * by its most recently seen runtime row.
+ *
+ * Deliberately a positive signal only, and deliberately not a gate. `false`
+ * means "no runtime row here says yes" — which covers a daemon that genuinely
+ * cannot, a row written before the server recorded capabilities at all, and a
+ * server too old to record them in the first place. Those have different
+ * remedies and the client cannot reliably tell them apart: it would have to
+ * infer the backend's age from data the backend wrote, and a row's silence
+ * outlives the upgrade that fixed it (#7113).
+ *
+ * So the client stopped trying. The server is asked instead — it knows its own
+ * version by construction — at every write path (create project, add resource,
+ * update resource) and again at claim time, which is the gate that actually
+ * keeps agents out of the user's working copy (MUL-5707). This function only
+ * decides whether to PRESELECT parallel mode, where a wrong guess costs a
+ * radio button, not a blocked user or a misleading instruction.
+ *
+ * Newest-row, not any-row: deregistering a runtime only marks it offline and
+ * its metadata survives, so a machine that once advertised the capability and
+ * then downgraded would otherwise keep vouching for itself forever.
+ */
+export function runtimeAdvertisesLocalWorktree(
+  runtimes: RuntimeCapabilityRow[],
+  daemonId: string | null | undefined,
+): boolean {
+  if (!daemonId) return false;
+  let newest: RuntimeCapabilityRow | undefined;
+  for (const rt of runtimes) {
+    if (rt.daemon_id !== daemonId) continue;
+    if (!newest) {
+      newest = rt;
+      continue;
+    }
+    // A row that never reported sorts oldest, so a live row always wins.
+    const candidateSeen = rt.last_seen_at ?? "";
+    const currentSeen = newest.last_seen_at ?? "";
+    if (candidateSeen > currentSeen) newest = rt;
+  }
+  const metadata = newest?.metadata;
+  if (!metadata || typeof metadata !== "object") return false;
+  const caps = (metadata as { capabilities?: unknown }).capabilities;
+  return Array.isArray(caps) && caps.includes(LOCAL_WORKTREE_CAPABILITY);
 }

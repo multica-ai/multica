@@ -15,8 +15,11 @@ export interface RuntimeMachine {
   daemonId: string | null;
   title: string;
   subtitle: string | null;
+  /** Compact OS/arch summary without the daemon-id fallback of `subtitle`. */
+  deviceSummary: string | null;
   deviceInfo: string | null;
   cliVersion: string | null;
+  launchedBy: string | null;
   mode: AgentRuntime["runtime_mode"];
   section: RuntimeMachineSection;
   isCurrent: boolean;
@@ -65,7 +68,7 @@ const HEALTH_SEVERITY: Record<RuntimeHealth, number> = {
   online: 0,
   recently_lost: 1,
   offline: 2,
-  about_to_gc: 3,
+  long_offline: 3,
 };
 
 export function splitRuntimeName(name: string): {
@@ -75,6 +78,20 @@ export function splitRuntimeName(name: string): {
   const m = name.match(/^(.+?)\s+\(([^)]+)\)$/);
   if (!m || !m[1] || !m[2]) return { base: name, hostname: null };
   return { base: m[1], hostname: m[2] };
+}
+
+// The label for a runtime rendered under (or next to) its machine's name.
+// A machine-level rename stamps the same custom_name on every runtime of
+// the daemon (MUL-4217), so repeating it per runtime is noise — fall back
+// to the provider base (e.g. "Claude"). A one-off per-runtime rename that
+// differs from the machine name stays visible verbatim.
+export function runtimeRowLabel(
+  runtime: AgentRuntime,
+  machineTitle: string,
+): string {
+  const custom = runtime.custom_name?.trim();
+  if (custom && custom !== machineTitle) return custom;
+  return splitRuntimeName(runtime.name).base;
 }
 
 export function buildRuntimeMachines(
@@ -117,8 +134,10 @@ function placeholderLocalMachine(
     daemonId,
     title: options.localMachineName ?? "This machine",
     subtitle: null,
+    deviceSummary: null,
     deviceInfo: null,
     cliVersion: null,
+    launchedBy: null,
     mode: "local",
     section: "local",
     isCurrent: true,
@@ -151,6 +170,7 @@ export function filterRuntimeMachines(
       machine.daemonId,
       machine.providerNames.join(" "),
       machine.runtimes.map((runtime) => runtime.name).join(" "),
+      machine.runtimes.map((runtime) => runtime.custom_name ?? "").join(" "),
     ]
       .filter(Boolean)
       .join(" ")
@@ -158,6 +178,11 @@ export function filterRuntimeMachines(
 
     return haystack.includes(q);
   });
+}
+
+/** Number of machines `buildRuntimeMachines` would group these runtimes into. */
+export function countRuntimeMachines(runtimes: AgentRuntime[]): number {
+  return new Set(runtimes.map(runtimeMachineId)).size;
 }
 
 export function runtimeMachineCounts(machines: RuntimeMachine[]): {
@@ -236,8 +261,10 @@ function finalizeRuntimeMachine(
     daemonId: draft.daemonId,
     title,
     subtitle,
+    deviceSummary: compactDeviceInfo(deviceInfo, title),
     deviceInfo,
-    cliVersion: commonCliVersion(runtimes),
+    cliVersion: currentMachineMetadata(runtimes, "cli_version"),
+    launchedBy: currentMachineMetadata(runtimes, "launched_by"),
     mode: draft.mode,
     section: isCurrent ? "local" : draft.mode === "cloud" ? "cloud" : "remote",
     isCurrent,
@@ -268,10 +295,28 @@ function runtimeDeviceName(runtime: AgentRuntime): string | null {
   return raw.split(" · ")[0]?.trim() || null;
 }
 
+// The custom name shared by every runtime on a machine (MUL-4217). A
+// machine-level rename writes the same custom_name to all runtimes on the
+// daemon, so a name shared by all of them is the machine's label. A one-off
+// per-runtime rename (not shared) is deliberately ignored here so it can't
+// masquerade as the whole machine's name.
+export function sharedCustomName(runtimes: AgentRuntime[]): string | null {
+  if (runtimes.length === 0) return null;
+  const names = runtimes.map((r) => r.custom_name?.trim() ?? "");
+  const first = names[0];
+  if (!first) return null;
+  return names.every((n) => n === first) ? first : null;
+}
+
 function machineTitle(
   runtimes: AgentRuntime[],
   options: { isCurrent: boolean; localMachineName?: string | null },
 ): string {
+  // An explicit user-set machine name wins over everything, including the
+  // OS-reported local machine name.
+  const shared = sharedCustomName(runtimes);
+  if (shared) return shared;
+
   if (options.isCurrent && options.localMachineName) {
     return options.localMachineName;
   }
@@ -350,15 +395,28 @@ function latestLastSeenAt(runtimes: AgentRuntime[]): string | null {
   return latest;
 }
 
-function commonCliVersion(runtimes: AgentRuntime[]): string | null {
-  const versions = new Set<string>();
-  for (const runtime of runtimes) {
-    const version = runtime.metadata?.cli_version;
-    if (typeof version === "string" && version.trim()) {
-      versions.add(version.trim());
-    }
+function currentMachineMetadata(
+  runtimes: AgentRuntime[],
+  key: "cli_version" | "launched_by",
+): string | null {
+  const online = runtimes.filter((runtime) => runtime.status === "online");
+  const candidates = online.length > 0 ? online : runtimes;
+
+  for (const runtime of candidates.toSorted(compareRuntimeReports)) {
+    const value = runtime.metadata?.[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
   }
-  return versions.size === 1 ? Array.from(versions)[0] ?? null : null;
+  return null;
+}
+
+function compareRuntimeReports(a: AgentRuntime, b: AgentRuntime): number {
+  return runtimeReportTime(b) - runtimeReportTime(a);
+}
+
+function runtimeReportTime(runtime: AgentRuntime): number {
+  const reportedAt = runtime.last_seen_at ?? runtime.updated_at;
+  const timestamp = Date.parse(reportedAt);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
 function shortDaemonId(daemonId: string): string {

@@ -1,0 +1,593 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import type { StoreApi } from "zustand/vanilla";
+import type { IssueViewState } from "@multica/core/issues/stores/view-store";
+import type { IssueViewBaseline } from "@multica/core/issue-views/baseline";
+import { AlertTriangle, FilterX, ListTodo, Plus } from "@multica/ui/icons";
+import { Button } from "@multica/ui/components/ui/button";
+import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { cn } from "@multica/ui/lib/utils";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useModalStore } from "@multica/core/modals";
+import { useQuery } from "@tanstack/react-query";
+import { workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
+import {
+  useViewStore,
+  ViewStoreProvider,
+} from "@multica/core/issues/stores/view-store-context";
+import {
+  getIssueSurfaceViewStore,
+  seedIssueSurfaceViewState,
+} from "@multica/core/issues/stores/surface-view-store";
+import { useActiveIssueView } from "@multica/core/issue-views/use-active-view";
+import { filteredBuiltinBaseline } from "@multica/core/issue-views/builtin-issue-views";
+import {
+  issueViewDefinitionFromState,
+  issueViewSeedDefinition,
+  sameFilterMeaning,
+} from "@multica/core/issue-views/definition";
+import { ViewBaselineProvider, useViewBaseline } from "./view-baseline-context";
+import type { IssueViewScope } from "@multica/core/issue-views/queries";
+import {
+  actorKindForViewVariant,
+  issueScopeKey,
+  myRelationForViewVariant,
+  type IssueScope,
+} from "@multica/core/issues/surface/scope";
+import type { Issue } from "@multica/core/types";
+import { BoardView } from "../components/board-view";
+import { BOARD_COL_WIDTH } from "../components/board-column";
+import { BatchActionToolbar } from "../components/batch-action-toolbar";
+import { GanttView } from "../components/gantt-view";
+import { ListView } from "../components/list-view";
+import { SwimLaneView } from "../components/swimlane-view";
+import { TableView } from "../components/table-view";
+import { useT } from "../../i18n";
+import { CollectionPageState } from "../../layout/collection-page";
+import { IssueContextMenuProvider } from "../actions";
+import { IssueSurfaceActionsProvider } from "./actions-context";
+import { IssuePeekHost } from "../components/issue-peek";
+import { IssueSurfaceSelectionProvider } from "./selection-context";
+import { ColumnStatusesProvider } from "./column-statuses-context";
+import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
+import {
+  useIssueSurfaceController,
+  type FilterDependencyKind,
+  type IssueSurfaceController,
+} from "./use-issue-surface-controller";
+
+export interface IssueSurfaceRenderContext {
+  controller: IssueSurfaceController;
+  issues: Issue[];
+}
+
+interface IssueSurfaceComponentProps extends IssueSurfaceProps {
+  renderHeader?: (context: IssueSurfaceRenderContext) => ReactNode;
+  renderEmpty?: (context: IssueSurfaceRenderContext) => ReactNode;
+  renderLoading?: (context: IssueSurfaceRenderContext) => ReactNode;
+  clientFilter?: (issue: Issue) => boolean;
+  showClientEmpty?: (context: IssueSurfaceRenderContext) => boolean;
+  batchToolbar?: "always" | "list" | "never";
+  contentClassName?: string;
+}
+
+/** An explicit, caller-owned store bypasses saved views and persisted surfaces. */
+export function IssueSurfaceWithStore({ store, baseline, ...props }: Omit<IssueSurfaceComponentProps, "surfaceKey"> & {
+  store: StoreApi<IssueViewState>;
+  baseline: IssueViewBaseline;
+}) {
+  const wsId = useWorkspaceId();
+  return <ViewStoreProvider store={store}>
+    <ViewBaselineProvider baseline={baseline}>
+      <IssueSurfaceContent key={wsId} {...props} />
+    </ViewBaselineProvider>
+  </ViewStoreProvider>;
+}
+
+export function IssueSurface({
+  scope,
+  modes,
+  surfaceKey,
+  createDefaults,
+  allowCreate = true,
+  search,
+  renderHeader,
+  renderEmpty,
+  renderLoading,
+  clientFilter,
+  showClientEmpty,
+  batchToolbar = "always",
+  contentClassName,
+}: IssueSurfaceComponentProps) {
+  const wsId = useWorkspaceId();
+  // Saved views exist on workspace / my / project surfaces only.
+  const viewScope: IssueViewScope | null =
+    scope.type === "workspace"
+      ? { scope_type: "workspace" }
+      : scope.type === "my"
+        ? { scope_type: "my" }
+        : scope.type === "project"
+          ? { scope_type: "project", scope_id: scope.projectId }
+          : null;
+  const { activeView } = useActiveIssueView(wsId, viewScope);
+
+  // An open saved view swaps the surface onto its own view-preference key:
+  // display/extra-filter adjustments persist per user per view, and the
+  // underlying built-in surface state is never touched (no draft machinery).
+  const resolvedSurfaceKey = activeView
+    ? `view:${activeView.id}`
+    : (surfaceKey ?? issueScopeKey(scope));
+  const seedDefinition = activeView
+    ? { ...activeView.query, ...activeView.display }
+    : null;
+  // While a view is open, the scope axis the view captured belongs to the
+  // VIEW, not to whichever tab the user stood on: workspace/project views
+  // carry an assignee-type variant, my views a relation variant. The user's
+  // own tab state is never touched — it is exactly where they left it when
+  // the view closes (or vanishes). A variant-free view resolves to the
+  // unrestricted axis value.
+  const effectiveScope: IssueScope =
+    activeView && (scope.type === "workspace" || scope.type === "project")
+      ? { ...scope, actorKind: actorKindForViewVariant(activeView.scope_variant) }
+      : activeView && scope.type === "my"
+        ? { ...scope, relation: myRelationForViewVariant(activeView.scope_variant) }
+        : scope;
+  const viewBaseline = filteredBuiltinBaseline(activeView);
+  const store = useMemo(() => {
+    // First-open seeding happens HERE, at store-creation time for this key:
+    // no React component has subscribed to the new key's store yet, so the
+    // setState inside cannot cascade into an in-render update loop (it did
+    // when this ran in the component body).
+    if (seedDefinition) {
+      seedIssueSurfaceViewState(resolvedSurfaceKey, seedDefinition);
+    }
+    const viewStore = getIssueSurfaceViewStore(resolvedSurfaceKey);
+    if (viewBaseline) keepFixedFilters(viewStore, viewBaseline);
+    return viewStore;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seed identity follows the key
+  }, [resolvedSurfaceKey]);
+  // Seeding happens once per key, but the stored state can be replaced later:
+  // a workspace switch reloads it from that workspace's preferences, which may
+  // never have held the condition. Re-apply it whenever it goes missing.
+  useEffect(() => {
+    if (!viewBaseline) return;
+    keepFixedFilters(store, viewBaseline);
+    return store.subscribe(() => keepFixedFilters(store, viewBaseline));
+  }, [store, viewBaseline]);
+
+  // Every change of this key tears down and remounts the ENTIRE surface
+  // (providers, DnD, all columns/cards) — by design for data-window changes,
+  // but expensive enough that unexpected flips are performance bugs. Dev-only
+  // breadcrumb so a Performance trace showing double mounts can be tied to
+  // the exact key transition.
+  const contentKey = `${wsId}:${issueScopeKey(effectiveScope)}:${activeView ? `view:${activeView.id}` : "default"}`;
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(`[issue-surface] mount ${contentKey}`);
+    }
+  }, [contentKey]);
+
+  return (
+    <ViewStoreProvider store={store}>
+      <ViewBaselineProvider baseline={viewBaseline}>
+        {/* Remount on data-window change: the list queries keep the previous
+            key's data as a placeholder (keepPreviousData) so sort/filter
+            changes within ONE surface never flash a skeleton — but reusing the
+            mounted observer across windows made project A's cards impersonate
+            project B (with isLoading=false, so no skeleton either) until B's
+            fetch landed. A window-keyed remount gives the new window a fresh
+            observer: cold window → skeleton, warm window → instant cache hit.
+            The window identity is wsId + scope — wsId is required because the
+            workspace layout does not remount on workspace switch and two
+            workspaces share the same scope key (e.g. "workspace:all"). Keyed
+            by data identity, not surfaceKey (view-preference identity). */}
+        <IssueSurfaceContent
+          key={contentKey}
+          scope={effectiveScope}
+          modes={modes}
+          createDefaults={createDefaults}
+          allowCreate={allowCreate}
+          search={search}
+          renderHeader={renderHeader}
+          renderEmpty={renderEmpty}
+          renderLoading={renderLoading}
+          clientFilter={clientFilter}
+          showClientEmpty={showClientEmpty}
+          batchToolbar={batchToolbar}
+          contentClassName={contentClassName}
+        />
+      </ViewBaselineProvider>
+    </ViewStoreProvider>
+  );
+}
+
+/**
+ * Holds a built-in view to its condition: exactly the relations and agent
+ * filter it is defined by. Other dimensions narrow it; these would widen it,
+ * since a dimension's values are ORed (Subscribed + Assigned is "subscribed
+ * or assigned").
+ */
+function keepFixedFilters(store: StoreApi<IssueViewState>, baseline: IssueViewBaseline) {
+  const state = store.getState();
+  const patch: Partial<IssueViewState> = {};
+  if (baseline.agentRunning && (!state.agentRunningFilter || state.agentIdleFilter)) {
+    Object.assign(patch, { agentRunningFilter: true, agentIdleFilter: false });
+  }
+  const relations = baseline.raw.relationFilters;
+  if (
+    relations.length > 0 &&
+    (relations.length !== state.relationFilters.length ||
+      relations.some((relation) => !state.relationFilters.includes(relation)))
+  ) {
+    patch.relationFilters = [...relations];
+  }
+  if (relations.length > 0 && state.negatedFilters.includes("relation")) {
+    patch.negatedFilters = state.negatedFilters.filter((dimension) => dimension !== "relation");
+  }
+  if (Object.keys(patch).length > 0) store.setState(patch);
+}
+
+function IssueSurfaceContent({
+  scope,
+  modes,
+  createDefaults,
+  allowCreate = true,
+  search,
+  renderHeader,
+  renderEmpty,
+  renderLoading,
+  clientFilter,
+  showClientEmpty,
+  batchToolbar,
+  contentClassName,
+}: Omit<IssueSurfaceComponentProps, "surfaceKey">) {
+  const workspaceId = useWorkspaceId();
+  // One polling owner for the whole surface; individual cards only select cache data.
+  useQuery({ ...workspaceWakeupSummariesOptions(workspaceId), refetchInterval: 10_000 });
+  const { t } = useT("projects");
+  const controller = useIssueSurfaceController({
+    scope,
+    modes,
+    createDefaults,
+    search,
+  });
+  const [tableLoadedIssues, setTableLoadedIssues] = useState<Issue[]>([]);
+  const handleTableLoadedIssuesChange = useCallback((next: Issue[]) => {
+    setTableLoadedIssues((current) =>
+      current.length === next.length &&
+      current.every((issue, index) => issue === next[index])
+        ? current
+        : next,
+    );
+  }, []);
+  useEffect(() => {
+    if (controller.viewMode !== "table") setTableLoadedIssues([]);
+  }, [controller.viewMode]);
+  const issues = useMemo(
+    () =>
+      clientFilter
+        ? controller.issues.filter((issue) => clientFilter(issue))
+        : controller.issues,
+    [clientFilter, controller.issues],
+  );
+  const swimlaneIssues = useMemo(
+    () =>
+      clientFilter
+        ? controller.swimlaneIssues.filter((issue) => clientFilter(issue))
+        : controller.swimlaneIssues,
+    [clientFilter, controller.swimlaneIssues],
+  );
+  const renderContext = useMemo(
+    () => ({ controller, issues }),
+    [controller, issues],
+  );
+  const openCreateIssue = useCallback(
+    (defaults?: IssueCreateDefaults) => {
+      controller.openCreateIssue(defaults);
+    },
+    [controller],
+  );
+  const shouldShowClientEmpty =
+    !!clientFilter &&
+    issues.length === 0 &&
+    (showClientEmpty ? showClientEmpty(renderContext) : true);
+  const shouldShowBatchToolbar =
+    batchToolbar !== "never" &&
+    (batchToolbar === "always" ||
+      controller.viewMode === "list" ||
+      controller.viewMode === "table");
+
+  return (
+    <IssueSurfaceActionsProvider actions={controller.actions}>
+      {/* One shared right-click menu for every card/row this surface renders
+          — see IssueContextMenuProvider. Inside the actions provider so the
+          singleton's useIssueActions routes updates through surface
+          actions. */}
+      <IssueContextMenuProvider>
+      <IssueSurfaceSelectionProvider selection={controller.selection}>
+      <ColumnStatusesProvider statuses={controller.columnStatuses}>
+        {renderHeader?.(renderContext)}
+        {/* Every view opens the side peek on Shift+Click. The host wraps the
+            loading and empty states too, so a view switch that briefly shows
+            a skeleton keeps the peek open. */}
+        <IssuePeekHost>
+        {/* A failed filter dependency precedes loading/empty/content on
+            purpose. Row fetching is suspended while it is down, so every
+            branch below would render an unexplained empty surface with no way
+            out. */}
+        {controller.filterDependencyError ? (
+          <FilterDependencyErrorState
+            kind={controller.filterDependencyError.kind}
+            onRetry={controller.filterDependencyError.retry}
+          />
+        ) : controller.isLoading ? (
+          renderLoading ? (
+            renderLoading(renderContext)
+          ) : (
+            <IssueSurfaceSkeleton mode={controller.viewMode} />
+          )
+        ) : controller.isEmpty || shouldShowClientEmpty ? (
+          // A filtered-empty surface is NOT an empty surface. Claiming "no
+          // issues here yet" and offering to create one is wrong when the rows
+          // exist and a filter is hiding them — and it is the state the
+          // agents-working chip drops you into most often (MUL-5525). This
+          // branch precedes `renderEmpty` on purpose: every surface's own empty
+          // copy describes the unfiltered case.
+          controller.hasActiveFilters ? (
+            <FilteredEmptyState />
+          ) : renderEmpty ? (
+            renderEmpty(renderContext)
+          ) : (
+            <CollectionPageState
+              icon={ListTodo}
+              title={t(($) => $.detail.empty_issues_title)}
+              description={t(($) => $.detail.empty_issues_hint)}
+              actions={
+                allowCreate && <>
+                  <Button size="sm" onClick={() => controller.openCreateIssue()}>
+                    <Plus aria-hidden="true" />
+                    {t(($) => $.detail.empty_issues_new_button)}
+                  </Button>
+                  {scope.type === "project" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        useModalStore
+                          .getState()
+                          .open("project-add-issue", { projectId: scope.projectId })
+                      }
+                    >
+                      {t(($) => $.detail.empty_issues_add_existing)}
+                    </Button>
+                  ) : null}
+                </>
+              }
+            />
+          )
+        ) : (
+          <div className={cn("flex flex-col flex-1 min-h-0", contentClassName)}>
+            {controller.viewMode === "board" && (
+              <BoardView
+                issues={issues}
+                visibleStatuses={controller.visibleStatuses}
+                onMoveIssue={controller.moveIssue}
+                childProgressMap={controller.childProgressMap}
+                projectMap={controller.projectMap}
+                projectId={controller.projectId}
+                onCreateIssue={allowCreate ? openCreateIssue : undefined}
+                statusPagination={controller.statusPagination}
+                groupBranches={controller.groupBranches}
+              />
+            )}
+            {controller.viewMode === "list" && (
+              <ListView
+                issues={issues}
+                visibleStatuses={controller.visibleStatuses}
+                childProgressMap={controller.childProgressMap}
+                projectMap={controller.projectMap}
+                projectId={controller.projectId}
+                onMoveIssue={controller.moveIssue}
+                onCreateIssue={allowCreate ? openCreateIssue : undefined}
+                statusPagination={controller.statusPagination!}
+              />
+            )}
+            {controller.viewMode === "table" && (
+              <TableView
+                serverQuery={controller.tableQuerySpec}
+                childProgressMap={controller.childProgressMap}
+                search={controller.tableSearch}
+                onSearchChange={controller.setTableSearch}
+                onLoadedIssuesChange={handleTableLoadedIssuesChange}
+                onCreateIssue={openCreateIssue}
+                exportIssues={controller.exportTableIssues}
+                resolveExportLookups={controller.resolveTableExportLookups}
+              />
+            )}
+            {controller.viewMode === "gantt" && (
+              <GanttView issues={controller.filteredGanttIssues} />
+            )}
+            {controller.viewMode === "swimlane" && (
+              <SwimLaneView
+                issues={issues}
+                unfilteredIssues={swimlaneIssues}
+                activeFilters={controller.activeFilters}
+                visibleStatuses={controller.visibleStatuses}
+                onMoveIssue={controller.moveIssue}
+                childProgressMap={controller.childProgressMap}
+                projectMap={controller.projectMap}
+                projectId={controller.projectId}
+                onCreateIssue={allowCreate ? openCreateIssue : undefined}
+                groupBranches={controller.groupBranches}
+              />
+            )}
+          </div>
+        )}
+        </IssuePeekHost>
+        {shouldShowBatchToolbar && (
+          <BatchActionToolbar
+            issues={
+              controller.viewMode === "table" ? tableLoadedIssues : issues
+            }
+          />
+        )}
+      </ColumnStatusesProvider>
+      </IssueSurfaceSelectionProvider>
+      </IssueContextMenuProvider>
+    </IssueSurfaceActionsProvider>
+  );
+}
+
+/**
+ * Missing filter dependencies must offer recovery instead of claiming that
+ * the filter matched no issues.
+ */
+function FilterDependencyErrorState({
+  kind,
+  onRetry,
+}: {
+  kind: FilterDependencyKind;
+  onRetry: () => void;
+}) {
+  const { t } = useT("issues");
+  return (
+    <CollectionPageState
+      role="alert"
+      tone="warning"
+      icon={AlertTriangle}
+      title={
+        kind === "working"
+          ? t(($) => $.working_filter_error.title)
+          : kind === "unread"
+            ? t(($) => $.unread_filter_error.title)
+            : kind === "relation"
+              ? t(($) => $.relation_filter_error.title)
+              : t(($) => $.status_catalog_error.title)
+      }
+      description={
+        kind === "status"
+          ? t(($) => $.status_catalog_error.hint)
+          : kind === "relation"
+            ? t(($) => $.relation_filter_error.hint)
+            : undefined
+      }
+      actions={
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          {t(($) => $.status_catalog_error.retry)}
+        </Button>
+      }
+    />
+  );
+}
+
+function FilteredEmptyState() {
+  const { t } = useT("issues");
+  const clearFilters = useViewStore((s) => s.clearFilters);
+  const resetFiltersTo = useViewStore((s) => s.resetFiltersTo);
+  const setDateFilter = useViewStore((s) => s.setDateFilter);
+  // Inside a saved view "clear" returns to the view's own conditions — the
+  // baseline is not clearable from here (only the edit dialog changes it).
+  const baseline = useViewBaseline();
+  const handleClear = baseline
+    ? () => {
+        resetFiltersTo(baseline.raw);
+        setDateFilter(null);
+      }
+    : clearFilters;
+  const baselineQuery = useMemo(
+    () => (baseline ? issueViewSeedDefinition({ query: { ...baseline.raw }, display: {} }).query : null),
+    [baseline],
+  );
+  // Only the view's own conditions are on, so there is nothing to clear.
+  const atBaseline = useViewStore(
+    // Date intervals are user filters, but intentionally live outside the
+    // saved-view definition and its baseline snapshot.
+    (s) => !s.dateFilter && !!baselineQuery && sameFilterMeaning(baselineQuery, issueViewDefinitionFromState(s).query),
+  );
+
+  return (
+    <CollectionPageState
+      size="compact"
+      icon={FilterX}
+      title={
+        atBaseline && baseline?.unread
+          ? t(($) => $.filtered_empty.unread_title)
+          : t(($) => $.filtered_empty.title)
+      }
+      actions={
+        atBaseline ? undefined : (
+          <Button variant="outline" size="sm" onClick={handleClear}>
+            {t(($) => $.filtered_empty.clear_button)}
+          </Button>
+        )
+      }
+    />
+  );
+}
+
+// Table is deliberately absent. It owns its own placeholders, drawn as rows
+// inside its real grid so the header, column widths and toolbar are up before
+// any data is — a surface-level stand-in would replace all of that with bars
+// of a different shape and then jump when the rows arrived. For the same
+// reason list and board are drawn box-for-box with `ListView` (40px group
+// header, issue-row-height rows) and `BoardView` (fixed-width columns, plain
+// one-line cards).
+function IssueSurfaceSkeleton({ mode }: { mode: string }) {
+  if (mode === "list") {
+    return (
+      <div className="flex-1 min-h-0 overflow-hidden p-2 pt-0">
+        <div className="space-y-1">
+          {[4, 3].map((rows, g) => (
+            <div key={g}>
+              <div className="flex h-10 items-center gap-2 rounded-lg bg-muted px-3">
+                <Skeleton className="size-3.5 rounded-full" />
+                <Skeleton className="h-3.5 w-20" />
+              </div>
+              {Array.from({ length: rows }).map((_, i) => (
+                <div key={i} className="flex h-[var(--issue-row-height)] items-center gap-2 px-4">
+                  <Skeleton className="size-4 shrink-0 rounded-full" />
+                  <span className="min-w-16 shrink-0">
+                    <Skeleton className="h-3 w-12" />
+                  </span>
+                  <Skeleton className="h-3.5 w-full max-w-80" />
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-1 min-h-0 gap-4 overflow-hidden p-2">
+      {[3, 2, 2, 1, 1].map((cards, c) => (
+        <div
+          key={c}
+          style={{ width: BOARD_COL_WIDTH }}
+          className="flex shrink-0 flex-col rounded-xl bg-muted/40 p-2"
+        >
+          <div className="mb-2 flex h-6 items-center gap-2 px-1.5">
+            <Skeleton className="size-2.5 rounded-full" />
+            <Skeleton className="h-3.5 w-20" />
+          </div>
+          <div className="p-1">
+            {Array.from({ length: cards }).map((_, i) => (
+              <div key={i} className={i === 0 ? undefined : "pt-2"}>
+                <div className="rounded-lg border-[0.5px] border-surface-border bg-surface px-2.5 py-3">
+                  <div className="flex h-4 items-center">
+                    <Skeleton className="h-3 w-14" />
+                  </div>
+                  <div className="mt-1 flex h-5 items-center">
+                    <Skeleton className="h-3.5 w-4/5" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

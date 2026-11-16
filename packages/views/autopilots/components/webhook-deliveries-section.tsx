@@ -12,7 +12,7 @@ import {
   Copy,
   Check,
   Webhook,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   autopilotDeliveriesOptions,
@@ -30,8 +30,10 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
+import { ObjectSection, ObjectSectionCard, ObjectSectionEmpty } from "../../layout/object-page";
 import type {
   WebhookDelivery,
   WebhookDeliveryStatus,
@@ -50,8 +52,8 @@ type StatusVisual = {
 };
 
 const STATUS_VISUAL: Record<WebhookDeliveryStatus, StatusVisual> = {
-  queued: { color: "text-blue-500", icon: Loader2, spin: true },
-  dispatched: { color: "text-emerald-500", icon: CheckCircle2 },
+  queued: { color: "text-info", icon: Loader2, spin: true },
+  dispatched: { color: "text-success", icon: CheckCircle2 },
   // Signature failures and pre-flight bouncebacks land here. Read as a
   // failure visually, the dialog footer explains the reason.
   rejected: { color: "text-destructive", icon: ShieldOff },
@@ -72,9 +74,9 @@ function visualForStatus(status: string): StatusVisual {
 
 // --- Helpers --------------------------------------------------------------
 
-function formatDate(value: string): string {
+function formatDate(value: string, locale: string): string {
   if (!value) return "—";
-  return new Date(value).toLocaleString(undefined, {
+  return new Date(value).toLocaleString(locale, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -119,10 +121,10 @@ export function WebhookDeliveriesSection({
   if (!hasWebhookTrigger) return null;
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-        {t(($) => $.deliveries.section_title)}
-      </h2>
+    <ObjectSection
+      title={t(($) => $.deliveries.section_title)}
+      count={isLoading ? undefined : deliveries.length}
+    >
       {isLoading ? (
         <div className="space-y-1">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -130,11 +132,9 @@ export function WebhookDeliveriesSection({
           ))}
         </div>
       ) : deliveries.length === 0 ? (
-        <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-          {t(($) => $.deliveries.empty)}
-        </div>
+        <ObjectSectionEmpty icon={Webhook} description={t(($) => $.deliveries.empty)} />
       ) : (
-        <div className="rounded-md border overflow-hidden">
+        <ObjectSectionCard>
           {deliveries.map((delivery) => (
             <DeliveryRow
               key={delivery.id}
@@ -142,9 +142,9 @@ export function WebhookDeliveriesSection({
               autopilotId={autopilotId}
             />
           ))}
-        </div>
+        </ObjectSectionCard>
       )}
-    </section>
+    </ObjectSection>
   );
 }
 
@@ -158,6 +158,7 @@ function DeliveryRow({
   autopilotId: string;
 }) {
   const { t } = useT("autopilots");
+  const locale = useLocale();
   const [open, setOpen] = useState(false);
 
   const visual = visualForStatus(delivery.status);
@@ -172,7 +173,7 @@ function DeliveryRow({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm hover:bg-accent/30 transition-colors"
+        className="flex min-h-10 w-full items-center gap-3 px-3 py-2 text-left text-body hover:bg-accent/30 transition-colors"
       >
         <StatusIcon
           className={cn(
@@ -181,13 +182,13 @@ function DeliveryRow({
             visual.spin && "animate-spin",
           )}
         />
-        <span className={cn("w-24 shrink-0 text-xs font-medium", visual.color)}>
+        <span className={cn("w-24 shrink-0 text-caption font-medium", visual.color)}>
           {statusLabel}
         </span>
-        <span className="w-20 shrink-0 text-xs text-muted-foreground truncate">
+        <span className="w-20 shrink-0 text-caption text-muted-foreground truncate">
           {providerLabel}
         </span>
-        <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate font-mono">
+        <span className="flex-1 min-w-0 text-caption text-muted-foreground truncate font-mono">
           {delivery.event || t(($) => $.webhook_payload.unknown_event)}
         </span>
         {delivery.replayed_from_delivery_id && (
@@ -203,8 +204,8 @@ function DeliveryRow({
             })}
           </Badge>
         )}
-        <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-          {formatDate(delivery.received_at || delivery.created_at)}
+        <span className="w-32 shrink-0 text-right text-caption text-muted-foreground tabular-nums">
+          {formatDate(delivery.received_at || delivery.created_at, locale)}
         </span>
       </button>
       {open && (
@@ -233,6 +234,7 @@ function DeliveryDetailDialog({
   delivery: WebhookDelivery;
 }) {
   const { t } = useT("autopilots");
+  const locale = useLocale();
   const wsId = useWorkspaceId();
   const { data: detail, isLoading } = useQuery(
     autopilotDeliveryOptions(wsId, autopilotId, delivery.id, { enabled: open }),
@@ -250,8 +252,8 @@ function DeliveryDetailDialog({
       {/* max-h + overflow-y-auto: webhook bodies + headers + response can
           easily exceed viewport height. Without a cap the dialog grows past
           the screen edge and the bottom (e.g. Replay button) becomes
-          unreachable. 85vh leaves breathing room around the dialog. */}
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          unreachable. 85% leaves breathing room around the dialog. */}
+      <DialogContent className="max-w-2xl max-h-[85%] overflow-y-auto">
         <DialogTitle className="flex items-center gap-2">
           <Webhook className="h-4 w-4 text-muted-foreground" />
           {t(($) => $.deliveries.detail.title)}
@@ -267,32 +269,42 @@ function DeliveryDetailDialog({
                   visual.spin && "animate-spin",
                 )}
               />
-              <span className={cn("text-sm font-medium", visual.color)}>
+              <span className={cn("text-body font-medium", visual.color)}>
                 {t(($) => $.deliveries.status[full.status as WebhookDeliveryStatus]) ??
                   full.status}
               </span>
             </div>
             <Badge variant="outline">{full.provider || "—"}</Badge>
-            <code className="rounded bg-muted px-2 py-0.5 text-xs font-mono">
+            <code className="rounded-xs bg-muted px-2 py-0.5 text-caption font-mono">
               {full.event || t(($) => $.webhook_payload.unknown_event)}
             </code>
             <SignatureBadge status={full.signature_status as WebhookSignatureStatus} />
           </div>
 
           {/* Meta grid */}
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-caption">
             <MetaRow
               label={t(($) => $.deliveries.detail.received_at)}
-              value={formatDate(full.received_at)}
+              value={formatDate(full.received_at, locale)}
             />
             <MetaRow
               label={t(($) => $.deliveries.detail.last_attempt_at)}
-              value={formatDate(full.last_attempt_at)}
+              value={formatDate(full.last_attempt_at, locale)}
             />
             <MetaRow
               label={t(($) => $.deliveries.detail.attempt_count)}
               value={String(full.attempt_count)}
             />
+            <MetaRow
+              label={t(($) => $.deliveries.detail.dispatch_attempts)}
+              value={String(full.dispatch_attempts)}
+            />
+            {full.status === "queued" && (
+              <MetaRow
+                label={t(($) => $.deliveries.detail.available_at)}
+                value={formatDate(full.available_at, locale)}
+              />
+            )}
             <MetaRow
               label={t(($) => $.deliveries.detail.response_status)}
               value={full.response_status != null ? String(full.response_status) : "—"}
@@ -323,7 +335,7 @@ function DeliveryDetailDialog({
           </dl>
 
           {full.error && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-caption text-destructive">
               <div className="font-medium">
                 {t(($) => $.deliveries.detail.error_label)}
               </div>
@@ -361,15 +373,16 @@ function MetaRow({
   return (
     <div className="flex flex-col">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          "truncate text-foreground",
-          mono && "font-mono",
-        )}
-        title={value}
-      >
-        {value}
-      </dd>
+      <TruncatedTooltip content={value} focusable>
+        <dd
+          className={cn(
+            "truncate text-foreground",
+            mono && "font-mono",
+          )}
+        >
+          {value}
+        </dd>
+      </TruncatedTooltip>
     </div>
   );
 }
@@ -454,12 +467,12 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
     // surrounding grid/flex cell (and the whole DialogContent) past the
     // viewport edge.
     <div className="min-w-0 rounded-md border bg-background">
-      <div className="flex items-center justify-between border-b px-3 py-1.5 text-[11px]">
+      <div className="flex items-center justify-between border-b px-3 py-1.5 text-micro">
         <span className="font-medium text-muted-foreground">{label}</span>
         <button
           type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1 rounded px-2 py-0.5 hover:bg-accent transition-colors"
+          className="flex items-center gap-1 rounded-xs px-2 py-0.5 hover:bg-accent transition-colors"
         >
           {copied ? (
             <Check className="h-3 w-3 text-emerald-500" />
@@ -474,10 +487,10 @@ function CodeBlock({ label, value }: { label: string; value: string }) {
       {/* whitespace-pre-wrap keeps pretty-printed indentation but lets
           long lines wrap; break-all is the only thing that breaks mid-token
           (necessary for minified JSON, which has no whitespace to break at). */}
-      <pre className="max-h-48 overflow-auto bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed whitespace-pre-wrap break-all">
+      <pre className="max-h-48 overflow-auto bg-muted/40 px-3 py-2 text-caption font-mono leading-relaxed whitespace-pre-wrap break-all">
         {display}
         {isTruncated && (
-          <span className="block pt-2 text-muted-foreground/70">
+          <span className="block pt-2 text-muted-foreground">
             {t(($) => $.webhook_payload.truncated_marker)}
           </span>
         )}
@@ -490,21 +503,21 @@ function ReplayHint({ delivery }: { delivery: WebhookDelivery }) {
   const { t } = useT("autopilots");
   if (delivery.signature_status === "invalid") {
     return (
-      <span className="text-xs text-muted-foreground">
+      <span className="text-caption text-muted-foreground">
         {t(($) => $.deliveries.replay.disabled_invalid_signature)}
       </span>
     );
   }
   if (delivery.status === "rejected") {
     return (
-      <span className="text-xs text-muted-foreground">
+      <span className="text-caption text-muted-foreground">
         {t(($) => $.deliveries.replay.disabled_rejected)}
       </span>
     );
   }
   if (delivery.status === "queued") {
     return (
-      <span className="text-xs text-muted-foreground">
+      <span className="text-caption text-muted-foreground">
         {t(($) => $.deliveries.replay.disabled_queued)}
       </span>
     );

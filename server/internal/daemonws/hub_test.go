@@ -16,54 +16,61 @@ import (
 )
 
 func TestNotifyTaskAvailable(t *testing.T) {
-	M.Reset()
-	defer M.Reset()
+	for eventType, notify := range map[string]func(*Hub, string, string){
+		protocol.EventDaemonTaskAvailable:           (*Hub).NotifyTaskAvailable,
+		protocol.EventDaemonTaskSupplementAvailable: (*Hub).NotifyTaskSupplementAvailable,
+	} {
+		t.Run(eventType, func(t *testing.T) {
+			M.Reset()
+			defer M.Reset()
 
-	hub := NewHub()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hub.HandleWebSocket(w, r, ClientIdentity{RuntimeIDs: []string{"runtime-1"}})
-	}))
-	defer server.Close()
+			hub := NewHub()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hub.HandleWebSocket(w, r, ClientIdentity{RuntimeIDs: []string{"runtime-1"}})
+			}))
+			defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("Dial: %v", err)
-	}
-	defer conn.Close()
+			wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			if err != nil {
+				t.Fatalf("Dial: %v", err)
+			}
+			defer conn.Close()
 
-	deadline := time.Now().Add(time.Second)
-	for hub.RuntimeConnectionCount("runtime-1") == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("runtime connection was not registered")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+			deadline := time.Now().Add(time.Second)
+			for hub.RuntimeConnectionCount("runtime-1") == 0 {
+				if time.Now().After(deadline) {
+					t.Fatal("runtime connection was not registered")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
 
-	hub.NotifyTaskAvailable("runtime-1", "task-1")
+			notify(hub, "runtime-1", "task-1")
 
-	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
-		t.Fatalf("SetReadDeadline: %v", err)
-	}
-	_, raw, err := conn.ReadMessage()
-	if err != nil {
-		t.Fatalf("ReadMessage: %v", err)
-	}
+			if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+				t.Fatalf("SetReadDeadline: %v", err)
+			}
+			_, raw, err := conn.ReadMessage()
+			if err != nil {
+				t.Fatalf("ReadMessage: %v", err)
+			}
 
-	var msg protocol.Message
-	if err := json.Unmarshal(raw, &msg); err != nil {
-		t.Fatalf("unmarshal message: %v", err)
-	}
-	if msg.Type != protocol.EventDaemonTaskAvailable {
-		t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonTaskAvailable)
-	}
+			var msg protocol.Message
+			if err := json.Unmarshal(raw, &msg); err != nil {
+				t.Fatalf("unmarshal message: %v", err)
+			}
+			if msg.Type != eventType {
+				t.Fatalf("message type = %q, want %q", msg.Type, eventType)
+			}
 
-	var payload protocol.TaskAvailablePayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
-	if payload.RuntimeID != "runtime-1" || payload.TaskID != "task-1" {
-		t.Fatalf("payload = %+v, want runtime/task IDs", payload)
+			var payload protocol.TaskAvailablePayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				t.Fatalf("unmarshal payload: %v", err)
+			}
+			if payload.RuntimeID != "runtime-1" || payload.TaskID != "task-1" {
+				t.Fatalf("payload = %+v, want runtime/task IDs", payload)
+			}
+		})
 	}
 }
 
@@ -119,6 +126,49 @@ func TestNotifyRuntimeProfilesChanged(t *testing.T) {
 	}
 	if payload.WorkspaceID != "ws-1" || payload.RuntimeProfileID != "profile-1" {
 		t.Fatalf("payload = %+v, want workspace/profile IDs", payload)
+	}
+}
+
+func TestNotifyWorkspacesChangedSupportsAccountOnlyConnection(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.HandleWebSocket(w, r, ClientIdentity{UserID: "user-1"})
+	}))
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer conn.Close()
+
+	deadline := time.Now().Add(time.Second)
+	for hub.UserConnectionCount("user-1") == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("user connection was not registered")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	hub.NotifyWorkspacesChanged("user-1")
+
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline: %v", err)
+	}
+	_, raw, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+	var msg protocol.Message
+	if err := json.Unmarshal(raw, &msg); err != nil {
+		t.Fatalf("unmarshal message: %v", err)
+	}
+	if msg.Type != protocol.EventDaemonWorkspacesChanged {
+		t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonWorkspacesChanged)
 	}
 }
 
@@ -186,40 +236,47 @@ func TestNotifyRuntimeProfilesChangedIndexesAllAuthorizedWorkspaces(t *testing.T
 }
 
 func TestRelayNotifierPublishesDaemonRuntimeScope(t *testing.T) {
-	M.Reset()
-	defer M.Reset()
+	for eventType, notify := range map[string]func(*RelayNotifier, string, string){
+		protocol.EventDaemonTaskAvailable:           (*RelayNotifier).NotifyTaskAvailable,
+		protocol.EventDaemonTaskSupplementAvailable: (*RelayNotifier).NotifyTaskSupplementAvailable,
+	} {
+		t.Run(eventType, func(t *testing.T) {
+			M.Reset()
+			defer M.Reset()
 
-	relay := &recordingRelayPublisher{}
-	notifier := NewRelayNotifier(nil, relay)
+			relay := &recordingRelayPublisher{}
+			notifier := NewRelayNotifier(nil, relay)
 
-	notifier.NotifyTaskAvailable("runtime-1", "task-1")
+			notify(notifier, "runtime-1", "task-1")
 
-	if relay.scopeType != realtime.ScopeDaemonRuntime {
-		t.Fatalf("scopeType = %q, want %q", relay.scopeType, realtime.ScopeDaemonRuntime)
-	}
-	if relay.scopeID != "task-1" {
-		t.Fatalf("scopeID = %q, want task_id shard key", relay.scopeID)
-	}
-	if relay.eventID == "" {
-		t.Fatal("expected event id")
-	}
-	if M.WakeupPublishedTotal.Load() != 1 {
-		t.Fatalf("published metric = %d, want 1", M.WakeupPublishedTotal.Load())
-	}
+			if relay.scopeType != realtime.ScopeDaemonRuntime {
+				t.Fatalf("scopeType = %q, want %q", relay.scopeType, realtime.ScopeDaemonRuntime)
+			}
+			if relay.scopeID != "task-1" {
+				t.Fatalf("scopeID = %q, want task_id shard key", relay.scopeID)
+			}
+			if relay.eventID == "" {
+				t.Fatal("expected event id")
+			}
+			if M.WakeupPublishedTotal.Load() != 1 {
+				t.Fatalf("published metric = %d, want 1", M.WakeupPublishedTotal.Load())
+			}
 
-	var msg protocol.Message
-	if err := json.Unmarshal(relay.frame, &msg); err != nil {
-		t.Fatalf("unmarshal frame: %v", err)
-	}
-	if msg.Type != protocol.EventDaemonTaskAvailable {
-		t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonTaskAvailable)
-	}
-	var payload protocol.TaskAvailablePayload
-	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
-	if payload.RuntimeID != "runtime-1" || payload.TaskID != "task-1" {
-		t.Fatalf("payload = %+v, want runtime/task IDs", payload)
+			var msg protocol.Message
+			if err := json.Unmarshal(relay.frame, &msg); err != nil {
+				t.Fatalf("unmarshal frame: %v", err)
+			}
+			if msg.Type != eventType {
+				t.Fatalf("message type = %q, want %q", msg.Type, eventType)
+			}
+			var payload protocol.TaskAvailablePayload
+			if err := json.Unmarshal(msg.Payload, &payload); err != nil {
+				t.Fatalf("unmarshal payload: %v", err)
+			}
+			if payload.RuntimeID != "runtime-1" || payload.TaskID != "task-1" {
+				t.Fatalf("payload = %+v, want runtime/task IDs", payload)
+			}
+		})
 	}
 }
 
@@ -261,39 +318,73 @@ func TestRelayNotifierPublishesRuntimeProfilesChanged(t *testing.T) {
 	}
 }
 
-func TestRelayNotifierDedupsLocalRedisLoopback(t *testing.T) {
+func TestRelayNotifierPublishesWorkspacesChanged(t *testing.T) {
 	M.Reset()
 	defer M.Reset()
 
-	hub := NewHub()
-	client := attachDaemonTestClient(hub, "runtime-1")
-	relay := &localFirstDaemonRelayPublisher{t: t, client: client}
-	notifier := NewRelayNotifier(hub, relay)
+	relay := &recordingRelayPublisher{}
+	notifier := NewRelayNotifier(nil, relay)
 
-	notifier.NotifyTaskAvailable("runtime-1", "task-1")
+	notifier.NotifyWorkspacesChanged("user-1")
 
-	if !relay.called {
-		t.Fatal("expected relay publish to be invoked")
+	if relay.scopeType != realtime.ScopeDaemonRuntime {
+		t.Fatalf("scopeType = %q, want %q", relay.scopeType, realtime.ScopeDaemonRuntime)
+	}
+	if relay.scopeID != "user-1" {
+		t.Fatalf("scopeID = %q, want user shard key", relay.scopeID)
 	}
 	if relay.eventID == "" {
 		t.Fatal("expected event id")
 	}
-	if M.WakeupDeliveredHit.Load() != 1 {
-		t.Fatalf("delivered hit metric = %d, want 1", M.WakeupDeliveredHit.Load())
+	var msg protocol.Message
+	if err := json.Unmarshal(relay.frame, &msg); err != nil {
+		t.Fatalf("unmarshal frame: %v", err)
 	}
+	if msg.Type != protocol.EventDaemonWorkspacesChanged {
+		t.Fatalf("message type = %q, want %q", msg.Type, protocol.EventDaemonWorkspacesChanged)
+	}
+}
 
-	hub.DeliverDaemonRuntime(relay.scopeID, relay.frame, relay.eventID)
+func TestRelayNotifierDedupsLocalRedisLoopback(t *testing.T) {
+	for eventType, notify := range map[string]func(*RelayNotifier, string, string){
+		protocol.EventDaemonTaskAvailable:           (*RelayNotifier).NotifyTaskAvailable,
+		protocol.EventDaemonTaskSupplementAvailable: (*RelayNotifier).NotifyTaskSupplementAvailable,
+	} {
+		t.Run(eventType, func(t *testing.T) {
+			M.Reset()
+			defer M.Reset()
 
-	select {
-	case duplicate := <-client.send:
-		t.Fatalf("expected redis loopback to be deduped, got duplicate %s", duplicate)
-	case <-time.After(20 * time.Millisecond):
-	}
-	if M.WakeupDeliveredHit.Load() != 1 {
-		t.Fatalf("delivered hit metric after loopback = %d, want 1", M.WakeupDeliveredHit.Load())
-	}
-	if M.WakeupDeliveredMiss.Load() != 0 {
-		t.Fatalf("delivered miss metric after dedup = %d, want 0", M.WakeupDeliveredMiss.Load())
+			hub := NewHub()
+			client := attachDaemonTestClient(hub, "runtime-1")
+			relay := &localFirstDaemonRelayPublisher{t: t, client: client}
+			notifier := NewRelayNotifier(hub, relay)
+
+			notify(notifier, "runtime-1", "task-1")
+
+			if !relay.called {
+				t.Fatal("expected relay publish to be invoked")
+			}
+			if relay.eventID == "" {
+				t.Fatal("expected event id")
+			}
+			if M.WakeupDeliveredHit.Load() != 1 {
+				t.Fatalf("delivered hit metric = %d, want 1", M.WakeupDeliveredHit.Load())
+			}
+
+			hub.DeliverDaemonRuntime(relay.scopeID, relay.frame, relay.eventID)
+
+			select {
+			case duplicate := <-client.send:
+				t.Fatalf("expected redis loopback to be deduped, got duplicate %s", duplicate)
+			case <-time.After(20 * time.Millisecond):
+			}
+			if M.WakeupDeliveredHit.Load() != 1 {
+				t.Fatalf("delivered hit metric after loopback = %d, want 1", M.WakeupDeliveredHit.Load())
+			}
+			if M.WakeupDeliveredMiss.Load() != 0 {
+				t.Fatalf("delivered miss metric after dedup = %d, want 0", M.WakeupDeliveredMiss.Load())
+			}
+		})
 	}
 }
 
@@ -330,6 +421,28 @@ func TestRelayNotifierDedupsRuntimeProfilesChangedLoopback(t *testing.T) {
 	}
 	if M.WakeupDeliveredMiss.Load() != 0 {
 		t.Fatalf("delivered miss metric after dedup = %d, want 0", M.WakeupDeliveredMiss.Load())
+	}
+}
+
+func TestRelayNotifierDedupsWorkspacesChangedLoopback(t *testing.T) {
+	M.Reset()
+	defer M.Reset()
+
+	hub := NewHub()
+	client := attachDaemonUserTestClient(hub, "user-1")
+	relay := &localFirstDaemonRelayPublisher{t: t, client: client}
+	notifier := NewRelayNotifier(hub, relay)
+
+	notifier.NotifyWorkspacesChanged("user-1")
+	if !relay.called || relay.eventID == "" {
+		t.Fatal("expected local delivery followed by relay publish")
+	}
+
+	hub.DeliverDaemonRuntime(relay.scopeID, relay.frame, relay.eventID)
+	select {
+	case duplicate := <-client.send:
+		t.Fatalf("expected redis loopback to be deduped, got duplicate %s", duplicate)
+	case <-time.After(20 * time.Millisecond):
 	}
 }
 
@@ -548,6 +661,21 @@ func attachDaemonWorkspaceTestClient(hub *Hub, workspaceID string) *client {
 	hub.mu.Lock()
 	hub.clients[c] = true
 	hub.byWorkspace[workspaceID] = map[*client]bool{c: true}
+	hub.mu.Unlock()
+
+	return c
+}
+
+func attachDaemonUserTestClient(hub *Hub, userID string) *client {
+	c := &client{
+		send:     make(chan []byte, 2),
+		identity: ClientIdentity{UserID: userID},
+		runtimes: map[string]struct{}{},
+	}
+
+	hub.mu.Lock()
+	hub.clients[c] = true
+	hub.byUser[userID] = map[*client]bool{c: true}
 	hub.mu.Unlock()
 
 	return c

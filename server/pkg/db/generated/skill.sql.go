@@ -30,7 +30,7 @@ func (q *Queries) AddAgentSkill(ctx context.Context, arg AddAgentSkillParams) er
 const createSkill = `-- name: CreateSkill :one
 INSERT INTO skill (workspace_id, name, description, content, config, created_by)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id
 `
 
 type CreateSkillParams struct {
@@ -62,12 +62,87 @@ func (q *Queries) CreateSkill(ctx context.Context, arg CreateSkillParams) (Skill
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PluginInstallationID,
+	)
+	return i, err
+}
+
+const createSkillVersion = `-- name: CreateSkillVersion :one
+INSERT INTO skill_version (
+    workspace_id, skill_id, version, name, description, content, files,
+    content_hash, source, restored_from_version, created_by, created_at
+)
+VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $11,
+    COALESCE($12::timestamptz, now())
+)
+RETURNING id, workspace_id, skill_id, version, name, source, restored_from_version, created_by, created_at
+`
+
+type CreateSkillVersionParams struct {
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	SkillID             pgtype.UUID        `json:"skill_id"`
+	Version             int32              `json:"version"`
+	Name                string             `json:"name"`
+	Description         string             `json:"description"`
+	Content             string             `json:"content"`
+	Files               []byte             `json:"files"`
+	ContentHash         string             `json:"content_hash"`
+	Source              string             `json:"source"`
+	RestoredFromVersion pgtype.Int4        `json:"restored_from_version"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+type CreateSkillVersionRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	SkillID             pgtype.UUID        `json:"skill_id"`
+	Version             int32              `json:"version"`
+	Name                string             `json:"name"`
+	Source              string             `json:"source"`
+	RestoredFromVersion pgtype.Int4        `json:"restored_from_version"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CreateSkillVersion(ctx context.Context, arg CreateSkillVersionParams) (CreateSkillVersionRow, error) {
+	row := q.db.QueryRow(ctx, createSkillVersion,
+		arg.WorkspaceID,
+		arg.SkillID,
+		arg.Version,
+		arg.Name,
+		arg.Description,
+		arg.Content,
+		arg.Files,
+		arg.ContentHash,
+		arg.Source,
+		arg.RestoredFromVersion,
+		arg.CreatedBy,
+		arg.CreatedAt,
+	)
+	var i CreateSkillVersionRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.SkillID,
+		&i.Version,
+		&i.Name,
+		&i.Source,
+		&i.RestoredFromVersion,
+		&i.CreatedBy,
+		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const deleteSkill = `-- name: DeleteSkill :exec
-DELETE FROM skill WHERE id = $1 AND workspace_id = $2
+WITH deleted_versions AS (
+    DELETE FROM skill_version
+    WHERE skill_version.skill_id = $1 AND skill_version.workspace_id = $2
+)
+DELETE FROM skill WHERE skill.id = $1 AND skill.workspace_id = $2
 `
 
 type DeleteSkillParams struct {
@@ -76,6 +151,8 @@ type DeleteSkillParams struct {
 }
 
 // Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
+// skill_version has no FK, so the skill's history is removed in the same
+// statement.
 func (q *Queries) DeleteSkill(ctx context.Context, arg DeleteSkillParams) error {
 	_, err := q.db.Exec(ctx, deleteSkill, arg.ID, arg.WorkspaceID)
 	return err
@@ -99,8 +176,27 @@ func (q *Queries) DeleteSkillFilesBySkill(ctx context.Context, skillID pgtype.UU
 	return err
 }
 
+const getLatestSkillVersion = `-- name: GetLatestSkillVersion :one
+SELECT version, content_hash FROM skill_version
+WHERE skill_id = $1
+ORDER BY version DESC
+LIMIT 1
+`
+
+type GetLatestSkillVersionRow struct {
+	Version     int32  `json:"version"`
+	ContentHash string `json:"content_hash"`
+}
+
+func (q *Queries) GetLatestSkillVersion(ctx context.Context, skillID pgtype.UUID) (GetLatestSkillVersionRow, error) {
+	row := q.db.QueryRow(ctx, getLatestSkillVersion, skillID)
+	var i GetLatestSkillVersionRow
+	err := row.Scan(&i.Version, &i.ContentHash)
+	return i, err
+}
+
 const getSkill = `-- name: GetSkill :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill
 WHERE id = $1
 `
 
@@ -117,12 +213,13 @@ func (q *Queries) GetSkill(ctx context.Context, id pgtype.UUID) (Skill, error) {
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PluginInstallationID,
 	)
 	return i, err
 }
 
 const getSkillByWorkspaceAndName = `-- name: GetSkillByWorkspaceAndName :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill
 WHERE workspace_id = $1 AND name = $2
 `
 
@@ -131,10 +228,8 @@ type GetSkillByWorkspaceAndNameParams struct {
 	Name        string      `json:"name"`
 }
 
-// Used by agent-template materialization to implement find-or-create: when a
-// template references a skill by name that already exists in the workspace,
-// reuse the existing skill_id rather than INSERT (which would fail the
-// UNIQUE(workspace_id, name) constraint from migration 008).
+// Used by skill import and runtime-local skill discovery to reuse a workspace
+// skill by name rather than violating UNIQUE(workspace_id, name).
 func (q *Queries) GetSkillByWorkspaceAndName(ctx context.Context, arg GetSkillByWorkspaceAndNameParams) (Skill, error) {
 	row := q.db.QueryRow(ctx, getSkillByWorkspaceAndName, arg.WorkspaceID, arg.Name)
 	var i Skill
@@ -148,6 +243,7 @@ func (q *Queries) GetSkillByWorkspaceAndName(ctx context.Context, arg GetSkillBy
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PluginInstallationID,
 	)
 	return i, err
 }
@@ -172,7 +268,7 @@ func (q *Queries) GetSkillFile(ctx context.Context, id pgtype.UUID) (SkillFile, 
 }
 
 const getSkillInWorkspace = `-- name: GetSkillInWorkspace :one
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -194,6 +290,39 @@ func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspa
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PluginInstallationID,
+	)
+	return i, err
+}
+
+const getSkillVersion = `-- name: GetSkillVersion :one
+SELECT id, workspace_id, skill_id, version, name, description, content, files, content_hash, source, restored_from_version, created_by, created_at FROM skill_version
+WHERE skill_id = $1 AND workspace_id = $2 AND version = $3
+`
+
+type GetSkillVersionParams struct {
+	SkillID     pgtype.UUID `json:"skill_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Version     int32       `json:"version"`
+}
+
+func (q *Queries) GetSkillVersion(ctx context.Context, arg GetSkillVersionParams) (SkillVersion, error) {
+	row := q.db.QueryRow(ctx, getSkillVersion, arg.SkillID, arg.WorkspaceID, arg.Version)
+	var i SkillVersion
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.SkillID,
+		&i.Version,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Files,
+		&i.ContentHash,
+		&i.Source,
+		&i.RestoredFromVersion,
+		&i.CreatedBy,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -203,6 +332,7 @@ SELECT ask.agent_id, s.name
 FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE ask.agent_id = ANY($1::uuid[])
+  AND ask.enabled = TRUE
 ORDER BY ask.agent_id, s.name ASC
 `
 
@@ -232,7 +362,7 @@ func (q *Queries) ListAgentSkillNamesByAgentIDs(ctx context.Context, agentIds []
 }
 
 const listAgentSkillSummaries = `-- name: ListAgentSkillSummaries :many
-SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at
+SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at, ask.enabled
 FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
@@ -248,6 +378,7 @@ type ListAgentSkillSummariesRow struct {
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Enabled     bool               `json:"enabled"`
 }
 
 // Summary variant for the agent skills list endpoint — omits `content` for
@@ -270,6 +401,7 @@ func (q *Queries) ListAgentSkillSummaries(ctx context.Context, agentID pgtype.UU
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Enabled,
 		); err != nil {
 			return nil, err
 		}
@@ -283,9 +415,9 @@ func (q *Queries) ListAgentSkillSummaries(ctx context.Context, agentID pgtype.UU
 
 const listAgentSkills = `-- name: ListAgentSkills :many
 
-SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at FROM skill s
+SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at, s.plugin_installation_id FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
-WHERE ask.agent_id = $1
+WHERE ask.agent_id = $1 AND ask.enabled = TRUE
 ORDER BY s.name ASC
 `
 
@@ -309,6 +441,58 @@ func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]S
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PluginInstallationID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentSkillsByIDs = `-- name: ListAgentSkillsByIDs :many
+SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at, s.plugin_installation_id FROM skill s
+JOIN agent_skill ask ON ask.skill_id = s.id
+WHERE ask.agent_id = $1
+  AND ask.enabled = TRUE
+  AND s.id = ANY($2::uuid[])
+ORDER BY s.name ASC
+`
+
+type ListAgentSkillsByIDsParams struct {
+	AgentID  pgtype.UUID   `json:"agent_id"`
+	SkillIds []pgtype.UUID `json:"skill_ids"`
+}
+
+// Scoped variant of ListAgentSkills: the same junction predicate, narrowed to
+// a set of requested skill IDs. The skill-bundle resolve path asks for one
+// skill per request, so loading the agent's whole set there costs a full read
+// and hash of every skill on every request. The junction predicate is also the
+// authorization: an ID the agent does not have enabled simply returns no row,
+// which the caller reports as not-found.
+func (q *Queries) ListAgentSkillsByIDs(ctx context.Context, arg ListAgentSkillsByIDsParams) ([]Skill, error) {
+	rows, err := q.db.Query(ctx, listAgentSkillsByIDs, arg.AgentID, arg.SkillIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Skill{}
+	for rows.Next() {
+		var i Skill
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Description,
+			&i.Content,
+			&i.Config,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PluginInstallationID,
 		); err != nil {
 			return nil, err
 		}
@@ -321,7 +505,7 @@ func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]S
 }
 
 const listAgentSkillsByWorkspace = `-- name: ListAgentSkillsByWorkspace :many
-SELECT ask.agent_id, s.id, s.name, s.description
+SELECT ask.agent_id, s.id, s.name, s.description, ask.enabled
 FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE s.workspace_id = $1
@@ -333,6 +517,7 @@ type ListAgentSkillsByWorkspaceRow struct {
 	ID          pgtype.UUID `json:"id"`
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
+	Enabled     bool        `json:"enabled"`
 }
 
 func (q *Queries) ListAgentSkillsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListAgentSkillsByWorkspaceRow, error) {
@@ -349,6 +534,68 @@ func (q *Queries) ListAgentSkillsByWorkspace(ctx context.Context, workspaceID pg
 			&i.ID,
 			&i.Name,
 			&i.Description,
+			&i.Enabled,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSkillFileMetadata = `-- name: ListSkillFileMetadata :many
+SELECT id, skill_id, path,
+       octet_length(content)::bigint AS size,
+       encode(sha256(convert_to(content, 'UTF8')), 'hex') AS content_hash,
+       created_at, updated_at
+FROM skill_file
+WHERE skill_id = $1
+ORDER BY path ASC
+`
+
+type ListSkillFileMetadataRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	SkillID     pgtype.UUID        `json:"skill_id"`
+	Path        string             `json:"path"`
+	Size        int64              `json:"size"`
+	ContentHash string             `json:"content_hash"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Metadata-only variant of ListSkillFiles: path, byte size and content hash
+// without the body. Same reason as ListSkillSummariesByWorkspace — a skill
+// whose supporting files total ~600KB cannot be listed at all when every row
+// carries its full content, and the one command that would show which file is
+// oversized was the command that timed out (GH multica-ai/multica#7498).
+// size/hash are computed in Postgres so the file bodies never leave it.
+//
+// convert_to(content, 'UTF8'), never content::bytea: the cast runs the bytea
+// INPUT parser over the text, so it reads backslash escapes instead of taking
+// the bytes. A file containing `\x41` would hash as the single byte `A`, and
+// one containing a bare backslash — a regex `\d+`, a Windows path, a LaTeX
+// snippet — fails outright with "invalid input syntax for type bytea",
+// turning an ordinary skill into a 500 on this endpoint.
+func (q *Queries) ListSkillFileMetadata(ctx context.Context, skillID pgtype.UUID) ([]ListSkillFileMetadataRow, error) {
+	rows, err := q.db.Query(ctx, listSkillFileMetadata, skillID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSkillFileMetadataRow{}
+	for rows.Next() {
+		var i ListSkillFileMetadataRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SkillID,
+			&i.Path,
+			&i.Size,
+			&i.ContentHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -370,6 +617,45 @@ ORDER BY path ASC
 // Skill File CRUD
 func (q *Queries) ListSkillFiles(ctx context.Context, skillID pgtype.UUID) ([]SkillFile, error) {
 	rows, err := q.db.Query(ctx, listSkillFiles, skillID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SkillFile{}
+	for rows.Next() {
+		var i SkillFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.SkillID,
+			&i.Path,
+			&i.Content,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSkillFilesBySkillIDs = `-- name: ListSkillFilesBySkillIDs :many
+SELECT id, skill_id, path, content, created_at, updated_at FROM skill_file
+WHERE skill_id = ANY($1::uuid[])
+ORDER BY skill_id, path ASC
+`
+
+// Batch variant of ListSkillFiles: loads every file for a set of skills in one
+// round trip so LoadAgentSkills doesn't issue one query per skill on the
+// task-claim hot path. Ordered by skill_id so the caller can group in a single
+// linear pass. Like ListSkillFiles it returns full file bodies — callers that
+// only need metadata must use ListSkillFileMetadata instead. Uses
+// idx_skill_file_skill.
+func (q *Queries) ListSkillFilesBySkillIDs(ctx context.Context, skillIds []pgtype.UUID) ([]SkillFile, error) {
+	rows, err := q.db.Query(ctx, listSkillFilesBySkillIDs, skillIds)
 	if err != nil {
 		return nil, err
 	}
@@ -446,9 +732,64 @@ func (q *Queries) ListSkillSummariesByWorkspace(ctx context.Context, workspaceID
 	return items, nil
 }
 
+const listSkillVersions = `-- name: ListSkillVersions :many
+SELECT id, workspace_id, skill_id, version, name, source, restored_from_version, created_by, created_at
+FROM skill_version
+WHERE skill_id = $1 AND workspace_id = $2
+ORDER BY version DESC
+`
+
+type ListSkillVersionsParams struct {
+	SkillID     pgtype.UUID `json:"skill_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type ListSkillVersionsRow struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	SkillID             pgtype.UUID        `json:"skill_id"`
+	Version             int32              `json:"version"`
+	Name                string             `json:"name"`
+	Source              string             `json:"source"`
+	RestoredFromVersion pgtype.Int4        `json:"restored_from_version"`
+	CreatedBy           pgtype.UUID        `json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+// Metadata only: snapshots can be large, and the list never shows bodies.
+func (q *Queries) ListSkillVersions(ctx context.Context, arg ListSkillVersionsParams) ([]ListSkillVersionsRow, error) {
+	rows, err := q.db.Query(ctx, listSkillVersions, arg.SkillID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSkillVersionsRow{}
+	for rows.Next() {
+		var i ListSkillVersionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.SkillID,
+			&i.Version,
+			&i.Name,
+			&i.Source,
+			&i.RestoredFromVersion,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSkillsByWorkspace = `-- name: ListSkillsByWorkspace :many
 
-SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill
 WHERE workspace_id = $1
 ORDER BY name ASC
 `
@@ -473,6 +814,7 @@ func (q *Queries) ListSkillsByWorkspace(ctx context.Context, workspaceID pgtype.
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PluginInstallationID,
 		); err != nil {
 			return nil, err
 		}
@@ -482,6 +824,33 @@ func (q *Queries) ListSkillsByWorkspace(ctx context.Context, workspaceID pgtype.
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockSkillForVersioning = `-- name: LockSkillForVersioning :one
+
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill WHERE id = $1 FOR UPDATE
+`
+
+// Skill versions
+// Serializes version-number allocation for one skill. Every content write
+// takes this row lock inside its transaction before reading the latest
+// version, so concurrent writers cannot allocate the same number.
+func (q *Queries) LockSkillForVersioning(ctx context.Context, id pgtype.UUID) (Skill, error) {
+	row := q.db.QueryRow(ctx, lockSkillForVersioning, id)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PluginInstallationID,
+	)
+	return i, err
 }
 
 const removeAgentSkill = `-- name: RemoveAgentSkill :exec
@@ -508,6 +877,58 @@ func (q *Queries) RemoveAllAgentSkills(ctx context.Context, agentID pgtype.UUID)
 	return err
 }
 
+const setAgentSkillEnabled = `-- name: SetAgentSkillEnabled :execrows
+UPDATE agent_skill
+SET enabled = $3
+WHERE agent_id = $1 AND skill_id = $2
+`
+
+type SetAgentSkillEnabledParams struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	SkillID pgtype.UUID `json:"skill_id"`
+	Enabled bool        `json:"enabled"`
+}
+
+func (q *Queries) SetAgentSkillEnabled(ctx context.Context, arg SetAgentSkillEnabledParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAgentSkillEnabled, arg.AgentID, arg.SkillID, arg.Enabled)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const touchSkill = `-- name: TouchSkill :one
+UPDATE skill SET updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id
+`
+
+type TouchSkillParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Supporting-file writes change the skill as a whole, so they bump the parent's
+// updated_at in the same transaction. Updating the row also takes its lock,
+// which serializes concurrent file writes on one skill with UpdateSkill.
+func (q *Queries) TouchSkill(ctx context.Context, arg TouchSkillParams) (Skill, error) {
+	row := q.db.QueryRow(ctx, touchSkill, arg.ID, arg.WorkspaceID)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PluginInstallationID,
+	)
+	return i, err
+}
+
 const updateSkill = `-- name: UpdateSkill :one
 UPDATE skill SET
     name = COALESCE($2, name),
@@ -516,7 +937,7 @@ UPDATE skill SET
     config = COALESCE($5, config),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id
 `
 
 type UpdateSkillParams struct {
@@ -546,6 +967,7 @@ func (q *Queries) UpdateSkill(ctx context.Context, arg UpdateSkillParams) (Skill
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PluginInstallationID,
 	)
 	return i, err
 }

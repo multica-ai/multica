@@ -24,10 +24,8 @@ SELECT * FROM skill
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: GetSkillByWorkspaceAndName :one
--- Used by agent-template materialization to implement find-or-create: when a
--- template references a skill by name that already exists in the workspace,
--- reuse the existing skill_id rather than INSERT (which would fail the
--- UNIQUE(workspace_id, name) constraint from migration 008).
+-- Used by skill import and runtime-local skill discovery to reuse a workspace
+-- skill by name rather than violating UNIQUE(workspace_id, name).
 SELECT * FROM skill
 WHERE workspace_id = $1 AND name = $2;
 
@@ -46,14 +44,61 @@ UPDATE skill SET
 WHERE id = $1
 RETURNING *;
 
+-- name: TouchSkill :one
+-- Supporting-file writes change the skill as a whole, so they bump the parent's
+-- updated_at in the same transaction. Updating the row also takes its lock,
+-- which serializes concurrent file writes on one skill with UpdateSkill.
+UPDATE skill SET updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
 -- name: DeleteSkill :exec
 -- Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
-DELETE FROM skill WHERE id = $1 AND workspace_id = $2;
+-- skill_version has no FK, so the skill's history is removed in the same
+-- statement.
+WITH deleted_versions AS (
+    DELETE FROM skill_version
+    WHERE skill_version.skill_id = $1 AND skill_version.workspace_id = $2
+)
+DELETE FROM skill WHERE skill.id = $1 AND skill.workspace_id = $2;
 
 -- Skill File CRUD
 
 -- name: ListSkillFiles :many
 SELECT * FROM skill_file
+WHERE skill_id = $1
+ORDER BY path ASC;
+
+-- name: ListSkillFilesBySkillIDs :many
+-- Batch variant of ListSkillFiles: loads every file for a set of skills in one
+-- round trip so LoadAgentSkills doesn't issue one query per skill on the
+-- task-claim hot path. Ordered by skill_id so the caller can group in a single
+-- linear pass. Like ListSkillFiles it returns full file bodies — callers that
+-- only need metadata must use ListSkillFileMetadata instead. Uses
+-- idx_skill_file_skill.
+SELECT * FROM skill_file
+WHERE skill_id = ANY(sqlc.arg('skill_ids')::uuid[])
+ORDER BY skill_id, path ASC;
+
+-- name: ListSkillFileMetadata :many
+-- Metadata-only variant of ListSkillFiles: path, byte size and content hash
+-- without the body. Same reason as ListSkillSummariesByWorkspace — a skill
+-- whose supporting files total ~600KB cannot be listed at all when every row
+-- carries its full content, and the one command that would show which file is
+-- oversized was the command that timed out (GH multica-ai/multica#7498).
+-- size/hash are computed in Postgres so the file bodies never leave it.
+--
+-- convert_to(content, 'UTF8'), never content::bytea: the cast runs the bytea
+-- INPUT parser over the text, so it reads backslash escapes instead of taking
+-- the bytes. A file containing `\x41` would hash as the single byte `A`, and
+-- one containing a bare backslash — a regex `\d+`, a Windows path, a LaTeX
+-- snippet — fails outright with "invalid input syntax for type bytea",
+-- turning an ordinary skill into a 500 on this endpoint.
+SELECT id, skill_id, path,
+       octet_length(content)::bigint AS size,
+       encode(sha256(convert_to(content, 'UTF8')), 'hex') AS content_hash,
+       created_at, updated_at
+FROM skill_file
 WHERE skill_id = $1
 ORDER BY path ASC;
 
@@ -80,13 +125,27 @@ DELETE FROM skill_file WHERE skill_id = $1;
 -- name: ListAgentSkills :many
 SELECT s.* FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
+WHERE ask.agent_id = $1 AND ask.enabled = TRUE
+ORDER BY s.name ASC;
+
+-- name: ListAgentSkillsByIDs :many
+-- Scoped variant of ListAgentSkills: the same junction predicate, narrowed to
+-- a set of requested skill IDs. The skill-bundle resolve path asks for one
+-- skill per request, so loading the agent's whole set there costs a full read
+-- and hash of every skill on every request. The junction predicate is also the
+-- authorization: an ID the agent does not have enabled simply returns no row,
+-- which the caller reports as not-found.
+SELECT s.* FROM skill s
+JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
+  AND ask.enabled = TRUE
+  AND s.id = ANY(sqlc.arg('skill_ids')::uuid[])
 ORDER BY s.name ASC;
 
 -- name: ListAgentSkillSummaries :many
 -- Summary variant for the agent skills list endpoint — omits `content` for
 -- the same reason as ListSkillSummariesByWorkspace.
-SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at
+SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at, ask.enabled
 FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
@@ -97,12 +156,18 @@ SELECT ask.agent_id, s.name
 FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE ask.agent_id = ANY(sqlc.arg('agent_ids')::uuid[])
+  AND ask.enabled = TRUE
 ORDER BY ask.agent_id, s.name ASC;
 
 -- name: AddAgentSkill :exec
 INSERT INTO agent_skill (agent_id, skill_id)
 VALUES ($1, $2)
 ON CONFLICT DO NOTHING;
+
+-- name: SetAgentSkillEnabled :execrows
+UPDATE agent_skill
+SET enabled = $3
+WHERE agent_id = $1 AND skill_id = $2;
 
 -- name: RemoveAgentSkill :exec
 DELETE FROM agent_skill
@@ -112,8 +177,45 @@ WHERE agent_id = $1 AND skill_id = $2;
 DELETE FROM agent_skill WHERE agent_id = $1;
 
 -- name: ListAgentSkillsByWorkspace :many
-SELECT ask.agent_id, s.id, s.name, s.description
+SELECT ask.agent_id, s.id, s.name, s.description, ask.enabled
 FROM agent_skill ask
 JOIN skill s ON s.id = ask.skill_id
 WHERE s.workspace_id = $1
 ORDER BY s.name ASC;
+
+-- Skill versions
+
+-- name: LockSkillForVersioning :one
+-- Serializes version-number allocation for one skill. Every content write
+-- takes this row lock inside its transaction before reading the latest
+-- version, so concurrent writers cannot allocate the same number.
+SELECT * FROM skill WHERE id = $1 FOR UPDATE;
+
+-- name: GetLatestSkillVersion :one
+SELECT version, content_hash FROM skill_version
+WHERE skill_id = $1
+ORDER BY version DESC
+LIMIT 1;
+
+-- name: CreateSkillVersion :one
+INSERT INTO skill_version (
+    workspace_id, skill_id, version, name, description, content, files,
+    content_hash, source, restored_from_version, created_by, created_at
+)
+VALUES (
+    @workspace_id, @skill_id, @version, @name, @description, @content, @files,
+    @content_hash, @source, sqlc.narg('restored_from_version'), sqlc.narg('created_by'),
+    COALESCE(sqlc.narg('created_at')::timestamptz, now())
+)
+RETURNING id, workspace_id, skill_id, version, name, source, restored_from_version, created_by, created_at;
+
+-- name: ListSkillVersions :many
+-- Metadata only: snapshots can be large, and the list never shows bodies.
+SELECT id, workspace_id, skill_id, version, name, source, restored_from_version, created_by, created_at
+FROM skill_version
+WHERE skill_id = $1 AND workspace_id = $2
+ORDER BY version DESC;
+
+-- name: GetSkillVersion :one
+SELECT * FROM skill_version
+WHERE skill_id = $1 AND workspace_id = $2 AND version = $3;

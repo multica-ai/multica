@@ -51,7 +51,7 @@ export function NoAccessPage() {
       <DragStrip />
       <div className="flex flex-1 flex-col items-center justify-center gap-6 px-6 pb-12 text-center">
         <div className="space-y-2">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-display-sm font-semibold tracking-tight">
             {t(($) => $.no_access.title)}
           </h1>
           <p className="max-w-md text-muted-foreground">

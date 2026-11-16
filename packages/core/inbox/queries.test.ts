@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { InboxItem } from "../types";
-import { deduplicateInboxItems } from "./queries";
+import type { InboxItem, InboxWorkspaceUnread } from "../types";
+import { EMPTY_INBOX_FILTERS, type InboxFilters } from "./filter-store";
+import {
+  archivedInboxFacetsOptions,
+  archivedInboxPagesOptions,
+  deduplicateArchivedInboxItems,
+  deduplicateInboxItems,
+  hasOtherWorkspaceUnread,
+  inboxKeys,
+  unreadCountForWorkspace,
+  unreadWorkspaceIds,
+} from "./queries";
 
 function item(overrides: Partial<InboxItem>): InboxItem {
   return {
@@ -53,22 +63,285 @@ describe("deduplicateInboxItems", () => {
     });
   });
 
-  it("preserves the newest row's own comment anchor", () => {
+  it("leaves an app request row on its own request, not an older comment", () => {
     const merged = deduplicateInboxItems([
+      item({ id: "comment-notification", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
       item({
-        id: "older-comment",
-        created_at: "2026-06-15T08:00:00Z",
-        details: { comment_id: "comment-1" },
-      }),
-      item({
-        id: "newer-comment",
-        created_at: "2026-06-15T08:02:00Z",
-        details: { comment_id: "comment-2" },
+        id: "app-notification",
+        type: "app_action_requested",
+        created_at: "2026-06-15T08:01:00Z",
+        details: { request_id: "request-1" },
       }),
     ]);
 
     expect(merged).toHaveLength(1);
+    expect(merged[0]?.id).toBe("app-notification");
+    expect(merged[0]?.details).toEqual({ request_id: "request-1" });
+  });
+
+  it("opens at the oldest unread comment, so the thread reads forward from there", () => {
+    const merged = deduplicateInboxItems([
+      item({ id: "read-comment", read: true, created_at: "2026-06-15T07:00:00Z", details: { comment_id: "comment-0" } }),
+      item({ id: "older-comment", created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "newer-comment", created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
+    ]);
+
+    expect(merged).toHaveLength(1);
     expect(merged[0]?.id).toBe("newer-comment");
+    expect(merged[0]?.details?.comment_id).toBe("comment-1");
+  });
+
+  it("opens at the newest comment once every notification is read", () => {
+    const merged = deduplicateInboxItems([
+      item({ id: "older-comment", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "newer-comment", read: true, created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
+    ]);
+
     expect(merged[0]?.details?.comment_id).toBe("comment-2");
+  });
+
+  it("opens an unread notification with no comment where the reader left off, not at a read comment", () => {
+    const merged = deduplicateInboxItems([
+      item({ id: "read-comment", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "status", type: "status_changed", created_at: "2026-06-15T08:02:00Z", details: { from: "todo", to: "in_review" } }),
+    ]);
+
+    expect(merged[0]?.id).toBe("status");
+    expect(merged[0]?.details).toEqual({ from: "todo", to: "in_review" });
+  });
+
+  it("drops the row's own read comment when only a notification without one is unread", () => {
+    const merged = deduplicateInboxItems([
+      item({ id: "status", type: "status_changed", created_at: "2026-06-15T08:00:00Z", details: { to: "in_review" } }),
+      item({ id: "read-comment", read: true, created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-1" } }),
+    ]);
+
+    expect(merged[0]?.id).toBe("read-comment");
+    expect(merged[0]?.details).toEqual({});
+  });
+
+  it("opens an unread failed run at the run", () => {
+    const merged = deduplicateInboxItems([
+      item({ id: "read-comment", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-1" } }),
+      item({ id: "failed", type: "task_failed", created_at: "2026-06-15T08:02:00Z", details: { task_id: "task-1" } }),
+    ]);
+
+    expect(merged[0]?.details).toEqual({ task_id: "task-1", comment_id: "task-1" });
+  });
+
+  it("leaves a reaction to lead only when nothing else unread has an entry", () => {
+    const withReply = deduplicateInboxItems([
+      item({ id: "reaction", type: "reaction_added", created_at: "2026-06-15T08:00:00Z", details: { emoji: "👍", comment_id: "old-comment" } }),
+      item({ id: "reply", created_at: "2026-06-15T08:02:00Z", details: { comment_id: "comment-2" } }),
+    ]);
+    expect(withReply[0]?.details?.comment_id).toBe("comment-2");
+
+    const alone = deduplicateInboxItems([
+      item({ id: "reaction", type: "reaction_added", created_at: "2026-06-15T08:00:00Z", details: { emoji: "👍", comment_id: "old-comment" } }),
+      item({ id: "status", type: "status_changed", created_at: "2026-06-15T08:02:00Z", details: { to: "in_review" } }),
+    ]);
+    expect(alone[0]?.details?.comment_id).toBe("old-comment");
+  });
+
+  it("opens a read issue at the newest notification's entry, a reaction included", () => {
+    const merged = deduplicateInboxItems([
+      item({ id: "reply", read: true, created_at: "2026-06-15T08:00:00Z", details: { comment_id: "comment-2" } }),
+      item({ id: "reaction", type: "reaction_added", read: true, created_at: "2026-06-15T08:02:00Z", details: { emoji: "👍", comment_id: "old-comment" } }),
+    ]);
+
+    expect(merged[0]?.details?.comment_id).toBe("old-comment");
+  });
+
+  it("drops archived rows so an optimistic archive leaves the list at once", () => {
+    const merged = deduplicateInboxItems([
+      item({ id: "active", issue_id: "issue-1" }),
+      item({ id: "filed-away", issue_id: "issue-2", archived: true }),
+    ]);
+
+    expect(merged.map((i) => i.id)).toEqual(["active"]);
+  });
+});
+
+describe("deduplicateArchivedInboxItems", () => {
+  it("keeps only archived rows, one per issue, newest first", () => {
+    const merged = deduplicateArchivedInboxItems([
+      item({
+        id: "archived-older",
+        issue_id: "issue-1",
+        archived: true,
+        created_at: "2026-06-15T08:00:00Z",
+      }),
+      item({
+        id: "archived-newer",
+        issue_id: "issue-1",
+        archived: true,
+        created_at: "2026-06-15T09:00:00Z",
+      }),
+      item({
+        id: "archived-other-issue",
+        issue_id: "issue-2",
+        archived: true,
+        created_at: "2026-06-15T07:00:00Z",
+      }),
+      item({ id: "still-active", issue_id: "issue-3" }),
+    ]);
+
+    expect(merged.map((i) => i.id)).toEqual([
+      "archived-newer",
+      "archived-other-issue",
+    ]);
+  });
+
+  it("drops a row the moment an optimistic unarchive flips it back", () => {
+    // What useUnarchiveInbox's onMutate does: flip `archived` on the archived
+    // cache. The row must leave this list without waiting for the refetch.
+    const restored = item({ id: "restored", archived: false });
+
+    expect(deduplicateArchivedInboxItems([restored])).toEqual([]);
+  });
+
+  it("groups issue-less notifications on their own id rather than merging them", () => {
+    const merged = deduplicateArchivedInboxItems([
+      item({ id: "standalone-1", issue_id: null, archived: true }),
+      item({ id: "standalone-2", issue_id: null, archived: true }),
+    ]);
+
+    expect(merged).toHaveLength(2);
+  });
+});
+
+describe("archived inbox options", () => {
+  it("keeps an agent selection out of archive query keys", () => {
+    const idle: InboxFilters = { ...EMPTY_INBOX_FILTERS, agent: "idle" };
+
+    expect(archivedInboxPagesOptions("ws", idle).queryKey).toEqual(
+      archivedInboxPagesOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
+    );
+    expect(archivedInboxFacetsOptions("ws", idle).queryKey).toEqual(
+      archivedInboxFacetsOptions("ws", EMPTY_INBOX_FILTERS).queryKey,
+    );
+  });
+
+  it("carries the previous result across a filter change but never across workspaces", () => {
+    const todo: InboxFilters = { ...EMPTY_INBOX_FILTERS, statuses: ["todo"] };
+    for (const options of [archivedInboxPagesOptions, archivedInboxFacetsOptions]) {
+      const placeholder = options("ws", todo).placeholderData as (
+        previousData: unknown,
+        previousQuery: { queryKey: readonly unknown[] } | undefined,
+      ) => unknown;
+      const previous = { cached: true };
+
+      expect(placeholder(previous, { queryKey: options("ws", EMPTY_INBOX_FILTERS).queryKey })).toBe(previous);
+      expect(placeholder(previous, { queryKey: options("other-ws", todo).queryKey })).toBeUndefined();
+      expect(placeholder(undefined, undefined)).toBeUndefined();
+    }
+  });
+});
+
+describe("hasOtherWorkspaceUnread", () => {
+  const summary = (entries: InboxWorkspaceUnread[]) => entries;
+
+  it("is true when a workspace other than the active one has unread", () => {
+    expect(
+      hasOtherWorkspaceUnread(
+        summary([{ workspace_id: "ws-2", count: 3 }]),
+        "ws-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("excludes the active workspace's own unread", () => {
+    expect(
+      hasOtherWorkspaceUnread(
+        summary([{ workspace_id: "ws-1", count: 5 }]),
+        "ws-1",
+      ),
+    ).toBe(false);
+  });
+
+  it("ignores other workspaces whose count is zero", () => {
+    expect(
+      hasOtherWorkspaceUnread(
+        summary([{ workspace_id: "ws-2", count: 0 }]),
+        "ws-1",
+      ),
+    ).toBe(false);
+  });
+
+  it("is true when at least one non-active workspace has unread", () => {
+    expect(
+      hasOtherWorkspaceUnread(
+        summary([
+          { workspace_id: "ws-1", count: 4 },
+          { workspace_id: "ws-2", count: 1 },
+        ]),
+        "ws-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("is false for an empty summary", () => {
+    expect(hasOtherWorkspaceUnread([], "ws-1")).toBe(false);
+  });
+
+  it("counts every workspace as 'other' when there is no active workspace", () => {
+    expect(
+      hasOtherWorkspaceUnread(
+        summary([{ workspace_id: "ws-1", count: 2 }]),
+        null,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("unreadWorkspaceIds", () => {
+  it("collects only workspaces with a non-zero count", () => {
+    const ids = unreadWorkspaceIds([
+      { workspace_id: "ws-1", count: 0 },
+      { workspace_id: "ws-2", count: 3 },
+      { workspace_id: "ws-3", count: 1 },
+    ]);
+    expect(ids.has("ws-1")).toBe(false);
+    expect(ids.has("ws-2")).toBe(true);
+    expect(ids.has("ws-3")).toBe(true);
+    expect(ids.size).toBe(2);
+  });
+
+  it("returns an empty set for an empty summary", () => {
+    expect(unreadWorkspaceIds([]).size).toBe(0);
+  });
+});
+
+describe("inboxKeys.unreadSummary", () => {
+  it("is a stable account-level key independent of any workspace", () => {
+    expect(inboxKeys.unreadSummary()).toEqual(["inbox", "unread-summary"]);
+  });
+});
+
+// The inbox nav / tab / dock badges all read this instead of counting the
+// inbox list, so that the count costs no list fetch (MUL-6967).
+describe("unreadCountForWorkspace", () => {
+  const summary: InboxWorkspaceUnread[] = [
+    { workspace_id: "ws-1", count: 3 },
+    { workspace_id: "ws-2", count: 7 },
+  ];
+
+  it("returns the requested workspace's count", () => {
+    expect(unreadCountForWorkspace(summary, "ws-2")).toBe(7);
+  });
+
+  it("reads an absent workspace as zero", () => {
+    // The endpoint omits workspaces with nothing unread rather than sending a
+    // zero row, so "missing" must mean 0 and not "unknown".
+    expect(unreadCountForWorkspace(summary, "ws-3")).toBe(0);
+  });
+
+  it("returns zero without a workspace", () => {
+    expect(unreadCountForWorkspace(summary, null)).toBe(0);
+    expect(unreadCountForWorkspace(summary, undefined)).toBe(0);
+  });
+
+  it("returns zero for an empty summary", () => {
+    expect(unreadCountForWorkspace([], "ws-1")).toBe(0);
   });
 });

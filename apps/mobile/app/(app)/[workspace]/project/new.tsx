@@ -42,6 +42,7 @@ import {
 import { useCreateProject } from "@/data/mutations/projects";
 import { useNewProjectDraftStore } from "@/data/stores/new-project-draft-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useT } from "@/lib/i18n";
 
 /**
  * Typed map of new-project picker route pathnames. Keeps `router.push` calls
@@ -56,6 +57,7 @@ const NEW_PROJECT_PICKER_PATHNAMES = {
 
 export default function NewProject() {
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
+  const { t } = useT("projects");
   const create = useCreateProject();
 
   const [title, setTitle] = useState("");
@@ -92,12 +94,12 @@ export default function NewProject() {
       return;
     }
     Alert.alert(
-      "Discard project?",
-      "Your draft will be lost.",
+      t("form.discard_title"),
+      t("form.discard_message"),
       [
-        { text: "Keep editing", style: "cancel" },
+        { text: t("form.keep_editing"), style: "cancel" },
         {
-          text: "Discard",
+          text: t("common:actions.discard"),
           style: "destructive",
           onPress: () => {
             resetDraft();
@@ -106,7 +108,7 @@ export default function NewProject() {
         },
       ],
     );
-  }, [dirty, resetDraft]);
+  }, [dirty, resetDraft, t]);
 
   const onCreate = useCallback(() => {
     if (!canCreate) return;
@@ -133,8 +135,8 @@ export default function NewProject() {
         },
         onError: (err) => {
           Alert.alert(
-            "Failed to create project",
-            err instanceof Error ? err.message : "Unknown error",
+            t("form.save_failed"),
+            err instanceof Error ? err.message : t("common:states.error"),
           );
         },
       },
@@ -149,15 +151,16 @@ export default function NewProject() {
     priority,
     wsSlug,
     resetDraft,
+    t,
   ]);
 
   const headerLeft = useCallback(() => {
     return (
       <Pressable onPress={onCancel} className="px-1 py-1">
-        <Text className="text-base text-brand">Cancel</Text>
+        <Text className="text-base text-brand">{t("common:actions.cancel")}</Text>
       </Pressable>
     );
-  }, [onCancel]);
+  }, [onCancel, t]);
 
   const headerRight = useCallback(() => {
     return (
@@ -167,11 +170,11 @@ export default function NewProject() {
         className={canCreate ? "px-1 py-1" : "px-1 py-1 opacity-40"}
       >
         <Text className="text-base text-brand font-semibold">
-          {create.isPending ? "Creating…" : "Create"}
+          {create.isPending ? t("actions.creating") : t("common:actions.create")}
         </Text>
       </Pressable>
     );
-  }, [canCreate, onCreate, create.isPending]);
+  }, [canCreate, onCreate, create.isPending, t]);
 
   return (
     <>
@@ -185,7 +188,7 @@ export default function NewProject() {
           contentContainerClassName="px-4 pt-4 pb-6 gap-4"
           keyboardShouldPersistTaps="handled"
         >
-          <Field label="Icon (emoji)">
+              <Field label={t("form.icon_emoji")}>
             <TextInput
               value={icon}
               onChangeText={(v) => setIcon(v.slice(0, 4))}
@@ -196,11 +199,11 @@ export default function NewProject() {
             />
           </Field>
 
-          <Field label="Title">
+              <Field label={t("form.title")}>
             <TextInput
               value={title}
               onChangeText={setTitle}
-              placeholder="Project title"
+                placeholder={t("form.title_placeholder")}
               placeholderTextColor={MOBILE_PLACEHOLDER_COLOR}
               className="text-base text-foreground bg-secondary/50 rounded-md px-3 py-2"
               autoFocus
@@ -208,11 +211,11 @@ export default function NewProject() {
             />
           </Field>
 
-          <Field label="Description">
+              <Field label={t("form.description")}>
             <AutosizeTextArea
               value={description}
               onChangeText={setDescription}
-              placeholder="What is this project about?"
+                  placeholder={t("form.description_placeholder")}
               className="bg-secondary/50 rounded-md px-3 py-2"
               minHeight={MIN_BODY_INPUT_HEIGHT_PX}
             />
@@ -220,7 +223,7 @@ export default function NewProject() {
 
           <View className="flex-row gap-2">
             <View className="flex-1">
-              <Field label="Status">
+              <Field label={t("properties.status")}>
                 <Pressable
                   onPress={() => openPicker("status")}
                   className="flex-row items-center gap-2 bg-secondary/50 rounded-md px-3 py-2.5"
@@ -233,7 +236,7 @@ export default function NewProject() {
               </Field>
             </View>
             <View className="flex-1">
-              <Field label="Priority">
+              <Field label={t("properties.priority")}>
                 <Pressable
                   onPress={() => openPicker("priority")}
                   className="flex-row items-center gap-2 bg-secondary/50 rounded-md px-3 py-2.5"

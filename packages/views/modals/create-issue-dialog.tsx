@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { Dialog, DialogContent } from "@multica/ui/components/ui/dialog";
 import {
@@ -9,6 +10,9 @@ import {
 } from "@multica/core/issues/stores/create-mode-store";
 import { AgentCreatePanel } from "./quick-create-issue";
 import { ManualCreatePanel, manualDialogContentClass } from "./create-issue";
+import { sourceContextPreviewOptions } from "@multica/core/issues/queries";
+import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
+import { useWorkspaceId } from "@multica/core/hooks";
 
 /**
  * Shell that owns the single `<Dialog>` AND `<DialogContent>` for the
@@ -26,9 +30,10 @@ import { ManualCreatePanel, manualDialogContentClass } from "./create-issue";
  * `onSwitchMode`; the shell stores it as the next panel's `data` so seeding
  * works exactly like a fresh open.
  *
- * Manual-mode `isExpanded` is lifted up because it drives `DialogContent`'s
- * className — the className lives here in the shell since the Popup is here,
- * but the toggle for that state lives in the manual panel body.
+ * `isExpanded` is lifted up because it drives `DialogContent`'s className —
+ * the className lives here in the shell since the Popup is here, but the
+ * toggle for that state lives in the panel bodies. It is persisted in the
+ * create-mode store, so the dialog reopens at the size it was last left at.
  */
 export function CreateIssueDialog({
   onClose,
@@ -39,14 +44,107 @@ export function CreateIssueDialog({
   initialMode: CreateMode;
   data?: Record<string, unknown> | null;
 }) {
+  const anchorCommentId = typeof data?.anchor_comment_id === "string"
+    ? data.anchor_comment_id
+    : null;
+  if (anchorCommentId) {
+    return (
+      <SourceContextCreateIssueDialog
+        onClose={onClose}
+        initialMode={initialMode}
+        data={data}
+        anchorCommentId={anchorCommentId}
+      />
+    );
+  }
+  return <CreateIssueDialogBody onClose={onClose} initialMode={initialMode} data={data} />;
+}
+
+function SourceContextCreateIssueDialog({
+  onClose,
+  initialMode,
+  data,
+  anchorCommentId,
+}: {
+  onClose: () => void;
+  initialMode: CreateMode;
+  data?: Record<string, unknown> | null;
+  anchorCommentId: string;
+}) {
+  const wsId = useWorkspaceId();
+  const [draftReady, setDraftReady] = useState(false);
+  const [sourceContextExpanded, setSourceContextExpanded] = useState(false);
+  const sourceQuery = useQuery(sourceContextPreviewOptions(wsId, anchorCommentId));
+
+  useLayoutEffect(() => {
+    useIssueDraftStore.getState().beginIsolatedDraft();
+    setDraftReady(true);
+    return () => useIssueDraftStore.getState().endIsolatedDraft();
+  }, []);
+
+  if (!draftReady) return null;
+
+  return (
+    <CreateIssueDialogBody
+      onClose={onClose}
+      initialMode={initialMode}
+      data={data}
+      sourceContextExpanded={sourceContextExpanded}
+      sourceContextData={{
+        anchor_comment_id: anchorCommentId,
+        source_context_preview: sourceQuery.isError || sourceQuery.isFetching
+          ? undefined
+          : sourceQuery.data,
+        source_context_loading: sourceQuery.isLoading || sourceQuery.isFetching,
+        source_context_failed: sourceQuery.isError,
+        source_context_error: sourceQuery.error,
+        source_context_refetch: sourceQuery.refetch,
+        source_context_expanded: sourceContextExpanded,
+        source_context_on_expanded_change: setSourceContextExpanded,
+      }}
+    />
+  );
+}
+
+function CreateIssueDialogBody({
+  onClose,
+  initialMode,
+  data,
+  sourceContextData,
+  sourceContextExpanded = false,
+}: {
+  onClose: () => void;
+  initialMode: CreateMode;
+  data?: Record<string, unknown> | null;
+  sourceContextData?: Record<string, unknown>;
+  sourceContextExpanded?: boolean;
+}) {
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const [mode, setMode] = useState<CreateMode>(initialMode);
+  const [manualOpened, setManualOpened] = useState(initialMode === "manual");
   const [panelData, setPanelData] = useState(data ?? null);
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Remembered across opens: the dialog reopens at the size it was left at.
+  const isExpanded = useCreateModeStore((s) => s.expanded);
+  const setIsExpanded = useCreateModeStore((s) => s.setExpanded);
+  const effectiveData = {
+    ...(panelData ?? {}),
+    ...sourceContextData,
+  };
 
   const switchTo = (next: CreateMode) => (carry?: Record<string, unknown> | null) => {
     setLastMode(next);
-    setPanelData(carry ?? null);
+    // Apply contextual owner defaults only on the first visit to manual mode.
+    // Later visits must preserve the user's edits, including an explicit clear.
+    const seedParentOwner = next === "manual" && !manualOpened
+      && typeof data?.parent_issue_id === "string"
+      && carry?.parent_issue_id === data?.parent_issue_id
+      && data?.assignee_type && data?.assignee_id;
+    setPanelData(seedParentOwner ? {
+      ...carry,
+      assignee_type: data.assignee_type,
+      assignee_id: data.assignee_id,
+    } : carry ?? null);
+    if (next === "manual") setManualOpened(true);
     setMode(next);
   };
 
@@ -58,16 +156,28 @@ export function CreateIssueDialog({
           // Smooth size transition when switching modes — the manual mode
           // uses the same easing.
           "!transition-all !duration-300 !ease-out",
-          // Expanded matches manual's expanded footprint so toggling expand
-          // mid-flow (or after a mode switch) lands the user on the same
-          // visual size. Collapsed keeps the slim, content-driven default
-          // — pasted screenshots still scroll inside instead of pushing the
-          // dialog past the viewport.
+          // Phone gutter. The widths below are `!important` so they beat
+          // DialogContent's own sizing — which also made them beat its
+          // `max-w-[calc(100%-2rem)]` safety margin, leaving the card flush
+          // against both screen edges on a 430px viewport (MUL-6236). Restore
+          // the margin here and let the `sm:` widths take over above 640px.
+          "!w-full !max-w-[calc(100%-1.5rem)]",
+          // Source-context create needs numeric collapsed/expanded endpoints
+          // so its preview transition can interpolate the height. Ordinary
+          // quick create has no expanding preview and keeps its original
+          // content-driven height, capped for mobile browser chrome.
           isExpanded
-            ? "!max-w-4xl !w-full !h-5/6"
-            : "!max-w-xl !w-full !max-h-[80vh]",
+            ? "!h-5/6 sm:!max-w-4xl"
+            : sourceContextData
+              ? sourceContextExpanded
+                ? "!h-5/6 sm:!max-w-2xl"
+                : "!h-96 sm:!max-w-xl"
+              : "!max-h-[80%] sm:!max-w-xl",
         )
-      : manualDialogContentClass(isExpanded);
+      : cn(
+          manualDialogContentClass(isExpanded),
+          sourceContextExpanded && "!h-5/6",
+        );
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -80,7 +190,7 @@ export function CreateIssueDialog({
           <AgentCreatePanel
             onClose={onClose}
             onSwitchMode={switchTo("manual")}
-            data={panelData}
+            data={effectiveData}
             isExpanded={isExpanded}
             setIsExpanded={setIsExpanded}
           />
@@ -88,7 +198,7 @@ export function CreateIssueDialog({
           <ManualCreatePanel
             onClose={onClose}
             onSwitchMode={switchTo("agent")}
-            data={panelData}
+            data={effectiveData}
             isExpanded={isExpanded}
             setIsExpanded={setIsExpanded}
           />

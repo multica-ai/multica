@@ -199,6 +199,74 @@ func TestNewEmailService_EHLOName(t *testing.T) {
 	}
 }
 
+func TestNewEmailService_FromEmailResolution(t *testing.T) {
+	tests := []struct {
+		name          string
+		smtpHost      string
+		smtpUsername  string
+		smtpFromEmail string
+		resendFrom    string
+		want          string
+	}{
+		{
+			name:       "resend mode uses resend from",
+			resendFrom: "resend@example.com",
+			want:       "resend@example.com",
+		},
+		{
+			name:          "smtp mode prefers smtp from",
+			smtpHost:      "smtp.example.com",
+			smtpUsername:  "auth@example.com",
+			smtpFromEmail: "sender@example.com",
+			resendFrom:    "resend@example.com",
+			want:          "sender@example.com",
+		},
+		{
+			name:         "smtp mode falls back to resend from",
+			smtpHost:     "smtp.example.com",
+			smtpUsername: "auth@example.com",
+			resendFrom:   "resend@example.com",
+			want:         "resend@example.com",
+		},
+		{
+			name: "default",
+			want: "noreply@multica.ai",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("RESEND_API_KEY", "")
+			t.Setenv("SMTP_HOST", tt.smtpHost)
+			t.Setenv("SMTP_USERNAME", tt.smtpUsername)
+			t.Setenv("SMTP_FROM_EMAIL", tt.smtpFromEmail)
+			t.Setenv("RESEND_FROM_EMAIL", tt.resendFrom)
+
+			s := NewEmailService()
+			if s.fromEmail != tt.want {
+				t.Fatalf("fromEmail = %q, want %q", s.fromEmail, tt.want)
+			}
+		})
+	}
+}
+
+func TestSendSMTPRequiresConfiguredFromEmail(t *testing.T) {
+	s := &EmailService{
+		smtpHost:     "127.0.0.1",
+		smtpPort:     "1",
+		smtpUsername: "auth@example.com",
+		smtpPassword: "testpass",
+	}
+
+	err := s.sendSMTP("to@example.com", "Test Subject", "<p>Hello</p>")
+	if err == nil {
+		t.Fatal("expected missing from email error")
+	}
+	if got := err.Error(); got != "SMTP_FROM_EMAIL or RESEND_FROM_EMAIL is required when SMTP_HOST is set" {
+		t.Fatalf("error = %q, want missing from email error", got)
+	}
+}
+
 func TestBuildInvitationParams_EscapesHTMLInBody(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -256,7 +324,7 @@ func TestBuildInvitationParams_EscapesHTMLInBody(t *testing.T) {
 				"invitee@example.com",
 				tt.inviter,
 				tt.workspace,
-				"https://app.multica.ai/invite/abc-123",
+				"https://multica.ai/invite/abc-123",
 			)
 			for _, needle := range tt.wantInBody {
 				if !strings.Contains(p.Html, needle) {
@@ -278,7 +346,7 @@ func TestBuildInvitationParams_SubjectStripsControls(t *testing.T) {
 		"invitee@example.com",
 		"Alice\r\n",
 		"Acme\t",
-		"https://app.multica.ai/invite/abc",
+		"https://multica.ai/invite/abc",
 	)
 	if strings.ContainsAny(p.Subject, "\r\n\t") {
 		t.Errorf("subject still contains control characters: %q", p.Subject)
@@ -295,7 +363,7 @@ func TestBuildInvitationParams_SubjectNotHTMLEscaped(t *testing.T) {
 		"invitee@example.com",
 		"Alice",
 		"Acme & Co.",
-		"https://app.multica.ai/invite/abc",
+		"https://multica.ai/invite/abc",
 	)
 	if strings.Contains(p.Subject, "&amp;") {
 		t.Errorf("subject should not be HTML-escaped, got %q", p.Subject)
@@ -312,7 +380,7 @@ func TestBuildInvitationParams_SubjectTruncated(t *testing.T) {
 		"invitee@example.com",
 		"Alice",
 		longWorkspace,
-		"https://app.multica.ai/invite/abc",
+		"https://multica.ai/invite/abc",
 	)
 	// Template: "Alice invited you to <ws> on Multica"
 	// ws is capped at maxSubjectFieldRunes; overall subject should also be bounded.
@@ -331,7 +399,7 @@ func TestBuildInvitationParams_ToAndFromPassedThrough(t *testing.T) {
 		"invitee@example.com",
 		"Alice",
 		"Acme",
-		"https://app.multica.ai/invite/abc",
+		"https://multica.ai/invite/abc",
 	)
 	if p.From != "noreply@multica.ai" {
 		t.Errorf("From = %q", p.From)
@@ -339,7 +407,7 @@ func TestBuildInvitationParams_ToAndFromPassedThrough(t *testing.T) {
 	if len(p.To) != 1 || p.To[0] != "invitee@example.com" {
 		t.Errorf("To = %v", p.To)
 	}
-	if !strings.Contains(p.Html, "https://app.multica.ai/invite/abc") {
+	if !strings.Contains(p.Html, "https://multica.ai/invite/abc") {
 		t.Errorf("body missing invite URL: %s", p.Html)
 	}
 }
@@ -413,6 +481,7 @@ func TestLoginAuth_Start_AllowsLoopbackIPs(t *testing.T) {
 
 func TestSendSMTP_OpenClientFailureNoPanic(t *testing.T) {
 	s := &EmailService{
+		fromEmail:    "from@example.com",
 		smtpHost:     "255.255.255.255", // unroutable, will time out or fail
 		smtpPort:     "25",
 		smtpUsername: "user",
@@ -579,6 +648,7 @@ func TestSendSMTP_FallbackReconnectsAndAuthsWithLOGIN(t *testing.T) {
 	host, port, _ := net.SplitHostPort(srv.Addr)
 
 	s := &EmailService{
+		fromEmail:    "from@example.com",
 		smtpHost:     host,
 		smtpPort:     port,
 		smtpUsername: "testuser",
@@ -605,6 +675,7 @@ func TestSendSMTP_PlainAuthSucceedsWithoutFallback(t *testing.T) {
 	host, port, _ := net.SplitHostPort(srv.Addr)
 
 	s := &EmailService{
+		fromEmail:    "from@example.com",
 		smtpHost:     host,
 		smtpPort:     port,
 		smtpUsername: "testuser",
@@ -625,8 +696,9 @@ func TestSendSMTP_NoAuthWhenUsernameEmpty(t *testing.T) {
 	host, port, _ := net.SplitHostPort(srv.Addr)
 
 	s := &EmailService{
-		smtpHost: host,
-		smtpPort: port,
+		fromEmail: "from@example.com",
+		smtpHost:  host,
+		smtpPort:  port,
 		// smtpUsername is empty → unauthenticated relay
 	}
 

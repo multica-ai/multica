@@ -1,5 +1,6 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { daemonStatusAlive } from "./daemon-types";
+import { daemonStateDescription, daemonStatusAlive } from "./daemon-types";
 
 describe("daemonStatusAlive", () => {
   it("treats a ready daemon as alive", () => {
@@ -18,5 +19,13 @@ describe("daemonStatusAlive", () => {
     expect(daemonStatusAlive("bogus")).toBe(false);
     expect(daemonStatusAlive("")).toBe(false);
     expect(daemonStatusAlive(undefined)).toBe(false);
+  });
+});
+
+describe("daemonStateDescription", () => {
+  it("makes an exhausted recovery budget actionable", () => {
+    expect(daemonStateDescription("recovery_paused", 0)).toMatch(
+      /start manually/i,
+    );
   });
 });

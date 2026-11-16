@@ -1,29 +1,50 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Tag, Plus, Settings2 } from "lucide-react";
+import { Tag, Plus, Settings2 } from "@multica/ui/icons";
 import { toast } from "sonner";
-import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
+import type { Label } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import {
   labelListOptions,
   issueLabelsOptions,
+  resourceLabelsOptions,
   useAttachLabel,
   useDetachLabel,
+  useAttachResourceLabel,
+  useDetachResourceLabel,
   useCreateLabel,
 } from "@multica/core/labels";
 import { LabelChip } from "../../../labels/label-chip";
-import { LabelsPanel } from "../labels-panel";
+import type { LabelScope } from "../../../labels/label-manager";
+import { useNavigation } from "../../../navigation";
 import {
   PropertyPicker,
   PickerItem,
   PickerEmpty,
 } from "./property-picker";
 import { useT } from "../../../i18n";
+import { paletteColor } from "@multica/core/appearance";
 
 interface LabelPickerProps {
-  issueId: string;
+  /**
+   * The issue whose labels are edited. Omit for **draft mode** (e.g. the
+   * create-issue dialog, where the issue doesn't exist yet): pass
+   * `selectedIds` + `onSelectedIdsChange` instead and attach the labels to the
+   * issue once it's created.
+   */
+  issueId?: string;
+  /**
+   * The skill whose labels are edited. Switches the picker to the skill label
+   * catalog; skill labels never draft, so this always runs in attached mode.
+   */
+  skillId?: string;
+  /** Draft-mode selection. Ignored when `issueId` or `skillId` is set. */
+  selectedIds?: string[];
+  /** Draft-mode change handler. Ignored when `issueId` or `skillId` is set. */
+  onSelectedIdsChange?: (ids: string[]) => void;
   /** Optional controlled open state (for tests / cmd+k integration). */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -31,6 +52,13 @@ interface LabelPickerProps {
   /** Open the picker on first mount. Used by progressive-disclosure
    *  sidebars so a newly-added field immediately enters edit state. */
   defaultOpen?: boolean;
+  /** Custom trigger element (e.g. a `PillButton` for the create toolbar).
+   *  When set, the attached-label chips render inside it without their own
+   *  × affordance — a remove <button> can't nest inside a trigger <button>,
+   *  so removal happens by toggling the label off in the open picker. */
+  triggerRender?: React.ReactElement;
+  /** Hover tooltip naming the property; hidden while the picker is open. */
+  tooltip?: React.ReactNode;
 }
 
 /**
@@ -52,32 +80,44 @@ function pickInlineColor(name: string): string {
 }
 
 /**
- * Multi-select label picker for an issue. Shows currently-attached labels
- * as inline chips above the trigger and lets the user toggle any label in
- * the workspace. Attach/detach are optimistic — the UI updates before the
- * server confirms.
+ * Multi-select label picker. Shows currently-selected labels as inline chips
+ * on the trigger and lets the user toggle any label in the workspace.
+ *
+ * Two modes:
+ * - **Attached mode** (`issueId` or `skillId` set): attach/detach hit the
+ *   server right away; issue attaches update optimistically.
+ * - **Draft mode** (`issueId` omitted): selection is held by the caller via
+ *   `selectedIds` / `onSelectedIdsChange`; nothing is persisted until the
+ *   caller attaches the labels itself. Used by the create-issue dialog.
  *
  * When the search term has no matches, offers inline creation: typing a
  * new name and pressing Enter (or clicking the "Create X" row) creates the
- * label with a hash-derived color and attaches it in one motion.
+ * label with a hash-derived color and selects it in one motion. The created
+ * label is a real workspace label in both modes; only the attach step differs.
  *
- * A "Manage labels" item at the bottom opens a dialog with the full
- * workspace label management panel (rename, recolor, delete) — keeping
- * users in context without forcing them to navigate away.
+ * A "Manage labels" item at the bottom opens the workspace Labels settings
+ * page on the picker's catalog — the single management surface for issue and
+ * skill labels.
  */
 export function LabelPicker({
   issueId,
+  skillId,
+  selectedIds = [],
+  onSelectedIdsChange,
   open: controlledOpen,
   onOpenChange,
   align = "start",
   defaultOpen = false,
+  triggerRender,
+  tooltip,
 }: LabelPickerProps) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
   const open = controlledOpen ?? internalOpen;
   const setOpen = onOpenChange ?? setInternalOpen;
   const [filter, setFilter] = useState("");
-  const [manageOpen, setManageOpen] = useState(false);
+  const navigation = useNavigation();
+  const paths = useWorkspacePaths();
 
   // Synchronous lock to prevent double-submit on rapid Enter / click. React
   // state (create.isPending, filter) isn't visible until the next render, so
@@ -86,17 +126,52 @@ export function LabelPicker({
   // for an error the user didn't cause. A ref closes the window cleanly.
   const creatingRef = useRef(false);
 
-  const wsId = useWorkspaceId();
-  const { data: allLabels = [] } = useQuery(labelListOptions(wsId));
-  const { data: attachedLabels = [] } = useQuery(issueLabelsOptions(wsId, issueId));
+  // A create request may finish after the user edits the controlled draft
+  // selection. Read the latest committed props when that response arrives.
+  const draftSelectionRef = useRef({ selectedIds, onSelectedIdsChange });
+  useLayoutEffect(() => {
+    draftSelectionRef.current = { selectedIds, onSelectedIdsChange };
+  }, [selectedIds, onSelectedIdsChange]);
 
-  const attach = useAttachLabel(issueId);
-  const detach = useDetachLabel(issueId);
+  const resourceType: LabelScope = skillId !== undefined ? "skill" : "issue";
+  // Draft mode when no issue exists yet: hold selection in the caller instead
+  // of hitting the attach/detach endpoints.
+  const isDraft = issueId === undefined && skillId === undefined;
+
+  const wsId = useWorkspaceId();
+  const { data: allLabels = [] } = useQuery(labelListOptions(wsId, resourceType));
+  // Both by-resource reads disable themselves for an empty id, so only the
+  // one matching this picker's resource ever fires.
+  const { data: issueLabels = [] } = useQuery(issueLabelsOptions(wsId, issueId ?? ""));
+  const { data: skillLabels = [] } = useQuery(
+    resourceLabelsOptions(wsId, "skill", skillId ?? ""),
+  );
+  const attachedLabels = resourceType === "skill" ? skillLabels : issueLabels;
+
+  // Hooks must run unconditionally; an empty id is never used because the
+  // mutation is picked by resource type, and draft mode routes toggle/create
+  // through onSelectedIdsChange instead.
+  const attachIssue = useAttachLabel(issueId ?? "");
+  const detachIssue = useDetachLabel(issueId ?? "");
+  const attachSkill = useAttachResourceLabel("skill", skillId ?? "");
+  const detachSkill = useDetachResourceLabel("skill", skillId ?? "");
+  const attach = resourceType === "skill" ? attachSkill : attachIssue;
+  const detach = resourceType === "skill" ? detachSkill : detachIssue;
   const create = useCreateLabel();
 
-  const attachedIds = useMemo(
-    () => new Set(attachedLabels.map((l) => l.id)),
-    [attachedLabels],
+  // The selected set drives both the trigger chips and the list checkmarks.
+  // Draft mode resolves ids against the workspace list (dropping any id whose
+  // label was deleted meanwhile) and preserves the user's selection order.
+  const selectedLabels = useMemo<Label[]>(() => {
+    if (!isDraft) return attachedLabels;
+    return selectedIds
+      .map((id) => allLabels.find((l) => l.id === id))
+      .filter((l): l is Label => Boolean(l));
+  }, [isDraft, attachedLabels, selectedIds, allLabels]);
+
+  const selectedIdSet = useMemo(
+    () => new Set(selectedLabels.map((l) => l.id)),
+    [selectedLabels],
   );
 
   const query = filter.trim();
@@ -105,8 +180,22 @@ export function LabelPicker({
   const exactMatch = allLabels.some((l) => l.name.toLowerCase() === queryLower);
   const canCreate = query.length > 0 && !exactMatch && !create.isPending;
 
+  const removeLabel = (labelId: string) => {
+    if (isDraft) {
+      onSelectedIdsChange?.(selectedIds.filter((id) => id !== labelId));
+    } else {
+      detach.mutate(labelId);
+    }
+  };
+
   const toggle = (labelId: string) => {
-    if (attachedIds.has(labelId)) {
+    if (isDraft) {
+      onSelectedIdsChange?.(
+        selectedIdSet.has(labelId)
+          ? selectedIds.filter((id) => id !== labelId)
+          : [...selectedIds, labelId],
+      );
+    } else if (selectedIdSet.has(labelId)) {
       detach.mutate(labelId);
     } else {
       attach.mutate(labelId);
@@ -118,10 +207,17 @@ export function LabelPicker({
     creatingRef.current = true;
     const name = query;
     create.mutate(
-      { name, color: pickInlineColor(name) },
+      { name, color: pickInlineColor(name), resource_type: resourceType },
       {
         onSuccess: (label) => {
-          attach.mutate(label.id);
+          if (isDraft) {
+            const latest = draftSelectionRef.current;
+            if (!latest.selectedIds.includes(label.id)) {
+              latest.onSelectedIdsChange?.([...latest.selectedIds, label.id]);
+            }
+          } else {
+            attach.mutate(label.id);
+          }
           setFilter("");
         },
         onError: (err: unknown) => {
@@ -136,10 +232,23 @@ export function LabelPicker({
 
   const openManage = () => {
     setOpen(false);
-    setManageOpen(true);
+    navigation.push(
+      `${paths.settings()}?tab=labels${resourceType === "skill" ? "&scope=skill" : ""}`,
+    );
   };
 
-  const hasLabels = attachedLabels.length > 0;
+  const hasLabels = selectedLabels.length > 0;
+
+  // In a custom trigger (PillButton) the trigger is itself a button, so the
+  // chips can't carry their own remove button. Otherwise fall back to the
+  // chip-wrap div used by the issue-detail sidebar. Its `py-1.5` puts the
+  // first line of 20px chips at the centre of a 32px property row, level with
+  // the row's label, however many lines the chips wrap onto.
+  const resolvedTriggerRender =
+    triggerRender ??
+    (hasLabels ? (
+      <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded-xs px-1 -mx-1 py-1.5 hover:bg-accent/30 transition-colors" />
+    ) : undefined);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -154,19 +263,17 @@ export function LabelPicker({
         searchable
         searchPlaceholder={t(($) => $.pickers.label.search_placeholder)}
         onSearchChange={setFilter}
-        triggerRender={
-          hasLabels ? (
-            <div className="flex flex-wrap items-center gap-1 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors" />
-          ) : undefined
-        }
+        triggerRender={resolvedTriggerRender}
+        nativeButton={!!triggerRender || !hasLabels}
+        tooltip={tooltip}
         trigger={
           hasLabels ? (
             <>
-              {attachedLabels.map((l) => (
+              {selectedLabels.map((l) => (
                 <LabelChip
                   key={l.id}
                   label={l}
-                  onRemove={() => detach.mutate(l.id)}
+                  onRemove={triggerRender ? undefined : () => removeLabel(l.id)}
                 />
               ))}
             </>
@@ -183,7 +290,7 @@ export function LabelPicker({
           <button
             type="button"
             onClick={openManage}
-            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent transition-colors"
+            className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body text-muted-foreground hover:bg-accent transition-colors"
           >
             <Settings2 className="h-3.5 w-3.5" />
             <span>{t(($) => $.pickers.label.manage_action)}</span>
@@ -191,7 +298,7 @@ export function LabelPicker({
         }
       >
         {filtered.map((label) => {
-          const selected = attachedIds.has(label.id);
+          const selected = selectedIdSet.has(label.id);
           return (
             <PickerItem
               key={label.id}
@@ -200,7 +307,7 @@ export function LabelPicker({
             >
               <span
                 className="inline-block h-3 w-3 shrink-0 rounded-full"
-                style={{ backgroundColor: label.color }}
+                style={{ backgroundColor: paletteColor(label.color) }}
                 aria-hidden
               />
               <span className="truncate">{label.name}</span>
@@ -216,19 +323,12 @@ export function LabelPicker({
             </span>
             <span
               className="ml-auto inline-block h-3 w-3 shrink-0 rounded-full"
-              style={{ backgroundColor: pickInlineColor(query) }}
+              style={{ backgroundColor: paletteColor(pickInlineColor(query)) }}
               aria-hidden
             />
           </PickerItem>
         )}
       </PropertyPicker>
-
-      <Dialog open={manageOpen} onOpenChange={setManageOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogTitle className="text-lg font-semibold">{t(($) => $.pickers.label.manage_dialog_title)}</DialogTitle>
-          <LabelsPanel />
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

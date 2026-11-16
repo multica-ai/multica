@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { ChevronsUpDown } from "@multica/ui/icons";
 import { toast } from "sonner";
 import {
   Select,
@@ -9,264 +10,417 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
-import { useTheme } from "@multica/ui/components/common/theme-provider";
-import { cn } from "@multica/ui/lib/utils";
+import { Switch } from "@multica/ui/components/ui/switch";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
-  DEFAULT_LOCALE,
-  SUPPORTED_LOCALES,
-  type SupportedLocale,
-} from "@multica/core/i18n";
-import { useLocaleAdapter } from "@multica/core/i18n/react";
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@multica/ui/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@multica/ui/components/ui/command";
+import type { SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
+import { useChatStore } from "@multica/core/chat";
+import {
+  useCommentComposerStore,
+  type CommentImageLayout,
+  type RunningAgentReply,
+} from "@multica/core/issues/stores";
+import {
+  useIssueOpeningStore,
+  type IssueOpenMode,
+} from "@multica/core/issues/stores/issue-opening-store";
+import {
+  MANUAL_CREATE_FIELDS,
+  QUICK_CREATE_FIELDS,
+  useIssueCreateSettingsStore,
+  type ManualCreateField,
+  type QuickCreateField,
+} from "@multica/core/issues/stores/issue-create-settings-store";
 import { api } from "@multica/core/api";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
+import { useLanguageSwitch } from "../../common/use-language-switch";
+import { SegmentedToggle } from "../../common/segmented-toggle";
 import { useT } from "../../i18n";
+import { QuickChatAgentRow } from "./quick-chat-agent-row";
+import {
+  SettingsCard,
+  SettingsRow,
+  SettingsSection,
+  SettingsTab,
+} from "./settings-layout";
 
-const LIGHT_COLORS = {
-  titleBar: "#e8e8e8",
-  content: "#ffffff",
-  sidebar: "#f4f4f5",
-  bar: "#e4e4e7",
-  barMuted: "#d4d4d8",
-};
-
-const DARK_COLORS = {
-  titleBar: "#333338",
-  content: "#27272a",
-  sidebar: "#1e1e21",
-  bar: "#3f3f46",
-  barMuted: "#52525b",
-};
-
-function WindowMockup({
-  variant,
-  className,
-}: {
-  variant: "light" | "dark";
-  className?: string;
-}) {
-  const colors = variant === "light" ? LIGHT_COLORS : DARK_COLORS;
-
-  return (
-    <div className={cn("flex h-full w-full flex-col", className)}>
-      {/* Title bar */}
-      <div
-        className="flex items-center gap-[3px] px-2 py-1.5"
-        style={{ backgroundColor: colors.titleBar }}
-      >
-        <span className="size-[6px] rounded-full bg-[#ff5f57]" />
-        <span className="size-[6px] rounded-full bg-[#febc2e]" />
-        <span className="size-[6px] rounded-full bg-[#28c840]" />
-      </div>
-      {/* Content area */}
-      <div
-        className="flex flex-1"
-        style={{ backgroundColor: colors.content }}
-      >
-        {/* Sidebar */}
-        <div
-          className="w-[30%] space-y-1 p-2"
-          style={{ backgroundColor: colors.sidebar }}
-        >
-          <div
-            className="h-1 w-3/4 rounded-full"
-            style={{ backgroundColor: colors.bar }}
-          />
-          <div
-            className="h-1 w-1/2 rounded-full"
-            style={{ backgroundColor: colors.bar }}
-          />
-        </div>
-        {/* Main */}
-        <div className="flex-1 space-y-1.5 p-2">
-          <div
-            className="h-1.5 w-4/5 rounded-full"
-            style={{ backgroundColor: colors.bar }}
-          />
-          <div
-            className="h-1 w-full rounded-full"
-            style={{ backgroundColor: colors.barMuted }}
-          />
-          <div
-            className="h-1 w-3/5 rounded-full"
-            style={{ backgroundColor: colors.barMuted }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
+/**
+ * Preferences on one page. The settings here are stored in three different
+ * places — the account (language, timezone), this device (composer, chat,
+ * opening issues) and this device for the current workspace (create-dialog
+ * fields) — so each section carries a scope badge instead of splitting them
+ * into tabs. Theme, style and frame colour live on the Appearance page.
+ * Changes apply immediately; only failures are announced.
+ */
 export function PreferencesTab() {
-  const { theme, setTheme } = useTheme();
-  const { t, i18n } = useT("settings");
-  const localeAdapter = useLocaleAdapter();
-  const user = useAuthStore((s) => s.user);
-
-  // i18next.language can be a region-tagged BCP-47 string (e.g. "en-US",
-  // "zh-Hans-CN") returned by intl-localematcher. Normalize to a supported
-  // locale before comparing — otherwise the radio shows neither option active.
-  const currentLocale: SupportedLocale = SUPPORTED_LOCALES.includes(
-    i18n.language as SupportedLocale,
-  )
-    ? (i18n.language as SupportedLocale)
-    : DEFAULT_LOCALE;
-
-  const themeOptions = [
-    { value: "light" as const, label: t(($) => $.preferences.theme.light) },
-    { value: "dark" as const, label: t(($) => $.preferences.theme.dark) },
-    { value: "system" as const, label: t(($) => $.preferences.theme.system) },
-  ];
-
-  const languageOptions: { value: SupportedLocale; label: string }[] = [
-    { value: "en", label: t(($) => $.preferences.language.english) },
-    { value: "zh-Hans", label: t(($) => $.preferences.language.chinese) },
-    { value: "ko", label: t(($) => $.preferences.language.korean) },
-    { value: "ja", label: t(($) => $.preferences.language.japanese) },
-  ];
-
-  // Persist locally → sync to user.language → reload. Reload (vs in-place
-  // changeLanguage) avoids hydration mismatch and is the i18next-recommended
-  // pattern for App Router.
-  //
-  // If the cross-device sync (PATCH /api/me) fails, the local cookie is
-  // already written so the new locale will take effect after reload — but
-  // the user's other devices won't see the change. Surface that explicitly
-  // via a toast and delay the reload long enough for the toast to be read,
-  // otherwise the failure would be invisible.
-  const handleLanguageChange = async (next: SupportedLocale) => {
-    if (next === currentLocale) return;
-    localeAdapter.persist(next);
-
-    let syncFailed = false;
-    if (user) {
-      try {
-        await api.updateMe({ language: next });
-      } catch {
-        syncFailed = true;
-      }
-    }
-
-    if (syncFailed) {
-      toast.warning(t(($) => $.preferences.language.sync_failed));
-      // Give the toast 2.5s of visible time before navigating away.
-      setTimeout(() => window.location.reload(), 2500);
-      return;
-    }
-    window.location.reload();
-  };
-
+  const { t } = useT("settings");
   return (
-    <div className="space-y-8">
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold">
-          {t(($) => $.preferences.theme.title)}
-        </h2>
-        <div className="flex gap-6" role="radiogroup">
-          {themeOptions.map((opt) => {
-            const active = theme === opt.value;
-            return (
-              <button
-                type="button"
-                key={opt.value}
-                role="radio"
-                aria-checked={active}
-                onClick={() => setTheme(opt.value)}
-                className="group flex flex-col items-center gap-2"
-              >
-                <div
-                  className={cn(
-                    "aspect-[4/3] w-36 overflow-hidden rounded-lg ring-1 transition-all",
-                    active
-                      ? "ring-2 ring-brand"
-                      : "ring-border hover:ring-2 hover:ring-border"
-                  )}
-                >
-                  {opt.value === "system" ? (
-                    <div className="relative h-full w-full">
-                      <WindowMockup
-                        variant="light"
-                        className="absolute inset-0"
-                      />
-                      <WindowMockup
-                        variant="dark"
-                        className="absolute inset-0 [clip-path:inset(0_0_0_50%)]"
-                      />
-                    </div>
-                  ) : (
-                    <WindowMockup variant={opt.value} />
-                  )}
-                </div>
-                <span
-                  className={cn(
-                    "text-sm transition-colors",
-                    active
-                      ? "font-medium text-foreground"
-                      : "text-muted-foreground"
-                  )}
-                >
-                  {opt.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+    <SettingsTab title={t(($) => $.page.tabs.preferences)}>
+      <SettingsSection
+        title={t(($) => $.preferences.region_title)}
+        scope="account"
+        anchor="region"
+      >
+        <SettingsCard>
+          <LanguageRow />
+          <TimezoneRow />
+        </SettingsCard>
+      </SettingsSection>
 
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold">
-          {t(($) => $.preferences.language.title)}
-        </h2>
-        <div className="flex gap-3" role="radiogroup">
-          {languageOptions.map((opt) => {
-            const active = currentLocale === opt.value;
-            return (
-              <button
-                type="button"
-                key={opt.value}
-                role="radio"
-                aria-checked={active}
-                onClick={() => handleLanguageChange(opt.value)}
-                className={cn(
-                  "rounded-md border px-4 py-2 text-sm transition-colors",
-                  active
-                    ? "border-brand bg-brand/10 font-medium text-foreground"
-                    : "border-border text-muted-foreground hover:border-foreground/30"
-                )}
-              >
-                {opt.label}
-              </button>
-            );
-          })}
-        </div>
-      </section>
+      <SettingsSection
+        title={t(($) => $.preferences.comments_title)}
+        scope="device"
+        anchor="comments"
+      >
+        <SettingsCard>
+          <StickyCommentBarRow />
+          <RunningAgentReplyRow />
+          <CommentImageLayoutRow />
+          <FloatingChatRow />
+          <QuickChatAgentRow />
+        </SettingsCard>
+      </SettingsSection>
 
-      <TimezoneSection />
-    </div>
+      <SettingsSection
+        title={t(($) => $.issue.opening.title)}
+        scope="device"
+        anchor="issue-opening"
+      >
+        <SettingsCard>
+          <IssueOpeningRow />
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t(($) => $.preferences.issue_fields_title)}
+        description={t(($) => $.issue.description)}
+        scope="device-workspace"
+        anchor="issue"
+      >
+        <IssueFieldsMatrix />
+      </SettingsSection>
+    </SettingsTab>
   );
 }
 
-// Base UI rejects "" as a SelectItem value, so route the "no preference"
-// state through this sentinel and translate at the wire boundary.
+function LanguageRow() {
+  const { t } = useT("settings");
+  const {
+    options: languageOptions,
+    currentLocale,
+    changeLanguage: handleLanguageChange,
+  } = useLanguageSwitch();
+
+  return (
+    <SettingsRow
+      anchor="language"
+      label={t(($) => $.preferences.language.title)}
+      size="select"
+    >
+      <Select
+        items={languageOptions}
+        value={currentLocale}
+        onValueChange={(next) => {
+          if (next) void handleLanguageChange(next as SupportedLocale);
+        }}
+      >
+        <SelectTrigger
+          size="sm"
+          className="w-full"
+          aria-label={t(($) => $.preferences.language.title)}
+        >
+          <SelectValue>
+            {languageOptions.find((option) => option.value === currentLocale)?.label}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent align="end">
+          {languageOptions.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </SettingsRow>
+  );
+}
+
+function StickyCommentBarRow() {
+  const { t } = useT("settings");
+  const sticky = useCommentComposerStore((s) => s.sticky);
+  const toggleSticky = useCommentComposerStore((s) => s.toggleSticky);
+
+  return (
+    <SettingsRow
+      anchor="sticky-comment-bar"
+      label={t(($) => $.preferences.sticky_comment_bar.title)}
+    >
+      <Switch
+        checked={sticky}
+        onCheckedChange={() => toggleSticky()}
+        aria-label={t(($) => $.preferences.sticky_comment_bar.title)}
+      />
+    </SettingsRow>
+  );
+}
+
+function RunningAgentReplyRow() {
+  const { t } = useT("settings");
+  const value = useCommentComposerStore((s) => s.runningAgentReply);
+  const setValue = useCommentComposerStore((s) => s.setRunningAgentReply);
+  const options: { value: RunningAgentReply; label: string }[] = [
+    { value: "steer", label: t(($) => $.preferences.running_agent_reply.steer) },
+    { value: "after_run", label: t(($) => $.preferences.running_agent_reply.after_run) },
+  ];
+
+  return (
+    <SettingsRow
+      anchor="running-agent-reply"
+      label={t(($) => $.preferences.running_agent_reply.title)}
+      description={t(($) => $.preferences.running_agent_reply.hint)}
+      size="select"
+    >
+      <Select
+        items={options}
+        value={value}
+        onValueChange={(next) => {
+          if (next && next !== value) setValue(next as RunningAgentReply);
+        }}
+      >
+        <SelectTrigger
+          size="sm"
+          className="w-full"
+          aria-label={t(($) => $.preferences.running_agent_reply.title)}
+        >
+          <SelectValue>
+            {options.find((option) => option.value === value)?.label}
+          </SelectValue>
+        </SelectTrigger>
+        <SelectContent align="end">
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {option.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </SettingsRow>
+  );
+}
+
+function CommentImageLayoutRow() {
+  const { t } = useT("settings");
+  const value = useCommentComposerStore((s) => s.imageLayout);
+  const setValue = useCommentComposerStore((s) => s.setImageLayout);
+  const label = t(($) => $.preferences.comment_images.title);
+  return (
+    <SettingsRow
+      anchor="comment-images"
+      label={label}
+      description={t(($) => $.preferences.comment_images.hint)}
+    >
+      <div role="group" aria-label={label}>
+        <SegmentedToggle<CommentImageLayout>
+          value={value}
+          onChange={setValue}
+          buttonClassName="px-3 py-1 text-label"
+          options={[
+            ["thumbnails", t(($) => $.preferences.comment_images.thumbnails)],
+            ["full", t(($) => $.preferences.comment_images.full)],
+          ]}
+        />
+      </div>
+    </SettingsRow>
+  );
+}
+
+/**
+ * What a plain click on an issue card or row opens across the issue views.
+ * The hint carries the one non-obvious part: Shift+Click opens the other one,
+ * so both stay one click away whichever is chosen.
+ */
+function IssueOpeningRow() {
+  const { t } = useT("settings");
+  const value = useIssueOpeningStore((s) => s.openMode);
+  const setValue = useIssueOpeningStore((s) => s.setOpenMode);
+  const label = t(($) => $.issue.opening.click);
+  return (
+    <SettingsRow
+      anchor="issue-opening"
+      label={label}
+      description={t(($) => $.issue.opening.hint)}
+    >
+      <div role="group" aria-label={label}>
+        <SegmentedToggle<IssueOpenMode>
+          value={value}
+          onChange={setValue}
+          buttonClassName="px-3 py-1 text-label"
+          options={[
+            ["page", t(($) => $.issue.opening.page)],
+            ["peek", t(($) => $.issue.opening.peek)],
+          ]}
+        />
+      </div>
+    </SettingsRow>
+  );
+}
+
+/**
+ * When off, the FAB / overlay never mount and Chat is reachable only from its
+ * dedicated tab. A persisted client setting, so it applies immediately.
+ */
+function FloatingChatRow() {
+  const { t } = useT("settings");
+  const enabled = useChatStore((s) => s.floatingChatEnabled);
+  const setEnabled = useChatStore((s) => s.setFloatingChatEnabled);
+  return (
+    <SettingsRow
+      anchor="chat"
+      label={t(($) => $.chat.floating_label)}
+    >
+      <Switch
+        checked={enabled}
+        onCheckedChange={(checked) => setEnabled(checked)}
+        aria-label={t(($) => $.chat.floating_label)}
+      />
+    </SettingsRow>
+  );
+}
+
+/**
+ * Which fields each create-issue dialog keeps on its toolbar, as one field ×
+ * dialog grid. A field toggled off stays reachable from the dialog's ⋯
+ * overflow and re-surfaces while it holds a value, so hiding is never
+ * destructive. Quick create supports fewer fields; those cells show a dash.
+ */
+function IssueFieldsMatrix() {
+  const { t } = useT("settings");
+  const quickFields = useIssueCreateSettingsStore((s) => s.quickCreateFields);
+  const setQuickVisible = useIssueCreateSettingsStore(
+    (s) => s.setQuickCreateFieldVisible,
+  );
+  const manualFields = useIssueCreateSettingsStore((s) => s.manualCreateFields);
+  const setManualVisible = useIssueCreateSettingsStore(
+    (s) => s.setManualCreateFieldVisible,
+  );
+  const quickLabel = t(($) => $.preferences.issue_fields.quick);
+  const manualLabel = t(($) => $.preferences.issue_fields.manual);
+
+  return (
+    <SettingsCard>
+      <table className="w-full text-body">
+        <thead>
+          <tr className="border-b border-surface-border bg-muted/20 text-caption font-medium text-muted-foreground">
+            <th scope="col" className="px-4 py-2 text-left font-medium">
+              {t(($) => $.preferences.issue_fields.field)}
+            </th>
+            <th scope="col" className="w-32 px-4 py-2 text-center font-medium">
+              {quickLabel}
+            </th>
+            <th scope="col" className="w-32 px-4 py-2 text-center font-medium">
+              {manualLabel}
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-surface-border">
+          {MANUAL_CREATE_FIELDS.map((field: ManualCreateField) => {
+            const fieldLabel = t(($) => $.issue.fields[field]);
+            const quickSupported = (QUICK_CREATE_FIELDS as readonly string[]).includes(field);
+            return (
+              <tr key={field}>
+                <th scope="row" className="px-4 py-2.5 text-left font-normal">
+                  {fieldLabel}
+                </th>
+                <td className="px-4 py-2.5 text-center">
+                  {quickSupported ? (
+                    <Checkbox
+                      checked={quickFields.includes(field as QuickCreateField)}
+                      onCheckedChange={(checked) =>
+                        setQuickVisible(field as QuickCreateField, checked === true)
+                      }
+                      aria-label={`${fieldLabel} · ${quickLabel}`}
+                    />
+                  ) : (
+                    <span
+                      className="text-faint-foreground"
+                      aria-label={t(($) => $.preferences.issue_fields.unsupported)}
+                      title={t(($) => $.preferences.issue_fields.unsupported)}
+                    >
+                      —
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-2.5 text-center">
+                  <Checkbox
+                    checked={manualFields.includes(field)}
+                    onCheckedChange={(checked) =>
+                      setManualVisible(field, checked === true)
+                    }
+                    aria-label={`${fieldLabel} · ${manualLabel}`}
+                  />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </SettingsCard>
+  );
+}
+
+// Base UI rejects "" as an item value, so route the "no preference" state
+// through this sentinel and translate at the wire boundary.
 const BROWSER_TZ_VALUE = "__browser__";
 
-function TimezoneSection() {
+/** "UTC+8", "UTC-3:30" — the offset right now, for scanning the list. */
+function utcOffset(tz: string): string {
+  try {
+    const part = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      timeZoneName: "shortOffset",
+    })
+      .formatToParts(new Date())
+      .find((p) => p.type === "timeZoneName")?.value;
+    return part ? part.replace(/^GMT/, "UTC").replace(/^UTC$/, "UTC+0") : "";
+  } catch {
+    return "";
+  }
+}
+
+function TimezoneRow() {
   const { t } = useT("settings");
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
+  const [open, setOpen] = useState(false);
   const stored = user?.timezone ?? null;
   const browser = browserTimezone();
   const value = stored ?? BROWSER_TZ_VALUE;
 
-  // Full IANA list (from timezoneOptions in common/timezone-select) so a
-  // user needing a non-curated zone isn't stuck with ~18 common ones.
-  // Memoized — timezoneOptions enumerates ~600 IANA zones per call.
+  // The full IANA list (~600 zones) so a user needing a non-curated zone is
+  // not stuck with the common ones — which is why this is searchable.
   const options = useMemo(
-    () => timezoneOptions(stored ?? browser),
+    () =>
+      timezoneOptions(stored ?? browser).map((tz) => ({
+        tz,
+        offset: utcOffset(tz),
+      })),
     [stored, browser],
   );
 
   const handleChange = async (next: string) => {
+    setOpen(false);
     if (next === value) return;
     const payload = next === BROWSER_TZ_VALUE ? "" : next;
     try {
@@ -281,41 +435,72 @@ function TimezoneSection() {
     }
   };
 
-  const formatTZLabel = (tz: string) => {
-    if (tz === BROWSER_TZ_VALUE) {
-      return `${browser}${t(($) => $.preferences.timezone.browser_suffix)}`;
-    }
-    return tz;
-  };
+  const current = stored ?? browser;
+  const suffix = stored ? "" : t(($) => $.preferences.timezone.browser_suffix);
 
   return (
-    <section className="space-y-2">
-      <h2 className="text-sm font-semibold">
-        {t(($) => $.preferences.timezone.title)}
-      </h2>
-      <Select
-        value={value}
-        onValueChange={(next) => {
-          if (next) handleChange(next);
-        }}
-      >
-        <SelectTrigger size="sm" className="w-72 rounded-md font-mono text-xs">
-          <SelectValue>{formatTZLabel(value)}</SelectValue>
-        </SelectTrigger>
-        <SelectContent align="start" className="max-h-72">
-          <SelectItem value={BROWSER_TZ_VALUE} className="font-mono text-xs">
-            {formatTZLabel(BROWSER_TZ_VALUE)}
-          </SelectItem>
-          {options.map((tz) => (
-            <SelectItem key={tz} value={tz} className="font-mono text-xs">
-              {formatTZLabel(tz)}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        {t(($) => $.preferences.timezone.hint)}
-      </p>
-    </section>
+    <SettingsRow
+      anchor="timezone"
+      label={t(($) => $.preferences.timezone.title)}
+      description={t(($) => $.preferences.timezone.hint)}
+      size="select-wide"
+    >
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <button
+              type="button"
+              aria-label={t(($) => $.preferences.timezone.title)}
+              className="flex h-7 w-full items-center gap-1.5 rounded-md border border-input bg-transparent pl-2.5 pr-2 text-left text-body outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 dark:hover:bg-input/50"
+            />
+          }
+        >
+          <span className="min-w-0 flex-1 truncate font-mono text-caption">
+            {current}
+            {suffix}
+          </span>
+          <span className="shrink-0 text-caption text-muted-foreground">
+            {utcOffset(current)}
+          </span>
+          <ChevronsUpDown aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-80 p-0">
+          {/* Plain substring matching: fuzzy ranking puts "Antarctica/Vostok"
+              next to "Asia/Tokyo" for "tok", which reads as a wrong result. */}
+          <Command
+            filter={(itemValue, search) =>
+              itemValue.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()) ? 1 : 0
+            }
+          >
+            <CommandInput placeholder={t(($) => $.preferences.timezone.search)} />
+            <CommandList>
+              <CommandEmpty>{t(($) => $.preferences.timezone.empty)}</CommandEmpty>
+              <CommandItem
+                value={`${browser} ${t(($) => $.preferences.timezone.browser_suffix)}`}
+                data-checked={value === BROWSER_TZ_VALUE}
+                onSelect={() => void handleChange(BROWSER_TZ_VALUE)}
+              >
+                <span className="min-w-0 flex-1 truncate font-mono text-caption">
+                  {browser}
+                  {t(($) => $.preferences.timezone.browser_suffix)}
+                </span>
+                <span className="text-caption text-muted-foreground">{utcOffset(browser)}</span>
+              </CommandItem>
+              {options.map(({ tz, offset }) => (
+                <CommandItem
+                  key={tz}
+                  value={`${tz} ${offset}`}
+                  data-checked={value === tz}
+                  onSelect={() => void handleChange(tz)}
+                >
+                  <span className="min-w-0 flex-1 truncate font-mono text-caption">{tz}</span>
+                  <span className="text-caption text-muted-foreground">{offset}</span>
+                </CommandItem>
+              ))}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </SettingsRow>
   );
 }
