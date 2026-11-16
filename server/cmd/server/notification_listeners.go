@@ -56,7 +56,7 @@ var parentBubbleNotifTypes = map[string]bool{
 // comment lands on the row a handoff would light anyway.
 //
 // An agent that cannot proceed reaches the human as a blocked status change,
-// which the handoff rule in deliverToSubscriber already delivers.
+// which the handoff rule in deliverDelegated already delivers.
 var delegatedAlwaysNotifTypes = map[string]bool{
 	"mentioned":   true,
 	"new_comment": true,
@@ -115,12 +115,9 @@ func issueStatusIsHandoff(
 	}
 }
 
-// deliverToSubscriber reports whether a subscriber row should receive this
-// notification type. Direct subscriptions (creator / assignee / commenter /
-// mentioned / manual / autopilot) pass — they opted in to this issue,
-// explicitly or by acting on it; the passive ones are narrowed separately on
-// someone else's issue (deliverToBystander). Only the delegated tier is
-// narrowed here, and only to drop churn.
+// deliverDelegated reports whether a subscription in the delegated tier
+// (inbox.DeliveryDelegated) receives this notification type. The tier only
+// drops churn.
 //
 // A child finishing is NOT churn: "sub-issue X is ready for review" is exactly
 // the signal a delegated watcher needs, and there is one per piece of real work.
@@ -134,10 +131,7 @@ func issueStatusIsHandoff(
 // statusIsHandoff is the resolved issueStatusIsHandoff answer for the issue's
 // current status, so the catalog is read once per notification rather than once
 // per subscriber row.
-func deliverToSubscriber(reason, notifType string, statusIsHandoff bool) bool {
-	if reason != "delegated" {
-		return true
-	}
+func deliverDelegated(notifType string, statusIsHandoff bool) bool {
 	if delegatedAlwaysNotifTypes[notifType] {
 		return true
 	}
@@ -147,29 +141,12 @@ func deliverToSubscriber(reason, notifType string, statusIsHandoff bool) bool {
 	return statusIsHandoff
 }
 
-// othersIssuesPref is the preference key for how much of SOMEONE ELSE'S issue
-// reaches a member who is only passively subscribed to it. Absent or
-// "key_updates" applies the bystander tier; "all" turns it off (MUL-9343).
-const othersIssuesPref = "others_issues"
-
-// bystanderReasons are the subscription reasons a member picks up as a side
-// effect of acting on an issue — filing it, once being its assignee,
-// commenting, being mentioned. On an issue assigned to someone else these
-// narrow to the bystander tier. manual and autopilot are explicit requests to
-// follow the issue and keep every event; delegated has its own tier.
-var bystanderReasons = map[string]bool{
-	"creator":   true,
-	"assignee":  true,
-	"commenter": true,
-	"mentioned": true,
-}
-
-// deliverToBystander reports whether a bystander — a passive subscriber of an
-// issue assigned to someone else — receives this notification type. They hear
-// what is addressed at them or needs them: a mention, a reply in a comment
-// thread they took part in, and a status that hands the issue back to a human
-// (statusIsHandoff, as in deliverToSubscriber). The rest of the issue's
-// back-and-forth stays on the issue page.
+// deliverToBystander reports whether a bystander — a subscription in the
+// key-updates tier (inbox.DeliveryKeyUpdates) — receives this notification
+// type. They hear what is addressed at them or needs them: a mention, a reply
+// in a comment thread they took part in, and a status that hands the issue
+// back to a human (statusIsHandoff, as in deliverDelegated). The rest of the
+// issue's back-and-forth stays on the issue page.
 func deliverToBystander(notifType string, statusIsHandoff, threadParticipant bool) bool {
 	switch notifType {
 	case "mentioned":
@@ -180,47 +157,6 @@ func deliverToBystander(notifType string, statusIsHandoff, threadParticipant boo
 		return threadParticipant
 	default:
 		return false
-	}
-}
-
-// issueOwner is who an issue is assigned to, resolved to the human behind it:
-// the assigned member, or the owner of the assigned agent. A squad assignee
-// has no single owner, so a squad's issue is nobody's own.
-type issueOwner struct {
-	assigned bool
-	ownerID  string
-}
-
-// isSomeoneElses reports whether the issue is assigned, and not to userID or
-// an agent userID owns. An unassigned issue is nobody else's: its creator is
-// the closest thing it has to an owner, and nothing about it is routine yet.
-func (o issueOwner) isSomeoneElses(userID string) bool {
-	return o.assigned && o.ownerID != userID
-}
-
-func loadIssueOwner(ctx context.Context, queries *db.Queries, issueID string) (issueOwner, error) {
-	issue, err := queries.GetIssue(ctx, parseUUID(issueID))
-	if err != nil {
-		return issueOwner{}, err
-	}
-	if !issue.AssigneeID.Valid {
-		return issueOwner{}, nil
-	}
-	switch issue.AssigneeType.String {
-	case "member":
-		return issueOwner{assigned: true, ownerID: util.UUIDToString(issue.AssigneeID)}, nil
-	case "agent":
-		agent, err := queries.GetAgent(ctx, issue.AssigneeID)
-		if err != nil {
-			return issueOwner{}, err
-		}
-		owner := ""
-		if agent.OwnerID.Valid {
-			owner = util.UUIDToString(agent.OwnerID)
-		}
-		return issueOwner{assigned: true, ownerID: owner}, nil
-	default:
-		return issueOwner{assigned: true}, nil
 	}
 }
 
@@ -247,6 +183,14 @@ func loadThreadParticipants(ctx context.Context, queries *db.Queries, workspaceI
 	return participants, nil
 }
 
+func loadIssueOwner(ctx context.Context, queries *db.Queries, issueID string) (inbox.IssueOwner, error) {
+	issue, err := queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		return inbox.IssueOwner{}, err
+	}
+	return inbox.LoadIssueOwner(ctx, queries, issue)
+}
+
 // bystanderTier applies deliverToBystander across one subscriber list. It
 // reads the issue's owner, and for a comment its thread, at most once and only
 // when a passive subscriber reaches it.
@@ -261,14 +205,16 @@ type bystanderTier struct {
 	details     []byte
 
 	ownerLoaded  bool
-	owner        issueOwner
+	owner        inbox.IssueOwner
 	ownerErr     error
 	threadLoaded bool
 	thread       map[string]bool
 	threadErr    error
 }
 
-func (b *bystanderTier) deliver(userID, notifType string, statusIsHandoff bool) bool {
+// isSomeoneElses answers inbox.SubscriptionDelivery's owner question for
+// userID. An unreadable owner reads as the member's own issue: every event.
+func (b *bystanderTier) isSomeoneElses(userID string) bool {
 	if !b.ownerLoaded {
 		b.ownerLoaded = true
 		b.owner, b.ownerErr = loadIssueOwner(b.ctx, b.queries, b.issueID)
@@ -277,10 +223,10 @@ func (b *bystanderTier) deliver(userID, notifType string, statusIsHandoff bool) 
 				"issue_id", b.issueID, "error", b.ownerErr)
 		}
 	}
-	if b.ownerErr != nil || !b.owner.isSomeoneElses(userID) {
-		return true
-	}
+	return b.ownerErr == nil && b.owner.IsSomeoneElses(userID)
+}
 
+func (b *bystanderTier) deliver(userID, notifType string, statusIsHandoff bool) bool {
 	participant := false
 	if notifType == "new_comment" {
 		if !b.threadLoaded {
@@ -757,20 +703,23 @@ func notifyIssueSubscribers(
 			continue
 		}
 
-		// Delegated subscriptions deliver a narrower event set than direct
-		// ones — see deliverToSubscriber.
-		if !deliverToSubscriber(sub.Reason, notifType, statusIsHandoff) {
-			tierSuppressed[subID] = true
-			continue
-		}
-
-		// A passive subscription to someone else's issue delivers the
-		// bystander tier unless the member asked for everything. This is not
-		// added to tierSuppressed: the parent bubble judges the parent's own
-		// subscription, and the parent may well be this member's issue.
-		if bystanderReasons[sub.Reason] && userPrefs[subID][othersIssuesPref] != "all" &&
-			!bystander.deliver(subID, notifType, statusIsHandoff) {
-			continue
+		// ListIssueSubscribers reports this same tier, so the issue page
+		// shows what the fanout actually delivers.
+		delivery := inbox.SubscriptionDelivery(sub.Reason, userPrefs[subID],
+			func() bool { return bystander.isSomeoneElses(subID) })
+		switch delivery {
+		case inbox.DeliveryDelegated:
+			if !deliverDelegated(notifType, statusIsHandoff) {
+				tierSuppressed[subID] = true
+				continue
+			}
+		case inbox.DeliveryKeyUpdates:
+			// Not added to tierSuppressed: the parent bubble judges the
+			// parent's own subscription, and the parent may well be this
+			// member's issue.
+			if !bystander.deliver(subID, notifType, statusIsHandoff) {
+				continue
+			}
 		}
 
 		if createMemberInboxItem(ctx, queries, bus, subID, workspaceID, e, targetIssueID, issueStatus,

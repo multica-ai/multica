@@ -22,6 +22,14 @@ export type IssueSubscriberReason =
   | "delegated"
   | "project";
 
+/**
+ * How much of the issue a member subscription actually delivers, as the
+ * server's notification fanout decides it. `key_updates` is the bystander
+ * tier on someone else's issue (MUL-9343); `delegated` is the tier of an issue
+ * an agent created on the member's behalf (MUL-5483).
+ */
+export type IssueSubscriberDelivery = "all" | "key_updates" | "delegated";
+
 export interface IssueSubscriber {
   issue_id: string;
   user_type: "member" | "agent";
@@ -29,9 +37,9 @@ export interface IssueSubscriber {
   reason: IssueSubscriberReason;
   created_at: string;
   /**
-   * A direct row whose member also subscribes to the issue's project. The
-   * project delivers every event, so the direct reason does not narrow what
-   * reaches them.
+   * Absent on agent rows, from servers that predate it, and on rows patched
+   * locally until the list is refetched. Show no tier then rather than
+   * derive one: only the server knows what it delivers.
    */
-  project_covered?: boolean;
+  delivery?: IssueSubscriberDelivery;
 }
