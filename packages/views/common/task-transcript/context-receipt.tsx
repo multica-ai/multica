@@ -53,6 +53,8 @@ export function receiptDeliveryBytes(receipt: ContextReceipt): { direct: number;
 
 function sourcePath(source: ContextReceiptSource): string | undefined {
   if (source.kind === "skill" && source.delivery === "file" && source.path) {
+    // URI identifiers are not filesystem paths, even when their suffix matches.
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source.path)) return source.path;
     // Existing receipts name the entry file but measure the complete package.
     return source.path.replace(/(^|[/\\])SKILL\.md$/, "$1") || ".";
   }
@@ -171,8 +173,8 @@ export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
         <thead>
           <tr className="border-b text-left text-muted-foreground">
             <th className="w-[34%] py-1 pr-2 font-normal">{t(($) => $.transcript.context_receipt_col_source)}</th>
-            <th className="w-[12%] py-1 pr-2 text-right font-normal">{t(($) => $.transcript.context_receipt_col_size)}</th>
-            <th className="w-[30%] py-1 pr-2 font-normal">{t(($) => $.transcript.context_receipt_col_delivery)}</th>
+            <th className="w-[16%] py-1 pr-2 text-right font-normal">{t(($) => $.transcript.context_receipt_col_size)}</th>
+            <th className="w-[26%] py-1 pr-2 font-normal">{t(($) => $.transcript.context_receipt_col_delivery)}</th>
             <th className="py-1 font-normal">{t(($) => $.transcript.context_receipt_col_load)}</th>
           </tr>
         </thead>
@@ -189,12 +191,12 @@ export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
               <td className="py-1 pr-2 text-right tabular-nums text-foreground">
                 <div>{formatBytes(s.bytes)}</div>
                 {s.kind === "skill" && s.delivery === "file" && (
-                  <div className="text-micro text-muted-foreground">{t(($) => $.transcript.context_receipt_package)}</div>
+                  <div className="text-micro text-muted-foreground [overflow-wrap:anywhere]">{t(($) => $.transcript.context_receipt_package)}</div>
                 )}
               </td>
               <td className="py-1 pr-2">
                 <div
-                  className={cn("truncate", s.delivery === "file" ? "font-mono text-foreground" : "text-muted-foreground")}
+                  className={s.delivery === "file" ? "font-mono text-foreground [overflow-wrap:anywhere]" : "truncate text-muted-foreground"}
                   title={sourcePath(s)}
                 >
                   {deliveryLabel(s, t)}

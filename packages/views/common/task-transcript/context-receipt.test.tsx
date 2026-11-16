@@ -160,6 +160,8 @@ describe("ContextReceiptView", () => {
     [String.raw`C:\DSH\skills\review\SKILL.md`, String.raw`C:\DSH\skills\review` + "\\"],
     ["SKILL.md", "."],
     ["native://custom-skill", "native://custom-skill"],
+    ["native://SKILL.md", "native://SKILL.md"],
+    ["native://record?id=/SKILL.md", "native://record?id=/SKILL.md"],
   ])("preserves the path representation for %s", (path, expected) => {
     renderWithI18n(<ContextReceiptView receipt={{ ...receipt, sources: [
       { kind: "skill", name: "review", bytes: 5120, delivery: "file", path, load: "unverified" },
