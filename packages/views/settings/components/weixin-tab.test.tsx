@@ -200,6 +200,7 @@ describe("WeChat QR connection", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "This WeChat account is connected to Research Assistant. Disconnect it there first.",
     );
+    expect(screen.queryByTitle("WeChat connection QR code")).not.toBeInTheDocument();
   });
 
   it("keeps cross-workspace conflict details private", async () => {

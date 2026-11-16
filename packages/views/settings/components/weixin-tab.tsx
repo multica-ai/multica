@@ -196,6 +196,7 @@ function WeixinConnect({
       (query.state.data as WeixinLogin | undefined)?.status !==
         "need_verifycode",
     refetchInterval: (query) =>
+      !weixinConflict(query.state.error) &&
       isWeixinLoginPending(
         (query.state.data as WeixinLogin | undefined)?.status,
       ) &&
@@ -311,7 +312,7 @@ function WeixinConnect({
             <p role="status">{t(($) => $.weixin.loading)}</p>
           ) : (
             <>
-              {pending && login?.qr_code_url && (
+              {pending && !conflict && login?.qr_code_url && (
                 <div className="mx-auto rounded-lg bg-white p-4">
                   <QRCode
                     value={login.qr_code_url}
@@ -320,9 +321,11 @@ function WeixinConnect({
                   />
                 </div>
               )}
-              <p role="status" className="text-body">
-                {statusText}
-              </p>
+              {!conflict && (
+                <p role="status" className="text-body">
+                  {statusText}
+                </p>
+              )}
               {status === "need_verifycode" && (
                 <form
                   className="space-y-3"
