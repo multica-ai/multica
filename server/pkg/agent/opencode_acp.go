@@ -378,6 +378,7 @@ func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt strin
 	var output strings.Builder
 	activity := make(chan struct{}, 1)
 	promptDone := make(chan hermesPromptResult, 1)
+	supplements := &opencodeSupplementSession{ctx: runCtx}
 
 	c := &hermesClient{
 		cfg:                        b.cfg,
@@ -418,6 +419,7 @@ func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt strin
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
+			supplements.ended.Store(true)
 			select {
 			case promptDone <- result:
 			default:
@@ -425,9 +427,11 @@ func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt strin
 		},
 	}
 
+	supplements.request = c.request
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
+		defer supplements.ended.Store(true)
 		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			if line := strings.TrimSpace(scanner.Text()); line != "" {
@@ -477,6 +481,7 @@ func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt strin
 
 	go func() {
 		defer close(msgCh)
+		defer supplements.ended.Store(true)
 		defer close(resCh)
 		defer cancel()
 		// Setup paths return early; a cancelled or timed-out setup is torn
@@ -523,6 +528,7 @@ func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt strin
 			return
 		}
 		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "opencode", b.cfg)
+		supplements.supported = opencodeSteeringSupported(initResult)
 
 		var sessionID string
 		var sessionResult json.RawMessage
@@ -561,6 +567,7 @@ func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt strin
 			sessionResult = created
 		}
 		c.sessionID = sessionID
+		supplements.sessionID = sessionID
 
 		model, level := opencodeACPSplitModel(opts.Model, opts.ThinkingLevel)
 		options, err := opencodeACPSelectModel(runCtx, c.request, sessionID, model, sessionResult)
@@ -593,7 +600,11 @@ func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt strin
 			_, err := c.requestAndNotifySent(context.Background(), "session/prompt", map[string]any{
 				"sessionId": sessionID,
 				"prompt":    []map[string]any{{"type": "text", "text": prompt}},
-			}, func() { promptSent.Store(true) })
+			}, func() {
+				promptSent.Store(true)
+				supplements.sent.Store(true)
+			})
+			supplements.ended.Store(true)
 			promptCh <- promptOutcome{err: err}
 		}()
 
@@ -710,7 +721,12 @@ func (b *opencodeBackend) executeACP(ctx context.Context, execPath, prompt strin
 		}
 	}()
 
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	session := &Session{Messages: msgCh, Result: resCh}
+	if opts.EnableTaskSupplement && OpenCodeSupportsTaskSupplement(b.cfg, opts) {
+		session.Supplement = supplements.send
+		session.SupplementReady = supplements.ready
+	}
+	return session, nil
 }
 
 // opencodeACPNotify writes a JSON-RPC notification (no id, no response).

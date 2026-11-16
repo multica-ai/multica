@@ -16,6 +16,7 @@ func TestTaskSupplementVersionGate(t *testing.T) {
 		{"grok", "1.0.14", true}, {"grok", "1.0.13", false}, {"grok", "0.2.120", false},
 		{"cursor", "2026.10.16-e3cb207", true}, {"cursor", "2026.10.14", true}, {"cursor", "2026.04.17-787b533", false},
 		{"kiro", "kiro-cli 2.33.0", true}, {"kiro", "2.34.1", true}, {"kiro", "kiro-cli 2.32.9", false},
+		{"opencode", "opencode v2.2.7", true}, {"opencode", "2.2.6", false}, {"opencode", "1.19.4", false}, {"opencode", "", false},
 		{"codex", "", false}, {"claude", "dev", false}, {"kimi", "9.0.0", false},
 	} {
 		if got := SupportsTaskSupplement(tc.provider, tc.version); got != tc.want {
