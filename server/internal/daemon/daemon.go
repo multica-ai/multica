@@ -9403,6 +9403,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	stopUsageFlush := d.startUsageFlush(ctx, task.ID, &liveUsage, taskLog)
 	defer stopUsageFlush()
+	// MUL-9427: forward the account's rate-limit state the CLI reports, so the
+	// runtime pages show how much of the plan's windows is left.
+	observeRateLimits, stopRateLimitFlush := d.startRateLimitFlush(ctx, task.ID, taskLog)
+	execOpts.OnRateLimits = observeRateLimits
+	defer stopRateLimitFlush()
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err

@@ -648,6 +648,9 @@ WITH
 deleted_runtimes AS (
     DELETE FROM agent_runtime WHERE agent_runtime.workspace_id = $1
 ),
+deleted_runtime_rate_limits AS (
+    DELETE FROM runtime_rate_limit WHERE runtime_rate_limit.workspace_id = $1
+),
 deleted_profiles AS (
     DELETE FROM runtime_profile WHERE runtime_profile.workspace_id = $1
 ),
