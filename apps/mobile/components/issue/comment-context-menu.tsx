@@ -1,3 +1,4 @@
+import { getServerConfig } from "@/data/server-config-store";
 /**
  * Native long-press actions for a comment bubble, with a pressed highlight
  * while the sheet is visible. Reply targets the inline composer.
@@ -56,7 +57,7 @@ export function useCommentLongPress(
     const isRoot = !entry.parent_id;
     const resolved = !!entry.resolved_at;
     const hasContent = !!entry.content;
-    const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
+    const webUrl = getServerConfig().webUrl;
     const canCopyLink = !!(webUrl && wsSlug && issueIdentifier);
     const reactions = (entry.reactions ?? []) as Reaction[];
 

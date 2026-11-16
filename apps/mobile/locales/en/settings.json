@@ -85,5 +85,25 @@
     "system": "System",
     "system_notifications": "System notifications",
     "chat_replies": "Include chat replies"
+  },
+  "server": {
+    "title": "Server settings",
+    "description": "Use Multica Cloud or connect to your own Multica server. Ask your administrator for the API and web addresses.",
+    "api_url": "API URL",
+    "web_url": "Web URL",
+    "api_help": "Backend root address, including a port or base path if needed. A trailing /api is removed because API routes add it automatically.",
+    "web_help": "Address used when copying links or opening Multica in a browser. It may differ from the API address.",
+    "save": "Save server settings",
+    "saving": "Saving…",
+    "restore_defaults": "Restore Cloud defaults",
+    "change_title": "Change server?",
+    "change_message": "You will be signed out. Local drafts and cached workspace data will be cleared. Sign in again on the selected server.",
+    "save_sign_out": "Save and sign out",
+    "invalid": "Enter a complete HTTPS address without credentials, a query, or a fragment. Check the host, port, and base path.",
+    "https_required": "HTTP is not supported. Use HTTPS with a certificate trusted by this device.",
+    "save_failed": "Could not save the server settings. Please try again. You may need to sign in again.",
+    "load_failed": "Saved server settings could not be loaded. Check the addresses and save them before signing in.",
+    "security": "Both addresses require HTTPS and a certificate trusted by this device. Changes take effect after saving and remain after restarting the app.",
+    "attachment_failed": "Could not open the attachment. Please try again."
   }
 }

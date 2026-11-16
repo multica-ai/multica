@@ -42,17 +42,10 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { getToken } from "@/data/secure-storage";
 import { api } from "@/data/api";
 import { WSClient } from "./ws-client";
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
-
-if (!API_URL) {
-  // ApiClient already throws on this; keeping a defensive check here
-  // avoids a confusing "URL constructor failed" deep in WSClient.
-  throw new Error("EXPO_PUBLIC_API_URL is not set");
-}
-
-// http(s)://host → ws(s)://host/ws
-const WS_URL = `${API_URL.replace(/^http/, "ws")}/ws`;
+import { getServerConfig, useServerConfigStore } from "@/data/server-config-store";
+import { serverWebSocketUrl } from "@/lib/server-url";
+import { registerSessionConnection } from "./session-connections";
+import { currentSessionEpoch, sessionEpochChanged } from "@/data/session-epoch";
 
 const RealtimeContext = createContext<WSClient | null>(null);
 
@@ -90,18 +83,28 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     let ws: WSClient | null = null;
     let appStateSub: { remove: () => void } | null = null;
     let netInfoUnsub: (() => void) | null = null;
+    const epoch = currentSessionEpoch();
+    const disconnect = () => {
+      cancelled = true;
+      appStateSub?.remove();
+      netInfoUnsub?.();
+      ws?.disconnect();
+      setConnection(null);
+    };
+    const unregister = registerSessionConnection(disconnect);
 
     void (async () => {
       const token = await getToken();
-      if (cancelled || !token) return;
+      if (cancelled || !token || sessionEpochChanged(epoch) ||
+          useServerConfigStore.getState().switching) return;
 
       ws = new WSClient({
-        url: WS_URL,
+        url: serverWebSocketUrl(getServerConfig().apiUrl),
         token,
         // Re-read per connection rather than reusing the token captured
         // above: a session renewed since this effect ran would otherwise keep
         // reconnecting with a credential on its way to expiring.
-        getToken: () => api.getToken(),
+        getToken: () => sessionEpochChanged(epoch) ? null : api.getToken(),
         workspaceSlug: wsSlug,
         clientVersion: Constants.expoConfig?.version,
         clientOS: Platform.OS,
@@ -143,11 +146,8 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     })();
 
     return () => {
-      cancelled = true;
-      appStateSub?.remove();
-      netInfoUnsub?.();
-      ws?.disconnect();
-      setConnection(null);
+      unregister();
+      disconnect();
     };
   }, [userId, wsSlug]);
 

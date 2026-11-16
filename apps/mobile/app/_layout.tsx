@@ -1,7 +1,7 @@
 import "../global.css";
 
 import { useEffect, useRef } from "react";
-import { AppState, type AppStateStatus } from "react-native";
+import { ActivityIndicator, AppState, View, type AppStateStatus } from "react-native";
 import { Stack, ThemeProvider, router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -20,6 +20,8 @@ import { LightboxProvider, prewarmHighlighter } from "@/lib/markdown";
 import { NAV_THEME } from "@/lib/theme";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { MobileI18nProvider } from "@/lib/i18n";
+import { useServerConfigStore } from "@/data/server-config-store";
+import { ServerSettings } from "@/components/auth/server-settings";
 
 // Kick off Shiki highlighter init at module load — fires once per process,
 // finishes before the user navigates to any screen with a code block. If
@@ -33,6 +35,9 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
   // Idempotent guard: 401 on multiple in-flight requests would otherwise
   // logout/navigate repeatedly during the same session-expire moment.
   const signingOutRef = useRef(false);
+  const initialized = useServerConfigStore((s) => s.initialized);
+  const configError = useServerConfigStore((s) => s.error);
+  const authLoading = useAuthStore((s) => s.isLoading);
 
   useEffect(() => {
     // Wire 401 handling onto the shared ApiClient singleton. Must be set
@@ -58,7 +63,9 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
     // Launch check for the sliding session (MUL-7436). Runs after the token
     // is restored and the identity probe has settled, so it never races the
     // first getMe(); a no-op when there is no session to extend.
-    void initialize().then(() => maybeRenewSession());
+    void initialize().then(() => maybeRenewSession()).catch(() => {
+      useAuthStore.setState({ isLoading: false });
+    });
   }, [initialize, qc]);
 
   // Foreground transitions are one of the two "someone is using this" signals;
@@ -73,6 +80,10 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
     return () => sub.remove();
   }, []);
 
+  if (configError) return <ServerSettings recovery />;
+  if (!initialized || authLoading) {
+    return <View className="flex-1 items-center justify-center bg-background"><ActivityIndicator /></View>;
+  }
   return <>{children}</>;
 }
 

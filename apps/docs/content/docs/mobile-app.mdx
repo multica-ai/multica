@@ -87,31 +87,13 @@ pnpm ios:mobile:device:prod:release
 
 ## Connecting to a self-hosted instance
 
-Release builds bake the API address into the app. `apps/mobile/.env.production` is committed with the public multica.ai defaults, so a fresh clone builds against production as-is.
+Open **Server settings** on the sign-in page, or **Settings → Server settings** after signing in. Enter the **API URL** (backend root) and **Web URL** (browser/link address), then save. They may share an origin or use separate hosts. The app remembers both addresses after a restart; no rebuild is needed. **Restore Cloud defaults**, followed by Save, returns to Multica Cloud.
 
-To connect to a self-hosted instance:
+Both addresses require HTTPS and a certificate trusted by the device. Custom ports and base paths are supported, for example API `https://multica.example.com:8443/backend` and Web `https://multica.example.com:8443/app`. A trailing `/api` in the API address is removed because request paths add it themselves; `/auth` and `/ws` use the same backend root. HTTP and certificate-verification bypasses are not supported in the distributed APK. The device must be able to reach the addresses; `localhost` refers to the phone itself.
 
-<Steps>
-<Step>
-Copy `apps/mobile/.env.production.example` to `apps/mobile/.env.production.local`, and fill in the addresses in the copy:
+Changing either address signs you out and clears local drafts, workspace selection and cached data. Sign in again on the selected instance. Server-side data remains on its original instance. File downloads and images obtain fresh signed URLs from that instance without exposing your session token to an external browser.
 
-```dotenv
-EXPO_PUBLIC_API_URL=https://api.example.com
-EXPO_PUBLIC_WEB_URL=https://app.example.com
-```
-
-The `.local` file overrides the committed defaults key by key and is gitignored, so personal endpoints never reach the repository. `EXPO_PUBLIC_API_URL` is required. `EXPO_PUBLIC_WEB_URL` powers entries like "Copy link" and "Open on web". Set both: a key you leave out falls back to the multica.ai default, so those entries would open multica.ai instead of your instance.
-</Step>
-<Step>
-Re-run the build command `pnpm ios:mobile:device:prod:release`. The iPhone must be able to reach the API address; when using a LAN address, don't write `localhost`, which on the iPhone points at the phone itself.
-</Step>
-</Steps>
-
-<Callout type="warning">
-Editing `.env.production` directly changes the production configuration of the current checkout. Keep personal values in the gitignored `.env.production.local`.
-</Callout>
-
-For mobile development, using the Simulator, or connecting to staging, see [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) in the repository.
+For development builds and initial installation defaults, see [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md).
 
 ## Next steps
 

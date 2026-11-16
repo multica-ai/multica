@@ -1,3 +1,4 @@
+import { getServerConfig } from "@/data/server-config-store";
 /**
  * Issue detail screen.
  *
@@ -116,7 +117,7 @@ export default function IssueDetail() {
   // the timeline list, not in this menu — one entry per action.
   const onPressMore = useCallback(() => {
     if (!issue || !wsSlug) return;
-    const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
+    const webUrl = getServerConfig().webUrl;
     const issueLink = webUrl
       ? `${webUrl}/${wsSlug}/issue/${issue.identifier}`
       : null;

@@ -141,14 +141,8 @@ import { parseWithFallback } from "@/lib/parse-response";
 import { createRequestId } from "@/lib/request-id";
 import { buildCommentUpdateBody } from "./revision";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
-
-if (!API_URL) {
-  throw new Error(
-    "EXPO_PUBLIC_API_URL is not set. Add it to the apps/mobile env file for " +
-      "the variant you are running (see apps/mobile/README.md).",
-  );
-}
+import { getServerConfig, initializeServerConfig, useServerConfigStore } from "./server-config-store";
+import { joinServerPath } from "@/lib/server-url";
 
 export interface LoginResponse {
   token: string;
@@ -199,6 +193,15 @@ export interface ApiClientOptions {
 class ApiClient {
   private token: string | null = null;
   private options: ApiClientOptions = {};
+  private generation = 0;
+  private readonly requests = new Set<AbortController>();
+
+  resetSession() {
+    this.generation++;
+    this.token = null;
+    for (const controller of this.requests) controller.abort();
+    this.requests.clear();
+  }
 
   setToken(token: string | null) {
     this.token = token;
@@ -218,122 +221,81 @@ class ApiClient {
   private async fetch<T>(
     path: string,
     init: RequestInit & { signal?: AbortSignal } = {},
+    multipart = false,
   ): Promise<T> {
+    const generation = this.generation;
+    const assertCurrent = () => {
+      if (generation !== this.generation || useServerConfigStore.getState().switching) {
+        const error = new Error("Server session changed");
+        error.name = "AbortError";
+        throw error;
+      }
+    };
+    await initializeServerConfig();
+    assertCurrent();
+    const url = joinServerPath(getServerConfig().apiUrl, path);
     const rid = createRequestId();
     const start = Date.now();
     const method = init.method ?? "GET";
-
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+      ...(!multipart ? { "Content-Type": "application/json" } : {}),
       "X-Client-Platform": "mobile",
       "X-Client-OS": Platform.OS,
       "X-Client-Version": Constants.expoConfig?.version ?? "unknown",
       "X-Request-ID": rid,
       ...((init.headers as Record<string, string>) ?? {}),
     };
-    if (this.token) {
-      headers["Authorization"] = `Bearer ${this.token}`;
-    }
-    // Backend middleware (server/internal/middleware/workspace.go) resolves
-    // slug → ws UUID and gates membership. Mirrors packages/core/api/client.ts.
+    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
     const slug = getCurrentSlug();
-    if (slug && !headers["X-Workspace-Slug"]) {
-      headers["X-Workspace-Slug"] = slug;
-    }
+    if (slug && !headers["X-Workspace-Slug"]) headers["X-Workspace-Slug"] = slug;
 
-    // Timeout + caller-signal forwarding.
-    //
-    // Hermes does NOT support AbortSignal.timeout() or AbortSignal.any() —
-    // see facebook/react-native#42042 and livekit#4014. So we manually
-    // compose a single controller that aborts on:
-    //   (a) caller-side signal (TQ cancelling a stale/inactive query, etc),
-    //   (b) 30s timeout (defends against iOS suspending the network task
-    //       silently during background — fetch() then never resolves;
-    //       facebook/react-native#35384). Without this, a refetch
-    //       triggered by WS reconnect can leave the FlatList pull-to-refresh
-    //       spinner stuck on the screen indefinitely.
+    // Hermes lacks AbortSignal.any/timeout. Forward caller cancellation and
+    // keep the controller until the body finishes, including multipart writes.
     const controller = new AbortController();
+    this.requests.add(controller);
+    let timedOut = false;
     const timeoutId = setTimeout(() => {
-      controller.abort(new Error(`request timed out after ${FETCH_TIMEOUT_MS}ms`));
+      timedOut = true;
+      controller.abort();
     }, FETCH_TIMEOUT_MS);
     const callerSignal = init.signal;
     const onCallerAbort = () => controller.abort(callerSignal?.reason);
-    if (callerSignal) {
-      if (callerSignal.aborted) controller.abort(callerSignal.reason);
-      else callerSignal.addEventListener("abort", onCallerAbort);
-    }
+    if (callerSignal?.aborted) controller.abort(callerSignal.reason);
+    else callerSignal?.addEventListener("abort", onCallerAbort);
 
     console.log(`[api] → ${method} ${path}`, { rid });
-
-    let res: Response;
     try {
-      res = await fetch(`${API_URL}${path}`, {
-        ...init,
-        signal: controller.signal,
-        headers,
-      });
-    } catch (err) {
-      clearTimeout(timeoutId);
-      callerSignal?.removeEventListener("abort", onCallerAbort);
-      // Re-throw with a clearer message if this was our own timeout abort.
-      if (
-        err instanceof Error &&
-        err.name === "AbortError" &&
-        !callerSignal?.aborted
-      ) {
-        const duration = Date.now() - start;
-        console.warn(`[api] ← TIMEOUT ${path}`, {
-          rid,
-          duration: `${duration}ms`,
+      const res = await fetch(url, { ...init, signal: controller.signal, headers });
+      assertCurrent();
+      const duration = `${Date.now() - start}ms`;
+      if (!res.ok) {
+        let body: unknown;
+        try { body = await res.json(); } catch { body = undefined; }
+        assertCurrent();
+        if (res.status === 401) this.options.onUnauthorized?.();
+        const message = body && typeof body === "object" && "message" in body
+          ? String(body.message) : `${res.status} ${res.statusText}`;
+        console[res.status === 404 ? "warn" : "error"](`[api] ← ${res.status} ${path}`, {
+          rid, duration, error: message,
         });
-        throw new ApiError(
-          `Request timed out after ${FETCH_TIMEOUT_MS}ms`,
-          0,
-          undefined,
-        );
+        throw new ApiError(message, res.status, body);
       }
-      throw err;
+      console.log(`[api] ← ${res.status} ${path}`, { rid, duration });
+      if (res.status === 204) return undefined as T;
+      const body: unknown = await res.json();
+      assertCurrent();
+      return body as T;
+    } catch (error) {
+      assertCurrent();
+      if (timedOut && !callerSignal?.aborted) {
+        throw new ApiError(`Request timed out after ${FETCH_TIMEOUT_MS}ms`, 0);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
+      this.requests.delete(controller);
+      callerSignal?.removeEventListener("abort", onCallerAbort);
     }
-    clearTimeout(timeoutId);
-    callerSignal?.removeEventListener("abort", onCallerAbort);
-    const duration = Date.now() - start;
-
-    if (!res.ok) {
-      // 401 sign-out hook: invoke once, let the platform layer (auth-store)
-      // clear the token + navigate. Subsequent requests in flight will also
-      // 401 and re-enter here, so the callback must be idempotent.
-      if (res.status === 401) {
-        this.options.onUnauthorized?.();
-      }
-
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        body = undefined;
-      }
-      const message =
-        (body && typeof body === "object" && "message" in body
-          ? String((body as { message: unknown }).message)
-          : null) ?? `${res.status} ${res.statusText}`;
-
-      const level = res.status === 404 ? "warn" : "error";
-      console[level](`[api] ← ${res.status} ${path}`, {
-        rid,
-        duration: `${duration}ms`,
-        error: message,
-      });
-
-      throw new ApiError(message, res.status, body);
-    }
-
-    console.log(`[api] ← ${res.status} ${path}`, {
-      rid,
-      duration: `${duration}ms`,
-    });
-
-    if (res.status === 204) return undefined as T;
-    return (await res.json()) as T;
   }
 
   /**
@@ -737,6 +699,13 @@ class ApiClient {
       EMPTY_ATTACHMENT_LIST,
       { ...opts, endpoint: "GET /api/issues/:id/attachments" },
     );
+  }
+
+  async getAttachmentForDownload(id: string, opts?: { signal?: AbortSignal }): Promise<Attachment> {
+    const raw = await this.fetch<unknown>(`/api/attachments/${id}/download-metadata`, opts);
+    const parsed = AttachmentSchema.safeParse(raw);
+    if (!parsed.success) throw new ApiError("Attachment response invalid", 0, raw);
+    return parsed.data;
   }
 
   // Active tasks for an issue (status in queued/dispatched/running). Returns
@@ -1317,31 +1286,17 @@ class ApiClient {
    * both empty when uploading from a not-yet-created issue (the attachment
    * is hooked to the issue once it's created — same flow as web).
    *
-   * Does NOT use `this.fetch` because:
+   * Uses the shared request lifecycle with multipart headers because:
    *   - FormData must not have a `Content-Type` header preset (the browser /
    *     RN fetch needs to set the multipart boundary itself).
    *   - `this.fetch` hard-codes `application/json`.
    *
-   * So we re-implement the auth + slug + logging shell inline.
    */
   async uploadFile(
     asset: FileAsset,
     opts?: { issueId?: string; commentId?: string },
   ): Promise<Attachment> {
-    const rid = createRequestId();
-    const start = Date.now();
     const path = "/api/upload-file";
-
-    const headers: Record<string, string> = {
-      // No Content-Type — let fetch set the multipart boundary.
-      "X-Client-Platform": "mobile",
-      "X-Client-OS": Platform.OS,
-      "X-Client-Version": Constants.expoConfig?.version ?? "unknown",
-      "X-Request-ID": rid,
-    };
-    if (this.token) headers["Authorization"] = `Bearer ${this.token}`;
-    const slug = getCurrentSlug();
-    if (slug) headers["X-Workspace-Slug"] = slug;
 
     const formData = new FormData();
     // RN's FormData accepts `{ uri, name, type }` as the file value.
@@ -1353,53 +1308,15 @@ class ApiClient {
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
 
-    console.log(`[api] → POST ${path}`, { rid, filename: asset.name });
-
-    const res = await fetch(`${API_URL}${path}`, {
-      method: "POST",
-      headers,
-      body: formData,
-    });
-    const duration = Date.now() - start;
-
-    if (!res.ok) {
-      if (res.status === 401) this.options.onUnauthorized?.();
-      let body: unknown;
-      try {
-        body = await res.json();
-      } catch {
-        body = undefined;
-      }
-      const message =
-        (body && typeof body === "object" && "message" in body
-          ? String((body as { message: unknown }).message)
-          : null) ?? `Upload failed: ${res.status}`;
-      console.error(`[api] ← ${res.status} ${path}`, {
-        rid,
-        duration: `${duration}ms`,
-        error: message,
-      });
-      throw new ApiError(message, res.status, body);
-    }
-
-    console.log(`[api] ← ${res.status} ${path}`, {
-      rid,
-      duration: `${duration}ms`,
-    });
-
-    // Strict validation: parseWithFallback's silent-fallback pattern doesn't
-    // fit here — an attachment without a `url` would be inserted into the
-    // user's text as `![](undefined)`. Throw on shape mismatch so the
-    // caller's Alert path fires instead of letting a broken link land in
-    // the editor.
-    const json: unknown = await res.json();
+    const json = await this.fetch<unknown>(path, {
+      method: "POST", body: formData,
+    }, true);
     const parsed = AttachmentSchema.safeParse(json);
     if (!parsed.success) {
       console.error(`[api] ← shape mismatch ${path}`, {
-        rid,
         error: parsed.error.message,
       });
-      throw new ApiError("Upload response invalid", res.status, json);
+      throw new ApiError("Upload response invalid", 0, json);
     }
     return parsed.data;
   }

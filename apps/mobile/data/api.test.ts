@@ -12,6 +12,7 @@ vi.hoisted(() => {
 vi.mock("@/data/workspace-store", () => ({ getCurrentSlug: () => null }));
 vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.1" } } }));
+vi.mock("expo-secure-store", () => ({ getItemAsync: async () => null }));
 
 describe("api.listAgents", () => {
   afterEach(() => vi.unstubAllGlobals());

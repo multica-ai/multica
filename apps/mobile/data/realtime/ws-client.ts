@@ -215,11 +215,16 @@ export class WSClient {
     this.logger.info("[ws] dialing", url.toString().replace(/token=[^&]*/, "token=…"));
 
     ws.onopen = () => {
+      const token = this.opts.getToken ? this.opts.getToken() : this.opts.token;
+      if (!token) {
+        this.disconnect();
+        return;
+      }
       this.logger.info("[ws] socket open, sending auth frame");
       ws.send(
         JSON.stringify({
           type: "auth",
-          payload: { token: this.opts.getToken?.() ?? this.opts.token },
+          payload: { token },
         }),
       );
     };

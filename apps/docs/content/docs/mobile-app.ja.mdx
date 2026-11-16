@@ -87,31 +87,13 @@ pnpm ios:mobile:device:prod:release
 
 ## セルフホストインスタンスへの接続
 
-Release ビルドは API アドレスをアプリに埋め込みます。`apps/mobile/.env.production` は公開されている multica.ai のデフォルト値とともにコミットされているため、新しくクローンした状態でも本番ビルドができます。
+ログイン画面の **Server settings**、またはログイン後の **Settings → Server settings** を開きます。**API URL**（バックエンドのルート）と **Web URL**（ブラウザーとリンクのアドレス）を入力して保存します。同一オリジンと別ホストの両方に対応し、再起動後も保持されます。再ビルドは不要です。**Restore Cloud defaults** を選んで保存すると Multica Cloud に戻ります。
 
-セルフホストインスタンスに接続するには:
+両方のアドレスには、端末が信頼する証明書を持つ HTTPS が必要です。カスタムポートとベースパスに対応します。例：API `https://multica.example.com:8443/backend`、Web `https://multica.example.com:8443/app`。API アドレス末尾の `/api` は除去され、リクエストパス側で追加されます。`/auth` と `/ws` も同じバックエンドルートを使います。配布 APK は HTTP や証明書検証の回避に対応しません。`localhost` は端末自身を指します。
 
-<Steps>
-<Step>
-`apps/mobile/.env.production.example` を `apps/mobile/.env.production.local` としてコピーし、コピーにアドレスを書きます:
+どちらかのアドレスを変更するとログアウトし、ローカルの下書き、ワークスペース選択、キャッシュを消去します。選択したインスタンスで再ログインしてください。サーバー側のデータは元のインスタンスに残ります。添付ファイルと画像には選択したサーバーから新しい署名 URL を取得し、セッショントークンを外部ブラウザーに渡しません。
 
-```dotenv
-EXPO_PUBLIC_API_URL=https://api.example.com
-EXPO_PUBLIC_WEB_URL=https://app.example.com
-```
-
-`.local` ファイルはコミット済みのデフォルトをキーごとに上書きし、gitignore されるため、個人の API アドレスがリポジトリに入ることはありません。`EXPO_PUBLIC_API_URL` は必須です。`EXPO_PUBLIC_WEB_URL` は "Copy link" や "Open on web" などの入口に使われます。両方を設定してください。書かなかったキーには multica.ai のデフォルト値が使われるため、これらの入口がセルフホストインスタンスではなく multica.ai を開きます。
-</Step>
-<Step>
-ビルドコマンド `pnpm ios:mobile:device:prod:release` を再実行します。iPhone がこの API アドレスに到達できる必要があります。LAN のアドレスを使う場合は `localhost` と書かないでください。iPhone 上では iPhone 自身を指します。
-</Step>
-</Steps>
-
-<Callout type="warning">
-`.env.production` を直接編集すると、現在のチェックアウトの本番設定が変わります。個人の値は gitignore された `.env.production.local` に書いてください。
-</Callout>
-
-モバイルの開発、Simulator の使用、staging への接続については、リポジトリの [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) を参照してください。
+開発ビルドと初回インストール時の既定値は [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) を参照してください。
 
 ## 次のステップ
 

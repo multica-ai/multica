@@ -1,3 +1,4 @@
+import { getServerConfig } from "@/data/server-config-store";
 /**
  * Project detail screen. Single column, scrolling:
  *
@@ -96,7 +97,7 @@ export default function ProjectDetail() {
 
   const onPressMore = () => {
     if (!project) return;
-    const wsUrl = process.env.EXPO_PUBLIC_WEB_URL;
+    const wsUrl = getServerConfig().webUrl;
     const actions = ["cancel", isPinned ? "unpin" : "pin", "edit"];
     if (wsUrl) actions.push("open_web");
     if (canDelete) actions.push("delete");

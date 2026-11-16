@@ -84,17 +84,20 @@ automatic dotenv loading so staging cannot acquire production endpoints during
 Gradle bundling. Minimum Android version: 7.0 (API 24). Default ABIs: `arm64-v8a`
 and `x86_64`. Override `MULTICA_ANDROID_ABIS` for other React Native architectures.
 
-For self-hosting, put both public origins in `.env.production.local`:
+For self-hosting, open **Server settings** on the login page or in Settings.
+Save API URL and Web URL independently; no rebuild is required. Both persist
+across restarts. **Restore Cloud defaults**, then Save, returns to Cloud.
+Custom ports and proxy prefixes are retained (API `https://host:8443/backend`,
+Web `https://host:8443/app`). The API field is a backend root: a trailing `/api`
+is removed because request paths add it. Auth and WS use `/auth` and `/ws` under
+the same root. The distributed APK requires HTTPS and device-trusted certificates;
+it never bypasses TLS. Changing either URL clears the old session, workspace,
+query caches and drafts before the new instance can receive requests.
 
-```dotenv
-EXPO_PUBLIC_API_URL=https://api.example.com
-EXPO_PUBLIC_WEB_URL=https://app.example.com
-```
-
-Addresses are embedded; rebuild to change them. `localhost` refers to the phone.
-Android emulators reach the host through `10.0.2.2`. HTTP needs the explicit
-`EXPO_ANDROID_ALLOW_CLEARTEXT=1` build opt-in. Use HTTPS for credentials on
-untrusted networks.
+Environment variables only choose the initial install defaults; saved runtime
+settings take precedence. `localhost` refers to the phone. Test infrastructure
+must provide a device-reachable HTTPS endpoint; do not enable global cleartext
+or disable TLS verification to reach an isolated HTTP-only backend.
 
 Application ID overrides: `EXPO_ANDROID_PACKAGE_PROD`,
 `EXPO_ANDROID_PACKAGE_STAGING`, `EXPO_ANDROID_PACKAGE_DEV`.
@@ -103,7 +106,7 @@ application ID and signing key stable:
 
 ```bash
 EXPO_ANDROID_VERSION_CODE=2 pnpm -C apps/mobile android:release
-adb install -r apps/mobile/dist/android/production/multica-0.1.1-2.apk
+adb install -r apps/mobile/dist/android/production/multica-0.1.2-2.apk
 ```
 
 ## Verification

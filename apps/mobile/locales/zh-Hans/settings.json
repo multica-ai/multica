@@ -87,5 +87,25 @@
     "chat_replies": "包含聊天回复"
   },
   "groups.assignments_description": "任务分配给我或取消分配给我时。",
-  "groups.mentions_description": "有人用 @ 提到你时，包括 @all 和 @squad。"
+  "groups.mentions_description": "有人用 @ 提到你时，包括 @all 和 @squad。",
+  "server": {
+    "title": "服务器设置",
+    "description": "使用 Multica Cloud，或连接自己的 Multica 服务器。API 和网页地址可向管理员获取。",
+    "api_url": "API 地址",
+    "web_url": "网页地址",
+    "api_help": "填写后端根地址，可包含端口和基础路径。末尾的 /api 会移除，接口路径会自动添加它。",
+    "web_help": "复制链接或在浏览器中打开 Multica 时使用的地址，可以与 API 地址不同。",
+    "save": "保存服务器设置",
+    "saving": "保存中…",
+    "restore_defaults": "恢复 Cloud 默认地址",
+    "change_title": "更换服务器？",
+    "change_message": "将退出登录，并清除本地草稿和工作区缓存。请在所选服务器上重新登录。",
+    "save_sign_out": "保存并退出登录",
+    "invalid": "请填写完整的 HTTPS 地址，不含用户名、密码、查询参数或锚点，并检查域名、端口和基础路径。",
+    "https_required": "不支持 HTTP。请使用 HTTPS，并确保设备信任服务器证书。",
+    "save_failed": "无法保存服务器设置，请重试。可能需要重新登录。",
+    "load_failed": "无法读取已保存的服务器设置。请检查地址并保存后再登录。",
+    "security": "两个地址都需要使用 HTTPS，且证书须受设备信任。保存后生效，重启 App 后仍会保留。",
+    "attachment_failed": "无法打开附件，请重试。"
+  }
 }

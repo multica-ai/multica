@@ -11,6 +11,7 @@ import { MulticaLogo } from "@/components/brand/multica-logo";
 import { useAuthStore } from "@/data/auth-store";
 import { i18n, useT } from "@/lib/i18n";
 import { mapAuthError } from "@/lib/auth-error";
+import { useServerConfigStore } from "@/data/server-config-store";
 
 export default function Login() {
   const { t } = useT("auth");
@@ -18,6 +19,8 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const apiUrl = useServerConfigStore((s) => s.config.apiUrl);
+  const { t: settings } = useT("settings");
 
   const onSubmit = async () => {
     const trimmed = email.trim();
@@ -85,6 +88,12 @@ export default function Login() {
           >
             <Text>{submitting ? t("login.sending") : t("login.send_code")}</Text>
           </Button>
+          <View className="gap-1">
+            <Button variant="ghost" disabled={submitting} onPress={() => router.push("/settings/server")}>
+              <Text>{settings("server.title")}</Text>
+            </Button>
+            <Text className="text-xs text-muted-foreground text-center" numberOfLines={2}>{apiUrl}</Text>
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

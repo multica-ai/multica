@@ -22,12 +22,13 @@
  * + size hint, opening the canonical download URL on tap.
  */
 import { useMemo } from "react";
-import { Linking, Pressable, View } from "react-native";
+import { Pressable, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { Attachment } from "@multica/core/types";
 import { standaloneAttachments } from "@/lib/attachment-dedup";
 import { MarkdownImage } from "@/lib/markdown/markdown-image";
-import { resolveAttachmentUrl } from "@/lib/attachment-url";
+import { openAttachment } from "@/data/attachment-media";
+import { attachmentSource } from "@/lib/attachment-source";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { Text } from "@/components/ui/text";
@@ -93,22 +94,7 @@ function FileCard({
   const sizeLabel = formatBytes(attachment.size_bytes);
   return (
     <Pressable
-      onPress={() => {
-        // download_url is the canonical link — opening it hands off to
-        // Safari which handles auth-token-free download + previewing for
-        // common types (PDF, txt). Mirrors what the markdown link renderer
-        // does for `[name](url)`.
-        //
-        // The backend may return a server-relative URL like
-        // `/api/attachments/{id}/download` when no CloudFront signer is
-        // configured (MUL-2976). RN's `Linking.openURL` requires an
-        // absolute http(s) URL — it returns "Cannot open URL" otherwise —
-        // so resolve against `EXPO_PUBLIC_API_URL` first.
-        const target = resolveAttachmentUrl(attachment.download_url);
-        if (target) {
-          void Linking.openURL(target);
-        }
-      }}
+      onPress={() => { void openAttachment(attachmentSource(attachment.download_url || attachment.url, [attachment])); }}
       accessibilityRole="button"
       accessibilityLabel={`Open ${attachment.filename}`}
       className="flex-row items-center gap-2 px-3 py-2 rounded-md bg-secondary/60 active:opacity-80"

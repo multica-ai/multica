@@ -13,8 +13,10 @@ import { create } from "zustand";
 import type { User } from "@multica/core/types";
 import { api, ApiError } from "./api";
 import { clearToken, getToken, setToken } from "./secure-storage";
-import { invalidateSessionEpoch } from "./session-epoch";
+import { currentSessionEpoch, invalidateSessionEpoch, sessionEpochChanged } from "./session-epoch";
 import { useWorkspaceStore } from "./workspace-store";
+import { initializeServerConfig } from "./server-config-store";
+import { stopSessionConnections } from "./realtime/session-connections";
 
 interface AuthState {
   user: User | null;
@@ -33,12 +35,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true,
 
   initialize: async () => {
+    const epoch = currentSessionEpoch();
+    await initializeServerConfig();
+    if (sessionEpochChanged(epoch)) return;
     // Restore the persisted workspace slug alongside the auth token so the
     // entry redirect (app/index.tsx) can route directly to the last-used
     // workspace without flashing /select-workspace.
     await useWorkspaceStore.getState().restoreSlug();
 
     const token = await getToken();
+    if (sessionEpochChanged(epoch)) return;
     if (!token) {
       set({ isLoading: false });
       return;
@@ -46,8 +52,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     api.setToken(token);
     try {
       const user = await api.getMe();
+      if (sessionEpochChanged(epoch)) return;
       set({ user, isLoading: false });
     } catch (err) {
+      if (sessionEpochChanged(epoch)) return;
       // Only clear token on a genuine 401. Network blips / 5xx keep the
       // token so the next launch (or a manual refresh) can retry.
       if (err instanceof ApiError && err.status === 401) {
@@ -67,12 +75,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   verifyCode: async (email, code) => {
+    const startedAt = currentSessionEpoch();
     const { token, user } = await api.verifyCode(email, code);
+    if (sessionEpochChanged(startedAt)) throw new Error("Server session changed");
     // Signing in replaces the credential just as decisively as signing out:
     // a renewal still in flight for the previous account must not write its
     // result over this one.
     invalidateSessionEpoch();
+    const epoch = currentSessionEpoch();
     await setToken(token);
+    if (sessionEpochChanged(epoch)) throw new Error("Server session changed");
     api.setToken(token);
     set({ user });
     return user;
@@ -83,9 +95,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     // below is async, so until it lands a concurrent read still returns the
     // token being removed — the epoch is what makes this instant.
     invalidateSessionEpoch();
+    api.resetSession();
+    stopSessionConnections();
+    set({ user: null, isLoading: false });
     await clearToken();
-    api.setToken(null);
-    set({ user: null });
   },
 
   setUser: (user) => set({ user }),

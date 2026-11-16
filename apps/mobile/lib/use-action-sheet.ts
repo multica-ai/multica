@@ -3,6 +3,7 @@ import { useActionSheet as useExpoActionSheet, type ActionSheetOptions } from "@
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { Platform } from "react-native";
 
 /** Native iOS menus and a scrollable Android sheet with system Back support. */
 export function useActionSheet() {
@@ -24,7 +25,13 @@ export function useActionSheet() {
           autoFocus: true,
           ...options,
         },
-        (index) => onSelect(index ?? options.cancelButtonIndex ?? -1),
+        (index) => {
+          const selected = index ?? options.cancelButtonIndex ?? -1;
+          // The Android provider calls us before its hidden state commits.
+          // A follow-on sheet opened in that batch would be lost (React 19).
+          if (Platform.OS === "android") setTimeout(() => { void onSelect(selected); }, 0);
+          else void onSelect(selected);
+        },
       );
     },
     [show, theme, bottom, colorScheme],

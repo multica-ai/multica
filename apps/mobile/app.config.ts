@@ -16,7 +16,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   if (!["development", "staging", "production"].includes(env)) {
     throw new Error(`Unsupported APP_ENV: ${env}`);
   }
-  const versionCode = Number(process.env.EXPO_ANDROID_VERSION_CODE ?? "1");
+  const versionCode = Number(process.env.EXPO_ANDROID_VERSION_CODE ?? "2");
   if (!Number.isSafeInteger(versionCode) || versionCode < 1 || versionCode > 2100000000) {
     throw new Error("EXPO_ANDROID_VERSION_CODE must be an integer from 1 to 2100000000");
   }
@@ -29,7 +29,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ? "Multica (Staging)"
         : "Multica (Dev)",
     slug: "multica-mobile",
-    version: "0.1.1",
+    version: "0.1.2",
     orientation: "portrait",
     userInterfaceStyle: "automatic",
     scheme: "multica",

@@ -28,8 +28,8 @@ import {
   collectImageSequence,
   type ImageSequenceBlock,
 } from "@multica/core/attachments/image-sequence";
-import { resolveAttachmentUrl } from "@/lib/attachment-url";
 import { stripHtml } from "./preprocess";
+import { attachmentSource } from "@/lib/attachment-source";
 
 const ImageSequenceContext = createContext<readonly string[]>([]);
 
@@ -60,7 +60,7 @@ export function ImageSequenceProvider({
         const url = !item.imageByConstruction && !item.attachment
           ? normalizeUri(item.url)
           : item.url;
-        return resolveAttachmentUrl(url) ?? url;
+        return attachmentSource(url, item.attachment ? [item.attachment] : undefined);
       }),
     [blocks],
   );
