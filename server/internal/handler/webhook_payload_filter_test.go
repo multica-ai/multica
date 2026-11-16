@@ -82,7 +82,7 @@ func TestWebhookPayloadFilter_DiagnosticBounds(t *testing.T) {
 		values = append(values, strings.Repeat("界", 300))
 	}
 	failure := newWebhookPayloadConditionFailure(WebhookPayloadCondition{Path: "items.*", Op: payloadOpEquals, Value: "x"}, map[string]any{"items": values}, 0, 0)
-	if len(failure.ActualValues) != 10 || !failure.Truncated || len([]rune(failure.ActualValues[0])) != 257 {
+	if len(failure.ActualValues) != 10 || !failure.Truncated || len([]rune(failure.ActualValues[0])) != 256 {
 		t.Fatalf("diagnostic was not bounded: %+v", failure)
 	}
 	missing := newWebhookPayloadConditionFailure(WebhookPayloadCondition{Path: "missing", Op: payloadOpExists}, nil, 0, 0)

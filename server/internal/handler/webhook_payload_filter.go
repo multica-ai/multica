@@ -39,7 +39,7 @@ func newWebhookPayloadConditionFailure(c WebhookPayloadCondition, payload any, f
 		encoded, _ := json.Marshal(value)
 		preview := []rune(string(encoded))
 		if len(preview) > maxPreviewRunes {
-			preview = append(preview[:maxPreviewRunes], '…')
+			preview = append(preview[:maxPreviewRunes-1], '…')
 			failure.Truncated = true
 		}
 		failure.ActualValues = append(failure.ActualValues, string(preview))
