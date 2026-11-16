@@ -6893,10 +6893,9 @@ func providerDisplayName(name string) string {
 // AGENTS.md-only instructions, notably the MULTICA_CLI_PATH contract; no run
 // transcript is attached. Separately, upstream v1.5.2 documents context-file
 // discovery from the working directory without project trust:
-// https://github.com/earendil-works/pi-mono/blob/v1.5.2/packages/coding-agent/docs/configuration.md
+// https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/docs/configuration.md
 // That is the loader contract, not a canary result. No fresh MUL-5392 canary
-// was run for 1.5.2. Acceptance of the reported evidence remains pending
-// Yushen's decision; the requirement for a probe behind each baseline is unchanged.
+// was run for 1.5.2.
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
 	case "openclaw", "kimi", "traecli", "qwenpaw":

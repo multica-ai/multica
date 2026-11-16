@@ -1245,8 +1245,8 @@ func buildPiArgsFor(label, sessionPath string, opts ExecOptions, logger *slog.Lo
 	// Pi loads the per-task AGENTS.md the daemon writes into the workdir, so
 	// inlining the same runtime brief would duplicate it on every turn.
 	// Pi 0.67.2 was verified by the MUL-5392 canary. For the author-reported
-	// Pi 1.5.2 in-band evidence (GitHub #10713), upstream contract, and pending
-	// acceptance decision, see providerNeedsInlineSystemPrompt's evidence ledger.
+	// Pi 1.5.2 in-band evidence (GitHub #10713) and upstream contract, see
+	// providerNeedsInlineSystemPrompt's evidence ledger.
 	args = append(args, filterPiCustomArgs(opts.CustomArgs, logger)...)
 	// The extension is explicit, so Pi loads it without trusting the project.
 	// It stays after custom args so the managed path cannot be mistaken for the
