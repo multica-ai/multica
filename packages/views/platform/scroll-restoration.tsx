@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useMemo,
   type ReactNode,
 } from "react";
 
@@ -64,6 +65,12 @@ export interface ScrollRestorationAdapter {
    * when there is nothing to restore.
    */
   get(containerKey: string): ScrollRestorationEntry | undefined;
+  /**
+   * Register a plain scroll container at attach time. The returned cleanup
+   * captures it before detach, including same-route view changes. The platform
+   * binds the capture to the tab/route that owned the element at registration.
+   */
+  registerScrollRoot?(containerKey: string, element: HTMLElement): () => void;
   /**
    * Register/unregister a scroll source that is not a `[data-tab-scroll-root]`
    * element (currently: a sandboxed iframe's internal document). Desktop
@@ -146,24 +153,26 @@ export function useRestoredScrollOffset(containerKey: string): number | undefine
  * saved offsets (vertical and horizontal) when the element attaches, which
  * happens during commit — before paint — so the first visible frame is
  * already at the restored position. Compose it with other refs via a merged
- * callback.
+ * callback. Detach captures the latest offsets through the same adapter.
  */
 export function useRestoredScrollRef(
   containerKey: string,
 ): (el: HTMLElement | null) => void {
   const adapter = useContext(ScrollRestorationContext);
-  return useCallback(
-    (el: HTMLElement | null) => {
+  return useMemo(() => {
+    let capture: (() => void) | undefined;
+    return (el: HTMLElement | null) => {
+      capture?.();
+      capture = undefined;
       if (!el) return;
       const saved = adapter?.get(containerKey);
-      if (!saved) return;
-      if (saved.top > 0) el.scrollTop = saved.top;
-      if (saved.left !== undefined && saved.left > 0) {
+      if (saved && saved.top > 0) el.scrollTop = saved.top;
+      if (saved?.left !== undefined && saved.left > 0) {
         el.scrollLeft = saved.left;
       }
-    },
-    [adapter, containerKey],
-  );
+      capture = adapter?.registerScrollRoot?.(containerKey, el);
+    };
+  }, [adapter, containerKey]);
 }
 
 /**
