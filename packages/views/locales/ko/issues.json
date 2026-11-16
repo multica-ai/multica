@@ -600,7 +600,8 @@
     "project_directory_path_copied_with_branch": "프로젝트 디렉터리 경로를 복사했습니다 — 작업은 {{branch}} 브랜치에 있습니다",
     "workdir_path_copy_failed": "작업 디렉터리 경로를 복사하지 못했습니다",
     "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 태스크를 실행하지 않았습니다",
-    "pull_requests_empty_title": "연결된 PR이 없습니다."
+    "pull_requests_empty_title": "연결된 PR이 없습니다.",
+    "guest_readonly_note": "게스트는 보고 댓글을 남길 수 있지만 작업 속성은 바꿀 수 없습니다."
   },
   "timeline": {
     "loading": "불러오는 중...",
@@ -764,7 +765,9 @@
     "restart_failed": "현재 실행을 중지하지 못했습니다. 메시지는 보내지 않았습니다.",
     "reply_action": "답글 달기",
     "actions_label": "댓글 작업",
-    "create_issue_from_selection": "선택한 내용으로 하위 태스크 만들기"
+    "create_issue_from_selection": "선택한 내용으로 하위 태스크 만들기",
+    "guest_placeholder": "답글… 멤버를 @ 할 수 있습니다",
+    "guest_hint": "게스트는 에이전트를 @ 하거나 작업을 배정할 수 없습니다"
   },
   "reply": {
     "recipients_changed": "답글 대상이 변경되었습니다. 받는 사람을 확인한 뒤 다시 보내 주세요.",

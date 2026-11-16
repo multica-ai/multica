@@ -1596,6 +1596,10 @@
       "member": {
         "label": "成員",
         "description": "建立並處理任務"
+      },
+      "guest": {
+        "label": "訪客",
+        "description": "只能查看和評論分享給他的專案，不能執行智慧體。"
       }
     },
     "share_links_create_title": "建立分享連結",
@@ -1645,7 +1649,32 @@
     "toast_invitation_pending": "已經有一封發給 {{email}} 的待接受邀請。",
     "toast_invite_check_unavailable": "暫時無法核對現有成員和邀請，請稍後再試。",
     "member_limit_full_description_billing": "工作區的訂閱需要處理。到「帳單與套餐」恢復訂閱後才能加人，也可以先移除一位成員。",
-    "open_billing": "開啟帳單與套餐"
+    "open_billing": "開啟帳單與套餐",
+    "guest_free_tag": "免費 · 不佔席位",
+    "guest_projects_label": "可以存取的專案",
+    "guest_projects_add": "新增專案…",
+    "guest_projects_remove": "移除 {{project}}",
+    "guest_projects_hint": "訪客看不到其他專案、智慧體、自動化和設定。",
+    "invite_guest_button": "邀請訪客",
+    "all_label": "全部",
+    "guests_label": "訪客",
+    "guest_count": "{{count}} 位訪客",
+    "list_separator": "、",
+    "takes_seat": "佔 1 個席位",
+    "frees_seat": "不佔席位",
+    "make_member": "轉為成員",
+    "make_member_title": "把 {{name}} 轉為成員？",
+    "make_member_description": "{{name}} 可以存取整個工作區、執行智慧體，會佔用 1 個席位。",
+    "make_member_seat_description": "{{name}} 可以存取整個工作區、執行智慧體。已購席位已用完，將補購 1 個席位。",
+    "purchase_seat_and_make_member": "補購席位並轉為成員",
+    "making_member": "正在轉為成員…",
+    "make_guest_title": "把 {{name}} 轉為訪客",
+    "make_guest_description": "{{name}} 之後只能存取下面的專案，並釋放 1 個席位。他的智慧體、自動化和執行環境權限會被收回。",
+    "make_guest_button": "轉為訪客",
+    "manage_projects": "管理可存取的專案",
+    "manage_projects_title": "{{name}} 可以存取的專案",
+    "save_projects": "儲存",
+    "toast_projects_updated": "已更新可存取的專案"
   },
   "integrations": {
     "status_connected": "已連線",

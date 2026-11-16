@@ -1611,6 +1611,10 @@
       "member": {
         "label": "Miembro",
         "description": "Crea tareas y trabaja en ellas"
+      },
+      "guest": {
+        "label": "Invitado",
+        "description": "Ve y comenta los proyectos compartidos con él. No puede ejecutar agentes."
       }
     },
     "share_links_create_title": "Crear enlace de invitación",
@@ -1660,7 +1664,32 @@
     "toast_invitation_pending": "Ya hay una invitación pendiente para {{email}}.",
     "toast_invite_check_unavailable": "No se pudieron comprobar los miembros y las invitaciones actuales. Inténtalo de nuevo en un momento.",
     "member_limit_full_description_billing": "La suscripción del espacio de trabajo necesita atención. Restablécela en Facturación para añadir miembros, o elimina antes a un miembro.",
-    "open_billing": "Abrir Facturación"
+    "open_billing": "Abrir Facturación",
+    "guest_free_tag": "Gratis · sin asiento",
+    "guest_projects_label": "Proyectos a los que puede acceder",
+    "guest_projects_add": "Añadir proyecto…",
+    "guest_projects_remove": "Quitar {{project}}",
+    "guest_projects_hint": "Los invitados no ven otros proyectos, agentes, automatizaciones ni ajustes.",
+    "invite_guest_button": "Invitar invitado",
+    "all_label": "Todos",
+    "guests_label": "Invitados",
+    "guest_count": "Invitados: {{count}}",
+    "list_separator": ", ",
+    "takes_seat": "Ocupa 1 asiento",
+    "frees_seat": "Libera un asiento",
+    "make_member": "Convertir en miembro",
+    "make_member_title": "¿Convertir a {{name}} en miembro?",
+    "make_member_description": "{{name}} verá todo el espacio de trabajo y podrá ejecutar agentes. Ocupa 1 asiento.",
+    "make_member_seat_description": "{{name}} verá todo el espacio de trabajo y podrá ejecutar agentes. Todos los asientos están ocupados, así que se compra 1 más.",
+    "purchase_seat_and_make_member": "Comprar asiento y convertir",
+    "making_member": "Convirtiendo…",
+    "make_guest_title": "Convertir a {{name}} en invitado",
+    "make_guest_description": "{{name}} solo verá los proyectos de abajo y liberará un asiento. Se retiran sus agentes, automatizaciones y acceso a runtimes.",
+    "make_guest_button": "Convertir en invitado",
+    "manage_projects": "Gestionar proyectos accesibles",
+    "manage_projects_title": "Proyectos a los que {{name}} puede acceder",
+    "save_projects": "Guardar",
+    "toast_projects_updated": "Proyectos actualizados"
   },
   "integrations": {
     "status_connected": "Conectado",

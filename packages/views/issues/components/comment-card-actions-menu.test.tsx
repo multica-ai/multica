@@ -10,6 +10,10 @@ import { renderWithI18n } from "../../test/i18n";
 // Copy link), and Delete alone at the bottom. Edit and Delete only show on
 // comments the viewer may change.
 
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("@multica/core/api", () => ({
   api: { uploadFile: vi.fn() },
   dispatchReasonCode: () => undefined,
