@@ -250,3 +250,33 @@ describe("EditScheduleTriggerDialog sends only what the user changed", () => {
     expect(patch.cron_expression).toBeDefined();
   });
 });
+
+describe("finite schedule editing", () => {
+  it("sends null only when Unlimited is selected, retaining count information", async () => {
+    const user = userEvent.setup();
+    renderDialog(trigger({ execution_limit: 3, execution_count: 3, exhausted: true }));
+    expect(screen.getByText("3 accepted so far. Editing keeps this count.")).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Execution limit"), "unlimited");
+    await user.click(saveButton());
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledWith({ autopilotId: AUTOPILOT_ID, triggerId: "trg-evening", execution_limit: null }));
+  });
+  it("selects Once without overwriting untouched cron or enabled fields", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.selectOptions(screen.getByLabelText("Execution limit"), "once");
+    await user.click(saveButton());
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledWith({ autopilotId: AUTOPILOT_ID, triggerId: "trg-evening", execution_limit: 1 }));
+  });
+  it("blocks empty or fractional Custom counts before saving", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await user.selectOptions(screen.getByLabelText("Execution limit"), "custom");
+    const input = screen.getByLabelText("Execution count");
+    await user.clear(input);
+    expect(saveButton()).toBeDisabled();
+    await user.type(input, "2.5");
+    expect(saveButton()).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a whole number");
+    expect(mockUpdateTrigger).not.toHaveBeenCalled();
+  });
+});

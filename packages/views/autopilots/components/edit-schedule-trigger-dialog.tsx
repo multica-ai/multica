@@ -8,6 +8,7 @@ import { Switch } from "@multica/ui/components/ui/switch";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { toast } from "sonner";
 import type { AutopilotTrigger } from "@multica/core/types";
+import { ExecutionLimitEditor, validExecutionLimit } from "./schedule-editor/execution-limit";
 import { ScheduleEditor } from "./schedule-editor/schedule-editor";
 import { parseCron, toCron } from "./schedule-editor/cron-mapping";
 import { useScheduleSubmitGate } from "./schedule-editor/validate";
@@ -59,6 +60,9 @@ function EditScheduleTriggerDialogBody({
   // row is editable here, not only the ones the pickers can describe.
   const initialCfg = parseCron(trigger.cron_expression ?? "", trigger.timezone ?? "UTC");
   const [config, setConfig] = useState<ScheduleConfig>(initialCfg);
+  const [executionLimit, setExecutionLimit] = useState<number | null>(trigger.execution_limit ?? null);
+  const initialLimit = useRef(trigger.execution_limit ?? null);
+  const limitDirty = executionLimit !== initialLimit.current;
   const [label, setLabel] = useState(trigger.label ?? "");
   const [enabled, setEnabled] = useState(trigger.enabled);
   const [submitting, setSubmitting] = useState(false);
@@ -90,12 +94,12 @@ function EditScheduleTriggerDialogBody({
     config.timezone !== baseline.current.timezone;
   const labelDirty = label.trim() !== baseline.current.label;
   const enabledDirty = enabled !== baseline.current.enabled;
-  const dirty = scheduleDirty || labelDirty || enabledDirty;
+  const dirty = scheduleDirty || labelDirty || enabledDirty || limitDirty;
   // The cron gate only stands between the user and a write that carries a cron.
   // A row whose stored expression the server can no longer preview is exactly
   // the one a user reaches for this dialog to switch OFF, and a rejection of an
   // expression they are not sending must not be what stops them.
-  const canSubmit = !submitting && dirty && (!scheduleDirty || scheduleGate.scheduleValid);
+  const canSubmit = !submitting && validExecutionLimit(executionLimit) && dirty && (!scheduleDirty || scheduleGate.scheduleValid);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -125,6 +129,7 @@ function EditScheduleTriggerDialogBody({
           : {}),
         ...(labelDirty ? { label: label.trim() } : {}),
         ...(enabledDirty ? { enabled } : {}),
+        ...(limitDirty ? { execution_limit: executionLimit } : {}),
       });
       toast.success(t(($) => $.edit_trigger_dialog.toast_updated));
       onOpenChange(false);
@@ -160,6 +165,7 @@ function EditScheduleTriggerDialogBody({
             disabled={submitting}
           />
 
+          <ExecutionLimitEditor value={executionLimit} onChange={setExecutionLimit} used={trigger.execution_count} disabled={submitting} />
           <div>
             <label className="text-caption font-medium text-muted-foreground">
               {t(($) => $.edit_trigger_dialog.label_field)}

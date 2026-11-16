@@ -1005,6 +1005,17 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 		}
 	}()
 
+	// Detect renamed schedule history before any DDL, including migrations
+	// earlier than 660. Replaying or rolling back it would lose lifetime counts.
+	for _, file := range opts.Files {
+		if migrations.ExtractVersion(file) == "660_autopilot_schedule_limit" {
+			if err := checkScheduleLimitMigrationHistory(ctx, conn, tableIdent); err != nil {
+				return err
+			}
+			break
+		}
+	}
+
 	// Create migrations tracking table.
 	if _, err := conn.Exec(ctx, fmt.Sprintf(`
 		CREATE TABLE IF NOT EXISTS %s (
@@ -1089,6 +1100,26 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 	}
 
 	return nil
+}
+
+func checkScheduleLimitMigrationHistory(ctx context.Context, conn *pgxpool.Conn, tableIdent string) error {
+	var present bool
+	if err := conn.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", tableIdent).Scan(&present); err != nil {
+		return fmt.Errorf("check schedule migration history table: %w", err)
+	}
+	if !present {
+		return nil
+	}
+	var version string
+	err := conn.QueryRow(ctx, "SELECT version FROM "+tableIdent+" WHERE version = ANY($1::text[]) ORDER BY version LIMIT 1",
+		[]string{"600_autopilot_schedule_limit", "615_autopilot_schedule_limit"}).Scan(&version)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check schedule migration history: %w", err)
+	}
+	return fmt.Errorf("%s is already applied; refusing to reapply the renamed migration: see server/migrations/README.md, Limited schedule migration rename; preserve execution counts before upgrading", version)
 }
 
 // quoteQualifiedIdentifier safely quotes either an unqualified table

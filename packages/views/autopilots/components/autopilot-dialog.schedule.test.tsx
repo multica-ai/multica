@@ -325,3 +325,15 @@ describe("AutopilotDialog schedule section on an autopilot with several triggers
     expect(mockCreateTrigger).not.toHaveBeenCalled();
   });
 });
+
+it("changes a finite limit without writing untouched cron fields", async () => {
+  mockUpdateAutopilot.mockReset().mockResolvedValue({ id: AUTOPILOT_ID });
+  mockUpdateTrigger.mockReset().mockResolvedValue({ id: "trg-1" });
+  const user = userEvent.setup();
+  renderEditDialog([trigger({ execution_limit: 3, execution_count: 3, exhausted: true })]);
+  await user.selectOptions(screen.getByLabelText("Execution limit"), "unlimited");
+  await user.click(saveButton());
+  await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledWith({
+    autopilotId: AUTOPILOT_ID, triggerId: "trg-1", execution_limit: null,
+  }));
+});
