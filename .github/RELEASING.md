@@ -75,9 +75,12 @@ The gate checks all six update metadata files (`latest-mac.yml`,
 artifact's architecture, upload status, and byte size. It also requires all six
 CLI targets in both legacy and versioned archive names plus `checksums.txt`.
 macOS update metadata must reference the ZIP; Windows requires EXE and Linux
-AppImage. Missing blockmaps do not block promotion. Signature and notarization
-checks belong on the macOS release host before upload; the gate does not download
-large binaries to recalculate SHA-512.
+AppImage. Missing blockmaps do not block promotion. The macOS `afterSign` hook
+runs `spctl` and `stapler validate` after notarization and before packaging/upload
+for explicit publishing builds. The release skill requires code signing so an
+unsigned build cannot skip that hook. These host checks do not run for unsigned
+local builds or other platforms. The gate does not download large binaries to
+recalculate SHA-512.
 
 Missing or inconsistent assets produce a `waiting` result with a list of blockers
 and leave Latest unchanged. This is normal when macOS and CI finish in either
