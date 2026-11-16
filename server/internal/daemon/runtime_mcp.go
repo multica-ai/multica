@@ -267,7 +267,12 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 
 	var path, key, format string
 	switch provider {
-	case "claude":
+	case "claude", "langcli":
+		// Langcli's config home is ~/.langcli, but its user-scope MCP file is
+		// still ~/.claude.json: getGlobalClaudeFile resolves
+		// CLAUDE_CONFIG_DIR (or the home directory) rather than the config
+		// home. Plugins are keyed to the config home instead, so the plugin
+		// branch below resolves it through claudeFamilyConfigDir.
 		path, key, format = filepath.Join(home, ".claude.json"), "mcpServers", "json"
 	case "codearts":
 		path, key, format = codeArtsUserConfigPath(home), "mcp", "jsonc"
@@ -329,10 +334,10 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
 	}
 
-	if provider == "claude" {
-		// User configuration has the same precedence Claude uses: plugin
+	if configDir, ok := claudeFamilyConfigDir(home, provider); ok {
+		// User configuration has the same precedence the CLI uses: plugin
 		// servers only fill names not already defined by the user.
-		for name, entry := range loadClaudePluginMcpServerConfigs(home) {
+		for name, entry := range loadClaudePluginMcpServerConfigs(configDir) {
 			if _, exists := servers[name]; !exists {
 				servers[name] = entry
 			}
@@ -362,9 +367,9 @@ func normalizeRuntimeMcpEntry(provider string, value any) any {
 	return entry
 }
 
-func loadClaudePluginMcpServerConfigs(home string) map[string]any {
+func loadClaudePluginMcpServerConfigs(configDir string) map[string]any {
 	out := map[string]any{}
-	for _, plugin := range listEnabledClaudePlugins(home) {
+	for _, plugin := range listEnabledClaudePlugins(configDir) {
 		manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 		paths := claudePluginComponentPaths(
 			plugin.InstallPath,
@@ -403,7 +408,8 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 	var path, key, source string
 	var format string
 	switch provider {
-	case "claude":
+	case "claude", "langcli":
+		// Same user-scope file as claude; see loadRuntimeMcpServerConfigs.
 		path, key, source, format = filepath.Join(home, ".claude.json"), "mcpServers", "User config", "json"
 	case "codearts":
 		path, key, source, format = codeArtsUserConfigPath(home), "mcp", "User config", "jsonc"
@@ -476,8 +482,8 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
 	}
 
-	if provider == "claude" {
-		out = append(out, listClaudePluginMcpServers(home)...)
+	if configDir, ok := claudeFamilyConfigDir(home, provider); ok {
+		out = append(out, listClaudePluginMcpServers(configDir)...)
 	}
 
 	// User configuration wins on a same-name collision. Plugin entries are
@@ -522,9 +528,9 @@ func runtimeMcpSummaries(servers map[string]any, source string) []runtimeLocalMc
 	return out
 }
 
-func listClaudePluginMcpServers(home string) []runtimeLocalMcpServerSummary {
+func listClaudePluginMcpServers(configDir string) []runtimeLocalMcpServerSummary {
 	out := make([]runtimeLocalMcpServerSummary, 0)
-	for _, plugin := range listEnabledClaudePlugins(home) {
+	for _, plugin := range listEnabledClaudePlugins(configDir) {
 		manifest, _ := readClaudePluginManifest(plugin.InstallPath)
 		paths := claudePluginComponentPaths(
 			plugin.InstallPath,

@@ -139,13 +139,26 @@ func resetClaudeCapabilityCacheForTests() {
 // user learns the model exists and why it is out of reach, with Description
 // carrying the runtime's own remedy.
 type claudeModelInfo struct {
-	Value                 string   `json:"value"`
-	ResolvedModel         string   `json:"resolvedModel"`
-	DisplayName           string   `json:"displayName"`
-	Description           string   `json:"description"`
+	Value         string `json:"value"`
+	ResolvedModel string `json:"resolvedModel"`
+	DisplayName   string `json:"displayName"`
+	Description   string `json:"description"`
+	// Provider is the vendor the picker groups this row under. Claude's own
+	// catalog omits it (every row is Anthropic); forks such as langcli serve
+	// several vendors from one binary and set it per row.
+	Provider              string   `json:"provider"`
 	SupportsEffort        bool     `json:"supportsEffort"`
 	SupportedEffortLevels []string `json:"supportedEffortLevels"`
 	Disabled              bool     `json:"disabled"`
+}
+
+// claudeModelProvider is the row's vendor label, defaulting to Anthropic for
+// rows that do not carry one.
+func claudeModelProvider(info claudeModelInfo) string {
+	if provider := strings.TrimSpace(info.Provider); provider != "" {
+		return provider
+	}
+	return "anthropic"
 }
 
 // claudeControlResponse is the control-protocol envelope. The doubled
@@ -345,7 +358,7 @@ func claudeModelsFromInfos(infos []claudeModelInfo) ([]Model, []UnavailableModel
 		models = append(models, Model{
 			ID:       id,
 			Label:    claudeModelLabel(info, id),
-			Provider: "anthropic",
+			Provider: claudeModelProvider(info),
 			Thinking: claudeThinkingFromInfo(info),
 		})
 	}
@@ -364,7 +377,7 @@ func claudeModelsFromInfos(infos []claudeModelInfo) ([]Model, []UnavailableModel
 				models = append(models, Model{
 					ID:       id,
 					Label:    claudeModelLabel(*defaultRow, id),
-					Provider: "anthropic",
+					Provider: claudeModelProvider(*defaultRow),
 					Default:  true,
 					Thinking: claudeThinkingFromInfo(*defaultRow),
 				})

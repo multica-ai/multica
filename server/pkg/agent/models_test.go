@@ -565,6 +565,20 @@ func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 			model:    "claude-sonnet-4-6",
 			want:     false,
 		},
+		{
+			// langcli is a Claude Code fork but routes other families' models,
+			// so it must not inherit claude's foreign-model clearing.
+			name:     "claude model is compatible with langcli",
+			provider: "langcli",
+			model:    "claude-sonnet-4-6",
+			want:     false,
+		},
+		{
+			name:     "openai model is compatible with langcli",
+			provider: "langcli",
+			model:    "gpt-5.5",
+			want:     false,
+		},
 	}
 
 	for _, tc := range cases {
@@ -880,6 +894,76 @@ func TestCachedDiscoveryDoesNotCacheEmpty(t *testing.T) {
 	}
 	if nonEmptyCalls != 1 {
 		t.Fatalf("non-empty result must be cached: expected fn called 1x, got %d", nonEmptyCalls)
+	}
+}
+
+// TestCachedDiscoveryPreservesCLIThinkingLevels pins the Catalog contract the
+// descriptor discovery funcs rely on: a cache hit must still carry the
+// installed binary's effort vocabulary, not just the model rows.
+func TestCachedDiscoveryPreservesCLIThinkingLevels(t *testing.T) {
+	const key = "test-cache-cli-levels"
+	reset := func() {
+		modelCacheMu.Lock()
+		delete(modelCache, key)
+		modelCacheMu.Unlock()
+	}
+	reset()
+	t.Cleanup(reset)
+
+	calls := 0
+	fn := func() (Catalog, error) {
+		calls++
+		return Catalog{Models: []Model{{ID: "m"}}, CLIThinkingLevels: []string{"low", "high"}}, nil
+	}
+	for i := 0; i < 2; i++ {
+		got, err := cachedDiscovery(key, fn)
+		if err != nil {
+			t.Fatalf("cachedDiscovery: %v", err)
+		}
+		if want := []string{"low", "high"}; !reflect.DeepEqual(got.CLIThinkingLevels, want) {
+			t.Fatalf("CLIThinkingLevels = %v, want %v", got.CLIThinkingLevels, want)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("non-empty result must be cached: expected fn called 1x, got %d", calls)
+	}
+}
+
+// TestListModelsBuiltinRuntimeUsesDescriptorCommand guards the empty-Command
+// default: a builtin runtime must enumerate its own binary, not the protocol
+// family's. Without that, ListModels("langcli") probes `claude`.
+func TestListModelsBuiltinRuntimeUsesDescriptorCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	dir := t.TempDir()
+	reply := `{"type":"control_response","response":{"subtype":"success","request_id":"multica-list-models","response":{"models":[{"value":"deepseek-flash","resolvedModel":"deepseek-flash","displayName":"DeepSeek V4.1 flash","provider":"deepseek"}]}}}`
+	// Drain stdin first (the request) so the caller's write cannot fail with a
+	// closed pipe, then answer. Only shell builtins are used: PATH holds just
+	// this fake, so a real `claude` can never be found.
+	script := "#!/bin/sh\nwhile read -r _line; do :; done\nprintf '%s\\n' '" + reply + "'\n"
+	writeTestExecutable(t, filepath.Join(dir, "langcli"), []byte(script))
+	t.Setenv("PATH", dir)
+
+	const key = "langcli"
+	modelCacheMu.Lock()
+	delete(modelCache, key)
+	modelCacheMu.Unlock()
+	t.Cleanup(func() {
+		modelCacheMu.Lock()
+		delete(modelCache, key)
+		modelCacheMu.Unlock()
+	})
+
+	catalog, err := ListModels(context.Background(), "langcli", Command{})
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(catalog.Models) != 1 || catalog.Models[0].ID != "deepseek-flash" {
+		t.Fatalf("models = %+v, want the langcli fake's row", catalog.Models)
+	}
+	if catalog.Models[0].Provider != "deepseek" {
+		t.Errorf("provider = %q, want deepseek", catalog.Models[0].Provider)
 	}
 }
 

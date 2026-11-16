@@ -4,6 +4,7 @@ import codeartsLogo from "./codearts-logo.svg";
 import qwenLogo from "./qwen-logo.svg";
 import reasonixLogo from "./reasonix-logo.svg";
 import dimLogo from "./dim-logo.png";
+import langcliLogo from "./langcli-logo.svg";
 import museappLogo from "./museapp-logo.svg";
 
 // Next.js exposes static imports as objects while Vite exposes URL strings.
@@ -387,6 +388,13 @@ function ZeroClawLogo({ className }: { className: string }) {
   );
 }
 
+// Langcli — official mark supplied by the Langcli project.
+const langcliLogoSrc = staticAssetSrc(langcliLogo);
+
+function LangcliLogo({ className }: { className: string }) {
+  return <img src={langcliLogoSrc} alt="Langcli" className={className} />;
+}
+
 // Muse app (Meta's personal AI agent, reached through a remote receptionist) —
 // the squiggle "M" as muse.ai serves it
 // (https://muse.ai/images/landing/brand/muse-logo.svg), copied verbatim. Not
@@ -450,6 +458,8 @@ export function ProviderLogo({
       return <Monitor className={className} />;
     case "omp":
       return <PiLogo className={className} />;
+    case "langcli":
+      return <LangcliLogo className={className} />;
     case "copilot":
       return <CopilotLogo className={className} />;
     case "cursor":
