@@ -3398,13 +3398,18 @@ func (d *Daemon) repoBarePathIsLive(barePath string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for workspaceID, ws := range d.workspaces {
+		matches := func(url string) bool {
+			path := d.repoCache.BarePath(workspaceID, url)
+			return filepath.Dir(path) == filepath.Dir(barePath) &&
+				repocache.BareDirMatchesURL(filepath.Base(barePath), url)
+		}
 		for url := range ws.allowedRepoURLs {
-			if d.repoCache.BarePath(workspaceID, url) == barePath {
+			if matches(url) {
 				return true
 			}
 		}
 		for url := range ws.taskRepoURLs {
-			if d.repoCache.BarePath(workspaceID, url) == barePath {
+			if matches(url) {
 				return true
 			}
 		}
