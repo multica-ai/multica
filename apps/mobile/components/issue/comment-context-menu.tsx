@@ -1,4 +1,4 @@
-import { getServerConfig } from "@/data/server-config-store";
+import { issueWebUrl } from "@/lib/issue-web-url";
 /**
  * Native long-press actions for a comment bubble, with a pressed highlight
  * while the sheet is visible. Reply targets the inline composer.
@@ -57,8 +57,8 @@ export function useCommentLongPress(
     const isRoot = !entry.parent_id;
     const resolved = !!entry.resolved_at;
     const hasContent = !!entry.content;
-    const webUrl = getServerConfig().webUrl;
-    const canCopyLink = !!(webUrl && wsSlug && issueIdentifier);
+    const commentLink = wsSlug && issueIdentifier ? issueWebUrl(wsSlug, issueIdentifier, entry.id) : null;
+    const canCopyLink = !!commentLink;
     const reactions = (entry.reactions ?? []) as Reaction[];
 
     Haptics.selectionAsync().catch(() => {});
@@ -163,9 +163,8 @@ export function useCommentLongPress(
             useCommentSelectStore.getState().setSelecting(entry.id);
             return;
           case "copyLink": {
-            if (!canCopyLink) return;
-            const url = `${webUrl}/${wsSlug}/issue/${issueIdentifier}#comment-${entry.id}`;
-            Clipboard.setStringAsync(url);
+            if (!commentLink) return;
+            Clipboard.setStringAsync(commentLink);
             Haptics.notificationAsync(
               Haptics.NotificationFeedbackType.Success,
             ).catch(() => {});

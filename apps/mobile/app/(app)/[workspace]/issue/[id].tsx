@@ -1,4 +1,4 @@
-import { getServerConfig } from "@/data/server-config-store";
+import { issueWebUrl } from "@/lib/issue-web-url";
 /**
  * Issue detail screen.
  *
@@ -117,10 +117,7 @@ export default function IssueDetail() {
   // the timeline list, not in this menu — one entry per action.
   const onPressMore = useCallback(() => {
     if (!issue || !wsSlug) return;
-    const webUrl = getServerConfig().webUrl;
-    const issueLink = webUrl
-      ? `${webUrl}/${wsSlug}/issue/${issue.identifier}`
-      : null;
+    const issueLink = issueWebUrl(wsSlug, issue.identifier);
     const actions = ["cancel", "pin"];
     if (isPinned) actions[1] = "unpin";
     actions.push("edit");
