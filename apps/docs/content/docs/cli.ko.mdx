@@ -427,7 +427,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `usage <issue-id>` | 집계 token 사용량 확인 | |
 | | `rerun-task <run-id>` | 원래 에이전트와 트리거 컨텍스트로 지정한 실행을 재시도 | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | 진행 중 또는 큐 대기 중인 실행 취소 | `--issue` |
-| `project` | `list/get/create/update/delete` | 프로젝트 관리 | `create`: `--title`(필수), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo`(반복 가능), `--visibility`(`workspace` 또는 `private`), `--member`(반복 가능, `--visibility private`와 함께); `update`: `--visibility`, `--member`(프로젝트를 비공개로 바꿀 때나 이미 비공개일 때 모두 목록에 추가) |
+| `project` | `get/create/update/delete` | 프로젝트 관리 | `create`: `--title`(필수), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo`(반복 가능), `--visibility`(`workspace` 또는 `private`), `--member`(반복 가능, `--visibility private`와 함께); `update`: `--visibility`, `--member`(프로젝트를 비공개로 바꿀 때나 이미 비공개일 때 모두 목록에 추가) |
 | | `list` | 프로젝트 목록 조회 및 필터링 | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
 | | `status <id> <status>` | 프로젝트 상태 변경 | |
 | | `archive/restore <id>` | 프로젝트 보관/복원. 보관된 프로젝트는 `list`에 표시되지 않고 새 태스크를 받지 않으며, 그 프로젝트에 태스크를 만드는 자동화는 일시 중지됨 | `list --archived`는 보관된 프로젝트만 표시 |

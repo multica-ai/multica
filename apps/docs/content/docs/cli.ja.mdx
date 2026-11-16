@@ -427,7 +427,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `usage <issue-id>` | 集計されたトークン使用量を表示 | |
 | | `rerun-task <run-id>` | 元のエージェントとトリガーのコンテキストで指定した実行を再試行 | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | 進行中またはキュー中の実行をキャンセル | `--issue` |
-| `project` | `list/get/create/update/delete` | プロジェクトを管理 | `create`: `--title`（必須）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（繰り返し可）、`--visibility`（`workspace` または `private`）、`--member`（繰り返し可、`--visibility private` と併用）；`update`: `--visibility`、`--member`（プロジェクトをプライベートにする場合も、すでにプライベートの場合もリストに追加） |
+| `project` | `get/create/update/delete` | プロジェクトを管理 | `create`: `--title`（必須）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（繰り返し可）、`--visibility`（`workspace` または `private`）、`--member`（繰り返し可、`--visibility private` と併用）；`update`: `--visibility`、`--member`（プロジェクトをプライベートにする場合も、すでにプライベートの場合もリストに追加） |
 | | `list` | プロジェクトを一覧表示・絞り込み | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
 | | `archive/restore <id>` | プロジェクトをアーカイブ／復元。アーカイブ済みのプロジェクトは `list` に表示されず、新しいタスクを受け付けず、そこにタスクを作成する自動化は一時停止される | `list --archived` でアーカイブ済みのプロジェクトのみを表示 |

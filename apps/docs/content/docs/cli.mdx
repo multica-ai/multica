@@ -458,7 +458,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `usage <issue-id>` | View aggregated token usage | |
 | | `rerun-task <run-id>` | Repeat a specific run with its original agent and trigger context | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | Cancel a running or queued run | `--issue` |
-| `project` | `list/get/create/update/delete` | Manage projects | `create`: `--title` (required), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (repeatable), `--visibility` (`workspace` or `private`), `--member` (repeatable, with `--visibility private`); `update`: `--visibility`, `--member` (adds the members whether the project is becoming private or already is) |
+| `project` | `get/create/update/delete` | Manage projects | `create`: `--title` (required), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (repeatable), `--visibility` (`workspace` or `private`), `--member` (repeatable, with `--visibility private`); `update`: `--visibility`, `--member` (adds the members whether the project is becoming private or already is) |
 | | `list` | List and filter projects | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
 | | `status <id> <status>` | Change project status | |
 | | `archive/restore <id>` | Archive or restore a project. Archived projects are hidden from `list`, accept no new issues, and pause the autopilots that file into them | `list --archived` lists only archived projects |
