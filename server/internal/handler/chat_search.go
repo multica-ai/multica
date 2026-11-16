@@ -108,7 +108,7 @@ func (h *Handler) SearchChatMessages(w http.ResponseWriter, r *http.Request) {
 		return rows.Err()
 	})
 	if err != nil {
-		if writeSearchCancellation(w, r, err) {
+		if writeQueryCancellation(w, r, err) {
 			return
 		}
 		// Statement-timeout surfaces as SQLSTATE 57014 — same fail-fast
@@ -125,7 +125,7 @@ func (h *Handler) SearchChatMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to search chat messages")
 		return
 	}
-	if writeSearchCancellation(w, r, ctx.Err()) {
+	if writeQueryCancellation(w, r, ctx.Err()) {
 		return
 	}
 
@@ -146,7 +146,7 @@ func (h *Handler) SearchChatMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if writeSearchCancellation(w, r, ctx.Err()) {
+	if writeQueryCancellation(w, r, ctx.Err()) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
