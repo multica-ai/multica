@@ -99,6 +99,18 @@ describe("useJumpToLiveEnd", () => {
     expect(screen.getByRole("button", { name: "latest" })).toBeTruthy();
   });
 
+  it("once shown, stays until the reader is within half a screen of the live end", () => {
+    render(<Harness metrics={{ scrollHeight: 3000, clientHeight: 500 }} pin={toBottom} />);
+    const scroller = screen.getByTestId("scroller");
+    scrollTo(scroller, 1000);
+
+    scrollTo(scroller, 2100); // 400px up
+    expect(screen.getByRole("button", { name: "latest" })).toBeTruthy();
+
+    scrollTo(scroller, 2300); // 200px up
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
   it("flags a reply that lands while the reader is away, and drops it back at the end", () => {
     const metrics = { scrollHeight: 3000, clientHeight: 500 };
     const { rerender } = render(<Harness metrics={metrics} pin={toBottom} tailKey="t1" />);

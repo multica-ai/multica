@@ -51,7 +51,7 @@ export function useServerSearch(query: string, options: { projects: boolean }) {
         const [issueRes, projectRes] = await Promise.all([
           searchIssues({ q, limit: 20, include_closed: true, signal: controller.signal }),
           withProjects
-            ? searchProjects({ q, limit: 10, include_closed: true, signal: controller.signal })
+            ? searchProjects({ q, limit: 10, include_closed: true, include_archived: true, signal: controller.signal })
             : Promise.resolve({ projects: [] as SearchProjectResult[] }),
         ]);
         if (!controller.signal.aborted) {

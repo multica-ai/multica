@@ -20,7 +20,7 @@ import (
 
 // privateRunFixture: a regular member who owns a private agent, and an issue
 // in a private project. inProject decides whether the member is a project
-// member; the workspace owner (f.UserID) is not a project member either way.
+// member; the workspace owner (f.UserID) is not one unless a test adds them.
 type privateRunFixture struct {
 	principalFixture
 	member  string
@@ -49,6 +49,13 @@ func newPrivateRunFixture(t *testing.T, inProject bool) privateRunFixture {
 	f.Cleanup(t, "DELETE FROM agent_task_queue WHERE issue_id=$1", issue)
 	f.Cleanup(t, "DELETE FROM activity_log WHERE issue_id=$1", issue)
 	return privateRunFixture{principalFixture: f, member: member, agent: agent, project: project, issue: parseTestUUID(t, issue)}
+}
+
+func (f privateRunFixture) addToProject(t *testing.T, userID string) {
+	t.Helper()
+	f.InsertNoID(t, "project_member", testutil.Cols{
+		"workspace_id": f.WorkspaceID, "project_id": f.project, "user_id": userID,
+	}, "project_id = $1 AND user_id = $2", f.project, userID)
 }
 
 func (f privateRunFixture) leaveProject(t *testing.T) {
@@ -135,21 +142,44 @@ func TestIssueWakeupClaimRechecksPrivateProject(t *testing.T) {
 	}
 }
 
-// The workspace owner sees every private project without a project_member row.
+// A workspace owner gets no pass (MUL-9284): their rule runs only while they
+// are in the project's member list, like anyone else's.
 func TestIssueWakeupPrivateProjectWorkspaceOwner(t *testing.T) {
-	f := newPrivateRunFixture(t, false)
-	s := &IssueWakeupService{Tasks: f.svc.TaskSvc}
-	ownerAgent := f.privateAgentOwnedBy(t, f.UserID, "pp-run-owner")
-	w, err := s.Create(context.Background(), f.issue, parseTestUUID(t, f.UserID), pgtype.UUID{}, WakeupInput{
-		AgentID: ownerAgent, Kind: "event", EventTypes: []string{"comment.created"}, Instruction: "Review",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.Comment(t, util.UUIDToString(f.issue), "trigger")
-	wakeDispatch(t, s, w)
-	if n := wakeRuns(t, f.principalFixture, w.ID); n != 1 {
-		t.Fatalf("owner's wakeup runs = %d, want 1", n)
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name     string
+		inList   bool
+		wantRuns int
+	}{
+		{"owner outside the member list", false, 0},
+		{"owner in the member list", true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPrivateRunFixture(t, false)
+			if tc.inList {
+				f.addToProject(t, f.UserID)
+			}
+			s := &IssueWakeupService{Tasks: f.svc.TaskSvc}
+			ownerAgent := f.privateAgentOwnedBy(t, f.UserID, "pp-run-owner")
+			w, err := s.Create(ctx, f.issue, parseTestUUID(t, f.UserID), pgtype.UUID{}, WakeupInput{
+				AgentID: ownerAgent, Kind: "event", EventTypes: []string{"comment.created"}, Instruction: "Review",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.Comment(t, util.UUIDToString(f.issue), "trigger")
+			wakeDispatch(t, s, w)
+			if n := wakeRuns(t, f.principalFixture, w.ID); n != tc.wantRuns {
+				t.Fatalf("owner's wakeup runs = %d, want %d", n, tc.wantRuns)
+			}
+			got, err := f.q.LocklessWakeup(ctx, w.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.inList && (got.Enabled || !got.DisabledAt.Valid) {
+				t.Fatalf("rule of an owner outside the project stays on: enabled=%t disabled_at=%v", got.Enabled, got.DisabledAt.Valid)
+			}
+		})
 	}
 }
 
@@ -168,8 +198,9 @@ func TestChildDoneWakeupPrivateProjectNeedsTheAgentOwner(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newPrivateRunFixture(t, tc.inProject)
 			s := &IssueWakeupService{Tasks: f.svc.TaskSvc}
-			// The parent's creator is the workspace owner, so the agent's
-			// owner is the only principal the project can stop.
+			// The parent's creator is in the project, so the agent's owner
+			// is the only principal the project can stop.
+			f.addToProject(t, f.UserID)
 			f.Exec(t, "UPDATE issue SET status='in_progress',assignee_type='agent',assignee_id=$2,creator_id=$3 WHERE id=$1", f.issue, f.agent, f.UserID)
 			child := f.Issue(t, "pp-run child", testutil.Cols{"parent_issue_id": f.issue, "project_id": f.project, "status": "in_progress"})
 			f.Cleanup(t, "DELETE FROM issue_child_event WHERE parent_id=$1", f.issue)
@@ -229,7 +260,7 @@ func TestDelegatedFailureRecoveryPrivateProjectNeedsTheHuman(t *testing.T) {
 	f, svc := seedDelegatedFailureFixture(t)
 	ctx := context.Background()
 	fx := testutil.New(f.pool, f.workspaceID, f.userID)
-	fx.Exec(t, "UPDATE member SET role='member' WHERE workspace_id=$1 AND user_id=$2", f.workspaceID, f.userID)
+	// The human is the workspace owner, which is no way into the project.
 	project := fx.Project(t, "recovery secret project", testutil.Cols{"visibility": projectaccess.VisibilityPrivate})
 	fx.Exec(t, "UPDATE issue SET project_id=$2 WHERE id=$1", f.issueID, project)
 

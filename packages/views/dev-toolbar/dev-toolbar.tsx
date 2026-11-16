@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useSyncExternalStore, type ReactNode } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { agentTaskSnapshotOptions } from "@multica/core/agents/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { paths } from "@multica/core/paths";
@@ -27,6 +27,7 @@ import {
   requestFailed,
   type MetricTone,
 } from "./metrics";
+import { DevActions } from "./actions-panel";
 import {
   ErrorsPanel,
   LongTaskPanel,
@@ -143,7 +144,8 @@ export function DevToolbar({ build, apiUrl, route, onNavigate }: DevToolbarProps
   const failed = recording.requests.filter(requestFailed).length;
   const errors = recording.errors.length;
   const queries = queryClient.getQueryCache().getAll();
-  const fetching = queries.filter((q) => q.state.fetchStatus === "fetching").length;
+  // Subscribes to the cache, so the counter does not wait for the next clock tick.
+  const fetching = useIsFetching();
   const online = runtimes?.filter((r) => r.status === "online").length ?? 0;
   const running = activeTasks(tasks ?? []).filter((t) => t.status === "running").length;
   const openIssue = slug ? (issueId: string) => onNavigate(paths.workspace(slug).issueDetail(issueId)) : null;
@@ -264,6 +266,7 @@ export function DevToolbar({ build, apiUrl, route, onNavigate }: DevToolbarProps
         <Metric label="Errors" value={String(errors)} tone={errors > 0 ? "bad" : "normal"}>
           <ErrorsPanel recording={recording} />
         </Metric>
+        <DevActions wsId={wsId} />
         <button
           type="button"
           onClick={() => setMinimized(true)}

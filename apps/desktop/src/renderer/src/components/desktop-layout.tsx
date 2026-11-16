@@ -18,14 +18,13 @@ import {
   CompactNavSheet,
   GlobalShortcuts,
   NavigationProgress,
-  NewIssueButton,
-  SearchButton,
   ShellRouteDataPrefetch,
   SpacePanel,
 } from "@multica/views/layout";
 import { SearchCommand } from "@multica/views/search";
 import { FloatingChat } from "@multica/views/chat";
 import { StarPrompt } from "@multica/views/star-prompt";
+import { WhatsNewDeck } from "@multica/views/whats-new";
 import { WorkspaceSlugProvider, useCurrentWorkspace } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace";
 import {
@@ -47,8 +46,6 @@ import { WindowToolbar, WINDOW_TOOLBAR_CLEARANCE } from "./window-toolbar";
 
 const TOP_BAR_HEIGHT_CLASS = "h-10";
 const RAIL_WIDTH = 56;
-const TITLE_BAR_ACTION_CLASS =
-  "flex size-7 items-center justify-center rounded-md text-faint-foreground transition-colors duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-2 focus-visible:outline-offset-2 [&_svg]:size-4";
 
 function RailTopSpacer() {
   return <div className={cn("shrink-0", TOP_BAR_HEIGHT_CLASS)} />;
@@ -72,8 +69,7 @@ function useNativeNavigationGestures() {
 // The main area's top bar doubles as a window drag region. The window
 // toolbar (traffic lights, history, panel toggle) floats over the rail and
 // the start of this bar, so the tabs start past whatever the rail leaves of
-// its width. New issue and search hold the far end; the tabs give way to
-// them.
+// its width.
 function MainTopBar({ railMounted }: { railMounted: boolean }) {
   const { isCompact } = useSidebar();
   const toolbarClearance =
@@ -104,19 +100,6 @@ function MainTopBar({ railMounted }: { railMounted: boolean }) {
       >
         <TabBar />
       </div>
-      {/* pr-6 is the canvas's mr-2 plus the page header's PAGE_GUTTER (px-4),
-          and gap-1 is the page header's action gap, so each icon here stands
-          on the same column as a trailing icon of the page header below. */}
-      {railMounted && (
-        <div
-          data-slot="title-bar-actions"
-          className="relative z-10 ml-auto flex shrink-0 items-center gap-1 pr-6"
-          style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
-        >
-          <NewIssueButton className={TITLE_BAR_ACTION_CLASS} tooltipSide="bottom" />
-          <SearchButton className={TITLE_BAR_ACTION_CLASS} tooltipSide="bottom" />
-        </div>
-      )}
     </header>
   );
 }
@@ -261,8 +244,10 @@ export function DesktopShell() {
           IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
         <DesktopInboxBridge />
-        <div className="flex h-screen bg-app-shell">
-          {/* bg-app-shell is the wrapper's non-inset fill, so it also owns the
+        <div className="flex h-screen">
+          {/* The wrapper alone paints the frame: a second fill under it would
+              double the frame's glass over a theme's backdrop.
+              bg-app-shell is the wrapper's non-inset fill, so it also owns the
               non-inset half of --sidebar-wrapper-fill. sidebar.tsx supplies the
               inset half of both. Anything that has to paint an opaque layer
               over this wrapper (the tab flares) reads the variable rather than
@@ -284,13 +269,12 @@ export function DesktopShell() {
                 {slug && (
                   <AppRail
                     topSlot={<RailTopSpacer />}
-                    globalActions={false}
                     // The card starts right under the top bar; the 7px
                     // centres the workspace tile on its header band.
                     className="hidden pt-[7px] md:flex"
                   />
                 )}
-                {slug && <CompactNavSheet globalActions={false} />}
+                {slug && <CompactNavSheet />}
                 {/* Right side: header + content card */}
                 <div className="flex flex-1 min-w-0 flex-col">
                   <MainTopBar railMounted={Boolean(slug)} />
@@ -305,6 +289,7 @@ export function DesktopShell() {
                     <TabContent />
                     {slug && <FloatingChat />}
                     {slug && <StarPrompt />}
+                    {slug && <WhatsNewDeck />}
                   </MainCanvas>
                   {slug && <AppBottomBar />}
                 </div>

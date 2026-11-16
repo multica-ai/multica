@@ -27,6 +27,10 @@ import { RolesDemo } from "@/components/demos/roles-demo";
 角色不決定誰能執行 AI 代理。每個 AI 代理有獨立的訪問範圍（Access），`owner` 和 `admin` 也不能繞過它執行未授權的 AI 代理。詳見[AI 代理](/agents#權限與-access)。
 </Callout>
 
+<Callout type="info">
+角色同樣不會開放私有專案。`owner` 或 `admin` 只有在成員名單裡時才能看到私有專案。詳見[私有專案](/projects#private-projects)。
+</Callout>
+
 ## 邀請成員
 
 `owner` 和 `admin` 在**設定 → 成員**中點選**邀請成員**，填寫信箱、選擇角色後傳送。邀請只能授予 `admin` 或 `member`；`owner` 需要先加入工作區，再由現有 `owner` 提升。

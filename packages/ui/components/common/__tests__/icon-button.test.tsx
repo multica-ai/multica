@@ -144,7 +144,7 @@ describe("TooltipHint", () => {
     );
 
     const button = screen.getByRole("button", { name: "Save" });
-    expect(button).not.toHaveAttribute("data-slot", "tooltip-trigger");
+    expect(button).not.toHaveAttribute("data-trigger");
   });
 });
 
@@ -218,6 +218,39 @@ describe("DeferredTooltip", () => {
         vi.advanceTimersByTime(550);
       });
       expect(document.querySelector("[data-slot='tooltip-content']")).toHaveTextContent("Collapse thread");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stays shut while the pointer is on a nested IconButton", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.now() + 10_000);
+      renderWithTooltips(
+        <DeferredTooltip
+          content="Open issue"
+          trigger={
+            <div data-testid="row">
+              Issue title
+              <IconButton label="Copy link">
+                <svg />
+              </IconButton>
+            </div>
+          }
+        />,
+      );
+      const row = screen.getByTestId("row");
+      const nested = screen.getByRole("button", { name: "Copy link" });
+
+      fireEvent.pointerEnter(row, { pointerType: "mouse" });
+      fireEvent.pointerOver(nested, { pointerType: "mouse" });
+      await act(async () => {
+        vi.advanceTimersByTime(TOOLTIP_OPEN_DELAY + 50);
+      });
+      expect(
+        screen.queryAllByText("Open issue").some((el) => el.closest("[data-slot='tooltip-content']")),
+      ).toBe(false);
     } finally {
       vi.useRealTimers();
     }

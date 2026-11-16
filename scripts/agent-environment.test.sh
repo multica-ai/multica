@@ -129,6 +129,29 @@ wait "$second" || fail "stop desktop failed"
 [ "$(count "down web")" = 1 ] && [ "$(count "down desktop")" = 1 ] || fail "concurrent stops did not stop both components"
 [ "$(count destroy)" = 1 ] || fail "concurrent stops destroyed $(count destroy) times, want once"
 
+# ...even where mkdir is not exclusive. uutils mkdir (Ubuntu 26.04) can tell
+# two simultaneous callers that each created the same directory; this one
+# tells every caller so.
+new_repo concurrent-mkdir
+touch "$repo/registered"
+live_claim web
+live_claim desktop
+mkdir -p "$repo/bin"
+cat > "$repo/bin/mkdir" <<'EOF'
+#!/usr/bin/env bash
+args=()
+for arg in "$@"; do [ "$arg" = -p ] || args+=("$arg"); done
+exec "$REAL_MKDIR" -p "${args[@]}"
+EOF
+chmod +x "$repo/bin/mkdir"
+PATH="$repo/bin:$PATH" REAL_MKDIR="$(command -v mkdir)" bash "$repo/scripts/agent-environment.sh" stop web > /dev/null &
+first=$!
+PATH="$repo/bin:$PATH" REAL_MKDIR="$(command -v mkdir)" bash "$repo/scripts/agent-environment.sh" stop desktop > /dev/null &
+second=$!
+wait "$first" || fail "stop web failed with a non-exclusive mkdir"
+wait "$second" || fail "stop desktop failed with a non-exclusive mkdir"
+[ "$(count destroy)" = 1 ] || fail "with a non-exclusive mkdir, concurrent stops destroyed $(count destroy) times, want once"
+
 # 4. The daemon signals start after running stop. start's own cleanup then
 #    finds nothing left to do.
 new_repo signalled
@@ -272,5 +295,32 @@ mkdir -p "$repo/.multica/agent-environments/lock.d"
 touch "$repo/.multica/agent-environments/lock.d/owner-$dead"
 bash "$repo/scripts/agent-environment.sh" stop web > /dev/null
 [ "$(count destroy)" = 1 ] || fail "a dead PID-specific lock prevented cleanup"
+
+# 10. A `start` from before the checkout was updated keeps running the script
+# it loaded, and its cleanup locks the way that version did: lock.d with only
+# its owner marker. A stop from the updated script waits for it.
+new_repo mixed-version
+touch "$repo/registered"
+lock_dir="$repo/.multica/agent-environments/lock.d"
+mkdir -p "$lock_dir"
+sleep 300 &
+old_holder=$!
+pids+=("$old_holder")
+touch "$lock_dir/owner-$old_holder"
+mv "$repo/scripts/dev-env.sh" "$repo/scripts/dev-env.original"
+cat > "$repo/scripts/dev-env.sh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+[ ! -e "$RACE_LOCK/owner-$RACE_HOLDER" ] || touch "$RACE_LOCK/../entered-while-held"
+exec bash "$(dirname "$0")/dev-env.original" "$@"
+EOF
+RACE_LOCK="$lock_dir" RACE_HOLDER="$old_holder" bash "$repo/scripts/agent-environment.sh" stop desktop > /dev/null &
+stopping=$!
+sleep 1
+[ ! -e "$repo/.multica/agent-environments/entered-while-held" ] || fail "a stop entered beside an earlier version's lock holder"
+rm "$lock_dir/owner-$old_holder" && rmdir "$lock_dir"
+stop_job "$old_holder"
+wait "$stopping" || fail "stop behind an earlier version's lock failed"
+[ "$(count "down desktop")" = 1 ] && [ "$(count destroy)" = 1 ] || fail "stop did not clean up once the earlier version released its lock"
 
 echo "✓ agent-environment.sh lifecycle verified"

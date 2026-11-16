@@ -86,7 +86,7 @@ func isUsageLimit403(lower string) bool {
 // failure_reason today and lets per-backend structured upgrades land
 // independently.
 func Classify(rawError string) Reason {
-	trimmed := strings.TrimSpace(rawError)
+	trimmed := strings.TrimSpace(WithoutCodebuddyProtocolSummary(rawError))
 	if trimmed == "" {
 		// SQL maps NULL/empty to a separate bucket ("empty_error"),
 		// but that bucket is not part of the canonical taxonomy. In-flight
@@ -202,12 +202,15 @@ func Classify(rawError string) Reason {
 		):
 		return ReasonAgentProviderQuotaLimit
 
-	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit.
+	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit, and
+	//    Kiro's throttling message, which carries none of those words and
+	//    would otherwise reach rule 6 through its "Internal error" wrapper.
 	case httpCapacityCodeRe.MatchString(lower),
 		containsAny(lower,
 			"rate limit",
 			"overloaded",
 			"no capacity available",
+			kiroThrottledWitness,
 		):
 		return ReasonAgentProviderCapacityOrRateLimit
 
@@ -578,6 +581,17 @@ const (
 	kiroDispatchFailurePhrase     = "dispatch failure"
 )
 
+// kiroThrottledWitness is Kiro CLI's fixed message for a throttled request
+// (GH #10652), surfaced through the same -32603 response-stream wrapper:
+//
+//	kiro session/prompt failed: session/prompt: Internal error (code=-32603,
+//	data=Encountered an error in the response stream: The request was
+//	throttled by the service (request_id: ...))
+//
+// The whole phrase is matched rather than a bare "throttled", which also
+// appears in unrelated text such as log or heartbeat descriptions.
+const kiroThrottledWitness = "request was throttled by the service"
+
 func isKiroDispatchFailure(lower string) bool {
 	return strings.Contains(lower, kiroResponseStreamErrorPhrase) &&
 		strings.Contains(lower, kiroDispatchFailurePhrase)
@@ -666,6 +680,7 @@ var legacyUsageLimit403Reasons = map[string]bool{
 // can be deleted once no daemon old enough to produce its wire shape is still
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
+	rawError = WithoutCodebuddyProtocolSummary(rawError)
 	if legacyConcurrentRequestLimitReasons[reason] &&
 		strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
 		return ReasonAgentProviderCapacityOrRateLimit
@@ -711,6 +726,14 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	if legacyKiroDispatchFailureReasons[reason] && isKiroDispatchFailure(lowerError) &&
 		Classify(rawError) == ReasonAgentProviderNetwork {
 		return ReasonAgentProviderNetwork
+	}
+	// GH #10652: a daemon predating kiroThrottledWitness files Kiro's
+	// throttling under the same wrapper buckets. Neither bucket is retryable,
+	// so this only corrects the label; Classify must still agree.
+	if legacyKiroDispatchFailureReasons[reason] &&
+		strings.Contains(lowerError, kiroThrottledWitness) &&
+		Classify(rawError) == ReasonAgentProviderCapacityOrRateLimit {
+		return ReasonAgentProviderCapacityOrRateLimit
 	}
 	if legacyOpencodeStreamEndedReasons[reason] &&
 		(strings.HasPrefix(lowerError, opencodeStreamEndedPrefix) ||

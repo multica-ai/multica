@@ -12,6 +12,18 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
+type VoiceOptions = { insert: (text: string) => boolean; submit?: () => void };
+const voiceOptions = vi.hoisted(() => ({ last: null as VoiceOptions | null }));
+
+// Voice input has its own tests; here only its wiring to the editor matters.
+vi.mock("../voice", () => ({
+  useComposerVoice: (options: VoiceOptions) => {
+    voiceOptions.last = options;
+    return { rootRef: () => {}, onFocusCapture: () => {} };
+  },
+  VoiceDialogFooter: ({ children }: { children: ReactNode }) => children,
+  VoiceMicButton: () => null,
+}));
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
 const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
@@ -361,6 +373,12 @@ vi.mock("../editor", async () => {
       },
       uploadFile: runUpload,
       focus: vi.fn(),
+      insertText: (text: string) => {
+        valueRef.current += text;
+        setValue(valueRef.current);
+        onUpdate?.(valueRef.current);
+        return true;
+      },
       hasActiveUploads: () => inFlightRef.current > 0,
       // Placeholder rebuild contract: the real handle draws a card for an
       // upload the document is not showing and reports whether it landed.
@@ -684,6 +702,20 @@ describe("AgentCreatePanel", () => {
     expect(mockClearDraft).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("dictates into the prompt and lets voice send it to the agent", async () => {
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    act(() => {
+      expect(voiceOptions.last?.insert("fix the inbox")).toBe(true);
+    });
+    expect(mockSetAgent).toHaveBeenLastCalledWith({ prompt: expect.stringContaining("fix the inbox") });
+    act(() => voiceOptions.last?.submit?.());
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ agent_id: "agent-1", prompt: expect.stringContaining("fix the inbox") }),
+      );
+    });
   });
 
   it("shows the upgrade recovery immediately when quick create is rejected by the issue preflight", async () => {
@@ -1053,6 +1085,14 @@ describe("AgentCreatePanel", () => {
     expect(screen.getByTestId("project-picker")).toHaveTextContent("Project proj-1");
   });
 
+  it("opens without a project when asked for none, over an unfinished draft's project", () => {
+    mockIssueDraftStore.draft.shared.projectId = "proj-1";
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { project_id: null } });
+
+    expect(screen.queryByText("Project proj-1")).toBeNull();
+  });
+
   // When the modal was opened from "Add sub issue" on an existing issue,
   // the manual panel transfers parent_issue_id through the `data` payload
   // on switch-to-agent. The agent panel must forward that UUID to the
@@ -1321,7 +1361,7 @@ describe("AgentCreatePanel", () => {
       expect(create.parentElement).toBe(footer);
       expect(keepOpen.parentElement?.parentElement).toBe(footer);
       expect(attach.parentElement?.parentElement).toBe(footer);
-      expect(attach).toHaveAttribute("data-size", "sm");
+      expect(attach).not.toHaveAttribute("data-size");
     });
   });
 });

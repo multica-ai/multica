@@ -53,6 +53,8 @@
     "zoom_actual": "실제 크기"
   },
   "attachment": {
+    "install_theme": "테마 설치",
+    "install_theme_failed": "첨부 파일을 읽을 수 없습니다. 잠시 후 다시 시도하세요.",
     "download_failed": "다운로드 링크를 가져오지 못했습니다. 잠시 후 다시 시도하세요.",
     "preview": "미리보기",
     "preview_loading": "미리보기 불러오는 중...",
@@ -178,5 +180,49 @@
     "clear_filter": "필터 지우기",
     "no_matches": "일치하는 행이 없습니다",
     "close": "닫기"
+  },
+  "voice": {
+    "dictate": "음성 입력",
+    "hold_to_talk": "누르고 말하기",
+    "tap_or_hold": "음성 입력 (탭하거나 길게 눌러 말하기)",
+    "cancel": "취소",
+    "insert": "삽입",
+    "send": "보내기",
+    "retry": "다시 시도",
+    "dismiss": "닫기",
+    "requesting": "마이크를 기다리는 중…",
+    "transcribing": "받아쓰는 중…",
+    "release_to_insert": "손을 떼면 삽입",
+    "recording": "녹음 중",
+    "errors": {
+      "permission_denied": "마이크 접근이 차단되어 있습니다. 브라우저나 시스템 설정에서 허용한 뒤 다시 시도하세요.",
+      "no_microphone": "마이크를 찾을 수 없습니다. 연결한 뒤 다시 시도하세요.",
+      "microphone_failed": "마이크를 시작할 수 없습니다.",
+      "no_speech": "말소리를 듣지 못했습니다. 마이크에 조금 더 가까이에서 다시 시도하세요.",
+      "unavailable": "이 컴퓨터에서는 음성을 받아쓸 수 없습니다.",
+      "transcription_failed": "받아쓰기에 실패했습니다. 녹음은 보관되어 있으니 다시 시도할 수 있습니다."
+    },
+    "models": {
+      "more_languages": "그 외 {{more}}개 언어",
+      "in_use": "사용 중",
+      "recommended": "추천",
+      "most_accurate": "가장 정확함",
+      "fastest": "가장 빠름",
+      "by": "제공: {{author}}",
+      "license": "라이선스",
+      "downloading": "다운로드 중 {{percent}}%",
+      "failed": "다운로드에 실패했습니다. 다시 시도하면 중단된 지점부터 이어서 받습니다.",
+      "download": "다운로드",
+      "retry": "다시 시도",
+      "cancel": "취소",
+      "use": "사용",
+      "delete": "{{name}} 삭제"
+    },
+    "setup": {
+      "title": "음성 입력 설정",
+      "description": "음성은 이 컴퓨터에서 받아쓰므로 녹음이 외부로 나가지 않습니다. 먼저 음성 모델을 한 번 다운로드하세요.",
+      "later": "나중에",
+      "start": "받아쓰기 시작"
+    }
   }
 }
