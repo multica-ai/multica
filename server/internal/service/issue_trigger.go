@@ -17,7 +17,7 @@ const (
 	// is being handed to an agent/squad. Parks silently on backlog.
 	RunSourceAssign RunEnqueueSource = "assign"
 	// RunSourceStatus covers promoting an already-assigned issue out of
-	// backlog into an active status.
+	// backlog or returning it from in_review to todo for rework.
 	RunSourceStatus RunEnqueueSource = "status"
 )
 
@@ -31,7 +31,7 @@ const (
 // gate so it never leaks a private agent's readiness to a member who cannot
 // see it. A nil func is treated as allow-all.
 //
-// IsSelfLoop reports whether promoting this issue out of backlog would be the
+// IsSelfLoop reports whether a status change on this issue would be the
 // calling agent re-triggering its own running task. Only the status source
 // consults it. A nil func means "not a self-loop".
 //
@@ -91,8 +91,8 @@ func allowAllAgents(db.Agent) bool { return true }
 // CreateAgentTask, guarded by the (issue_id, agent_id) partial unique index
 // over pending (queued/dispatched) tasks; the pending check below mirrors that
 // guard, and only the status source needs it:
-//   - status source (backlog → active) can re-fire against an assignee that
-//     already holds a pending task (e.g. one a @mention raised while the issue
+//   - status source (backlog → active, in_review → todo) can re-fire against an
+//     assignee that already holds a pending task (e.g. one a @mention raised while the issue
 //     sat in backlog); the check keeps preview from promising a run the unique
 //     index would coalesce away.
 //   - assign source (create / assignee change) skips the check: a create
@@ -129,6 +129,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		return IssueRunTrigger{}, false
 	}
 
+	rework := in.StatusChanged && prevStatus == "in_review" && currentStatus == "todo"
 	var source RunEnqueueSource
 	switch {
 	case in.IsCreate || in.AssigneeChanged:
@@ -137,15 +138,22 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 			return IssueRunTrigger{}, false
 		}
 		source = RunSourceAssign
-	case in.StatusChanged && prevStatus == "backlog" &&
+	case rework || (in.StatusChanged && prevStatus == "backlog" &&
 		currentStatus != "backlog" &&
-		currentStatus != "done" && currentStatus != "cancelled":
+		currentStatus != "done" && currentStatus != "cancelled"):
 		if probe.IsSelfLoop != nil && probe.IsSelfLoop() {
 			return IssueRunTrigger{}, false
 		}
 		source = RunSourceStatus
 	default:
 		return IssueRunTrigger{}, false
+	}
+
+	// Rework resumes an idle assignee; an active run already covers the issue.
+	// Backlog promotion keeps its existing pending-only coalescing behavior.
+	blocksStatusRun := s.hasPendingRun
+	if rework {
+		blocksStatusRun = s.hasActiveRun
 	}
 
 	switch issue.AssigneeType.String {
@@ -163,7 +171,10 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		}
 		// A step entered under the agent's own run queues behind it; one
 		// already queued covers the new step too.
-		if (source == RunSourceStatus || in.EnteredHandoffStep) && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
+		if source == RunSourceStatus && blocksStatusRun(ctx, issue.ID, issue.AssigneeID) {
+			return IssueRunTrigger{}, false
+		}
+		if in.EnteredHandoffStep && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
 			return IssueRunTrigger{}, false
 		}
 		return IssueRunTrigger{
@@ -198,7 +209,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if !canAccess(leader) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, squad.LeaderID) {
+		if source == RunSourceStatus && blocksStatusRun(ctx, issue.ID, squad.LeaderID) {
 			return IssueRunTrigger{}, false
 		}
 		return IssueRunTrigger{
@@ -210,6 +221,15 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		}, true
 	}
 	return IssueRunTrigger{}, false
+}
+
+// hasActiveRun fails closed so a failed lookup cannot create duplicate rework.
+func (s *IssueService) hasActiveRun(ctx context.Context, issueID, agentID pgtype.UUID) bool {
+	active, err := s.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
+	return active || err != nil
 }
 
 // hasPendingRun reports whether the agent already holds a queued or dispatched

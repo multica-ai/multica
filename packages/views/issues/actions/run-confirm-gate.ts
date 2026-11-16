@@ -65,6 +65,7 @@ const NEVER_STARTS: IssueStatusCategory[] = ["done", "closed"];
  * - **promote**: moving an already-owned issue out of the fixed backlog status.
  *   That status change alone starts the run (`RunSourceStatus`), so it earns
  *   the same dialog when the target is not terminal, including custom statuses.
+ *   Returning from the built-in in_review status to todo also starts rework.
  *
  * Unresolvable categories fail toward confirming: a dialog the user dismisses
  * costs a click, a silent start costs an unwanted agent run.
@@ -95,7 +96,7 @@ export function runConfirmIntent(
     updates.status &&
     updates.status !== issue.status &&
     // Unknown counts as possibly-parked: the write may promote, so confirm.
-    (parked || issueCategory === null) &&
+    (parked || issueCategory === null || (issue.status === "in_review" && updates.status === "todo")) &&
     (owner === "agent" || owner === "squad") &&
     issue.assignee_id
   ) {

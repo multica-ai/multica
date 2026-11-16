@@ -4123,6 +4123,36 @@ func TestRunIssueStatusNoStartSendsSuppressRun(t *testing.T) {
 	}
 }
 
+func TestRunIssueStatusReportsEnqueueOutcome(t *testing.T) {
+	for _, enqueued := range []bool{true, false} {
+		t.Run(fmt.Sprint(enqueued), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "in_review"})
+				} else {
+					json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "todo", "run_enqueued": enqueued})
+				}
+			}))
+			defer srv.Close()
+			setCLITestServerEnv(t, srv.URL)
+			t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+			t.Setenv("MULTICA_TOKEN", "mat_test-token")
+			stderr := captureStderr(t)
+			defer stderr.restore()
+			if err := runIssueStatus(newIssueStatusTestCmd(), []string{"MUL-1", "todo"}); err != nil {
+				t.Fatal(err)
+			}
+			want := "Agent run: queued."
+			if !enqueued {
+				want = "Agent run: not_enqueued."
+			}
+			if got := stderr.read(); !strings.Contains(got, "status changed to todo") || !strings.Contains(got, want) {
+				t.Fatalf("status and enqueue outcomes not reported separately: %s", got)
+			}
+		})
+	}
+}
+
 // newDuplicateMarkTestServer serves MUL-1 (the original) and MUL-2 (the
 // duplicate) and records the body of the PUT to MUL-2. With recorded=false it
 // answers like a server older than the duplicate mark: no duplicate_of field.

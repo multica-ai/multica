@@ -4436,9 +4436,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if handoff != nil && req.StopPreviousAssigneeRuns {
 		h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 	}
-	if willRun {
-		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
-	}
+	runEnqueued := willRun && h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
 
 	// Sub-issue rules on the parent (the child_done system rule and sub-issue
 	// conditions): the write recorded the change; process it now. A failure
@@ -4455,7 +4453,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			h.fillStatusCategory(r.Context(), issue.WorkspaceID, hidden, &resp)
 		}
 	}
-	writeJSON(w, http.StatusOK, resp)
+	// The mutation succeeds independently of its optional enqueue side effect.
+	writeJSON(w, http.StatusOK, struct {
+		IssueResponse
+		RunEnqueued bool `json:"run_enqueued"`
+	}{resp, runEnqueued})
 }
 
 // validateAssigneePair verifies the (assignee_type, assignee_id) pair refers

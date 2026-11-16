@@ -208,6 +208,14 @@ describe("ChatSessionSchema", () => {
   });
 });
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  it("preserves a reported enqueue outcome without guessing for older or malformed responses", () => {
+    for (const outcome of [true, false]) {
+      expect(IssueSchema.parse({ ...baseIssue, run_enqueued: outcome }).run_enqueued).toBe(outcome);
+    }
+    for (const outcome of [undefined, null, "false", 1]) {
+      expect(IssueSchema.parse({ ...baseIssue, run_enqueued: outcome }).run_enqueued).toBeUndefined();
+    }
+  });
   // A custom status key can be derived rather than readable — "客户确认" becomes
   // `in_review_2` — so the display name travels with it. The field has to
   // survive a server that predates it, since an issue that fails validation

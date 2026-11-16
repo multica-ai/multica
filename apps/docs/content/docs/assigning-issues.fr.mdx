@@ -56,6 +56,10 @@ Les agents mettent à jour le statut au fil du travail. Par défaut, ils passent
 
 Si le projet passe régulièrement le travail entre plusieurs personnes ou agents, utilisez un [workflow](/workflows) pour organiser les relais. Pour enregistrer une demande fréquente sans changer le responsable, utilisez une [action rapide](/quick-actions).
 
+Remettre une tâche assignée à un agent ou à un squad du statut intégré `in_review` à `todo` demande une reprise du travail. Si ce responsable n'a aucune exécution en attente ou active sur cette tâche, une exécution est mise en file sans changer le responsable. Répéter `todo` n'en ajoute pas. Le sélecteur de statut d'une tâche demande confirmation ; **Ne pas démarrer maintenant**, ou `multica issue status <issue-id> todo --no-start` dans la CLI, enregistre uniquement le changement de statut.
+
+La réponse de mise à jour inclut `run_enqueued`. La CLI indique `queued` ou `not_enqueued` séparément du statut enregistré.
+
 ## Assigner sans démarrer
 
 **Ne pas démarrer maintenant** dans la boîte de dialogue de confirmation enregistre l'assigné sans créer d'exécution cette fois-ci. Utilisez-le pour régler d'abord la question du responsable, puis démarrer une fois le contexte ou les dépendances prêts.

@@ -106,6 +106,7 @@ describe("runConfirmIntent — promote", () => {
     ["custom unstarted target is not parked", "backlog", "later"],
     ["a non-todo target that still starts a run", "backlog", "in_progress"],
     ["a custom in_review target", "backlog", "qa"],
+    ["review rejected for rework", "in_review", "todo"],
   ])("confirms the promotion (%s)", (_label, from, to) => {
     expect(runConfirmIntent(issue({ status: from }), { status: to }, CATALOG)).toEqual({
       issueIds: ["issue-1"],
@@ -130,6 +131,9 @@ describe("runConfirmIntent — promote", () => {
     ["closing the issue", { status: "backlog" }, "done"],
     ["cancelling the issue", { status: "backlog" }, "cancelled"],
     ["custom unstarted origin has no promotion trigger", { status: "later" }, "rework"],
+    ["custom review origin has no rework trigger", { status: "qa" }, "todo"],
+    ["custom todo target has no rework trigger", { status: "in_review" }, "rework"],
+    ["already working", { status: "in_progress" }, "todo"],
     ["the same status again", { status: "backlog" }, "backlog"],
   ])("applies directly when no run starts (%s)", (_label, from, to) => {
     expect(runConfirmIntent(issue(from as Partial<GateIssue>), { status: to }, CATALOG)).toBeNull();
