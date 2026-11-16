@@ -953,7 +953,7 @@ export function InboxPage() {
         icon={settledRow.reason === "snoozed" ? <AlarmClock /> : undefined}
         onUndo={() =>
           settledRow.reason === "snoozed"
-            ? unsnooze(settledRow.item.id)
+            ? unsnooze(settledRow.item.id, settledRow.key)
             : void restoreInbox(settledRow.item.id, { quiet: true })
         }
         next={nextInboxRow(listedItems, settledRow.key)}

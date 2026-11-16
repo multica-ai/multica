@@ -117,7 +117,7 @@ export function IssueInboxActions({
     snoozeRef.current = item
       ? () => setSnoozeOpen(true)
       : snoozed
-        ? () => unsnooze(snoozed.item_id)
+        ? () => unsnooze(snoozed.item_id, issueId)
         : null;
   });
   useEffect(() => {
@@ -147,7 +147,7 @@ export function IssueInboxActions({
           open={snoozeOpen}
           onOpenChange={setSnoozeOpen}
           onSnooze={(until) => snooze({ id: snoozed.item_id }, until)}
-          onUnsnooze={() => unsnooze(snoozed.item_id)}
+          onUnsnooze={() => unsnooze(snoozed.item_id, issueId)}
         >
           {settled && next && <InboxNextButton next={next} onNext={moveOn} />}
         </SnoozedChip>

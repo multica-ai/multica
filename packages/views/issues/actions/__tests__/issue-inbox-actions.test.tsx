@@ -161,6 +161,37 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("IssueInboxActions", () => {
+  it("keeps the last row on a later side-effect archive after snooze fails", async () => {
+    state.snooze.mockRejectedValueOnce(new Error("snooze failed"));
+    const nav = setup({ rows: [ROWS[0]!] });
+    fireEvent.keyDown(document, { key: "h", code: "KeyH" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^1 hour/ }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("snooze failed"));
+    expect(nav.push).not.toHaveBeenCalled();
+
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
+    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+  });
+
+  it("keeps the last row on a later side-effect archive after undoing snooze", async () => {
+    const nav = setup({ rows: [ROWS[0]!] });
+    fireEvent.keyDown(document, { key: "h", code: "KeyH" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^1 hour/ }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledOnce());
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
+
+    const options = vi.mocked(toast.success).mock.calls[0]![1] as unknown as { action: { onClick: () => void } };
+    await act(async () => options.action.onClick());
+    expect(state.unsnooze).toHaveBeenCalledWith({ id: "n-1", read: true });
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, [ROWS[0]!]));
+    expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
+
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
+    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+  });
+
   it("stays out of an issue that was not opened from the Inbox", () => {
     useInboxSelectionStore.setState({ sidebarIssueByWorkspace: { ws: "issue-2" } });
     setup();
@@ -282,6 +313,18 @@ describe("IssueInboxActions", () => {
     await act(async () => undo.action.onClick());
     expect(state.unarchiveInbox).toHaveBeenCalledWith("n-1");
     expect(onMarkDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the row snoozing left once the issue is brought back early", () => {
+    useInboxSelectionStore.setState({ leftRowKeyByWorkspace: { ws: "issue-1" } });
+    const until = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    setup({
+      rows: [ROWS[1]!],
+      snoozed: [{ issue_id: "issue-1", item_id: "n-1", snoozed_until: until, snoozed_at: SNOOZED_AT, updates: 0 }],
+    });
+    fireEvent.keyDown(document, { key: "h", code: "KeyH" });
+    expect(state.unsnooze).toHaveBeenCalledWith({ id: "n-1" });
+    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace.ws).toBeUndefined();
   });
 
   it("archives and moves on to the next notification", async () => {

@@ -7,6 +7,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { isOwnIssue } from "@multica/core/issues/ownership";
 import type { InboxItem } from "@multica/core/types";
 import { agentListOptions } from "@multica/core/workspace/queries";
+import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import {
   undoUnsubscribeArchiveInbox,
   useUnsubscribeArchiveInbox,
@@ -49,6 +50,10 @@ export interface UnsubscribeArchiveTarget {
  * offered for a single issue only: a subtree opt-out tombstones every
  * descendant, and one issue's undo would not bring those back.
  *
+ * Its row is the issue's, which the surface leaves (`useLeaveInboxRow`); an
+ * undo or a failure returns it, so a row the user stayed on can be kept in
+ * place again.
+ *
  * The toasts hang off the mutation itself, not the `mutate` call: every
  * surface moves on to the next notification straight away, which unmounts the
  * caller before the request settles.
@@ -59,6 +64,7 @@ export function useUnsubscribeArchive() {
   const wsId = useWorkspaceId();
   const failed = (fallback: string) => (err: unknown) =>
     toast.error(err instanceof Error && err.message ? err.message : fallback);
+  const returnRow = (issueId: string) => useInboxSelectionStore.getState().returnRow(wsId, issueId);
   const { mutate } = useUnsubscribeArchiveInbox({
     onSuccess: ({ id, issueId, scope }) =>
       toast.success(
@@ -72,6 +78,7 @@ export function useUnsubscribeArchive() {
               ? {
                   label: t(($) => $.toasts.undo),
                   onClick: () => {
+                    returnRow(issueId);
                     undoUnsubscribeArchiveInbox(qc, wsId, { id, issueId }).catch(
                       failed(t(($) => $.errors.undo_unsubscribe_failed)),
                     );
@@ -80,7 +87,10 @@ export function useUnsubscribeArchive() {
               : undefined,
         },
       ),
-    onError: failed(t(($) => $.errors.unsubscribe_archive_failed)),
+    onError: (err, { issueId }) => {
+      returnRow(issueId);
+      failed(t(($) => $.errors.unsubscribe_archive_failed))(err);
+    },
   });
   return useCallback(
     (target: UnsubscribeArchiveTarget, scope: InboxUnsubscribeScope = "issue") =>
