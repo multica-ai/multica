@@ -6,7 +6,7 @@ import { longTaskCause, longTaskReport, scriptSource, taskActivity, updateLabel 
 const AT = new Date(2026, 10, 16, 19, 39, 16, 120).getTime();
 
 function attribution(overrides: Partial<DevLongTaskAttribution> = {}): DevLongTaskAttribution {
-  return { frame: null, scripts: [], updates: [], components: [], ...overrides };
+  return { frame: null, scripts: [], updates: [], components: [], spanningComponents: [], ...overrides };
 }
 
 function task(overrides: Partial<DevLongTask> = {}): DevLongTask {
@@ -100,6 +100,7 @@ describe("longTaskReport", () => {
         scripts: [script],
         updates: [{ kind: "Cascading Update", lane: "Blocking", component: "CommentList", method: "setState" }],
         components: [{ name: "CommentCard", renders: 120, selfMs: 900, changedProps: ["comment", "onReply"], deeplyEqualProps: true }],
+        spanningComponents: [{ name: "NavigationProvider", renders: 2 }],
       }),
     });
     const quick = task({ at: AT - 3000, durationMs: 60, attribution: attribution({ scripts: [{ ...script, durationMs: 55 }] }) });
@@ -113,6 +114,7 @@ describe("longTaskReport", () => {
     expect(report).toContain(
       "- <CommentCard> 900ms self, 120×; changed props: comment, onReply; props were deeply equal (new object, same contents)",
     );
+    expect(report).toContain("Time-sliced renders crossing this task, no time counted: <NavigationProvider> 2×");
     expect(report.indexOf("### 19:39:16.120 · 2.1s")).toBeLessThan(report.indexOf("### 19:39:13.120 · 60ms"));
   });
 

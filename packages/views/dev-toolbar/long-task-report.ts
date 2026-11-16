@@ -56,6 +56,10 @@ export function updateLabel(update: DevReactUpdate): string {
     .join(" ");
 }
 
+export function spanningLabel(component: { name: string; renders: number }): string {
+  return `<${component.name}>${component.renders > 1 ? ` ${component.renders}×` : ""}`;
+}
+
 /**
  * One line on what most likely made the task long, for the task list: the
  * component that took a real share of it, else the longest script.
@@ -113,7 +117,7 @@ export function longTaskDetail(task: DevLongTask, recording: DevRecording): stri
   if (!attribution) {
     lines.push("", "Not attributed yet.");
   } else {
-    const { frame, scripts, updates, components } = attribution;
+    const { frame, scripts, updates, components, spanningComponents } = attribution;
     if (frame) {
       const render = frame.renderMs > 0 ? `; rendering ${formatDuration(frame.renderMs)} (style and layout ${formatDuration(frame.styleLayoutMs)})` : "";
       lines.push("", `Frame: ${formatDuration(frame.durationMs)}, ${formatDuration(frame.blockingMs)} blocking${render}`);
@@ -138,7 +142,13 @@ export function longTaskDetail(task: DevLongTask, recording: DevRecording): stri
         lines.push(`- <${component.name}> ${formatDuration(component.selfMs)} self, ${component.renders}×${props}${deep}`);
       }
     }
-    if (!frame && scripts.length === 0 && updates.length === 0 && components.length === 0) {
+    if (spanningComponents.length > 0) {
+      lines.push(
+        "",
+        `Time-sliced renders crossing this task, no time counted: ${spanningComponents.map(spanningLabel).join(", ")}`,
+      );
+    }
+    if (!frame && scripts.length + updates.length + components.length + spanningComponents.length === 0) {
       lines.push("", "Nothing attributed: no long animation frame or React measure covered this task.");
     }
   }
@@ -185,7 +195,11 @@ export interface LongTaskReportContext {
 export function longTaskReport(recording: DevRecording, context: LongTaskReportContext): string {
   const tasks = recording.longTasks;
   const total = tasks.reduce((sum, task) => sum + task.durationMs, 0);
-  const withReact = tasks.filter((t) => t.attribution && (t.attribution.components.length > 0 || t.attribution.updates.length > 0)).length;
+  const withReact = tasks.filter(
+    (t) =>
+      t.attribution &&
+      t.attribution.components.length + t.attribution.updates.length + t.attribution.spanningComponents.length > 0,
+  ).length;
   const lines = [
     `## Long tasks · ${context.build} · ${context.apiUrl}`,
     "",
@@ -195,7 +209,7 @@ export function longTaskReport(recording: DevRecording, context: LongTaskReportC
     `- ${tasks.length} long tasks, ${formatDuration(total)} blocked in total; blocked in the last 10s: ${context.blocked === null ? "not reported" : `${Math.round(context.blocked * 100)}%`}`,
     `- Script attribution: ${context.framesSupported ? "Long Animation Frames API" : "not reported by this engine"}. React measures in ${withReact} of ${tasks.length} tasks (development React builds only).`,
     "",
-    "A long task kept the main thread busy for 50ms or more. Scripts are the entry points the browser ran during the task's frame. React components are renders whose props changed, the only ones React's development build measures; self time excludes measured child components. \"Around it\" lists what the client saw from 1s before the task (2s for route changes) until it ended.",
+    "A long task kept the main thread busy for 50ms or more. Scripts are the entry points the browser ran during the task's frame. React components are renders whose props changed, the only ones React's development build measures; self time excludes measured child components. Only renders that began and ended inside a task are timed: a time-sliced render that crosses a task's edges may have yielded to other work, so it is listed as a lead with no time counted. \"Around it\" lists what the client saw from 1s before the task (2s for route changes) until it ended.",
   ];
   if (tasks.length === 0) return [...lines, "", "No long tasks were recorded."].join("\n");
 

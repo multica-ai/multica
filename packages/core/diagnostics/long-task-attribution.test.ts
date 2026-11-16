@@ -80,9 +80,14 @@ describe("attributeLongTask", () => {
     expect(rendered.find((c) => c.name === "IssueDetail")?.changedProps).toEqual(["issue"]);
   });
 
-  it("counts only the part of a time-sliced render that ran inside the task", () => {
+  it("lists a render that crosses the task's edges as a lead without charging it time", () => {
     render("NavigationProvider", 0, 300);
-    expect(attributeLongTask(200, 70).components[0]).toMatchObject({ name: "NavigationProvider", selfMs: 70 });
+    render("NavigationProvider", 260, 40);
+    render("IssueRow", 210, 30);
+
+    const attribution = attributeLongTask(200, 70);
+    expect(attribution.components.map((c) => [c.name, c.selfMs])).toEqual([["IssueRow", 30]]);
+    expect(attribution.spanningComponents).toEqual([{ name: "NavigationProvider", renders: 2 }]);
   });
 
   it("flags props React found deeply equal", () => {
@@ -109,7 +114,7 @@ describe("attributeLongTask", () => {
   it("ignores measures that are not React's", () => {
     recordMeasureEntry({ name: "app:boot", startTime: 0, duration: 100, detail: null });
     recordMeasureEntry({ name: "Reconnect", startTime: 0, duration: 100, detail: components });
-    expect(attributeLongTask(0, 100)).toEqual({ frame: null, scripts: [], updates: [], components: [] });
+    expect(attributeLongTask(0, 100)).toEqual({ frame: null, scripts: [], updates: [], components: [], spanningComponents: [] });
   });
 });
 

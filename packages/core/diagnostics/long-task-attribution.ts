@@ -60,8 +60,13 @@ export interface DevLongTaskAttribution {
   scripts: DevLongTaskScript[];
   /** In the order their renders began. */
   updates: DevReactUpdate[];
-  /** Most self time first. */
+  /** Renders that began and ended inside the task, most self time first. */
   components: DevComponentRender[];
+  /**
+   * Time-sliced renders that cross the task's start or end. Their spans include
+   * time React yielded to other work, so they are leads with no time charged.
+   */
+  spanningComponents: { name: string; renders: number }[];
 }
 
 /** Performance-timeline span: ms since `performance.timeOrigin`. */
@@ -103,6 +108,8 @@ const MAX_SCRIPTS = 8;
 const MAX_UPDATES = 8;
 const MAX_COMPONENTS = 10;
 const MAX_PROPS = 8;
+// Long task durations are coarsened to whole milliseconds; measures are not.
+const EDGE_SLACK_MS = 1;
 
 let frames: FrameRecord[] = [];
 let measures: MeasureRecord[] = [];
@@ -277,10 +284,14 @@ export function attributeLongTask(startTime: number, durationMs: number): DevLon
       component: property(m.properties, "Component name"),
       method: property(m.properties, "Method name"),
     }));
-  // A time-sliced render spans several tasks; only its part inside this one counts here.
-  const renders = measures
-    .filter((m) => m.track === COMPONENTS_TRACK && overlaps(m, task))
-    .map((m) => ({ ...m, start: Math.max(m.start, task.start), end: Math.min(m.end, task.end) }));
+  // A task runs without yielding, so a render inside it was rendering the
+  // whole time. A render that crosses its edges was time-sliced: React may
+  // have yielded to other tasks, this one included, so none of its span is
+  // known to be render time here.
+  const overlapping = measures.filter((m) => m.track === COMPONENTS_TRACK && overlaps(m, task));
+  const inside = (m: MeasureRecord) => m.start >= task.start - EDGE_SLACK_MS && m.end <= task.end + EDGE_SLACK_MS;
+  const spanning = new Map<string, number>();
+  for (const m of overlapping) if (!inside(m)) spanning.set(m.name, (spanning.get(m.name) ?? 0) + 1);
   return {
     frame: frame && {
       durationMs: frame.end - frame.start,
@@ -290,7 +301,10 @@ export function attributeLongTask(startTime: number, durationMs: number): DevLon
     },
     scripts,
     updates,
-    components: componentRenders(renders),
+    components: componentRenders(overlapping.filter(inside)),
+    spanningComponents: [...spanning]
+      .map(([name, renders]) => ({ name, renders }))
+      .slice(0, MAX_COMPONENTS),
   };
 }
 

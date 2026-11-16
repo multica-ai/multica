@@ -34,6 +34,7 @@ import {
   longTaskReport,
   scriptLabel,
   scriptSource,
+  spanningLabel,
   taskActivity,
   updateLabel,
 } from "./long-task-report";
@@ -242,7 +243,11 @@ function LongTaskDetails({ task, recording }: { task: DevLongTask; recording: De
   const nothing =
     attribution &&
     !attribution.frame &&
-    attribution.scripts.length + attribution.updates.length + attribution.components.length === 0;
+    attribution.scripts.length +
+      attribution.updates.length +
+      attribution.components.length +
+      attribution.spanningComponents.length ===
+      0;
   return (
     <div className="flex flex-col gap-2 px-3 pt-1 pb-2 pl-8">
       <div className="font-mono break-all text-muted-foreground">{task.route ?? "unknown route"}</div>
@@ -295,6 +300,11 @@ function LongTaskDetails({ task, recording }: { task: DevLongTask; recording: De
               </span>
             </div>
           ))}
+        </DetailSection>
+      )}
+      {attribution && attribution.spanningComponents.length > 0 && (
+        <DetailSection title="Time-sliced renders crossing this task, no time counted">
+          <div className="font-mono break-words">{attribution.spanningComponents.map(spanningLabel).join(", ")}</div>
         </DetailSection>
       )}
       {activity.length > 0 && (
