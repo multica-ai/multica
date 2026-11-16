@@ -398,7 +398,7 @@ func TestCreateWorktreeContextCancelsRunningGitProcessTree(t *testing.T) {
 	}
 }
 
-func TestBareDirName(t *testing.T) {
+func TestLegacyBareDirName(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		input, want string
@@ -417,8 +417,8 @@ func TestBareDirName(t *testing.T) {
 		{"", "repo.git"},
 	}
 	for _, tt := range tests {
-		if got := bareDirName(tt.input); got != tt.want {
-			t.Errorf("bareDirName(%q) = %q, want %q", tt.input, got, tt.want)
+		if got := legacyBareDirName(tt.input); got != tt.want {
+			t.Errorf("legacyBareDirName(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }

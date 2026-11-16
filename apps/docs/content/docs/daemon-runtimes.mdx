@@ -155,6 +155,8 @@ A run on a project's local directory works in your own directory, which the daem
 
 The daemon keeps one bare-repository cache per workspace repository, under `.repos/<workspace-id>/` in the workspaces root. Runs of the same workspace on this computer share it: each checkout creates a git worktree from the cache and only fetches new commits instead of cloning again. Codex runs on Linux and Windows are the exception and get a standalone clone with `.git` inside the work directory, because Codex's workspace-write sandbox leaves Git metadata outside the work directory read-only.
 
+New cache directory names use up to 16 ASCII characters from the repository name plus a 12-character hash, keeping long remote URLs from lengthening Git's metadata paths on Windows. Existing caches keep their original paths so linked worktrees continue working.
+
 A cache is removed only when all three hold: no workspace or project references the repository any more, no worktrees remain, and no run has checked out from it for 30 days. It is cloned again when needed. After removing stale agent branches, the daemon runs `git reflog expire --expire=30.days --all` and `git gc --prune=30.days` on the cache while no runs are executing.
 
 ### Sessions, memory, and temporary directories

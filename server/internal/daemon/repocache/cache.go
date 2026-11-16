@@ -4,6 +4,7 @@ package repocache
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -382,7 +383,7 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 		if repo.URL == "" {
 			continue
 		}
-		barePath := filepath.Join(wsDir, bareDirName(repo.URL))
+		barePath := c.BarePath(workspaceID, repo.URL)
 
 		repoLock := c.lockForRepo(barePath)
 		if err := repoLock.LockContext(ctx); err != nil {
@@ -428,6 +429,12 @@ func (c *Cache) Lookup(workspaceID, url string) string {
 // question, which the GC needs to map a set of live repo URLs onto the
 // directories it is about to consider evicting.
 func (c *Cache) BarePath(workspaceID, url string) string {
+	// Existing worktrees contain absolute pointers into the legacy cache.
+	// Reuse it in place so upgrades never break running tasks.
+	legacyPath := filepath.Join(c.root, workspaceID, legacyBareDirName(url))
+	if isBareRepo(legacyPath) {
+		return legacyPath
+	}
 	return filepath.Join(c.root, workspaceID, bareDirName(url))
 }
 
@@ -514,8 +521,38 @@ func (c *Cache) Fetch(barePath string) error {
 	})
 }
 
-// bareDirName returns a filesystem-safe, collision-free directory name for
-// the bare clone of rawURL. The name is built from the host plus each
+// bareDirName bounds the cache name to 33 ASCII bytes, leaving room for
+// Git's worktree administration files on Windows. Hash the legacy identity
+// so equivalent HTTPS and SSH URLs still share one cache on every platform.
+func bareDirName(rawURL string) string {
+	identity := legacyBareDirName(rawURL)
+	hash := sha256.Sum256([]byte(identity))
+	name := strings.TrimSuffix(identity, ".git")
+	name = name[strings.LastIndex(name, "+")+1:]
+	name = strings.Map(func(ch rune) rune {
+		if ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '-' || ch == '_' {
+			return ch
+		}
+		return '-'
+	}, name)
+	if len(name) > 16 {
+		name = name[:16]
+	}
+	if name = strings.Trim(name, "-"); name == "" {
+		name = "repo"
+	}
+	return fmt.Sprintf("%s-%x.git", name, hash[:6])
+}
+
+// BareDirMatchesURL recognizes both cache naming schemes without requiring
+// either directory to exist. GC must protect both if old and new daemons
+// have populated caches for the same repository.
+func BareDirMatchesURL(dirName, repoURL string) bool {
+	return repoURL != "" && (dirName == bareDirName(repoURL) || dirName == legacyBareDirName(repoURL))
+}
+
+// legacyBareDirName preserves the identity and on-disk names used before
+// bounded cache names. The name is built from the host plus each
 // path segment, joined by '+'. '+' is disallowed in GitHub and GitLab
 // path segments, so two URLs produce the same name only if they point at
 // the same repository on the same host.
@@ -531,7 +568,7 @@ func (c *Cache) Fetch(barePath string) error {
 //	ssh://git@gitlab.example.com:22/g/s/r.git    -> gitlab.example.com%3A22+g+s+r.git
 //	git@gitlab.example.com-22:org/repo.git       -> gitlab.example.com-22+org+repo.git
 //	my-repo                                      -> my-repo.git (bare name fallback)
-func bareDirName(rawURL string) string {
+func legacyBareDirName(rawURL string) string {
 	rawURL = strings.TrimRight(rawURL, "/")
 
 	host, path := splitHostAndPath(rawURL)
@@ -1168,7 +1205,7 @@ func isolatedCheckoutOriginContext(ctx context.Context, path string) (string, er
 // barePath. Caches are keyed by bareDirName, so URL spellings that share a
 // cache count as the same repository.
 func isolatedOriginCachedAt(origin, barePath string) bool {
-	return origin != "" && bareDirName(origin) == filepath.Base(barePath)
+	return BareDirMatchesURL(filepath.Base(barePath), origin)
 }
 
 func linkedWorktreeCommonDirContext(ctx context.Context, checkoutPath string) (string, error) {
@@ -1489,25 +1526,59 @@ func createWorktreeContext(ctx context.Context, gitRoot, worktreePath, branchNam
 		return "", fmt.Errorf("worktree path already exists and is not a valid git worktree: %s", worktreePath)
 	}
 
-	err := runWorktreeAddContext(ctx, gitRoot, worktreePath, branchName, baseRef)
+	branchExisted, err := worktreeBranchExistsContext(ctx, gitRoot, branchName)
+	if err != nil {
+		return "", err
+	}
+	err = runWorktreeAddContext(ctx, gitRoot, worktreePath, branchName, baseRef)
 	if err != nil && isBranchCollisionError(err) {
 		// Branch name collision: append timestamp and retry once.
 		branchName = fmt.Sprintf("%s-%d", branchName, time.Now().Unix())
+		branchExisted, err = worktreeBranchExistsContext(ctx, gitRoot, branchName)
+		if err != nil {
+			return "", err
+		}
 		err = runWorktreeAddContext(ctx, gitRoot, worktreePath, branchName, baseRef)
 	}
 	if err != nil {
 		// A cancelled git is killed before it can clean up, and the leftover
 		// tree would otherwise be reused by every later checkout of this
-		// workdir. Any other failure leaves the path alone: the pre-check only
-		// holds under this repo's lock, and a repo from another cache with the
-		// same basename may have created the path since (see
-		// createIsolatedCheckoutContext).
+		// workdir. For ordinary failures, remove only a checkout whose
+		// registration proves it belongs to this cache and path: another cache
+		// with the same basename may have created the path since the pre-check.
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			removePartialWorktree(gitRoot, worktreePath)
+		} else if adminDir, ok := worktreeAdminDir(worktreePath); ok && samePath(filepath.Dir(adminDir), filepath.Join(gitRoot, "worktrees")) {
+			if owner, ok := worktreeRegistrationOwner(adminDir); ok && samePath(owner, worktreePath) {
+				removePartialWorktree(gitRoot, worktreePath)
+			}
+		}
+		// worktree add -b can create its branch before failing. Never delete a
+		// pre-existing branch, including a collision on the timestamp retry.
+		// Use a fresh, bounded context so cancellation cannot skip rollback.
+		if !branchExisted {
+			_ = runGitWithTimeoutContext(context.Background(), 5*time.Second, "-C", gitRoot, "branch", "-D", branchName)
 		}
 		return "", err
 	}
 	return branchName, nil
+}
+
+// A failed/cancelled probe is not evidence that a branch was absent: rollback
+// must never delete an existing branch because Git could not inspect it.
+func worktreeBranchExistsContext(ctx context.Context, gitRoot, branchName string) (bool, error) {
+	err := runGitContext(ctx, "-C", gitRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branchName)
+	if err == nil {
+		return true, nil
+	}
+	if ctx.Err() != nil {
+		return false, context.Cause(ctx)
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("inspect worktree branch: %w", err)
 }
 
 // removePartialWorktree removes a checkout a cancelled `git worktree add` left
