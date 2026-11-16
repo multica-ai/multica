@@ -132,7 +132,7 @@ async function mountShell() {
       <ReadyShell />
     </CoreProvider>,
   );
-  await waitFor(() => expect(document.querySelector('[data-slot="title-bar-actions"]')).toBeInTheDocument());
+  await waitFor(() => expect(document.querySelector('[data-slot="app-rail"]')).toBeInTheDocument());
 }
 
 beforeAll(async () => {
