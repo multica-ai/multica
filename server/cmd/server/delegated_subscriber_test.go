@@ -449,7 +449,7 @@ func TestUnsubscribeIsDurableAgainstAutoRules(t *testing.T) {
 	}
 }
 
-// TestDeliverToSubscriber_DelegatedTier pins the noise contract. The tier drops
+// TestDeliverDelegated pins the noise contract. The tier drops
 // churn and nothing else: a child FINISHING is real signal, one per piece of work
 // a reviewer has to act on. An earlier cut suppressed those in favour of a
 // synthesized "whole batch finished" roll-up; that machinery is gone (see the
@@ -458,34 +458,30 @@ func TestUnsubscribeIsDurableAgainstAutoRules(t *testing.T) {
 //
 // Which statuses ARE handoffs is issueStatusIsHandoff's job and is covered by
 // TestIssueStatusIsHandoff; this table covers the routing on top of that answer.
-func TestDeliverToSubscriber_DelegatedTier(t *testing.T) {
+func TestDeliverDelegated(t *testing.T) {
 	cases := []struct {
 		name      string
-		reason    string
 		notifType string
 		handoff   bool
 		want      bool
 	}{
-		{"direct subscriber keeps every event", "creator", "status_changed", false, true},
-		{"direct subscriber keeps comments", "assignee", "new_comment", false, true},
+		{"delegated skips routine progress", "status_changed", false, false},
+		{"delegated skips assignee churn", "assignee_changed", false, false},
+		{"delegated skips date churn", "due_date_changed", false, false},
+		{"delegated skips non-status events even on a handoff", "due_date_changed", true, false},
 
-		{"delegated skips routine progress", "delegated", "status_changed", false, false},
-		{"delegated skips assignee churn", "delegated", "assignee_changed", false, false},
-		{"delegated skips date churn", "delegated", "due_date_changed", false, false},
-		{"delegated skips non-status events even on a handoff", "delegated", "due_date_changed", true, false},
+		{"delegated gets the handoff", "status_changed", true, true},
 
-		{"delegated gets the handoff", "delegated", "status_changed", true, true},
-
-		{"delegated always gets direct mentions", "delegated", "mentioned", false, true},
-		{"delegated always gets comments", "delegated", "new_comment", false, true},
-		{"delegated always gets failures", "delegated", "task_failed", false, true},
+		{"delegated always gets direct mentions", "mentioned", false, true},
+		{"delegated always gets comments", "new_comment", false, true},
+		{"delegated always gets failures", "task_failed", false, true},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := deliverToSubscriber(tc.reason, tc.notifType, tc.handoff); got != tc.want {
-				t.Fatalf("deliverToSubscriber(%q, %q, %v) = %v, want %v",
-					tc.reason, tc.notifType, tc.handoff, got, tc.want)
+			if got := deliverDelegated(tc.notifType, tc.handoff); got != tc.want {
+				t.Fatalf("deliverDelegated(%q, %v) = %v, want %v",
+					tc.notifType, tc.handoff, got, tc.want)
 			}
 		})
 	}
@@ -569,7 +565,7 @@ func TestIssueStatusIsHandoff(t *testing.T) {
 }
 
 // TestDelegatedTier_ChildCompletionDeliversExactlyOnce is the case a unit test of
-// deliverToSubscriber alone cannot catch. status_changed bubbles from a child to
+// deliverDelegated alone cannot catch. status_changed bubbles from a child to
 // the parent's subscribers, and the common shape is a human who is BOTH a direct
 // subscriber of the parent and a delegate on the child. They must be told the
 // child finished, and told once — not twice via the bubble, and not zero times.
@@ -639,16 +635,6 @@ func TestDelegatedTier_ChildCompletionDeliversExactlyOnce(t *testing.T) {
 		agentEvent, nil, "status_changed", "info", "child", "", emptyDetails)
 	if n := countInbox(); n != 1 {
 		t.Fatalf("expected exactly 1 inbox row for the child completion, got %d", n)
-	}
-}
-
-// TestDeliverToSubscriber_UnknownReasonIsDirect: 'reason' is an open vocabulary
-// (a new rule can add one without a migration touching this file). An
-// unrecognized reason must fall back to FULL delivery — silently dropping a
-// user's notifications is the worse failure.
-func TestDeliverToSubscriber_UnknownReasonIsDirect(t *testing.T) {
-	if !deliverToSubscriber("some_future_reason", "new_comment", false) {
-		t.Fatal("an unrecognized subscription reason must default to full delivery")
 	}
 }
 

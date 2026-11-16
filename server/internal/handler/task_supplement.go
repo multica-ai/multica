@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -22,7 +23,7 @@ func (h *Handler) hydrateTaskSupplementMetadata(ctx context.Context, r *http.Req
 	}
 	taskIDs := make([]pgtype.UUID, 0, len(tasks))
 	for i := range tasks {
-		if tasks[i].IssueID.Valid {
+		if tasks[i].IssueID.Valid || tasks[i].ChatSessionID.Valid {
 			taskIDs = append(taskIDs, tasks[i].ID)
 		}
 	}
@@ -467,7 +468,20 @@ type ackTaskSupplementRequest struct {
 
 func (h *Handler) ClaimTaskSupplement(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
-	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
+		return
+	}
+	if task.ChatSessionID.Valid && !task.IssueID.Valid {
+		row, err := h.Queries.ClaimNextChatTaskSupplement(r.Context(), task.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusOK, map[string]any{})
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to claim chat guidance")
+		} else {
+			// Keep the daemon wire contract: this opaque id names a chat message.
+			writeJSON(w, http.StatusOK, map[string]any{"comment_id": uuidToString(row.MessageID), "author_type": "member", "author_name": row.AuthorName, "content": row.Content})
+		}
 		return
 	}
 	var req struct {
@@ -497,7 +511,8 @@ func (h *Handler) ClaimTaskSupplement(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) AckTaskSupplement(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
-	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
 		return
 	}
 	commentID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "commentId"), "comment id")
@@ -507,6 +522,10 @@ func (h *Handler) AckTaskSupplement(w http.ResponseWriter, r *http.Request) {
 	var req ackTaskSupplementRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if task.ChatSessionID.Valid && !task.IssueID.Valid {
+		h.ackChatTaskSupplement(w, r, task, commentID, req.Delivered)
 		return
 	}
 	var row db.TaskSupplement
@@ -532,6 +551,47 @@ func (h *Handler) AckTaskSupplement(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publishTaskSupplementUpdate(r, row)
 	writeJSON(w, http.StatusOK, supplementReceipt(row))
+}
+
+func (h *Handler) ackChatTaskSupplement(w http.ResponseWriter, r *http.Request, task db.AgentTaskQueue, messageID pgtype.UUID, delivered bool) {
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to acknowledge chat guidance")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	q := h.Queries.WithTx(tx)
+	if _, err = q.LockChatSessionForTask(r.Context(), task.ID); err != nil {
+		writeError(w, http.StatusConflict, "chat session has ended")
+		return
+	}
+	if _, err = q.LockTaskForSupplementBind(r.Context(), task.ID); err != nil {
+		writeError(w, http.StatusConflict, "chat turn has ended")
+		return
+	}
+	var queued []db.AgentTaskQueue
+	if delivered {
+		_, err = q.AckChatTaskSupplement(r.Context(), db.AckChatTaskSupplementParams{TaskID: task.ID, MessageID: messageID})
+	} else {
+		queued, err = service.RequeueChatTaskSupplements(r.Context(), q, task, messageID)
+	}
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusConflict, "chat guidance is no longer deliverable")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to acknowledge chat guidance")
+		}
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to acknowledge chat guidance")
+		return
+	}
+	for _, next := range queued {
+		h.TaskService.BroadcastTaskQueued(r.Context(), next)
+		h.TaskService.NotifyTaskEnqueued(r.Context(), next)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
 func stableTaskSupplementFailureReason(reason string) string {

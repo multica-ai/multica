@@ -91,6 +91,8 @@ Webhook 請求的約束：
 
 例如，事件名填寫 `workflow_run`，Actions 填寫 `completed, failed`，只會接收這兩類 `workflow_run` 結果。Multica 會從常見請求頭和 payload 中識別事件與 action，包括 GitHub 的 `X-GitHub-Event` 和 body 中的 `action`。
 
+也可以透過 CLI 的 `--event-filters-file` 完整配置這些條件。更新時不傳過濾引數就保留原值；`--clear-event-filters` 明確清空條件、恢復接收所有事件。JSON 格式和命令見 [CLI 範例](/cli#webhook-event-filters)。
+
 ### 保護 Webhook URL
 
 <Callout type="warning">

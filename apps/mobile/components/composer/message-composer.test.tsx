@@ -3,6 +3,7 @@ import { act, useState, type ComponentProps } from "react";
 import { create, type ReactTestRenderer, type ReactTestInstance } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InlineCommentComposer } from "@/components/issue/inline-comment-composer";
+import { ChatComposer } from "@/components/chat/chat-composer";
 import { MessageComposer } from "./message-composer";
 import { useMentionDraftStore } from "@/data/stores/mention-draft-store";
 import type { MentionChip } from "@/components/issue/composer-attachment-row";
@@ -15,6 +16,11 @@ vi.mock("react-native", () => ({
   Alert: { alert: vi.fn() }, Keyboard: { dismiss: native.dismiss },
 }));
 vi.mock("react-native-keyboard-controller", () => ({ KeyboardStickyView: "KeyboardStickyView" }));
+vi.mock("react-native-reanimated", () => ({
+  default: { View: "AnimatedView" },
+  FadeIn: { duration: () => undefined },
+  FadeOut: { duration: () => undefined },
+}));
 vi.mock("react-native-safe-area-context", () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
 vi.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
 vi.mock("expo-router", () => ({ router: { push: vi.fn() }, DefaultTheme: {}, DarkTheme: {} }));
@@ -113,7 +119,7 @@ describe("MessageComposer request lifecycle (mocked native hosts)", () => {
     await attach();
     await act(async () => { useMentionDraftStore.getState().toggle(alice); });
     await act(async () => { void button("arrow-up").props.onPress(); });
-    expect(submit).toHaveBeenCalledWith({ content: "[@Alice](mention://member/alice) A", attachmentIds: ["file-a"], mentions: [alice] });
+    expect(submit).toHaveBeenCalledWith({ content: "[@Alice](mention://member/alice) A", attachmentIds: ["file-a"], mentions: [alice], queue: false });
     expect(input().props.value).toBe("  A  ");
     expect(input().props.editable).toBe(false);
     expect(row().props.attachments[0].id).toBe("file-a");
@@ -265,7 +271,7 @@ describe("MessageComposer request lifecycle (mocked native hosts)", () => {
     await act(async () => { upload.resolve(); await picking; });
     expect(button("arrow-up").props.disabled).toBe(false);
     await act(async () => { await button("arrow-up").props.onPress(); });
-    expect(submit).toHaveBeenCalledWith({ content: "A", attachmentIds: ["file-a"], mentions: [] });
+    expect(submit).toHaveBeenCalledWith({ content: "A", attachmentIds: ["file-a"], mentions: [], queue: false });
   });
 
   it("ignores a picker returning after the send has started", async () => {
@@ -287,4 +293,39 @@ describe("MessageComposer request lifecycle (mocked native hosts)", () => {
     expect(hosts("AttachmentRow")).toHaveLength(0);
   });
 
+  it.each([false, true])("preserves chat draft protection and queue forwarding during a reply (queue=%s)", async (queue) => {
+    const request = deferred();
+    const send = vi.fn(() => request.promise);
+    function ChatDraft() {
+      const [value, setValue] = useState("A");
+      return <ChatComposer value={value} onChangeText={setValue} onSend={send}
+        sending allowSendWhileSending onStop={vi.fn()} />;
+    }
+    await act(async () => { renderer = create(<ChatDraft />); mounted = true; });
+    await act(async () => { hosts("Pressable")[0].props.onPress(); });
+    await attach();
+    const sendAction = button("arrow-up").props.onPress;
+    const queueAction = button("time-outline").props.onPress;
+    const selectedAction = queue ? queueAction : sendAction;
+    await act(async () => { selectedAction(); selectedAction(); (queue ? sendAction : queueAction)(); });
+    expect(send).toHaveBeenCalledExactlyOnceWith("A", ["file-a"], queue ? { queue: true } : undefined);
+    expect(input().props.editable).toBe(false);
+    expect(input().props.value).toBe("A");
+    expect(row().props.attachments[0].id).toBe("file-a");
+    expect(button("arrow-up").props.disabled).toBe(true);
+    expect(button("time-outline").props.disabled).toBe(true);
+    await settle(request, true);
+    expect(input().props.value).toBe("A");
+    expect(row().props.attachments[0].id).toBe("file-a");
+    await type("B");
+    await act(async () => { selectedAction(); });
+    expect(send).toHaveBeenCalledOnce();
+    send.mockResolvedValueOnce();
+    await act(async () => { (queue ? button("time-outline") : button("arrow-up")).props.onPress(); });
+    expect(send).toHaveBeenLastCalledWith("B", ["file-a"], queue ? { queue: true } : undefined);
+    expect(hosts("TextInput")).toHaveLength(0);
+    await act(async () => { hosts("Pressable")[0].props.onPress(); });
+    expect(input().props.value).toBe("");
+    expect(hosts("AttachmentRow")).toHaveLength(0);
+  });
 });

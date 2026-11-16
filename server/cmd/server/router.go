@@ -1867,9 +1867,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// store it; a version is immutable once published, so
 					// there is no update route here by design.
 					r.Get("/plugins/packages", h.ListPluginPackages)
-					r.Post("/plugins/packages", h.PublishPluginPackage)
-					r.Post("/plugins/packages/local", h.PublishLocalPluginPackage)
-					r.Delete("/plugins/packages/{packageId}", h.DeletePluginPackage)
+					// Machine credentials inherit their owner's role, but
+					// plugin consent also requires a human credential.
+					r.With(handler.RequireHumanActor).Post("/plugins/packages", h.PublishPluginPackage)
+					r.With(handler.RequireHumanActor).Post("/plugins/packages/local", h.PublishLocalPluginPackage)
+					r.With(handler.RequireHumanActor).Delete("/plugins/packages/{packageId}", h.DeletePluginPackage)
 					// Installing a Plugin is two steps on purpose: preview
 					// reads the published version's manifest and returns the
 					// scope list without writing anything, so the consent
@@ -1877,19 +1879,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// exists. Both steps name the same version id, which is
 					// what makes the approved manifest and the running code
 					// the same artifact.
-					r.Post("/plugins/preview", h.PreviewPlugin)
-					r.Post("/plugins", h.InstallPlugin)
+					r.With(handler.RequireHumanActor).Post("/plugins/preview", h.PreviewPlugin)
+					r.With(handler.RequireHumanActor).Post("/plugins", h.InstallPlugin)
 					r.Get("/plugins/{installationId}/invocations", h.ListPluginInvocations)
-					r.Post("/plugins/{installationId}/token", h.RotatePluginToken)
-					r.Delete("/plugins/{installationId}/token", h.RevokePluginToken)
+					r.With(handler.RequireHumanActor).Post("/plugins/{installationId}/token", h.RotatePluginToken)
+					r.With(handler.RequireHumanActor).Delete("/plugins/{installationId}/token", h.RevokePluginToken)
 					// mcp-transport approval. Discovery adopts nothing; the PUT
 					// is the grant, and it pins the tools by schema digest.
 					r.Get("/plugins/{installationId}/mcp/{hookKey}/tools", h.ListPluginMCPTools)
-					r.Put("/plugins/{installationId}/mcp/{hookKey}/tools", h.ApprovePluginMCPTools)
-					r.Put("/plugins/{installationId}/config", h.ConfigurePlugin)
-					r.Post("/plugins/{installationId}/enable", h.EnablePlugin)
-					r.Post("/plugins/{installationId}/disable", h.DisablePlugin)
-					r.Delete("/plugins/{installationId}", h.UninstallPlugin)
+					r.With(handler.RequireHumanActor).Put("/plugins/{installationId}/mcp/{hookKey}/tools", h.ApprovePluginMCPTools)
+					r.With(handler.RequireHumanActor).Put("/plugins/{installationId}/config", h.ConfigurePlugin)
+					r.With(handler.RequireHumanActor).Post("/plugins/{installationId}/enable", h.EnablePlugin)
+					r.With(handler.RequireHumanActor).Post("/plugins/{installationId}/disable", h.DisablePlugin)
+					r.With(handler.RequireHumanActor).Delete("/plugins/{installationId}", h.UninstallPlugin)
 				})
 				// Owner-only access
 				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
@@ -2282,14 +2284,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
 				// Workspace owner only: every private project, joined or not.
-				r.Get("/private", h.ListPrivateProjectsForOwner)
+				// Human-only: a machine credential carries its owner's user
+				// id and must not use the owner's way into private projects.
+				r.With(handler.RequireHumanActor).Get("/private", h.ListPrivateProjectsForOwner)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
-					r.Post("/join", h.JoinPrivateProject)
+					r.With(handler.RequireHumanActor).Post("/join", h.JoinPrivateProject)
 					r.Post("/archive", h.ArchiveProject)
 					r.Post("/restore", h.RestoreProject)
 					r.Post("/workflow", h.SetProjectWorkflow)

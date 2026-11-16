@@ -53,11 +53,23 @@ On an issue assigned to someone else or to their agent, a subscription you picke
 
 The issue page marks such a subscription **Key updates only**. Its menu offers **Get all activity**, which turns it into an explicit subscription to this issue; there's no way back to key updates for that issue afterwards, only unsubscribing. **Change the default** opens **Settings → Notifications**, where **Other people's issues**, at the top of **Issues you subscribe to**, switches all such issues to **All activity**.
 
-## Agents don't use the inbox
+## Agents and the inbox
 
-The inbox is only for workspace members. Even when an agent is the assignee or a subscriber, it never reads inbox notifications.
+Inbox notifications belong to workspace members. For the active notification list used by `multica inbox list` and for archived notifications, an agent may read the runtime owner's notifications only when the server verifies that the owner is the upstream human who triggered the run. This identity follows agent delegation chains. Runs triggered by another person or without a verifiable human, and cloud-node credentials without a task binding, cannot read them. This guarantee covers only the active and archived lists; the snoozed list, unread counts and write endpoints retain their current permissions pending separate work.
 
 @-mentioning an agent in a comment, assigning an issue to it, or triggering an autopilot creates a run directly; no notification is left for the agent. `@all` notifies members only.
+
+## Read from the CLI
+
+Use your existing CLI login to list your active notifications without marking them read:
+
+```sh
+multica inbox list --project <project-id> --type mentioned --output json
+```
+
+`--project` accepts a full UUID or a unique ID prefix, including the short ID from `multica project list`. Prefixes are resolved through the project list before reading the inbox; no match or an ambiguous prefix produces an error.
+
+Both filters are optional and apply locally after fetching the active inbox. JSON includes notification, issue, project and optional comment IDs, plus the type, title, read status and creation time. The default output is a table. An authorized agent run reads the runtime owner's notifications using its task credential; it never falls back to a person's login.
 
 ## Handle notifications
 
@@ -107,7 +119,11 @@ Reading a notification doesn't remove it. A row leaves the inbox only when:
 - you move its issue to any status in the `done` or `closed` category yourself, while **Archive issues you complete** is on (it is by default). Only your own notifications on that issue are archived, read or not. When someone else or an agent completes an issue, its notifications stay in your inbox, so you still see the news;
 - it's a **Run failed** notification and its issue moves to a status that hands it back to a person: `in_review`, a custom status in the `started` category, or any status in the `done` or `closed` category. This archives everyone's Run failed notifications on the issue, whoever moved it, and doesn't depend on the setting above. `blocked` is the exception: it hands the issue over too, but the work is still stuck, so the earlier failures are still worth reading.
 
-Open windows drop an archived row right away. A later notification on the issue lands in the inbox again.
+Open windows drop an archived row right away, except the one you have open. When its notification leaves the inbox some other way (you set the issue to `done` from its status, another window archived it, or an edit took it out of the section's filters), the row stays lit where it was and the issue header says what happened. **Undo** brings the notification back, and **Next** (or `E`) opens the next row. The row leaves once you move on.
+
+When you take the open row out yourself, from the issue header, its row, the hover card, or a bulk action that includes it, the next row opens instead. With nothing left to open, the issue stays open. Archiving, marking as done and the bulk actions confirm with **Undo**, which brings the notifications back and leaves the issue's status as it is.
+
+A later notification on the issue lands in the inbox again.
 
 **Settings → Notifications → Leaving the Inbox** has the **Archive issues you complete** switch and links to the archived notifications.
 

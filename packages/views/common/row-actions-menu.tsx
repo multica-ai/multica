@@ -9,7 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { usePointAnchor, type RowMenuState } from "./point-menu";
+import { nextRowMenuState, usePointAnchor, type RowMenuState } from "./point-menu";
 
 export interface RowActionItem {
   key: string;
@@ -101,7 +101,16 @@ export function RowActionsPointMenu({
   const filled = groups.filter((group) => group.length > 0);
 
   return (
-    <DropdownMenu open={menu.open && filled.length > 0} onOpenChange={onOpenChange}>
+    <DropdownMenu
+      open={menu.open && filled.length > 0}
+      onOpenChange={(open, details) => {
+        if (!nextRowMenuState(menu, open, details.reason)) {
+          details.cancel();
+          return;
+        }
+        onOpenChange(open);
+      }}
+    >
       <DropdownMenuContent align="start" anchor={anchor} className="w-auto">
         <RowActionGroups groups={filled} />
       </DropdownMenuContent>

@@ -125,12 +125,22 @@
   "toasts": {
     "source_context_retry_started": "Nouvelle tentative démarrée avec le contexte d'origine",
     "archived": "Notification archivée",
+    "archived_many_one": "{{count}} notification archivée",
+    "archived_many_other": "{{count}} notifications archivées",
     "unarchived": "Notification restaurée",
     "deleted": "Notification supprimée",
     "unsubscribed_archived": "Désabonné et archivé",
     "unsubscribed_archived_subtree": "Désabonné de cette tâche et de ses sous-tâches",
     "unsubscribed_hint": "Ses mises à jour n'arriveront plus dans votre boîte de réception. Les @mentions, si.",
     "undo": "Annuler"
+  },
+  "kept": {
+    "archived": "Archivée",
+    "leaves": "Quitte la boîte de réception quand vous passez à la suite",
+    "filtered": "Ne correspond plus à vos filtres",
+    "notification_archived": "Notification archivée",
+    "next": "Suivante",
+    "next_tooltip": "Ouvrir la suivante : {{title}}"
   },
   "errors": {
     "archived_lookup_failed": "Échec du chargement de la notification liée",

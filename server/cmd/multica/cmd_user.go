@@ -43,7 +43,7 @@ var userProfileUpdateCmd = &cobra.Command{
 	Long: "Set the personal profile description that gets injected into agent " +
 		"briefs as `## Requesting User`. Pass an empty value to clear it.\n\n" +
 		"Pick the input mode that preserves your content:\n" +
-		"  --description \"...\"          inline (decodes \\n / \\t escapes)\n" +
+		"  --description \"...\"          inline (preserves literal text)\n" +
 		"  --description-stdin           pipe a HEREDOC (preserves verbatim)\n" +
 		"  --description-file <path>     read a UTF-8 file (Windows-safe)\n",
 	RunE: runUserProfileUpdate,
@@ -56,7 +56,7 @@ func init() {
 
 	userProfileGetCmd.Flags().String("output", "table", "Output format: table or json")
 
-	userProfileUpdateCmd.Flags().String("description", "", "New profile description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
+	userProfileUpdateCmd.Flags().String("description", "", "New profile description (preserves literal text. Use --description-stdin or --description-file for multi-line input)")
 	userProfileUpdateCmd.Flags().Bool("description-stdin", false, "Read description from stdin (preserves multi-line content verbatim)")
 	userProfileUpdateCmd.Flags().String("description-file", "", "Read description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
 	userProfileUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")

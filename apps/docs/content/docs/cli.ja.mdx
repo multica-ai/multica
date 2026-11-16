@@ -145,6 +145,20 @@ multica issue comment add MUL-123 --content-file note.md --steer-active
 
 複数の PR を順番に作成するタスクでは、`issue create --title "..." --pr-auto-complete off` または `issue update <id> --pr-auto-complete off` で、マージ時も状態を維持できます。`--pr-auto-complete on` はワークスペースのルールを復元し、次の PR イベントから有効になります。`issue pull-requests <id>` は、PR が未関連付けでもタスクとワークスペースの設定、移行先の状態、判定結果を表示します。対応サーバーは作成トランザクション内で設定を保存し、旧サーバーには追加の PUT を送ります。失敗時は作成済み ID と再試行用の update コマンドが表示されるため、create を繰り返さないでください。
 
+### 一括更新
+
+複数のタスクに同じ変更を適用できます。`--ids-stdin` ではタスク番号または UUID を標準入力から1行ずつ読み取ります。
+
+```bash
+multica issue batch update MUL-123 MUL-124 --priority high --add-label QA --dry-run
+multica issue batch update MUL-123 MUL-124 --priority high --add-label QA
+multica issue batch update MUL-123 MUL-124 --property "Severity=High" --unset-property Reviewer
+```
+
+`--add-label` と `--remove-label` は他のラベルを変えません。`--clear-labels` は追加の前に全ラベルを消します。`--property` で値を設定し、`--unset-property` で消します。複数値のプロパティは値全体を置き換えます。ステータス、担当者、プロジェクト、日付、親タスク、ステージも変更できます。`--no-start` を付けるとエージェントの実行を開始せずに変更を適用します。
+
+タスクごとに `updated`、`unchanged`、または理由付きの `skipped` が返ります。1件でもスキップされると結果を出力して非ゼロで終了しますが、成功した変更は残ります。修正後はスキップされたタスクだけを再試行してください。`--dry-run` は検証と変更予定の表示だけを行い、書き込みません。
+
 ### タスクを削除する
 
 1 件のタスクを削除するか、複数のタスク番号または完全な UUID を渡して一括削除します。
@@ -157,6 +171,12 @@ multica issue delete MUL-123 MUL-124 --yes --output json
 削除は元に戻せません。コメントと添付ファイルが削除され、進行中の実行はキャンセルされ、関連する自動化の実行は失敗扱いになります。削除したタスクを参照する重複マークは解除されます。サブタスクは親との関連が外れますが、削除されません。確認の前にすべての ID を解決し、存在しないタスクやアクセスできないタスクがあれば、削除せずにコマンドを中止します。
 
 コマンドは確認を求めます。`--yes` で確認を省略できます。指定しない場合、確認に答えられない非対話実行は、何も削除せずにエラーで終了します。
+
+`--dry-run` は削除権限を含めて削除予定を確認します。書き込みや確認プロンプトはありません。
+
+```bash
+multica issue delete MUL-123 MUL-124 --dry-run --output json
+```
 
 ### タイムライン
 
@@ -315,12 +335,43 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 - ワークスペースの `--context` は、ワークスペース内のすべてのエージェントに渡されます。`--slug` は作成後に変更できません。`--issue-prefix` は大文字に変換され、変更すると既存のすべてのタスクが振り直され、外部から参照している古い番号は使えなくなります。
 - `--issue-title-template` で置き換えられるのは `{{date}}`（UTC、`YYYY-MM-DD`）だけで、ほかの `{{...}}` は拒否されます。スケジュールトリガーの `--timezone` は既定で UTC です。
 
+### Webhook イベントフィルター [#webhook-event-filters]
+
+`autopilot trigger-add` または `trigger-update` の `--event-filters-file` で、Webhook トリガーのイベントと action のフィルターを設定できます。空でない JSON 配列を `filters.json` として保存します。
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+この例では、PR レビューの送信とすべての push イベントを受け入れます。`actions` を省略するか空の配列を指定すると、そのイベントのすべての action を受け入れます。
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-list <autopilot-id> --full-id
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+更新時はファイルの内容でフィルター一覧全体を置き換えます。両方のフィルターオプションを省略すると、ラベルの変更やトリガーの有効化・無効化でも保存済みのフィルターを保持します。`autopilot get` はトップレベルの `triggers` 配列でフィルターを返します。
+
+すべてのフィルターを削除して全イベントを受け入れるには、更新専用のオプションを使います。
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` と `--event-filters-file` は同時に指定できません。トップレベルが `null` または空の配列であるファイルや、不明なフィールド、不正な JSON、空または空白のみのイベント名・action 名を含むファイルは拒否されます。これらのオプションは Webhook トリガー専用です。フィルターファイルを指定せずに作成すると全イベントを受け入れます。受信イベントの照合方法は[オートパイロット](/autopilots#event-filters)を参照してください。
+
 ## コマンド概要
 
 | コマンド | 用途 |
 | --- | --- |
 | `issue` | タスクの作成、更新、割り当て、検索。コメント、購読者、ラベル、プロパティ、ウェイクアップ、タイムライン、実行履歴の管理 |
 | `project` | プロジェクトとそのリソースを管理 |
+| `inbox` | 既読状態を変えずに自分の通知を読み取る |
 | `label`、`property` | ワークスペースのラベルとカスタムプロパティを管理 |
 | `view` | 保存したビューを読み取り、ビューに表示されるタスクを一覧 |
 | `agent`、`skill`、`squad` | エージェント、スキル、スクワッドを管理 |
@@ -387,13 +438,16 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `get <id>` | 単一のタスクを表示 | `--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します） |
 | | `create` | タスクを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可）、`--property`（繰り返し可）、`--allow-duplicate`（同じタイトルの未完了タスクがあっても作成） |
 | | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--position`、`--no-start`、`--duplicate-of` |
-| | `delete <id>...` | 1 件以上のタスクを完全に削除 | `--yes` で確認を省略。タスク番号または完全な UUID を指定 |
+| | `batch update <id>...` | 複数のタスクに同じ変更を適用 | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
+| | `delete <id>...` | 1 件以上のタスクを完全に削除 | `--yes` で確認を省略。タスク番号または完全な UUID を指定; `--dry-run` |
 | | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign`、`--no-start` |
 | | `status <id> <status>` | ステータスを変更 | `--no-start`、`--duplicate-of` |
 | | `reorder <id>` | カラム内で移動 | |
 | | `search <query>` | タスクを検索 | `--limit`、`--include-closed`、`--project` |
 | | `children <id>` | サブタスクをステージごとに一覧 | |
 | | `pull-requests <id>` | 関連付けられた PR を一覧 | |
+| | `pull-requests link <id> <pr-url>` | タイトルとブランチにタスクキーがない同期済み PR を関連付け | `unlink` で外した PR の復元にも使えます |
+| | `pull-requests unlink <id> <pr>` | 関連付けた PR を外し、以後自動で関連付けない | `<pr>` は PR の URL、番号、または id |
 | | `comment list/add/update/delete/resolve/unresolve` | コメントを管理 | `add`: `--content` / `--content-stdin` / `--content-file`、`--parent`、`--attachment`；`update`: `--expected-revision`（必須）、`--content` / `--content-stdin` / `--content-file`；`list`: `--since`、`--thread`、`--tail`、`--recent`、`--roots-only`、`--summary`、`--compact`、`--full` |
 | | `timeline <id>` | アクティビティ記録とコメントを時系列で表示 | `--action`（繰り返し可）、`--activity-only`、`--since`、`--tail` |
 | | `wakeup events/list/get/create/update/disable/trigger/delete/checkin/runs` | タスクのウェイクアップを管理。詳しくは[タスクのウェイクアップ](/issue-wakeups) | `create` / `update`: `--agent-id`、`--kind`（`event`、`at`、`every`、`cron`）、`--event`、`--at` / `--after`、`--every`、`--cron`、`--timezone`、`--until-*` 条件、`--expires-in` / `--expires-at`、`--instruction` / `--instruction-file`；`checkin`: `--note` |
@@ -406,7 +460,8 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `usage <issue-id>` | 集計されたトークン使用量を表示 | |
 | | `rerun-task <run-id>` | 元のエージェントとトリガーのコンテキストで指定した実行を再試行 | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | 進行中またはキュー中の実行をキャンセル | `--issue` |
-| `project` | `list/get/create/update/delete` | プロジェクトを管理 | `create`: `--title`（必須）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（繰り返し可）、`--visibility`（`workspace` または `private`）、`--member`（繰り返し可、`--visibility private` と併用）；`update`: `--visibility`、`--member`（プロジェクトをプライベートにする場合も、すでにプライベートの場合もリストに追加） |
+| `project` | `get/create/update/delete` | プロジェクトを管理 | `create`: `--title`（必須）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（繰り返し可）、`--visibility`（`workspace` または `private`）、`--member`（繰り返し可、`--visibility private` と併用）；`update`: `--visibility`、`--member`（プロジェクトをプライベートにする場合も、すでにプライベートの場合もリストに追加） |
+| | `list` | プロジェクトを一覧表示・絞り込み | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
 | | `archive/restore <id>` | プロジェクトをアーカイブ／復元。アーカイブ済みのプロジェクトは `list` に表示されず、新しいタスクを受け付けず、そこにタスクを作成する自動化は一時停止される | `list --archived` でアーカイブ済みのプロジェクトのみを表示 |
 | | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
@@ -438,6 +493,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `member list/add/set-role/remove` | スクワッドのメンバーを管理 | |
 | | `activity <issue-id> <outcome>` | リーダーの評価を記録 | |
 | `chat` | `history`、`thread [id]` | エージェントが現在処理している外部チャットセッションを読み取り | `--limit`、`--before` |
+| `inbox` | `list` | 既読にせずに[現在の通知を読み取る](/inbox) | `--project`、`--type`、`--output`（`table` または `json`）；フィルターはローカルで適用 |
 
 ### Runtime
 

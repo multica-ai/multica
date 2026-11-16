@@ -1,13 +1,8 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { Bell, Settings2 } from "@multica/ui/icons";
-import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { receivesKeyUpdatesOnly } from "@multica/core/notification-preferences/bystander";
-import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
-import { agentListOptions } from "@multica/core/workspace/queries";
-import type { IssueAssigneeType, IssueSubscriber } from "@multica/core/types";
+import type { IssueSubscriberDelivery } from "@multica/core/types";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,47 +18,23 @@ import { useNavigation } from "../../navigation";
 /**
  * Says that this issue reaches the viewer as key updates only — someone
  * else's issue they follow passively (MUL-9343) — and offers the way back to
- * every event for this one issue. Renders nothing until the preference and the
- * agent list resolve, so it never flashes on the viewer's own issue.
+ * every event for this one issue. The tier is the server's `delivery` for the
+ * viewer's subscription; without one it renders nothing.
  */
 export function KeyUpdatesSubscriptionBadge({
-  issue,
-  userId,
-  reason,
-  projectCovered,
+  delivery,
   pending,
   onFollowAll,
 }: {
-  issue: { assignee_type?: IssueAssigneeType | null; assignee_id?: string | null };
-  userId: string | undefined;
-  reason: IssueSubscriber["reason"] | undefined;
-  projectCovered: boolean;
+  delivery: IssueSubscriberDelivery | undefined;
   pending: boolean;
   onFollowAll: () => void;
 }) {
   const { t } = useT("issues");
-  const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const { push } = useNavigation();
-  const { data: preferences, isSuccess: preferencesKnown } = useQuery(
-    notificationPreferenceOptions(wsId),
-  );
-  const { data: agents, isSuccess: agentsKnown } = useQuery(agentListOptions(wsId));
 
-  if (
-    !preferencesKnown ||
-    !agentsKnown ||
-    !receivesKeyUpdatesOnly({
-      reason,
-      projectCovered,
-      issue,
-      userId,
-      agents: agents ?? [],
-      preferences: preferences?.preferences ?? {},
-    })
-  ) {
-    return null;
-  }
+  if (delivery !== "key_updates") return null;
 
   return (
     <DropdownMenu>

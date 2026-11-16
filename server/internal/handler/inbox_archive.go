@@ -46,7 +46,9 @@ var (
 	archivedInboxNegatable  = []string{"type", "actor", "status", "priority", "project", "assignee", "label", "dueDate"}
 )
 
-func parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.ArchivedInboxFacetsParams, bool) {
+// parseArchivedInboxFilters also gates the archive on owner access, so every
+// archive read that goes through it shares the active list's protection.
+func (h *Handler) parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.ArchivedInboxFacetsParams, bool) {
 	var p db.ArchivedInboxFacetsParams
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -54,6 +56,9 @@ func parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.Archi
 	}
 	p.WorkspaceID, ok = parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
 	if !ok {
+		return p, false
+	}
+	if !h.requireInboxOwnerAccess(w, r, userID, p.WorkspaceID) {
 		return p, false
 	}
 	p.RecipientID = parseUUID(userID)
@@ -135,7 +140,7 @@ func archivedInboxScope(p db.ArchivedInboxFacetsParams, groupID pgtype.UUID) str
 }
 
 func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) {
-	filters, ok := parseArchivedInboxFilters(w, r)
+	filters, ok := h.parseArchivedInboxFilters(w, r)
 	if !ok {
 		return
 	}
@@ -232,7 +237,7 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) GetArchivedInboxFacets(w http.ResponseWriter, r *http.Request) {
-	p, ok := parseArchivedInboxFilters(w, r)
+	p, ok := h.parseArchivedInboxFilters(w, r)
 	if !ok {
 		return
 	}
