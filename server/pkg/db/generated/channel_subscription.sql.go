@@ -14,24 +14,26 @@ import (
 const createChannelIssueSubscription = `-- name: CreateChannelIssueSubscription :one
 INSERT INTO channel_issue_subscription (
     workspace_id, issue_id, installation_id, channel_type,
-    chat_id, thread_id, anchor_message_id, created_by
+    chat_id, thread_id, anchor_message_id, created_by, project_subscription_id
 ) VALUES (
     $1, $2, $3, $4,
-    $5, $6, $7, $8
+    $5, $6, $7, $8,
+    $9
 )
 ON CONFLICT (issue_id, installation_id, chat_id, thread_id) DO NOTHING
-RETURNING id, workspace_id, issue_id, installation_id, channel_type, chat_id, thread_id, anchor_message_id, created_by, created_at
+RETURNING id, workspace_id, issue_id, installation_id, channel_type, chat_id, thread_id, anchor_message_id, created_by, created_at, project_subscription_id, muted
 `
 
 type CreateChannelIssueSubscriptionParams struct {
-	WorkspaceID     pgtype.UUID `json:"workspace_id"`
-	IssueID         pgtype.UUID `json:"issue_id"`
-	InstallationID  pgtype.UUID `json:"installation_id"`
-	ChannelType     string      `json:"channel_type"`
-	ChatID          string      `json:"chat_id"`
-	ThreadID        string      `json:"thread_id"`
-	AnchorMessageID string      `json:"anchor_message_id"`
-	CreatedBy       pgtype.UUID `json:"created_by"`
+	WorkspaceID           pgtype.UUID `json:"workspace_id"`
+	IssueID               pgtype.UUID `json:"issue_id"`
+	InstallationID        pgtype.UUID `json:"installation_id"`
+	ChannelType           string      `json:"channel_type"`
+	ChatID                string      `json:"chat_id"`
+	ThreadID              string      `json:"thread_id"`
+	AnchorMessageID       string      `json:"anchor_message_id"`
+	CreatedBy             pgtype.UUID `json:"created_by"`
+	ProjectSubscriptionID pgtype.UUID `json:"project_subscription_id"`
 }
 
 // Returns no row when the chat already follows the issue.
@@ -45,6 +47,7 @@ func (q *Queries) CreateChannelIssueSubscription(ctx context.Context, arg Create
 		arg.ThreadID,
 		arg.AnchorMessageID,
 		arg.CreatedBy,
+		arg.ProjectSubscriptionID,
 	)
 	var i ChannelIssueSubscription
 	err := row.Scan(
@@ -58,6 +61,8 @@ func (q *Queries) CreateChannelIssueSubscription(ctx context.Context, arg Create
 		&i.AnchorMessageID,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.ProjectSubscriptionID,
+		&i.Muted,
 	)
 	return i, err
 }
@@ -147,7 +152,7 @@ func (q *Queries) DeleteChannelProjectSubscriptionsByProject(ctx context.Context
 }
 
 const listChannelIssueSubscriptionsForIssue = `-- name: ListChannelIssueSubscriptionsForIssue :many
-SELECT id, workspace_id, issue_id, installation_id, channel_type, chat_id, thread_id, anchor_message_id, created_by, created_at FROM channel_issue_subscription
+SELECT id, workspace_id, issue_id, installation_id, channel_type, chat_id, thread_id, anchor_message_id, created_by, created_at, project_subscription_id, muted FROM channel_issue_subscription
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at, id
 `
@@ -177,6 +182,8 @@ func (q *Queries) ListChannelIssueSubscriptionsForIssue(ctx context.Context, arg
 			&i.AnchorMessageID,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.ProjectSubscriptionID,
+			&i.Muted,
 		); err != nil {
 			return nil, err
 		}
@@ -283,4 +290,18 @@ func (q *Queries) ListProjectsByTitle(ctx context.Context, arg ListProjectsByTit
 		return nil, err
 	}
 	return items, nil
+}
+
+const setChannelIssueSubscriptionMuted = `-- name: SetChannelIssueSubscriptionMuted :exec
+UPDATE channel_issue_subscription SET muted = $1 WHERE id = $2
+`
+
+type SetChannelIssueSubscriptionMutedParams struct {
+	Muted bool        `json:"muted"`
+	ID    pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) SetChannelIssueSubscriptionMuted(ctx context.Context, arg SetChannelIssueSubscriptionMutedParams) error {
+	_, err := q.db.Exec(ctx, setChannelIssueSubscriptionMuted, arg.Muted, arg.ID)
+	return err
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -444,5 +445,138 @@ func TestRouter_PublishProjectFeed_DB(t *testing.T) {
 	}
 	if len(counts) != 2 || counts["oc_project"] != 1 || counts["oc_both"] != 1 {
 		t.Fatalf("project fanout = %v, want each chat once", counts)
+	}
+}
+
+// fakeTopicPoster roots a topic per OpenTopic call, like Feishu.
+type fakeTopicPoster struct {
+	fakePoster
+	mu     sync.Mutex
+	opened []string
+}
+
+func (f *fakeTopicPoster) OpenTopic(_ context.Context, _ db.ChannelInstallation, chatID, text string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.opened = append(f.opened, chatID+"|"+text)
+	return fmt.Sprintf("om_topic_%d", len(f.opened)), nil
+}
+
+func (f *fakeTopicPoster) topics() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.opened...)
+}
+
+func TestRouter_ProjectFeedOpensOneTopicPerIssue_DB(t *testing.T) {
+	s := newSubscriptionDB(t)
+	h, _ := s.harness(t)
+	poster := &fakeTopicPoster{}
+	h.router.Register(channel.TypeFeishu, ResolverSet{
+		Installation: h.inst, Identity: h.ident, Dedup: h.dedup, Session: h.binder,
+		Audit: h.audit, Replier: h.replier, Poster: poster, OriginType: "lark_chat",
+	})
+	ctx := context.Background()
+	drain := func() {
+		t.Helper()
+		if !h.router.Drain(ctx) {
+			t.Fatal("drain timed out")
+		}
+	}
+
+	cmd := groupSubscribeMessage(t, "/subscribe project Web App")
+	cmd.MessageID = "om-project-cmd"
+	if got := sendSubscription(t, h, cmd); got.Subscription.Action != SubscriptionSubscribed {
+		t.Fatalf("subscribe project = %+v", got)
+	}
+
+	h.router.PublishIssueCreated(s.workspaceID, s.webIssue.ID, func(context.Context) string { return "created" })
+	drain()
+	if topics := poster.topics(); len(topics) != 1 || topics[0] != "oc_chat|created" {
+		t.Fatalf("opened topics = %v, want one chat-level post for the new issue", topics)
+	}
+	rows := s.rows(t, s.webIssue.ID)
+	if len(rows) != 1 || rows[0].AnchorMessageID != "om_topic_1" || !rows[0].ProjectSubscriptionID.Valid || rows[0].ThreadID != "" {
+		t.Fatalf("issue topic row = %+v", rows)
+	}
+
+	h.router.PublishIssueUpdate(s.workspaceID, s.webIssue.ID, func(context.Context) string { return "updated" })
+	drain()
+	posts := poster.calls()
+	if len(posts) != 1 || posts[0].target.AnchorMessageID != "om_topic_1" || posts[0].text != "updated" || len(poster.topics()) != 1 {
+		t.Fatalf("later update = posts %+v topics %v, want one reply in the issue topic", posts, poster.topics())
+	}
+
+	// /unsubscribe issue inside the issue topic mutes it; the project does not
+	// reopen a topic, and /subscribe issue there resumes it.
+	inTopic := func(text string) channel.InboundMessage {
+		msg := groupSubscribeMessage(t, text)
+		msg.MessageID = "om-" + strings.ReplaceAll(text, " ", "-")
+		msg.Source.ThreadID = "omt_issue"
+		msg.ReplyTo = &channel.ReplyCtx{MessageID: "om_topic_1", RootID: "om_topic_1"}
+		return msg
+	}
+	ref := fmt.Sprintf("SUB-%d", s.webIssue.Number)
+	if got := sendSubscription(t, h, inTopic("/unsubscribe issue "+ref)); got.Subscription.Action != SubscriptionUnsubscribed {
+		t.Fatalf("unsubscribe in issue topic = %+v", got)
+	}
+	h.router.PublishIssueUpdate(s.workspaceID, s.webIssue.ID, func(context.Context) string { return "muted" })
+	drain()
+	if len(poster.calls()) != 1 || len(poster.topics()) != 1 {
+		t.Fatalf("muted issue posted: posts %+v topics %v", poster.calls(), poster.topics())
+	}
+	if got := sendSubscription(t, h, inTopic("/subscribe issue "+ref)); got.Subscription.Action != SubscriptionSubscribed {
+		t.Fatalf("resubscribe in issue topic = %+v", got)
+	}
+	h.router.PublishIssueUpdate(s.workspaceID, s.webIssue.ID, func(context.Context) string { return "resumed" })
+	drain()
+	if posts := poster.calls(); len(posts) != 2 || posts[1].text != "resumed" {
+		t.Fatalf("resumed issue topic posts = %+v", posts)
+	}
+
+	// Unsubscribing the project retires its issue topics.
+	if got := sendSubscription(t, h, groupSubscribeMessage(t, "/unsubscribe project Web App")); got.Subscription.Action != SubscriptionUnsubscribed {
+		t.Fatalf("unsubscribe project = %+v", got)
+	}
+	h.router.PublishIssueUpdate(s.workspaceID, s.webIssue.ID, func(context.Context) string { return "after" })
+	drain()
+	if len(poster.calls()) != 2 || len(poster.topics()) != 1 {
+		t.Fatalf("update after project unsubscribe: posts %+v topics %v", poster.calls(), poster.topics())
+	}
+	if rows := s.rows(t, s.webIssue.ID); len(rows) != 0 {
+		t.Fatalf("stale issue topic kept: %+v", rows)
+	}
+}
+
+// An issue the chat created with /issue already follows its reply topic, so
+// the chat's project subscription does not open a second topic for it.
+func TestRouter_ProjectFeedSkipsIssueTopicForOriginChat_DB(t *testing.T) {
+	s := newSubscriptionDB(t)
+	h, _ := s.harness(t)
+	poster := &fakeTopicPoster{}
+	h.router.Register(channel.TypeFeishu, ResolverSet{
+		Installation: h.inst, Identity: h.ident, Dedup: h.dedup, Session: h.binder,
+		Audit: h.audit, Replier: h.replier, Poster: poster, OriginType: "lark_chat",
+	})
+	ctx := context.Background()
+	if _, err := s.q.CreateChannelProjectSubscription(ctx, db.CreateChannelProjectSubscriptionParams{
+		WorkspaceID: s.workspaceID, ProjectID: s.webProject, InstallationID: s.installation,
+		ChannelType: string(channel.TypeFeishu), ChatID: "oc_chat", CreatedBy: s.userID,
+	}); err != nil {
+		t.Fatalf("seed project subscription: %v", err)
+	}
+	sessionID := uuid.NewString()
+	s.f.Insert(t, "channel_chat_session_binding", dbfx.Cols{
+		"chat_session_id": sessionID, "installation_id": util.UUIDToString(s.installation),
+		"channel_type": string(channel.TypeFeishu), "channel_chat_id": "oc_chat", "chat_type": "group",
+	})
+	s.f.Exec(t, `UPDATE issue SET origin_type = 'lark_chat', origin_id = $2 WHERE id = $1`, util.UUIDToString(s.webIssue.ID), sessionID)
+
+	h.router.PublishIssueCreated(s.workspaceID, s.webIssue.ID, func(context.Context) string { return "created" })
+	if !h.router.Drain(ctx) {
+		t.Fatal("drain timed out")
+	}
+	if topics := poster.topics(); len(topics) != 0 {
+		t.Fatalf("origin chat got a project topic: %v", topics)
 	}
 }

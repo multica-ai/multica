@@ -487,16 +487,18 @@ type ChannelInstallation struct {
 }
 
 type ChannelIssueSubscription struct {
-	ID              pgtype.UUID        `json:"id"`
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	IssueID         pgtype.UUID        `json:"issue_id"`
-	InstallationID  pgtype.UUID        `json:"installation_id"`
-	ChannelType     string             `json:"channel_type"`
-	ChatID          string             `json:"chat_id"`
-	ThreadID        string             `json:"thread_id"`
-	AnchorMessageID string             `json:"anchor_message_id"`
-	CreatedBy       pgtype.UUID        `json:"created_by"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	InstallationID        pgtype.UUID        `json:"installation_id"`
+	ChannelType           string             `json:"channel_type"`
+	ChatID                string             `json:"chat_id"`
+	ThreadID              string             `json:"thread_id"`
+	AnchorMessageID       string             `json:"anchor_message_id"`
+	CreatedBy             pgtype.UUID        `json:"created_by"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	ProjectSubscriptionID pgtype.UUID        `json:"project_subscription_id"`
+	Muted                 bool               `json:"muted"`
 }
 
 type ChannelMediaPendingObject struct {

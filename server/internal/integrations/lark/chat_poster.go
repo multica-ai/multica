@@ -19,8 +19,10 @@ type chatPoster struct {
 	log         *slog.Logger
 }
 
-// NewChatPoster returns the Feishu engine.ChatPoster.
-func NewChatPoster(client APIClient, credentials CredentialsResolver, log *slog.Logger) engine.ChatPoster {
+// NewChatPoster returns the Feishu engine.ChatPoster. It is an
+// engine.TopicPoster: replies in thread under a chat-level message form a
+// topic, so a followed project gets one topic per issue.
+func NewChatPoster(client APIClient, credentials CredentialsResolver, log *slog.Logger) engine.TopicPoster {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -54,4 +56,21 @@ func (p *chatPoster) PostToChat(ctx context.Context, row db.ChannelInstallation,
 		})
 		return err
 	})
+}
+
+// OpenTopic posts text at chat level and returns its message id, the anchor
+// later updates reply under to stay in that message's topic.
+func (p *chatPoster) OpenTopic(ctx context.Context, row db.ChannelInstallation, chatID, text string) (string, error) {
+	if chatID == "" {
+		return "", errors.New("lark chat poster: missing chat_id")
+	}
+	inst, err := installationFromRow(row)
+	if err != nil {
+		return "", fmt.Errorf("decode feishu installation: %w", err)
+	}
+	creds, err := installationCredentialsFor(inst, p.credentials)
+	if err != nil {
+		return "", err
+	}
+	return p.client.SendTextMessage(ctx, SendTextParams{InstallationID: creds, ChatID: ChatID(chatID), Text: text})
 }

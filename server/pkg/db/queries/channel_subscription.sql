@@ -2,16 +2,20 @@
 -- Returns no row when the chat already follows the issue.
 INSERT INTO channel_issue_subscription (
     workspace_id, issue_id, installation_id, channel_type,
-    chat_id, thread_id, anchor_message_id, created_by
+    chat_id, thread_id, anchor_message_id, created_by, project_subscription_id
 ) VALUES (
     sqlc.arg('workspace_id'), sqlc.arg('issue_id'), sqlc.arg('installation_id'), sqlc.arg('channel_type'),
-    sqlc.arg('chat_id'), sqlc.arg('thread_id'), sqlc.arg('anchor_message_id'), sqlc.narg('created_by')
+    sqlc.arg('chat_id'), sqlc.arg('thread_id'), sqlc.arg('anchor_message_id'), sqlc.narg('created_by'),
+    sqlc.narg('project_subscription_id')
 )
 ON CONFLICT (issue_id, installation_id, chat_id, thread_id) DO NOTHING
 RETURNING *;
 
 -- name: DeleteChannelIssueSubscriptionByID :exec
 DELETE FROM channel_issue_subscription WHERE id = sqlc.arg('id');
+
+-- name: SetChannelIssueSubscriptionMuted :exec
+UPDATE channel_issue_subscription SET muted = sqlc.arg('muted') WHERE id = sqlc.arg('id');
 
 -- name: ListChannelIssueSubscriptionsForIssue :many
 SELECT * FROM channel_issue_subscription

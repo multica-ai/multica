@@ -156,6 +156,15 @@ type ChatPoster interface {
 	PostToChat(ctx context.Context, inst db.ChannelInstallation, target ChatTarget, text string) error
 }
 
+// TopicPoster is a ChatPoster whose chat-level posts can root a topic that
+// later posts reply under (Feishu, through AnchorMessageID). A chat following
+// a project then gets one topic per issue: OpenTopic posts the issue's first
+// update at chat level and returns the message id that anchors its topic.
+type TopicPoster interface {
+	ChatPoster
+	OpenTopic(ctx context.Context, inst db.ChannelInstallation, chatID, text string) (anchorMessageID string, err error)
+}
+
 // ChatSubscriptionQueries is the database surface chat subscriptions need.
 // *db.Queries satisfies it.
 type ChatSubscriptionQueries interface {
@@ -167,6 +176,8 @@ type ChatSubscriptionQueries interface {
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 	CreateChannelIssueSubscription(ctx context.Context, arg db.CreateChannelIssueSubscriptionParams) (db.ChannelIssueSubscription, error)
 	DeleteChannelIssueSubscriptionByID(ctx context.Context, id pgtype.UUID) error
+	SetChannelIssueSubscriptionMuted(ctx context.Context, arg db.SetChannelIssueSubscriptionMutedParams) error
+	GetChannelChatSessionBindingBySessionAny(ctx context.Context, chatSessionID pgtype.UUID) (db.ChannelChatSessionBinding, error)
 	ListChannelIssueSubscriptionsForIssue(ctx context.Context, arg db.ListChannelIssueSubscriptionsForIssueParams) ([]db.ChannelIssueSubscription, error)
 	CreateChannelProjectSubscription(ctx context.Context, arg db.CreateChannelProjectSubscriptionParams) (db.ChannelProjectSubscription, error)
 	DeleteChannelProjectSubscriptionByID(ctx context.Context, id pgtype.UUID) error
@@ -291,9 +302,22 @@ type subscriptionSubject struct {
 	// reveal fills the reply with the subject's details.
 	reveal func(*Result)
 	// find lists the chat's existing subscriptions to it (see chatSpot).
-	find       func(context.Context) ([]pgtype.UUID, error)
+	find       func(context.Context) ([]subscriptionMatch, error)
 	create     func(context.Context) (bool, error)
 	deleteByID func(context.Context, pgtype.UUID) error
+	// setMuted mutes or resumes a project-derived issue topic; nil for
+	// subjects without them.
+	setMuted func(context.Context, pgtype.UUID, bool) error
+}
+
+// subscriptionMatch is one of the chat's existing subscriptions to a subject.
+// fromProject marks an issue topic a project subscription opened: stopping
+// it mutes the row instead of deleting it, so the project does not open a
+// new topic for the issue on its next update.
+type subscriptionMatch struct {
+	id          pgtype.UUID
+	fromProject bool
+	muted       bool
 }
 
 type subjectLookup uint8
@@ -323,17 +347,20 @@ func (r *Router) resolveIssueSubject(ctx context.Context, inst ResolvedInstallat
 			res.IssueIdentifier = service.IssueIdentifier(prefix, issue.Number)
 			res.IssueWorkspaceSlug = slug
 		},
-		find: func(ctx context.Context) ([]pgtype.UUID, error) {
+		find: func(ctx context.Context) ([]subscriptionMatch, error) {
 			rows, err := r.subscriptions.ListChannelIssueSubscriptionsForIssue(ctx, db.ListChannelIssueSubscriptionsForIssueParams{
 				IssueID: issue.ID, WorkspaceID: inst.WorkspaceID,
 			})
-			var ids []pgtype.UUID
+			var out []subscriptionMatch
 			for _, row := range rows {
 				if spot.holds(row.InstallationID, row.ChatID, row.ThreadID, row.AnchorMessageID) {
-					ids = append(ids, row.ID)
+					out = append(out, subscriptionMatch{id: row.ID, fromProject: row.ProjectSubscriptionID.Valid, muted: row.Muted})
 				}
 			}
-			return ids, err
+			return out, err
+		},
+		setMuted: func(ctx context.Context, id pgtype.UUID, muted bool) error {
+			return r.subscriptions.SetChannelIssueSubscriptionMuted(ctx, db.SetChannelIssueSubscriptionMutedParams{ID: id, Muted: muted})
 		},
 		create: func(ctx context.Context) (bool, error) {
 			return r.subscribeChatToIssue(ctx, inst, msg.Source.ChannelType, issue, identity.UserID, spot.target)
@@ -408,17 +435,17 @@ func (r *Router) resolveProjectSubject(ctx context.Context, inst ResolvedInstall
 			}
 			return true, nil
 		},
-		find: func(ctx context.Context) ([]pgtype.UUID, error) {
+		find: func(ctx context.Context) ([]subscriptionMatch, error) {
 			rows, err := r.subscriptions.ListChannelProjectSubscriptionsForProject(ctx, db.ListChannelProjectSubscriptionsForProjectParams{
 				ProjectID: project.ID, WorkspaceID: inst.WorkspaceID,
 			})
-			var ids []pgtype.UUID
+			var out []subscriptionMatch
 			for _, row := range rows {
 				if spot.holds(row.InstallationID, row.ChatID, row.ThreadID, row.AnchorMessageID) {
-					ids = append(ids, row.ID)
+					out = append(out, subscriptionMatch{id: row.ID})
 				}
 			}
-			return ids, err
+			return out, err
 		},
 		deleteByID: r.subscriptions.DeleteChannelProjectSubscriptionByID,
 	}, subjectFound, nil
@@ -467,23 +494,37 @@ func (r *Router) handleSubscriptionCommand(ctx context.Context, set ResolverSet,
 		return verdict(SubscriptionAmbiguous)
 	}
 
-	existing, err := subject.find(ctx)
+	matches, err := subject.find(ctx)
 	if err != nil {
 		return Result{}, fmt.Errorf("list chat subscriptions: %w", err)
+	}
+	var active, muted []subscriptionMatch
+	for _, m := range matches {
+		if m.muted {
+			muted = append(muted, m)
+		} else {
+			active = append(active, m)
+		}
 	}
 	if cmd.Kind == SubscriptionCommandUnsubscribe {
 		// Anyone in the chat may stop updates the chat already receives, even
 		// without access; only an existing subscription reveals the subject.
-		if len(existing) == 0 && !subject.visible {
+		if len(active) == 0 && !subject.visible {
 			return verdict(SubscriptionNotFound)
 		}
-		for _, id := range existing {
-			if err := subject.deleteByID(ctx, id); err != nil {
-				return Result{}, fmt.Errorf("delete chat subscription: %w", err)
+		for _, m := range active {
+			var err error
+			if m.fromProject {
+				err = subject.setMuted(ctx, m.id, true)
+			} else {
+				err = subject.deleteByID(ctx, m.id)
+			}
+			if err != nil {
+				return Result{}, fmt.Errorf("stop chat subscription: %w", err)
 			}
 		}
 		subject.reveal(&res)
-		if len(existing) > 0 {
+		if len(active) > 0 {
 			return verdict(SubscriptionUnsubscribed)
 		}
 		return verdict(SubscriptionNotSubscribed)
@@ -492,8 +533,16 @@ func (r *Router) handleSubscriptionCommand(ctx context.Context, set ResolverSet,
 		return verdict(SubscriptionNotFound)
 	}
 	subject.reveal(&res)
-	if len(existing) > 0 {
+	if len(active) > 0 {
 		return verdict(SubscriptionAlreadySubscribed)
+	}
+	if len(muted) > 0 {
+		for _, m := range muted {
+			if err := subject.setMuted(ctx, m.id, false); err != nil {
+				return Result{}, fmt.Errorf("resume chat subscription: %w", err)
+			}
+		}
+		return verdict(SubscriptionSubscribed)
 	}
 	created, err := subject.create(ctx)
 	if err != nil {
@@ -553,7 +602,8 @@ func (r *Router) PublishIssueUpdate(workspaceID, issueID pgtype.UUID, render fun
 }
 
 // PublishIssueCreated posts a new issue into the chats that follow its
-// project. Issue-level subscriptions cannot exist yet.
+// project, opening its topic where the platform supports one. Issue-level
+// subscriptions cannot exist yet.
 func (r *Router) PublishIssueCreated(workspaceID, issueID pgtype.UUID, render func(context.Context) string) {
 	r.publishDetached(workspaceID, issueID, false, render)
 }
@@ -575,19 +625,57 @@ func (r *Router) publishDetached(workspaceID, issueID pgtype.UUID, includeIssueS
 type feedRecipient struct {
 	id             pgtype.UUID
 	viaProject     bool
+	muted          bool
 	installationID pgtype.UUID
 	channelType    string
 	target         ChatTarget
 	createdBy      pgtype.UUID
+	// openTopic marks a project subscription whose platform roots one topic
+	// per issue: the update opens the issue's topic at chat level.
+	openTopic bool
 }
 
-// feedRecipients merges the issue's and its project's subscriptions. A chat
-// (thread) that follows both gets the update once.
+func feedKey(installationID pgtype.UUID, chatID, threadID string) string {
+	return util.UUIDToString(installationID) + "\x00" + chatID + "\x00" + threadID
+}
+
+func (r *Router) topicPoster(channelType string) (TopicPoster, bool) {
+	r.mu.RLock()
+	set, ok := r.sets[channel.Type(channelType)]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	tp, ok := set.Poster.(TopicPoster)
+	return tp, ok
+}
+
+// feedRecipients merges the issue's and its project's subscriptions, each
+// chat (thread) once. An issue subscription wins over the project's for the
+// same place: an issue topic a project opened (fromProject) is that issue's
+// place in the chat, and a muted one keeps the project from posting there.
+// Topics of a project subscription that no longer covers the issue are
+// deleted.
 func (r *Router) feedRecipients(ctx context.Context, issue db.Issue, includeIssueSubs bool) ([]feedRecipient, error) {
+	var projectSubs []db.ChannelProjectSubscription
+	if issue.ProjectID.Valid {
+		subs, err := r.subscriptions.ListChannelProjectSubscriptionsForProject(ctx, db.ListChannelProjectSubscriptionsForProjectParams{
+			ProjectID: issue.ProjectID, WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list project subscriptions: %w", err)
+		}
+		projectSubs = subs
+	}
+	covering := map[[16]byte]struct{}{}
+	for _, s := range projectSubs {
+		covering[s.ID.Bytes] = struct{}{}
+	}
+
 	var out []feedRecipient
 	seen := map[string]struct{}{}
-	add := func(rec feedRecipient) {
-		key := util.UUIDToString(rec.installationID) + "\x00" + rec.target.ChatID + "\x00" + rec.target.ThreadID
+	fromProject := map[[16]byte]struct{}{}
+	add := func(key string, rec feedRecipient) {
 		if _, dup := seen[key]; dup {
 			return
 		}
@@ -602,27 +690,62 @@ func (r *Router) feedRecipients(ctx context.Context, issue db.Issue, includeIssu
 			return nil, fmt.Errorf("list issue subscriptions: %w", err)
 		}
 		for _, s := range subs {
-			add(feedRecipient{
-				id: s.ID, installationID: s.InstallationID, channelType: s.ChannelType, createdBy: s.CreatedBy,
+			if s.ProjectSubscriptionID.Valid {
+				if _, ok := covering[s.ProjectSubscriptionID.Bytes]; !ok {
+					if err := r.subscriptions.DeleteChannelIssueSubscriptionByID(ctx, s.ID); err != nil {
+						return nil, fmt.Errorf("delete stale issue topic: %w", err)
+					}
+					continue
+				}
+				fromProject[s.ProjectSubscriptionID.Bytes] = struct{}{}
+			}
+			add(feedKey(s.InstallationID, s.ChatID, s.ThreadID), feedRecipient{
+				id: s.ID, muted: s.Muted, installationID: s.InstallationID, channelType: s.ChannelType, createdBy: s.CreatedBy,
 				target: ChatTarget{ChatID: s.ChatID, ThreadID: s.ThreadID, AnchorMessageID: s.AnchorMessageID},
 			})
 		}
 	}
-	if issue.ProjectID.Valid {
-		subs, err := r.subscriptions.ListChannelProjectSubscriptionsForProject(ctx, db.ListChannelProjectSubscriptionsForProjectParams{
-			ProjectID: issue.ProjectID, WorkspaceID: issue.WorkspaceID,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("list project subscriptions: %w", err)
+	for _, s := range projectSubs {
+		if _, ok := fromProject[s.ID.Bytes]; ok {
+			continue
 		}
-		for _, s := range subs {
-			add(feedRecipient{
-				id: s.ID, viaProject: true, installationID: s.InstallationID, channelType: s.ChannelType, createdBy: s.CreatedBy,
-				target: ChatTarget{ChatID: s.ChatID, ThreadID: s.ThreadID, AnchorMessageID: s.AnchorMessageID},
-			})
+		rec := feedRecipient{
+			id: s.ID, viaProject: true, installationID: s.InstallationID, channelType: s.ChannelType, createdBy: s.CreatedBy,
+			target: ChatTarget{ChatID: s.ChatID, ThreadID: s.ThreadID, AnchorMessageID: s.AnchorMessageID},
+		}
+		key := feedKey(s.InstallationID, s.ChatID, s.ThreadID)
+		if _, ok := r.topicPoster(s.ChannelType); ok {
+			rec.openTopic = true
+			key = feedKey(s.InstallationID, s.ChatID, "")
+		}
+		add(key, rec)
+	}
+	active := out[:0]
+	for _, rec := range out {
+		if !rec.muted {
+			active = append(active, rec)
 		}
 	}
-	return out, nil
+	return active, nil
+}
+
+// issueOriginChat returns the chat an issue was created from with /issue, if
+// any. That chat follows the issue in its /issue reply topic, so a project
+// subscription there does not open a second topic for it.
+func (r *Router) issueOriginChat(ctx context.Context, issue db.Issue) (pgtype.UUID, string, bool) {
+	if !issue.OriginID.Valid {
+		return pgtype.UUID{}, "", false
+	}
+	binding, err := r.subscriptions.GetChannelChatSessionBindingBySessionAny(ctx, issue.OriginID)
+	if err != nil {
+		return pgtype.UUID{}, "", false
+	}
+	return binding.InstallationID, binding.ChannelChatID, true
+}
+
+func originChatHolds(key, chatID string) bool {
+	// Topic-isolated sessions key their binding "chat:thread".
+	return key == chatID || strings.HasPrefix(key, chatID+":")
 }
 
 // publishIssueFeed delivers one update. A subscription's updates pause
@@ -642,9 +765,13 @@ func (r *Router) publishIssueFeed(ctx context.Context, workspaceID, issueID pgty
 		log.Warn("channel issue feed: list subscriptions failed", "error", err)
 		return
 	}
+	originInst, originChat, hasOrigin := r.issueOriginChat(ctx, issue)
 	visibleTo := map[[16]byte]bool{}
 	allowed := recipients[:0:0]
 	for _, rec := range recipients {
+		if rec.openTopic && hasOrigin && rec.installationID == originInst && originChatHolds(originChat, rec.target.ChatID) {
+			continue
+		}
 		visible, cached := visibleTo[rec.createdBy.Bytes]
 		if !cached {
 			if visible, err = issueVisibleTo(ctx, r.subscriptions, issue, rec.createdBy); err != nil {
@@ -694,7 +821,11 @@ func (r *Router) publishIssueFeed(ctx context.Context, workspaceID, issueID pgty
 			continue
 		}
 		postCtx, cancel := context.WithTimeout(ctx, issueFeedPostTimeout)
-		err = set.Poster.PostToChat(postCtx, inst, rec.target, text)
+		if tp, ok := set.Poster.(TopicPoster); ok && rec.openTopic {
+			err = r.openIssueTopic(postCtx, tp, inst, issue, rec, text)
+		} else {
+			err = set.Poster.PostToChat(postCtx, inst, rec.target, text)
+		}
 		cancel()
 		if err != nil {
 			log.Warn("channel issue feed: post failed",
@@ -702,6 +833,27 @@ func (r *Router) publishIssueFeed(ctx context.Context, workspaceID, issueID pgty
 				"installation_id", util.UUIDToString(rec.installationID), "error", err)
 		}
 	}
+}
+
+// openIssueTopic posts the issue's first update for a project subscription at
+// chat level and records the message as the anchor of the issue's topic.
+func (r *Router) openIssueTopic(ctx context.Context, tp TopicPoster, inst db.ChannelInstallation, issue db.Issue, rec feedRecipient, text string) error {
+	anchor, err := tp.OpenTopic(ctx, inst, rec.target.ChatID, text)
+	if err != nil || anchor == "" {
+		return err
+	}
+	_, err = r.subscriptions.CreateChannelIssueSubscription(ctx, db.CreateChannelIssueSubscriptionParams{
+		WorkspaceID: issue.WorkspaceID, IssueID: issue.ID, InstallationID: rec.installationID,
+		ChannelType: rec.channelType, ChatID: rec.target.ChatID, AnchorMessageID: anchor,
+		CreatedBy: rec.createdBy, ProjectSubscriptionID: rec.id,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("record issue topic: %w", err)
+	}
+	return nil
 }
 
 // IssueChatSubscribedNote is appended to an /issue confirmation when the
@@ -747,7 +899,7 @@ func SubscriptionReplyText(res Result, appURL string, escape func(string) string
 	switch sub.Action {
 	case SubscriptionSubscribed:
 		if project {
-			return withLink("🔔 This chat now follows " + named + ". New issues, status changes, assignments and comments in it will be posted here.")
+			return withLink("🔔 This chat now follows " + named + ". New issues, status changes, assignments and comments in it will be posted to this chat.")
 		}
 		return withLink("🔔 This chat now follows " + named + ". Status changes, assignments and comments will be posted here.")
 	case SubscriptionAlreadySubscribed:
