@@ -40,3 +40,7 @@ export function invalidateSessionEpoch(): void {
 export function sessionEpochChanged(at: number): boolean {
   return epoch !== at;
 }
+
+export function assertCurrentSession(at: number): void {
+  if (sessionEpochChanged(at)) throw new Error("Server session changed");
+}

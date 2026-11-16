@@ -4,12 +4,13 @@
  * Send-message is NOT a mutation: the chat screen runs a hand-written
  * optimistic burst (seed messages cache → seed pendingTask cache → flip
  * activeSession → POST → patch with real task_id) that doesn't map cleanly
- * onto useMutation. See the chat tab screen for the send path.
+ * onto useSessionMutation. See the chat tab screen for the send path.
  *
  * Mirrors the optimistic-update + rollback + onSettled-invalidate pattern
  * of data/mutations/inbox.ts and web's packages/core/chat/mutations.ts.
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSessionMutation } from "@/data/use-session-mutation";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ChatSession } from "@multica/core/types";
 import { api } from "@/data/api";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -19,7 +20,7 @@ export function useCreateChatSession() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: (data: { agent_id: string; title?: string }) =>
       api.createChatSession(data),
     onSettled: () => {
@@ -37,11 +38,12 @@ export function useDeleteChatSession() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: (id: string) => api.deleteChatSession(id),
-    onMutate: async (id) => {
+    onMutate: async (id, session) => {
       const key = chatKeys.sessions(wsId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<ChatSession[]>(key);
       qc.setQueryData<ChatSession[]>(key, (old) =>
         old ? old.filter((s) => s.id !== id) : old,
@@ -64,11 +66,12 @@ export function useMarkChatSessionRead() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: (sessionId: string) => api.markChatSessionRead(sessionId),
-    onMutate: async (sessionId) => {
+    onMutate: async (sessionId, session) => {
       const key = chatKeys.sessions(wsId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<ChatSession[]>(key);
       // Zero unread_count together with has_unread — the tab badge sums
       // unread_count (see lib/unread-counts.ts), so clearing only the flag

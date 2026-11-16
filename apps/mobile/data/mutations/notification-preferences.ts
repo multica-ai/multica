@@ -1,7 +1,8 @@
 /**
  * Mobile notification-preferences mutation. Mirrors the optimistic pattern of
  * packages/core/notification-preferences/mutations.ts — written here per the
- * "Mobile-owned updaters" rule (don't import web mutations; key shape is
+ * "Mobile-owned updaters" rule (don't import { useSessionMutation } from "@/data/use-session-mutation";
+import web mutations; key shape is
  * independent and may drift).
  *
  * Optimistic policy: patch cache → fire PATCH → rollback on error → invalidate
@@ -10,7 +11,6 @@
  * snapping back if the request hangs would look broken.
  */
 import {
-  useMutation,
   useQueryClient,
   type MutateOptions,
 } from "@tanstack/react-query";
@@ -90,7 +90,7 @@ export function useUpdateNotificationPreferences() {
 
   // Match Core's concurrency contract: serialize writes per workspace and
   // capture the slug so queued work cannot follow a later workspace switch.
-  const mutation = useMutation<
+  const mutation = useSessionMutation<
     NotificationPreferenceResponse,
     Error,
     NotificationPreferenceMutationVariables,
@@ -106,9 +106,10 @@ export function useUpdateNotificationPreferences() {
       }
       return api.updateNotificationPreferences(patch, targetWorkspaceSlug);
     },
-    onMutate: async ({ patch, workspaceId }) => {
+    onMutate: async ({ patch, workspaceId }, session) => {
       const targetKey = notificationPreferenceKeys.all(workspaceId);
       await qc.cancelQueries({ queryKey: targetKey });
+      session.assertCurrentSession();
       const previous =
         qc.getQueryData<NotificationPreferenceResponse>(targetKey);
       qc.setQueryData<NotificationPreferenceResponse>(targetKey, (old) => ({

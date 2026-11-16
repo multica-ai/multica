@@ -1,6 +1,9 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Attachment } from "@multica/core/types";
+import { Alert } from "react-native";
+import { freshAttachmentUrl } from "@/data/attachment-media";
+import { invalidateSessionEpoch } from "@/data/session-epoch";
 
 const state = vi.hoisted(() => ({
   contexts: new Map<unknown, unknown>(),
@@ -20,7 +23,7 @@ vi.mock("react", async (importOriginal) => ({
   },
 }));
 vi.mock("react-native", () => ({
-  Image: { getSize: vi.fn() }, Pressable: "Pressable", View: "View",
+  Image: { getSize: vi.fn() }, Pressable: "Pressable", View: "View", Alert: { alert: vi.fn() },
 }));
 vi.mock("expo-image", () => ({ Image: "ExpoImage" }));
 vi.mock("react-native-image-viewing", () => ({ default: "ImageView" }));
@@ -28,9 +31,9 @@ vi.mock("@/components/ui/text", () => ({ Text: "Text" }));
 
 vi.mock("@/data/server-config-store", () => ({ getServerConfig: () => ({ apiUrl: "", webUrl: "" }) }));
 vi.mock("@/data/attachment-media", () => ({
-  freshAttachmentUrl: async (source: string) => source.includes("11111111-1111-4111-8111-111111111111")
-    ? "https://cdn.example/signed.png?Signature=raw%2Bvalue" : source,
+  freshAttachmentUrl: vi.fn(),
 }));
+vi.mock("@/lib/i18n/singleton", () => ({ i18n: { t: (key: string) => key } }));
 vi.mock("@/data/use-attachment-media", () => ({
   useAttachmentMedia: (source: string) => ({
     uri: source.includes("11111111-1111-4111-8111-111111111111")
@@ -59,6 +62,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.contexts.clear();
   state.setters.length = 0;
+  vi.mocked(freshAttachmentUrl).mockImplementation(async (source: string) => source.includes(ID)
+    ? "https://cdn.example/signed.png?Signature=raw%2Bvalue" : source);
 });
 
 // Follow real parsing, provider values and press/open callbacks. Native leaves
@@ -110,9 +115,9 @@ describe("mobile Markdown image sequence wiring", () => {
     await vi.waitFor(() => expect(state.setters[0]).toHaveBeenCalledOnce());
     expect(state.setters[0]).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       images: [
-        { uri: "https://cdn.example/first.png" },
+        {},
         { uri: expectedUri },
-        { uri: "https://cdn.example/last.png" },
+        {},
       ],
       index: 1,
     }));
@@ -138,9 +143,9 @@ describe("mobile Markdown image sequence wiring", () => {
     await vi.waitFor(() => expect(state.setters[0]).toHaveBeenCalledOnce());
     expect(state.setters[0]).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       images: [
-        { uri: "https://cdn.example/first.png" },
+        {},
         { uri: expectedUri },
-        { uri: "https://cdn.example/last.png" },
+        {},
       ],
       index: 1,
     }));
@@ -168,5 +173,40 @@ describe("mobile Markdown image sequence wiring", () => {
       "https://cdn.example/first.png",
       "https://cdn.example/last.png",
     ]);
+  });
+
+  it("opens the selected image without requesting unavailable or slow neighbors", async () => {
+    vi.mocked(freshAttachmentUrl).mockImplementation(async (source) => {
+      if (source !== "selected") throw new Error("Attachment metadata returned 404");
+      return "https://signed.test/selected";
+    });
+    LightboxProvider({ children: null }).props.value.open("selected", ["missing", "selected", "slow"]);
+    await vi.waitFor(() => expect(state.setters[0]).toHaveBeenCalledOnce());
+    expect(freshAttachmentUrl).toHaveBeenCalledExactlyOnceWith("selected");
+    expect(state.setters[0]).toHaveBeenCalledWith(expect.objectContaining({
+      images: [{}, { uri: "https://signed.test/selected" }, {}], index: 1,
+      sources: ["missing", "selected", "slow"],
+    }));
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("reports a selected-image failure instead of silently ignoring it", async () => {
+    vi.mocked(freshAttachmentUrl).mockRejectedValueOnce(new Error("404"));
+    LightboxProvider({ children: null }).props.value.open("missing", ["missing", "valid"]);
+    await vi.waitFor(() => expect(Alert.alert).toHaveBeenCalledWith("settings:server.attachment_failed"));
+    expect(state.setters[0]).not.toHaveBeenCalled();
+  });
+
+  it.each(["resolve", "reject"])("discards a selected-image %s after the session changes", async (outcome) => {
+    let resolve!: (uri: string) => void;
+    let reject!: (error: Error) => void;
+    vi.mocked(freshAttachmentUrl).mockReturnValueOnce(new Promise((yes, no) => { resolve = yes; reject = no; }));
+    LightboxProvider({ children: null }).props.value.open("selected");
+    invalidateSessionEpoch();
+    if (outcome === "resolve") resolve("https://old.test/signed");
+    else reject(new Error("old failure"));
+    await new Promise((done) => setTimeout(done, 0));
+    expect(state.setters[0]).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
   });
 });

@@ -8,7 +8,8 @@
  * Both mutations key on (wsId, userId). userId comes from the auth store
  * because the cache itself is per-user-per-workspace (see pinKeys).
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSessionMutation } from "@/data/use-session-mutation";
+import { useQueryClient } from "@tanstack/react-query";
 import type { PinnedItem, PinnedItemType } from "@multica/core/types";
 import { api } from "@/data/api";
 import { pinKeys } from "@/data/queries/pins";
@@ -20,13 +21,14 @@ export function useCreatePin() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const userId = useAuthStore((s) => s.user?.id ?? null);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: (data: { item_type: PinnedItemType; item_id: string }) =>
       api.createPin(data),
-    onMutate: async (data) => {
+    onMutate: async (data, session) => {
       if (!wsId || !userId) return;
       const key = pinKeys.list(wsId, userId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<PinnedItem[]>(key);
       // Optimistic stub. Real id arrives in onSuccess; until then a stable
       // synthetic id keeps any list keyExtractor happy. Position = max + 1
@@ -77,7 +79,7 @@ export function useDeletePin() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const userId = useAuthStore((s) => s.user?.id ?? null);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: ({
       itemType,
       itemId,
@@ -85,10 +87,11 @@ export function useDeletePin() {
       itemType: PinnedItemType;
       itemId: string;
     }) => api.deletePin(itemType, itemId),
-    onMutate: async ({ itemType, itemId }) => {
+    onMutate: async ({ itemType, itemId }, session) => {
       if (!wsId || !userId) return;
       const key = pinKeys.list(wsId, userId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<PinnedItem[]>(key);
       qc.setQueryData<PinnedItem[]>(key, (old) =>
         old

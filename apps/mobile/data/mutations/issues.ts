@@ -13,7 +13,8 @@
  *   - On settled: invalidate so the server's real comment row replaces the
  *     synthetic one (real id, real created_at).
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSessionMutation } from "@/data/use-session-mutation";
+import { useQueryClient } from "@tanstack/react-query";
 import type {
   CreateIssueRequest,
   Issue,
@@ -84,12 +85,13 @@ export function useCreateComment(issueId: string) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const userId = useAuthStore((s) => s.user?.id ?? null);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: ({ content, parentId, attachmentIds }: CreateCommentVars) =>
       api.createComment(issueId, content, { parentId, attachmentIds }),
-    onMutate: async ({ content, parentId }) => {
+    onMutate: async ({ content, parentId }, session) => {
       const key = issueKeys.timeline(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<TimelineEntry[]>(key);
       if (!userId) return { prev, key, optimisticId: null };
 
@@ -183,7 +185,7 @@ export function useToggleCommentReaction(issueId: string) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const userId = useAuthStore((s) => s.user?.id ?? null);
 
-  return useMutation({
+  return useSessionMutation({
     mutationKey: ["toggleCommentReaction", issueId] as const,
     mutationFn: async ({
       commentId,
@@ -196,9 +198,10 @@ export function useToggleCommentReaction(issueId: string) {
       }
       return api.addReaction(commentId, emoji);
     },
-    onMutate: async ({ commentId, emoji, existing }) => {
+    onMutate: async ({ commentId, emoji, existing }, session) => {
       const key = issueKeys.timeline(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<TimelineEntry[]>(key);
       if (!userId) return { prev, key };
 
@@ -260,7 +263,7 @@ export function useEditComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: ({
       commentId,
       content,
@@ -280,9 +283,10 @@ export function useEditComment(issueId: string) {
         commentContentFromTimeline(timeline, commentId),
       );
     },
-    onMutate: async ({ commentId, content }) => {
+    onMutate: async ({ commentId, content }, session) => {
       const key = issueKeys.timeline(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<TimelineEntry[]>(key);
       qc.setQueryData<TimelineEntry[]>(key, (old) =>
         old?.map((entry) =>
@@ -344,7 +348,7 @@ export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     // The capability is read when the delete runs, from the same config cache
     // the confirm copy reads, so the route matches what the user was told.
     mutationFn: async (commentId: string) => {
@@ -385,7 +389,7 @@ export function useResolveComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: ({
       commentId,
       resolved,
@@ -396,9 +400,10 @@ export function useResolveComment(issueId: string) {
       resolved
         ? api.resolveComment(commentId)
         : api.unresolveComment(commentId),
-    onMutate: async ({ commentId, resolved }) => {
+    onMutate: async ({ commentId, resolved }, session) => {
       const key = issueKeys.timeline(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<TimelineEntry[]>(key);
       const now = resolved ? new Date().toISOString() : null;
       qc.setQueryData<TimelineEntry[]>(key, (old) =>
@@ -444,7 +449,7 @@ export function useToggleIssueReaction(issueId: string) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const userId = useAuthStore((s) => s.user?.id ?? null);
 
-  return useMutation({
+  return useSessionMutation({
     mutationKey: ["toggleIssueReaction", issueId] as const,
     mutationFn: async ({ emoji, existing }: ToggleIssueReactionVars) => {
       if (existing) {
@@ -453,9 +458,10 @@ export function useToggleIssueReaction(issueId: string) {
       }
       return api.addIssueReaction(issueId, emoji);
     },
-    onMutate: async ({ emoji, existing }) => {
+    onMutate: async ({ emoji, existing }, session) => {
       const key = issueKeys.detail(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<Issue>(key);
       if (!userId || !prev) return { prev, key };
 
@@ -534,12 +540,13 @@ export function useUpdateIssue(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationKey: ["updateIssue", issueId] as const,
     mutationFn: (patch: UpdateIssueRequest) => api.updateIssue(issueId, patch),
-    onMutate: async (patch) => {
+    onMutate: async (patch, session) => {
       const key = issueKeys.detail(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<Issue>(key);
       if (prev) {
         const {
@@ -595,13 +602,14 @@ export function useAttachLabel(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationKey: ["attachLabel", issueId] as const,
     mutationFn: ({ label }: { label: Label }) =>
       api.attachLabel(issueId, label.id),
-    onMutate: async ({ label }) => {
+    onMutate: async ({ label }, session) => {
       const key = issueKeys.detail(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<Issue>(key);
       if (prev) {
         const existing = prev.labels ?? [];
@@ -637,13 +645,14 @@ export function useDetachLabel(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationKey: ["detachLabel", issueId] as const,
     mutationFn: ({ labelId }: { labelId: string }) =>
       api.detachLabel(issueId, labelId),
-    onMutate: async ({ labelId }) => {
+    onMutate: async ({ labelId }, session) => {
       const key = issueKeys.detail(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<Issue>(key);
       if (prev) {
         const existing = prev.labels ?? [];
@@ -685,7 +694,7 @@ export function useCreateIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: (body: CreateIssueRequest) => api.createIssue(body),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
@@ -702,15 +711,16 @@ export function useDeleteIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: (id: string) => api.deleteIssue(id),
-    onSuccess: async (_data, id) => {
+    onSuccess: async (_data, id, _result, session) => {
       const listKey = issueKeys.list(wsId);
       const myAllKey = issueKeys.myAll(wsId);
       await Promise.all([
         qc.cancelQueries({ queryKey: listKey }),
         qc.cancelQueries({ queryKey: myAllKey }),
       ]);
+      session.assertCurrentSession();
       qc.setQueryData<Issue[]>(listKey, (old) =>
         old ? old.filter((issue) => issue.id !== id) : old,
       );
@@ -731,7 +741,7 @@ export function useCancelTask(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: (taskId: string) => api.cancelTaskById(taskId),
     // Pending mutation options can change when the workspace changes.
     onMutate: () => ({

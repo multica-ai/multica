@@ -14,7 +14,8 @@
  * — mobile-owned ws-updaters live in `data/realtime/project-ws-updaters.ts`
  * and are invoked by `use-projects-realtime.ts` + `use-project-realtime.ts`.
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSessionMutation } from "@/data/use-session-mutation";
+import { useQueryClient } from "@tanstack/react-query";
 import type {
   CreateProjectRequest,
   CreateProjectResourceRequest,
@@ -30,7 +31,7 @@ export function useCreateProject() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: (body: CreateProjectRequest) => api.createProject(body),
     onSuccess: (project) => {
       // Seed the detail cache so the post-create navigation lands on a
@@ -49,11 +50,11 @@ export function useUpdateProject(projectId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationKey: ["updateProject", projectId] as const,
     mutationFn: (patch: UpdateProjectRequest) =>
       api.updateProject(projectId, patch),
-    onMutate: async (patch) => {
+    onMutate: async (patch, session) => {
       const detailKey = projectKeys.detail(wsId, projectId);
       const listKey = projectKeys.list(wsId);
       // Cancel both — a concurrent list refetch can race-overwrite the
@@ -62,6 +63,7 @@ export function useUpdateProject(projectId: string) {
         qc.cancelQueries({ queryKey: detailKey }),
         qc.cancelQueries({ queryKey: listKey }),
       ]);
+      session.assertCurrentSession();
 
       const prevDetail = qc.getQueryData<Project>(detailKey);
       const prevList = qc.getQueryData<Project[]>(listKey);
@@ -103,12 +105,13 @@ export function useDeleteProject(projectId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationKey: ["deleteProject", projectId] as const,
     mutationFn: () => api.deleteProject(projectId),
-    onMutate: async () => {
+    onMutate: async (_variables, session) => {
       const listKey = projectKeys.list(wsId);
       await qc.cancelQueries({ queryKey: listKey });
+      session.assertCurrentSession();
       const prevList = qc.getQueryData<Project[]>(listKey);
       qc.setQueryData<Project[]>(listKey, (old) =>
         old ? old.filter((p) => p.id !== projectId) : old,
@@ -131,7 +134,7 @@ export function useCreateProjectResource(projectId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationKey: ["createProjectResource", projectId] as const,
     mutationFn: (body: CreateProjectResourceRequest) =>
       api.createProjectResource(projectId, body),
@@ -166,13 +169,14 @@ export function useDeleteProjectResource(projectId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationKey: ["deleteProjectResource", projectId] as const,
     mutationFn: (resourceId: string) =>
       api.deleteProjectResource(projectId, resourceId),
-    onSuccess: async (_data, resourceId) => {
+    onSuccess: async (_data, resourceId, _result, session) => {
       const key = projectKeys.resources(wsId, projectId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       qc.setQueryData<ProjectResource[]>(key, (old) =>
         old ? old.filter((r) => r.id !== resourceId) : old,
       );

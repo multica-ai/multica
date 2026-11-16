@@ -22,12 +22,13 @@
  * desktop chevrons — same semantics, phone-native interaction.
  */
 import { createContext, use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { AppState, View } from "react-native";
+import { Alert, AppState, View } from "react-native";
 import ImageView from "react-native-image-viewing";
 import { Text } from "@/components/ui/text";
 import { freshAttachmentUrl } from "@/data/attachment-media";
 import { registerSessionConnection } from "@/data/realtime/session-connections";
 import { currentSessionEpoch, sessionEpochChanged } from "@/data/session-epoch";
+import { i18n } from "@/lib/i18n/singleton";
 
 interface LightboxApi {
   /**
@@ -50,7 +51,7 @@ export function useLightbox(): LightboxApi {
 }
 
 interface Viewing {
-  images: { uri: string }[];
+  images: { uri?: string }[];
   sources: string[];
   index: number;
   epoch: number;
@@ -62,11 +63,12 @@ export function LightboxProvider({ children }: { children: ReactNode }) {
   // `viewing` itself is the frozen snapshot taken when the viewer opened.
   const [currentIndex, setCurrentIndex] = useState(0);
   const openSequence = useRef(0);
+  const reportedFailures = useRef(new Set<string>());
 
   useEffect(() => registerSessionConnection(() => {
     openSequence.current++;
     setViewing(null);
-  }), [viewing]);
+  }), []);
 
   useEffect(() => {
     if (!viewing) return;
@@ -82,7 +84,12 @@ export function LightboxProvider({ children }: { children: ReactNode }) {
             images[currentIndex] = { uri };
             return { ...current, images };
           });
-        }).catch(() => {});
+        }).catch(() => {
+          const source = viewing.sources[currentIndex];
+          if (cancelled || sessionEpochChanged(viewing.epoch) || reportedFailures.current.has(source)) return;
+          reportedFailures.current.add(source);
+          Alert.alert(i18n.t("settings:server.attachment_failed"));
+        });
     };
     // Keep the selected image's 60-second proxy capability usable while the
     // viewer is open, on swipes and on return from the background.
@@ -105,11 +112,20 @@ export function LightboxProvider({ children }: { children: ReactNode }) {
         // fallback web takes when `openAt` reports the key is unknown.
         const sources = found >= 0 ? uris : [uri];
         const index = found >= 0 ? found : 0;
-        void Promise.all(sources.map((source) => freshAttachmentUrl(source))).then((urls) => {
+        reportedFailures.current.clear();
+        // Resolve only the tapped image. Other history entries may no longer
+        // exist; their capabilities are loaded independently when swiped to.
+        void freshAttachmentUrl(uri).then((url) => {
           if (attempt !== openSequence.current || sessionEpochChanged(epoch)) return;
           setCurrentIndex(index);
-          setViewing({ images: urls.map((u) => ({ uri: u })), sources, index, epoch });
-        }).catch(() => {});
+          setViewing({
+            images: sources.map((_, i) => i === index ? { uri: url } : {}),
+            sources, index, epoch,
+          });
+        }).catch(() => {
+          if (attempt !== openSequence.current || sessionEpochChanged(epoch)) return;
+          Alert.alert(i18n.t("settings:server.attachment_failed"));
+        });
       },
     }),
     [],

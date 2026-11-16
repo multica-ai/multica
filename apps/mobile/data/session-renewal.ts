@@ -51,6 +51,15 @@ const MIN_CHECK_INTERVAL_MS = 5 * 1000;
 // attempt is what keeps those two from sharing one number.
 let nextCheckAt = 0;
 let consecutiveFailures = 0;
+let scheduleEpoch = currentSessionEpoch();
+
+function scopeScheduleToSession(): void {
+  if (scheduleEpoch === currentSessionEpoch()) return;
+  scheduleEpoch = currentSessionEpoch();
+  nextCheckAt = 0;
+  consecutiveFailures = 0;
+  inFlight = null;
+}
 
 /** Push the next allowed check out by the current backoff step. */
 function scheduleRetryAfterFailure(): void {
@@ -69,6 +78,7 @@ let inFlight: Promise<void> | null = null;
  * everywhere else prefer `maybeRenewSession`.
  */
 export async function renewSessionNow(): Promise<void> {
+  scopeScheduleToSession();
   if (inFlight) return inFlight;
 
   // Captured before anything awaits. Comparing tokens alone is not enough on
@@ -92,6 +102,7 @@ export async function renewSessionNow(): Promise<void> {
       if (!startedFrom || sessionEpochChanged(epochAtStart)) return;
 
       const result = await api.refreshSession();
+      if (sessionEpochChanged(epochAtStart)) return;
       // A response that carries no cadence is not a usable answer. The schema
       // fallback produces exactly this shape — `parseWithFallback` returns
       // zeroes for a body that failed validation instead of throwing — and a
@@ -128,6 +139,7 @@ export async function renewSessionNow(): Promise<void> {
       if (sessionEpochChanged(epochAtStart)) return;
       api.setToken(result.token);
     } catch (err) {
+      if (sessionEpochChanged(epochAtStart)) return;
       // A 401 has already been routed to the sign-out path by the client's
       // onUnauthorized hook. Everything else — airplane mode, a captive
       // portal, a 5xx — says nothing about the session, which just
@@ -138,7 +150,7 @@ export async function renewSessionNow(): Promise<void> {
         console.log("[auth] session renewal deferred", err);
       }
     } finally {
-      inFlight = null;
+      if (!sessionEpochChanged(epochAtStart)) inFlight = null;
     }
   })();
 
@@ -147,12 +159,14 @@ export async function renewSessionNow(): Promise<void> {
 
 /** Run a check unless one is not due yet. */
 export function maybeRenewSession(): void {
+  scopeScheduleToSession();
   if (Date.now() < nextCheckAt) return;
   void renewSessionNow();
 }
 
 /** Test seam: forget the cadence and the last-attempt timestamp. */
 export function resetSessionRenewalForTest(): void {
+  scheduleEpoch = currentSessionEpoch();
   nextCheckAt = 0;
   consecutiveFailures = 0;
   inFlight = null;

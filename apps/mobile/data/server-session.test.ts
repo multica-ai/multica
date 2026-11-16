@@ -1,5 +1,31 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { QueryClient } from "@tanstack/react-query";
+import type { StateCreator } from "zustand";
+
+const hooks = vi.hoisted(() => ({ qc: undefined as unknown as QueryClient }));
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>();
+  return {
+    ...actual,
+    useQueryClient: () => hooks.qc,
+    useMutation: (options: ConstructorParameters<typeof actual.MutationObserver>[1]) => {
+      const observer = new actual.MutationObserver(hooks.qc, options);
+      return {
+        mutateAsync: (variables: unknown, callbacks: Parameters<typeof observer.mutate>[1]) =>
+          observer.mutate(variables, callbacks),
+      };
+    },
+  };
+});
+vi.mock("zustand", async (original) => {
+  const actual = await original<typeof import("zustand")>();
+  const bind = (initializer: StateCreator<unknown>) => {
+    const store = actual.create(initializer);
+    return Object.assign((select: (state: unknown) => unknown) => select(store.getState()), store);
+  };
+  return { ...actual, create: (initializer?: StateCreator<unknown>) => initializer ? bind(initializer) : bind };
+});
 
 const disk = vi.hoisted(() => ({
   values: new Map<string, string>(),
@@ -57,6 +83,67 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe("persistent instance/session isolation", () => {
+  it.each(["chat", "inbox", "project", "comment"])("does not revive %s cache or failed-comment state after an actual server switch", async (kind) => {
+    const { initializeServerConfig } = await import("./server-config-store");
+    await initializeServerConfig();
+    const { api } = await import("./api");
+    const { useAuthStore } = await import("./auth-store");
+    const { useWorkspaceStore } = await import("./workspace-store");
+    const { queryClient } = await import("./query-client");
+    const { changeServerConfig } = await import("./server-session");
+    const { useFailedCommentsStore } = await import("./stores/failed-comments-store");
+    hooks.qc = queryClient;
+    api.setToken("a-token");
+    useAuthStore.setState({ user: { id: "user-a" } as never });
+    await useWorkspaceStore.getState().setCurrentWorkspace("ws", "demo");
+    const late = deferred<Response>();
+    const fetch = vi.fn(() => late.promise);
+    vi.stubGlobal("fetch", fetch);
+    let pending: Promise<unknown>;
+    if (kind === "chat") {
+      const { chatKeys } = await import("./queries/chat");
+      queryClient.setQueryData(chatKeys.sessions("ws"), [{ id: "old", title: "private" }]);
+      pending = (await import("./mutations/chat")).useDeleteChatSession().mutateAsync("old");
+    } else if (kind === "inbox") {
+      const { inboxKeys } = await import("./queries/inbox");
+      queryClient.setQueryData(inboxKeys.list("ws"), [{ id: "old", issue_id: "issue" }]);
+      pending = (await import("./mutations/inbox")).useArchiveInbox().mutateAsync("old");
+    } else if (kind === "project") {
+      const { projectKeys } = await import("./queries/projects");
+      queryClient.setQueryData(projectKeys.list("ws"), [{ id: "old", title: "private" }]);
+      pending = (await import("./mutations/projects")).useDeleteProject("old").mutateAsync();
+    } else {
+      pending = (await import("./mutations/issues")).useCreateComment("issue").mutateAsync({ content: "private draft" });
+    }
+    const rejected = expect(pending).rejects.toThrow("Server session changed");
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    await changeServerConfig(second);
+    expect(queryClient.getQueryCache().getAll()).toEqual([]);
+    late.resolve(new Response(null, { status: 204 }));
+    await rejected;
+    expect(queryClient.getQueryCache().getAll()).toEqual([]);
+    expect(useFailedCommentsStore.getState().failed).toEqual({});
+  });
+
+  it("stops an old optimistic continuation before it can dispatch on the new server", async () => {
+    const { initializeServerConfig } = await import("./server-config-store");
+    await initializeServerConfig();
+    const { queryClient } = await import("./query-client");
+    hooks.qc = queryClient;
+    const cancel = deferred<void>();
+    vi.spyOn(queryClient, "cancelQueries").mockReturnValueOnce(cancel.promise);
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const pending = (await import("./mutations/chat")).useDeleteChatSession().mutateAsync("old");
+    const rejected = expect(pending).rejects.toThrow("Server session changed");
+    await vi.waitFor(() => expect(queryClient.cancelQueries).toHaveBeenCalledOnce());
+    await (await import("./server-session")).changeServerConfig(second);
+    cancel.resolve();
+    await rejected;
+    expect(fetch).not.toHaveBeenCalled();
+    expect(queryClient.getQueryCache().getAll()).toEqual([]);
+  });
+
   it("waits for configuration before restoring auth or making any request", async () => {
     const read = deferred<string | null>();
     disk.readConfig = read.promise;

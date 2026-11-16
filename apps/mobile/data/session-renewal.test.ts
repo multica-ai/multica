@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "./api";
 import {
@@ -96,6 +96,65 @@ function notYet(checkAgainInSeconds = 3600) {
     check_again_in_seconds: checkAgainInSeconds,
   };
 }
+
+afterEach(() => vi.restoreAllMocks());
+
+describe("renewal scheduling across sessions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetKeychain();
+    resetSessionRenewalForTest();
+  });
+
+  it("checks B immediately instead of inheriting A's three-day deadline", async () => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    apiMock.refreshSession.mockResolvedValue(notYet(3 * 24 * 3600));
+    await renewSessionNow();
+    invalidateSessionEpoch();
+    await clearToken();
+    invalidateSessionEpoch();
+    await setToken("instance-b");
+    apiMock.refreshSession.mockResolvedValue(notYet(360));
+    clock.mockReturnValue(1_000_000 + 2 * 3600 * 1000);
+    for (let i = 0; i < 5; i++) maybeRenewSession();
+    await vi.waitFor(() => expect(apiMock.refreshSession).toHaveBeenCalledTimes(2));
+    expect(await getToken()).toBe("instance-b");
+  });
+
+  it.each(["success", "failure"])("ignores a late A %s without disturbing B's deadline or single flight", async (outcome) => {
+    let resolveA!: (result: unknown) => void;
+    let rejectA!: (error: Error) => void;
+    apiMock.refreshSession.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      resolveA = resolve; rejectA = reject;
+    }));
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+    const a = renewSessionNow();
+    await vi.waitFor(() => expect(apiMock.refreshSession).toHaveBeenCalledOnce());
+    invalidateSessionEpoch();
+    await setToken("instance-b");
+    let resolveB!: (result: unknown) => void;
+    apiMock.refreshSession.mockImplementationOnce(() => new Promise((resolve) => { resolveB = resolve; }));
+    const b = renewSessionNow();
+    await vi.waitFor(() => expect(apiMock.refreshSession).toHaveBeenCalledTimes(2));
+    if (outcome === "success") resolveA(renewed("stale-a", 3 * 24 * 3600));
+    else rejectA(new Error("A disconnected"));
+    await a;
+    maybeRenewSession();
+    await Promise.resolve();
+    expect(apiMock.refreshSession).toHaveBeenCalledTimes(2);
+    resolveB(notYet(10));
+    await b;
+    clock.mockReturnValue(1_006_000);
+    maybeRenewSession();
+    expect(apiMock.refreshSession).toHaveBeenCalledTimes(2);
+    clock.mockReturnValue(1_011_000);
+    apiMock.refreshSession.mockResolvedValue(notYet(10));
+    maybeRenewSession();
+    await vi.waitFor(() => expect(apiMock.refreshSession).toHaveBeenCalledTimes(3));
+    expect(await getToken()).toBe("instance-b");
+    expect(apiMock.setToken).not.toHaveBeenCalled();
+  });
+});
 
 describe("mobile session renewal", () => {
   beforeEach(() => {
