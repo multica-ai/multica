@@ -53,10 +53,12 @@ let baseUrl = "";
 let queryClient: QueryClient;
 const originalDesktopAPI = window.desktopAPI;
 const originalScrollIntoView = Element.prototype.scrollIntoView;
-// Every row and route here waits on the real fixture server, which a loaded CI
-// runner can take more than two seconds to answer.
-const NETWORK_WAIT = { timeout: 5000 };
-const TEST_TIMEOUT = 20_000;
+// Every row and route here waits on the real fixture server, which shares its
+// event loop with the whole shell. In CI, turbo runs other packages' suites
+// beside this one, and the first search has queued behind the shell's startup
+// requests for over five seconds.
+const NETWORK_WAIT = { timeout: 15_000 };
+const TEST_TIMEOUT = 60_000;
 
 function payloadFor(path: string, workspace: string): unknown {
   if (path === "/api/config") return { feature_flags: {}, allow_signup: false };
