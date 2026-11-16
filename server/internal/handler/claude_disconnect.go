@@ -218,7 +218,9 @@ func (h *Handler) cleanupInactiveClaude(ctx context.Context) {
 	rows.Close()
 	for _, ws := range workspaces {
 		cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		_ = h.cleanupClaudeJournal(cleanupCtx, ws)
+		if err := h.cleanupClaudeJournal(cleanupCtx, ws); errors.Is(err, claudemanagedruntime.ErrCleanupUnauthorized) {
+			_, _ = h.DB.Exec(cleanupCtx, `UPDATE cloud_agent_connection SET status='error',last_error=$2 WHERE provider='claude_managed' AND workspace_id=$1`, ws, claudemanagedruntime.ErrCleanupUnauthorized.Error())
+		}
 		cancel()
 	}
 }
@@ -293,7 +295,7 @@ func (h *Handler) cleanupClaudeJournal(ctx context.Context, ws string) error {
 			return fmt.Errorf("remote cleanup pending: %w", err)
 		}
 	}
-	_, err = h.DB.Exec(ctx, `UPDATE cloud_agent_connection SET journal_encrypted='' WHERE provider='claude_managed' AND workspace_id=$1`, ws)
+	_, err = h.DB.Exec(ctx, `UPDATE cloud_agent_connection SET journal_encrypted='',status='stopped',last_error='' WHERE provider='claude_managed' AND workspace_id=$1`, ws)
 	return err
 }
 

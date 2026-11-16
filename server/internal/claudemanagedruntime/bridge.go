@@ -22,6 +22,9 @@ import (
 
 const Provider = "claude_managed"
 
+// ErrCleanupUnauthorized keeps cleanup pending until Anthropic access is restored.
+var ErrCleanupUnauthorized = errors.New("Anthropic denied session cleanup; restore access or update the API key")
+
 var validVaultID = regexp.MustCompile(`^vlt_[a-zA-Z0-9_-]{1,128}$`)
 
 type Config struct {
@@ -155,9 +158,9 @@ func (b *Bridge) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Validate remote access before accepting work. Existing runs still reconcile
-	// even if the live agent/environment was removed after the session snapshot.
-	if len(b.state.Runs) == 0 {
+	// Validate remote access before accepting work. Existing runs and pending
+	// cleanup still reconcile if the live agent/environment was removed.
+	if len(b.state.Runs) == 0 && len(b.state.Cleanup) == 0 && len(b.state.Unresolved) == 0 {
 		if err := b.Check(ctx); err != nil {
 			return err
 		}
@@ -182,7 +185,13 @@ func (b *Bridge) Run(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return nil
 		}
-		b.cleanup(ctx)
+		if err := b.cleanup(ctx); err != nil {
+			var diskErr *persistenceError
+			if errors.Is(err, ErrCleanupUnauthorized) || errors.As(err, &diskErr) {
+				return err
+			}
+			b.log.WarnContext(ctx, "remote session cleanup will retry", "error", err)
+		}
 		// Heartbeats run even while event delivery or submission reconciliation is failing.
 		if err := b.multica.call(ctx, http.MethodPost, "/api/daemon/heartbeat", map[string]any{"runtime_id": b.state.RuntimeID}, nil); err != nil {
 			b.log.WarnContext(ctx, "runtime heartbeat failed", "error", err)
@@ -803,15 +812,16 @@ func (b *Bridge) queueUnresolved(u unresolvedCreate) {
 }
 
 // resolveUnresolved retries the lookups of unresolved creations. A session it
-// finds moves to the cleanup queue; an entry leaves the list once the lookup
-// settles, either with no session or with a rejection that retrying cannot fix.
-func (b *Bridge) resolveUnresolved(ctx context.Context) {
+// finds moves to the cleanup queue; an entry leaves the list only after a
+// successful lookup. A rejected lookup cannot prove the session is stopped.
+func (b *Bridge) resolveUnresolved(ctx context.Context) error {
 	if len(b.state.Unresolved) == 0 {
-		return
+		return nil
 	}
 	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var pending []unresolvedCreate
+	var lookupErr error
 	for _, u := range b.state.Unresolved {
 		if lookupCtx.Err() != nil {
 			pending = append(pending, u)
@@ -822,16 +832,24 @@ func (b *Bridge) resolveUnresolved(ctx context.Context) {
 		case err == nil && found != "":
 			b.queueCleanup(found)
 		case err == nil:
-		case definitelyRejected(err):
-			b.log.WarnContext(ctx, "Claude session lookup was rejected; dropping the unresolved creation", "task_id", u.TaskID, "agent_id", u.AgentID, "error", err)
 		default:
 			pending = append(pending, u)
+			lookupErr = errors.Join(lookupErr, cleanupError(err))
 		}
 	}
 	b.state.Unresolved = pending
 	if err := b.persist(); err != nil {
-		b.log.ErrorContext(ctx, "cannot persist unresolved session creations", "error", err)
+		return errors.Join(lookupErr, err)
 	}
+	return lookupErr
+}
+
+func cleanupError(err error) error {
+	var denied *apiError
+	if errors.As(err, &denied) && (denied.Status == http.StatusUnauthorized || denied.Status == http.StatusForbidden) {
+		return fmt.Errorf("%w: %w", ErrCleanupUnauthorized, err)
+	}
+	return err
 }
 
 func (b *Bridge) logPossibleSession(ctx context.Context, r *run, err error) {
@@ -904,10 +922,10 @@ func (b *Bridge) queueCleanup(id string) {
 	}
 	b.state.Cleanup = append(b.state.Cleanup, id)
 }
-func (b *Bridge) cleanup(ctx context.Context) {
-	b.resolveUnresolved(ctx)
+func (b *Bridge) cleanup(ctx context.Context) error {
+	cleanupErr := b.resolveUnresolved(ctx)
 	if len(b.state.Cleanup) == 0 {
-		return
+		return cleanupErr
 	}
 	// Entries are tried in order within one timeout; a failing entry stays
 	// queued without holding back the ones after it.
@@ -915,17 +933,23 @@ func (b *Bridge) cleanup(ctx context.Context) {
 	defer cancel()
 	var pending []string
 	for _, id := range b.state.Cleanup {
-		if cleanupCtx.Err() != nil || b.cancelSession(cleanupCtx, id) != nil {
+		if cleanupCtx.Err() != nil {
 			pending = append(pending, id)
+			continue
+		}
+		if err := b.cancelSession(cleanupCtx, id); err != nil {
+			pending = append(pending, id)
+			cleanupErr = errors.Join(cleanupErr, cleanupError(err))
 		}
 	}
 	if len(pending) == len(b.state.Cleanup) {
-		return
+		return cleanupErr
 	}
 	b.state.Cleanup = pending
 	if err := b.persist(); err != nil {
-		b.log.ErrorContext(ctx, "cannot persist remote cleanup", "error", err)
+		return errors.Join(cleanupErr, err)
 	}
+	return cleanupErr
 }
 
 // Binding identifies one workspace/environment independently of process lifetime.
@@ -942,7 +966,7 @@ func CancelRemoteSession(ctx context.Context, baseURL, token, sessionID string) 
 		return err
 	}
 	b := &Bridge{anthropic: api}
-	return b.cancelSession(ctx, sessionID)
+	return cleanupError(b.cancelSession(ctx, sessionID))
 }
 
 // CancelUnconfirmedSession stops the session an unconfirmed create may have
@@ -955,7 +979,7 @@ func CancelUnconfirmedSession(ctx context.Context, baseURL, token, workspaceID, 
 	b := &Bridge{anthropic: api, cfg: Config{WorkspaceID: workspaceID}, log: slog.Default()}
 	id, err := b.findCreatedSession(ctx, agentID, taskID, attemptAt)
 	if err != nil || id == "" {
-		return err
+		return cleanupError(err)
 	}
-	return b.cancelSession(ctx, id)
+	return cleanupError(b.cancelSession(ctx, id))
 }

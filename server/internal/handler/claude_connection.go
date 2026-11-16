@@ -289,8 +289,8 @@ func (h *Handler) saveClaudeConnection(w http.ResponseWriter, r *http.Request, r
 		writeError(w, 409, "Claude Managed Agents is synchronizing; retry shortly")
 		return
 	}
-	var journal string
-	if err := tx.QueryRow(r.Context(), `SELECT journal_encrypted FROM cloud_agent_connection WHERE provider='claude_managed' AND workspace_id=$1`, ws).Scan(&journal); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	var journal, previousConfig string
+	if err := tx.QueryRow(r.Context(), `SELECT journal_encrypted,config_encrypted FROM cloud_agent_connection WHERE provider='claude_managed' AND workspace_id=$1`, ws).Scan(&journal, &previousConfig); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 500, "cannot read execution state")
 		return
 	}
@@ -301,16 +301,33 @@ func (h *Handler) saveClaudeConnection(w http.ResponseWriter, r *http.Request, r
 			return
 		}
 		var state struct {
-			Runs    []json.RawMessage `json:"runs"`
-			Cleanup []string          `json:"cleanup"`
+			Runs       []json.RawMessage `json:"runs"`
+			Cleanup    []string          `json:"cleanup"`
+			Unresolved []json.RawMessage `json:"unresolved"`
 		}
 		if json.Unmarshal([]byte(raw), &state) != nil {
 			writeError(w, 500, "cannot read execution state")
 			return
 		}
-		if len(state.Cleanup) > 0 || len(state.Runs) > 0 {
+		if len(state.Runs) > 0 {
 			writeError(w, 409, "wait for Claude Managed Agents execution cleanup before changing configuration")
 			return
+		}
+		if len(state.Cleanup) > 0 || len(state.Unresolved) > 0 {
+			rawConfig, err := h.openVCSSecret(previousConfig)
+			var previous claudeSettings
+			if err != nil || json.Unmarshal([]byte(rawConfig), &previous) != nil {
+				writeError(w, 500, "cannot read Claude Managed Agents configuration")
+				return
+			}
+			if previous.EnvironmentID != cfg.EnvironmentID {
+				writeError(w, 409, "wait for Claude Managed Agents execution cleanup before changing environment")
+				return
+			}
+			// Keep the journal bound to this environment while allowing a new
+			// API key to restore access to sessions that still need cleanup.
+		} else {
+			journal = ""
 		}
 	}
 	var revokedHash string
@@ -345,7 +362,7 @@ func (h *Handler) saveClaudeConnection(w http.ResponseWriter, r *http.Request, r
 	}
 	_, err = tx.Exec(r.Context(), `DELETE FROM daemon_token WHERE id IN (SELECT token_id FROM cloud_agent_connection WHERE provider='claude_managed' AND workspace_id=$1)`, ws)
 	if err == nil {
-		_, err = tx.Exec(r.Context(), `INSERT INTO cloud_agent_connection(workspace_id,provider,owner_id,token_id,config_encrypted) VALUES($1,'claude_managed',$2,$3,$4) ON CONFLICT(workspace_id,provider) DO UPDATE SET owner_id=excluded.owner_id,token_id=excluded.token_id,config_encrypted=excluded.config_encrypted,enabled=($5 OR cloud_agent_connection.enabled),journal_encrypted='',revision=cloud_agent_connection.revision+1,status=CASE WHEN $5 OR cloud_agent_connection.enabled THEN 'starting' ELSE cloud_agent_connection.status END,last_error='',updated_at=now()`, ws, parseUUID(user), pat.ID, encrypted, resume)
+		_, err = tx.Exec(r.Context(), `INSERT INTO cloud_agent_connection(workspace_id,provider,owner_id,token_id,config_encrypted) VALUES($1,'claude_managed',$2,$3,$4) ON CONFLICT(workspace_id,provider) DO UPDATE SET owner_id=excluded.owner_id,token_id=excluded.token_id,config_encrypted=excluded.config_encrypted,enabled=($5 OR cloud_agent_connection.enabled),journal_encrypted=$6,revision=cloud_agent_connection.revision+1,status=CASE WHEN $5 OR cloud_agent_connection.enabled THEN 'starting' ELSE cloud_agent_connection.status END,last_error='',updated_at=now()`, ws, parseUUID(user), pat.ID, encrypted, resume, journal)
 	}
 	if err != nil || tx.Commit(r.Context()) != nil {
 		writeError(w, 500, "cannot save Claude Managed Agents configuration")
@@ -455,6 +472,9 @@ func (h *Handler) runClaudeSupervisor(ctx context.Context, conn *pgxpool.Conn, s
 				if err != nil {
 					slog.WarnContext(ctx, "Claude bridge stopped", "workspace_id", ws, "error", err)
 					message = "remote execution unavailable; retrying"
+					if errors.Is(err, claudemanagedruntime.ErrCleanupUnauthorized) {
+						message = claudemanagedruntime.ErrCleanupUnauthorized.Error()
+					}
 				}
 				_, _ = conn.Exec(ctx, `UPDATE cloud_agent_connection SET status='error',last_error=$2 WHERE provider='claude_managed' AND workspace_id=$1`, ws, message)
 				delete(runs, ws)
