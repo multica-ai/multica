@@ -95,6 +95,10 @@ func (s *slowSettleStore) Resolve(context.Context, string) (claimState, error) {
 	return claimHeld, nil
 }
 
+func (s *slowSettleStore) ClaimState(context.Context, string) (claimState, error) {
+	return claimHeld, nil
+}
+
 func (s *slowSettleStore) ClaimBudget() time.Duration { return s.roundTrip }
 
 func (s *slowSettleStore) settleAttempts() int {

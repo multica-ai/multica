@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, type ReactNode } from "react";
-import { Check, ChevronDown, FileText, ImageIcon, MessageSquareText } from "lucide-react";
+import { Check, ChevronDown, FileText, ImageIcon, MessageSquareText } from "@multica/ui/icons";
 import {
   findDeliverableVersion,
   type DeliverableFile,
@@ -15,6 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
 import { useLocale, useT, useTimeAgo } from "../../../i18n";
 import { ActorAvatar } from "../../../common/actor-avatar";
@@ -37,16 +38,20 @@ export type DeliverableOrigin =
 
 /**
  * The issue page's `describeItem` for its preview sequence: the version
- * switcher next to the file name, the info panel, and "show in comments".
+ * switcher next to the file name, the info panel, "show in comments", and
+ * "copy link to latest version" for deliverables.
  */
 export function useDeliverableDetails({
   files,
   commentById,
   onLocate,
+  onCopyLink,
 }: {
   files: ReadonlyArray<DeliverableFile>;
   commentById: ReadonlyMap<string, TimelineEntry>;
   onLocate: (origin: DeliverableOrigin) => void;
+  /** Copies a deliverable's latest-version link, by file name. */
+  onCopyLink?: (filename: string) => void;
 }) {
   const { t } = useT("issues");
   return useCallback(
@@ -94,15 +99,22 @@ export function useDeliverableDetails({
           />
         ),
         locate: locate ? { label: locateLabel, onSelect: locate } : undefined,
+        // Only a deliverable has a latest version to link to; a description
+        // file is an input, and the link would name no deliverable.
+        copyLink:
+          deliverable && onCopyLink
+            ? {
+                label: t(($) => $.deliverables.copy_link),
+                onSelect: () => onCopyLink(deliverable.file.latest.filename),
+              }
+            : undefined,
       };
     },
-    [files, commentById, onLocate, t],
+    [files, commentById, onLocate, onCopyLink, t],
   );
 }
 
-// ---------------------------------------------------------------------------
 // Version switcher
-// ---------------------------------------------------------------------------
 
 function VersionSwitcher({
   file,
@@ -161,9 +173,7 @@ function VersionSwitcher({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Info panel
-// ---------------------------------------------------------------------------
 
 function DeliverableInfo({
   item,
@@ -254,32 +264,32 @@ function DeliverableInfo({
             {siblings.map((sibling) => {
               const current = sibling.key === item.key;
               return (
-                <button
-                  key={sibling.key}
-                  type="button"
-                  className={cn(
-                    "aspect-square overflow-hidden rounded-md ring-1 transition-shadow",
-                    current
-                      ? "ring-2 ring-foreground"
-                      : "ring-border hover:ring-foreground/40",
-                  )}
-                  title={sibling.filename}
-                  aria-label={sibling.filename}
-                  aria-current={current || undefined}
-                  onClick={() => controls.goTo(sibling.key)}
-                >
-                  {sibling.attachment ? (
-                    <DeliverableThumbnail
-                      attachment={sibling.attachment}
-                      showTypeLabel={false}
-                      className="size-full"
-                    />
-                  ) : (
-                    <span className="flex size-full items-center justify-center bg-muted text-muted-foreground">
-                      <ImageIcon className="size-4" />
-                    </span>
-                  )}
-                </button>
+                <TooltipHint key={sibling.key} label={sibling.filename}>
+                  <button
+                    type="button"
+                    className={cn(
+                      "aspect-square overflow-hidden rounded-md ring-1 transition-shadow",
+                      current
+                        ? "ring-2 ring-foreground"
+                        : "ring-border hover:ring-foreground/40",
+                    )}
+                    aria-label={sibling.filename}
+                    aria-current={current || undefined}
+                    onClick={() => controls.goTo(sibling.key)}
+                  >
+                    {sibling.attachment ? (
+                      <DeliverableThumbnail
+                        attachment={sibling.attachment}
+                        showTypeLabel={false}
+                        className="size-full"
+                      />
+                    ) : (
+                      <span className="flex size-full items-center justify-center bg-muted text-muted-foreground">
+                        <ImageIcon className="size-4" />
+                      </span>
+                    )}
+                  </button>
+                </TooltipHint>
               );
             })}
           </div>

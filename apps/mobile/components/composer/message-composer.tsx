@@ -217,16 +217,20 @@ export function MessageComposer({
 
   // Auto-expand + focus when an `expandTrigger` changes. Comment uses
   // this to react to the long-press → reply flow setting a reply target.
-  const triggerSeen = useRef<string | null>(null);
+  const [triggerSeen, setTriggerSeen] = useState<string | null>(null);
   if (
     expandTrigger &&
-    triggerSeen.current !== expandTrigger &&
+    triggerSeen !== expandTrigger &&
     !disabled
   ) {
-    triggerSeen.current = expandTrigger;
+    setTriggerSeen(expandTrigger);
     setExpanded(true);
-    requestAnimationFrame(() => inputRef.current?.focus());
   }
+  useEffect(() => {
+    if (!expanded || !triggerSeen || disabled) return;
+    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [expanded, triggerSeen, disabled]);
 
   const hasInFlightUpload = attachments.some((a) => a.status === "uploading");
   const canSend =
@@ -341,7 +345,7 @@ export function MessageComposer({
         );
       }
     },
-    [uploadContext, t],
+    [uploadContext, t, setAttachments],
   );
 
   const onImagePress = useCallback(async () => {
@@ -417,7 +421,7 @@ export function MessageComposer({
 
   const onRemoveAttachment = useCallback((localId: string) => {
     setAttachments((prev) => prev.filter((it) => it.localId !== localId));
-  }, []);
+  }, [setAttachments]);
 
   const onRetryAttachment = useCallback(
     (localId: string) => {
@@ -436,7 +440,7 @@ export function MessageComposer({
         type: item.mimeType,
       });
     },
-    [attachments, startUpload],
+    [attachments, startUpload, setAttachments],
   );
 
   const onAtPress = useCallback(() => {

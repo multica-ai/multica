@@ -10,6 +10,7 @@ export const FAILURE_REASON_I18N_KEYS = {
   // Platform / scheduler side.
   queued_expired: "queued_expired",
   runtime_offline: "runtime_offline",
+  runtime_access_revoked: "runtime_access_revoked",
   runtime_reconnect_timeout: "runtime_reconnect_timeout",
   runtime_recovery: "runtime_recovery",
   timeout: "timeout",

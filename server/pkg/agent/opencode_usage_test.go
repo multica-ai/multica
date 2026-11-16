@@ -86,7 +86,7 @@ func TestOpencodeExecuteRetainsReasoningOnlyUsage(t *testing.T) {
 		CLIVersion:     "1.18.31",
 		BuiltinRuntime: true,
 		Logger:         slog.Default(),
-		Env: map[string]string{
+		Env: map[string]string{opencodeTransportEnv: "run",
 			opencodeStdinHelperEnv:       "1",
 			opencodeStdinHelperArgvFile:  filepath.Join(dir, "argv.txt"),
 			opencodeStdinHelperInFile:    filepath.Join(dir, "stdin.txt"),

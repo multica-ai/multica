@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Keyboard, RotateCcw, Search, X } from "lucide-react";
+import { Keyboard, RotateCcw, Search, X } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import {
   AlertDialog,
@@ -20,6 +21,7 @@ import {
   createShortcutChord,
   isReservedShortcut,
   isShortcutAllowedForAction,
+  isShortcutModifierKey,
   isPlainShortcut,
   resolveShortcut,
   shortcutFromEvent,
@@ -45,6 +47,7 @@ type CaptureError =
   | { kind: "reserved" }
   | { kind: "send" }
   | { kind: "unsafe" }
+  | { kind: "unrecognized" }
   | null;
 
 export function KeyboardShortcutsTab() {
@@ -91,7 +94,12 @@ export function KeyboardShortcutsTab() {
     }
 
     const shortcut = shortcutFromEvent(event.nativeEvent);
-    if (!shortcut) return;
+    if (!shortcut) {
+      if (!isShortcutModifierKey(event.key)) {
+        setCaptureError({ kind: "unrecognized" });
+      }
+      return;
+    }
     if (isReservedShortcut(shortcut)) {
       setCaptureError({ kind: "reserved" });
       return;
@@ -100,7 +108,7 @@ export function KeyboardShortcutsTab() {
       setCaptureError({ kind: actionId === "send" ? "send" : "unsafe" });
       return;
     }
-    const conflict = findShortcutConflict(actionId, shortcut);
+    const conflict = findShortcutConflict(actionId, shortcut, event.nativeEvent);
     if (conflict) {
       setCaptureError({ kind: "conflict", actionId: conflict });
       return;
@@ -265,7 +273,7 @@ function ShortcutRow({
   const { t } = useT("settings");
   const label = t(($) => $.shortcuts.actions[action.id].label);
   // Keep descriptions in the search index, but only show non-obvious behavior.
-  const description = ["openSearch", "toggleRightSidebar", "archiveInboxItem", "send"].includes(action.id)
+  const description = ["openSearch", "toggleRightSidebar", "archiveInboxItem", "unsubscribeArchiveInboxItem", "snoozeInboxItem", "send"].includes(action.id)
     ? t(($) => $.shortcuts.actions[action.id].description)
     : undefined;
   const errorText = error?.kind === "reserved"
@@ -274,6 +282,8 @@ function ShortcutRow({
       ? t(($) => $.shortcuts.send_error)
     : error?.kind === "unsafe"
       ? t(($) => $.shortcuts.unsafe_error)
+    : error?.kind === "unrecognized"
+      ? t(($) => $.shortcuts.unrecognized_error)
     : error?.kind === "conflict"
       ? t(($) => $.shortcuts.conflict_error, {
           action: t(($) => $.shortcuts.actions[error.actionId].label),
@@ -324,28 +334,26 @@ function ShortcutRow({
               </span>
             )}
           </button>
-          <Button
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-sm"
             onClick={onReset}
             disabled={!customized}
-            aria-label={t(($) => $.shortcuts.reset_action, { action: label })}
-            title={t(($) => $.shortcuts.reset)}
+            label={t(($) => $.shortcuts.reset_action, { action: label })}
           >
             <RotateCcw className="size-3.5" />
-          </Button>
-          <Button
+          </IconButton>
+          <IconButton
             type="button"
             variant="ghost"
             size="icon-sm"
             onClick={onDisable}
             disabled={shortcut === null}
-            aria-label={t(($) => $.shortcuts.disable_action, { action: label })}
-            title={t(($) => $.shortcuts.disable)}
+            label={t(($) => $.shortcuts.disable_action, { action: label })}
           >
             <X className="size-3.5" />
-          </Button>
+          </IconButton>
         </div>
         {errorText ? (
           <span role="alert" className="max-w-72 text-right text-caption text-destructive">

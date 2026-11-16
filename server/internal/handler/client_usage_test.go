@@ -6,7 +6,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func ptrInt32(value int32) *int32 { return &value }
@@ -87,5 +90,57 @@ func TestUpsertClientUsageKeepsRuntimeSnapshotOnActivityRefresh(t *testing.T) {
 	}
 	if rowCount != 1 || runtimeCount != 1 || onlineCount != 1 {
 		t.Fatalf("daily row = count %d runtime %d online %d", rowCount, runtimeCount, onlineCount)
+	}
+}
+
+func TestUpsertClientUsageOutOfOrderTransactions(t *testing.T) {
+	installID := uuid.New()
+	t.Cleanup(func() {
+		dbfx.Exec(t, "DELETE FROM client_usage_daily WHERE user_id = $1 AND install_id = $2", testUserID, installID)
+	})
+	ctx := t.Context()
+	params := db.UpsertClientUsageDailyParams{
+		UserID: parseUUID(testUserID), InstallID: pgtype.UUID{Bytes: installID, Valid: true},
+		ClientType: "web", ClientVersion: "0.1.0", Os: "linux",
+	}
+
+	older, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer older.Rollback(ctx)
+	var first pgtype.Timestamptz
+	if err := older.QueryRow(ctx, "SELECT CURRENT_TIMESTAMP FROM pg_sleep(0.01)").Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+
+	// A newer transaction inserts and commits while the older one is still open.
+	inserted, err := testHandler.Queries.UpsertClientUsageDaily(ctx, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := testHandler.Queries.WithTx(older).UpsertClientUsageDaily(ctx, params)
+	if err != nil {
+		t.Fatalf("older transaction could not update the daily row: %v", err)
+	}
+	if err := older.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !updated.FirstActiveAt.Time.Equal(first.Time) || !updated.LastActiveAt.Time.Equal(inserted.LastActiveAt.Time) ||
+		!updated.FirstActiveAt.Time.Before(updated.LastActiveAt.Time) {
+		t.Fatalf("daily row must span both reports: first=%v last=%v, want %v to %v",
+			updated.FirstActiveAt.Time, updated.LastActiveAt.Time, first.Time, inserted.LastActiveAt.Time)
+	}
+
+	refreshed, err := testHandler.Queries.UpsertClientUsageDaily(ctx, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !refreshed.FirstActiveAt.Time.Equal(first.Time) || !refreshed.LastActiveAt.Time.After(updated.LastActiveAt.Time) {
+		t.Fatalf("subsequent report must advance only the latest activity: first=%v last=%v",
+			refreshed.FirstActiveAt.Time, refreshed.LastActiveAt.Time)
+	}
+	if count := dbfx.Count(t, "SELECT count(*) FROM client_usage_daily WHERE user_id = $1 AND install_id = $2", testUserID, installID); count != 1 {
+		t.Fatalf("got %d daily rows, want one", count)
 	}
 }

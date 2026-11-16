@@ -66,7 +66,7 @@ func TestRerunIssueQueuesBehindActiveTaskWithoutCancelling(t *testing.T) {
 			svc, pool, creatorID, agentID, issueID, runtimeID := rerunQueueFixture(t)
 			activeID := seedRerunTask(t, pool, agentID, runtimeID, issueID, activeStatus)
 
-			task, err := svc.RerunIssue(context.Background(), util.MustParseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, util.MustParseUUID(creatorID), nil)
+			task, err := svc.RerunIssue(context.Background(), util.MustParseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, util.MustParseUUID(creatorID), false, nil)
 			if err != nil {
 				t.Fatalf("RerunIssue: %v", err)
 			}
@@ -100,7 +100,7 @@ func TestRerunIssueReplacesNotYetStartedTask(t *testing.T) {
 			svc, pool, creatorID, agentID, issueID, runtimeID := rerunQueueFixture(t)
 			pendingID := seedRerunTask(t, pool, agentID, runtimeID, issueID, pendingStatus)
 
-			task, err := svc.RerunIssue(context.Background(), util.MustParseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, util.MustParseUUID(creatorID), nil)
+			task, err := svc.RerunIssue(context.Background(), util.MustParseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, util.MustParseUUID(creatorID), false, nil)
 			if err != nil {
 				t.Fatalf("RerunIssue: %v", err)
 			}

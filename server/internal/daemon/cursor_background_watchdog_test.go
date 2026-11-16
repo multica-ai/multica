@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/awakeclock"
 )
 
 type backgroundToolBackend struct {
@@ -25,7 +26,7 @@ func (b *backgroundToolBackend) Execute(ctx context.Context, _ string, _ agent.E
 	stopped := make(chan struct{})
 	var nativeCount atomic.Int32
 	var nativeActivity atomic.Int64
-	nativeActivity.Store(time.Now().UnixNano())
+	nativeActivity.Store(int64(awakeclock.Now()))
 	nativeCount.Store(1)
 	if !b.dropTranscript {
 		messages <- agent.Message{Type: agent.MessageToolUse, Tool: "shell", CallID: "bg"}
@@ -43,7 +44,7 @@ func (b *backgroundToolBackend) Execute(ctx context.Context, _ string, _ agent.E
 		}
 		select {
 		case <-natural:
-			nativeActivity.Store(time.Now().UnixNano())
+			nativeActivity.Store(int64(awakeclock.Now()))
 			if !b.dropTranscript {
 				messages <- agent.Message{Type: agent.MessageToolResult, Tool: "shell", CallID: "bg", Output: "raw launch result"}
 			}
@@ -69,12 +70,12 @@ func (b *backgroundToolBackend) Execute(ctx context.Context, _ string, _ agent.E
 			results <- agent.Result{Status: "aborted"}
 		}
 	}()
-	return &agent.Session{Messages: messages, Result: results, ToolActivity: func() (int32, time.Time) { return nativeCount.Load(), time.Unix(0, nativeActivity.Load()) }, InterruptBackgroundTools: func() bool {
+	return &agent.Session{Messages: messages, Result: results, ToolActivity: func() (int32, time.Duration) { return nativeCount.Load(), time.Duration(nativeActivity.Load()) }, InterruptBackgroundTools: func() bool {
 		b.interrupts.Add(1)
 		if b.invalid || !b.cleaned.CompareAndSwap(false, true) {
 			return false
 		}
-		nativeActivity.Store(time.Now().UnixNano())
+		nativeActivity.Store(int64(awakeclock.Now()))
 		if !b.dropTranscript {
 			messages <- agent.Message{Type: agent.MessageToolResult, Tool: "shell", CallID: "bg", Output: "raw launch result"}
 		}
@@ -131,7 +132,7 @@ func TestBackgroundToolWatchdogShortOverride(t *testing.T) {
 		var last, threshold atomic.Int64
 		var tools atomic.Int32
 		var fired atomic.Bool
-		last.Store(time.Now().UnixNano())
+		last.Store(int64(awakeclock.Now()))
 		tools.Store(1)
 		calls := 0
 		go new(Daemon).runIdleWatchdog(ctx, 10*time.Minute, time.Minute, &last, tools.Load, &fired, &threshold, cancel, make(chan agent.Message), func() bool { calls++; cancel(); return true }, nil, slog.Default())
@@ -151,11 +152,11 @@ func TestBackgroundToolWatchdogNaturalExitRace(t *testing.T) {
 		var last, threshold atomic.Int64
 		var tools atomic.Int32
 		var fired atomic.Bool
-		last.Store(time.Now().UnixNano())
+		last.Store(int64(awakeclock.Now()))
 		tools.Store(1)
 		go new(Daemon).runIdleWatchdog(ctx, time.Minute, time.Minute, &last, tools.Load, &fired, &threshold, cancel, make(chan agent.Message), func() bool {
 			tools.Store(0)
-			last.Store(time.Now().UnixNano())
+			last.Store(int64(awakeclock.Now()))
 			return false
 		}, nil, slog.Default())
 		synctest.Wait()
@@ -173,13 +174,13 @@ func TestBackgroundToolWatchdogFreshActivityDuringRevalidation(t *testing.T) {
 		defer cancel()
 		var last, threshold atomic.Int64
 		var fired atomic.Bool
-		last.Store(time.Now().UnixNano())
+		last.Store(int64(awakeclock.Now()))
 		refreshAtBoundary, refreshed := false, false
 		// Match Session.ToolActivity's production callback: refreshing native
 		// activity publishes a timestamp even when the tool count stays positive.
 		toolState := func() int32 {
 			if refreshAtBoundary && !refreshed {
-				last.Store(time.Now().UnixNano())
+				last.Store(int64(awakeclock.Now()))
 				refreshed = true
 			}
 			return 1

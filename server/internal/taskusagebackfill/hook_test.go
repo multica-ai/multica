@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -208,20 +207,18 @@ func TestHook_FreshDatabaseStampsWatermarkOnly(t *testing.T) {
 // database without coupling to cmd/migrate's exit-on-error model.
 // ---------------------------------------------------------------------
 
-// resolveMigrationsDir locates server/migrations relative to this test
-// file's source path. The shared migrations.ResolveDir() walks parent
+// resolveMigrationsDir locates server/migrations relative to this
+// package's directory. The shared migrations.ResolveDir() walks parent
 // directories looking for any folder literally named "migrations",
 // which collides with the Go package server/internal/migrations and
-// returns the wrong directory. Anchoring on runtime.Caller's file path
-// avoids that ambiguity entirely.
+// returns the wrong directory. go test runs in the package directory, so
+// a fixed relative path avoids that ambiguity; runtime.Caller is not used
+// because -trimpath turns its result into a module path.
 func resolveMigrationsDir() (string, error) {
-	_, here, _, ok := runtime.Caller(0)
-	if !ok {
-		return "", fmt.Errorf("runtime.Caller(0) failed")
+	dir, err := filepath.Abs(filepath.Join("..", "..", "migrations"))
+	if err != nil {
+		return "", err
 	}
-	// here = .../server/internal/taskusagebackfill/hook_test.go
-	dir := filepath.Join(filepath.Dir(here), "..", "..", "migrations")
-	dir = filepath.Clean(dir)
 	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 		return "", fmt.Errorf("migrations dir not at %s", dir)
 	}

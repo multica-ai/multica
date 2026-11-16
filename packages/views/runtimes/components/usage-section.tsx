@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, ChevronRight, AlertCircle } from "lucide-react";
+import { BarChart3, ChevronRight, AlertCircle } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -45,80 +45,26 @@ import {
 } from "./charts";
 import { CustomPricingDialog } from "./custom-pricing-dialog";
 import { useT } from "../../i18n";
+import { ObjectSectionEmpty } from "../../layout/object-page";
+import {
+  Segmented,
+  TIME_RANGES,
+  dimsForDays,
+  type Dim,
+  type TimeRange as DashboardTimeRange,
+} from "../../dashboard/components/dashboard-shared";
+import { DimSegmented } from "../../dashboard/components/dim-segmented";
 
 // Single source of truth for the period selector. KPIs, the When-chart, the
 // Cost-by tabs, and the CSV export all read from the same `days` value so
-// the labels ("· 30D") and the data slice never disagree.
-//
-// `dims` declares which dimensions each range is allowed in. 7 days at the
-// weekly grain is one bar, so 7d is daily-only; 180d is weekly-only because
-// 180 daily bars are visually unreadable.
-const TIME_RANGES = [
-  { label: "7d", days: 7, dims: ["daily"] as const },
-  { label: "30d", days: 30, dims: ["daily", "weekly"] as const },
-  { label: "90d", days: 90, dims: ["daily", "weekly"] as const },
-  { label: "180d", days: 180, dims: ["weekly"] as const },
-] as const;
+// the labels ("· 30D") and the data slice never disagree. Same ranges as the
+// Analytics page except 1d.
+const PERIODS = TIME_RANGES.filter(
+  (r): r is Exclude<(typeof TIME_RANGES)[number], { days: 1 }> => r.days !== 1,
+);
 
-type TimeRange = (typeof TIME_RANGES)[number]["days"];
-type WhenTab = "daily" | "weekly" | "heatmap";
+type TimeRange = Exclude<DashboardTimeRange, 1>;
 
-// Default time range per dimension. Switching dimensions resets the period
-// to its default rather than keeping a now-invalid value.
-const DEFAULT_DAYS_BY_DIM: Record<Exclude<WhenTab, "heatmap">, TimeRange> = {
-  daily: 30,
-  weekly: 90,
-};
-
-function rangesForDim(dim: Exclude<WhenTab, "heatmap">) {
-  return TIME_RANGES.filter((r) =>
-    (r.dims as readonly string[]).includes(dim),
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Local segmented control. shadcn's Tabs is wired for full tab pages with
-// keyboard nav and ARIA semantics that a compact toolbar pill doesn't need.
-// Visual: light-grey track + white "raised" active pill.
-// ---------------------------------------------------------------------------
-
-function Segmented<T extends string | number>({
-  value,
-  onChange,
-  options,
-  disabled,
-}: {
-  value: T;
-  onChange: (v: T) => void;
-  options: readonly { label: string; value: T }[];
-  disabled?: boolean;
-}) {
-  return (
-    <div
-      className={`inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5 ${
-        disabled ? "opacity-50" : ""
-      }`}
-    >
-      {options.map((o) => (
-        <button
-          key={String(o.value)}
-          type="button"
-          disabled={disabled}
-          onClick={() => onChange(o.value)}
-          className={`rounded-sm px-2.5 py-1 text-caption font-medium transition-colors disabled:cursor-not-allowed ${
-            o.value === value
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Top-level orchestrator. Owns the time window, fetches a 180-day usage
 // cache once, slices it into "current" / "prior" windows for delta math,
 // and threads everything into the four visual blocks below.
@@ -127,7 +73,6 @@ function Segmented<T extends string | number>({
 // weeks (~6 months) so the long view actually looks long. The 7d/30d/90d
 // period selector slices client-side; the prior-window delta on the Cost
 // KPI also benefits from having extra history available.
-// ---------------------------------------------------------------------------
 
 export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   const { t, i18n } = useT("runtimes");
@@ -139,7 +84,6 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   const { data: usage = [], isLoading: loading } = useQuery(
     runtimeUsageOptions(runtimeId, 180, tz),
   );
-  const [dim, setDim] = useState<Exclude<WhenTab, "heatmap">>("daily");
   const [days, setDays] = useState<TimeRange>(30);
   // Subscribe so the KPI cards (which call estimateCost at render-time, not
   // through a memo) re-evaluate when the user saves a custom rate. The
@@ -157,16 +101,6 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   // boundary the backend used when bucketing rows.
   const { filtered, prevFiltered } = sliceWindow(usage, days, tz);
 
-  const allowedRanges = rangesForDim(dim);
-  const handleDimChange = (next: Exclude<WhenTab, "heatmap">) => {
-    setDim(next);
-    const stillAllowed = (rangesForDim(next) as readonly { days: number }[]).some(
-      (r) => r.days === days,
-    );
-    if (!stillAllowed) {
-      setDays(DEFAULT_DAYS_BY_DIM[next]);
-    }
-  };
   const totals = computeTotals(filtered);
   const prevTotals = computeTotals(prevFiltered);
 
@@ -183,40 +117,19 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
 
   return (
     <div className="space-y-5">
-      {/* Page-wide period selector. Lives at the top because it controls
-          basically everything below: the KPI numbers and labels, the
-          daily / weekly chart window, and the cost-by aggregations. The
-          Heatmap tab is the only sub-view that ignores it (always shows
-          26 weeks), and its tab disables this control to telegraph that. */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <span className="text-caption uppercase tracking-wider text-muted-foreground">
-            {t(($) => $.usage.dimension_label)}
-          </span>
-          <Segmented
-            value={dim}
-            onChange={handleDimChange}
-            options={
-              [
-                { label: t(($) => $.usage.when_tab_daily), value: "daily" },
-                { label: t(($) => $.usage.when_tab_weekly), value: "weekly" },
-              ] as const
-            }
-          />
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-caption uppercase tracking-wider text-muted-foreground">
-            {t(($) => $.usage.period_label)}
-          </span>
-          <Segmented
-            value={days}
-            onChange={setDays}
-            options={allowedRanges.map((r) => ({
-              label: r.label,
-              value: r.days,
-            }))}
-          />
-        </div>
+      {/* The section's only filter: the KPIs, the When chart's window and
+          the cost-by aggregations all follow it. The heatmap view ignores
+          it (always 26 weeks) and says so in its caption. */}
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <span className="text-caption uppercase tracking-wider text-muted-foreground">
+          {t(($) => $.usage.period_label)}
+        </span>
+        <Segmented
+          label={t(($) => $.usage.period_label)}
+          value={days}
+          onChange={setDays}
+          options={PERIODS.map((r) => ({ label: r.label, value: r.days }))}
+        />
       </div>
 
       {/* Pricing bar. Sits above the KPI grid so a *partial* unmapping
@@ -304,17 +217,8 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
         />
       </div>
 
-      {/* Layer 2 — WHEN chart. Dimension (Daily / Weekly) is owned by the
-          parent so the period selector at the top can react to it. The
-          Heatmap is an independent toggle inside this card — it ignores
-          the period selector by design (it's a fixed 26-week long-view). */}
-      <WhenChart
-        usage={usage}
-        filtered={filtered}
-        days={days}
-        dim={dim}
-        tz={tz}
-      />
+      {/* Layer 2 — WHEN chart. */}
+      <WhenChart usage={usage} filtered={filtered} days={days} tz={tz} />
 
       {/* Layer 3 — WHO/WHAT burned the spend. */}
       <CostByBlock runtimeId={runtimeId} days={days} usage={filtered} tz={tz} />
@@ -327,33 +231,31 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // WhenChart — answers "WHEN was this runtime spending money?".
-// Dimension (Daily / Weekly) is owned by the parent so the page-level
-// period selector can react to it. Heatmap is an independent view toggled
-// inside this card; it ignores both the dimension and the period selector,
-// always showing the long 26-week view.
-// ---------------------------------------------------------------------------
+// Daily / Weekly is card-scoped and offers only the grains the period allows,
+// so it never changes the period (MUL-5759). Heatmap is an independent view
+// toggled inside this card; it ignores both, always showing 26 weeks.
 
-type Dim = Exclude<WhenTab, "heatmap">;
 type DailyMetric = "cost" | "tokens";
 
 function WhenChart({
   usage,
   filtered,
   days,
-  dim,
   tz,
 }: {
   usage: RuntimeUsage[];
   filtered: RuntimeUsage[];
   days: TimeRange;
-  dim: Dim;
   tz: string;
 }) {
   const { t } = useT("runtimes");
-  // Heatmap is the "independent" sibling — toggled here, not part of the
-  // page-level dimension segmented (per the RFC).
+  const { t: tUsage } = useT("usage");
+  const allowedDims = dimsForDays(days);
+  const [dim, setDim] = useState<Dim>("daily");
+  // Derived, never written back: 7d and 180d each draw the one grain they
+  // allow, and widening back to 30d / 90d restores the reader's choice.
+  const effectiveDim: Dim = allowedDims.includes(dim) ? dim : allowedDims[0]!;
   const [showHeatmap, setShowHeatmap] = useState(false);
   // Daily and Weekly share a Cost-vs-Tokens metric toggle.
   const [chartMetric, setChartMetric] = useState<DailyMetric>("cost");
@@ -388,22 +290,29 @@ function WhenChart({
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
           <h4 className="text-body font-semibold">{t(($) => $.usage.when_title)}</h4>
-          {/* Cost / Tokens metric toggle — only meaningful when the chart
-              actually has two series-types to switch between. */}
+          {/* Metric and grain toggles — the heatmap has neither, so both
+              hide while it is on. */}
           {metricToggleVisible && (
-            <Segmented
-              value={chartMetric}
-              onChange={setChartMetric}
-              options={
-                [
-                  { label: t(($) => $.usage.daily_metric_cost), value: "cost" },
-                  { label: t(($) => $.usage.daily_metric_tokens), value: "tokens" },
-                ] as const
-              }
-            />
+            <>
+              <Segmented
+                label={tUsage(($) => $.daily.metric_label)}
+                value={chartMetric}
+                onChange={setChartMetric}
+                options={
+                  [
+                    { label: t(($) => $.usage.daily_metric_cost), value: "cost" },
+                    { label: t(($) => $.usage.daily_metric_tokens), value: "tokens" },
+                  ] as const
+                }
+              />
+              <DimSegmented
+                allowedDims={allowedDims}
+                value={effectiveDim}
+                onChange={setDim}
+              />
+            </>
           )}
-          {/* Heatmap toggle — independent of the page-level dim segmented.
-              "On" puts the card into a fixed 26-week long-view that ignores
+          {/* "On" puts the card into a fixed 26-week long-view that ignores
               the period selector. */}
           <button
             type="button"
@@ -432,7 +341,7 @@ function WhenChart({
       <div className="min-h-[260px]">
         {showHeatmap ? (
           <ActivityHeatmap usage={usage} tz={tz} />
-        ) : dim === "daily" ? (
+        ) : effectiveDim === "daily" ? (
           <DailyTab
             metric={chartMetric}
             costData={dailyCostStack}
@@ -503,14 +412,12 @@ function WeeklyTab({
   return <WeeklyCostChart data={costData} />;
 }
 
-// ---------------------------------------------------------------------------
 // EmptyChartState — drop-in replacement for "the chart would render empty".
 // Two cases worth distinguishing:
 //   1. No tokens at all → "no usage" (genuinely nothing happened).
 //   2. Tokens present but cost is $0 → almost always means the model name
 //      reported by the daemon isn't in our pricing table. List the offenders
 //      so a developer can update MODEL_PRICING in one go.
-// ---------------------------------------------------------------------------
 
 function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {
   const { t } = useT("runtimes");
@@ -551,7 +458,6 @@ function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // CustomPricingBar — the only entry point into the custom-pricing dialog,
 // rendered above the KPI grid. Two states:
 //
@@ -565,7 +471,6 @@ function EmptyChartState({ usage }: { usage: RuntimeUsage[] }) {
 //      saved rates could no longer be corrected or removed from the UI.
 //
 // Hidden entirely when nothing is unmapped and nothing is overridden.
-// ---------------------------------------------------------------------------
 
 function CustomPricingBar({ usage }: { usage: RuntimeUsage[] }) {
   const { t } = useT("runtimes");
@@ -622,10 +527,8 @@ function CustomPricingBar({ usage }: { usage: RuntimeUsage[] }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Chart legend — one coloured dot + label per stack segment, rendered in
 // WhenChart's header so the chart body keeps its full vertical real estate.
-// ---------------------------------------------------------------------------
 
 function ChartLegend({ includeCacheRead = false }: { includeCacheRead?: boolean }) {
   const { t } = useT("runtimes");
@@ -655,9 +558,7 @@ function ChartLegend({ includeCacheRead = false }: { includeCacheRead?: boolean 
   );
 }
 
-// ---------------------------------------------------------------------------
 // Cost-by block: two-tab attribution view (by agent / by model).
-// ---------------------------------------------------------------------------
 
 function CostByBlock({
   runtimeId,
@@ -710,6 +611,7 @@ function CostByBlock({
               : t(($) => $.usage.cost_by_title_model)}
           </h4>
           <Segmented
+            label={t(($) => $.usage.cost_by_label)}
             value={tab}
             onChange={setTab}
             options={
@@ -743,7 +645,7 @@ function CostByBlock({
           <CostByList
             rows={byModel}
             renderKey={(key) => (
-              <span className="truncate font-mono text-caption text-foreground">
+              <span className="block truncate font-mono text-caption text-foreground">
                 {key}
               </span>
             )}
@@ -804,11 +706,9 @@ function CostByList({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Folded row — single chevron-toggle link revealing the raw breakdown
 // table. The Activity heatmap used to live here too; it was promoted to a
 // WhenChart toggle, leaving only the breakdown table behind.
-// ---------------------------------------------------------------------------
 
 function FoldedRow({ usage }: { usage: RuntimeUsage[] }) {
   const { t } = useT("runtimes");
@@ -881,9 +781,7 @@ function DailyBreakdownTable({ usage }: { usage: RuntimeUsage[] }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Loading + empty states
-// ---------------------------------------------------------------------------
 
 function UsageSkeleton() {
   return (
@@ -898,18 +796,11 @@ function UsageSkeleton() {
 function UsageEmpty() {
   const { t } = useT("runtimes");
   return (
-    <div className="flex flex-col items-center rounded-lg border border-dashed py-8">
-      <BarChart3 className="h-5 w-5 text-faint-foreground" />
-      <p className="mt-2 text-caption text-muted-foreground">
-        {t(($) => $.usage.no_data)}
-      </p>
-    </div>
+    <ObjectSectionEmpty icon={BarChart3} description={t(($) => $.usage.no_data)} />
   );
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 interface UsageTotals {
   input: number;

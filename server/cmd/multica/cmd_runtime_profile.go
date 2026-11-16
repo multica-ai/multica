@@ -16,7 +16,6 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
-// ---------------------------------------------------------------------------
 // `multica runtime profile ...` — custom runtime profiles (MUL-3284)
 //
 // A runtime profile lets a workspace declare a custom agent runtime built on
@@ -30,7 +29,6 @@ import (
 // config so the daemon can launch a profile whose command isn't on PATH (or
 // pick a specific install among several). That mapping never leaves the
 // machine — it is not sent to the server.
-// ---------------------------------------------------------------------------
 
 var runtimeProfileCmd = &cobra.Command{
 	Use:   "profile",

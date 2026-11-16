@@ -143,6 +143,7 @@ func TestOpencodeV2ExecuteRefusesMCPConfig(t *testing.T) {
 		ExecutablePath: fakePath,
 		CLIVersion:     "opencode v2.0.10",
 		BuiltinRuntime: true,
+		Env:            map[string]string{opencodeTransportEnv: "run"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {
@@ -186,6 +187,7 @@ func TestOpencodeV1StillDeliversMCPConfig(t *testing.T) {
 		ExecutablePath: fakePath,
 		CLIVersion:     "1.18.31",
 		BuiltinRuntime: true,
+		Env:            map[string]string{opencodeTransportEnv: "run"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {
@@ -238,7 +240,7 @@ func TestOpencodeV2ArgvOmitsDirAndFoldsVariant(t *testing.T) {
 		CLIVersion:     "opencode v2.0.10",
 		BuiltinRuntime: true,
 		Logger:         slog.Default(),
-		Env: map[string]string{
+		Env: map[string]string{opencodeTransportEnv: "run",
 			"OPENCODE_ARGS_FILE": argsFile,
 			"OPENCODE_PWD_FILE":  pwdFile,
 		},
@@ -309,7 +311,7 @@ func TestOpencodeV1ArgvKeepsDirAndVariant(t *testing.T) {
 		CLIVersion:     "1.18.31",
 		BuiltinRuntime: true,
 		Logger:         slog.Default(),
-		Env:            map[string]string{"OPENCODE_ARGS_FILE": argsFile},
+		Env:            map[string]string{opencodeTransportEnv: "run", "OPENCODE_ARGS_FILE": argsFile},
 	})
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
@@ -567,7 +569,7 @@ func TestOpencodeV2CancelInterruptsThroughRunConnection(t *testing.T) {
 		CLIVersion:     "opencode v2.0.10",
 		BuiltinRuntime: true,
 		Logger:         slog.Default(),
-		Env:            map[string]string{"MULTICA_TEST_ENV": "task-marker"},
+		Env:            map[string]string{opencodeTransportEnv: "run", "MULTICA_TEST_ENV": "task-marker"},
 	})
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)

@@ -1,27 +1,6 @@
-// Derived presence types for agents — the user-facing state we display
-// across the UI (list dots, hover cards, status lines). Computed in the
-// front-end from raw server data (agent + runtime + recent tasks); the
-// back-end never knows about these enums.
-//
-// Two orthogonal dimensions, derived independently and answering only
-// "what's true right now?" — historical / error context lives on the
-// agent detail page (Recent Work, failure_reason) and Inbox, not in the
-// list-level summary state:
-//
-//   1. AgentAvailability — "Can this agent take work right now?"
-//      Depends only on runtime reachability. The dot colour everywhere in
-//      the app reflects this single dimension; never sticky-red because of
-//      a past task outcome.
-//
-//   2. Workload — "What is on this agent's plate right now?"
-//      Depends only on the workspace task snapshot. Three states, each
-//      pointing at a clear user action:
-//        working → tasks running, normal
-//        queued  → tasks queued but nothing running (= stuck if availability
-//                  is offline/unstable; momentary if online)
-//        idle    → nothing to do
-//      No `failed` / `completed` / `cancelled` states — those are historical,
-//      surfaced via Recent Work + Inbox.
+// Agent presence has two independent current-state dimensions: runtime
+// availability and active task workload. Past failures and completed tasks belong
+// in Recent Work and Inbox rather than persisting as a list-level error state.
 
 // Runtime-reachability dimension. `unstable` is the transient amber state
 // during the runtime sweeper's grace window (offline < 5 min); it decays

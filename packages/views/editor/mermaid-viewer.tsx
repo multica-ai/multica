@@ -23,10 +23,11 @@ import {
   Download,
   Image as ImageIcon,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -82,16 +83,17 @@ function ToolbarButton({
   children: React.ReactNode;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-      className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-    >
-      {children}
-    </button>
+    <TooltipHint label={label} side="bottom">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+      >
+        {children}
+      </button>
+    </TooltipHint>
   );
 }
 
@@ -114,7 +116,7 @@ export function MermaidViewer({
         // panes `vh` includes retracted browser chrome, which would push the
         // toolbar off-screen — the exact "can't find the close button"
         // failure this viewer exists to remove.
-        className="!max-w-[calc(100vw-2rem)] !h-[min(90dvh,calc(100dvh-2rem))] !w-[calc(100vw-2rem)] flex flex-col gap-0 overflow-hidden p-0 xl:!max-w-[80rem]"
+        className="!max-w-[calc(100%-2rem)] !h-[min(90%,calc(100%-2rem))] !w-[calc(100%-2rem)] flex flex-col gap-0 overflow-hidden p-0 xl:!max-w-[80rem]"
         aria-label={t(($) => $.mermaid.viewer_title)}
       >
         {/* Body state (zoom, pan, source toggle) deliberately lives below the
@@ -226,18 +228,19 @@ function MermaidViewerContent({
               {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
             </ToolbarButton>
             <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button
-                    type="button"
-                    title={t(($) => $.mermaid.export)}
-                    aria-label={t(($) => $.mermaid.export)}
-                    className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                  >
-                    <Download className="size-4" />
-                  </button>
-                }
-              />
+              <TooltipHint label={t(($) => $.mermaid.export)} side="bottom">
+                <DropdownMenuTrigger
+                  render={
+                    <button
+                      type="button"
+                      aria-label={t(($) => $.mermaid.export)}
+                      className="flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                    >
+                      <Download className="size-4" />
+                    </button>
+                  }
+                />
+              </TooltipHint>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={handleDownloadPng} disabled={!canExportImage}>
                   <ImageIcon className="size-4" />

@@ -23,9 +23,10 @@ import {
   type Row,
   type SortingState,
 } from "@tanstack/react-table";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "@multica/ui/icons";
 import { DataTable } from "@multica/ui/components/ui/data-table";
 import { cn } from "@multica/ui/lib/utils";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useT } from "../i18n";
 import {
   parseDelimited,
@@ -54,7 +55,7 @@ const SCROLLBAR_SLACK = 16;
 // Rendered width of `value` at `fontPx`, in em-fractions per character class
 // of a proportional UI face: figures and capitals run wide (and figures are
 // tabular), lowercase and punctuation narrower, CJK glyphs a full em.
-function textWidth(value: string, fontPx: number): number {
+export function textWidth(value: string, fontPx: number): number {
   let ems = 0;
   for (const char of value) {
     if ((char.codePointAt(0) ?? 0) > 0x2e80) ems += 1;
@@ -173,15 +174,16 @@ export function TablePreview({ text, delimiter }: TablePreviewProps) {
         cell: ({ getValue }) => {
           const value = getValue<string | undefined>() ?? "";
           return (
-            <span
-              className={cn(
-                "block truncate",
-                columnInfo[index]?.numeric && "text-right tabular-nums",
-              )}
-              title={value}
-            >
-              {value}
-            </span>
+            <TruncatedTooltip content={value}>
+              <span
+                className={cn(
+                  "block truncate",
+                  columnInfo[index]?.numeric && "text-right tabular-nums",
+                )}
+              >
+                {value}
+              </span>
+            </TruncatedTooltip>
           );
         },
         size: columnInfo[index]?.width ?? MIN_COLUMN_WIDTH,
@@ -230,7 +232,7 @@ export function TablePreview({ text, delimiter }: TablePreviewProps) {
   );
 }
 
-function SortHeader({
+export function SortHeader({
   title,
   numeric,
   sorted,
@@ -243,28 +245,30 @@ function SortHeader({
 }) {
   const Icon = sorted === "asc" ? ArrowUp : sorted === "desc" ? ArrowDown : ArrowUpDown;
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      className={cn(
-        // The table header's spreadsheet casing is for labels the app wrote;
-        // these are the file's own column names and show as written.
-        "group/sort flex w-full min-w-0 items-center gap-1 rounded-sm normal-case tracking-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        numeric && "flex-row-reverse",
-      )}
-    >
-      <span className="truncate font-medium" title={title}>
-        {title}
-      </span>
-      <Icon
-        aria-hidden
+    <TruncatedTooltip content={title}>
+      <button
+        type="button"
+        onClick={onToggle}
         className={cn(
-          "size-3.5 shrink-0",
-          sorted
-            ? "text-foreground"
-            : "text-muted-foreground opacity-0 transition-opacity group-hover/sort:opacity-100 group-focus-visible/sort:opacity-100",
+          // The table header's spreadsheet casing is for labels the app wrote;
+          // these are the file's own column names and show as written.
+          "group/sort flex w-full min-w-0 items-center gap-1 rounded-sm normal-case tracking-normal text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          numeric && "flex-row-reverse",
         )}
-      />
-    </button>
+      >
+        <span className="truncate font-medium">
+          {title}
+        </span>
+        <Icon
+          aria-hidden
+          className={cn(
+            "size-3.5 shrink-0",
+            sorted
+              ? "text-foreground"
+              : "text-muted-foreground opacity-0 transition-opacity group-hover/sort:opacity-100 group-focus-visible/sort:opacity-100",
+          )}
+        />
+      </button>
+    </TruncatedTooltip>
   );
 }

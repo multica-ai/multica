@@ -4,10 +4,11 @@ description: Install Multica on your iPhone from source, and connect to Cloud or
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 The Multica iOS client is not on the App Store yet. You can build a Release version from the public source repository on a Mac and install it on your own iPhone. There is no Android client yet.
 
-The installed app connects to Multica Cloud by default; sign in with your existing account. Workspaces, issues, comments, and run history all live on the server — nothing needs to be synced manually from web or Desktop.
+The installed app connects to Multica Cloud by default; sign in with your existing account. Workspaces, issues, comments, and run history all live on the server, so nothing needs to be synced from web or Desktop.
 
 ## Prerequisites
 
@@ -23,6 +24,8 @@ If Xcode or the on-device development environment isn't set up yet, complete Exp
 
 ## Installing to your iPhone
 
+<Steps>
+<Step>
 Clone the repository and install dependencies:
 
 ```bash
@@ -30,16 +33,20 @@ git clone https://github.com/multica-ai/multica.git
 cd multica
 pnpm install
 ```
-
-Then run from the repo root:
+</Step>
+<Step>
+Run from the repo root:
 
 ```bash
 pnpm ios:mobile:device:prod:release
 ```
 
 This builds a Release version with no Metro dependency and installs it on the connected iPhone. The first build downloads iOS dependencies and compiles React Native; later builds reuse Xcode's cache.
-
-If the iPhone blocks the app from opening, trust the developer certificate under **Settings → General → VPN & Device Management**.
+</Step>
+<Step>
+Open the app on the iPhone. If iOS blocks it from opening, trust the developer certificate under **Settings → General → VPN & Device Management**.
+</Step>
+</Steps>
 
 ## 7-day limit of free signing
 
@@ -72,16 +79,23 @@ pnpm ios:mobile:device:prod:release
 
 Release builds bake the API address into the app. `apps/mobile/.env.production` is committed with the public multica.ai defaults, so a fresh clone builds against production as-is.
 
-To connect to a self-hosted instance, copy `apps/mobile/.env.production.example` to `apps/mobile/.env.production.local` and edit the copy:
+To connect to a self-hosted instance:
+
+<Steps>
+<Step>
+Copy `apps/mobile/.env.production.example` to `apps/mobile/.env.production.local`, and fill in the addresses in the copy:
 
 ```dotenv
 EXPO_PUBLIC_API_URL=https://api.example.com
 EXPO_PUBLIC_WEB_URL=https://app.example.com
 ```
 
-The `.local` file overrides the committed defaults key by key and is gitignored, so personal endpoints never reach the repository. `EXPO_PUBLIC_API_URL` is required. `EXPO_PUBLIC_WEB_URL` powers entries like "Copy link" and "Open on web". Set both in the copy: a key you leave out falls back to the multica.ai default, so those entries would open multica.ai instead of your instance.
-
-Re-run the build command after editing. The iPhone must be able to reach the API address; when using a LAN address, don't write `localhost` — on the iPhone it points at the phone itself.
+The `.local` file overrides the committed defaults key by key and is gitignored, so personal endpoints never reach the repository. `EXPO_PUBLIC_API_URL` is required. `EXPO_PUBLIC_WEB_URL` powers entries like "Copy link" and "Open on web". Set both: a key you leave out falls back to the multica.ai default, so those entries would open multica.ai instead of your instance.
+</Step>
+<Step>
+Re-run the build command `pnpm ios:mobile:device:prod:release`. The iPhone must be able to reach the API address; when using a LAN address, don't write `localhost`, which on the iPhone points at the phone itself.
+</Step>
+</Steps>
 
 <Callout type="warning">
 Editing `.env.production` directly changes the production configuration of the current checkout. Keep personal values in the gitignored `.env.production.local`.

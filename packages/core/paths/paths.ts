@@ -15,12 +15,25 @@
 const encode = (id: string) => encodeURIComponent(id);
 
 /**
- * `?focus=` token that scrolls the agent's Instructions tab to its
+ * `?focus=` token that scrolls the agent's General settings to its
  * conversation-starters editor and flashes it. Lives here because it is URL
- * vocabulary: `agentConversationStarters()` writes it and the tab reads it,
+ * vocabulary: `agentConversationStarters()` writes it and the page reads it,
  * and a shared constant is what stops the two from drifting apart.
  */
 export const AGENT_FOCUS_CONVERSATION_STARTERS = "conversation_starters";
+
+/**
+ * My agents' work is the My issues route with `?scope=agents`. It is URL
+ * vocabulary rather than stored state so every tab and window keeps its own
+ * — a Cmd-click opens it beside My issues, and one tab's switch leaves the
+ * others alone.
+ */
+const MY_AGENTS_SCOPE = "agents";
+
+/** Whether a My issues URL's search params open My agents' work. */
+export function isMyAgentsSearch(searchParams: URLSearchParams): boolean {
+  return searchParams.get("scope") === MY_AGENTS_SCOPE;
+}
 
 function workspaceScoped(slug: string) {
   const ws = `/${encode(slug)}`;
@@ -29,27 +42,33 @@ function workspaceScoped(slug: string) {
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
+    // Opens the newest upload of the deliverable named `filename` on this
+    // issue. Addresses the file by name, not by attachment id, so the link
+    // keeps pointing at the latest version as new ones are uploaded.
+    issueDeliverable: (id: string, filename: string) =>
+      `${ws}/issues/${encode(id)}/deliverables/${encode(filename)}`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,
+    // Step 1 of agent creation: choose where the agent runs.
     newAgent: () => `${ws}/agents/new`,
-    // The two creation methods behind the chooser. Each is a real route so a
+    // Step 2: configure the agent on the chosen runtime. A real route so a
     // half-filled form survives a refresh and can be linked to directly.
     newAgentManual: () => `${ws}/agents/new/manual`,
-    newAgentAi: () => `${ws}/agents/new/ai`,
+    // Step 3: the agent exists; offer its first uses.
+    newAgentDone: (agentId: string) =>
+      `${ws}/agents/new/done/${encode(agentId)}`,
     // One creation conversation. It is a durable object, not a step of the
-    // route above: it survives leaving the studio and is resumed later, so it
-    // owns an address instead of being a query param on the "start one" screen.
+    // routes above: it survives leaving the studio and is resumed later, so it
+    // owns an address instead of being a query param on the screen that started it.
     newAgentAiSession: (sessionId: string) =>
       `${ws}/agents/new/ai/${encode(sessionId)}`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
-    // Deep link behind "customize" in a chat's empty state: the agent's
-    // Instructions tab, scrolled to the conversation starters that produced
-    // the buttons the viewer just looked at.
+    // The agent's General settings, scrolled to its conversation starters.
     agentConversationStarters: (id: string) =>
-      `${ws}/agents/${encode(id)}?view=instructions&focus=${AGENT_FOCUS_CONVERSATION_STARTERS}`,
+      `${ws}/agents/${encode(id)}?view=general&focus=${AGENT_FOCUS_CONVERSATION_STARTERS}`,
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,
     squads: () => `${ws}/squads`,
     squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,
@@ -60,6 +79,8 @@ function workspaceScoped(slug: string) {
     chatSession: (sessionId: string) =>
       `${ws}/chat?session=${encode(sessionId)}`,
     myIssues: () => `${ws}/my-issues`,
+    myAgents: () => `${ws}/my-issues?scope=${MY_AGENTS_SCOPE}`,
+    views: () => `${ws}/views`,
     runtimes: () => `${ws}/runtimes`,
     runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,
     runtimeSettings: (machineId: string, runtimeId: string) =>

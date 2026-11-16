@@ -33,10 +33,8 @@ import { IssueActionsContextMenu } from "../actions";
 import { sortIssues } from "../utils/sort";
 import { useLocale, useT } from "../../i18n";
 
-// ---------------------------------------------------------------------------
 // Date utilities — everything is UTC-day-aligned so a `due_date` ISO string
 // produced anywhere maps to exactly one column on the axis.
-// ---------------------------------------------------------------------------
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -72,9 +70,7 @@ function isWeekStartUTC(d: Date): boolean {
   return d.getUTCDay() === 1; // Monday
 }
 
-// ---------------------------------------------------------------------------
 // Geometry
-// ---------------------------------------------------------------------------
 
 const ROW_HEIGHT = 36;
 const HEADER_HEIGHT = 56;
@@ -114,9 +110,7 @@ function computeRange(issues: Issue[], today: Date, zoom: GanttZoom): Range {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Top axis — sticky on vertical scroll. Renders month + day/week ticks.
-// ---------------------------------------------------------------------------
 
 function GanttAxis({
   range,
@@ -239,10 +233,8 @@ function GanttAxis({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Background layer — weekend shading, week/month gridlines, today line.
 // Rendered once across the full timeline track height behind all bars.
-// ---------------------------------------------------------------------------
 
 function BackgroundLayer({
   range,
@@ -294,9 +286,7 @@ function BackgroundLayer({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Bar color by status (uses semantic Tailwind tokens, not hardcoded colors).
-// ---------------------------------------------------------------------------
 
 // Keyed by CATEGORY, not by status key: an issue on a custom status draws in
 // the color of the category it behaves as. Keying this by IssueStatus made the
@@ -309,9 +299,7 @@ const STATUS_BAR_BG: Record<IssueStatusCategory, string> = {
   closed: "bg-muted-foreground/40",
 };
 
-// ---------------------------------------------------------------------------
 // One row — left label cell + right timeline track with absolute bar.
-// ---------------------------------------------------------------------------
 
 function ScheduledRow({
   issue,
@@ -464,9 +452,7 @@ function ScheduledRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // GanttView — public component
-// ---------------------------------------------------------------------------
 
 export function GanttView({ issues }: { issues: Issue[] }) {
   const { t } = useT("issues");

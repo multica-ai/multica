@@ -82,6 +82,60 @@ ORDER BY (
 installation_id, repo_owner, repo_name, pr_number
 LIMIT sqlc.arg('max_rows');
 
+-- name: ListStaleConflictWatchedGitHubPRs :many
+-- Second sweep source: open/draft PRs linked to an issue with an enabled
+-- "wake on merge conflict" rule. A decided snapshot leaves the undecided sweep,
+-- but a base-branch move can turn it conflicting without any event for this
+-- PR, so watched PRs are re-fetched on the TTL regardless. The candidate set
+-- comes from the enabled rules, whose count is capped. Like the undecided
+-- sweep, an address cursor rotates the bounded batch, so addresses whose
+-- fetches keep failing (their snapshot never gets newer) cannot pin it.
+WITH candidates AS (
+    SELECT pr.installation_id, pr.repo_owner, pr.repo_name, pr.pr_number
+    FROM github_pull_request AS pr
+    WHERE pr.state IN ('open', 'draft')
+      AND (pr.snapshot_fetched_at IS NULL OR pr.snapshot_fetched_at < sqlc.arg('older_than'))
+      AND pr.id IN (
+          SELECT ipr.pull_request_id
+          FROM issue_wakeup AS w
+          JOIN issue_pull_request AS ipr ON ipr.issue_id = w.issue_id
+          WHERE w.enabled
+            AND w.condition->>'type' = 'pull_request'
+            AND w.condition->>'event' = 'conflicts'
+      )
+    GROUP BY pr.installation_id, pr.repo_owner, pr.repo_name, pr.pr_number
+)
+SELECT installation_id, repo_owner, repo_name, pr_number
+FROM candidates
+ORDER BY (
+    ROW(installation_id, repo_owner, repo_name, pr_number) >
+    ROW(
+        sqlc.arg('after_installation_id')::BIGINT,
+        sqlc.arg('after_repo_owner')::TEXT,
+        sqlc.arg('after_repo_name')::TEXT,
+        sqlc.arg('after_pr_number')::INTEGER
+    )
+) DESC,
+installation_id, repo_owner, repo_name, pr_number
+LIMIT sqlc.arg('max_rows');
+
+-- name: ListConflictWatchedGitHubPRNumbersInRepo :many
+-- Open/draft PRs in one repository that an enabled "wake on merge conflict"
+-- rule watches. A merge into the repository can make them conflicting without
+-- an event of their own, so the merge webhook re-fetches them.
+SELECT DISTINCT pr.pr_number
+FROM issue_wakeup AS w
+JOIN issue_pull_request AS ipr ON ipr.issue_id = w.issue_id
+JOIN github_pull_request AS pr ON pr.id = ipr.pull_request_id
+WHERE w.enabled
+  AND w.condition->>'type' = 'pull_request'
+  AND w.condition->>'event' = 'conflicts'
+  AND pr.installation_id = $1 AND pr.repo_owner = $2 AND pr.repo_name = $3
+  AND pr.state IN ('open', 'draft')
+  AND pr.pr_number <> $4
+ORDER BY pr.pr_number
+LIMIT 200;
+
 -- name: ListGitHubPRNumbersByHeadSHA :many
 -- Resolves a commit SHA to the PR numbers whose head it is. `status` webhook
 -- events (legacy commit statuses) carry a SHA + repo but no PR number, so we

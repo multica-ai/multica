@@ -64,6 +64,7 @@ vi.mock("../i18n", () => ({
         // useStatusLabel resolves BUILT-IN keys through i18n and custom ones
         // through the catalog, so the promote headline needs both sources.
         status: { todo: "Todo" },
+        batch: { update_partial: "updated {{updated}} of {{count}}" },
       };
       return sel(labels).replace(/\{\{(\w+)\}\}/g, (_m, k) => String(vars?.[k] ?? ""));
     },
@@ -92,7 +93,7 @@ vi.mock("@multica/ui/components/ui/spinner", () => ({
 }));
 // vi.hoisted: vi.mock factories run before module-level consts initialize.
 // Only error is used now — completion is silent (no result toast).
-const mockToast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
+const mockToast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), warning: vi.fn() }));
 vi.mock("sonner", () => ({ toast: mockToast }));
 
 beforeEach(() => {
@@ -100,6 +101,7 @@ beforeEach(() => {
   mockBatch.mockClear().mockResolvedValue({ updated: 2 });
   mockToast.error.mockClear();
   mockToast.success.mockClear();
+  mockToast.warning.mockClear();
   // The real shortcut store drives both the submit chord and the keycap hint,
   // and jsdom's platform follows the host OS — pin it so the chord is ⌘+Enter
   // everywhere, not Ctrl+Enter on a Linux CI runner.
@@ -304,4 +306,43 @@ describe("RunConfirmModal", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(mockToast.success).not.toHaveBeenCalled();
   });
+
+  it("runs onApplied only after the write succeeds (MUL-8179)", async () => {
+    const onApplied = vi.fn();
+    mockBatch.mockRejectedValueOnce(new Error("boom"));
+    render(
+      <RunConfirmModal
+        onClose={vi.fn()}
+        data={{ ...single, issueIds: ["i1", "i2"], onApplied }}
+      />,
+    );
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("boom"));
+    expect(onApplied).not.toHaveBeenCalled();
+
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1));
+  });
+
+  for (const updated of [0, 1]) {
+    for (const button of ["Confirm assignment", "Don't start yet"]) {
+      it(`a partial batch (${updated}/2, "${button}") warns and skips onApplied`, async () => {
+        const onApplied = vi.fn();
+        const onClose = vi.fn();
+        mockBatch.mockResolvedValueOnce({ updated });
+        render(
+          <RunConfirmModal
+            onClose={onClose}
+            data={{ ...single, issueIds: ["i1", "i2"], onApplied }}
+          />,
+        );
+        fireEvent.click(screen.getByRole("button", { name: button }));
+        await waitFor(() =>
+          expect(mockToast.warning).toHaveBeenCalledWith(`updated ${updated} of 2`),
+        );
+        expect(onApplied).not.toHaveBeenCalled();
+        expect(onClose).toHaveBeenCalled();
+      });
+    }
+  }
 });

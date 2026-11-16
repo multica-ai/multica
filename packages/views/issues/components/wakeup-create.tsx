@@ -16,8 +16,8 @@ import {
   Plus,
   RefreshCw,
   Zap,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { childIssuesOptions, issueDetailOptions, useCreateIssueWakeup } from "@multica/core/issues";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { labelListOptions } from "@multica/core/labels/queries";
@@ -27,6 +27,7 @@ import { ApiError } from "@multica/core/api";
 import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { shortcutMatchesEvent, useShortcut } from "@multica/core/shortcuts";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
@@ -102,11 +103,10 @@ export function WakeupCreate({
     >
       <PopoverTrigger
         render={
-          <Button
+          <IconButton
             variant="ghost"
             size="icon-xs"
-            className="text-muted-foreground"
-            aria-label={t(($) => $.wakeups.create.open)}
+            label={t(($) => $.wakeups.create.open)}
           />
         }
       >
@@ -372,7 +372,7 @@ function ConditionMenu({
   onChange: (value: WakeupCondition) => void;
 }) {
   const { t } = useT("issues");
-  const items: Record<WakeupCondition, { icon: LucideIcon; label: string; hint: string }> = {
+  const items: Record<WakeupCondition, { icon: IconComponent; label: string; hint: string }> = {
     at: { icon: Clock3, label: t(($) => $.wakeups.create.cond_at), hint: t(($) => $.wakeups.create.cond_at_hint) },
     recurring: { icon: RefreshCw, label: t(($) => $.wakeups.create.cond_recurring), hint: t(($) => $.wakeups.create.cond_recurring_hint) },
     reply: { icon: MessageSquare, label: t(($) => $.wakeups.create.cond_reply), hint: t(($) => $.wakeups.create.cond_reply_hint) },
@@ -458,6 +458,7 @@ function ConditionParams({
           options={[
             { value: "checks_finished", label: t(($) => $.wakeups.create.pr_checks) },
             { value: "merged", label: t(($) => $.wakeups.create.pr_merged) },
+            { value: "conflicts", label: t(($) => $.wakeups.create.pr_conflicts) },
           ]}
           onChange={(prEvent) => update({ prEvent: prEvent as WakeupDraft["prEvent"] })}
         />
@@ -473,6 +474,7 @@ function ConditionParams({
               { value: "done", label: t(($) => $.wakeups.create.other_done) },
               { value: "ended", label: t(($) => $.wakeups.create.other_ended) },
               { value: "in_review", label: t(($) => $.wakeups.create.other_in_review) },
+              { value: "blocked", label: t(($) => $.wakeups.create.other_blocked) },
             ]}
             onChange={(otherState) => update({ otherState: otherState as WakeupDraft["otherState"] })}
           />

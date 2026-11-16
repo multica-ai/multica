@@ -97,6 +97,10 @@ func opencodeModelArg(model, thinkingLevel string) (string, bool) {
 // ErrOpenCodeV2MCPUnsupported reports that the MCP servers Multica manages for
 // a task cannot be delivered to an OpenCode 2.x runtime yet.
 //
+// This applies to the `opencode run` transport only. The ACP transport, which
+// built-in 2.x runtimes use by default (opencode_acp.go), passes MCP servers in
+// ACP session/new and never needs the workdir file.
+//
 // The message deliberately does not name agent.mcp_config. ExecOptions.McpConfig
 // is the *composed* set, and only one of its sources is the agent's own column:
 // the daemon also folds in the workspace MCP servers bound to the agent (at

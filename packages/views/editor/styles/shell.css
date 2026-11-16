@@ -40,6 +40,16 @@
   display: block !important;
 }
 
+/* The table NodeView (TableView) is a block, and Tiptap marks ProseMirror's
+   <tbody> inside it as a wrapper too; it keeps its table display. */
+.rich-text-editor [data-node-view-wrapper].table-node {
+  display: block;
+}
+
+.rich-text-editor tbody[data-node-view-wrapper] {
+  display: table-row-group;
+}
+
 /* Bubble menu — floating toolbar pill */
 .bubble-menu {
   display: flex;

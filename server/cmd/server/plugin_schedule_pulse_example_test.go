@@ -12,7 +12,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -53,11 +52,12 @@ type schedulePulseHookBody struct {
 
 func schedulePulseExampleDir(t *testing.T) string {
 	t.Helper()
-	_, thisFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate this test file")
+	// Relative to the package directory go test runs in; runtime.Caller
+	// would return a module path under -trimpath.
+	dir, err := filepath.Abs(filepath.Join("..", "..", "..", "examples", "plugins", "schedule-pulse"))
+	if err != nil {
+		t.Fatalf("resolve the schedule-pulse example dir: %v", err)
 	}
-	dir := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "examples", "plugins", "schedule-pulse")
 	if _, err := os.Stat(filepath.Join(dir, plugincontract.ManifestFilename)); err != nil {
 		t.Fatalf("the schedule-pulse example is missing: %v", err)
 	}

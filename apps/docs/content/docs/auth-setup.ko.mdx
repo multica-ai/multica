@@ -4,6 +4,7 @@ description: 이메일 인증 코드, Google 로그인, 신규 사용자 가입 
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Multica는 기본적으로 이메일 인증 코드로 로그인하며 Google OAuth를 추가할 수도 있습니다. 기존 사용자는 언제든 다시 로그인할 수 있습니다. 가입 제한은 새 계정을 만들 수 있는지만 결정합니다.
 
@@ -15,15 +16,28 @@ Multica는 기본적으로 이메일 인증 코드로 로그인하며 Google OAu
 
 ### Resend 사용
 
-1. [Resend](https://resend.com/)에서 발신 도메인을 인증하고 API key를 만듭니다.
-2. 다음을 설정합니다.
+<Steps>
+<Step>
 
-   ```dotenv
-   RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
-   RESEND_FROM_EMAIL=noreply@example.com
-   ```
+[Resend](https://resend.com/)에서 발신 도메인을 인증하고 API key를 만듭니다.
 
-3. API 서비스를 다시 시작합니다.
+</Step>
+<Step>
+
+다음을 설정합니다.
+
+```dotenv
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+RESEND_FROM_EMAIL=noreply@example.com
+```
+
+</Step>
+<Step>
+
+API 서비스를 다시 시작합니다.
+
+</Step>
+</Steps>
 
 `RESEND_FROM_EMAIL`은 Resend에서 인증한 도메인에 속해야 합니다.
 
@@ -57,7 +71,7 @@ SMTP_EHLO_NAME=mail.example.com
 
 ### 이메일 서비스가 없을 때의 동작
 
-서버는 계속 시작되지만 인증 코드와 초대 링크가 이메일로 전송되지 않고 로그에만 기록됩니다. 로컬 개발에는 적합하지만 프로덕션 환경에는 적합하지 않습니다.
+서버는 계속 시작되지만 인증 코드와 초대 링크가 이메일로 전송되지 않고 로그에만 기록됩니다. 이 모드는 로컬 개발에만 적합합니다.
 
 시작 로그에는 현재 `Resend API`, `SMTP relay`, `DEV mode` 중 무엇을 사용하는지 표시됩니다.
 
@@ -78,22 +92,38 @@ MULTICA_DEV_VERIFICATION_CODE=888888
 
 ## Google 로그인
 
-1. [Google Cloud Console](https://console.cloud.google.com/)에서 OAuth 2.0 client를 만듭니다.
-2. Multica 프런트엔드의 callback 주소를 **Authorized redirect URIs**에 추가합니다.
+<Steps>
+<Step>
 
-   ```text
-   https://multica.example.com/auth/callback
-   ```
+[Google Cloud Console](https://console.cloud.google.com/)에서 OAuth 2.0 client를 만듭니다.
 
-3. 다음을 설정합니다.
+</Step>
+<Step>
 
-   ```dotenv
-   GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
-   GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
-   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
-   ```
+Multica 프런트엔드의 callback 주소를 **Authorized redirect URIs**에 추가합니다.
 
-4. API 서비스를 다시 시작합니다.
+```text
+https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+다음을 설정합니다.
+
+```dotenv
+GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+API 서비스를 다시 시작합니다.
+
+</Step>
+</Steps>
 
 Google Console과 `GOOGLE_REDIRECT_URI`의 주소는 프로토콜, 포트, 마지막 슬래시까지 완전히 같아야 합니다. 설정이 적용되면 로그인 페이지에 Google 로그인 버튼이 표시됩니다. 프런트엔드 이미지를 다시 빌드할 필요는 없습니다.
 
@@ -144,7 +174,7 @@ ALLOWED_EMAILS=partner@example.net
 
 세션은 슬라이딩 갱신됩니다. 아래 값은 로그인 시점부터의 카운트다운이 아니라 **유휴** 한도입니다. 남은 유효 기간이 절반 아래로 내려가면 다음 요청에서 전체 기간으로 다시 발급되므로, 계속 사용하는 계정이 주기적으로 로그아웃되지 않습니다. 절대 상한은 없습니다.
 
-이 한도는 한쪽 방향으로만 적용됩니다. 절반 아래로 내려간 뒤에야 다시 발급되므로, 마지막 사용 시점에 절반 이상 남아 있던 세션은 연장되지 않습니다. 항상 견딜 수 있는 유휴 시간은 아래 값의 절반입니다.
+이 한도는 한쪽 방향으로만 적용됩니다. 절반 아래로 내려간 뒤에야 다시 발급되므로, 마지막 사용 시점에 절반 이상 남아 있던 세션은 연장되지 않습니다. 확실히 유지되는 유휴 시간은 아래 값의 절반뿐입니다.
 
 `AUTH_TOKEN_TTL`로 조정할 수 있으며 Go duration 또는 양의 정수 초를 지원합니다.
 
