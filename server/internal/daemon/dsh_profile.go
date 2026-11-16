@@ -273,20 +273,20 @@ const dshProvisionOutputBytes = 2048
 // colon and an @ before the next path separator, so "https://host:8443/p" and
 // "ssh://git@host/p" are left alone.
 //
-// Local to provisioning rather than added to pkg/redact's shared pattern list.
+// Local to DSH diagnostics rather than added to pkg/redact's shared pattern list.
 // redact.Text runs over every agent's task messages, comments and error text, so
 // a rule added there changes output for every provider; the case that needs it
 // here is one package manager's error text, and widening a shared filter is its
 // own change with its own blast radius.
 var dshProvisionURLCredentials = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.\-]*)://[^/?#\s:@]+:[^/?#\s@]+@`)
 
-// dshProvisionOutput renders captured output for a log line. Registry errors
+// dshDiagnosticOutput renders captured probe/install diagnostics. Registry errors
 // routinely echo the request URL back, so URL credentials are scrubbed and the
 // shared redactor still runs for the token shapes it knows, before the text is
 // bounded.
-func dshProvisionOutput(raw []byte) string {
+func dshDiagnosticOutput(raw []byte) string {
 	text := dshProvisionURLCredentials.ReplaceAllString(
-		strings.TrimSpace(string(raw)), "$1://[REDACTED URL CREDENTIALS]@")
+		strings.ToValidUTF8(strings.TrimSpace(string(raw)), "�"), "$1://[REDACTED URL CREDENTIALS]@")
 	text = redact.Text(text)
 	if len(text) <= dshProvisionOutputBytes {
 		return text
@@ -297,7 +297,7 @@ func dshProvisionOutput(raw []byte) string {
 	// produces is an invalid-UTF-8 log line, which downstream JSON encoders
 	// rewrite into replacement characters.
 	tail := text[len(text)-dshProvisionOutputBytes:]
-	for len(tail) > 0 && !utf8.ValidString(tail[:1]) {
+	for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
 		tail = tail[1:]
 	}
 	return "…" + tail
@@ -382,10 +382,10 @@ func provisionDshMulticaProfile(ctx context.Context, dshPath string, logger *slo
 			// done the job, and stopping on it would hide a later spec that
 			// would have.
 			lastErr = fmt.Errorf("dsh plugin --profile %s add (candidate %d of %d): reported success without creating the profile: %s",
-				dshMulticaProfileName, i+1, len(specs), dshProvisionOutput(output))
+				dshMulticaProfileName, i+1, len(specs), dshDiagnosticOutput(output))
 		default:
 			lastErr = fmt.Errorf("dsh plugin --profile %s add (candidate %d of %d): %w: %s",
-				dshMulticaProfileName, i+1, len(specs), err, dshProvisionOutput(output))
+				dshMulticaProfileName, i+1, len(specs), err, dshDiagnosticOutput(output))
 		}
 		// Leave the directory. A refused add can write a skeleton, and a failure
 		// can also land on a profile the user already had. dshMulticaProfilePresent

@@ -105,7 +105,9 @@ Multica 當前會檢測以下命令：
 
 **DSH Desktop。** 裝的是 DeepSeek Harness Desktop 而不是 npm 包時，守護程序也會去找這個應用生成的 CLI shim，位置在它自己的使用者級資料目錄下：macOS 是 `~/Library/Application Support/DSH Desktop`，Windows 是 `%APPDATA%\DSH Desktop`。Windows 上這是漫遊應用資料目錄，不是安裝目錄：應用本身裝在 Program Files 或 `%LOCALAPPDATA%\Programs`，它驅動的 CLI 則和其他使用者級狀態放在一起。這些路徑裡的版本層是生成的 id，守護程序會逐個列舉，優先取最新的一份。PATH 上不需要別的東西，生成的 shim 會用絕對路徑呼叫應用自帶的執行時。DSH Desktop 裝在非預設位置時，用 `MULTICA_DSH_PATH` 指向那個 shim。
 
-守護程序只有在 `dsh --profile multica --probe` 成功後才註冊 DeepSeek Harness；失敗時會在 `/health` 報告缺少 profile。
+**升級 DSH 後。** 如果探測指出 profile 中的核心套件不相容，先備份守護程序診斷中列出的設定檔。檢查 `@deepseek-ai/dsh-agent`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-tools` 和 `@deepseek-ai/dsh-llm` 的本機覆寫：盡量使用應用程式內附的核心套件，或讓覆寫版本與已安裝的 DSH 版本一致。保留需要的獨立外掛和鉤子，不要刪除所有相依套件。修復後重新執行 `dsh --profile multica --probe`。Multica 會將這種已確認的相容性拒絕回報為需要手動修復 profile，不會覆寫現有設定。
+
+守護程序只有在 `dsh --profile multica --probe` 成功後才註冊 DeepSeek Harness。`/health` 診斷會區分 profile 缺失、已確認需要手動修復、協定不相容和探測暫時無法使用。啟動失敗時，診斷會包含偵測到的 CLI 版本、設定檔位置，以及可用的已遮蔽敏感資訊輸出。
 
 </Accordion>
 <Accordion title="Devin CLI" id="devin-cli">

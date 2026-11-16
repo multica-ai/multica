@@ -2698,12 +2698,17 @@ probeLoop:
 			// daemon may be the stale side of the skew. A probe that merely
 			// failed is transient, on the same rule every other provider's
 			// version probe gets.
-			switch probeDshMulticaProfile(ctx, resolved.Path) {
+			profileProbe := probeDshMulticaProfile(ctx, resolved.Path)
+			switch profileProbe.verdict {
 			case dshProbeOK:
 			case dshProbeNeedsMigration:
+				reason := dshProfileMigrationReason
+				if profileProbe.detail != "" {
+					reason = fmt.Sprintf("DSH %s: %s", dshDiagnosticOutput([]byte(version)), profileProbe.detail)
+				}
 				d.logger.Warn("skip registering runtime: DSH Multica runtime profile needs manual migration",
-					"name", name, "path", resolved.Path)
-				return "", dshProfileMigrationReason, builtinProbeProfileMigration
+					"name", name, "path", resolved.Path, "error", reason)
+				return "", reason, builtinProbeProfileMigration
 			case dshProbeMissingProfile:
 				d.logger.Warn("skip registering runtime: DSH Multica runtime profile is not installed",
 					"name", name, "path", resolved.Path)
@@ -2722,8 +2727,11 @@ probeLoop:
 				// is. The labelled break matters: a bare one would leave only
 				// the switch and fall through to registering a runtime whose
 				// profile answered nothing.
-				lastErr = errors.New(dshProbeFailedReason)
-				transientReason = dshProbeFailedReason
+				transientReason = fmt.Sprintf("%s (DSH %s; profile %q)", dshProbeFailedReason, dshDiagnosticOutput([]byte(version)), dshMulticaProfileManifestPath())
+				if profileProbe.detail != "" {
+					transientReason += ": " + profileProbe.detail
+				}
+				lastErr = errors.New(transientReason)
 				if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
 					break probeLoop
 				}

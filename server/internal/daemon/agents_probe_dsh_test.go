@@ -140,7 +140,7 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 		path := dshProbeFixture(t, `exec sleep 30`, false)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		if got := probeDshMulticaProfile(ctx, path); got != dshProbeUnavailable {
+		if got := probeDshMulticaProfile(ctx, path).verdict; got != dshProbeUnavailable {
 			t.Fatalf("probeDshMulticaProfile() = %v, want %v", got, dshProbeUnavailable)
 		}
 	})
@@ -151,7 +151,7 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 				shortenDshProbeTimeoutForHang(t)
 			}
 			path := dshProbeFixture(t, tc.body, tc.manifest)
-			if got := probeDshMulticaProfile(context.Background(), path); got != tc.want {
+			if got := probeDshMulticaProfile(context.Background(), path).verdict; got != tc.want {
 				t.Fatalf("probeDshMulticaProfile() = %v, want %v", got, tc.want)
 			}
 		})
@@ -179,7 +179,7 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 				t.Fatal(err)
 			}
 			start := time.Now()
-			if got := probeDshMulticaProfile(context.Background(), path); got != dshProbeMissingProfile {
+			if got := probeDshMulticaProfile(context.Background(), path).verdict; got != dshProbeMissingProfile {
 				t.Fatalf("probeDshMulticaProfile() = %v, want missing", got)
 			}
 			if time.Since(start) > time.Second {
@@ -210,7 +210,7 @@ func TestProbeDshMulticaProfile(t *testing.T) {
 		if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if got := probeDshMulticaProfile(context.Background(), path); got != dshProbeUnavailable {
+		if got := probeDshMulticaProfile(context.Background(), path).verdict; got != dshProbeUnavailable {
 			t.Fatalf("probeDshMulticaProfile() = %v, want unavailable", got)
 		}
 		if _, err := os.Stat(marker); err != nil {

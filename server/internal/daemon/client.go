@@ -1190,10 +1190,9 @@ const RuntimeOfflineCodeNotExecutable = "not_executable"
 // queued forever. The exception is an install the daemon is running right now,
 // which Installing states explicitly.
 //
-// Only an ABSENT profile reaches this code. A profile that is present but
-// answers with a protocol this daemon does not drive never takes a live runtime
-// offline at all: the daemon can be the stale side of that skew, so it reports
-// the incompatibility and leaves the runtime alone.
+// Missing profiles and confirmed manual-repair configurations reach this code.
+// A profile that answers with a protocol this daemon does not drive remains
+// non-demotable: the daemon can be the stale side of that separate skew.
 const RuntimeOfflineCodeDshProfile = "dsh_profile"
 
 // RuntimeOfflineReason is why a runtime went offline, in the form clients can
