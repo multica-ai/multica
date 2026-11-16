@@ -139,8 +139,8 @@ Multica Cloud 無需執行本節。自託管需要先建立自己的 GitHub App�
 | 欄位 | 值 |
 |---|---|
 | Homepage URL | Multica 前端地址，例如 `https://multica.example.com` |
-| Callback URL | 留空 |
-| Setup URL | `https://<api-host>/api/github/setup`，並啟用 **Redirect on update** |
+| Callback URL | `https://<api-host>/api/github/setup` |
+| Request user authorization (OAuth) during installation | 啟用 |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | 一段長期儲存的隨機字串 |
 
@@ -175,10 +175,12 @@ PR 快照透過 Pull requests、Checks 和 Commit statuses 的 REST API 獲取�
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<建立 App 時填寫的 webhook secret>
+GITHUB_APP_CLIENT_ID=<Client ID>
+GITHUB_APP_CLIENT_SECRET=<Client secret>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-`GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 缺少任意一個時，連線按鈕會被禁用，webhook 介面也會拒絕處理事件。
+新連線需要以上四個 GitHub 變數，缺少任意一個都會停用連線按鈕；webhook 接入只要求 `GITHUB_WEBHOOK_SECRET`。既有綁定繼續運作。部署前，將第一個 Callback URL 設為此端點，並啟用安裝時 OAuth 授權。啟用此選項後，GitHub 不再使用獨立的 Setup URL。
 
 PR 卡片要顯示 CI 狀態與可合併性，還需要下面兩個變數，Multica 用它們以 App 身份鑑權並拉取快照：
 
@@ -207,7 +209,7 @@ make migrate-up
 
 ## 常見問題
 
-- **連線按鈕不可用**：檢查 `GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 是否已進入 API 程序。
+- **連線按鈕不可用**：檢查以上四個 GitHub 變數、第一個 Callback URL，以及 **Request user authorization (OAuth) during installation**。
 - **Webhook 返回 401**：確認 GitHub App 與 API 使用同一個 Webhook secret，然後在 GitHub 的 **Recent Deliveries** 中重新投遞。
 - **PR 沒有關聯**：檢查倉庫是否在 App 授權範圍內、自動關聯是否開啟、編號是否屬於當前工作區，以及是否有人把它從任務上移除過。
 - **正文寫了編號但沒關聯**：改用 `Closes MUL-123`，或把編號放到分支名、PR 標題中，或者手動關聯。
