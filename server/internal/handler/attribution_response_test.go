@@ -31,6 +31,36 @@ func TestTaskCommentChangeCancellation(t *testing.T) {
 	}
 }
 
+// TestTaskToResponseQueueConstraintGating covers the queued gate on the
+// queue-wait attribution (#8551): the constraint is exposed only while it
+// describes the row's current wait. A reason surviving on a dispatched or
+// cancelled row is a leftover from a previous wait — the claim UPDATE clears
+// it, but terminal transitions don't have to — and must not read as a live
+// constraint. With omitempty on the wire, an empty value here means the
+// response omits the field entirely.
+func TestTaskToResponseQueueConstraintGating(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, reason, want string
+	}{
+		{"queued row passes the reason through", "queued", "agent_capacity", "agent_capacity"},
+		{"queued row trims surrounding whitespace", "queued", "  agent_capacity ", "agent_capacity"},
+		{"queued row without a reason omits the field", "queued", "", ""},
+		{"dispatched row ignores its leftover reason", "dispatched", "agent_capacity", ""},
+		{"cancelled row ignores its leftover reason", "cancelled", "agent_capacity", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := db.AgentTaskQueue{ID: parseUUID("11111111-1111-1111-1111-111111111111"), Status: tc.status}
+			if tc.reason != "" {
+				row.QueueWaitReason = pgtype.Text{String: tc.reason, Valid: true}
+			}
+			got := taskToResponse(row, "")
+			if got.QueueConstraint != tc.want {
+				t.Fatalf("queue_constraint = %q, want %q", got.QueueConstraint, tc.want)
+			}
+		})
+	}
+}
+
 func TestComputeTaskKindPreservesLinkedQuickCreateOrigin(t *testing.T) {
 	issueID := parseUUID("11111111-1111-1111-1111-111111111111")
 	if got := computeTaskKind(db.AgentTaskQueue{
