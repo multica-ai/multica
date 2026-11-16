@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func newChatSupplementFixture(t *testing.T, negotiated bool) (string, string, string) {
@@ -26,6 +27,7 @@ func newChatSupplementFixture(t *testing.T, negotiated bool) (string, string, st
 	dbfx.Cleanup(t, `DELETE FROM chat_task_supplement WHERE chat_session_id=$1`, sessionID)
 	dbfx.Cleanup(t, `DELETE FROM task_supplement_capability WHERE task_id=$1`, taskID)
 	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE chat_session_id=$1 AND id<>$2`, sessionID, taskID)
+	dbfx.Cleanup(t, `DELETE FROM task_supplement_capability WHERE task_id IN (SELECT id FROM agent_task_queue WHERE chat_session_id=$1)`, sessionID)
 	return sessionID, taskID, agentID
 }
 
@@ -40,7 +42,7 @@ func sendChatGuidance(t *testing.T, sessionID string, body map[string]any) SendC
 func TestChatSupplementSendClaimAck(t *testing.T) {
 	sessionID, taskID, _ := newChatSupplementFixture(t, true)
 	key := uuid.NewString()
-	body := map[string]any{"content": "use the new location", "submission_id": key}
+	body := map[string]any{"steer": true, "content": "use the new location", "submission_id": key}
 	sent := sendChatGuidance(t, sessionID, body)
 	replay := sendChatGuidance(t, sessionID, body)
 	if !sent.Steered || sent.Queued || sent.TaskID != taskID || replay.MessageID != sent.MessageID {
@@ -75,7 +77,7 @@ func TestChatSupplementFallbacks(t *testing.T) {
 	for _, reason := range []string{"completed", "failed", "cancelled", "provider_rejected"} {
 		t.Run(reason, func(t *testing.T) {
 			sessionID, taskID, _ := newChatSupplementFixture(t, true)
-			sent := sendChatGuidance(t, sessionID, map[string]any{"content": "never lose this"})
+			sent := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "never lose this"})
 			if !sent.Steered {
 				t.Fatal("not steered")
 			}
@@ -131,16 +133,150 @@ func TestChatSupplementFallbacks(t *testing.T) {
 func TestChatSupplementQueueChoiceAndOldDaemon(t *testing.T) {
 	for _, negotiated := range []bool{false, true} {
 		sessionID, taskID, _ := newChatSupplementFixture(t, negotiated)
-		sent := sendChatGuidance(t, sessionID, map[string]any{"content": "next turn", "queue": negotiated})
+		sent := sendChatGuidance(t, sessionID, map[string]any{"content": "next turn", "steer": !negotiated})
 		if sent.Steered || !sent.Queued || sent.TaskID == taskID {
 			t.Fatalf("queue fallback: %+v", sent)
 		}
 	}
 }
 
+func TestChatSupplementLegacySendRemainsQueued(t *testing.T) {
+	sessionID, taskID, _ := newChatSupplementFixture(t, true)
+	sent := sendChatGuidance(t, sessionID, map[string]any{"content": "legacy queued message"})
+	if sent.Steered || !sent.Queued || sent.TaskID == taskID {
+		t.Fatalf("legacy send changed into guidance: %+v", sent)
+	}
+}
+
+func TestChatSupplementRetryKeepsInputAndOrder(t *testing.T) {
+	for _, onRetry := range []bool{false, true} {
+		for _, delivered := range []bool{false, true} {
+			name := map[bool]string{false: "root", true: "retry"}[onRetry] + "/" + map[bool]string{false: "pending", true: "delivered"}[delivered]
+			t.Run(name, func(t *testing.T) {
+				sessionID, rootID, _ := newChatSupplementFixture(t, true)
+				activeID := rootID
+				fail := func(taskID string) db.AgentTaskQueue {
+					t.Helper()
+					if _, err := testHandler.TaskService.FailTask(t.Context(), parseUUID(taskID), "connection reset", "", "", "", "agent_error.provider_network", false, "", ""); err != nil {
+						t.Fatal(err)
+					}
+					var childID string
+					if err := testPool.QueryRow(t.Context(), `SELECT id::text FROM agent_task_queue WHERE parent_task_id=$1`, taskID).Scan(&childID); err != nil {
+						t.Fatal(err)
+					}
+					child, err := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(childID))
+					if err != nil {
+						t.Fatal(err)
+					}
+					return child
+				}
+				if onRetry {
+					child := fail(rootID)
+					activeID = uuidToString(child.ID)
+					dbfx.Exec(t, `UPDATE agent_task_queue SET status='dispatched' WHERE id=$1`, activeID)
+					if _, err := testHandler.TaskService.StartTask(t.Context(), child.ID, service.TaskStartCapabilities{Supplement: true}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				sent := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "keep guidance after the original objective"})
+				if sent.TaskID != activeID || sent.MessageTaskID != rootID || !sent.Steered {
+					t.Fatalf("send: %+v", sent)
+				}
+				if delivered {
+					if _, err := testHandler.Queries.ClaimNextChatTaskSupplement(t.Context(), parseUUID(activeID)); err != nil {
+						t.Fatal(err)
+					}
+					req := withURLParams(newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": true}), "taskId", activeID, "commentId", sent.MessageID)
+					testutil.Call(t, testHandler.AckTaskSupplement, req).Want(http.StatusOK)
+				}
+				child := fail(activeID)
+				if child.ChatInputTaskID != parseUUID(rootID) {
+					t.Fatal("retry lost its root input owner")
+				}
+				if onRetry && child.Status != "deferred" {
+					t.Fatalf("last network retry should retain its backoff: %s", child.Status)
+				}
+				inputs, err := testHandler.Queries.ListChatInputMessages(t.Context(), child.ChatInputTaskID)
+				if err != nil || len(inputs) != 2 || inputs[0].Content != "original objective" || inputs[1].Content != "keep guidance after the original objective" {
+					t.Fatalf("retry input order/content: %+v, %v", inputs, err)
+				}
+				wantTasks := 2
+				if onRetry {
+					wantTasks++
+				}
+				if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1`, sessionID); n != wantTasks {
+					t.Fatalf("guidance created its own run ahead of retry: %d tasks, want %d", n, wantTasks)
+				}
+			})
+		}
+	}
+}
+
+func TestChatSupplementExhaustedRetryQueuesGuidance(t *testing.T) {
+	sessionID, taskID, _ := newChatSupplementFixture(t, true)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET attempt=3 WHERE id=$1`, taskID)
+	sent := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "next turn after the failure"})
+	if _, err := testHandler.TaskService.FailTask(t.Context(), parseUUID(taskID), "connection reset", "", "", "", "agent_error.provider_network", false, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var nextID string
+	if err := testPool.QueryRow(t.Context(), `SELECT task_id::text FROM chat_message WHERE id=$1`, sent.MessageID).Scan(&nextID); err != nil {
+		t.Fatal(err)
+	}
+	if nextID == taskID {
+		t.Fatal("exhausted retry stranded guidance on the failed task")
+	}
+	inputs, err := testHandler.Queries.ListChatInputMessages(t.Context(), parseUUID(nextID))
+	if err != nil || len(inputs) != 1 || inputs[0].Content != "next turn after the failure" {
+		t.Fatalf("fallback input=%+v err=%v", inputs, err)
+	}
+}
+
+func TestChatSupplementSubmissionReplayPreservesSendMode(t *testing.T) {
+	sessionID, _, _ := newChatSupplementFixture(t, true)
+	key := uuid.NewString()
+	sendChatGuidance(t, sessionID, map[string]any{"content": "queued", "submission_id": key})
+	req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodPost, "/messages", map[string]any{"content": "queued", "submission_id": key, "steer": true})), "sessionId", sessionID)
+	testutil.Call(t, testHandler.SendChatMessage, req).Want(http.StatusConflict)
+}
+
+func TestChatSupplementDaemonRecoveryRetainsRetryInput(t *testing.T) {
+	sessionID, taskID, _ := newChatSupplementFixture(t, true)
+	sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "guidance before daemon restart"})
+	task, err := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(taskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed, err := testHandler.TaskService.RecoverOrphanedTasksForRuntime(t.Context(), task.RuntimeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recovered bool
+	for _, parent := range failed {
+		if parent.ID != task.ID {
+			continue
+		}
+		child, err := testHandler.TaskService.MaybeRetryFailedTask(t.Context(), parent)
+		if err != nil || child == nil {
+			t.Fatalf("recovery retry=%+v err=%v", child, err)
+		}
+		inputs, err := testHandler.Queries.ListChatInputMessages(t.Context(), child.ChatInputTaskID)
+		if err != nil || len(inputs) != 2 || inputs[0].Content != "original objective" || inputs[1].Content != "guidance before daemon restart" {
+			t.Fatalf("recovery input=%+v err=%v", inputs, err)
+		}
+		recovered = true
+	}
+	if !recovered {
+		t.Fatal("fixture task was not recovered")
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1`, sessionID); n != 2 {
+		t.Fatalf("guidance escaped the retry batch: %d tasks", n)
+	}
+}
+
 func TestChatSupplementDeliveredGuidanceSurvivesDraftRestore(t *testing.T) {
 	sessionID, taskID, _ := newChatSupplementFixture(t, true)
-	sent := sendChatGuidance(t, sessionID, map[string]any{"content": "keep this guidance in history"})
+	sent := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "keep this guidance in history"})
 	if _, err := testHandler.Queries.ClaimNextChatTaskSupplement(t.Context(), parseUUID(taskID)); err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +295,7 @@ func TestChatSupplementBulkStopDoesNotStartNewWork(t *testing.T) {
 	for _, archive := range []bool{false, true} {
 		t.Run(map[bool]string{false: "stop all", true: "archive"}[archive], func(t *testing.T) {
 			sessionID, _, agentID := newChatSupplementFixture(t, true)
-			sent := sendChatGuidance(t, sessionID, map[string]any{"content": "withdraw with all work"})
+			sent := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "withdraw with all work"})
 			var err error
 			if archive {
 				_, err = testHandler.TaskService.CancelTasksForArchivedAgent(t.Context(), parseUUID(agentID))
@@ -181,7 +317,7 @@ func TestChatSupplementBulkStopDoesNotStartNewWork(t *testing.T) {
 
 func TestChatSupplementRuntimeTeardownDoesNotStartNewWork(t *testing.T) {
 	sessionID, taskID, _ := newChatSupplementFixture(t, true)
-	sent := sendChatGuidance(t, sessionID, map[string]any{"content": "withdraw with runtime"})
+	sent := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "withdraw with runtime"})
 	task, err := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(taskID))
 	if err != nil {
 		t.Fatal(err)
@@ -207,10 +343,10 @@ func TestChatSupplementRuntimeTeardownDoesNotStartNewWork(t *testing.T) {
 
 func TestChatSupplementPermissionAndSessionDeletion(t *testing.T) {
 	sessionID, taskID, agentID := newChatSupplementFixture(t, true)
-	sent := sendChatGuidance(t, sessionID, map[string]any{"content": "pending"})
+	sent := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "pending"})
 	dbfx.Exec(t, `UPDATE agent_runtime SET visibility='public' WHERE id=(SELECT runtime_id FROM agent WHERE id=$1)`, agentID)
 	dbfx.Exec(t, `UPDATE agent SET permission_mode='private', owner_id=$2 WHERE id=$1`, agentID, dbfx.User(t, "Other", "other-"+uuid.NewString()+"@test.local"))
-	req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodPost, "/messages", map[string]any{"content": "forbidden"})), "sessionId", sessionID)
+	req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodPost, "/messages", map[string]any{"steer": true, "content": "forbidden"})), "sessionId", sessionID)
 	testutil.Call(t, testHandler.SendChatMessage, req).Want(http.StatusForbidden)
 	if n := dbfx.Count(t, `SELECT count(*) FROM chat_task_supplement WHERE task_id=$1`, taskID); n != 1 {
 		t.Fatal("revoked send mutated receipts")

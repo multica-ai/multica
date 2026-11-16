@@ -28,6 +28,7 @@ type ChatSubmissionResponse struct {
 	Queued           bool   `json:"queued"`
 	Steered          bool   `json:"steered,omitempty"`
 	MessageCreatedAt string `json:"message_created_at,omitempty"`
+	MessageTaskID    string `json:"message_task_id,omitempty"`
 	// AttachmentIDs are the attachment rows actually bound to this message by
 	// the server. The client diffs these against the ids it requested so it
 	// can warn the user when an attachment silently failed to bind — no extra
@@ -51,7 +52,7 @@ type chatSubmission struct {
 	fingerprint []byte
 }
 
-func newChatSubmission(session db.ChatSession, userID pgtype.UUID, content string, attachmentIDs []pgtype.UUID, actorType string, actorID, submissionID pgtype.UUID, queue ...bool) chatSubmission {
+func newChatSubmission(session db.ChatSession, userID pgtype.UUID, content string, attachmentIDs []pgtype.UUID, actorType string, actorID, submissionID pgtype.UUID, steer ...bool) chatSubmission {
 	ids := make([]string, 0, len(attachmentIDs))
 	for _, id := range attachmentIDs {
 		ids = append(ids, util.UUIDToString(id))
@@ -62,8 +63,8 @@ func newChatSubmission(session db.ChatSession, userID pgtype.UUID, content strin
 	payload, _ := json.Marshal(struct {
 		Content       string   `json:"content"`
 		AttachmentIDs []string `json:"attachment_ids"`
-		Queue         bool     `json:"queue,omitempty"`
-	}{content, ids, len(queue) > 0 && queue[0]})
+		Steer         bool     `json:"steer,omitempty"`
+	}{content, ids, len(steer) > 0 && steer[0]})
 	hash := sha256.Sum256(payload)
 	return chatSubmission{
 		key: db.GetChatSubmissionReceiptParams{
@@ -94,32 +95,32 @@ func (submission chatSubmission) lookup(ctx context.Context, q *db.Queries) (*Ch
 
 // LookupDirectChatSubmission must be called only after current authorization.
 // It intentionally avoids runtime readiness, overlays and provider lookups.
-func (s *TaskService) LookupDirectChatSubmission(ctx context.Context, session db.ChatSession, userID pgtype.UUID, content string, attachmentIDs []pgtype.UUID, actorType string, actorID, submissionID pgtype.UUID, queue ...bool) (*ChatSubmissionResponse, error) {
-	return newChatSubmission(session, userID, content, attachmentIDs, actorType, actorID, submissionID, queue...).lookup(ctx, s.Queries)
+func (s *TaskService) LookupDirectChatSubmission(ctx context.Context, session db.ChatSession, userID pgtype.UUID, content string, attachmentIDs []pgtype.UUID, actorType string, actorID, submissionID pgtype.UUID, steer ...bool) (*ChatSubmissionResponse, error) {
+	return newChatSubmission(session, userID, content, attachmentIDs, actorType, actorID, submissionID, steer...).lookup(ctx, s.Queries)
 }
 
 // SendDirectChatMessageWithSubmission requires a real transaction even for
 // callers which construct TaskService without its usual database wiring.
-func (s *TaskService) SendDirectChatMessageWithSubmission(ctx context.Context, session db.ChatSession, agent db.Agent, userID pgtype.UUID, content string, attachmentIDs []pgtype.UUID, actorType string, actorID, submissionID pgtype.UUID, queue ...bool) (*DirectChatSendResult, error) {
+func (s *TaskService) SendDirectChatMessageWithSubmission(ctx context.Context, session db.ChatSession, agent db.Agent, userID pgtype.UUID, content string, attachmentIDs []pgtype.UUID, actorType string, actorID, submissionID pgtype.UUID, steer ...bool) (*DirectChatSendResult, error) {
 	if !submissionID.Valid {
 		return nil, errors.New("submission_id is required for keyed chat send")
 	}
 	if s.TxStarter == nil {
 		return nil, errors.New("chat submission requires a transaction starter")
 	}
-	submission := newChatSubmission(session, userID, content, attachmentIDs, actorType, actorID, submissionID, queue...)
+	submission := newChatSubmission(session, userID, content, attachmentIDs, actorType, actorID, submissionID, steer...)
 	if response, err := submission.lookup(ctx, s.Queries); err != nil {
 		return nil, err
 	} else if response != nil {
 		return &DirectChatSendResult{Replayed: true, Acceptance: response}, nil
 	}
-	return s.sendDirectChatMessage(ctx, session, agent, userID, content, attachmentIDs, actorType, actorID, &submission, len(queue) > 0 && queue[0])
+	return s.sendDirectChatMessage(ctx, session, agent, userID, content, attachmentIDs, actorType, actorID, &submission, len(steer) > 0 && steer[0])
 }
 
 func (submission chatSubmission) store(ctx context.Context, q *db.Queries, sent *DirectChatSendResult, attachmentsRequested bool) error {
 	response := ChatSubmissionResponse{
 		MessageID: util.UUIDToString(sent.Message.ID), TaskID: util.UUIDToString(sent.Task.ID),
-		SupportsQueue: true, Queued: sent.Queued, Steered: sent.Steered, MessageCreatedAt: util.TimestampToString(sent.Message.CreatedAt), CreatedAt: util.TimestampToString(sent.Task.CreatedAt),
+		SupportsQueue: true, Queued: sent.Queued, Steered: sent.Steered, MessageTaskID: util.UUIDToString(sent.Message.TaskID), MessageCreatedAt: util.TimestampToString(sent.Message.CreatedAt), CreatedAt: util.TimestampToString(sent.Task.CreatedAt),
 	}
 	if attachmentsRequested {
 		response.AttachmentIDs = make([]string, 0, len(sent.BoundAttachmentIDs))

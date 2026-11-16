@@ -47,6 +47,12 @@ WITH moved AS (
 UPDATE chat_message SET task_id = @next_task_id
 WHERE id IN (SELECT message_id FROM moved);
 
+-- name: RetainChatTaskSupplementsForRetry :exec
+-- Retire delivery into the failed attempt. The message stays in the root
+-- input batch and reaches the retry as ordinary input, not another steer.
+UPDATE chat_task_supplement SET status = 'withdrawn'
+WHERE task_id = $1 AND status IN ('pending', 'delivering');
+
 -- name: DeleteChatTaskSupplementsBySession :exec
 DELETE FROM chat_task_supplement WHERE chat_session_id = $1;
 

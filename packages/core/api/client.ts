@@ -4232,10 +4232,9 @@ export class ApiClient {
   ): Promise<SendChatMessageResponse> {
     const body: {
       content: string;
-      queue?: boolean;
+      steer: boolean;
       attachment_ids?: string[];
-    } = { content };
-    if (options?.queue) body.queue = true;
+    } = { content, steer: options?.queue !== true };
     if (attachmentIds && attachmentIds.length > 0) {
       body.attachment_ids = attachmentIds;
     }

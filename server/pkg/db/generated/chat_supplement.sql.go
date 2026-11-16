@@ -252,6 +252,18 @@ func (q *Queries) RequeueChatTaskSupplement(ctx context.Context, arg RequeueChat
 	return err
 }
 
+const retainChatTaskSupplementsForRetry = `-- name: RetainChatTaskSupplementsForRetry :exec
+UPDATE chat_task_supplement SET status = 'withdrawn'
+WHERE task_id = $1 AND status IN ('pending', 'delivering')
+`
+
+// Retire delivery into the failed attempt. The message stays in the root
+// input batch and reaches the retry as ordinary input, not another steer.
+func (q *Queries) RetainChatTaskSupplementsForRetry(ctx context.Context, taskID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, retainChatTaskSupplementsForRetry, taskID)
+	return err
+}
+
 const withdrawChatTaskSupplementsByAgent = `-- name: WithdrawChatTaskSupplementsByAgent :exec
 UPDATE chat_task_supplement SET status = 'withdrawn'
 WHERE task_id IN (SELECT id FROM agent_task_queue WHERE agent_id = $1)

@@ -591,7 +591,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
         chat_session_id: sessionId,
         role: "user",
         content: finalContent,
-        task_id: result.task_id,
+        task_id: result.message_task_id ?? result.task_id,
         created_at: result.message_created_at ?? result.created_at,
         attachments: draftAttachments,
       };
