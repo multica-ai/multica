@@ -75,8 +75,18 @@ for (const surface of ["standalone", "modal"] as const) {
           await expect(menu).toBeVisible();
           await expect(menu.getByRole("menuitemradio", { name: "Fit", exact: true })).toHaveAttribute("aria-checked", "true");
           await expect(menu.getByRole("menuitemcheckbox", { name: "Wrap lines", exact: true })).toBeDisabled();
-          await menu.getByRole("menuitemradio", { name: "Phone", exact: true }).click();
+          await expect(menu.getByRole("menuitemradio", { name: "Fit", exact: true })).toBeFocused();
+          for (let step = 0; step < 3; step++) await page.keyboard.press("ArrowDown");
+          await expect(menu.getByRole("menuitemradio", { name: "Phone", exact: true })).toBeFocused();
+          await page.keyboard.press("Enter");
           await expect(menu).toBeHidden();
+          await expect(more).toBeFocused();
+          if (surface === "modal") {
+            await page.keyboard.press("Tab");
+            await expect(close).toBeFocused();
+            await page.keyboard.press("Shift+Tab");
+            await expect(more).toBeFocused();
+          }
           await more.click();
           await expect(menu.getByRole("menuitemradio", { name: "Phone", exact: true })).toHaveAttribute("aria-checked", "true");
           await page.keyboard.press("Escape");
@@ -177,13 +187,17 @@ for (const kind of ["structured", "image"] as const) {
       }
       const more = page.getByRole("button", { name: "More actions", exact: true });
       await expect(more).toBeInViewport({ ratio: 1 });
-      await more.click();
+      await more.focus();
+      await page.keyboard.press("ArrowDown");
       const menu = page.getByRole("menu");
       if (structured) {
         await expect(menu.getByRole("menuitemradio", { name: "Tree", exact: true })).toHaveAttribute("aria-checked", "true");
         await expect(menu.getByRole("menuitemcheckbox", { name: "Wrap lines", exact: true })).toBeDisabled();
-        await menu.getByRole("menuitemradio", { name: "Raw", exact: true }).click();
+        await page.keyboard.press("ArrowDown");
+        await expect(menu.getByRole("menuitemradio", { name: "Raw", exact: true })).toBeFocused();
+        await page.keyboard.press("Enter");
         await expect(menu).toBeHidden();
+        await expect(more).toBeFocused();
         await expect(page.locator("pre")).toContainText('{"name":"toolbar","enabled":true}');
         await more.click();
         await expect(menu.getByRole("menuitemradio", { name: "Raw", exact: true })).toHaveAttribute("aria-checked", "true");
@@ -194,10 +208,12 @@ for (const kind of ["structured", "image"] as const) {
       } else {
         await menu.getByRole("menuitem", { name: "Actual size", exact: true }).click();
         await expect(menu).toBeHidden();
+        await expect(more).toBeFocused();
         await more.click();
         await expect(menu.getByText("100%", { exact: true })).toBeVisible();
         await menu.getByRole("menuitem", { name: "Zoom out", exact: true }).click();
         await expect(menu).toBeHidden();
+        await expect(more).toBeFocused();
         await more.click();
         await expect(menu.getByText("100%", { exact: true })).toHaveCount(0);
         await expect(menu.getByRole("menuitem", { name: "Fit to view", exact: true })).toBeEnabled();

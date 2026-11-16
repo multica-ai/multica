@@ -922,6 +922,11 @@ function PreviewPanel({
   };
   const overflowTriggerRef = useRef<HTMLButtonElement>(null);
   const restoreOverflowFocus = useRef(false);
+  const overflowActionMovesFocus = useRef(false);
+  const navigateFromOverflow = (navigate: () => void) => {
+    overflowActionMovesFocus.current = true;
+    navigate();
+  };
   const showZoomControls = kind === "image" && !!(natural || sequence);
   const hasViewControls = showZoomControls || kind === "html" || kind === "structured" || kind === "text";
   const hasOverflowActions = hasViewControls || !!(locate || copyLink || onOpenInNewTab || onOpenOverview || info);
@@ -1098,9 +1103,13 @@ function PreviewPanel({
             <div className="@3xl:hidden">
               <DropdownMenu
                 onOpenChange={(open, details) => {
-                  // A hover dismissal can follow Escape during the exit animation.
-                  if (open || details.reason !== "trigger-hover") {
-                    restoreOverflowFocus.current = !open && details.reason === "escape-key";
+                  if (open) {
+                    restoreOverflowFocus.current = false;
+                    overflowActionMovesFocus.current = false;
+                  } else if (details.reason !== "trigger-hover") {
+                    // Hover dismissal can follow item selection or Escape during exit.
+                    restoreOverflowFocus.current = details.reason === "escape-key" ||
+                      (details.reason === "item-press" && !overflowActionMovesFocus.current);
                   }
                 }}
                 onOpenChangeComplete={(open) => {
@@ -1189,7 +1198,7 @@ function PreviewPanel({
                   )}
                   {hasViewControls && (locate || copyLink || onOpenInNewTab || onOpenOverview || info) && <DropdownMenuSeparator />}
                   {locate && (
-                    <DropdownMenuItem onClick={locate.onSelect}>
+                    <DropdownMenuItem onClick={() => navigateFromOverflow(locate.onSelect)}>
                       <MessageSquareText className="size-4" />
                       {locate.label}
                     </DropdownMenuItem>
@@ -1201,13 +1210,13 @@ function PreviewPanel({
                     </DropdownMenuItem>
                   )}
                   {onOpenInNewTab && (
-                    <DropdownMenuItem onClick={onOpenInNewTab}>
+                    <DropdownMenuItem onClick={() => navigateFromOverflow(onOpenInNewTab)}>
                       <ExternalLink className="size-4" />
                       {t(($) => $.attachment.open_in_new_tab)}
                     </DropdownMenuItem>
                   )}
                   {onOpenOverview && (
-                    <DropdownMenuItem onClick={onOpenOverview}>
+                    <DropdownMenuItem onClick={() => navigateFromOverflow(onOpenOverview)}>
                       <LayoutGrid className="size-4" />
                       {t(($) => $.attachment.overview)}
                     </DropdownMenuItem>
