@@ -1045,7 +1045,7 @@ func (h *Handler) requireWorkspaceMember(w http.ResponseWriter, r *http.Request,
 		return db.Member{}, false
 	}
 	if projectaccess.IsGuestRole(member.Role) && !middleware.GuestMayRequest(r) {
-		writeError(w, http.StatusForbidden, "insufficient permissions")
+		middleware.RefuseGuest(w, r)
 		return db.Member{}, false
 	}
 

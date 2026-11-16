@@ -246,7 +246,7 @@ func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []str
 				return
 			}
 			if member.Role == "guest" && !GuestMayRequest(r) {
-				writeError(w, http.StatusForbidden, "insufficient permissions")
+				RefuseGuest(w, r)
 				return
 			}
 

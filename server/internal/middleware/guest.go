@@ -41,6 +41,7 @@ var guestRoutes = compileGuestRoutes([]string{
 	"GET /api/issues/*/metadata",
 	"GET /api/issues/*/pull-requests",
 	"GET /api/issues/*/active-task",
+	"GET /api/issues/*/duplicates",
 
 	// Commenting, reacting and following.
 	"POST /api/issues/*/comments",
@@ -76,6 +77,7 @@ var guestRoutes = compileGuestRoutes([]string{
 	// The guest's own inbox, pins, view preferences and notification settings.
 	"GET /api/inbox",
 	"GET /api/inbox/*",
+	"GET /api/inbox/*/*",
 	"POST /api/inbox/*",
 	"POST /api/inbox/*/*",
 	"POST /api/inbox/issues/*/read",
@@ -101,6 +103,24 @@ var guestRoutes = compileGuestRoutes([]string{
 	"GET /api/attachments/*/download-metadata",
 })
 
+// Reads the workspace shell makes on every page (presence, chat badges,
+// runtime health, mention and assignee lists) answer a guest with an empty
+// result instead of 403: the guest has none of these, and an empty answer
+// keeps every component that asks from failing.
+var guestEmptyReads = []struct {
+	route guestRoute
+	body  string
+}{
+	{compileGuestRoutes([]string{"GET /api/agent-task-snapshot"})[0], `[]`},
+	{compileGuestRoutes([]string{"GET /api/assignee-frequency"})[0], `[]`},
+	{compileGuestRoutes([]string{"GET /api/chat/sessions"})[0], `[]`},
+	{compileGuestRoutes([]string{"GET /api/chat/pending-tasks"})[0], `{"tasks":[]}`},
+	{compileGuestRoutes([]string{"GET /api/chat/pending-tasks/has-any"})[0], `{"has_pending":false}`},
+	{compileGuestRoutes([]string{"GET /api/runtimes"})[0], `[]`},
+	{compileGuestRoutes([]string{"GET /api/squads"})[0], `[]`},
+	{compileGuestRoutes([]string{"GET /api/squads/involved"})[0], `{"squad_ids":[]}`},
+}
+
 type guestRoute struct {
 	method   string
 	segments []string
@@ -122,23 +142,40 @@ func splitPath(path string) []string {
 	return strings.Split(strings.Trim(path, "/"), "/")
 }
 
+func (route guestRoute) matches(method string, segments []string) bool {
+	if route.method != method || len(route.segments) != len(segments) {
+		return false
+	}
+	for i, s := range route.segments {
+		if s != "*" && s != segments[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // GuestMayRequest reports whether a guest may make this request at all.
 func GuestMayRequest(r *http.Request) bool {
 	segments := splitPath(r.URL.Path)
 	for _, route := range guestRoutes {
-		if route.method != r.Method || len(route.segments) != len(segments) {
-			continue
-		}
-		match := true
-		for i, s := range route.segments {
-			if s != "*" && s != segments[i] {
-				match = false
-				break
-			}
-		}
-		if match {
+		if route.matches(r.Method, segments) {
 			return true
 		}
 	}
 	return false
+}
+
+// RefuseGuest answers a guest request GuestMayRequest rejected: an empty
+// result for the shell's background reads, 403 for everything else.
+func RefuseGuest(w http.ResponseWriter, r *http.Request) {
+	segments := splitPath(r.URL.Path)
+	for _, read := range guestEmptyReads {
+		if read.route.matches(r.Method, segments) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(read.body))
+			return
+		}
+	}
+	writeError(w, http.StatusForbidden, "insufficient permissions")
 }

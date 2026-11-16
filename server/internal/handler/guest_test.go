@@ -128,12 +128,24 @@ func TestGuestRoutesAreDenyByDefault(t *testing.T) {
 		{http.MethodPost, "/api/issues", http.StatusForbidden},
 		{http.MethodPost, "/api/projects", http.StatusForbidden},
 		{http.MethodGet, "/api/autopilots", http.StatusForbidden},
-		{http.MethodGet, "/api/runtimes", http.StatusForbidden},
+		{http.MethodGet, "/api/runtimes/" + f.sharedIssue, http.StatusForbidden},
 		{http.MethodPost, "/api/chat/sessions", http.StatusForbidden},
 	} {
 		rec := guestRequest(t, ok, f.guest, tc.method, tc.path, nil)
 		if rec.Code != tc.want {
 			t.Errorf("%s %s = %d, want %d", tc.method, tc.path, rec.Code, tc.want)
+		}
+	}
+
+	// The shell's background reads come back empty rather than refused, and
+	// never reach the handler.
+	for path, want := range map[string]string{
+		"/api/runtimes":           `[]`,
+		"/api/chat/pending-tasks": `{"tasks":[]}`,
+	} {
+		rec := guestRequest(t, ok, f.guest, http.MethodGet, path, nil)
+		if rec.Code != http.StatusOK || rec.Body.String() != want {
+			t.Errorf("GET %s = %d %s, want 200 %s", path, rec.Code, rec.Body.String(), want)
 		}
 	}
 }
@@ -257,6 +269,36 @@ func TestGuestPromotionAndDemotion(t *testing.T) {
 		if m.UserID == f.guest && fmt.Sprint(m.ProjectIDs) != fmt.Sprint([]string{f.other}) {
 			t.Errorf("members list guest project_ids = %v, want only other", m.ProjectIDs)
 		}
+	}
+}
+
+func TestGuestSeesOnlyGuestsItSharesAProjectWith(t *testing.T) {
+	f := newGuestFixture(t)
+	addGuest := func(email, project string) string {
+		userID := createPlainMember(t, f.marker+email)
+		dbfx.Exec(t, `UPDATE member SET role = 'guest' WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, userID)
+		addProjectMemberRow(t, project, userID)
+		return userID
+	}
+	colleague := addGuest("-colleague@multica.test", f.shared)
+	stranger := addGuest("-stranger@multica.test", f.other)
+
+	var members []MemberWithUserResponse
+	guestRequest(t, testHandler.ListMembersWithUser, f.guest, http.MethodGet,
+		"/api/workspaces/"+testWorkspaceID+"/members", nil, "id", testWorkspaceID).
+		Want(http.StatusOK).JSON(&members)
+	seen := map[string]bool{}
+	for _, m := range members {
+		seen[m.UserID] = true
+		if len(m.ProjectIDs) > 0 {
+			t.Errorf("guest sees project_ids of %s", m.Name)
+		}
+	}
+	if !seen[f.guest] || !seen[colleague] {
+		t.Errorf("guest misses itself or a guest on its project: %v", seen)
+	}
+	if seen[stranger] {
+		t.Error("guest sees a guest it shares no project with")
 	}
 }
 

@@ -593,20 +593,42 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rows, err := h.Queries.ListGuestProjects(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list members")
+		return
+	}
 	guestProjects := map[[16]byte][]string{}
-	if requester, _ := ctxMember(r.Context()); !projectaccess.IsGuestRole(requester.Role) {
-		rows, err := h.Queries.ListGuestProjects(r.Context(), wsUUID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to list members")
-			return
+	for _, row := range rows {
+		guestProjects[row.UserID.Bytes] = append(guestProjects[row.UserID.Bytes], uuidToString(row.ProjectID))
+	}
+	// A guest sees the members, itself, and only those guests it shares a
+	// project with: guests are often outside people who should not learn of
+	// each other. Nobody's projects are listed to a guest.
+	requester, _ := ctxMember(r.Context())
+	requesterIsGuest := projectaccess.IsGuestRole(requester.Role)
+	visibleGuests := map[[16]byte]bool{requester.UserID.Bytes: true}
+	if requesterIsGuest {
+		mine := map[string]bool{}
+		for _, id := range guestProjects[requester.UserID.Bytes] {
+			mine[id] = true
 		}
-		for _, row := range rows {
-			guestProjects[row.UserID.Bytes] = append(guestProjects[row.UserID.Bytes], uuidToString(row.ProjectID))
+		for userID, ids := range guestProjects {
+			for _, id := range ids {
+				if mine[id] {
+					visibleGuests[userID] = true
+					break
+				}
+			}
 		}
 	}
-	resp := make([]MemberWithUserResponse, len(members))
-	for i, m := range members {
-		resp[i] = MemberWithUserResponse{
+	resp := make([]MemberWithUserResponse, 0, len(members))
+	for _, m := range members {
+		guest := projectaccess.IsGuestRole(m.Role)
+		if requesterIsGuest && guest && !visibleGuests[m.UserID.Bytes] {
+			continue
+		}
+		item := MemberWithUserResponse{
 			ID:          uuidToString(m.ID),
 			WorkspaceID: uuidToString(m.WorkspaceID),
 			UserID:      uuidToString(m.UserID),
@@ -616,9 +638,10 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 			Email:       m.UserEmail,
 			AvatarURL:   h.resolveAvatarURLPtr(textToPtr(m.UserAvatarUrl)),
 		}
-		if projectaccess.IsGuestRole(m.Role) {
-			resp[i].ProjectIDs = guestProjects[m.UserID.Bytes]
+		if guest && !requesterIsGuest {
+			item.ProjectIDs = guestProjects[m.UserID.Bytes]
 		}
+		resp = append(resp, item)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
