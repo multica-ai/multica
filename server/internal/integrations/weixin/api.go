@@ -306,7 +306,14 @@ func (c *apiClient) Updates(ctx context.Context, cursor string) (updates, error)
 	if err != nil {
 		return result, err
 	}
-	return result, result.check(true)
+	if err := result.check(false); err != nil {
+		return result, err
+	}
+	// Successful polls may omit ret; still reject bodies with no update fields.
+	if result.Ret == nil && result.Messages == nil && result.Cursor == "" {
+		return result, ErrProtocol
+	}
+	return result, nil
 }
 
 func (c *apiClient) Send(ctx context.Context, msg message) (string, error) {
@@ -323,7 +330,7 @@ func (c *apiClient) Send(ctx context.Context, msg message) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := result.check(true); err != nil {
+	if err := result.check(false); err != nil {
 		return "", err
 	}
 	// Some successful responses omit a server ID. The stable client ID records

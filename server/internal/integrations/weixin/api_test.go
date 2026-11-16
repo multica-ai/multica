@@ -99,6 +99,7 @@ func TestProviderFailuresAndMissingContext(t *testing.T) {
 		want       error
 	}{
 		{"expired", `{"ret":-14}`, ErrTokenExpired},
+		{"expired errcode", `{"errcode":-14}`, ErrTokenExpired},
 		{"missing status", `{}`, ErrProtocol},
 		{"invalid json", `{"bot_token":"secret"`, ErrProtocol},
 	} {
@@ -114,6 +115,57 @@ func TestProviderFailuresAndMissingContext(t *testing.T) {
 	_, err := newAPI("", "", nil).Send(context.Background(), textMessage("owner", "", "id", "text"))
 	if !errors.Is(err, ErrNoContext) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestUpdatesAcceptSuccessWithoutRet(t *testing.T) {
+	for _, body := range []string{
+		`{"msgs":[],"sync_buf":"sync","get_updates_buf":"next"}`,
+		`{"msgs":[{"message_id":123,"from_user_id":"owner","message_type":1,"item_list":[{"type":1,"text_item":{"text":"hello"}}]}],"get_updates_buf":"next"}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+			result, err := newAPI(server.URL, "token", server.Client()).Updates(context.Background(), "")
+			if err != nil || result.Cursor != "next" {
+				t.Fatalf("successful update rejected: cursor=%q error=%v", result.Cursor, err)
+			}
+		})
+	}
+}
+
+func TestSendAcceptSuccessWithoutRet(t *testing.T) {
+	for _, tc := range []struct{ body, want string }{
+		{`{"message_id":"provider-id"}`, "provider-id"},
+		{`{}`, "client-id"},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			got, err := newAPI(server.URL, "token", server.Client()).Send(context.Background(), textMessage("owner", "context", "client-id", "reply"))
+			if err != nil || got != tc.want {
+				t.Fatalf("successful send rejected: id=%q error=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestSendRejectsProviderErrors(t *testing.T) {
+	for _, body := range []string{`{"ret":-14}`, `{"errcode":-14}`, `{"ret":123}`, `{"errcode":456}`} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+			got, err := newAPI(server.URL, "token", server.Client()).Send(context.Background(), textMessage("owner", "context", "client-id", "reply"))
+			if err == nil || got != "" {
+				t.Fatalf("provider failure accepted: id=%q error=%v", got, err)
+			}
+		})
 	}
 }
 
