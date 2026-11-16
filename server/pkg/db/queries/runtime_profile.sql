@@ -13,8 +13,9 @@ INSERT INTO runtime_profile (
     visibility,
     created_by,
     enabled,
-    runtime_type
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    runtime_type,
+    skip_if_missing
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
 -- name: GetRuntimeProfile :one
@@ -65,6 +66,7 @@ SET display_name = COALESCE(sqlc.narg('display_name'), display_name),
     fixed_args   = COALESCE(sqlc.narg('fixed_args'), fixed_args),
     visibility   = COALESCE(sqlc.narg('visibility'), visibility),
     enabled      = COALESCE(sqlc.narg('enabled'), enabled),
+    skip_if_missing = COALESCE(sqlc.narg('skip_if_missing'), skip_if_missing),
     updated_at   = now()
 WHERE id = @id AND workspace_id = @workspace_id
 RETURNING *;
