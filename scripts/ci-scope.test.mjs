@@ -189,6 +189,17 @@ test("no gated job or shared quality step continues past a failure", () => {
   assert.doesNotMatch(action, /continue-on-error:/);
 });
 
+// A push only checks the paths it changed, so a main run that is cancelled or
+// left pending behind a newer push skips its commit for good.
+test("path-filtered workflows never cancel or supersede a main run", () => {
+  for (const name of ["ci.yml", "mobile-verify.yml"]) {
+    const source = readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");
+    const block = field(source, /^concurrency:\n((?:  .+\n)+)/m);
+    assert.match(block, /^  group: .*\$\{\{ github\.event\.pull_request\.number \|\| github\.run_id \}\}$/m, name);
+    assert.match(block, /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m, name);
+  }
+});
+
 test("quality checks have exactly one runner", () => {
   const invocation = "uses: ./.github/actions/frontend-quality";
   const owners = Object.entries(jobs).filter(([, source]) => source.includes(invocation)).map(([job]) => job);
