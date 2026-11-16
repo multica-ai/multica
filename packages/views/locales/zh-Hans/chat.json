@@ -52,10 +52,10 @@
   "queue": {
     "title_other": "{{count}} 条排队消息",
     "clear": "全部清空",
-    "steer": "引导",
-    "steer_unavailable": "当前回复开始后才能引导",
+    "steer": "立即发送（停止当前回复）",
+    "steer_unavailable": "当前回复开始后可立即发送",
     "steer_no_permission": "你已没有运行该智能体的权限",
-    "steer_unavailable_toast": "暂时无法引导，正在刷新队列。",
+    "steer_unavailable_toast": "暂时无法立即发送，正在刷新队列。",
     "edit": "编辑排队消息",
     "remove": "移除排队消息",
     "more": "更多队列操作",

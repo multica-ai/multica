@@ -2376,6 +2376,7 @@ type DirectChatSendResult struct {
 	Message            db.ChatMessage
 	BoundAttachmentIDs []pgtype.UUID
 	Queued             bool
+	Steered            bool
 	InitialTitle       string
 }
 
@@ -2401,8 +2402,9 @@ func (s *TaskService) SendDirectChatMessage(
 	attachmentIDs []pgtype.UUID,
 	uploaderType string,
 	uploaderID pgtype.UUID,
+	queue ...bool,
 ) (*DirectChatSendResult, error) {
-	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil)
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil, len(queue) > 0 && queue[0])
 }
 
 func (s *TaskService) sendDirectChatMessage(
@@ -2415,6 +2417,7 @@ func (s *TaskService) sendDirectChatMessage(
 	uploaderType string,
 	uploaderID pgtype.UUID,
 	submission *chatSubmission,
+	queue bool,
 ) (*DirectChatSendResult, error) {
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
@@ -2492,30 +2495,44 @@ func (s *TaskService) sendDirectChatMessage(
 		}
 		out.Queued = queued
 
-		task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
-			ID:                   dbid.NewV7(),
-			AgentID:              session.AgentID,
-			RuntimeID:            carrier.RuntimeID,
-			Priority:             2, // medium priority for chat; matches EnqueueChatTask
-			ChatSessionID:        session.ID,
-			InitiatorUserID:      initiatorUserID,
-			OriginatorUserID:     attr.UserID,
-			AccountableUserID:    attr.AccountableUserID,
-			ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},
-			RuntimeMcpOverlay:    overlay.Overlay,
-			RuntimeConnectedApps: overlay.ConnectedApps,
-			OriginatorSource:     attrSource,
-			TriggerEvidenceKind:  attrEvidenceKind,
-			TriggerEvidenceRefID: attrEvidenceRef,
-		})
-		if err != nil {
-			return fmt.Errorf("create direct chat task: %w", err)
+		// Only plain human messages use the text-only supplement transport.
+		// Locking the turn serializes the binding with every terminal transition.
+		var task db.AgentTaskQueue
+		if !queue && uploaderType == "member" && len(attachmentIDs) == 0 {
+			task, err = qtx.LockRunningChatTaskForSupplement(ctx, session.ID)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("find running chat turn: %w", err)
+			}
+			out.Steered = err == nil
 		}
-		// Claim this task's own input batch (chat_input_task_id = id) in the same
-		// transaction, before the user message is written with task_id = task.id.
-		task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
-		if err != nil {
-			return fmt.Errorf("stamp direct chat input owner: %w", err)
+		if out.Steered {
+			out.Queued = false
+		} else {
+			task, err = qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
+				ID:                   dbid.NewV7(),
+				AgentID:              session.AgentID,
+				RuntimeID:            carrier.RuntimeID,
+				Priority:             2, // medium priority for chat; matches EnqueueChatTask
+				ChatSessionID:        session.ID,
+				InitiatorUserID:      initiatorUserID,
+				OriginatorUserID:     attr.UserID,
+				AccountableUserID:    attr.AccountableUserID,
+				ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},
+				RuntimeMcpOverlay:    overlay.Overlay,
+				RuntimeConnectedApps: overlay.ConnectedApps,
+				OriginatorSource:     attrSource,
+				TriggerEvidenceKind:  attrEvidenceKind,
+				TriggerEvidenceRefID: attrEvidenceRef,
+			})
+			if err != nil {
+				return fmt.Errorf("create direct chat task: %w", err)
+			}
+			// Claim this task's own input batch (chat_input_task_id = id) in the same
+			// transaction, before the user message is written with task_id = task.id.
+			task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
+			if err != nil {
+				return fmt.Errorf("stamp direct chat input owner: %w", err)
+			}
 		}
 		out.Task = task
 
@@ -2559,6 +2576,15 @@ func (s *TaskService) sendDirectChatMessage(
 			return fmt.Errorf("create user chat message: %w", err)
 		}
 		out.Message = msg
+
+		if out.Steered {
+			if err := qtx.CreateChatTaskSupplement(ctx, db.CreateChatTaskSupplementParams{
+				TaskID: task.ID, MessageID: msg.ID, ChatSessionID: session.ID,
+				WorkspaceID: session.WorkspaceID, AuthorID: initiatorUserID,
+			}); err != nil {
+				return fmt.Errorf("bind chat supplement: %w", err)
+			}
+		}
 
 		if len(attachmentIDs) > 0 {
 			bound, err := qtx.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{
@@ -2618,6 +2644,9 @@ func (s *TaskService) sendDirectChatMessage(
 	}
 
 	if out.Replayed {
+		return &out, nil
+	}
+	if out.Steered {
 		return &out, nil
 	}
 	slog.Info("direct chat task enqueued",
@@ -2792,6 +2821,9 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 		var err error
 		cancelled, err = qtx.CancelAgentTasksByAgent(ctx, agentID)
 		if err != nil {
+			return err
+		}
+		if err := qtx.WithdrawChatTaskSupplementsByAgent(ctx, agentID); err != nil {
 			return err
 		}
 		return SettleTerminalTaskState(ctx, qtx, cancelled...)
@@ -6385,7 +6417,14 @@ func (s *TaskService) RecoverOrphanedTasksForRuntime(ctx context.Context, runtim
 // non-chat tasks keep their existing behavior.
 func (s *TaskService) CancelTasksForArchivedAgent(ctx context.Context, agentID pgtype.UUID) ([]db.AgentTaskQueue, error) {
 	cancelled, err := s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
-		return qtx.CancelAgentTasksByAgent(ctx, agentID)
+		tasks, err := qtx.CancelAgentTasksByAgent(ctx, agentID)
+		if err != nil {
+			return nil, err
+		}
+		if err := qtx.WithdrawChatTaskSupplementsByAgent(ctx, agentID); err != nil {
+			return nil, err
+		}
+		return tasks, nil
 	})
 	if err != nil {
 		return nil, err
@@ -6577,6 +6616,13 @@ func SettleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.Age
 	}
 	if _, err := q.SettleTerminalTaskSupplements(ctx, taskIDs); err != nil {
 		return fmt.Errorf("settle terminal task supplements: %w", err)
+	}
+	for _, task := range tasks {
+		if task.ChatSessionID.Valid && (task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled") {
+			if _, err := RequeueChatTaskSupplements(ctx, q, task, pgtype.UUID{}); err != nil {
+				return err
+			}
+		}
 	}
 	return SettleDeliveredDelegatedFailureRecoveries(ctx, q, tasks...)
 }

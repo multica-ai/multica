@@ -1207,6 +1207,22 @@ describe("useChatController.handleSend — compose target tracking", () => {
     };
   }
 
+  it("keeps the active reply and its queue when a send steers the current run", async () => {
+    h.pendingTask = { task_id: "running-task", status: "running", supports_queue: true };
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "guidance", task_id: "running-task", steered: true,
+      created_at: "2026-01-01T00:00:00Z", message_created_at: "2026-01-01T00:01:00Z",
+    });
+    h.queryClient.setQueryData.mockClear();
+    const { send, commitInput } = sendFrom("sA");
+    await send();
+    expect(h.queryClient.setQueryData.mock.calls.filter(([key]) =>
+      JSON.stringify(key) === JSON.stringify(chatKeys.pendingTask("sA"))))
+      .toHaveLength(0);
+    expect(commitInput).toHaveBeenCalled();
+    expect(api.cancelTaskById).not.toHaveBeenCalled();
+  });
+
   it("scrubs the composer after a new chat's first send", async () => {
     const { commitInput, send } = sendFrom(null);
     await send();

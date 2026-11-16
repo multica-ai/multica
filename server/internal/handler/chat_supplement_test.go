@@ -1,0 +1,227 @@
+package handler
+
+import (
+	"net/http"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
+)
+
+func newChatSupplementFixture(t *testing.T, negotiated bool) (string, string, string) {
+	t.Helper()
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := dbfx.Runtime(t, "chat-steering", testutil.Cols{"provider": "codex"})
+	agentID := dbfx.Agent(t, "Chat steering "+uuid.NewString(), runtimeID)
+	sessionID := dbfx.ChatSession(t, agentID)
+	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "chat_session_id": sessionID, "issue_id": nil, "status": "dispatched"})
+	dbfx.Exec(t, `UPDATE agent_task_queue SET chat_input_task_id=id WHERE id=$1`, taskID)
+	dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": sessionID, "task_id": taskID, "role": "user", "content": "original objective"})
+	if _, err := testHandler.TaskService.StartTask(t.Context(), parseUUID(taskID), service.TaskStartCapabilities{Supplement: negotiated}); err != nil {
+		t.Fatal(err)
+	}
+	dbfx.Cleanup(t, `DELETE FROM chat_task_supplement WHERE chat_session_id=$1`, sessionID)
+	dbfx.Cleanup(t, `DELETE FROM task_supplement_capability WHERE task_id=$1`, taskID)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE chat_session_id=$1 AND id<>$2`, sessionID, taskID)
+	return sessionID, taskID, agentID
+}
+
+func sendChatGuidance(t *testing.T, sessionID string, body map[string]any) SendChatMessageResponse {
+	t.Helper()
+	var response SendChatMessageResponse
+	req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodPost, "/messages", body)), "sessionId", sessionID)
+	testutil.Call(t, testHandler.SendChatMessage, req).Want(http.StatusCreated).JSON(&response)
+	return response
+}
+
+func TestChatSupplementSendClaimAck(t *testing.T) {
+	sessionID, taskID, _ := newChatSupplementFixture(t, true)
+	key := uuid.NewString()
+	body := map[string]any{"content": "use the new location", "submission_id": key}
+	sent := sendChatGuidance(t, sessionID, body)
+	replay := sendChatGuidance(t, sessionID, body)
+	if !sent.Steered || sent.Queued || sent.TaskID != taskID || replay.MessageID != sent.MessageID {
+		t.Fatalf("send=%+v replay=%+v", sent, replay)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1`, sessionID); n != 1 {
+		t.Fatalf("steering created another run: %d", n)
+	}
+	var claim struct{ CommentID, Content string }
+	// JSON wire names are intentionally shared with issue supplement delivery.
+	var wire map[string]any
+	req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/claim", nil), "taskId", taskID)
+	testutil.Call(t, testHandler.ClaimTaskSupplement, req).Want(http.StatusOK).JSON(&wire)
+	claim.CommentID, _ = wire["comment_id"].(string)
+	claim.Content, _ = wire["content"].(string)
+	if claim.CommentID != sent.MessageID || claim.Content != body["content"] || wire["author_type"] != "member" {
+		t.Fatalf("wrong guidance: %+v", wire)
+	}
+	for range 2 {
+		req = withURLParams(newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": true}), "taskId", taskID, "commentId", sent.MessageID)
+		testutil.Call(t, testHandler.AckTaskSupplement, req).Want(http.StatusOK)
+	}
+	if w := completeTaskViaHandler(t, taskID, "updated reply"); w.Code != http.StatusOK {
+		t.Fatalf("completion: %s", w.Body.String())
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1`, sessionID); n != 1 {
+		t.Fatal("delivered guidance ran twice")
+	}
+}
+
+func TestChatSupplementFallbacks(t *testing.T) {
+	for _, reason := range []string{"completed", "failed", "cancelled", "provider_rejected"} {
+		t.Run(reason, func(t *testing.T) {
+			sessionID, taskID, _ := newChatSupplementFixture(t, true)
+			sent := sendChatGuidance(t, sessionID, map[string]any{"content": "never lose this"})
+			if !sent.Steered {
+				t.Fatal("not steered")
+			}
+			if reason == "provider_rejected" {
+				if _, err := testHandler.Queries.ClaimNextChatTaskSupplement(t.Context(), parseUUID(taskID)); err != nil {
+					t.Fatal(err)
+				}
+				req := withURLParams(newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": false}), "taskId", taskID, "commentId", sent.MessageID)
+				testutil.Call(t, testHandler.AckTaskSupplement, req).Want(http.StatusOK)
+				req = withURLParams(newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": false}), "taskId", taskID, "commentId", sent.MessageID)
+				testutil.Call(t, testHandler.AckTaskSupplement, req).Want(http.StatusOK)
+			} else {
+				tx, err := testPool.Begin(t.Context())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback(t.Context())
+				q := testHandler.Queries.WithTx(tx)
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_task_queue SET status=$2 WHERE id=$1`, taskID, reason); err != nil {
+					t.Fatal(err)
+				}
+				task, err := q.GetAgentTask(t.Context(), parseUUID(taskID))
+				if err != nil {
+					t.Fatal(err)
+				}
+				for range 2 {
+					if err := service.SettleTerminalTaskState(t.Context(), q, task); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := tx.Commit(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var owner, status string
+			if err := testPool.QueryRow(t.Context(), `SELECT m.task_id::text, t.status FROM chat_message m JOIN agent_task_queue t ON t.id=m.task_id WHERE m.id=$1`, sent.MessageID).Scan(&owner, &status); err != nil {
+				t.Fatal(err)
+			}
+			if owner == taskID || status != "queued" {
+				t.Fatalf("fallback owner=%s status=%s", owner, status)
+			}
+			inputs, err := testHandler.Queries.ListChatInputMessages(t.Context(), parseUUID(owner))
+			if err != nil || len(inputs) != 1 || inputs[0].Content != "never lose this" {
+				t.Fatalf("fallback input=%+v err=%v", inputs, err)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1`, sessionID); n != 2 {
+				t.Fatalf("fallback created %d tasks", n)
+			}
+		})
+	}
+}
+
+func TestChatSupplementQueueChoiceAndOldDaemon(t *testing.T) {
+	for _, negotiated := range []bool{false, true} {
+		sessionID, taskID, _ := newChatSupplementFixture(t, negotiated)
+		sent := sendChatGuidance(t, sessionID, map[string]any{"content": "next turn", "queue": negotiated})
+		if sent.Steered || !sent.Queued || sent.TaskID == taskID {
+			t.Fatalf("queue fallback: %+v", sent)
+		}
+	}
+}
+
+func TestChatSupplementDeliveredGuidanceSurvivesDraftRestore(t *testing.T) {
+	sessionID, taskID, _ := newChatSupplementFixture(t, true)
+	sent := sendChatGuidance(t, sessionID, map[string]any{"content": "keep this guidance in history"})
+	if _, err := testHandler.Queries.ClaimNextChatTaskSupplement(t.Context(), parseUUID(taskID)); err != nil {
+		t.Fatal(err)
+	}
+	req := withURLParams(newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": true}), "taskId", taskID, "commentId", sent.MessageID)
+	testutil.Call(t, testHandler.AckTaskSupplement, req).Want(http.StatusOK)
+	restored, err := testHandler.Queries.DeleteUserChatMessageByTask(t.Context(), parseUUID(taskID))
+	if err != nil || restored.Content != "original objective" {
+		t.Fatalf("restored the wrong draft: %+v, %v", restored, err)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM chat_message WHERE id=$1`, sent.MessageID); n != 1 {
+		t.Fatal("draft restore deleted delivered guidance")
+	}
+}
+
+func TestChatSupplementBulkStopDoesNotStartNewWork(t *testing.T) {
+	for _, archive := range []bool{false, true} {
+		t.Run(map[bool]string{false: "stop all", true: "archive"}[archive], func(t *testing.T) {
+			sessionID, _, agentID := newChatSupplementFixture(t, true)
+			sent := sendChatGuidance(t, sessionID, map[string]any{"content": "withdraw with all work"})
+			var err error
+			if archive {
+				_, err = testHandler.TaskService.CancelTasksForArchivedAgent(t.Context(), parseUUID(agentID))
+			} else {
+				_, err = testHandler.TaskService.CancelTasksForAgent(t.Context(), parseUUID(agentID))
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND status='queued'`, sessionID); n != 0 {
+				t.Fatal("bulk stop created a new run")
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM chat_task_supplement WHERE message_id=$1 AND status='withdrawn'`, sent.MessageID); n != 1 {
+				t.Fatal("guidance was not withdrawn")
+			}
+		})
+	}
+}
+
+func TestChatSupplementRuntimeTeardownDoesNotStartNewWork(t *testing.T) {
+	sessionID, taskID, _ := newChatSupplementFixture(t, true)
+	sent := sendChatGuidance(t, sessionID, map[string]any{"content": "withdraw with runtime"})
+	task, err := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(taskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := testPool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err := service.TeardownRuntime(t.Context(), testHandler.Queries.WithTx(tx), task.RuntimeID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND status='queued'`, sessionID); n != 0 {
+		t.Fatal("runtime teardown created new work")
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM chat_task_supplement WHERE message_id=$1 AND status='withdrawn'`, sent.MessageID); n != 1 {
+		t.Fatal("runtime teardown left guidance pending")
+	}
+}
+
+func TestChatSupplementPermissionAndSessionDeletion(t *testing.T) {
+	sessionID, taskID, agentID := newChatSupplementFixture(t, true)
+	sent := sendChatGuidance(t, sessionID, map[string]any{"content": "pending"})
+	dbfx.Exec(t, `UPDATE agent_runtime SET visibility='public' WHERE id=(SELECT runtime_id FROM agent WHERE id=$1)`, agentID)
+	dbfx.Exec(t, `UPDATE agent SET permission_mode='private', owner_id=$2 WHERE id=$1`, agentID, dbfx.User(t, "Other", "other-"+uuid.NewString()+"@test.local"))
+	req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodPost, "/messages", map[string]any{"content": "forbidden"})), "sessionId", sessionID)
+	testutil.Call(t, testHandler.SendChatMessage, req).Want(http.StatusForbidden)
+	if n := dbfx.Count(t, `SELECT count(*) FROM chat_task_supplement WHERE task_id=$1`, taskID); n != 1 {
+		t.Fatal("revoked send mutated receipts")
+	}
+	dbfx.Exec(t, `UPDATE agent SET owner_id=$2 WHERE id=$1`, agentID, testUserID)
+	req = withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodDelete, "/session", nil)), "sessionId", sessionID)
+	testutil.Call(t, testHandler.DeleteChatSession, req).Want(http.StatusNoContent)
+	if n := dbfx.Count(t, `SELECT count(*) FROM chat_task_supplement WHERE message_id=$1`, sent.MessageID); n != 0 {
+		t.Fatal("deleted session retained guidance")
+	}
+	if _, err := testHandler.Queries.GetTaskSupplementCapability(t.Context(), parseUUID(taskID)); err == nil {
+		t.Fatal("deleted session retained capability")
+	}
+}

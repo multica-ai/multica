@@ -187,6 +187,9 @@ export interface ChatMessagesPage {
 }
 
 export interface SendChatMessageResponse {
+  /** Accepted into the running reply without creating another turn. */
+  steered?: boolean;
+  message_created_at?: string;
   message_id: string;
   task_id: string;
   /** True when the server supports queued follow-up sends. */

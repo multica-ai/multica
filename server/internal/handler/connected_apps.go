@@ -1215,7 +1215,7 @@ func (h *Handler) ResumeAfterDecision(ctx context.Context, req db.AppActionReque
 		return err
 	}
 	content := "[Multica] " + strings.TrimSpace(note)
-	sent, err := h.TaskService.SendDirectChatMessage(ctx, session, agent, actorID, content, nil, "member", actorID)
+	sent, err := h.TaskService.SendDirectChatMessage(ctx, session, agent, actorID, content, nil, "member", actorID, true)
 	if err != nil {
 		return err
 	}
