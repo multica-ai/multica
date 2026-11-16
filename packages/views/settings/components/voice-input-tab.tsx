@@ -12,6 +12,7 @@ import {
 } from "@multica/ui/components/ui/select";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
+import { useConfigStore } from "@multica/core/config";
 import { useShortcut } from "@multica/core/shortcuts";
 import {
   MAX_VOCABULARY_WORDS,
@@ -46,13 +47,16 @@ export function VoiceInputTab() {
   const models = useVoiceModels();
   const engineAvailable = models?.engineAvailable;
   const serverEngine = useServerVoiceEngine();
+  const serverTranscription = useConfigStore((state) => state.voiceTranscriptionEnabled);
   const enabled = useVoiceSettingsStore((state) => state.enabled);
   const modelId = useVoiceSettingsStore((state) => state.modelId);
   const onDeviceModels = models?.models.filter((model) => !model.streams).length ?? 0;
   const offersServer = (models?.models.length ?? 0) > onDeviceModels;
   const active = pickVoiceModel(models, modelId);
   // The on-device copy promises speech stays here, so it needs an on-device model in use.
-  const onDeviceOnly = !serverEngine && (!offersServer || (active !== null && !active.streams));
+  // Until the list loads, the server may still be among the models.
+  const serverOffered = models ? offersServer : serverTranscription;
+  const onDeviceOnly = !serverEngine && (!serverOffered || (active !== null && !active.streams));
   return (
     <SettingsTab
       title={t(($) => $.page.tabs.voice_input)}

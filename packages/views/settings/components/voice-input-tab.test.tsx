@@ -110,4 +110,11 @@ describe("VoiceInputTab", () => {
     expect(screen.queryByText(/never leaves it/)).not.toBeInTheDocument();
     expect(screen.getByText(/speech-to-text service your Multica server/)).toBeInTheDocument();
   });
+
+  it("on desktop, makes no on-device promise while the model list is still loading", () => {
+    configStore.getState().setVoiceTranscriptionEnabled(true);
+    useVoiceModelsStore.setState({ models: null });
+    renderWithI18n(<VoiceInputTab />);
+    expect(screen.queryByText(/never leaves it/)).not.toBeInTheDocument();
+  });
 });
