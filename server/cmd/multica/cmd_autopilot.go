@@ -863,14 +863,15 @@ func runAutopilotTriggerRotateURL(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
+	resolveCtx, cancelResolve := cli.APIContext(context.Background())
 
-	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
+	autopilotRef, err := resolveAutopilotID(resolveCtx, client, args[0])
 	if err != nil {
+		cancelResolve()
 		return fmt.Errorf("resolve autopilot: %w", err)
 	}
-	triggerRef, err := resolveAutopilotTriggerID(ctx, client, autopilotRef.ID, args[1])
+	triggerRef, err := resolveAutopilotTriggerID(resolveCtx, client, autopilotRef.ID, args[1])
+	cancelResolve()
 	if err != nil {
 		return fmt.Errorf("resolve trigger: %w", err)
 	}
@@ -890,6 +891,10 @@ func runAutopilotTriggerRotateURL(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
+
+	// Waiting for confirmation must not consume the rotation request's timeout.
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
 
 	var result map[string]any
 	path := "/api/autopilots/" + autopilotRef.ID + "/triggers/" + triggerRef.ID + "/rotate-webhook-token"
