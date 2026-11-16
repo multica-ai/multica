@@ -99,7 +99,7 @@ var contextFileLoadProbes = map[string]string{
 	"claude":   "2.1.220",
 	"codex":    "0.144.6",
 	"opencode": "1.17.7",
-	"pi":       "0.67.2",
+	"pi":       "1.5.2",
 	"hermes":   "0.18.2",
 	"kiro":     "2.13.0",
 	"mcode":    "0.1.2",
