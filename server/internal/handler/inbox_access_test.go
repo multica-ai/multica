@@ -177,7 +177,10 @@ func TestListInboxHumanCredentialsAndReadOnlyIsolation(t *testing.T) {
 }
 
 func TestListInboxDelegatedOriginatorAndProjectVisibility(t *testing.T) {
-	f := newPrivateProjectFixture(t)
+	var counterBefore int64
+	dbfx.QueryRow(t, `SELECT GREATEST(issue_counter,
+		(SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id=$1))
+		FROM workspace WHERE id=$1`, testWorkspaceID).Scan(&counterBefore)
 	worker := seedAllowListedAgent(t, "Inbox delegated worker", testUserID, "public_to", testUserID)
 	chain := newCrossIssueChain(t, testUserID, testUserID)
 	agentComments(t, chain.CoordinatorID, chain.TaskA, chain.IssueY, mention(worker), "").Want(http.StatusCreated)
@@ -189,6 +192,8 @@ func TestListInboxDelegatedOriginatorAndProjectVisibility(t *testing.T) {
 	// Delegation normally has a runtime selected when claimed.
 	dbfx.Exec(t, `UPDATE agent_task_queue SET runtime_id=$2 WHERE id=$1`, taskID, testRuntimeID)
 	token := inboxTaskCredential(t, taskID, worker, testWorkspaceID, testUserID)
+	// Allocate delegation issue numbers before introducing the fixture's random high numbers.
+	f := newPrivateProjectFixture(t)
 	secret := insertSecretInboxItem(t, f, testUserID)
 	list := func() map[string]bool {
 		var items []InboxItemResponse
@@ -212,4 +217,12 @@ func TestListInboxDelegatedOriginatorAndProjectVisibility(t *testing.T) {
 	// Loss of an upstream human must never borrow the accountable owner.
 	dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id=NULL,accountable_user_id=$2 WHERE id=$1`, taskID, testUserID)
 	testutil.Call(t, inboxAccessHandler(nil), inboxCredentialRequest(token, testWorkspaceID)).Want(http.StatusForbidden)
+
+	var counterAfter int64
+	dbfx.QueryRow(t, `SELECT issue_counter FROM workspace WHERE id=$1`, testWorkspaceID).Scan(&counterAfter)
+	if counterAfter != counterBefore+2 {
+		t.Fatalf("issue counter advanced from %d to %d; want %d for the two delegation issues without entering the private fixture's random range",
+			counterBefore, counterAfter, counterBefore+2)
+	}
+	t.Logf("delegation issue counter: %d -> %d", counterBefore, counterAfter)
 }
