@@ -1,10 +1,17 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import type { ChatMessage, ChatPendingTask } from "@multica/core/types";
-import { hideQueuedChatMessages } from "@multica/core/chat/pending";
+import type {
+  Attachment,
+  ChatMessage,
+  ChatPendingTask,
+} from "@multica/core/types";
 import { queuedChatMessages } from "./chat-queued-messages";
 
-function userMessage(id: string, taskId: string | null): ChatMessage {
+function userMessage(
+  id: string,
+  taskId: string | null,
+  over: Partial<ChatMessage> = {},
+): ChatMessage {
   return {
     id,
     chat_session_id: "session-1",
@@ -12,8 +19,15 @@ function userMessage(id: string, taskId: string | null): ChatMessage {
     content: id,
     task_id: taskId,
     created_at: "2026-11-16T00:00:00Z",
+    ...over,
   };
 }
+
+const screenshot = {
+  id: "attachment-1",
+  filename: "screenshot.png",
+  content_type: "image/png",
+} as Attachment;
 
 const pending: ChatPendingTask = {
   task_id: "task-active",
@@ -44,12 +58,42 @@ describe("queuedChatMessages", () => {
       userMessage("message-next", "task-next"),
       userMessage("message-last", "task-last"),
     ];
-    const visible = hideQueuedChatMessages(messages, pending);
 
-    expect(visible.map((message) => message.id)).toEqual(["message-active"]);
-    expect(queuedChatMessages(pending, visible).map((row) => row.content)).toEqual([
+    expect(queuedChatMessages(pending, messages).map((row) => row.content)).toEqual([
       "then update the docs",
       "and open a PR",
+    ]);
+  });
+
+  it("carries the hidden message's attachments, including attachment-only sends", () => {
+    const withFiles: ChatPendingTask = {
+      ...pending,
+      queued_tasks: [
+        { ...pending.queued_tasks![0]! },
+        {
+          task_id: "task-file",
+          status: "queued",
+          created_at: "2026-11-16T00:00:04Z",
+          message_id: "message-file",
+        },
+      ],
+    };
+    const messages = [
+      userMessage("message-active", "task-active"),
+      userMessage("message-next", "task-next", { attachments: [screenshot] }),
+      userMessage("message-file", "task-file", {
+        content: "",
+        attachments: [screenshot],
+      }),
+    ];
+
+    expect(queuedChatMessages(withFiles, messages)).toEqual([
+      {
+        task_id: "task-next",
+        content: "then update the docs",
+        attachments: [screenshot],
+      },
+      { task_id: "task-file", content: "", attachments: [screenshot] },
     ]);
   });
 
@@ -64,13 +108,10 @@ describe("queuedChatMessages", () => {
         content: "use the new path",
       }],
     };
-    const visible = hideQueuedChatMessages(
-      [userMessage("optimistic-1", null)],
-      withPlaceholder,
-    );
 
-    expect(visible).toHaveLength(1);
-    expect(queuedChatMessages(withPlaceholder, visible)).toEqual([]);
+    expect(queuedChatMessages(withPlaceholder, [
+      userMessage("optimistic-1", null),
+    ])).toEqual([]);
   });
 
   it("skips guidance the transcript still shows under its earlier owner", () => {
@@ -86,15 +127,13 @@ describe("queuedChatMessages", () => {
         content: "use the new path",
       }],
     };
-    const visible = hideQueuedChatMessages(
-      [userMessage("message-guidance", "task-active")],
-      requeued,
-    );
 
-    expect(queuedChatMessages(requeued, visible)).toEqual([]);
+    expect(queuedChatMessages(requeued, [
+      userMessage("message-guidance", "task-active"),
+    ])).toEqual([]);
   });
 
-  it("returns nothing without queued content", () => {
+  it("returns nothing without anything to show", () => {
     expect(queuedChatMessages(undefined, [])).toEqual([]);
     expect(queuedChatMessages({
       task_id: "task-active",

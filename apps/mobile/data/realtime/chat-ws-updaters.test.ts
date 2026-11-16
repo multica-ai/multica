@@ -250,6 +250,34 @@ describe("pending task queue events", () => {
     });
   });
 
+  it("skips the messages refetch for a turn its message already names", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), [{
+      id: "message-follow-up",
+      chat_session_id: SESSION,
+      role: "user",
+      content: "follow up",
+      task_id: "task-follow-up",
+      created_at: "2026-07-09T00:00:01Z",
+    }]);
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    seedPendingTaskFromQueued(qc, {
+      task_id: "task-follow-up",
+      agent_id: "agent-1",
+      issue_id: "",
+      chat_session_id: SESSION,
+      status: "queued",
+    });
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: chatKeys.pendingTask(SESSION),
+    });
+    expect(invalidate).not.toHaveBeenCalledWith({
+      queryKey: chatKeys.messages(SESSION),
+    });
+  });
+
   it("refetches pending state and messages when a task is dispatched", () => {
     const qc = new QueryClient();
     qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(SESSION), {

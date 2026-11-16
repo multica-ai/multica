@@ -28,7 +28,7 @@ import { Text } from "@/components/ui/text";
 import { Markdown } from "@/lib/markdown";
 import { ImageSequenceProvider } from "@/lib/markdown/image-sequence";
 import { failureReasonKey } from "@/lib/failure-reason-label";
-import { queuedChatMessages } from "@/lib/chat-queued-messages";
+import type { QueuedChatMessage } from "@/lib/chat-queued-messages";
 import { formatElapsedMs } from "@/lib/format-elapsed";
 import { cn } from "@/lib/utils";
 import { useChatSelectStore } from "@/data/chat-select-store";
@@ -69,6 +69,8 @@ interface Props {
   /** Live timeline rows for the in-flight task. Already fetched by the
    *  parent so this list doesn't have to manage its own subscription. */
   liveTaskMessages?: TaskMessagePayload[];
+  /** Follow-ups waiting for their turn, rendered after the live reply. */
+  queuedMessages?: QueuedChatMessage[];
   /** Resolved availability — drives the StatusPill's "Offline" /
    *  "Reconnecting" stages. Pass `undefined` while loading. */
   availability?: AgentAvailability;
@@ -84,6 +86,7 @@ export function ChatMessageList({
   quickActionsDisabled = false,
   pendingTask,
   liveTaskMessages,
+  queuedMessages = [],
   availability,
 }: Props) {
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
@@ -143,7 +146,6 @@ export function ChatMessageList({
   const showLiveSection = !!pendingTaskId && !pendingAlreadyPersisted;
   const showLiveTimeline =
     showLiveSection && (liveTaskMessages?.length ?? 0) > 0;
-  const queued = queuedChatMessages(pendingTask ?? undefined, messages);
 
   return (
     // Outer Pressable owns the "tap anywhere outside the selected bubble
@@ -183,7 +185,7 @@ export function ChatMessageList({
       )}
       ItemSeparatorComponent={MessageSeparator}
       ListFooterComponent={
-        showLiveSection || queued.length > 0 ? (
+        showLiveSection || queuedMessages.length > 0 ? (
           <View style={{ paddingTop: 12 }} className="gap-2">
             {showLiveTimeline ? (
               <ChatTimeline items={liveTaskMessages ?? []} isStreaming />
@@ -195,8 +197,8 @@ export function ChatMessageList({
                 availability={availability}
               />
             ) : null}
-            {queued.map((row) => (
-              <QueuedMessageRow key={row.task_id} content={row.content} />
+            {queuedMessages.map((row) => (
+              <QueuedMessageRow key={row.task_id} message={row} />
             ))}
           </View>
         ) : null
@@ -247,20 +249,26 @@ function MessageSeparator() {
  * web and desktop. Once its turn starts the server row returns to the
  * transcript in this position.
  */
-function QueuedMessageRow({ content }: { content: string }) {
+function QueuedMessageRow({ message }: { message: QueuedChatMessage }) {
   const { t } = useT("chat");
   const { colorScheme } = useColorScheme();
   return (
-    <View
-      className="self-end max-w-[80%] items-end gap-1 opacity-60"
-      accessible
-      accessibilityLabel={`${t("status.queued")}: ${content}`}
-    >
+    <View className="self-end max-w-[80%] items-end gap-1 opacity-60">
       <View
-        className="rounded-xl border-2 border-transparent bg-muted px-3.5 py-2"
+        className="gap-1.5 rounded-xl border-2 border-transparent bg-muted px-3.5 py-2"
         style={continuousCorners}
       >
-        <Markdown content={content} compact />
+        {message.content.trim() ? (
+          <Markdown
+            content={message.content}
+            attachments={message.attachments}
+            compact
+          />
+        ) : null}
+        <CommentAttachmentList
+          attachments={message.attachments}
+          content={message.content}
+        />
       </View>
       <View className="flex-row items-center gap-1 px-1">
         <Ionicons

@@ -84,6 +84,7 @@ import {
   reconcileAcceptedChatSend,
 } from "@/data/realtime/chat-ws-updaters";
 import { useWorkspaceAgentAvailability } from "@/lib/workspace-agent-availability";
+import { queuedChatMessages } from "@/lib/chat-queued-messages";
 import {
   dispatchReasonCode,
 } from "@/lib/dispatch-reason";
@@ -161,6 +162,7 @@ export default function ChatTab() {
     pendingChatTaskOptions(activeSessionId),
   );
   const visibleMessages = hideQueuedChatMessages(messages, pendingTask);
+  const queuedMessages = queuedChatMessages(pendingTask, messages);
   // Live execution trace for the in-flight task. `task:message` WS events
   // append rows to this same cache key via `appendTaskMessage`, so the
   // list/pill stay in sync without a polling fetch. `enabled` is gated by
@@ -542,6 +544,7 @@ export default function ChatTab() {
           quickActionsDisabled={sending || disabled}
           pendingTask={pendingTask}
           liveTaskMessages={liveTaskMessages}
+          queuedMessages={queuedMessages}
           availability={presenceAvailability}
         />
         {runtimeBound ? (

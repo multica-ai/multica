@@ -214,10 +214,17 @@ export function seedPendingTaskFromQueued(
   invalidatePendingTask(qc, payload.chat_session_id);
   // Guidance the running reply could not take is re-queued by moving its
   // message to a new turn. Only the refetched row carries that owner, which
-  // is what moves it out of the transcript and into the queued rows.
-  qc.invalidateQueries({
-    queryKey: chatKeys.messages(payload.chat_session_id),
-  });
+  // is what moves it out of the transcript and into the queued rows. A turn
+  // whose message already names it (this device's reconciled send) needs no
+  // second refetch.
+  const messages = qc.getQueryData<ChatMessage[]>(
+    chatKeys.messages(payload.chat_session_id),
+  );
+  if (!messages?.some((message) => message.task_id === payload.task_id)) {
+    qc.invalidateQueries({
+      queryKey: chatKeys.messages(payload.chat_session_id),
+    });
+  }
 }
 
 export function promotePendingTaskToRunning(
