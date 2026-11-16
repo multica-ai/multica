@@ -26,6 +26,7 @@ These rules apply only to `apps/mobile/`, in addition to the [root instructions]
 - Add RNR components with `npx @react-native-reusables/cli@latest add <name>`. Review generated changes and preserve local customizations. Keep default variants/spacing unless a concrete product need requires changes.
 - Generic primitives live in `components/ui/`; domain compositions live in `components/<domain>/`. Use the existing `cn()` in `lib/utils.ts` and semantic tokens.
 - Screens have titles, tab bars have icons, secondary labels use type-aware helpers, and multiple trailing row elements stack vertically. Check long text, keyboard, safe areas, scrolling, and both themes.
+- Keyboard-aware screens use `components/ui/keyboard-avoiding-view.tsx`: native iOS behavior is preserved, while Android uses keyboard-controller frame events for edge-to-edge windows. Keep authentication forms scrollable on small screens.
 
 ### Theming model
 

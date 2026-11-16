@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, View } from "react-native";
+import { Platform, ScrollView, View } from "react-native";
+import { KeyboardAvoidingView } from "@/components/ui/keyboard-avoiding-view";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -41,7 +42,11 @@ export default function Login() {
         className="flex-1"
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <View className="flex-1 justify-center px-6 gap-6">
+        <ScrollView
+          className="flex-1"
+          contentContainerClassName="grow justify-center px-6 py-6 gap-6"
+          keyboardShouldPersistTaps="handled"
+        >
           <View className="items-center gap-3">
             <MulticaLogo size={30} />
             <View className="gap-1 items-center">
@@ -80,7 +85,7 @@ export default function Login() {
           >
             <Text>{submitting ? t("login.sending") : t("login.send_code")}</Text>
           </Button>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

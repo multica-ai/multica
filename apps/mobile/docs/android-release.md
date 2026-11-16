@@ -113,6 +113,8 @@ Run the mobile checks in `AGENTS.md`, then build Release. Menus use `useActionSh
 on iOS and use Ionicons on Android. Android pickers use full-height modal routes
 with native close controls. OS photo/document pickers supply attachments without
 broad media access; camera and microphone are disabled.
+Android forms use keyboard-controller frame events to avoid covering focused
+inputs in edge-to-edge windows; authentication forms also scroll on small screens.
 
 Record the exact APK hash, commit, device, system version and network for:
 
