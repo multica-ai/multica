@@ -102,7 +102,7 @@ while [ ! -f "$2" ]; do sleep 0.02; done`, "fixture", pidFile, release)
 	done()
 	_ = p.Wait()
 	waited = true
-	waitProcessGone(t, pids[1])
+	waitRuntimeDescendantGone(t, pids[1])
 }
 
 func TestOwnedRuntimeProcessObservationFailureUnblocksOutput(t *testing.T) {
@@ -124,7 +124,7 @@ func TestOwnedRuntimeProcessObservationFailureUnblocksOutput(t *testing.T) {
 	}()
 	// A per-call seam models a sandbox denying waitid; no package-global
 	// syscall hook or unrelated process is involved.
-	go p.observeExit(context.Background(), nil, func() { _ = stdout.Close() }, func(int) error { return syscall.EPERM })
+	go p.observeExit(context.Background(), nil, func() { _ = stdout.Close() }, func(int) error { return syscall.EPERM }, signalProcessGroup)
 	readDone := make(chan struct{})
 	go func() { _, _ = io.Copy(io.Discard, stdout); close(readDone) }()
 	select {

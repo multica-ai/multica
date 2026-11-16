@@ -5,7 +5,9 @@ package agent
 import (
 	"context"
 	"log/slog"
+	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -33,10 +35,18 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed"
 			t.Run(runtime.name+"/"+tc.name, func(t *testing.T) {
 				tempDir := t.TempDir()
 				pidFile := filepath.Join(tempDir, "pids")
+				stopFile := filepath.Join(tempDir, "stop")
+				childPID := 0
+				t.Cleanup(func() {
+					_ = os.WriteFile(stopFile, nil, 0600)
+					if childPID != 0 {
+						waitRuntimeDescendantGone(t, childPID)
+					}
+				})
 				fakePath := filepath.Join(tempDir, runtime.name)
 				// Finite even on a regression: no cleanup signals a reaped PID.
 				script := "#!/bin/sh\n" + runtime.input +
-					"sleep 5 " + tc.redirect + " &\n" +
+					"( i=0; while [ ! -f \"$STOP_FILE\" ] && [ \"$i\" -lt 300 ]; do sleep 0.1; i=$((i+1)); done ) " + tc.redirect + " &\n" +
 					`printf '%s %s\n' "$$" "$!" > "$OPENCODE_PID_FILE"` + "\n" +
 					runtime.events + "exit 0\n"
 				writeTestExecutable(t, fakePath, []byte(script))
@@ -44,7 +54,7 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed"
 					TaskID:         "task-1",
 					ExecutablePath: fakePath,
 					Logger:         slog.Default(),
-					Env:            map[string]string{"OPENCODE_PID_FILE": pidFile, opencodeTransportEnv: "run"},
+					Env:            map[string]string{"OPENCODE_PID_FILE": pidFile, "STOP_FILE": stopFile, opencodeTransportEnv: "run"},
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -58,6 +68,7 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed"
 					}
 				}()
 				pids := waitForPids(t, pidFile)
+				childPID = pids[1]
 				select {
 				case result := <-session.Result:
 					if result.Status != "completed" || result.Error != "" || result.Output != "done" {
@@ -66,8 +77,22 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed"
 				case <-time.After(2 * time.Second):
 					t.Fatal("runtime exited, but descendant kept task pipes open")
 				}
-				waitProcessGone(t, pids[1])
+				waitRuntimeDescendantGone(t, pids[1])
 			})
 		}
 	}
+}
+
+// The complete assertion window must be shorter than the fixture's lifetime;
+// natural expiry must never satisfy the descendant-cleanup regression.
+func waitRuntimeDescendantGone(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err == syscall.ESRCH {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("runtime descendant %d survived cleanup deadline", pid)
 }

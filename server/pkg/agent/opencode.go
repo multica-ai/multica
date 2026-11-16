@@ -344,7 +344,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 				process.signal(syscall.SIGKILL)
 			}
 		}
-		_ = stdout.Close()
+		closeRuntimeOutputAfterDrain(procDone, func() { _ = stdout.Close() })
 	}()
 
 	go func() {
@@ -417,7 +417,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		resCh <- Result{
 			Status:     scanResult.status,
 			Output:     scanResult.output,
-			Error:      scanResult.errMsg,
+			Error:      process.withObservationError(scanResult.errMsg),
 			DurationMs: duration.Milliseconds(),
 			SessionID:  scanResult.sessionID,
 			Usage:      usage,

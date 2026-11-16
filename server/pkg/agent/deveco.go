@@ -189,7 +189,7 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				process.signal(syscall.SIGKILL)
 			}
 		}
-		_ = stdout.Close()
+		closeRuntimeOutputAfterDrain(procDone, func() { _ = stdout.Close() })
 	}()
 
 	go func() {
@@ -233,7 +233,7 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		resCh <- Result{
 			Status:     scanResult.status,
 			Output:     scanResult.output,
-			Error:      scanResult.errMsg,
+			Error:      process.withObservationError(scanResult.errMsg),
 			DurationMs: duration.Milliseconds(),
 			SessionID:  scanResult.sessionID,
 			Usage:      usage,

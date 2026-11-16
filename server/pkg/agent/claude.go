@@ -258,7 +258,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			if !process.waitGroupGone(claudeTerminateGrace()) {
 				process.signal(syscall.SIGKILL)
 			}
-			_ = stdout.Close()
+			closeRuntimeOutputAfterDrain(procDone, func() { _ = stdout.Close() })
 		}
 
 		// On cancellation / timeout, terminate claude (and every MCP server and
@@ -291,7 +291,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					process.signal(syscall.SIGKILL)
 				}
 			}
-			_ = stdout.Close()
+			closeRuntimeOutputAfterDrain(procDone, func() { _ = stdout.Close() })
 		}()
 
 		scanner := newAgentStreamScanner(stdout)
@@ -520,7 +520,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		resCh <- Result{
 			Status:         finalStatus,
 			Output:         finalOutput,
-			Error:          finalError,
+			Error:          process.withObservationError(finalError),
 			DurationMs:     duration.Milliseconds(),
 			SessionID:      reportedSessionID,
 			Usage:          usage,
