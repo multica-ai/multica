@@ -91,7 +91,10 @@ run(tool("zipalign"), ["-P", "16", "-f", "4", unsigned, aligned]);
 const apk = join(outputDir, `multica-${config.version}-${config.android.versionCode}.apk`);
 run(tool("apksigner"), [
   "sign", "--ks", keystore, "--ks-key-alias", alias,
-  "--ks-pass", `file:${passwordFile}`, "--key-pass", `file:${keyPasswordFile}`,
+  "--ks-pass", `file:${passwordFile}`,
+  // apksigner consumes successive lines when a password file is reused.
+  // Omit --key-pass to reuse the store password for the usual PKCS12 case.
+  ...(keyPasswordFile === passwordFile ? [] : ["--key-pass", `file:${keyPasswordFile}`]),
   "--out", apk, aligned,
 ]);
 const signature = run(tool("apksigner"), ["verify", "--verbose", "--print-certs", apk], true);
