@@ -72,7 +72,7 @@ function renderPicker(props: Partial<React.ComponentProps<typeof RuntimePicker>>
 }
 
 function trigger(container: HTMLElement): HTMLButtonElement {
-  const element = container.querySelector<HTMLButtonElement>('[data-slot="popover-trigger"]');
+  const element = container.querySelector<HTMLButtonElement>('[data-trigger="popover"]');
   if (!element) throw new Error("runtime picker trigger not rendered");
   return element;
 }
@@ -122,7 +122,7 @@ describe("RuntimePicker (creation studio)", () => {
       disabled: true,
     });
     const filters = [...container.querySelectorAll("button")].filter(
-      (button) => button.getAttribute("data-slot") !== "popover-trigger",
+      (button) => button.getAttribute("data-trigger") !== "popover",
     );
     expect(filters.length).toBeGreaterThan(0);
     for (const button of filters) {

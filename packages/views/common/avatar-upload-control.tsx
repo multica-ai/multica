@@ -40,7 +40,7 @@ interface AvatarUploadControlProps {
   variant: AvatarUploadVariant;
   /** Name used for initials / first-letter fallback and the image alt. */
   name?: string;
-  /** Pixel diameter of the circle. Defaults to 64. */
+  /** Pixel width and height of the avatar. Defaults to 64. */
   size?: number;
   disabled?: boolean;
   /**
@@ -247,8 +247,7 @@ export function AvatarUploadControl({
         "flex items-center justify-center",
         "focus-visible:ring-2 focus-visible:ring-ring",
         "disabled:cursor-not-allowed disabled:opacity-60",
-        // eslint-disable-next-line no-restricted-syntax -- avatar: the control is the avatar itself
-        "rounded-full",
+        "rounded-avatar",
         className,
       )}
       style={{ width: size, height: size }}

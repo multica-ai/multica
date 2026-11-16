@@ -21,8 +21,8 @@ import (
 
 // privateProjectAudience narrows realtime fanout for events about a private
 // project (MUL-8472): the project itself, its resources, its issues, their
-// comments and their runs reach only project members and workspace
-// owners/admins. Every other event keeps workspace fanout, and so does an
+// comments and their runs reach only project members; a workspace role
+// adds nobody (MUL-9284). Every other event keeps workspace fanout, and so does an
 // event whose project cannot be resolved (a deleted issue's id, a
 // workspace-level object): narrowing anything wider is how #9133 silenced
 // realtime for whole workspaces.
@@ -35,7 +35,6 @@ type privateProjectAudience interface {
 
 type audienceQuerier interface {
 	ListPrivateProjectAudience(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListPrivateProjectAudienceRow, error)
-	ListWorkspaceManagerUserIDs(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error)
 	GetIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetCommentIssueProjectID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
@@ -71,7 +70,6 @@ type workspaceAudience struct {
 	loadedAt time.Time
 	// projects maps a private project id to its member user ids.
 	projects map[string][]string
-	managers []string
 }
 
 const (
@@ -132,7 +130,8 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 		return nil, false, err
 	}
 	// A run can read more than one project (a quick-create into one project
-	// under a parent in another); only members of every private one may see it.
+	// under a parent in another), and a pull request can be linked to issues in
+	// several; only members of every private one may see it.
 	var members []string
 	private := false
 	for _, projectID := range projectIDs {
@@ -149,18 +148,7 @@ func (a *dbPrivateProjectAudience) Audience(ctx context.Context, e events.Event)
 	if !private {
 		return nil, false, nil
 	}
-	seen := make(map[string]struct{}, len(members)+len(ws.managers))
-	out := make([]string, 0, len(members)+len(ws.managers))
-	for _, ids := range [][]string{ws.managers, members} {
-		for _, id := range ids {
-			if _, dup := seen[id]; dup {
-				continue
-			}
-			seen[id] = struct{}{}
-			out = append(out, id)
-		}
-	}
-	return out, true, nil
+	return members, true, nil
 }
 
 func intersect(a, b []string) []string {
@@ -201,15 +189,6 @@ func (a *dbPrivateProjectAudience) workspace(ctx context.Context, workspaceID st
 		}
 		loaded.projects[pid] = members
 	}
-	if len(loaded.projects) > 0 {
-		managers, err := a.q.ListWorkspaceManagerUserIDs(ctx, wsUUID)
-		if err != nil {
-			return workspaceAudience{}, err
-		}
-		for _, id := range managers {
-			loaded.managers = append(loaded.managers, util.UUIDToString(id))
-		}
-	}
 	a.mu.Lock()
 	a.workspaces[workspaceID] = loaded
 	a.mu.Unlock()
@@ -218,7 +197,8 @@ func (a *dbPrivateProjectAudience) workspace(ctx context.Context, workspaceID st
 
 // eventProjectIDs resolves the projects an event is about, or none. It reads
 // the payload's own references first and only falls back to the database for
-// a bare issue, comment, autopilot or task id.
+// a bare issue, comment, autopilot or task id, or the issues a pull request is
+// linked to.
 func (a *dbPrivateProjectAudience) eventProjectIDs(ctx context.Context, e events.Event) ([]string, error) {
 	refs := extractEventRefs(e.Type, e.Payload)
 	if refs.projectKnown {
@@ -243,6 +223,17 @@ func (a *dbPrivateProjectAudience) eventProjectIDs(ctx context.Context, e events
 	}
 	if refs.commentID != "" {
 		return lookup(refs.commentID, a.q.GetCommentIssueProjectID)
+	}
+	if len(refs.linkedIssueIDs) > 0 {
+		var out []string
+		for _, id := range refs.linkedIssueIDs {
+			projects, err := lookup(id, a.q.GetIssueProjectID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, projects...)
+		}
+		return out, nil
 	}
 	if refs.autopilotID != "" {
 		return lookup(refs.autopilotID, func(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
@@ -322,6 +313,8 @@ type eventRefs struct {
 	issueID      string
 	commentID    string
 	autopilotID  string
+	// linkedIssueIDs are the issues a pull_request:updated event names.
+	linkedIssueIDs []string
 }
 
 // extractEventRefs reads project / issue / comment references from an event
@@ -366,7 +359,8 @@ func extractEventRefs(eventType string, payload any) eventRefs {
 			}
 		}
 	}
-	if id, ok := str(top, "project_id"); ok && id != "" && (isProjectEvent || eventType == protocol.EventProjectMembersChanged) {
+	// A deleted issue states its project, since its row is gone by now.
+	if id, ok := str(top, "project_id"); ok && id != "" && (isProjectEvent || eventType == protocol.EventProjectMembersChanged || eventType == protocol.EventIssueDeleted) {
 		return eventRefs{projectKnown: true, projectID: id}
 	}
 	// An autopilot bound to a private project carries its prompt and runs.
@@ -405,6 +399,11 @@ func extractEventRefs(eventType string, payload any) eventRefs {
 	if refs.issueID == "" && refs.commentID == "" {
 		if id, ok := str(top, "comment_id"); ok {
 			refs.commentID = id
+		}
+	}
+	if refs.issueID == "" && refs.commentID == "" {
+		if v, ok := top["linked_issue_ids"]; ok {
+			_ = json.Unmarshal(v, &refs.linkedIssueIDs)
 		}
 	}
 	return refs

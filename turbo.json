@@ -52,11 +52,18 @@
       // electron-vite) and signs the dev Desktop in (read by its main process).
       // Desktop's bundled CLI finds a custom dev-env registry through
       // MULTICA_DEV_HOME, or refuses its daemon inside an agent task.
-      "passThroughEnv": ["REMOTE_DEBUGGING_PORT", "MULTICA_DEV_AUTH_TOKEN", "MULTICA_DEV_HOME"]
+      // VITE_DEV_TOOLBAR turns on the web/desktop dev status bar.
+      "passThroughEnv": [
+        "REMOTE_DEBUGGING_PORT",
+        "MULTICA_DEV_AUTH_TOKEN",
+        "MULTICA_DEV_HOME",
+        "VITE_DEV_TOOLBAR"
+      ]
     },
     "dev:staging": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "passThroughEnv": ["VITE_DEV_TOOLBAR"]
     },
     "typecheck": {
       "dependsOn": ["^typecheck", "mdx"]

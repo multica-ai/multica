@@ -21,7 +21,8 @@
     "active": "啟用",
     "paused": "已暫停",
     "paused_runtime_required": "已暫停——執行 AI 代理需繫結執行時",
-    "archived": "已歸檔"
+    "archived": "已歸檔",
+    "paused_project_archived": "已暫停——所屬專案已歸檔"
   },
   "execution_mode": {
     "create_issue": "建立任務",
@@ -115,7 +116,8 @@
       "cancel": "取消",
       "confirm": "刪除",
       "deleting": "刪除中..."
-    }
+    },
+    "paused_project_archived": "由於所屬專案已歸檔，自動化已暫停。還原專案後請重新啟用。"
   },
   "access": {
     "title": "管理訪問",

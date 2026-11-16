@@ -21,7 +21,8 @@
     "active": "Active",
     "paused": "Paused",
     "paused_runtime_required": "Paused — the assignee needs a runtime",
-    "archived": "Archived"
+    "archived": "Archived",
+    "paused_project_archived": "Paused — its project is archived"
   },
   "execution_mode": {
     "create_issue": "Create Issue",
@@ -115,7 +116,8 @@
       "cancel": "Cancel",
       "confirm": "Delete",
       "deleting": "Deleting..."
-    }
+    },
+    "paused_project_archived": "Paused because its project was archived. Restore the project, then reactivate this autopilot."
   },
   "access": {
     "title": "Manage access",

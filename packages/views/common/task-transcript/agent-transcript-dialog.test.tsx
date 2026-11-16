@@ -50,6 +50,12 @@ vi.mock("react-virtuoso", () => ({
   ),
 }));
 
+// The receipt button fetches through React Query and has its own tests
+// (context-receipt.test.tsx); this suite renders the dialog without a client.
+vi.mock("./context-receipt", () => ({
+  ContextReceiptButton: () => null,
+}));
+
 vi.mock("../actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));

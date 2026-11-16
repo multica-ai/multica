@@ -40,4 +40,16 @@ if (typeof window !== "undefined") {
   if (typeof Element.prototype.scrollIntoView !== "function") {
     Element.prototype.scrollIntoView = () => {};
   }
+
+  // jsdom doesn't implement Range geometry. ProseMirror's post-dispatch
+  // scrollToSelection measures the caret through coordsAtPos, which calls these
+  // on a text Range, so any test that types into an editor would throw.
+  // Return an empty layout; tests that need real geometry override them.
+  if (typeof Range.prototype.getClientRects !== "function") {
+    Range.prototype.getClientRects = () =>
+      ({ length: 0, item: () => null, [Symbol.iterator]: function* () {} }) as unknown as DOMRectList;
+  }
+  if (typeof Range.prototype.getBoundingClientRect !== "function") {
+    Range.prototype.getBoundingClientRect = () => new DOMRect(0, 0, 0, 0);
+  }
 }

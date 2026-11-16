@@ -15,6 +15,18 @@ import enIssues from "../../locales/en/issues.json";
 // link/markdownLink fields are ignored by the engine, which re-derives them).
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
 const mockToastInfo = vi.hoisted(() => vi.fn());
+const voiceOptions = vi.hoisted(() => ({ last: null as { scope?: string; hidden?: boolean } | null }));
+
+vi.mock("../../voice/use-composer-voice", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../voice/use-composer-voice")>();
+  return {
+    ...actual,
+    useComposerVoice: (options: Parameters<typeof actual.useComposerVoice>[0]) => {
+      voiceOptions.last = options;
+      return actual.useComposerVoice(options);
+    },
+  };
+});
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { info: mockToastInfo, error: vi.fn(), success: vi.fn() }),
 }));
@@ -538,6 +550,43 @@ describe("ChatInput new-chat draft identity", () => {
   });
 });
 
+// The editor is shared across sessions and agents, so voice input is scoped to
+// what the composer is writing to: changing it cancels dictation in flight.
+describe("ChatInput voice scope", () => {
+  const state = () =>
+    useChatStore.getState() as unknown as { activeSessionId: string | null; selectedAgentId: string };
+
+  it("changes when the conversation or the agent changes", () => {
+    state().activeSessionId = "session-a";
+    const { rerender } = render(element({}));
+    expect(voiceOptions.last?.scope).toBe("session-a:agent-1");
+
+    state().activeSessionId = "session-b";
+    rerender(element({}));
+    expect(voiceOptions.last?.scope).toBe("session-b:agent-1");
+
+    state().activeSessionId = null;
+    rerender(element({}));
+    expect(voiceOptions.last?.scope).toBe("__draft_new__:agent-1");
+
+    state().selectedAgentId = "agent-2";
+    rerender(element({}));
+    expect(voiceOptions.last?.scope).toBe("__draft_new__:agent-2");
+  });
+
+  it("uses an embedded surface's own draft key", () => {
+    render(element({ draftKeyOverride: "builder:agent-9" }));
+    expect(voiceOptions.last?.scope).toBe("builder:agent-9");
+  });
+
+  it("passes hidden through so a closed window stops listening", () => {
+    const { rerender } = render(element({}));
+    expect(voiceOptions.last?.hidden).toBe(false);
+    rerender(element({ hidden: true }));
+    expect(voiceOptions.last?.hidden).toBe(true);
+  });
+});
+
 describe("ChatInput focusRequest", () => {
   it("focuses the editor when focusRequest becomes a non-zero value (new chat)", () => {
     const { rerender } = render(
@@ -945,7 +994,7 @@ describe("ChatInput project context", () => {
     expect(onProjectChange).toHaveBeenCalledWith(null);
   });
 
-  it("swaps Stop for Queue Send when the running composer has content", async () => {
+  it("offers default Send and an explicit queue action while replying", async () => {
     const onSend = vi.fn<ChatInputOnSend>(async () => true);
     const onStop = vi.fn();
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend, onStop });
@@ -958,15 +1007,26 @@ describe("ChatInput project context", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled();
     const queueButton = screen.getByRole("button", { name: "Queue message" });
     expect(queueButton).not.toBeDisabled();
     fireEvent.click(queueButton);
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]?.[4]).toEqual({ queue: true });
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+  });
+
+  it("sends guidance by default during a reply without forcing the queue", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "use the new location" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]?.[4]).toBeUndefined();
   });
 
   it("keeps Stop available while queued content is uploading", async () => {

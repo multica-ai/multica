@@ -47,6 +47,15 @@ const (
 	searchIndexCursorMaxBytes = 256 << 10
 	searchIndexCursorVersion  = 1
 	searchIndexStatementLimit = 15 * time.Second
+	// searchIndexAccessRules numbers the rules that decide which projects a
+	// caller may see, and goes up whenever they get stricter. Such a change
+	// writes no search_index_change row, so a copy built before it keeps
+	// content its holder may no longer read; a cursor carries the number it
+	// was issued under so that copy can be told to rebuild.
+	//
+	//	1: a private project is visible to its member list only. Before this,
+	//	   workspace owners and admins saw every private project (MUL-9284).
+	searchIndexAccessRules = 1
 )
 
 // searchIndexBootstrapSlots bounds the manifest and snapshot reads one API
@@ -111,18 +120,22 @@ func validPGSnapshotText(s string) bool {
 // searchIndexCursor is opaque to clients. Since is the snapshot whose changes
 // the client already holds. Target and the After* keyset are set only while a
 // catch-up spans several pages; once it completes, Target becomes the next
-// Since.
+// Since. AccessRules is the searchIndexAccessRules the cursor was issued
+// under; it is an optional field rather than a new Version so that a server
+// from before it existed still accepts the cursor.
 type searchIndexCursor struct {
-	Version   int    `json:"v"`
-	Since     string `json:"s"`
-	Target    string `json:"t,omitempty"`
-	AfterXid  string `json:"x,omitempty"`
-	AfterType string `json:"e,omitempty"`
-	AfterID   string `json:"i,omitempty"`
+	Version     int    `json:"v"`
+	Since       string `json:"s"`
+	Target      string `json:"t,omitempty"`
+	AfterXid    string `json:"x,omitempty"`
+	AfterType   string `json:"e,omitempty"`
+	AfterID     string `json:"i,omitempty"`
+	AccessRules int    `json:"a,omitempty"`
 }
 
 func encodeSearchIndexCursor(c searchIndexCursor) string {
 	c.Version = searchIndexCursorVersion
+	c.AccessRules = searchIndexAccessRules
 	raw, _ := json.Marshal(c)
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
@@ -269,6 +282,9 @@ func (h *Handler) runSearchIndexRead(ctx context.Context, fn func(q *db.Queries)
 }
 
 func (h *Handler) writeSearchIndexError(w http.ResponseWriter, r *http.Request, op string, err error) {
+	if writeQueryCancellation(w, r, err) {
+		return
+	}
 	if isSearchStatementTimeout(err) {
 		writeError(w, http.StatusServiceUnavailable, "search index read timed out; please retry")
 		return
@@ -284,8 +300,15 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(wsUUID))
+	if !ok {
+		return
+	}
 	release, ok := acquireSearchIndexBootstrapSlot(r.Context())
 	if !ok {
+		if writeRequestCancellation(w, r, r.Context().Err()) {
+			return
+		}
 		writeSearchIndexBusy(w)
 		return
 	}
@@ -293,11 +316,17 @@ func (h *Handler) GetSearchIndexManifest(w http.ResponseWriter, r *http.Request)
 	var row db.GetSearchIndexManifestRow
 	err := h.runSearchIndexRead(r.Context(), func(q *db.Queries) error {
 		var err error
-		row, err = q.GetSearchIndexManifest(r.Context(), wsUUID)
+		row, err = q.GetSearchIndexManifest(r.Context(), db.GetSearchIndexManifestParams{
+			WorkspaceID:      wsUUID,
+			HiddenProjectIds: hidden.Param(),
+		})
 		return err
 	})
 	if err != nil {
 		h.writeSearchIndexError(w, r, "manifest", err)
+		return
+	}
+	if writeQueryCancellation(w, r, r.Context().Err()) {
 		return
 	}
 	writeJSON(w, http.StatusOK, SearchIndexManifestResponse{
@@ -337,6 +366,9 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 	}
 	release, ok := acquireSearchIndexBootstrapSlot(ctx)
 	if !ok {
+		if writeRequestCancellation(w, r, r.Context().Err()) {
+			return
+		}
 		writeSearchIndexBusy(w)
 		return
 	}
@@ -397,7 +429,7 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := SearchIndexSnapshotResponse{
-		Issues:          h.searchIndexIssues(ctx, wsUUID, visibleIssues),
+		Issues:          h.searchIndexIssues(ctx, wsUUID, hidden, visibleIssues),
 		Comments:        make([]SearchIndexComment, 0, len(comments)),
 		Projects:        searchIndexProjects(visibleProjects(hidden, projects)),
 		NextAfterNumber: nextAfterNumber,
@@ -409,13 +441,17 @@ func (h *Handler) GetSearchIndexSnapshot(w http.ResponseWriter, r *http.Request)
 		}
 		resp.Comments = append(resp.Comments, searchIndexComment(c.ID, c.IssueID, c.Content, c.CreatedAt))
 	}
+	if writeQueryCancellation(w, r, r.Context().Err()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // ListSearchIndexChanges returns the entities written after the cursor's
 // snapshot: live rows as upserts, missing rows (and comment tombstones) as
 // deletions. Returns 410 when retention pruning may have dropped a change the
-// cursor has not seen; the client must then rebuild its copy.
+// cursor has not seen, or when the copy predates the current access rules and
+// the caller cannot see every project; the client must then rebuild its copy.
 func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	wsUUID, ok := parseUUIDOrBadRequest(w, h.resolveWorkspaceID(r), "workspace_id")
@@ -427,6 +463,9 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		Limit  int    `json:"limit"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, searchIndexCursorMaxBytes+1024)).Decode(&req); err != nil {
+		if writeRequestCancellation(w, r, err) {
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -527,6 +566,14 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	if cur.AccessRules != searchIndexAccessRules && !hidden.Empty() {
+		// The copy was built under other access rules and may hold a project
+		// this caller cannot see any more; only a rebuild drops it. A caller
+		// who sees every project has nothing to drop and just gets a current
+		// cursor back.
+		writeError(w, http.StatusGone, "search index access rules changed; rebuild the local index")
+		return
+	}
 	if !hidden.Empty() {
 		issues = filterVisibleIssues(hidden, issues)
 		projects = visibleProjects(hidden, projects)
@@ -550,7 +597,7 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := SearchIndexChangesResponse{
-		Issues:   h.searchIndexIssues(ctx, wsUUID, issues),
+		Issues:   h.searchIndexIssues(ctx, wsUUID, hidden, issues),
 		Comments: []SearchIndexComment{},
 		Projects: searchIndexProjects(projects),
 		Deleted: SearchIndexDeleted{
@@ -607,10 +654,13 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	} else {
 		resp.Cursor = encodeSearchIndexCursor(searchIndexCursor{Since: target})
 	}
+	if writeQueryCancellation(w, r, r.Context().Err()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, issues []db.Issue) []SearchIndexIssue {
+func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, hidden projectaccess.Hidden, issues []db.Issue) []SearchIndexIssue {
 	out := make([]SearchIndexIssue, 0, len(issues))
 	if len(issues) == 0 {
 		return out
@@ -620,7 +670,7 @@ func (h *Handler) searchIndexIssues(ctx context.Context, wsUUID pgtype.UUID, iss
 	for _, is := range issues {
 		originals = appendDuplicateOriginal(originals, is.Status, is.DuplicateOfIssueID)
 	}
-	fill := h.newStatusCategoryFiller(ctx, wsUUID, originals...)
+	fill := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals...)
 	for _, is := range issues {
 		resp := issueToResponse(is, prefix)
 		fill(&resp)

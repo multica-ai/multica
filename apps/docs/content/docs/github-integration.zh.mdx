@@ -17,6 +17,8 @@ GitHub 集成只读取安装时授权的仓库，不会提交代码、评论或 
 
 工作区 owner 或 admin 可以完成连接：
 
+新连接还要求 GitHub 侧的安装管理权限：个人安装必须属于授权用户本人；组织安装要求用户对安装覆盖的每个仓库都有 admin 权限。只有读权限或只能管理部分仓库时无法连接。组织安装需先选中至少一个仓库。
+
 <Steps>
 <Step>
 打开 **设置 → 代码**。
@@ -139,8 +141,8 @@ Multica Cloud 无需执行本节。自托管需要先创建自己的 GitHub App�
 | 字段 | 值 |
 |---|---|
 | Homepage URL | Multica 前端地址，例如 `https://multica.example.com` |
-| Callback URL | 留空 |
-| Setup URL | `https://<api-host>/api/github/setup`，并启用 **Redirect on update** |
+| Callback URL | `https://<api-host>/api/github/setup` |
+| Request user authorization (OAuth) during installation | 启用 |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | 一段长期保存的随机字符串 |
 
@@ -175,19 +177,21 @@ PR 快照通过 Pull requests、Checks 和 Commit statuses 的 REST API 获取�
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<创建 App 时填写的 webhook secret>
+GITHUB_APP_CLIENT_ID=<Client ID>
+GITHUB_APP_CLIENT_SECRET=<Client secret>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-`GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 缺少任意一个时，连接按钮会被禁用，webhook 接口也会拒绝处理事件。
+新连接需要本节的全部六个 GitHub 变量，包括 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY`。缺少任意一个都会禁用连接按钮；webhook 接入只要求 `GITHUB_WEBHOOK_SECRET`。已有绑定继续工作。部署前，将第一个 Callback URL 设为此端点，并启用安装时 OAuth 授权。启用此选项后，GitHub 不再使用单独的 Setup URL。
 
-PR 卡片要显示 CI 状态与可合并性，还需要下面两个变量，Multica 用它们以 App 身份鉴权并拉取快照：
+新连接以及 PR 卡片的 CI 状态、可合并性还需要以下两个变量。Multica 用只读 metadata token 获取安装的完整仓库列表，并与操作者可管理的仓库列表核对：
 
 ```dotenv
 GITHUB_APP_ID=<GitHub App 的数字 ID>
 GITHUB_APP_PRIVATE_KEY=<完整 PEM 私钥，保留 BEGIN/END 行和换行>
 ```
 
-私钥在 GitHub App 的 **Private keys → Generate a private key** 中生成。不配置这两个变量时，PR 照常镜像，任务照常自动关联并在合并时改状态，只是 PR 卡片不显示 CI 或合并状态。
+私钥在 GitHub App 的 **Private keys → Generate a private key** 中生成。不配置这两个变量时，连接按钮会被禁用。已有绑定仍通过 webhook 镜像 PR、更新任务，但 PR 卡片不显示 CI 或合并状态。
 
 </Step>
 <Step>
@@ -207,7 +211,7 @@ make migrate-up
 
 ## 常见问题
 
-- **连接按钮不可用**：检查 `GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 是否已进入 API 进程。
+- **连接按钮不可用**：检查以上六个 GitHub 变量、第一个 Callback URL，以及 **Request user authorization (OAuth) during installation**。
 - **Webhook 返回 401**：确认 GitHub App 与 API 使用同一个 Webhook secret，然后在 GitHub 的 **Recent Deliveries** 中重新投递。
 - **PR 没有关联**：检查仓库是否在 App 授权范围内、自动关联是否开启、编号是否属于当前工作区，以及是否有人把它从任务上移除过。
 - **正文写了编号但没关联**：改用 `Closes MUL-123`，或把编号放到分支名、PR 标题中，或者手动关联。

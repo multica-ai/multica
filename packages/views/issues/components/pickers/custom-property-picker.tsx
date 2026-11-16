@@ -26,6 +26,7 @@ import { useLocale, useT } from "../../../i18n";
 import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
 import { PropertyPicker, PickerItem, PickerEmpty } from "./property-picker";
 import { ActorPropertyPicker, ActorPropertyDisplay } from "./actor-property-picker";
+import { paletteColor } from "@multica/core/appearance";
 
 const EDITABLE_PROPERTY_TYPES = [
   "select",
@@ -238,7 +239,7 @@ export function CustomPropertyValueInput({
                 setOpen(false);
               }}
             >
-              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />
+              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: paletteColor(option.color) }} />
               <span className="truncate">{option.name}</span>
             </PickerItem>
           ))}
@@ -274,7 +275,7 @@ export function CustomPropertyValueInput({
               disabled={atCapacity && !selected.includes(option.id)}
               onClick={() => toggle(option.id)}
             >
-              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />
+              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: paletteColor(option.color) }} />
               <span className="truncate">{option.name}</span>
             </PickerItem>
           ))}
@@ -688,7 +689,7 @@ export function CustomPropertyValueDisplay({
       }
       return (
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />
+          <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: paletteColor(option.color) }} />
           <span className="truncate">{option.name}</span>
         </span>
       );
@@ -710,7 +711,7 @@ export function CustomPropertyValueDisplay({
               key={option.id}
               className="inline-flex max-w-32 items-center gap-1 rounded-full border border-surface-border px-1.5 py-px text-micro"
             >
-              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: option.color }} />
+              <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: paletteColor(option.color) }} />
               <span className="truncate">{option.name}</span>
             </span>
           ))}

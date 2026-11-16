@@ -39,6 +39,12 @@ type InboxItemResponse struct {
 	ActorType         *string         `json:"actor_type"`
 	ActorID           *string         `json:"actor_id"`
 	Details           json.RawMessage `json:"details"`
+	// When the issue comes back from a snooze (MUL-9333). In the list it is
+	// always past: the issue came back on its own at that time.
+	SnoozedUntil *string `json:"snoozed_until,omitempty"`
+	// When that snooze began; the issue's rows written after it arrived
+	// while it was away.
+	SnoozedAt *string `json:"snoozed_at,omitempty"`
 }
 
 func inboxToResponse(i db.InboxItem) InboxItemResponse {
@@ -58,6 +64,8 @@ func inboxToResponse(i db.InboxItem) InboxItemResponse {
 		ActorType:     textToPtr(i.ActorType),
 		ActorID:       uuidToPtr(i.ActorID),
 		Details:       json.RawMessage(i.Details),
+		SnoozedUntil:  timestampToPtr(i.SnoozedUntil),
+		SnoozedAt:     timestampToPtr(i.SnoozedAt),
 	}
 }
 
@@ -141,6 +149,8 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		ActorType:         textToPtr(r.ActorType),
 		ActorID:           uuidToPtr(r.ActorID),
 		Details:           json.RawMessage(r.Details),
+		SnoozedUntil:      timestampToPtr(r.SnoozedUntil),
+		SnoozedAt:         timestampToPtr(r.SnoozedAt),
 	}
 }
 
@@ -318,6 +328,31 @@ func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 
 	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) DeleteInboxItem(w http.ResponseWriter, r *http.Request) {
+	item, ok := h.loadInboxItemForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+	if !h.requireIssueIDVisible(w, r, uuidToString(item.WorkspaceID), item.IssueID, http.StatusNotFound, "inbox item not found") {
+		return
+	}
+	count, err := h.Queries.DeleteInboxGroup(r.Context(), db.DeleteInboxGroupParams{
+		ID:          item.ID,
+		WorkspaceID: item.WorkspaceID,
+		RecipientID: item.RecipientID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete notification")
+		return
+	}
+	h.publish(protocol.EventInboxDeleted, uuidToString(item.WorkspaceID), "member", requestUserID(r), map[string]any{
+		"item_id":      uuidToString(item.ID),
+		"recipient_id": uuidToString(item.RecipientID),
+		"count":        count,
+	})
+	writeJSON(w, http.StatusOK, map[string]any{"count": count})
 }
 
 func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {

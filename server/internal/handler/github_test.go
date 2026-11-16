@@ -310,14 +310,18 @@ func TestGitHubStateDesktopAndLegacyLinks(t *testing.T) {
 		mac := hmac.New(sha256.New, []byte("test-secret-123"))
 		mac.Write([]byte(payload))
 		token := payload + "." + hex.EncodeToString(mac.Sum(nil))
-		if got, ok := verifyState(token); !ok || got != wsID {
-			t.Fatalf("legacy %s rejected", target)
+		if _, ok := verifyState(token); ok {
+			t.Fatalf("untimed legacy %s state accepted", target)
 		}
 	}
 }
 
 func TestGitHubConnectUsesUnifiedState(t *testing.T) {
 	t.Setenv("GITHUB_APP_SLUG", "multica-test")
+	t.Setenv("GITHUB_APP_ID", "11111")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "configured-key")
+	t.Setenv("GITHUB_APP_CLIENT_ID", "test-client")
+	t.Setenv("GITHUB_APP_CLIENT_SECRET", "test-client-secret")
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
 	wsID := "11111111-2222-3333-4444-555555555555"
 	for _, platform := range []string{"web", "legacy-desktop", "desktop"} {
@@ -354,27 +358,28 @@ func TestGitHubSetupCallbackReturnsToInitiatingClient(t *testing.T) {
 	t.Setenv("FRONTEND_ORIGIN", "https://app.multica.test")
 	t.Setenv("GITHUB_APP_ID", "")
 	t.Setenv("GITHUB_APP_PRIVATE_KEY", "")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	installationID := time.Now().UnixNano()
+	stubGitHubOwnership(t, func(w http.ResponseWriter, r *http.Request) {
+		if serveGitHubOwnership(t, w, r, installationID) {
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"account": map[string]any{"login": "example-org", "type": "Organization"}})
-	}))
-	t.Cleanup(srv.Close)
-	oldBase := githubAPIBase
-	githubAPIBase = srv.URL
-	t.Cleanup(func() { githubAPIBase = oldBase })
+	})
 	workspace, err := testHandler.Queries.GetWorkspace(context.Background(), parseUUID(testWorkspaceID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	installationID := time.Now().UnixNano()
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
 	})
 	for _, desktop := range []bool{false, true} {
+		// Each client must exercise a new OAuth-verified binding.
+		testPool.Exec(context.Background(), `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
 		state, err := signGitHubState(testWorkspaceID, desktop)
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/github/setup?installation_id=%d&state=%s", installationID, url.QueryEscape(state)), nil)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/github/setup?installation_id=%d&code=valid-code&state=%s", installationID, url.QueryEscape(state)), nil)
 		rec := httptest.NewRecorder()
 		testHandler.GitHubSetupCallback(rec, req)
 		if desktop {
@@ -1420,6 +1425,57 @@ func TestLinkIssuePullRequest_ByURL(t *testing.T) {
 	firePRWebhook(t, secret, installationID, 41, "Refactor session helper (renamed)", "", "refactor/session", "edited_merged")
 	if n := linkedPRCountForTest(t, created.ID); n != 1 {
 		t.Errorf("a manual link must survive webhook reconciliation, got %d rows", n)
+	}
+}
+
+// TestListIssuePullRequestSummaries: the workspace-wide read behind the issue
+// views' "Pull requests" display option returns each linked PR under its
+// issue, and drops a PR once it is unlinked.
+func TestListIssuePullRequestSummaries(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	secret := "pr-summaries-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+	const installationID int64 = 30264009
+	created := prAutoCompleteTestIssue(t, "pr summaries", installationID)
+
+	firePRWebhook(t, secret, installationID, 61, created.Identifier+": first", "", "fix/first", "opened")
+	firePRWebhook(t, secret, installationID, 62, created.Identifier+": second", "", "fix/second", "merged")
+
+	summaries := func() map[int32]IssuePullRequestSummaryResponse {
+		t.Helper()
+		req := newRequest("GET", "/api/issues/pull-requests?workspace_id="+testWorkspaceID, nil)
+		w := testutil.Call(t, testHandler.ListIssuePullRequestSummaries, req).Want(http.StatusOK)
+		var body struct {
+			PullRequests []IssuePullRequestSummaryResponse `json:"pull_requests"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+			t.Fatalf("decode summaries: %v", err)
+		}
+		out := map[int32]IssuePullRequestSummaryResponse{}
+		for _, pr := range body.PullRequests {
+			if pr.IssueID == created.ID {
+				out[pr.Number] = pr
+			}
+		}
+		return out
+	}
+
+	got := summaries()
+	if len(got) != 2 {
+		t.Fatalf("summaries for issue = %+v, want #61 and #62", got)
+	}
+	if pr := got[61]; pr.State != "open" || pr.Provider != "github" || pr.RepoName != "widget" || pr.HtmlURL == "" {
+		t.Errorf("#61 = %+v, want an open github PR on widget with a URL", pr)
+	}
+	if pr := got[62]; pr.State != "merged" {
+		t.Errorf("#62 state = %q, want merged", pr.State)
+	}
+
+	unlinkPRForTest(t, created.ID, githubPRIDForTest(t, "widget", 61))
+	if got := summaries(); len(got) != 1 || got[62].Number != 62 {
+		t.Errorf("after unlinking #61: summaries = %+v, want only #62", got)
 	}
 }
 
@@ -2812,13 +2868,12 @@ func TestSetupCallback_ConsumesPendingInstallationCreated(t *testing.T) {
 	// Force fetchInstallationAccount to take its degraded path. This pins that
 	// the final real account name comes from the earlier webhook, not the
 	// setup callback's synchronous GitHub API lookup.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	stubGitHubOwnership(t, func(w http.ResponseWriter, r *http.Request) {
+		if serveGitHubOwnership(t, w, r, installationID) {
+			return
+		}
 		http.Error(w, "auth required", http.StatusUnauthorized)
-	}))
-	t.Cleanup(srv.Close)
-	oldBase := githubAPIBase
-	githubAPIBase = srv.URL
-	t.Cleanup(func() { githubAPIBase = oldBase })
+	})
 
 	body, _ := json.Marshal(map[string]any{
 		"action": "created",
@@ -2858,7 +2913,7 @@ func TestSetupCallback_ConsumesPendingInstallationCreated(t *testing.T) {
 		t.Fatalf("signState: %v", err)
 	}
 	setupReq := httptest.NewRequest("GET",
-		fmt.Sprintf("/api/github/setup?installation_id=%d&state=%s", installationID, state),
+		fmt.Sprintf("/api/github/setup?installation_id=%d&code=valid-code&state=%s", installationID, state),
 		nil,
 	)
 	setupRec := httptest.NewRecorder()

@@ -145,6 +145,39 @@ multica issue comment add MUL-123 --content-file note.md --steer-active
 
 一个任务要依次提交多个 PR 时，用 `issue create --title "..." --pr-auto-complete off` 或 `issue update <id> --pr-auto-complete off`，让这个任务在 PR 合并后保持原状态。用 `--pr-auto-complete on` 恢复工作区规则，从下一次 PR 事件起生效。`issue pull-requests <id>` 会显示任务开关、工作区开关、目标状态和判断结果，没有关联 PR 时也会显示。支持该字段的服务端会在创建事务内保存开关；旧服务端会补调一次 PUT，失败时 CLI 会给出已创建的任务 ID 和重试用的 update 命令，请勿重复创建。
 
+### 批量更新
+
+把相同修改应用到多条任务，也可用 `--ids-stdin` 从标准输入逐行读取任务编号或 UUID：
+
+```bash
+multica issue batch update MUL-123 MUL-124 --priority high --add-label QA --dry-run
+multica issue batch update MUL-123 MUL-124 --priority high --add-label QA
+multica issue batch update MUL-123 MUL-124 --property "Severity=High" --unset-property Reviewer
+```
+
+`--add-label` 和 `--remove-label` 不影响其他标签；`--clear-labels` 会先清空标签，再执行添加。`--property` 设置属性，`--unset-property` 清空属性；多值属性会整体替换。也支持状态、负责人、项目、日期、父任务和阶段。加上 `--no-start` 可应用修改而不启动智能体运行。
+
+每条任务分别返回 `updated`、`unchanged` 或带原因的 `skipped`。只要有任务被跳过，命令就会在输出结果后以非零状态退出，已成功的修改仍然保留。修正后只重试被跳过的任务。`--dry-run` 只检查并预览拟议修改，不写入数据。
+
+### 删除任务
+
+删除一条任务，或传入多个任务编号、完整 UUID 批量删除：
+
+```bash
+multica issue delete MUL-123
+multica issue delete MUL-123 MUL-124 --yes --output json
+```
+
+删除无法撤销：评论和附件会被移除，进行中的运行会被取消，关联的自动化运行会被标记为失败，指向这些任务的重复标记会被清除；子任务会解除关联，但不会被删除。确认前会先解析所有 ID；遇到不存在或无权访问的任务时，命令会中止，不执行删除。
+
+命令会要求确认。`--yes` 跳过确认；不加此参数时，无法回答提示的非交互运行会报错退出，不删除任何任务。
+
+`--dry-run` 会检查拟删除的任务和删除权限，不写入数据，也不要求确认：
+
+```bash
+multica issue delete MUL-123 MUL-124 --dry-run --output json
+```
+
 ### 时间线
 
 `issue get` 给出任务现在的状态；`issue timeline` 按时间顺序列出状态、优先级、负责人、标题、日期的改动和运行结果，并混排评论，用来回答"什么时候进入 in_review""卡在当前状态多久了"：
@@ -265,7 +298,7 @@ multica runtime profile create --display-name "内部 Claude 封装" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` 为当前 profile 登记开机自启，平台差异见[开机自启](/daemon-runtimes#autostart)。`runtime usage` 默认统计 90 天，`--days` 最多 365。`runtime update` 让那台电脑上的守护进程把 CLI 更新到指定版本，`--wait` 会一直等到更新结束。`runtime profile create` 用 `--runtime-type` 指定兼容的工具（旧的 `--protocol-family` 仍可用）；固定参数目前只能在网页端填写。
+`daemon autostart` 为当前 profile 登记开机自启，平台差异见[开机自启](/daemon-runtimes#autostart)。`runtime usage` 默认统计 90 天，`--days` 最多 365。`runtime update` 让那台电脑上的守护进程把 CLI 更新到指定版本，`--wait` 等待更新结束；更新失败、更新超时或等待本身超时时，命令会以非零状态退出。`runtime profile create` 用 `--runtime-type` 指定兼容的工具（旧的 `--protocol-family` 仍可用）；固定参数目前只能在网页端填写。
 
 删除仍绑定活跃智能体的运行时时，命令默认拒绝。`multica runtime delete <id> --cascade` 会解绑这些智能体、保留其配置与历史记录，并取消它们的活动运行。
 
@@ -301,6 +334,36 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 - `--lead` 接受成员或智能体的名称。`--default-branch-hint` 只告诉智能体仓库的默认分支，不会切换分支。
 - 工作区的 `--context` 会提供给工作区里的每个智能体。`--slug` 创建后不能修改；`--issue-prefix` 会转成大写，修改它会给所有现有任务重新编号，外部引用里的旧编号随之失效。
 - `--issue-title-template` 只替换 `{{date}}`（UTC，`YYYY-MM-DD`），其他 `{{...}}` 会被拒绝。定时触发器的 `--timezone` 默认 UTC。
+
+### Webhook 事件过滤 [#webhook-event-filters]
+
+`autopilot trigger-add` 和 `trigger-update` 可以通过 `--event-filters-file` 配置 Webhook 触发器的事件和 action 过滤条件。将非空 JSON 数组保存为 `filters.json`：
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+这个示例接收 PR 评审提交和所有 push 事件。省略 `actions` 或使用空的 actions 数组，表示接收该事件的所有 action。
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-list <autopilot-id> --full-id
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+更新时，文件内容会替换整组过滤条件。不传这两个过滤参数就保留原值，修改标签或启停触发器时也一样。`autopilot get` 在顶层 `triggers` 数组中返回过滤条件。
+
+要删除全部过滤条件、恢复接收所有事件，使用仅限更新的参数：
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` 与 `--event-filters-file` 不能同时使用。顶层为 `null` 或空数组、包含未知字段、无效 JSON 或空白事件/action 名称的文件会被拒绝。这些参数只适用于 Webhook 触发器；创建时不传过滤文件则接收所有事件。事件匹配方式见[自动化](/autopilots#事件过滤)。
 
 ## 命令概览
 
@@ -382,12 +445,16 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `get <id>` | 查看单个任务 | `--resolve-properties`（仅 JSON；在保存的 id 旁附上属性、选项和成员名称） |
 | | `create` | 创建任务 | `--title`（必填）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（可重复）、`--property`（可重复）、`--allow-duplicate`（已有同名未关闭任务时仍创建） |
 | | `update <id>` | 更新任务字段 | 与 `create` 同类字段，另有 `--position`、`--no-start`、`--duplicate-of` |
+| | `batch update <id>...` | 对多条任务应用相同修改 | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
+| | `delete <id>...` | 永久删除一条或多条任务 | `--yes` 跳过确认；接受任务编号或完整 UUID; `--dry-run` |
 | | `assign <id>` | 指派或取消指派 | `--to`（名称模糊匹配成员、智能体或小队）、`--to-id`、`--unassign`、`--no-start` |
 | | `status <id> <status>` | 修改状态 | `--no-start`、`--duplicate-of` |
 | | `reorder <id>` | 在列内移动 | |
 | | `search <query>` | 搜索任务 | `--limit`、`--include-closed`、`--project` |
 | | `children <id>` | 按阶段分组列出子任务 | |
 | | `pull-requests <id>` | 列出关联的 PR | |
+| | `pull-requests link <id> <pr-url>` | 关联一个已同步、但标题和分支里没有任务编号的 PR | 也能恢复用 `unlink` 移除的 PR |
+| | `pull-requests unlink <id> <pr>` | 移除关联的 PR，之后不会再自动关联 | `<pr>` 可以是 PR 链接、编号或 id |
 | | `comment list/add/update/delete/resolve/unresolve` | 管理评论 | `add`：`--content` / `--content-stdin` / `--content-file`、`--parent`、`--attachment`；`update`：`--expected-revision`（必填）、`--content` / `--content-stdin` / `--content-file`；`list`：`--since`、`--thread`、`--tail`、`--recent`、`--roots-only`、`--summary`、`--compact`、`--full` |
 | | `timeline <id>` | 按时间列出活动记录和评论 | `--action`（可重复）、`--activity-only`、`--since`、`--tail` |
 | | `wakeup events/list/get/create/update/disable/trigger/delete/checkin/runs` | 管理任务唤醒，详见[任务唤醒](/issue-wakeups) | `create` / `update`：`--agent-id`、`--kind`（`event`、`at`、`every`、`cron`）、`--event`、`--at` / `--after`、`--every`、`--cron`、`--timezone`、`--until-*` 条件、`--expires-in` / `--expires-at`、`--instruction` / `--instruction-file`；`checkin`：`--note` |
@@ -400,16 +467,19 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `usage <issue-id>` | 查看聚合 token 用量 | |
 | | `rerun-task <run-id>` | 沿用原智能体和触发上下文，重跑指定运行 | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | 取消进行中或排队中的运行 | `--issue` |
-| `project` | `list/get/create/update/delete` | 管理项目 | `create`：`--title`（必填）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（可重复） |
+| `project` | `get/create/update/delete` | 管理项目 | `create`：`--title`（必填）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（可重复）、`--visibility`（`workspace` 或 `private`）、`--member`（可重复，配合 `--visibility private`）；`update`：`--visibility`、`--member`（项目正在改为私有或已经是私有时都会加入名单） |
+| | `list` | 列出和筛选项目 | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
 | | `status <id> <status>` | 修改项目状态 | |
+| | `archive/restore <id>` | 归档或恢复项目。已归档的项目不出现在 `list` 中、不再接受新任务，向它创建任务的自动化会被暂停 | `list --archived` 只列出已归档的项目 |
 | | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目录的 `in_place` / `worktree`） |
+| | `member list/add/remove` | 查看、添加或移除私有项目的成员。只有名单里的 `owner`/`admin` 和项目的访问管理者能添加或移除；智能体不能修改访问权限 | `add <project-id> <member>...`、`remove <project-id> <member>`；成员可以是名称、邮箱或用户 ID |
 | | `workflow get/set <project-id>` | 查看项目当前生效的工作流，或切换工作流 | `set <project-id> <workflow\|default>`：`--map old=new`（可重复），`--dry-run` 打印状态迁移计划；切换不会重新分配任务，也不会启动运行。仅管理员和项目负责人可操作 |
 | `workflow` | `list/get/create/update/delete` | 管理工作流；`get` 等命令接受 ID、ID 前缀、完整名称或 `default`。工作流声明的状态属于工作区状态目录，用 `issue-status` 修改 | `create` / `update`：`--name`、`--description`、`--steps-file`（步骤的 JSON 数组，整体替换）；`update`：`--map old=new`（可重复）、`--dry-run`。编辑和删除仅限工作流所有者和工作区管理员；仍被项目使用的工作流不能删除 |
 | | `handoff set <workflow> <status-key>` | 设置单个步骤的处理人、说明和下一步/退回状态，未指定的字段保持不变 | `--handler`（`none`、`project_lead`、`creator`，或成员/智能体/小队的名称或 UUID）、`--instructions` / `--instructions-file`、`--next`、`--back`、`--copy-for-project` |
 | `issue-status` | `list/get/create/update/archive` | 管理工作区状态目录，即所有工作流共用的状态。修改任务当前状态请用 `issue status` | `create`：`--name`、`--category`、`--color`、`--key`、`--icon`；`update`：`--name`、`--description`、`--color`、`--icon`（空值恢复为分类默认图标）、`--position`；`list`：`--include-archived`。变更需要工作区所有者或管理员权限 |
 | `label` | `list/get/create/update/delete` | 管理工作区标签 | `list`：`--resource-type`（`issue` 或 `skill`）、`--full-id`；`create`：`--name`、`--color`、`--resource-type`（`issue` 或 `skill`）、`--description` |
 | `property` | `list/get/create/update/archive/unarchive` | 管理工作区自定义属性 | `create`：`--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（可重复，仅 select 类型）；`list`：`--include-archived`；类型创建后不可修改 |
-| `view` | `list/get/issues` | 读取你能打开的视图（自己的和工作区共享的）；`issues` 按视图保存的排序列出视图里的任务，视图保存的全部筛选条件都由服务端执行。在智能体运行中，看到的视图和其中「我的」条件都属于运行时的所有者 | `<view>` 接受 ID、ID 前缀或完整名称；`list`：`--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`：`--limit`（最多 100）、`--cursor`（上一页的 `next_cursor`）、`--today`（相对到期日筛选按哪一天计算，默认今天）、`--fields`（仅 JSON）、`--full-id` |
+| `view` | `list/get/issues/create/update/duplicate/delete` | 读取你能打开的视图（自己的和工作区共享的）；`issues` 按视图保存的排序列出视图里的任务，视图保存的全部筛选条件都由服务端执行。`create`、`update`、`duplicate`、`delete` 按应用保存视图的同一格式写入，视图会出现在侧边栏并可继续在应用里编辑；`update` 只改传入的参数，视图在读取后被他人改过时拒绝覆盖。只有所有者（共享视图还包括工作区所有者和管理员）能修改或删除视图。在智能体运行中，看到的视图和其中「我的」条件都属于运行时的所有者 | `<view>` 接受 ID、ID 前缀或完整名称；`list`：`--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`：`--limit`（最多 100）、`--cursor`（上一页的 `next_cursor`）、`--today`（相对到期日筛选按哪一天计算，默认今天）、`--fields`（仅 JSON）、`--full-id`；`create`：`--name`、`--scope`、`--project`、`--scope-variant`、`--visibility`；`create/update/duplicate` 筛选：`--status`、`--priority`、`--assignee`、`--creator`、`--label`、`--project-filter`、`--property "Name=Value"`、`--negate <filter>` 等；显示：`--view-mode`、`--grouping`、`--sort`、`--direction`、`--show-sub-issues` 等；`--definition-file`、`--clear-filters`、`--dry-run` |
 | `agent` | `list/get/create/update/archive/restore` | 管理智能体 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--custom-env` / `--custom-env-file` / `--custom-env-stdin`（仅 `create`）、`--custom-args`、`--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`、`--permission-mode`、`--visibility`（旧写法）、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 复制为新智能体，原智能体不受影响 | `--name`（默认为原名加 ` (copy)`）、`--runtime-id`（复制到其他运行时时必须同时指定 `--model`）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` 等机密配置不会复制，需用与 `create` 相同的 flag 重新提供 |
 | | `tasks <id>` | 查看智能体的运行 | |

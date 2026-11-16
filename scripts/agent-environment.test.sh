@@ -129,6 +129,29 @@ wait "$second" || fail "stop desktop failed"
 [ "$(count "down web")" = 1 ] && [ "$(count "down desktop")" = 1 ] || fail "concurrent stops did not stop both components"
 [ "$(count destroy)" = 1 ] || fail "concurrent stops destroyed $(count destroy) times, want once"
 
+# ...even where mkdir is not exclusive. uutils mkdir (Ubuntu 26.04) can tell
+# two simultaneous callers that each created the same directory; this one
+# tells every caller so.
+new_repo concurrent-mkdir
+touch "$repo/registered"
+live_claim web
+live_claim desktop
+mkdir -p "$repo/bin"
+cat > "$repo/bin/mkdir" <<'EOF'
+#!/usr/bin/env bash
+args=()
+for arg in "$@"; do [ "$arg" = -p ] || args+=("$arg"); done
+exec "$REAL_MKDIR" -p "${args[@]}"
+EOF
+chmod +x "$repo/bin/mkdir"
+PATH="$repo/bin:$PATH" REAL_MKDIR="$(command -v mkdir)" bash "$repo/scripts/agent-environment.sh" stop web > /dev/null &
+first=$!
+PATH="$repo/bin:$PATH" REAL_MKDIR="$(command -v mkdir)" bash "$repo/scripts/agent-environment.sh" stop desktop > /dev/null &
+second=$!
+wait "$first" || fail "stop web failed with a non-exclusive mkdir"
+wait "$second" || fail "stop desktop failed with a non-exclusive mkdir"
+[ "$(count destroy)" = 1 ] || fail "with a non-exclusive mkdir, concurrent stops destroyed $(count destroy) times, want once"
+
 # 4. The daemon signals start after running stop. start's own cleanup then
 #    finds nothing left to do.
 new_repo signalled
@@ -191,5 +214,113 @@ serve_component
 start_in_background web
 grep -q -- "--ttl 25" "$repo/calls.log" || fail "start did not give a new environment its TTL"
 stop_job "$start_pid"
+
+# 9. Both stops observed the same dead lock holder. Delay the second reaper
+# until the first owns a new lock: stale observations must not remove that
+# new lock and let both callers destroy the environment.
+new_repo stale-lock
+touch "$repo/registered"
+live_claim web
+live_claim desktop
+mkdir -p "$repo/.multica/agent-environments/lock.d" "$repo/bin"
+printf '%s\n' "$dead" > "$repo/.multica/agent-environments/lock.d/pid"
+cp "$repo/.multica/agent-environments/lock.d/pid" "$repo/stale-pid"
+real_cat="$(command -v cat)"
+real_rm="$(command -v rm)"
+cat > "$repo/bin/cat" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+if [ "$1" = "$RACE_REPO/.multica/agent-environments/lock.d/pid" ] && [ ! -f "$RACE_REPO/$RACE_COMPONENT.observed" ]; then
+  touch "$RACE_REPO/$RACE_COMPONENT.observed"
+  for i in $(seq 1 300); do
+    [ ! -f "$RACE_REPO/web.observed" ] || [ ! -f "$RACE_REPO/desktop.observed" ] || break
+    sleep 0.01
+  done
+  exec "$REAL_CAT" "$RACE_REPO/stale-pid"
+fi
+exec "$REAL_CAT" "$@"
+EOF
+cat > "$repo/bin/rm" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+if [ "$RACE_COMPONENT" = desktop ] && [ ! -f "$RACE_REPO/desktop.reaping" ]; then
+  case "$*" in
+    *agent-environments/lock.d*)
+      touch "$RACE_REPO/desktop.reaping"
+      for i in $(seq 1 300); do
+        [ ! -f "$RACE_REPO/web.down" ] || break
+        sleep 0.01
+      done
+      [ -f "$RACE_REPO/web.down" ] || { echo 'first stop never acquired its lock' >&2; exit 1; }
+      result=0
+      "$REAL_RM" "$@" || result=$?
+      touch "$RACE_REPO/desktop.reaped"
+      exit "$result" ;;
+  esac
+fi
+exec "$REAL_RM" "$@"
+EOF
+chmod +x "$repo/bin/cat" "$repo/bin/rm"
+# Keep the first lock holder in down until the stale reap actually finishes.
+mv "$repo/scripts/dev-env.sh" "$repo/scripts/dev-env.original"
+cat > "$repo/scripts/dev-env.sh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+if [ "$1" = down ]; then
+  touch "$RACE_REPO/$3.down"
+  if [ "$3" = web ]; then
+    for i in $(seq 1 300); do
+      [ ! -f "$RACE_REPO/desktop.reaped" ] || break
+      sleep 0.01
+    done
+    [ -f "$RACE_REPO/desktop.reaped" ] || { echo 'second stale reap never finished' >&2; exit 1; }
+  fi
+fi
+exec bash "$(dirname "$0")/dev-env.original" "$@"
+EOF
+PATH="$repo/bin:$PATH" RACE_REPO="$repo" RACE_COMPONENT=web REAL_CAT="$real_cat" REAL_RM="$real_rm" \
+  bash "$repo/scripts/agent-environment.sh" stop web > /dev/null &
+first=$!
+PATH="$repo/bin:$PATH" RACE_REPO="$repo" RACE_COMPONENT=desktop REAL_CAT="$real_cat" REAL_RM="$real_rm" \
+  bash "$repo/scripts/agent-environment.sh" stop desktop > /dev/null &
+second=$!
+wait "$first" || fail "first stale-lock stop failed"
+wait "$second" || fail "second stale-lock stop failed"
+[ "$(count destroy)" = 1 ] || fail "stale lock observations destroyed $(count destroy) times, want once"
+
+# The PID-specific format can also be reclaimed after a killed holder.
+new_repo stale-owner
+touch "$repo/registered"
+mkdir -p "$repo/.multica/agent-environments/lock.d"
+touch "$repo/.multica/agent-environments/lock.d/owner-$dead"
+bash "$repo/scripts/agent-environment.sh" stop web > /dev/null
+[ "$(count destroy)" = 1 ] || fail "a dead PID-specific lock prevented cleanup"
+
+# 10. A `start` from before the checkout was updated keeps running the script
+# it loaded, and its cleanup locks the way that version did: lock.d with only
+# its owner marker. A stop from the updated script waits for it.
+new_repo mixed-version
+touch "$repo/registered"
+lock_dir="$repo/.multica/agent-environments/lock.d"
+mkdir -p "$lock_dir"
+sleep 300 &
+old_holder=$!
+pids+=("$old_holder")
+touch "$lock_dir/owner-$old_holder"
+mv "$repo/scripts/dev-env.sh" "$repo/scripts/dev-env.original"
+cat > "$repo/scripts/dev-env.sh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+[ ! -e "$RACE_LOCK/owner-$RACE_HOLDER" ] || touch "$RACE_LOCK/../entered-while-held"
+exec bash "$(dirname "$0")/dev-env.original" "$@"
+EOF
+RACE_LOCK="$lock_dir" RACE_HOLDER="$old_holder" bash "$repo/scripts/agent-environment.sh" stop desktop > /dev/null &
+stopping=$!
+sleep 1
+[ ! -e "$repo/.multica/agent-environments/entered-while-held" ] || fail "a stop entered beside an earlier version's lock holder"
+rm "$lock_dir/owner-$old_holder" && rmdir "$lock_dir"
+stop_job "$old_holder"
+wait "$stopping" || fail "stop behind an earlier version's lock failed"
+[ "$(count "down desktop")" = 1 ] && [ "$(count destroy)" = 1 ] || fail "stop did not clean up once the earlier version released its lock"
 
 echo "✓ agent-environment.sh lifecycle verified"

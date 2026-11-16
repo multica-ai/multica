@@ -16,9 +16,26 @@
     "scripts/ci-scope.mjs",
     "scripts/ci-scope.test.mjs"
   ],
+  "docs": [
+    "apps/docs/**",
+    "package.json",
+    ".npmrc",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "patches/**",
+    ".github/workflows/ci.yml",
+    ".github/ci-paths.json",
+    "scripts/ci-scope.mjs",
+    "scripts/ci-scope.test.mjs"
+  ],
   "backend": [
     "server/**",
     "packages/core/runtimes/cli-version.ts",
+    "packages/core/types/inbox.ts",
+    ".multica/environments.toml",
+    "examples/plugins/**",
+    ".env.example",
+    "docker-compose.selfhost.yml",
     "scripts/agent-cli-command-names.txt",
     "scripts/go-test-with-agent-cli-guard.sh",
     "scripts/test-go.sh",
@@ -52,6 +69,13 @@
     "server/cmd/**",
     "server/go.mod",
     "server/go.sum",
+    ".github/ci-paths.json",
+    "scripts/ci-scope.mjs",
+    "scripts/ci-scope.test.mjs"
+  ],
+  "processtree": [
+    "server/internal/daemon/processtree/**",
+    ".github/workflows/ci.yml",
     ".github/ci-paths.json",
     "scripts/ci-scope.mjs",
     "scripts/ci-scope.test.mjs"
