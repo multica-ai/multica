@@ -6,12 +6,14 @@ import {
   AlarmClock,
   AppWindow,
   Archive,
+  ArrowUp,
   Bot,
   Check,
   ChevronDown,
   Clock,
   Ellipsis,
   Laptop,
+  Paperclip,
   Plus,
   Quote,
   RotateCw,
@@ -392,7 +394,56 @@ function SnoozeArt() {
   );
 }
 
+/* ── Desktop voice input: hold the mic in a comment box and talk ───── */
+
+/** A frozen take of the recorder's waveform; 0 is a silent dot. */
+const VOICE_LEVELS = [0, 0, 0.3, 0.6, 0.9, 0.5, 0.75, 1, 0.65, 0.35, 0, 0.45, 0.8, 0.55, 0.95, 0.7, 0.4];
+
+function VoiceArt() {
+  const { t } = useT("editor");
+  const { t: tIssues } = useT("issues");
+  return (
+    <div className="absolute top-[5.75rem] left-6 w-[20.5rem]">
+      <div className="absolute bottom-full left-1/2 z-10 mb-3 flex h-10 -translate-x-1/2 items-center gap-2.5 whitespace-nowrap rounded-full bg-multica-ink pr-4 pl-3.5 text-multica-paper shadow-[var(--floating-shadow)]">
+        <span className="size-2 shrink-0 rounded-full bg-[#ff5a52]" />
+        <span className="flex h-5 items-center gap-[2px]">
+          {VOICE_LEVELS.map((level, i) => (
+            <span
+              key={i}
+              className={cn("w-[2.5px] rounded-full bg-current", level === 0 && "opacity-40")}
+              style={{ height: level === 0 ? 2.5 : 2.5 + 17.5 * level }}
+            />
+          ))}
+        </span>
+        <span className="text-caption tabular-nums opacity-70">0:07</span>
+        <span className="text-caption opacity-70">{t(($) => $.voice.release_to_insert)}</span>
+      </div>
+      <Surface className="relative">
+        <div className="px-3 py-2 text-body text-muted-foreground">
+          {tIssues(($) => $.comment.leave_comment_placeholder)}
+        </div>
+        <div className="flex h-9 items-center justify-end gap-1 px-2 pb-1 text-muted-foreground">
+          <span className="grid size-7 place-items-center">
+            <Paperclip className="size-4" />
+          </span>
+          <span className="grid size-7 place-items-center rounded-md bg-brand/10 text-brand">
+            <span className="flex h-3.5 items-center gap-[2px]">
+              {[0.7, 1, 0.8].map((h) => (
+                <span key={h} className="w-[3px] rounded-full bg-current" style={{ height: `${h * 100}%` }} />
+              ))}
+            </span>
+          </span>
+          <span className="grid size-7 place-items-center rounded-full bg-muted text-faint-foreground">
+            <ArrowUp className="size-4" />
+          </span>
+        </div>
+      </Surface>
+    </div>
+  );
+}
+
 export const THEMES_HERO: WhatsNewHero = { ground: "orange", Art: ThemesArt };
 export const ENVIRONMENTS_HERO: WhatsNewHero = { ground: "ice", Art: EnvironmentsArt };
 export const ANNOTATIONS_HERO: WhatsNewHero = { ground: "lime", Art: AnnotationsArt };
 export const SNOOZE_HERO: WhatsNewHero = { ground: "brand", Art: SnoozeArt };
+export const VOICE_HERO: WhatsNewHero = { ground: "orange", Art: VoiceArt };
