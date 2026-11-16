@@ -155,11 +155,19 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			text := issueCreatedText(res, r.appURL)
 			if res.IssueDuplicate {
 				text = issueDuplicateText(res, r.appURL)
+			} else if res.IssueChatSubscribed {
+				text += "\n\n" + engine.IssueChatSubscribedNote(res)
 			}
 			if err := r.post(ctx, inst, msg, text); err != nil {
 				r.logger.WarnContext(ctx, "dingtalk replier: issue outcome reply failed",
 					"installation_id", util.UUIDToString(inst.ID), "error", err)
 			}
+		}
+	case engine.OutcomeIssueSubscription:
+		text := engine.SubscriptionReplyText(res, r.appURL, channel.BreakMarkdownLinkAdjacency)
+		if err := r.post(ctx, inst, msg, text); err != nil {
+			r.logger.WarnContext(ctx, "dingtalk replier: issue subscription reply failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeDropped:
 		// Dropped /issue commands get a refusal so the sender is not left
@@ -339,4 +347,19 @@ func issueResultIdentifier(res engine.Result) string {
 		return fmt.Sprintf("#%d", res.IssueNumber)
 	}
 	return util.UUIDToString(res.IssueID)
+}
+
+var _ engine.ChatPoster = (*OutboundReplier)(nil)
+
+// PostToChat delivers a chat issue subscription update into a group
+// conversation. DingTalk has no threads, so only the chat id is used.
+func (r *OutboundReplier) PostToChat(ctx context.Context, row db.ChannelInstallation, target engine.ChatTarget, text string) error {
+	inst := engine.ResolvedInstallation{ID: row.ID, Platform: row}
+	// The update quotes member-authored titles and comments into markdown.
+	if _, err := sendInstallationText(ctx, r.client, r.decrypt, inst, sendTarget{
+		ConversationType: convTypeGroup, ConversationID: target.ChatID,
+	}, channel.BreakMarkdownLinkAdjacency(text)); err != nil {
+		return fmt.Errorf("post dingtalk issue update: %w", err)
+	}
+	return nil
 }

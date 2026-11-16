@@ -180,6 +180,11 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			r.logger.WarnContext(ctx, "wecom replier: issue usage reply failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
+	case engine.OutcomeIssueSubscription:
+		if err := r.post(ctx, inst, msg, c.SubscriptionUnsupported); err != nil {
+			r.logger.WarnContext(ctx, "wecom replier: issue subscription reply failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	case engine.OutcomeInvokeDenied:
 		if err := r.sendInvokeDenied(ctx, inst, msg, c); err != nil {
 			r.logger.WarnContext(ctx, "wecom replier: invoke-denied notice failed",

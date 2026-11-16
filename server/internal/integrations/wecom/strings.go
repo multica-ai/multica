@@ -135,6 +135,9 @@ type copyPack struct {
 	FreshPending string
 	ChatStarted  string
 	IssueUsage   string
+	// SubscriptionUnsupported answers /subscribe and /unsubscribe: WeCom
+	// does not post issue updates into chats.
+	SubscriptionUnsupported string
 
 	// InvokeDenied answers a member who may not run this agent (a private
 	// agent belongs to its owner alone). It always goes to that member alone —
@@ -389,17 +392,18 @@ type progressCopy struct {
 
 var copyPacks = map[Locale]copyPack{
 	LocaleZhHans: {
-		AgentOffline:         "⚠️ 智能体当前不在线，你的消息已收到，等它上线后会处理。",
-		AgentArchived:        "⚠️ 该智能体已归档，无法回复。请联系工作区管理员。",
-		FreshPending:         "✅ 已准备从空上下文运行。你的下一条聊天消息仍会进入当前对话，但不会带上之前的上下文。",
-		ChatStarted:          "✅ 已新建 Multica 对话。你的下一条消息会进入该对话。",
-		IssueUsage:           "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）",
-		InvokeDenied:         "⚠️ 你没有权限运行该智能体。如需使用，请联系它的所有者。",
-		BindingPromptPrefix:  "👋 请先绑定你的 Multica 账号，才能与我对话：\n",
-		BindingPromptSuffix:  "\n（链接 15 分钟内有效）",
-		BindingPending:       "👋 绑定链接刚才已经发给你了，就在上方，请直接点击完成绑定。",
-		BindingSentPrivately: "👋 已把绑定链接私发给你，请在与我的单聊里点击完成绑定。",
-		MessageMeFirst:       "👋 请先私信我一句，我在那里回复你。",
+		AgentOffline:            "⚠️ 智能体当前不在线，你的消息已收到，等它上线后会处理。",
+		AgentArchived:           "⚠️ 该智能体已归档，无法回复。请联系工作区管理员。",
+		FreshPending:            "✅ 已准备从空上下文运行。你的下一条聊天消息仍会进入当前对话，但不会带上之前的上下文。",
+		ChatStarted:             "✅ 已新建 Multica 对话。你的下一条消息会进入该对话。",
+		IssueUsage:              "请填写任务标题，格式如下：\n\n`/issue <标题>`\n`[描述]`（可选）",
+		SubscriptionUnsupported: "企业微信暂不支持在群聊中订阅任务更新。",
+		InvokeDenied:            "⚠️ 你没有权限运行该智能体。如需使用，请联系它的所有者。",
+		BindingPromptPrefix:     "👋 请先绑定你的 Multica 账号，才能与我对话：\n",
+		BindingPromptSuffix:     "\n（链接 15 分钟内有效）",
+		BindingPending:          "👋 绑定链接刚才已经发给你了，就在上方，请直接点击完成绑定。",
+		BindingSentPrivately:    "👋 已把绑定链接私发给你，请在与我的单聊里点击完成绑定。",
+		MessageMeFirst:          "👋 请先私信我一句，我在那里回复你。",
 
 		IssueCreatedPrefix:   "✅ 已创建 ",
 		IssueTitleSeparator:  " — ",
@@ -469,17 +473,18 @@ var copyPacks = map[Locale]copyPack{
 		InboxTypeFallback: "新消息",
 	},
 	LocaleEn: {
-		AgentOffline:         "⚠️ The agent is offline right now. Your message was received and will be handled once it's back.",
-		AgentArchived:        "⚠️ This agent has been archived and can't reply. Please contact your workspace admin.",
-		FreshPending:         "✅ Fresh start ready. Your next message stays in this chat but runs without the earlier context.",
-		ChatStarted:          "✅ Started a new Multica chat. Your next message will enter it.",
-		IssueUsage:           "Please include an issue title. Use:\n\n`/issue <title>`\n`[description]` (optional)",
-		InvokeDenied:         "⚠️ You don't have permission to run this agent. Ask its owner if you need to use it.",
-		BindingPromptPrefix:  "👋 Link your Multica account before we can talk:\n",
-		BindingPromptSuffix:  "\n(the link is good for 15 minutes)",
-		BindingPending:       "👋 I already sent you a link — it is just above, tap it to finish linking.",
-		BindingSentPrivately: "👋 I've sent the link to your direct chat with me — tap it there to finish linking.",
-		MessageMeFirst:       "👋 Send me a direct message first, and I'll reply there.",
+		AgentOffline:            "⚠️ The agent is offline right now. Your message was received and will be handled once it's back.",
+		AgentArchived:           "⚠️ This agent has been archived and can't reply. Please contact your workspace admin.",
+		FreshPending:            "✅ Fresh start ready. Your next message stays in this chat but runs without the earlier context.",
+		ChatStarted:             "✅ Started a new Multica chat. Your next message will enter it.",
+		IssueUsage:              "Please include an issue title. Use:\n\n`/issue <title>`\n`[description]` (optional)",
+		SubscriptionUnsupported: "Issue subscriptions aren't available in WeCom chats yet.",
+		InvokeDenied:            "⚠️ You don't have permission to run this agent. Ask its owner if you need to use it.",
+		BindingPromptPrefix:     "👋 Link your Multica account before we can talk:\n",
+		BindingPromptSuffix:     "\n(the link is good for 15 minutes)",
+		BindingPending:          "👋 I already sent you a link — it is just above, tap it to finish linking.",
+		BindingSentPrivately:    "👋 I've sent the link to your direct chat with me — tap it there to finish linking.",
+		MessageMeFirst:          "👋 Send me a direct message first, and I'll reply there.",
 
 		IssueCreatedPrefix:   "✅ Created ",
 		IssueTitleSeparator:  " — ",

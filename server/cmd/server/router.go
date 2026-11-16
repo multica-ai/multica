@@ -545,12 +545,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// is the single shared inbound handler injected into every Channel.
 	channelRegistry := channel.NewRegistry()
 	channelRouter := engine.NewRouter(h.IssueService, h.TaskService, queries, engine.RouterConfig{
-		Logger: slog.Default(), Lifecycle: h,
+		Logger: slog.Default(), Lifecycle: h, Subscriptions: queries,
 	})
 	// Debounce the per-session run trigger so a burst of messages collapses
 	// into one agent run instead of one per message (MUL-2968).
 	channelRouter.EnableRunBatching(engine.DefaultChatRunBatchWindow)
 	h.ChannelRouter = channelRouter
+	registerChannelIssueFeedListeners(bus, queries, channelRouter, appURLFromEnv())
 	// Media intent-ledger reconciler: settles uploaded-but-unbound objects.
 	// Built ONLY when a storage backend exists — store is nil when S3 is not
 	// configured and the local upload dir failed to initialize, and a
@@ -697,9 +698,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Logger:      slog.Default(),
 				})
 				mediaResolver := lark.NewFeishuMediaResolver(larkClient, installSvc, store, engine.NewDBMediaIntentLedger(queries), slog.Default())
-				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
+				feishuSet := lark.NewFeishuResolverSet(
 					cs, feishuSession, auditLogger, resolverReplier, typingIndicator, mediaResolver,
-				))
+				)
+				if larkClient.IsConfigured() {
+					feishuSet.Poster = lark.NewChatPoster(larkClient, installSvc, slog.Default())
+				}
+				channelRouter.Register(channel.TypeFeishu, feishuSet)
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
 
 				// One-shot union_id backfill for installations created
@@ -844,7 +849,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					slog.Default(),
 				)
 			}
-			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping, slackMedia))
+			slackSet := slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping, slackMedia)
+			slackSet.Poster = slack.NewChatPoster(box.Open, slog.Default())
+			channelRouter.Register(slack.TypeSlack, slackSet)
 			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)
 
 			// On-demand history reader behind the unified `multica chat history`
@@ -916,7 +923,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				)
 			}
 			botNames := dingtalk.NewBotNameResolver(dingtalkClient, box.Open)
-			channelRouter.Register(dingtalk.TypeDingTalk, dingtalk.NewDingTalkResolverSet(queries, pool, replier, ack, media, botNames))
+			dingtalkSet := dingtalk.NewDingTalkResolverSet(queries, pool, replier, ack, media, botNames)
+			dingtalkSet.Poster = replier
+			channelRouter.Register(dingtalk.TypeDingTalk, dingtalkSet)
 			dingtalk.NewOutbound(queries, box.Open, dingtalkClient, ack, slog.Default()).Register(bus)
 			dingtalk.RegisterDingTalk(channelRegistry, dingtalk.ChannelDeps{
 				Decrypt:  box.Open,
@@ -1316,7 +1325,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				telegramOutbound.EnableFileDelivery(store)
 				h.DeclareChannelFileDelivery(string(telegram.TypeTelegram))
 			}
-			channelRouter.Register(telegram.TypeTelegram, telegram.NewTelegramResolverSet(queries, pool, telegramReplier, telegramTyping, telegramMedia))
+			telegramSet := telegram.NewTelegramResolverSet(queries, pool, telegramReplier, telegramTyping, telegramMedia)
+			telegramSet.Poster = telegramReplier
+			channelRouter.Register(telegram.TypeTelegram, telegramSet)
 			telegramOutbound.Register(bus)
 			h.TelegramOutbound = telegramOutbound
 

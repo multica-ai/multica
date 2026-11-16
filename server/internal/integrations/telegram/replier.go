@@ -132,11 +132,18 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			text := issueCreatedText(res)
 			if res.IssueDuplicate {
 				text = issueDuplicateText(res)
+			} else if res.IssueChatSubscribed {
+				text += "\n" + engine.IssueChatSubscribedNote(res)
 			}
 			if err := r.post(ctx, inst, msg, text); err != nil {
 				r.logger.WarnContext(ctx, "telegram replier: issue outcome reply failed",
 					"installation_id", util.UUIDToString(inst.ID), "error", err)
 			}
+		}
+	case engine.OutcomeIssueSubscription:
+		if err := r.post(ctx, inst, msg, engine.SubscriptionReplyText(res, r.appURL, nil)); err != nil {
+			r.logger.WarnContext(ctx, "telegram replier: issue subscription reply failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeDropped:
 		if text := droppedReplyText(res, msg); text != "" {
@@ -264,4 +271,31 @@ func droppedReplyText(res engine.Result, msg channel.InboundMessage) string {
 	default:
 		return ""
 	}
+}
+
+var _ engine.ChatPoster = (*OutboundReplier)(nil)
+
+// PostToChat delivers a chat issue subscription update as plain text, into
+// the forum topic the subscription was made in when there is one.
+func (r *OutboundReplier) PostToChat(ctx context.Context, row db.ChannelInstallation, target engine.ChatTarget, text string) error {
+	creds, err := decodeCredentials(row.Config, r.decrypt)
+	if err != nil {
+		return fmt.Errorf("decode credentials: %w", err)
+	}
+	chatID, err := strconv.ParseInt(target.ChatID, 10, 64)
+	if err != nil {
+		return fmt.Errorf("bad chat id %q: %w", target.ChatID, err)
+	}
+	var threadID int64
+	if target.ThreadID != "" {
+		threadID, _ = strconv.ParseInt(target.ThreadID, 10, 64)
+	}
+	if _, err := newBotAPI(r.apiBase, creds.BotToken, r.client).SendMessage(ctx, sendMessageParams{
+		ChatID:          chatID,
+		Text:            text,
+		MessageThreadID: threadID,
+	}); err != nil {
+		return fmt.Errorf("post telegram issue update: %w", err)
+	}
+	return nil
 }

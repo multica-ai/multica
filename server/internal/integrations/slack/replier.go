@@ -148,11 +148,19 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			text := issueCreatedText(res)
 			if res.IssueDuplicate {
 				text = issueDuplicateText(res)
+			} else if res.IssueChatSubscribed {
+				text += "\n" + engine.IssueChatSubscribedNote(res)
 			}
 			if err := r.postResult(ctx, inst, msg, res, text); err != nil {
 				r.logger.WarnContext(ctx, "slack replier: issue outcome reply failed",
 					"installation_id", util.UUIDToString(inst.ID), "error", err)
 			}
+		}
+	case engine.OutcomeIssueSubscription:
+		text := engine.SubscriptionReplyText(res, r.appURL, memberIssueTitle)
+		if err := r.postResult(ctx, inst, msg, res, text); err != nil {
+			r.logger.WarnContext(ctx, "slack replier: issue subscription reply failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	}
 }

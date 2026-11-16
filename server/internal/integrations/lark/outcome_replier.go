@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -219,8 +220,30 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 				)
 			}
 		}
+	case OutcomeIssueSubscription:
+		text := engine.SubscriptionReplyText(engineSubscriptionResult(res), r.appURL, nil)
+		if err := r.sendReplyText(ctx, inst, msg, text); err != nil {
+			r.log.Warn("lark outcome replier: issue subscription reply failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
+		}
 	case OutcomeDropped:
 		// OutcomeDropped is informational; no user-visible reply.
+	}
+}
+
+func engineSubscriptionResult(res DispatchResult) engine.Result {
+	return engine.Result{
+		IssueID:            res.IssueID,
+		IssueNumber:        res.IssueNumber,
+		IssueIdentifier:    res.IssueIdentifier,
+		IssueWorkspaceSlug: res.IssueWorkspaceSlug,
+		IssueTitle:         res.IssueTitle,
+		SubscriptionAction: res.SubscriptionAction,
+		SubscriptionKind:   res.SubscriptionKind,
+		SubscriptionRef:    res.SubscriptionRef,
 	}
 }
 
@@ -263,16 +286,23 @@ func isBindingPromptUnavailable(err error) bool {
 // sendIssueOutcome posts either the created confirmation or active-duplicate
 // conflict as plain text, with a link to the relevant issue when configured.
 func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
+	text := issueCreatedText(res, r.appURL)
+	if res.IssueDuplicate {
+		text = issueDuplicateText(res, r.appURL)
+	} else if res.IssueChatSubscribed {
+		text += "\n" + engine.IssueChatSubscribedNote(engineSubscriptionResult(res))
+	}
+	return r.sendReplyText(ctx, inst, msg, text)
+}
+
+// sendReplyText posts plain text back to the triggering message's chat.
+func (r *LarkOutcomeReplier) sendReplyText(ctx context.Context, inst Installation, msg InboundMessage, text string) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
 	}
 	creds, err := r.installationCredentials(inst)
 	if err != nil {
 		return err
-	}
-	text := issueCreatedText(res, r.appURL)
-	if res.IssueDuplicate {
-		text = issueDuplicateText(res, r.appURL)
 	}
 	// Share the Patcher's classified fallback: a thread reply that
 	// fails because the topic cannot receive it (recalled trigger,

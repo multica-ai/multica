@@ -301,18 +301,22 @@ func (r *feishuOutboundReplier) Reply(ctx context.Context, inst engine.ResolvedI
 // the OutcomeReplier consumes. The Outcome/DropReason string values match 1:1.
 func dispatchResultFromEngine(res engine.Result) DispatchResult {
 	return DispatchResult{
-		Outcome:            Outcome(string(res.Outcome)),
-		DropReason:         DropReason(string(res.DropReason)),
-		InstallationID:     res.InstallationID,
-		ChatSessionID:      res.ChatSessionID,
-		SenderOpenID:       OpenID(res.Sender),
-		IssueID:            res.IssueID,
-		IssueNumber:        res.IssueNumber,
-		IssueIdentifier:    res.IssueIdentifier,
-		IssueWorkspaceSlug: res.IssueWorkspaceSlug,
-		IssueTitle:         res.IssueTitle,
-		IssueDuplicate:     res.IssueDuplicate,
-		IssueUsageHadMedia: res.IssueUsageHadMedia,
+		Outcome:             Outcome(string(res.Outcome)),
+		DropReason:          DropReason(string(res.DropReason)),
+		InstallationID:      res.InstallationID,
+		ChatSessionID:       res.ChatSessionID,
+		SenderOpenID:        OpenID(res.Sender),
+		IssueID:             res.IssueID,
+		IssueNumber:         res.IssueNumber,
+		IssueIdentifier:     res.IssueIdentifier,
+		IssueWorkspaceSlug:  res.IssueWorkspaceSlug,
+		IssueTitle:          res.IssueTitle,
+		IssueDuplicate:      res.IssueDuplicate,
+		IssueUsageHadMedia:  res.IssueUsageHadMedia,
+		IssueChatSubscribed: res.IssueChatSubscribed,
+		SubscriptionAction:  res.SubscriptionAction,
+		SubscriptionKind:    res.SubscriptionKind,
+		SubscriptionRef:     res.SubscriptionRef,
 	}
 }
 
