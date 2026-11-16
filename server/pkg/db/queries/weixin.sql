@@ -9,7 +9,7 @@ WHERE id = $1 AND workspace_id = $2 AND initiator_user_id = $3;
 -- name: LockWeixinLoginSession :one
 SELECT * FROM weixin_login_session
 WHERE id = $1 AND lease_token = $2 AND expires_at > now()
-  AND status IN ('wait', 'scaned', 'need_verifycode', 'scaned_but_redirect')
+  AND (status IN ('wait', 'scaned', 'scaned_but_redirect') OR strpos(status, 'need_verifycode') > 0)
 FOR UPDATE;
 
 -- name: ClaimWeixinLoginSession :one
@@ -17,7 +17,7 @@ UPDATE weixin_login_session
 SET lease_token = sqlc.arg(lease_token), lease_expires_at = now() + interval '50 seconds'
 WHERE id = sqlc.arg(id) AND workspace_id = sqlc.arg(workspace_id)
   AND initiator_user_id = sqlc.arg(initiator_user_id) AND expires_at > now()
-  AND status IN ('wait', 'scaned', 'need_verifycode', 'scaned_but_redirect')
+  AND (status IN ('wait', 'scaned', 'scaned_but_redirect') OR strpos(status, 'need_verifycode') > 0)
   AND (lease_expires_at IS NULL OR lease_expires_at < now())
 RETURNING *;
 
@@ -26,7 +26,7 @@ UPDATE weixin_login_session
 SET status = sqlc.arg(status), state_encrypted = sqlc.arg(state_encrypted),
     installation_id = sqlc.narg(installation_id), lease_token = NULL, lease_expires_at = NULL
 WHERE id = sqlc.arg(id) AND lease_token = sqlc.arg(lease_token)
-  AND status IN ('wait', 'scaned', 'need_verifycode', 'scaned_but_redirect');
+  AND (status IN ('wait', 'scaned', 'scaned_but_redirect') OR strpos(status, 'need_verifycode') > 0);
 
 -- name: ReleaseWeixinLoginSession :exec
 UPDATE weixin_login_session SET lease_token = NULL, lease_expires_at = NULL
@@ -35,12 +35,12 @@ WHERE id = $1 AND lease_token = $2;
 -- name: CancelWeixinLoginSession :execrows
 UPDATE weixin_login_session SET status = 'cancelled', state_encrypted = '', lease_token = NULL, lease_expires_at = NULL
 WHERE id = $1 AND workspace_id = $2 AND initiator_user_id = $3
-  AND status IN ('wait', 'scaned', 'need_verifycode', 'scaned_but_redirect');
+  AND (status IN ('wait', 'scaned', 'scaned_but_redirect') OR strpos(status, 'need_verifycode') > 0);
 
 -- name: CancelPreviousWeixinLogins :exec
 UPDATE weixin_login_session SET status = 'cancelled', state_encrypted = '', lease_token = NULL, lease_expires_at = NULL
 WHERE workspace_id = $1 AND agent_id = $2 AND initiator_user_id = $3
-  AND status IN ('wait', 'scaned', 'need_verifycode', 'scaned_but_redirect');
+  AND (status IN ('wait', 'scaned', 'scaned_but_redirect') OR strpos(status, 'need_verifycode') > 0);
 
 -- name: PurgeWeixinState :exec
 WITH expired AS (

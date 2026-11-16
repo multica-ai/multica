@@ -30,21 +30,26 @@ export const EMPTY_WEIXIN_INSTALLATIONS: ListWeixinInstallationsResponse = {
   configured: false,
 };
 
+export const isWeixinVerificationRequired = (status?: string) =>
+  status?.includes("need_verifycode") === true;
+
 export const WeixinLoginSchema = z
   .object({
     id: z.string().min(1),
     status: z
-      .enum([
-        "wait",
-        "scaned",
-        "need_verifycode",
-        "scaned_but_redirect",
-        "confirmed",
-        "expired",
-        "verify_code_blocked",
-        "binded_redirect",
-        "cancelled",
-        "error",
+      .union([
+        z.enum([
+          "wait",
+          "scaned",
+          "scaned_but_redirect",
+          "confirmed",
+          "expired",
+          "verify_code_blocked",
+          "binded_redirect",
+          "cancelled",
+          "error",
+        ]),
+        z.string().refine(isWeixinVerificationRequired),
       ])
       .catch("error"),
     qr_code_url: z.string().optional(),
@@ -63,5 +68,5 @@ export const INVALID_WEIXIN_LOGIN: WeixinLogin = {
 export const isWeixinLoginPending = (status?: string) =>
   status === "wait" ||
   status === "scaned" ||
-  status === "need_verifycode" ||
+  isWeixinVerificationRequired(status) ||
   status === "scaned_but_redirect";

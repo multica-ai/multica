@@ -11,6 +11,7 @@ import {
   weixinInstallationsOptions,
   weixinKeys,
   isWeixinLoginPending,
+  isWeixinVerificationRequired,
   weixinConflict,
 } from "@multica/core/weixin";
 import { Button } from "@multica/ui/components/ui/button";
@@ -193,15 +194,17 @@ function WeixinConnect({
       isWeixinLoginPending(
         (query.state.data as WeixinLogin | undefined)?.status,
       ) &&
-      (query.state.data as WeixinLogin | undefined)?.status !==
-        "need_verifycode",
+      !isWeixinVerificationRequired(
+        (query.state.data as WeixinLogin | undefined)?.status,
+      ),
     refetchInterval: (query) =>
       !weixinConflict(query.state.error) &&
       isWeixinLoginPending(
         (query.state.data as WeixinLogin | undefined)?.status,
       ) &&
-      (query.state.data as WeixinLogin | undefined)?.status !==
-        "need_verifycode"
+      !isWeixinVerificationRequired(
+        (query.state.data as WeixinLogin | undefined)?.status,
+      )
         ? 2000
         : false,
     refetchOnWindowFocus: false,
@@ -268,7 +271,7 @@ function WeixinConnect({
       ? t(($) => $.weixin.success)
       : status === "scaned" || status === "scaned_but_redirect"
         ? t(($) => $.weixin.scanned)
-        : status === "need_verifycode"
+        : isWeixinVerificationRequired(status)
           ? t(($) => $.weixin.verify_hint)
           : status === "expired"
             ? t(($) => $.weixin.expired)
@@ -326,7 +329,7 @@ function WeixinConnect({
                   {statusText}
                 </p>
               )}
-              {status === "need_verifycode" && (
+              {isWeixinVerificationRequired(status) && (
                 <form
                   className="space-y-3"
                   onSubmit={(event) => {

@@ -405,6 +405,51 @@ func providerClient(server *httptest.Server) *http.Client {
 	})}
 }
 
+func TestLoginVerificationStatesRetainSession(t *testing.T) {
+	for _, status := range []string{"need_verifycode", "confirmed_but_need_verifycode", "future_need_verifycode"} {
+		t.Run(status, func(t *testing.T) {
+			x := newDatabaseFixture(t)
+			confirmed := x.status.Load().(qrStatus)
+			x.status.Store(qrStatus{Status: status})
+			id := x.begin(t)
+			view, err := x.svc.Poll(context.Background(), id, x.workspace, x.user, "")
+			if err != nil || view.Status != status || view.QRCodeURL == "" || view.InstallationID != "" {
+				t.Fatalf("verification did not remain pending: %#v, %v", view, err)
+			}
+			x.status.Store(confirmed)
+			view, err = x.svc.Poll(context.Background(), id, x.workspace, x.user, "001234")
+			if err != nil || view.Status != "confirmed" || view.InstallationID == "" {
+				t.Fatalf("verification could not finish: %#v, %v", view, err)
+			}
+		})
+	}
+}
+
+func TestVerificationLoginCanBeCancelledOrReplaced(t *testing.T) {
+	for _, action := range []string{"cancel", "replace"} {
+		t.Run(action, func(t *testing.T) {
+			x := newDatabaseFixture(t)
+			x.status.Store(qrStatus{Status: "confirmed_but_need_verifycode"})
+			ctx := context.Background()
+			id := x.begin(t)
+			if _, err := x.svc.Poll(ctx, id, x.workspace, x.user, ""); err != nil {
+				t.Fatal(err)
+			}
+			if action == "cancel" {
+				if err := x.svc.Cancel(ctx, id, x.workspace, x.user); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				x.begin(t)
+			}
+			view, err := x.svc.Get(ctx, id, x.workspace, x.user)
+			if err != nil || view.Status != "cancelled" || view.QRCodeURL != "" {
+				t.Fatalf("verification login was not cancelled: %#v, %v", view, err)
+			}
+		})
+	}
+}
+
 func TestOutboundDedupUnknownAndRouting(t *testing.T) {
 	for _, scenario := range []string{"accepted", "response-lost", "web-origin", "revoked", "rebound", "retry-pending"} {
 		t.Run(scenario, func(t *testing.T) {

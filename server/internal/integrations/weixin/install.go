@@ -146,7 +146,7 @@ func (s *InstallService) view(row db.WeixinLoginSession) (LoginView, error) {
 }
 
 func pendingLogin(status string) bool {
-	return status == "wait" || status == "scaned" || status == "need_verifycode" || status == "scaned_but_redirect"
+	return status == "wait" || status == "scaned" || strings.Contains(status, "need_verifycode") || status == "scaned_but_redirect"
 }
 
 func (s *InstallService) openState(sealed []byte) (loginState, error) {

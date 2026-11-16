@@ -100,7 +100,7 @@ test("WeChat QR verification, connection listing, and disconnect", async ({
       }
       polls++;
       return route.fulfill({
-        json: { ...login, status: polls > 1 ? "need_verifycode" : "scaned" },
+        json: { ...login, status: polls > 1 ? "confirmed_but_need_verifycode" : "scaned" },
       });
     }
     return route.fallback();
@@ -127,6 +127,11 @@ test("WeChat QR verification, connection listing, and disconnect", async ({
     await expect(dialog.getByRole("img", { name: "WeChat connection QR code" })).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("weixin-qr.png"),
+      fullPage: true,
+    });
+    await expect(dialog.getByLabel("Verification code")).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("weixin-verification.png"),
       fullPage: true,
     });
     await dialog.getByLabel("Verification code").fill("001234");

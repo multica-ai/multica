@@ -57,6 +57,8 @@ describe("WeChat API compatibility", () => {
       "wait",
       "scaned",
       "need_verifycode",
+      "confirmed_but_need_verifycode",
+      "future_need_verifycode",
       "scaned_but_redirect",
     ])
       expect(isWeixinLoginPending(status)).toBe(true);
@@ -71,4 +73,14 @@ describe("WeChat API compatibility", () => {
     ])
       expect(isWeixinLoginPending(status)).toBe(false);
   });
+  it.each([
+    "need_verifycode",
+    "confirmed_but_need_verifycode",
+    "future_need_verifycode",
+  ])(
+    "preserves the pending verification status %s",
+    (status) => {
+      expect(WeixinLoginSchema.parse({ id: "login", status }).status).toBe(status);
+    },
+  );
 });

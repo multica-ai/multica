@@ -279,8 +279,11 @@ func (c *apiClient) QRStatus(ctx context.Context, qr, verifyCode string) (qrStat
 	if err := result.check(false); err != nil {
 		return result, err
 	}
+	if strings.Contains(result.Status, "need_verifycode") {
+		return result, nil
+	}
 	switch result.Status {
-	case "wait", "scaned", "expired", "need_verifycode", "verify_code_blocked", "binded_redirect":
+	case "wait", "scaned", "expired", "verify_code_blocked", "binded_redirect":
 	case "scaned_but_redirect":
 		if _, err := validateBaseURL("https://" + result.RedirectHost); err != nil {
 			return result, err

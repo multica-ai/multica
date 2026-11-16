@@ -14,7 +14,7 @@ import (
 const cancelPreviousWeixinLogins = `-- name: CancelPreviousWeixinLogins :exec
 UPDATE weixin_login_session SET status = 'cancelled', state_encrypted = '', lease_token = NULL, lease_expires_at = NULL
 WHERE workspace_id = $1 AND agent_id = $2 AND initiator_user_id = $3
-  AND status IN ('wait', 'scaned', 'need_verifycode', 'scaned_but_redirect')
+  AND (status IN ('wait', 'scaned', 'scaned_but_redirect') OR strpos(status, 'need_verifycode') > 0)
 `
 
 type CancelPreviousWeixinLoginsParams struct {
@@ -31,7 +31,7 @@ func (q *Queries) CancelPreviousWeixinLogins(ctx context.Context, arg CancelPrev
 const cancelWeixinLoginSession = `-- name: CancelWeixinLoginSession :execrows
 UPDATE weixin_login_session SET status = 'cancelled', state_encrypted = '', lease_token = NULL, lease_expires_at = NULL
 WHERE id = $1 AND workspace_id = $2 AND initiator_user_id = $3
-  AND status IN ('wait', 'scaned', 'need_verifycode', 'scaned_but_redirect')
+  AND (status IN ('wait', 'scaned', 'scaned_but_redirect') OR strpos(status, 'need_verifycode') > 0)
 `
 
 type CancelWeixinLoginSessionParams struct {
@@ -53,7 +53,7 @@ UPDATE weixin_login_session
 SET lease_token = $1, lease_expires_at = now() + interval '50 seconds'
 WHERE id = $2 AND workspace_id = $3
   AND initiator_user_id = $4 AND expires_at > now()
-  AND status IN ('wait', 'scaned', 'need_verifycode', 'scaned_but_redirect')
+  AND (status IN ('wait', 'scaned', 'scaned_but_redirect') OR strpos(status, 'need_verifycode') > 0)
   AND (lease_expires_at IS NULL OR lease_expires_at < now())
 RETURNING id, workspace_id, agent_id, initiator_user_id, state_encrypted, status, installation_id, lease_token, lease_expires_at, expires_at, created_at
 `
@@ -274,7 +274,7 @@ func (q *Queries) IsWeixinTypingActive(ctx context.Context, arg IsWeixinTypingAc
 const lockWeixinLoginSession = `-- name: LockWeixinLoginSession :one
 SELECT id, workspace_id, agent_id, initiator_user_id, state_encrypted, status, installation_id, lease_token, lease_expires_at, expires_at, created_at FROM weixin_login_session
 WHERE id = $1 AND lease_token = $2 AND expires_at > now()
-  AND status IN ('wait', 'scaned', 'need_verifycode', 'scaned_but_redirect')
+  AND (status IN ('wait', 'scaned', 'scaned_but_redirect') OR strpos(status, 'need_verifycode') > 0)
 FOR UPDATE
 `
 
@@ -431,7 +431,7 @@ UPDATE weixin_login_session
 SET status = $1, state_encrypted = $2,
     installation_id = $3, lease_token = NULL, lease_expires_at = NULL
 WHERE id = $4 AND lease_token = $5
-  AND status IN ('wait', 'scaned', 'need_verifycode', 'scaned_but_redirect')
+  AND (status IN ('wait', 'scaned', 'scaned_but_redirect') OR strpos(status, 'need_verifycode') > 0)
 `
 
 type UpdateWeixinLoginSessionParams struct {

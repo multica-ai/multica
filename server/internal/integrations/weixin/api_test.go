@@ -52,6 +52,21 @@ func TestQRLoginProtocol(t *testing.T) {
 	}
 }
 
+func TestQRVerificationStates(t *testing.T) {
+	for _, status := range []string{"need_verifycode", "confirmed_but_need_verifycode", "future_need_verifycode"} {
+		t.Run(status, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
+			}))
+			defer server.Close()
+			result, err := newAPI(server.URL, "", server.Client()).QRStatus(context.Background(), "qr", "")
+			if err != nil || result.Status != status {
+				t.Fatalf("verification status rejected: %q, %v", result.Status, err)
+			}
+		})
+	}
+}
+
 func TestUpdatesPreserveMessageIDAndReplyContext(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer test-token" || r.Header.Get("AuthorizationType") != "ilink_bot_token" {

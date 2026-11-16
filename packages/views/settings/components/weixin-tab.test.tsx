@@ -78,49 +78,52 @@ describe("WeChat QR connection", () => {
     mocks.revoke.mockResolvedValue(undefined);
   });
 
-  it("renders the QR, submits the phone code, and refreshes the connection after confirmation", async () => {
-    const user = userEvent.setup();
-    mocks.poll
-      .mockResolvedValueOnce({ ...login, status: "need_verifycode" })
-      .mockImplementation(async () => {
-        mocks.list.mockResolvedValue({
-          configured: true,
-          install_supported: true,
-          installations: [active],
+  it.each(["need_verifycode", "confirmed_but_need_verifycode"])(
+    "submits the phone code for %s and refreshes the confirmed connection",
+    async (status) => {
+      const user = userEvent.setup();
+      mocks.poll
+        .mockResolvedValueOnce({ ...login, status })
+        .mockImplementation(async () => {
+          mocks.list.mockResolvedValue({
+            configured: true,
+            install_supported: true,
+            installations: [active],
+          });
+          return {
+            id: login.id,
+            status: "confirmed",
+            installation_id: active.id,
+            expires_at: login.expires_at,
+          };
         });
-        return {
-          id: login.id,
-          status: "confirmed",
-          installation_id: active.id,
-          expires_at: login.expires_at,
-        };
-      });
-    renderButton();
-    await user.click(
-      await screen.findByRole("button", { name: "Connect WeChat" }),
-    );
-    expect(
-      await screen.findByRole("dialog", {
-        name: "Connect WeChat to Assistant",
-      }),
-    ).toBeVisible();
-    expect(
-      await screen.findByTitle("WeChat connection QR code"),
-    ).toBeInTheDocument();
-    await user.type(
-      await screen.findByLabelText("Verification code"),
-      "001234",
-    );
-    await user.click(screen.getByRole("button", { name: "Verify" }));
-    await waitFor(() =>
-      expect(mocks.poll).toHaveBeenCalledWith(
-        "workspace-1",
-        "login-1",
+      renderButton();
+      await user.click(
+        await screen.findByRole("button", { name: "Connect WeChat" }),
+      );
+      expect(
+        await screen.findByRole("dialog", {
+          name: "Connect WeChat to Assistant",
+        }),
+      ).toBeVisible();
+      expect(
+        await screen.findByTitle("WeChat connection QR code"),
+      ).toBeInTheDocument();
+      await user.type(
+        await screen.findByLabelText("Verification code"),
         "001234",
-      ),
-    );
-    expect(await screen.findByText("Connected", { exact: true })).toBeVisible();
-  });
+      );
+      await user.click(screen.getByRole("button", { name: "Verify" }));
+      await waitFor(() =>
+        expect(mocks.poll).toHaveBeenCalledWith(
+          "workspace-1",
+          "login-1",
+          "001234",
+        ),
+      );
+      expect(await screen.findByText("Connected", { exact: true })).toBeVisible();
+    },
+  );
 
   it("waits for server cancellation before closing and retains a failed cancellation", async () => {
     const user = userEvent.setup();
