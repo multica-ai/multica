@@ -75,7 +75,9 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
   // someone who stopped using it alive.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (status: AppStateStatus) => {
-      if (status === "active") maybeRenewSession();
+      if (status === "active" && !useAuthStore.getState().isLoading &&
+          useServerConfigStore.getState().initialized &&
+          !useServerConfigStore.getState().switching) maybeRenewSession();
     });
     return () => sub.remove();
   }, []);
