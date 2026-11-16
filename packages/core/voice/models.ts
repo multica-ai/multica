@@ -21,6 +21,11 @@ export interface VoiceModel {
   status: VoiceModelStatus;
   receivedBytes: number;
   error?: string;
+  /**
+   * Transcribed by the server's speech provider while the user talks, through
+   * the runtime's `stream`; nothing to download or delete on this device.
+   */
+  streams?: boolean;
 }
 
 export interface VoiceModels {
@@ -53,4 +58,15 @@ export function pickVoiceModel(models: VoiceModels | null, preferred: string | n
 
 export function activeVoiceModel(): VoiceModel | null {
   return pickVoiceModel(useVoiceModelsStore.getState().models, useVoiceSettingsStore.getState().modelId);
+}
+
+/**
+ * The model to transcribe a kept clip with: the active one, unless it only
+ * streams, then the first installed model that takes clips.
+ */
+export function clipVoiceModel(): VoiceModel | null {
+  const active = activeVoiceModel();
+  if (!active?.streams) return active;
+  const models = useVoiceModelsStore.getState().models?.models ?? [];
+  return models.find((model) => model.status === "ready" && !model.streams) ?? null;
 }

@@ -18,6 +18,7 @@ export {
 export { applyVocabulary, dictationSeparator, removeSpokenFillers } from "./text";
 export { MAX_VOICE_HOTWORDS, setVoiceContextWords, voiceHotwords } from "./hotwords";
 export {
+  clipVoiceModel,
   pickVoiceModel,
   useVoiceModelsStore,
   type VoiceModel,

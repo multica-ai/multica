@@ -32,6 +32,7 @@ const MODELS: VoiceModels = {
       sizeBytes: 0,
       status: "ready",
       receivedBytes: 0,
+      streams: true,
     },
   ],
 };
@@ -274,5 +275,21 @@ describe("a streaming runtime", () => {
     connected();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(getVoiceState().phase).toBe("error");
+  });
+
+  it("records a clip instead when the chosen model is on this device", async () => {
+    const local = { ...MODELS.models[0]!, id: "local", name: "Local", streams: undefined };
+    useVoiceModelsStore.getState().setModels({ engineAvailable: true, models: [MODELS.models[0]!, local] });
+    useVoiceSettingsStore.getState().update({ modelId: "local" });
+    stream.record.mockReturnValue({
+      start: () => Promise.resolve(),
+      finish: () => Promise.resolve({ blob: new Blob(), durationMs: 0, heardSpeech: false }),
+      discard: () => {},
+    });
+    target("box");
+    tap("box");
+    await untilPhase("recording");
+    expect(stream.record).toHaveBeenCalledTimes(1);
+    expect(stream.handlers).toBeNull();
   });
 });

@@ -1,12 +1,13 @@
 /**
  * The voice session's runtime: the microphone recorder plus a speech engine.
- * Desktop transcribes on the device through the preload IPC. A browser has no
- * local engine, so the web app streams to the speech provider the server
- * configured, with a short-lived token the server mints.
+ * Desktop transcribes on the device through the preload IPC, and also offers
+ * the server's speech provider as a model when the server has one. A browser
+ * has no local engine, so the web app only streams to the server's provider,
+ * with a short-lived token the server mints.
  */
 import { useEffect } from "react";
 import { api } from "@multica/core/api";
-import { useConfigStore } from "@multica/core/config";
+import { configStore, useConfigStore } from "@multica/core/config";
 import {
   connectVoiceRuntime,
   useVoiceModelsStore,
@@ -34,7 +35,28 @@ async function decodeClip(clip: Blob): Promise<Float32Array> {
   return mixed;
 }
 
-function desktopVoiceRuntime(): VoiceRuntime | null {
+/**
+ * The server engine's one model: always ready, nothing to download. Flux
+ * hears English and decides its own language handling, so the app offers no
+ * language choice for it.
+ */
+export const SERVER_VOICE_MODEL: VoiceModel = {
+  id: "server",
+  name: "Server",
+  author: "",
+  licenseUrl: "",
+  languages: ["en"],
+  languageHint: false,
+  sizeBytes: 0,
+  status: "ready",
+  receivedBytes: 0,
+  streams: true,
+};
+
+const openServerStream: NonNullable<VoiceRuntime["stream"]> = (handlers, onMeter, onLimit) =>
+  new DeepgramStream(handlers, onMeter, onLimit, (signal) => api.createVoiceSession(signal));
+
+export function desktopVoiceRuntime(): VoiceRuntime | null {
   const api = localVoiceAPI();
   if (!api) return null;
   const history = api.history;
@@ -60,38 +82,38 @@ function desktopVoiceRuntime(): VoiceRuntime | null {
       },
       update: (id, status, text) => void history.update(id, { status, text }).catch(() => {}),
     },
+    stream: openServerStream,
     watchModels: (onChange) => {
+      let local: VoiceModels | null = null;
       let changed = false;
+      // The server model leads the list while the server transcribes, so it is
+      // the default until another model is chosen.
+      const report = () => {
+        if (!configStore.getState().voiceTranscriptionEnabled) {
+          if (local) onChange(local);
+          return;
+        }
+        onChange({ engineAvailable: true, models: [SERVER_VOICE_MODEL, ...(local?.models ?? [])] });
+      };
+      configStore.subscribe((next, previous) => {
+        if (next.voiceTranscriptionEnabled !== previous.voiceTranscriptionEnabled) report();
+      });
       api.onModelsChanged((models) => {
         changed = true;
-        onChange(models);
+        local = models;
+        report();
       });
       void api.listModels().then(
         (models) => {
-          if (!changed) onChange(models);
+          if (changed) return;
+          local = models;
+          report();
         },
         () => {},
       );
     },
   };
 }
-
-/**
- * The server engine's one model: always ready, nothing to download. Flux
- * hears English and decides its own language handling, so the app offers no
- * language choice for it.
- */
-export const SERVER_VOICE_MODEL: VoiceModel = {
-  id: "server",
-  name: "Server",
-  author: "",
-  licenseUrl: "",
-  languages: ["en"],
-  languageHint: false,
-  sizeBytes: 0,
-  status: "ready",
-  receivedBytes: 0,
-};
 
 /** Streams to the server's speech provider: each finished sentence is typed as it ends. */
 export function serverVoiceRuntime(): VoiceRuntime {
@@ -100,8 +122,7 @@ export function serverVoiceRuntime(): VoiceRuntime {
     prepare: () => {},
     // Streams never send a clip; only history re-transcribes one, and the web keeps none.
     transcribe: async () => ({ ok: false, reason: "engine-unavailable" }),
-    stream: (handlers, onMeter, onLimit) =>
-      new DeepgramStream(handlers, onMeter, onLimit, (signal) => api.createVoiceSession(signal)),
+    stream: openServerStream,
     watchModels: (onChange) => onChange({ engineAvailable: true, models: [SERVER_VOICE_MODEL] }),
   };
 }

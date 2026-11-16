@@ -55,6 +55,7 @@ beforeEach(() => {
         sizeBytes: 0,
         status: "ready",
         receivedBytes: 0,
+        streams: true,
       },
     ],
   });

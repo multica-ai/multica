@@ -20,7 +20,7 @@
 import { create } from "zustand";
 import { getShortcut } from "../shortcuts/store";
 import { shortcutMatchesEvent } from "../shortcuts/definitions";
-import { activeVoiceModel, useVoiceModelsStore, type VoiceModel, type VoiceModels, type VoiceTranscription } from "./models";
+import { activeVoiceModel, clipVoiceModel, useVoiceModelsStore, type VoiceModel, type VoiceModels, type VoiceTranscription } from "./models";
 import { voiceHistoryDays, type VoiceHistoryStatus } from "./history";
 import { voiceHotwords } from "./hotwords";
 import { useVoiceSettingsStore } from "./store";
@@ -262,7 +262,7 @@ function cleanTranscript(text: string): string {
  * when there is no model or engine, or nothing was heard.
  */
 export async function transcribeVoiceClip(clip: Blob): Promise<string | null> {
-  const model = activeVoiceModel();
+  const model = clipVoiceModel();
   if (!runtime || !model) return null;
   const result = await runtime.transcribe(clip, model, decodeOptions()).catch(() => null);
   if (!result?.ok) return null;
@@ -285,7 +285,7 @@ function begin(targetId: string, mode: VoiceMode) {
     return;
   }
   target.activate?.();
-  if (runtime.stream) {
+  if (runtime.stream && model.streams) {
     beginStream(targetId, mode, runtime.stream);
     return;
   }
@@ -467,7 +467,7 @@ async function finish(send: boolean) {
 
 async function transcribe(token: number) {
   const clip = lastClip;
-  const model = activeVoiceModel();
+  const model = clipVoiceModel();
   if (!clip || !runtime) return;
   const { targetId } = state();
   if (!model) {

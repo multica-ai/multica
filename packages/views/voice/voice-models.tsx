@@ -91,19 +91,25 @@ function ModelRow({
             </Badge>
           )}
         </div>
-        <div className="mt-0.5 text-caption leading-5 text-muted-foreground">
-          {languages} · <span className="whitespace-nowrap">{formatBytes(model.sizeBytes)}</span>
-        </div>
-        <div className="text-caption leading-5 text-muted-foreground">
-          {t(($) => $.voice.models.by, { author: model.author })} ·{" "}
-          <button
-            type="button"
-            className="underline underline-offset-3 hover:text-foreground"
-            onClick={() => openExternal(model.licenseUrl)}
-          >
-            {t(($) => $.voice.models.license)}
-          </button>
-        </div>
+        {model.streams ? (
+          <div className="mt-0.5 text-caption leading-5 text-muted-foreground">{languages}</div>
+        ) : (
+          <>
+            <div className="mt-0.5 text-caption leading-5 text-muted-foreground">
+              {languages} · <span className="whitespace-nowrap">{formatBytes(model.sizeBytes)}</span>
+            </div>
+            <div className="text-caption leading-5 text-muted-foreground">
+              {t(($) => $.voice.models.by, { author: model.author })} ·{" "}
+              <button
+                type="button"
+                className="underline underline-offset-3 hover:text-foreground"
+                onClick={() => openExternal(model.licenseUrl)}
+              >
+                {t(($) => $.voice.models.license)}
+              </button>
+            </div>
+          </>
+        )}
         {model.status === "downloading" && (
           <Progress value={percent} className="mt-2" aria-label={t(($) => $.voice.models.downloading, { percent })} />
         )}
@@ -135,12 +141,14 @@ function ModelRow({
                 {t(($) => $.voice.models.use)}
               </Button>
             )}
-            <IconButton
-              label={t(($) => $.voice.models.delete, { name: model.name })}
-              onClick={() => void api?.deleteModel(model.id)}
-            >
-              <Trash2 />
-            </IconButton>
+            {!model.streams && (
+              <IconButton
+                label={t(($) => $.voice.models.delete, { name: model.name })}
+                onClick={() => void api?.deleteModel(model.id)}
+              >
+                <Trash2 />
+              </IconButton>
+            )}
           </>
         )}
       </div>
