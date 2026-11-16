@@ -503,7 +503,7 @@ export function ClaudeConnectDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[85%] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t(($) => $.claude_managed.connect_title)}</DialogTitle>
           <DialogDescription>
@@ -562,14 +562,14 @@ export function ClaudeManagedPage() {
   const data = connection.data;
   if (connection.isPending) {
     return (
-      <ObjectPage layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
+      <ObjectPage type="runtime" layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
         <ClaudeBodySkeleton />
       </ObjectPage>
     );
   }
   if (connection.isError || data?.available !== true) {
     return (
-      <ObjectPage layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
+      <ObjectPage type="runtime" layoutId={LAYOUT_ID} segments={segments} leaf={leaf}>
         <CollectionPageState
           icon={AlertCircle}
           tone="destructive"
@@ -607,6 +607,7 @@ export function ClaudeManagedPage() {
 
   return (
     <ObjectPage
+      type="runtime"
       layoutId={LAYOUT_ID}
       segments={segments}
       leaf={leaf}
