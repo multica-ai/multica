@@ -134,14 +134,14 @@ function ModelRow({
             </Button>
           </>
         )}
-        {model.status === "ready" && manage && (
+        {model.status === "ready" && (
           <>
             {!active && (
               <Button size="xs" variant="outline" onClick={() => update({ modelId: model.id })}>
                 {t(($) => $.voice.models.use)}
               </Button>
             )}
-            {!model.streams && (
+            {manage && !model.streams && (
               <IconButton
                 label={t(($) => $.voice.models.delete, { name: model.name })}
                 onClick={() => void api?.deleteModel(model.id)}
@@ -157,8 +157,8 @@ function ModelRow({
 }
 
 /**
- * Desktop's speech models as rows, for a bordered list. `manage` adds
- * choosing between installed models and deleting the downloaded ones.
+ * Desktop's speech models as rows, for a bordered list. Any installed model
+ * can be chosen; `manage` adds deleting the downloaded ones.
  */
 export function VoiceModelRows({
   manage = false,

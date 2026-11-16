@@ -51,15 +51,16 @@ export const useVoiceModelsStore = create<VoiceModelsState>()((set) => ({
 }));
 
 /**
- * The installed model to use: the chosen one, else the first installed. When
- * a chosen model is gone, an on-device model stands in before a streaming one,
- * so losing a local choice does not quietly send speech to the server.
+ * The installed model to use: the chosen one, else the first installed. A
+ * chosen model that is gone never resolves to a streaming model: an on-device
+ * model stands in, or none, so losing a local choice does not send speech to
+ * the server.
  */
 export function pickVoiceModel(models: VoiceModels | null, preferred: string | null): VoiceModel | null {
   const ready = models?.models.filter((model) => model.status === "ready") ?? [];
   const chosen = ready.find((model) => model.id === preferred);
   if (chosen) return chosen;
-  if (preferred !== null) return ready.find((model) => !model.streams) ?? ready[0] ?? null;
+  if (preferred !== null) return ready.find((model) => !model.streams) ?? null;
   return ready[0] ?? null;
 }
 

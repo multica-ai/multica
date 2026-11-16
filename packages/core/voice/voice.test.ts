@@ -153,7 +153,7 @@ describe("pickVoiceModel", () => {
     expect(pickVoiceModel(models, "deleted-local")).toBe(whisper);
   });
 
-  it("uses the streaming model only when nothing else is installed", () => {
-    expect(pickVoiceModel({ engineAvailable: true, models: [server] }, "deleted-local")).toBe(server);
+  it("never resolves a missing choice to the streaming model", () => {
+    expect(pickVoiceModel({ engineAvailable: true, models: [server] }, "deleted-local")).toBeNull();
   });
 });
