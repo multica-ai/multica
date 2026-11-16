@@ -20,7 +20,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 | 태스크 만들기 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` slash 명령으로 에이전트가 설명을 정리한 뒤 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 |
 | 새 Chat 시작 | `/new [메시지]` | DM: `/new [메시지]`, 채널/thread: `@Multica /new [메시지]` | `/new [메시지]` | `/new [메시지]` | `/new [메시지]` | `/new [메시지]` |
 | 현재 Chat 컨텍스트 지우기 | `/clear [메시지]` | DM: `/clear [메시지]`, 채널/thread: `@Multica /clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` |
-| 그룹에서 태스크 구독 | `/subscribe <태스크>`, `/unsubscribe <태스크>` | `@Multica /subscribe <태스크>`, `@Multica /unsubscribe <태스크>` | `/subscribe <태스크>`, `/unsubscribe <태스크>` | 지원하지 않음 | `/subscribe <태스크>`, `/unsubscribe <태스크>` | 지원하지 않음 |
+| 그룹에서 태스크나 프로젝트 구독 | `/subscribe issue <태스크>`, `/subscribe project <프로젝트>`, `/unsubscribe …` | `@Multica /subscribe issue <태스크>`, `@Multica /subscribe project <프로젝트>`, `@Multica /unsubscribe …` | `/subscribe issue <태스크>`, `/subscribe project <프로젝트>`, `/unsubscribe …` | 지원하지 않음 | `/subscribe issue <태스크>`, `/subscribe project <프로젝트>`, `/unsubscribe …` | 지원하지 않음 |
 | 연결 방식 | 플랫폼 장기 연결 | Socket Mode | Stream 모드 | 플랫폼 장기 연결 | `getUpdates` long polling | iLink 롱 폴링 |
 
 새 연결은 현재 중국 본토 버전 Feishu에서만 만들 수 있습니다. 기존 국제 버전 Lark 연결은 계속 사용하고 관리할 수 있습니다.
@@ -63,11 +63,11 @@ Bot을 @멘션하지 않은 채널 메시지는 에이전트를 트리거하지 
 
 Slack DM에서는 `/new`과 `/clear`가 네이티브 slash 명령입니다. 네이티브 slash command payload로는 채널의 대상 thread를 식별할 수 없으므로 대상 thread에서 `@Multica /new [메시지]` 또는 `@Multica /clear [메시지]`를 보내세요.
 
-## 그룹에서 태스크 구독
+## 그룹에서 태스크나 프로젝트 구독
 
-그룹 채팅은 태스크를 구독할 수 있습니다. 태스크의 상태 변경, 담당자 변경, 새 댓글이 그룹에 게시되며 Multica로 돌아가는 링크가 함께 붙습니다. Bot을 @멘션하고 `/subscribe <태스크>`로 구독을 시작하고 `/unsubscribe <태스크>`로 해제합니다. `<태스크>`에는 태스크 키(`ABC-123`), 번호 또는 Multica 링크를 쓸 수 있습니다. 그룹에서 `/issue`를 보내면 그 그룹이 새 태스크를 구독하며, 확인 메시지에도 표시됩니다. Slack의 기본 `/issue` slash 명령은 구독하지 않으므로 `@Multica /subscribe`를 보내세요.
+그룹 채팅은 태스크나 프로젝트를 구독할 수 있으며, 업데이트가 그룹에 게시되고 Multica로 돌아가는 링크가 함께 붙습니다. 태스크는 상태 변경, 담당자 변경, 새 댓글이, 프로젝트는 그 안의 모든 태스크에 대한 같은 업데이트와 새 태스크가 게시됩니다. Bot을 @멘션하고 `/subscribe issue <태스크>` 또는 `/subscribe project <프로젝트>`로 구독을 시작하고, `/unsubscribe issue …` 또는 `/unsubscribe project …`로 해제합니다. `<태스크>`에는 태스크 키(`ABC-123`), 번호 또는 Multica 링크를, `<프로젝트>`에는 프로젝트 이름이나 Multica 링크를 쓸 수 있습니다. 태스크는 `issue`를 생략하고 `/subscribe <태스크>`로도 구독할 수 있습니다. 그룹에서 `/issue`를 보내면 그 그룹이 새 태스크를 구독하며, 확인 메시지에도 표시됩니다. Slack의 기본 `/issue` slash 명령은 구독하지 않으므로 `@Multica /subscribe`를 보내세요. 태스크와 그 프로젝트를 모두 구독한 채팅에는 각 업데이트가 한 번만 게시됩니다.
 
-업데이트는 구독한 스레드나 토픽에, 그 외에는 그룹에 게시됩니다. 자신이 볼 수 있는 태스크만 구독할 수 있습니다. 비공개 프로젝트의 태스크를 구독하면 프로젝트 밖의 사람을 포함해 그룹 전원이 업데이트를 받습니다. 구독한 멤버가 태스크에 대한 접근 권한을 잃으면 게시가 멈춥니다. 그룹의 누구나 `/unsubscribe`할 수 있습니다. DM에서는 Multica에서 태스크를 구독하면 업데이트가 [인박스](/inbox)로 옵니다.
+업데이트는 구독한 스레드나 토픽에, 그 외에는 그룹에 게시됩니다. 자신이 볼 수 있는 태스크나 프로젝트만 구독할 수 있습니다. 비공개 프로젝트를 구독하면 프로젝트 밖의 사람을 포함해 그룹 전원이 업데이트를 받습니다. 구독한 멤버가 접근 권한을 잃으면 그 게시는 멈춥니다. 그룹의 누구나 `/unsubscribe`할 수 있습니다. DM에서는 Multica에서 태스크나 프로젝트를 구독하면 업데이트가 [인박스](/inbox)로 옵니다.
 
 ## 대화 격리
 

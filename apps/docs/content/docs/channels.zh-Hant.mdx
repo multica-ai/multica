@@ -20,7 +20,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 | 建立任務 | `/issue` 訊息命令，按輸入直接建立 | `/issue` slash 命令，AI 代理整理描述後建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 |
 | 新建 Chat | `/new [訊息]` | 私聊：`/new [訊息]`；頻道/thread：`@Multica /new [訊息]` | `/new [訊息]` | `/new [訊息]` | `/new [訊息]` | `/new [訊息]` |
 | 清空當前 Chat 上下文 | `/clear [訊息]` | 私聊：`/clear [訊息]`；頻道/thread：`@Multica /clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` |
-| 群聊訂閱任務 | `/subscribe <任務>`、`/unsubscribe <任務>` | `@Multica /subscribe <任務>`、`@Multica /unsubscribe <任務>` | `/subscribe <任務>`、`/unsubscribe <任務>` | 暫不支援 | `/subscribe <任務>`、`/unsubscribe <任務>` | 暫不支援 |
+| 群聊訂閱任務或專案 | `/subscribe issue <任務>`、`/subscribe project <專案>`、`/unsubscribe …` | `@Multica /subscribe issue <任務>`、`@Multica /subscribe project <專案>`、`@Multica /unsubscribe …` | `/subscribe issue <任務>`、`/subscribe project <專案>`、`/unsubscribe …` | 暫不支援 | `/subscribe issue <任務>`、`/subscribe project <專案>`、`/unsubscribe …` | 暫不支援 |
 | 連線方式 | 平臺長連線 | Socket Mode | Stream 模式 | 平臺長連線 | `getUpdates` 長輪詢 | iLink 長輪詢 |
 
 新連線目前只開放中國大陸版飛書；已有的國際版 Lark 連線仍可繼續使用和管理。
@@ -63,11 +63,11 @@ Telegram 會把圖片、檔案、影片和音訊作為附件轉交給 AI 代理�
 
 在 Slack 私聊中，`/new` 和 `/clear` 都是原生 slash 命令。原生 slash command payload 無法標識頻道里的目標 thread，因此需要在目標 thread 中傳送 `@Multica /new [訊息]` 或 `@Multica /clear [訊息]`。
 
-## 在群聊中訂閱任務
+## 在群聊中訂閱任務或專案
 
-群聊可以訂閱任務：任務的狀態變化、負責人變化和新評論都會推送到群裡，並附上回到 Multica 的連結。@ Bot 傳送 `/subscribe <任務>` 開始訂閱，`/unsubscribe <任務>` 取消；`<任務>` 可以是任務編號（`ABC-123`）、序號或 Multica 連結。在群裡用 `/issue` 建立的任務會自動被該群訂閱，確認訊息中會註明。Slack 原生 `/issue` slash 命令不會自動訂閱，需要再傳送 `@Multica /subscribe`。
+群聊可以訂閱任務或專案，更新會推送到群裡，並附上回到 Multica 的連結。訂閱任務時推送它的狀態變化、負責人變化和新評論；訂閱專案時推送專案下所有任務的這些更新，以及新建立的任務。@ Bot 傳送 `/subscribe issue <任務>` 或 `/subscribe project <專案>` 開始訂閱，傳送 `/unsubscribe issue …` 或 `/unsubscribe project …` 取消。`<任務>` 可以是任務編號（`ABC-123`）、序號或 Multica 連結；`<專案>` 可以是專案名稱或 Multica 連結。訂閱任務時也可以省略 `issue`，直接傳送 `/subscribe <任務>`。在群裡用 `/issue` 建立的任務會自動被該群訂閱，確認訊息中會註明。Slack 原生 `/issue` slash 命令不會自動訂閱，需要再傳送 `@Multica /subscribe`。同時訂閱了任務和它所在專案的群，每則更新只會收到一次。
 
-更新會發到訂閱時所在的 thread 或話題，否則發到群裡。只能訂閱自己有權限查看的任務。訂閱私有專案中的任務後，群裡所有人都會收到它的更新，包括專案外的成員。發起訂閱的成員失去該任務的存取權限後，推送會停止；群裡任何人都仍可以 `/unsubscribe`。在私聊中，請在 Multica 裡訂閱任務，更新會進入你的[收件匣](/inbox)。
+更新會發到訂閱時所在的 thread 或話題，否則發到群裡。只能訂閱自己有權限查看的任務或專案。訂閱私有專案後，群裡所有人都會收到它的更新，包括專案外的成員。發起訂閱的成員失去存取權限後，這些推送會停止；群裡任何人都仍可以 `/unsubscribe`。在私聊中，請在 Multica 裡訂閱任務或專案，更新會進入你的[收件匣](/inbox)。
 
 ## 會話隔離
 
