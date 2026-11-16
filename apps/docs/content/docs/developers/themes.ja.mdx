@@ -149,6 +149,27 @@ paper/
 [data-mc="content"] { max-width: var(--page-width); }
 ```
 
+## 背景とガラス
+
+テーマはアプリの背後に、グラデーション、画像、アニメーション SVG などの絵を置き、フレームとページをその上のガラスにできます。モードごとに設定します。
+
+```css
+.theme-dark {
+  --backdrop: url(night.svg) center / cover no-repeat;
+  --backdrop-color: #1e1e4a;
+  --glass-opacity: 72%;
+  --glass-blur: 18px;
+  --frame-glass-opacity: 0%;
+  --frame-glass-blur: 0px;
+}
+```
+
+- `--backdrop` はウィンドウ全体の下に描かれる CSS の `background` 値で、デスクトップでも Web でも表示されます。画像はテーマフォルダ内に置く必要があり、SVG 自体のアニメーションは再生されます。
+- 背景を使うときは `--backdrop-color` が必須です。読み込み中に表示される単色で、`theme:check` がガラスのコントラストを測る下地でもあります。
+- `--glass-opacity` と `--glass-blur` は、ページ自身の色が背景をどれだけ覆うかと、ページの後ろで背景をどれだけぼかすかを決めます。`--frame-glass-opacity` と `--frame-glass-blur` はレール、ウィンドウツールバー、タブバー、ボトムバーに同じことをします。
+
+`--app-shell` を透明にしたり `body` に `background` を設定したりする代わりに、これらを使ってください。そうすれば背景を変えてもウィンドウがちらつきません。[`examples/themes/night-sky`](https://github.com/multica-ai/multica/tree/main/examples/themes/night-sky) が完全な例です。
+
 ## セレクタ
 
 クラス名や DOM 構造ではなく、アンカー、スロット、状態フックを対象にしてください。前者は予告なく変わります。アンカー、スロット、フックは次の `apiVersion` まで維持されます。
@@ -178,7 +199,7 @@ paper/
 - 公開されていない変数を使っている（オプションの id か、テーマ自身が `var()` で読む変数を除く）。
 - `.theme-light` と `.theme-dark` 以外の場所で、子孫セレクタなしに変数を設定している。テーマピッカーがテーマの色を読み取れなくなります。
 - フォントスタックに汎用ファミリー（`sans-serif`、`serif` …）や `ui-*` キーワードがある。本人が選んだ CJK フォントが効かなくなります。
-- どちらかのモードで WCAG AA のコントラストを満たさない：`--foreground` と `--muted-foreground` はすべてのサーフェスで 4.5:1、`--brand` は読むためのサーフェスで 4.5:1、プライマリボタンのラベルはボタン上で 4.5:1、`--faint-foreground` は 3:1 が必要です。ツールチップの文字は `--tooltip` 上で 4.5:1、押された表示設定チップの文字はその塗りの上で 4.5:1 が必要です。ツールチップは常にダークモードの文字色を使うため、変えるには `--tooltip-foreground` を設定します。押されたチップは `--display-chip-pressed-background` を設定しない限り `--input` で塗られます。
+- どちらかのモードで WCAG AA のコントラストを満たさない：`--foreground` と `--muted-foreground` はすべてのサーフェスで 4.5:1、`--brand` は読むためのサーフェスで 4.5:1、プライマリボタンのラベルはボタン上で 4.5:1、`--faint-foreground` は 3:1 が必要です。ツールチップの文字は `--tooltip` 上で 4.5:1、押された表示設定チップの文字はその塗りの上で 4.5:1 が必要です。ツールチップは常にダークモードの文字色を使うため、変えるには `--tooltip-foreground` を設定します。押されたチップは `--display-chip-pressed-background` を設定しない限り `--input` で塗られます。 背景がある場合、フレームとページは `--backdrop-color` の上のガラスとして測定されます。
 
 ## チェックとプレビュー
 
@@ -195,6 +216,14 @@ pnpm theme:preview path/to/paper --out preview   # preview/light.png と preview
 `theme:preview` はテーマストアに表示されるスクリーンショットを描画します。アプリ自身のスタイルで作ったタスク一覧と開いたタスクを、オプションを既定値にしたテーマで表示します。
 
 作業中にテーマでインターフェースが隠れたり崩れたりしたら、`?theme=default` を付けてアプリを開くか、読み込み直後に **Shift** を押し続けます。[テーマで表示が崩れたとき](/themes#テーマで表示が崩れたとき)を参照してください。
+
+チェッカーはリポジトリをインストールしなくても、スパースクローンと Node 22.18 以降で実行できます。エージェントも、組み込みの Multica スキルで同じコマンドを使います。
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/multica-ai/multica.git multica-themes
+git -C multica-themes sparse-checkout set docs scripts packages/core packages/ui
+node multica-themes/scripts/theme-check.mjs path/to/paper
+```
 
 ## テーマストアに公開する
 

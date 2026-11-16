@@ -27,6 +27,7 @@ import {
   requestFailed,
   type MetricTone,
 } from "./metrics";
+import { DevActions } from "./actions-panel";
 import {
   ErrorsPanel,
   LongTaskPanel,
@@ -265,6 +266,7 @@ export function DevToolbar({ build, apiUrl, route, onNavigate }: DevToolbarProps
         <Metric label="Errors" value={String(errors)} tone={errors > 0 ? "bad" : "normal"}>
           <ErrorsPanel recording={recording} />
         </Metric>
+        <DevActions wsId={wsId} />
         <button
           type="button"
           onClick={() => setMinimized(true)}

@@ -80,6 +80,9 @@ export function DeferredTooltip({
   // hover delay; a Tab under a resting pointer still opens at once.
   const hoveringRef = useRef(false);
   const keyPressesAtHoverRef = useRef(0);
+  // The pointer is on a descendant with a tooltip of its own (a lock icon
+  // inside a row link); that tooltip owns the hover, so this one stays shut.
+  const onNestedTriggerRef = useRef(false);
 
   const clearTimer = () => {
     if (timerRef.current !== null) {
@@ -93,13 +96,25 @@ export function DeferredTooltip({
     // A trigger whose own menu/popover is open keeps the tooltip hidden;
     // plain expand/collapse toggles (aria-expanded without a popup) keep it.
     const el = anchorRef.current;
-    if (!el) return false;
+    if (!el || onNestedTriggerRef.current) return false;
     const popupOpen =
       el.hasAttribute("data-popup-open") ||
       (el.getAttribute("aria-expanded") === "true" &&
         (el.getAttribute("aria-haspopup") ?? "false") !== "false");
     if (popupOpen) return false;
     return !shouldOpen || shouldOpen(el);
+  };
+
+  // Same delay as every other tooltip, and the same instant hand-off: when
+  // a tooltip is showing or just closed, open without waiting.
+  const armOpen = () => {
+    clearTimer();
+    timerRef.current = setTimeout(
+      () => {
+        if (canOpen()) setOpen(true);
+      },
+      isTooltipInstantPhase() ? 0 : TOOLTIP_OPEN_DELAY,
+    );
   };
 
   const triggerRef = trigger.props.ref as Ref<HTMLElement> | undefined;
@@ -115,19 +130,25 @@ export function DeferredTooltip({
       hoveringRef.current = true;
       keyPressesAtHoverRef.current = keyPresses;
       setWarm(true);
-      clearTimer();
-      // Same delay as every other tooltip, and the same instant hand-off: when
-      // a tooltip is showing or just closed, open without waiting.
-      timerRef.current = setTimeout(
-        () => {
-          if (canOpen()) setOpen(true);
-        },
-        isTooltipInstantPhase() ? 0 : TOOLTIP_OPEN_DELAY,
-      );
+      armOpen();
+    },
+    onPointerOver: (e: React.PointerEvent) => {
+      (trigger.props.onPointerOver as ((e: React.PointerEvent) => void) | undefined)?.(e);
+      const nested = (e.target as Element).closest?.('[data-trigger="tooltip"]');
+      const onNested = !!nested && nested !== anchorRef.current && !!anchorRef.current?.contains(nested);
+      if (onNested === onNestedTriggerRef.current) return;
+      onNestedTriggerRef.current = onNested;
+      if (onNested) {
+        clearTimer();
+        setOpen(false);
+      } else {
+        armOpen();
+      }
     },
     onPointerLeave: (e: React.PointerEvent) => {
       (trigger.props.onPointerLeave as ((e: React.PointerEvent) => void) | undefined)?.(e);
       hoveringRef.current = false;
+      onNestedTriggerRef.current = false;
       clearTimer();
       setOpen(false);
     },

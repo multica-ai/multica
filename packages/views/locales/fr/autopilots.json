@@ -21,7 +21,8 @@
     "active": "Active",
     "paused": "En pause",
     "paused_runtime_required": "En pause — l'assigné a besoin d'un runtime",
-    "archived": "Archivée"
+    "archived": "Archivée",
+    "paused_project_archived": "En pause — son projet est archivé"
   },
   "execution_mode": {
     "create_issue": "Créer une tâche",
@@ -115,7 +116,8 @@
       "cancel": "Annuler",
       "confirm": "Supprimer",
       "deleting": "Suppression..."
-    }
+    },
+    "paused_project_archived": "En pause car son projet a été archivé. Restaurez le projet, puis réactivez cette automatisation."
   },
   "access": {
     "title": "Gérer l'accès",

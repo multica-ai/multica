@@ -612,6 +612,8 @@ function EditorBubbleMenu({
   return (
     <div
       ref={floatingRef}
+      data-mc="editor-toolbar"
+      data-mode={mode === "link-edit" ? "link" : "format"}
       style={{
         position: "fixed",
         zIndex: 50,

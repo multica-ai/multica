@@ -16,8 +16,6 @@ import {
   Pin,
   Plus,
   RotateCw,
-  Search,
-  SquarePen,
   type IconComponent,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
@@ -135,8 +133,7 @@ function TabStrip({ tabs, active, tabClassName }: { tabs: Tab[]; active: number;
 
 /**
  * Desktop's window: the rail runs the full height under the window toolbar,
- * the title bar holds the tabs and, at its far end, New issue and search, and
- * the page sits on the content card. A window that runs off its frame passes
+ * the title bar holds the tabs, and the page sits on the content card. A window that runs off its frame passes
  * `bleed` so the page keeps its content out of the cropped strip.
  */
 function NativeWindow({
@@ -163,16 +160,6 @@ function NativeWindow({
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex h-10 shrink-0 items-center gap-2" style={{ paddingLeft: TOOLBAR_CLEARANCE - RAIL_WIDTH }}>
           <TabStrip tabs={tabs} active={activeTab} tabClassName={compact ? "w-32 shrink-0" : "w-56"} />
-          {compact ? null : (
-            <span className="flex shrink-0 items-center gap-2" style={{ marginRight: bleed + 12 }}>
-              <span className={TITLE_BAR_ACTION}>
-                <SquarePen className="size-4" />
-              </span>
-              <span className={TITLE_BAR_ACTION}>
-                <Search className="size-4" />
-              </span>
-            </span>
-          )}
         </div>
         <div className={cn(APP_CARD, "mr-2 mb-2")}>
           <div className="relative flex min-w-0 flex-1 flex-col" style={{ marginRight: bleed, marginBottom: bleed }}>

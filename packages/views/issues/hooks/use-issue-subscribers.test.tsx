@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
@@ -39,8 +39,11 @@ vi.mock("../../i18n", () => ({
   }),
 }));
 
+const wsHandlers = new Map<string, (payload: unknown) => void>();
 vi.mock("@multica/core/realtime", () => ({
-  useWSEvent: () => undefined,
+  useWSEvent: (event: string, handler: (payload: unknown) => void) => {
+    wsHandlers.set(event, handler);
+  },
   useWSReconnect: () => undefined,
 }));
 
@@ -276,5 +279,77 @@ describe("useIssueSubscribers subscriptionKnown", () => {
       ).toBe("error"),
     );
     expect(result.current.subscriptionKnown).toBe(false);
+  });
+});
+
+/**
+ * A project watcher who comments gets a direct commenter row. The project
+ * still delivers every event to them, so the hook must keep saying so, or the
+ * issue page claims "key updates only" for a subscription that is not narrowed
+ * (MUL-9343).
+ */
+describe("useIssueSubscribers project coverage", () => {
+  afterEach(() => {
+    cleanup();
+    wsHandlers.clear();
+  });
+
+  const row = (reason: string, extra: Record<string, unknown> = {}) => ({
+    issue_id: "issue-1",
+    user_type: "member",
+    user_id: "user-1",
+    reason,
+    created_at: "2026-01-01T00:00:00Z",
+    ...extra,
+  });
+
+  it("reads project_covered from the server", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => [row("commenter", { project_covered: true })],
+    } as unknown as ApiClient);
+
+    const { result } = renderSubscribers();
+    await waitFor(() => expect(result.current.subscriptionKnown).toBe(true));
+    await waitFor(() => expect(result.current.subscriptionReason).toBe("commenter"));
+    expect(result.current.subscriptionProjectCovered).toBe(true);
+  });
+
+  it("keeps the coverage when a project row turns into a direct one", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => [row("project")],
+    } as unknown as ApiClient);
+
+    const { result } = renderSubscribers();
+    await waitFor(() => expect(result.current.subscriptionReason).toBe("project"));
+    act(() => {
+      wsHandlers.get("subscriber:added")?.({
+        issue_id: "issue-1",
+        user_type: "member",
+        user_id: "user-1",
+        reason: "commenter",
+      });
+    });
+
+    await waitFor(() => expect(result.current.subscriptionReason).toBe("commenter"));
+    expect(result.current.subscriptionProjectCovered).toBe(true);
+  });
+
+  it("is false for a plain direct subscription", async () => {
+    setApiInstance({
+      listIssueSubscribers: async () => [row("manual")],
+    } as unknown as ApiClient);
+
+    const { result } = renderSubscribers();
+    await waitFor(() => expect(result.current.subscriptionKnown).toBe(true));
+    act(() => {
+      wsHandlers.get("subscriber:added")?.({
+        issue_id: "issue-1",
+        user_type: "member",
+        user_id: "user-1",
+        reason: "commenter",
+      });
+    });
+    await waitFor(() => expect(result.current.subscriptionReason).toBe("commenter"));
+    expect(result.current.subscriptionProjectCovered).toBe(false);
   });
 });

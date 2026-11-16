@@ -55,8 +55,9 @@ func TestPrivateProjectAutopilotsHiddenFromOutsiders(t *testing.T) {
 		want   int
 	}{
 		{"workspace member outside the project", f.outsider, http.StatusNotFound},
+		{"workspace admin outside the project", f.outsideAdmin, http.StatusNotFound},
 		{"project member", f.insider, http.StatusOK},
-		{"workspace owner outside the member list", testUserID, http.StatusOK},
+		{"workspace owner in the member list", testUserID, http.StatusOK},
 	} {
 		list := call(tc.userID, testHandler.ListAutopilots, "/api/autopilots", nil)
 		listed := strings.Contains(list.Body.String(), autopilotID)

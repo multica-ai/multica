@@ -9,14 +9,13 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import { createQueryClient } from "../query-client";
 import { issueViewContainerKey, useActiveIssueViewStore } from "./active-view-store";
-import { UNREAD_VIEW_ID } from "./unread-view";
 import { useActiveIssueView } from "./use-active-view";
 import type { IssueViewScope } from "./queries";
 
 const WORKSPACE: IssueViewScope = { scope_type: "workspace" };
 const PROJECT: IssueViewScope = { scope_type: "project", scope_id: "p1" };
 
-describe("useActiveIssueView and the built-in Unread view", () => {
+describe("useActiveIssueView and the built-in filtered views", () => {
   let qc: QueryClient;
 
   function render(scope: IssueViewScope) {
@@ -38,16 +37,26 @@ describe("useActiveIssueView and the built-in Unread view", () => {
     vi.restoreAllMocks();
   });
 
-  it("opens on the workspace page without a saved view behind it", async () => {
-    act(() => useActiveIssueViewStore.getState().setActive(issueViewContainerKey("ws-1", WORKSPACE), UNREAD_VIEW_ID));
+  it.each([
+    ["my_work", { relationFilters: ["assigned", "my_agents"] }],
+    ["working", { agentRunningFilter: true }],
+    ["subscribed", { relationFilters: ["subscribed"] }],
+  ])("opens %s on the workspace page without a saved view behind it", async (id, query) => {
+    act(() => useActiveIssueViewStore.getState().setActive(issueViewContainerKey("ws-1", WORKSPACE), id));
     const { result } = render(WORKSPACE);
     await waitFor(() => expect(result.current.viewsReady).toBe(true));
-    expect(result.current.activeView).toMatchObject({ id: UNREAD_VIEW_ID, query: { unreadFilter: true } });
+    expect(result.current.activeView).toMatchObject({ id, query });
     expect(result.current.missing).toBe(false);
   });
 
+  it("no longer opens the retired Unread view", async () => {
+    act(() => useActiveIssueViewStore.getState().setActive(issueViewContainerKey("ws-1", WORKSPACE), "unread"));
+    const { result } = render(WORKSPACE);
+    await waitFor(() => expect(result.current.missing).toBe(true));
+  });
+
   it("is not a view on other surfaces, so the id there reads as missing", async () => {
-    act(() => useActiveIssueViewStore.getState().setActive(issueViewContainerKey("ws-1", PROJECT), UNREAD_VIEW_ID));
+    act(() => useActiveIssueViewStore.getState().setActive(issueViewContainerKey("ws-1", PROJECT), "subscribed"));
     const { result } = render(PROJECT);
     await waitFor(() => expect(result.current.missing).toBe(true));
     expect(result.current.activeView).toBeNull();
