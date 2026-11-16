@@ -53,23 +53,38 @@ func TestCheckoutReusesLegacyCache(t *testing.T) {
 				TaskID:              "12345678-0000-0000-0000-000000000000",
 				IsolatedGitMetadata: isolated,
 			}
-			result, err := cache.CreateWorktree(params)
+			// Seed the checkout as an older daemon would, before migration exists.
+			path := filepath.Join(params.WorkDir, repoNameFromURL(source))
+			branch := "agent/test/" + taskKey(params.TaskID)
+			baseRef := getRemoteDefaultBranch(legacyPath)
+			result := &WorktreeResult{Path: path, BranchName: branch}
+			var err error
+			if isolated {
+				result, err = cache.createOrUpdateIsolatedCheckoutContext(context.Background(), legacyPath, source, path, branch, baseRef, false)
+			} else {
+				_, err = createWorktreeContext(context.Background(), legacyPath, path, branch, baseRef)
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(filepath.Join(result.Path, "local.txt"), []byte("uncommitted work"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			// Simulate a daemon restart after upgrading. Fetch and checkout must
-			// keep the cache and the running task's work exactly where they are.
+			// Linked metadata pins the cache in place. Isolated metadata does
+			// not depend on its old path, so that cache may be migrated.
 			cache = New(cache.root, testLogger())
 			if err := cache.Sync("ws", []RepoInfo{{URL: source}}); err != nil {
 				t.Fatal(err)
 			}
-			if got := cache.Lookup("ws", source); got != legacyPath {
-				t.Fatalf("cache moved: got %s, want %s", got, legacyPath)
+			shortPath := filepath.Join(cache.root, "ws", bareDirName(source))
+			wantPath, absentPath := legacyPath, shortPath
+			if isolated {
+				wantPath, absentPath = shortPath, legacyPath
 			}
-			if _, err := os.Stat(filepath.Join(cache.root, "ws", bareDirName(source))); !os.IsNotExist(err) {
+			if got := cache.Lookup("ws", source); got != wantPath {
+				t.Fatalf("cache path = %s, want %s", got, wantPath)
+			}
+			if _, err := os.Stat(absentPath); !os.IsNotExist(err) {
 				t.Fatalf("upgrade created a duplicate cache: %v", err)
 			}
 			kept, err := cache.CreateWorktree(params)

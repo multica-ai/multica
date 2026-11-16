@@ -327,6 +327,30 @@ func (c *Cache) lockForRepo(barePath string) *repoLock {
 	return actual.(*repoLock)
 }
 
+// URL-based operations hold both path locks, always short then legacy. This
+// serializes a rename with callers already waiting on either path and with
+// GC, whose maintenance callbacks lock the directory they found on disk.
+func (c *Cache) lockRepoURLContext(ctx context.Context, workspaceID, repoURL string) (func(), error) {
+	shortPath := filepath.Join(c.root, workspaceID, bareDirName(repoURL))
+	legacyPath := filepath.Join(c.root, workspaceID, legacyBareDirName(repoURL))
+	shortLock := c.lockForRepo(shortPath)
+	if err := shortLock.LockContext(ctx); err != nil {
+		return nil, err
+	}
+	if shortPath == legacyPath {
+		return shortLock.Unlock, nil
+	}
+	legacyLock := c.lockForRepo(legacyPath)
+	if err := legacyLock.LockContext(ctx); err != nil {
+		shortLock.Unlock()
+		return nil, err
+	}
+	return func() {
+		legacyLock.Unlock()
+		shortLock.Unlock()
+	}, nil
+}
+
 // Activity reports aggregate repository coordination without exposing cache
 // paths. It is safe to call while operations are starting or finishing.
 func (c *Cache) Activity() Activity {
@@ -383,11 +407,17 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 		if repo.URL == "" {
 			continue
 		}
-		barePath := c.BarePath(workspaceID, repo.URL)
-
-		repoLock := c.lockForRepo(barePath)
-		if err := repoLock.LockContext(ctx); err != nil {
+		unlock, err := c.lockRepoURLContext(ctx, workspaceID, repo.URL)
+		if err != nil {
 			return err
+		}
+		barePath, err := c.prepareBarePathContext(ctx, workspaceID, repo.URL)
+		if err != nil {
+			unlock()
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 		if isBareRepo(barePath) {
 			// Already cached — fetch latest.
@@ -409,7 +439,7 @@ func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []Rep
 				}
 			}
 		}
-		repoLock.Unlock()
+		unlock()
 	}
 	return firstErr
 }
@@ -436,6 +466,41 @@ func (c *Cache) BarePath(workspaceID, url string) string {
 		return legacyPath
 	}
 	return filepath.Join(c.root, workspaceID, bareDirName(url))
+}
+
+// prepareBarePathContext must run with both URL path locks held. Resolve the
+// path after taking the locks: another caller may have migrated it while we
+// waited. Registered worktrees contain absolute pointers into their cache,
+// so only an unused cache can be renamed, and an existing destination wins.
+func (c *Cache) prepareBarePathContext(ctx context.Context, workspaceID, repoURL string) (string, error) {
+	path := c.BarePath(workspaceID, repoURL)
+	shortPath := filepath.Join(c.root, workspaceID, bareDirName(repoURL))
+	if path == shortPath {
+		return path, nil
+	}
+	if _, err := os.Lstat(shortPath); err == nil {
+		return path, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("inspect short cache path: %w", err)
+	}
+	if out, err := runGitCombinedOutputContext(ctx, "-C", path, "worktree", "prune", "--expire=now"); err != nil {
+		return "", fmt.Errorf("prune worktrees before cache migration: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	entries, err := os.ReadDir(filepath.Join(path, "worktrees"))
+	if err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("inspect worktrees before cache migration: %w", err)
+	}
+	if len(entries) != 0 {
+		return path, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return "", context.Cause(ctx)
+	}
+	if err := os.Rename(path, shortPath); err != nil {
+		return "", fmt.Errorf("migrate unused repo cache from %s to %s: %w", path, shortPath, err)
+	}
+	c.logger.Info("repo cache: shortened unused legacy cache path", "old_path", path, "path", shortPath)
+	return shortPath, nil
 }
 
 // lastUsedFile records the last time a task asked for a worktree from this
@@ -839,21 +904,15 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 // lock is held, so a client that times out behind maintenance cannot leave a
 // late, unwanted checkout.
 func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams) (*WorktreeResult, error) {
-	barePath := c.Lookup(params.WorkspaceID, params.RepoURL)
-	if barePath == "" {
-		return nil, fmt.Errorf("repo not found in cache: %s (workspace: %s)", params.RepoURL, params.WorkspaceID)
-	}
-
 	// Serialize concurrent CreateWorktree calls on the same bare repo. Git's
 	// own lockfiles (packed-refs.lock, config.lock, worktree admin dirs)
 	// can't tolerate parallel fetch + worktree mutations on the same repo.
-	repoLock := c.lockForRepo(barePath)
 	lockCtx := ctx
 	cancel := func() {}
 	if params.LockWaitTimeout > 0 {
 		lockCtx, cancel = context.WithTimeout(ctx, params.LockWaitTimeout)
 	}
-	err := repoLock.LockContext(lockCtx)
+	unlock, err := c.lockRepoURLContext(lockCtx, params.WorkspaceID, params.RepoURL)
 	cancel()
 	if err != nil {
 		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
@@ -861,9 +920,16 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		}
 		return nil, err
 	}
-	defer repoLock.Unlock()
+	defer unlock()
 	if err := ctx.Err(); err != nil {
 		return nil, context.Cause(ctx)
+	}
+	barePath, err := c.prepareBarePathContext(ctx, params.WorkspaceID, params.RepoURL)
+	if err != nil {
+		return nil, err
+	}
+	if !isBareRepo(barePath) {
+		return nil, fmt.Errorf("repo not found in cache: %s (workspace: %s)", params.RepoURL, params.WorkspaceID)
 	}
 
 	// Stamp before doing the work, not after: a task asking for a worktree is
