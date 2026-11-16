@@ -163,7 +163,7 @@ The display settings saved in a view are its **Default display**: members see th
 
 Drag views in the view bar to reorder them; ordering and visibility in **Manage views** affect only you. Right-click a view to edit it, delete it, or **Add to sidebar**, which lists it in the **Views** section of the Work panel.
 
-The Views section also offers four built-in views: **All issues**; **My work**, issues assigned to you or to your agents; **Working**, issues an agent is running on; and **Subscribed**, every issue you subscribe to. My work, Working, and Subscribed are All issues under a fixed condition: other filters can narrow them, but that condition can't be removed or widened. The sliders button in the Views section header turns each built-in view on or off.
+The Views section also offers five built-in views: **All issues**; **My work**, issues assigned to you or to your agents; **Working**, issues an agent is running on; and **Subscribed**, every issue you subscribe to. **Snoozed** lists issues you have [snoozed in your inbox](/inbox#snooze-an-issue). My work, Working, and Subscribed are All issues under a fixed condition: other filters can narrow them, but that condition can't be removed or widened. The sliders button in the Views section header turns each built-in view on or off.
 
 ### Side preview
 
@@ -173,7 +173,11 @@ While the preview is open, `J` / `K` move to the next or previous issue, `H` / `
 
 ## Batch edits
 
-Select several issues in a list, a table, or a sub-issue list, and a batch toolbar appears at the bottom to change status, priority, or assignee, or delete them all at once. In a table, Shift-click selects a range.
+Select several issues in a list, a table, or a sub-issue list to show the batch toolbar. In a table, Shift-click selects a range. The toolbar edits status, priority, assignee, labels, project, and due date. **More actions** adds start date, parent, stage for sub-issues, custom properties, copying links, and deletion. The selection's right-click menu offers the same actions.
+
+Labels show whether they are on all, some, or none of the selected issues. Add or remove one without changing other labels, or clear all labels. Custom properties can be set or cleared; multi-value properties replace the whole value.
+
+If some issues cannot take a change, the others are still updated. The result names skipped issues and their reasons, with an action to select only those issues for correction and retry.
 
 - When the selection spans several projects, the status menu offers only statuses every selected issue's workflow allows. An issue that does not support a change keeps its value, and the rest are updated.
 - Batch status changes apply directly. Agent-assigned issues that leave `backlog` start running as usual.
