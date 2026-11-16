@@ -6,6 +6,8 @@ const disk = vi.hoisted(() => ({
   readConfig: null as Promise<string | null> | null,
   deleteToken: null as Promise<void> | null,
   failWrite: false,
+  clearCookies: null as Promise<void> | null,
+  cookieClears: 0,
 }));
 vi.mock("expo-secure-store", () => ({
   getItemAsync: vi.fn(async (key: string) =>
@@ -22,6 +24,12 @@ vi.mock("expo-secure-store", () => ({
 vi.mock("react-native", () => ({
   Platform: { OS: "android" },
   AppState: { addEventListener: () => ({ remove: vi.fn() }) },
+  Networking: {
+    clearCookies: (done: (cleared: boolean) => void) => {
+      disk.cookieClears++;
+      void (disk.clearCookies ?? Promise.resolve()).then(() => done(true));
+    },
+  },
 }));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.2" } } }));
 vi.mock("@react-native-community/netinfo", () => ({
@@ -42,6 +50,8 @@ beforeEach(() => {
   disk.readConfig = null;
   disk.deleteToken = null;
   disk.failWrite = false;
+  disk.clearCookies = null;
+  disk.cookieClears = 0;
   vi.spyOn(console, "log").mockImplementation(() => {});
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -50,12 +60,17 @@ describe("persistent instance/session isolation", () => {
   it("waits for configuration before restoring auth or making any request", async () => {
     const read = deferred<string | null>();
     disk.readConfig = read.promise;
+    const cookies = deferred<void>();
+    disk.clearCookies = cookies.promise;
     const fetch = vi.fn(async () => Response.json({ id: "user-a" }));
     vi.stubGlobal("fetch", fetch);
     const { useAuthStore } = await import("./auth-store");
     const initialize = useAuthStore.getState().initialize();
     await vi.waitFor(() => expect(fetch).not.toHaveBeenCalled());
     read.resolve(JSON.stringify(first));
+    await vi.waitFor(() => expect(disk.cookieClears).toBe(1));
+    expect(fetch).not.toHaveBeenCalled();
+    cookies.resolve();
     await initialize;
     expect(fetch).toHaveBeenCalledWith(`${first.apiUrl}/api/me`, expect.objectContaining({
       headers: expect.objectContaining({ Authorization: "Bearer a-token" }),
@@ -103,6 +118,8 @@ describe("persistent instance/session isolation", () => {
     await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     const deletion = deferred<void>();
     disk.deleteToken = deletion.promise;
+    const cookies = deferred<void>();
+    disk.clearCookies = cookies.promise;
     const change = changeServerConfig(second);
     expect(stopped).toHaveBeenCalledOnce();
     expect(api.getToken()).toBeNull();
@@ -110,11 +127,17 @@ describe("persistent instance/session isolation", () => {
     expect(queryClient.getQueryData(["private"])).toBeUndefined();
     expect(useChatDraftsStore.getState().drafts).toEqual({});
     expect(useWorkspaceStore.getState().currentWorkspaceSlug).toBeNull();
-    for (const call of fetch.mock.calls) expect((call[1] as RequestInit).signal?.aborted).toBe(true);
+    for (const call of fetch.mock.calls) {
+      expect((call[1] as RequestInit).signal?.aborted).toBe(true);
+      expect((call[1] as RequestInit).credentials).toBe("omit");
+    }
     expect(useServerConfigStore.getState().config).toEqual(first);
     await expect(api.sendCode("synthetic@example.test")).rejects.toThrow("Server session changed");
     expect(fetch).toHaveBeenCalledTimes(2);
     deletion.resolve();
+    await vi.waitFor(() => expect(disk.values.has("multica_token")).toBe(false));
+    expect(useServerConfigStore.getState().config).toEqual(first);
+    cookies.resolve();
     await change;
     expect(disk.values.has("multica_token")).toBe(false);
     expect(JSON.parse(disk.values.get("multica_server_config")!)).toEqual(second);

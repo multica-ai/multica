@@ -10,7 +10,10 @@ vi.hoisted(() => {
 
 // The real store pulls in expo-secure-store; the client only needs the slug.
 vi.mock("@/data/workspace-store", () => ({ getCurrentSlug: () => null }));
-vi.mock("react-native", () => ({ Platform: { OS: "android" } }));
+vi.mock("react-native", () => ({
+  Platform: { OS: "android" },
+  Networking: { clearCookies: (done: (cleared: boolean) => void) => done(false) },
+}));
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.1" } } }));
 vi.mock("expo-secure-store", () => ({ getItemAsync: async () => null }));
 
@@ -28,6 +31,7 @@ describe("api.listAgents", () => {
     expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
       `https://api.example.test${path}`,
       expect.objectContaining({
+        credentials: "omit",
         headers: expect.objectContaining({ "X-Client-OS": "android", "X-Client-Version": "0.1.1" }),
       }),
     );

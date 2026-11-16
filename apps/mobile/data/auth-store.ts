@@ -17,6 +17,7 @@ import { currentSessionEpoch, invalidateSessionEpoch, sessionEpochChanged } from
 import { useWorkspaceStore } from "./workspace-store";
 import { initializeServerConfig } from "./server-config-store";
 import { stopSessionConnections } from "./realtime/session-connections";
+import { clearNativeSessionCookies, initializeNativeSession } from "./native-session";
 
 interface AuthState {
   user: User | null;
@@ -37,6 +38,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   initialize: async () => {
     const epoch = currentSessionEpoch();
     await initializeServerConfig();
+    await initializeNativeSession();
     if (sessionEpochChanged(epoch)) return;
     // Restore the persisted workspace slug alongside the auth token so the
     // entry redirect (app/index.tsx) can route directly to the last-used
@@ -98,7 +100,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     api.resetSession();
     stopSessionConnections();
     set({ user: null, isLoading: false });
-    await clearToken();
+    await Promise.all([clearToken(), clearNativeSessionCookies()]);
   },
 
   setUser: (user) => set({ user }),

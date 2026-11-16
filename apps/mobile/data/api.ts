@@ -143,6 +143,7 @@ import { buildCommentUpdateBody } from "./revision";
 
 import { getServerConfig, initializeServerConfig, useServerConfigStore } from "./server-config-store";
 import { joinServerPath } from "@/lib/server-url";
+import { initializeNativeSession } from "./native-session";
 
 export interface LoginResponse {
   token: string;
@@ -232,6 +233,7 @@ class ApiClient {
       }
     };
     await initializeServerConfig();
+    await initializeNativeSession();
     assertCurrent();
     const url = joinServerPath(getServerConfig().apiUrl, path);
     const rid = createRequestId();
@@ -265,7 +267,7 @@ class ApiClient {
 
     console.log(`[api] → ${method} ${path}`, { rid });
     try {
-      const res = await fetch(url, { ...init, signal: controller.signal, headers });
+      const res = await fetch(url, { ...init, signal: controller.signal, headers, credentials: "omit" });
       assertCurrent();
       const duration = `${Date.now() - start}ms`;
       if (!res.ok) {
