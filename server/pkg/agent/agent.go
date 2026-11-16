@@ -24,6 +24,8 @@ type Backend interface {
 
 // ExecOptions configures a single execution.
 type ExecOptions struct {
+	// SkillInvocation is set only for validated member-authored skill selections.
+	SkillInvocation *SkillInvocation
 	// EnableTaskSupplement installs provider hooks only for runs whose daemon/server
 	// capability handshake enabled additional messages.
 	EnableTaskSupplement bool

@@ -455,6 +455,16 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	} else {
 		args = buildPiArgs(sessionPath, opts, b.cfg.Logger)
 	}
+	// Pi natively expands a leading "/skill:<name> " in session.prompt, which
+	// is exactly where both delivery modes land the task text (stdin in print
+	// mode, a prompt command in RPC mode). omp shares this backend but never
+	// command-dispatches the stdin prompt, and a custom runtime profile only
+	// promises the JSON protocol, not the vendor binary's skill grammar — an
+	// unexpanded token would reach the model as literal text. Both keep the
+	// fallback prompt; only the built-in pi binary earns the native one.
+	if label == "pi" && b.cfg.BuiltinRuntime && opts.SkillInvocation != nil {
+		prompt = opts.SkillInvocation.piSkillPrompt(opts.PiSkillPaths, b.cfg.LaunchPrefix, opts.ExtraArgs, opts.CustomArgs)
+	}
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(processCtx, choosePiInvocation, lookedUp, args, b.cfg.Logger)
 	// The joined cleanup below owns TERM, escalation and pipe release.
 	cmd.Cancel = func() error { return nil }
