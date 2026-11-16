@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { forwardRef, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { TimelineEntry } from "@multica/core/types";
@@ -54,21 +54,35 @@ vi.mock("../../editor", async () => ({
 import { CommentCard } from "./comment-card";
 import { resetRememberedThreadRowHeights } from "./virtual-thread-row";
 
+// Nothing intersects until a test says so: virtualized rows start as
+// placeholders, and `intersectAll` reports every observed row in view.
+let observers: { callback: IntersectionObserverCallback; node?: Element }[] = [];
 beforeEach(() => {
-  // Nothing intersects: every virtualized row stays a placeholder.
+  observers = [];
   vi.stubGlobal("IntersectionObserver", class {
-    observe() {}
+    entry: { callback: IntersectionObserverCallback; node?: Element };
+    constructor(callback: IntersectionObserverCallback) { this.entry = { callback }; observers.push(this.entry); }
+    observe(node: Element) { this.entry.node = node; }
     disconnect() {}
   });
 });
+const intersectAll = () => act(() => {
+  for (const { callback, node } of observers) {
+    if (node) callback([{ target: node, isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+  }
+});
 afterEach(() => { vi.unstubAllGlobals(); resetRememberedThreadRowHeights(); });
 
-function comment(id: string, parentId: string | null, content: string): TimelineEntry {
+function comment(
+  id: string,
+  parentId: string | null,
+  content: string,
+  author: Pick<TimelineEntry, "actor_type" | "actor_id"> = { actor_type: "agent", actor_id: "agent-1" },
+): TimelineEntry {
   return {
     type: "comment",
     id,
-    actor_type: "agent",
-    actor_id: "agent-1",
+    ...author,
     content,
     parent_id: parentId,
     comment_type: "comment",
@@ -82,13 +96,13 @@ function comment(id: string, parentId: string | null, content: string): Timeline
 
 function renderThread(replies: TimelineEntry[], replyScrollParent: HTMLElement | null) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderWithI18n(
+  const view = (rows: TimelineEntry[]) => (
     <QueryClientProvider client={qc}>
       <CommentCard
         issueId="issue-1"
         replyScrollParent={replyScrollParent}
         entry={comment("root", null, "root body")}
-        replies={replies}
+        replies={rows}
         currentUserId="user-1"
         onReply={vi.fn().mockResolvedValue(true)}
         onEdit={vi.fn().mockResolvedValue(undefined)}
@@ -97,8 +111,10 @@ function renderThread(replies: TimelineEntry[], replyScrollParent: HTMLElement |
         onCopyLink={vi.fn()}
         onCreateSubIssue={vi.fn()}
       />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  const result = renderWithI18n(view(replies));
+  return { ...result, update: (rows: TimelineEntry[]) => result.rerender(view(rows)) };
 }
 
 const longReplies = () => [1, 2, 3].map((n) => comment(`reply-${n}`, "root", `report ${n} ${"x".repeat(5_000)}`));
@@ -117,6 +133,31 @@ describe("CommentCard — reply virtualization", () => {
     const { container } = renderThread([1, 2, 3].map((n) => comment(`reply-${n}`, "root", `short ${n}`)), document.body);
     expect(container.querySelector("[data-virtual-thread-row]")).toBeNull();
     expect(screen.getByText("short 2")).toBeInTheDocument();
+    expect(container.querySelector("#comment-reply-2")?.getAttribute("data-mc")).toBe("comment-reply");
+  });
+
+  it("keeps an open reply editor when a new report pushes the thread past the threshold", async () => {
+    // Found in review of #10744: switching inline rows to virtual rows swapped
+    // the component, unmounting the editor and dropping focus.
+    const initial = [
+      comment("own", "root", "My reply", { actor_type: "member", actor_id: "user-1" }),
+      comment("report", "root", "x".repeat(11_000)),
+    ];
+    const result = renderThread(initial, document.body);
+    expect(result.container.querySelector("[data-virtual-thread-row]")).toBeNull();
+    fireEvent.click(result.container.querySelector('#comment-own button[aria-haspopup="menu"]')!);
+    fireEvent.click(await screen.findByText("Edit"));
+    const editor = await screen.findByTestId("editor");
+    editor.focus();
+
+    result.update([...initial, comment("new-report", "root", "y".repeat(2_000))]);
+    expect(result.container.querySelectorAll("[data-virtual-thread-row]")).toHaveLength(3);
+    // Existing rows stay mounted through the switch; the new one is a placeholder.
+    expect(result.container.querySelector("#comment-own")?.getAttribute("data-virtual-thread-mounted")).toBe("true");
+    expect(result.container.querySelector("#comment-new-report")?.getAttribute("data-virtual-thread-mounted")).toBe("false");
+    intersectAll();
+    expect(screen.queryByTestId("editor")).toBe(editor);
+    expect(document.activeElement).toBe(editor);
   });
 
   it("renders every reply without a scroll parent, for in-page find", () => {

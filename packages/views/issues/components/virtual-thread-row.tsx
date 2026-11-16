@@ -62,21 +62,39 @@ export function resetRememberedThreadRowHeights() {
   rememberedHeights.clear();
 }
 
-/** Keep anchors addressable without parsing every offscreen Markdown reply. */
-export function VirtualThreadRow({ id, taskId, scrollParent, children }: {
+/**
+ * Keep anchors addressable without parsing every offscreen Markdown reply.
+ *
+ * Every timeline thread row renders through this wrapper, virtualized or not,
+ * so a thread that crosses the virtualization threshold (a new long report
+ * arrives) keeps the same component tree: its rows stay mounted until they are
+ * observed offscreen, and an open editor is never torn down by the switch.
+ * The anchor `id` lives on the wrapper only while virtualized; otherwise the
+ * row content carries it as before.
+ */
+export function VirtualThreadRow({ id, taskId, scrollParent, virtualize = true, children }: {
   id: string;
   taskId?: string;
   scrollParent?: HTMLElement | null;
+  /** False renders the row inline; switching it never remounts the row. */
+  virtualize?: boolean;
   children: () => ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const height = useRef(rememberedHeights.get(id) ?? UNMEASURED_ROW_HEIGHT);
-  const [visible, setVisible] = useState(false);
-  const mounted = !scrollParent || visible;
+  const active = !!scrollParent && virtualize;
+  // A row that starts inline counts as visible, so turning virtualization on
+  // later keeps it mounted until the observer reports it offscreen.
+  const [visible, setVisible] = useState(!active);
+  const mounted = !active || visible;
 
   useEffect(() => {
     const node = ref.current;
-    if (!node || !scrollParent) return;
+    if (!node) return;
+    if (!active) {
+      setVisible(true);
+      return;
+    }
     if (typeof IntersectionObserver !== "function") {
       setVisible(true);
       return;
@@ -90,15 +108,19 @@ export function VirtualThreadRow({ id, taskId, scrollParent, children }: {
     }, { root: scrollParent, rootMargin: "800px 0px" });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [scrollParent]);
+  }, [active, scrollParent]);
 
   // The placeholder's height becomes the real one in this commit. Keep the
   // content below a row above the viewport from moving (see the helper).
+  // Only a placeholder → content transition shifts layout.
+  const wasMounted = useRef(mounted);
   useLayoutEffect(() => {
+    const was = wasMounted.current;
+    wasMounted.current = mounted;
     const node = ref.current;
-    if (!node || !visible || !scrollParent) return;
+    if (was || !mounted || !node || !scrollParent) return;
     keepThreadRowAnchored(scrollParent, node, height.current);
-  }, [visible, scrollParent]);
+  }, [mounted, scrollParent]);
 
   useEffect(() => {
     const node = ref.current;
@@ -117,8 +139,8 @@ export function VirtualThreadRow({ id, taskId, scrollParent, children }: {
     return () => observer.disconnect();
   }, [mounted, id]);
 
-  return <div ref={ref} id={id} data-run-slot-id={taskId}
-    data-virtual-thread-row data-virtual-thread-mounted={mounted}
+  return <div ref={ref} id={active ? id : undefined} data-run-slot-id={active ? taskId : undefined} data-thread-row=""
+    data-virtual-thread-row={active ? "" : undefined} data-virtual-thread-mounted={active ? mounted : undefined}
     style={mounted ? undefined : { height: height.current }}>
     {mounted ? children() : null}
   </div>;
