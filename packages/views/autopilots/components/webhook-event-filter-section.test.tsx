@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { configStore } from "@multica/core/config";
 import { screen, fireEvent, within } from "@testing-library/react";
 import { renderWithI18n } from "../../test/i18n";
 import { WebhookEventFilterSection } from "./webhook-event-filter-section";
@@ -9,6 +10,15 @@ import { WebhookEventFilterSection } from "./webhook-event-filter-section";
 // getByRole(..., { name }) is the assertion that keeps them named.
 
 describe("WebhookEventFilterSection", () => {
+  beforeEach(() => configStore.getState().setWebhookPayloadConditionsSupported(true));
+  afterEach(() => configStore.getState().setWebhookPayloadConditionsSupported(false));
+
+  it("offers only event filters when an older backend cannot enforce payload conditions", () => {
+    configStore.getState().setWebhookPayloadConditionsSupported(false);
+    renderWithI18n(<WebhookEventFilterSection filters={[{ event: "pull_request" }]} onChange={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Add condition" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add" })).toBeInTheDocument();
+  });
   it("names the add control instead of shipping a bare + icon", () => {
     renderWithI18n(
       <WebhookEventFilterSection filters={[]} onChange={vi.fn()} />,

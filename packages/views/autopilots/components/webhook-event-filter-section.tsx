@@ -18,6 +18,7 @@ import type {
   WebhookPayloadCondition,
 } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { useConfigStore } from "@multica/core/config";
 import {
   CONDITION_OPS,
   EMPTY_CONDITION_DRAFT,
@@ -40,6 +41,7 @@ export function WebhookEventFilterSection({
   onChange,
 }: WebhookEventFilterSectionProps) {
   const { t, i18n } = useT("autopilots");
+  const payloadSupported = useConfigStore((state) => state.webhookPayloadConditionsSupported);
   const [newEvent, setNewEvent] = useState("");
   const [newActions, setNewActions] = useState("");
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -117,7 +119,7 @@ export function WebhookEventFilterSection({
           {filters.map((f, idx) => {
             const conditions = f.conditions ?? [];
             const editing = editingIdx === idx;
-            const canAddCondition = !editing && conditions.length < MAX_CONDITIONS;
+            const canAddCondition = payloadSupported && !editing && conditions.length < MAX_CONDITIONS;
             return (
               <div key={idx} className="rounded-md border bg-background text-caption">
                 <div className="flex min-w-0 items-center gap-2 py-1 pr-1 pl-2.5">

@@ -1,8 +1,13 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { EMPTY_WEBHOOK_DELIVERY, ListWebhookDeliveriesResponseSchema, WebhookDeliveryResponseSchema } from "./schemas";
+import { AppConfigSchema, EMPTY_WEBHOOK_DELIVERY, ListWebhookDeliveriesResponseSchema, WebhookDeliveryResponseSchema } from "./schemas";
 
 describe("webhook delivery filter diagnostics", () => {
+  it("requires explicit backend support before enabling payload conditions", () => {
+    expect(AppConfigSchema.parse({}).webhook_payload_conditions_supported).toBe(false);
+    expect(AppConfigSchema.parse({ webhook_payload_conditions_supported: "yes" }).webhook_payload_conditions_supported).toBe(false);
+    expect(AppConfigSchema.parse({ webhook_payload_conditions_supported: true }).webhook_payload_conditions_supported).toBe(true);
+  });
   const failure = {
     filter_index: 0, condition_index: 1,
     condition: { path: "pull_request.base.ref", op: "equals", value: "main" },
