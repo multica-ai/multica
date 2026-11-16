@@ -13,7 +13,6 @@ import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { formatSnoozeTime } from "./inbox-snooze-time";
-import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle, isAutopilotQuotaNotice } from "./inbox-display";
 
 /**
@@ -119,8 +118,7 @@ export function InboxKeptActions({
 /** Opens the next notification, named in its tooltip; E does the same. */
 export function InboxNextButton({ next, onNext }: { next: InboxItem; onNext: () => void }) {
   const { t } = useT("inbox");
-  const typeLabels = useTypeLabels();
-  const title = isAutopilotQuotaNotice(next.type) ? typeLabels[next.type] : getInboxDisplayTitle(next);
+  const title = isAutopilotQuotaNotice(next.type) ? t(($) => $.types[next.type]) : getInboxDisplayTitle(next);
   return (
     <TooltipHint
       label={t(($) => $.kept.next_tooltip, { title })}
