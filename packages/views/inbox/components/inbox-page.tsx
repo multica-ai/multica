@@ -121,7 +121,7 @@ import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
 import { InboxKeptActions, useKeptInboxRowText } from "./inbox-kept-actions";
 import { useFilteredInboxRows } from "./use-filtered-inbox-rows";
 import { useKeptOpenInboxRow } from "./use-kept-open-inbox-row";
-import { useArchiveInboxWithUndo, useRestoreInbox } from "./use-leave-inbox-row";
+import { useArchiveInboxBatchWithUndo, useArchiveInboxWithUndo, useRestoreInbox } from "./use-leave-inbox-row";
 import { useInboxSnooze } from "./use-inbox-snooze";
 import { InboxAppRequest } from "../../common/app-requests";
 import { useT } from "../../i18n";
@@ -423,6 +423,7 @@ export function InboxPage() {
   const [deleteTarget, setDeleteTarget] = useState<InboxItem | null>(null);
   const markUnreadMutation = useMarkInboxUnread();
   const archiveWithUndo = useArchiveInboxWithUndo();
+  const archiveBatchWithUndo = useArchiveInboxBatchWithUndo();
   const restoreInbox = useRestoreInbox();
   const { unsnooze } = useInboxSnooze();
   const keptText = useKeptInboxRowText(wsId);
@@ -599,9 +600,15 @@ export function InboxPage() {
     setSelectedKey(next ? inboxRowKey(next) : "");
   };
   // A batch archive that takes the open row moves on to the next one it leaves.
-  const advancePastBatch = (archives: (item: InboxItem) => boolean) => {
+  const archiveBatch = (
+    archive: () => Promise<{ count: number }>,
+    archives: (item: InboxItem) => boolean,
+    failed: string,
+  ) => {
     const open = listedItems.find((i) => inboxRowKey(i) === selectedKey);
-    if (!open || !archives(open)) return;
+    const takesOpen = !!open && archives(open);
+    void archiveBatchWithUndo(archive, archives, failed, takesOpen ? selectedKey : null);
+    if (!takesOpen) return;
     leaveRow(wsId, selectedKey);
     const next = nextInboxRow(listedItems, selectedKey, archives);
     setSelectedKey(next ? inboxRowKey(next) : "");
@@ -612,7 +619,8 @@ export function InboxPage() {
     advanceSelectionPast(id, listedItems);
     // Archived already: moving on is all that is left.
     if (settledRow?.item.id === id) return;
-    archiveWithUndo(id);
+    const target = listedItems.find((i) => i.id === id);
+    archiveWithUndo(id, target ? inboxRowKey(target) : id);
   };
 
   const handleUnarchive = (id: string) => {
@@ -673,29 +681,15 @@ export function InboxPage() {
     });
   };
 
-  const handleArchiveAll = () => {
-    advancePastBatch(() => true);
-    archiveAllMutation.mutate(undefined, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_all_failed),
-        ),
-    });
-  };
+  const handleArchiveAll = () =>
+    archiveBatch(() => archiveAllMutation.mutateAsync(), () => true, t(($) => $.errors.archive_all_failed));
 
-  const handleArchiveAllRead = () => {
-    advancePastBatch((item) => item.read === true);
-    archiveAllReadMutation.mutate(undefined, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_all_read_failed),
-        ),
-    });
-  };
+  const handleArchiveAllRead = () =>
+    archiveBatch(
+      () => archiveAllReadMutation.mutateAsync(),
+      (item) => item.read === true,
+      t(($) => $.errors.archive_all_read_failed),
+    );
 
   // The command bar calls the page's own handlers, so archiving from it moves
   // the selection and toasts exactly like the row actions do.
@@ -728,20 +722,15 @@ export function InboxPage() {
     ),
   );
 
-  const handleArchiveCompleted = () => {
-    advancePastBatch((item) => {
-      const category = item.issue_status ? categoryOf(item.issue_status) : null;
-      return category === "done" || category === "closed";
-    });
-    archiveCompletedMutation.mutate(undefined, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_completed_failed),
-        ),
-    });
-  };
+  const handleArchiveCompleted = () =>
+    archiveBatch(
+      () => archiveCompletedMutation.mutateAsync(),
+      (item) => {
+        const category = item.issue_status ? categoryOf(item.issue_status) : null;
+        return category === "done" || category === "closed";
+      },
+      t(($) => $.errors.archive_completed_failed),
+    );
 
   // -- Shared sub-components --------------------------------------------------
 

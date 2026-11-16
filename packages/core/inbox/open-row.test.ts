@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import type { InboxItem } from "../types";
 import { keepOpenInboxRow, nextInboxRow, type HeldInboxRow } from "./open-row";
 import { useInboxSelectionStore } from "./selection-store";
+import { onInboxIssueDeleted, onInboxIssuesDeleted } from "./ws-updaters";
 
 function item(id: string, overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -123,6 +125,29 @@ describe("held and left rows", () => {
 
     store().releaseRows("ws", []);
     expect(Object.keys(store().heldRows)).toEqual(["other:section"]);
+  });
+
+  it("lets a row be kept again once the action that left it is undone", () => {
+    store().leaveRow("ws", "b");
+    store().returnRow("ws", "c");
+    expect(store().leftRowKeyByWorkspace).toEqual({ ws: "b" });
+    store().returnRow("ws", "b");
+    expect(store().leftRowKeyByWorkspace).toEqual({});
+    store().holdRow("ws", "section", held(B, 1));
+    expect(store().heldRows["ws:section"]?.key).toBe("b");
+  });
+
+  it("forgets every row of an issue that was deleted", async () => {
+    store().holdRow("ws", "section", held(B, 1));
+    store().holdRow("ws", "page", held(B, 1));
+    store().holdRow("other", "section", held(B, 1));
+    const qc = new QueryClient();
+    await onInboxIssueDeleted(qc, "ws", "b");
+    expect(Object.keys(store().heldRows)).toEqual(["other:section"]);
+
+    store().leaveRow("ws", "c");
+    await onInboxIssuesDeleted(qc, "ws", ["c"]);
+    expect(store().leftRowKeyByWorkspace).toEqual({});
   });
 
   it("drops the row of a list that goes away", () => {

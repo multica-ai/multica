@@ -2,13 +2,12 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { AlarmClock, Archive, ChevronDown, CircleCheck } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
-import { useArchiveInbox, type InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
+import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
 import { findSnoozedInboxIssue, snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { nextInboxRow } from "@multica/core/inbox/open-row";
 import {
@@ -69,7 +68,6 @@ export function IssueInboxActions({
   const item = settled ? null : row;
   const next = row ? nextInboxRow(rows, issueId) : null;
   const leave = useLeaveInboxRow();
-  const { mutateAsync: archiveAsync } = useArchiveInbox();
   const archiveWithUndo = useArchiveInboxWithUndo();
   const restore = useRestoreInbox();
   const unsubscribeArchive = useUnsubscribeArchive();
@@ -81,7 +79,7 @@ export function IssueInboxActions({
 
   const archiveItem = () => {
     if (!item) return;
-    archiveWithUndo(item.id);
+    archiveWithUndo(item.id, issueId);
     leave(issueId, next);
   };
 
@@ -98,15 +96,13 @@ export function IssueInboxActions({
   };
 
   // Done archives the issue's notifications on the server; archiving here as
-  // well takes the row out at once instead of when that event arrives. The
-  // row is let go at once, so that event cannot keep it in the meantime.
+  // well confirms it with an undo, which restores the notification and leaves
+  // the issue done. Until the status is saved the row stays, so a write that
+  // fails or never happens leaves it as it was.
   const markDone = () => {
     if (!item || !onMarkDone) return;
-    leave(issueId, null);
     onMarkDone(() => {
-      archiveAsync(item.id).catch((err: unknown) =>
-        toast.error(err instanceof Error && err.message ? err.message : t(($) => $.errors.archive_failed)),
-      );
+      void archiveWithUndo(item.id, issueId);
       leave(issueId, next);
     });
   };

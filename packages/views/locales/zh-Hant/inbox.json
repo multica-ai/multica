@@ -123,6 +123,7 @@
   "toasts": {
     "source_context_retry_started": "已使用原始上下文開始重試",
     "archived": "已歸檔通知",
+    "archived_many_other": "已歸檔 {{count}} 條通知",
     "unarchived": "已恢復通知",
     "deleted": "通知已刪除",
     "unsubscribed_archived": "已取消訂閱並歸檔",

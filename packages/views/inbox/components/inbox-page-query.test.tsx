@@ -401,3 +401,17 @@ it("keeps the archived list and its filter menu mounted while a new filter loads
   expect(screen.getByTestId("filter-menu")).toBe(menu);
   expect(filterMenuUnmounted).not.toHaveBeenCalled();
 });
+
+it("lets the open notification go once its issue is deleted, rather than keep it in place", async () => {
+  useInboxFilterStore.setState({ filtersByWorkspace: {} });
+  useInboxSelectionStore.setState({ heldRows: {}, leftRowKeyByWorkspace: {} });
+  searchParams = new URLSearchParams("issue=issue-a");
+  let rows = [item({ read: true })];
+  setApiInstance({ listInbox: async () => rows, getInboxUnreadSummary: async () => [] } as unknown as ApiClient);
+  renderPage();
+  expect(await screen.findByTestId("detail")).toHaveTextContent("issue-a");
+  rows = [];
+  await act(async () => { await onInboxIssueDeleted(qc, "workspace-1", "issue-a"); });
+  await waitFor(() => expect(screen.queryByTestId("detail")).not.toBeInTheDocument());
+  expect(replace).toHaveBeenLastCalledWith("/acme/inbox");
+});

@@ -123,6 +123,7 @@
   "toasts": {
     "source_context_retry_started": "元のコンテキストで再試行を開始しました",
     "archived": "通知をアーカイブしました",
+    "archived_many_other": "{{count}} 件の通知をアーカイブしました",
     "unarchived": "通知を元に戻しました",
     "deleted": "通知を削除しました",
     "unsubscribed_archived": "購読を解除してアーカイブしました",

@@ -53,7 +53,11 @@ import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
 import { useInboxUnsubscribable, useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
-import { useArchiveInboxWithUndo, useLeaveInboxRow } from "../../inbox/components/use-leave-inbox-row";
+import {
+  useArchiveInboxBatchWithUndo,
+  useArchiveInboxWithUndo,
+  useLeaveInboxRow,
+} from "../../inbox/components/use-leave-inbox-row";
 import { useKeptInboxRowText } from "../../inbox/components/inbox-kept-actions";
 import { StatusIcon } from "../../issues/components";
 import { useStatusLabel } from "../../issues/utils/status-label";
@@ -221,7 +225,7 @@ export function InboxSection({
               settled={list.kept?.item.id === item.id && list.kept.reason !== "filtered"}
               updatesWhileSnoozed={item.issue_id ? (updatesWhileSnoozed.get(item.issue_id) ?? 0) : 0}
               onArchive={() => {
-                archive(item.id);
+                archive(item.id, inboxRowKey(item));
                 leaveIfOpen(item);
               }}
               onUnsubscribe={
@@ -299,13 +303,19 @@ function InboxSectionActions({
   const { t } = useT("layout");
   const { t: tInbox } = useT("inbox");
   const leave = useLeaveInboxRow();
+  const archiveWithUndo = useArchiveInboxBatchWithUndo();
   const { categoryOf } = useIssueStatuses(wsId);
   // A batch archive is the user's own Inbox action: when it takes the open
   // notification, that one moves on to the next row the batch leaves.
-  const archiveBatch = (archive: () => void, archives: (item: InboxItem) => boolean) => {
+  const archiveBatch = (
+    archive: () => Promise<{ count: number }>,
+    archives: (item: InboxItem) => boolean,
+    failed: string,
+  ) => {
     const open = openRowKey ? rows.find((item) => inboxRowKey(item) === openRowKey) : undefined;
-    if (open && archives(open)) leave(openRowKey!, nextInboxRow(rows, openRowKey!, archives));
-    archive();
+    const takesOpen = !!open && archives(open);
+    void archiveWithUndo(archive, archives, failed, takesOpen ? openRowKey : null);
+    if (takesOpen) leave(openRowKey!, nextInboxRow(rows, openRowKey!, archives));
   };
   const isRead = (item: InboxItem) => item.read === true;
   const isFinished = (item: InboxItem) => {
@@ -373,8 +383,9 @@ function InboxSectionActions({
         <DropdownMenuItem
           onClick={() =>
             archiveBatch(
-              () => archiveAllRead.mutate(undefined, { onError: onError(tInbox(($) => $.errors.archive_all_read_failed)) }),
+              () => archiveAllRead.mutateAsync(),
               isRead,
+              tInbox(($) => $.errors.archive_all_read_failed),
             )
           }
         >
@@ -384,8 +395,9 @@ function InboxSectionActions({
         <DropdownMenuItem
           onClick={() =>
             archiveBatch(
-              () => archiveCompleted.mutate(undefined, { onError: onError(tInbox(($) => $.errors.archive_completed_failed)) }),
+              () => archiveCompleted.mutateAsync(),
               isFinished,
+              tInbox(($) => $.errors.archive_completed_failed),
             )
           }
         >
@@ -395,8 +407,9 @@ function InboxSectionActions({
         <DropdownMenuItem
           onClick={() =>
             archiveBatch(
-              () => archiveAll.mutate(undefined, { onError: onError(tInbox(($) => $.errors.archive_all_failed)) }),
+              () => archiveAll.mutateAsync(),
               () => true,
+              tInbox(($) => $.errors.archive_all_failed),
             )
           }
         >

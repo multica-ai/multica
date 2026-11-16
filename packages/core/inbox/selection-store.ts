@@ -38,6 +38,10 @@ interface InboxSelectionState {
    */
   leftRowKeyByWorkspace: Record<string, string>;
   leaveRow: (wsId: string, key: string) => void;
+  /** Undoes `leaveRow` for an action that was undone or failed, so the row can be kept again. */
+  returnRow: (wsId: string, key: string) => void;
+  /** Forgets every row held or left for these notifications, whose issues are gone. */
+  forgetRows: (wsId: string, keys: readonly string[]) => void;
   /** Forgets the rows held or left for notifications that are no longer open. */
   releaseRows: (wsId: string, openKeys: readonly string[]) => void;
   /** Forgets the row one list holds, for a list that is going away. */
@@ -104,6 +108,26 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set) => ({
         Object.entries(state.heldRows).filter(([id, row]) => !(id.startsWith(`${wsId}:`) && row.key === key)),
       ),
     })),
+  returnRow: (wsId, key) =>
+    set((state) => {
+      if (state.leftRowKeyByWorkspace[wsId] !== key) return state;
+      const { [wsId]: _returned, ...leftRowKeyByWorkspace } = state.leftRowKeyByWorkspace;
+      return { leftRowKeyByWorkspace };
+    }),
+  forgetRows: (wsId, keys) =>
+    set((state) => {
+      const held = Object.entries(state.heldRows).filter(
+        ([id, row]) => !(id.startsWith(`${wsId}:`) && keys.includes(row.key)),
+      );
+      const left = state.leftRowKeyByWorkspace[wsId];
+      const leftGoes = left !== undefined && keys.includes(left);
+      if (!leftGoes && held.length === Object.keys(state.heldRows).length) return state;
+      const { [wsId]: _forgotten, ...otherLeft } = state.leftRowKeyByWorkspace;
+      return {
+        heldRows: Object.fromEntries(held),
+        leftRowKeyByWorkspace: leftGoes ? otherLeft : state.leftRowKeyByWorkspace,
+      };
+    }),
   releaseRows: (wsId, openKeys) =>
     set((state) => {
       const left = state.leftRowKeyByWorkspace[wsId];

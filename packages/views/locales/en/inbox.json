@@ -125,6 +125,8 @@
   "toasts": {
     "source_context_retry_started": "Retry started with the original context",
     "archived": "Notification archived",
+    "archived_many_one": "{{count}} notification archived",
+    "archived_many_other": "{{count}} notifications archived",
     "unarchived": "Notification restored",
     "deleted": "Notification deleted",
     "unsubscribed_archived": "Unsubscribed and archived",

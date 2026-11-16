@@ -129,6 +129,10 @@
   "toasts": {
     "source_context_retry_started": "Повтор запущен с исходным контекстом",
     "archived": "Уведомление архивировано",
+    "archived_many_one": "{{count}} уведомление архивировано",
+    "archived_many_few": "{{count}} уведомления архивированы",
+    "archived_many_many": "{{count}} уведомлений архивировано",
+    "archived_many_other": "{{count}} уведомления архивированы",
     "unarchived": "Уведомление восстановлено",
     "deleted": "Уведомление удалено",
     "unsubscribed_archived": "Вы отписались, уведомление в архиве",

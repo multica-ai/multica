@@ -265,15 +265,23 @@ describe("IssueInboxActions", () => {
     expect(state.archiveInbox).not.toHaveBeenCalled();
   });
 
-  it("lets the row go when marking done, so the archive that follows cannot keep it", async () => {
-    const onMarkDone = vi.fn();
-    const nav = setup({ rows: [ROWS[0]!], onMarkDone });
+  it("archives once done is saved, with an undo that restores only the notification, and moves on", async () => {
+    const archive = pendingArchive();
+    const onMarkDone = vi.fn((onSaved: () => void) => onSaved());
+    const nav = setup({ onMarkDone });
     fireEvent.click(screen.getByRole("button", { name: "Mark as done" }));
-    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
+    await waitFor(() => expect(state.archiveInbox).toHaveBeenCalledWith("n-1"));
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-2#comment-c-9");
+    nav.leave();
+    await archive.resolve();
 
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Mark as done" })).toBeNull());
-    expect(screen.queryByText("Notification archived")).toBeNull();
-    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace.ws).toBe("issue-1");
+    expect(toast.success).toHaveBeenCalledWith("Notification archived", {
+      action: { label: "Undo", onClick: expect.any(Function) },
+    });
+    const undo = vi.mocked(toast.success).mock.calls.at(-1)?.[1] as unknown as { action: { onClick: () => void } };
+    await act(async () => undo.action.onClick());
+    expect(state.unarchiveInbox).toHaveBeenCalledWith("n-1");
+    expect(onMarkDone).toHaveBeenCalledTimes(1);
   });
 
   it("archives and moves on to the next notification", async () => {
@@ -407,5 +415,36 @@ describe("IssueInboxActions", () => {
   it("offers no unsubscribe on an issue the viewer does not follow as a bystander", () => {
     setup();
     expect(screen.queryByRole("button", { name: "Unsubscribe & archive" })).toBeNull();
+  });
+});
+
+describe("IssueInboxActions once an action is undone or never saved", () => {
+  it("keeps the row again after archiving the last row and undoing", async () => {
+    const original = ROWS[0]!;
+    const rows = [original];
+    state.archiveInbox.mockImplementation(async () => {
+      rows.splice(0);
+      return { ...original, archived: true };
+    });
+    state.unarchiveInbox.mockImplementation(async () => { rows.push(original); });
+    const nav = setup({ rows });
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expect(nav.push).not.toHaveBeenCalled();
+    const undo = vi.mocked(toast.success).mock.calls.at(-1)?.[1] as unknown as { action: { onClick: () => void } };
+    await act(async () => undo.action.onClick());
+    await screen.findByRole("button", { name: "Archive" });
+    // The user continues reading the same issue; a later status change archives it.
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
+    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
+  });
+
+  it("keeps the row after a failed mark-done followed by a status-side-effect archive", async () => {
+    const nav = setup({ rows: [ROWS[0]!], onMarkDone: () => {} });
+    // No success callback: the status write failed and the user stayed here.
+    fireEvent.click(screen.getByRole("button", { name: "Mark as done" }));
+    expect(nav.push).not.toHaveBeenCalled();
+    act(() => nav.qc.setQueryData(inboxListOptions("ws").queryKey, []));
+    expect(await screen.findByText("Notification archived")).toBeInTheDocument();
   });
 });
