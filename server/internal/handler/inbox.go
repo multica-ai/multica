@@ -208,7 +208,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.requireInboxListAccess(w, r, userID, wsUUID) {
+	if !h.requireInboxOwnerAccess(w, r, userID, wsUUID) {
 		return
 	}
 
@@ -239,9 +239,10 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 }
 
 // Task tokens identify the runtime owner, not necessarily the human who asked
-// the agent to act. Personal notifications require that same human upstream.
-// Auth strips client identity headers and stamps the task/agent from the token.
-func (h *Handler) requireInboxListAccess(w http.ResponseWriter, r *http.Request, userID string, workspaceID pgtype.UUID) bool {
+// the agent to act. Reading the owner's notifications (active list and the
+// archive) requires that same human upstream. Auth strips client identity
+// headers and stamps the task/agent from the token.
+func (h *Handler) requireInboxOwnerAccess(w http.ResponseWriter, r *http.Request, userID string, workspaceID pgtype.UUID) bool {
 	source := r.Header.Get("X-Actor-Source")
 	if source == "" {
 		return true
@@ -304,6 +305,10 @@ func (h *Handler) ListArchivedInbox(w http.ResponseWriter, r *http.Request) {
 	workspaceID := ctxWorkspaceID(r.Context())
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
+		return
+	}
+
+	if !h.requireInboxOwnerAccess(w, r, userID, wsUUID) {
 		return
 	}
 
