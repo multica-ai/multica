@@ -16,7 +16,7 @@ import (
 // The SDK leaves provider-specific identity validation to the upstream.
 type ExecuteToolRequest struct {
 	// Arguments is the structured input to the tool. Shape varies per tool.
-	// ExecuteTool sends nil as an empty object for tools with no input fields.
+	// ExecuteTool sends nil as an empty object.
 	Arguments map[string]any `json:"arguments"`
 
 	// ConnectedAccountID pins execution to a specific connected account.
