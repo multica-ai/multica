@@ -4176,22 +4176,25 @@ func (s *TaskService) RequeueTaskAfterClaimFailure(ctx context.Context, task db.
 // every cycle. It is an optional, additive signal: an empty set reproduces the
 // exact pre-#7452 behavior, and ids not in runtimeIDs are ignored.
 //
-// The second return value ACKNOWLEDGES the subset of forceRecheckRuntimeIDs
-// whose candidate SELECT came back with ZERO candidates this cycle, as
-// canonical uuid strings. A forced runtime is acknowledged only once it has
-// been observed genuinely idle and MarkEmpty-repaired (step 5): its cache entry
-// is then freshly authoritative, so the hint has done its job and the daemon
-// can drop it.
+// The second return value ACKNOWLEDGES, as canonical uuid strings, the subset
+// of forceRecheckRuntimeIDs this call fully settled:
+//   - a forced runtime whose candidate SELECT came back with ZERO candidates
+//     (step 5): it is genuinely idle and its cache entry was just re-armed;
+//   - a forced runtime whose every candidate agent was attempted in step 6 and
+//     left nothing claimable behind: each agent either claimed its only
+//     candidate or had nothing claimable (capacity or per-(issue, agent)
+//     serialization). The terminal transition that clears such a barrier emits
+//     its own Bump plus targeted wakeup, which re-forces the runtime.
 //
 // Everything else is deliberately NOT acknowledged, so the daemon keeps the
 // runtime forced and re-forces it next cycle:
-//   - a forced runtime whose SELECT found candidates. The batch's
-//     one-attempt-per-agent rule can claim one of two same-agent tasks and leave
-//     the second queued, and the stale verdict that made the runtime need
-//     forcing is still cached. Acknowledging here would depend on a repair write
-//     (a Bump/invalidate) succeeding, and that write can fail in the very Redis
-//     outage that lost the enqueue-side Bump, silently restoring the stale
-//     verdict. Staying forced until a scan is empty needs no such write.
+//   - a forced runtime that may still hold a claimable task this call did not
+//     attempt: an agent claimed one task but had more candidates (one attempt
+//     per agent per call), or max_tasks stopped the loop first. The stale
+//     verdict that made the runtime need forcing is still cached, and
+//     acknowledging would depend on a repair write (a Bump/invalidate) that can
+//     fail in the very Redis outage that lost the enqueue-side Bump. Staying
+//     forced needs no such write.
 //   - a forced runtime the server never scanned, because reclaim already filled
 //     the batch (step 2 early return) or an error cut the cycle short.
 //
@@ -4326,7 +4329,8 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	// genuinely idle.
 	nonEmpty := make([]pgtype.UUID, 0, len(uniqueIDs))
 	versions := make(map[string]int64, len(uniqueIDs))
-	// forceRechecked acknowledges the forced runtimes that step 5 confirms idle,
+	// forceRechecked acknowledges the forced runtimes this call settles (step 5
+	// for zero candidates, after step 6 for the rest),
 	// so every other forced runtime stays forced (see the doc comment).
 	forceRechecked := make([]string, 0, len(forceRecheck))
 	for _, rid := range uniqueIDs {
@@ -4381,9 +4385,7 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 			// The runtime is confirmed idle and its cache entry has just been
 			// re-armed from a real SELECT, so the force hint has done its job:
 			// acknowledge it and let the daemon drop it (#7452). A forced runtime
-			// that DID yield candidates is intentionally left unacknowledged: it
-			// stays forced until a later scan comes back empty, which is what makes
-			// the contract independent of any Redis repair write succeeding.
+			// that DID yield candidates is settled after step 6 instead.
 			if _, forced := forceRecheck[key]; forced {
 				forceRechecked = append(forceRechecked, key)
 			}
@@ -4407,12 +4409,29 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	for i := range candidates {
 		candidatesByAgent[util.UUIDToString(candidates[i].AgentID)]++
 	}
+	// leftover names runtimes that may still hold a claimable task this call
+	// did not attempt (#7452): an agent claimed one task but had more
+	// candidates (one attempt per agent per call), or max_tasks cut the loop
+	// off before an agent was tried. Only these forced runtimes stay forced.
+	// A forced runtime whose agents were all attempted is acknowledged even
+	// when nothing was claimed: claimTask returning nil means the agent has
+	// nothing claimable right now (capacity cap or per-(issue, agent)
+	// serialization), and the terminal transition that clears that barrier
+	// emits its own Bump plus targeted wakeup (NotifyTaskFinished), which
+	// re-forces the runtime. Keeping it forced instead would hold the daemon
+	// on the short poll for as long as the blocker runs.
+	leftover := make(map[string]struct{})
 	for i := range candidates {
 		if len(claimed) >= maxTasks {
 			slog.Debug("batch claim: reached max tasks",
 				"claimed", len(claimed),
 				"candidates_remaining", len(candidates)-i,
 			)
+			for j := i; j < len(candidates); j++ {
+				if _, tried := triedAgents[util.UUIDToString(candidates[j].AgentID)]; !tried {
+					leftover[util.UUIDToString(candidates[j].RuntimeID)] = struct{}{}
+				}
+			}
 			break
 		}
 		agentKey := util.UUIDToString(candidates[i].AgentID)
@@ -4435,13 +4454,17 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 				slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
 					"error", err, "claimed", len(claimed))
 				// Step 5 already ran, so any forced runtime it confirmed idle is
-				// safely acknowledged; the rest stay forced.
+				// safely acknowledged; the loop did not finish, so forced runtimes
+				// with candidates stay forced.
 				return claimed, forceRechecked, nil
 			}
 			return nil, nil, fmt.Errorf("claim task: %w", err)
 		}
 		if task == nil {
 			continue
+		}
+		if candidatesByAgent[agentKey] > 1 {
+			leftover[util.UUIDToString(candidates[i].RuntimeID)] = struct{}{}
 		}
 		// The SQL claim is scoped to the candidate runtime. Retain this guard as
 		// a defensive contract check so a future query change cannot route work
@@ -4454,6 +4477,16 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 			continue
 		}
 		claimed = append(claimed, *task)
+	}
+
+	for key := range withCandidates {
+		if _, forced := forceRecheck[key]; !forced {
+			continue
+		}
+		if _, ok := leftover[key]; ok {
+			continue
+		}
+		forceRechecked = append(forceRechecked, key)
 	}
 
 	return claimed, forceRechecked, nil

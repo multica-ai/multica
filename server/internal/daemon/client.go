@@ -280,14 +280,17 @@ const batchClaimRequestTimeout = protocol.DaemonBatchClaimRequestTimeout
 // daemons talking to old servers and claims whose WS outcome was uncertain.
 //
 // ForceRecheckedRuntimeIDs is the server's force_rechecked_runtime_ids
-// acknowledgement (#7452): the forced runtimes the server actually observed
-// genuinely idle this cycle (a zero-candidate scan, cache re-armed). It is a
-// POINTER so absence is distinguishable from emptiness: a non-nil empty slice
-// means an upgraded server ran the re-check and acknowledged nothing (keep every
-// forced runtime forced), while nil means the server omitted the field entirely
-// — either it predates #7452, or this claim executed no server-side re-check at
-// all (uncertain WS outcome, cooldown, legacy fallback) — so the caller
-// preserves the hint rather than consuming it on a re-check that never ran.
+// acknowledgement (#7452): the forced runtimes the server settled this cycle
+// (no candidates, or every candidate agent attempted with nothing claimable
+// left behind). It is a POINTER so absence is distinguishable from emptiness:
+// a non-nil empty slice means an upgraded server acknowledged nothing, so the
+// caller keeps every drained runtime forced; nil means the server omitted the
+// field (it predates #7452, or the legacy per-runtime fallback ran), so the
+// caller drops the drained hints as before #7452 and the empty-claim TTL stays
+// the outer bound. The WS transport also synthesizes values: the cooldown
+// branch returns present-but-empty (nothing was sent) and the uncertain-after-
+// send branch acknowledges the whole drained set (a frame went out, so
+// replaying the hint could double-claim).
 type claimTasksResult struct {
 	Tasks                       []*Task   `json:"tasks"`
 	ClaimPollHintSupported      bool      `json:"claim_poll_hint_supported,omitempty"`

@@ -5693,12 +5693,12 @@ func (d *Daemon) noteWokenRuntime(runtimeID string) {
 //     pre-#7452 behaviour) rather than re-forcing forever; the empty-claim TTL
 //     remains the outer bound.
 //   - acknowledged non-nil: an upgraded server spoke. It lists only the forced
-//     runtimes it observed genuinely idle (a zero-candidate scan, cache
-//     re-armed). Every other drained runtime is re-noted and forced again next
-//     cycle, including when the list is empty. A forced runtime whose scan found
-//     candidates is deliberately in that group: it keeps its stale cached
-//     verdict until a scan comes back empty, so the fix never depends on a
-//     Redis repair write succeeding.
+//     runtimes it settled this cycle (no candidates, or every candidate agent
+//     attempted with nothing claimable left behind). Every other drained
+//     runtime is re-noted and forced again next cycle, including when the list
+//     is empty. A forced runtime that may still hold an unattempted claimable
+//     task is deliberately in that group: it keeps its stale cached verdict, so
+//     staying forced is what makes the fix independent of a Redis repair write.
 //
 // The caller passes a set already intersected with the live runtime set
 // (filterLiveRuntimes), so a runtime deleted since it was woken is never

@@ -170,12 +170,14 @@ func TestClaimTasksForRuntimes_ForcedPositiveIsNotAcknowledged(t *testing.T) {
 	if forced[0].ID == second[0].ID {
 		t.Fatal("second forced claim returned the same task, want the distinct second same-agent task")
 	}
-	if len(secondAck) != 0 {
-		t.Fatalf("acknowledged set = %v, want empty: this scan also found candidates", secondAck)
+	// The agent's only remaining candidate was attempted and claimed, so nothing
+	// claimable is left behind and rt1 is settled: the daemon may drop the hint.
+	if len(secondAck) != 1 || secondAck[0] != rt1 {
+		t.Fatalf("acknowledged set = %v, want [rt1]: the last candidate was claimed", secondAck)
 	}
 
-	// Once the queue really is drained, a forced scan comes back empty and only
-	// THEN is rt1 acknowledged, so the daemon finally drops the hint.
+	// A further forced scan on the drained queue comes back empty and also
+	// acknowledges rt1.
 	drained, drainedAck, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{rt1ID}, 5, rt1ID)
 	if err != nil {
 		t.Fatalf("drained forced claim: %v", err)
@@ -185,5 +187,68 @@ func TestClaimTasksForRuntimes_ForcedPositiveIsNotAcknowledged(t *testing.T) {
 	}
 	if len(drainedAck) != 1 || drainedAck[0] != rt1 {
 		t.Fatalf("acknowledged set = %v, want [rt1] once the forced scan is empty", drainedAck)
+	}
+}
+
+// TestClaimTasksForRuntimes_ForcedBlockedCandidateIsAcknowledged: a forced
+// runtime whose only queued task cannot be claimed right now (the same agent
+// already runs a task on that issue) is acknowledged. Every candidate agent was
+// attempted and nothing claimable was left behind, and the blocker's terminal
+// transition emits its own Bump plus targeted wakeup. Leaving it unacknowledged
+// would hold the daemon on the short poll for as long as the blocker runs.
+func TestClaimTasksForRuntimes_ForcedBlockedCandidateIsAcknowledged(t *testing.T) {
+	ctx := context.Background()
+	pool := newTaskClaimRacePool(t)
+	rdb := newRedisTestClient(t)
+
+	svc := NewTaskService(db.New(pool), pool, nil, events.New())
+	svc.EmptyClaim = NewEmptyClaimCache(rdb)
+
+	_, rt2 := batchClaimFixture(t, ctx, pool)
+	rt2ID := util.MustParseUUID(rt2)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, priority, context, runtime_id, dispatched_at, started_at)
+		SELECT agent_id, issue_id, 'running', 0, '{}'::jsonb, runtime_id, now(), now()
+		FROM agent_task_queue WHERE runtime_id = $1 AND status = 'queued'`, rt2); err != nil {
+		t.Fatalf("insert running same-issue sibling: %v", err)
+	}
+
+	got, acknowledged, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{rt2ID}, 5, rt2ID)
+	if err != nil {
+		t.Fatalf("forced claim: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("forced claim returned %d tasks, want 0 (the only candidate is serialized behind a running task)", len(got))
+	}
+	if len(acknowledged) != 1 || acknowledged[0] != rt2 {
+		t.Fatalf("acknowledged set = %v, want [rt2]: a blocked candidate must not keep the runtime forced", acknowledged)
+	}
+}
+
+// TestClaimTasksForRuntimes_ForcedRuntimeCutOffByMaxTasksStaysForced: when
+// max_tasks stops the claim loop before a forced runtime's agent is attempted,
+// that runtime may still hold a claimable task, so it is not acknowledged.
+func TestClaimTasksForRuntimes_ForcedRuntimeCutOffByMaxTasksStaysForced(t *testing.T) {
+	ctx := context.Background()
+	pool := newTaskClaimRacePool(t)
+	rdb := newRedisTestClient(t)
+
+	svc := NewTaskService(db.New(pool), pool, nil, events.New())
+	svc.EmptyClaim = NewEmptyClaimCache(rdb)
+
+	rt1, rt2 := batchClaimFixture(t, ctx, pool)
+	rt1ID, rt2ID := util.MustParseUUID(rt1), util.MustParseUUID(rt2)
+
+	// Candidates are ordered FIFO: rt1's two tasks precede rt2's, so with
+	// max_tasks=1 the loop claims rt1's first task and never attempts rt2.
+	got, acknowledged, err := svc.ClaimTasksForRuntimes(ctx, []pgtype.UUID{rt1ID, rt2ID}, 1, rt1ID, rt2ID)
+	if err != nil {
+		t.Fatalf("forced claim: %v", err)
+	}
+	if len(got) != 1 || util.UUIDToString(got[0].RuntimeID) != rt1 {
+		t.Fatalf("forced claim = %v, want exactly one task on rt1", got)
+	}
+	if len(acknowledged) != 0 {
+		t.Fatalf("acknowledged set = %v, want empty: rt1 has a second same-agent task and rt2 was never attempted", acknowledged)
 	}
 }
