@@ -91,6 +91,8 @@ Webhook 요청에는 다음 제약이 있습니다.
 
 예를 들어 이벤트 이름에 `workflow_run`, Actions에 `completed, failed`를 입력하면 이 두 종류의 `workflow_run` 결과만 받습니다. Multica는 GitHub의 `X-GitHub-Event`와 body의 `action`을 포함해 일반적인 요청 header와 payload에서 이벤트와 action을 식별합니다.
 
+CLI의 `--event-filters-file`로도 이 필터들을 모두 설정할 수 있습니다. 업데이트할 때 필터 옵션을 생략하면 기존 설정이 유지되고, `--clear-event-filters`를 지정하면 필터를 명시적으로 삭제하여 모든 이벤트를 받습니다. JSON 형식과 명령은 [CLI 예시](/cli#webhook-event-filters)를 참고하세요.
+
 ### Webhook URL 보호
 
 <Callout type="warning">

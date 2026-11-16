@@ -781,11 +781,17 @@ RETURNING task.*;
 -- member the product's internal prompt as their restored draft, and silently
 -- drop what they actually typed. Callers release the kickoff separately
 -- (ReleaseOnboardingKickoffFromTask) so the next send re-adopts it.
-DELETE FROM chat_message
-WHERE task_id = $1
-  AND role = 'user'
-  AND message_kind <> 'onboarding_kickoff'
-RETURNING *;
+DELETE FROM chat_message AS message
+WHERE message.task_id = $1
+  AND message.role = 'user'
+  AND message.message_kind <> 'onboarding_kickoff'
+  -- Guidance already accepted into a run is conversation history, not the
+  -- original draft restored by Stop. A requeued message is editable normally.
+  AND NOT EXISTS (
+      SELECT 1 FROM chat_task_supplement s
+      WHERE s.message_id = message.id AND s.status <> 'requeued'
+  )
+RETURNING message.*;
 
 -- name: ReleaseOnboardingKickoffFromTask :exec
 -- Hands an adopted kickoff on to the session's next un-started turn when its

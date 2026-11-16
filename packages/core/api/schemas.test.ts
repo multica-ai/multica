@@ -931,6 +931,14 @@ describe("SendChatMessageResponseSchema", () => {
   it("ignores a malformed additive queue position without losing the accepted send", () => {
     expect(SendChatMessageResponseSchema.parse({ ...base, queued: "no" }).queued).toBeUndefined();
   });
+
+  it("preserves steering acceptance and tolerates older or malformed metadata", () => {
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true }).steered).toBe(true);
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true, message_task_id: "root-task" }).message_task_id).toBe("root-task");
+    expect(SendChatMessageResponseSchema.parse(base).steered).toBeUndefined();
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: "yes", message_created_at: 42, message_task_id: 42 }))
+      .toMatchObject({ ...base, steered: undefined, message_created_at: undefined, message_task_id: undefined });
+  });
 });
 
 describe("PrioritizeQueuedChatTaskResponseSchema", () => {

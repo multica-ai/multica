@@ -117,6 +117,13 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		if err != nil {
 			return empty, err
 		}
+		cancelledIDs := make([]pgtype.UUID, 0, len(result.CancelledTasks))
+		for _, task := range result.CancelledTasks {
+			cancelledIDs = append(cancelledIDs, task.ID)
+		}
+		if err = qtx.WithdrawChatTaskSupplementsByTasks(ctx, cancelledIDs); err != nil {
+			return empty, err
+		}
 		if err = service.SettleTerminalTaskState(ctx, qtx, result.CancelledTasks...); err != nil {
 			return empty, err
 		}

@@ -74,6 +74,22 @@ export interface IssueInTree {
 
 const NOT_IN_TREE: IssueInTree = { issueId: null, sources: [] };
 
+function hasPrefix(key: readonly unknown[], prefix: readonly unknown[]): boolean {
+  return prefix.every((part, i) => key[i] === part);
+}
+
+/**
+ * Whether a cache entry can change `useIssueInTree`'s answer: a sidebar list,
+ * or the detail of an issue a list keeps.
+ */
+function readsIntoTree(wsId: string, key: readonly unknown[]): boolean {
+  if (hasPrefix(key, issueKeys.sidebarAll(wsId))) return true;
+  const detail = issueKeys.detail(wsId, "");
+  if (key.length !== detail.length || !hasPrefix(key, detail.slice(0, -1))) return false;
+  const id = key[detail.length - 1];
+  return Object.values(useSidebarKeptStore.getState().held).some((held) => held.id === id);
+}
+
 /**
  * Where the expanded rows list or keep the issue under `ref` — its UUID, or
  * an identifier like `MUL-123` matched case-insensitively as the server does.
@@ -83,14 +99,20 @@ export function useIssueInTree(wsId: string, ref: string | null): IssueInTree {
   const cache = qc.getQueryCache();
   const subscribe = useCallback(
     (onChange: () => void) => {
-      const unsubscribeCache = cache.subscribe(onChange);
+      // Only events on the entries the answer reads. Opening an issue mounts
+      // hundreds of observers elsewhere in the cache, and rescanning the
+      // whole cache for each of them blocked the main thread for seconds,
+      // more the longer the session had filled the cache (MUL-9375).
+      const unsubscribeCache = cache.subscribe((event) => {
+        if (readsIntoTree(wsId, event.query.queryKey)) onChange();
+      });
       const unsubscribeKept = useSidebarKeptStore.subscribe(onChange);
       return () => {
         unsubscribeCache();
         unsubscribeKept();
       };
     },
-    [cache],
+    [cache, wsId],
   );
   // The snapshot is a string so an unchanged answer compares equal.
   const snapshot = useSyncExternalStore(subscribe, () => {

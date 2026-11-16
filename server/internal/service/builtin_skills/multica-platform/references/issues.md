@@ -105,8 +105,10 @@ a draft?" is `state == "draft"`; coarse CI status is `checks_conclusion`.
 If the command returns no linked PRs after a PR was opened, check the syntax
 first: the key must be in the PR title or branch, or right after a closing
 keyword in the body — a bare body mention does not count. When the syntax is the
-problem, editing the title re-runs the scan. If a person removed
-the PR from the issue, it stays removed until someone links it again.
+problem, editing the title re-runs the scan. Otherwise link the synced PR with
+`multica issue pull-requests link <issue-id> <pr-url>`; that also restores a PR
+someone removed (removed PRs stay off until relinked). `unlink <issue-id> <pr>`
+(URL, number, or id) removes one and keeps it removed.
 
 If the key is already written correctly and the list is still empty, stop editing
 the PR blind: another no-op edit cannot fix an integration that never received the

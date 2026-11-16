@@ -114,7 +114,7 @@ export function SnoozedInboxPage() {
       interactive: true,
       cell: (row) => (
         <SnoozedRowActions
-          onUnsnooze={() => unsnooze(row.item_id)}
+          onUnsnooze={() => unsnooze(row.item_id, row.issue_id)}
           onSnooze={(until) => snooze({ id: row.item_id }, until)}
         />
       ),

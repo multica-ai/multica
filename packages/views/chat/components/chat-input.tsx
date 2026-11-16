@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Scan, TriangleAlert, X } from "@multica/ui/icons";
+import { ListEnd, Scan, TriangleAlert, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -76,6 +76,7 @@ interface ChatInputProps {
     attachmentIds: string[] | undefined,
     commitInput: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
     draftAttachments: Attachment[],
+    options?: { queue?: boolean },
   ) => void | boolean | Promise<void | boolean>;
   restoreDraftRequest?: {
     id: string;
@@ -493,6 +494,7 @@ export function ChatInput({
   // stale `true` behind for the next one.
   const editorScrubbedRef = useRef(false);
 
+  const queueNextSendRef = useRef(false);
   const { submitting, submit } = useComposerSubmit({
     editorRef,
     uploadGate: gate,
@@ -508,6 +510,8 @@ export function ChatInput({
       return hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current) : "";
     },
     onSubmit: async (content: string): Promise<boolean> => {
+      const queue = queueNextSendRef.current;
+      queueNextSendRef.current = false;
       editorScrubbedRef.current = false;
       // Same tick as `normalize`, so this is exactly what `content` quotes.
       const annotationKeyAtSend = annotationDraftKey;
@@ -616,12 +620,15 @@ export function ChatInput({
       const sent = attachedPage
         ? `[${escapeMarkdownLabel(attachedPage.label)}](mention://${attachedPage.type}/${attachedPage.id})\n\n${content}`
         : content;
-      const accepted = await onSend(
+      const sendArgs = [
         sent,
         uniqueActiveIds.length > 0 ? uniqueActiveIds : undefined,
         commitInput,
         draftAttachments.filter((attachment) => uniqueActiveIds.includes(attachment.id)),
-      );
+      ] as const;
+      const accepted = queue
+        ? await onSend(...sendArgs, { queue: true })
+        : await onSend(...sendArgs);
       // Owner rejected the send (or threw, which useComposerSubmit also treats
       // as a rejection): the draft was never committed, so it stays put for
       // retry. Only a commit — here or by the owner — clears it.
@@ -914,13 +921,26 @@ export function ChatInput({
               <Scan />
             </IconButton>
           )}
+          {isRunning && allowSubmitWhileRunning && !hasNothingToSend && !gate.uploading && (
+            <IconButton
+              type="button"
+              label={t(($) => $.input.queue_send_tooltip)}
+              disabled={submitting || gate.uploading || !!disabled || !!noAgent}
+              onClick={() => {
+                queueNextSendRef.current = true;
+                void submit().finally(() => { queueNextSendRef.current = false; });
+              }}
+            >
+              <ListEnd />
+            </IconButton>
+          )}
           <SubmitButton
             onClick={submit}
             disabled={hasNothingToSend || submitting || !!disabled || !!noAgent}
             loading={submitting}
             busy={gate.uploading}
             // Queue-capable runs reuse this one action slot: an empty composer
-            // offers Stop, while live content swaps it to Queue Send. Older
+            // offers Stop, while live content swaps it to Send. Older
             // servers cannot accept follow-ups, so they remain stop-only. An
             // upload blocks submit, so it also falls back to Stop rather than
             // removing chat's only cancellation path; the attachment node
@@ -937,7 +957,7 @@ export function ChatInput({
                 ? placeholder
                 : undefined}
             tooltip={isRunning
-              ? t(($) => $.input.queue_send_tooltip)
+              ? t(($) => $.input.send_tooltip)
               : sendShortcut
                 ? (
                   <>
@@ -948,8 +968,6 @@ export function ChatInput({
                 : t(($) => $.input.send_tooltip)}
             ariaLabel={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
-              : isRunning
-                ? t(($) => $.input.queue_send_tooltip)
               : t(($) => $.input.send_tooltip)}
             stopTooltip={t(($) => $.input.stop_tooltip)}
             stopAriaLabel={t(($) => $.input.stop_tooltip)}

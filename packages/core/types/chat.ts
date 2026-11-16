@@ -187,6 +187,11 @@ export interface ChatMessagesPage {
 }
 
 export interface SendChatMessageResponse {
+  /** Accepted into the running reply without creating another turn. */
+  steered?: boolean;
+  message_created_at?: string;
+  /** Input owner of the user message; may differ from the active retry. */
+  message_task_id?: string;
   message_id: string;
   task_id: string;
   /** True when the server supports queued follow-up sends. */

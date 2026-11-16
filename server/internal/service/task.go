@@ -2376,6 +2376,7 @@ type DirectChatSendResult struct {
 	Message            db.ChatMessage
 	BoundAttachmentIDs []pgtype.UUID
 	Queued             bool
+	Steered            bool
 	InitialTitle       string
 }
 
@@ -2401,8 +2402,9 @@ func (s *TaskService) SendDirectChatMessage(
 	attachmentIDs []pgtype.UUID,
 	uploaderType string,
 	uploaderID pgtype.UUID,
+	steer ...bool,
 ) (*DirectChatSendResult, error) {
-	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil)
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil, len(steer) > 0 && steer[0])
 }
 
 func (s *TaskService) sendDirectChatMessage(
@@ -2415,6 +2417,7 @@ func (s *TaskService) sendDirectChatMessage(
 	uploaderType string,
 	uploaderID pgtype.UUID,
 	submission *chatSubmission,
+	steer bool,
 ) (*DirectChatSendResult, error) {
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
@@ -2492,30 +2495,44 @@ func (s *TaskService) sendDirectChatMessage(
 		}
 		out.Queued = queued
 
-		task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
-			ID:                   dbid.NewV7(),
-			AgentID:              session.AgentID,
-			RuntimeID:            carrier.RuntimeID,
-			Priority:             2, // medium priority for chat; matches EnqueueChatTask
-			ChatSessionID:        session.ID,
-			InitiatorUserID:      initiatorUserID,
-			OriginatorUserID:     attr.UserID,
-			AccountableUserID:    attr.AccountableUserID,
-			ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},
-			RuntimeMcpOverlay:    overlay.Overlay,
-			RuntimeConnectedApps: overlay.ConnectedApps,
-			OriginatorSource:     attrSource,
-			TriggerEvidenceKind:  attrEvidenceKind,
-			TriggerEvidenceRefID: attrEvidenceRef,
-		})
-		if err != nil {
-			return fmt.Errorf("create direct chat task: %w", err)
+		// Only plain human messages use the text-only supplement transport.
+		// Locking the turn serializes the binding with every terminal transition.
+		var task db.AgentTaskQueue
+		if steer && uploaderType == "member" && len(attachmentIDs) == 0 {
+			task, err = qtx.LockRunningChatTaskForSupplement(ctx, session.ID)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("find running chat turn: %w", err)
+			}
+			out.Steered = err == nil
 		}
-		// Claim this task's own input batch (chat_input_task_id = id) in the same
-		// transaction, before the user message is written with task_id = task.id.
-		task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
-		if err != nil {
-			return fmt.Errorf("stamp direct chat input owner: %w", err)
+		if out.Steered {
+			out.Queued = false
+		} else {
+			task, err = qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
+				ID:                   dbid.NewV7(),
+				AgentID:              session.AgentID,
+				RuntimeID:            carrier.RuntimeID,
+				Priority:             2, // medium priority for chat; matches EnqueueChatTask
+				ChatSessionID:        session.ID,
+				InitiatorUserID:      initiatorUserID,
+				OriginatorUserID:     attr.UserID,
+				AccountableUserID:    attr.AccountableUserID,
+				ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},
+				RuntimeMcpOverlay:    overlay.Overlay,
+				RuntimeConnectedApps: overlay.ConnectedApps,
+				OriginatorSource:     attrSource,
+				TriggerEvidenceKind:  attrEvidenceKind,
+				TriggerEvidenceRefID: attrEvidenceRef,
+			})
+			if err != nil {
+				return fmt.Errorf("create direct chat task: %w", err)
+			}
+			// Claim this task's own input batch (chat_input_task_id = id) in the same
+			// transaction, before the user message is written with task_id = task.id.
+			task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
+			if err != nil {
+				return fmt.Errorf("stamp direct chat input owner: %w", err)
+			}
 		}
 		out.Task = task
 
@@ -2545,20 +2562,29 @@ func (s *TaskService) sendDirectChatMessage(
 			}
 		}
 
-		// Create the user message already owned by this task (task_id = task.id),
-		// so it belongs to this immutable input batch the instant it exists.
+		// Bind guidance to the root input batch, including when it joins a retry.
+		// The delivery receipt still names the exact running attempt.
 		msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
 			ID:            dbid.NewV7(),
 			ChatSessionID: session.ID,
 			Role:          "user",
 			Content:       content,
-			TaskID:        task.ID,
+			TaskID:        chatInputOwnerID(task),
 			MessageKind:   pgtype.Text{String: protocol.ChatMessageKindMessage, Valid: true},
 		})
 		if err != nil {
 			return fmt.Errorf("create user chat message: %w", err)
 		}
 		out.Message = msg
+
+		if out.Steered {
+			if err := qtx.CreateChatTaskSupplement(ctx, db.CreateChatTaskSupplementParams{
+				TaskID: task.ID, MessageID: msg.ID, ChatSessionID: session.ID,
+				WorkspaceID: session.WorkspaceID, AuthorID: initiatorUserID,
+			}); err != nil {
+				return fmt.Errorf("bind chat supplement: %w", err)
+			}
+		}
 
 		if len(attachmentIDs) > 0 {
 			bound, err := qtx.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{
@@ -2618,6 +2644,9 @@ func (s *TaskService) sendDirectChatMessage(
 	}
 
 	if out.Replayed {
+		return &out, nil
+	}
+	if out.Steered {
 		return &out, nil
 	}
 	slog.Info("direct chat task enqueued",
@@ -2792,6 +2821,9 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 		var err error
 		cancelled, err = qtx.CancelAgentTasksByAgent(ctx, agentID)
 		if err != nil {
+			return err
+		}
+		if err := qtx.WithdrawChatTaskSupplementsByAgent(ctx, agentID); err != nil {
 			return err
 		}
 		return SettleTerminalTaskState(ctx, qtx, cancelled...)
@@ -3028,6 +3060,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 	var (
 		task                 db.AgentTaskQueue
 		cancelledChatMessage *CancelledChatMessageResult
+		queuedChat           []db.AgentTaskQueue
 		err                  error
 	)
 	if opts.QueuedOnly {
@@ -3092,7 +3125,8 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 			}
 			// CancelAgentTaskByUser appends the recovery receipt in the same
 			// statement, so the returned row already carries it.
-			if err := SettleTerminalTaskState(ctx, qtx, cancelled); err != nil {
+			queuedChat, err = settleTerminalTaskState(ctx, qtx, cancelled)
+			if err != nil {
 				return err
 			}
 			if !cancelled.ChatSessionID.Valid {
@@ -3117,6 +3151,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 
 	slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCancelled(ctx, task)
+	s.publishRequeuedChatTasks(ctx, queuedChat)
 	if !opts.QueuedOnly {
 		cancelledChatMessage = s.finalizeCancelledChatMessage(ctx, task, opts)
 	}
@@ -3338,6 +3373,11 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 		if err := lockChatSessionForTaskWrite(ctx, qtx, task.ID); err != nil {
 			return err
 		}
+		if exists, err := qtx.HasChatTaskAssistantOutcome(ctx, task.ID); err != nil {
+			return err
+		} else if exists {
+			return nil
+		}
 		hasMessages, err := qtx.HasTaskMessages(ctx, task.ID)
 		if err != nil {
 			return fmt.Errorf("list cancelled chat task messages: %w", err)
@@ -3506,10 +3546,11 @@ func (s *TaskService) RetireCancelledTaskSession(ctx context.Context, taskID pgt
 
 func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID pgtype.UUID) bool {
 	var (
-		task    db.AgentTaskQueue
-		payload protocol.ChatCancelFinalizedPayload
-		changed bool
-		settled bool
+		task       db.AgentTaskQueue
+		payload    protocol.ChatCancelFinalizedPayload
+		changed    bool
+		settled    bool
+		queuedChat []db.AgentTaskQueue
 	)
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		// Lock the task's chat_session first. chat_draft_restore has no FK
@@ -3550,6 +3591,17 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 			return nil
 		}
 		if !claimed.ChatSessionID.Valid {
+			return nil
+		}
+		queuedChat, err = requeueChatTaskSupplements(ctx, qtx, claimed, pgtype.UUID{}, false)
+		if err != nil {
+			return err
+		}
+		// A client requiring a synchronous Stop outcome may already have
+		// finalized the transcript while injection was still in flight.
+		if exists, err := qtx.HasChatTaskAssistantOutcome(ctx, claimed.ID); err != nil {
+			return err
+		} else if exists {
 			return nil
 		}
 		settled = true
@@ -3642,6 +3694,7 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 		)
 		return false
 	}
+	s.publishRequeuedChatTasks(ctx, queuedChat)
 	if !settled || payload.Outcome == "" {
 		return changed
 	}
@@ -4166,9 +4219,48 @@ func (s *TaskService) RequeueTaskAfterClaimFailure(ctx context.Context, task db.
 // The returned slice contains both reclaimed and freshly-claimed tasks, each
 // already carrying its runtime_id so the daemon routes it to the matching
 // runtime locally.
-func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pgtype.UUID, maxTasks int) ([]db.AgentTaskQueue, error) {
+// forceRecheckRuntimeIDs, when non-empty, names runtimes whose empty-claim
+// verdict must be ignored for THIS call: a targeted daemon `task_available`
+// wakeup carries them so a queued task becomes claimable immediately even if a
+// prior enqueue's EmptyClaim.Bump was lost to a transient Redis failure and the
+// stale "empty" verdict would otherwise survive to its TTL (GitHub #7452). The
+// forced runtimes still MarkEmpty-repair on a zero-candidate result (step 5),
+// so a genuinely-idle runtime re-arms the cache instead of polling Postgres
+// every cycle. It is an optional, additive signal: an empty set reproduces the
+// exact pre-#7452 behavior, and ids not in runtimeIDs are ignored.
+//
+// The second return value ACKNOWLEDGES the subset of forceRecheckRuntimeIDs
+// whose candidate SELECT came back with ZERO candidates this cycle, as
+// canonical uuid strings. A forced runtime is acknowledged only once it has
+// been observed genuinely idle and MarkEmpty-repaired (step 5): its cache entry
+// is then freshly authoritative, so the hint has done its job and the daemon
+// can drop it.
+//
+// Everything else is deliberately NOT acknowledged, so the daemon keeps the
+// runtime forced and re-forces it next cycle:
+//   - a forced runtime whose SELECT found candidates. The batch's
+//     one-attempt-per-agent rule can claim one of two same-agent tasks and leave
+//     the second queued, and the stale verdict that made the runtime need
+//     forcing is still cached. Acknowledging here would depend on a repair write
+//     (a Bump/invalidate) succeeding, and that write can fail in the very Redis
+//     outage that lost the enqueue-side Bump, silently restoring the stale
+//     verdict. Staying forced until a scan is empty needs no such write.
+//   - a forced runtime the server never scanned, because reclaim already filled
+//     the batch (step 2 early return) or an error cut the cycle short.
+//
+// The set is meaningful even when empty, and the handler always emits the field,
+// so a daemon can tell "this server acknowledged nothing" from "this server does
+// not know the field at all".
+func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pgtype.UUID, maxTasks int, forceRecheckRuntimeIDs ...pgtype.UUID) ([]db.AgentTaskQueue, []string, error) {
 	if len(runtimeIDs) == 0 || maxTasks <= 0 {
-		return nil, nil
+		return nil, nil, nil
+	}
+
+	// Runtimes whose cached empty verdict is bypassed for this call. Keyed by
+	// canonical uuid string so it matches the per-runtime bookkeeping below.
+	forceRecheck := make(map[string]struct{}, len(forceRecheckRuntimeIDs))
+	for _, rid := range forceRecheckRuntimeIDs {
+		forceRecheck[util.UUIDToString(rid)] = struct{}{}
 	}
 
 	// De-dup runtime IDs defensively so MarkEmpty/version bookkeeping stays
@@ -4210,7 +4302,7 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		promoted = nil
 	} else if err != nil {
 		s.recordClaimDecision(pgtype.UUID{}, pgtype.UUID{}, "error_promote_deferred", claimScope{claimPath: claimPathBatch}, claimDecisionDetail{})
-		return nil, fmt.Errorf("promote deferred tasks: %w", err)
+		return nil, nil, fmt.Errorf("promote deferred tasks: %w", err)
 	}
 	for _, task := range promoted {
 		slog.Info("deferred task promoted (batch)",
@@ -4246,7 +4338,7 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		})
 		if err != nil {
 			s.recordClaimDecision(pgtype.UUID{}, pgtype.UUID{}, "error_reclaim_dispatched", claimScope{claimPath: claimPathBatch}, claimDecisionDetail{})
-			return nil, fmt.Errorf("reclaim stale dispatched tasks: %w", err)
+			return nil, nil, fmt.Errorf("reclaim stale dispatched tasks: %w", err)
 		}
 		// The UPDATE's fixed setup/locking cost dominates array width. Query and
 		// advance the complete machine-level set together so per-runtime backstops
@@ -4269,15 +4361,31 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		)
 	}
 	if len(claimed) >= maxTasks {
-		return claimed[:maxTasks], nil
+		// Reclaim (step 2) already filled the batch, so step 3 never runs and a
+		// forceRecheck runtime not among the reclaimed tasks keeps its stale
+		// "empty" verdict this cycle. That is self-healing: the daemon re-drives
+		// the same free slots on the next poll (and the wakeup that set the force
+		// signal recurs), so the bypass lands then; the TTL is the outer bound.
+		// Nothing was scanned, so nothing is acknowledged: the daemon keeps every
+		// forced runtime forced and the bypass lands on the next poll.
+		return claimed[:maxTasks], nil, nil
 	}
 
 	// 3. Empty-cache short-circuit + version sampling for the remaining runtimes.
+	// A runtime named in forceRecheck skips the IsEmpty short-circuit and always
+	// runs the real candidate SELECT (step 4), repairing a stale "empty" verdict
+	// left by a lost Bump (#7452). It still samples the version so step 5 can
+	// MarkEmpty-repair it, and acknowledge it, when the SELECT confirms it is
+	// genuinely idle.
 	nonEmpty := make([]pgtype.UUID, 0, len(uniqueIDs))
 	versions := make(map[string]int64, len(uniqueIDs))
+	// forceRechecked acknowledges the forced runtimes that step 5 confirms idle,
+	// so every other forced runtime stays forced (see the doc comment).
+	forceRechecked := make([]string, 0, len(forceRecheck))
 	for _, rid := range uniqueIDs {
 		key := util.UUIDToString(rid)
-		if s.EmptyClaim.IsEmpty(ctx, key) {
+		_, forced := forceRecheck[key]
+		if !forced && s.EmptyClaim.IsEmpty(ctx, key) {
 			continue
 		}
 		versions[key] = s.EmptyClaim.CurrentVersion(ctx, key)
@@ -4286,7 +4394,7 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	if len(nonEmpty) == 0 {
 		s.recordClaimDecision(pgtype.UUID{}, pgtype.UUID{}, "empty_cache_hit", claimScope{claimPath: claimPathBatch}, claimDecisionDetail{})
 		slog.Debug("batch claim: all runtimes empty-cached", "runtimes", len(uniqueIDs))
-		return claimed, nil
+		return claimed, forceRechecked, nil
 	}
 
 	// 4. One candidate SELECT across the non-empty set.
@@ -4304,9 +4412,11 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		if len(claimed) > 0 {
 			slog.Error("batch claim: candidate query failed after partial success; returning claimed tasks to avoid loss",
 				"error", err, "claimed", len(claimed))
-			return claimed, nil
+			// The SELECT errored, so no forced runtime was observed idle:
+			// acknowledge none of them and let the daemon keep them forced.
+			return claimed, nil, nil
 		}
-		return nil, fmt.Errorf("list queued claim candidates: %w", err)
+		return nil, nil, fmt.Errorf("list queued claim candidates: %w", err)
 	}
 
 	// 5. Mark runtimes with zero candidates empty so their next idle poll skips
@@ -4321,6 +4431,15 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		key := util.UUIDToString(rid)
 		if _, ok := withCandidates[key]; !ok {
 			s.EmptyClaim.MarkEmpty(ctx, key, versions[key])
+			// The runtime is confirmed idle and its cache entry has just been
+			// re-armed from a real SELECT, so the force hint has done its job:
+			// acknowledge it and let the daemon drop it (#7452). A forced runtime
+			// that DID yield candidates is intentionally left unacknowledged: it
+			// stays forced until a later scan comes back empty, which is what makes
+			// the contract independent of any Redis repair write succeeding.
+			if _, forced := forceRecheck[key]; forced {
+				forceRechecked = append(forceRechecked, key)
+			}
 		}
 	}
 	if len(candidates) == 0 {
@@ -4329,7 +4448,7 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		// agent/runtime binding, so this is about visible candidates, not
 		// about the queue being empty).
 		s.recordClaimDecision(pgtype.UUID{}, pgtype.UUID{}, "empty_db", claimScope{claimPath: claimPathBatch}, claimDecisionDetail{})
-		return claimed, nil
+		return claimed, forceRechecked, nil
 	}
 
 	// 6. Claim per distinct agent through the runtime-scoped helper, preserving
@@ -4368,9 +4487,11 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 			if len(claimed) > 0 {
 				slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
 					"error", err, "claimed", len(claimed))
-				return claimed, nil
+				// Step 5 already ran, so any forced runtime it confirmed idle is
+				// safely acknowledged; the rest stay forced.
+				return claimed, forceRechecked, nil
 			}
-			return nil, fmt.Errorf("claim task: %w", err)
+			return nil, nil, fmt.Errorf("claim task: %w", err)
 		}
 		if task == nil {
 			continue
@@ -4388,7 +4509,7 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		claimed = append(claimed, *task)
 	}
 
-	return claimed, nil
+	return claimed, forceRechecked, nil
 }
 
 // cancelSupersededDeferredRetries drops deferred auto-retry rows that an active
@@ -4716,6 +4837,7 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	// task inside the completion transaction below. It is broadcast (chat:done)
 	// only after the transaction commits.
 	var chatAssistantMsg *db.ChatMessage
+	var queuedChat []db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
 			return err
@@ -4741,7 +4863,8 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 
 		// Atomic with the status flip: a crash between the two would leave a
 		// finished obligation looking pending forever.
-		if err := SettleTerminalTaskState(ctx, qtx, t); err != nil {
+		queuedChat, err = settleTerminalTaskState(ctx, qtx, t)
+		if err != nil {
 			return err
 		}
 
@@ -4826,6 +4949,7 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	}
 
 	s.publishQoderIssueChange(ctx, change)
+	s.publishRequeuedChatTasks(ctx, queuedChat)
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
 
@@ -5210,6 +5334,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 
 	var task db.AgentTaskQueue
 	var retried *db.AgentTaskQueue
+	var queuedChat []db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
 			return err
@@ -5236,14 +5361,6 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			return err
 		}
 		task = t
-
-		// Atomic with the status flip, same as the completion path. A failed
-		// coordinator that already received the recovery comment has consumed
-		// the obligation: the pre-existing delivered_comment_ids coverage check
-		// never looked at the covering task's status either.
-		if err := SettleTerminalTaskState(ctx, qtx, t); err != nil {
-			return err
-		}
 
 		// Keep resume-unsafe sessions on the task row for observability, but
 		// do not promote them to the chat-level resume pointer.
@@ -5397,6 +5514,22 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			}
 		}
 
+		if retried != nil && t.ChatSessionID.Valid {
+			// The retry reads guidance from the root input batch. Retire the old
+			// attempt's delivery receipts instead of scheduling separate turns.
+			if err := qtx.RetainChatTaskSupplementsForRetry(ctx, t.ID); err != nil {
+				return err
+			}
+		}
+		// Atomic with the status flip, same as the completion path. A failed
+		// coordinator that already received the recovery comment has consumed
+		// the obligation: the pre-existing delivered_comment_ids coverage check
+		// never looked at the covering task's status either.
+		queuedChat, err = settleTerminalTaskState(ctx, qtx, t)
+		if err != nil {
+			return err
+		}
+
 		// A terminal non-retried chat failure is a visible assistant outcome.
 		// Persist it while the session lock and failure transaction are still
 		// held, then reanchor the next direct head. Otherwise the successor could
@@ -5461,6 +5594,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
+	s.publishRequeuedChatTasks(ctx, queuedChat)
 
 	// The auto-retry child (if any) was created inside the transaction above so
 	// no newer chat task could jump ahead of it. Surface it now: broadcast
@@ -6317,7 +6451,14 @@ func (s *TaskService) RecoverOrphanedTasksForRuntime(ctx context.Context, runtim
 // non-chat tasks keep their existing behavior.
 func (s *TaskService) CancelTasksForArchivedAgent(ctx context.Context, agentID pgtype.UUID) ([]db.AgentTaskQueue, error) {
 	cancelled, err := s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
-		return qtx.CancelAgentTasksByAgent(ctx, agentID)
+		tasks, err := qtx.CancelAgentTasksByAgent(ctx, agentID)
+		if err != nil {
+			return nil, err
+		}
+		if err := qtx.WithdrawChatTaskSupplementsByAgent(ctx, agentID); err != nil {
+			return nil, err
+		}
+		return tasks, nil
 	})
 	if err != nil {
 		return nil, err
@@ -6333,6 +6474,7 @@ func (s *TaskService) CancelTasksForArchivedAgent(ctx context.Context, agentID p
 
 func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Queries) ([]db.AgentTaskQueue, error)) ([]db.AgentTaskQueue, error) {
 	var failed []db.AgentTaskQueue
+	var queuedChat []db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		var err error
 		failed, err = fail(qtx)
@@ -6359,10 +6501,22 @@ func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Quer
 				failed[indices[task.ID]] = task
 			}
 		}
-		return SettleTerminalTaskState(ctx, qtx, failed...)
+		// Infrastructure sweeps schedule their retries after this transaction.
+		// Retain guidance in that same input batch instead of creating a turn
+		// that could run before the original request's retry.
+		for _, task := range failed {
+			if task.ChatSessionID.Valid && task.Status == "failed" && retryEligible(task.FailureReason.String, task) {
+				if err := qtx.RetainChatTaskSupplementsForRetry(ctx, task.ID); err != nil {
+					return err
+				}
+			}
+		}
+		queuedChat, err = settleTerminalTaskState(ctx, qtx, failed...)
+		return err
 	}); err != nil {
 		return nil, err
 	}
+	s.publishRequeuedChatTasks(ctx, queuedChat)
 	return failed, nil
 }
 
@@ -6499,8 +6653,15 @@ const (
 // task-row -> dependent-row lock order without making task status writes depend
 // on database trigger behavior.
 func SettleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.AgentTaskQueue) error {
+	_, err := settleTerminalTaskState(ctx, q, tasks...)
+	return err
+}
+
+// Callers that can requeue Chat guidance publish the returned tasks only after
+// their terminal transaction commits.
+func settleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.AgentTaskQueue) ([]db.AgentTaskQueue, error) {
 	if len(tasks) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	taskIDs := make([]pgtype.UUID, 0, len(tasks))
@@ -6508,9 +6669,19 @@ func SettleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.Age
 		taskIDs = append(taskIDs, task.ID)
 	}
 	if _, err := q.SettleTerminalTaskSupplements(ctx, taskIDs); err != nil {
-		return fmt.Errorf("settle terminal task supplements: %w", err)
+		return nil, fmt.Errorf("settle terminal task supplements: %w", err)
 	}
-	return SettleDeliveredDelegatedFailureRecoveries(ctx, q, tasks...)
+	var queued []db.AgentTaskQueue
+	for _, task := range tasks {
+		if task.ChatSessionID.Valid && (task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled") {
+			next, err := RequeueChatTaskSupplements(ctx, q, task, pgtype.UUID{})
+			if err != nil {
+				return nil, err
+			}
+			queued = append(queued, next...)
+		}
+	}
+	return queued, SettleDeliveredDelegatedFailureRecoveries(ctx, q, tasks...)
 }
 
 // SettleDeliveredDelegatedFailureRecoveries retires every delegated-failure

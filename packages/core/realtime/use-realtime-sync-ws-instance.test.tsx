@@ -379,6 +379,17 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(qc.getQueryState(issueKeys.tasks("parent"))?.isInvalidated).toBe(false);
   });
 
+  it("refetches the issue's subscribers on a reassignment, which can change their delivery tier", () => {
+    const emit = subtreeEvents();
+    qc.setQueryData(issueKeys.subscribers("child"), []);
+    qc.setQueryData(issueKeys.subscribers("other"), []);
+    emit("issue:updated", { priority_changed: true, issue: { id: "child" } });
+    expect(qc.getQueryState(issueKeys.subscribers("child"))?.isInvalidated).toBe(false);
+    emit("issue:updated", { assignee_changed: true, issue: { id: "child" } });
+    expect(qc.getQueryState(issueKeys.subscribers("child"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(issueKeys.subscribers("other"))?.isInvalidated).toBe(false);
+  });
+
   it("patches matching owning-issue titles across subtree caches without refetching", () => {
     const emit = subtreeEvents();
     const fetchRuns = vi.fn(async () => []);

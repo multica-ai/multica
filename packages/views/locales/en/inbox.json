@@ -125,12 +125,22 @@
   "toasts": {
     "source_context_retry_started": "Retry started with the original context",
     "archived": "Notification archived",
+    "archived_many_one": "{{count}} notification archived",
+    "archived_many_other": "{{count}} notifications archived",
     "unarchived": "Notification restored",
     "deleted": "Notification deleted",
     "unsubscribed_archived": "Unsubscribed and archived",
     "unsubscribed_archived_subtree": "Unsubscribed from this issue and its sub-issues",
     "unsubscribed_hint": "Its updates won't reach your inbox. @mentions still will.",
     "undo": "Undo"
+  },
+  "kept": {
+    "archived": "Archived",
+    "leaves": "Leaves the Inbox when you move on",
+    "filtered": "No longer matches your filters",
+    "notification_archived": "Notification archived",
+    "next": "Next",
+    "next_tooltip": "Open next: {{title}}"
   },
   "errors": {
     "archived_lookup_failed": "Failed to load the linked notification",

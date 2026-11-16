@@ -53,9 +53,11 @@
     "zoom_actual": "實際大小"
   },
   "attachment": {
-    "install_theme": "安裝主題",
-    "install_theme_failed": "無法讀取附件，請稍後再試。",
     "download_failed": "下載連結獲取失敗，請稍後重試。",
+    "copy_contents": "複製全文",
+    "contents_copied": "已複製全文",
+    "copy_failed": "無法複製全文",
+    "more_actions": "更多操作",
     "preview": "預覽",
     "preview_loading": "載入預覽中…",
     "preview_failed": "預覽載入失敗",

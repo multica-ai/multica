@@ -731,7 +731,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"~/.config/Multica/themes",
 				"does not switch to it",
 				"every save to the theme in use applies",
-				"**Install theme**",
+				"**Import theme**",
 				"multica attachment upload <path>",
 			},
 		},
