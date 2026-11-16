@@ -98,10 +98,6 @@ function ReplyInput({
   const composerRef = useRef<HTMLDivElement>(null);
   // See CommentInput — replying mid-upload posts without the file.
   const uploadGate = useUploadGate(editorRef);
-  // Quick actions in the `/` menu — same catalog and same insert-don't-run
-  // behavior as the top-level composer. A reply posts to the same issue, so
-  // `/` has to offer the same thing here (MUL-5588).
-  const quickActionMenu = useQuickActionMenu();
   // If a draft key is provided, hydrate from store on mount (defaultValue is
   // the only injection point on ContentEditorRef) and flush on every onUpdate.
   const [initialDraft] = useState(() =>
@@ -152,6 +148,11 @@ function ReplyInput({
       !!initialDraft?.trim() ||
       (draftKey ? useCommentDraftStore.getState().getUploads(draftKey).length > 0 : false),
     editorRef,
+  });
+  const quickActionMenu = useQuickActionMenu(issueId, {
+    enabled: lazy.active,
+    parentId: previewParentId,
+    targetMissing,
   });
   useImperativeHandle(handleRef, () => ({ focus: () => lazy.activate() }), [lazy]);
   const { isDragOver, dropZoneProps } = useFileDropZone({

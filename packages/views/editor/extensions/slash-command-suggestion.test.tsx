@@ -116,6 +116,24 @@ describe("slash command suggestion items", () => {
     expect(items(qc).map((i) => i.label)).toEqual(["deploy", "review"]);
   });
 
+  it("filters paused skills from the active agent", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        agent({
+          id: "agent-1",
+          skills: [
+            { id: "paused", name: "paused", description: "", enabled: false },
+            { id: "active", name: "active", description: "", enabled: true },
+          ],
+        }),
+      ],
+    });
+
+    expect(items(qc).map((item) => item.id)).toEqual(["active"]);
+  });
+
   it("filters skills by name case-insensitively", () => {
     chatState.selectedAgentId = "agent-1";
     const qc = fakeQc({
@@ -555,6 +573,46 @@ describe("buildBuiltinCommandItems", () => {
     expect(buildBuiltinCommandItems("")).toEqual(BUILTIN_COMMANDS);
   });
 
+  it("merges quick actions, skills, and /note with namespaced item ids", () => {
+    expect(buildBuiltinCommandItems(
+      "",
+      [{ id: "qa-1", name: "review", description: "Review this" }],
+      [{ id: "skill-1", name: "deploy", description: "Ship changes" }],
+    )).toEqual([
+      { id: "quick-action:qa-1", label: "review", description: "Review this" },
+      { id: "skill:skill-1", label: "deploy", description: "Ship changes" },
+      BUILTIN_COMMANDS[0],
+    ]);
+  });
+
+  it("ranks Issue skills by name and description within the shared item cap", () => {
+    const skills = [
+      ...Array.from({ length: 25 }, (_, index) => ({
+        id: `description-${index}`,
+        name: `skill-${index}`,
+        description: "Build a throwaway prototype",
+      })),
+      { id: "named", name: "wayfinder", description: "" },
+    ];
+    const result = buildBuiltinCommandItems("wa", [], skills);
+
+    expect(result).toHaveLength(20);
+    expect(result[0]?.id).toBe("skill:named");
+    expect(result.every((item) => item.id.startsWith("skill:"))).toBe(true);
+  });
+
+  it.each(["", "n", "no"])("reserves /note for query %j with 25 matching skills", (query) => {
+    const skills = Array.from({ length: 25 }, (_, index) => ({
+      id: `skill-${index}`,
+      name: `skill-${index}`,
+      description: "note",
+    }));
+
+    const result = buildBuiltinCommandItems(query, [], skills);
+    expect(result).toHaveLength(20);
+    expect(result.at(-1)?.id).toBe("note");
+  });
+
   it("includes /note while the query is a prefix of the label", () => {
     expect(buildBuiltinCommandItems("no").map((c) => c.id)).toEqual(["note"]);
     expect(buildBuiltinCommandItems("NOTE").map((c) => c.id)).toEqual(["note"]);
@@ -604,7 +662,13 @@ describe("builtin `/` menu — cached quick action content", () => {
       insertContentAt: vi.fn(() => chain),
       run: vi.fn(() => true),
     };
-    return { chain, editor: { chain: () => chain } };
+    return {
+      chain,
+      editor: {
+        chain: () => chain,
+        view: { state: { selection: { $to: { nodeAfter: null } } } },
+      },
+    };
   }
 
   it("replaces the command range synchronously and parses mention markdown", () => {
@@ -630,5 +694,42 @@ describe("builtin `/` menu — cached quick action content", () => {
     suggestion.command!({ editor, range, props: item } as never);
 
     expect(chain.insertContentAt).not.toHaveBeenCalled();
+  });
+
+  it("inserts a skill through the shared slashCommand node shape", () => {
+    const selection = window.getSelection()!;
+    const collapse = vi.spyOn(selection, "collapseToEnd").mockImplementation(() => {});
+    const { editor, chain } = fakeEditor();
+    const suggestion = createBuiltinCommandSuggestion();
+
+    suggestion.command!({
+      editor,
+      range,
+      props: { id: "skill:skill-1", label: "deploy" },
+    } as never);
+
+    expect(chain.insertContentAt).toHaveBeenCalledWith(range, [
+      {
+        type: "slashCommand",
+        attrs: { id: "skill-1", label: "deploy", mentionSuggestionChar: "/" },
+      },
+      { type: "text", text: " " },
+    ]);
+    expect(chain.run).toHaveBeenCalledOnce();
+    collapse.mockRestore();
+  });
+
+  it("keeps /note as plain text", () => {
+    const selection = window.getSelection()!;
+    const collapse = vi.spyOn(selection, "collapseToEnd").mockImplementation(() => {});
+    const { editor, chain } = fakeEditor();
+    const suggestion = createBuiltinCommandSuggestion();
+
+    suggestion.command!({ editor, range, props: { id: "note", label: "note" } } as never);
+
+    expect(chain.insertContentAt).toHaveBeenCalledWith(range, [
+      { type: "text", text: "/note " },
+    ]);
+    collapse.mockRestore();
   });
 });
