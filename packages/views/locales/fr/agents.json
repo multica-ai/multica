@@ -216,13 +216,11 @@
     "edit": "Modifier",
     "add": "Ajouter",
     "manage": "Gérer",
-    "instructions_empty": "Aucune instruction pour l'instant."
+    "instructions_empty": "Aucune instruction pour l'instant.",
+    "channels_empty": "Aucun canal de messagerie n'est connecté à cet agent."
   },
   "panel": {
-    "status": "Statut",
-    "runs_7d": "Exécutions (7 j)",
-    "edit_access_aria": "Accès : {{value}}. Modifier l'accès",
-    "all_settings": "Tous les paramètres"
+    "status": "Statut"
   },
   "pickers": {
     "concurrency_range": "Exécutions simultanées maximales ({{min}}–{{max}})",
@@ -272,11 +270,14 @@
     "clear_full": "Effacer la sélection (utiliser la valeur par défaut du fournisseur)"
   },
   "tabs": {
+    "overview": "Aperçu",
     "work": "Travail",
     "capabilities": "Capacités",
     "settings": "Paramètres",
     "general": "Général",
+    "profile": "Profil",
     "access": "Accès",
+    "channels": "Messagerie",
     "section_navigation_aria": "Section de l'agent",
     "activity": "Activité",
     "tasks": "Exécutions",
@@ -288,11 +289,17 @@
     "composio_mcp": "Apps",
     "integrations": "Intégrations",
     "runtime_config": "Routage",
+    "runtime": "Runtime et modèle",
     "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "Abandonner les modifications non enregistrées ?",
-    "discard_dialog_description": "Cet onglet contient des modifications non enregistrées. Les quitter maintenant les abandonnera.",
+    "discard_dialog_description": "Cette section contient des modifications non enregistrées. La quitter maintenant les abandonnera.",
     "discard_keep": "Continuer à modifier",
     "discard_confirm": "Abandonner les modifications"
+  },
+  "nav": {
+    "define": "Définition",
+    "connect": "Connexion",
+    "run": "Exécution"
   },
   "creation_studio": {
     "title": "Créer un agent",

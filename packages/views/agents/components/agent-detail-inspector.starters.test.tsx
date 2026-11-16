@@ -4,9 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { configStore } from "@multica/core/config";
-import type { Agent, AgentRuntime } from "@multica/core/types";
+import type { Agent } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
-import { AgentDetailInspector } from "./agent-detail-inspector";
+import { AgentProfileSettings } from "./agent-detail-inspector";
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
@@ -39,19 +39,13 @@ const agent = {
   max_concurrent_tasks: 1,
 } as unknown as Agent;
 
-function renderInspector({
-  runtime = null,
-}: { runtime?: AgentRuntime | null } = {}) {
+function renderInspector() {
   const onUpdate = vi.fn(
     async (_id: string, _data: Record<string, unknown>) => {},
   );
   renderWithI18n(
-    <AgentDetailInspector
+    <AgentProfileSettings
       agent={agent}
-      runtime={runtime}
-      runtimes={[]}
-      members={[]}
-      currentUserId="user-1"
       canEdit
       onUpdate={onUpdate}
     />,
@@ -59,7 +53,7 @@ function renderInspector({
   return onUpdate;
 }
 
-describe("AgentDetailInspector conversation starters", () => {
+describe("AgentProfileSettings conversation starters", () => {
   beforeEach(() => {
     configStore.getState().setAgentConversationStartersSupported(true);
   });
@@ -98,15 +92,6 @@ describe("AgentDetailInspector conversation starters", () => {
         }),
       { timeout: 2000 },
     );
-  });
-
-  it("offers starters and a chat preview for a Qoder agent", () => {
-    renderInspector({
-      runtime: { id: "runtime-1", provider: "qoder_cloud" } as AgentRuntime,
-    });
-
-    expect(screen.getByText("Conversation starters")).toBeInTheDocument();
-    expect(screen.getByText("New chat preview")).toBeInTheDocument();
   });
 
   it("omits the editor on a backend that does not persist starters", () => {

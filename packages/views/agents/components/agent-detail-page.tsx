@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import {
   AlertCircle,
@@ -14,7 +14,6 @@ import {
   Plus,
   RotateCcw,
   Server,
-  Settings2,
   Square,
   Trash2,
 } from "@multica/ui/icons";
@@ -71,35 +70,39 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
-import { AppLink, useNavigation } from "../../navigation";
+import { AppLink, resolveClickIntent, useNavigation } from "../../navigation";
 import { CollectionPageState } from "../../layout/collection-page";
 import {
   OBJECT_PAGE_BODY,
   ObjectIdentity,
   ObjectPage,
+  ObjectPageNav,
 } from "../../layout/object-page";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 import { availabilityConfig } from "../presence";
-import {
-  AgentAdvancedSettings,
-  isAdvancedSection,
-  type AdvancedSection,
-} from "./agent-advanced-settings";
-import { AgentInstructionsSection } from "./agent-instructions-section";
-import { AgentPropertiesPanel } from "./agent-properties-panel";
+import { AgentPresenceIndicator } from "./agent-presence-indicator";
 import { describeCancelImpact } from "./agent-row-actions";
-import { AgentChannelLinks, AgentChannelsSection } from "./agent-channels-section";
-import { AgentSkillsSection } from "./agent-skills-section";
-import { AgentWorkDialog } from "./agent-work-dialog";
-import { AgentWorkSections } from "./tabs/activity-tab";
+import { AgentChannelLinks } from "./agent-channels-section";
+import { AgentOverview } from "./agent-overview";
+import {
+  AgentSectionContent,
+  WIDE_AGENT_SECTIONS,
+  resolveAgentSection,
+  useAgentSectionGroups,
+  type AgentSection,
+} from "./agent-sections";
 
 const AGENT_DETAIL_LAYOUT_ID = "multica_agent_detail_layout";
 
+/** A settings section's column, beside the nav. */
+const SECTION_BODY =
+  "w-full px-[var(--space-lg,1.5rem)] py-[var(--space-xl,2rem)]";
+
 /**
- * The page's `?view=` deep link. Every view the old tabbed page had stays
- * linkable: settings sections open Advanced settings there, `work` opens the
- * work list, and the rest are the page itself. `?tab=` predates `?view=`.
+ * The page's `?view=` deep link: the open section. Every view the old tabbed
+ * page had stays linkable. `?tab=` predates `?view=`.
  */
 function viewFromParams(params: URLSearchParams): string | null {
   const view = params.get("view");
@@ -183,46 +186,45 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     params.set("view", "channels");
     navigation.replace(`${navigation.pathname}?${params}`);
   }, [requestedView, navigation, agent]);
-  const [advancedSection, setAdvancedSection] = useState<AdvancedSection | null>(
-    () => (isAdvancedSection(urlView) ? urlView : null),
-  );
-  const [workOpen, setWorkOpen] = useState(() => urlView === "work");
-  const lastUrlViewRef = useRef(urlView);
 
-  // Back/forward or a link landing on this mounted page.
+  const runtime =
+    agent && isAgentRuntimeBound(agent)
+      ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
+      : null;
+  const sectionGroups = useAgentSectionGroups({
+    runtime,
+    canEdit: canEdit.allowed,
+  });
+  const active = resolveAgentSection(urlView, sectionGroups);
+  const sectionHref = useCallback(
+    (section: AgentSection) =>
+      section === "overview"
+        ? paths.agentDetail(agentId)
+        : `${paths.agentDetail(agentId)}?view=${section}`,
+    [agentId, paths],
+  );
+
+  // A section reports unsaved edits; leaving it asks first. Sections unmount
+  // on the way out without reporting, so a new section starts clean.
+  const [dirty, setDirty] = useState(false);
+  const [pendingSection, setPendingSection] = useState<AgentSection | null>(null);
   useEffect(() => {
-    if (urlView === lastUrlViewRef.current) return;
-    lastUrlViewRef.current = urlView;
-    setAdvancedSection(isAdvancedSection(urlView) ? urlView : null);
-    setWorkOpen(urlView === "work");
-  }, [urlView]);
-
-  const writeView = useCallback(
-    (view: string | null) => {
-      lastUrlViewRef.current = view;
-      const params = new URLSearchParams(navigation.searchParams);
-      params.delete("tab");
-      if (view === null) params.delete("view");
-      else params.set("view", view);
-      const query = params.toString();
-      navigation.replace(`${navigation.pathname}${query ? `?${query}` : ""}`);
-    },
-    [navigation],
-  );
-  const openAdvanced = useCallback(
-    (section: AdvancedSection | null) => {
-      setAdvancedSection(section);
-      writeView(section);
-    },
-    [writeView],
-  );
-  const openWork = useCallback(
-    (open: boolean) => {
-      setWorkOpen(open);
-      writeView(open ? "work" : null);
-    },
-    [writeView],
-  );
+    setDirty(false);
+    if (scrollParent) scrollParent.scrollTop = 0;
+  }, [active.id, scrollParent]);
+  const handleNavClick = (
+    id: string,
+    event: React.MouseEvent<HTMLAnchorElement>,
+  ) => {
+    if (resolveClickIntent(event) !== "push") return;
+    if (id === active.id) {
+      event.preventDefault();
+      return;
+    }
+    if (!dirty) return;
+    event.preventDefault();
+    setPendingSection(id as AgentSection);
+  };
 
   const handleUpdate = useCallback(
     async (id: string, data: Record<string, unknown>) => {
@@ -432,9 +434,6 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
 
   const isArchived = !!agent.archived_at;
   const runtimeBound = isAgentRuntimeBound(agent);
-  const runtime = runtimeBound
-    ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
-    : null;
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
@@ -499,14 +498,6 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           <MessageSquare />
         </IconButton>
       )}
-      <IconButton
-        label={t(($) => $.detail.settings)}
-        tooltipSide="bottom"
-        className="text-muted-foreground"
-        onClick={() => openAdvanced("general")}
-      >
-        <Settings2 />
-      </IconButton>
       {!isArchived && canAssign.allowed && (
         <Button type="button" size="sm" onClick={handleAssign}>
           <Plus />
@@ -526,11 +517,6 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           }
         />
         <DropdownMenuContent align="end" className="w-auto min-w-48">
-          <DropdownMenuItem onClick={() => openAdvanced("general")}>
-            <Settings2 />
-            {t(($) => $.detail.settings)}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() =>
               handleCopy(
@@ -615,7 +601,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         {t(($) => $.detail.archived_banner)}
       </Notice>
     ),
-    !isArchived && !runtimeBound && (
+    !isArchived && !runtimeBound && active.id !== "runtime" && (
       <Notice
         key="runtime"
         tone="warning"
@@ -625,7 +611,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             <Button
               variant="outline"
               size="xs"
-              onClick={() => openAdvanced("general")}
+              render={<AppLink href={sectionHref("runtime")} />}
+              nativeButton={false}
             >
               {t(($) => $.detail.bind_runtime)}
             </Button>
@@ -636,6 +623,104 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       </Notice>
     ),
   ].filter(Boolean);
+
+  const nav = (
+    <ObjectPageNav
+      label={t(($) => $.tabs.section_navigation_aria)}
+      header={
+        <div className="flex min-w-0 items-center gap-2 px-2.5 pb-1">
+          <ActorAvatar actorType="agent" actorId={agent.id} size="md" profileLink={false} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-label font-medium">{agent.name}</div>
+            <div className="text-caption">
+              <AgentPresenceIndicator detail={presence} hideCounts />
+            </div>
+          </div>
+        </div>
+      }
+      groups={sectionGroups.map(({ key, items }) => ({
+        key,
+        label: key === "main" ? undefined : t(($) => $.nav[key]),
+        items: items.map((item) => ({
+          id: item.id,
+          label: t(($) => $.tabs[item.labelKey]),
+          icon: item.icon,
+          count: item.id === "skills" ? agent.skills.length : undefined,
+          href: sectionHref(item.id),
+        })),
+      }))}
+      active={active.id}
+      onItemClick={handleNavClick}
+    />
+  );
+
+  let body: React.ReactNode;
+  if (active.id === "overview") {
+    body = (
+      <AgentOverview
+        agent={agent}
+        runtime={runtime}
+        presence={presence}
+        owner={owner}
+        showSkills={runtime?.provider !== "qoder_cloud"}
+        scrollParent={scrollParent}
+        sectionHref={sectionHref}
+        onViewAllWork={() => navigation.push(sectionHref("work"))}
+        header={
+          <div className="space-y-4">
+            <ObjectIdentity
+              media={<AgentMark agent={agent} presence={presence} />}
+              title={agent.name}
+              description={agent.description || undefined}
+              trailing={
+                isArchived ? (
+                  <span className="inline-flex shrink-0 items-center rounded-md bg-muted px-1.5 py-0.5 text-caption text-muted-foreground">
+                    {t(($) => $.row.archived)}
+                  </span>
+                ) : null
+              }
+            />
+            <AgentChannelLinks agent={agent} />
+            {notices.length > 0 && <div className="space-y-2">{notices}</div>}
+          </div>
+        }
+      />
+    );
+  } else if (active.id === "work") {
+    body = (
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <ActorIssuesPanel actorType="agent" actorId={agent.id} />
+      </div>
+    );
+  } else {
+    body = (
+      <div
+        className={cn(
+          SECTION_BODY,
+          WIDE_AGENT_SECTIONS.has(active.id) ? "max-w-5xl" : "max-w-3xl",
+        )}
+      >
+        <h1 className="text-title font-semibold text-balance">
+          {t(($) => $.tabs[active.labelKey])}
+        </h1>
+        {notices.length > 0 && <div className="mt-4 space-y-2">{notices}</div>}
+        <div className="mt-6">
+          <AgentSectionContent
+            key={`${agent.id}:${active.id}`}
+            section={active.id}
+            agent={agent}
+            runtime={runtime}
+            runtimes={runtimes}
+            members={members}
+            currentUserId={currentUserId}
+            canEdit={canEdit.allowed}
+            onUpdate={handleUpdate}
+            onDirtyChange={setDirty}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -656,79 +741,44 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           </span>
         }
         actions={actions}
-        panel={
-          <AgentPropertiesPanel
-            agent={agent}
-            runtime={runtime}
-            runtimes={runtimes}
-            presence={presence}
-            owner={owner}
-            members={members}
-            currentUserId={currentUserId}
-            canEdit={canEdit.allowed}
-            onUpdate={handleUpdate}
-            onEditAccess={() => openAdvanced("access")}
-            onOpenSettings={() => openAdvanced("general")}
-          />
-        }
+        nav={nav}
       >
-        <div className={cn(OBJECT_PAGE_BODY, "space-y-8")}>
-          <div className="space-y-4">
-            <ObjectIdentity
-              media={<AgentMark agent={agent} presence={presence} />}
-              title={agent.name}
-              description={agent.description || undefined}
-              trailing={
-                isArchived ? (
-                  <span className="inline-flex shrink-0 items-center rounded-md bg-muted px-1.5 py-0.5 text-caption text-muted-foreground">
-                    {t(($) => $.row.archived)}
-                  </span>
-                ) : null
-              }
-            />
-            <AgentChannelLinks agent={agent} />
-            {notices.length > 0 && <div className="space-y-2">{notices}</div>}
-          </div>
-
-          <AgentWorkSections
-            key={`${wsId}:${agent.id}`}
-            agent={agent}
-            scrollParent={scrollParent}
-            onViewAll={() => openWork(true)}
-          />
-
-          <AgentChannelsSection agent={agent} />
-
-          <AgentInstructionsSection
-            agent={agent}
-            canEdit={canEdit.allowed}
-            onUpdate={handleUpdate}
-          />
-
-          {/* Qoder agents take their skills from Qoder Cloud Agents. */}
-          {runtime?.provider === "qoder_cloud" ? null : (
-            <AgentSkillsSection
-              agent={agent}
-              canEdit={canEdit.allowed}
-              onManage={() => openAdvanced("skills")}
-            />
-          )}
-        </div>
+        {body}
       </ObjectPage>
 
-      <AgentAdvancedSettings
-        agent={agent}
-        runtime={runtime}
-        runtimes={runtimes}
-        members={members}
-        onUpdate={handleUpdate}
-        currentUserId={currentUserId}
-        canEdit={canEdit.allowed}
-        section={advancedSection}
-        onSectionChange={openAdvanced}
-      />
-
-      <AgentWorkDialog agent={agent} open={workOpen} onOpenChange={openWork} />
+      {pendingSection !== null && (
+        <AlertDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setPendingSection(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t(($) => $.tabs.discard_dialog_title)}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t(($) => $.tabs.discard_dialog_description)}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t(($) => $.tabs.discard_keep)}</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => {
+                  const next = pendingSection;
+                  setPendingSection(null);
+                  setDirty(false);
+                  navigation.push(sectionHref(next));
+                }}
+              >
+                {t(($) => $.tabs.discard_confirm)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
 
       {confirmCancelRuns && (
         <AlertDialog

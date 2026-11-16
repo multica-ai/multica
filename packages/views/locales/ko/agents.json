@@ -205,13 +205,11 @@
     "edit": "편집",
     "add": "추가",
     "manage": "관리",
-    "instructions_empty": "아직 지침이 없습니다."
+    "instructions_empty": "아직 지침이 없습니다.",
+    "channels_empty": "이 에이전트에 연결된 메신저 채널이 없습니다."
   },
   "panel": {
-    "status": "상태",
-    "runs_7d": "실행 (7일)",
-    "edit_access_aria": "접근 권한: {{value}}. 접근 권한 변경",
-    "all_settings": "모든 설정"
+    "status": "상태"
   },
   "pickers": {
     "concurrency_range": "최대 동시 실행 수({{min}}-{{max}})",
@@ -261,11 +259,14 @@
     "clear_full": "선택 지우기(제공자 기본값 사용)"
   },
   "tabs": {
+    "overview": "개요",
     "work": "작업",
     "capabilities": "기능",
     "settings": "설정",
     "general": "일반",
+    "profile": "프로필",
     "access": "접근 권한",
+    "channels": "메신저",
     "section_navigation_aria": "에이전트 섹션",
     "activity": "활동",
     "tasks": "실행",
@@ -277,11 +278,17 @@
     "composio_mcp": "앱",
     "integrations": "연동",
     "runtime_config": "라우팅",
+    "runtime": "런타임 및 모델",
     "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "저장하지 않은 변경사항을 버릴까요?",
-    "discard_dialog_description": "이 탭에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
+    "discard_dialog_description": "이 섹션에 저장하지 않은 변경사항이 있습니다. 지금 나가면 변경사항이 사라집니다.",
     "discard_keep": "계속 편집",
     "discard_confirm": "변경사항 버리기"
+  },
+  "nav": {
+    "define": "정의",
+    "connect": "연결",
+    "run": "실행"
   },
   "create_dialog": {
     "name_label": "이름",

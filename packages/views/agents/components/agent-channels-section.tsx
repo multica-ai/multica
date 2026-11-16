@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
 import { dingtalkAgentGroupsOptions } from "@multica/core/dingtalk";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
-import { ExternalLink, MoreHorizontal, Plus } from "@multica/ui/icons";
+import { ExternalLink, MessagesSquare, MoreHorizontal, Plus } from "@multica/ui/icons";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,10 +16,9 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 
 import { docsLocalePrefix } from "../../common/docs-locale";
-import { ObjectSection, ObjectSectionAction } from "../../layout/object-page";
+import { ObjectSectionEmpty } from "../../layout/object-page";
 import { useT, useTimeAgo } from "../../i18n";
 import { openExternal } from "../../platform";
-import { useNavigation } from "../../navigation";
 import { IntegrationChannelIcon } from "../../settings/components/integration-channel-icon";
 import { ChannelDisconnectDialog } from "../../settings/components/channel-disconnect-dialog";
 import { ChannelConnectDialog } from "../../settings/components/channel-connect-dialog";
@@ -88,12 +87,10 @@ function AgentChannelContact({
 
 export function AgentChannelsSection({ agent }: { agent: Agent }) {
   const { t } = useT("settings");
+  const { t: ta } = useT("agents");
   const { queries, connections, canManage, available, isAdmin } =
     useMessagingChannels();
   const [open, setOpen] = useState(false);
-  const sectionRef = useRef<HTMLDivElement>(null);
-  const { searchParams } = useNavigation();
-  const view = searchParams.get("view") ?? searchParams.get("tab");
   const installed = connections.filter(
     (entry) => entry.installation.agent_id === agent.id,
   );
@@ -106,67 +103,52 @@ export function AgentChannelsSection({ agent }: { agent: Agent }) {
         !installed.some((entry) => entry.channel === id),
     );
   const failed = CHANNEL_INTEGRATIONS.filter((id) => queries[id].isError);
-  const visible = installed.length > 0 || canAdd || failed.length > 0;
-  useEffect(() => {
-    if (visible && (view === "channels" || view === "integrations"))
-      sectionRef.current?.scrollIntoView({ block: "start" });
-  }, [visible, view]);
-  if (!visible) return null;
+  const loading = CHANNEL_INTEGRATIONS.some((id) => queries[id].isLoading);
 
   return (
-    <div
-      ref={sectionRef}
-      id="messaging-channels"
-      data-settings-anchor="channels"
-    >
-      <ObjectSection
-        title={t(($) => $.page.tabs.channels)}
-        count={installed.length}
-        action={
-          canAdd ? (
-            <ObjectSectionAction icon={Plus} onClick={() => setOpen(true)}>
-              {t(($) => $.channels.add)}
-            </ObjectSectionAction>
-          ) : undefined
-        }
-      >
-        {installed.length ? (
-          <div className="divide-y rounded-lg border">
-            {installed.map((connection) => (
-              <AgentChannelRow
-                key={connection.installation.id}
-                connection={connection}
-                canManage={canManage(connection.channel, agent)}
-                canForget={isAdmin}
-              />
-            ))}
-          </div>
-        ) : canAdd ? (
-          <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-            <Plus />
-            {t(($) => $.channels.add)}
-          </Button>
-        ) : null}
-        {failed.map((id) => (
-          <div
-            key={id}
-            role="alert"
-            className="mt-2 flex items-center justify-between gap-3 text-caption text-muted-foreground"
+    <div className="space-y-3">
+      {installed.length ? (
+        <div className="divide-y rounded-lg border">
+          {installed.map((connection) => (
+            <AgentChannelRow
+              key={connection.installation.id}
+              connection={connection}
+              canManage={canManage(connection.channel, agent)}
+              canForget={isAdmin}
+            />
+          ))}
+        </div>
+      ) : canAdd || loading || failed.length > 0 ? null : (
+        <ObjectSectionEmpty
+          icon={MessagesSquare}
+          description={ta(($) => $.sections.channels_empty)}
+        />
+      )}
+      {canAdd ? (
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Plus />
+          {t(($) => $.channels.add)}
+        </Button>
+      ) : null}
+      {failed.map((id) => (
+        <div
+          key={id}
+          role="alert"
+          className="flex items-center justify-between gap-3 text-caption text-muted-foreground"
+        >
+          <span>
+            {t(($) => $[id].section_title)} ·{" "}
+            {t(($) => $.integrations.status_unknown)}
+          </span>
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={() => void queries[id].refetch()}
           >
-            <span>
-              {t(($) => $[id].section_title)} ·{" "}
-              {t(($) => $.integrations.status_unknown)}
-            </span>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={() => void queries[id].refetch()}
-            >
-              {t(($) => $.lark.install_retry)}
-            </Button>
-          </div>
-        ))}
-      </ObjectSection>
+            {t(($) => $.lark.install_retry)}
+          </Button>
+        </div>
+      ))}
       <ChannelConnectDialog
         agents={[agent]}
         initialAgent={agent}

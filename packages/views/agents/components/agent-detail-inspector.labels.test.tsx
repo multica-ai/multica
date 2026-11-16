@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, screen } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
-import { AgentDetailInspector } from "./agent-detail-inspector";
+import { AgentProfileSettings } from "./agent-detail-inspector";
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
@@ -44,7 +44,7 @@ const agent = {
   runtime_id: "runtime-1",
 } as Agent;
 
-describe("AgentDetailInspector labels", () => {
+describe("AgentProfileSettings labels", () => {
   afterEach(() => {
     cleanup();
   });
@@ -54,12 +54,8 @@ describe("AgentDetailInspector labels", () => {
   // dead end pointing at a catalog the user cannot populate.
   it("does not offer a label picker", () => {
     renderWithI18n(
-      <AgentDetailInspector
+      <AgentProfileSettings
         agent={agent}
-        runtime={null}
-        runtimes={[]}
-        members={[]}
-        currentUserId="user-1"
         canEdit
         onUpdate={vi.fn(async () => {})}
       />,

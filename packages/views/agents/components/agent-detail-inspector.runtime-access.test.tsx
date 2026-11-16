@@ -30,7 +30,7 @@ vi.mock("./inspector/runtime-picker", () => ({
   RuntimePicker: () => <div data-testid="runtime-picker" />,
 }));
 
-import { AgentDetailInspector } from "./agent-detail-inspector";
+import { AgentExecutionSettings } from "./agent-detail-inspector";
 
 const agent = {
   id: "agent-1",
@@ -73,7 +73,7 @@ let queryClient: QueryClient;
 function renderInspector(currentUserId: string) {
   renderWithI18n(
     <QueryClientProvider client={queryClient}>
-      <AgentDetailInspector
+      <AgentExecutionSettings
         agent={agent}
         runtime={privateRuntime}
         runtimes={[privateRuntime]}
@@ -86,7 +86,7 @@ function renderInspector(currentUserId: string) {
   );
 }
 
-describe("AgentDetailInspector runtime access", () => {
+describe("AgentExecutionSettings runtime access", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockInitiateListModels.mockResolvedValue(completedModelsRequest);

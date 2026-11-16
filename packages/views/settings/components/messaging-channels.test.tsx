@@ -218,20 +218,24 @@ describe("agent messaging channels", () => {
   });
   it("does not offer management to someone without workspace membership", async () => {
     state.member = false;
-    const { container } = show(<AgentChannelsSection agent={agent} />);
+    show(<AgentChannelsSection agent={agent} />);
     expect(
       screen.queryByRole("button", { name: "Add messaging channel" }),
     ).toBeNull();
-    expect(container).toBeEmptyDOMElement();
+    expect(
+      screen.getByText("No messaging channels are connected to this agent."),
+    ).toBeInTheDocument();
     expect(api.listLarkInstallations).not.toHaveBeenCalled();
   });
-  it("hides the empty section from a member who cannot manage the agent", async () => {
+  it("tells a member who cannot manage the agent that nothing is connected", async () => {
     state.role = "member";
-    const { container } = show(<AgentChannelsSection agent={otherAgent} />);
-    await waitFor(() =>
-      expect(api.listTelegramInstallations).toHaveBeenCalled(),
-    );
-    expect(container).toBeEmptyDOMElement();
+    show(<AgentChannelsSection agent={otherAgent} />);
+    expect(
+      await screen.findByText("No messaging channels are connected to this agent."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Add messaging channel" }),
+    ).toBeNull();
   });
 
   it("gives an agent owner Lark and DingTalk, with admin-only platforms labelled", async () => {

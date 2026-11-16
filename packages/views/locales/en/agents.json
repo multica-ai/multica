@@ -216,13 +216,11 @@
     "edit": "Edit",
     "add": "Add",
     "manage": "Manage",
-    "instructions_empty": "No instructions yet."
+    "instructions_empty": "No instructions yet.",
+    "channels_empty": "No messaging channels are connected to this agent."
   },
   "panel": {
-    "status": "Status",
-    "runs_7d": "Runs (7d)",
-    "edit_access_aria": "Access: {{value}}. Change access",
-    "all_settings": "All settings"
+    "status": "Status"
   },
   "pickers": {
     "concurrency_range": "Max concurrent runs ({{min}}–{{max}})",
@@ -272,11 +270,14 @@
     "clear_full": "Clear selection (use provider default)"
   },
   "tabs": {
+    "overview": "Overview",
     "work": "Work",
     "capabilities": "Capabilities",
     "settings": "Settings",
     "general": "General",
+    "profile": "Profile",
     "access": "Access",
+    "channels": "Messaging",
     "section_navigation_aria": "Agent section",
     "activity": "Activity",
     "tasks": "Runs",
@@ -288,11 +289,17 @@
     "composio_mcp": "Apps",
     "integrations": "Integrations",
     "runtime_config": "Routing",
+    "runtime": "Runtime & model",
     "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "Discard unsaved changes?",
-    "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
+    "discard_dialog_description": "You have unsaved changes in this section. Leaving now will discard them.",
     "discard_keep": "Keep editing",
     "discard_confirm": "Discard changes"
+  },
+  "nav": {
+    "define": "Define",
+    "connect": "Connect",
+    "run": "Run"
   },
   "creation_studio": {
     "title": "Create an agent",

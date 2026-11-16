@@ -205,13 +205,11 @@
     "edit": "編輯",
     "add": "新增",
     "manage": "管理",
-    "instructions_empty": "還沒有指令。"
+    "instructions_empty": "還沒有指令。",
+    "channels_empty": "這個智能體還沒有連接訊息渠道。"
   },
   "panel": {
-    "status": "狀態",
-    "runs_7d": "執行（7 天）",
-    "edit_access_aria": "訪問權限：{{value}}。變更訪問權限",
-    "all_settings": "全部設定"
+    "status": "狀態"
   },
   "pickers": {
     "concurrency_range": "最大並行執行數（{{min}}–{{max}}）",
@@ -261,11 +259,14 @@
     "clear_full": "清除選擇（使用提供方預設）"
   },
   "tabs": {
+    "overview": "概覽",
     "work": "工作",
     "capabilities": "能力",
     "settings": "設定",
     "general": "通用",
+    "profile": "資料",
     "access": "訪問權限",
+    "channels": "訊息渠道",
     "section_navigation_aria": "AI 代理分區",
     "activity": "動態",
     "tasks": "執行",
@@ -277,11 +278,17 @@
     "composio_mcp": "應用",
     "integrations": "整合",
     "runtime_config": "路由",
+    "runtime": "執行時與模型",
     "qoder_agent": "Qoder Cloud Agents",
     "discard_dialog_title": "放棄未儲存的修改？",
-    "discard_dialog_description": "當前 tab 有未儲存的修改，離開會丟棄這些修改。",
+    "discard_dialog_description": "當前分區有未儲存的修改，離開會丟棄這些修改。",
     "discard_keep": "繼續編輯",
     "discard_confirm": "放棄修改"
+  },
+  "nav": {
+    "define": "定義",
+    "connect": "接入",
+    "run": "執行"
   },
   "creation_studio": {
     "title": "建立 AI 代理",

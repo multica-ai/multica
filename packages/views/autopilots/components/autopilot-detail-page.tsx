@@ -1211,7 +1211,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             </span>
             {autopilot.assignee_type === "agent" && (
               <AppLink
-                href={`${wsPaths.agentDetail(autopilot.assignee_id)}?view=general`}
+                href={`${wsPaths.agentDetail(autopilot.assignee_id)}?view=runtime`}
                 className="font-medium underline underline-offset-2"
               >
                 {t(($) => $.detail.bind_runtime)}

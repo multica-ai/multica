@@ -254,11 +254,14 @@
     "clear_full": "Limpiar selección (usar el predeterminado del proveedor)"
   },
   "tabs": {
+    "overview": "Resumen",
     "work": "Trabajo",
     "capabilities": "Capacidades",
     "settings": "Ajustes",
     "general": "General",
+    "profile": "Perfil",
     "access": "Acceso",
+    "channels": "Mensajería",
     "section_navigation_aria": "Sección del agente",
     "activity": "Actividad",
     "tasks": "Ejecuciones",
@@ -270,11 +273,17 @@
     "composio_mcp": "Aplicaciones",
     "integrations": "Integraciones",
     "runtime_config": "Enrutado",
+    "runtime": "Runtime y modelo",
     "discard_dialog_title": "¿Descartar los cambios sin guardar?",
-    "discard_dialog_description": "Hay cambios sin guardar en esta pestaña. Si sales ahora, se descartarán.",
+    "discard_dialog_description": "Hay cambios sin guardar en esta sección. Si sales ahora, se descartarán.",
     "discard_keep": "Seguir editando",
     "discard_confirm": "Descartar cambios",
     "qoder_agent": "Qoder Cloud Agents"
+  },
+  "nav": {
+    "define": "Definición",
+    "connect": "Conexión",
+    "run": "Ejecución"
   },
   "creation_studio": {
     "title": "Crear un agente",
@@ -1060,13 +1069,11 @@
     "edit": "Editar",
     "add": "Añadir",
     "manage": "Gestionar",
-    "instructions_empty": "Aún no hay instrucciones."
+    "instructions_empty": "Aún no hay instrucciones.",
+    "channels_empty": "Este agente no tiene canales de mensajería conectados."
   },
   "panel": {
-    "status": "Estado",
-    "runs_7d": "Ejecuciones (7 d)",
-    "edit_access_aria": "Acceso: {{value}}. Cambiar acceso",
-    "all_settings": "Todos los ajustes"
+    "status": "Estado"
   },
   "intro": {
     "title": "Incorpora a tu primer compañero de IA",
