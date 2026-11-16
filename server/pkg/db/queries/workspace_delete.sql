@@ -386,6 +386,9 @@ deleted_issue_subscribers AS (
 deleted_channel_issue_subscriptions AS (
     DELETE FROM channel_issue_subscription WHERE workspace_id = $1
 ),
+deleted_channel_project_subscriptions AS (
+    DELETE FROM channel_project_subscription WHERE workspace_id = $1
+),
 deleted_issue_labels AS (
     DELETE FROM issue_to_label
     WHERE issue_id IN (SELECT id FROM ws_issues)

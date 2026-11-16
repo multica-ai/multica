@@ -538,6 +538,19 @@ type ChannelOutboundMessage struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
+type ChannelProjectSubscription struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	InstallationID  pgtype.UUID        `json:"installation_id"`
+	ChannelType     string             `json:"channel_type"`
+	ChatID          string             `json:"chat_id"`
+	ThreadID        string             `json:"thread_id"`
+	AnchorMessageID string             `json:"anchor_message_id"`
+	CreatedBy       pgtype.UUID        `json:"created_by"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChannelReplyDelivery struct {
 	TurnID         pgtype.UUID        `json:"turn_id"`
 	TaskID         pgtype.UUID        `json:"task_id"`

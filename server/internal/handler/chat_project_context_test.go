@@ -370,3 +370,33 @@ func TestClaimTaskByRuntime_ChatProjectContext(t *testing.T) {
 		t.Fatalf("repos = %+v, want project repo only", response.Task.Repos)
 	}
 }
+
+func TestDeleteProject_DeletesChatProjectSubscriptions(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	projectID := createChatProjectTestProject(t, testWorkspaceID, "Followed chat project", "")
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO channel_project_subscription (workspace_id, project_id, installation_id, channel_type, chat_id)
+		VALUES ($1, $2, gen_random_uuid(), 'feishu', 'oc_group')
+	`, testWorkspaceID, projectID); err != nil {
+		t.Fatalf("seed chat project subscription: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM channel_project_subscription WHERE project_id = $1`, projectID)
+	})
+
+	w := httptest.NewRecorder()
+	testHandler.DeleteProject(w, withURLParam(newRequest(http.MethodDelete, "/api/projects/"+projectID, nil), "id", projectID))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteProject: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	var remaining int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM channel_project_subscription WHERE project_id = $1`, projectID).Scan(&remaining); err != nil {
+		t.Fatalf("count chat project subscriptions: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("project delete left %d chat subscriptions", remaining)
+	}
+}
