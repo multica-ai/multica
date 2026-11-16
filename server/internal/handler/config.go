@@ -54,9 +54,9 @@ type AppConfig struct {
 	VCSIntegrationAvailable bool `json:"vcs_integration_available,omitempty"`
 
 	// ThemeStoreEnabled tells the app it can browse and install community
-	// themes through /api/theme-store. Self-hosted operators turn it off with
-	// MULTICA_THEME_STORE=off. Omitted when off, and older servers omit it
-	// too, so the app shows no Browse entry and makes no store requests.
+	// themes through /api/theme-store. Omitted when the store could not start
+	// (an invalid MULTICA_THEME_REGISTRY_URL), and older servers omit it too,
+	// so the app shows no Browse entry and makes no store requests.
 	ThemeStoreEnabled bool `json:"theme_store_enabled,omitempty"`
 
 	// PostHog public config for the frontend. The key is the same Project
@@ -107,6 +107,12 @@ type AppConfig struct {
 	// replies unless it is declared.
 	CommentDeleteKeepRepliesSupported bool `json:"comment_delete_keep_replies_supported"`
 
+	// IssueBatchOpsSupported tells clients that batch update accepts labels,
+	// properties and dry_run, and that batch update and delete return
+	// per-issue results. Older handlers ignore those fields — a dry run there
+	// would write — so clients must fail closed when this is absent.
+	IssueBatchOpsSupported bool `json:"issue_batch_ops_supported"`
+
 	// ServerVersion is the running API build version, so self-hosted
 	// operators can confirm what's deployed and include it in bug reports.
 	// Only emitted on self-hosted deployments — omitted on the managed cloud,
@@ -127,6 +133,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		AgentConversationStartersSupported: true,
 		IssueCreatePropertiesSupported:     true,
 		CommentDeleteKeepRepliesSupported:  true,
+		IssueBatchOpsSupported:             true,
 		AllowSignup:                        os.Getenv("ALLOW_SIGNUP") != "false",
 		GoogleClientID:                     os.Getenv("GOOGLE_CLIENT_ID"),
 		WorkspaceCreationDisabled:          os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",

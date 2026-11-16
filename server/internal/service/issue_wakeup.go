@@ -643,6 +643,22 @@ func (s *IssueWakeupService) authorize(ctx context.Context, q *db.Queries, ws, m
 	return nil
 }
 
+// authorizeRun is authorize plus the private-project rule every issue run
+// obeys (guardRunProjectAccess): the rule's creator and the agent's owner must
+// both still see the issue's project.
+func (s *IssueWakeupService) authorizeRun(ctx context.Context, q *db.Queries, issue db.Issue, member pgtype.UUID, a db.Agent) error {
+	if err := s.authorize(ctx, q, issue.WorkspaceID, member, a); err != nil {
+		return err
+	}
+	if err := s.Tasks.guardRunProjectAccess(ctx, issue, a, member, member); err != nil {
+		if errors.Is(err, ErrProjectAccessDenied) {
+			return ErrWakeupForbidden
+		}
+		return err
+	}
+	return nil
+}
+
 // Tick uses the existing scheduler lease. Each config has a row lock as well,
 // so a manual retry or a second server cannot dispatch the same receipt twice.
 func (s *IssueWakeupService) Tick(ctx context.Context) error {
@@ -1019,7 +1035,7 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 	if agent.ID.Valid && agent.RuntimeID != candidate.RuntimeID {
 		return tx.Commit(ctx)
 	}
-	authErr := s.authorize(ctx, q, w.WorkspaceID, w.CreatedBy, agent)
+	authErr := s.authorizeRun(ctx, q, issue, w.CreatedBy, agent)
 	if w.DisabledAt.Valid || !active || authErr != nil {
 		if authErr != nil && !errors.Is(authErr, ErrWakeupForbidden) {
 			return authErr
@@ -1492,5 +1508,12 @@ func (s *IssueWakeupService) CheckClaim(ctx context.Context, task db.AgentTaskQu
 	if err != nil {
 		return err
 	}
-	return s.authorize(ctx, s.Tasks.Queries, w.WorkspaceID, w.CreatedBy, agent)
+	issue, err := s.Tasks.Queries.GetIssue(ctx, w.IssueID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrWakeupForbidden
+	}
+	if err != nil {
+		return err
+	}
+	return s.authorizeRun(ctx, s.Tasks.Queries, issue, w.CreatedBy, agent)
 }

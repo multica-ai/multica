@@ -46,6 +46,8 @@ Multica détecte actuellement ces commandes :
 | Qoder CN CLI | `qoderclicn` | [Démarrage rapide de Qoder CN CLI](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
 | Qwen Code | `qwen` | [Qwen Code](https://github.com/QwenLM/qwen-code) |
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
+| Amp | `amp` | [Amp CLI](https://ampcode.com/docs/cli) |
+| Factory Droid | `droid` | [Factory Droid](https://docs.factory.com/droid-exec/overview) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [Site officiel de TRAE](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
@@ -72,6 +74,7 @@ En dessous de la version minimale, le daemon n'enregistre pas le runtime corresp
 | Copilot | 1.0.0 |
 | Grok | 0.2.89 |
 | Qwen Code | 0.20.0 |
+| Factory Droid | 1.8.0 |
 | MiniMax Code | 0.1.2 |
 | Muse Code | 1.4.10 |
 | OpenCode | 1.1.54 |
@@ -102,7 +105,9 @@ Privilégiez un bundle que votre propre équipe publie ou compile : cette valeur
 
 **DSH Desktop.** Si vous avez installé DeepSeek Harness Desktop plutôt que le paquet npm, le daemon recherche aussi les shims CLI que génère cette application, dans son propre répertoire de données par utilisateur : `~/Library/Application Support/DSH Desktop` sur macOS, `%APPDATA%\DSH Desktop` sur Windows. Sous Windows, il s'agit des données d'application itinérantes (roaming), pas du répertoire d'installation : l'application s'installe dans Program Files ou dans `%LOCALAPPDATA%\Programs`, mais le CLI qu'elle pilote se trouve à côté de ses autres données par utilisateur. Le segment de version de ces chemins est un identifiant généré ; le daemon les énumère donc et privilégie le plus récent. Rien d'autre n'est nécessaire dans le `PATH` : un shim généré exécute le runtime propre de l'application Desktop par chemin absolu. Si DSH Desktop est installé à un emplacement non standard, faites pointer `MULTICA_DSH_PATH` vers le shim.
 
-Le daemon n'enregistre DeepSeek Harness qu'après la réussite de `dsh --profile multica --probe`, et signale le profil manquant sur `/health` en cas d'échec.
+**Après une mise à niveau de DSH.** Si la sonde signale des paquets cœur incompatibles dans le profil, sauvegardez le manifeste indiqué dans le diagnostic du daemon. Vérifiez les substitutions de `@deepseek-ai/dsh-agent`, `@deepseek-ai/dsh-session`, `@deepseek-ai/dsh-tools` et `@deepseek-ai/dsh-llm` : préférez les paquets fournis par l’application, ou alignez les substitutions sur la version installée de DSH. Conservez les plugins et hooks indépendants nécessaires ; ne supprimez pas toutes les dépendances. Relancez `dsh --profile multica --probe` après la réparation. Multica indique que ce refus de compatibilité confirmé nécessite une réparation manuelle et n’écrase pas le profil existant.
+
+Le daemon enregistre DeepSeek Harness uniquement après la réussite de `dsh --profile multica --probe`. Le diagnostic de `/health` distingue un profil absent, une réparation manuelle confirmée, une incompatibilité de protocole et une sonde indisponible. En cas d’échec au démarrage, il inclut la version détectée du CLI, l’emplacement du manifeste et les diagnostics expurgés disponibles.
 
 </Accordion>
 <Accordion title="MiniMax Code" id="minimax-code">
@@ -214,4 +219,4 @@ Si l'outil apparaît en ligne mais que les exécutions échouent toujours, ouvre
 - [Daemon et runtimes](/daemon-runtimes) — statut en ligne, parallélisme et runtimes personnalisés.
 - [Comparatif des outils de codage IA](/providers) — comparer ce que chaque outil peut faire dans Multica.
 
-Sur macOS, ZCode Desktop est détecté depuis son bundle d'application. Installez Node.js et activez une connexion API fonctionnelle dans l'application. Les choix de modèle et de raisonnement viennent de ZCode ; voir [la comparaison des outils](/providers#zcode).
+Sur macOS, ZCode Desktop est détecté depuis son bundle d'application et nécessite Node.js. Sur Linux, le daemon détecte ZCode Desktop via `zcode` dans le PATH ou `/opt/ZCode/zcode` et exécute son CLI intégré sans ouvrir de fenêtre. Sur Linux, aucune installation séparée de Node.js ni configuration manuelle de variables d'environnement n'est nécessaire. Activez une connexion API fonctionnelle dans l'application. Les choix de modèle et de raisonnement viennent de ZCode ; voir [la comparaison des outils](/providers#zcode).

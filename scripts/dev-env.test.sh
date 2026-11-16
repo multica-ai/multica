@@ -592,4 +592,43 @@ printf 'n\n' | dev_env destroy orphan-902 > "$out" 2>&1 || fail "declining destr
 require_contains "$out" "Cancelled."
 [ -d "$MULTICA_DEV_HOME/envs/orphan-902" ] || fail "declined destroy removed the environment anyway"
 
+# ---------------------------------------------------------------------------
+# uutils mkdir (Ubuntu 26.04) reports success to a caller that lost the race
+# to create a directory. A mkdir that succeeds on the held allocation lock must
+# not hand it to a second holder, or two `up`s allocate the same slot.
+# ---------------------------------------------------------------------------
+(
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  command mkdir -p "$LOCK_DIR"
+  printf '%s\n' "$PPID" > "$LOCK_DIR/pid"
+  mkdir() { command mkdir "$@" 2>/dev/null || [ -d "$LOCK_DIR" ]; }
+  sleep() { :; }
+  if (acquire_lock) > "$out" 2>&1; then
+    fail "a mkdir that succeeded on the held lock directory let a second holder in"
+  fi
+  require_contains "$out" "Timed out waiting for the allocation lock"
+  [ "$(cat "$LOCK_DIR/pid")" = "$PPID" ] || fail "the lock holder's pid was overwritten"
+  command rm -rf "$LOCK_DIR"
+)
+
+# Releasing must drop only this holder's claim. Under uutils mkdir the next
+# caller can claim the directory as soon as the pid file is unlinked; deleting
+# the directory after that would hand the lock to a third caller.
+(
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  acquire_lock
+  rm() {
+    command rm -f "$LOCK_DIR/pid"
+    # The next caller claims the lock between the unlink and the directory removal.
+    printf '%s\n' "$PPID" > "$LOCK_DIR/pid"
+    case "$1" in -r*) command rmdir "$LOCK_DIR" ;; esac
+  }
+  release_lock 2> "$out" || fail "release_lock failed when the next holder had already claimed the lock"
+  unset -f rm
+  [ "$(cat "$LOCK_DIR/pid" 2>/dev/null)" = "$PPID" ] || fail "release_lock removed the next holder's lock"
+  command rm -rf "$LOCK_DIR"
+)
+
 echo "✓ dev-env.sh registry behaviour verified"

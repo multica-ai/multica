@@ -115,6 +115,7 @@ describe("issue view defaults", () => {
       project: true,
       childProgress: true,
       labels: false,
+      pullRequests: false,
     });
   });
 

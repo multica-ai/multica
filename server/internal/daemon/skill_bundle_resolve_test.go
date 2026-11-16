@@ -390,6 +390,9 @@ func TestFormatBytes(t *testing.T) {
 		{1024, "1 KB"},
 		{552960, "540 KB"},
 		{1101426, "1.05 MB"},
+		{1048063, "1023 KB"},
+		{1048064, "1.00 MB"},
+		{1048575, "1.00 MB"},
 	}
 	for _, tc := range cases {
 		if got := formatBytes(tc.n); got != tc.want {

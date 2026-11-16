@@ -1092,6 +1092,36 @@ describe("ApiClient schema fallback", () => {
       const subs = await client.listIssueSubscribers("issue-1");
       expect(subs).toEqual([]);
     });
+
+    const subscriber = (delivery?: unknown) => ({
+      issue_id: "issue-1",
+      user_type: "member",
+      user_id: "user-1",
+      reason: "commenter",
+      created_at: "2026-01-01T00:00:00Z",
+      ...(delivery === undefined ? {} : { delivery }),
+    });
+
+    it("keeps each valid delivery tier", async () => {
+      stubFetchJson(["all", "key_updates", "delegated"].map(subscriber));
+      const client = new ApiClient("https://api.example.test");
+      const subs = await client.listIssueSubscribers("issue-1");
+      expect(subs.map((s) => s.delivery)).toEqual(["all", "key_updates", "delegated"]);
+    });
+
+    it.each([
+      { name: "missing", delivery: undefined },
+      { name: "unknown", delivery: "muted" },
+      { name: "malformed", delivery: 42 },
+      { name: "null", delivery: null },
+    ])("keeps the row without a tier when delivery is $name", async ({ delivery }) => {
+      stubFetchJson([subscriber(delivery)]);
+      const client = new ApiClient("https://api.example.test");
+      const subs = await client.listIssueSubscribers("issue-1");
+      expect(subs).toHaveLength(1);
+      expect(subs[0]).toMatchObject({ user_id: "user-1", reason: "commenter" });
+      expect(subs[0]!.delivery).toBeUndefined();
+    });
   });
 
   describe("listChildIssues", () => {
@@ -1126,6 +1156,51 @@ describe("ApiClient schema fallback", () => {
 
       await expect(client.getChildIssueProgress()).resolves.toEqual({
         progress: [],
+      });
+    });
+  });
+
+  describe("listIssuePullRequestSummaries", () => {
+    it("drops a malformed row instead of blanking every card's PR chips", async () => {
+      stubFetchJson({
+        pull_requests: [
+          {
+            issue_id: "issue-1",
+            id: "pr-1",
+            repo_owner: "acme",
+            repo_name: "widget",
+            number: 1,
+            state: "merged",
+            html_url: "https://github.com/acme/widget/pull/1",
+          },
+          { issue_id: "issue-1", id: "pr-2", number: "two" },
+        ],
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listIssuePullRequestSummaries()).resolves.toEqual({
+        pull_requests: [
+          {
+            issue_id: "issue-1",
+            id: "pr-1",
+            provider: "github",
+            repo_owner: "acme",
+            repo_name: "widget",
+            number: 1,
+            title: "",
+            state: "merged",
+            html_url: "https://github.com/acme/widget/pull/1",
+          },
+        ],
+      });
+    });
+
+    it("falls back to no PRs when the list is not an array", async () => {
+      stubFetchJson({ pull_requests: "invalid" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listIssuePullRequestSummaries()).resolves.toEqual({
+        pull_requests: [],
       });
     });
   });

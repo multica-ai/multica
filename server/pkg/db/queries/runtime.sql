@@ -495,6 +495,10 @@ WHERE runtime_id = @runtime_id
 RETURNING *;
 
 -- name: DeleteAgentRuntime :exec
+-- runtime_rate_limit has no FK; its row goes with the runtime.
+WITH deleted_rate_limit AS (
+    DELETE FROM runtime_rate_limit WHERE runtime_id = $1
+)
 DELETE FROM agent_runtime WHERE id = $1;
 
 -- name: DeleteSystemAgentsByRuntime :exec

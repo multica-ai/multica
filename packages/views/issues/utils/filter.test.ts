@@ -294,6 +294,14 @@ describe("filterIssues", () => {
   });
 
   // --- Agent running quick filter ---
+  it("shows only idle issues, including never-run issues, and waits for activity data", () => {
+    const filters = { ...NO_FILTER, agentIdleFilter: true };
+    expect(filterIssues(issues, filters)).toEqual([]);
+    expect(filterIssues(issues, { ...filters, activeIssueIds: new Set(["2", "4"]) }).map((i) => i.id)).toEqual(["1", "3"]);
+    expect(filterIssues(issues, { ...filters, activeIssueIds: new Set() })).toHaveLength(4);
+    expect(filterIssues(issues, { ...filters, activeIssueIds: new Set(["2", "4"]), statusFilters: ["todo"] }).map((i) => i.id)).toEqual(["1"]);
+  });
+
   it("keeps only running issues when agentRunningFilter is on", () => {
     const result = filterIssues(issues, {
       ...NO_FILTER,
@@ -438,6 +446,20 @@ describe("filterAssigneeGroups", () => {
 
   it("passes undefined through untouched", () => {
     expect(filterAssigneeGroups(undefined, { showSubIssues: false })).toBeUndefined();
+  });
+
+  it("keeps idle issues across assignee groups and drops busy-only groups", () => {
+    const groups = [
+      group("a1", [makeIssue({ id: "busy" }), makeIssue({ id: "idle" })]),
+      group("a2", [makeIssue({ id: "queued" })]),
+      group("none", [makeIssue({ id: "unassigned" })]),
+    ];
+    expect(filterAssigneeGroups(groups, { agentIdleFilter: true })).toEqual([]);
+    const result = filterAssigneeGroups(groups, { agentIdleFilter: true, activeIssueIds: new Set(["busy", "queued"]) });
+    expect(result?.map((g) => ({ id: g.id, ids: g.issues.map((i) => i.id), total: g.total }))).toEqual([
+      { id: "a1", ids: ["idle"], total: 1 },
+      { id: "none", ids: ["unassigned"], total: 1 },
+    ]);
   });
 
   it("hides sub-issues, recomputes total, and drops emptied groups", () => {

@@ -132,7 +132,8 @@ export function useIssueSurfaceActions({
           errorMessage: t(($) => $.detail.toast_move_issue_failed),
           ...options,
         }),
-      batchUpdate: (issueIds, updates) => batchUpdateMutation.mutateAsync({ ids: issueIds, updates }),
+      batchUpdate: (issueIds, updates, ops) =>
+        batchUpdateMutation.mutateAsync({ ids: issueIds, updates, ...ops }),
       batchDelete: async (issueIds) => {
         await batchDeleteMutation.mutateAsync(issueIds);
       },

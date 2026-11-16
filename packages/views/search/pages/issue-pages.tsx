@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CalendarClock, CalendarX, FolderMinus, Lock, Network, UserMinus, Zap } from "@multica/ui/icons";
 import { Command as CommandPrimitive } from "cmdk";
-import { dispatchReasonCode } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import { addDaysDateOnly, todayDateOnly } from "@multica/core/issues/date";
@@ -19,11 +18,12 @@ import { issueLabelsOptions, labelListOptions } from "@multica/core/labels/queri
 import { useAttachLabelToIssue, useDetachLabel } from "@multica/core/labels/mutations";
 import { useModalStore } from "@multica/core/modals";
 import { projectListOptions } from "@multica/core/projects/queries";
-import { quickActionListOptions, useRunQuickAction } from "@multica/core/quick-actions";
+import { selectableProjects } from "@multica/core/projects";
+import { quickActionListOptions } from "@multica/core/quick-actions";
 import type { Issue, IssuePriority, Label } from "@multica/core/types";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { PriorityIcon } from "../../issues/components/priority-icon";
-import { outcomeMessage } from "../../issues/components/quick-actions-section";
+import { useQuickActionRunner } from "../../issues/hooks/use-quick-action-runner";
 import { useIssueStatusOptions } from "../../issues/utils/status-options";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
@@ -36,6 +36,7 @@ import { AgentPresenceText, ActorRow, IssueResultRow } from "../result-rows";
 import { useActorDirectory } from "../use-actor-directory";
 import { useServerSearch } from "../use-server-search";
 import type { IssueTarget } from "../types";
+import { paletteColor } from "@multica/core/appearance";
 
 /** The value every target issue shares, or undefined when they differ. */
 function common<T>(issues: Issue[], pick: (issue: Issue) => T): T | undefined {
@@ -116,6 +117,8 @@ export function IssueStatusPage({ target, query }: { target: IssueTarget; query:
     <PaletteGroup heading={t(($) => $.pages.status)}>
       {visible.map((option) => (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           key={option.key}
           value={`status:${option.key}`}
           onSelect={() => select(option.key)}
@@ -154,6 +157,8 @@ export function IssuePriorityPage({ target, query }: { target: IssueTarget; quer
     <PaletteGroup heading={t(($) => $.pages.priority)}>
       {options.map(({ priority, label }) => (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           key={priority}
           value={`priority:${priority}`}
           onSelect={() => {
@@ -209,6 +214,8 @@ export function IssueAssigneePage({ target, query }: { target: IssueTarget; quer
       {showUnassigned && (
         <PaletteGroup heading={t(($) => $.pages.assignee)}>
           <CommandPrimitive.Item
+            data-mc="palette-item"
+            data-type="option"
             value="assignee:none"
             onSelect={() => select(null, null)}
             className={ROW_CLASS}
@@ -313,37 +320,48 @@ export function IssueLabelsPage({ target, query }: { target: IssueTarget; query:
   });
   const attach = useAttachLabelToIssue();
   const detach = useDetachLabel(single?.id ?? "");
+  const writer = useIssueTargetWriter(target);
   const labelIdsOf = (issue: Issue) =>
     new Set((single && issue.id === single.id && singleLabels ? singleLabels : issue.labels ?? []).map((l) => l.id));
   const visible = filterByLabel(labels, query, (label) => label.name);
+  const countOf = (label: Label) => issues.filter((issue) => labelIdsOf(issue).has(label.id)).length;
 
+  // A row on every target is a checked toggle: selecting it removes the label.
   const toggle = (label: Label) => {
     palette.close();
-    const lacking = issues.filter((issue) => !labelIdsOf(issue).has(label.id));
-    if (lacking.length === 0 && single) {
-      // Every target already has it: on a single issue the row reads as a
-      // checked toggle, so selecting it removes the label.
-      detach.mutateAsync(label.id).then(
-        () => toast.success(t(($) => $.toast.label_removed, { name: label.name })),
-        (err: unknown) => toast.error(err instanceof Error ? err.message : String(err)),
+    const onAll = countOf(label) === issues.length;
+    if (!single) {
+      writer.applyLabels(
+        onAll ? { remove: [label.id] } : { add: [label.id] },
+        onAll
+          ? t(($) => $.toast.label_removed, { name: label.name })
+          : t(($) => $.toast.label_added, { name: label.name }),
       );
       return;
     }
-    void Promise.allSettled(
-      lacking.map((issue) => attach.mutateAsync({ issueId: issue.id, labelId: label.id })),
-    ).then((results) => {
-      const failed = results.filter((r) => r.status === "rejected").length;
-      if (failed > 0) toast.error(t(($) => $.toast.label_failed, { name: label.name }));
-      else toast.success(t(($) => $.toast.label_added, { name: label.name }));
-    });
+    const write = onAll
+      ? detach.mutateAsync(label.id)
+      : attach.mutateAsync({ issueId: single.id, labelId: label.id });
+    write.then(
+      () =>
+        toast.success(
+          onAll
+            ? t(($) => $.toast.label_removed, { name: label.name })
+            : t(($) => $.toast.label_added, { name: label.name }),
+        ),
+      (err: unknown) => toast.error(err instanceof Error ? err.message : String(err)),
+    );
   };
 
   return (
     <PaletteGroup heading={t(($) => $.pages.labels)}>
       {visible.map((label) => {
-        const onAll = issues.every((issue) => labelIdsOf(issue).has(label.id));
+        const n = countOf(label);
+        const onAll = n === issues.length;
         return (
           <CommandPrimitive.Item
+            data-mc="palette-item"
+            data-type="option"
             key={label.id}
             value={`label:${label.id}`}
             onSelect={() => toggle(label)}
@@ -351,12 +369,16 @@ export function IssueLabelsPage({ target, query }: { target: IssueTarget; query:
           >
             <span
               className="mx-1 size-2.5 shrink-0 rounded-full"
-              style={{ backgroundColor: label.color }}
+              style={{ backgroundColor: paletteColor(label.color) }}
             />
             <span className="min-w-0 flex-1 truncate">
               <HighlightText text={label.name} query={query} />
             </span>
-            {onAll && <RowCheck label={t(($) => $.pages.current)} />}
+            {onAll ? (
+              <RowCheck label={t(($) => $.pages.current)} />
+            ) : (
+              n > 0 && <RowHint>{`${n}/${issues.length}`}</RowHint>
+            )}
           </CommandPrimitive.Item>
         );
       })}
@@ -388,6 +410,8 @@ export function IssueDueDatePage({ target, query }: { target: IssueTarget; query
     <PaletteGroup heading={t(($) => $.pages.due_date)}>
       {options.map((option) => (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           key={option.id}
           value={`due:${option.id}`}
           onSelect={() => {
@@ -418,7 +442,9 @@ export function IssueProjectPage({ target, query }: { target: IssueTarget; query
   const writer = useIssueTargetWriter(target);
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const current = common(writer.issues, (issue) => issue.project_id);
-  const live = projects.filter((project) => project.status !== "cancelled" || project.id === current);
+  const live = selectableProjects(projects, current).filter(
+    (project) => project.status !== "cancelled" || project.id === current,
+  );
   const visible = filterByLabel(live, query, (project) => project.title);
   const noProjectLabel = t(($) => $.pages.no_project);
   const q = query.trim().toLowerCase();
@@ -426,6 +452,8 @@ export function IssueProjectPage({ target, query }: { target: IssueTarget; query
     <PaletteGroup heading={t(($) => $.pages.project)}>
       {(!q || scoreText(noProjectLabel, q) > 0) && (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           value="project:none"
           onSelect={() => {
             palette.close();
@@ -440,6 +468,8 @@ export function IssueProjectPage({ target, query }: { target: IssueTarget; query
       )}
       {visible.map((project) => (
         <CommandPrimitive.Item
+          data-mc="palette-item"
+          data-type="option"
           key={project.id}
           value={`project:${project.id}`}
           onSelect={() => {
@@ -475,6 +505,8 @@ export function IssueParentPage({ target, query }: { target: IssueTarget; query:
       {hasParent && !query.trim() && (
         <PaletteGroup heading={t(($) => $.pages.parent)}>
           <CommandPrimitive.Item
+            data-mc="palette-item"
+            data-type="option"
             value="parent:none"
             onSelect={() => {
               palette.close();
@@ -519,7 +551,7 @@ export function IssueQuickActionPage({ issue, query }: { issue: Issue; query: st
   const wsId = useWorkspaceId();
   const palette = usePalette();
   const { data = [] } = useQuery(quickActionListOptions(wsId));
-  const run = useRunQuickAction(issue.id);
+  const run = useQuickActionRunner(issue.id);
   const actions = filterByLabel(
     data.filter((action) => action.status === "active"),
     query,
@@ -532,25 +564,13 @@ export function IssueQuickActionPage({ issue, query }: { issue: Issue; query: st
         const targetName = action.target_name || tIssues(($) => $.detail.quick_action_target_fallback);
         return (
           <CommandPrimitive.Item
+            data-mc="palette-item"
+            data-type="option"
             key={action.id}
             value={`quick-action:${action.id}`}
             onSelect={() => {
               palette.close();
-              run.mutateAsync({ quickActionId: action.id }).then(
-                (comment) => {
-                  const { message, kind } = outcomeMessage(comment.trigger_outcomes?.[0], targetName, tIssues);
-                  if (kind === "success") toast.success(message);
-                  else if (kind === "error") toast.error(message);
-                  else toast.info(message);
-                },
-                (error: unknown) => {
-                  if (dispatchReasonCode(error) === "invocation_not_allowed") {
-                    toast.error(tIssues(($) => $.detail.quick_action_blocked_body, { name: action.name }));
-                    return;
-                  }
-                  toast.error(error instanceof Error ? error.message : String(error));
-                },
-              );
+              run(action);
             }}
             className={ROW_CLASS}
           >

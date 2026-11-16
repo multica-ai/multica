@@ -526,6 +526,43 @@ describe("ChatMessageList tool rows (#8835 regression)", () => {
   });
 });
 
+describe("ChatMessageList command tool rows", () => {
+  it("shows a command line by line, not as escaped JSON", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "tool_use", {
+        tool: "Bash",
+        input: { command: "pnpm test\npnpm lint", description: "Run checks" },
+      }),
+    ]);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={{ task_id: TASK_ID, status: "running" }}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    fireEvent.click(await screen.findByText("Bash"));
+
+    // Match the raw text: the default matcher collapses the newline that this
+    // test is about.
+    const command = Array.from(document.querySelectorAll("pre > div")).find(
+      (line) => line.textContent === "pnpm test\npnpm lint",
+    );
+    expect(command).toHaveClass("text-foreground");
+    // Same capped, scrolling box as the panel's other inputs and results.
+    expect(command?.parentElement).toHaveClass("max-h-32", "overflow-auto");
+    expect(screen.queryByText(/"command":/)).not.toBeInTheDocument();
+    expect(command?.nextElementSibling?.textContent).toContain('"description": "Run checks"');
+  });
+});
+
 describe("ChatMessageList footer spacing", () => {
   it("keeps the bottom inset when no task is pending", () => {
     const { container } = render(

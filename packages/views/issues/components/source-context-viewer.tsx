@@ -211,8 +211,8 @@ export function SourceContextBadge({
           className={cn(
             "flex w-full max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 transition-[height,max-width] motion-reduce:transition-none",
             viewerExpanded
-              ? "h-[calc(100dvh-2rem)] sm:max-w-[calc(100%-2rem)]"
-              : "h-[min(82dvh,56rem)] sm:max-w-4xl",
+              ? "h-[calc(100%-2rem)] sm:max-w-[calc(100%-2rem)]"
+              : "h-[min(82%,56rem)] sm:max-w-4xl",
           )}
         >
           <DialogHeader className="relative shrink-0 gap-1 border-b px-5 py-4 pr-20 sm:px-6">

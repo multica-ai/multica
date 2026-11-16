@@ -6,3 +6,5 @@ out
 *.log*
 # CLI binary bundled at build time (from server/bin/)
 resources/bin/
+# Speech engine staged at build time (scripts/bundle-voice-engine.mjs)
+resources/voice-engine/

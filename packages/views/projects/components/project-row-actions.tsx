@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ExternalLink, Link2, Pencil, Pin, PinOff, Trash2 } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, ExternalLink, Link2, Pencil, Pin, PinOff, Trash2 } from "@multica/ui/icons";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
@@ -31,19 +31,24 @@ import { agentListOptions, memberListOptions } from "@multica/core/workspace/que
 import { useT } from "../../i18n";
 import { useIntentNavigate, useNavigation } from "../../navigation";
 import { CollectionRowMenu } from "../../layout/collection-list";
+import { useArchiveProjects, useRestoreProjects } from "./project-archive";
 
 export function DeleteProjectsDialog({
   rows,
   open,
   onOpenChange,
   onDeleted,
+  onArchiveInstead,
 }: {
   rows: Project[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDeleted?: () => void;
+  /** Offers archiving as the reversible alternative; omitted when every row is already archived. */
+  onArchiveInstead?: () => void;
 }) {
   const { t } = useT("projects");
+  const canArchiveInstead = !!onArchiveInstead && rows.some((p) => !p.archived_at);
   const deleteProject = useDeleteProject();
   const [deleting, setDeleting] = useState(false);
 
@@ -81,7 +86,29 @@ export function DeleteProjectsDialog({
             {t(($) => $.delete_dialog.description)}
           </DialogDescription>
         </DialogHeader>
+        {canArchiveInstead && (
+          <div className="flex items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-caption text-muted-foreground">
+            <Archive className="mt-0.5 size-3.5 shrink-0" />
+            <span>{t(($) => $.delete_dialog.archive_hint)}</span>
+          </div>
+        )}
         <DialogFooter>
+          {canArchiveInstead && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="sm:mr-auto"
+              disabled={deleting}
+              onClick={() => {
+                onOpenChange(false);
+                onArchiveInstead?.();
+              }}
+            >
+              <Archive className="size-3.5" />
+              {t(($) => $.delete_dialog.archive_instead)}
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"
@@ -141,6 +168,8 @@ export function ProjectRowActions({
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const { requestArchive, dialog: archiveDialog } = useArchiveProjects();
+  const restore = useRestoreProjects();
 
   const togglePin = () => {
     if (pinned) deletePin.mutate({ itemType: "project", itemId: project.id });
@@ -201,17 +230,26 @@ export function ProjectRowActions({
           <Link2 className="size-3.5" />
           {tLayout(($) => $.rail.copy_link)}
         </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {project.archived_at ? (
+          <DropdownMenuItem onClick={() => restore(project)}>
+            <ArchiveRestore className="size-3.5" />
+            {t(($) => $.page.restore)}
+          </DropdownMenuItem>
+        ) : (
+          <DropdownMenuItem onClick={() => requestArchive([project])}>
+            <Archive className="size-3.5" />
+            {t(($) => $.page.archive)}
+          </DropdownMenuItem>
+        )}
         {canDelete && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Trash2 className="size-3.5" />
-              {t(($) => $.page.delete)}
-            </DropdownMenuItem>
-          </>
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2 className="size-3.5" />
+            {t(($) => $.page.delete)}
+          </DropdownMenuItem>
         )}
         {trailing}
       </CollectionRowMenu>
@@ -220,7 +258,9 @@ export function ProjectRowActions({
         rows={[project]}
         open={deleteOpen}
         onOpenChange={setDeleteOpen}
+        onArchiveInstead={() => requestArchive([project], { immediate: true })}
       />
+      {archiveDialog}
     </>
   );
 }

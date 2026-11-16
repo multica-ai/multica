@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +12,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -110,5 +114,170 @@ func TestEnvironmentCommandsNeedATask(t *testing.T) {
 	t.Setenv("MULTICA_DAEMON_PORT", "")
 	if err := runEnvironmentList(newEnvironmentTestCmd(nil), nil); err == nil || !strings.Contains(err.Error(), "inside a daemon task") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEnvironmentUnauthorizedUsesTheFinalRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		token      string
+		redirect   bool
+		locale     string
+		wantScoped bool
+	}{
+		{name: "task credential", token: "mat_synthetic", wantScoped: true},
+		{name: "task credential in Chinese", token: "mat_synthetic", locale: "zh_CN.UTF-8", wantScoped: true},
+		{name: "other credential", token: "synthetic_other"},
+		{name: "cross host redirect", token: "mat_synthetic", redirect: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const message = "environment commands need the credential of a task running in this daemon"
+			locale := tc.locale
+			if locale == "" {
+				locale = "en_US.UTF-8"
+			}
+			t.Setenv("LC_ALL", locale)
+			t.Setenv("MULTICA_DEBUG", "")
+			final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if tc.redirect && r.Header.Get("Authorization") != "" {
+					t.Error("cross-host redirect retained Authorization")
+				}
+				http.Error(w, message, http.StatusUnauthorized)
+			}))
+			defer final.Close()
+			fakeEnvironmentDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "Bearer "+tc.token {
+					t.Errorf("initial Authorization = %q", r.Header.Get("Authorization"))
+				}
+				if tc.redirect {
+					http.Redirect(w, r, strings.Replace(final.URL, "127.0.0.1", "localhost", 1), http.StatusFound)
+					return
+				}
+				http.Error(w, message, http.StatusUnauthorized)
+			})
+			t.Setenv("MULTICA_TOKEN", tc.token)
+			err := runEnvironmentList(newEnvironmentTestCmd(nil), nil)
+			var httpErr *cli.HTTPError
+			if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized || httpErr.TaskScoped != tc.wantScoped {
+				t.Fatalf("error = %#v, want HTTP401 TaskScoped=%v", err, tc.wantScoped)
+			}
+			if cli.ExitCodeFor(err) != cli.ExitAuth {
+				t.Errorf("exit = %d, want auth", cli.ExitCodeFor(err))
+			}
+			formatted := cli.FormatError(err, false)
+			stop := cli.TaskTokenRejectedMessage()
+			if !strings.Contains(formatted, message) || strings.Contains(formatted, "multica login") || strings.Contains(formatted, stop) != tc.wantScoped {
+				t.Errorf("formatted error = %q", formatted)
+			}
+		})
+	}
+}
+
+func TestEnvironmentUnauthorizedSharedCallers(t *testing.T) {
+	fakeEnvironmentDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "active task credential required", http.StatusUnauthorized)
+	})
+	for name, run := range map[string]func(*cobra.Command, []string) error{
+		"start": runEnvironmentStart,
+		"stop":  runEnvironmentStop,
+		"list":  runEnvironmentList,
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, err := captureStdout(t, func() error {
+				return run(newEnvironmentTestCmd(map[string]string{"output": "json"}), []string{"web"})
+			})
+			if cli.ExitCodeFor(err) != cli.ExitAuth || out != "" {
+				t.Errorf("stdout=%q error=%v exit=%d", out, err, cli.ExitCodeFor(err))
+			}
+		})
+	}
+}
+
+func TestEnvironmentOtherStatusMessages(t *testing.T) {
+	for _, status := range []int{http.StatusForbidden, http.StatusNotFound, http.StatusInternalServerError} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			fakeEnvironmentDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "daemon message", status)
+			})
+			err := runEnvironmentList(newEnvironmentTestCmd(nil), nil)
+			if err == nil || err.Error() != "daemon message" || cli.ExitCodeFor(err) != cli.ExitGeneric {
+				t.Errorf("err=%v exit=%d", err, cli.ExitCodeFor(err))
+			}
+		})
+	}
+}
+
+func TestEnvironmentResponseFailures(t *testing.T) {
+	t.Run("missing token", func(t *testing.T) {
+		t.Setenv("MULTICA_DAEMON_PORT", "1")
+		t.Setenv("MULTICA_TOKEN", "")
+		err := runEnvironmentList(newEnvironmentTestCmd(nil), nil)
+		if err == nil || !strings.Contains(err.Error(), "active task credential") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("encode", func(t *testing.T) {
+		t.Setenv("MULTICA_DAEMON_PORT", "1")
+		t.Setenv("MULTICA_TOKEN", "mat_synthetic")
+		err := callDaemonEnvironment(context.Background(), "/environments/list", make(chan int), nil, time.Second)
+		if err == nil || !strings.Contains(err.Error(), "encode request") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("cancelled", func(t *testing.T) {
+		t.Setenv("MULTICA_DAEMON_PORT", "1")
+		t.Setenv("MULTICA_TOKEN", "mat_synthetic")
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		err := callDaemonEnvironment(ctx, "/environments/list", map[string]any{}, nil, time.Second)
+		if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "connect to daemon") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("network", func(t *testing.T) {
+		server := httptest.NewServer(http.NotFoundHandler())
+		u, _ := url.Parse(server.URL)
+		server.Close()
+		t.Setenv("MULTICA_DAEMON_PORT", u.Port())
+		t.Setenv("MULTICA_TOKEN", "mat_synthetic")
+		err := runEnvironmentList(newEnvironmentTestCmd(nil), nil)
+		if err == nil || !strings.Contains(err.Error(), "connect to daemon") || cli.ExitCodeFor(err) != cli.ExitGeneric {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("truncated body", func(t *testing.T) {
+		fakeEnvironmentDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Length", "100")
+			fmt.Fprint(w, "short")
+		})
+		err := runEnvironmentList(newEnvironmentTestCmd(nil), nil)
+		if err == nil || !strings.Contains(err.Error(), "read daemon response") || cli.ExitCodeFor(err) != cli.ExitGeneric {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("invalid JSON", func(t *testing.T) {
+		fakeEnvironmentDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "invalid")
+		})
+		err := runEnvironmentList(newEnvironmentTestCmd(nil), nil)
+		if err == nil || !strings.Contains(err.Error(), "parse daemon response") || cli.ExitCodeFor(err) != cli.ExitGeneric {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestEnvironmentStopPrintsSuccessfulJSON(t *testing.T) {
+	fakeEnvironmentDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/environments/stop" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"environment":{"name":"web","state":"stopped"}}`)
+	})
+	out, err := captureStdout(t, func() error {
+		return runEnvironmentStop(newEnvironmentTestCmd(map[string]string{"output": "json"}), []string{"web"})
+	})
+	var env daemonEnvironment
+	if err != nil || json.Unmarshal([]byte(out), &env) != nil || env.Name != "web" || env.State != "stopped" {
+		t.Fatalf("stdout=%q error=%v", out, err)
 	}
 }

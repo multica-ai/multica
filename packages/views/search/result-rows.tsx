@@ -21,6 +21,7 @@ import { ActorAvatar } from "../common/actor-avatar";
 import { availabilityConfig } from "../agents/presence";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
+import { ArchivedProjectTag } from "../projects/components/project-archive";
 import { useProjectStatusLabels } from "../projects/components/labels";
 import { useT } from "../i18n";
 import { HighlightText } from "./highlight-text";
@@ -65,6 +66,8 @@ export function ProjectResultRow({
 
   return (
     <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="project"
       value={`project:${project.id}`}
       disabled={disabled}
       onSelect={onSelect}
@@ -75,6 +78,7 @@ export function ProjectResultRow({
         <span className="min-w-0 flex-1 truncate">
           <HighlightText text={project.title} query={query} />
         </span>
+        {project.archived_at && <ArchivedProjectTag />}
         <span
           className={`shrink-0 text-caption ${PROJECT_STATUS_CONFIG[status]?.color ?? "text-muted-foreground"}`}
         >
@@ -116,6 +120,8 @@ export function IssueResultRow({
     "matched_comment_snippet" in issue ? issue.matched_comment_snippet : undefined;
   return (
     <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="issue"
       value={value ?? issue.id}
       disabled={disabled}
       onSelect={onSelect}
@@ -206,7 +212,14 @@ export function ActorRow({
   showStatusDot?: boolean;
 }) {
   return (
-    <CommandPrimitive.Item value={value} disabled={disabled} onSelect={onSelect} className={ROW_CLASS}>
+    <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type={actorType}
+      value={value}
+      disabled={disabled}
+      onSelect={onSelect}
+      className={ROW_CLASS}
+    >
       <ActorAvatar
         actorType={actorType}
         actorId={actorId}
@@ -246,7 +259,14 @@ export function ObjectRow({
   disabled?: boolean;
 }) {
   return (
-    <CommandPrimitive.Item value={value} disabled={disabled} onSelect={onSelect} className={ROW_CLASS}>
+    <CommandPrimitive.Item
+      data-mc="palette-item"
+      data-type="object"
+      value={value}
+      disabled={disabled}
+      onSelect={onSelect}
+      className={ROW_CLASS}
+    >
       {icon}
       <span className="min-w-0 shrink truncate">
         <HighlightText text={title} query={query} />

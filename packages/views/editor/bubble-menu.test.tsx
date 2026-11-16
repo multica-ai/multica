@@ -3,7 +3,7 @@ import type { Editor } from "@tiptap/core";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ContextMenu, ContextMenuContent, ContextMenuItem } from "@multica/ui/components/ui/context-menu";
-import { contextMenuOriginRef } from "../common/context-menu-origin";
+import { contextMenuOriginRef } from "@multica/ui/lib/context-menu-origin";
 
 const formatState = vi.hoisted(() => ({ codeBlock: false }));
 

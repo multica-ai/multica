@@ -17,6 +17,8 @@ Multica auto-hébergé peut aussi connecter en parallèle des instances Forgejo,
 
 Un propriétaire ou un administrateur de l'espace de travail peut effectuer la connexion :
 
+Une nouvelle connexion exige aussi le contrôle de l’installation GitHub : une installation personnelle doit appartenir à l’utilisateur qui autorise l’App ; une installation d’organisation exige la permission admin sur chaque dépôt couvert. Un accès en lecture seule ou partiel ne suffit pas. Sélectionnez au moins un dépôt pour une installation d’organisation.
+
 <Steps>
 <Step>
 Ouvrez **Paramètres → Code**.
@@ -139,8 +141,8 @@ Créez l'App dans **Developer settings → GitHub Apps** sur GitHub et renseigne
 | Champ | Valeur |
 |---|---|
 | Homepage URL | L'adresse de votre frontend Multica, par ex. `https://multica.example.com` |
-| Callback URL | Laisser vide |
-| Setup URL | `https://<api-host>/api/github/setup`, avec **Redirect on update** activé |
+| Callback URL | `https://<api-host>/api/github/setup` |
+| Request user authorization (OAuth) during installation | Activer |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | Une chaîne aléatoire que vous conservez durablement |
 
@@ -175,19 +177,21 @@ Récupérez le slug dans l'URL publique de l'App. Par exemple, le slug de `https
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<the webhook secret you entered when creating the App>
+GITHUB_APP_CLIENT_ID=<Client ID>
+GITHUB_APP_CLIENT_SECRET=<Client secret>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-Si `GITHUB_APP_SLUG` ou `GITHUB_WEBHOOK_SECRET` manque, le bouton de connexion est désactivé et le point de terminaison du webhook refuse de traiter les événements.
+Les six variables GitHub de cette section sont requises pour les nouvelles connexions, y compris `GITHUB_APP_ID` et `GITHUB_APP_PRIVATE_KEY`. Si une variable manque, la connexion est désactivée ; la réception des webhooks exige seulement `GITHUB_WEBHOOK_SECRET`. Les connexions existantes continuent de fonctionner. Avant le déploiement, définissez la première Callback URL sur cet endpoint et activez OAuth lors de l’installation. GitHub n’utilise alors pas de Setup URL distincte.
 
-Pour que la carte de PR affiche le statut CI et la possibilité de fusion, définissez aussi les deux variables suivantes. Multica s'en sert pour s'authentifier en tant qu'App et récupérer les instantanés :
+Pour les nouvelles connexions, le statut CI et la possibilité de fusion des PR, définissez aussi les deux variables suivantes. Multica compare la liste complète des dépôts de l’installation, obtenue avec un jeton metadata en lecture seule, aux dépôts administrés par l’utilisateur :
 
 ```dotenv
 GITHUB_APP_ID=<the GitHub App's numeric ID>
 GITHUB_APP_PRIVATE_KEY=<full PEM private key, keeping the BEGIN/END lines and newlines>
 ```
 
-Générez la clé privée dans **Private keys → Generate a private key** de la GitHub App. Sans ces deux variables, les PR sont toujours reflétées et les tâches toujours associées automatiquement et changées de statut à la fusion ; la carte de PR n'affiche simplement ni CI ni état de fusion.
+Générez la clé privée dans **Private keys → Generate a private key** de la GitHub App. Sans ces deux variables, la connexion est désactivée. Les connexions existantes continuent de refléter les PR et de mettre à jour les tâches via les webhooks, mais les cartes de PR n’affichent ni CI ni état de fusion.
 
 </Step>
 <Step>
@@ -207,7 +211,7 @@ Redémarrez le serveur API, puis effectuez la connexion dans **Paramètres → C
 
 ## Dépannage
 
-- **Bouton de connexion désactivé** : vérifiez que `GITHUB_APP_SLUG` et `GITHUB_WEBHOOK_SECRET` parviennent bien au processus de l'API.
+- **Bouton de connexion désactivé** : vérifiez les six variables GitHub ci-dessus, la première Callback URL et **Request user authorization (OAuth) during installation**.
 - **Le webhook renvoie 401** : vérifiez que la GitHub App et l'API utilisent le même secret de webhook, puis relancez la livraison depuis **Recent Deliveries** sur GitHub.
 - **PR non associée** : vérifiez que le dépôt fait partie du périmètre autorisé de l'App, que l'association automatique est activée, que l'identifiant appartient à l'espace de travail courant et que personne n'a retiré la PR de la tâche.
 - **Identifiant dans la description, mais PR non associée** : placez-le juste après un mot-clé de clôture (`Closes MUL-123`), ou dans le nom de branche ou le titre de la PR, ou associez la PR à la main.

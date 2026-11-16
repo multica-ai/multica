@@ -17,7 +17,7 @@ import {
   type ResolvedContextMenuScope,
   type RowActionItem,
 } from "@multica/views/common/context-menu-scope";
-import { contextMenuOriginRef } from "@multica/views/common/context-menu-origin";
+import { contextMenuOriginRef } from "@multica/ui/lib/context-menu-origin";
 import { contextPrimitives } from "@multica/views/common/menu-primitives";
 import {
   contextMenuActions,

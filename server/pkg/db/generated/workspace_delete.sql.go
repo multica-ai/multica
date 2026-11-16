@@ -42,6 +42,9 @@ deleted_channel_task_deliveries AS (
 ),
 deleted_draft_restores AS (
     DELETE FROM chat_draft_restore WHERE task_id IN (SELECT id FROM batch)
+),
+deleted_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE task_id IN (SELECT id FROM batch)
 )
 DELETE FROM agent_task_queue WHERE id IN (SELECT id FROM batch)
 `
@@ -316,6 +319,9 @@ deleted_orphan_task_supplements AS (
 deleted_orphan_task_supplement_capabilities AS (
     DELETE FROM task_supplement_capability WHERE workspace_id = $1
 ),
+deleted_orphan_task_context_receipts AS (
+    DELETE FROM task_context_receipt WHERE workspace_id = $1
+),
 deleted_hourly_dirty AS (
     DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1
 ),
@@ -332,6 +338,9 @@ deleted_channel_outbound_cards AS (
 deleted_lark_outbound_cards AS (
     DELETE FROM lark_outbound_card_message
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
+),
+deleted_chat_submission_receipts AS (
+    DELETE FROM chat_submission_receipt WHERE chat_submission_receipt.workspace_id = $1
 ),
 deleted_draft_restores AS (
     DELETE FROM chat_draft_restore
@@ -482,6 +491,13 @@ deleted_channel_binding_tokens AS (
 ),
 deleted_wecom_install_sessions AS (
     DELETE FROM wecom_install_session WHERE workspace_id = $1
+),
+deleted_weixin_login_sessions AS (
+    DELETE FROM weixin_login_session WHERE workspace_id = $1
+),
+deleted_weixin_account_states AS (
+    DELETE FROM weixin_account_state
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
 ),
 deleted_workspace_composio_connections AS (
     DELETE FROM workspace_composio_connection WHERE workspace_id = $1
@@ -638,6 +654,9 @@ const deleteWorkspaceRuntimesAndProjects = `-- name: DeleteWorkspaceRuntimesAndP
 WITH
 deleted_runtimes AS (
     DELETE FROM agent_runtime WHERE agent_runtime.workspace_id = $1
+),
+deleted_runtime_rate_limits AS (
+    DELETE FROM runtime_rate_limit WHERE runtime_rate_limit.workspace_id = $1
 ),
 deleted_profiles AS (
     DELETE FROM runtime_profile WHERE runtime_profile.workspace_id = $1

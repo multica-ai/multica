@@ -96,6 +96,46 @@ export interface UpdateIssueRequest {
   duplicate_of_issue_id?: string;
 }
 
+/** Label changes for a batch update; add and remove leave other labels alone, clear removes every label not being added. */
+export interface BatchIssueLabelOps {
+  add?: string[];
+  remove?: string[];
+  clear?: boolean;
+}
+
+/** Custom property changes for a batch update, keyed by property id. */
+export interface BatchIssuePropertyOps {
+  set?: IssuePropertyValues;
+  unset?: string[];
+}
+
+export type BatchIssueOutcome =
+  | "updated"
+  | "unchanged"
+  | "skipped"
+  | "would_update"
+  | "deleted"
+  | "would_delete";
+
+/** One issue's outcome in a batch write; skipped results carry a reason code. */
+export interface BatchIssueResult {
+  issue_id: string;
+  identifier?: string;
+  outcome: BatchIssueOutcome;
+  code?: string;
+  message?: string;
+}
+
+export interface BatchUpdateIssuesResponse {
+  /** Issues that now hold the requested values (updated or already unchanged). */
+  updated: number;
+  /** Absent on servers that predate per-issue results. */
+  results?: BatchIssueResult[];
+  dry_run?: boolean;
+  /** The response could not be read, so which issues changed is unknown. */
+  unconfirmed?: boolean;
+}
+
 /** Both sides of an issue's duplicate relation (MUL-7349). */
 export interface IssueDuplicates {
   /** The original this issue duplicates, when it is marked as a duplicate. */
@@ -380,6 +420,8 @@ export interface IssueTableFilters {
     end: string;
   };
   working_only?: boolean;
+  /** No visible running or queued work, matching the Inbox Idle filter. */
+  idle_only?: boolean;
   /** Match the running-task issue projection returned by
    *  `/api/working-agents`. An explicit empty list matches nothing. */
   working_issue_ids?: string[];

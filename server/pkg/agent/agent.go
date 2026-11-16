@@ -172,6 +172,15 @@ type ExecOptions struct {
 	// can trip its idle watchdog. Take the snapshot and report on your own
 	// goroutine.
 	OnUsage func(map[string]TokenUsage)
+	// OnRateLimits optionally receives the account's subscription rate-limit
+	// snapshot each time the agent CLI reports a change (Claude Code's
+	// rate_limit_event, Codex's account/rateLimits/updated). Every call carries
+	// the full merged view, so the latest call supersedes earlier ones.
+	// Backends whose CLI reports no rate limits never call it.
+	//
+	// Like OnUsage it runs on the backend's protocol reader goroutine and MUST
+	// NOT block.
+	OnRateLimits func(RateLimitSnapshot)
 	// piMcpExtensionPath is set by piBackend.Execute after it writes the
 	// temporary MCP extension. The daemon does not fill it.
 	piMcpExtensionPath string
@@ -432,6 +441,8 @@ var SupportedTypes = []string{
 	"grok",
 	"qwen",
 	"qwenpaw",
+	"droid",
+	"amp",
 	"mcode",
 	"muse",
 	"dim",
@@ -471,6 +482,8 @@ var resumeRejectionUndetectable = map[string]bool{
 	"deveco":      true,
 	"opencode":    true,
 	"codearts":    true,
+	"droid":       true,
+	"amp":         true,
 }
 
 // ResumeRejectionUndetectable reports whether agentType is a backend that
@@ -540,6 +553,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &qwenBackend{cfg: cfg}, nil
 	case "qwenpaw":
 		return &qwenpawBackend{cfg: cfg}, nil
+	case "droid":
+		return &droidBackend{cfg: cfg}, nil
+	case "amp":
+		return &ampBackend{cfg: cfg}, nil
 	case "mcode":
 		return &mcodeBackend{cfg: cfg}, nil
 	case "devin":
@@ -596,6 +613,8 @@ var launchHeaders = map[string]string{
 	"grok":        "grok agent stdio",
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
+	"droid":       "droid exec (stream-json)",
+	"amp":         "amp --execute (stream-json)",
 	"dim":         "dim acp",
 	"devin":       "devin acp",
 	"mcode":       "mcode acp",

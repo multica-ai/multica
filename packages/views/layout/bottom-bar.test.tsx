@@ -31,9 +31,6 @@ vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsMobile: () => h.isMobile }
 vi.mock("./panels/team-status", () => ({ useTeamAgentStatus: () => h.team }));
 vi.mock("./app-shell-context", () => ({ useAppShell: () => null }));
 vi.mock("../chat/components/chat-bar", () => ({ ChatBar: () => <div data-testid="chat-bar" /> }));
-vi.mock("../common/actor-avatar", () => ({
-  ActorAvatar: ({ actorId }: { actorId: string }) => <span data-testid={`avatar-${actorId}`} />,
-}));
 
 function renderBar(pathname = "/acme/issues") {
   const adapter: NavigationAdapter = {
@@ -68,14 +65,13 @@ describe("AppBottomBar", () => {
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 
-  it("counts the agents that are working and links to the team", () => {
+  it("keeps quick chat without a working-agent entry when agents are running", () => {
     h.team.working = [{ id: "a1" }, { id: "a2" }, { id: "a3" }, { id: "a4" }];
     renderBar();
 
-    const link = screen.getByRole("link", { name: "4 agents working" });
-    expect(link).toHaveAttribute("href", "/acme/agents");
-    // The avatar stack is capped; the count carries the rest.
-    expect(screen.getAllByTestId(/^avatar-/)).toHaveLength(3);
+    expect(screen.queryByText("4 agents working")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-bar")).toBeInTheDocument();
   });
 
   it("adds up the tasks waiting on offline runtimes across agents", () => {

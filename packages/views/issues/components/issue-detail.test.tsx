@@ -134,7 +134,11 @@ vi.mock("@multica/core/paths", async () => {
 const settingsPush = vi.hoisted(() => vi.fn());
 
 // Mock navigation
-vi.mock("../../navigation", () => ({
+vi.mock("../../navigation", async () => ({
+  // Real hold hook (pure React) the header's Inbox actions read through.
+  ...(await vi.importActual<typeof import("../../navigation/use-held-until-arrival")>(
+    "../../navigation/use-held-until-arrival",
+  )),
   AppLink: ({ children, href, ...props }: any) => (
     <a href={href} {...props}>
       {children}
@@ -803,6 +807,12 @@ function hasHighlightedCommentBackground(root: ParentNode | null): boolean {
 // Tests
 // ---------------------------------------------------------------------------
 
+
+// Timeline thread rows render inside a stable wrapper (MUL-9409), so row order
+// and adjacency are compared at the wrapper level.
+function threadRow(el: Element): Element {
+  return el.closest("[data-thread-row]") ?? el;
+}
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1714,7 +1724,7 @@ describe("IssueDetail (shared)", () => {
     const agentBlock = container.querySelector(`[data-run-comment-id="${taskId}"]`)!;
     expect(agentBlock).not.toBeNull();
     expect(userBlock.contains(agentBlock)).toBe(false);
-    expect(agentBlock.parentElement).toBe(userBlock.parentElement);
+    expect(threadRow(agentBlock).parentElement).toBe(userBlock.parentElement);
     expect(agentBlock.querySelector(`[data-run-id="${taskId}"]`)).not.toBeNull();
     const running: AgentTask = { ...task, status: "running", started_at: task.created_at, delivered_comment_ids: [root.id] };
     act(() => client.setQueryData(issueKeys.tasks("issue-1"), [running]));
@@ -1782,8 +1792,8 @@ describe("IssueDetail (shared)", () => {
     const firstComment = container.querySelector(`#comment-${first.id}`);
     expect(latestComment).not.toBeNull();
     expect(firstComment).not.toBeNull();
-    expect(latestComment!.nextElementSibling).toBe(run);
-    expect(firstComment!.nextElementSibling).not.toBe(run);
+    expect(threadRow(latestComment!).nextElementSibling).toBe(threadRow(run));
+    expect(threadRow(firstComment!).nextElementSibling).not.toBe(threadRow(run));
   });
 
   it("keeps the running block after its delivered comment and one queued block after later replies", async () => {
@@ -1825,7 +1835,7 @@ describe("IssueDetail (shared)", () => {
     expect(rootContent!.compareDocumentPosition(runningBlock!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(runningBlock!.compareDocumentPosition(firstComment!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(firstComment!.compareDocumentPosition(latestComment!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(latestComment!.nextElementSibling).toBe(queuedBlock);
+    expect(threadRow(latestComment!).nextElementSibling).toBe(threadRow(queuedBlock!));
     expect(container.querySelectorAll(`[data-run-comment-id="${queued.id}"]`)).toHaveLength(1);
   });
 
@@ -1909,9 +1919,9 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => expect(container.querySelectorAll('[data-run-slot-id]')).toHaveLength(3));
     const slots = tasks.map((task) => container.querySelector(`[data-run-slot-id="${task.id}"]`)!);
     const [secondRow, thirdRow] = [second, third].map((request) => container.querySelector(`#comment-${request.id}`)!);
-    expect(secondRow!.previousElementSibling).toBe(slots[0]);
-    expect(secondRow!.nextElementSibling).toBe(slots[1]);
-    expect(thirdRow!.nextElementSibling).toBe(slots[2]);
+    expect(threadRow(secondRow!).previousElementSibling).toBe(threadRow(slots[0]!));
+    expect(threadRow(secondRow!).nextElementSibling).toBe(threadRow(slots[1]!));
+    expect(threadRow(thirdRow!).nextElementSibling).toBe(threadRow(slots[2]!));
     fireEvent.click(within(slots[0] as HTMLElement).getByRole("button", { name: /View activity/ }));
     await within(slots[0] as HTMLElement).findByText("No activity recorded yet.");
     for (const index of [0, 1]) {
@@ -1935,9 +1945,9 @@ describe("IssueDetail (shared)", () => {
     expect(within(slots[0] as HTMLElement).queryByRole("button", { name: /View activity/ })).not.toBeInTheDocument();
     // Answers land at their own time, after the requests; the queued run
     // stays with its request.
-    expect(thirdRow!.nextElementSibling).toBe(slots[2]);
-    expect(slots[2]!.nextElementSibling).toBe(slots[0]);
-    expect(slots[0]!.nextElementSibling).toBe(slots[1]);
+    expect(threadRow(thirdRow!).nextElementSibling).toBe(threadRow(slots[2]!));
+    expect(threadRow(slots[2]!).nextElementSibling).toBe(threadRow(slots[0]!));
+    expect(threadRow(slots[0]!).nextElementSibling).toBe(threadRow(slots[1]!));
     expect(container.querySelector(`[data-run-slot-id="${tasks[2]!.id}"]`)).toBe(slots[2]);
     expect(within(slots[2] as HTMLElement).getByText("Waiting for an available agent.")).toBeInTheDocument();
   });
@@ -2011,7 +2021,7 @@ describe("IssueDetail (shared)", () => {
     const userReply = container.querySelector("#comment-user-reply")!;
     const agentBlock = container.querySelector(`[data-run-comment-id="${task.id}"]`)!;
     expect(userReply.contains(agentBlock)).toBe(false);
-    expect(userReply.nextElementSibling).toBe(agentBlock);
+    expect(threadRow(userReply).nextElementSibling).toBe(threadRow(agentBlock));
     expect(within(agentBlock as HTMLElement).getByRole("button", { name: "Retry run" })).toBeInTheDocument();
     expect(container.querySelectorAll(`[data-run-id="${task.id}"]`)).toHaveLength(1);
   });
@@ -2099,6 +2109,53 @@ describe("IssueDetail (shared)", () => {
       await screen.findByText("Retrying after the deploy");
       await waitFor(() => expect(container.querySelector(`#comment-failure-notice [data-run-id="${task.id}"]`)).not.toBeNull());
       expectStatedOnce(container.querySelector("#comment-failure-notice") as HTMLElement);
+    });
+
+    // A task_failed notification names the task (MUL-9340); the run renders
+    // under its notice's id when it left one, and under the task id otherwise.
+    describe("lands a failed run's notification", () => {
+      const taskId = failedRun().id;
+
+      it.each(["failure-notice", taskId])("in a thread with a notice, through %s", async (target) => {
+        const root = mockTimeline[0]!;
+        const task = failedRun({ trigger_comment_id: root.id, delivered_comment_ids: [root.id] });
+        mockApiObj.listTimeline.mockResolvedValue([root, notice(task, root.id)]);
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(target);
+
+        await waitFor(() => expect(container.querySelector("#comment-failure-notice [data-run-id]")).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector("#comment-failure-notice"))).toBe(true));
+      });
+
+      it("in a thread without a notice, through the task id", async () => {
+        const root = mockTimeline[0]!;
+        const task = failedRun({ trigger_comment_id: root.id, delivered_comment_ids: [root.id] });
+        mockApiObj.listTimeline.mockResolvedValue([root]);
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(task.id);
+
+        await waitFor(() => expect(container.querySelector(`#comment-${task.id}`)).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector(`#comment-${task.id}`))).toBe(true));
+      });
+
+      it("at the top level with a notice, through the task id", async () => {
+        const task = failedRun();
+        mockApiObj.listTimeline.mockResolvedValue([...mockTimeline, notice(task, null)]);
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(task.id);
+
+        await waitFor(() => expect(container.querySelector(`#comment-failure-notice [data-run-comment-id="${task.id}"]`)).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector("#comment-failure-notice"))).toBe(true));
+      });
+
+      it("at the top level without a notice, through the task id", async () => {
+        const task = failedRun();
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(task.id);
+
+        await waitFor(() => expect(container.querySelector(`#comment-${task.id}`)).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector(`#comment-${task.id}`))).toBe(true));
+      });
     });
   });
 
@@ -2322,6 +2379,75 @@ describe("IssueDetail (shared)", () => {
 
     await screen.findByText("System coordination update.");
     expect(screen.queryByRole("button", { name: "Retry run" })).not.toBeInTheDocument();
+  });
+
+  describe("an issue an agent created for a member (#7995)", () => {
+    const created = (actorType: "agent" | "member", actorId: string): TimelineEntry => ({
+      type: "activity",
+      id: "act-created",
+      actor_type: actorType,
+      actor_id: actorId,
+      action: "created",
+      details: {},
+      created_at: "2026-01-15T00:00:00Z",
+    });
+
+    it("names the requester in the created entry and under the creator", async () => {
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        creator_type: "agent",
+        creator_id: "agent-1",
+        requester_id: "user-1",
+      });
+      mockApiObj.listTimeline.mockResolvedValue([created("agent", "agent-1")]);
+
+      renderIssueDetail();
+
+      expect(await screen.findByText("created this issue on behalf of Test User")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Details"));
+      const creatorRow = screen.getByText("Created by").parentElement!;
+      expect(creatorRow).toHaveTextContent("Claude Agent");
+      expect(within(creatorRow).getByRole("link", { name: "On behalf of Test User" }))
+        .toHaveAttribute("href", "/test/members/user-1");
+      expect(screen.queryByText("Requested by")).not.toBeInTheDocument();
+    });
+
+    it.each([
+      { creatorType: "agent", creatorId: "agent-1", requesterId: null },
+      { creatorType: "agent", creatorId: "agent-1", requesterId: undefined },
+      { creatorType: "member", creatorId: "user-1", requesterId: "user-1" },
+    ] as const)("keeps plain creation for $creatorType with requester $requesterId", async ({ creatorType, creatorId, requesterId }) => {
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        creator_type: creatorType,
+        creator_id: creatorId,
+        requester_id: requesterId,
+      });
+      mockApiObj.listTimeline.mockResolvedValue([created(creatorType, creatorId)]);
+
+      renderIssueDetail();
+
+      expect(await screen.findByText("created this issue")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Details"));
+      expect(screen.queryByText(/On behalf of/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Requested by")).not.toBeInTheDocument();
+    });
+
+    it("uses the existing member-name fallback when the requester is unavailable", async () => {
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        creator_type: "agent",
+        creator_id: "agent-1",
+        requester_id: "former-member",
+      });
+      mockApiObj.listTimeline.mockResolvedValue([created("agent", "agent-1")]);
+
+      renderIssueDetail();
+
+      expect(await screen.findByText("created this issue on behalf of Unknown")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Details"));
+      expect(screen.getByText("Created by").parentElement).toHaveTextContent("On behalf of Unknown");
+    });
   });
 
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {
@@ -2549,7 +2675,7 @@ describe("IssueDetail (shared)", () => {
         screen.getByText(/from In Review to Awaiting Response/i),
       ).toBeInTheDocument();
     });
-    expect(statusChangeIcon("Awaiting Response").style.color).toBe("rgb(255, 0, 0)");
+    expect(statusChangeIcon("Awaiting Response").style.color).toBe("var(--palette-red, #ff0000)");
   });
 
   it("leaves a built-in status-change activity on its semantic token colour", async () => {
@@ -4050,7 +4176,7 @@ describe("IssueDetail (shared)", () => {
     async function openSubscriberPicker() {
       const heading = await screen.findByText("Activity");
       const header = heading.parentElement?.parentElement;
-      const trigger = header?.querySelector('[data-slot="popover-trigger"]');
+      const trigger = header?.querySelector('[data-trigger="popover"]');
       if (!trigger) throw new Error("subscriber picker trigger not found");
       fireEvent.click(trigger);
       return waitFor(() => {

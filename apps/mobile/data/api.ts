@@ -987,8 +987,12 @@ class ApiClient {
   // --- Projects ---
   async listProjects(opts?: {
     signal?: AbortSignal;
+    includeArchived?: boolean;
   }): Promise<ListProjectsResponse> {
-    const raw = await this.fetch<unknown>("/api/projects", {
+    const path = opts?.includeArchived
+      ? "/api/projects?include_archived=true"
+      : "/api/projects";
+    const raw = await this.fetch<unknown>(path, {
       signal: opts?.signal,
     });
     return parseWithFallback(
@@ -1164,7 +1168,7 @@ class ApiClient {
   async sendChatMessage(
     sessionId: string,
     content: string,
-    opts?: { attachmentIds?: string[] },
+    opts?: { attachmentIds?: string[]; queue?: boolean },
   ): Promise<SendChatMessageResponse> {
     // Strict parse — we need task_id + created_at to anchor the optimistic
     // StatusPill. Fallback would silently break the elapsed-time timer.
@@ -1173,7 +1177,16 @@ class ApiClient {
     // server-side `chat.go` back-fills `chat_message_id` on the listed
     // attachments after the message row is inserted (see
     // server/internal/handler/chat.go:410-456).
-    const body: { content: string; attachment_ids?: string[] } = { content };
+    //
+    // `steer` asks the server to add this message to the running reply. The
+    // server decides eligibility (plain text, direct chat, a started reply on
+    // a capable daemon) and queues otherwise; older servers ignore the field
+    // and queue. `queue: true` is the explicit next-turn send. Same contract
+    // as web's `packages/core/api/client.ts`.
+    const body: { content: string; steer: boolean; attachment_ids?: string[] } = {
+      content,
+      steer: opts?.queue !== true,
+    };
     if (opts?.attachmentIds && opts.attachmentIds.length > 0) {
       body.attachment_ids = opts.attachmentIds;
     }

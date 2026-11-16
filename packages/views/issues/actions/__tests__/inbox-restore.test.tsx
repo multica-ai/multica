@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
@@ -32,35 +34,61 @@ function Harness({ enabled }: { enabled: boolean }) {
   );
 }
 
-function setup(archived: InboxItem[], enabled = true) {
+/** A menu that closes on a pick, unmounting its items, as the issue menus do. */
+function ClosingHarness() {
+  const [open, setOpen] = useState(true);
+  const itemId = useArchivedInboxItemId("issue-1", true);
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger>more</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem>Pin to sidebar</DropdownMenuItem>
+        {itemId && <InboxRestoreMenuItem itemId={itemId} Item={DropdownMenuItem} />}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function setup(
+  archived: InboxItem[],
+  { enabled = true, closing = false, unarchive }: { enabled?: boolean; closing?: boolean; unarchive?: () => Promise<InboxItem> } = {},
+) {
   let rows = archived;
   const listArchivedInboxPage = vi.fn(async (_filters: unknown, options: { groupId?: string }) => ({
     items: rows.filter((row) => row.issue_id === options.groupId),
     hasMore: false,
     nextCursor: null,
   }));
-  const unarchiveInbox = vi.fn(async (id: string) => {
-    rows = rows.filter((row) => row.id !== id);
-    return notification({ id, archived: false });
-  });
+  const unarchiveInbox = vi.fn(
+    unarchive ??
+      (async (id: string) => {
+        rows = rows.filter((row) => row.id !== id);
+        return notification({ id, archived: false });
+      }),
+  );
   setApiInstance({
     listArchivedInboxPage,
     unarchiveInbox,
     listInbox: async () => [],
     getInboxUnreadSummary: async () => [],
   } as unknown as ApiClient);
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } },
+  });
   render(
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={RESOURCES}>
-        <Harness enabled={enabled} />
+        {closing ? <ClosingHarness /> : <Harness enabled={enabled} />}
       </I18nProvider>
     </QueryClientProvider>,
   );
   return { listArchivedInboxPage, unarchiveInbox };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 describe("inbox restore menu entry", () => {
   it("is absent when the issue is not archived in the reader's inbox", async () => {
@@ -72,7 +100,7 @@ describe("inbox restore menu entry", () => {
   });
 
   it("skips the lookup when the host owns inbox actions", async () => {
-    const api = setup([notification({})], false);
+    const api = setup([notification({})], { enabled: false });
     await screen.findByRole("menuitem", { name: "Pin to sidebar" });
     expect(api.listArchivedInboxPage).not.toHaveBeenCalled();
     expect(screen.queryByRole("menuitem", { name: "Restore to inbox" })).toBeNull();
@@ -83,5 +111,34 @@ describe("inbox restore menu entry", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Restore to inbox" }));
     await waitFor(() => expect(api.unarchiveInbox).toHaveBeenCalledWith("item-1"));
     await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Restore to inbox" })).toBeNull());
+  });
+
+  it("still confirms the restore after the menu closes", async () => {
+    let finish!: () => void;
+    const api = setup([notification({})], {
+      closing: true,
+      unarchive: () => new Promise((resolve) => (finish = () => resolve(notification({ archived: false })))),
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restore to inbox" }));
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Pin to sidebar" })).toBeNull());
+    await waitFor(() => expect(api.unarchiveInbox).toHaveBeenCalled());
+    await act(async () => finish());
+
+    expect(toast.success).toHaveBeenCalledWith("Notification restored");
+  });
+
+  it("still reports a failed restore after the menu closes", async () => {
+    let fail!: (err: Error) => void;
+    const api = setup([notification({})], {
+      closing: true,
+      unarchive: () => new Promise((_resolve, reject) => (fail = reject)),
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Restore to inbox" }));
+    await waitFor(() => expect(screen.queryByRole("menuitem", { name: "Pin to sidebar" })).toBeNull());
+    await waitFor(() => expect(api.unarchiveInbox).toHaveBeenCalled());
+    await act(async () => fail(new Error("Restore rejected")));
+
+    expect(toast.error).toHaveBeenCalledWith("Restore rejected");
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

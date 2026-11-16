@@ -12,12 +12,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/entitlement"
-	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const autopilotQuotaFirstRejectionNoticeKey = "rejection_first"
@@ -44,19 +42,18 @@ func (s *AutopilotService) deliverAutopilotQuotaRejectionNotice(
 		policy.notifications.OnRejection != entitlement.NotificationFirstRejectionPerPeriod {
 		return
 	}
-	items, err := s.createAutopilotQuotaRejectionNotice(ctx, policy, workspaceID, source, params)
-	if err != nil {
+	if _, err := s.createAutopilotQuotaRejectionNotice(ctx, policy, workspaceID, source, params); err != nil {
 		slog.Warn("autopilot quota rejection notice delivery failed; quota rejection remains committed",
 			"workspace_id", util.UUIDToString(workspaceID),
 			"autopilot_id", util.UUIDToString(params.AutopilotID),
 			"source", source,
 			"error", err,
 		)
-		return
 	}
-	s.publishAutopilotQuotaInboxItems(items)
 }
 
+// createAutopilotQuotaRejectionNotice writes the period's first rejection
+// notice and, once that commits, announces each row.
 func (s *AutopilotService) createAutopilotQuotaRejectionNotice(
 	ctx context.Context,
 	policy autopilotQuotaPolicy,
@@ -85,7 +82,8 @@ func (s *AutopilotService) createAutopilotQuotaRejectionNotice(
 		return nil, nil
 	}
 
-	items, err := s.createAutopilotQuotaInboxItems(ctx, q, autopilotQuotaNoticeFacts{
+	var pending inbox.Deferred
+	items, err := s.createAutopilotQuotaInboxItems(ctx, q, &pending, autopilotQuotaNoticeFacts{
 		WorkspaceID: period.WorkspaceID,
 		AutopilotID: params.AutopilotID,
 		Source:      source,
@@ -116,12 +114,14 @@ func (s *AutopilotService) createAutopilotQuotaRejectionNotice(
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit quota rejection notice: %w", err)
 	}
+	pending.Flush(s.Bus)
 	return items, nil
 }
 
 func (s *AutopilotService) createAutopilotQuotaInboxItems(
 	ctx context.Context,
 	q *db.Queries,
+	pending *inbox.Deferred,
 	facts autopilotQuotaNoticeFacts,
 ) ([]db.InboxItem, error) {
 	autopilotTitle := ""
@@ -159,14 +159,14 @@ func (s *AutopilotService) createAutopilotQuotaInboxItems(
 
 	items := make([]db.InboxItem, 0, len(recipients))
 	for _, recipient := range recipients {
-		item, inserted, err := inbox.CreateIfEligible(ctx, q, db.CreateInboxItemParams{
+		item, inserted, err := inbox.Deliver(ctx, q, pending, inbox.Notification{Params: db.CreateInboxItemParams{
 			ID: dbid.NewV7(), WorkspaceID: facts.WorkspaceID,
 			RecipientType: recipient.Type, RecipientID: recipient.ID,
 			Type: "autopilot_quota_exceeded", Severity: "attention", IssueID: pgtype.UUID{},
 			Title: "Autopilot run limit reached", Body: pgtype.Text{String: body, Valid: true},
 			ActorType: pgtype.Text{String: "system", Valid: true}, ActorID: pgtype.UUID{},
 			Details: details,
-		})
+		}})
 		if err != nil {
 			return nil, fmt.Errorf("create autopilot quota inbox item: %w", err)
 		}
@@ -176,26 +176,4 @@ func (s *AutopilotService) createAutopilotQuotaInboxItems(
 		items = append(items, item)
 	}
 	return items, nil
-}
-
-func (s *AutopilotService) publishAutopilotQuotaInboxItems(items []db.InboxItem) {
-	if s.Bus == nil {
-		return
-	}
-	for _, item := range items {
-		s.Bus.Publish(events.Event{
-			Type: protocol.EventInboxNew, WorkspaceID: util.UUIDToString(item.WorkspaceID),
-			ActorType: "system",
-			Payload: map[string]any{"item": map[string]any{
-				"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
-				"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),
-				"type": item.Type, "severity": item.Severity, "issue_id": nil,
-				"issue_status": nil, "issue_priority": nil,
-				"title": item.Title, "body": util.TextToPtr(item.Body), "read": item.Read,
-				"archived": item.Archived, "created_at": util.TimestampToString(item.CreatedAt),
-				"actor_type": util.TextToPtr(item.ActorType), "actor_id": nil,
-				"details": json.RawMessage(item.Details),
-			}},
-		})
-	}
 }

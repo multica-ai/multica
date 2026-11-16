@@ -5,6 +5,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { RESOURCES } from "@multica/views/locales";
+import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import type { ContextMenuRequest } from "../../../shared/context-menu";
 import { SessionRenameInput } from "../../../../../../packages/views/chat/components/session-rename-input";
 import { useCommentAnnotations } from "../../../../../../packages/views/issues/components/use-comment-annotations";
@@ -104,13 +111,13 @@ async function pickFromFieldMenu(field: HTMLElement, item: RegExp) {
   fireEvent.pointerDown(field, { button: 2 });
   fireEvent.contextMenu(field, { clientX: 5, clientY: 5 });
   act(() => api.listener?.(request({ isEditable: true, canCut: true, canCopy: true, canPaste: true })));
-  const menu = await screen.findByRole("menu");
+  const entry = await screen.findByRole("menuitem", { name: item });
+  const menu = entry.closest("[role=menu]")!;
   await waitFor(() => expect(menu.contains(document.activeElement)).toBe(true));
-  const entry = screen.getByRole("menuitem", { name: item });
   fireEvent.pointerDown(entry, { button: 0 });
   fireEvent.click(entry);
   await waitFor(() => expect(api.runContextMenuCommand).toHaveBeenCalledTimes(1));
-  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  await waitFor(() => expect(menu.isConnected).toBe(false));
 }
 
 const draftKey = "reply:issue:root" as const;
@@ -213,5 +220,80 @@ describe("NativeContextMenu inside an overlay", () => {
     });
     fireEvent.pointerDown(document.body);
     expect(submit).toHaveBeenCalledWith("alpha beta");
+  });
+
+  function PopoverHost({ nested = false }: { nested?: boolean }) {
+    const field = <input aria-label="Search" defaultValue="alpha" />;
+    return (
+      <>
+        <Popover defaultOpen>
+          <PopoverTrigger>Open</PopoverTrigger>
+          <PopoverContent aria-label="Outer">
+            {nested ? (
+              <Popover defaultOpen>
+                <PopoverTrigger>Inner</PopoverTrigger>
+                <PopoverContent aria-label="Inner">{field}</PopoverContent>
+              </Popover>
+            ) : (
+              field
+            )}
+          </PopoverContent>
+        </Popover>
+        <button type="button">Elsewhere</button>
+      </>
+    );
+  }
+
+  it("keeps a popover open while the menu of a field inside it pastes", async () => {
+    renderHost(<PopoverHost />);
+    const field = await screen.findByRole("textbox", { name: "Search" });
+    field.focus();
+
+    await pickFromFieldMenu(field, /^Paste/);
+
+    expect(api.runContextMenuCommand).toHaveBeenCalledWith({ id: 1, type: "paste" });
+    expect(field.isConnected).toBe(true);
+    expect(field).toHaveValue("alpha");
+    await waitFor(() => expect(field).toHaveFocus());
+  });
+
+  it("keeps an outer popover open while a nested popover's field uses its menu", async () => {
+    renderHost(<PopoverHost nested />);
+    const field = await screen.findByRole("textbox", { name: "Search" });
+    field.focus();
+
+    await pickFromFieldMenu(field, /^Copy/);
+
+    expect(field.isConnected).toBe(true);
+    expect(screen.getByLabelText("Outer")).toBeInTheDocument();
+  });
+
+  it("still closes the popover on a press outside", async () => {
+    renderHost(<PopoverHost />);
+    const field = await screen.findByRole("textbox", { name: "Search" });
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Elsewhere" }));
+    fireEvent.click(screen.getByRole("button", { name: "Elsewhere" }));
+
+    await waitFor(() => expect(field.isConnected).toBe(false));
+  });
+
+  it("keeps a dropdown menu with a search field open while the field's menu cuts", async () => {
+    renderHost(
+      <DropdownMenu defaultOpen>
+        <DropdownMenuTrigger>Filter</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <input aria-label="Filter options" defaultValue="alpha" />
+          <DropdownMenuItem>Option</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    );
+    const field = await screen.findByRole("textbox", { name: "Filter options" });
+    field.focus();
+
+    await pickFromFieldMenu(field, /^Cut/);
+
+    expect(field.isConnected).toBe(true);
+    await waitFor(() => expect(field).toHaveFocus());
   });
 });

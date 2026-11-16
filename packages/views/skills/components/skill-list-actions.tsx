@@ -313,7 +313,7 @@ export function AddToAgentDialog({
       {/* Fixed-height dialog: header/chips/footer stay put, only the agent
           list scrolls (flex-1 + min-h-0). One size up from the default
           confirm dialogs — this is a working picker, not a prompt. */}
-      <DialogContent className="flex h-[32rem] max-h-[85svh] max-w-lg flex-col">
+      <DialogContent className="flex h-[32rem] max-h-[85%] max-w-lg flex-col">
         <DialogHeader>
           <DialogTitle className="text-body">
             {t(($) => $.actions.add_to_agent)}

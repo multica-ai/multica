@@ -87,6 +87,16 @@ export function useSourceBackfillDismissCount(
   return [count, bump] as const;
 }
 
+/** Forgets one user's dismissals, for the dev toolbar. */
+export function resetSourceBackfillDismissCount(userId: string): void {
+  try {
+    window.localStorage.removeItem(storageKey(userId));
+  } catch {
+    // Same private-mode caveat as `bump`.
+  }
+  notify();
+}
+
 /** Test helper — not exported from the package index. */
 export function _resetSourceBackfillDismissCountForTests(): void {
   if (typeof window === "undefined") return;

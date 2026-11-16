@@ -52,6 +52,12 @@
       "try": "Essayer",
       "open": "Ouvrir",
       "learn_more": "En savoir plus"
+    },
+    "deck": {
+      "tag": "Nouveau",
+      "next": "Suivant",
+      "done": "Compris",
+      "page": "Nouveauté {{current}} sur {{total}}"
     }
   },
   "star_prompt": {
@@ -92,7 +98,6 @@
   "rail": {
     "label": "Navigation de l'application",
     "sheet_description": "Changer d'espace et d'espace de travail.",
-    "inbox": "Boîte",
     "work": "Travail",
     "team": "Équipe",
     "chat": "Chat",
@@ -122,12 +127,12 @@
   },
   "panels": {
     "work": {
-      "my_agents": "Travail de mes agents",
-      "all_issues": "Toutes les tâches",
-      "unread": "Non lues",
       "views": "Vues",
       "new_project": "Nouveau projet",
       "new_issue_in_project": "Nouvelle tâche dans {{name}}",
+      "new_issue_no_project": "Nouvelle tâche sans projet",
+      "no_project": "Aucun projet",
+      "private_project": "Visible uniquement par les membres du projet",
       "all_projects_one": "Tous les projets ({{count}})",
       "all_projects_other": "Tous les projets ({{count}})",
       "project_issues": "Tâches de {{name}}",
@@ -149,11 +154,13 @@
       "projects_ordering": "Tri",
       "projects_order_manual": "Manuel",
       "projects_order_name": "Nom",
-      "projects_order_updated": "Mis à jour récemment",
+      "projects_order_updated": "Activité récente",
       "projects_order_created": "Créés récemment",
       "projects_show": "Afficher",
       "projects_only_mine": "Seulement les projets que je dirige",
+      "projects_show_no_project": "Afficher « Aucun projet »",
       "projects_show_count": "Nombre de tâches ouvertes",
+      "projects_minimal_icons": "Icônes par défaut uniquement",
       "new_view": "Nouvelle vue",
       "all_views": "Toutes les vues",
       "view_actions": "Actions pour {{name}}",
@@ -163,7 +170,25 @@
       "view_rename": "Renommer",
       "view_duplicate": "Dupliquer",
       "view_delete": "Supprimer la vue",
-      "new_issue_here": "Nouvelle tâche dans ce projet"
+      "new_issue_here": "Nouvelle tâche dans ce projet",
+      "inbox_actions": "Actions de la boîte de réception",
+      "inbox_view_snoozed": "Voir les reportés",
+      "inbox_view_archived": "Voir les archivées",
+      "inbox_empty": "Aucune notification",
+      "inbox_settings": "Affichage de la boîte de réception",
+      "inbox_all": "Toutes les notifications",
+      "inbox_compact": "Lignes compactes",
+      "inbox_open": "Ouvrir",
+      "inbox_show_count": "Nombre de non lus",
+      "inbox_rail_badge": "Badge de non lus sur Travail",
+      "inbox_types": "Me notifier pour",
+      "inbox_types_hint": "Désactivé, un type de notification n’est plus envoyé, et rien de cette période ne revient quand vous le réactivez.",
+      "inbox_more_settings": "Tous les réglages de notification",
+      "section_limit": "Lignes affichées",
+      "pinned_settings": "Affichage des épingles",
+      "views_settings": "Affichage des vues",
+      "views_builtin": "Vues intégrées",
+      "views_show_count": "Compteurs"
     },
     "team": {
       "new_agent": "Nouvel agent",
@@ -222,6 +247,7 @@
     "select_row": "Sélectionner la ligne",
     "row_actions": "Actions de la ligne",
     "sort_by": "Trier par",
+    "group_by": "Regroupement",
     "direction_asc": "Croissant",
     "direction_desc": "Décroissant",
     "section_columns": "Colonnes",
