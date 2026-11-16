@@ -5,8 +5,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   clearDevErrors,
+  clearDevLongTasks,
   clearDevRequests,
   DEV_RECORDING_WINDOW_MS,
+  type DevLongTask,
   type DevRecording,
   type DevRequest,
 } from "@multica/core/diagnostics";
@@ -25,6 +27,16 @@ import {
   requestFailed,
   type MetricTone,
 } from "./metrics";
+import {
+  formatClockMs,
+  longTaskCause,
+  longTaskDetail,
+  longTaskReport,
+  scriptLabel,
+  scriptSource,
+  taskActivity,
+  updateLabel,
+} from "./long-task-report";
 
 export const TONE_CLASS: Record<MetricTone, string> = {
   normal: "text-foreground",
@@ -215,12 +227,146 @@ export function NavigationPanel({ recording }: { recording: DevRecording }) {
   );
 }
 
-export function LongTaskPanel({ recording, blocked }: { recording: DevRecording; blocked: number | null }) {
+function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-micro text-muted-foreground">{title}</span>
+      {children}
+    </div>
+  );
+}
+
+function LongTaskDetails({ task, recording }: { task: DevLongTask; recording: DevRecording }) {
+  const attribution = task.attribution;
+  const activity = taskActivity(task, recording);
+  const nothing =
+    attribution &&
+    !attribution.frame &&
+    attribution.scripts.length + attribution.updates.length + attribution.components.length === 0;
+  return (
+    <div className="flex flex-col gap-2 px-3 pt-1 pb-2 pl-8">
+      <div className="font-mono break-all text-muted-foreground">{task.route ?? "unknown route"}</div>
+      {!attribution && <div className="text-muted-foreground">Attributing…</div>}
+      {nothing && (
+        <div className="text-muted-foreground">
+          Nothing attributed: no long animation frame or React measure covered this task.
+        </div>
+      )}
+      {attribution?.frame && (
+        <div className="font-mono">
+          {`Frame ${formatDuration(attribution.frame.durationMs)}, ${formatDuration(attribution.frame.blockingMs)} blocking`}
+          {attribution.frame.renderMs > 0 &&
+            `, rendering ${formatDuration(attribution.frame.renderMs)} (style and layout ${formatDuration(attribution.frame.styleLayoutMs)})`}
+        </div>
+      )}
+      {attribution && attribution.scripts.length > 0 && (
+        <DetailSection title="Scripts">
+          {attribution.scripts.map((script, i) => (
+            <div key={i} className="flex min-w-0 gap-2 font-mono">
+              <span className="w-12 shrink-0 text-right tabular-nums">{formatDuration(script.durationMs)}</span>
+              <span className="min-w-0 truncate" title={script.source ?? undefined}>
+                {scriptLabel(script)}
+                {script.source && <span className="text-muted-foreground">{` ${scriptSource(script.source)}`}</span>}
+              </span>
+            </div>
+          ))}
+        </DetailSection>
+      )}
+      {attribution && attribution.updates.length > 0 && (
+        <DetailSection title="React updates">
+          {attribution.updates.map((update, i) => (
+            <div key={i} className="truncate font-mono">
+              {updateLabel(update)}
+            </div>
+          ))}
+        </DetailSection>
+      )}
+      {attribution && attribution.components.length > 0 && (
+        <DetailSection title="Components, by self time">
+          {attribution.components.map((component) => (
+            <div key={component.name} className="flex min-w-0 gap-2 font-mono">
+              <span className="w-12 shrink-0 text-right tabular-nums">{formatDuration(component.selfMs)}</span>
+              <span className="min-w-0 truncate">
+                {`<${component.name}> ${component.renders}×`}
+                {component.changedProps.length > 0 && (
+                  <span className="text-muted-foreground">{` ${component.changedProps.join(", ")}`}</span>
+                )}
+                {component.deeplyEqualProps && <span className="text-warning"> deeply equal props</span>}
+              </span>
+            </div>
+          ))}
+        </DetailSection>
+      )}
+      {activity.length > 0 && (
+        <DetailSection title="Around it">
+          {activity.map((item, i) => (
+            <div key={i} className="flex min-w-0 gap-2 font-mono">
+              <span className="shrink-0 text-muted-foreground">{formatClockMs(item.at)}</span>
+              <span className="min-w-0 truncate" title={item.text}>
+                {item.text}
+              </span>
+            </div>
+          ))}
+        </DetailSection>
+      )}
+      <div className="flex gap-1">
+        <SmallButton onClick={() => void copy(longTaskDetail(task, recording), "long task")}>
+          <Copy className="size-3" />
+          Copy task
+        </SmallButton>
+      </div>
+    </div>
+  );
+}
+
+function framesSupported(): boolean {
+  return (
+    typeof PerformanceObserver !== "undefined" &&
+    Boolean(PerformanceObserver.supportedEntryTypes?.includes("long-animation-frame"))
+  );
+}
+
+export function LongTaskPanel({
+  recording,
+  blocked,
+  build,
+  apiUrl,
+  route,
+}: {
+  recording: DevRecording;
+  blocked: number | null;
+  build: string;
+  apiUrl: string;
+  route: string;
+}) {
+  const [expandedAt, setExpandedAt] = useState<number | null>(null);
   const tasks = [...recording.longTasks].reverse();
   const total = tasks.reduce((sum, task) => sum + task.durationMs, 0);
+  const copyTrace = () =>
+    void copy(
+      longTaskReport(recording, {
+        build,
+        apiUrl,
+        route,
+        now: Date.now(),
+        blocked,
+        framesSupported: framesSupported(),
+        userAgent: navigator.userAgent,
+      }),
+      "long task trace",
+    );
   return (
     <>
-      <PanelHeader title="Long tasks" />
+      <PanelHeader title="Long tasks">
+        <SmallButton onClick={copyTrace} disabled={tasks.length === 0}>
+          <Copy className="size-3" />
+          Copy trace
+        </SmallButton>
+        <SmallButton onClick={clearDevLongTasks}>
+          <Trash2 className="size-3" />
+          Clear
+        </SmallButton>
+      </PanelHeader>
       <Stats
         items={[
           { label: "Blocked, last 10s", value: blocked === null ? "—" : `${Math.round(blocked * 100)}%` },
@@ -229,15 +375,29 @@ export function LongTaskPanel({ recording, blocked }: { recording: DevRecording;
         ]}
       />
       <Rows empty={blocked === null ? "This engine does not report long tasks." : "No task has blocked the main thread for 50ms or more."}>
-        {tasks.map((task) => (
-          <div key={task.at} className="flex items-center gap-3 px-3 py-1 font-mono">
-            <span className="shrink-0 text-muted-foreground">{formatClock(task.at)}</span>
-            <span className="min-w-0 flex-1 truncate">{task.route ?? "—"}</span>
-            <span className={cn("shrink-0 tabular-nums", TONE_CLASS[longTaskTone(task.durationMs)])}>
-              {formatDuration(task.durationMs)}
-            </span>
-          </div>
-        ))}
+        {tasks.map((task) => {
+          const expanded = expandedAt === task.at;
+          const Chevron = expanded ? ChevronDown : ChevronRight;
+          return (
+            <div key={task.at}>
+              <button
+                type="button"
+                onClick={() => setExpandedAt(expanded ? null : task.at)}
+                className="flex w-full items-center gap-2 px-3 py-1 text-left font-mono hover:bg-accent"
+              >
+                <Chevron className="size-3 shrink-0 text-muted-foreground" />
+                <span className="shrink-0 text-muted-foreground">{formatClock(task.at)}</span>
+                <span className="min-w-0 flex-1 truncate" title={task.route ?? undefined}>
+                  {longTaskCause(task) ?? task.route ?? "—"}
+                </span>
+                <span className={cn("shrink-0 tabular-nums", TONE_CLASS[longTaskTone(task.durationMs)])}>
+                  {formatDuration(task.durationMs)}
+                </span>
+              </button>
+              {expanded && <LongTaskDetails task={task} recording={recording} />}
+            </div>
+          );
+        })}
       </Rows>
     </>
   );

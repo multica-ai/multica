@@ -3,6 +3,7 @@ export { installUserTimingCap } from "./user-timing-cap";
 export {
   clearDevErrors,
   clearDevEvents,
+  clearDevLongTasks,
   clearDevRequests,
   DEV_RECORDING_WINDOW_MS,
   dropDevConnection,
@@ -29,6 +30,13 @@ export type {
   DevRequest,
   DevSyncChange,
 } from "./dev-recorder";
+export type {
+  DevComponentRender,
+  DevLongTaskAttribution,
+  DevLongTaskFrame,
+  DevLongTaskScript,
+  DevReactUpdate,
+} from "./long-task-attribution";
 export {
   bucketDiagnosticPath,
   getDiagnosticRoute,

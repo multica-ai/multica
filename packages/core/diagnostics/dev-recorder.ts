@@ -13,6 +13,14 @@ import {
 } from "../api/realtime-observer";
 import { getCurrentWsId } from "../platform/workspace-storage";
 import type { WSMessage } from "../types/events";
+import {
+  attributeLongTask,
+  attributionEntryTypes,
+  recordFrameEntry,
+  recordMeasureEntry,
+  resetLongTaskAttribution,
+  type DevLongTaskAttribution,
+} from "./long-task-attribution";
 
 export interface DevRequest {
   requestId: string;
@@ -44,6 +52,8 @@ export interface DevLongTask {
   at: number;
   durationMs: number;
   route: string | null;
+  /** What ran during the task; null until it is attributed, shortly after the task is recorded. */
+  attribution: DevLongTaskAttribution | null;
 }
 
 export type DevErrorSource = "console" | "uncaught" | "rejection";
@@ -138,6 +148,9 @@ const CACHE_KEYS_MAX = 500;
 const MESSAGE_MAX_CHARS = 1_000;
 const MEMORY_SAMPLE_MS = 2_000;
 const PRUNE_INTERVAL_MS = 5_000;
+// What ran in a long task can be reported a little after the task itself:
+// React logs a render's measures when it commits.
+const ATTRIBUTION_DELAY_MS = 300;
 // Panels re-render on every change; coalescing keeps a burst of requests, or
 // an error logged while rendering, from turning into a render per entry.
 const NOTIFY_DELAY_MS = 100;
@@ -546,17 +559,53 @@ export function installDevRecorder(queryClient?: QueryClient): () => void {
   cleanups.push(() => setApiRequestObserver(null));
 
   if (PerformanceObserver.supportedEntryTypes?.includes("longtask")) {
+    const sources = attributionEntryTypes();
+    if (sources.length > 0) {
+      const sourceObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (entry.entryType === "measure") recordMeasureEntry(entry as PerformanceMeasure);
+          else recordFrameEntry(entry);
+        }
+      });
+      for (const type of sources) sourceObserver.observe({ type });
+      cleanups.push(() => {
+        sourceObserver.disconnect();
+        resetLongTaskAttribution();
+      });
+    }
+
+    const pending: { task: DevLongTask; startTime: number }[] = [];
+    let attributeTimer: ReturnType<typeof setTimeout> | null = null;
+    const attributePending = () => {
+      attributeTimer = null;
+      const attributed = new Map(
+        pending.splice(0).map(({ task, startTime }) => [task, attributeLongTask(startTime, task.durationMs)]),
+      );
+      update({
+        longTasks: recording.longTasks.map((task) => {
+          const attribution = attributed.get(task);
+          return attribution ? { ...task, attribution } : task;
+        }),
+      });
+    };
     const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
-        append("longTasks", {
+        const task: DevLongTask = {
           at: performance.timeOrigin + entry.startTime,
           durationMs: entry.duration,
           route: currentRoute,
-        });
+          attribution: null,
+        };
+        append("longTasks", task);
+        pending.push({ task, startTime: entry.startTime });
       }
+      attributeTimer ??= setTimeout(attributePending, ATTRIBUTION_DELAY_MS);
     });
     observer.observe({ type: "longtask" });
-    cleanups.push(() => observer.disconnect());
+    cleanups.push(() => {
+      observer.disconnect();
+      if (attributeTimer) clearTimeout(attributeTimer);
+    });
   }
 
   const onError = (event: ErrorEvent) => {
@@ -651,6 +700,10 @@ export function clearDevRequests(): void {
 
 export function clearDevErrors(): void {
   update({ errors: [] });
+}
+
+export function clearDevLongTasks(): void {
+  update({ longTasks: [] });
 }
 
 export function clearDevEvents(): void {
