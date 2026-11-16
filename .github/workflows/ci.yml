@@ -9,9 +9,14 @@ on:
     - cron: "23 3 * * *"
   workflow_dispatch:
 
+# Only a PR's runs supersede each other. A push filters paths against the
+# commit just before it, so a cancelled main run's scope is never re-checked
+# and a breaking commit lands green (MUL-8798). A shared group is not enough
+# either: with cancel-in-progress off, a new run still cancels a pending one,
+# so every non-PR run gets its own group.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # PRs and main pushes use the same paths. Scheduled/manual runs validate all
