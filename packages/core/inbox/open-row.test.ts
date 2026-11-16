@@ -41,45 +41,58 @@ const held = (row: InboxItem, index: number, filters: unknown = FILTERS): HeldIn
 describe("keepOpenInboxRow", () => {
   it("leaves a list that still shows the open row as it is", () => {
     const rows = [A, B, C];
-    expect(keepOpenInboxRow(rows, rows, held(B, 1), "b", FILTERS, NOW)).toEqual({ rows, kept: null });
+    expect(keepOpenInboxRow(rows, rows, held(B, 1), "b", FILTERS, { now: NOW })).toEqual({ rows, kept: null });
   });
 
   it("keeps an archived open row where it was", () => {
-    const { rows, kept } = keepOpenInboxRow([A, C], [A, C], held(B, 1), "b", FILTERS, NOW);
+    const { rows, kept } = keepOpenInboxRow([A, C], [A, C], held(B, 1), "b", FILTERS, { now: NOW });
     expect(rows).toEqual([A, B, C]);
     expect(kept).toEqual({ key: "b", item: B, reason: "archived" });
   });
 
   it("says a row snoozed elsewhere is snoozed, as it is now", () => {
     const snoozed = { ...B, snoozed_until: "2026-11-17T09:00:00Z" };
-    const { kept } = keepOpenInboxRow([A, C], [A, snoozed, C], held(B, 1), "b", FILTERS, NOW);
+    const { kept } = keepOpenInboxRow([A, C], [A, snoozed, C], held(B, 1), "b", FILTERS, { now: NOW });
     expect(kept).toEqual({ key: "b", item: snoozed, reason: "snoozed" });
+  });
+
+  it("says a row snoozed in another window is snoozed, though the list leaves it out", () => {
+    const until = "2026-11-17T09:00:00Z";
+    const snoozed = [{ issue_id: "b", item_id: "n-b2", snoozed_until: until, snoozed_at: "2026-11-16T07:00:00Z", updates: 0 }];
+    const { rows, kept } = keepOpenInboxRow([A, C], [A, C], held(B, 1), "b", FILTERS, { snoozed, now: NOW });
+    expect(kept).toEqual({ key: "b", item: { ...B, id: "n-b2", snoozed_until: until }, reason: "snoozed" });
+    expect(rows[1]).toBe(kept?.item);
+  });
+
+  it("says a row whose snooze has passed was archived", () => {
+    const snoozed = [{ issue_id: "b", item_id: "n-b", snoozed_until: "2026-11-15T09:00:00Z", snoozed_at: "2026-11-14T07:00:00Z", updates: 0 }];
+    expect(keepOpenInboxRow([A, C], [A, C], held(B, 1), "b", FILTERS, { snoozed, now: NOW }).kept?.reason).toBe("archived");
   });
 
   it("keeps a row an edit took out of the filters, as it is now", () => {
     const edited = { ...B, issue_status: "todo" };
-    const { rows, kept } = keepOpenInboxRow([A, C], [A, edited, C], held(B, 1), "b", FILTERS, NOW);
+    const { rows, kept } = keepOpenInboxRow([A, C], [A, edited, C], held(B, 1), "b", FILTERS, { now: NOW });
     expect(rows).toEqual([A, edited, C]);
     expect(kept?.reason).toBe("filtered");
   });
 
   it("lets a changed filter drop the open row", () => {
     const rows = [A, C];
-    expect(keepOpenInboxRow(rows, [A, B, C], held(B, 1), "b", { ...FILTERS }, NOW)).toEqual({ rows, kept: null });
+    expect(keepOpenInboxRow(rows, [A, B, C], held(B, 1), "b", { ...FILTERS }, { now: NOW })).toEqual({ rows, kept: null });
   });
 
   it("keeps an archived row even under changed filters", () => {
-    expect(keepOpenInboxRow([A], [A], held(B, 1), "b", { ...FILTERS }, NOW).kept?.reason).toBe("archived");
+    expect(keepOpenInboxRow([A], [A], held(B, 1), "b", { ...FILTERS }, { now: NOW }).kept?.reason).toBe("archived");
   });
 
   it("keeps nothing for another notification, or with none open", () => {
-    expect(keepOpenInboxRow([A, C], [A, C], held(B, 1), "c", FILTERS, NOW).kept).toBeNull();
-    expect(keepOpenInboxRow([A, C], [A, C], held(B, 1), null, FILTERS, NOW).kept).toBeNull();
-    expect(keepOpenInboxRow([A, C], [A, C], undefined, "b", FILTERS, NOW).kept).toBeNull();
+    expect(keepOpenInboxRow([A, C], [A, C], held(B, 1), "c", FILTERS, { now: NOW }).kept).toBeNull();
+    expect(keepOpenInboxRow([A, C], [A, C], held(B, 1), null, FILTERS, { now: NOW }).kept).toBeNull();
+    expect(keepOpenInboxRow([A, C], [A, C], undefined, "b", FILTERS, { now: NOW }).kept).toBeNull();
   });
 
   it("puts the row at the end of a list that got shorter", () => {
-    expect(keepOpenInboxRow([A], [A], held(C, 2), "c", FILTERS, NOW).rows).toEqual([A, C]);
+    expect(keepOpenInboxRow([A], [A], held(C, 2), "c", FILTERS, { now: NOW }).rows).toEqual([A, C]);
   });
 });
 

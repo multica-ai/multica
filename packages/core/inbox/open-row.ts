@@ -1,4 +1,4 @@
-import type { InboxItem } from "../types";
+import type { InboxItem, SnoozedInboxIssue } from "../types";
 import { isInboxItemSnoozed } from "./snooze";
 
 /** A row's group key: its issue, or the notification itself when it has none. */
@@ -38,9 +38,11 @@ export interface KeptInboxRow {
  * here (see `leaveInboxRow`).
  *
  * `notifications` is every active notification, unfiltered, which tells an
- * archived row from a filtered-out one. Changing the filters is itself a
- * request to filter rows out, so a row they drop is kept only under the
- * `filters` it was shown with.
+ * archived row from a filtered-out one. The active list leaves snoozed
+ * notifications out, so `snoozed`, the viewer's snoozed issues, tells a
+ * snoozed row from an archived one. Changing the filters is itself a request
+ * to filter rows out, so a row they drop is kept only under the `filters` it
+ * was shown with.
  */
 export function keepOpenInboxRow(
   rows: InboxItem[],
@@ -48,16 +50,30 @@ export function keepOpenInboxRow(
   held: HeldInboxRow | undefined,
   openKey: string | null,
   filters: unknown,
-  now = Date.now(),
+  { snoozed = [], now = Date.now() }: { snoozed?: readonly SnoozedInboxIssue[]; now?: number } = {},
 ): { rows: InboxItem[]; kept: KeptInboxRow | null } {
   if (!openKey || !held || held.key !== openKey) return { rows, kept: null };
   if (rows.some((row) => inboxRowKey(row) === openKey)) return { rows, kept: null };
   const group = notifications.filter((item) => inboxRowKey(item) === openKey);
-  const reason: KeptInboxRowReason =
-    group.length === 0 ? "archived" : group.some((item) => isInboxItemSnoozed(item, now)) ? "snoozed" : "filtered";
+  const snooze =
+    group.length === 0
+      ? snoozed.find((entry) => entry.issue_id === openKey && new Date(entry.snoozed_until).getTime() > now)
+      : undefined;
+  const reason: KeptInboxRowReason = snooze
+    ? "snoozed"
+    : group.length === 0
+      ? "archived"
+      : group.some((item) => isInboxItemSnoozed(item, now))
+        ? "snoozed"
+        : "filtered";
   if (reason === "filtered" && held.filters !== filters) return { rows, kept: null };
-  // Not archived: show it as it is now.
-  const item = reason === "archived" ? held.item : (group.find((other) => other.id === held.item.id) ?? group[0]!);
+  // Not archived: show it as it is now. A snoozed issue's notification is the
+  // one its snooze entry names, which the snooze endpoints take.
+  const item = snooze
+    ? { ...held.item, id: snooze.item_id, snoozed_until: snooze.snoozed_until }
+    : reason === "archived"
+      ? held.item
+      : (group.find((other) => other.id === held.item.id) ?? group[0]!);
   const at = Math.min(held.index, rows.length);
   return {
     rows: [...rows.slice(0, at), item, ...rows.slice(at)],

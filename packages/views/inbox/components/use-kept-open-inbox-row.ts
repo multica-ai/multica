@@ -1,9 +1,13 @@
 "use client";
 
 import { useLayoutEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { inboxRowKey, keepOpenInboxRow } from "@multica/core/inbox/open-row";
+import { snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
-import type { InboxItem } from "@multica/core/types";
+import type { InboxItem, SnoozedInboxIssue } from "@multica/core/types";
+
+const NO_SNOOZED: SnoozedInboxIssue[] = [];
 
 /**
  * `rows` with the open notification's row kept in place once something other
@@ -28,11 +32,12 @@ export function useKeptOpenInboxRow(
   const held = useInboxSelectionStore((s) => (enabled ? s.heldRows[`${wsId}:${list}`] : undefined));
   const left = useInboxSelectionStore((s) => !!openKey && s.leftRowKeyByWorkspace[wsId] === openKey);
   const holdRow = useInboxSelectionStore((s) => s.holdRow);
+  const { data: snoozed = NO_SNOOZED } = useQuery({ ...snoozedInboxOptions(wsId), enabled: enabled && !!wsId });
   useLayoutEffect(() => {
     if (wsId && openKey && item && !left) holdRow(wsId, list, { key: openKey, item, index, filters });
   }, [wsId, list, openKey, item, index, filters, left, holdRow]);
   return useMemo(
-    () => (left ? { rows, kept: null } : keepOpenInboxRow(rows, notifications, held, openKey, filters)),
-    [left, rows, notifications, held, openKey, filters],
+    () => (left ? { rows, kept: null } : keepOpenInboxRow(rows, notifications, held, openKey, filters, { snoozed })),
+    [left, rows, notifications, held, openKey, filters, snoozed],
   );
 }
