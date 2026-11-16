@@ -166,6 +166,11 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"workspace":                          workspaceDelete,
 	"workspace_invitation":               workspaceDelete,
 	"workspace_share_link":               workspaceDelete,
+	// A presigned upload session owns object-storage bytes the workspace is
+	// about to lose. Teardown must NOT delete the rows: the row is the only
+	// record naming those objects, and the client that PUT them will never
+	// clean up. Teardown releases every session to the reconciler instead.
+	"attachment_upload_session": workspaceDeleteSettle,
 }
 
 func TestWorkspaceDeletionManifestCoversPublicSchema(t *testing.T) {

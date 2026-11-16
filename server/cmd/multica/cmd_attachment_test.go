@@ -166,6 +166,12 @@ func TestRunAttachmentDownloadCreatesMissingOutputDir(t *testing.T) {
 	}
 }
 
+// isPresignUploadRequest reports whether r is the presign request a fake server
+// should answer with 404 when it models a build that predates the endpoint.
+func isPresignUploadRequest(r *http.Request) bool {
+	return r.Method == http.MethodPost && r.URL.Path == "/api/attachments/presign-upload"
+}
+
 func newAttachmentUploadTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "upload"}
 	cmd.Flags().String("task", "", "")
@@ -178,6 +184,13 @@ func TestRunAttachmentUploadSendsTaskIDAndPrintsContract(t *testing.T) {
 	var gotFile string
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// This fake models a server from before the presigned-upload endpoint:
+		// the route is absent, which is exactly the case the client falls back
+		// from. Everything below is the legacy multipart contract.
+		if isPresignUploadRequest(r) {
+			http.NotFound(w, r)
+			return
+		}
 		if r.Method != http.MethodPost || r.URL.Path != "/api/upload-file" {
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -241,6 +254,10 @@ func TestRunAttachmentUploadSendsTaskIDAndPrintsContract(t *testing.T) {
 // not image `![...]` markdown.
 func TestRunAttachmentUploadNonImageUsesFileCardMarkdown(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isPresignUploadRequest(r) {
+			http.NotFound(w, r)
+			return
+		}
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			t.Fatalf("parse multipart: %v", err)
 		}
@@ -287,6 +304,10 @@ func TestRunAttachmentUploadNonImageUsesFileCardMarkdown(t *testing.T) {
 // attachment is hidden by the referenced URL, showing nothing.
 func TestRunAttachmentUploadEscapesFilename(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if isPresignUploadRequest(r) {
+			http.NotFound(w, r)
+			return
+		}
 		if err := r.ParseMultipartForm(1 << 20); err != nil {
 			t.Fatalf("parse multipart: %v", err)
 		}
