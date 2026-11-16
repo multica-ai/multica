@@ -739,6 +739,23 @@ func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
 	}
 }
 
+func TestMergeEnvReplacesInheritedClaudeEntrypointWithTaskValue(t *testing.T) {
+	t.Parallel()
+
+	env := mergeEnv([]string{"PATH=/usr/bin", "CLAUDE_CODE_ENTRYPOINT=cli"},
+		map[string]string{"CLAUDE_CODE_ENTRYPOINT": "multica"})
+
+	var entrypoints []string
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "CLAUDE_CODE_ENTRYPOINT=") {
+			entrypoints = append(entrypoints, entry)
+		}
+	}
+	if len(entrypoints) != 1 || entrypoints[0] != "CLAUDE_CODE_ENTRYPOINT=multica" {
+		t.Fatalf("expected only the task's CLAUDE_CODE_ENTRYPOINT, got %v", entrypoints)
+	}
+}
+
 func TestBuildEnvAppendsExtras(t *testing.T) {
 	t.Parallel()
 

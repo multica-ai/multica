@@ -217,6 +217,7 @@ Codex 原生子智能体同样默认关闭：父线程结束时，Multica 就把
 | `MULTICA_TASK_SLOT` | 守护进程全局并发池中的槽位，可用于 GPU 等按槽位编号的资源 | 仅供参考 |
 | `MULTICA_REPO_CHECKOUT_MODE` | 只在 Linux 和 Windows 的 Codex 运行中设为 `isolated`，让 `multica repo checkout` 生成 `.git` 在工作目录内的独立克隆；其他运行不设置 | 仅供参考 |
 | `TMPDIR` | 当前 task 的私有临时目录；也会以 `TMP` 和 `TEMP` 提供，但在 Windows 上 task 会继承用户临时路径以维持 Git Bash 的共享 `/tmp`；Windows 上的 Claude Code 会将 `CLAUDE_CODE_TMPDIR` 默认设为 task 临时目录 | 仅供参考 |
+| `CLAUDE_CODE_ENTRYPOINT` | Claude Code 运行中为 `multica`，让 Claude Code 把调用方报告为 Multica，而不是 headless 模式默认的 `sdk-cli`；agent 的自定义环境变量可以覆盖它 | 仅供参考 |
 
 使用 `MULTICA_TOKEN` 发起请求时，作者身份由服务端决定；任务评论等写入操作会归属到被指派的智能体和当前 task。令牌的完整绑定关系、权限、归属方式、最长 24 小时的有效期和清理规则见[智能体执行的临时令牌](/auth-tokens#智能体执行的临时令牌)。
 

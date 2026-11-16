@@ -203,6 +203,12 @@ func taskMulticaEnvironment(task Task, provider, agentName, token, configRoot, w
 		env["MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_TYPE"] = assigneeType
 		env["MULTICA_QUICK_CREATE_DEFAULT_ASSIGNEE_ID"] = assigneeID
 	}
+	// Claude Code reports its caller in the user agent and billing header of
+	// every request. Headless `claude -p` defaults that to the generic
+	// `sdk-cli`; name Multica instead, unless the agent's custom env sets it.
+	if provider == "claude" && !agentCustomEnvHasKey(task, claudeCodeEntrypointEnv) {
+		env[claudeCodeEntrypointEnv] = multicaClaudeCodeEntrypoint
+	}
 	if runtime.GOOS != "windows" {
 		return env
 	}
@@ -230,6 +236,25 @@ func taskMulticaEnvironment(task Task, provider, agentName, token, configRoot, w
 		}
 	}
 	return env
+}
+
+const (
+	claudeCodeEntrypointEnv     = "CLAUDE_CODE_ENTRYPOINT"
+	multicaClaudeCodeEntrypoint = "multica"
+)
+
+// agentCustomEnvHasKey reports whether the agent's custom env sets key, in any
+// letter case, so a daemon default never duplicates a user's own value.
+func agentCustomEnvHasKey(task Task, key string) bool {
+	if task.Agent == nil {
+		return false
+	}
+	for name := range task.Agent.CustomEnv {
+		if strings.EqualFold(name, key) {
+			return true
+		}
+	}
+	return false
 }
 
 // taskRunner executes a single agent task and returns the result.
