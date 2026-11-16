@@ -47,15 +47,9 @@ func startOwnedProcessTree(cmd *exec.Cmd, _ *slog.Logger) error {
 // releaseProcessGroup is a no-op on non-Windows platforms: a process group needs
 // no handle and is gone once its members are.
 //
-// It deliberately does NOT reap the group. Reaping here would fire whenever the
-// leader's cmd.Wait returns, which is wrong for the callers that drop ownership
-// while the tree is meant to keep running — the ACP managed terminal keeps a
-// backgrounded child alive between the command's exit and an explicit
-// terminal/release (acp_terminal.go), and the probe helpers already reap before
-// releasing (runOwned in launch.go). The normal-exit descendant leak (#8153)
-// lives only in the backends that neuter cmd.Cancel to drive their own
-// shutdown, and is fixed there with an explicit reapProcessTree before this
-// call — mirroring runOwned — not by overloading this shared no-op.
+// It deliberately does not terminate descendants: ACP managed terminals retain
+// background children until terminal/release. Streaming runtimes instead use
+// ownedRuntimeProcess to finish cleanup before reaping the leader.
 func releaseProcessGroup(cmd *exec.Cmd) {}
 
 func codexInitializeRetrySupported() bool { return true }

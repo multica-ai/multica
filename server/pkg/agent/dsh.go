@@ -244,7 +244,9 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	}
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[dsh:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	cancellationDone := make(chan struct{})
+	process, err := startOwnedRuntimeProcess(runCtx, cmd, b.cfg.Logger, cancellationDone, func() { _ = stdout.Close() })
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("start dsh: %w", err)
 	}
@@ -266,8 +268,9 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		return encoder.Encode(value)
 	}
 	if err := writeFrame(command); err != nil {
-		signalProcessGroup(cmd, syscall.SIGKILL)
-		_ = cmd.Wait()
+		process.signal(syscall.SIGKILL)
+		close(cancellationDone)
+		_ = process.Wait()
 		releaseProcessGroup(cmd)
 		cancel()
 		return nil, fmt.Errorf("send dsh execute command: %w", err)
@@ -279,6 +282,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	procDone := make(chan struct{})
 
 	go func() {
+		defer close(cancellationDone)
 		select {
 		case <-procDone:
 			return
@@ -290,11 +294,13 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		select {
 		case <-procDone:
 			return
+		case <-process.exitObserved:
+			return
 		case <-timer.C:
 		}
-		signalProcessGroup(cmd, syscall.SIGTERM)
-		if !waitProcessGroupGone(cmd, dshTerminateGrace) {
-			signalProcessGroup(cmd, syscall.SIGKILL)
+		process.signal(syscall.SIGTERM)
+		if !process.waitGroupGone(dshTerminateGrace) {
+			process.signal(syscall.SIGKILL)
 		}
 		_ = stdout.Close()
 	}()
@@ -324,14 +330,8 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		if scanErr != nil {
 			_ = stdout.Close()
 		}
-		exitErr := cmd.Wait()
+		exitErr := process.Wait()
 		close(procDone)
-		// Reap the group on the normal-exit path: dsh neuters cmd.Cancel to drive
-		// its own shutdown, so nothing signals the group when the leader exits on
-		// its own, and releaseProcessGroup is a Unix no-op — a descendant the agent
-		// left running would otherwise outlive the completed task (#8153). Mirrors
-		// runOwned and the write-failure path above; harmless if already empty.
-		reapProcessTree(cmd)
 		releaseProcessGroup(cmd)
 
 		result := state.result
@@ -355,6 +355,10 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			default:
 				result.Error = "dsh exited without a terminal result"
 			}
+		}
+		if result.Status == "completed" && exitErr != nil {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("dsh exited with error: %v", exitErr)
 		}
 		if result.Error != "" {
 			result.Error = withAgentStderr(result.Error, "dsh", stderrBuf.Tail())

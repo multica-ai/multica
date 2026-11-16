@@ -100,7 +100,7 @@ func runOpencodeCancellationTest(t *testing.T, script string) {
 		if res.Status != "aborted" {
 			t.Errorf("status = %q, want aborted", res.Status)
 		}
-	case <-time.After(10 * time.Second):
+	case <-time.After(2 * time.Second):
 		t.Fatal("Execute did not return after cancellation (possible scanner deadlock or unkilled process)")
 	}
 

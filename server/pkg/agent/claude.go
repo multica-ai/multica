@@ -152,7 +152,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	cancellationDone := make(chan struct{})
+	process, err := startOwnedRuntimeProcess(runCtx, cmd, b.cfg.Logger, cancellationDone, func() { _ = stdout.Close() })
+	if err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
@@ -252,9 +254,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case <-time.After(claudeErrorResultGrace()):
 			}
 			b.cfg.Logger.Warn("claude still running after an error result; terminating process group", "pid", cmd.Process.Pid)
-			signalProcessGroup(cmd, syscall.SIGTERM)
-			if !waitProcessGroupGone(cmd, claudeTerminateGrace()) {
-				signalProcessGroup(cmd, syscall.SIGKILL)
+			process.signal(syscall.SIGTERM)
+			if !process.waitGroupGone(claudeTerminateGrace()) {
+				process.signal(syscall.SIGKILL)
 			}
 			_ = stdout.Close()
 		}
@@ -268,6 +270,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// last-resort unblock for a scanner a wedged descendant still keeps
 		// open. WaitDelay is the final backstop (#5918).
 		go func() {
+			defer close(cancellationDone)
 			select {
 			case <-procDone:
 				return // finished on its own; nothing to terminate
@@ -275,17 +278,17 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			}
 			closeStdin()
 			if cmd.Process != nil {
-				signalProcessGroup(cmd, syscall.SIGTERM)
+				process.signal(syscall.SIGTERM)
 				// Escalate to a group SIGKILL unless the WHOLE process group has
 				// exited within the grace window. This must key off the process
 				// group, not procDone: procDone only means cmd.Wait() returned
 				// for the leader, so a SIGTERM-ignoring descendant that does not
 				// hold claude's stdout would let the leader exit, close procDone,
 				// and skip the SIGKILL — leaking exactly the orphan this fix
-				// targets. waitProcessGroupGone returns as soon as the group is
-				// empty, so the graceful case adds no latency.
-				if !waitProcessGroupGone(cmd, claudeTerminateGrace()) {
-					signalProcessGroup(cmd, syscall.SIGKILL)
+				// targets. Retaining the unreaped leader can keep the group
+				// observable until the bounded grace window expires.
+				if !process.waitGroupGone(claudeTerminateGrace()) {
+					process.signal(syscall.SIGKILL)
 				}
 			}
 			_ = stdout.Close()
@@ -414,18 +417,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		closeStdin()
 
 		// Wait for process exit, then release the cancellation handler.
-		exitErr := cmd.Wait()
+		exitErr := process.Wait()
 		close(procDone)
-		// The leader is reaped. Kill its process group before dropping ownership
-		// so a descendant that outlived the CLI on a NORMAL exit dies with it,
-		// not just on cancellation. claude neuters cmd.Cancel (above) to drive its
-		// own SIGTERM→SIGKILL, so the group is never signalled on the normal path;
-		// releaseProcessGroup is a Unix no-op, so before this an orphaned headless
-		// Chrome the agent opened over CDP kept running after the task completed
-		// (#8153). Mirrors runOwned in launch.go. On Windows releaseProcessGroup
-		// then closes the Job Object, which kills anything still inside it — the
-		// same outcome the reap gives on Unix (GH #7522).
-		reapProcessTree(cmd)
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 		// writeDone is buffered (cap 1) and the writer always sends — by the

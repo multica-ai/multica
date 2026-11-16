@@ -275,7 +275,9 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[opencode:stderr] ")
 
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	cancellationDone := make(chan struct{})
+	process, err := startOwnedRuntimeProcess(runCtx, cmd, b.cfg.Logger, cancellationDone, func() { _ = stdout.Close() })
+	if err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start opencode: %w", err)
@@ -314,6 +316,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// last-resort unblock for a scanner that a wedged descendant still keeps
 	// open. WaitDelay is the final backstop (#4533).
 	go func() {
+		defer close(cancellationDone)
 		select {
 		case <-procDone:
 			return // finished on its own; nothing to terminate
@@ -333,11 +336,12 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			opencodeInterruptSession(interruptConn, run.session.get(), b.cfg.Logger)
 		}
 		if cmd.Process != nil {
-			signalProcessGroup(cmd, syscall.SIGTERM)
+			process.signal(syscall.SIGTERM)
 			select {
 			case <-procDone: // exited within the grace window
+			case <-process.exitObserved: // still unreaped; cleanup follows the handler
 			case <-time.After(opencodeTerminateGrace()):
-				signalProcessGroup(cmd, syscall.SIGKILL)
+				process.signal(syscall.SIGKILL)
 			}
 		}
 		_ = stdout.Close()
@@ -352,14 +356,8 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		scanResult := run.processEvents(stdout, msgCh)
 
 		// Wait for process exit, then release the cancellation handler.
-		exitErr := cmd.Wait()
+		exitErr := process.Wait()
 		close(procDone)
-		// Reap the group on the normal-exit path: opencode neuters cmd.Cancel to
-		// drive its own shutdown, so nothing signals the group when the leader
-		// exits on its own, and releaseProcessGroup is a Unix no-op — a descendant
-		// the agent left running would otherwise outlive the completed task
-		// (#8153). Mirrors runOwned; harmless if the group is already empty.
-		reapProcessTree(cmd)
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 

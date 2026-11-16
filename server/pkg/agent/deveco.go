@@ -150,7 +150,9 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[deveco:stderr] ")
 
-	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+	cancellationDone := make(chan struct{})
+	process, err := startOwnedRuntimeProcess(runCtx, cmd, b.cfg.Logger, cancellationDone, func() { _ = stdout.Close() })
+	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("start deveco: %w", err)
 	}
@@ -172,17 +174,19 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// Only then is it safe to close the stdout read end as a last-resort
 	// unblock for a scanner that a wedged descendant still keeps open.
 	go func() {
+		defer close(cancellationDone)
 		select {
 		case <-procDone:
 			return // finished on its own; nothing to terminate
 		case <-runCtx.Done():
 		}
 		if cmd.Process != nil {
-			signalProcessGroup(cmd, syscall.SIGTERM)
+			process.signal(syscall.SIGTERM)
 			select {
 			case <-procDone: // exited within the grace window
+			case <-process.exitObserved: // still unreaped; cleanup follows the handler
 			case <-time.After(devecoTerminateGrace()):
-				signalProcessGroup(cmd, syscall.SIGKILL)
+				process.signal(syscall.SIGKILL)
 			}
 		}
 		_ = stdout.Close()
@@ -196,14 +200,8 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		startTime := time.Now()
 		scanResult := b.processEvents(stdout, msgCh)
 
-		exitErr := cmd.Wait()
+		exitErr := process.Wait()
 		close(procDone)
-		// Reap the group on the normal-exit path: deveco neuters cmd.Cancel to
-		// drive its own shutdown, so nothing signals the group when the leader
-		// exits on its own, and releaseProcessGroup is a Unix no-op — a descendant
-		// the agent left running would otherwise outlive the completed task
-		// (#8153). Mirrors runOwned; harmless if the group is already empty.
-		reapProcessTree(cmd)
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
