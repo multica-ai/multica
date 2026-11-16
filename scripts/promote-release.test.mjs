@@ -105,9 +105,7 @@ test("API failures and unpublished releases fail closed", async () => {
   for (const key of ["getRelease", "getAssets", "readMetadata", "getLatest", "promote"]) {
     const f = fixture();
     f.options[key] = async () => { throw new Error("API unavailable"); };
-    // Metadata failures are listed as blockers; endpoint failures reject.
-    if (key === "readMetadata") assert.equal((await promoteRelease(f.options)).status, "waiting");
-    else await assert.rejects(promoteRelease(f.options), /API unavailable/);
+    await assert.rejects(promoteRelease(f.options), /API unavailable/);
   }
   for (const change of [{ draft: true }, { prerelease: true }, { tag_name: "v0.9.0" }]) {
     const f = fixture();

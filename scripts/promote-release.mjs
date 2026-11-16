@@ -41,8 +41,11 @@ export async function validateRelease(tag, release, assets, readMetadata) {
   for (const [name, platform, arch, extension] of channels) {
     const asset = uploaded.get(name);
     if (!asset) { problems.push(`Missing ${name}`); continue; }
+    // Authentication/transport failures are workflow errors, not incomplete
+    // artifacts. Only malformed metadata belongs in the waiting result.
+    const contents = await readMetadata(asset);
     try {
-      const metadata = parse(await readMetadata(asset));
+      const metadata = parse(contents);
       if (metadata?.version !== version) throw new Error(`version must be ${version}`);
       if (!Array.isArray(metadata.files) || metadata.files.length === 0) {
         throw new Error("files must contain update artifacts");
