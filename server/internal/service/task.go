@@ -3293,7 +3293,12 @@ func (s *TaskService) settleQueuedChatInput(
 	if err != nil {
 		return nil, fmt.Errorf("check queued chat channel provenance: %w", err)
 	}
-	if channelIngested {
+	// A wakeup turn has no draft to give back: its input is the platform's.
+	_, wakeupTurn, err := chatWakeupTurnInput(ctx, qtx, task)
+	if err != nil {
+		return nil, err
+	}
+	if channelIngested || wakeupTurn {
 		if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
 			ID:            dbid.NewV7(),
 			ChatSessionID: task.ChatSessionID,
@@ -3398,7 +3403,11 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 			if err != nil {
 				return fmt.Errorf("check cancelled chat channel provenance: %w", err)
 			}
-			restorable = !channelIngested
+			_, wakeupTurn, err := chatWakeupTurnInput(ctx, qtx, task)
+			if err != nil {
+				return err
+			}
+			restorable = !channelIngested && !wakeupTurn
 		}
 		if restorable && task.StartedAt.Valid && opts.ClientSupportsDraftRestore {
 			// A started task's daemon learns of the cancellation by polling
@@ -5114,6 +5123,18 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 			return nil, fmt.Errorf("count chat attachments: %w", err)
 		}
 		pendingAttachments = n
+	}
+
+	// A wakeup turn that checked in, or found nothing to say, ends without a
+	// trace on every surface: no row, no no_response bubble, nothing sent.
+	if pendingAttachments == 0 {
+		silent, err := chatWakeupTurnIsSilent(ctx, qtx, task, isEmpty)
+		if err != nil {
+			return nil, err
+		}
+		if silent {
+			return nil, nil
+		}
 	}
 
 	// Channel/legacy empty completion with nothing to show: emit no assistant

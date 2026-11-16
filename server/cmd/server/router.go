@@ -2646,10 +2646,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// creator-only fetch + idempotent consume.
 					r.Get("/draft-restores", h.ListChatDraftRestores)
 					r.Delete("/draft-restores/{restoreId}", h.ConsumeChatDraftRestore)
+					r.Get("/wakeups", h.ListChatSessionWakeups)
+					r.Post("/wakeups/{wakeupId}/cancel", h.CancelChatSessionWakeup)
 				})
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 			r.Get("/api/chat/pending-tasks/has-any", h.HasPendingChatTasks)
+			r.Get("/api/chat/my-wakeups", h.ListMyChatWakeups)
 
 			// Quick-agent bar: per-user pinned agents for one-tap new chats.
 			r.Get("/api/chat/pinned-agents", h.ListChatPinnedAgents)
@@ -2663,6 +2666,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// thread (?id for a specific one, else the thread the session is in).
 			r.Get("/api/chat/history", h.GetChatChannelHistory)
 			r.Get("/api/chat/thread", h.GetChatThread)
+			// Agent-facing chat wakeups: like history, scoped to the calling
+			// turn's own conversation through its task token.
+			r.Route("/api/chat/wakeups", func(r chi.Router) {
+				r.Get("/", h.ListChatTurnWakeups)
+				r.Post("/", h.CreateChatTurnWakeup)
+				r.Put("/{wakeupId}", h.UpdateChatTurnWakeup)
+				r.Post("/{wakeupId}/cancel", h.CancelChatTurnWakeup)
+				r.Post("/{wakeupId}/finish", h.FinishChatTurnWakeup)
+				r.Post("/{wakeupId}/checkin", h.CheckInChatTurnWakeup)
+			})
 
 			// Connected Apps (MUL-8516)
 			// Connected Apps management and decisions are for people; runs

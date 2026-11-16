@@ -610,6 +610,7 @@ func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
 	b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 	b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
+	b.WriteString("- When you tell the user you will report back later (after handed-off work finishes, at a time they named, or while you watch something), create a chat wakeup before you reply: `multica chat wakeup create --help`. It brings you back to this conversation on your own. Say in your reply what you are waiting for and until when. For recurring work (every morning, every Friday), suggest an Autopilot instead\n")
 	b.WriteString("- Keep responses concise and direct\n\n")
 }
 
