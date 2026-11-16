@@ -343,7 +343,35 @@ LIMIT 1;
 -- name: GetAutopilotRunByWebhookDelivery :one
 SELECT * FROM autopilot_run
 WHERE webhook_delivery_id = $1
+   OR id = (SELECT autopilot_run_id FROM webhook_delivery WHERE id = $1)
 LIMIT 1;
+
+-- name: ResumeFailedWebhookIssueDelivery :one
+-- Keep the original run, issue, and consumed quota. The old delivery retains
+-- its audit link to the run when the new delivery takes over dispatch.
+WITH candidate AS (
+    SELECT retry.id AS retry_id, prior.id AS prior_id,
+           linked.status = 'failed' AND linked.task_id IS NULL AND NOT EXISTS (
+               SELECT 1 FROM agent_task_queue task WHERE task.issue_id = linked.issue_id
+           ) AS reopen
+    FROM webhook_delivery retry
+    JOIN webhook_delivery prior ON prior.trigger_id = retry.trigger_id
+      AND prior.workspace_id = retry.workspace_id AND prior.dedupe_key = retry.dedupe_key
+    JOIN autopilot_run linked ON linked.webhook_delivery_id = prior.id
+    WHERE retry.id = $1 AND retry.status = 'queued' AND prior.status = 'failed'
+      AND linked.issue_id IS NOT NULL
+    ORDER BY prior.created_at DESC, prior.id DESC
+    LIMIT 1
+)
+UPDATE autopilot_run r
+SET webhook_delivery_id = candidate.retry_id,
+    status = CASE WHEN candidate.reopen THEN 'issue_created' ELSE r.status END,
+    completed_at = CASE WHEN candidate.reopen THEN NULL ELSE r.completed_at END,
+    failure_reason = CASE WHEN candidate.reopen THEN NULL ELSE r.failure_reason END,
+    reason_code = CASE WHEN candidate.reopen THEN NULL ELSE r.reason_code END
+FROM candidate
+WHERE r.webhook_delivery_id = candidate.prior_id
+RETURNING r.*;
 
 -- name: GetAutopilotRunByQuotaReservation :one
 SELECT * FROM autopilot_run

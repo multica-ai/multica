@@ -903,6 +903,68 @@ func TestWebhookDeliveryWorker_RepairsCreateIssueTaskCrashWindow(t *testing.T) {
 	}
 }
 
+func TestWebhookDeliveryWorker_RedeliveryRepairsCommittedIssue(t *testing.T) {
+	for _, scenario := range []string{"initial enqueue", "reclaim repair"} {
+		t.Run(scenario, func(t *testing.T) {
+			ctx := context.Background()
+			agent := createWebhookTestAgent(t, "Redelivery Agent")
+			ap := createWebhookTestAutopilot(t, agent, "active", "create_issue")
+			trigger := createWebhookTriggerViaHandler(t, ap)
+			post := func() string {
+				return requireAcceptedWebhookResponse(t, postWebhook(t, *trigger.WebhookToken,
+					map[string]any{"event": "redelivery"}, map[string]string{"Idempotency-Key": "redelivery"}))
+			}
+			exec := func(query string, args ...any) {
+				t.Helper()
+				if _, err := testPool.Exec(ctx, query, args...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Cleanup(func() {
+				exec(`DELETE FROM agent_task_queue WHERE issue_id IN (SELECT id FROM issue WHERE origin_id = $1)`, ap)
+				exec(`DELETE FROM issue WHERE origin_id = $1`, ap)
+			})
+			delivery := post()
+			if scenario == "reclaim repair" {
+				first := processQueuedWebhookDelivery(t, delivery)
+				exec(`DELETE FROM agent_task_queue WHERE issue_id = (SELECT issue_id FROM autopilot_run WHERE id = $1)`, first.AutopilotRunID)
+				exec(`UPDATE autopilot_run SET task_id = NULL WHERE id = $1`, first.AutopilotRunID)
+				exec(`UPDATE webhook_delivery SET status = 'queued' WHERE id = $1`, delivery)
+			}
+
+			// Fail only this agent's inserts, after the issue transaction commits.
+			constraint := fmt.Sprintf("test_enqueue_%d", time.Now().UnixNano())
+			exec(fmt.Sprintf("ALTER TABLE agent_task_queue ADD CONSTRAINT %s CHECK (agent_id <> '%s') NOT VALID", constraint, agent))
+			drop := "ALTER TABLE agent_task_queue DROP CONSTRAINT IF EXISTS " + constraint
+			t.Cleanup(func() { exec(drop) })
+			failed := processQueuedWebhookDelivery(t, delivery)
+			if failed.Status != "failed" {
+				t.Fatalf("expected failed delivery, got %s", failed.Status)
+			}
+			before, err := testHandler.Queries.GetAutopilotRun(ctx, failed.AutopilotRunID)
+			if err != nil || !before.IssueID.Valid {
+				t.Fatalf("expected a committed issue, got run=%v err=%v", before, err)
+			}
+			exec(drop)
+			retry := processQueuedWebhookDelivery(t, post())
+			if retry.Status != "dispatched" || retry.AutopilotRunID != before.ID {
+				t.Fatalf("redelivery should dispatch original run %v, got %v", before.ID, retry)
+			}
+			original, err := testHandler.Queries.GetAutopilotRunByWebhookDelivery(ctx, failed.ID)
+			if err != nil || original.ID != before.ID || original.IssueID != before.IssueID || !original.TaskID.Valid {
+				t.Fatalf("original delivery lost its repaired run: run=%v err=%v", original, err)
+			}
+			var issues, tasks int
+			err = testPool.QueryRow(ctx, `SELECT
+				(SELECT count(*) FROM issue WHERE origin_id = $1),
+				(SELECT count(*) FROM agent_task_queue WHERE issue_id = $2)`, ap, before.IssueID).Scan(&issues, &tasks)
+			if err != nil || issues != 1 || tasks != 1 {
+				t.Fatalf("expected one issue with one task, got issues=%d tasks=%d err=%v", issues, tasks, err)
+			}
+		})
+	}
+}
+
 func TestWebhookDeliveryWorker_OverlappingWorkersReuseIssue(t *testing.T) {
 	ctx := context.Background()
 	agentID := createWebhookTestAgent(t, "Worker overlap agent")
