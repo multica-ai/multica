@@ -3102,11 +3102,10 @@ func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, a
 // mentions from the current comment and returns the runnable agent recipients.
 // Skips agents with on_mention trigger disabled, and private agents mentioned
 // by non-owner members (only the agent owner or workspace admin/owner can
-// mention a private agent). Self-mentions are intentionally allowed so an
-// agent running in one issue can explicitly enqueue itself on another (e.g.
-// a child-issue run notifying the parent issue whose assignee is the same
-// agent); runaway loops are prevented by HasPendingTaskForIssueAndAgent
-// dedupe and the natural queued/dispatched coalescing of the task queue.
+// mention a private agent). A self-mention from a trusted authoring task on
+// this issue is suppressed, including during completion replay. Cross-issue
+// self-mentions remain explicit handoffs (e.g. a child-issue run notifying the
+// parent issue whose assignee is the same agent).
 // Note: no issue status gate here — @mention is an explicit action and should
 // work even on done/cancelled issues (the agent can reopen the issue if needed).
 // commentMentionTarget is one EXPLICIT @agent / @squad mention and how it
@@ -3317,6 +3316,22 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		if verdict, err := service.AgentReadiness(ctx, h.runtimeLookup(obsmetrics.RuntimeLookupSourceComment), agent); err == nil && verdict.Blocked() {
 			blockUnusableTarget("agent", m.ID, agent, verdict)
 			continue
+		}
+		if authorType == "agent" && authorID == uuidToString(agent.ID) && opts.AuthoringTaskID.Valid {
+			sourceTask, err := h.Queries.GetAgentTask(ctx, opts.AuthoringTaskID)
+			if err != nil {
+				blockTarget("agent", m.ID, ReasonInternalError)
+				continue
+			}
+			// Compare the exact authoring task, never the assignee or latest
+			// run: the same agent may be notifying this issue from another.
+			// Terminal source tasks still match when completion replays a comment.
+			if sourceTask.AgentID == agent.ID && sourceTask.IssueID == issue.ID {
+				active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, agent.ID, opts.ThreadCommentID)
+				status, reason := decideSuppressedLeaderOutcome(active, activeErr)
+				addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, Status: status, ReasonCode: reason})
+				continue
+			}
 		}
 		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts)
 		if err != nil {
