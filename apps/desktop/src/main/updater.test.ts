@@ -25,10 +25,15 @@ const ctx = vi.hoisted(() => ({
 }));
 
 vi.mock("electron-updater", () => {
+  let channel: string | undefined;
   const autoUpdater = {
     autoDownload: false,
     autoInstallOnAppQuit: false,
-    channel: undefined as string | undefined,
+    get channel() { return channel; },
+    set channel(value: string | undefined) {
+      channel = value;
+      this.allowDowngrade = true;
+    },
     allowDowngrade: false,
     on: vi.fn((event: string, handler: Handler) => {
       const handlers = ctx.handlers.get(event) ?? [];
@@ -68,6 +73,19 @@ import {
   type UpdaterDaemonGate,
 } from "./updater";
 import { updaterPreferencesPath } from "./updater-preferences";
+
+it("disables downgrades after selecting the Windows arm64 channel", async () => {
+  vi.stubGlobal("process", { ...process, platform: "win32", arch: "arm64" });
+  vi.resetModules();
+  try {
+    await import("./updater");
+    expect(autoUpdater.channel).toBe("latest-arm64");
+    expect(autoUpdater.allowDowngrade).toBe(false);
+  } finally {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  }
+});
 
 describe("macOS x64 update channel", () => {
   it("does not touch established architecture paths", () => {
