@@ -365,6 +365,24 @@ export function useArchiveCompletedInbox() {
 }
 
 /**
+ * Undo for a batch archive: restore the notifications it took, one request
+ * per row, since a restore brings back the whole issue's group. A plain
+ * function rather than a hook, because it runs from a toast that outlives the
+ * page that showed it.
+ */
+export async function undoArchiveInboxBatch(
+  qc: QueryClient,
+  wsId: string,
+  ids: readonly string[],
+): Promise<void> {
+  try {
+    await Promise.all(ids.map((id) => api.unarchiveInbox(id)));
+  } finally {
+    refreshInboxAfterWrite(qc, wsId);
+  }
+}
+
+/**
  * When the issue of an inbox item is snoozed until, as far as the cache knows;
  * null when it isn't snoozed or its time has passed.
  */

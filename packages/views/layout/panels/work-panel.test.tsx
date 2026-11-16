@@ -262,7 +262,12 @@ beforeEach(() => {
   });
   useActiveIssueViewStore.setState({ active: {} });
   useSidebarKeptStore.setState({ held: {} });
-  useInboxSelectionStore.setState({ sidebarIssueByWorkspace: {}, sidebarTabIssuesByWorkspace: {} });
+  useInboxSelectionStore.setState({
+    sidebarIssueByWorkspace: {},
+    sidebarTabIssuesByWorkspace: {},
+    heldRows: {},
+    leftRowKeyByWorkspace: {},
+  });
   apiMock.listIssueTableRows.mockResolvedValue({
     rows: [ISSUE, OTHER].map((issue) => ({ issue })),
     total: 2,
@@ -336,18 +341,32 @@ describe("WorkPanel Inbox highlight", () => {
     expect(allIssues()).not.toHaveAttribute("aria-current");
   });
 
-  it("falls back to the other lists once the notification is archived", async () => {
+  it("keeps the open row lit in place once its notification is archived some other way", async () => {
     const qc = renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
     await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
     fireEvent.click(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME }));
     act(() => {
-      qc.setQueryData(inboxListOptions("ws-1").queryKey, [{ ...inboxItem(ISSUE), archived: true }]);
+      qc.setQueryData(inboxListOptions("ws-1").queryKey, []);
     });
 
-    await waitFor(() =>
-      expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).toHaveAttribute("aria-current", "page"),
-    );
-    expect(inInbox()).toBeNull();
+    const row = await within(inInbox()).findByRole("link", { name: /Leaves the Inbox when you move on/ });
+    expect(row).toHaveAttribute("aria-current", "page");
+    expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+    expect(allIssues()).not.toHaveAttribute("aria-current");
+  });
+
+  it("lights nothing else once an Inbox action took the open row with nothing left to open", async () => {
+    const qc = renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
+    await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
+    fireEvent.click(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME }));
+    act(() => {
+      useInboxSelectionStore.getState().leaveRow("ws-1", ISSUE.id);
+      qc.setQueryData(inboxListOptions("ws-1").queryKey, []);
+    });
+
+    await waitFor(() => expect(inInbox()).toBeNull());
+    expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+    expect(allIssues()).not.toHaveAttribute("aria-current");
   });
 
   it("lights an issue opened from a row's hover card in the Inbox", async () => {
@@ -451,6 +470,7 @@ describe("WorkPanel Inbox highlight while the next page loads", () => {
     const qc = await openFromInbox([]);
     act(() => {
       qc.setQueryData(inboxListOptions("ws-1").queryKey, [{ ...inboxItem(ISSUE), archived: true }, inboxItem(OTHER)]);
+      useInboxSelectionStore.getState().leaveRow("ws-1", ISSUE.id);
       useInboxSelectionStore.getState().rememberSidebarIssue("ws-1", OTHER.id);
     });
 
