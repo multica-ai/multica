@@ -994,7 +994,7 @@ describe("ChatInput project context", () => {
     expect(onProjectChange).toHaveBeenCalledWith(null);
   });
 
-  it("swaps Stop for Queue Send when the running composer has content", async () => {
+  it("offers default Send and an explicit queue action while replying", async () => {
     const onSend = vi.fn<ChatInputOnSend>(async () => true);
     const onStop = vi.fn();
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend, onStop });
@@ -1007,15 +1007,26 @@ describe("ChatInput project context", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled();
     const queueButton = screen.getByRole("button", { name: "Queue message" });
     expect(queueButton).not.toBeDisabled();
     fireEvent.click(queueButton);
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]?.[4]).toEqual({ queue: true });
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+  });
+
+  it("sends guidance by default during a reply without forcing the queue", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "use the new location" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]?.[4]).toBeUndefined();
   });
 
   it("keeps Stop available while queued content is uploading", async () => {

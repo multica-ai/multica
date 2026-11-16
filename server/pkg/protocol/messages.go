@@ -32,6 +32,9 @@ const (
 	// the extra deferred-task lookup for clients that opt in, and an older
 	// server's missing fields make a newer daemon retain its short fallback.
 	DaemonCapabilityClaimPollHintsV1 = "claim-poll-hints-v1"
+	// DaemonCapabilityForceRecheckV1 requests presence-aware batch claim
+	// acknowledgements on both HTTP and WebSocket.
+	DaemonCapabilityForceRecheckV1 = "force-recheck-v1"
 
 	// DaemonCapabilityPlatformSkillV1 advertises that the daemon's runtime
 	// brief names the merged `multica-platform` skill instead of the

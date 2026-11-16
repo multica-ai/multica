@@ -1222,7 +1222,8 @@ export function useToggleIssueSubscriber(issueId: string) {
           issueKeys.subscribers(issueId),
           (old) => {
             // An explicit subscribe rewrites an existing row's reason to
-            // manual, which lifts it out of the delegated and bystander tiers.
+            // manual. The delivery tier is the server's to report, so it is
+            // dropped until onSettled refetches it.
             if (
               old?.some(
                 (s) => s.user_id === userId && s.user_type === userType,
@@ -1230,7 +1231,7 @@ export function useToggleIssueSubscriber(issueId: string) {
             )
               return old.map((s) =>
                 s.user_id === userId && s.user_type === userType
-                  ? { ...s, reason: "manual" as const }
+                  ? { ...s, reason: "manual" as const, delivery: undefined }
                   : s,
               );
             return [...(old ?? []), temp];

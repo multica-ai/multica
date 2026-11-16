@@ -52,10 +52,10 @@
   "queue": {
     "title_other": "{{count}} 條排隊訊息",
     "clear": "全部清空",
-    "steer": "引導",
-    "steer_unavailable": "當前回覆開始後才能引導",
+    "steer": "立即傳送（停止目前回覆）",
+    "steer_unavailable": "目前回覆開始後可立即傳送",
     "steer_no_permission": "你已沒有執行該 AI 代理的權限",
-    "steer_unavailable_toast": "暫時無法引導，正在重新整理佇列。",
+    "steer_unavailable_toast": "暫時無法立即傳送，正在重新整理佇列。",
     "edit": "編輯排隊訊息",
     "remove": "移除排隊訊息",
     "more": "更多佇列操作",

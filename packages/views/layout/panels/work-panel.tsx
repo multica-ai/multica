@@ -47,14 +47,15 @@ function routeSegment(pathname: string, base: string): string | null {
 }
 
 /**
- * Ends the rows the sidebar lists keep (`useKeptActiveItem`) once their issue
- * or project is no longer the page. Mounted with the shell rather than the
+ * Ends the rows the sidebar lists keep (`useKeptActiveItem`), and the Inbox
+ * rows kept in place (`keepOpenInboxRow`), once their issue, project or
+ * notification is no longer the page. Mounted with the shell rather than the
  * Work panel, which unmounts on leaving Work and with every compact sheet
  * close.
  */
 export function KeptRowsRelease() {
   const p = useWorkspacePaths();
-  const { pathname } = useNavigation();
+  const { pathname, searchParams } = useNavigation();
   const wsId = useCurrentWorkspace()?.id ?? "";
   const issueSegment = routeSegment(pathname, p.issues());
   const { data: issue } = useQuery({
@@ -64,10 +65,13 @@ export function KeptRowsRelease() {
   // `undefined` while an identifier route waits for the page to load its issue.
   const issueId = issueSegment ? (issue?.id ?? (isIssueUuid(issueSegment) ? issueSegment : undefined)) : null;
   const projectId = routeSegment(pathname, p.projects());
+  // The notification the Inbox page has open, as its rows are keyed.
+  const inboxKey = pathname === p.inbox() ? searchParams.get("issue") : null;
   useLayoutEffect(() => {
     if (issueId === undefined) return;
     useSidebarKeptStore.getState().release([issueId, projectId].filter((id) => id !== null));
-  }, [issueId, projectId]);
+    if (wsId) useInboxSelectionStore.getState().releaseRows(wsId, [issueId, inboxKey].filter((id) => id !== null));
+  }, [wsId, issueId, projectId, inboxKey]);
   return null;
 }
 
@@ -110,10 +114,11 @@ export function WorkPanel() {
     !!liveClickedIssue && !isOpenIssue(liveClickedIssue.segment),
   );
   // An issue opened from the Inbox, by a row or by the issue header moving on
-  // to the next notification, lights there while the section still shows it;
-  // once archived, it falls back to the other lists.
+  // to the next notification, belongs to the Inbox until another list is
+  // clicked. Its row stays in place while it is open (`keepOpenInboxRow`),
+  // and when an Inbox action took it with nothing left to open it lights
+  // nowhere: never in another list the user did not open it from.
   const inbox = useSidebarInboxIssue(wsId, currentIssueId, clicked.movingOn);
-  const movingOn = clicked.movingOn || inbox.movingOn;
   const clickedIssue = clicked.value;
   const clickedList = clickedIssue && isOpenIssue(clickedIssue.segment) ? clickedIssue.list : undefined;
   // The notification open beside the section: an issue opened from it, or an
@@ -128,9 +133,7 @@ export function WorkPanel() {
   const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
   const rememberSidebarTabIssue = useInboxSelectionStore((s) => s.rememberSidebarTabIssue);
   const forgetSidebarTabIssue = useInboxSelectionStore((s) => s.forgetSidebarTabIssue);
-  // Moving on from an archived row keeps the issue lit nowhere rather than elsewhere.
-  const inboxClaimsIssue =
-    !!currentIssueId && inbox.fromInbox && (movingOn || inboxRows.shownIssueIds.has(currentIssueId));
+  const inboxClaimsIssue = !!currentIssueId && inbox.fromInbox && !inboxRows.collapsed;
   const treeClaimsIssue = inboxClaimsIssue || (clickedList !== undefined && clickedList !== PINS_LIST);
   const pins = usePanelPins(wsId, userId, pathname, treeClaimsIssue ? null : currentIssueId);
   const requestLocate = useSidebarTreeStore((s) => s.requestLocate);

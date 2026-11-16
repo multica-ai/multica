@@ -6,7 +6,12 @@ import { useDevActionsStore } from "@multica/core/dev-actions";
 import { useDevPromptStore, useSessionPromptStore } from "@multica/core/session-prompt";
 import { configureShortcutPlatform } from "@multica/core/shortcuts";
 import type { User } from "@multica/core/types";
+import { WHATS_NEW_RELEASES } from "../whats-new/releases";
+import { deckCards } from "../whats-new/whats-new-deck";
 import { ActionsPanel, DevActions } from "./actions-panel";
+
+// Follow the release list, so adding a release doesn't break the deck status test.
+const [latest, previous] = WHATS_NEW_RELEASES;
 
 const stores = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -27,7 +32,7 @@ function signIn(user: Partial<User> = {}) {
     user: {
       id: "u1",
       created_at: "2026-11-14T08:00:00Z",
-      whats_new_seen_version: "0.9.0",
+      whats_new_seen_version: latest!.version,
       onboarded_at: "2026-11-14T08:00:00Z",
       onboarding_questionnaire: { source: ["friend"] },
       star_prompt_shown_count: 0,
@@ -64,10 +69,12 @@ describe("ActionsPanel", () => {
     act(() => search().blur());
 
     expect(status("What's new deck")).toHaveTextContent("nothing unread");
-    fireEvent.change(screen.getByRole("combobox", { name: "Set seen version" }), { target: { value: "0.8.2" } });
-    expect(stores.auth.getState().user?.whats_new_seen_version).toBe("0.8.2");
-    expect(row("What's new deck", "Unread")).toHaveTextContent("0.9.0");
-    expect(row("What's new deck", "Cards to deal")).toHaveTextContent("3");
+    fireEvent.change(screen.getByRole("combobox", { name: "Set seen version" }), {
+      target: { value: previous!.version },
+    });
+    expect(stores.auth.getState().user?.whats_new_seen_version).toBe(previous!.version);
+    expect(row("What's new deck", "Unread")).toHaveTextContent(latest!.version);
+    expect(row("What's new deck", "Cards to deal")).toHaveTextContent(String(deckCards([latest!]).length));
     expect(status("What's new deck")).toHaveTextContent("deals at the next check");
 
     act(() => useSessionPromptStore.setState({ surveyPending: true }));

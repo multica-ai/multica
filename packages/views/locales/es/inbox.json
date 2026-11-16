@@ -125,12 +125,22 @@
   "toasts": {
     "source_context_retry_started": "Reintento iniciado con el contexto original",
     "archived": "Notificación archivada",
+    "archived_many_one": "{{count}} notificación archivada",
+    "archived_many_other": "{{count}} notificaciones archivadas",
     "unarchived": "Notificación restaurada",
     "deleted": "Notificación eliminada",
     "unsubscribed_archived": "Baja y archivo hechos",
     "unsubscribed_archived_subtree": "Te diste de baja de esta tarea y sus subtareas",
     "unsubscribed_hint": "Sus actualizaciones no llegarán a tu bandeja. Las @menciones sí.",
     "undo": "Deshacer"
+  },
+  "kept": {
+    "archived": "Archivado",
+    "leaves": "Sale de la bandeja al continuar",
+    "filtered": "Ya no coincide con tus filtros",
+    "notification_archived": "Notificación archivada",
+    "next": "Siguiente",
+    "next_tooltip": "Abrir la siguiente: {{title}}"
   },
   "errors": {
     "archived_lookup_failed": "No se ha podido cargar la notificación enlazada",

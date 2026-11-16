@@ -107,7 +107,11 @@ Reading a notification doesn't remove it. A row leaves the inbox only when:
 - you move its issue to any status in the `done` or `closed` category yourself, while **Archive issues you complete** is on (it is by default). Only your own notifications on that issue are archived, read or not. When someone else or an agent completes an issue, its notifications stay in your inbox, so you still see the news;
 - it's a **Run failed** notification and its issue moves to a status that hands it back to a person: `in_review`, a custom status in the `started` category, or any status in the `done` or `closed` category. This archives everyone's Run failed notifications on the issue, whoever moved it, and doesn't depend on the setting above. `blocked` is the exception: it hands the issue over too, but the work is still stuck, so the earlier failures are still worth reading.
 
-Open windows drop an archived row right away. A later notification on the issue lands in the inbox again.
+Open windows drop an archived row right away, except the one you have open. When its notification leaves the inbox some other way (you set the issue to `done` from its status, another window archived it, or an edit took it out of the section's filters), the row stays lit where it was and the issue header says what happened. **Undo** brings the notification back, and **Next** (or `E`) opens the next row. The row leaves once you move on.
+
+When you take the open row out yourself, from the issue header, its row, the hover card, or a bulk action that includes it, the next row opens instead. With nothing left to open, the issue stays open. Archiving, marking as done and the bulk actions confirm with **Undo**, which brings the notifications back and leaves the issue's status as it is.
+
+A later notification on the issue lands in the inbox again.
 
 **Settings → Notifications → Leaving the Inbox** has the **Archive issues you complete** switch and links to the archived notifications.
 

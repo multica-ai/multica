@@ -1260,6 +1260,8 @@ interface IssueDetailProps {
   variant?: "page" | "peek";
   /** Peek only: host controls at the end of the header (open full page, close). */
   trailingActions?: ReactNode;
+  /** A bar the host shows under the header, above the scrolling body. */
+  notice?: ReactNode;
   /**
    * Read the viewer's inbox notifications on this issue while it is on screen
    * (MUL-8588). The inbox turns this off for the issue it has open: it reads
@@ -1479,7 +1481,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, notice, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -2422,7 +2424,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   } = useIssueReactions(id, user?.id);
 
   const {
-    subscribers, isSubscribed, subscriptionReason, subscriptionProjectCovered, subscriptionKnown,
+    subscribers, isSubscribed, subscriptionReason, subscriptionDelivery, subscriptionKnown,
     togglePending, subtreePending,
     toggleSubscribe: handleToggleSubscribe, toggleSubscriber, followAllActivity,
     unsubscribeFromSubtree: handleUnsubscribeSubtree,
@@ -3665,6 +3667,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             </>
           }
         />
+        {notice}
 
         {/* scrollbar-gutter both-edges: with classic (space-taking) scrollbars —
             macOS with a mouse or "always show", Windows, Linux — the global
@@ -4082,8 +4085,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                 {/* A delegated subscription is one the user never opted into
                     by hand — their agent created this issue for them. Saying
                     so is what keeps it from reading as the product quietly
-                    adding them to things (MUL-5483). */}
-                {isSubscribed && subscriptionReason === "delegated" && (
+                    adding them to things (MUL-5483). The server's delivery
+                    tier decides it: a project watcher's delegated row still
+                    gets every event (MUL-9360). */}
+                {isSubscribed && subscriptionDelivery === "delegated" && (
                   <Tooltip>
                     {/* Quiet surface, not plain body text: this is metadata
                         explaining a state, and must not read as a second
@@ -4099,10 +4104,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                 )}
                 {isSubscribed && (
                   <KeyUpdatesSubscriptionBadge
-                    issue={issue}
-                    userId={user?.id}
-                    reason={subscriptionReason}
-                    projectCovered={subscriptionProjectCovered}
+                    delivery={subscriptionDelivery}
                     pending={togglePending}
                     onFollowAll={followAllActivity}
                   />

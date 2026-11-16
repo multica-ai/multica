@@ -1282,6 +1282,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 		{
+			name: "delete chat supplements",
+			run:  func() error { return qtx.DeleteChatTaskSupplementsByWorkspace(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete chat pins",
 			run:  func() error { return qtx.DeleteChatPinnedAgentsByWorkspace(ctx, requester.WorkspaceID) },
 		},

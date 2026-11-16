@@ -107,7 +107,11 @@ Lire une notification ne la retire pas. Une ligne quitte la boîte de réception
 - quand vous passez vous-même sa tâche à n'importe quel statut des catégories `done` ou `closed`, tant que **Archiver les tâches que vous terminez** est activé (c'est le cas par défaut). Seules vos propres notifications sur cette tâche sont archivées, lues ou non. Quand quelqu'un d'autre ou un agent termine une tâche, ses notifications restent dans votre boîte de réception, pour que vous voyiez la nouvelle ;
 - quand c'est une notification **Exécution en échec** et que sa tâche passe à un statut qui la rend à une personne : `in_review`, un statut personnalisé de la catégorie `started`, ou n'importe quel statut des catégories `done` ou `closed`. Les notifications Exécution en échec de tout le monde sur cette tâche sont alors archivées, quelle que soit la personne qui a changé le statut, et indépendamment du réglage ci-dessus. `blocked` fait exception : il rend aussi la tâche, mais le travail reste bloqué, donc les échecs précédents méritent encore d'être lus.
 
-Les fenêtres ouvertes retirent aussitôt une ligne archivée. Une notification ultérieure sur la tâche revient dans la boîte de réception.
+Les fenêtres ouvertes retirent aussitôt une ligne archivée, sauf celle que vous avez ouverte. Quand sa notification quitte la boîte de réception autrement (vous passez la tâche à `done` depuis son statut, une autre fenêtre l'archive, ou une modification la sort des filtres de la section), la ligne reste en surbrillance à sa place et l'en-tête de la tâche indique ce qui s'est passé. **Annuler** fait revenir la notification, et **Suivante** (ou `E`) ouvre la ligne suivante. La ligne disparaît dès que vous passez à autre chose.
+
+Quand vous retirez vous-même la ligne ouverte, depuis l'en-tête de la tâche, sa ligne, la carte de survol ou une action groupée qui l'inclut, c'est la ligne suivante qui s'ouvre. S'il n'en reste aucune, la tâche reste ouverte. L'archivage, le passage à terminé et les actions groupées proposent **Annuler**, qui fait revenir les notifications sans changer le statut de la tâche.
+
+Une notification ultérieure sur la tâche revient dans la boîte de réception.
 
 **Paramètres → Notifications → Sortir de la boîte de réception** contient l'interrupteur **Archiver les tâches que vous terminez** et renvoie vers les notifications archivées.
 

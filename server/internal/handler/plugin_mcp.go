@@ -66,6 +66,10 @@ type approvePluginMCPToolsRequest struct {
 
 // ApprovePluginMCPTools — PUT /api/workspaces/{id}/plugins/{installationId}/mcp/{hookKey}/tools
 func (h *Handler) ApprovePluginMCPTools(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	installation, ok := h.pluginInstallationFromURL(w, r)
 	if !ok {
 		return
