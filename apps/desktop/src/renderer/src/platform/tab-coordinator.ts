@@ -133,16 +133,15 @@ export function createScrollRestorationAdapter(
       }
       const state = useTabStore.getState();
       const generation = state.mountGeneration;
-      const url = getActiveTab(state)?.url;
       return () => {
         const state = useTabStore.getState();
-        // Tab, route and reload transitions already captured synchronously.
+        // Tab, pathname and reload transitions already captured synchronously.
         // Their teardown must not overwrite that snapshot with a collapsed
-        // scroller or attribute the outgoing element to an incoming route.
+        // scroller. Query/hash synchronization can leave this element mounted,
+        // so it must keep capturing on a later detach.
         if (
           activeRouteKey() !== routeKey ||
-          state.mountGeneration !== generation ||
-          getActiveTab(state)?.url !== url
+          state.mountGeneration !== generation
         ) return;
         state.commitScrollMemento(tabId, routeKey, {
           [containerKey]: captureElementScrollEntry(element),

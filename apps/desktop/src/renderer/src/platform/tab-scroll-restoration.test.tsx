@@ -106,6 +106,31 @@ describe("same-route scroll restoration", () => {
     expect(saved["/acme/issues::list"]?.top).toBe(150);
   });
 
+  it.each(["?view=saved-a", "#comment-a"])(
+    "keeps capturing after same-path URL synchronization from %s",
+    (suffix) => {
+      const store = useTabStore.getState();
+      store.navigateActiveSession(`/acme/issues${suffix}`);
+      const tabId = getActiveTab(useTabStore.getState())!.id;
+      const adapter = createScrollRestorationAdapter(tabId);
+      const rendered = render(
+        <ScrollRestorationProvider adapter={adapter}>
+          <ScrollRoot name="board" />
+        </ScrollRestorationProvider>,
+      );
+      registerActiveHostElement(rendered.container);
+      const board = rendered.container.firstElementChild as HTMLElement;
+      board.scrollLeft = 640;
+
+      act(() => store.navigateActiveSession("/acme/issues", { replace: true }));
+      expect(adapter.get("board")?.left).toBe(640);
+      board.scrollLeft = 0;
+      rendered.unmount();
+
+      expect(adapter.get("board")).toBeUndefined();
+    },
+  );
+
   it.each(["tab", "route", "reload"])("keeps the pre-unmount capture when %s changes before detach", (change) => {
     const store = useTabStore.getState();
     const tabId = getActiveTab(store)!.id;
