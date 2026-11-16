@@ -247,6 +247,18 @@
       "disabled_invalid_signature": "Can't replay — signature was invalid",
       "disabled_rejected": "Can't replay a rejected delivery",
       "disabled_queued": "Still queued — replay once it settles"
+    },
+    "ignore": {
+      "title": "Ignore reason",
+      "payload_filtered": "Payload conditions not met",
+      "event_filtered": "Event or action did not match",
+      "trigger_disabled": "Trigger disabled",
+      "autopilot_paused": "Autopilot paused",
+      "autopilot_archived": "Autopilot archived",
+      "quota_exceeded": "Run quota reached",
+      "actual_value": "Actual value",
+      "missing": "Field missing",
+      "truncated": "Preview truncated. See the raw body for the full value."
     }
   },
   "add_trigger_dialog": {
@@ -332,7 +344,7 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_add": "Add",
     "event_filter_remove_label": "Remove filter",
-    "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
+    "event_filter_hint": "Only process events matching a rule and all its payload conditions. Leave empty to accept all events.",
     "event_filter_condition_remove_label": "Remove condition",
     "event_filter_condition_add_label": "Add condition",
     "event_filter_condition_cancel": "Cancel",
@@ -364,7 +376,8 @@
         "label": "Run only",
         "description": "Silent run, no issue created"
       }
-    }
+    },
+    "event_filter_condition_all": "And payload matches all conditions"
   },
   "schedule_editor": {
     "time_label": "Time",

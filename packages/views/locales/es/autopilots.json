@@ -247,6 +247,18 @@
       "disabled_invalid_signature": "No se puede repetir: la firma no era válida",
       "disabled_rejected": "No se puede repetir una entrega rechazada",
       "disabled_queued": "Todavía en cola: repítela cuando se estabilice"
+    },
+    "ignore": {
+      "title": "Motivo de omisión",
+      "payload_filtered": "El contenido no cumple las condiciones",
+      "event_filtered": "El evento o la acción no coincide",
+      "trigger_disabled": "Disparador desactivado",
+      "autopilot_paused": "Automatización en pausa",
+      "autopilot_archived": "Automatización archivada",
+      "quota_exceeded": "Cuota de ejecuciones alcanzada",
+      "actual_value": "Valor real",
+      "missing": "Campo ausente",
+      "truncated": "Vista previa truncada. Consulta el contenido original para ver el valor completo."
     }
   },
   "add_trigger_dialog": {
@@ -332,7 +344,7 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_add": "Añadir",
     "event_filter_remove_label": "Quitar filtro",
-    "event_filter_hint": "Solo procesa webhooks que coincidan con estos eventos. Déjalo vacío para aceptar todos.",
+    "event_filter_hint": "Solo se procesan eventos que coinciden con una regla y todas sus condiciones. Deja vacío para aceptar todos los eventos.",
     "schedule_multiple_notice": "Esta automatización tiene {{count}} programaciones. Cierra este diálogo y edita cada una en Disparadores, más abajo.",
     "schedule_empty": "Sin programación: esta automatización solo se ejecuta cuando se dispara manualmente.",
     "schedule_add": "Añadir programación",
@@ -347,7 +359,25 @@
         "label": "Solo ejecutar",
         "description": "Ejecución silenciosa, sin crear tarea"
       }
-    }
+    },
+    "event_filter_condition_remove_label": "Eliminar condición",
+    "event_filter_condition_add_label": "Añadir condición",
+    "event_filter_condition_cancel": "Cancelar",
+    "event_filter_condition_ops": {
+      "equals": "es",
+      "not_equals": "no es",
+      "contains": "contiene",
+      "in": "es uno de",
+      "exists": "existe"
+    },
+    "event_filter_condition_path_label": "Campo del contenido",
+    "event_filter_condition_path_placeholder": "p. ej., pull_request.labels.*.name",
+    "event_filter_condition_op_label": "Operador",
+    "event_filter_condition_value_label": "Valor",
+    "event_filter_condition_value_placeholder": "p. ej., main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "Ignorar mayúsculas",
+    "event_filter_condition_all": "Y el contenido cumple todas las condiciones"
   },
   "schedule_editor": {
     "time_label": "Hora",

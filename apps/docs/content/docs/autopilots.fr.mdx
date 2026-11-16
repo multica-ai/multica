@@ -91,7 +91,7 @@ Lorsqu'une même source envoie plusieurs types d'événements, ajoutez des filtr
 
 Par exemple, avec `workflow_run` comme nom d'événement et `completed, failed` comme actions, seuls ces deux types de résultats `workflow_run` sont acceptés. Multica reconnaît l'événement et l'action à partir des en-têtes de requête et des champs de charge utile courants, notamment l'en-tête `X-GitHub-Event` de GitHub et le champ `action` du corps.
 
-Chaque ligne peut aussi porter des `conditions` sur les champs de la charge utile : cliquez sur **Condition** dans la ligne, ou définissez-les via l'API. Toutes les conditions doivent être vraies pour que la ligne corresponde ; un événement filtré est ignoré avant le démarrage de toute exécution. `path` parcourt la charge utile avec des points : un nombre indexe un tableau et `*` désigne n'importe quel élément (`pull_request.labels.*.name`). `op` vaut `equals`, `not_equals`, `contains`, `in` ou `exists`, et `ignore_case` s'applique au texte. Avec `*`, `equals`, `contains`, `in` et `exists` sont vraies si un élément correspond, et `not_equals` si aucun ne correspond. Un champ absent ne correspond jamais, et `exists` ignore `null`. Par exemple, cette ligne n'accepte que les pull requests prêtes, étiquetées `needs-review`, qui ciblent `main` ou `release` et n'ont pas été ouvertes par un bot :
+Chaque ligne peut aussi porter des `conditions` sur les champs de la charge utile : cliquez sur **Ajouter une condition** dans la ligne, ou définissez-les via l'API. Toutes les conditions doivent être vraies pour que la ligne corresponde ; un événement filtré est ignoré avant le démarrage de toute exécution. `path` parcourt la charge utile avec des points : un nombre indexe un tableau et `*` désigne n'importe quel élément (`pull_request.labels.*.name`). `op` vaut `equals`, `not_equals`, `contains`, `in` ou `exists`, et `ignore_case` s'applique au texte. Avec `*`, `equals`, `contains`, `in` et `exists` sont vraies si un élément correspond, et `not_equals` si aucun ne correspond. Un champ absent ne correspond jamais, et `exists` ignore `null`. Par exemple, cette ligne n'accepte que les pull requests prêtes, étiquetées `needs-review`, qui ciblent `main` ou `release` et n'ont pas été ouvertes par un bot :
 
 ```json
 {
@@ -105,6 +105,8 @@ Chaque ligne peut aussi porter des `conditions` sur les champs de la charge util
   ]
 }
 ```
+
+Un tableau vide développé par `*` satisfait `not_equals` ; un chemin absent échoue toujours. Les événements ou actions non correspondants sont enregistrés comme `event_filtered`, et les conditions non remplies comme `payload_filtered`. Les deux renvoient HTTP 200 sans créer d’exécution ni de tâche. La liste affiche la raison et le premier champ bloquant ; le détail affiche la condition et la valeur réelle enregistrées à la réception. Modifier la règle ne change pas cet instantané. L’aperçu est limité à 10 valeurs de 256 caractères ; le contenu brut conserve la valeur complète.
 
 Vous pouvez aussi configurer entièrement ces filtres via le CLI avec `--event-filters-file`. Une mise à jour sans option de filtrage conserve les filtres existants ; `--clear-event-filters` les supprime explicitement et accepte tous les événements. Voir les [exemples CLI](/cli#webhook-event-filters) pour le format JSON et les commandes.
 

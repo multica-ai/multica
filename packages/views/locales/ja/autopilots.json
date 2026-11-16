@@ -247,6 +247,18 @@
       "disabled_invalid_signature": "署名が無効だったため再実行できません",
       "disabled_rejected": "拒否された配信は再実行できません",
       "disabled_queued": "まだキュー待ちです。処理が落ち着いてから再実行してください"
+    },
+    "ignore": {
+      "title": "無視した理由",
+      "payload_filtered": "本文の条件を満たしていません",
+      "event_filtered": "イベントまたはアクションが一致しません",
+      "trigger_disabled": "トリガーは無効です",
+      "autopilot_paused": "自動化は一時停止中です",
+      "autopilot_archived": "自動化はアーカイブ済みです",
+      "quota_exceeded": "実行の上限に達しました",
+      "actual_value": "実際の値",
+      "missing": "フィールドがありません",
+      "truncated": "プレビューは省略されています。完全な値は元の本文で確認できます。"
     }
   },
   "add_trigger_dialog": {
@@ -332,7 +344,7 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_add": "追加",
     "event_filter_remove_label": "フィルターを削除",
-    "event_filter_hint": "これらのイベントに一致する Webhook のみを処理します。空にするとすべて許可します。",
+    "event_filter_hint": "ルールと本文のすべての条件に一致するイベントのみ処理します。空欄の場合はすべて受け付けます。",
     "event_filter_condition_remove_label": "条件を削除",
     "event_filter_condition_add_label": "条件を追加",
     "event_filter_condition_cancel": "キャンセル",
@@ -364,7 +376,8 @@
         "label": "実行のみ",
         "description": "タスクを作成せず、静かに実行します"
       }
-    }
+    },
+    "event_filter_condition_all": "かつ本文がすべての条件を満たす"
   },
   "schedule_editor": {
     "time_label": "時刻",

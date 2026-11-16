@@ -234,8 +234,8 @@ func TestWebhookHandler_PayloadConditionsGateRuns(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if w.Code != http.StatusOK || resp["status"] != "ignored" || resp["reason"] != "event_filtered" {
-		t.Fatalf("expected ignored/event_filtered, got %d %#v", w.Code, resp)
+	if w.Code != http.StatusOK || resp["status"] != "ignored" || resp["reason"] != "payload_filtered" {
+		t.Fatalf("expected ignored/payload_filtered, got %d %#v", w.Code, resp)
 	}
 
 	w = postWebhook(t, *trig.WebhookToken, map[string]any{
@@ -379,7 +379,7 @@ func TestUpdateWebhookTrigger_ExplicitEmptyArrayClearsFilters(t *testing.T) {
 		Event:        "github.something_else.opened",
 		EventPayload: json.RawMessage(`{"action":"opened"}`),
 	}
-	if !webhookEventAllowedByTriggerScope(row.EventFilters, env) {
+	if !evaluateWebhookTriggerScope(row.EventFilters, env).Allowed {
 		t.Fatal("after clear, matcher should allow all events")
 	}
 }

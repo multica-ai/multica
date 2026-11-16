@@ -27,7 +27,7 @@ func resetAutopilotFilterFlags(t *testing.T, cmd *cobra.Command) {
 }
 
 func TestAutopilotEventFiltersRequests(t *testing.T) {
-	const filters = `[{"event":"pull_request_review","actions":["submitted"]},{"event":"push"}]`
+	const filters = `[{"event":"pull_request_review","actions":["submitted"],"conditions":[{"path":"pull_request.draft","op":"equals","value":false},{"path":"pull_request.base.ref","op":"in","values":["main","release"],"ignore_case":true}]},{"event":"push"}]`
 	for _, tc := range []struct {
 		name, file, label string
 		create, clear     bool

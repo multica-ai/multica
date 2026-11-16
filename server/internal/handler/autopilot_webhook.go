@@ -549,14 +549,14 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	// 10. Event filter scope → ignored. If the trigger declares a concrete
 	//     event_filters list and the incoming event is outside that scope,
 	//     record an ignored delivery without creating an expensive run/task.
-	if !webhookEventAllowedByTriggerScope(trigRow.EventFilters, envelope) {
+	if decision := evaluateWebhookTriggerScope(trigRow.EventFilters, envelope); !decision.Allowed {
 		respBody := map[string]any{
 			"status":      "ignored",
 			"delivery_id": uuidToString(delivery.ID),
-			"reason":      "event_filtered",
+			"reason":      decision.ReasonCode,
 			"event":       envelope.Event,
 		}
-		h.finaliseDeliveryTerminal(r, delivery.ID, deliveryStatusIgnored, http.StatusOK, respBody, "event_filtered")
+		h.finaliseDeliveryTerminal(r, delivery.ID, deliveryStatusIgnored, http.StatusOK, respBody, decision.storedError(), decision.ReasonCode)
 		writeJSON(w, http.StatusOK, respBody)
 		return
 	}
@@ -668,7 +668,7 @@ const maxWebhookPayloadConditions = 20
 
 // validateWebhookEventFilters enforces the contract at the HTTP boundary so
 // that malformed shapes never reach the database. The matcher (read path)
-// trusts whatever is stored — see webhookEventAllowedByTriggerScope.
+// also fails closed on malformed stored conditions.
 func validateWebhookEventFilters(filters []WebhookEventFilter) error {
 	for i, f := range filters {
 		if strings.TrimSpace(f.Event) == "" {
@@ -758,12 +758,11 @@ func encodeWebhookEventFiltersAlways(filters []WebhookEventFilter) ([]byte, erro
 	return json.Marshal(filters)
 }
 
-// webhookEventAllowedByTriggerScope returns true when the trigger has no
-// filters (NULL / empty) or when the incoming envelope matches at least one
-// declared filter.
-func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnvelope) bool {
+// evaluateWebhookTriggerScope records the first failing condition from the
+// first event/action-compatible row, unless a later row accepts the delivery.
+func evaluateWebhookTriggerScope(eventFilters []byte, envelope WebhookEnvelope) webhookFilterDecision {
 	if len(eventFilters) == 0 {
-		return true
+		return webhookFilterDecision{Allowed: true}
 	}
 	var filters []WebhookEventFilter
 	if err := json.Unmarshal(eventFilters, &filters); err != nil {
@@ -773,16 +772,17 @@ func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnve
 		// "only allow X" policy is worse than dropping events until an
 		// operator notices.
 		slog.Warn("webhook: malformed event_filters, denying", "error", err)
-		return false
+		return webhookFilterDecision{ReasonCode: "event_filtered"}
 	}
 	if len(filters) == 0 {
-		return true
+		return webhookFilterDecision{Allowed: true}
 	}
 	_, eventName, eventAction := splitWebhookEvent(envelope.Event)
 	actionCandidates := webhookActionCandidates(eventAction, envelope.EventPayload)
 	var payload any
 	payloadDecoded := false
-	for _, f := range filters {
+	decision := webhookFilterDecision{ReasonCode: "event_filtered"}
+	for filterIndex, f := range filters {
 		if f.Event != eventName {
 			continue
 		}
@@ -790,7 +790,11 @@ func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnve
 			continue
 		}
 		if len(f.Conditions) == 0 {
-			return true
+			return webhookFilterDecision{Allowed: true}
+		}
+		if len(f.Conditions) > maxWebhookPayloadConditions {
+			decision.ReasonCode = "payload_filtered"
+			continue
 		}
 		if !payloadDecoded {
 			// Undecodable payloads leave payload nil, so every condition
@@ -798,8 +802,18 @@ func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnve
 			_ = json.Unmarshal(envelope.EventPayload, &payload)
 			payloadDecoded = true
 		}
-		if webhookPayloadConditionsHold(f.Conditions, payload) {
-			return true
+		var failure *WebhookPayloadConditionFailure
+		for conditionIndex, c := range f.Conditions {
+			if validateWebhookPayloadCondition(c) != nil || !webhookPayloadConditionHolds(c, payload) {
+				failure = newWebhookPayloadConditionFailure(c, payload, filterIndex, conditionIndex)
+				break
+			}
+		}
+		if failure == nil {
+			return webhookFilterDecision{Allowed: true}
+		}
+		if decision.Failure == nil {
+			decision = webhookFilterDecision{ReasonCode: "payload_filtered", Failure: failure}
 		}
 		// Intentionally do NOT return false here: the UI allows several
 		// filters that share the same event name (e.g. two workflow_run
@@ -808,7 +822,7 @@ func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnve
 		// the others depending on iteration order — see PR #3231 review.
 		// Keep scanning so any later filter still gets its chance.
 	}
-	return false
+	return decision
 }
 
 // splitWebhookEvent splits a normalized event like "github.workflow_run.completed"
@@ -879,22 +893,14 @@ func webhookActionAllowed(allowed, candidates []string) bool {
 	return false
 }
 
-func webhookPayloadConditionsHold(conditions []WebhookPayloadCondition, payload any) bool {
-	for _, c := range conditions {
-		if !webhookPayloadConditionHolds(c, payload) {
-			return false
-		}
-	}
-	return true
-}
-
 // webhookPayloadConditionHolds resolves the path to every value it reaches
 // (a "*" segment fans out over array elements). equals, contains, in and
 // exists hold when any value matches; not_equals holds when none does. A
-// path that reaches nothing never matches, and exists ignores JSON nulls.
+// missing path never matches. An empty wildcard expansion satisfies
+// not_equals; exists ignores JSON nulls.
 func webhookPayloadConditionHolds(c WebhookPayloadCondition, payload any) bool {
-	values := resolveWebhookPayloadPath(payload, strings.Split(c.Path, "."))
-	if len(values) == 0 {
+	values, found := resolveWebhookPayloadPath(payload, strings.Split(c.Path, "."))
+	if !found {
 		return false
 	}
 	if c.Op == payloadOpNotEquals {
@@ -942,33 +948,36 @@ func webhookConditionValueMatches(c WebhookPayloadCondition, got any) bool {
 // resolveWebhookPayloadPath walks objects by key and arrays by index or
 // "*". Each payload node is visited at most once per path, so the work is
 // bounded by the body size cap.
-func resolveWebhookPayloadPath(node any, segs []string) []any {
+func resolveWebhookPayloadPath(node any, segs []string) ([]any, bool) {
 	if len(segs) == 0 {
-		return []any{node}
+		return []any{node}, true
 	}
 	seg, rest := segs[0], segs[1:]
 	switch n := node.(type) {
 	case map[string]any:
 		next, ok := n[seg]
 		if !ok {
-			return nil
+			return nil, false
 		}
 		return resolveWebhookPayloadPath(next, rest)
 	case []any:
 		if seg == webhookPathWildcard {
 			var out []any
+			found := len(n) == 0
 			for _, el := range n {
-				out = append(out, resolveWebhookPayloadPath(el, rest)...)
+				values, resolved := resolveWebhookPayloadPath(el, rest)
+				out = append(out, values...)
+				found = found || resolved
 			}
-			return out
+			return out, found
 		}
 		idx, err := strconv.Atoi(seg)
 		if err != nil || idx < 0 || idx >= len(n) {
-			return nil
+			return nil, false
 		}
 		return resolveWebhookPayloadPath(n[idx], rest)
 	}
-	return nil
+	return nil, false
 }
 
 // webhookConditionValuesEqual compares JSON-decoded scalars. Mismatched

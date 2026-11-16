@@ -128,19 +128,6 @@ export function WebhookEventFilterSection({
                     </span>
                   )}
                   <div className="ml-auto flex shrink-0 items-center">
-                    {canAddCondition && (
-                      <TooltipHint label={t(($) => $.dialog.event_filter_condition_add_label)}>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={() => openEditor(idx)}
-                          aria-label={t(($) => $.dialog.event_filter_condition_add_label)}
-                        >
-                          <Plus />
-                        </Button>
-                      </TooltipHint>
-                    )}
                     <TooltipHint label={t(($) => $.dialog.event_filter_remove_label)}>
                       <Button
                         type="button"
@@ -156,7 +143,11 @@ export function WebhookEventFilterSection({
                 </div>
 
                 {conditions.length > 0 && (
-                  <ul className="border-t py-1">
+                  <div className="border-t py-1">
+                    <p className="px-2.5 py-1 text-micro text-muted-foreground">
+                      {t(($) => $.dialog.event_filter_condition_all)}
+                    </p>
+                    <ul>
                     {conditions.map((c, cIdx) => (
                       <li
                         key={cIdx}
@@ -194,7 +185,15 @@ export function WebhookEventFilterSection({
                         </TooltipHint>
                       </li>
                     ))}
-                  </ul>
+                    </ul>
+                  </div>
+                )}
+
+                {canAddCondition && (
+                  <Button type="button" variant="ghost" size="xs" className="m-1 text-muted-foreground" onClick={() => openEditor(idx)}>
+                    <Plus />
+                    {t(($) => $.dialog.event_filter_condition_add_label)}
+                  </Button>
                 )}
 
                 {editing && (

@@ -346,6 +346,18 @@ Utilisez `--event-filters-file` avec `autopilot trigger-add` ou `trigger-update`
 ]
 ```
 
+Chaque ligne peut aussi contenir des `conditions`, avec les mêmes règles sur la charge utile que dans l’application. Par exemple, cette règle accepte les pull requests non brouillon ciblant `main` :
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
 Cet exemple accepte les soumissions de revues de PR et tous les événements push. Omettre `actions` ou fournir un tableau d'actions vide accepte toutes les actions de cet événement.
 
 ```bash

@@ -347,6 +347,7 @@ export type {
   AutopilotQuotaUsage,
   WebhookEventFilter,
   WebhookPayloadCondition,
+  WebhookPayloadConditionFailure,
   WebhookPayloadConditionValue,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,

@@ -361,6 +361,18 @@ Use `--event-filters-file` on `autopilot trigger-add` or `trigger-update` to con
 ]
 ```
 
+Each row may also include `conditions`, using the same payload-field rules as the app. For example, this row accepts only non-draft pull requests targeting `main`:
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
 This accepts PR review submissions and all push events. Omitting `actions` or using an empty actions array accepts every action for that event.
 
 ```bash

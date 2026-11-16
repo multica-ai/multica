@@ -204,13 +204,13 @@ func TestNormalizeWebhookPayload_XEventTypeHeader(t *testing.T) {
 // ── Event filter helpers ────────────────────────────────────────────────────
 
 func TestWebhookEventAllowedByTriggerScope_NoFiltersAllowsAll(t *testing.T) {
-	if !webhookEventAllowedByTriggerScope(nil, WebhookEnvelope{Event: "github.push"}) {
+	if !evaluateWebhookTriggerScope(nil, WebhookEnvelope{Event: "github.push"}).Allowed {
 		t.Fatal("nil filters should allow all")
 	}
-	if !webhookEventAllowedByTriggerScope([]byte{}, WebhookEnvelope{Event: "github.push"}) {
+	if !evaluateWebhookTriggerScope([]byte{}, WebhookEnvelope{Event: "github.push"}).Allowed {
 		t.Fatal("empty filters should allow all")
 	}
-	if !webhookEventAllowedByTriggerScope([]byte("[]"), WebhookEnvelope{Event: "github.push"}) {
+	if !evaluateWebhookTriggerScope([]byte("[]"), WebhookEnvelope{Event: "github.push"}).Allowed {
 		t.Fatal("empty JSON array should allow all")
 	}
 }
@@ -218,7 +218,7 @@ func TestWebhookEventAllowedByTriggerScope_NoFiltersAllowsAll(t *testing.T) {
 func TestWebhookEventAllowedByTriggerScope_FiltersUndeclaredEvent(t *testing.T) {
 	filters := []byte(`[{"event":"workflow_run","actions":["completed"]}]`)
 	env := WebhookEnvelope{Event: "github.push", EventPayload: json.RawMessage(`{"action":"pushed"}`)}
-	if webhookEventAllowedByTriggerScope(filters, env) {
+	if evaluateWebhookTriggerScope(filters, env).Allowed {
 		t.Fatal("undeclared event should be filtered")
 	}
 }
@@ -226,7 +226,7 @@ func TestWebhookEventAllowedByTriggerScope_FiltersUndeclaredEvent(t *testing.T) 
 func TestWebhookEventAllowedByTriggerScope_FiltersUndeclaredAction(t *testing.T) {
 	filters := []byte(`[{"event":"workflow_run","actions":["completed"]}]`)
 	env := WebhookEnvelope{Event: "github.workflow_run.in_progress", EventPayload: json.RawMessage(`{"action":"in_progress"}`)}
-	if webhookEventAllowedByTriggerScope(filters, env) {
+	if evaluateWebhookTriggerScope(filters, env).Allowed {
 		t.Fatal("undeclared action should be filtered")
 	}
 }
@@ -234,7 +234,7 @@ func TestWebhookEventAllowedByTriggerScope_FiltersUndeclaredAction(t *testing.T)
 func TestWebhookEventAllowedByTriggerScope_AllowsDeclaredAction(t *testing.T) {
 	filters := []byte(`[{"event":"workflow_run","actions":["completed"]}]`)
 	env := WebhookEnvelope{Event: "github.workflow_run.completed", EventPayload: json.RawMessage(`{"action":"completed"}`)}
-	if !webhookEventAllowedByTriggerScope(filters, env) {
+	if !evaluateWebhookTriggerScope(filters, env).Allowed {
 		t.Fatal("declared action should be allowed")
 	}
 }
@@ -242,7 +242,7 @@ func TestWebhookEventAllowedByTriggerScope_AllowsDeclaredAction(t *testing.T) {
 func TestWebhookEventAllowedByTriggerScope_AnyActionWhenEmpty(t *testing.T) {
 	filters := []byte(`[{"event":"workflow_run"}]`)
 	env := WebhookEnvelope{Event: "github.workflow_run.in_progress", EventPayload: json.RawMessage(`{"action":"in_progress"}`)}
-	if !webhookEventAllowedByTriggerScope(filters, env) {
+	if !evaluateWebhookTriggerScope(filters, env).Allowed {
 		t.Fatal("empty actions should allow any action for the event")
 	}
 }
@@ -263,7 +263,7 @@ func TestWebhookEventAllowedByTriggerScope_MultipleFiltersSameEvent(t *testing.T
 		Event:        "github.workflow_run.completed",
 		EventPayload: json.RawMessage(`{"action":"completed"}`),
 	}
-	if !webhookEventAllowedByTriggerScope(filters, completed) {
+	if !evaluateWebhookTriggerScope(filters, completed).Allowed {
 		t.Fatal("workflow_run.completed should match the first filter")
 	}
 
@@ -271,7 +271,7 @@ func TestWebhookEventAllowedByTriggerScope_MultipleFiltersSameEvent(t *testing.T
 		Event:        "github.workflow_run.requested",
 		EventPayload: json.RawMessage(`{"action":"requested"}`),
 	}
-	if !webhookEventAllowedByTriggerScope(filters, requested) {
+	if !evaluateWebhookTriggerScope(filters, requested).Allowed {
 		t.Fatal("workflow_run.requested should match the second filter — pre-fix this silently dropped")
 	}
 
@@ -279,7 +279,7 @@ func TestWebhookEventAllowedByTriggerScope_MultipleFiltersSameEvent(t *testing.T
 		Event:        "github.workflow_run.in_progress",
 		EventPayload: json.RawMessage(`{"action":"in_progress"}`),
 	}
-	if webhookEventAllowedByTriggerScope(filters, inProgress) {
+	if evaluateWebhookTriggerScope(filters, inProgress).Allowed {
 		t.Fatal("workflow_run.in_progress is in neither filter and should be filtered out")
 	}
 }
@@ -294,7 +294,7 @@ func TestWebhookEventAllowedByTriggerScope_MalformedDenies(t *testing.T) {
 		Event:        "github.workflow_run.completed",
 		EventPayload: json.RawMessage(`{"action":"completed"}`),
 	}
-	if webhookEventAllowedByTriggerScope(corrupt, env) {
+	if evaluateWebhookTriggerScope(corrupt, env).Allowed {
 		t.Fatal("malformed event_filters must fail closed (deny), never widen the allowlist")
 	}
 }
@@ -303,17 +303,17 @@ func TestWebhookEventAllowedByTriggerScope_MultipleFilters(t *testing.T) {
 	filters := []byte(`[{"event":"workflow_run","actions":["completed"]},{"event":"check_suite","actions":["completed","failure"]}]`)
 
 	allowed1 := WebhookEnvelope{Event: "github.check_suite.completed", EventPayload: json.RawMessage(`{"action":"completed"}`)}
-	if !webhookEventAllowedByTriggerScope(filters, allowed1) {
+	if !evaluateWebhookTriggerScope(filters, allowed1).Allowed {
 		t.Fatal("check_suite.completed should be allowed")
 	}
 
 	allowed2 := WebhookEnvelope{Event: "github.check_suite.failure", EventPayload: json.RawMessage(`{"action":"failure"}`)}
-	if !webhookEventAllowedByTriggerScope(filters, allowed2) {
+	if !evaluateWebhookTriggerScope(filters, allowed2).Allowed {
 		t.Fatal("check_suite.failure should be allowed")
 	}
 
 	filtered := WebhookEnvelope{Event: "github.check_suite.requested", EventPayload: json.RawMessage(`{"action":"requested"}`)}
-	if webhookEventAllowedByTriggerScope(filters, filtered) {
+	if evaluateWebhookTriggerScope(filters, filtered).Allowed {
 		t.Fatal("check_suite.requested should be filtered")
 	}
 }
@@ -351,7 +351,7 @@ func TestWebhookEventAllowedByTriggerScope_PayloadConditions(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := webhookEventAllowedByTriggerScope(filters, pullRequestEnvelope(tc.payload)); got != tc.want {
+			if got := evaluateWebhookTriggerScope(filters, pullRequestEnvelope(tc.payload)).Allowed; got != tc.want {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
@@ -363,7 +363,7 @@ func TestWebhookEventAllowedByTriggerScope_ConditionsDoNotShadowLaterFilters(t *
 		{"event":"pull_request","conditions":[{"path":"pull_request.draft","op":"equals","value":false}]},
 		{"event":"pull_request","conditions":[{"path":"pull_request.number","op":"equals","value":42}]}
 	]`)
-	if !webhookEventAllowedByTriggerScope(filters, pullRequestEnvelope(`{"pull_request":{"draft":true,"number":42}}`)) {
+	if !evaluateWebhookTriggerScope(filters, pullRequestEnvelope(`{"pull_request":{"draft":true,"number":42}}`)).Allowed {
 		t.Fatal("second filter should match when the first one's conditions fail")
 	}
 }
@@ -397,7 +397,7 @@ func TestWebhookEventAllowedByTriggerScope_ConditionOps(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			filters := []byte(`[{"event":"pull_request","conditions":[` + tc.cond + `]}]`)
-			if got := webhookEventAllowedByTriggerScope(filters, pullRequestEnvelope(payload)); got != tc.want {
+			if got := evaluateWebhookTriggerScope(filters, pullRequestEnvelope(payload)).Allowed; got != tc.want {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})

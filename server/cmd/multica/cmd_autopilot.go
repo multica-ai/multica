@@ -987,8 +987,17 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 }
 
 type autopilotEventFilter struct {
-	Event   string   `json:"event"`
-	Actions []string `json:"actions,omitempty"`
+	Event      string                      `json:"event"`
+	Actions    []string                    `json:"actions,omitempty"`
+	Conditions []autopilotPayloadCondition `json:"conditions,omitempty"`
+}
+
+type autopilotPayloadCondition struct {
+	Path       string `json:"path"`
+	Op         string `json:"op"`
+	Value      any    `json:"value,omitempty"`
+	Values     []any  `json:"values,omitempty"`
+	IgnoreCase bool   `json:"ignore_case,omitempty"`
 }
 
 func autopilotEventFiltersInput(cmd *cobra.Command) ([]autopilotEventFilter, error) {

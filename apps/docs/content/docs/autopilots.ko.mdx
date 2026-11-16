@@ -91,7 +91,7 @@ Webhook 요청에는 다음 제약이 있습니다.
 
 예를 들어 이벤트 이름에 `workflow_run`, Actions에 `completed, failed`를 입력하면 이 두 종류의 `workflow_run` 결과만 받습니다. Multica는 GitHub의 `X-GitHub-Event`와 body의 `action`을 포함해 일반적인 요청 header와 payload에서 이벤트와 action을 식별합니다.
 
-각 줄에는 payload 필드에 대한 `conditions`도 지정할 수 있습니다. 줄의 **조건**을 클릭하거나 API로 설정하세요. 모든 조건을 만족해야 해당 줄이 일치하며, 걸러진 이벤트는 실행이 시작되기 전에 무시됩니다. `path`는 점으로 payload를 따라가며, 숫자는 배열 인덱스이고 `*`는 임의의 요소를 뜻합니다(`pull_request.labels.*.name`). `op`는 `equals`, `not_equals`, `contains`, `in`, `exists` 중 하나이며, `ignore_case`는 텍스트에 적용됩니다. `*`를 쓰면 `equals`, `contains`, `in`, `exists`는 요소 하나라도 일치하면 성립하고, `not_equals`는 어떤 요소도 일치하지 않을 때 성립합니다. 필드가 없으면 일치하지 않으며, `exists`는 `null`을 무시합니다. 예를 들어 아래 줄은 준비된 상태이고 `needs-review` 라벨이 있으며 `main` 또는 `release`를 대상으로 하고 봇이 열지 않은 pull request만 받습니다.
+각 줄에는 payload 필드에 대한 `conditions`도 지정할 수 있습니다. 줄의 **조건 추가**을 클릭하거나 API로 설정하세요. 모든 조건을 만족해야 해당 줄이 일치하며, 걸러진 이벤트는 실행이 시작되기 전에 무시됩니다. `path`는 점으로 payload를 따라가며, 숫자는 배열 인덱스이고 `*`는 임의의 요소를 뜻합니다(`pull_request.labels.*.name`). `op`는 `equals`, `not_equals`, `contains`, `in`, `exists` 중 하나이며, `ignore_case`는 텍스트에 적용됩니다. `*`를 쓰면 `equals`, `contains`, `in`, `exists`는 요소 하나라도 일치하면 성립하고, `not_equals`는 어떤 요소도 일치하지 않을 때 성립합니다. 필드가 없으면 일치하지 않으며, `exists`는 `null`을 무시합니다. 예를 들어 아래 줄은 준비된 상태이고 `needs-review` 라벨이 있으며 `main` 또는 `release`를 대상으로 하고 봇이 열지 않은 pull request만 받습니다.
 
 ```json
 {
@@ -105,6 +105,8 @@ Webhook 요청에는 다음 제약이 있습니다.
   ]
 }
 ```
+
+`*`가 빈 배열을 펼치면 `not_equals`는 충족됩니다. 경로가 없으면 일치하지 않습니다. 이벤트나 동작 불일치는 `event_filtered`, 본문 조건 불충족은 `payload_filtered`로 기록합니다. 모두 HTTP 200을 반환하며 실행이나 태스크를 만들지 않습니다. 목록에는 이유와 첫 번째 불일치 필드를 표시하고, 상세에는 수신 당시 저장한 조건과 실제 값을 표시합니다. 나중에 규칙을 바꿔도 이 기록은 유지됩니다. 미리보기는 값 10개, 각 256자로 제한됩니다. 전체 값은 원본 본문에서 확인하세요.
 
 CLI의 `--event-filters-file`로도 이 필터들을 모두 설정할 수 있습니다. 업데이트할 때 필터 옵션을 생략하면 기존 설정이 유지되고, `--clear-event-filters`를 지정하면 필터를 명시적으로 삭제하여 모든 이벤트를 받습니다. JSON 형식과 명령은 [CLI 예시](/cli#webhook-event-filters)를 참고하세요.
 
