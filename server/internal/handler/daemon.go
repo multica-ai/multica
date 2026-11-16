@@ -2107,6 +2107,14 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		DaemonID   string   `json:"daemon_id"`
 		RuntimeIDs []string `json:"runtime_ids"`
 		MaxTasks   int      `json:"max_tasks"`
+		// ForceRecheckRuntimeIDs is an optional, additive signal (#7452): the
+		// daemon lists the runtimes woken by a targeted `task_available` since its
+		// last claim so the server bypasses their cached "empty" verdict and runs
+		// the real candidate SELECT, repairing a stale verdict left by a lost
+		// EmptyClaim.Bump. Absent/unknown on an older daemon → behaves exactly as
+		// before (TTL fallback). Parsed defensively; ids not in the authorized set
+		// are dropped.
+		ForceRecheckRuntimeIDs []string `json:"force_recheck_runtime_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -2129,6 +2137,16 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An explicit force list also opts in for clients that predate the header.
+	wantAck := len(req.ForceRecheckRuntimeIDs) > 0 || requestHasClientCapability(r, protocol.DaemonCapabilityForceRecheckV1)
+	respondEmpty := func() {
+		response := map[string]any{"tasks": []AgentTaskResponse{}}
+		if wantAck {
+			response["force_rechecked_runtime_ids"] = []string{}
+		}
+		writeMeasuredJSON(w, http.StatusOK, response)
+	}
+
 	// max_tasks semantics (MUL-4257 review): a negative count is malformed; zero
 	// is a valid "no free slots" poll that must claim nothing — never coerce to
 	// 1, which would dispatch a task the daemon cannot run and strand it until
@@ -2139,7 +2157,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.MaxTasks == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
+		respondEmpty()
 		return
 	}
 	maxTasks := req.MaxTasks
@@ -2161,7 +2179,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		idByKey[util.UUIDToString(ruid)] = ruid
 	}
 	if len(idByKey) == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
+		respondEmpty()
 		return
 	}
 	ids := make([]pgtype.UUID, 0, len(idByKey))
@@ -2221,11 +2239,27 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		authorized = append(authorized, rt.ID)
 	}
 	if len(authorized) == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
+		respondEmpty()
 		return
 	}
 
-	claimed, err := h.TaskService.ClaimTasksForRuntimes(r.Context(), authorized, maxTasks)
+	// Restrict the force-recheck set (#7452) to runtimes this daemon is
+	// authorized for: an unknown or malformed id is skipped (matching this
+	// endpoint's "unknown id skipped" semantics), and an id for another daemon's
+	// runtime cannot force a cross-machine cache bypass.
+	forceRecheck := make([]pgtype.UUID, 0, len(req.ForceRecheckRuntimeIDs))
+	for _, rid := range req.ForceRecheckRuntimeIDs {
+		ruid, err := util.ParseUUID(rid)
+		if err != nil {
+			continue
+		}
+		if _, ok := runtimeByID[util.UUIDToString(ruid)]; !ok {
+			continue
+		}
+		forceRecheck = append(forceRecheck, ruid)
+	}
+
+	claimed, forceRechecked, err := h.TaskService.ClaimTasksForRuntimes(r.Context(), authorized, maxTasks, forceRecheck...)
 	if err != nil {
 		slog.Warn("claim tasks failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to claim tasks")
@@ -2324,6 +2358,14 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			"total_ms", time.Since(start).Milliseconds())
 	}
 	response := map[string]any{"tasks": out}
+	if wantAck {
+		// An explicit empty list keeps outstanding hints pending. Absence
+		// tells the client to fall back to legacy polling.
+		if forceRechecked == nil {
+			forceRechecked = []string{}
+		}
+		response["force_rechecked_runtime_ids"] = forceRechecked
+	}
 	// Only opted-in daemons understand this additive response metadata. Query
 	// after the claim so a future fire_at can shorten the long healthy-WS safety
 	// poll; a task that crossed fire_at during this request yields a bounded
