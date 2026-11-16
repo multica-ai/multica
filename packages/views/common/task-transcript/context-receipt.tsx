@@ -41,6 +41,24 @@ export function topLevelSources(receipt: ContextReceipt): ContextReceiptSource[]
   return receipt.sources.filter((s) => !s.parent);
 }
 
+/** Delivery describes preparation, independently of later file-load evidence. */
+export function receiptDeliveryBytes(receipt: ContextReceipt): { direct: number; files: number } {
+  const totals = { direct: 0, files: 0 };
+  for (const source of topLevelSources(receipt)) {
+    if (source.delivery === "inline" || source.delivery === "prompt") totals.direct += source.bytes;
+    else if (source.delivery === "file") totals.files += source.bytes;
+  }
+  return totals;
+}
+
+function sourcePath(source: ContextReceiptSource): string | undefined {
+  if (source.kind === "skill" && source.delivery === "file" && source.path) {
+    // Existing receipts name the entry file but measure the complete package.
+    return source.path.replace(/(^|[/\\])SKILL\.md$/, "$1") || ".";
+  }
+  return source.path;
+}
+
 /** Rows the reader should look at first: delivery we cannot vouch for. */
 export function receiptWarnings(receipt: ContextReceipt): ContextReceiptSource[] {
   return topLevelSources(receipt).filter((s) => loadTone(s.load) === "warn");
@@ -86,7 +104,7 @@ export function ContextReceiptButton({ taskId, open }: { taskId: string; open: b
 export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
   const { t } = useT("agents");
   const topLevel = topLevelSources(receipt);
-  const totalBytes = topLevel.reduce((sum, s) => sum + s.bytes, 0);
+  const bytes = receiptDeliveryBytes(receipt);
   const warnings = receiptWarnings(receipt);
 
   const runtimeLabel = [providerDisplayName(receipt.runtime), receipt.runtime_version]
@@ -100,8 +118,11 @@ export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
         <div className="text-muted-foreground">
           {t(($) => $.transcript.context_receipt_summary, {
             count: topLevel.length,
-            size: formatBytes(totalBytes),
           })}
+        </div>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground">
+          <span>{t(($) => $.transcript.context_receipt_direct_bytes, { size: formatBytes(bytes.direct) })}</span>
+          <span>{t(($) => $.transcript.context_receipt_file_bytes, { size: formatBytes(bytes.files) })}</span>
         </div>
       </div>
 
@@ -165,11 +186,16 @@ export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
                 </div>
                 {s.sha256 && <div className="font-mono text-micro text-faint-foreground">{s.sha256}</div>}
               </td>
-              <td className="py-1 pr-2 text-right tabular-nums text-foreground">{formatBytes(s.bytes)}</td>
+              <td className="py-1 pr-2 text-right tabular-nums text-foreground">
+                <div>{formatBytes(s.bytes)}</div>
+                {s.kind === "skill" && s.delivery === "file" && (
+                  <div className="text-micro text-muted-foreground">{t(($) => $.transcript.context_receipt_package)}</div>
+                )}
+              </td>
               <td className="py-1 pr-2">
                 <div
                   className={cn("truncate", s.delivery === "file" ? "font-mono text-foreground" : "text-muted-foreground")}
-                  title={s.path}
+                  title={sourcePath(s)}
                 >
                   {deliveryLabel(s, t)}
                 </div>
@@ -226,7 +252,7 @@ function sourceLabel(source: ContextReceiptSource, t: T): string {
 function deliveryLabel(source: ContextReceiptSource, t: T): string {
   switch (source.delivery) {
     case "file":
-      return source.path ?? t(($) => $.transcript.context_delivery_file);
+      return sourcePath(source) ?? t(($) => $.transcript.context_delivery_file);
     case "inline":
       return t(($) => $.transcript.context_delivery_inline);
     case "prompt":
