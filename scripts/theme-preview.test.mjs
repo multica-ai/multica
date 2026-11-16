@@ -96,6 +96,12 @@ const EXPECTED = [
     source: "packages/views/layout/panel-nav.tsx",
   },
   {
+    what: "the frame",
+    find: (els) => els.filter((el) => el.attrs["data-slot"] === "sidebar-wrapper"),
+    classes: ["bg-app-shell"],
+    source: "packages/views/layout/dashboard-layout.tsx",
+  },
+  {
     what: "the page",
     find: (els) => anchors(els, "page"),
     classes: ["rounded-page", "bg-page-canvas", "ring-page-border"],
@@ -166,7 +172,14 @@ const EXPECTED = [
   })),
   {
     what: "the small buttons",
-    find: (els) => els.filter((el) => "data-variant" in el.attrs && ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"])),
+    // The composer's send button is the one round button (submit-button.tsx).
+    find: (els) =>
+      els.filter(
+        (el) =>
+          el.attrs["data-slot"] === "button" &&
+          ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"]) &&
+          !el.classes.has("rounded-full"),
+      ),
     classes: ["rounded-button-sm"],
     source: "packages/ui/components/ui/button.tsx",
   },

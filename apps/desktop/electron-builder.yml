@@ -43,6 +43,9 @@ mac:
   # Electron 44 requires macOS 13 Ventura; declare it on every mac bundle.
   minimumSystemVersion: "13.0.0"
   entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    # Shown in the macOS prompt the first time voice input opens the mic.
+    NSMicrophoneUsageDescription: Multica uses the microphone for voice input when you dictate into chat or comments.
   target:
     - dmg
     - zip

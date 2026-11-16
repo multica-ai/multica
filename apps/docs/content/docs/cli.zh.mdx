@@ -414,9 +414,11 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `usage <issue-id>` | 查看聚合 token 用量 | |
 | | `rerun-task <run-id>` | 沿用原智能体和触发上下文，重跑指定运行 | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | 取消进行中或排队中的运行 | `--issue` |
-| `project` | `list/get/create/update/delete` | 管理项目 | `create`：`--title`（必填）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（可重复） |
+| `project` | `list/get/create/update/delete` | 管理项目 | `create`：`--title`（必填）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（可重复）、`--visibility`（`workspace` 或 `private`）、`--member`（可重复，配合 `--visibility private`）；`update`：`--visibility`、`--member`（项目正在改为私有或已经是私有时都会加入名单） |
 | | `status <id> <status>` | 修改项目状态 | |
+| | `archive/restore <id>` | 归档或恢复项目。已归档的项目不出现在 `list` 中、不再接受新任务，向它创建任务的自动化会被暂停 | `list --archived` 只列出已归档的项目 |
 | | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目录的 `in_place` / `worktree`） |
+| | `member list/add/remove` | 查看、添加或移除私有项目的成员。只有名单里的 `owner`/`admin` 和项目的访问管理者能添加或移除；智能体不能修改访问权限 | `add <project-id> <member>...`、`remove <project-id> <member>`；成员可以是名称、邮箱或用户 ID |
 | | `workflow get/set <project-id>` | 查看项目当前生效的工作流，或切换工作流 | `set <project-id> <workflow\|default>`：`--map old=new`（可重复），`--dry-run` 打印状态迁移计划；切换不会重新分配任务，也不会启动运行。仅管理员和项目负责人可操作 |
 | `workflow` | `list/get/create/update/delete` | 管理工作流；`get` 等命令接受 ID、ID 前缀、完整名称或 `default`。工作流声明的状态属于工作区状态目录，用 `issue-status` 修改 | `create` / `update`：`--name`、`--description`、`--steps-file`（步骤的 JSON 数组，整体替换）；`update`：`--map old=new`（可重复）、`--dry-run`。编辑和删除仅限工作流所有者和工作区管理员；仍被项目使用的工作流不能删除 |
 | | `handoff set <workflow> <status-key>` | 设置单个步骤的处理人、说明和下一步/退回状态，未指定的字段保持不变 | `--handler`（`none`、`project_lead`、`creator`，或成员/智能体/小队的名称或 UUID）、`--instructions` / `--instructions-file`、`--next`、`--back`、`--copy-for-project` |

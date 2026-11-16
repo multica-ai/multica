@@ -76,10 +76,12 @@ func TestPrivateProjectInboxItemMutationsNeedVisibility(t *testing.T) {
 	// Delivered before the outsider lost access (or written by a path that
 	// never checked): the row exists, but the outsider may not act on it.
 	outsiderItem := insertSecretInboxItem(t, f, f.outsider)
+	adminItem := insertSecretInboxItem(t, f, f.outsideAdmin)
 
-	allowed("workspace owner outside the member list", testUserID, ownerItem)
+	allowed("workspace owner in the member list", testUserID, ownerItem)
 	allowed("project member", f.insider, insiderItem)
 	blocked("workspace member outside the project", f.outsider, outsiderItem)
+	blocked("workspace admin outside the project", f.outsideAdmin, adminItem)
 
 	removeProjectMemberAsOwner(t, f, f.insider)
 	blocked("revoked project member", f.insider, insiderItem)
@@ -99,7 +101,7 @@ func TestPrivateProjectSubscribedIssueIDsHidden(t *testing.T) {
 			"issue_id": issueID, "user_type": "member", "user_id": userID, "reason": "manual",
 		}, "issue_id = $1 AND user_id = $2", issueID, userID)
 	}
-	for _, userID := range []string{testUserID, f.insider, f.outsider} {
+	for _, userID := range []string{testUserID, f.insider, f.outsider, f.outsideAdmin} {
 		subscribe(f.secretIssue, userID)
 		subscribe(f.publicIssue, userID)
 	}
@@ -123,9 +125,10 @@ func TestPrivateProjectSubscribedIssueIDsHidden(t *testing.T) {
 			t.Errorf("%s: subscribed secret=%v public=%v, want secret=%v public=true", who, got[f.secretIssue], got[f.publicIssue], wantSecret)
 		}
 	}
-	check("workspace owner outside the member list", testUserID, true)
+	check("workspace owner in the member list", testUserID, true)
 	check("project member", f.insider, true)
 	check("workspace member outside the project", f.outsider, false)
+	check("workspace admin outside the project", f.outsideAdmin, false)
 
 	removeProjectMemberAsOwner(t, f, f.insider)
 	check("revoked project member", f.insider, false)
@@ -159,9 +162,10 @@ func TestPrivateProjectLabelUsageCountHidden(t *testing.T) {
 		userID string
 		want   int64
 	}{
-		{"workspace owner outside the member list", testUserID, 2},
+		{"workspace owner in the member list", testUserID, 2},
 		{"project member", f.insider, 2},
 		{"workspace member outside the project", f.outsider, 1},
+		{"workspace admin outside the project", f.outsideAdmin, 1},
 	} {
 		if got := usage(tc.userID); got != tc.want {
 			t.Errorf("%s: usage_count = %d, want %d", tc.name, got, tc.want)
@@ -220,7 +224,7 @@ func TestPrivateProjectViewPreferenceScopeHidden(t *testing.T) {
 	}
 
 	for _, tc := range []struct{ name, userID string }{
-		{"workspace owner outside the member list", testUserID},
+		{"workspace owner in the member list", testUserID},
 		{"project member", f.insider},
 	} {
 		put(tc.userID, f.projectID).Want(http.StatusOK)
@@ -230,6 +234,7 @@ func TestPrivateProjectViewPreferenceScopeHidden(t *testing.T) {
 		}
 	}
 	blocked("workspace member outside the project", f.outsider)
+	blocked("workspace admin outside the project", f.outsideAdmin)
 
 	removeProjectMemberAsOwner(t, f, f.insider)
 	blocked("revoked project member", f.insider)

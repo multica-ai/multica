@@ -18,6 +18,7 @@ Work that a single issue can describe does not need a project. Projects fit a gr
 | **Status** | `planned`, `in_progress`, `paused`, `completed`, or `cancelled`. |
 | **Priority** | `urgent`, `high`, `medium`, `low`, or `none`. |
 | **Lead** | A member or an agent — who coordinates the project. |
+| **Access** | The entire workspace, or only the project's members. See [Private projects](#private-projects). |
 | **Start and target dates** | The project's planned time range. |
 | **Issues and progress** | The work in the project and how much of it is finished. |
 | **Resources** | Linked GitHub repositories or local directories on specific computers. |
@@ -60,13 +61,56 @@ Choose the project’s **Workflow** to set its board columns and who takes over 
 
 The lead can be a member or an agent; a member who is the lead can also switch the project’s workflow. Making someone the lead does not assign issues to them or start any work. To hand a step to the lead, set that step's handler to **Project lead** in the workflow.
 
+## Private projects
+
+A project's **Access** is either **Entire workspace** or **Project members only**. A private project, with its issues, comments, and attachments, is visible only to the people on its member list. For everyone else it does not appear in lists or search, and a link to it opens as not found.
+
+### Who can see a private project
+
+- **People on the member list, and nobody else.** A workspace role opens nothing: an `owner` or `admin` who is not on the list cannot see the project. They are added to the list like anyone else, and can be removed from it.
+- **Agents** follow the people they work for. An agent run sees a private project only when both the person who triggered the run and the agent's owner are on the list. An issue in a private project can only be assigned to an agent whose owner is on the list.
+- A member who leaves the workspace leaves every private project in it.
+
+<Callout type="info">
+If you are an `owner` or `admin` and a private project no longer shows up for you, you are not on its member list. Ask the member who manages its access to add you; the workspace owner can also join it from settings (see [Workspace owner recovery](#workspace-owner-recovery)).
+</Callout>
+
+### Who manages the member list
+
+Managing access means adding and removing members, changing the project lead, and switching the project back to the entire workspace. These people can do it:
+
+- `owner` and `admin` members who are on the list.
+- One member the project names as its access manager, marked **Manages access** in the **Access** dialog: the lead, when the lead is a person on the list; otherwise the creator, when on the list; otherwise the member who has been on the list the longest.
+
+The lead of a private project can be a member, an agent, or nobody, as on any project. The access manager is not stored but worked out from the lead, the creator, and the list each time, so it moves when the lead changes or someone leaves. Naming a person as lead adds them to the list; to remove the current lead from the list, change the lead first. Other members can see the list but cannot change it. Agents cannot change any project's access.
+
+### Create a private project or make a project private
+
+- **New project**: in the create dialog, open **Access**, choose **Project members only**, and add members. You are always on the list, and so is a person you name as lead.
+- **Existing project**: click **Access** in the project's properties and choose **Project members only**. Making a workspace-visible project private takes an `owner` or `admin`; they are added to the list, along with the lead if the lead is a person.
+- **CLI**: pass `--visibility private` to `project create` or `project update`, with `--member` (a name, email, or user ID; repeatable) for the initial list. Manage the list afterwards with `project member list|add|remove`.
+
+```bash
+multica project create --title "Pricing revamp" --visibility private --member alice@example.com --member Bob
+multica project update <project-id> --visibility private --member alice@example.com
+multica project member add <project-id> carol@example.com
+```
+
+Switching a private project back to **Entire workspace** makes the project and its issues, comments, and attachments visible to every workspace member. The app asks for confirmation first; `multica project update --visibility workspace` applies the change immediately.
+
+### Workspace owner recovery
+
+A private project may have no `owner` or `admin` on its list, or no members left at all. The workspace `owner` can step in from **Settings → General → Private projects**, a section only owners see (admins do not). It lists every private project with its name and members, and nothing else: issues, comments, and attachments stay hidden until you join.
+
+Click **Join** and confirm to add yourself to the member list. You appear in the list like any member, its existing members get an inbox notification, and as an owner on the list you can manage its access. Joining does not change the lead. A project whose members have all left is recovered the same way: join it, then manage or delete it from the project page.
+
 ## Pin to the sidebar
 
 A pinned project appears in your sidebar. Pinning is a personal preference and does not affect other members.
 
 ## Create, edit, and delete
 
-Any workspace member can create and edit projects. Members can delete projects they created or that an agent they currently own created; agents can delete only their own projects. Human `owner` and `admin` members can delete any project, including older projects with an unknown creator.
+Any workspace member can create and edit projects. Members can delete projects they created or that an agent they currently own created; agents can delete only their own projects. Human `owner` and `admin` members can delete any project, including older projects with an unknown creator. A private project can only be edited or deleted by people on its member list, so an `owner` or `admin` has to be on the list first.
 
 <Callout type="warning">
 Deleting a project does not delete its issues: they detach and stay in the workspace. The project's description, status, and resources are permanently deleted.

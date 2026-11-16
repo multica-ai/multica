@@ -411,9 +411,11 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `usage <issue-id>` | 檢視聚合 token 用量 | |
 | | `rerun-task <run-id>` | 沿用原 AI 代理和觸發上下文，重跑指定執行 | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | 取消進行中或排隊中的執行 | `--issue` |
-| `project` | `list/get/create/update/delete` | 管理專案 | `create`：`--title`（必填）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（可重複） |
+| `project` | `list/get/create/update/delete` | 管理專案 | `create`：`--title`（必填）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（可重複）、`--visibility`（`workspace` 或 `private`）、`--member`（可重複，搭配 `--visibility private`）；`update`：`--visibility`、`--member`（專案正在改為私有或已經是私有時都會加入名單） |
 | | `status <id> <status>` | 修改專案狀態 | |
+| | `archive/restore <id>` | 歸檔或恢復專案。已歸檔的專案不出現在 `list` 中、不再接受新任務，向它建立任務的自動化會被暫停 | `list --archived` 只列出已歸檔的專案 |
 | | `resource list/add/update/remove` | 管理專案附加資源 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目錄的 `in_place` / `worktree`） |
+| | `member list/add/remove` | 檢視、新增或移除私有專案的成員。只有名單裡的 `owner`/`admin` 和專案的存取管理者能新增或移除；AI 代理不能修改存取權限 | `add <project-id> <member>...`、`remove <project-id> <member>`；成員可以是名稱、信箱或使用者 ID |
 | | `workflow get/set <project-id>` | 檢視專案當前生效的工作流，或切換工作流 | `set <project-id> <workflow\|default>`：`--map old=new`（可重複），`--dry-run` 列印狀態遷移計劃；切換不會重新分配任務，也不會啟動執行。僅管理員和專案負責人可操作 |
 | `workflow` | `list/get/create/update/delete` | 管理工作流；`get` 等命令接受 ID、ID 字首、完整名稱或 `default`。工作流宣告的狀態屬於工作區狀態目錄，用 `issue-status` 修改 | `create` / `update`：`--name`、`--description`、`--steps-file`（步驟的 JSON 陣列，整體替換）；`update`：`--map old=new`（可重複）、`--dry-run`。編輯和刪除僅限工作流所有者和工作區管理員；仍被專案使用的工作流不能刪除 |
 | | `handoff set <workflow> <status-key>` | 設定單個步驟的處理人、說明和下一步/退回狀態，未指定的欄位保持不變 | `--handler`（`none`、`project_lead`、`creator`，或成員/ AI 代理/小隊的名稱或 UUID）、`--instructions` / `--instructions-file`、`--next`、`--back`、`--copy-for-project` |

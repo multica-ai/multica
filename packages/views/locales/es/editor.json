@@ -53,6 +53,8 @@
     "zoom_actual": "Tamaño real"
   },
   "attachment": {
+    "install_theme": "Instalar tema",
+    "install_theme_failed": "No se pudo leer el adjunto. Inténtalo de nuevo en un momento.",
     "download_failed": "No se ha podido obtener un enlace de descarga. Inténtalo de nuevo en un momento.",
     "preview": "Vista previa",
     "preview_loading": "Cargando vista previa…",
@@ -182,5 +184,49 @@
     "clear_filter": "Borrar filtro",
     "no_matches": "Ninguna fila coincide",
     "close": "Cerrar"
+  },
+  "voice": {
+    "dictate": "Dictar",
+    "hold_to_talk": "Mantén pulsado para hablar",
+    "tap_or_hold": "Dictar (toca, o mantén pulsado para hablar)",
+    "cancel": "Cancelar",
+    "insert": "Insertar",
+    "send": "Enviar",
+    "retry": "Reintentar",
+    "dismiss": "Cerrar",
+    "requesting": "Esperando el micrófono…",
+    "transcribing": "Transcribiendo…",
+    "release_to_insert": "Suelta para insertar",
+    "recording": "Grabando",
+    "errors": {
+      "permission_denied": "El acceso al micrófono está bloqueado. Permítelo en el navegador o en la configuración del sistema y vuelve a intentarlo.",
+      "no_microphone": "No se encontró ningún micrófono. Conecta uno y vuelve a intentarlo.",
+      "microphone_failed": "No se pudo iniciar el micrófono.",
+      "no_speech": "No se detectó voz. Vuelve a intentarlo un poco más cerca del micrófono.",
+      "unavailable": "La entrada de voz no puede transcribir en este ordenador.",
+      "transcription_failed": "La transcripción falló. La grabación se conserva, así que puedes reintentarlo."
+    },
+    "models": {
+      "more_languages": "{{more}} más",
+      "in_use": "En uso",
+      "recommended": "Recomendado",
+      "most_accurate": "Más preciso",
+      "fastest": "Más rápido",
+      "by": "De {{author}}",
+      "license": "Licencia",
+      "downloading": "Descargando, {{percent}} %",
+      "failed": "La descarga falló. Reinténtala para continuar donde se quedó.",
+      "download": "Descargar",
+      "retry": "Reintentar",
+      "cancel": "Cancelar",
+      "use": "Usar",
+      "delete": "Eliminar {{name}}"
+    },
+    "setup": {
+      "title": "Configurar la entrada de voz",
+      "description": "La voz se transcribe en este ordenador, así que las grabaciones nunca salen de él. Descarga un modelo de voz una vez para empezar.",
+      "later": "Ahora no",
+      "start": "Empezar a dictar"
+    }
   }
 }

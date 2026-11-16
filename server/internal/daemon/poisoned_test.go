@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -8,6 +9,30 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
+
+func TestClassifyPoisonedErrorIgnoresCodebuddyProtocolSummary(t *testing.T) {
+	for _, count := range []int{400, 1400, 4000} {
+		summary := fmt.Sprintf("\n[codebuddy protocol: exit_code=0 stdout_bytes=%d stderr_bytes=0 event_count=1 invalid_event_count=0 assistant_event_count=0 tool_use_count=0 saw_result=true result_is_error=true result_bytes=0 last_assistant_bytes=0 scanner_error=false]", count)
+		for _, tc := range []struct {
+			raw  string
+			want taskfailure.Reason
+		}{
+			{`HTTP 404 {"type":"invalid_request_error","message":"unknown model test-model","code":"model_not_found"}`, taskfailure.ReasonAgentModelNotFoundOrUnavailable},
+			{`HTTP 401 {"type":"invalid_request_error","message":"invalid api key","code":"invalid_api_key"}`, taskfailure.ReasonAgentProviderAuthOrAccess},
+		} {
+			raw := tc.raw + summary
+			if reason, poisoned := classifyPoisonedError(raw); poisoned || reason != "" {
+				t.Errorf("count=%d: non-poisoning failure classified as %q", count, reason)
+			}
+			if got := taskfailure.Classify(raw); got != tc.want {
+				t.Errorf("count=%d: provider reason=%s, want %s", count, got, tc.want)
+			}
+		}
+		if reason, poisoned := classifyPoisonedError(`HTTP 400 {"type":"invalid_request_error","message":"Could not process image"}` + summary); !poisoned || reason != FailureReasonAPIInvalidRequest {
+			t.Errorf("count=%d: lost actual poisoned request: %q/%v", count, reason, poisoned)
+		}
+	}
+}
 
 func TestClassifyPoisonedOutput(t *testing.T) {
 	cases := []struct {

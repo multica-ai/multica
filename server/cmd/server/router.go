@@ -2162,6 +2162,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/subscribe", h.SubscribeToIssue)
 					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
 					r.Post("/unsubscribe/subtree", h.UnsubscribeFromIssueSubtree)
+					r.Post("/unsubscribe/undo", h.UndoUnsubscribeFromIssue)
 					r.Post("/read", h.MarkIssueRead)
 					r.Post("/unread", h.MarkIssueUnread)
 					r.Get("/wakeups", h.ListIssueWakeups)
@@ -2280,12 +2281,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
+				// Workspace owner only: every private project, joined or not.
+				r.Get("/private", h.ListPrivateProjectsForOwner)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
+					r.Post("/join", h.JoinPrivateProject)
+					r.Post("/archive", h.ArchiveProject)
+					r.Post("/restore", h.RestoreProject)
 					r.Post("/workflow", h.SetProjectWorkflow)
 					r.Get("/members", h.ListProjectMembers)
 					r.Post("/members", h.AddProjectMembers)
@@ -2657,6 +2663,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
+				// The caller's snoozed issues, for the Snoozed view (MUL-9333).
+				r.Get("/snoozed", h.ListSnoozedInbox)
 				// Every unread notification on one issue, for reading the issue
 				// outside the inbox (MUL-8588).
 				r.Post("/issues/{issueId}/read", h.MarkIssueInboxRead)
@@ -2664,6 +2672,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/unread", h.MarkInboxUnread)
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
 				r.Post("/{id}/unarchive", h.UnarchiveInboxItem)
+				r.Post("/{id}/snooze", h.SnoozeInboxItem)
+				r.Post("/{id}/unsnooze", h.UnsnoozeInboxItem)
 				r.Delete("/{id}", h.DeleteInboxItem)
 			})
 

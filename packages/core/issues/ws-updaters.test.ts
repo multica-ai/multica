@@ -17,6 +17,7 @@ import {
   patchIssueProperties,
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
+import { NO_PROJECT_SIDEBAR_SOURCE } from "./sidebar-list";
 import { labelKeys } from "../labels/queries";
 import { EMPTY_INBOX_FILTERS } from "../inbox/filters";
 import { archivedInboxFacetsOptions, archivedInboxPagesOptions } from "../inbox/queries";
@@ -1191,6 +1192,18 @@ describe("sidebar issue lists", () => {
   it("refetches the project an issue moves into", () => {
     onIssueUpdated(qc, WS_ID, { id: ISSUE_ID, project_id: "project-9", revision: 2 }, { projectChanged: true });
     expect(invalidated(otherKey)).toBe(true);
+  });
+
+  it("refetches No project when an issue leaves its project", () => {
+    const noProjectKey = issueKeys.sidebar(
+      WS_ID,
+      NO_PROJECT_SIDEBAR_SOURCE,
+      { table: { scope: { kind: "workspace" }, filters: { include_no_project: true }, sort } },
+      5,
+    );
+    qc.setQueryData(noProjectKey, { issues: [], total: 0 });
+    onIssueUpdated(qc, WS_ID, { id: ISSUE_ID, project_id: null, revision: 2 }, { projectChanged: true });
+    expect(invalidated(noProjectKey)).toBe(true);
   });
 
   it("refetches every list when an issue is created or deleted", () => {

@@ -33,6 +33,14 @@ import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
+import {
+  useComposerVoice,
+  VoiceErrorRow,
+  VoiceHud,
+  VoiceMicButton,
+  VoiceSetupDialog,
+  VoiceStrip,
+} from "../../voice";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
 import { ReplyAnnotations } from "../../issues/components/reply-annotations";
@@ -155,6 +163,8 @@ interface ChatInputProps {
    */
   draftKeyOverride?: string;
   editorKeyOverride?: string;
+  /** Mounted but not shown (the closed floating window): voice input is off. */
+  hidden?: boolean;
   /** Saved quotes from this session's replies, sent ahead of the typed text. */
   annotations?: Pick<ChatAnnotations, "draftKey" | "composer" | "editAnnotation">;
 }
@@ -191,6 +201,7 @@ export function ChatInput({
   focusRequest,
   draftKeyOverride,
   editorKeyOverride,
+  hidden = false,
   annotations: annotationSlot,
 }: ChatInputProps) {
   const { t } = useT("chat");
@@ -200,6 +211,7 @@ export function ChatInput({
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   // Two keys with deliberately different concerns:
   //
   // `draftKey` — zustand storage key. Scopes the in-progress draft per session
@@ -695,6 +707,15 @@ export function ChatInput({
     !isProjectUpdating;
   const selectedProject = projects.find((project) => project.id === projectId);
   const canSubmitNow = !disabled && !noAgent && (!isRunning || !!allowSubmitWhileRunning);
+  const voice = useComposerVoice({
+    insert: (text) => editorRef.current?.insertText(text) ?? false,
+    submit: canSubmitNow ? () => void submit() : undefined,
+    // The editor is shared across sessions and agents; a switch must not
+    // carry a transcript (or its send) over to the new conversation.
+    scope: draftKeyOverride ?? `${draftKey}:${selectedAgentId ?? ""}`,
+    hidden,
+    disabled: !!disabled || !!noAgent,
+  });
 
   return (
     <>
@@ -747,6 +768,8 @@ export function ChatInput({
           noAgent && "pointer-events-none opacity-60",
         )}
         aria-disabled={noAgent || undefined}
+        ref={voice.rootRef}
+        onFocusCapture={voice.onFocusCapture}
         onKeyDown={(event) => {
           // Tab is the editor's when it wants it (list indent, the @ and /
           // pickers): those handle the key first and prevent its default.
@@ -853,7 +876,15 @@ export function ChatInput({
             showBubbleMenu
           />
         </div>
-        {(uploadEnabled || projectSelectionEnabled || leftAdornment) && (
+        <VoiceHud voice={voice} />
+        <VoiceSetupDialog voice={voice} />
+        <VoiceErrorRow voice={voice} className="mx-2 mb-1" />
+        {voice.showStrip && (
+          <div className="absolute inset-x-1.5 bottom-1 flex items-center">
+            <VoiceStrip voice={voice} />
+          </div>
+        )}
+        {!voice.showStrip && (uploadEnabled || projectSelectionEnabled || leftAdornment) && (
           <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1">
             {(uploadEnabled || projectSelectionEnabled) && (
               <ChatAddMenu
@@ -869,7 +900,8 @@ export function ChatInput({
             {leftAdornment}
           </div>
         )}
-        <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+        <div className={cn("absolute bottom-1 right-1.5 flex items-center gap-1", voice.showStrip && "hidden")}>
+          <VoiceMicButton voice={voice} />
           {pageContext && (
             <IconButton
               type="button"

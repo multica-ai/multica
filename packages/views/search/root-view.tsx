@@ -1,16 +1,21 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Clock, Loader2, MessageSquare, Sparkles, SquarePen, UserPlus, Zap, type IconComponent } from "@multica/ui/icons";
+import { Clock, Layers, Loader2, MessageSquare, Sparkles, SquarePen, UserPlus, Zap, type IconComponent } from "@multica/ui/icons";
 import { Command as CommandPrimitive } from "cmdk";
 import { useQuery } from "@tanstack/react-query";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { inboxUnreadSummaryOptions, unreadWorkspaceIds } from "@multica/core/inbox/queries";
+import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
+import { issueViewTarget } from "@multica/core/issue-views/view-target";
 import { paths, useWorkspacePaths } from "@multica/core/paths";
+import { projectListOptions } from "@multica/core/projects/queries";
 import type { InboxWorkspaceUnread } from "@multica/core/types";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../common/actor-avatar";
+import { BUILTIN_VIEW_ICON, useBuiltinViewNavigation } from "../issue-views/builtin-views";
 import { routeIconForPath } from "../layout/route-icon-components";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
@@ -21,6 +26,7 @@ import { usePalette } from "./palette-context";
 import { CommandGroupView, CommandRow, PaletteGroup, ROW_CLASS, ROW_ICON_CLASS, RowHint } from "./rows";
 import { ActorRow, AgentPresenceText, IssueResultRow, ObjectRow, ProjectResultRow } from "./result-rows";
 import type { IssueTarget } from "./types";
+import type { PaletteView } from "./use-object-search";
 import type { BestMatch, HandToAgentSeed, RootModel } from "./use-root-model";
 
 const EMPTY_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
@@ -29,6 +35,7 @@ const EMPTY_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 const TYPE_ORDER = [
   "context",
   "pages",
+  "views",
   "commands",
   "agents",
   "squads",
@@ -105,6 +112,24 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               </CommandPrimitive.Item>
             );
           })}
+        </PaletteGroup>
+      ),
+    });
+  }
+  if (objects.views.length > 0) {
+    groups.push({
+      key: "views",
+      type: "views",
+      score: objects.views[0]!.score,
+      node: (
+        <PaletteGroup key="views" heading={t(($) => $.groups.views)}>
+          {objects.views.map(({ item }) => (
+            <ViewResultRow
+              key={item.kind === "builtin" ? `builtin:${item.key}` : item.view.id}
+              view={item}
+              query={query}
+            />
+          ))}
         </PaletteGroup>
       ),
     });
@@ -402,6 +427,52 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
 }
 
 /**
+ * Opens a view the way its sidebar row does: the view's link, and the
+ * active-view write that makes an already-open page switch to it.
+ */
+function ViewResultRow({ view, query }: { view: PaletteView; query: string }) {
+  const { t } = useT("issues");
+  const palette = usePalette();
+  const wsId = useWorkspaceId();
+  const p = useWorkspacePaths();
+  const builtinNav = useBuiltinViewNavigation();
+  const setActive = useActiveIssueViewStore((s) => s.setActive);
+  const projectId = view.kind === "view" && view.view.scope_type === "project" ? (view.view.scope_id ?? null) : null;
+  const { data: projects } = useQuery({ ...projectListOptions(wsId), enabled: !!projectId });
+
+  if (view.kind === "builtin") {
+    const { key } = view;
+    return (
+      <ObjectRow
+        value={`view:builtin:${key}`}
+        icon={<span className="flex text-muted-foreground">{BUILTIN_VIEW_ICON[key]}</span>}
+        title={view.name}
+        query={query}
+        onSelect={() => palette.navigate(builtinNav.hrefFor(key), () => builtinNav.prepare(key))}
+      />
+    );
+  }
+
+  const saved = view.view;
+  const target = issueViewTarget(wsId, saved, p);
+  const location = projectId
+    ? (projects?.find((project) => project.id === projectId)?.title ?? t(($) => $.views.directory.location_project))
+    : saved.scope_type === "my"
+      ? t(($) => $.views.builtin.my_issues)
+      : t(($) => $.views.builtin.all_issues);
+  return (
+    <ObjectRow
+      value={`view:${saved.id}`}
+      icon={<Layers className={ROW_ICON_CLASS} />}
+      title={view.name}
+      query={query}
+      detail={location}
+      onSelect={() => palette.navigate(target.href, () => setActive(target.containerKey, saved.id))}
+    />
+  );
+}
+
+/**
  * Always the last row while there is input, so ↵ on a result never turns into
  * a write. It only opens quick create, prefilled; the user confirms there.
  * Disabled with the stale results so a fast ↵ does not land on it before the
@@ -544,15 +615,17 @@ function BestMatchGroups({
         trailing={<RowHint>{t(($) => $.types.project)}</RowHint>}
       />
     );
-    actions.push({
-      id: "new-issue",
-      label: t(($) => $.best.new_issue_in, { name: project.title }),
-      icon: SquarePen,
-      run: () => {
-        palette.close();
-        openCreateIssueWithPreference({ project_id: project.id });
-      },
-    });
+    if (!project.archived_at) {
+      actions.push({
+        id: "new-issue",
+        label: t(($) => $.best.new_issue_in, { name: project.title }),
+        icon: SquarePen,
+        run: () => {
+          palette.close();
+          openCreateIssueWithPreference({ project_id: project.id });
+        },
+      });
+    }
   }
 
   return (

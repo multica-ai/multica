@@ -21,7 +21,8 @@
     "active": "启用",
     "paused": "已暂停",
     "paused_runtime_required": "已暂停——执行智能体需绑定运行时",
-    "archived": "已归档"
+    "archived": "已归档",
+    "paused_project_archived": "已暂停——所属项目已归档"
   },
   "execution_mode": {
     "create_issue": "创建任务",
@@ -115,7 +116,8 @@
       "cancel": "取消",
       "confirm": "删除",
       "deleting": "删除中..."
-    }
+    },
+    "paused_project_archived": "由于所属项目已归档，自动化已暂停。恢复项目后请重新启用。"
   },
   "access": {
     "title": "管理访问",

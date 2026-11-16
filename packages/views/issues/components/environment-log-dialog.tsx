@@ -155,7 +155,7 @@ export function EnvironmentLogDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(640px,calc(100dvh-4rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[880px]">
+      <DialogContent className="flex h-[min(640px,calc(100%-4rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-[880px]">
         <div className="border-b px-4 pt-4 pb-3 pr-12">
           <DialogTitle className="flex min-w-0 items-center gap-2 text-body font-medium">
             <Server className={cn("size-4 shrink-0", env.state === "exited" ? "text-destructive" : "text-muted-foreground")} />

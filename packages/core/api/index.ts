@@ -1,6 +1,7 @@
 export {
   ApiClient,
   ApiError,
+  BatchOpsUnsupportedError,
   clientErrorMessage,
   dispatchReasonCode,
   errorCode,

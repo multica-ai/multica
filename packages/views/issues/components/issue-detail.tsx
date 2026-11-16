@@ -12,7 +12,7 @@ import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useMemo, useRef, useId, Fragment, type ReactNode } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso, type ListRange, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
 import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
@@ -69,6 +69,7 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
+import { KeyUpdatesSubscriptionBadge } from "./key-updates-subscription-badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
@@ -76,6 +77,8 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { MemberProfileCard } from "../../members/member-profile-card";
 import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
+import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
+import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
 import { PropRow } from "../../common/prop-row";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
 import { PropertyIcon } from "../../common/property-icon";
@@ -98,7 +101,7 @@ import { AssigneePicker } from "./pickers/assignee-picker";
 import { LabelPicker } from "./pickers/label-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
+import { IssueActionsDropdown, useIssuePageMenu, useIssueActions, useArchivedInboxItemId, IssueActionsContextMenu, IssueContextMenuProvider, IssueInboxActions } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
@@ -1221,6 +1224,11 @@ interface IssueDetailProps {
   onDelete?: () => void;
   /** Called after the issue is marked as done via the toolbar button. */
   onDone?: () => void;
+  /**
+   * The Inbox's "unsubscribe & archive", shown next to Done on issues that
+   * are not the viewer's own. Only read alongside `onDone`.
+   */
+  onUnsubscribeArchive?: (scope: InboxUnsubscribeScope) => void;
   defaultSidebarOpen?: boolean;
   layoutId?: string;
   /** When set, the issue detail will auto-scroll to this comment and briefly highlight it. */
@@ -1228,10 +1236,9 @@ interface IssueDetailProps {
   /**
    * Bump to replay the `highlightCommentId` landing on an already-mounted
    * detail. A remount replays it by itself (fresh mount, cleared memento
-   * entry); this token is for the one path with neither remount nor
-   * guaranteed re-render — re-clicking the notification row that is already
-   * open (see InboxPage.handleSelect). The bump both re-arms the landing
-   * guard and forces the render that re-reads the cleared memento entry.
+   * entry); this token is for a host that asks again with neither remount
+   * nor guaranteed re-render. The bump both re-arms the landing guard and
+   * forces the render that re-reads the cleared memento entry.
    */
   highlightRequestToken?: number;
   /** The app confirmation an Inbox notification points at; its card scrolls
@@ -1472,7 +1479,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -1633,10 +1640,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const stickyComposer = useStickyComposer();
   // Read by the image rules in editor/styles/attachment.css.
   const commentImageLayout = useCommentComposerStore((s) => s.imageLayout);
-  // Mobile shows it only near the top of the page, where it covers the text
-  // column the least; desktop shows it whenever the latest entry is more than
-  // a screen away.
-  const jumpToLatest = useJumpToLatest(scrollContainerEl, { nearTopOnly: isMobile });
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -1814,12 +1817,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id, activeDeliverableJump?.commentId);
-  const newComments = useNewCommentsWhileAway(timeline, {
-    ready: !timelineLoading,
-    away: jumpToLatest.visible,
-    userId: user?.id,
-    resetKey: id,
-  });
 
   const { data: commentTasks, isLoading: commentTasksLoading } = useQuery(issueTasksOptions(id));
   const enteringRunIds = useNewRunIds(id, commentTasks);
@@ -2006,29 +2003,47 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return map;
   }, [timelineView.threadReplies]);
 
-  // Thread root of a deep-link target. A run that left no comment is addressed
-  // by its task id and sits in a slot inside the thread it answers, so it
-  // unfolds and scrolls with that thread exactly like a reply does.
-  const highlightRootId = useMemo(() => {
+  // The anchor a deep-link target renders under. A failed run's notification
+  // names its task, but a run that left a reply (its failure notice included)
+  // renders under the reply's id, in a thread slot and at the top level alike.
+  const highlightTargetId = useMemo(() => {
     if (!highlightCommentId) return undefined;
-    const replyRoot = replyToRoot.get(highlightCommentId);
+    const topLevel = items.find((it) => it.kind === "run" && it.run.task.id === highlightCommentId);
+    if (topLevel) return topLevel.id;
+    for (const runs of commentRuns.values()) {
+      const run = runs.find((candidate) => candidate.task.id === highlightCommentId);
+      if (!run) continue;
+      const reply = run.hasReply && run.commentId
+        ? displayTimeline.find((entry) => entry.id === run.commentId)
+        : undefined;
+      return reply && !isDeletedComment(reply) ? reply.id : run.task.id;
+    }
+    return highlightCommentId;
+  }, [highlightCommentId, items, commentRuns, displayTimeline]);
+
+  // Thread root of a deep-link target. A run sits in a slot inside the thread
+  // it answers, so it unfolds and scrolls with that thread exactly like a
+  // reply does.
+  const highlightRootId = useMemo(() => {
+    if (!highlightTargetId) return undefined;
+    const replyRoot = replyToRoot.get(highlightTargetId);
     if (replyRoot) return replyRoot;
     for (const [rootId, runs] of commentRuns) {
       if (runs.some((run) => run.task.id === highlightCommentId)) return rootId;
     }
     return undefined;
-  }, [highlightCommentId, replyToRoot, commentRuns]);
+  }, [highlightTargetId, highlightCommentId, replyToRoot, commentRuns]);
 
   // Deep-link target index in the flat items array. For root comments this is
   // a direct findIndex hit; for replies and threaded runs we look up the
   // enclosing root.
   const targetIdx = useMemo(() => {
-    if (!highlightCommentId) return -1;
-    const direct = items.findIndex((it) => it.id === highlightCommentId);
+    if (!highlightTargetId) return -1;
+    const direct = items.findIndex((it) => it.id === highlightTargetId);
     if (direct >= 0) return direct;
     if (!highlightRootId) return -1;
     return items.findIndex((it) => it.id === highlightRootId);
-  }, [items, highlightCommentId, highlightRootId]);
+  }, [items, highlightTargetId, highlightRootId]);
 
   // One entry per comment thread (folded resolved bars included), activity
   // groups skipped. Derived from the same flat `items` array Virtuoso renders
@@ -2068,11 +2083,43 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const handleTimelineHeightChange = useCallback((height: number) => {
     if (height > 0) setMeasuredTimelineId(id);
   }, [id]);
-  const pendingHighlight = !!highlightCommentId && consumedHighlightId !== highlightCommentId;
+  // Whether Virtuoso's rendered rows (overscan included) stop short of the
+  // last one; rows past them are only estimated. Settled from Virtuoso's own
+  // range report, not `items.length`: a comment appended at the bottom is
+  // unrendered for a frame, and that frame must not read as "away".
+  const timelineItemCountRef = useRef(items.length);
+  timelineItemCountRef.current = items.length;
+  const [timelineTail, setTimelineTail] = useState({ issueId: id, pending: false });
+  const handleTimelineRangeChanged = useCallback((range: ListRange) => {
+    const pending = range.endIndex < timelineItemCountRef.current - 1;
+    setTimelineTail((prev) => (prev.issueId === id && prev.pending === pending ? prev : { issueId: id, pending }));
+  }, [id]);
+  // Mobile shows it only near the top of the page, where it covers the text
+  // column the least; desktop shows it whenever the latest entry is more than
+  // a screen away.
+  const jumpToLatest = useJumpToLatest(scrollContainerEl, {
+    nearTopOnly: isMobile,
+    tailPending: !isFlatTimeline && timelineTail.issueId === id && timelineTail.pending,
+  });
+  // Keyed to `away`, not `visible`: mobile hides the button past the top of
+  // the page, but the reader has not reached the new comments there.
+  const newComments = useNewCommentsWhileAway(timeline, {
+    ready: !timelineLoading,
+    away: jumpToLatest.away,
+    userId: user?.id,
+    resetKey: id,
+  });
+  const timelineReady = !issueLoading && !timelineLoading && !commentTasksLoading;
+  // A target the loaded timeline lacks (its comment was deleted) has nothing
+  // to land on, so the issue opens where the reader left off instead of at
+  // the top. If it arrives later, the landing still runs.
+  const highlightMissing = timelineReady && targetIdx < 0;
+  const pendingHighlight =
+    !!highlightCommentId && consumedHighlightId !== highlightCommentId && !highlightMissing;
   const { pending: readingAnchor, complete: completeAnchorRestore } = useIssueTimelineAnchor({
     containerKey: scrollContainerKey,
     container: scrollContainerEl,
-    ready: !issueLoading && !timelineLoading && !commentTasksLoading,
+    ready: timelineReady,
     skipRestore: isPeek || pendingHighlight,
   });
   useEffect(() => {
@@ -2375,9 +2422,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   } = useIssueReactions(id, user?.id);
 
   const {
-    subscribers, isSubscribed, subscriptionReason, subscriptionKnown,
+    subscribers, isSubscribed, subscriptionReason, subscriptionProjectCovered, subscriptionKnown,
     togglePending, subtreePending,
-    toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
+    toggleSubscribe: handleToggleSubscribe, toggleSubscriber, followAllActivity,
     unsubscribeFromSubtree: handleUnsubscribeSubtree,
   } = useIssueSubscribers(id, user?.id);
 
@@ -2540,7 +2587,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return;
     }
 
-    const rootId = highlightRootId ?? highlightCommentId;
+    const targetId = highlightTargetId ?? highlightCommentId;
+    const rootId = highlightRootId ?? targetId;
     const collapse = useCommentCollapseStore.getState();
     if (collapse.isCollapsed(id, rootId)) collapse.toggle(id, rootId);
     if (rootId) {
@@ -2557,7 +2605,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           rootItem.entry,
           timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES,
         );
-        if (resolution.kind === "reply" && resolution.resolutionId !== highlightCommentId) {
+        if (resolution.kind === "reply" && resolution.resolutionId !== targetId) {
           toggleResolvedExpand(rootId, true);
           return;
         }
@@ -2568,9 +2616,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // carries has no anchor to scroll to and no row to flash. Land on the
     // comment above where it was; the id itself stays this landing's identity
     // for the guards and the memento below.
-    const threadRootId = rootId ?? highlightCommentId;
+    const threadRootId = rootId ?? targetId;
     const landingId = commentLandingTarget(
-      highlightCommentId,
+      targetId,
       threadRootId,
       timelineView.threadReplies.get(threadRootId) ?? EMPTY_REPLIES,
     );
@@ -2613,7 +2661,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         interruptedLandingRef.current = highlightCommentId;
       }
     };
-  }, [highlightCommentId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading, flashJumpTarget]);
+  }, [highlightCommentId, highlightTargetId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading, flashJumpTarget]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
@@ -3539,6 +3587,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} onJumpToRun={jumpToRun} />
             <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />
+            {!onDone && !isPeek && (
+              <IssueInboxActions
+                issueId={id}
+                onMarkDone={
+                  issueBehavesAsAny(issue, ["done", "closed"])
+                    ? undefined
+                    : (onSaved) => handleUpdateField({ status: "done" }, { onSuccess: onSaved })
+                }
+              />
+            )}
+            {onDone && onUnsubscribeArchive && (
+              <UnsubscribeArchiveButton issueId={id} userId={user?.id} onConfirm={onUnsubscribeArchive} />
+            )}
             {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <IconButton
                 label={t(($) => $.detail.mark_done_tooltip)}
@@ -4036,6 +4097,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     </TooltipContent>
                   </Tooltip>
                 )}
+                {isSubscribed && (
+                  <KeyUpdatesSubscriptionBadge
+                    issue={issue}
+                    userId={user?.id}
+                    reason={subscriptionReason}
+                    projectCovered={subscriptionProjectCovered}
+                    pending={togglePending}
+                    onFollowAll={followAllActivity}
+                  />
+                )}
                 {/* Inherited from the project: say so, and that leaving
                     here only covers this issue, so Unsubscribe is not read as
                     leaving the whole project. */}
@@ -4190,6 +4261,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       initialScrollTop={readingAnchor ? undefined : restoredScrollTop}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       totalListHeightChanged={handleTimelineHeightChange}
+                      rangeChanged={handleTimelineRangeChanged}
                       computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
                       // Also load-bearing for long threads: keepThreadRowAnchored
                       // corrects after Virtuoso's resize handling in the same frame.

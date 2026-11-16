@@ -34,12 +34,12 @@ function summary(overrides: Partial<IssuePullRequestSummary>): IssuePullRequestS
   };
 }
 
-function Chips({ enabled, linked = false }: { enabled: boolean; linked?: boolean }) {
+function Chips({ enabled }: { enabled: boolean }) {
   const pullRequests = useIssuePullRequestSummaries("issue-1", enabled);
-  return <IssuePullRequestChips pullRequests={pullRequests} max={2} linked={linked} />;
+  return <IssuePullRequestChips pullRequests={pullRequests} max={2} />;
 }
 
-function renderChips(props: { enabled: boolean; linked?: boolean }, onRowClick = vi.fn()) {
+function renderChips(props: { enabled: boolean }, onRowClick = vi.fn()) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
@@ -85,7 +85,7 @@ describe("issue pull request chips", () => {
       ],
     });
     const onRowClick = vi.fn();
-    renderChips({ enabled: true, linked: true }, onRowClick);
+    renderChips({ enabled: true }, onRowClick);
 
     const chips = await screen.findAllByTestId("issue-pull-request-chip");
     expect(chips.map((chip) => chip.textContent)).toEqual(["Mergedwidget#3", "Draftapi#2"]);

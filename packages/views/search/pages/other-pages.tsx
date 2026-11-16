@@ -13,6 +13,7 @@ import { useModalStore } from "@multica/core/modals";
 import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER } from "@multica/core/projects/config";
 import { useUpdateProject } from "@multica/core/projects/mutations";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { selectableProjects } from "@multica/core/projects";
 import type { Agent, ChatSession, Project } from "@multica/core/types";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
 import { cn } from "@multica/ui/lib/utils";
@@ -229,7 +230,7 @@ export function ChatProjectPage({
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const current = session.project_id ?? null;
   const q = query.trim().toLowerCase();
-  const visible = projects
+  const visible = selectableProjects(projects, current)
     .filter((project) => project.status !== "cancelled" || project.id === current)
     .filter((project) => !q || scoreText(project.title, q) > 0);
   const noProjectLabel = t(($) => $.pages.no_project);

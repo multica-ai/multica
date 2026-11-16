@@ -51,7 +51,7 @@ export function ThemesButton() {
         {t(($) => $.appearance.store.manage)}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex max-h-[min(44rem,calc(100dvh-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <DialogContent className="flex max-h-[min(44rem,calc(100%-2rem))] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
           {open ? <Themes /> : null}
         </DialogContent>
       </Dialog>

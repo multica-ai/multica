@@ -3,7 +3,7 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { BellOff, BellRing, Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, UserMinus } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, BellOff, BellRing, Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2 } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -11,7 +11,6 @@ import { toast } from "sonner";
 import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
-import { canChangeProjectLead } from "@multica/core/projects/access";
 import { projectDetailOptions, projectSubscriptionOptions } from "@multica/core/projects/queries";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import { useUpdateProject, useDeleteProject, useSetProjectSubscription, ProjectDeletionOfflineError } from "@multica/core/projects/mutations";
@@ -34,6 +33,7 @@ import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
 import { ProjectAccessControl } from "./project-access";
+import { ProjectLeadPicker } from "./project-lead-picker";
 import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
 import { ProjectWorkflowMenuItem, ProjectWorkflowSheet } from "../../workflows/project-workflow-sheet";
 import { IssueSurface } from "../../issues/surface/issue-surface";
@@ -81,8 +81,15 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
-import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
-import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import { useProjectStatusLabels, useProjectPriorityLabels, useFormatRelativeDate } from "./labels";
+import {
+  ArchivedProjectNotice,
+  ArchivedProjectTag,
+  useArchiveProjects,
+  useOfferArchiveOnComplete,
+  useRestoreProjects,
+} from "./project-archive";
+import { PAGE_GUTTER } from "../../layout/page-header";
 
 // Property row — sidebar property display
 
@@ -125,6 +132,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const userId = useAuthStore((s) => s.user?.id);
   const deleteProject = useDeleteProject();
   const deleted = deleteProject.isSuccess && deleteProject.variables === projectId;
+  const { requestArchive, dialog: archiveDialog } = useArchiveProjects();
+  const restore = useRestoreProjects();
+  const offerArchive = useOfferArchiveOnComplete();
+  const formatRelativeDate = useFormatRelativeDate();
   const { data: project, isLoading } = useQuery({
     ...projectDetailOptions(wsId, projectId),
     enabled: !deleted,
@@ -161,7 +172,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   });
   const isPinned = pinnedItems.some((p) => p.item_type === "project" && p.item_id === projectId);
   const role = members.find((m) => m.user_id === userId)?.role ?? null;
-  const canManageAccess = !!project && canChangeProjectLead(project, userId, role);
   const canDelete = !!project && canDeleteProject(project, userId ?? null, role, agents);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
@@ -244,11 +254,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   useRightSidebarShortcut(rightSidebarShortcutTargetRef, handleToggleSidebar);
 
   // Lead popover
-  const [leadOpen, setLeadOpen] = useState(false);
-  const [leadFilter, setLeadFilter] = useState("");
-  const leadQuery = leadFilter.toLowerCase();
-  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
-  const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
 
   const handleUpdateField = useCallback(
     (data: Parameters<typeof updateProject.mutate>[0] extends { id: string } & infer R ? R : never) => {
@@ -256,6 +261,15 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       updateProject.mutate({ id: project.id, ...data });
     },
     [project, updateProject],
+  );
+
+  const handleStatusChange = useCallback(
+    (status: ProjectStatus) => {
+      if (!project) return;
+      handleUpdateField({ status });
+      offerArchive(project, status);
+    },
+    [project, handleUpdateField, offerArchive],
   );
 
   const handleDelete = useCallback(() => {
@@ -307,6 +321,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }
 
   const issueMetrics = getProjectIssueMetrics(project);
+  const archived = !!project.archived_at;
   const statusCfg = PROJECT_STATUS_CONFIG[project.status];
 
   const sidebarContent = (
@@ -371,7 +386,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               />
               <DropdownMenuContent align="start" className="w-44">
                 {PROJECT_STATUS_ORDER.map((s) => (
-                  <DropdownMenuItem key={s} onClick={() => handleUpdateField({ status: s as ProjectStatus })}>
+                  <DropdownMenuItem key={s} onClick={() => handleStatusChange(s as ProjectStatus)}>
                     <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
                     <span>{statusLabels[s]}</span>
                     {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
@@ -405,79 +420,22 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <ProjectAccessControl project={project} />
           </PropRow>}
           <PropRow label={t(($) => $.table.lead)}>
-            <Popover open={leadOpen && canManageAccess} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
-              <PopoverTrigger
-                disabled={!canManageAccess}
-                render={
-                  <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
-                    {project.lead_type && project.lead_id ? (
-                      <>
-                        <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard showStatusDot />
-                        <span className="cursor-pointer">{getActorName(project.lead_type, project.lead_id)}</span>
-                      </>
-                    ) : (
-                      <span className="text-muted-foreground">{t(($) => $.lead.no_lead)}</span>
-                    )}
-                  </button>
-                }
-              />
-              <PopoverContent align="start" className="w-52 p-0">
-                <div className="px-2 py-1.5 border-b">
-                  <input
-                    type="text"
-                    value={leadFilter}
-                    onChange={(e) => setLeadFilter(e.target.value)}
-                    placeholder={t(($) => $.lead.assign_placeholder)}
-                    className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
-                  />
-                </div>
-                <div className="p-1 max-h-60 overflow-y-auto">
-                  <button
-                    type="button"
-                    onClick={() => { handleUpdateField({ lead_type: null, lead_id: null }); setLeadOpen(false); }}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
-                  >
-                    <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
+            <ProjectLeadPicker
+              project={project}
+              handleUpdate={handleUpdateField}
+              renderTrigger={(leadName) => (
+                <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
+                  {project.lead_type && project.lead_id ? (
+                    <>
+                      <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard showStatusDot />
+                      <span className="cursor-pointer">{leadName}</span>
+                    </>
+                  ) : (
                     <span className="text-muted-foreground">{t(($) => $.lead.no_lead)}</span>
-                  </button>
-                  {filteredMembers.length > 0 && (
-                    <>
-                      <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">{t(($) => $.lead.members_group)}</div>
-                      {filteredMembers.map((m) => (
-                        <button
-                          type="button"
-                          key={m.user_id}
-                          onClick={() => { handleUpdateField({ lead_type: "member", lead_id: m.user_id }); setLeadOpen(false); }}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
-                        >
-                          <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
-                          <span>{m.name}</span>
-                        </button>
-                      ))}
-                    </>
                   )}
-                  {filteredAgents.length > 0 && (
-                    <>
-                      <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">{t(($) => $.lead.agents_group)}</div>
-                      {filteredAgents.map((a) => (
-                        <button
-                          type="button"
-                          key={a.id}
-                          onClick={() => { handleUpdateField({ lead_type: "agent", lead_id: a.id }); setLeadOpen(false); }}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
-                        >
-                          <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
-                          <span>{a.name}</span>
-                        </button>
-                      ))}
-                    </>
-                  )}
-                  {filteredMembers.length === 0 && filteredAgents.length === 0 && leadFilter && (
-                    <div className="px-2 py-3 text-center text-body text-muted-foreground">{t(($) => $.lead.no_results)}</div>
-                  )}
-                </div>
-              </PopoverContent>
-            </Popover>
+                </button>
+              )}
+            />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_start_date)}>
             <ProjectStartDatePicker startDate={project.start_date} onUpdate={handleUpdateField} />
@@ -486,6 +444,18 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
           </PropRow>
           <ProjectWorkflowPropRow project={project} onOpen={openWorkflowSheet} />
+          {archived && (
+            <PropRow label={t(($) => $.archive.prop_label)}>
+              <span className="tabular-nums">{formatRelativeDate(project.archived_at!)}</span>
+              {project.archived_by_type && project.archived_by_id && (
+                <>
+                  <span className="text-muted-foreground">·</span>
+                  <ActorAvatar actorType={project.archived_by_type} actorId={project.archived_by_id} size="sm" enableHoverCard />
+                  <span className="truncate">{getActorName(project.archived_by_type, project.archived_by_id)}</span>
+                </>
+              )}
+            </PropRow>
+          )}
         </div>}
       </div>
 
@@ -562,10 +532,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <IssueSurface
             scope={issueScope}
             modes={["board", "list", "table", "swimlane", "gantt"]}
+            allowCreate={!archived}
             renderHeader={({ controller }) => (
+              <>
               <IssueViewHeader
                 controller={controller}
                 base={{ kind: "project", project }}
+                baseBadge={archived ? <ArchivedProjectTag /> : undefined}
+                hideCreate={archived}
                 baseMenu={
                   <>
                     <DropdownMenuItem
@@ -604,19 +578,28 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                       {isSubscribed ? t(($) => $.detail.unsubscribe_action) : t(($) => $.detail.subscribe_action)}
                     </DropdownMenuItem>
                     <ProjectWorkflowMenuItem project={project} onOpen={() => setWorkflowSheetOpen(true)} />
+                    <DropdownMenuSeparator />
+                    {archived ? (
+                      <DropdownMenuItem onClick={() => restore(project)}>
+                        <ArchiveRestore className="h-3.5 w-3.5" />
+                        {t(($) => $.detail.restore_action)}
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuItem onClick={() => requestArchive([project])}>
+                        <Archive className="h-3.5 w-3.5" />
+                        {t(($) => $.detail.archive_action)}
+                      </DropdownMenuItem>
+                    )}
                     {canDelete && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          disabled={deleting}
-                          aria-busy={deleting}
-                          onClick={() => setDeleteDialogOpen(true)}
-                        >
-                          {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
-                          {t(($) => $.detail.delete_action)}
-                        </DropdownMenuItem>
-                      </>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        disabled={deleting}
+                        aria-busy={deleting}
+                        onClick={() => setDeleteDialogOpen(true)}
+                      >
+                        {deleting ? <Spinner className="size-3.5" aria-hidden="true" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        {t(($) => $.detail.delete_action)}
+                      </DropdownMenuItem>
                     )}
                   </>
                 }
@@ -639,6 +622,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   </Tooltip>
                 }
               />
+              {archived && (
+                <div className={cn("shrink-0 pt-2", PAGE_GUTTER)}>
+                  <ArchivedProjectNotice project={project} />
+                </div>
+              )}
+              </>
             )}
           />
           </div>
@@ -672,6 +661,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </ResizablePanelGroup>
 
       <ProjectWorkflowSheet project={project} open={workflowSheetOpen} onOpenChange={setWorkflowSheetOpen} />
+      {archiveDialog}
 
       {/* Delete confirmation */}
       {canDelete && (
@@ -688,7 +678,29 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 {t(($) => $.delete_dialog.description)}
               </AlertDialogDescription>
             </AlertDialogHeader>
+            {!archived && (
+              <div className="flex items-start gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-caption text-muted-foreground">
+                <Archive className="mt-0.5 size-3.5 shrink-0" />
+                <span>{t(($) => $.delete_dialog.archive_hint)}</span>
+              </div>
+            )}
             <AlertDialogFooter>
+              {!archived && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="sm:mr-auto"
+                  disabled={deleting}
+                  onClick={() => {
+                    setDeleteDialogOpen(false);
+                    requestArchive([project], { immediate: true });
+                  }}
+                >
+                  <Archive className="size-3.5" />
+                  {t(($) => $.delete_dialog.archive_instead)}
+                </Button>
+              )}
               <AlertDialogCancel disabled={deleting}>
                 {t(($) => $.delete_dialog.cancel)}
               </AlertDialogCancel>

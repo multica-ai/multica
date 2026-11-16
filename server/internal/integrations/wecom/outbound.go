@@ -1090,7 +1090,7 @@ func (o *Outbound) memberBindingFor(ctx context.Context, item map[string]any, wo
 }
 
 // inboxActorAgent reads the agent an inbox notification names as its actor,
-// when it names one. The payload is the map inboxItemToResponse builds, whose
+// when it names one. The payload is the map inbox.Deliver builds, whose
 // actor fields are pointers (util.TextToPtr / util.UUIDToPtr) and nil for a
 // notification a member authored. Both spellings are accepted, the same
 // defensive shape itemIDOf uses, so a payload that was re-encoded on its way

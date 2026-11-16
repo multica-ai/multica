@@ -37,6 +37,7 @@ import { ListTodo } from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProjectIcon } from "../../projects/components/project-icon";
+import { ArchivedProjectTag } from "../../projects/components/project-archive";
 import { useT } from "../../i18n";
 import { Badge } from "@multica/ui/components/ui/badge";
 import {
@@ -89,6 +90,8 @@ export interface MentionItem {
   icon?: string | null;
   /** Project status snapshot for recent/current project rendering */
   projectStatus?: ProjectStatus;
+  /** Archived projects stay mentionable; search ranks them last. */
+  projectArchived?: boolean;
   /** Present when the target should remain discoverable but cannot be selected. */
   disabledReason?: "agent_runtime_required";
 }
@@ -310,6 +313,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
                   q,
                   limit: SERVER_CONTEXT_SEARCH_LIMIT,
                   include_closed: true,
+                  include_archived: true,
                   signal: controller.signal,
                 }),
               ]);
@@ -611,6 +615,7 @@ function MentionRow({
             </span>
           )}
         </span>
+        {item.projectArchived && <ArchivedProjectTag />}
         {projectStatusCfg && (
           <span className={`${projectStatusCfg.dotColor} ml-auto size-1.5 shrink-0 rounded-full`} />
         )}
@@ -683,7 +688,14 @@ function issueToMention(
   };
 }
 
-function projectToMention(p: { id: string; title: string; description?: string | null; icon?: string | null; status?: ProjectStatus }): MentionItem {
+function projectToMention(p: {
+  id: string;
+  title: string;
+  description?: string | null;
+  icon?: string | null;
+  status?: ProjectStatus;
+  archived_at?: string | null;
+}): MentionItem {
   return {
     id: p.id,
     label: p.title,
@@ -691,6 +703,7 @@ function projectToMention(p: { id: string; title: string; description?: string |
     description: p.description ?? undefined,
     icon: p.icon ?? null,
     projectStatus: p.status,
+    projectArchived: !!p.archived_at,
   };
 }
 
