@@ -36,10 +36,14 @@ import {
  * so a re-upload to the same attachment id refuses to restore a stale offset.
  * Plain containers leave it undefined and get identity comparison (undefined
  * === undefined), so they are unaffected.
+ *
+ * `left` is the horizontal offset, present only when it is > 0 (e.g. the
+ * board's column strip scrolled sideways); an entry may then carry top 0.
  */
 export interface ScrollRestorationEntry {
   top: number;
   height: number;
+  left?: number;
   contentKey?: string;
 }
 
@@ -126,19 +130,23 @@ export function useRestoredScrollEntry(
 }
 
 /**
- * The saved scroll offset for a container key on the current route, or
- * undefined. Read it once at mount (e.g. into a Virtuoso `initialScrollTop`)
- * — it reflects the state captured when this route was last left.
+ * The saved vertical scroll offset for a container key on the current route,
+ * or undefined when there is none (an entry saved only for its horizontal
+ * offset counts as none). Read it once at mount (e.g. into a Virtuoso
+ * `initialScrollTop`) — it reflects the state captured when this route was
+ * last left.
  */
 export function useRestoredScrollOffset(containerKey: string): number | undefined {
-  return useRestoredScrollEntry(containerKey)?.top;
+  const top = useRestoredScrollEntry(containerKey)?.top;
+  return top !== undefined && top > 0 ? top : undefined;
 }
 
 /**
  * Ref callback for PLAIN (non-virtualized) scroll containers: assigns the
- * saved offset when the element attaches, which happens during commit —
- * before paint — so the first visible frame is already at the restored
- * position. Compose it with other refs via a merged callback.
+ * saved offsets (vertical and horizontal) when the element attaches, which
+ * happens during commit — before paint — so the first visible frame is
+ * already at the restored position. Compose it with other refs via a merged
+ * callback.
  */
 export function useRestoredScrollRef(
   containerKey: string,
@@ -148,8 +156,11 @@ export function useRestoredScrollRef(
     (el: HTMLElement | null) => {
       if (!el) return;
       const saved = adapter?.get(containerKey);
-      if (!saved || saved.top <= 0) return;
-      el.scrollTop = saved.top;
+      if (!saved) return;
+      if (saved.top > 0) el.scrollTop = saved.top;
+      if (saved.left !== undefined && saved.left > 0) {
+        el.scrollLeft = saved.left;
+      }
     },
     [adapter, containerKey],
   );

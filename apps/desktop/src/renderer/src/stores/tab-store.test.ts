@@ -1051,6 +1051,25 @@ describe("commitScrollMemento", () => {
     expect(useTabStore.getState().byWorkspace.acme).toBe(before);
   });
 
+  it("writes when only the horizontal offset changed", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      board: { top: 0, height: 800, left: 300 },
+    });
+
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      board: { top: 0, height: 800, left: 900 },
+    });
+
+    expect(
+      useTabStore.getState().byWorkspace.acme.tabs[0].memento.scroll[
+        "/acme/issues::board"
+      ],
+    ).toEqual({ top: 0, height: 800, left: 900 });
+  });
+
   it("preserves view-state entries across a scroll REPLACE", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");

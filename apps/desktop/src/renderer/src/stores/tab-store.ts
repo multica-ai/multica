@@ -27,6 +27,8 @@ import { isIssueUuid } from "@multica/core/issues/canonical-id";
 export interface ScrollMementoEntry {
   top: number;
   height: number;
+  /** Horizontal offset, present only when > 0. */
+  left?: number;
   contentKey?: string;
 }
 
@@ -1246,6 +1248,7 @@ export const useTabStore = create<TabStore>()(
               prev !== undefined &&
               prev.top === next.top &&
               prev.height === next.height &&
+              prev.left === next.left &&
               prev.contentKey === next.contentKey
             );
           });
