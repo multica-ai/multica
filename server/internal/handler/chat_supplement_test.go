@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -145,6 +146,203 @@ func TestChatSupplementLegacySendRemainsQueued(t *testing.T) {
 	sent := sendChatGuidance(t, sessionID, map[string]any{"content": "legacy queued message"})
 	if sent.Steered || !sent.Queued || sent.TaskID == taskID {
 		t.Fatalf("legacy send changed into guidance: %+v", sent)
+	}
+}
+
+func TestChatSupplementTerminalFallbackBroadcastsQueued(t *testing.T) {
+	for _, terminal := range []string{"completed", "failed", "cancelled"} {
+		t.Run(terminal, func(t *testing.T) {
+			sessionID, taskID, _ := newChatSupplementFixture(t, true)
+			sent := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "next turn"})
+			queued := subscribeChatTaskQueued(t, sessionID)
+			switch terminal {
+			case "completed":
+				if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
+					t.Fatal(w.Body.String())
+				}
+			case "failed":
+				if _, err := testHandler.TaskService.FailTask(t.Context(), parseUUID(taskID), "failed", "", "", "", "agent_error", false, "", ""); err != nil {
+					t.Fatal(err)
+				}
+			case "cancelled":
+				if _, err := testHandler.TaskService.CancelTask(t.Context(), parseUUID(taskID)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var owner string
+			dbfx.QueryRow(t, `SELECT task_id::text FROM chat_message WHERE id=$1`, sent.MessageID).Scan(&owner)
+			select {
+			case id := <-queued:
+				if id != owner {
+					t.Fatalf("queued %s, want %s", id, owner)
+				}
+			default:
+				t.Fatal("terminal fallback did not broadcast task:queued")
+			}
+		})
+	}
+}
+
+func TestChatSupplementStopWaitsForDeliveryResult(t *testing.T) {
+	for _, delivered := range []bool{false, true} {
+		t.Run(map[bool]string{true: "delivered", false: "rejected"}[delivered], func(t *testing.T) {
+			sessionID, taskID, _ := newChatSupplementFixture(t, true)
+			first := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "first guidance"})
+			if _, err := testHandler.Queries.ClaimNextChatTaskSupplement(t.Context(), parseUUID(taskID)); err != nil {
+				t.Fatal(err)
+			}
+			sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "second guidance"})
+			queued := subscribeChatTaskQueued(t, sessionID)
+			if _, err := testHandler.TaskService.CancelTask(t.Context(), parseUUID(taskID)); err != nil {
+				t.Fatal(err)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND status='queued'`, sessionID); n != 0 {
+				t.Fatal("Stop requeued guidance before its delivery result")
+			}
+			for range 2 {
+				req := withURLParams(newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": delivered}), "taskId", taskID, "commentId", first.MessageID)
+				testutil.Call(t, testHandler.AckTaskSupplement, req).Want(http.StatusOK)
+			}
+			for range 2 {
+				req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/cancel-ack", nil), "taskId", taskID)
+				testutil.Call(t, testHandler.AckTaskCancelled, req).Want(http.StatusOK)
+			}
+			want := 1
+			if !delivered {
+				want++
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND status='queued'`, sessionID); n != want {
+				t.Fatalf("queued %d turns, want %d", n, want)
+			}
+			if n := len(queued); n != want {
+				t.Fatalf("queued events=%d, want %d", n, want)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM chat_message WHERE task_id=$1 AND role='assistant'`, taskID); n > 1 {
+				t.Fatal("Stop wrote duplicate outcomes")
+			}
+		})
+	}
+}
+
+func TestChatSupplementStopGraceRequeuesUnconfirmedGuidance(t *testing.T) {
+	sessionID, taskID, _ := newChatSupplementFixture(t, true)
+	sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "delivery unconfirmed"})
+	if _, err := testHandler.Queries.ClaimNextChatTaskSupplement(t.Context(), parseUUID(taskID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testHandler.TaskService.CancelTask(t.Context(), parseUUID(taskID)); err != nil {
+		t.Fatal(err)
+	}
+	// The existing sweeper invokes this finalizer when the daemon never acks.
+	if !testHandler.TaskService.FinalizeDeferredCancelledChat(t.Context(), parseUUID(taskID)) {
+		t.Fatal("unconfirmed guidance was stranded")
+	}
+	if testHandler.TaskService.FinalizeDeferredCancelledChat(t.Context(), parseUUID(taskID)) {
+		t.Fatal("duplicate finalize changed state")
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND status='queued'`, sessionID); n != 1 {
+		t.Fatalf("fallback created %d turns", n)
+	}
+}
+
+func TestChatSupplementStopWithTranscriptSettlesDeliveryWithoutDuplicateOutcome(t *testing.T) {
+	sessionID, taskID, _ := newChatSupplementFixture(t, true)
+	sent := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "already injected"})
+	if _, err := testHandler.Queries.ClaimNextChatTaskSupplement(t.Context(), parseUUID(taskID)); err != nil {
+		t.Fatal(err)
+	}
+	dbfx.Exec(t, `INSERT INTO task_message (task_id,seq,type,content) VALUES ($1,1,'assistant','working')`, taskID)
+	if _, err := testHandler.TaskService.CancelTaskWithResult(t.Context(), parseUUID(taskID), service.CancelTaskOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	req := withURLParams(newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": true}), "taskId", taskID, "commentId", sent.MessageID)
+	testutil.Call(t, testHandler.AckTaskSupplement, req).Want(http.StatusOK)
+	testHandler.TaskService.FinalizeDeferredCancelledChat(t.Context(), parseUUID(taskID))
+	if n := dbfx.Count(t, `SELECT count(*) FROM chat_message WHERE task_id=$1 AND role='assistant'`, taskID); n != 1 {
+		t.Fatalf("Stop outcomes=%d", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1`, sessionID); n != 1 {
+		t.Fatal("acknowledged guidance ran again")
+	}
+}
+
+func TestChatSupplementAccessRevocationWithdrawsGuidance(t *testing.T) {
+	sessionID, taskID, _ := newChatSupplementFixture(t, true)
+	sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "in flight"})
+	if _, err := testHandler.Queries.ClaimNextChatTaskSupplement(t.Context(), parseUUID(taskID)); err != nil {
+		t.Fatal(err)
+	}
+	sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "pending"})
+	tx, err := testPool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	q := testHandler.Queries.WithTx(tx)
+	if _, err := q.LockChatSessionForTask(t.Context(), parseUUID(taskID)); err != nil {
+		t.Fatal(err)
+	}
+	task, err := q.CancelAgentTask(t.Context(), parseUUID(taskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.PrepareRuntimeAccessCancellation(t.Context(), q, []db.AgentTaskQueue{task}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	testHandler.TaskService.FinalizeDeferredCancelledChat(t.Context(), task.ID)
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1`, sessionID); n != 1 {
+		t.Fatal("revocation started more work")
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM chat_task_supplement WHERE task_id=$1 AND status='withdrawn'`, taskID); n != 2 {
+		t.Fatal("revocation left guidance deliverable")
+	}
+}
+
+func TestChatSupplementRetryClaimKeepsColdInputAndOmitsResumedGuidance(t *testing.T) {
+	for _, sameSession := range []bool{true, false} {
+		t.Run(map[bool]string{true: "same provider session", false: "different provider session"}[sameSession], func(t *testing.T) {
+			sessionID, taskID, _ := newChatSupplementFixture(t, true)
+			sent := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "delivered guidance"})
+			if _, err := testHandler.Queries.ClaimNextChatTaskSupplement(t.Context(), parseUUID(taskID)); err != nil {
+				t.Fatal(err)
+			}
+			req := withURLParams(newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": true}), "taskId", taskID, "commentId", sent.MessageID)
+			testutil.Call(t, testHandler.AckTaskSupplement, req).Want(http.StatusOK)
+			sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "pending guidance"})
+			if _, err := testHandler.TaskService.FailTask(t.Context(), parseUUID(taskID), "connection reset", "provider-session", "/work", "", "agent_error.provider_network", false, "", ""); err != nil {
+				t.Fatal(err)
+			}
+			if !sameSession {
+				dbfx.Exec(t, `UPDATE chat_session SET session_id='other-session' WHERE id=$1`, sessionID)
+			}
+			var childID string
+			dbfx.QueryRow(t, `SELECT id::text FROM agent_task_queue WHERE parent_task_id=$1`, taskID).Scan(&childID)
+			child, err := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(childID))
+			if err != nil {
+				t.Fatal(err)
+			}
+			runtime, err := testHandler.Queries.GetAgentRuntime(t.Context(), child.RuntimeID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp, _, _, _, _, failure := testHandler.buildClaimedTaskResponse(newOwnerDaemonRequest(http.MethodPost, "/claim", nil), &child, runtime, uuidToString(child.RuntimeID), uuidToString(runtime.WorkspaceID))
+			if failure != nil {
+				t.Fatalf("claim failed: %+v", failure)
+			}
+			if !strings.Contains(resp.ChatMessage, "delivered guidance") || !strings.Contains(resp.ChatMessage, "pending guidance") {
+				t.Fatalf("cold input lost guidance: %s", resp.ChatMessage)
+			}
+			if sameSession {
+				if resp.ChatResumeMessage == nil || *resp.ChatResumeMessage != "original objective\n\npending guidance" {
+					t.Fatalf("resumed input: %+v", resp.ChatResumeMessage)
+				}
+			} else if resp.ChatResumeMessage != nil {
+				t.Fatal("omitted guidance from a different provider session")
+			}
+		})
 	}
 }
 

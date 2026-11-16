@@ -3060,6 +3060,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 	var (
 		task                 db.AgentTaskQueue
 		cancelledChatMessage *CancelledChatMessageResult
+		queuedChat           []db.AgentTaskQueue
 		err                  error
 	)
 	if opts.QueuedOnly {
@@ -3124,7 +3125,8 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 			}
 			// CancelAgentTaskByUser appends the recovery receipt in the same
 			// statement, so the returned row already carries it.
-			if err := SettleTerminalTaskState(ctx, qtx, cancelled); err != nil {
+			queuedChat, err = settleTerminalTaskState(ctx, qtx, cancelled)
+			if err != nil {
 				return err
 			}
 			if !cancelled.ChatSessionID.Valid {
@@ -3149,6 +3151,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 
 	slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCancelled(ctx, task)
+	s.publishRequeuedChatTasks(ctx, queuedChat)
 	if !opts.QueuedOnly {
 		cancelledChatMessage = s.finalizeCancelledChatMessage(ctx, task, opts)
 	}
@@ -3370,6 +3373,11 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 		if err := lockChatSessionForTaskWrite(ctx, qtx, task.ID); err != nil {
 			return err
 		}
+		if exists, err := qtx.HasChatTaskAssistantOutcome(ctx, task.ID); err != nil {
+			return err
+		} else if exists {
+			return nil
+		}
 		hasMessages, err := qtx.HasTaskMessages(ctx, task.ID)
 		if err != nil {
 			return fmt.Errorf("list cancelled chat task messages: %w", err)
@@ -3538,10 +3546,11 @@ func (s *TaskService) RetireCancelledTaskSession(ctx context.Context, taskID pgt
 
 func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID pgtype.UUID) bool {
 	var (
-		task    db.AgentTaskQueue
-		payload protocol.ChatCancelFinalizedPayload
-		changed bool
-		settled bool
+		task       db.AgentTaskQueue
+		payload    protocol.ChatCancelFinalizedPayload
+		changed    bool
+		settled    bool
+		queuedChat []db.AgentTaskQueue
 	)
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		// Lock the task's chat_session first. chat_draft_restore has no FK
@@ -3582,6 +3591,17 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 			return nil
 		}
 		if !claimed.ChatSessionID.Valid {
+			return nil
+		}
+		queuedChat, err = requeueChatTaskSupplements(ctx, qtx, claimed, pgtype.UUID{}, false)
+		if err != nil {
+			return err
+		}
+		// A client requiring a synchronous Stop outcome may already have
+		// finalized the transcript while injection was still in flight.
+		if exists, err := qtx.HasChatTaskAssistantOutcome(ctx, claimed.ID); err != nil {
+			return err
+		} else if exists {
 			return nil
 		}
 		settled = true
@@ -3674,6 +3694,7 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 		)
 		return false
 	}
+	s.publishRequeuedChatTasks(ctx, queuedChat)
 	if !settled || payload.Outcome == "" {
 		return changed
 	}
@@ -4816,6 +4837,7 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	// task inside the completion transaction below. It is broadcast (chat:done)
 	// only after the transaction commits.
 	var chatAssistantMsg *db.ChatMessage
+	var queuedChat []db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
 			return err
@@ -4841,7 +4863,8 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 
 		// Atomic with the status flip: a crash between the two would leave a
 		// finished obligation looking pending forever.
-		if err := SettleTerminalTaskState(ctx, qtx, t); err != nil {
+		queuedChat, err = settleTerminalTaskState(ctx, qtx, t)
+		if err != nil {
 			return err
 		}
 
@@ -4926,6 +4949,7 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	}
 
 	s.publishQoderIssueChange(ctx, change)
+	s.publishRequeuedChatTasks(ctx, queuedChat)
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
 
@@ -5310,6 +5334,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 
 	var task db.AgentTaskQueue
 	var retried *db.AgentTaskQueue
+	var queuedChat []db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
 			return err
@@ -5500,7 +5525,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		// coordinator that already received the recovery comment has consumed
 		// the obligation: the pre-existing delivered_comment_ids coverage check
 		// never looked at the covering task's status either.
-		if err := SettleTerminalTaskState(ctx, qtx, t); err != nil {
+		queuedChat, err = settleTerminalTaskState(ctx, qtx, t)
+		if err != nil {
 			return err
 		}
 
@@ -5568,6 +5594,7 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
+	s.publishRequeuedChatTasks(ctx, queuedChat)
 
 	// The auto-retry child (if any) was created inside the transaction above so
 	// no newer chat task could jump ahead of it. Surface it now: broadcast
@@ -6447,6 +6474,7 @@ func (s *TaskService) CancelTasksForArchivedAgent(ctx context.Context, agentID p
 
 func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Queries) ([]db.AgentTaskQueue, error)) ([]db.AgentTaskQueue, error) {
 	var failed []db.AgentTaskQueue
+	var queuedChat []db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		var err error
 		failed, err = fail(qtx)
@@ -6483,10 +6511,12 @@ func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Quer
 				}
 			}
 		}
-		return SettleTerminalTaskState(ctx, qtx, failed...)
+		queuedChat, err = settleTerminalTaskState(ctx, qtx, failed...)
+		return err
 	}); err != nil {
 		return nil, err
 	}
+	s.publishRequeuedChatTasks(ctx, queuedChat)
 	return failed, nil
 }
 
@@ -6623,8 +6653,15 @@ const (
 // task-row -> dependent-row lock order without making task status writes depend
 // on database trigger behavior.
 func SettleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.AgentTaskQueue) error {
+	_, err := settleTerminalTaskState(ctx, q, tasks...)
+	return err
+}
+
+// Callers that can requeue Chat guidance publish the returned tasks only after
+// their terminal transaction commits.
+func settleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.AgentTaskQueue) ([]db.AgentTaskQueue, error) {
 	if len(tasks) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	taskIDs := make([]pgtype.UUID, 0, len(tasks))
@@ -6632,16 +6669,19 @@ func SettleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.Age
 		taskIDs = append(taskIDs, task.ID)
 	}
 	if _, err := q.SettleTerminalTaskSupplements(ctx, taskIDs); err != nil {
-		return fmt.Errorf("settle terminal task supplements: %w", err)
+		return nil, fmt.Errorf("settle terminal task supplements: %w", err)
 	}
+	var queued []db.AgentTaskQueue
 	for _, task := range tasks {
 		if task.ChatSessionID.Valid && (task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled") {
-			if _, err := RequeueChatTaskSupplements(ctx, q, task, pgtype.UUID{}); err != nil {
-				return err
+			next, err := RequeueChatTaskSupplements(ctx, q, task, pgtype.UUID{})
+			if err != nil {
+				return nil, err
 			}
+			queued = append(queued, next...)
 		}
 	}
-	return SettleDeliveredDelegatedFailureRecoveries(ctx, q, tasks...)
+	return queued, SettleDeliveredDelegatedFailureRecoveries(ctx, q, tasks...)
 }
 
 // SettleDeliveredDelegatedFailureRecoveries retires every delegated-failure

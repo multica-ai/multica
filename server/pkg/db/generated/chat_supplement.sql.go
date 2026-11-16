@@ -118,6 +118,57 @@ func (q *Queries) DeleteChatTaskSupplementsByWorkspace(ctx context.Context, work
 	return err
 }
 
+const hasChatTaskAssistantOutcome = `-- name: HasChatTaskAssistantOutcome :one
+SELECT EXISTS (SELECT 1 FROM chat_message WHERE task_id = $1 AND role = 'assistant')
+`
+
+func (q *Queries) HasChatTaskAssistantOutcome(ctx context.Context, taskID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasChatTaskAssistantOutcome, taskID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const listChatGuidanceInProviderSession = `-- name: ListChatGuidanceInProviderSession :many
+SELECT s.message_id FROM chat_task_supplement s
+JOIN agent_task_queue t ON t.id = s.task_id
+WHERE s.workspace_id = $1 AND s.message_id = ANY($2::uuid[])
+  AND s.status = 'delivered'
+  AND t.session_id = $3 AND t.runtime_id = $4
+`
+
+type ListChatGuidanceInProviderSessionParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	MessageIds  []pgtype.UUID `json:"message_ids"`
+	SessionID   pgtype.Text   `json:"session_id"`
+	RuntimeID   pgtype.UUID   `json:"runtime_id"`
+}
+
+func (q *Queries) ListChatGuidanceInProviderSession(ctx context.Context, arg ListChatGuidanceInProviderSessionParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listChatGuidanceInProviderSession,
+		arg.WorkspaceID,
+		arg.MessageIds,
+		arg.SessionID,
+		arg.RuntimeID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var message_id pgtype.UUID
+		if err := rows.Scan(&message_id); err != nil {
+			return nil, err
+		}
+		items = append(items, message_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockRunningChatTaskForSupplement = `-- name: LockRunningChatTaskForSupplement :one
 SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.workflow_step FROM agent_task_queue t
 JOIN task_supplement_capability cap ON cap.task_id = t.id
@@ -283,5 +334,15 @@ WHERE task_id IN (SELECT id FROM agent_task_queue WHERE runtime_id = $1)
 
 func (q *Queries) WithdrawChatTaskSupplementsByRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, withdrawChatTaskSupplementsByRuntime, runtimeID)
+	return err
+}
+
+const withdrawChatTaskSupplementsByTasks = `-- name: WithdrawChatTaskSupplementsByTasks :exec
+UPDATE chat_task_supplement SET status = 'withdrawn'
+WHERE task_id = ANY($1::uuid[]) AND status IN ('pending', 'delivering')
+`
+
+func (q *Queries) WithdrawChatTaskSupplementsByTasks(ctx context.Context, taskIds []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, withdrawChatTaskSupplementsByTasks, taskIds)
 	return err
 }

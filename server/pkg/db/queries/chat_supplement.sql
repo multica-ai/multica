@@ -56,6 +56,16 @@ WHERE task_id = $1 AND status IN ('pending', 'delivering');
 -- name: DeleteChatTaskSupplementsBySession :exec
 DELETE FROM chat_task_supplement WHERE chat_session_id = $1;
 
+-- name: HasChatTaskAssistantOutcome :one
+SELECT EXISTS (SELECT 1 FROM chat_message WHERE task_id = $1 AND role = 'assistant');
+
+-- name: ListChatGuidanceInProviderSession :many
+SELECT s.message_id FROM chat_task_supplement s
+JOIN agent_task_queue t ON t.id = s.task_id
+WHERE s.workspace_id = @workspace_id AND s.message_id = ANY(@message_ids::uuid[])
+  AND s.status = 'delivered'
+  AND t.session_id = @session_id AND t.runtime_id = @runtime_id;
+
 -- name: DeleteChatTaskSupplementsByWorkspace :exec
 DELETE FROM chat_task_supplement WHERE workspace_id = $1;
 
@@ -67,6 +77,10 @@ WHERE task_id IN (SELECT id FROM agent_task_queue WHERE chat_session_id = $1);
 UPDATE chat_task_supplement SET status = 'withdrawn'
 WHERE task_id IN (SELECT id FROM agent_task_queue WHERE runtime_id = $1)
   AND status IN ('pending', 'delivering');
+
+-- name: WithdrawChatTaskSupplementsByTasks :exec
+UPDATE chat_task_supplement SET status = 'withdrawn'
+WHERE task_id = ANY(@task_ids::uuid[]) AND status IN ('pending', 'delivering');
 
 -- name: WithdrawChatTaskSupplementsByAgent :exec
 UPDATE chat_task_supplement SET status = 'withdrawn'
