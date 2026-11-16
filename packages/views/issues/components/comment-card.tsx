@@ -1065,8 +1065,7 @@ function ReplyToQuote({ entry, onJump }: { entry: TimelineEntry; onJump?: (comme
   );
 }
 
-/** A run without a persisted reply still belongs to the agent, never its trigger author. */
-export function AgentRunComment({ run, standalone = false, commentProps, entering = false, replyTo, highlightedId, managedAnchor = false }: {
+type AgentRunCommentProps = {
   run: CommentRun;
   managedAnchor?: boolean;
   standalone?: boolean;
@@ -1076,7 +1075,33 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
   replyTo?: ReactNode;
   /** The flashed jump target: the slot's comment id, or the run's task id until it has one. */
   highlightedId?: string | null;
-}) {
+};
+
+function shallowEqual<T extends object>(a: T | undefined, b: T | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = Object.keys(a) as (keyof T)[];
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => Object.is(a[key], b[key]));
+}
+
+/**
+ * The timeline rebuilds `commentProps` on every render, so a plain shallow
+ * compare would never match. Its fields are the same stable values
+ * `CommentCard` already memoizes on; compare them one level down. Without
+ * this every agent reply on screen re-rendered on each Virtuoso range or
+ * height update — every frame of a sidebar toggle (MUL-9426).
+ */
+function agentRunCommentPropsEqual(prev: AgentRunCommentProps, next: AgentRunCommentProps): boolean {
+  const { commentProps: prevComment, ...prevRest } = prev;
+  const { commentProps: nextComment, ...nextRest } = next;
+  return shallowEqual(prevRest, nextRest) && shallowEqual(prevComment, nextComment);
+}
+
+/** A run without a persisted reply still belongs to the agent, never its trigger author. */
+export const AgentRunComment = memo(AgentRunCommentImpl, agentRunCommentPropsEqual);
+
+function AgentRunCommentImpl({ run, standalone = false, commentProps, entering = false, replyTo, highlightedId, managedAnchor = false }: AgentRunCommentProps) {
   const viewState = useInlineCommentRunState();
   const replyEntry = commentProps?.entry;
   // A deleted reply renders nothing in a run slot either (see CommentRow), so
