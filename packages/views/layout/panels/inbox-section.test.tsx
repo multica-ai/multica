@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -9,7 +9,9 @@ import {
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { AgentTask, InboxItem } from "@multica/core/types";
+import type { Agent, AgentTask, InboxItem, SnoozedInboxIssue } from "@multica/core/types";
+import { agentListOptions } from "@multica/core/workspace/queries";
+import { snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { InboxSection, useInboxSectionRows } from "./inbox-section";
@@ -18,12 +20,16 @@ const state = vi.hoisted(() => ({
   unread: 0,
   compact: false,
   archive: vi.fn(),
+  unarchive: vi.fn(() => Promise.resolve()),
+  unsubscribeArchive: vi.fn(),
   markAllRead: vi.fn(),
   archiveAll: vi.fn(),
   archiveAllRead: vi.fn(),
   archiveCompleted: vi.fn(),
   markRead: vi.fn(),
   markUnread: vi.fn(),
+  snooze: vi.fn(() => Promise.resolve()),
+  unsnooze: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("@multica/core/paths", async (importOriginal) => {
@@ -35,13 +41,25 @@ vi.mock("@multica/core/inbox/queries", async (importOriginal) => ({
   useInboxUnreadCount: () => state.unread,
 }));
 vi.mock("@multica/core/inbox/mutations", () => ({
-  useArchiveInbox: () => ({ mutate: state.archive }),
+  useArchiveInbox: () => ({
+    mutate: state.archive,
+    mutateAsync: (id: string) => {
+      state.archive(id);
+      return Promise.resolve();
+    },
+  }),
+  useUnarchiveInbox: () => ({ mutateAsync: state.unarchive }),
   useMarkAllInboxRead: () => ({ mutate: state.markAllRead }),
-  useArchiveAllInbox: () => ({ mutate: state.archiveAll }),
-  useArchiveAllReadInbox: () => ({ mutate: state.archiveAllRead }),
-  useArchiveCompletedInbox: () => ({ mutate: state.archiveCompleted }),
+  useArchiveAllInbox: () => ({ mutateAsync: async () => (await state.archiveAll()) ?? { count: 1 } }),
+  useArchiveAllReadInbox: () => ({ mutateAsync: async () => (await state.archiveAllRead()) ?? { count: 1 } }),
+  useArchiveCompletedInbox: () => ({ mutateAsync: async () => (await state.archiveCompleted()) ?? { count: 1 } }),
   useMarkInboxRead: () => ({ mutate: state.markRead }),
   useMarkInboxUnread: () => ({ mutate: state.markUnread }),
+  useUnsubscribeArchiveInbox: () => ({ mutate: state.unsubscribeArchive }),
+  undoUnsubscribeArchiveInbox: vi.fn(),
+  useSnoozeInbox: () => ({ mutateAsync: state.snooze }),
+  useUnsnoozeInbox: () => ({ mutateAsync: state.unsnooze }),
+  cachedInboxSnoozedUntil: () => null,
 }));
 vi.mock("@multica/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/hooks")>()),
@@ -107,9 +125,13 @@ function renderSection(
   activeIssueId: string | null = null,
   url = "/acme/issues",
   tasks: Partial<AgentTask>[] = [],
+  snoozed: SnoozedInboxIssue[] = [],
+  agents: Pick<Agent, "id" | "owner_id">[] = [],
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   client.setQueryData(["inbox", "ws-1", "list"], items);
+  client.setQueryData(snoozedInboxOptions("ws-1").queryKey, snoozed);
+  client.setQueryData(agentListOptions("ws-1").queryKey, agents as Agent[]);
   client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, tasks as AgentTask[]);
   const nav = adapter(url);
   // As the Work panel keys it: the issue opened from the section, or the Inbox page's notification.
@@ -121,7 +143,7 @@ function renderSection(
       </NavigationProvider>
     </QueryClientProvider>,
   );
-  return { ...result, nav };
+  return { ...result, nav, client };
 }
 
 const rows = () => Array.from(document.querySelectorAll<HTMLElement>("[data-inbox-row]"));
@@ -142,7 +164,7 @@ beforeEach(() => {
   }
   useSidebarTreeStore.setState({ inboxCollapsed: false, inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS });
   useInboxFilterStore.getState().clearFilters("ws-1");
-  useInboxSelectionStore.setState({ landing: null });
+  useInboxSelectionStore.setState({ landing: null, heldRows: {}, leftRowKeyByWorkspace: {} });
 });
 
 describe("InboxSection", () => {
@@ -326,10 +348,97 @@ describe("InboxSection", () => {
     expect(state.archive).toHaveBeenCalledWith("n1");
   });
 
+  it("offers unsubscribe & archive on the card only for issues that are not the viewer's", async () => {
+    renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Theirs", body: "Their comment", issue_assignee_type: "agent", issue_assignee_id: "agent-x" }),
+        item({ id: "n2", issue_id: "issue-b", title: "Mine", body: "My comment", issue_assignee_type: "agent", issue_assignee_id: "agent-mine" }),
+      ],
+      null,
+      "/acme/issues",
+      [],
+      [],
+      [{ id: "agent-x", owner_id: "someone" }, { id: "agent-mine", owner_id: "member-1" }],
+    );
+    const label = "Unsubscribe & archive";
+
+    fireEvent.mouseEnter(rows()[1]!.firstElementChild!);
+    const mine = await screen.findByText("My comment", { selector: "[data-inbox-card] p" }, { timeout: 2000 });
+    expect(within(mine.closest<HTMLElement>("[data-inbox-card]")!).queryByRole("button", { name: label })).toBeNull();
+    fireEvent.mouseLeave(rows()[1]!.firstElementChild!);
+
+    fireEvent.mouseEnter(rows()[0]!.firstElementChild!);
+    const theirs = await screen.findByText("Their comment", { selector: "[data-inbox-card] p" }, { timeout: 2000 });
+    fireEvent.click(within(theirs.closest<HTMLElement>("[data-inbox-card]")!).getByRole("button", { name: label }));
+    expect(state.unsubscribeArchive).toHaveBeenCalledWith({ id: "n1", issueId: "issue-a", scope: "issue" });
+  });
+
+  it("closes the card when the row is pressed, and keeps a pending hover from reopening it", async () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a", title: "Commented", body: "Ship it on Friday" })]);
+    const trigger = rows()[0]!.firstElementChild!;
+    const card = () => document.querySelector("[data-inbox-card]");
+
+    fireEvent.mouseEnter(trigger);
+    await screen.findByText("Ship it on Friday", { selector: "[data-inbox-card] p" }, { timeout: 2000 });
+    fireEvent.pointerDown(trigger);
+    await waitFor(() => expect(card()).toBeNull());
+
+    // Pressed before the hover delay ran out: the card stays shut.
+    fireEvent.mouseLeave(trigger);
+    fireEvent.pointerLeave(trigger);
+    fireEvent.mouseEnter(trigger);
+    fireEvent.pointerDown(trigger);
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(card()).toBeNull();
+
+    // Leaving the row lets the next hover show it again.
+    fireEvent.mouseLeave(trigger);
+    fireEvent.pointerLeave(trigger);
+    fireEvent.mouseEnter(trigger);
+    await screen.findByText("Ship it on Friday", { selector: "[data-inbox-card] p" }, { timeout: 2000 });
+  });
+
   it("archives a row from its hover button", () => {
     renderSection([item({ id: "n1", issue_id: "issue-a", title: "Commented" })]);
     fireEvent.click(within(rows()[0]!).getByRole("button", { name: "Archive" }));
     expect(state.archive).toHaveBeenCalledWith("n1");
+  });
+
+  it("opens the next row once the open one is archived from its row, and stays put for any other", () => {
+    const { nav } = renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Open one" }),
+        item({ id: "n2", issue_id: "issue-b", title: "Next one", created_at: "2026-11-09T08:00:00Z" }),
+        item({ id: "n3", issue_id: "issue-c", title: "Last one", created_at: "2026-11-08T08:00:00Z" }),
+      ],
+      "issue-a",
+    );
+    fireEvent.click(within(rows()[2]!).getByRole("button", { name: "Archive" }));
+    expect(state.archive).toHaveBeenCalledWith("n3");
+    expect(nav.push).not.toHaveBeenCalled();
+
+    fireEvent.click(within(rows()[0]!).getByRole("button", { name: "Archive" }));
+    expect(state.archive).toHaveBeenCalledWith("n1");
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-b");
+    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace["ws-1"]).toBe("issue-a");
+  });
+
+  it("says when the open row comes back once another window snoozed it, rather than that it was archived", async () => {
+    const open = item({ id: "n1", issue_id: "issue-a", title: "Open one" });
+    const other = item({ id: "n2", issue_id: "issue-b", title: "Other one", created_at: "2026-11-09T08:00:00Z" });
+    const { client } = renderSection([open, other], "issue-a");
+    const until = new Date(Date.now() + 26 * 60 * 60 * 1000).toISOString();
+    act(() => {
+      client.setQueryData(snoozedInboxOptions("ws-1").queryKey, [
+        { issue_id: "issue-a", item_id: "n1", snoozed_until: until, snoozed_at: new Date().toISOString(), updates: 0 },
+      ]);
+      client.setQueryData(["inbox", "ws-1", "list"], [other]);
+    });
+
+    const row = screen.getByRole("link", { name: /^Open one/ });
+    await waitFor(() => expect(row).toHaveTextContent(/Back .* · Leaves the Inbox when you move on/));
+    expect(row).toHaveAttribute("aria-current", "page");
+    expect(row).not.toHaveTextContent("Archived");
   });
 
   it("caps the list at the chosen number of rows, with the rest behind Show more", () => {
@@ -426,6 +535,82 @@ describe("InboxSection", () => {
     expect(state.archiveCompleted).toHaveBeenCalledTimes(1);
     fireEvent.click(within(await open()).getByRole("menuitem", { name: "Archive all" }));
     expect(state.archiveAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the next row a bulk archive leaves when it takes the open one", async () => {
+    const { nav } = renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Open one", read: true }),
+        item({ id: "n2", issue_id: "issue-b", title: "Read one", read: true, created_at: "2026-11-09T08:00:00Z" }),
+        item({ id: "n3", issue_id: "issue-c", title: "Unread one", created_at: "2026-11-08T08:00:00Z" }),
+      ],
+      "issue-a",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all read" }));
+    expect(state.archiveAllRead).toHaveBeenCalledTimes(1);
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-c");
+  });
+
+  it("keeps the issue open with nothing lit once a bulk archive takes every row", async () => {
+    const { nav } = renderSection([item({ id: "n1", issue_id: "issue-a", title: "Open one" })], "issue-a");
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all" }));
+    expect(state.archiveAll).toHaveBeenCalledTimes(1);
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace["ws-1"]).toBe("issue-a");
+  });
+
+  it("keeps a bulk archive that spares the open row from moving it", async () => {
+    const { nav } = renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Open one" }),
+        item({ id: "n2", issue_id: "issue-b", title: "Read one", read: true, created_at: "2026-11-09T08:00:00Z" }),
+      ],
+      "issue-a",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all read" }));
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace["ws-1"]).toBeUndefined();
+  });
+
+  it("says a row is back from a snooze, with what arrived meanwhile, until it is read", () => {
+    const snooze = { snoozed_until: "2026-11-12T09:00:00Z", snoozed_at: "2026-11-10T09:00:00Z" };
+    const items = [
+      item({ id: "n3", issue_id: "issue-a", created_at: "2026-11-11T10:00:00Z", ...snooze }),
+      item({ id: "n2", issue_id: "issue-a", created_at: "2026-11-11T08:00:00Z", ...snooze }),
+      item({ id: "n1", issue_id: "issue-a", created_at: "2026-11-10T08:00:00Z", ...snooze }),
+      item({ id: "n4", issue_id: "issue-b", title: "Newer", created_at: "2026-11-11T12:00:00Z" }),
+    ];
+    const { unmount } = renderSection(items);
+    // Back at 09:00 on the 12th, so it sorts above the newer notification.
+    expect(rows()[0]).toHaveTextContent("Snooze ended · 2 updates while snoozed");
+    expect(rows()[1]).toHaveTextContent("Newer");
+    unmount();
+
+    renderSection(items.map((row) => ({ ...row, read: true })));
+    expect(rows()[0]).not.toHaveTextContent("Snooze ended");
+  });
+
+  it("snoozes a row from its hover button", async () => {
+    renderSection([item({ id: "n1", issue_id: "issue-a" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^1 day/ }));
+    expect(state.snooze).toHaveBeenCalledWith({ id: "n1", until: expect.any(Date) });
+  });
+
+  it("opens the snoozed list from the section header, with its count", async () => {
+    const until = "2099-01-01T09:00:00Z";
+    const { nav } = renderSection([item({ id: "n1", issue_id: "issue-a" })], null, "/acme/issues", [], [
+      { issue_id: "issue-z", item_id: "z1", snoozed_until: until, snoozed_at: "2026-11-10T09:00:00Z", updates: 0 },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    const entry = within(await screen.findByRole("menu")).getByRole("menuitem", { name: /View snoozed/ });
+    expect(entry).toHaveTextContent("1");
+    fireEvent.click(entry);
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues?view=snoozed");
   });
 
   it("opens the archive from the section header", async () => {

@@ -5,12 +5,13 @@ import { useState, type ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
 import { ApiError } from "@multica/core/api/client";
 
-const { openExternalMock, isDesktopShellMock, copyImageMock, toastMock } =
+const { openExternalMock, isDesktopShellMock, copyImageMock, copyTextMock, toastMock } =
   vi.hoisted(() => ({
     openExternalMock: vi.fn(),
     // Web by default; the copy-image tests flip it to the desktop shell.
     isDesktopShellMock: vi.fn(() => false),
     copyImageMock: vi.fn(async (_url: string) => true),
+    copyTextMock: vi.fn(async (_text: string) => true),
     toastMock: { success: vi.fn(), error: vi.fn() },
   }));
 
@@ -24,6 +25,7 @@ vi.mock("../platform/local-directory", () => ({
 
 vi.mock("@multica/ui/lib/clipboard", () => ({
   copyImage: copyImageMock,
+  copyText: copyTextMock,
 }));
 
 vi.mock("sonner", () => ({ toast: toastMock }));
@@ -145,6 +147,10 @@ vi.mock("../i18n", () => ({
           preview_unsupported: "This file type can't be previewed.",
           close: "Close",
           download_failed: "",
+          copy_contents: "Copy contents",
+          contents_copied: "Contents copied",
+          copy_failed: "Couldn't copy contents",
+          more_actions: "More actions",
           open_in_new_tab: "Open in new tab",
           wrap_lines: "Wrap lines",
           viewport: "Viewport width",
@@ -234,6 +240,7 @@ beforeEach(() => {
   slugState.value = "acme";
   isDesktopShellMock.mockReturnValue(false);
   copyImageMock.mockResolvedValue(true);
+  copyTextMock.mockResolvedValue(true);
   // Default to web's same-origin empty base so existing absolute-URL tests
   // remain unaffected by the relative-URL resolution added in normalize().
   getBaseUrlMock.mockReturnValue("");
@@ -854,6 +861,76 @@ describe("AttachmentPreviewModal — controls", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("AttachmentPreviewModal — copy contents", () => {
+  it.each([
+    ["example.php", "text/plain", "<?php\r\n// 示例\r\necho 'Hello';\r\n"],
+    ["README.md", "text/markdown", "# Heading\n\n**Keep the source**\n"],
+    ["config.json", "application/json", '{ "enabled": true, "items": [1, 2] }\n'],
+    ["report.csv", "text/csv", 'name,value\n"Example",42\n'],
+  ])("copies the complete original %s body without line numbers or formatting", async (filename, contentType, text) => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({ text, originalContentType: contentType });
+    const attachment = makeAttachment({ filename, content_type: contentType });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment }} open onClose={() => {}} />);
+    const button = screen.getByRole("button", { name: "Copy contents" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    expect(copyTextMock).toHaveBeenCalledWith(text);
+    expect(getAttachmentTextContentMock).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalledWith("Contents copied"));
+  });
+
+  it("uses the same copy action in the standalone preview", async () => {
+    getAttachmentTextContentMock.mockResolvedValueOnce({ text: "complete file\n", originalContentType: "text/plain" });
+    render(<AttachmentPreviewStandalone attachment={makeAttachment({ filename: "example.txt", content_type: "text/plain" })} />);
+    const button = screen.getByRole("button", { name: "Copy contents" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    expect(copyTextMock).toHaveBeenCalledWith("complete file\n");
+  });
+
+  it("keeps copy disabled while loading and after a text fetch failure", async () => {
+    let reject!: (reason: Error) => void;
+    getAttachmentTextContentMock.mockReturnValueOnce(new Promise((_, fail) => { reject = fail; }));
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: makeAttachment({ filename: "example.txt", content_type: "text/plain" }) }} open onClose={() => {}} />);
+    expect(screen.getByRole("button", { name: "Copy contents" })).toBeDisabled();
+    await act(async () => reject(new Error("unavailable")));
+    expect(await screen.findByText("Couldn't load preview")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy contents" })).toBeDisabled();
+    expect(copyTextMock).not.toHaveBeenCalled();
+  });
+
+  it("reports clipboard failure without claiming success", async () => {
+    copyTextMock.mockResolvedValueOnce(false);
+    getAttachmentTextContentMock.mockResolvedValueOnce({ text: "example", originalContentType: "text/plain" });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: makeAttachment({ filename: "example.txt", content_type: "text/plain" }) }} open onClose={() => {}} />);
+    const button = screen.getByRole("button", { name: "Copy contents" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith("Couldn't copy contents"));
+    expect(toastMock.success).not.toHaveBeenCalled();
+  });
+
+  it("offers HTML copying only in source view", async () => {
+    const text = "<!doctype html>\n<p>Example</p>\n";
+    getAttachmentTextContentMock.mockResolvedValueOnce({ text, originalContentType: "text/html" });
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: makeAttachment({ filename: "example.html", content_type: "text/html" }) }} open onClose={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Copy contents" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View source" }));
+    const button = await screen.findByRole("button", { name: "Copy contents" });
+    await waitFor(() => expect(button).toBeEnabled());
+    fireEvent.click(button);
+    expect(copyTextMock).toHaveBeenCalledWith(text);
+  });
+
+  it.each([
+    ["example.png", "image/png"],
+    ["example.pdf", "application/pdf"],
+  ])("does not offer text copying for %s", (filename, contentType) => {
+    render(<AttachmentPreviewModal source={{ kind: "full", attachment: makeAttachment({ filename, content_type: contentType }) }} open onClose={() => {}} />);
+    expect(screen.queryByRole("button", { name: "Copy contents" })).toBeNull();
   });
 });
 

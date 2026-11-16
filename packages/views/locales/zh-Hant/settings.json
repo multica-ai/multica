@@ -426,6 +426,14 @@
         "label": "歸檔通知",
         "description": "歸檔當前開啟的收件箱通知；在歸檔列表中則取消歸檔。"
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "取消訂閱並歸檔",
+        "description": "退訂當前通知所在的任務並歸檔它。僅在不屬於你或你的智能體的任務上可用。"
+      },
+      "snoozeInboxItem": {
+        "label": "延後通知",
+        "description": "延後從收件箱開啟的任務；已延後時讓它現在回來。"
+      },
       "send": {
         "label": "傳送",
         "description": "也用於提交新任務。"
@@ -713,6 +721,7 @@
     "save_failed": "儲存屬性失敗",
     "limit_hint": "{{count}}/{{max}} 個啟用中屬性",
     "archived_badge": "已歸檔",
+    "options_preview": "查看 {{name}} 的全部選項",
     "types": {
       "text": "文字",
       "number": "數字",
@@ -830,15 +839,20 @@
       "projects": "你訂閱的專案",
       "agents": "AI 代理"
     },
+    "others_issues": {
+      "label": "別人的任務",
+      "description": "任務指派給別人或別人的 AI 代理，而你只是因為建立、留言或被 @ 自動訂閱了它。關鍵更新指 @你、回覆你參與的討論，以及待評審、受阻、完成等需要人來看的狀態。",
+      "key_updates": "僅關鍵更新",
+      "all": "全部動態"
+    },
     "leaving": {
       "title": "移出收件箱",
       "description": "通知不會因為已讀而離開收件箱。",
       "manual_label": "手動歸檔",
       "manual_description": "在側欄列上或通知詳情頂部點歸檔",
       "manual_value": "隨時",
-      "done_label": "任務已完成",
-      "done_description": "任務進入「已完成」類狀態時，它的通知自動歸檔；取消不會。",
-      "done_value": "自動",
+      "done_label": "自動歸檔我完成的任務",
+      "done_description": "你把任務改為「已完成」或「已取消」類狀態時，它的通知自動歸檔。別人完成的任務會留在收件箱。",
       "archived_label": "已歸檔的通知",
       "archived_description": "可以在這裡找回並取消歸檔",
       "archived_action": "查看已歸檔"
@@ -861,6 +875,10 @@
         "label": "提及",
         "description": "有人 @ 你時，包括 @all 和 @squad"
       },
+      "reactions": {
+        "label": "表情回應",
+        "description": "有人對你建立的任務或你寫的評論加上表情時"
+      },
       "updates": {
         "label": "優先順序與截止日期",
         "description": "你訂閱的任務優先順序或截止日期變更時"
@@ -871,7 +889,7 @@
       },
       "agent_activity": {
         "label": "AI 代理活動",
-        "description": "AI 代理執行失敗時"
+        "description": "AI 代理執行失敗，或 AI 代理請求的應用操作被攔截、過期時"
       },
       "chat_replies": {
         "label": "包含聊天回覆"
@@ -1676,6 +1694,40 @@
     "mcp": "由管理員新增、在工作區內共享，再按 AI 代理分配。",
     "apps": "透過 Multica 連線團隊或個人帳號，再將應用新增至 AI 代理。",
     "plugins": "安裝後可提供工具、定時 hook 和儲存，每個外掛單獨授權。"
+  },
+  "weixin": {
+    "section_title": "微信",
+    "page_description": "接收掃碼帳號的私訊。",
+    "loading": "正在連線…",
+    "load_failed": "無法載入微信連線。",
+    "not_enabled": "此伺服器尚未啟用微信，請聯絡管理員。",
+    "empty": "在 AI 代理的「整合」分頁中連接微信。",
+    "admin_only": "工作區管理員可以連接微信。",
+    "connected": "已連接",
+    "connect": "連接微信",
+    "disconnect": "中斷連線",
+    "disconnect_title": "中斷微信連線？",
+    "disconnect_description": "新訊息將不再傳送給此 AI 代理，Multica 聊天記錄會保留。",
+    "cancel": "取消",
+    "close": "關閉",
+    "action_failed": "操作未完成，請重試。",
+    "connect_title": "將微信連接到 {{agent}}",
+    "privacy_hint": "請用你自己的微信掃碼，訊息將以你的身分在此工作區執行。請勿分享 QR 碼。",
+    "qr_label": "微信連線 QR 碼",
+    "scan_hint": "使用微信掃碼，並在手機上確認。",
+    "scanned": "已掃碼，請在微信中確認連線。",
+    "verify_hint": "微信要求輸入驗證碼，請填寫手機上顯示的數字。",
+    "verify_label": "驗證碼",
+    "verify": "驗證",
+    "success": "已連接。請在微信中向機器人傳送新訊息。",
+    "expired": "QR 碼已過期，請重新產生。",
+    "blocked": "微信已暫停驗證碼驗證，請稍後重試。",
+    "already_bound": "此機器人已在微信中綁定，請先中斷原用戶端，再重試。",
+    "refresh": "重新產生 QR 碼",
+    "retry": "重試",
+    "already_connected": "此微信已連接至 AI 代理 {{agent}}，請先在該處中斷連線。",
+    "connected_elsewhere": "此微信已在其他位置連接，請先中斷原連線。",
+    "authorization_expired": "微信授權已過期，請重新掃碼連接。"
   },
   "connected_apps": {
     "description": "AI 代理透過這些帳號操作外部應用，允許的操作會直接執行。",

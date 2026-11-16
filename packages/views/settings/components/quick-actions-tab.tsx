@@ -50,6 +50,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { useLocale, useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
+import { CatalogHeader, CatalogRow, CatalogRows, CatalogTable } from "./catalog-table";
 
 // Quick Actions catalog (MUL-5465).
 //
@@ -59,10 +60,8 @@ import { SettingsTab } from "./settings-layout";
 // where the "unused" cleanup signal belongs.
 //
 // Layout deliberately mirrors the Labels and Properties tabs: same search +
-// primary-action row, same bordered card, same responsive column grid, same
-// overflow menu. When the card is too narrow for the columns, a row
-// collapses to the name and menu over one wrapping meta line. These three are
-// the workspace's "catalog of small named things" and reading as one surface
+// primary-action row and the shared `CatalogTable`. These three are the
+// workspace's "catalog of small named things" and reading as one surface
 // matters more than any per-tab cleverness.
 
 const UNUSED_DAYS_THRESHOLD = 90;
@@ -229,15 +228,14 @@ export function QuickActionsTab() {
           </Button>
         </div>
 
-        <div className="@container/quick-actions overflow-hidden rounded-lg border border-surface-border bg-card">
-          <div className="hidden grid-cols-[minmax(10rem,1fr)_minmax(9rem,1fr)_6rem_5rem_7rem_2rem] gap-4 border-b border-surface-border bg-muted/20 px-4 py-2.5 text-caption font-medium text-muted-foreground @min-[48rem]/quick-actions:grid">
+        <CatalogTable columns="minmax(10rem,1fr) minmax(9rem,1fr) 6rem 5rem 7rem">
+          <CatalogHeader>
             <span>{t(($) => $.quick_actions.columns.name)}</span>
             <span>{t(($) => $.quick_actions.columns.target)}</span>
             <span>{t(($) => $.quick_actions.columns.visibility)}</span>
             <span>{t(($) => $.quick_actions.columns.usage)}</span>
             <span>{t(($) => $.quick_actions.columns.updated)}</span>
-            <span />
-          </div>
+          </CatalogHeader>
 
           {isLoading ? (
             <div className="px-4 py-12 text-center text-body text-muted-foreground">
@@ -258,48 +256,43 @@ export function QuickActionsTab() {
               ) : null}
             </div>
           ) : (
-            <div className="divide-y divide-surface-border">
+            <CatalogRows>
               {filtered.map((action) => {
                 const stale = isStale(action);
                 return (
-                  <div
+                  <CatalogRow
                     key={action.id}
-                    className={cn(
-                      "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 px-4 py-3 @min-[48rem]/quick-actions:grid-cols-[minmax(10rem,1fr)_minmax(9rem,1fr)_6rem_5rem_7rem_2rem] @min-[48rem]/quick-actions:gap-4",
-                      action.status !== "active" && "opacity-60",
-                    )}
-                  >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <Zap className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="truncate text-body font-medium">{action.name}</span>
-                      {action.status !== "active" ? (
-                        <Badge variant="outline" className="shrink-0 font-normal">
-                          {t(($) => $.quick_actions.archived)}
-                        </Badge>
-                      ) : null}
-                    </div>
-                    {/* One wrapping meta line when narrow; `contents` when wide so
-                        each field lands in its own column. */}
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-caption text-muted-foreground @min-[48rem]/quick-actions:contents">
-                      <div className="min-w-0 max-w-full truncate @min-[48rem]/quick-actions:text-body">
-                        <TargetLine action={action} t={t} />
+                    className={cn(action.status !== "active" && "opacity-60")}
+                    name={
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Zap className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="truncate text-body font-medium">{action.name}</span>
+                        {action.status !== "active" ? (
+                          <Badge variant="outline" className="shrink-0 font-normal">
+                            {t(($) => $.quick_actions.archived)}
+                          </Badge>
+                        ) : null}
                       </div>
-                      <div className="min-w-0">
-                        <VisibilityBadge action={action} t={t} />
-                      </div>
-                      <span
-                        className={cn(
-                          "tabular-nums @min-[48rem]/quick-actions:text-body",
-                          stale && "text-warning",
-                        )}
-                      >
-                        {action.use_count === 0
-                          ? t(($) => $.quick_actions.never_used)
-                          : t(($) => $.quick_actions.used_count, { count: action.use_count })}
-                      </span>
-                      <span>{new Date(action.updated_at).toLocaleDateString(locale)}</span>
-                    </div>
-                    <div className="col-[2] row-[1/span_2] @min-[48rem]/quick-actions:col-auto @min-[48rem]/quick-actions:row-auto">
+                    }
+                    meta={
+                      <>
+                        <div className="min-w-0 max-w-full truncate">
+                          <TargetLine action={action} t={t} />
+                        </div>
+                        <div className="min-w-0">
+                          <VisibilityBadge action={action} t={t} />
+                        </div>
+                        <span className={cn("tabular-nums", stale && "text-warning")}>
+                          {action.use_count === 0
+                            ? t(($) => $.quick_actions.never_used)
+                            : t(($) => $.quick_actions.used_count, { count: action.use_count })}
+                        </span>
+                        <span className="text-caption">
+                          {new Date(action.updated_at).toLocaleDateString(locale)}
+                        </span>
+                      </>
+                    }
+                    menu={
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           render={
@@ -339,13 +332,13 @@ export function QuickActionsTab() {
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    </div>
-                  </div>
+                    }
+                  />
                 );
               })}
-            </div>
+            </CatalogRows>
           )}
-        </div>
+        </CatalogTable>
       </div>
 
       <QuickActionDialog

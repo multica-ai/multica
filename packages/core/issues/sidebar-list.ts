@@ -121,6 +121,20 @@ export function noProjectCountRequest(statuses: readonly StatusRef[]): IssueTabl
   };
 }
 
+/**
+ * Counts what an expanded row lists, as the facet total. The server folds the
+ * total into a facet's own scan only while the query does not filter that
+ * facet's dimension, so the facet is one the request leaves unfiltered.
+ */
+export function sidebarCountRequest(request: SidebarIssuesRequest): IssueTableFacetsRequest {
+  const { table } = request;
+  return {
+    query: { ...table, sort: { field: "position", direction: "asc" } },
+    facets: [{ kind: table.filters.priorities?.length ? "creator" : "priority" }],
+    include_total: true,
+  };
+}
+
 const VIEW_SORTS = new Set<string>([
   "position",
   "status",
@@ -231,7 +245,7 @@ export function viewSidebarRequest(
 }
 
 /** What each built-in adds to All issues, as the issues page applies it. */
-const BUILTIN_FILTERS: Record<Exclude<BuiltinViewKey, "working">, IssueTableQuerySpec["filters"]> = {
+const BUILTIN_FILTERS: Record<Exclude<BuiltinViewKey, "working" | "snoozed">, IssueTableQuerySpec["filters"]> = {
   all_issues: {},
   my_work: { relations: ASSIGNEE_RELATIONS.me_and_my_agents },
   subscribed: { relations: ["subscribed"] },
@@ -241,14 +255,15 @@ const BUILTIN_FILTERS: Record<Exclude<BuiltinViewKey, "working">, IssueTableQuer
  * The request for an expanded built-in view: its filter, listed with the same
  * status, sub-issue and ordering settings as an expanded project. The
  * assignee setting is for projects only: a built-in already says whose
- * issues it lists. Working lists `workingIssueIds`, the issues agents are
- * running on, as the page does. `null` when the settings leave nothing to list.
+ * issues it lists. Working and Snoozed list `issueIds`: the issues agents are
+ * running on, as the page does, and the issues the viewer snoozed. `null` when
+ * the settings leave nothing to list.
  */
 export function builtinSidebarRequest(
   builtin: BuiltinViewKey,
   settings: SidebarIssueSettings,
   statuses: readonly StatusRef[],
-  workingIssueIds: readonly string[] = [],
+  issueIds: readonly string[] = [],
 ): SidebarIssuesRequest | null {
   const shown = shownSidebarStatuses(settings, statuses);
   if (shown.length === 0) return null;
@@ -256,8 +271,8 @@ export function builtinSidebarRequest(
     table: {
       scope: { kind: "workspace" },
       filters: {
-        ...(builtin === "working"
-          ? { working_issue_ids: [...workingIssueIds].sort() }
+        ...(builtin === "working" || builtin === "snoozed"
+          ? { working_issue_ids: [...issueIds].sort() }
           : BUILTIN_FILTERS[builtin]),
         ...(shown.length < statuses.length ? { statuses: shown } : {}),
         include_sub_issues: settings.showSubIssues,

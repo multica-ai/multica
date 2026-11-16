@@ -310,14 +310,18 @@ func TestGitHubStateDesktopAndLegacyLinks(t *testing.T) {
 		mac := hmac.New(sha256.New, []byte("test-secret-123"))
 		mac.Write([]byte(payload))
 		token := payload + "." + hex.EncodeToString(mac.Sum(nil))
-		if got, ok := verifyState(token); !ok || got != wsID {
-			t.Fatalf("legacy %s rejected", target)
+		if _, ok := verifyState(token); ok {
+			t.Fatalf("untimed legacy %s state accepted", target)
 		}
 	}
 }
 
 func TestGitHubConnectUsesUnifiedState(t *testing.T) {
 	t.Setenv("GITHUB_APP_SLUG", "multica-test")
+	t.Setenv("GITHUB_APP_ID", "11111")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "configured-key")
+	t.Setenv("GITHUB_APP_CLIENT_ID", "test-client")
+	t.Setenv("GITHUB_APP_CLIENT_SECRET", "test-client-secret")
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
 	wsID := "11111111-2222-3333-4444-555555555555"
 	for _, platform := range []string{"web", "legacy-desktop", "desktop"} {
@@ -354,27 +358,28 @@ func TestGitHubSetupCallbackReturnsToInitiatingClient(t *testing.T) {
 	t.Setenv("FRONTEND_ORIGIN", "https://app.multica.test")
 	t.Setenv("GITHUB_APP_ID", "")
 	t.Setenv("GITHUB_APP_PRIVATE_KEY", "")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	installationID := time.Now().UnixNano()
+	stubGitHubOwnership(t, func(w http.ResponseWriter, r *http.Request) {
+		if serveGitHubOwnership(t, w, r, installationID) {
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"account": map[string]any{"login": "example-org", "type": "Organization"}})
-	}))
-	t.Cleanup(srv.Close)
-	oldBase := githubAPIBase
-	githubAPIBase = srv.URL
-	t.Cleanup(func() { githubAPIBase = oldBase })
+	})
 	workspace, err := testHandler.Queries.GetWorkspace(context.Background(), parseUUID(testWorkspaceID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	installationID := time.Now().UnixNano()
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
 	})
 	for _, desktop := range []bool{false, true} {
+		// Each client must exercise a new OAuth-verified binding.
+		testPool.Exec(context.Background(), `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
 		state, err := signGitHubState(testWorkspaceID, desktop)
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/github/setup?installation_id=%d&state=%s", installationID, url.QueryEscape(state)), nil)
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/github/setup?installation_id=%d&code=valid-code&state=%s", installationID, url.QueryEscape(state)), nil)
 		rec := httptest.NewRecorder()
 		testHandler.GitHubSetupCallback(rec, req)
 		if desktop {
@@ -2863,13 +2868,12 @@ func TestSetupCallback_ConsumesPendingInstallationCreated(t *testing.T) {
 	// Force fetchInstallationAccount to take its degraded path. This pins that
 	// the final real account name comes from the earlier webhook, not the
 	// setup callback's synchronous GitHub API lookup.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	stubGitHubOwnership(t, func(w http.ResponseWriter, r *http.Request) {
+		if serveGitHubOwnership(t, w, r, installationID) {
+			return
+		}
 		http.Error(w, "auth required", http.StatusUnauthorized)
-	}))
-	t.Cleanup(srv.Close)
-	oldBase := githubAPIBase
-	githubAPIBase = srv.URL
-	t.Cleanup(func() { githubAPIBase = oldBase })
+	})
 
 	body, _ := json.Marshal(map[string]any{
 		"action": "created",
@@ -2909,7 +2913,7 @@ func TestSetupCallback_ConsumesPendingInstallationCreated(t *testing.T) {
 		t.Fatalf("signState: %v", err)
 	}
 	setupReq := httptest.NewRequest("GET",
-		fmt.Sprintf("/api/github/setup?installation_id=%d&state=%s", installationID, state),
+		fmt.Sprintf("/api/github/setup?installation_id=%d&code=valid-code&state=%s", installationID, state),
 		nil,
 	)
 	setupRec := httptest.NewRecorder()

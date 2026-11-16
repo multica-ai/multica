@@ -17,7 +17,8 @@ function filterFiles(files) {
 
 for (const [name, files, selected] of [
   ["readme only", ["README.md"], []],
-  ["docs only", ["apps/docs/content/docs/guide.mdx"], ["quality"]],
+  ["docs only", ["apps/docs/content/docs/guide.mdx"], ["quality", "docs"]],
+  ["docs test", ["apps/docs/lib/unrendered-bold.test.ts"], ["quality", "docs"]],
   ["web changelog", ["apps/web/features/landing/i18n/en.ts"], ["frontend", "quality"]],
   ["mobile UI", ["apps/mobile/app/index.tsx"], ["quality"]],
   ["migration only", ["server/migrations/999_example.up.sql"], ["backend", "sqlc"]],
@@ -50,14 +51,16 @@ for (const [name, files, selected] of [
   ["brand generator", ["scripts/brand/sync.mjs"], ["quality"]],
   ["PR evidence uploader", ["scripts/pr-shots"], ["quality"]],
   ["cross-module runtime contract", ["packages/core/runtimes/cli-version.ts"], ["frontend", "backend", "runtime", "quality"]],
+  ["inbox type contract", ["packages/core/types/inbox.ts"], ["frontend", "backend", "quality"]],
   ["shared quick action body contract", ["server/internal/handler/testdata/quick_action_bodies.json"], ["frontend", "backend", "runtime"]],
-  ["lockfile", ["pnpm-lock.yaml"], ["frontend", "quality"]],
-  ["workspace package patch", ["patches/example.patch"], ["frontend", "quality"]],
+  ["lockfile", ["pnpm-lock.yaml"], ["frontend", "quality", "docs"]],
+  ["workspace catalog", ["pnpm-workspace.yaml"], ["frontend", "quality", "docs"]],
+  ["workspace package patch", ["patches/example.patch"], ["frontend", "quality", "docs"]],
   ["mobile package patch", ["apps/mobile/patches/example.patch"], ["quality"]],
   ["radius policy", ["scripts/check-ui-radius-tokens.mjs"], ["quality"]],
   ["shared quality action", [".github/actions/frontend-quality/action.yml"], ["frontend", "quality"]],
   ["new bitmap", ["apps/web/public/hero.png"], ["frontend", "quality", "images"]],
-  ["mixed docs and migration", ["apps/docs/content/guide.mdx", "server/migrations/999_example.up.sql"], ["quality", "backend", "sqlc"]],
+  ["mixed docs and migration", ["apps/docs/content/guide.mdx", "server/migrations/999_example.up.sql"], ["quality", "docs", "backend", "sqlc"]],
   ["CI configuration", [".github/ci-paths.json"], Object.keys(filters)],
 ]) {
   test(`PR and main select only affected scopes: ${name}`, () => {
@@ -186,6 +189,17 @@ test("no gated job or shared quality step continues past a failure", () => {
   assert.doesNotMatch(action, /continue-on-error:/);
 });
 
+// A push only checks the paths it changed, so a main run that is cancelled or
+// left pending behind a newer push skips its commit for good.
+test("path-filtered workflows never cancel or supersede a main run", () => {
+  for (const name of ["ci.yml", "mobile-verify.yml"]) {
+    const source = readFileSync(new URL(`../.github/workflows/${name}`, import.meta.url), "utf8");
+    const block = field(source, /^concurrency:\n((?:  .+\n)+)/m);
+    assert.match(block, /^  group: .*\$\{\{ github\.event\.pull_request\.number \|\| github\.run_id \}\}$/m, name);
+    assert.match(block, /^  cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}$/m, name);
+  }
+});
+
 test("quality checks have exactly one runner", () => {
   const invocation = "uses: ./.github/actions/frontend-quality";
   const owners = Object.entries(jobs).filter(([, source]) => source.includes(invocation)).map(([job]) => job);
@@ -197,6 +211,17 @@ test("quality checks have exactly one runner", () => {
       const results = productionNeeds("frontend", outputs);
       const runners = owners.filter((job) => results[job].result === "success");
       assert.equal(runners.length, frontend === "true" || quality === "true" ? 1 : 0);
+    }
+  }
+});
+
+test("docs run their test suite on one runner and are never built", () => {
+  const owners = Object.entries(jobs).filter(([, source]) => source.includes("--filter @multica/docs test")).map(([job]) => job);
+  assert.deepEqual(owners, ["docs-test"]);
+  assert.equal(productionMapping("frontend")["docs-test"], "docs");
+  for (const [job, source] of Object.entries(jobs)) {
+    for (const [run] of source.matchAll(/turbo build[^\n]*/g)) {
+      assert.match(run, /--filter='!@multica\/docs'/, `${job} builds docs`);
     }
   }
 });

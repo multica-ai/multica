@@ -551,6 +551,11 @@
     "unsubscribe": "구독 해제",
     "delegated_subscription_badge": "에이전트를 통해 구독 중",
     "delegated_subscription_hint": "에이전트가 회원님을 대신해 이 태스크를 만들었기 때문에 구독 중입니다. 검토 필요, 완료, 차단 시 알림을 받습니다.",
+    "key_updates_subscription_badge": "주요 업데이트만",
+    "key_updates_subscription_hint": "다른 사람이 맡은 태스크이며, 만들거나 댓글을 달거나 멘션되어 구독 중입니다. 나를 향한 @멘션, 참여한 스레드의 답글, 그리고 검토 필요·차단·완료 시에만 알림을 받습니다.",
+    "key_updates_follow_all": "모든 활동 받기",
+    "key_updates_follow_all_done": "이 태스크의 모든 활동을 받습니다",
+    "key_updates_settings": "기본값 변경",
     "project_subscription_badge": "프로젝트를 통해 구독 중",
     "project_subscription_hint": "이 프로젝트의 모든 태스크를 구독 중입니다. 여기서 구독을 해제하면 이 태스크의 알림만 중지됩니다.",
     "unsubscribe_this": "이 태스크 구독 해제",
@@ -1818,7 +1823,8 @@
       "all_issues": "전체 태스크",
       "my_work": "내 작업",
       "working": "실행 중",
-      "subscribed": "구독 중"
+      "subscribed": "구독 중",
+      "snoozed": "미뤄둔 항목"
     },
     "untitled": "제목 없는 뷰",
     "copy_name": "{{name}} (사본)",

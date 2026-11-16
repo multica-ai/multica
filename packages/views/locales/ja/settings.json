@@ -426,6 +426,14 @@
         "label": "通知をアーカイブ",
         "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。"
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "購読解除してアーカイブ",
+        "description": "開いている通知のタスクの購読を解除し、アーカイブします。自分や自分のエージェントのタスク以外で使えます。"
+      },
+      "snoozeInboxItem": {
+        "label": "通知をスヌーズ",
+        "description": "インボックスから開いたタスクをスヌーズします。スヌーズ中なら今すぐ戻します。"
+      },
       "send": {
         "label": "送信",
         "description": "新しいタスクの作成にも使えます。"
@@ -713,6 +721,7 @@
     "save_failed": "プロパティを保存できませんでした",
     "limit_hint": "{{count}}/{{max}} 個の有効なプロパティ",
     "archived_badge": "アーカイブ済み",
+    "options_preview": "{{name}} のすべてのオプションを表示",
     "types": {
       "text": "テキスト",
       "number": "数値",
@@ -830,15 +839,20 @@
       "projects": "購読中のプロジェクト",
       "agents": "エージェント"
     },
+    "others_issues": {
+      "label": "他の人のタスク",
+      "description": "他の人やその人のエージェントに割り当てられたタスクで、作成・コメント・メンションによって自動的に購読しているもの。重要な更新とは、あなたへの @メンション、参加したスレッドへの返信、レビュー待ち・ブロック・完了など人の確認が必要なステータスです。",
+      "key_updates": "重要な更新のみ",
+      "all": "すべてのアクティビティ"
+    },
     "leaving": {
       "title": "インボックスから外れるとき",
       "description": "既読にしてもインボックスからは消えません。",
       "manual_label": "手動でアーカイブ",
       "manual_description": "サイドバーの行、または通知の上部から",
       "manual_value": "いつでも",
-      "done_label": "タスクが完了",
-      "done_description": "タスクが完了系のステータスになると、その通知はアーカイブされます。キャンセルではアーカイブされません。",
-      "done_value": "自動",
+      "done_label": "自分が完了したタスクをアーカイブ",
+      "done_description": "タスクを完了系またはキャンセル系のステータスにすると、その通知はアーカイブされます。他の人が完了したタスクはインボックスに残ります。",
       "archived_label": "アーカイブ済みの通知",
       "archived_description": "ここから見つけてアーカイブを解除できます",
       "archived_action": "アーカイブ済みを表示"
@@ -861,6 +875,10 @@
         "label": "メンション",
         "description": "誰かがあなたを @メンションしたとき（@all と @squad を含む）"
       },
+      "reactions": {
+        "label": "リアクション",
+        "description": "あなたが作成したタスクや書いたコメントに誰かがリアクションしたとき"
+      },
       "updates": {
         "label": "優先度と期限",
         "description": "フォロー中のタスクの優先度や期限が変わったとき"
@@ -871,7 +889,7 @@
       },
       "agent_activity": {
         "label": "エージェントのアクティビティ",
-        "description": "エージェントの実行が失敗したとき"
+        "description": "エージェントの実行が失敗したとき、またはエージェントが求めたアプリ操作がブロックされたか期限切れになったとき"
       },
       "chat_replies": {
         "label": "チャットの返信を含める"
@@ -1676,6 +1694,40 @@
     "mcp": "管理者が追加してワークスペースで共有し、エージェントごとに割り当てます。",
     "apps": "Multica で接続したチームまたは個人のアカウントを、各エージェントに追加します。",
     "plugins": "インストールするとツール、定期フック、ストレージを追加でき、プラグインごとに権限を付与します。"
+  },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "接続用 QR コードを読み取ったアカウントとの個別メッセージ。",
+    "loading": "接続中…",
+    "load_failed": "WeChat の接続を読み込めませんでした。",
+    "not_enabled": "このサーバーでは WeChat が有効になっていません。管理者にお問い合わせください。",
+    "empty": "エージェントの「連携」タブから WeChat に接続してください。",
+    "admin_only": "ワークスペースの管理者が WeChat に接続できます。",
+    "connected": "接続済み",
+    "connect": "WeChat に接続",
+    "disconnect": "接続を解除",
+    "disconnect_title": "WeChat の接続を解除しますか？",
+    "disconnect_description": "新しいメッセージはこのエージェントに届かなくなります。Multica のチャット履歴は残ります。",
+    "cancel": "キャンセル",
+    "close": "閉じる",
+    "action_failed": "操作を完了できませんでした。もう一度お試しください。",
+    "connect_title": "WeChat を {{agent}} に接続",
+    "privacy_hint": "自分の WeChat アカウントで読み取ってください。メッセージはこのワークスペースであなたの権限で実行されます。QR コードを共有しないでください。",
+    "qr_label": "WeChat 接続用 QR コード",
+    "scan_hint": "WeChat で読み取り、スマートフォンで確認してください。",
+    "scanned": "読み取り済み。WeChat で接続を確認してください。",
+    "verify_hint": "WeChat による認証が必要です。スマートフォンに表示されたコードを入力してください。",
+    "verify_label": "認証コード",
+    "verify": "認証",
+    "success": "接続しました。WeChat でボットに新しいメッセージを送信してください。",
+    "expired": "QR コードの有効期限が切れました。新しく生成してください。",
+    "blocked": "WeChat により認証が制限されています。しばらくしてからお試しください。",
+    "already_bound": "このボットはすでに WeChat に接続されています。以前のクライアントの接続を解除して再試行してください。",
+    "refresh": "新しい QR コード",
+    "retry": "再試行",
+    "already_connected": "このWeChatアカウントは{{agent}}に接続されています。先にそちらで接続を解除してください。",
+    "connected_elsewhere": "このWeChatアカウントは別の場所で接続されています。先に既存の接続を解除してください。",
+    "authorization_expired": "WeChatの認証が失効しました。もう一度スキャンして接続してください。"
   },
   "connected_apps": {
     "description": "エージェントが外部アプリを操作するアカウントです。許可された操作はすぐに実行されます。",

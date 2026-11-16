@@ -160,6 +160,12 @@ const EXPECTED = [
     ],
     source: "packages/ui/components/ui/switch.tsx",
   },
+  {
+    what: "the avatars",
+    find: (els) => els.filter((el) => el.attrs["data-slot"] === "avatar"),
+    classes: ["rounded-avatar"],
+    source: "packages/ui/components/common/actor-avatar.tsx",
+  },
   ...[
     ["open", "git-pull-request-arrow"],
     ["merged", "git-merge"],
@@ -172,7 +178,14 @@ const EXPECTED = [
   })),
   {
     what: "the small buttons",
-    find: (els) => els.filter((el) => "data-variant" in el.attrs && ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"])),
+    // The composer's send button is the one round button (submit-button.tsx).
+    find: (els) =>
+      els.filter(
+        (el) =>
+          el.attrs["data-slot"] === "button" &&
+          ["sm", "icon-sm", "icon-xs"].includes(el.attrs["data-size"]) &&
+          !el.classes.has("rounded-full"),
+      ),
     classes: ["rounded-button-sm"],
     source: "packages/ui/components/ui/button.tsx",
   },
@@ -192,7 +205,6 @@ const NOT_DRAWN = {
     tooltip: "no tooltip is open",
     input: "the page has no text input",
     button: "only small buttons are on the page",
-    avatar: "actor avatars are round (rounded-full) in the app",
     "board-column": "the page shows the list, not the board",
     "board-card": "the page shows the list, not the board",
   },

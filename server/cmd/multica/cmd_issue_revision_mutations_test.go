@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -369,6 +370,54 @@ func TestPrimaryConditionalWritesFailClosedOnOldServer(t *testing.T) {
 			_, err := captureStdout(t, func() error { return run(cmd, args) })
 			if err == nil || mutations != 0 || protected != 1 {
 				t.Fatalf("err=%v unconditional=%d protected=%d", err, mutations, protected)
+			}
+		})
+	}
+}
+
+// Guarded mutations retain upstream path-key validation and URL escaping.
+func TestIssueMetadataConditionalKeyValidation(t *testing.T) {
+	for _, operation := range []struct {
+		name   string
+		cmd    *cobra.Command
+		method string
+	}{{"set", issueMetadataSetCmd, http.MethodPut}, {"delete", issueMetadataDeleteCmd, http.MethodDelete}} {
+		t.Run(operation.name, func(t *testing.T) {
+			for _, key := range []string{".", "..", "state?expected_revision=99", "state#draft", "state/other"} {
+				t.Run(key, func(t *testing.T) {
+					resetIssueRevisionCommand(t, operation.cmd)
+					for flag, value := range map[string]string{"key": key, expectedRevisionFlag: "7", "output": "json"} {
+						if err := operation.cmd.Flags().Set(flag, value); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if operation.name == "set" {
+						if err := operation.cmd.Flags().Set("value", "after"); err != nil {
+							t.Fatal(err)
+						}
+					}
+					requests := 0
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						requests++
+						if r.Method != operation.method || r.URL.EscapedPath() != "/api/issues/"+testIssueUUID+"/conditional/metadata/"+url.PathEscape(key) || r.URL.RawQuery != "expected_revision=7" {
+							t.Errorf("guarded request lost key or revision: %s %s", r.Method, r.URL.RequestURI())
+						}
+						http.Error(w, "key must match", http.StatusBadRequest)
+					}))
+					defer server.Close()
+					setCLITestServerEnv(t, server.URL)
+					_, err := captureStdout(t, func() error { return operation.cmd.RunE(operation.cmd, []string{testIssueUUID}) })
+					if err == nil || !strings.Contains(err.Error(), "key must match") {
+						t.Fatalf("invalid key error=%v", err)
+					}
+					wantRequests := 1
+					if key == "." || key == ".." {
+						wantRequests = 0
+					}
+					if requests != wantRequests {
+						t.Fatalf("requests=%d, want %d", requests, wantRequests)
+					}
+				})
 			}
 		})
 	}

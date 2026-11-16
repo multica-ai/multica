@@ -1,3 +1,5 @@
+import type { ListWeixinInstallationsResponse, WeixinLogin } from "../types/weixin";
+import { ListWeixinInstallationsSchema, WeixinLoginSchema, EMPTY_WEIXIN_INSTALLATIONS, INVALID_WEIXIN_LOGIN } from "../weixin/schema";
 import type { ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
@@ -57,6 +59,7 @@ import type {
   UpdateRuntimeProfileRequest,
   InboxItem,
   InboxWorkspaceUnread,
+  SnoozedInboxIssue,
   IssueSubscriber,
   IssueUnread,
   Comment,
@@ -483,9 +486,11 @@ import {
   IssueInboxReadSchema,
   InboxDeleteSchema,
   InboxItemListSchema,
+  SnoozedInboxListSchema,
   ArchivedInboxPageSchema,
   ArchivedInboxFacetsSchema,
   EMPTY_INBOX_ITEMS,
+  EMPTY_SNOOZED_INBOX,
   NotificationPreferenceResponseSchema,
   EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
   LabelSchema,
@@ -2037,6 +2042,15 @@ export class ApiClient {
     });
   }
 
+  /**
+   * Reverses the caller's own issue-only unsubscribe, restoring the
+   * subscription with its original reason (or the project subscription that
+   * covered it). Not a subscribe: that would make it a manual subscription.
+   */
+  async undoUnsubscribeFromIssue(issueId: string): Promise<void> {
+    await this.fetch(`/api/issues/${issueId}/unsubscribe/undo`, { method: "POST" });
+  }
+
   // Agents
   async listAgents(params?: { workspace_id?: string; include_archived?: boolean }): Promise<Agent[]> {
     const search = new URLSearchParams();
@@ -3187,16 +3201,6 @@ export class ApiClient {
     });
   }
 
-  // Archived notifications, backing the inbox's "Archived" sub-view. Capped
-  // server-side (no pagination in v1). Schema-guarded so a contract drift
-  // renders an empty archive instead of taking the inbox down with it.
-  async listArchivedInbox(): Promise<InboxItem[]> {
-    const raw = await this.fetch<unknown>("/api/inbox/archived");
-    return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
-      endpoint: "GET /api/inbox/archived",
-    });
-  }
-
   private archivedInboxParams(filters: ArchivedInboxFilters): URLSearchParams {
     return new URLSearchParams(archivedInboxQuery(filters));
   }
@@ -3229,14 +3233,24 @@ export class ApiClient {
     return this.fetch(`/api/inbox/${id}/unarchive`, { method: "POST" });
   }
 
-  // Raw unread ROW count — not the number any badge shows. The inbox renders
-  // one row per issue, so a single issue with three unread notifications
-  // counts once there and three times here. `getInboxUnreadSummary` is the
-  // deduplicated, per-workspace count the UI is built on (see
-  // `useInboxUnreadCount`); reach for this one only when raw rows are what
-  // you actually mean.
-  async getUnreadInboxCount(): Promise<{ count: number }> {
-    return this.fetch("/api/inbox/unread-count");
+  // The viewer's snoozed issues, soonest back first (MUL-9333).
+  async listSnoozedInbox(): Promise<SnoozedInboxIssue[]> {
+    const raw = await this.fetch<unknown>("/api/inbox/snoozed");
+    return parseWithFallback(raw, SnoozedInboxListSchema, EMPTY_SNOOZED_INBOX, {
+      endpoint: "GET /api/inbox/snoozed",
+    });
+  }
+
+  // Snooze the item's issue until `until` (an ISO time). Snoozing a snoozed
+  // issue changes its time.
+  async snoozeInbox(id: string, until: string): Promise<{ issue_id: string; snoozed_until: string }> {
+    return this.fetch(`/api/inbox/${id}/snooze`, { method: "POST", body: JSON.stringify({ until }) });
+  }
+
+  // End the snooze on the item's issue. `read` restores it as read: undoing a
+  // snooze puts back the state it had.
+  async unsnoozeInbox(id: string, options: { read?: boolean } = {}): Promise<{ issue_id: string }> {
+    return this.fetch(`/api/inbox/${id}/unsnooze`, { method: "POST", body: JSON.stringify({ read: options.read ?? false }) });
   }
 
   // Cross-workspace unread summary: one entry per workspace the user belongs
@@ -4216,11 +4230,13 @@ export class ApiClient {
     sessionId: string,
     content: string,
     attachmentIds?: string[],
+    options?: { queue?: boolean },
   ): Promise<SendChatMessageResponse> {
     const body: {
       content: string;
+      steer: boolean;
       attachment_ids?: string[];
-    } = { content };
+    } = { content, steer: options?.queue !== true };
     if (attachmentIds && attachmentIds.length > 0) {
       body.attachment_ids = attachmentIds;
     }
@@ -6065,6 +6081,30 @@ export class ApiClient {
       EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/wecom/binding/redeem" },
     );
+  }
+
+  async listWeixinInstallations(workspaceId: string): Promise<ListWeixinInstallationsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/weixin/installations`);
+    return parseWithFallback(raw, ListWeixinInstallationsSchema, EMPTY_WEIXIN_INSTALLATIONS, { endpoint: "GET /api/workspaces/:id/weixin/installations" });
+  }
+
+  async beginWeixinLogin(workspaceId: string, agentId: string): Promise<WeixinLogin> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/weixin/logins?${search}`, { method: "POST" });
+    return parseWithFallback(raw, WeixinLoginSchema, INVALID_WEIXIN_LOGIN, { endpoint: "POST /api/workspaces/:id/weixin/logins" });
+  }
+
+  async pollWeixinLogin(workspaceId: string, loginId: string, verifyCode = "", signal?: AbortSignal): Promise<WeixinLogin> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/weixin/logins/${loginId}/poll`, { method: "POST", body: JSON.stringify({ verify_code: verifyCode }), signal });
+    return parseWithFallback(raw, WeixinLoginSchema, INVALID_WEIXIN_LOGIN, { endpoint: "POST /api/workspaces/:id/weixin/logins/:loginId/poll" });
+  }
+
+  async cancelWeixinLogin(workspaceId: string, loginId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/weixin/logins/${loginId}`, { method: "DELETE" });
+  }
+
+  async deleteWeixinInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/weixin/installations/${installationId}`, { method: "DELETE" });
   }
 
   async listTelegramInstallations(

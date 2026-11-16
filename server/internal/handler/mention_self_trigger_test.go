@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -13,21 +14,21 @@ import (
 // test helper so these integration tests keep asserting enqueue side effects.
 func enqueueMentionedAgentTasksForTest(t *testing.T, ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, authorType, authorID string) {
 	t.Helper()
-	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, authorType, authorID, commentTriggerComputeOptions{})
+	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, authorType, authorID, commentTriggerComputeOptions{
+		AuthoringTaskID: comment.SourceTaskID,
+	})
 	testHandler.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 }
 
 // selfMentionFixture wires the seeded "Handler Test Agent" as J plus two
 // fresh issues so we can exercise the agent-self-mention path on the @mention
 // branch of computeCommentAgentTriggers. The three tests below cover
-// the behavior we want post-MUL-2338:
+// the self-mention routing boundaries:
 //
 //   - cross-issue self-mention enqueues (child→parent handoff between issues
 //     assigned to the same agent must not be swallowed)
-//   - same-issue self-mention with an in-flight running task enqueues a
-//     follow-up (queue coalescing already allows this — the comment handler
-//     must not pre-empt it with an extra in-thread guard)
-//   - same-issue self-mention with a queued/dispatched task is deduped
+//   - same-issue self-mention from the authoring task does not enqueue a follow-up
+//   - legacy unstamped self-mention with a queued/dispatched task is deduped
 //     (HasPendingTaskForIssueAndAgent still does its job)
 type selfMentionFixture struct {
 	JID        string
@@ -162,6 +163,11 @@ func TestEnqueueMentionedAgentTasks_SelfMentionCrossIssueEnqueues(t *testing.T) 
 	}
 	ctx := context.Background()
 	fx := newSelfMentionFixture(t)
+	sourceID := dbfx.Task(t, fx.JID, testutil.Cols{
+		"runtime_id": fx.RuntimeID, "issue_id": fx.IssueAID, "status": "running",
+	})
+	fx.CommentB.SourceTaskID = parseUUID(sourceID)
+	dbfx.Exec(t, `UPDATE comment SET source_task_id = $2 WHERE id = $1`, fx.CommentBID, sourceID)
 
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueBID); got != 0 {
 		t.Fatalf("before: expected 0 pending tasks on parent issue, got %d", got)
@@ -174,25 +180,19 @@ func TestEnqueueMentionedAgentTasks_SelfMentionCrossIssueEnqueues(t *testing.T) 
 	}
 }
 
-// TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningQueuesFollowup proves
-// that a self-mention posted in the same issue an agent is currently running
-// in does NOT pre-empt the natural queue-coalescing behavior: a `running`
-// task is not "pending" for dedup purposes, so a new queued follow-up is
-// added and the agent picks it up on its next cycle.
-func TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningQueuesFollowup(t *testing.T) {
+// A trusted authoring task must not wake itself by mentioning its own agent on
+// the same issue, even though running tasks are not pending for queue dedup.
+func TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningDoesNotQueueFollowup(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
 	fx := newSelfMentionFixture(t)
 
-	// Seed a running task for J on issue A — this is the agent's current run.
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status)
-		VALUES ($1, $2, $3, 'running')
-	`, fx.JID, fx.RuntimeID, fx.IssueAID); err != nil {
-		t.Fatalf("seed running task: %v", err)
-	}
+	sourceID := dbfx.Task(t, fx.JID, testutil.Cols{
+		"runtime_id": fx.RuntimeID, "issue_id": fx.IssueAID, "status": "running",
+	})
+	fx.CommentA.SourceTaskID = parseUUID(sourceID)
 
 	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueAID); got != 0 {
 		t.Fatalf("before: expected 0 queued/dispatched tasks (only the running task), got %d", got)
@@ -200,8 +200,8 @@ func TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningQueuesFollowup(t *tes
 
 	enqueueMentionedAgentTasksForTest(t, ctx, fx.IssueA, fx.CommentA, nil, "agent", fx.JID)
 
-	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueAID); got != 1 {
-		t.Fatalf("after self-mention while running: expected 1 new queued follow-up, got %d", got)
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueAID); got != 0 {
+		t.Fatalf("after same-issue self-mention: expected no queued follow-up, got %d", got)
 	}
 }
 

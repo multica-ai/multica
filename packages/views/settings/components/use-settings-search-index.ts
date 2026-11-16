@@ -11,6 +11,7 @@ const NOTIFICATION_GROUPS = [
   "status_changes",
   "comments",
   "mentions",
+  "reactions",
   "updates",
   "new_issues",
   "agent_activity",
@@ -181,6 +182,18 @@ export function useSettingsSearchIndex(
         title: t(($) => $.notifications.groups[group].label),
         description: t(($) => $.notifications.groups[group].description),
       })),
+      {
+        tab: "notifications",
+        anchor: "others_issues",
+        title: t(($) => $.notifications.others_issues.label),
+        description: t(($) => $.notifications.others_issues.description),
+      },
+      {
+        tab: "notifications",
+        anchor: "auto_archive_completed",
+        title: t(($) => $.notifications.leaving.done_label),
+        description: t(($) => $.notifications.leaving.done_description),
+      },
       {
         tab: "notifications",
         anchor: "archived",

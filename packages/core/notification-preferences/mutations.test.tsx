@@ -12,6 +12,7 @@ import type {
   NotificationPreferenceResponse,
   NotificationPreferences,
 } from "../types";
+import { issueKeys } from "../issues/queries";
 import { useUpdateNotificationPreferences } from "./mutations";
 import { notificationPreferenceKeys } from "./queries";
 
@@ -261,7 +262,13 @@ describe("useUpdateNotificationPreferences", () => {
       preferences: { comments: "muted", updates: "muted" },
     });
     await waitFor(() => {
-      expect(invalidateQueries).toHaveBeenCalledTimes(1);
+      expect(invalidateQueries).toHaveBeenCalledTimes(2);
     });
+    // Subscriber lists carry the server's delivery tier, which reads
+    // others_issues, so they refetch with the preferences.
+    expect(invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+      notificationPreferenceKeys.all(WORKSPACE_ID),
+      issueKeys.subscribersAll(),
+    ]);
   });
 });

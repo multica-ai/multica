@@ -2,9 +2,10 @@ import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 import type { ArchivedInboxPage } from "../types/inbox";
 import { EMPTY_INBOX_FILTERS, archivedInboxQuery, type ArchivedInboxFilters } from "./filters";
 import { groupInboxItemsByIssue } from "./group";
+import { isInboxItemSnoozed } from "./snooze";
 import { infiniteQueryOptions, keepPreviousData, queryOptions, useQuery } from "@tanstack/react-query";
 import { api } from "../api";
-import type { InboxItem, InboxWorkspaceUnread } from "../types";
+import type { InboxItem, InboxWorkspaceUnread, SnoozedInboxIssue } from "../types";
 import { focusManager } from "@tanstack/react-query";
 
 export const inboxKeys = {
@@ -14,6 +15,7 @@ export const inboxKeys = {
   pages: (wsId: string) => [...inboxKeys.archived(wsId), "pages"] as const,
   lookup: (wsId: string) => [...inboxKeys.archived(wsId), "lookup"] as const,
   facets: (wsId: string) => [...inboxKeys.all(wsId), "archived-facets"] as const,
+  snoozed: (wsId: string) => [...inboxKeys.all(wsId), "snoozed"] as const,
   // Account-level (not workspace-scoped): a single shared cache entry that
   // holds unread counts for every workspace the user belongs to.
   unreadSummary: () => ["inbox", "unread-summary"] as const,
@@ -27,15 +29,24 @@ export function inboxListOptions(wsId: string) {
 }
 
 /**
- * @deprecated Legacy array endpoint, capped at 200 groups. New archive
- * consumers must use archivedInboxPagesOptions for the complete archive.
- * Retained for compatibility with legacy cache consumers.
+ * The viewer's snoozed issues, soonest back first. Under `inboxKeys.all`, so
+ * every inbox event refreshes it with the lists.
  */
-export function archivedInboxListOptions(wsId: string) {
+export function snoozedInboxOptions(wsId: string) {
   return queryOptions({
-    queryKey: inboxKeys.archived(wsId),
-    queryFn: () => api.listArchivedInbox(),
+    queryKey: inboxKeys.snoozed(wsId),
+    queryFn: () => api.listSnoozedInbox(),
   });
+}
+
+/** The snoozed entry for one issue, or undefined when it is not snoozed. */
+export function findSnoozedInboxIssue(
+  snoozed: readonly SnoozedInboxIssue[] | undefined,
+  issueId: string | null | undefined,
+  now = Date.now(),
+): SnoozedInboxIssue | undefined {
+  if (!issueId) return undefined;
+  return snoozed?.find((entry) => entry.issue_id === issueId && new Date(entry.snoozed_until).getTime() > now);
 }
 
 // Keyed by the request parameters themselves: an `agent` selection carried in
@@ -192,10 +203,9 @@ export function unreadCountForWorkspace(
  * its own; deriving it from `listInbox()` instead downloaded the entire
  * unbounded inbox on every app start just to render a number (MUL-6967).
  *
- * `GET /api/inbox/unread-count` is deliberately not the source: it counts raw
- * notification rows, while the inbox renders one row per issue. The summary
- * endpoint applies the same newest-per-issue rule `deduplicateInboxItems`
- * applies client-side, so this number matches the list the user sees.
+ * The summary endpoint applies the same newest-per-issue rule
+ * `deduplicateInboxItems` applies client-side, so this number matches the
+ * list the user sees.
  */
 export function useInboxUnreadCount(
   wsId: string | null | undefined,
@@ -216,7 +226,10 @@ export function useInboxUnreadCount(
  * (to avoid new array references on every cache update).
  */
 export function deduplicateInboxItems(items: InboxItem[]): InboxItem[] {
-  return groupInboxItemsByIssue(items.filter((i) => !i.archived));
+  // The server leaves snoozed issues out; this drops the ones snoozed since the
+  // list loaded, optimistically or by a row that joined a snooze.
+  const now = Date.now();
+  return groupInboxItemsByIssue(items.filter((i) => !i.archived && !isInboxItemSnoozed(i, now)));
 }
 
 /**

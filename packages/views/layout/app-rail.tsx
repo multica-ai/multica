@@ -24,6 +24,7 @@ import {
   useInboxUnreadCount,
 } from "@multica/core/inbox/queries";
 import { useMarkAllInboxRead } from "@multica/core/inbox/mutations";
+import { useInboxSnoozeWake } from "@multica/core/inbox/use-snooze-wake";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { resolveRailOrder, useRailOrderStore } from "@multica/core/navigation";
 import {
@@ -75,6 +76,7 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
   const p = useWorkspacePaths();
   const { pathname } = useNavigation();
   const inboxUnread = useInboxUnreadCount(wsId);
+  useInboxSnoozeWake(wsId);
   const inboxBadge = useSidebarTreeStore((s) => s.inboxSettings.railBadge);
 
   const { data: chatSessions = [] } = useQuery({
@@ -321,16 +323,13 @@ const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToFirstScrollableAncesto
  * The app rail: workspaces, New issue and search, the four spaces in the
  * user's order (drag to reorder), then help, settings and the account. It
  * sits on the app shell, outside the content card, and stays put while the
- * panel beside it collapses. Desktop passes `globalActions={false}`: its
- * title bar carries New issue and search.
+ * panel beside it collapses.
  */
 export function AppRail({
   topSlot,
-  globalActions = true,
   className,
 }: {
   topSlot?: React.ReactNode;
-  globalActions?: boolean;
   className?: string;
 }) {
   const { t } = useT("layout");
@@ -402,14 +401,10 @@ export function AppRail({
     >
       {topSlot}
       <RailWorkspaces />
-      {globalActions ? (
-        <div className="my-2 flex flex-col items-center gap-1">
-          <NewIssueButton className={RAIL_ICON_BUTTON_CLASS} tooltipSide="right" />
-          <SearchButton className={RAIL_ICON_BUTTON_CLASS} tooltipSide="right" />
-        </div>
-      ) : (
-        <div className="h-2 shrink-0" />
-      )}
+      <div className="my-2 flex flex-col items-center gap-1">
+        <NewIssueButton className={RAIL_ICON_BUTTON_CLASS} tooltipSide="right" />
+        <SearchButton className={RAIL_ICON_BUTTON_CLASS} tooltipSide="right" />
+      </div>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}

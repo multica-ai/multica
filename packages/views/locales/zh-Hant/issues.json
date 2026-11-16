@@ -551,6 +551,11 @@
     "unsubscribe": "取消訂閱",
     "delegated_subscription_badge": "由 AI 代理代你關注",
     "delegated_subscription_hint": "你的 AI 代理代你建立了這個任務，因此你在關注它。待評審、完成或受阻時會通知你。",
+    "key_updates_subscription_badge": "僅關鍵更新",
+    "key_updates_subscription_hint": "這是別人負責的任務，你是因為建立、留言或被 @ 才訂閱的。只有 @你、回覆你參與的討論，以及待評審、受阻、完成時會通知你。",
+    "key_updates_follow_all": "接收全部動態",
+    "key_updates_follow_all_done": "之後會收到這個任務的全部動態",
+    "key_updates_settings": "修改預設設定",
     "project_subscription_badge": "透過專案訂閱",
     "project_subscription_hint": "你訂閱了這個專案的全部任務。在這裡取消訂閱只會停止這個任務的通知。",
     "unsubscribe_this": "取消訂閱此任務",
@@ -1818,7 +1823,8 @@
       "all_issues": "全部任務",
       "my_work": "我的工作",
       "working": "執行中",
-      "subscribed": "已訂閱"
+      "subscribed": "已訂閱",
+      "snoozed": "已延後"
     },
     "untitled": "未命名檢視",
     "copy_name": "{{name}}（副本）",

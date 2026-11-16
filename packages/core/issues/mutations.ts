@@ -1221,12 +1221,19 @@ export function useToggleIssueSubscriber(issueId: string) {
         qc.setQueryData<IssueSubscriber[]>(
           issueKeys.subscribers(issueId),
           (old) => {
+            // An explicit subscribe rewrites an existing row's reason to
+            // manual. The delivery tier is the server's to report, so it is
+            // dropped until onSettled refetches it.
             if (
               old?.some(
                 (s) => s.user_id === userId && s.user_type === userType,
               )
             )
-              return old;
+              return old.map((s) =>
+                s.user_id === userId && s.user_type === userType
+                  ? { ...s, reason: "manual" as const, delivery: undefined }
+                  : s,
+              );
             return [...(old ?? []), temp];
           },
         );

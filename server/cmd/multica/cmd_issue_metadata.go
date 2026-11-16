@@ -251,14 +251,25 @@ func runIssueMetadataGet(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func validateIssueMetadataPathKey(key string) error {
+	if key == "" {
+		return fmt.Errorf("--key is required")
+	}
+	// PathEscape leaves dot segments unchanged; proxies can normalize them to another endpoint.
+	if key == "." || key == ".." {
+		return fmt.Errorf("key must match ^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$")
+	}
+	return nil
+}
+
 func runIssueMetadataSet(cmd *cobra.Command, args []string) error {
 	expectedRevision, err := readExpectedRevision(cmd)
 	if err != nil {
 		return err
 	}
 	key, _ := cmd.Flags().GetString("key")
-	if key == "" {
-		return fmt.Errorf("--key is required")
+	if err := validateIssueMetadataPathKey(key); err != nil {
+		return err
 	}
 	if !cmd.Flags().Changed("value") {
 		return fmt.Errorf("--value is required")
@@ -307,8 +318,8 @@ func runIssueMetadataDelete(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	key, _ := cmd.Flags().GetString("key")
-	if key == "" {
-		return fmt.Errorf("--key is required")
+	if err := validateIssueMetadataPathKey(key); err != nil {
+		return err
 	}
 
 	client, err := newAPIClient(cmd)

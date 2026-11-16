@@ -528,6 +528,11 @@
     "unsubscribe": "Darse de baja",
     "delegated_subscription_badge": "Observando a través de un agente",
     "delegated_subscription_hint": "Tu agente creó esta tarea en tu nombre, así que estás suscrito. Recibirás una notificación cuando necesite revisión, termine o se quede atascada.",
+    "key_updates_subscription_badge": "Solo actualizaciones clave",
+    "key_updates_subscription_hint": "Esta tarea es de otra persona y la sigues porque la creaste, la comentaste o te mencionaron. Recibirás las @menciones, las respuestas en tus hilos y los avisos cuando necesite revisión, se bloquee o termine.",
+    "key_updates_follow_all": "Recibir toda la actividad",
+    "key_updates_follow_all_done": "Recibirás toda la actividad de esta tarea",
+    "key_updates_settings": "Cambiar el valor predeterminado",
     "project_subscription_badge": "Suscrito a través del proyecto",
     "project_subscription_hint": "Estás suscrito a todas las tareas de este proyecto. Darte de baja aquí solo detiene las notificaciones de esta tarea.",
     "unsubscribe_this": "Darse de baja de esta tarea",
@@ -1895,7 +1900,8 @@
       "all_issues": "Todas las tareas",
       "my_work": "Mi trabajo",
       "working": "En ejecución",
-      "subscribed": "Suscritas"
+      "subscribed": "Suscritas",
+      "snoozed": "Pospuestos"
     },
     "untitled": "Vista sin título",
     "copy_name": "{{name}} (copia)",

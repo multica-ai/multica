@@ -40,7 +40,8 @@
     "archive": "归档",
     "unarchive": "取消归档",
     "open_in_new_tab": "在新标签页打开",
-    "delete": "删除"
+    "delete": "删除",
+    "unsubscribe_archive": "取消订阅并归档"
   },
   "list": {
     "loading_selection": "正在加载通知…",
@@ -122,8 +123,21 @@
   "toasts": {
     "source_context_retry_started": "已使用原始上下文开始重试",
     "archived": "已归档通知",
+    "archived_many_other": "已归档 {{count}} 条通知",
     "unarchived": "已恢复通知",
-    "deleted": "通知已删除"
+    "deleted": "通知已删除",
+    "unsubscribed_archived": "已取消订阅并归档",
+    "unsubscribed_archived_subtree": "已取消订阅此任务及其子任务",
+    "unsubscribed_hint": "之后的普通动态不会再进收件箱，@你时仍会通知",
+    "undo": "撤销"
+  },
+  "kept": {
+    "archived": "已归档",
+    "leaves": "离开后移出收件箱",
+    "filtered": "不再符合筛选",
+    "notification_archived": "通知已归档",
+    "next": "下一条",
+    "next_tooltip": "打开下一条：{{title}}"
   },
   "errors": {
     "archived_lookup_failed": "无法加载链接指向的通知",
@@ -140,7 +154,9 @@
     "unarchive_failed": "取消归档失败",
     "archived_load_failed": "无法加载已归档通知",
     "filters_load_failed": "无法加载筛选项",
-    "delete_failed": "无法删除通知，请重试。"
+    "delete_failed": "无法删除通知，请重试。",
+    "unsubscribe_archive_failed": "取消订阅失败",
+    "undo_unsubscribe_failed": "撤销失败"
   },
   "delete_dialog": {
     "title": "删除通知？",
@@ -148,5 +164,43 @@
     "issue_description": "当前视图中此任务的通知将被永久删除，任务和运行记录不受影响。",
     "cancel": "取消",
     "active_issue_description": "此任务在收件箱中的通知将被永久删除。此前归档的通知会保留，并重新显示在归档视图中。任务和运行记录不受影响。"
+  },
+  "unsubscribe": {
+    "title": "取消订阅并归档：不再收到它的订阅通知，@你时仍会通知",
+    "this_issue": "仅此任务",
+    "subtree_other": "此任务及其 {{count}} 个子任务",
+    "subtree_unknown": "此任务及其子任务"
+  },
+  "snooze": {
+    "action": "延后",
+    "menu_title": "延后到…",
+    "unsnooze": "现在回来",
+    "change_time": "修改时间",
+    "hours_1": "1 小时",
+    "hours_3": "3 小时",
+    "days_1": "1 天",
+    "days_3": "3 天",
+    "weeks_1": "1 周",
+    "pick_time": "选择日期和时间…",
+    "picker_title": "选择日期和时间",
+    "picker_back": "返回",
+    "picker_time": "时间",
+    "picker_hour": "时",
+    "picker_minute": "分",
+    "picker_submit": "延后到 {{time}}",
+    "hint": "被点名 @、被指派或运行失败时会提前回来。",
+    "custom_invalid": "请选择一年内的未来时间。",
+    "back_at": "{{time}} 回来",
+    "returned": "延后到期",
+    "updates_other": "期间 {{count}} 条动态",
+    "toast_snoozed": "已延后到 {{time}}",
+    "toast_unsnoozed": "已回到收件箱",
+    "undo": "撤销",
+    "failed": "延后失败",
+    "unsnooze_failed": "恢复失败",
+    "view_empty": "没有延后的事项",
+    "view_empty_description": "在收件箱里延后一个任务，它会在这里等到时间再回来。",
+    "col_updates": "延后期间",
+    "col_back": "回来时间"
   }
 }

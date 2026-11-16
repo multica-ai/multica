@@ -14,6 +14,7 @@
     "upload_image": "Upload image",
     "upload_file": "Upload file",
     "send": "Send",
+    "queue": "Queue message",
     "default_placeholder": "Type a message…",
     "unavailable": "Chat unavailable",
     "stop_agent": "Stop agent",

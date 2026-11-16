@@ -38,7 +38,7 @@ function renderHeader(
 // title stays left only while nothing distributes the free space: the content
 // group grows and the header never uses `justify-between`.
 function expectTitleLeftOfFreeSpace(header: HTMLElement) {
-  const trigger = header.querySelector("[data-slot='sidebar-trigger']");
+  const trigger = header.querySelector("[data-sidebar='trigger']");
   expect(trigger).not.toBeNull();
   expect(header.firstElementChild).toBe(trigger);
   expect(header).not.toHaveClass("justify-between");
@@ -98,7 +98,7 @@ describe("PageHeader base chrome", () => {
       { hasExternalTrigger: true },
     );
 
-    expect(header.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
+    expect(header.querySelector("[data-sidebar='trigger']")).toBeNull();
     expect(within(header).getByRole("heading")).toBe(header.firstElementChild);
   });
 
@@ -111,7 +111,7 @@ describe("PageHeader base chrome", () => {
       </SidebarProvider>,
     );
 
-    expect(container.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
+    expect(container.querySelector("[data-sidebar='trigger']")).toBeNull();
   });
 
   // A frameless window (the Desktop issue window) hands its title bar to the
@@ -147,7 +147,7 @@ describe("PageHeader base chrome", () => {
   it("renders nothing when no sidebar is mounted", () => {
     const { container } = renderWithI18n(<CollapsedNavTrigger />);
 
-    expect(container.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
+    expect(container.querySelector("[data-sidebar='trigger']")).toBeNull();
   });
 });
 
@@ -170,7 +170,7 @@ describe("CollapsedNavTrigger in the app shell", () => {
         </AppShellProvider>
       </SidebarProvider>,
     );
-    return () => container.querySelector("[data-slot='sidebar-trigger']");
+    return () => container.querySelector("[data-sidebar='trigger']");
   }
 
   it("is a compact-only trigger while the panel is open", () => {

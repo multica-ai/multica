@@ -42,7 +42,8 @@
     "archive": "Archive",
     "unarchive": "Unarchive",
     "open_in_new_tab": "Open in new tab",
-    "delete": "Delete"
+    "delete": "Delete",
+    "unsubscribe_archive": "Unsubscribe & archive"
   },
   "list": {
     "loading_selection": "Loading notification…",
@@ -124,8 +125,22 @@
   "toasts": {
     "source_context_retry_started": "Retry started with the original context",
     "archived": "Notification archived",
+    "archived_many_one": "{{count}} notification archived",
+    "archived_many_other": "{{count}} notifications archived",
     "unarchived": "Notification restored",
-    "deleted": "Notification deleted"
+    "deleted": "Notification deleted",
+    "unsubscribed_archived": "Unsubscribed and archived",
+    "unsubscribed_archived_subtree": "Unsubscribed from this issue and its sub-issues",
+    "unsubscribed_hint": "Its updates won't reach your inbox. @mentions still will.",
+    "undo": "Undo"
+  },
+  "kept": {
+    "archived": "Archived",
+    "leaves": "Leaves the Inbox when you move on",
+    "filtered": "No longer matches your filters",
+    "notification_archived": "Notification archived",
+    "next": "Next",
+    "next_tooltip": "Open next: {{title}}"
   },
   "errors": {
     "archived_lookup_failed": "Failed to load the linked notification",
@@ -142,7 +157,9 @@
     "unarchive_failed": "Failed to unarchive",
     "archived_load_failed": "Failed to load archived notifications",
     "filters_load_failed": "Could not load filters",
-    "delete_failed": "Failed to delete notification. Try again."
+    "delete_failed": "Failed to delete notification. Try again.",
+    "unsubscribe_archive_failed": "Failed to unsubscribe",
+    "undo_unsubscribe_failed": "Failed to undo"
   },
   "delete_dialog": {
     "title": "Delete notification?",
@@ -150,5 +167,45 @@
     "issue_description": "This permanently deletes the notifications for this issue in this view. The issue and its runs are kept.",
     "cancel": "Cancel",
     "active_issue_description": "This permanently deletes the active notifications for this issue. Previously archived notifications remain and will be visible again in Archived. The issue and its runs are kept."
+  },
+  "unsubscribe": {
+    "title": "Unsubscribe and archive. Its updates stop reaching you; an @mention still does.",
+    "this_issue": "This issue only",
+    "subtree_one": "This issue and its {{count}} sub-issue",
+    "subtree_other": "This issue and its {{count}} sub-issues",
+    "subtree_unknown": "This issue and its sub-issues"
+  },
+  "snooze": {
+    "action": "Snooze",
+    "menu_title": "Snooze until…",
+    "unsnooze": "Bring back now",
+    "change_time": "Change time",
+    "hours_1": "1 hour",
+    "hours_3": "3 hours",
+    "days_1": "1 day",
+    "days_3": "3 days",
+    "weeks_1": "1 week",
+    "pick_time": "Pick a date and time…",
+    "picker_title": "Pick a date and time",
+    "picker_back": "Back",
+    "picker_time": "Time",
+    "picker_hour": "Hour",
+    "picker_minute": "Minute",
+    "picker_submit": "Snooze until {{time}}",
+    "hint": "Comes back early when you're mentioned by name, assigned, or a run fails.",
+    "custom_invalid": "Pick a time in the future, within a year.",
+    "back_at": "Back {{time}}",
+    "returned": "Snooze ended",
+    "updates_one": "{{count}} update while snoozed",
+    "updates_other": "{{count}} updates while snoozed",
+    "toast_snoozed": "Snoozed until {{time}}",
+    "toast_unsnoozed": "Back in your inbox",
+    "undo": "Undo",
+    "failed": "Failed to snooze",
+    "unsnooze_failed": "Failed to bring back",
+    "view_empty": "Nothing snoozed",
+    "view_empty_description": "Snooze an issue from your inbox and it waits here until it's time to come back.",
+    "col_updates": "While snoozed",
+    "col_back": "Back"
   }
 }

@@ -551,6 +551,11 @@
     "unsubscribe": "購読解除",
     "delegated_subscription_badge": "エージェント経由で購読中",
     "delegated_subscription_hint": "エージェントがあなたに代わってこのタスクを作成したため、購読しています。レビュー待ち・完了・ブロック時に通知されます。",
+    "key_updates_subscription_badge": "重要な更新のみ",
+    "key_updates_subscription_hint": "他の人が担当するタスクで、作成・コメント・メンションによって購読しています。あなたへの @メンション、参加したスレッドへの返信、レビュー待ち・ブロック・完了のときだけ通知されます。",
+    "key_updates_follow_all": "すべてのアクティビティを受け取る",
+    "key_updates_follow_all_done": "このタスクのすべてのアクティビティを受け取ります",
+    "key_updates_settings": "デフォルトを変更",
     "project_subscription_badge": "プロジェクト経由で購読中",
     "project_subscription_hint": "このプロジェクトのすべてのタスクを購読しています。ここで購読解除すると、このタスクの通知だけが止まります。",
     "unsubscribe_this": "このタスクの購読を解除",
@@ -1818,7 +1823,8 @@
       "all_issues": "すべてのタスク",
       "my_work": "自分の作業",
       "working": "実行中",
-      "subscribed": "購読中"
+      "subscribed": "購読中",
+      "snoozed": "スヌーズ中"
     },
     "untitled": "無題のビュー",
     "copy_name": "{{name}}（コピー）",

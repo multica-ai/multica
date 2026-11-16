@@ -559,6 +559,11 @@
     "unsubscribe": "Se désabonner",
     "delegated_subscription_badge": "Suivi via un agent",
     "delegated_subscription_hint": "Votre agent a créé cette tâche en votre nom : vous y êtes donc abonné. Vous serez notifié lorsqu'elle demandera une relecture, se terminera ou se bloquera.",
+    "key_updates_subscription_badge": "Mises à jour clés",
+    "key_updates_subscription_hint": "Cette tâche est celle de quelqu'un d'autre, et vous la suivez parce que vous l'avez créée, commentée ou y avez été mentionné. Vous recevrez les @mentions, les réponses dans vos fils, et les alertes quand elle demande une relecture, se bloque ou se termine.",
+    "key_updates_follow_all": "Recevoir toute l'activité",
+    "key_updates_follow_all_done": "Vous recevrez toute l'activité de cette tâche",
+    "key_updates_settings": "Modifier la valeur par défaut",
     "project_subscription_badge": "Suivi via le projet",
     "project_subscription_hint": "Vous êtes abonné à toutes les tâches de ce projet. Vous désabonner ici arrête uniquement les notifications de cette tâche.",
     "unsubscribe_this": "Se désabonner de cette tâche",
@@ -1895,7 +1900,8 @@
       "all_issues": "Toutes les tâches",
       "my_work": "Mon travail",
       "working": "En cours d'exécution",
-      "subscribed": "Abonnements"
+      "subscribed": "Abonnements",
+      "snoozed": "Reportés"
     },
     "untitled": "Vue sans titre",
     "copy_name": "{{name}} (copie)",

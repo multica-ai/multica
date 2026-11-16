@@ -122,8 +122,8 @@ func TestRunWorkspaceCreatePostsWorkspaceAndDoesNotSwitchDefault(t *testing.T) {
 	if gotBody["slug"] != "growth-team" {
 		t.Errorf("slug = %v, want growth-team", gotBody["slug"])
 	}
-	if gotBody["description"] != "Handles\nGTM work" {
-		t.Errorf("description = %q, want decoded newline", gotBody["description"])
+	if gotBody["description"] != `Handles\nGTM work` {
+		t.Errorf("description = %q, want literal backslashes", gotBody["description"])
 	}
 	if gotBody["context"] != "Launch notes" {
 		t.Errorf("context = %v, want Launch notes", gotBody["context"])
@@ -600,9 +600,9 @@ func TestBuildWorkspaceUpdateBody(t *testing.T) {
 		if body["name"] != "Acme" {
 			t.Errorf("name = %v, want Acme", body["name"])
 		}
-		// resolveTextFlag decodes \n in inline values.
-		if body["description"] != "line1\nline2" {
-			t.Errorf("description = %q, want decoded newline", body["description"])
+		// Inline text retains literal backslashes.
+		if body["description"] != `line1\nline2` {
+			t.Errorf("description = %q, want literal backslashes", body["description"])
 		}
 		if body["issue_prefix"] != "ENG" {
 			t.Errorf("issue_prefix = %v, want ENG", body["issue_prefix"])

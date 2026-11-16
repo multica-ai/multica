@@ -489,6 +489,14 @@ var serverMessagePrefixes = map[ErrorKind][2]string{
 	KindTooLarge:   {"Request too large: ", "请求过大："},
 }
 
+// TaskTokenRejectedMessage returns the localized stop guidance for a rejected
+// task token. It is for callers that talk to an endpoint outside the API
+// client (the local daemon's environment routes) and want to append the same
+// guidance to the endpoint's own explanation, so there is one copy of it.
+func TaskTokenRejectedMessage() string {
+	return messageFor(KindTaskTokenRejected, DetectLanguage())
+}
+
 // messageFor returns the localized message for a kind.
 func messageFor(kind ErrorKind, lang Language) string {
 	m, ok := kindMessages[kind]

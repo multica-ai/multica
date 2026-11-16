@@ -1,5 +1,8 @@
 "use client";
 
+import { weixinKeys } from "../weixin/queries";
+
+
 import { useEffect, useRef } from "react";
 import { forgetLocalSearchIndex } from "../search-index/instance";
 import { useQueryClient, type InfiniteData, type QueryClient, type QueryFilters } from "@tanstack/react-query";
@@ -589,6 +592,10 @@ export async function handleInboxNew(
   // A new item in ANY workspace can light the workspace-switcher dot, so
   // refresh the cross-workspace summary regardless of the active workspace.
   void onInboxSummaryInvalidate(qc);
+  // Moving to in_progress is routine progress (an agent picking the issue
+  // up), the same exception the server's delegated-handoff rule makes. The
+  // row still lands in the inbox; it just doesn't interrupt with a banner.
+  if (item.type === "status_changed" && item.details?.to === "in_progress") return;
   // Fire a native OS notification only when the app isn't focused. When
   // the user is already looking at Multica, the inbox sidebar's unread
   // styling is enough — no need to interrupt with a banner. `desktopAPI`
@@ -1073,6 +1080,10 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
       },
+      weixin_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: weixinKeys.installations(wsId) });
+      },
       telegram_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: telegramKeys.installations(wsId) });
@@ -1266,6 +1277,11 @@ export function useRealtimeSync(
         qc.setQueriesData<AgentTask[]>(subtreeFilter, (tasks) => tasks?.map((task) =>
           task.issue_id === issue.id ? { ...task, issue_title: issue.title } : task,
         ));
+      }
+      // Whose issue it is decides each subscriber's delivery tier, and a
+      // reassignment can change that without any subscriber event (MUL-9360).
+      if (payload.assignee_changed) {
+        qc.invalidateQueries({ queryKey: issueKeys.subscribers(issue.id) });
       }
       const wsId = getCurrentWsId();
       if (wsId) {

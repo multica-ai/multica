@@ -64,6 +64,7 @@ import type {
   IssueEnvironmentsResponse,
   IssuePullRequestSummariesResponse,
   InboxItem,
+  SnoozedInboxIssue,
   InboxWorkspaceUnread,
   IssueUnread,
   Label,
@@ -2080,6 +2081,9 @@ const SubscriberSchema = z.object({
   user_id: z.string(),
   reason: z.string(),
   created_at: z.string(),
+  // An unknown or malformed tier shows no badge; it must not drop the row,
+  // which would read as "not subscribed".
+  delivery: z.enum(["all", "key_updates", "delegated"]).optional().catch(undefined),
 }).loose();
 
 export const SubscribersListSchema = z.array(SubscriberSchema);
@@ -2615,12 +2619,16 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
   status: z.string().optional(),
   created_at: z.string().optional(),
   supports_queue: z.boolean().optional(),
+  can_supplement: z.boolean().optional().catch(undefined),
   queued_tasks: ChatQueuedTasksSchema.optional(),
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
+  steered: z.boolean().optional().catch(undefined),
+  message_created_at: z.string().optional().catch(undefined),
+  message_task_id: z.string().optional().catch(undefined),
   message_id: z.string().min(1),
   task_id: z.string().min(1),
   supports_queue: z.boolean().optional(),
@@ -3218,6 +3226,22 @@ export const InboxItemListSchema = z.array(
       read: z.boolean(),
       archived: z.boolean(),
       created_at: z.string(),
+      snoozed_until: z.string().nullish(),
+      snoozed_at: z.string().nullish(),
+    })
+    .loose(),
+);
+
+// The viewer's snoozed issues (`/api/inbox/snoozed` GET). A malformed body
+// reads as nothing snoozed.
+export const SnoozedInboxListSchema = z.array(
+  z
+    .object({
+      issue_id: z.string(),
+      item_id: z.string(),
+      snoozed_until: z.string(),
+      snoozed_at: z.string(),
+      updates: z.number().int().nonnegative(),
     })
     .loose(),
 );
@@ -3251,6 +3275,7 @@ export const ArchivedInboxFacetsSchema = z.object({
 }));
 
 export const EMPTY_INBOX_ITEMS: InboxItem[] = [];
+export const EMPTY_SNOOZED_INBOX: SnoozedInboxIssue[] = [];
 
 // Billing schemas (cloud-billing proxy surface)
 //

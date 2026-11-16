@@ -559,6 +559,11 @@
     "unsubscribe": "Unsubscribe",
     "delegated_subscription_badge": "Watching via agent",
     "delegated_subscription_hint": "Your agent created this issue on your behalf, so you're subscribed to it. You'll get notified when it needs review, finishes, or gets stuck.",
+    "key_updates_subscription_badge": "Key updates only",
+    "key_updates_subscription_hint": "This issue is someone else's, and you follow it because you created, commented on or were mentioned in it. You'll hear about @mentions, replies in your threads, and when it needs review, gets stuck or finishes.",
+    "key_updates_follow_all": "Get all activity",
+    "key_updates_follow_all_done": "You'll get all activity on this issue",
+    "key_updates_settings": "Change the default",
     "project_subscription_badge": "Via project",
     "project_subscription_hint": "You're subscribed to every issue in this project. Unsubscribing here stops notifications for this issue only.",
     "unsubscribe_this": "Unsubscribe from this issue",
@@ -1895,7 +1900,8 @@
       "all_issues": "All issues",
       "my_work": "My work",
       "working": "Working",
-      "subscribed": "Subscribed"
+      "subscribed": "Subscribed",
+      "snoozed": "Snoozed"
     },
     "untitled": "Untitled view",
     "copy_name": "{{name}} (copy)",

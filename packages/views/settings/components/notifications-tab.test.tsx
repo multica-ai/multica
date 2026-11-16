@@ -51,7 +51,9 @@ describe("Inbox notification settings", () => {
       "About you",
       "Assignments",
       "Mentions",
+      "Reactions",
       "Issues you subscribe to",
+      "Other people's issues",
       "Status changes",
       "Comments",
       "Priority & Due date",
@@ -64,15 +66,36 @@ describe("Inbox notification settings", () => {
     expect(within(inbox).getByRole("switch", { name: "Comments" })).toBeChecked();
   });
 
+  it.each<{ preferences: Record<string, string>; shown: string }>([
+    { preferences: {}, shown: "Key updates only" },
+    { preferences: { others_issues: "key_updates" }, shown: "Key updates only" },
+    { preferences: { others_issues: "all" }, shown: "All activity" },
+  ])("shows how much of other people's issues reaches you: %j", ({ preferences, shown }) => {
+    renderTab(preferences);
+    const inbox = screen.getByRole("region", { name: "Inbox" });
+    expect(within(inbox).getByRole("combobox", { name: "Other people's issues" })).toHaveTextContent(shown);
+  });
+
   it("explains how notifications leave the Inbox, with a way to the archived ones", () => {
     renderTab();
     const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
     expect(leaving).toHaveTextContent("Reading a notification doesn't take it out of the Inbox.");
-    expect(leaving).toHaveTextContent("Cancelling it doesn't.");
+    expect(leaving).toHaveTextContent("Issues others complete stay in your Inbox.");
     expect(within(leaving).getByRole("link", { name: "View archived" })).toHaveAttribute(
       "href",
       "/acme/inbox?view=archived",
     );
+  });
+
+  it.each<{ preferences: Record<string, string>; checked: boolean }>([
+    { preferences: {}, checked: true },
+    { preferences: { auto_archive_completed: "muted" }, checked: false },
+  ])("toggles archiving issues you complete: %j", ({ preferences, checked }) => {
+    renderTab(preferences);
+    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
+    const toggle = within(leaving).getByRole("switch", { name: "Archive issues you complete" });
+    if (checked) expect(toggle).toBeChecked();
+    else expect(toggle).not.toBeChecked();
   });
 });
 
