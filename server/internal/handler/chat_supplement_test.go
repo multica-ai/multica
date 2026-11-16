@@ -1,14 +1,17 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func newChatSupplementFixture(t *testing.T, negotiated bool) (string, string, string) {
@@ -22,13 +25,20 @@ func newChatSupplementFixture(t *testing.T, negotiated bool) (string, string, st
 	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "chat_session_id": sessionID, "issue_id": nil, "status": "dispatched"})
 	dbfx.Exec(t, `UPDATE agent_task_queue SET chat_input_task_id=id WHERE id=$1`, taskID)
 	dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": sessionID, "task_id": taskID, "role": "user", "content": "original objective"})
-	if _, err := testHandler.TaskService.StartTask(t.Context(), parseUUID(taskID), service.TaskStartCapabilities{Supplement: negotiated}); err != nil {
-		t.Fatal(err)
-	}
 	dbfx.Cleanup(t, `DELETE FROM chat_task_supplement WHERE chat_session_id=$1`, sessionID)
 	dbfx.Cleanup(t, `DELETE FROM task_supplement_capability WHERE task_id=$1`, taskID)
 	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE chat_session_id=$1 AND id<>$2`, sessionID, taskID)
 	dbfx.Cleanup(t, `DELETE FROM task_supplement_capability WHERE task_id IN (SELECT id FROM agent_task_queue WHERE chat_session_id=$1)`, sessionID)
+	var capabilities []string
+	if negotiated {
+		capabilities = append(capabilities, protocol.DaemonCapabilityTaskSupplementV1)
+	}
+	var started AgentTaskResponse
+	req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/start", map[string]any{"capabilities": capabilities}), "taskId", taskID)
+	testutil.Call(t, testHandler.StartTask, req).Want(http.StatusOK).JSON(&started)
+	if negotiated && started.SupplementCapability != protocol.DaemonCapabilityTaskSupplementV1 {
+		t.Fatalf("chat start did not echo its negotiated capability: %q", started.SupplementCapability)
+	}
 	return sessionID, taskID, agentID
 }
 
@@ -38,6 +48,73 @@ func sendChatGuidance(t *testing.T, sessionID string, body map[string]any) SendC
 	req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodPost, "/messages", body)), "sessionId", sessionID)
 	testutil.Call(t, testHandler.SendChatMessage, req).Want(http.StatusCreated).JSON(&response)
 	return response
+}
+
+func TestChatSupplementStartReplayAndBurst(t *testing.T) {
+	sessionID, taskID, _ := newChatSupplementFixture(t, true)
+	task, err := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(taskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation := time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET dispatched_at=$2 WHERE id=$1`, taskID, generation)
+	for range 2 {
+		var started AgentTaskResponse
+		req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/start", map[string]any{
+			"runtime_id": uuidToString(task.RuntimeID), "dispatched_at": generation.Format(time.RFC3339Nano),
+			"capabilities": []string{protocol.DaemonCapabilityTaskSupplementV1},
+		}), "taskId", taskID)
+		testutil.Call(t, testHandler.StartTask, req).Want(http.StatusOK).JSON(&started)
+		if started.SupplementCapability != protocol.DaemonCapabilityTaskSupplementV1 {
+			t.Fatal("chat start replay lost steering negotiation")
+		}
+	}
+	const count = 5
+	var sent []SendChatMessageResponse
+	for i := range count {
+		sent = append(sent, sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": fmt.Sprintf("guidance %d", i)}))
+		if !sent[i].Steered || sent[i].Queued || sent[i].TaskID != taskID {
+			t.Fatalf("guidance %d created a separate turn: %+v", i, sent[i])
+		}
+	}
+	for _, message := range sent {
+		var claimed struct {
+			MessageID string `json:"comment_id"`
+		}
+		req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/claim", nil), "taskId", taskID)
+		testutil.Call(t, testHandler.ClaimTaskSupplement, req).Want(http.StatusOK).JSON(&claimed)
+		if claimed.MessageID != message.MessageID {
+			t.Fatalf("guidance order: got %s, want %s", claimed.MessageID, message.MessageID)
+		}
+		req = withURLParams(newOwnerDaemonRequest(http.MethodPost, "/ack", map[string]any{"delivered": true}), "taskId", taskID, "commentId", message.MessageID)
+		testutil.Call(t, testHandler.AckTaskSupplement, req).Want(http.StatusOK)
+	}
+	if w := completeTaskViaHandler(t, taskID, "one answer covering every addition"); w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1`, sessionID); n != 1 {
+		t.Fatalf("burst produced %d turns", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM chat_message WHERE chat_session_id=$1 AND role='assistant'`, sessionID); n != 1 {
+		t.Fatalf("burst produced %d replies", n)
+	}
+}
+
+func TestChatSupplementPendingCapability(t *testing.T) {
+	for _, negotiated := range []bool{false, true} {
+		t.Run(fmt.Sprintf("negotiated=%v", negotiated), func(t *testing.T) {
+			sessionID, taskID, _ := newChatSupplementFixture(t, negotiated)
+			for _, status := range []string{"running", "dispatched", "queued"} {
+				dbfx.Exec(t, `UPDATE agent_task_queue SET status=$2 WHERE id=$1`, taskID, status)
+				var pending PendingChatTaskResponse
+				req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodGet, "/pending-task", nil)), "sessionId", sessionID)
+				testutil.Call(t, testHandler.GetPendingChatTask, req).Want(http.StatusOK).JSON(&pending)
+				if want := negotiated && status == "running"; pending.CanSupplement != want {
+					t.Fatalf("%s: can_supplement=%v, want %v", status, pending.CanSupplement, want)
+				}
+			}
+		})
+	}
 }
 
 func TestChatSupplementSendClaimAck(t *testing.T) {
@@ -544,6 +621,13 @@ func TestChatSupplementPermissionAndSessionDeletion(t *testing.T) {
 	sent := sendChatGuidance(t, sessionID, map[string]any{"steer": true, "content": "pending"})
 	dbfx.Exec(t, `UPDATE agent_runtime SET visibility='public' WHERE id=(SELECT runtime_id FROM agent WHERE id=$1)`, agentID)
 	dbfx.Exec(t, `UPDATE agent SET permission_mode='private', owner_id=$2 WHERE id=$1`, agentID, dbfx.User(t, "Other", "other-"+uuid.NewString()+"@test.local"))
+	session, err := testHandler.Queries.GetChatSession(t.Context(), parseUUID(sessionID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testHandler.canSupplementChatTask(newRequest(http.MethodGet, "/pending-task", nil), session, parseUUID(taskID), "running") {
+		t.Fatal("revoked caller was offered steering")
+	}
 	req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodPost, "/messages", map[string]any{"steer": true, "content": "forbidden"})), "sessionId", sessionID)
 	testutil.Call(t, testHandler.SendChatMessage, req).Want(http.StatusForbidden)
 	if n := dbfx.Count(t, `SELECT count(*) FROM chat_task_supplement WHERE task_id=$1`, taskID); n != 1 {
