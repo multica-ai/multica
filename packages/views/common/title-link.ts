@@ -12,7 +12,7 @@ export interface TitleLinkPayload {
 
 export function titleLinkPayload(label: string, url: string): TitleLinkPayload {
   return {
-    text: `[${escapeMarkdownLabel(label)}](${url})`,
+    text: `[${escapeMarkdownLabel(label).replace(/</g, "\\<")}](${url})`,
     html: `<a href="${escapeHtmlAttribute(url)}">${escapeHtmlText(label)}</a>`,
   };
 }

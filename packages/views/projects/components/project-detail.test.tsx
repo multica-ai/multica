@@ -385,6 +385,17 @@ describe("ProjectDetail copy title as link", () => {
     );
     expect(mocks.toastSuccess).toHaveBeenCalledWith("Title copied as link");
   });
+
+  it("reports a failed copy without a success toast", async () => {
+    mocks.copyTextAndHtml.mockResolvedValueOnce(false);
+    const user = userEvent.setup();
+    renderProjectDetail();
+
+    await user.click(screen.getByRole("button", { name: "Copy title as link" }));
+
+    expect(mocks.toastError).toHaveBeenCalledWith("Failed to copy link");
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
+  });
 });
 
 describe("ProjectDetail project deletion", () => {
