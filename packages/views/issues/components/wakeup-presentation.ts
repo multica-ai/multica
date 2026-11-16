@@ -235,6 +235,8 @@ export function useWakeupText() {
         break;
       case "children_done":
         return c.stage ? { key: "children_stage" as const, values: { stage: c.stage } } : { key: "children_all" as const, values: {} };
+      case "children_reported":
+        return c.stage ? { key: "children_reported_stage" as const, values: { stage: c.stage } } : { key: "children_reported_all" as const, values: {} };
       case "pull_request":
         return {
           key: c.event === "merged" ? ("pr_merged" as const) : c.event === "conflicts" ? ("pr_conflicts" as const) : ("pr_checks" as const),

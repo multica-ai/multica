@@ -379,6 +379,7 @@ function ConditionMenu({
     field: { icon: CircleDot, label: t(($) => $.wakeups.create.cond_field), hint: t(($) => $.wakeups.create.cond_field_hint) },
     run_end: { icon: Bot, label: t(($) => $.wakeups.create.cond_run_end), hint: t(($) => $.wakeups.create.cond_run_end_hint) },
     children: { icon: ListChecks, label: t(($) => $.wakeups.create.cond_children), hint: t(($) => $.wakeups.create.cond_children_hint) },
+    children_reported: { icon: ListChecks, label: t(($) => $.wakeups.create.cond_children_reported), hint: t(($) => $.wakeups.create.cond_children_reported_hint) },
     pull_request: { icon: GitPullRequest, label: t(($) => $.wakeups.create.cond_pr), hint: t(($) => $.wakeups.create.cond_pr_hint) },
     other_issue: { icon: Link2, label: t(($) => $.wakeups.create.cond_issue), hint: t(($) => $.wakeups.create.cond_issue_hint) },
     custom: { icon: Zap, label: t(($) => $.wakeups.create.cond_custom), hint: t(($) => $.wakeups.create.cond_custom_hint, { count: WAKEUP_EVENT_TYPES.length }) },
@@ -386,7 +387,7 @@ function ConditionMenu({
   const groups: [string, WakeupCondition[]][] = [
     [t(($) => $.wakeups.create.group_time), ["at", "recurring"]],
     [t(($) => $.wakeups.create.group_collaboration), ["reply", "field"]],
-    [t(($) => $.wakeups.create.group_runs), ["run_end", "children"]],
+    [t(($) => $.wakeups.create.group_runs), ["run_end", "children", "children_reported"]],
     [t(($) => $.wakeups.create.group_linked), ["pull_request", "other_issue"]],
   ];
   const selected = value ? items[value] : null;
@@ -449,7 +450,8 @@ function ConditionParams({
     case "field":
       return <FieldParams draft={draft} workspaceId={workspaceId} update={update} />;
     case "children":
-      return <StageChoice workspaceId={workspaceId} issueId={issueId} value={draft.stage} onChange={(stage) => update({ stage })} />;
+    case "children_reported":
+      return <StageChoice workspaceId={workspaceId} issueId={issueId} reported={draft.condition === "children_reported"} value={draft.stage} onChange={(stage) => update({ stage })} />;
     case "pull_request":
       return (
         <PillMenu
@@ -888,11 +890,13 @@ function FieldParams({
 function StageChoice({
   workspaceId,
   issueId,
+  reported,
   value,
   onChange,
 }: {
   workspaceId: string;
   issueId: string;
+  reported: boolean;
   value: number | null;
   onChange: (stage: number | null) => void;
 }) {
@@ -901,7 +905,7 @@ function StageChoice({
   const stages = [...new Set(children.map((c) => c.stage).filter((s): s is number => typeof s === "number"))].sort((a, b) => a - b);
   return (
     <PillMenu
-      label={t(($) => $.wakeups.create.cond_children)}
+      label={reported ? t(($) => $.wakeups.create.cond_children_reported) : t(($) => $.wakeups.create.cond_children)}
       value={value === null ? "all" : String(value)}
       options={[
         { value: "all", label: t(($) => $.wakeups.create.children_all) },

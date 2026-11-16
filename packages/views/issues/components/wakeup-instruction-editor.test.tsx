@@ -47,6 +47,16 @@ it("cancels a draft without saving", async () => {
   expect(edit).not.toHaveBeenCalled();
   expect(await open()).toHaveValue("Check CI");
 });
+it("edits a reported wait's prompt without submitting or replacing its condition", async () => {
+  rule.condition = { type: "children_reported", stage: 2 };
+  mount();
+  fireEvent.change(await open(), { target: { value: "Inspect worker reports" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(edit).toHaveBeenCalledWith("issue", "wake", {
+    instruction: "Inspect worker reports", expected_instruction: "Check CI", revision: 2,
+  }));
+  expect(rule.condition).toEqual({ type: "children_reported", stage: 2 });
+});
 it("keeps the draft after a conflict and never silently uses the refreshed revision", async () => {
   const client = mount();
   const input = await open();

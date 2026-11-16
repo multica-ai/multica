@@ -54,6 +54,7 @@ import {
 export function conditionIcon(condition?: WakeupCondition | null) {
   switch (condition?.type) {
     case "children_done":
+    case "children_reported":
       return ListChecks;
     case "pull_request":
       return GitPullRequest;

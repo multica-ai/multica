@@ -56,6 +56,7 @@ Dans la tâche ci-dessous, Assistant ops a demandé des devis et attend les rép
 | Collaboration | Un champ prend une valeur | Le statut, l'assigné, une étiquette ou une propriété personnalisée de la tâche prend la valeur choisie. |
 | Exécutions et sous-tâches | L’exécution d’un agent se termine | Une exécution d'un agent donné (ou de n'importe quel agent) sur cette tâche réussit, échoue ou est annulée. |
 | Exécutions et sous-tâches | Les sous-tâches se terminent | Toutes les sous-tâches sont closes (`done` ou `cancelled`), ou toutes celles jusqu'à l'étape choisie. Sans sous-tâche, la règle ne se déclenche jamais. |
+| Exécutions et sous-tâches | Rapport des sous-tâches | Toutes les sous-tâches sélectionnées sont en revue ou terminées, annulations comprises. Invite à vérifier les résultats sans approuver les revues. |
 | Liés | La CI d’une PR liée se termine | Ou la PR est fusionnée, ou elle a des conflits de fusion. Seules les PR liées directement à cette tâche comptent ; s'il y en a plusieurs, une seule suffit. CI et conflits ne fonctionnent qu'avec les pull requests GitHub. |
 | Liés | Le statut d’une autre tâche | Une autre tâche est terminée, terminée ou annulée, ou passe en revue. |
 | | Événements personnalisés | Choisissez parmi 25 événements bruts : réactions, pièces jointes, commentaires modifiés, fils résolus… |
@@ -101,6 +102,8 @@ Pour voir tous les réveils de l'espace de travail, ouvrez **Automatisation** et
 - Une règle répétée se met en pause quand elle atteint son nombre maximal de déclenchements. Les règles d'attente se mettent aussi en pause quand elles se déclenchent mutuellement avec d'autres réveils (la chaîne passe une troisième fois par la règle sans intervention humaine), ou quand elles se déclenchent plus de 12 fois en une heure. Une règle en pause reste désactivée jusqu'à ce que quelqu'un la réactive, et son compteur repart de zéro.
 - Une tâche peut avoir au plus 32 réveils actifs, un espace de travail au plus 1 000.
 
+Choisissez **Rapport des sous-tâches** (CLI : `--until-children-reported`) pour vérifier ensemble les résultats de tâches indépendantes. Seul `in_review` exact ou une catégorie terminale `done`/`closed` compte, y compris les statuts terminaux personnalisés. `--stage N` (1–1000) sélectionne les sous-tâches directes avec une étape jusqu’à N ; l’étape N doit exister. Sans étape, les sous-tâches sans étape sont incluses. Une sélection vide ne déclenche rien. L’ensemble actuel est vérifié toutes les 30 secondes : ajout, suppression, déplacement et changement d’étape modifient l’attente. Une règle répétée peut manquer un remplacement à nombre égal ou une transition rapide entre deux vérifications. Ce regroupement ne signale pas chaque rapport et n’approuve, n’attribue ni ne fait avancer aucune étape. La règle système ci-dessous et la condition de fin existante attendent toujours des statuts terminaux.
+
 ## Réveiller le parent quand les sous-tâches se terminent [#child-done]
 
 Quand une tâche a des sous-tâches, sa section Réveils affiche une règle marquée **Système**. Personne n'a besoin de la créer :
@@ -140,7 +143,7 @@ multica issue wakeup create OPS-56 --until-status in_review --instruction "Véri
 
 - **Temps** : `--kind at` avec `--after 10m` ou `--at <heure RFC3339>` ; `--kind every --every 1h` pour un intervalle fixe d'au moins 1 minute ; `--kind cron --cron "<expression à 5 champs>"` avec `--timezone` (UTC par défaut).
 - **Événements** : indiquez les noms d'événements après `--event`, séparés par des virgules. `multica issue wakeup events` liste tous les événements et filtres. `--mode continuous` rend la règle répétée.
-- **Conditions** : `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-pr checks|merged|conflicts` et `--until-issue <tâche> --until-issue-state done|ended|in_review|blocked`. Un seul `--until-*` par réveil, et jamais avec `--event`.
+- **Conditions** : `--until-status`, `--until-assignee`, `--until-label`, `--until-property`, `--until-children-done [--stage N]`, `--until-children-reported [--stage N]`, `--until-pr checks|merged|conflicts` et `--until-issue <tâche> --until-issue-state done|ended|in_review|blocked`. Un seul `--until-*` par réveil, et jamais avec `--event`.
 - **Fin** : le CLI n'ajoute pas d'échéance à votre place. Utilisez `--expires-in 72h` ou `--expires-at <heure RFC3339>` ; `--on-timeout wake` fait qu'une règle d'événement réveille l'agent une dernière fois à l'échéance. `--max-fires N` (1–1000) limite le nombre d'exécutions d'une règle répétée.
 - **Où va la réponse** : `--parent <id-de-commentaire>` garde la réponse de l'exécution réveillée dans le fil d'origine.
 

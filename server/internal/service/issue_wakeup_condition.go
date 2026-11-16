@@ -32,7 +32,7 @@ const (
 // stored facts (a field value, sub-issue status, a linked pull request's
 // state); it does not interpret business meaning.
 type WakeupCondition struct {
-	// issue_field | children_done | pull_request | other_issue
+	// issue_field | children_done | children_reported | pull_request | other_issue
 	Type string `json:"type"`
 	// issue_field: status | assignee | label | property
 	Field        string          `json:"field,omitempty"`
@@ -41,7 +41,7 @@ type WakeupCondition struct {
 	AssigneeID   string          `json:"assignee_id,omitempty"`
 	LabelID      string          `json:"label_id,omitempty"`
 	PropertyID   string          `json:"property_id,omitempty"`
-	// children_done: a stage number, or every sub-issue when omitted.
+	// children_done / children_reported: a stage number, or every sub-issue when omitted.
 	Stage *int32 `json:"stage,omitempty"`
 	// EachStage is the child_done system rule's reading of children_done:
 	// every stage closing while a later one waits, then every sub-issue
@@ -178,7 +178,7 @@ func validateCondition(ctx context.Context, tx pgx.Tx, issue db.Issue, raw json.
 		default:
 			return nil, nil, badCondition("field must be status, assignee, label or property")
 		}
-	case "children_done":
+	case "children_done", "children_reported":
 		if c.EachStage {
 			return nil, nil, badCondition("each_stage is reserved for the platform's sub-issue rule")
 		}
@@ -212,7 +212,7 @@ func validateCondition(ctx context.Context, tx pgx.Tx, issue db.Issue, raw json.
 		}
 		out = WakeupCondition{Type: c.Type, IssueID: util.UUIDToString(id), State: c.State, Identifier: identifier}
 	default:
-		return nil, nil, badCondition("type must be issue_field, children_done, pull_request or other_issue")
+		return nil, nil, badCondition("type must be issue_field, children_done, children_reported, pull_request or other_issue")
 	}
 	normalized, _ := json.Marshal(out)
 	return normalized, events, nil
@@ -252,10 +252,14 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 			value := canonicalWakeupPayload(property)
 			return bytes.Equal(value, canonicalWakeupPayload(c.Value)), "property:" + string(value), map[string]any{"property_id": c.PropertyID, "value": json.RawMessage(value)}, nil
 		}
-	case "children_done":
+	case "children_done", "children_reported":
 		children, err := loadSubIssues(ctx, tx, q, w.IssueID, w.WorkspaceID)
 		if err != nil {
 			return false, "", nil, err
+		}
+		if c.Type == "children_reported" {
+			met, fingerprint, observed := childrenReported(c, children)
+			return met, fingerprint, observed, nil
 		}
 		met, fingerprint, observed := childrenDone(c, children)
 		return met, fingerprint, observed, nil
@@ -581,6 +585,9 @@ type subIssue struct {
 	Stage     pgtype.Int4
 	Closed    bool
 	Cancelled bool
+	// ReviewReady is deliberately separate from Closed: review handoffs must
+	// never advance the terminal-only system stage barrier.
+	ReviewReady bool
 }
 
 func loadSubIssues(ctx context.Context, tx pgx.Tx, q *db.Queries, parent, workspace pgtype.UUID) ([]subIssue, error) {
@@ -615,6 +622,7 @@ func loadSubIssues(ctx context.Context, tx pgx.Tx, q *db.Queries, parent, worksp
 		}
 		children[i].Closed = category == "done" || category == "closed"
 		children[i].Cancelled = category == "closed"
+		children[i].ReviewReady = status == "in_review"
 	}
 	return children, nil
 }
@@ -641,6 +649,31 @@ func childrenDone(c WakeupCondition, children []subIssue) (bool, string, map[str
 	}
 	met := total > 0 && done == total && (c.Stage == nil || inStage > 0)
 	return met, fmt.Sprintf("children:%d", total), map[string]any{"finished": done, "total": total}
+}
+
+// childrenReported is an opt-in barrier for inspecting all workers' results.
+// Cancellation ends a worker's wait; it does not approve that worker's work.
+func childrenReported(c WakeupCondition, children []subIssue) (bool, string, map[string]any) {
+	total, review, closed, cancelled, inStage := 0, 0, 0, 0, 0
+	for _, ch := range children {
+		if c.Stage != nil && (!ch.Stage.Valid || ch.Stage.Int32 > *c.Stage) {
+			continue
+		}
+		if c.Stage != nil && ch.Stage.Int32 == *c.Stage {
+			inStage++
+		}
+		total++
+		if ch.Closed {
+			closed++
+		} else if ch.ReviewReady {
+			review++
+		}
+		if ch.Cancelled {
+			cancelled++
+		}
+	}
+	met := total > 0 && review+closed == total && (c.Stage == nil || inStage > 0)
+	return met, fmt.Sprintf("children_reported:%d", total), map[string]any{"review_ready": review, "closed": closed, "cancelled": cancelled, "total": total}
 }
 
 type stageCount struct {
