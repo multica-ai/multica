@@ -25,6 +25,8 @@ For Debug development, configure `.env.development.local` inside `apps/mobile`
 using `.env.example`, then run `pnpm -C apps/mobile android`.
 Release builds regenerate the ignored `android/` directory before Gradle.
 Keep native changes in `app.config.ts` and config plugins.
+The Android plugin keeps fbjni aligned with React Native's C++ runtime; Shiki's
+dynamic native dependency must not upgrade that ABI independently.
 
 ## Signing
 

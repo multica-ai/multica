@@ -48,6 +48,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       versionCode,
       softwareKeyboardLayoutMode: "resize",
       blockedPermissions: [
+        "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.READ_MEDIA_IMAGES",
