@@ -88,7 +88,7 @@ pnpm --filter @multica/mobile lint
 pnpm --filter @multica/mobile test
 ```
 
-- Root frontend checks exclude mobile. `.github/workflows/mobile-verify.yml` runs mobile checks without building native artifacts or verifying native rendering. Signed Android APKs use `scripts/android-release.mjs`; see `docs/android-release.md`.
+- Root frontend checks exclude mobile. `.github/workflows/mobile-verify.yml` runs mobile checks and builds an unsigned Android Release with an embedded bundle. It does not build an IPA or verify native rendering. Signed APKs use `scripts/android-release.mjs`; see `docs/android-release.md`.
 - For UI changes, verify the affected flow in the simulator/device, including themes, keyboard/scrolling, and navigation. For shared semantics or realtime changes, change the same data from web and confirm mobile catches up without manual refresh, including after reconnect.
 - Test parsing/transforms in the existing Vitest setup. Preserve `scripts/ios-run.test.sh` coverage when changing the native build wrapper.
 - Report which checks ran and which native/cross-client checks were unavailable. Do not claim visual or release verification from typecheck/unit tests alone.
