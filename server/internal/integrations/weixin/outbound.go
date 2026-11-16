@@ -80,7 +80,7 @@ func (o *Outbound) Start(ctx context.Context) {
 
 func (o *Outbound) WaitWithTimeout(timeout time.Duration) bool {
 	done := make(chan struct{})
-	go func() { o.wg.Wait(); o.Typing.wg.Wait(); close(done) }()
+	go func() { o.wg.Wait(); o.Typing.wait(); close(done) }()
 	select {
 	case <-done:
 		return true

@@ -64,6 +64,13 @@ func (n *TypingNotifier) Start(ctx context.Context) {
 	n.mu.Unlock()
 }
 
+func (n *TypingNotifier) wait() {
+	// Shutdown cancels ctx first; synchronize with an ingest already adding work.
+	n.mu.Lock()
+	n.mu.Unlock()
+	n.wg.Wait()
+}
+
 func (n *TypingNotifier) OnIngested(_ context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID, _ pgtype.UUID) {
 	row, ok := inst.Platform.(db.ChannelInstallation)
 	if !ok || !sessionID.Valid {
