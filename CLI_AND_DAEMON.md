@@ -1110,7 +1110,14 @@ multica autopilot create \
   --mode create_issue \
   --subscriber "Alice"
 
+multica autopilot create \
+  --title "Weekly dependency audit" \
+  --description "Audit dependencies for security updates." \
+  --squad "Backend Squad" \
+  --mode create_issue
+
 multica autopilot update <id> --status paused
+multica autopilot update <id> --squad-id <squad-uuid>
 multica autopilot update <id> --description "New prompt"
 multica autopilot update <id> --subscriber "Alice" --subscriber "Bob"
 multica autopilot update <id> --clear-subscribers
@@ -1118,6 +1125,7 @@ multica autopilot delete <id>
 ```
 
 `--mode` accepts `create_issue` (creates a new issue on each run and assigns it to the agent) or `run_only` (enqueues a direct agent task without creating an issue). `--agent` accepts either a name or UUID.
+To assign a squad instead, use `--squad` (name or ID) or `--squad-id` (canonical UUID); the run goes to the squad's leader, and in `create_issue` mode the created issue is assigned to the squad. `--agent`, `--squad`, and `--squad-id` are mutually exclusive, and `create` requires one of them. On `update` they switch the assignee (sending `assignee_type` with `assignee_id`); an update without any of them leaves the current assignee untouched. Table output labels the assignee by type, e.g. `squad:Backend Squad`.
 `--subscriber` accepts a workspace member name or user ID and may be repeated; on update it replaces the autopilot's subscriber template. Subscribers receive inbox notifications for issues created by a `create_issue` autopilot. Use `--clear-subscribers` to remove all autopilot subscribers.
 
 ### Manual Trigger
