@@ -5,13 +5,16 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type ReactElement,
   type ReactNode,
 } from "react";
-import type { Issue } from "@multica/core/types";
+import { toast } from "sonner";
+import type { AgentTask, Issue } from "@multica/core/types";
+import { useCancelIssueRun } from "@multica/core/issues/mutations";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -21,7 +24,14 @@ import {
   IssueActionsMenuItems,
   contextPrimitives,
 } from "./issue-actions-menu-items";
-import { AssigneePicker } from "../components/pickers";
+import { TerminateTaskConfirmDialog } from "../components/terminate-task-confirm-dialog";
+import {
+  ContextMenuScopeSubmenu,
+  findContextMenuScope,
+  useScopeSubmenuFocus,
+  type ResolvedContextMenuScope,
+} from "../../common/context-menu-scope";
+import { useT } from "../../i18n";
 
 /**
  * One shared context menu per surface instead of one Base UI ContextMenu
@@ -40,6 +50,8 @@ import { AssigneePicker } from "../components/pickers";
 interface ActiveMenu {
   issue: Issue;
   position: { x: number; y: number };
+  /** The object around the issue — a comment around a mention. */
+  submenu: ResolvedContextMenuScope["submenu"];
 }
 
 type OpenIssueContextMenu = (issue: Issue, event: React.MouseEvent) => void;
@@ -48,10 +60,36 @@ const IssueContextMenuContext = createContext<OpenIssueContextMenu | null>(
   null,
 );
 
+/**
+ * The surface's batch menu: a right-click on a row that is part of a
+ * multi-row selection acts on the whole selection, not on that row alone.
+ */
+export interface IssueBatchMenu {
+  covers: (issueId: string) => boolean;
+  openAt: (point: { x: number; y: number }) => void;
+}
+
+const IssueBatchMenuRegistry = createContext<((menu: IssueBatchMenu | null) => void) | null>(null);
+
+/** Hands the provider the batch menu; `menu` should be stable. */
+export function useRegisterIssueBatchMenu(menu: IssueBatchMenu) {
+  const register = useContext(IssueBatchMenuRegistry);
+  useEffect(() => {
+    if (!register) return;
+    register(menu);
+    return () => register(null);
+  }, [register, menu]);
+}
+
+type IssueContextMenuVariant = "full" | "sidebar";
+
 export function IssueContextMenuProvider({
   children,
+  variant = "full",
 }: {
   children: ReactNode;
+  /** Which menu the surface's rows open; see `IssueActionsMenuItems`. */
+  variant?: IssueContextMenuVariant;
 }) {
   const [active, setActive] = useState<ActiveMenu | null>(null);
   const [open, setOpen] = useState(false);
@@ -61,14 +99,28 @@ export function IssueContextMenuProvider({
   // managing it imperatively here keeps the affordance without re-rendering
   // every row on open/close.
   const triggerElRef = useRef<HTMLElement | null>(null);
+  const batchMenuRef = useRef<IssueBatchMenu | null>(null);
+  const registerBatchMenu = useCallback((menu: IssueBatchMenu | null) => {
+    batchMenuRef.current = menu;
+  }, []);
 
   const openMenu = useCallback<OpenIssueContextMenu>((issue, event) => {
     event.preventDefault();
+    const batch = batchMenuRef.current;
+    if (batch?.covers(issue.id)) {
+      setOpen(false);
+      batch.openAt({ x: event.clientX, y: event.clientY });
+      return;
+    }
     triggerElRef.current?.removeAttribute("data-popup-open");
     const el = event.currentTarget as HTMLElement;
     el.setAttribute("data-popup-open", "");
     triggerElRef.current = el;
-    setActive({ issue, position: { x: event.clientX, y: event.clientY } });
+    setActive({
+      issue,
+      position: { x: event.clientX, y: event.clientY },
+      submenu: findContextMenuScope(el.parentElement).submenu,
+    });
     setOpen(true);
   }, []);
 
@@ -82,15 +134,17 @@ export function IssueContextMenuProvider({
 
   return (
     <IssueContextMenuContext.Provider value={openMenu}>
-      {children}
+      <IssueBatchMenuRegistry.Provider value={registerBatchMenu}>{children}</IssueBatchMenuRegistry.Provider>
       {/* Mounted on first use, kept mounted after (one closed menu root per
           surface — the popup itself unmounts while closed). */}
       {active && (
         <IssueContextMenuSingleton
           issue={active.issue}
           position={active.position}
+          submenu={active.submenu}
           open={open}
           onOpenChange={handleOpenChange}
+          variant={variant}
         />
       )}
     </IssueContextMenuContext.Provider>
@@ -100,14 +154,18 @@ export function IssueContextMenuProvider({
 function IssueContextMenuSingleton({
   issue,
   position,
+  submenu,
   open,
   onOpenChange,
+  variant,
 }: ActiveMenu & {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  variant: IssueContextMenuVariant;
 }) {
   const actions = useIssueActions(issue);
-  const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [stopTask, setStopTask] = useState<AgentTask | null>(null);
+  const scope = useScopeSubmenuFocus(submenu);
 
   // Point-sized virtual anchor at the right-click position — replaces the
   // cursor anchor Base UI's own trigger would have registered.
@@ -127,43 +185,75 @@ function IssueContextMenuSingleton({
   return (
     <>
       <ContextMenu open={open} onOpenChange={(v) => onOpenChange(v)}>
-        <ContextMenuContent anchor={anchor}>
+        {/* A fixed width keeps the sidebar menu from resizing with the
+            header title, which is clamped to two lines instead. */}
+        <ContextMenuContent
+          anchor={anchor}
+          className={variant === "sidebar" ? "w-62" : "w-auto min-w-56"}
+          finalFocus={scope.finalFocus}
+        >
           <IssueActionsMenuItems
             issue={issue}
             actions={actions}
             primitives={contextPrimitives}
-            onOpenAssignee={() => setAssigneeOpen(true)}
+            onClose={() => onOpenChange(false)}
+            variant={variant}
+            onStopRun={setStopTask}
           />
+          <ContextMenuScopeSubmenu submenu={scope.submenu} primitives={contextPrimitives} />
         </ContextMenuContent>
       </ContextMenu>
-      {/* Mount the picker only once the user actually opens it, anchored at
-          the right-click position so it opens where the context menu just
-          was instead of jumping to the row's top-left corner. */}
-      {assigneeOpen && (
-        <AssigneePicker
-          assigneeType={issue.assignee_type}
-          assigneeId={issue.assignee_id}
-          onUpdate={actions.updateField}
-          open={assigneeOpen}
-          onOpenChange={setAssigneeOpen}
-          triggerRender={
-            <span
-              aria-hidden
-              className="pointer-events-none fixed"
-              style={{
-                left: position.x,
-                top: position.y,
-                width: 0,
-                height: 0,
-              }}
-            />
-          }
-          trigger={<span />}
-          align="start"
+      {stopTask && (
+        <StopRunConfirmDialog
+          issueId={issue.id}
+          task={stopTask}
+          onClose={() => setStopTask(null)}
         />
       )}
     </>
   );
+}
+
+function StopRunConfirmDialog({
+  issueId,
+  task,
+  onClose,
+}: {
+  issueId: string;
+  task: AgentTask;
+  onClose: () => void;
+}) {
+  const { t } = useT("issues");
+  const cancelRun = useCancelIssueRun(issueId);
+  return (
+    <TerminateTaskConfirmDialog
+      open
+      onOpenChange={(v) => {
+        if (!v) onClose();
+      }}
+      onConfirm={() => {
+        // The dialog closes (and unmounts this component) before the request
+        // settles, so per-call mutate callbacks would never fire.
+        void cancelRun.mutateAsync(task.id).catch((e: unknown) => {
+          toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.cancel_failed));
+        });
+      }}
+      showRunningNote
+    />
+  );
+}
+
+/** Opens the surrounding provider's issue menu at the event's cursor, for an
+ *  item that must stay selectable text (IssueActionsContextMenu makes its child
+ *  `select-none`). */
+export function useOpenIssueContextMenu(): OpenIssueContextMenu {
+  const openMenu = useContext(IssueContextMenuContext);
+  if (!openMenu) {
+    throw new Error(
+      "useOpenIssueContextMenu requires an IssueContextMenuProvider ancestor",
+    );
+  }
+  return openMenu;
 }
 
 interface IssueActionsContextMenuProps {

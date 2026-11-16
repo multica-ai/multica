@@ -771,7 +771,7 @@ func TestRerunIssue_PreservesSourceCommentPlanAndResetsReceipt(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 	})
 
-	rerun, err := testHandler.TaskService.RerunIssue(ctx, util.MustParseUUID(issueID), util.MustParseUUID(sourceID), pgtype.UUID{}, pgtype.UUID{}, nil)
+	rerun, err := testHandler.TaskService.RerunIssue(ctx, util.MustParseUUID(issueID), util.MustParseUUID(sourceID), pgtype.UUID{}, pgtype.UUID{}, false, nil)
 	if err != nil {
 		t.Fatalf("RerunIssue: %v", err)
 	}
@@ -818,7 +818,7 @@ func testRerunPromotesSurvivorAfterTriggerDeleted(t *testing.T, deleteTriggerSQL
 		t.Fatalf("delete rerun source trigger: %v", err)
 	}
 
-	rerun, err := testHandler.TaskService.RerunIssue(ctx, parseUUID(fixture.issueID), parseUUID(fixture.taskID), pgtype.UUID{}, pgtype.UUID{}, nil)
+	rerun, err := testHandler.TaskService.RerunIssue(ctx, parseUUID(fixture.issueID), parseUUID(fixture.taskID), pgtype.UUID{}, pgtype.UUID{}, false, nil)
 	if err != nil {
 		t.Fatalf("RerunIssue: %v", err)
 	}

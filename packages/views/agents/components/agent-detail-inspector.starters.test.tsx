@@ -100,13 +100,13 @@ describe("AgentDetailInspector conversation starters", () => {
     );
   });
 
-  it("offers neither starters nor a chat preview for a Qoder agent", () => {
+  it("offers starters and a chat preview for a Qoder agent", () => {
     renderInspector({
       runtime: { id: "runtime-1", provider: "qoder_cloud" } as AgentRuntime,
     });
 
-    expect(screen.queryByText("Conversation starters")).toBeNull();
-    expect(screen.queryByText("New chat preview")).toBeNull();
+    expect(screen.getByText("Conversation starters")).toBeInTheDocument();
+    expect(screen.getByText("New chat preview")).toBeInTheDocument();
   });
 
   it("omits the editor on a backend that does not persist starters", () => {

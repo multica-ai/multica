@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays } from "lucide-react";
+import { CalendarDays } from "@multica/ui/icons";
 import type { UpdateIssueRequest } from "@multica/core/types";
 import { DateOnlyPicker } from "../../../common/date-only-picker";
 import { useT } from "../../../i18n";

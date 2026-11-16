@@ -11,8 +11,99 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 )
+
+func TestDownloadFileInterruptedBodyIsClassified(t *testing.T) {
+	withLang(t, "en_US.UTF-8")
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Length", "71")
+		_, _ = io.WriteString(w, "payload")
+	}))
+	defer srv.Close()
+
+	client := NewAPIClient(srv.URL, "ws-1", "test-token")
+	data, err := client.DownloadFile(context.Background(), "/download")
+	if string(data) != "payload" || !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("lost partial body or underlying error: data=%q err=%v", data, err)
+	}
+	var netErr *NetworkError
+	if !errors.As(err, &netErr) || netErr.Op != "GET /download" {
+		t.Fatalf("expected download NetworkError, got %T: %v", err, err)
+	}
+	if got := ExitCodeFor(err); got != ExitNetwork {
+		t.Errorf("ExitCodeFor = %d, want %d", got, ExitNetwork)
+	}
+	if msg := FormatError(err, false); !strings.Contains(msg, "network connection") {
+		t.Errorf("FormatError = %q, want network guidance", msg)
+	}
+	if requests.Load() != 1 {
+		t.Errorf("download sent %d requests, want one", requests.Load())
+	}
+}
+
+type downloadRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f downloadRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestDownloadFileBodyReadErrors(t *testing.T) {
+	readerErr := errors.New("synthetic reader failure")
+	for _, tc := range []struct {
+		name     string
+		err      error
+		wantExit int
+	}{
+		{"canceled", context.Canceled, ExitNetwork},
+		{"deadline exceeded", context.DeadlineExceeded, ExitNetwork},
+		{"non-network reader error", readerErr, ExitGeneric},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewAPIClient("https://example.test", "", "")
+			client.HTTPClient.Transport = downloadRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(iotest.ErrReader(tc.err)),
+					Request:    req,
+				}, nil
+			})
+			_, err := client.DownloadFile(context.Background(), "/download")
+			if !errors.Is(err, tc.err) || ExitCodeFor(err) != tc.wantExit {
+				t.Fatalf("DownloadFile = %v (exit %d), want underlying %v (exit %d)", err, ExitCodeFor(err), tc.err, tc.wantExit)
+			}
+			var netErr *NetworkError
+			if got, want := errors.As(err, &netErr), tc.wantExit == ExitNetwork; got != want {
+				t.Errorf("NetworkError = %t, want %t", got, want)
+			}
+			if tc.err == readerErr && err != readerErr {
+				t.Errorf("non-network error changed: %v", err)
+			}
+		})
+	}
+}
+
+func TestDownloadFileBodyTimeoutIsClassified(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "payload")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	client := NewAPIClient(srv.URL, "", "")
+	client.HTTPClient = &http.Client{Timeout: 200 * time.Millisecond}
+	data, err := client.DownloadFile(context.Background(), "/download")
+	if string(data) != "payload" || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected timeout after reading partial body: data=%q err=%v", data, err)
+	}
+	if got := ExitCodeFor(err); got != ExitNetwork {
+		t.Errorf("ExitCodeFor = %d, want %d; err=%v", got, ExitNetwork, err)
+	}
+}
 
 func TestUploadResponseErrorsAreClassified(t *testing.T) {
 	withLang(t, "en_US.UTF-8")

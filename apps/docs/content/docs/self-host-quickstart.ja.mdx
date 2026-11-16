@@ -4,6 +4,9 @@ description: Docker Compose で Multica を起動し、ログインして、最�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
+import { Accordion, Accordions } from "fumadocs-ui/components/accordion";
 
 Multica のセルフホストは 2 つの部分に分かれます。
 
@@ -35,7 +38,10 @@ Multica は Compose v2（`docker compose`）を使います。旧版の `docker-
 
 実行用コンピュータには、Claude Code、Codex、Cursor などの [AI コーディングツール](/providers)を最低 1 つインストールし、ログインしておく必要があります。Multica CLI はステップ 5 でインストールします。
 
-## 1. Multica を起動する
+<Steps>
+<Step>
+
+## Multica を起動する [#1-multica-を起動する]
 
 サービスを実行するマシンで次を実行します。
 
@@ -45,7 +51,10 @@ cd multica
 make selfhost
 ```
 
-初回実行時、`make selfhost` は次を行います。
+2 回目以降の `make selfhost` は既存の `.env` とボリュームをそのまま使い、シークレットを再生成しません。
+
+<Accordions>
+<Accordion title="初回実行時に make selfhost が行うこと" id="what-make-selfhost-does">
 
 1. `.env.example` から `.env` を作成する
 2. `JWT_SECRET`、PostgreSQL パスワード、`MULTICA_VCS_SECRET_KEY`（セルフホストの Git 連携用の暗号化キー）をランダム生成する
@@ -53,12 +62,13 @@ make selfhost
 4. 永続化ボリュームを作成し、3 つのコンテナを起動する
 5. backend がヘルスチェックに応答し始めるまで待機する
 
-2 回目以降の `make selfhost` は既存の `.env` とボリュームをそのまま使い、シークレットを再生成しません。
+</Accordion>
+</Accordions>
 
 <Callout type="info">
 `make selfhost` は公開済みのイメージを取得し、checkout 中のコードをビルドしません。ローカルのソースを試すには `make selfhost-build` を使ってください。
 
-公開済みのイメージは最新の **release タグ** を追跡しますが、単なる `git clone` でチェックアウトされるのは `main` で、通常リリースより先行しています。この checkout から何かをビルドする場合（CLI、または `make selfhost-build` によるイメージ）は、先に対応する release タグへ切り替えて、ビルドしたバイナリと稼働中のコンテナのバージョンを揃えてください:
+公開済みのイメージは最新の **release タグ** を追跡しますが、単なる `git clone` でチェックアウトされるのは `main` で、通常リリースより先行しています。この checkout から何かをビルドする場合（CLI、または `make selfhost-build` によるイメージ）は、先に対応する release タグへ切り替えて、ビルドしたバイナリと稼働中のコンテナのバージョンを揃えてください。
 
 ```bash
 git fetch --tags --depth 1
@@ -66,7 +76,10 @@ git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
 ```
 </Callout>
 
-## 2. サービスの準備完了を確認する
+</Step>
+<Step>
+
+## サービスの準備完了を確認する [#2-サービスの準備完了を確認する]
 
 コンテナの状態を確認します。
 
@@ -88,13 +101,18 @@ curl -fsS http://localhost:8080/readyz
 
 backend コンテナは起動のたびにデータベースの migration を実行してからサービスを開始するため、migration コマンドを手動で実行する必要はありません。
 
-## 3. アクセス方法を選ぶ
+</Step>
+<Step>
 
-### ローカルアクセス
+## アクセス方法を選ぶ [#3-アクセス方法を選ぶ]
+
+<Tabs items={["ローカルアクセス", "リモートアクセス"]}>
+<Tab value="ローカルアクセス">
 
 [http://localhost:3000](http://localhost:3000) をそのまま開きます。後で `multica setup self-host` を実行するときも、URL を渡す必要はありません。
 
-### リモートアクセス
+</Tab>
+<Tab value="リモートアクセス" id="remote-access">
 
 Docker Compose はデフォルトで `3000` と `8080` を `127.0.0.1` だけにバインドします。`0.0.0.0` に変えて公開インターネットへ直接さらさず、HTTPS 付きのリバースプロキシを使ってください。
 
@@ -113,7 +131,10 @@ MULTICA_PUBLIC_URL=https://api.example.com
 
 この構成ではブラウザのトラフィックがすべて app ドメインを経由し、cookie がドメインをまたがないため、`COOKIE_DOMAIN` の設定は不要です。ブラウザに api ドメインへ直接アクセスさせる場合は設定が必須です。[環境変数](/environment-variables)を参照してください。
 
-次に DNS を設定し、Caddy でローカルポートをプロキシします。
+次に DNS を設定し、Caddy でローカルポートをプロキシします。Caddy が TLS 証明書を取得し、WebSocket を転送します。
+
+<Tabs items={["2 つのドメイン", "単一オリジン"]}>
+<Tab value="2 つのドメイン">
 
 ```text
 app.example.com {
@@ -138,7 +159,8 @@ api.example.com {
 }
 ```
 
-すべてのトラフィックを**単一オリジン**（1 つのドメイン、または 1 台のホストに 1 つのポートで、小規模サーバーで一般的な構成）で扱いたい場合は、デーモンが依存するパスを backend に明示的に転送し、残りを frontend に任せます:
+</Tab>
+<Tab value="単一オリジン">
 
 ```text
 multica.example.com {
@@ -148,15 +170,15 @@ multica.example.com {
         reverse_proxy 127.0.0.1:8080
     }
 
-    # ブラウザの realtime WebSocket——web イメージは WS アップグレードを proxy できないため backend へ直接
+    # ブラウザの realtime WebSocket。web イメージは WS アップグレードを proxy できないため backend へ直接
     handle /ws {
         reverse_proxy 127.0.0.1:8080 {
             flush_interval -1
         }
     }
 
-    # デーモンの長時間接続: {server-url}/api/daemon/ws にダイヤルします（/ws ではない）。
-    # このルートがないとハンドシェイクが失敗し、デーモンは通知なくポーリングへフォールバックします
+    # デーモンの長時間接続: {server-url}/api/daemon/ws にダイヤルする（/ws ではない）。
+    # このルートがないとハンドシェイクが失敗し、デーモンは通知なくポーリングへフォールバックする
     handle /api/daemon/ws {
         reverse_proxy 127.0.0.1:8080 {
             flush_interval -1
@@ -170,9 +192,12 @@ multica.example.com {
 }
 ```
 
-単一オリジンでは、2 つの URL をどちらもそこに向けます（`.env` の `FRONTEND_ORIGIN` と `MULTICA_APP_URL`、および `multica setup self-host` の `--server-url` と `--app-url`）。
+</Tab>
+</Tabs>
 
-Caddy が TLS 証明書を取得し、WebSocket を転送します。`.env` を変更したら、`up -d` でコンテナを作り直して新しい設定を反映します。
+**単一オリジン**（1 つのドメイン、または 1 台のホストに 1 つのポート。小規模サーバーで一般的な構成）では、デーモンが依存するパスを backend に明示的に転送し、残りを frontend に任せます。この場合は 2 つの URL をどちらもそこに向けます。`.env` の `FRONTEND_ORIGIN` と `MULTICA_APP_URL`、および `multica setup self-host` の `--server-url` と `--app-url` です。
+
+`.env` を変更したら、`up -d` でコンテナを作り直して新しい設定を反映します。
 
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
@@ -180,13 +205,27 @@ curl -fsS https://api.example.com/readyz
 curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-最後のコマンドは `daemon_server_url`（デーモンが API に接続するための URL）を出力します: `MULTICA_DAEMON_SERVER_URL` が設定されていればそれを、次に `MULTICA_PUBLIC_URL`、どちらも未設定ならアプリ URL（`MULTICA_APP_URL`、未設定なら `FRONTEND_ORIGIN` にフォールバック）を使います。`MULTICA_APP_URL` と `FRONTEND_ORIGIN` のどちらも未設定の場合、`MULTICA_DAEMON_SERVER_URL` や `MULTICA_PUBLIC_URL` が設定されていてもこのフィールドはレスポンスから丸ごと省略されます（上の grep は何も出力しません）。`localhost` と出力される場合は `.env` がまだローカルのデフォルトのままです: `.env.example` からコピーした `${FRONTEND_PORT}` 参照に頼らず、`FRONTEND_ORIGIN` と `MULTICA_APP_URL` を公開 URL として明示的に設定し、コンテナを作り直してください。
+最後のコマンドは `daemon_server_url`、つまりデーモンが API に接続するための URL を出力します。`localhost` と出力される場合は `.env` がまだローカルのデフォルトのままです。`.env.example` からコピーした `${FRONTEND_PORT}` 参照に頼らず、`FRONTEND_ORIGIN` と `MULTICA_APP_URL` を公開 URL として明示的に設定し、コンテナを作り直してください。
+
+<Accordions>
+<Accordion title="daemon_server_url の決まり方" id="how-daemon-server-url-is-resolved">
+
+`MULTICA_DAEMON_SERVER_URL` が設定されていればそれを、次に `MULTICA_PUBLIC_URL`、どちらも未設定ならアプリ URL（`MULTICA_APP_URL`、未設定なら `FRONTEND_ORIGIN` にフォールバック）を使います。`MULTICA_APP_URL` と `FRONTEND_ORIGIN` のどちらも未設定の場合、`MULTICA_DAEMON_SERVER_URL` や `MULTICA_PUBLIC_URL` が設定されていてもこのフィールドはレスポンスから丸ごと省略されます（上の grep は何も出力しません）。
+
+</Accordion>
+</Accordions>
 
 <Callout type="warning">
 `docker compose restart` は既存のコンテナを再起動するだけで、`.env` を読み直しません。設定を変更した後に `.env` を読み直すには、`docker compose -f docker-compose.selfhost.yml up -d` を実行してください。
 </Callout>
 
-## 4. ログインしてワークスペースを作成する
+</Tab>
+</Tabs>
+
+</Step>
+<Step>
+
+## ログインしてワークスペースを作成する [#4-ログインしてワークスペースを作成する]
 
 ローカルの `http://localhost:3000`、または先ほど設定した `https://app.example.com` を開き、メールアドレスを入力して認証コードをリクエストします。
 
@@ -209,35 +248,47 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 セルフホストのデプロイはデフォルトで `APP_ENV=production` を使い、固定の認証コードは有効になりません。公開インスタンスで `MULTICA_DEV_VERIFICATION_CODE` を設定しないでください。
 </Callout>
 
-## 5. 実行用コンピュータを接続する
+</Step>
+<Step>
+
+## 実行用コンピュータを接続する [#5-実行用コンピュータを接続する]
 
 以下のコマンドは **AI コーディングツールを実行するコンピュータ**で実行します。Docker を実行しているサーバーとは限りません。
 
 <Callout type="warning">
-作業はデーモンを実行しているユーザーの全権限で動作し、そのユーザーが読み書きできるものはすべて読み書きできます。個人アカウントではなく、専用の Unix ユーザー、コンテナ、または VM でデーモンを実行してください。[セキュリティモデル](/security-model)を参照してください。
+実行はデーモンを実行しているユーザーの全権限で動作し、そのユーザーが読み書きできるものはすべて読み書きできます。個人アカウントではなく、専用の Unix ユーザー、コンテナ、または VM でデーモンを実行してください。[セキュリティモデル](/security-model)を参照してください。
 </Callout>
 
 まず Multica CLI をインストールします。
 
-**macOS / Linux**
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
 
-**Windows PowerShell**
+</Tab>
+<Tab value="Windows">
 
 ```powershell
 irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
 ```
 
-Multica サービスがこのコンピュータでも動いている場合は、次を実行します。
+</Tab>
+</Tabs>
+
+次に CLI をサービスに接続します。Multica サービスが動いている場所に合わせて選んでください。
+
+<Tabs items={["このコンピュータ", "別のマシン"]}>
+<Tab value="このコンピュータ">
 
 ```bash
 multica setup self-host
 ```
 
-Multica サービスが別のマシンで動いている場合は、先ほど設定した 2 つの URL を渡します。
+</Tab>
+<Tab value="別のマシン">
 
 ```bash
 multica setup self-host \
@@ -245,7 +296,10 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-このコマンドはまず `<server-url>/health` を確認し、次にブラウザを開いてログインを完了します。ログイン後はローカルに認証情報を保存し、デーモンを起動します。このステップで `Server not reachable` エラーが出る場合、`/health` のプローブが 200 を取得できなかったことを意味します: プロキシがすべてのトラフィックをこのパスを転送しない古い frontend に向けているか、プロキシが `/health` を backend にルーティングしていないか、あるいは DNS・TLS・ファイアウォール・タイムアウト・backend からの 5xx といったより下位の障害です。詳細は[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)を参照してください。
+</Tab>
+</Tabs>
+
+別のマシンの場合は、先ほど設定した 2 つの URL を渡します。このコマンドはまず `<server-url>/health` を確認し、次にブラウザを開いてログインを完了します。ログイン後はローカルに認証情報を保存し、デーモンを起動します。このステップで `Server not reachable` エラーが出る場合、`/health` のプローブが 200 を取得できていません。考えられる原因は 3 つです。プロキシがすべてのトラフィックをこのパスを転送しない古い frontend に向けている、プロキシが `/health` を backend にルーティングしていない、あるいは DNS・TLS・ファイアウォール・タイムアウト・backend からの 5xx といったより下位の障害です。詳細は[トラブルシューティング](/troubleshooting#multica-setup-reports-the-server-is-not-reachable)を参照してください。
 
 接続状態を確認します。
 
@@ -259,11 +313,17 @@ multica daemon status
 - `Agents` にこのマシンにインストール済みの AI コーディングツールが並ぶ
 - `Workspaces` が `0` より大きい
 
-## 6. 最初の実行を完了する
+</Step>
+<Step>
+
+## 最初の実行を完了する [#6-最初の実行を完了する]
 
 Multica に戻ります。ランタイム一覧にオンラインのランタイムが表示されたら、エージェントを作成し、最初のタスクを割り当てます。
 
 実行ログが完了になり、タイムラインにエージェントの返信が現れれば、セルフホストのサービス、実行用コンピュータ、AI コーディングツールがつながっています。詳しい手順は[クイックスタート](/cloud-quickstart)のステップ 3〜5 を参照してください。
+
+</Step>
+</Steps>
 
 ## よく使う管理コマンド
 
@@ -283,50 +343,32 @@ docker compose -f docker-compose.selfhost.yml up -d
 docker compose -f docker-compose.selfhost.yml down
 ```
 
-公開済みの最新イメージへアップグレードします。
-
-```bash
-git pull --ff-only
-docker compose -f docker-compose.selfhost.yml pull
-docker compose -f docker-compose.selfhost.yml up -d
-curl -fsS http://localhost:8080/readyz
-```
-
-Docker Compose 構成のアップグレード方法は2通りあります。既存の構成では**同じ結果**になります — `Makefile` の `selfhost` ターゲットは同じ `docker compose pull` + `up -d` を実行し、加えて `.env` が無ければ生成し、`/health` を待ってからステータスの要約を表示します。好きな方を使ってください。
-
-```bash
-cd multica
-git pull
-make selfhost
-```
-
-```bash
-cd multica
-git pull
-docker compose -f docker-compose.selfhost.yml pull
-docker compose -f docker-compose.selfhost.yml up -d
-```
-
-### `git pull` が実際に更新するもの
-
-`git pull` が更新するのは **`docker-compose.selfhost.yml` そのもの**です — 新しい環境変数、新しいサービス、変更された healthcheck。新しい Multica のバージョンを取得する仕組み**ではありません**。
-
-実際に動くバージョンを決めるのは `docker compose pull` で、そのタグが今どのイメージを指しているかを GHCR に問い合わせます。したがって数か月更新していない checkout でも今日の `latest` イメージを取得できますし、逆に `git pull` だけではイメージを取得してコンテナを作り直すまで何も変わりません。
-
 <Callout type="warning">
-**`MULTICA_IMAGE_TAG` を固定している場合、どちらのコマンドでもアップグレードされません。** 両方のイメージが `${MULTICA_IMAGE_TAG:-latest}` として解決され（`docker-compose.selfhost.yml`：`services.backend.image`、`services.frontend.image`）、`.env.example` は `MULTICA_IMAGE_TAG=latest` を同梱しています。`.env` で特定のリリースに固定していると、`pull` は同じタグを取り直すだけで、古いバージョンのままです — エラーも警告も出ません。アップグレード前に確認してください。
+`docker compose down` は `pgdata` と `backend_uploads` を保持します。`-v` を付けると、データベースを含むこれらのボリュームが削除されます。インスタンスを消去するつもりがない限り、`docker compose down -v` を実行しないでください。
+</Callout>
+
+## アップグレード
+
+<Steps>
+<Step>
+
+### イメージタグが固定されていないか確認する
+
+両方のイメージが `${MULTICA_IMAGE_TAG:-latest}` として解決され（`docker-compose.selfhost.yml`：`services.backend.image`、`services.frontend.image`）、`.env.example` は `MULTICA_IMAGE_TAG=latest` を同梱しています。
 
 ```bash
 grep MULTICA_IMAGE_TAG .env
 # MULTICA_IMAGE_TAG=v0.4.5   ← 固定されている: 先に latest（または希望のリリース）へ変更する
 ```
+
+<Callout type="warning">
+**`MULTICA_IMAGE_TAG` を固定している場合、以下のコマンドではアップグレードされません。** `pull` は同じタグを取り直すだけで、古いバージョンのままです。エラーも警告も出ません。
 </Callout>
 
-### `.env` は上書きされません
+</Step>
+<Step>
 
-`make selfhost` が `.env` を生成するのは、ファイルが**存在しない**ときだけです。既存の構成で再実行しても、`JWT_SECRET`、Postgres のパスワード、メール設定、`FRONTEND_ORIGIN` はそのまま残ります。
-
-### 先に Postgres をバックアップする
+### Postgres をバックアップする
 
 migration は前方向のみで巻き戻せないため、大事な環境をアップグレードする前にダンプを取ってください。
 
@@ -335,42 +377,87 @@ docker compose -f docker-compose.selfhost.yml exec -T postgres \
   pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
 ```
 
-<Callout type="warning">
-**`pg_dump` を直接 `gzip` にパイプしないでください。** シェルはパイプラインの**最後**のコマンドの終了ステータスを返すため、`pg_dump … | gzip > backup.sql.gz` はダンプが失敗しても `0` で終了し、形式としては完全に正当な、中身が空の20バイトのアーカイブが残ります。先にファイルへリダイレクトすれば `pg_dump` 自身の終了ステータスが効くようになり、`&&` は実際に成功したダンプだけを圧縮します。
-</Callout>
-
 `POSTGRES_USER` / `POSTGRES_DB` を `multica` のデフォルトから変更している場合は、`.env` の値に置き換えてください。データは `multica_pgdata` という名前付きボリュームにあり、`docker compose down` では消えませんが、`down -v` では消えます。
 
-### migration は自動で実行されます
+<Callout type="warning">
+**`pg_dump` を直接 `gzip` にパイプしないでください。** シェルはパイプラインの**最後**のコマンドの終了ステータスを返すため、`pg_dump … | gzip > backup.sql.gz` はダンプが失敗しても `0` で終了し、形式としては完全に正当な、中身が空の 20 バイトのアーカイブが残ります。先にファイルへリダイレクトすれば `pg_dump` 自身の終了ステータスが効くようになり、`&&` は実際に成功したダンプだけを圧縮します。
+</Callout>
 
-[ステップ1](#1-multica-を起動する)と同じく、バックエンドコンテナはトラフィックを受け付ける前に起動時に `./migrate up` を実行します（`docker/entrypoint.sh`）。個別のアップグレードコマンドはありません — 新しいイメージを立ち上げること自体が migration のステップです。様子を見るには:
+</Step>
+<Step>
+
+### 新しいイメージを取得してコンテナを作り直す
+
+既存の構成では、次の 2 つの書き方は**同じ結果**になります。`Makefile` の `selfhost` ターゲットは同じ `docker compose pull` + `up -d` を実行し、加えて `.env` が無ければ生成し、`/health` を待ってからステータスの要約を表示します。好きな方を使ってください。
+
+<Tabs items={["make selfhost", "docker compose"]}>
+<Tab value="make selfhost">
+
+```bash
+cd multica
+git pull --ff-only
+make selfhost
+```
+
+</Tab>
+<Tab value="docker compose">
+
+```bash
+cd multica
+git pull --ff-only
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+</Tab>
+</Tabs>
+
+[ステップ 2](#2-サービスの準備完了を確認する) と同じく、backend コンテナはトラフィックを受け付ける前に起動時に `./migrate up` を実行します（`docker/entrypoint.sh`）。個別のアップグレードコマンドはなく、新しいイメージを立ち上げること自体が migration のステップです。様子を見るには次を実行します。
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs -f backend
 ```
 
-migration は backend の起動時に自動で実行されます。過去データのバックフィルが必要な migration（103 など）も、バックフィルまで自動で完了します。ごくまれに自動バックフィルが `refusing to drop legacy daily rollups` で失敗することがあります。対処は[トラブルシューティング](/troubleshooting#migration-103-の失敗)を参照してください。
+過去データのバックフィルが必要な migration（103 など）も、バックフィルまで自動で完了します。ごくまれに自動バックフィルが `refusing to drop legacy daily rollups` で失敗することがあります。対処は[トラブルシューティング](/troubleshooting#migration-103-blocks-an-upgrade)を参照してください。
+
+</Step>
+<Step>
 
 ### `/health` ではなく `/readyz` で検証する
-
-`/health` は **liveness** プローブで、プロセスが生きている限り `{"status":"ok"}` を返します — migration が失敗していても同じです。`/readyz`（`server/cmd/server/router.go` で登録された `readyHandler`、`/healthz` はそのエイリアス）はデータベースと適用済み migration の集合をチェックするため、失敗したアップグレードを捕捉できるのはこちらです。
 
 ```bash
 curl -s localhost:8080/readyz
 # {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
 ```
 
-HTTP 200 かつ両方のチェックが `ok` でない場合、新しいバージョンは migration を完了していません。トラフィックを流す前にバックエンドのログを確認してください。
+HTTP 200 かつ両方のチェックが `ok` でない場合、新しいバージョンは migration を完了していません。トラフィックを流す前に backend のログを確認してください。
 
-### Kubernetes
+`/health` は **liveness** プローブで、プロセスが生きている限り `{"status":"ok"}` を返します。migration が失敗していても同じです。`/readyz`（`server/cmd/server/router.go` で登録された `readyHandler`、`/healthz` はそのエイリアス）はデータベースと適用済み migration の集合をチェックするため、失敗したアップグレードを捕捉できるのはこちらです。
 
-Helm には独自のアップグレード経路があります。values ファイルで `images.backend.tag` / `images.frontend.tag` に目的のリリースを設定し、`helm upgrade` を実行してください。タグを変えると Pod スペックが変わるため、Kubernetes が新しいイメージを取得して Deployment をロールします — これが確実な経路です。
+</Step>
+</Steps>
 
-`kubectl -n multica rollout restart` はそれ単体ではアップグレードになりません。チャートは `pullPolicy: IfNotPresent` を同梱しているため（`deploy/helm/multica/values.yaml`）、そのタグをすでにキャッシュしているノードでは古いイメージが再利用され、restart しても何も変わりません — `MULTICA_IMAGE_TAG` の固定と同種の落とし穴です。浮動タグでこの方法を使いたい場合は、先に `images.backend.pullPolicy` / `images.frontend.pullPolicy` を `Always` に設定してください。リポジトリの [Self-hosting guide](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative) を参照してください。
+<Accordions type="multiple">
+<Accordion title="git pull が実際に更新するもの" id="what-git-pull-actually-does">
 
-<Callout type="warning">
-`docker compose down` は `pgdata` と `backend_uploads` を保持します。`-v` を付けると、データベースを含むこれらのボリュームが削除されます。インスタンスを消去するつもりがない限り、`docker compose down -v` を実行しないでください。
-</Callout>
+`git pull` が更新するのは **`docker-compose.selfhost.yml` そのもの**です。新しい環境変数、新しいサービス、変更された healthcheck などです。新しい Multica のバージョンを取得する仕組み**ではありません**。
+
+実際に動くバージョンを決めるのは `docker compose pull` で、そのタグが今どのイメージを指しているかを GHCR に問い合わせます。したがって数か月更新していない checkout でも今日の `latest` イメージを取得できますし、逆に `git pull` だけではイメージを取得してコンテナを作り直すまで何も変わりません。
+
+</Accordion>
+<Accordion title=".env は上書きされません" id="your-env-is-not-overwritten">
+
+`make selfhost` が `.env` を生成するのは、ファイルが**存在しない**ときだけです。既存の構成で再実行しても、`JWT_SECRET`、Postgres のパスワード、メール設定、`FRONTEND_ORIGIN` はそのまま残ります。
+
+</Accordion>
+<Accordion title="Kubernetes でのアップグレード" id="kubernetes">
+
+Helm には独自のアップグレード経路があります。values ファイルで `images.backend.tag` / `images.frontend.tag` に目的のリリースを設定し、`helm upgrade` を実行してください。タグを変えると Pod スペックが変わるため、Kubernetes が新しいイメージを取得して Deployment をロールします。これが確実な経路です。
+
+`kubectl -n multica rollout restart` はそれ単体ではアップグレードに**なりません**。チャートは `pullPolicy: IfNotPresent` を同梱しているため（`deploy/helm/multica/values.yaml`）、そのタグをすでにキャッシュしているノードでは古いイメージが再利用され、restart しても何も変わりません。`MULTICA_IMAGE_TAG` の固定と同種の落とし穴です。浮動タグでこの方法を使いたい場合は、先に `images.backend.pullPolicy` / `images.frontend.pullPolicy` を `Always` に設定してください。リポジトリの [Self-hosting guide](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative) を参照してください。
+
+</Accordion>
+</Accordions>
 
 ## よくある問題
 
@@ -378,7 +465,7 @@ Helm には独自のアップグレード経路があります。values ファ�
 |---|---|
 | `/readyz` が `ok` を返さない | `docker compose -f docker-compose.selfhost.yml logs backend postgres` を実行する。 |
 | 認証コードが届かない | コードを一度リクエストし、backend のログで `Verification code` を探す。 |
-| `setup self-host` が server に到達できないと報告する | 実行用コンピュータから `https://api.example.com/health` をリクエストし、DNS、TLS、リバースプロキシがすべて到達可能か確認する。404 が返る場合、プロキシが `/health` をこのパスを転送しない古い web リリースに向けているため、backend へ直接ルーティングすること（[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)）。 |
+| `setup self-host` が server に到達できないと報告する | 実行用コンピュータから `https://api.example.com/health` をリクエストし、DNS、TLS、リバースプロキシがすべて到達可能か確認する。404 が返る場合、プロキシが `/health` をこのパスを転送しない古い web リリースに向けているため、backend へ直接ルーティングすること（[トラブルシューティング](/troubleshooting#multica-setup-reports-the-server-is-not-reachable)）。 |
 | デーモンが `Agents` を表示しない | AI コーディングツールが `PATH` にありログイン済みであることを確認し、`multica daemon restart` を実行する。 |
 | タスクがキューにとどまり続ける | `multica daemon status` を実行し、デーモンが起動していてワークスペースに接続していることを確認する。 |
 

@@ -19,7 +19,6 @@ function workflow(id: string, name: string, isDefault: boolean): IssueWorkflow {
   };
 }
 
-vi.mock("@multica/core/config", () => ({ useFeatureEnabled: () => true }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 const workflows = vi.hoisted(() => ({ list: [] as IssueWorkflow[] }));
 vi.mock("@multica/core/issue-workflows", () => ({

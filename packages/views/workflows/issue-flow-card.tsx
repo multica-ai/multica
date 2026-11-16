@@ -1,9 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Settings, Workflow } from "lucide-react";
-import { useFeatureEnabled } from "@multica/core/config";
-import { PROJECT_WORKFLOWS_V1_FLAG } from "@multica/core/feature-flags";
+import { Settings, Workflow } from "@multica/ui/icons";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useProjectWithWorkflow } from "@multica/core/issue-workflows";
@@ -29,7 +27,6 @@ export function IssueFlowCard({ projectId, currentStatus }: { projectId: string 
   const wsId = useWorkspaceId();
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
-  const enabled = useFeatureEnabled(PROJECT_WORKFLOWS_V1_FLAG, false);
   const catalog = useIssueStatuses(wsId);
   const labelOf = useStatusLabel(wsId);
   const { project, workflow } = useProjectWithWorkflow(wsId, projectId);
@@ -48,7 +45,6 @@ export function IssueFlowCard({ projectId, currentStatus }: { projectId: string 
           >
             <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="truncate text-foreground">{workflow.name}</span>
-            <span className="shrink-0 text-muted-foreground">{t(($) => $.workflows.detail.follows_project)}</span>
           </button>
         }
       />
@@ -87,7 +83,7 @@ export function IssueFlowCard({ projectId, currentStatus }: { projectId: string 
             );
           })}
         </ol>
-        {canCreateWorkflow && enabled && (
+        {canCreateWorkflow && (
           <div className="-mx-3 -mb-3 mt-2 border-t border-surface-border p-1">
             <Button
               variant="ghost"

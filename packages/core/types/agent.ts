@@ -86,6 +86,12 @@ export interface RuntimeDevice {
    * a missing value as `null` (built-in).
    */
   profile_id?: string | null;
+  /**
+   * Runtime-wide cap on tasks running at once across every agent bound to
+   * this runtime (GitHub #9626). `null` means no runtime cap; each agent's
+   * own limit still applies. Older backends omit the field.
+   */
+  max_concurrent_tasks?: number | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
@@ -129,9 +135,13 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "grok",
   "qwen",
   "qwenpaw",
+  "droid",
+  "amp",
   "mcode",
   "muse",
+  "devin",
   "zeroclaw",
+  "zcode",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -301,6 +311,9 @@ export interface TaskCancellationActor {
 }
 
 export interface AgentTask {
+  /** Owning issue labels supplied by subtree execution-history reads. */
+  issue_identifier?: string;
+  issue_title?: string;
   wakeup_id?: string;
   id: string;
   agent_id: string;
@@ -468,6 +481,10 @@ export interface AgentTask {
  * instead. Unlike the aggregate rows there is no `uncosted_*` split here: a
  * `task_usage` row is priced or it isn't, so "uncosted" is just "all of them
  * when cost_usd_ticks is absent", which is what the estimator already assumes.
+ *
+ * `credits_micros` is the charge of a provider that bills in its own credits
+ * instead of exposing tokens (Qoder Cloud Agents), in millionths of a credit.
+ * It has no USD rate and is shown beside the cost, never folded into it.
  */
 export interface TaskUsage {
   provider?: string;
@@ -477,6 +494,53 @@ export interface TaskUsage {
   cache_read_tokens: number;
   cache_write_tokens: number;
   cost_usd_ticks?: number;
+  credits_micros?: number;
+}
+
+/**
+ * Per-run context receipt (MUL-9013): which context sources the daemon handed
+ * a run, with sizes, short hashes, delivery and load evidence. Metadata only.
+ * String enums stay open (`string`) so a newer daemon's value still renders.
+ */
+export type ContextReceiptLoad =
+  | "delivered"
+  | "verified"
+  | "verified_other_version"
+  | "unverified"
+  | "not_delivered"
+  | (string & {});
+
+export interface ContextReceiptSource {
+  kind: string;
+  name?: string;
+  bytes: number;
+  sha256?: string;
+  delivery: string;
+  path?: string;
+  load: ContextReceiptLoad;
+  verified_version?: string;
+  /** Set when this source is a section inside another (e.g. `runtime_brief`). */
+  parent?: string;
+}
+
+export interface ContextReceipt {
+  schema_version: number;
+  runtime: string;
+  runtime_version?: string;
+  model?: string;
+  prompt_bytes: number;
+  brief_bytes: number;
+  brief_delivery: string;
+  resumed_session: boolean;
+  fresh_retry?: boolean;
+  mcp_servers: string[];
+  sources: ContextReceiptSource[];
+}
+
+export interface TaskContextReceiptResponse {
+  /** Null when the run has none: an older daemon, or a run that never launched. */
+  receipt: ContextReceipt | null;
+  recorded_at?: string;
 }
 
 /**
@@ -891,6 +955,32 @@ export interface SkillFile {
   content: string;
   created_at: string;
   updated_at: string;
+}
+
+/** How a skill reached a version. Unknown server values fall back to "update". */
+export type SkillVersionSource =
+  | "baseline"
+  | "create"
+  | "update"
+  | "import"
+  | "refresh"
+  | "restore";
+
+export interface SkillVersionSummary {
+  id: string;
+  skill_id: string;
+  version: number;
+  name: string;
+  source: SkillVersionSource;
+  restored_from_version: number | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface SkillVersion extends SkillVersionSummary {
+  description: string;
+  content: string;
+  files: { path: string; content: string }[];
 }
 
 export interface CreateSkillRequest {

@@ -38,4 +38,11 @@ describe("concrete status columns", () => {
     expect(visibleStatusKeys(["awaiting_response"], [], catalog)).toEqual(["awaiting_response"]);
     expect(visibleStatusKeys(["backlog"], ["backlog"], catalog)).toEqual(["backlog"]);
   });
+  it("'status is not' keeps the everyday board minus the excluded keys", () => {
+    expect(visibleStatusKeys(["done", "cancelled"], ["backlog"], catalog, true)).toEqual([
+      "todo", "in_progress", "in_review", "blocked", "awaiting_response",
+    ]);
+    // Excluding a key never brings back an archived column.
+    expect(visibleStatusKeys(["done"], [], catalog, true)).not.toContain("old_review");
+  });
 });

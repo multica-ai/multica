@@ -29,6 +29,25 @@ export function machineUpdateRuntime(
   );
 }
 
+/**
+ * Whether the machine has a CLI version or update channel to show.
+ * A viewer's ability to send an update command must not gate the
+ * machine-level version and manager information. The only local machine
+ * without anything to report is Desktop's synthesized stopped-daemon row.
+ */
+export function machineHasCliInfo(
+  machine: RuntimeMachine,
+  updateRuntime: AgentRuntime | null,
+): boolean {
+  if (machine.mode !== "local") return !!machine.cliVersion;
+  return (
+    !!updateRuntime ||
+    machine.runtimes.length > 0 ||
+    !!machine.cliVersion ||
+    !!machine.launchedBy
+  );
+}
+
 export function MachineCliSection({
   machine,
   currentUserId,
@@ -44,22 +63,10 @@ export function MachineCliSection({
     canManagePublicRuntimes,
   );
 
-  if (machine.mode !== "local") {
-    return machine.cliVersion ? (
-      <span className="font-mono">CLI {machine.cliVersion}</span>
-    ) : null;
-  }
+  if (!machineHasCliInfo(machine, updateRuntime)) return null;
 
-  // A viewer's ability to send an update command must not gate the
-  // machine-level version and manager information. The only local machine
-  // without anything to report is Desktop's synthesized stopped-daemon row.
-  if (
-    !updateRuntime &&
-    machine.runtimes.length === 0 &&
-    !machine.cliVersion &&
-    !machine.launchedBy
-  ) {
-    return null;
+  if (machine.mode !== "local") {
+    return <span className="font-mono">CLI {machine.cliVersion}</span>;
   }
 
   return (

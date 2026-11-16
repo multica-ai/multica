@@ -104,6 +104,9 @@ type MediaRef struct {
 	// partial media failure cannot shift later attachments into the wrong place.
 	InlinePlaceholder string
 	InlineIndex       int
+	// InlineCount optionally replaces consecutive occurrences with one attachment,
+	// for example an image repeated within explicitly quoted context.
+	InlineCount int
 	// InlineIDOnly makes that replacement name the attachment instead of
 	// embedding it: the marker becomes itself carrying the attachment's id,
 	// "[Image: 019fe1d3-…]", rather than a Markdown link to the object.

@@ -8,7 +8,7 @@ import {
   Loader2,
   Pencil,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import type { ChatQueuedTask } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";

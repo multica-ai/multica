@@ -305,3 +305,91 @@ func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessage
 	}
 	return items, nil
 }
+
+const listTaskProgressSince = `-- name: ListTaskProgressSince :many
+SELECT seq, type, tool, content, input FROM task_message
+WHERE task_id = $1
+  AND seq > $2
+  AND type IN ('tool_use', 'thinking', 'error')
+ORDER BY seq ASC
+`
+
+type ListTaskProgressSinceParams struct {
+	TaskID   pgtype.UUID `json:"task_id"`
+	AfterSeq int32       `json:"after_seq"`
+}
+
+type ListTaskProgressSinceRow struct {
+	Seq     int32       `json:"seq"`
+	Type    string      `json:"type"`
+	Tool    pgtype.Text `json:"tool"`
+	Content pgtype.Text `json:"content"`
+	Input   []byte      `json:"input"`
+}
+
+// The rows a WeCom bubble shows while a run works: tool calls, reasoning and
+// errors past the last seq the bubble has folded in. Read by the replica that
+// holds the bubble, which is how a step reported to any replica reaches it
+// without the step's text crossing the realtime relay. Only the columns the
+// bubble renders: output (a tool's result) is the block the bubble never
+// shows, and routinely the largest column in the table.
+func (q *Queries) ListTaskProgressSince(ctx context.Context, arg ListTaskProgressSinceParams) ([]ListTaskProgressSinceRow, error) {
+	rows, err := q.db.Query(ctx, listTaskProgressSince, arg.TaskID, arg.AfterSeq)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskProgressSinceRow{}
+	for rows.Next() {
+		var i ListTaskProgressSinceRow
+		if err := rows.Scan(
+			&i.Seq,
+			&i.Type,
+			&i.Tool,
+			&i.Content,
+			&i.Input,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTaskReplyFragments = `-- name: ListTaskReplyFragments :many
+SELECT type, COALESCE(CASE WHEN type = 'text' THEN content END, '')::text AS content
+FROM task_message
+WHERE task_id = $1 AND type IN ('text', 'tool_use', 'error')
+ORDER BY seq ASC
+`
+
+type ListTaskReplyFragmentsRow struct {
+	Type    string `json:"type"`
+	Content string `json:"content"`
+}
+
+// Rebuild a Telegram placeholder without its progress when another replica
+// handles cancellation. Only prose leaves this query; tool/error rows mark
+// paragraph boundaries without loading arguments, results, or reasoning.
+func (q *Queries) ListTaskReplyFragments(ctx context.Context, taskID pgtype.UUID) ([]ListTaskReplyFragmentsRow, error) {
+	rows, err := q.db.Query(ctx, listTaskReplyFragments, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTaskReplyFragmentsRow{}
+	for rows.Next() {
+		var i ListTaskReplyFragmentsRow
+		if err := rows.Scan(&i.Type, &i.Content); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

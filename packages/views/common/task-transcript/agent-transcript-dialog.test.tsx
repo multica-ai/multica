@@ -50,6 +50,12 @@ vi.mock("react-virtuoso", () => ({
   ),
 }));
 
+// The receipt button fetches through React Query and has its own tests
+// (context-receipt.test.tsx); this suite renders the dialog without a client.
+vi.mock("./context-receipt", () => ({
+  ContextReceiptButton: () => null,
+}));
+
 vi.mock("../actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));
@@ -248,11 +254,16 @@ afterEach(() => {
   cleanup();
 });
 
+// Match a body's raw text: the default matcher collapses newlines.
+function codeBlock(text: string) {
+  return Array.from(document.querySelectorAll("pre")).find((pre) => pre.textContent === text);
+}
+
 describe("AgentTranscriptDialog", () => {
   it.each([
-    { type: "text", label: "Agent", icon: ".lucide-bot" },
-    { type: "thinking", label: "Thinking", icon: ".lucide-brain" },
-    { type: "error", label: "Error", icon: ".lucide-circle-alert" },
+    { type: "text", label: "Agent", icon: ".icon-bot" },
+    { type: "thinking", label: "Thinking", icon: ".icon-brain" },
+    { type: "error", label: "Error", icon: ".icon-circle-alert" },
   ] as const)("labels a $type step correctly when opened from the timeline", ({ type, label, icon }) => {
     renderDialog([
       { seq: 1, type, content: "Final delivered reply", created_at: baseTask.started_at! },
@@ -397,11 +408,28 @@ describe("AgentTranscriptDialog", () => {
     // The report is the narrative and renders whole; a tool call is a line
     // whose body waits in the inspector. This inversion is the redesign.
     expect(screen.getByTestId("rich-content")).toHaveTextContent("Agent hidden detail");
-    expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
+    expect(codeBlock("pnpm test")).toBeUndefined();
 
     fireEvent.click(screen.getByRole("button", { name: /pnpm test/ }));
 
-    expect(screen.getByText(/"command": "pnpm test"/)).toBeInTheDocument();
+    expect(codeBlock("pnpm test")).toBeDefined();
+  });
+
+  it("shows a command line by line with its other arguments as JSON below", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "tool_use",
+        tool: "Bash",
+        input: { command: "pnpm test\npnpm lint", description: "Run checks" },
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Bash/ }));
+
+    expect(codeBlock("pnpm test\npnpm lint")).toHaveClass("text-foreground");
+    expect(screen.queryByText(/"command":/)).not.toBeInTheDocument();
+    expect(screen.getByText(/"description": "Run checks"/, { selector: "pre" })).toBeInTheDocument();
   });
 
   // Regression, #7125: a run of short prose steps under a long agent name put
@@ -438,10 +466,10 @@ describe("AgentTranscriptDialog", () => {
     ]);
 
     const agentFacet = screen.getByRole("menuitemcheckbox", { name: "Agent" });
-    expect(agentFacet.querySelector(".lucide-bot")).not.toBeNull();
+    expect(agentFacet.querySelector(".icon-bot")).not.toBeNull();
 
     const proseRow = screen.getByTestId("rich-content").closest(".group");
-    expect(proseRow?.querySelector(".lucide-bot")).not.toBeNull();
+    expect(proseRow?.querySelector(".icon-bot")).not.toBeNull();
   });
 
   it("names a tool facet the way its rows do, keeping the prefix in the key", () => {

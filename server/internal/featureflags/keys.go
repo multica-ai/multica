@@ -30,12 +30,6 @@ const (
 	// either way. Turning it off stops new intake and triage runs but leaves
 	// existing Triage issues workable.
 	TriageV1 = "triage_v1"
-	// ProjectWorkflowsV1 gates project workflows (MUL-7420): creating a
-	// workflow and pointing a project at one, plus the Settings → Workflows
-	// and project workflow UI. Turning it off stops new adoption but leaves
-	// workflows already in use working, and a project can always switch back
-	// to the Default workflow.
-	ProjectWorkflowsV1 = "project_workflows_v1"
 	// LocalSearchIndex gates the sync endpoints behind Web/Desktop local search
 	// (MUL-7754). On by default. Turning it off (FF_LOCAL_SEARCH_INDEX=off)
 	// makes those endpoints answer 404, so clients stop syncing and search
@@ -56,13 +50,15 @@ const (
 	// gate remained in every such client and fails closed (default false) if
 	// the key stops being published.
 	resourceLabelsCompat = "settings_resource_labels"
+	// projectWorkflowsCompat keeps workflow UI available in installed desktop
+	// clients that still gate it on this config decision and default to false.
+	projectWorkflowsCompat = "project_workflows_v1"
 )
 
 var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
-	ProjectWorkflowsV1,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -86,16 +82,13 @@ func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bo
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
-	out := make(map[string]bool, len(frontendPublicFlags)+3)
+	out := make(map[string]bool, len(frontendPublicFlags)+4)
 	for _, key := range frontendPublicFlags {
 		out[key] = flags.IsEnabled(ctx, key, false)
 	}
 	out[agentBuilderCompat] = true
 	out[agentSkillTogglesCompat] = true
 	out[resourceLabelsCompat] = true
+	out[projectWorkflowsCompat] = true
 	return out
-}
-
-func ProjectWorkflowsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
-	return flags.IsEnabled(ctx, ProjectWorkflowsV1, false)
 }

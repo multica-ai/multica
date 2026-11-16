@@ -12,7 +12,7 @@ Compose `Dialog`, `DialogTrigger`, `DialogContent`, `DialogHeader`, `DialogTitle
 
 Provide a title and a concise description. Let the primitive manage focus trapping, Escape, outside dismissal and focus restoration. Use `DialogTrigger` so focus can return to the opener. Label form fields. Keep the footer reachable with long content and narrow viewports.
 
-Only close a submitting dialog after the operation succeeds. Preserve its input and show an error on failure. The UI Lab save interaction is a local demonstration; it makes no API request.
+Only close a submitting dialog after the operation succeeds. Preserve its input and show an error on failure.
 
 HTML code previews use the focused `HtmlPreviewSurface` in `packages/views/editor/` instead of a portal. Its native dialog promotes the existing inline iframe to the browser's top layer without changing its DOM parent or reloading its document. Keep the preview mounted when switching to source, and defer source updates until it is visible. When returning to inline preview, request a fresh height report even if unchanged; fullscreen reports must not overwrite the inline height. Verify repeated open/close, focus restoration, backdrop dismissal and inline height restoration after content expands or shrinks in a browser; jsdom cannot verify iframe document retention. Escape works when focus is in the parent document; keyboard events inside a cross-origin iframe do not reach it.
 
@@ -52,8 +52,8 @@ Popup and backdrop consume `--dialog-enter-duration`, `--dialog-exit-duration`, 
 
 Changes affect shared Dialog instances on web and desktop, including compositions that use DialogContent, unless callers override the animation. They do not change Popover, Tooltip, AlertDialog or JavaScript motion constants.
 
-Respect `prefers-reduced-motion`: popup and backdrop animations are disabled. UI Lab playback speed is preview-only and never exported. Open, close and replay the real component; also interrupt it with rapid open/close actions.
+Respect `prefers-reduced-motion`: popup and backdrop animations are disabled. Open, close and replay the real component; also interrupt it with rapid open/close actions.
 
 ## Application
 
-Compare both themes and keyboard behavior. Save a scheme for later or export CSS and merge into the matching `:root` block in `packages/ui/styles/tokens.css`. Exporting does not write to product code.
+Edit the motion tokens in the `:root` block of `packages/ui/styles/tokens.css`, then compare both themes and keyboard behavior.

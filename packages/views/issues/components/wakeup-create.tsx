@@ -16,8 +16,8 @@ import {
   Plus,
   RefreshCw,
   Zap,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { childIssuesOptions, issueDetailOptions, useCreateIssueWakeup } from "@multica/core/issues";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { labelListOptions } from "@multica/core/labels/queries";
@@ -106,7 +106,6 @@ export function WakeupCreate({
           <IconButton
             variant="ghost"
             size="icon-xs"
-            className="text-muted-foreground"
             label={t(($) => $.wakeups.create.open)}
           />
         }
@@ -373,7 +372,7 @@ function ConditionMenu({
   onChange: (value: WakeupCondition) => void;
 }) {
   const { t } = useT("issues");
-  const items: Record<WakeupCondition, { icon: LucideIcon; label: string; hint: string }> = {
+  const items: Record<WakeupCondition, { icon: IconComponent; label: string; hint: string }> = {
     at: { icon: Clock3, label: t(($) => $.wakeups.create.cond_at), hint: t(($) => $.wakeups.create.cond_at_hint) },
     recurring: { icon: RefreshCw, label: t(($) => $.wakeups.create.cond_recurring), hint: t(($) => $.wakeups.create.cond_recurring_hint) },
     reply: { icon: MessageSquare, label: t(($) => $.wakeups.create.cond_reply), hint: t(($) => $.wakeups.create.cond_reply_hint) },
@@ -475,6 +474,7 @@ function ConditionParams({
               { value: "done", label: t(($) => $.wakeups.create.other_done) },
               { value: "ended", label: t(($) => $.wakeups.create.other_ended) },
               { value: "in_review", label: t(($) => $.wakeups.create.other_in_review) },
+              { value: "blocked", label: t(($) => $.wakeups.create.other_blocked) },
             ]}
             onChange={(otherState) => update({ otherState: otherState as WakeupDraft["otherState"] })}
           />

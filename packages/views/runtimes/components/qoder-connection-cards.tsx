@@ -12,7 +12,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Trash2,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import {
   MAX_CONCURRENCY,

@@ -5,7 +5,7 @@ description: Un espace de travail est la frontière qui isole les équipes, le t
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Un espace de travail est la frontière de plus haut niveau de Multica. Les membres, les tâches, les projets, les agents, les skills et l'historique des exécutions appartiennent tous à un seul espace de travail et sont entièrement isolés de tous les autres.
+Un espace de travail est la frontière de plus haut niveau de Multica. Les membres, les tâches, les projets, les agents, les skills et l'historique des exécutions appartiennent tous à un seul espace de travail, et rien ne circule d'un espace de travail à l'autre.
 
 ## Contenu d'un espace de travail
 
@@ -14,7 +14,7 @@ Un espace de travail est la frontière de plus haut niveau de Multica. Les membr
 | **Travail** | Tâches, projets, commentaires, pièces jointes, historique des exécutions |
 | **Équipe** | Membres, rôles, invitations |
 | **Agents** | Configuration des agents, skills, runtimes, automatisations |
-| **Paramètres partagés** | Contexte, étiquettes, propriétés personnalisées, intégrations |
+| **Paramètres partagés** | Contexte, étiquettes, [propriétés personnalisées](/issues#propriétés-personnalisées), intégrations |
 
 Le **Contexte** est fourni à chaque agent de l'espace de travail — c'est l'endroit où placer les informations générales sur l'équipe, les conventions produit et les exigences durables. Les exigences ponctuelles d'une exécution ont leur place dans la tâche correspondante.
 
@@ -40,7 +40,7 @@ Après un changement de préfixe des tâches, chaque tâche passe immédiatement
 
 ## Changer d'espace de travail et le quitter
 
-Un même compte peut rejoindre plusieurs espaces de travail. Changer d'espace de travail modifie seulement ce que vous consultez ; aucune donnée n'est déplacée.
+Un même compte peut rejoindre plusieurs espaces de travail. Changer d'espace de travail change seulement ce que vous consultez ; les données ne bougent pas.
 
 Après avoir quitté un espace de travail, il vous faut une nouvelle invitation pour y revenir. Quitter un espace de travail désactive aussi les runtimes dont vous êtes propriétaire, archive les agents qui y sont liés et annule leurs exécutions non terminées.
 
@@ -48,7 +48,7 @@ Le dernier `owner` ne peut pas quitter l'espace de travail ; promouvez d'abord u
 
 ## Supprimer un espace de travail
 
-Seul un `owner` peut supprimer un espace de travail. La suppression retire définitivement tout son travail, ses membres, la configuration de ses agents et l'historique de ses exécutions, et elle est irréversible. Si vous vous absentez seulement pour un temps, quittez l'espace de travail au lieu de le supprimer.
+Seul un `owner` peut supprimer un espace de travail. La suppression retire définitivement tout son travail, ses membres, la configuration de ses agents et l'historique de ses exécutions, et elle est irréversible. Si vous vous absentez seulement pour un temps, il suffit de quitter l'espace de travail.
 
 ## Étapes suivantes
 

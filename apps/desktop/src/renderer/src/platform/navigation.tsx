@@ -13,6 +13,12 @@ import {
   useActiveTabUrl,
 } from "@/stores/tab-store";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
+import {
+  handOffToWorkspaceWindow,
+  openWorkspaceInNewWindow,
+  otherWindowWorkspaces,
+} from "./workspace-windows";
+import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 function requireRuntimeAppUrl(scope: string): string {
   const runtimeConfig = window.desktopAPI.runtimeConfig;
@@ -57,7 +63,7 @@ function tryRouteToOverlay(path: string): boolean {
       return true;
     }
     if (id) {
-      overlay.open({ type: "invite", invitationId: id });
+      overlay.open({ type: "invitations", invitationId: id });
       return true;
     }
   }
@@ -78,7 +84,8 @@ function tryRouteToOverlay(path: string): boolean {
  *
  * The target's bare Issues root (what the workspace switchers send, and where
  * web lands) resumes the workspace's last active tab instead, or Issues if it
- * has none. Any deeper path opens exactly that path.
+ * has none. Any deeper path opens exactly that path. When another window
+ * already shows the target workspace, that window takes the navigation.
  */
 function tryRouteToOtherWorkspace(path: string): boolean {
   const targetSlug = workspaceSlugForPath(path);
@@ -86,7 +93,9 @@ function tryRouteToOtherWorkspace(path: string): boolean {
   const { activeWorkspaceSlug, switchWorkspace } = useTabStore.getState();
   if (targetSlug === activeWorkspaceSlug) return false;
   const resume = path === paths.workspace(targetSlug).issues();
-  switchWorkspace(targetSlug, resume ? undefined : path);
+  const openPath = resume ? undefined : path;
+  if (handOffToWorkspaceWindow(targetSlug, openPath)) return true;
+  switchWorkspace(targetSlug, openPath);
   return true;
 }
 
@@ -109,7 +118,7 @@ export function routeContentLinkPath(
   const store = useTabStore.getState();
   const slug = workspaceSlugForPath(path);
   if (slug && slug !== store.activeWorkspaceSlug) {
-    store.switchWorkspace(slug, path);
+    if (!handOffToWorkspaceWindow(slug, path)) store.switchWorkspace(slug, path);
     return;
   }
   if (disposition === "push") {
@@ -122,6 +131,22 @@ export function routeContentLinkPath(
   // Empty seed title — the tab bar derives the real title from the URL and
   // cache; a raw path would flash before that resolves.
   store.openTab(path, "", { activate: disposition === "foreground-tab" });
+}
+
+/** A desktop deep link explicitly targets its URL, including a new comment. */
+export function routeIssueDeepLinkPath(path: string): void {
+  const store = useTabStore.getState();
+  const slug = workspaceSlugForPath(path);
+  if (!slug) return;
+  if (slug !== store.activeWorkspaceSlug) {
+    if (handOffToWorkspaceWindow(slug, path, { navigate: true })) return;
+    store.switchWorkspace(slug, path);
+  } else {
+    store.openTab(path, "", { activate: true });
+  }
+  // Ordinary opens restore a reused tab's view. A deep link must also apply
+  // this address after deduplication, through the session's history flow.
+  useTabStore.getState().navigateActiveSession(path);
 }
 
 /**
@@ -234,11 +259,19 @@ export function DesktopNavigationProvider({
         const slug = workspaceSlugForPath(path);
         const store = useTabStore.getState();
         if (slug && slug !== store.activeWorkspaceSlug) {
-          store.switchWorkspace(slug, path);
+          if (!handOffToWorkspaceWindow(slug, path)) {
+            store.switchWorkspace(slug, path);
+          }
           return;
         }
         store.openTab(path, title ?? "", { activate: opts?.activate });
       },
+      openWorkspaceInNewWindow,
+      openIssueInNewWindow: (path: string, title: string) => {
+        if (!parseIssueWindowPath(path)) return;
+        void window.desktopAPI.openIssueWindow({ path, title });
+      },
+      workspacesInOtherWindows: () => [...otherWindowWorkspaces()],
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),
     [appUrl, location],

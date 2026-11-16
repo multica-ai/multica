@@ -92,23 +92,29 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("%s %s returned %d: %s", e.Method, e.Path, e.StatusCode, strings.TrimSpace(e.Body))
 }
 
+// maxErrorBodyBytes caps how much of an error response is kept. It must hold
+// a whole structured error: a workflow's 409 status mapping plan lists one row
+// per status in use (up to 50) and runs past 4 KiB, and a truncated body no
+// longer parses as JSON. Only --debug prints the raw body.
+const maxErrorBodyBytes = 64 << 10
+
 // newHTTPError builds a *HTTPError from an error response (status >= 400),
 // reading a capped slice of the body. Every Multica API helper funnels its
 // >= 400 responses through this so the top-level FormatError / ExitCodeFor can
 // classify the failure via errors.As(err, **HTTPError) regardless of which
 // HTTP verb the command used.
 func newHTTPError(method, path string, resp *http.Response) *HTTPError {
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	return &HTTPError{
 		Method:     method,
 		Path:       path,
 		StatusCode: resp.StatusCode,
 		Body:       strings.TrimSpace(string(data)),
-		TaskScoped: requestUsedTaskToken(resp),
+		TaskScoped: RequestUsedTaskToken(resp),
 	}
 }
 
-// requestUsedTaskToken reports whether the request that produced resp actually
+// RequestUsedTaskToken reports whether the request that produced resp actually
 // sent a task token.
 //
 // Reading the client's own Token field would be wrong twice over. DownloadFile
@@ -118,7 +124,7 @@ func newHTTPError(method, path string, resp *http.Response) *HTTPError {
 // across a cross-host redirect, so the request that was sent is not always the
 // one the caller built. resp.Request is the request that actually went out,
 // after redirects, which is the only thing this claim can honestly rest on.
-func requestUsedTaskToken(resp *http.Response) bool {
+func RequestUsedTaskToken(resp *http.Response) bool {
 	if resp == nil || resp.Request == nil {
 		return false
 	}
@@ -317,6 +323,17 @@ func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
 
 // DeleteJSONResponse performs a DELETE request and optionally decodes the JSON response.
 func (c *APIClient) DeleteJSONResponse(ctx context.Context, path string, out any) error {
+	return c.deleteJSON(ctx, path, out, nil)
+}
+
+// DeleteJSONWithConflict lets callers consume a structured 409 in full before
+// deciding whether a follow-up request is safe. Other HTTP errors use the
+// usual bounded diagnostic body.
+func (c *APIClient) DeleteJSONWithConflict(ctx context.Context, path string, onConflict func(io.Reader) error) error {
+	return c.deleteJSON(ctx, path, nil, onConflict)
+}
+
+func (c *APIClient) deleteJSON(ctx context.Context, path string, out any, onConflict func(io.Reader) error) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+path, nil)
 	if err != nil {
 		return err
@@ -330,6 +347,9 @@ func (c *APIClient) DeleteJSONResponse(ctx context.Context, path string, out any
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusConflict && onConflict != nil {
+		return onConflict(resp.Body)
+	}
 	if resp.StatusCode >= 400 {
 		return newHTTPError(http.MethodDelete, path, resp)
 	}
@@ -808,31 +828,6 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 	}
 
 	const maxDownloadSize = 100 << 20 // 100 MB
-	return io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
-}
-
-// HealthCheck hits the /health endpoint and returns the response body.
-func (c *APIClient) HealthCheck(ctx context.Context) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/health", nil)
-	if err != nil {
-		return "", err
-	}
-	resp, err := c.HTTPClient.Do(req)
-	err = wrapTransport(req, err)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode >= 400 {
-		return "", &HTTPError{
-			Method:     http.MethodGet,
-			Path:       "/health",
-			StatusCode: resp.StatusCode,
-			Body:       strings.TrimSpace(string(data)),
-			TaskScoped: requestUsedTaskToken(resp),
-		}
-	}
-	return strings.TrimSpace(string(data)), nil
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
+	return data, wrapBodyRead(req, err)
 }

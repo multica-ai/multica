@@ -978,7 +978,10 @@ WITH retired_sessions AS (
       )
 ), latest_per_session AS (
     SELECT DISTINCT ON (t.session_id)
-        t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason, t.error, t.completed_at
+        t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason,
+        -- Match the issue resume query and taskfailure.WithoutCodebuddyProtocolSummary.
+        regexp_replace(COALESCE(t.error, ''), '^\[codebuddy protocol: exit_code=-?[0-9]+ stdout_bytes=[0-9]+ stderr_bytes=[0-9]+ event_count=[0-9]+ invalid_event_count=[0-9]+ assistant_event_count=[0-9]+ tool_use_count=[0-9]+ saw_result=(true|false) result_is_error=(true|false) result_bytes=[0-9]+ last_assistant_bytes=[0-9]+ scanner_error=(true|false)\]$', '', 'gn') AS error,
+        t.completed_at
     FROM agent_task_queue t
     WHERE t.chat_session_id = $1
       AND (
@@ -2285,6 +2288,38 @@ func (q *Queries) ListChatMessagesPageForChannelContext(ctx context.Context, arg
 			&i.ChannelOutboundMessageIds,
 			&i.ChannelTypingSettled,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChatSessionCreators = `-- name: ListChatSessionCreators :many
+SELECT id, creator_id FROM chat_session
+WHERE id = ANY($1::uuid[])
+`
+
+type ListChatSessionCreatorsRow struct {
+	ID        pgtype.UUID `json:"id"`
+	CreatorID pgtype.UUID `json:"creator_id"`
+}
+
+// Owners of a page of chat tasks, so task lists can hide the content of chat
+// tasks the viewer did not start.
+func (q *Queries) ListChatSessionCreators(ctx context.Context, ids []pgtype.UUID) ([]ListChatSessionCreatorsRow, error) {
+	rows, err := q.db.Query(ctx, listChatSessionCreators, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChatSessionCreatorsRow{}
+	for rows.Next() {
+		var i ListChatSessionCreatorsRow
+		if err := rows.Scan(&i.ID, &i.CreatorID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

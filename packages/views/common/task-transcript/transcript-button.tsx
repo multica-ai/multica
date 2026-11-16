@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, ScrollText } from "lucide-react";
+import { Loader2, ScrollText } from "@multica/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -48,6 +48,8 @@ interface TranscriptButtonProps {
    * somewhere else never sees the click that would tell it.
    */
   finalFocus?: boolean;
+  /** Host a terminal transcript outside a row that may be virtualized away. */
+  onOpenTranscript?: (items: TimelineItem[], fromKeyboard: boolean) => void;
   /**
    * Optional content rendered above the transcript event list. Used to
    * surface autopilot webhook payloads inline with the run history.
@@ -80,6 +82,7 @@ export function TranscriptButton({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   finalFocus,
+  onOpenTranscript,
   headerSlot,
 }: TranscriptButtonProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
@@ -130,25 +133,30 @@ export function TranscriptButton({
         setOpen(true, keyboard);
         return;
       }
+      const openTerminal = (timeline: TimelineItem[]) => {
+        if (onOpenTranscript) onOpenTranscript(timeline, keyboard);
+        else setOpen(true, keyboard);
+      };
       if (providedItems !== undefined || loadedItems !== null) {
-        setOpen(true, keyboard);
+        openTerminal(providedItems ?? loadedItems ?? []);
         return;
       }
       setLoading(true);
       api
         .listTaskMessages(task.id)
         .then((msgs) => {
-          setLoadedItems(buildTimeline(msgs));
-          setOpen(true, keyboard);
+          const timeline = buildTimeline(msgs);
+          setLoadedItems(timeline);
+          openTerminal(timeline);
         })
         .catch((err) => {
           console.error(err);
           setLoadedItems([]);
-          setOpen(true, keyboard);
+          openTerminal([]);
         })
         .finally(() => setLoading(false));
     },
-    [liveCacheMode, providedItems, loadedItems, setOpen, task.id],
+    [liveCacheMode, providedItems, loadedItems, setOpen, task.id, onOpenTranscript],
   );
 
   useEffect(() => {

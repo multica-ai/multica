@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle } from "@multica/ui/icons";
 import { toast } from "sonner";
 import type { AgentRuntime } from "@multica/core/types";
 import { ApiError, parseWithFallback } from "@multica/core/api";
@@ -101,7 +101,7 @@ export function RevokeRuntimeAccessDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={(next) => !submitting && onOpenChange(next)}>
-      <AlertDialogContent className="w-[calc(100vw-2rem)] !max-w-[560px] gap-0 overflow-hidden rounded-lg p-0">
+      <AlertDialogContent className="w-[calc(100%-2rem)] !max-w-[560px] gap-0 overflow-hidden rounded-lg p-0">
         <div className="px-5 pb-4 pt-5">
           <AlertDialogTitle className="text-title-sm font-semibold">
             {t(($) => $.detail.visibility_revoke_dialog.title)}

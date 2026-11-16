@@ -15,17 +15,19 @@ describe("archived inbox API", () => {
   it("sends cursor, lookup and every archive filter dimension and maps the page", async () => {
     const fetch = respond({ items: [], next_cursor: null, has_more: false });
     const api = new ApiClient("https://api.example.test");
-    // The archive has no idle dimension; a selection carried in from the
+    // The archive has no agent dimension; a selection carried in from the
     // active inbox must not reach the server.
     const filters: InboxFilters = {
-      statuses: ["in_review"], priorities: ["high"], actors: ["system"], unreadOnly: true, idleOnly: true,
+      ...EMPTY_INBOX_FILTERS,
+      statuses: ["in_review"], priorities: ["high"], actors: ["system"], unreadOnly: true, agent: "idle",
+      labels: ["label-1"], negated: ["label"],
     };
     await expect(api.listArchivedInboxPage(filters, { cursor: "cursor-value", groupId: "group" })).resolves.toEqual({ items: [], nextCursor: null, hasMore: false });
     const url = new URL(fetch.mock.calls[0]![0]);
     expect(url.pathname).toBe("/api/inbox/archived/page");
     expect(Object.fromEntries(url.searchParams)).toEqual({
       statuses: "in_review", priorities: "high", actors: "system", unread_only: "true",
-      limit: "50", cursor: "cursor-value", group_id: "group",
+      labels: "label-1", negated: "label", limit: "50", cursor: "cursor-value", group_id: "group",
     });
   });
 
@@ -43,8 +45,14 @@ describe("archived inbox API", () => {
   it("maps complete facets and rejects incomplete or invalid counts", async () => {
     respond({ statuses: { in_review: 2 }, priorities: {}, actors: { system: 0 }, unread_count: 1 });
     const api = new ApiClient("https://api.example.test");
+    // An older server sends no type / project / assignee / label counts.
     await expect(api.getArchivedInboxFacets(EMPTY_INBOX_FILTERS)).resolves.toEqual({
       statuses: { in_review: 2 }, priorities: {}, actors: { system: 0 }, unreadCount: 1,
+      types: {}, projects: {}, assignees: {}, labels: {},
+    });
+    respond({ statuses: {}, priorities: {}, actors: {}, types: { mention: 1 }, projects: { none: 2 }, assignees: {}, labels: { l: 1 }, unread_count: 0 });
+    await expect(api.getArchivedInboxFacets(EMPTY_INBOX_FILTERS)).resolves.toMatchObject({
+      types: { mention: 1 }, projects: { none: 2 }, labels: { l: 1 },
     });
     for (const body of [{}, { statuses: {}, priorities: {}, actors: {}, unread_count: -1 }]) {
       respond(body);

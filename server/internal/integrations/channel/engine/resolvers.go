@@ -319,6 +319,56 @@ type MediaResolver interface {
 	ResolveMedia(ctx context.Context, inst ResolvedInstallation, sender ResolvedIdentity, sessionID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage
 }
 
+// MediaAbandonNotifier is an optional extra a MediaResolver may implement, for
+// the one failure it cannot see for itself.
+//
+// ResolveMedia owns telling the sender about the attachments it tried and
+// could not fetch. But the Router wraps the whole call in a media budget of
+// its own, and when THAT expires the resolver either never ran or was cut off
+// mid-way, and the Router then discards even the refs it did return. The
+// resolver cannot see that last step, so neither the notice nor any count it
+// keeps covers it. The user is left with the bot answering the line they typed
+// beside the picture as if there were no picture, and nothing telling them to
+// send it again.
+//
+// The Router calls this on that path, on a goroutine of its own and a context
+// of its own with a deadline (mediaAbandonNoticeTimeout): database
+// finalization does not wait for it, and the context that expired cannot carry
+// a message out. Implementing it is optional, and a resolver that does not is
+// left exactly as it was: the type assertion simply misses, which is what
+// keeps the budget path unchanged for every channel that has not opted in.
+type MediaAbandonNotifier interface {
+	NotifyMediaAbandoned(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, a MediaAbandonment)
+}
+
+// MediaNoticeDrainer is an optional extra for a MediaResolver whose
+// ResolveMedia sends its failure notice on a goroutine of its own, so that the
+// Router's bind does not wait on a chat write. The Router's Drain calls it
+// after every media job has finished, which is after every ResolveMedia has
+// returned and so after every such notice has been started; it blocks until
+// those notices are done. Each notice carries its own deadline, which is what
+// bounds the wait.
+type MediaNoticeDrainer interface {
+	DrainMediaNotices()
+}
+
+// MediaAbandonment is what the Router knows about the attachments it gave up
+// on, and the resolver does not.
+type MediaAbandonment struct {
+	// Cause is the media budget's own error: context.DeadlineExceeded when the
+	// budget ran out, context.Canceled when the Router is draining for
+	// shutdown.
+	Cause error
+	// Started is false when the budget was gone before ResolveMedia was
+	// called, so the resolver saw none of this message's attachments. When it
+	// is true, ResolveMedia ran and returned, and every attachment it failed on
+	// is already its own to account for.
+	Started bool
+	// Dropped are the refs ResolveMedia returned that the Router is discarding
+	// instead of binding: stored, but too late to reach the agent.
+	Dropped []channel.MediaRef
+}
+
 // MediaIntentLedger persists upload intent BEFORE the object is written. The
 // row is the only artifact any failure path leaves behind: upload error,
 // resolve deadline, bind failure, ambiguous commit, or a crash all simply

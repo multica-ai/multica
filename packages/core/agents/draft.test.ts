@@ -340,7 +340,7 @@ it("drops settings a Qoder runtime cannot run from a draft started elsewhere", (
   expect(request.model).toBeUndefined();
   expect(request.thinking_level).toBeUndefined();
   expect(request.service_tier).toBeUndefined();
-  expect(request).not.toHaveProperty("conversation_starters");
+  expect(request.conversation_starters).toEqual([{ label: "Plan", prompt: "Plan it" }]);
   expect(request).not.toHaveProperty("custom_args");
 
   const local = buildCreateAgentRequest({ draft: current, runtimeId: "runtime-1", runtimeProvider: "codex" });

@@ -1,0 +1,132 @@
+---
+title: Analytics
+description: See what agents cost, how many tokens they used, how long they ran, and which runs failed and why.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { UsageDemo } from "@/components/demos/usage-demo";
+
+The **Analytics** page in the sidebar rolls up agent usage across the whole workspace: cost, tokens, run time, run count, and failed runs. Every workspace member can open it. Each runtime's own usage lives on the runtime detail page, and what a single issue cost lives in its **Runs** dialog; both are covered below.
+
+## Page layout
+
+The page has two tabs, **Usage** and **Errors**, which share the two filters at the top right:
+
+- **Time range**: `1d`, `7d`, `30d` (default), `90d`, `180d`. `1d` means today, starting at midnight in your time zone, not the last 24 hours.
+- **Project**: **All projects** by default. With a project selected, only runs on that project's issues count; runs that belong to no issue, such as chat runs, drop out.
+
+Days are cut in your time zone: the one set under **Settings → Preferences → Time zone**, or the browser's if you have not set one. The header shows that time zone and when the data was last updated. The server rolls the figures up every 5 minutes and an open page refreshes on the same interval, so a run that just finished can take a few minutes to appear; the refresh button pulls the latest figures immediately.
+
+Switching to the Errors tab adds `?tab=errors` to the address, so a link you send a teammate opens straight on that tab.
+
+## Usage tab
+
+Four figures sit at the top:
+
+| Card | What it shows |
+| --- | --- |
+| **Cost** | Estimated cost in USD; see [How cost is calculated](#how-cost-is-calculated) |
+| **Tokens** | Input, output, cache-read and cache-write tokens combined, with input and output broken out underneath |
+| **Run time** | Total execution time of finished runs, from when each started to when it ended |
+| **Runs** | Runs that finished in the range, and how many of them failed |
+
+Run time and Runs count only runs that actually started executing (completed, failed, or cancelled mid-run); a run cancelled while still queued is left out.
+
+The trend card plots Tokens, Cost, Time, or Runs on one time axis, at a **Daily** or **Weekly** grain. `30d` and `90d` offer both; `1d` and `7d` are daily only, `180d` weekly only. Weeks start on Monday, and the current, unfinished week is drawn lighter; hovering it marks the bar as partial and says how many of its 7 days have passed.
+
+The **Leaderboard** lists each agent's tokens, cost, run time, and runs, ranked by whichever of the four you pick. It shows the top 10; **Show all** reveals the rest. Two rows can stand for more than one agent:
+
+- **Deleted agents**: usage of agents that have since been deleted, merged into one row so the rows still add up to the totals above.
+- **Other agents**: agents you cannot see, merged into one row. Workspace owners and admins see every agent members created; a regular member does not see other people's private agents, whose usage appears only here, without names.
+
+When some of an agent's runs did not report tokens, its Tokens and Cost carry a `≥` prefix and a line under its name says how many runs did not report usage.
+
+In the demo below, an operations team has three agents. Check the cost trend first, then who spends the most, and finally find the reasons for failures on the Errors tab.
+
+<UsageDemo />
+
+## Errors tab
+
+At the top are **Failed runs**, **Failure rate**, and **Agents affected**. The rate is taken over every run that finished in the range, and the card spells out both numbers underneath.
+
+Below them:
+
+- **Daily errors** (or Weekly errors): each colour in a bar is one failure class.
+- **Failure mix**: every failure in the range, split by class. **Show error codes** swaps in the raw failure reason codes, which you can search logs for or paste into an issue.
+- **Top offenders**: ranked by failure count by default, with anything past the first 8 behind a toggle. When ranked by **Rate**, agents with fewer than 10 runs sort last, because a rate from that few runs says little. Clicking an agent's name opens its detail page, which lists its recent runs and the reason for each failure.
+
+Failure reason codes fall into seven classes:
+
+| Class | Includes | Usual fix |
+| --- | --- | --- |
+| Auth | Provider authentication or access denied, missing configuration such as an API key | Sign in again in the AI coding tool, or fill in the configuration |
+| Rate limit | Rate limits, insufficient capacity, exhausted quota or balance | Retry later, or raise the limit |
+| Timeout | Run timeout, the tool going unresponsive, Codex stalling | Narrow the task, or adjust the timeout |
+| Provider | Provider server errors, network failures, unavailable models, rejected requests | Retry later, or switch to an available model |
+| Runtime | Runtime offline, daemon restart, queue expiry, skill bundle download failure, missing or outdated tool, environment preparation failure | Check the computer that ran it |
+| Agent | Tool process crash, unparseable output, context overflow, iteration limit, agent reporting it cannot continue | Read the transcript, adjust the issue, and retry |
+| Other | Failures that could not be classified | Check the raw error code and the transcript |
+
+For what each code means and how to handle it, see [Runs · Failure reason reference](/tasks#failure-reason-reference).
+
+## How cost is calculated
+
+Every cost in Analytics is an estimate in USD, not a bill from the AI coding tool or the model provider:
+
+- Multica ships a table of published model rates, priced per million tokens separately for input, output, cache reads, and cache writes, and multiplies the reported tokens by it.
+- When the AI coding tool reports its own cost (Grok Build does, for example), that figure is used as is instead of an estimate.
+- Tokens from models missing from the table are still counted, but their cost counts as $0. You can [set custom prices](#custom-prices) for those models from a runtime's usage.
+- Some models charge a higher rate once a prompt passes a certain length. The rolled-up data cannot tell how long each request was, so everything is priced at the standard rate, and such runs may be underestimated.
+
+Tokens are reported by the AI coding tool. When a tool reports none, the run still counts toward run time and runs, but adds no tokens or cost. The current GitHub Copilot CLI, for example, does not include token counts in its output, so agents using it show `≥` and the unreported count on the leaderboard.
+
+## Runtime usage
+
+Open **Runtimes** and go into a runtime's detail page to see that runtime's usage. A private runtime's usage is visible only to its owner; a public runtime's usage is visible to every member.
+
+- At the top are **Cost**, **Cache savings**, and **Tokens**. Cost is compared with the previous period of the same length. Cache savings estimates how much more the cache reads would have cost at the full input rate, with the cache hit rate underneath.
+- **When this runtime spent**: cost or tokens per day or per week. The **Heatmap** view shades a square for each day of the last 26 weeks by its cost, regardless of the time range above.
+- **Cost by agent** and **Cost by model**: which agents and which models the period's cost went to.
+- **Daily breakdown table**: expands into each type of token per date and model.
+
+The runtime page offers `7d`, `30d`, `90d`, and `180d`.
+
+## Custom prices
+
+When the selected range includes models missing from the price table, the runtime's usage shows a notice above the figures saying how many models have no maintained price and that their tokens are excluded from cost. Click **Set custom prices**, enter each model's input, output, cache-read, and cache-write rates in USD per million tokens, and save. Once every model has a price, an **Edit custom prices** button stays there so you can change them later. To remove a model's price, clear all its fields and save, or click the delete button next to it.
+
+<Callout type="info">
+Custom prices are stored only in the browser or desktop app on this device. They are not synced to your account or shared with other workspace members, and they apply to every workspace on this device. Other members still see $0 for those models.
+</Callout>
+
+Custom prices apply only to models missing from the price table; they cannot override a built-in rate, and they never replace a cost the AI coding tool reported itself. After you save, Analytics, runtime usage, and issue Runs dialogs on this device recalculate with the new rates.
+
+## Issue cost
+
+The **Execution log** in each issue's sidebar shows the issue's **Spent**, **Tokens**, and **Agent time**, plus one cost bar per run. Click the total, a cost bar, or **Open timeline** to open the **Runs** dialog:
+
+- The summary at the top shows **Spent**, **Tokens** (and how much came from cache), **Output**, **Agent time**, and **Runs**. Agent time is the sum of the runs' durations; the "elapsed" figure next to it is the time from the first run's start to the last run's end. Next to Runs are the failed, cancelled, and active counts.
+- The chart's **Per run** view draws a bar per run for cost, tokens, or agent time; **Cumulative** draws cumulative cost growing over time.
+- **By agent** and **By model** bands show who and which models the cost went to.
+- Below, runs are listed by day; **Run details** shows a run's cost breakdown and what its cache hits saved.
+
+The bottom of the dialog notes that cost is estimated and names any models without a price.
+
+## From the CLI
+
+```bash
+multica issue usage <issue-id>
+multica runtime usage <runtime-id> --days 30
+```
+
+`issue usage` prints an issue's token totals (input, output, cache read, cache write) and run counts. `RUNS` is the number of finished runs, `METERED_RUNS` how many reported usage, and `UNREPORTED` how many did not; when any run went unreported, token totals carry a `>=` prefix because the real figure can only be higher.
+
+`runtime usage` lists a runtime's tokens per date, provider, and model. `--days` defaults to 90, up to 365.
+
+Neither table includes a cost estimate; add `--output json` for the raw data the API returns.
+
+## Next steps
+
+- [Runs](/tasks) — the execution log, failure reasons, and retries.
+- [Daemon and runtimes](/daemon-runtimes) — which computer a run executes on.
+- [Members and roles](/members-roles) — who can see which agents.

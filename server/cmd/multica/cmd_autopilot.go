@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"regexp"
@@ -164,6 +166,7 @@ func init() {
 	autopilotTriggerAddCmd.Flags().String("cron", "", "Cron expression (required for --kind schedule)")
 	autopilotTriggerAddCmd.Flags().String("timezone", "", "IANA timezone (default UTC; schedule only)")
 	autopilotTriggerAddCmd.Flags().String("label", "", "Optional human-readable label")
+	autopilotTriggerAddCmd.Flags().String("event-filters-file", "", "Read webhook event/action filters from a JSON array file (webhook only)")
 	autopilotTriggerAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// trigger-list
@@ -179,6 +182,8 @@ func init() {
 	autopilotTriggerUpdateCmd.Flags().String("cron", "", "New cron expression")
 	autopilotTriggerUpdateCmd.Flags().String("timezone", "", "New IANA timezone")
 	autopilotTriggerUpdateCmd.Flags().String("label", "", "New label")
+	autopilotTriggerUpdateCmd.Flags().String("event-filters-file", "", "Replace webhook event/action filters from a JSON array file (webhook only)")
+	autopilotTriggerUpdateCmd.Flags().Bool("clear-event-filters", false, "Remove webhook filters and accept all events (webhook only)")
 	autopilotTriggerUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
@@ -425,7 +430,7 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 		body["description"] = v
 	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
-		projectRef, err := resolveProjectID(ctx, client, v)
+		projectRef, err := resolveProjectIDForNewWork(ctx, client, v)
 		if err != nil {
 			return fmt.Errorf("resolve project: %w", err)
 		}
@@ -492,6 +497,8 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 		if v == "" {
 			body["project_id"] = nil
 		} else {
+			// Keeping a paused autopilot on its archived project is allowed;
+			// the server refuses a switch into one or a resume.
 			projectRef, err := resolveProjectID(ctx, client, v)
 			if err != nil {
 				return fmt.Errorf("resolve project: %w", err)
@@ -807,6 +814,16 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"kind": kind}
+	filters, err := autopilotEventFiltersInput(cmd)
+	if err != nil {
+		return err
+	}
+	if filters != nil {
+		if kind != "webhook" {
+			return fmt.Errorf("--event-filters-file is only valid with --kind webhook")
+		}
+		body["event_filters"] = filters
+	}
 	if kind == "schedule" {
 		body["cron_expression"] = cron
 		if v, _ := cmd.Flags().GetString("timezone"); v != "" {
@@ -861,14 +878,15 @@ func runAutopilotTriggerRotateURL(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
+	resolveCtx, cancelResolve := cli.APIContext(context.Background())
 
-	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
+	autopilotRef, err := resolveAutopilotID(resolveCtx, client, args[0])
 	if err != nil {
+		cancelResolve()
 		return fmt.Errorf("resolve autopilot: %w", err)
 	}
-	triggerRef, err := resolveAutopilotTriggerID(ctx, client, autopilotRef.ID, args[1])
+	triggerRef, err := resolveAutopilotTriggerID(resolveCtx, client, autopilotRef.ID, args[1])
+	cancelResolve()
 	if err != nil {
 		return fmt.Errorf("resolve trigger: %w", err)
 	}
@@ -888,6 +906,10 @@ func runAutopilotTriggerRotateURL(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
+
+	// Waiting for confirmation must not consume the rotation request's timeout.
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
 
 	var result map[string]any
 	path := "/api/autopilots/" + autopilotRef.ID + "/triggers/" + triggerRef.ID + "/rotate-webhook-token"
@@ -911,6 +933,13 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{}
+	filters, err := autopilotEventFiltersInput(cmd)
+	if err != nil {
+		return err
+	}
+	if filters != nil {
+		body["event_filters"] = filters
+	}
 	if cmd.Flags().Changed("enabled") {
 		v, _ := cmd.Flags().GetBool("enabled")
 		body["enabled"] = v
@@ -928,7 +957,7 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 		body["label"] = v
 	}
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, or --label")
+		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, --label, --event-filters-file, or --clear-event-filters")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -955,6 +984,57 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Trigger updated: %s\n", strVal(result, "id"))
 	return nil
+}
+
+type autopilotEventFilter struct {
+	Event   string   `json:"event"`
+	Actions []string `json:"actions,omitempty"`
+}
+
+func autopilotEventFiltersInput(cmd *cobra.Command) ([]autopilotEventFilter, error) {
+	clear, _ := cmd.Flags().GetBool("clear-event-filters")
+	fromFile := cmd.Flags().Changed("event-filters-file")
+	if clear && fromFile {
+		return nil, fmt.Errorf("--event-filters-file and --clear-event-filters cannot be combined")
+	}
+	if clear {
+		return []autopilotEventFilter{}, nil
+	}
+	if !fromFile {
+		return nil, nil
+	}
+	path, _ := cmd.Flags().GetString("event-filters-file")
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("read --event-filters-file: %w", err)
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	decoder.DisallowUnknownFields()
+	var filters []autopilotEventFilter
+	if err := decoder.Decode(&filters); err != nil {
+		return nil, fmt.Errorf("invalid --event-filters-file: %w", err)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return nil, fmt.Errorf("--event-filters-file must contain one JSON array")
+	}
+	if filters == nil {
+		return nil, fmt.Errorf("--event-filters-file must contain a JSON array, not null")
+	}
+	if len(filters) == 0 {
+		return nil, fmt.Errorf("--event-filters-file must not be empty; use --clear-event-filters on trigger-update to accept all events")
+	}
+	for i, filter := range filters {
+		if strings.TrimSpace(filter.Event) == "" {
+			return nil, fmt.Errorf("--event-filters-file: event_filters[%d].event must not be empty", i)
+		}
+		for j, action := range filter.Actions {
+			if strings.TrimSpace(action) == "" {
+				return nil, fmt.Errorf("--event-filters-file: event_filters[%d].actions[%d] must not be empty", i, j)
+			}
+		}
+	}
+	return filters, nil
 }
 
 func runAutopilotTriggerDelete(cmd *cobra.Command, args []string) error {
@@ -1015,8 +1095,8 @@ func resolveAutopilotSubscriberInputs(ctx context.Context, client *cli.APIClient
 // uuidRegexp matches a canonical UUID (8-4-4-4-12 hex).
 var uuidRegexp = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// resolveAgent accepts either a UUID or an agent name (case-insensitive substring)
-// and returns the agent's UUID. Errors on no match or ambiguous match.
+// resolveAgent passes UUIDs through and otherwise resolves workspace agents
+// using the shared ID, exact-name, and substring matching rules.
 func resolveAgent(ctx context.Context, client *cli.APIClient, nameOrID string) (string, error) {
 	if uuidRegexp.MatchString(nameOrID) {
 		return nameOrID, nil
@@ -1031,26 +1111,13 @@ func resolveAgent(ctx context.Context, client *cli.APIClient, nameOrID string) (
 		return "", fmt.Errorf("fetch agents: %w", err)
 	}
 
-	nameLower := strings.ToLower(nameOrID)
-	type match struct{ ID, Name string }
-	var matches []match
+	candidates := make([]assigneeCandidate, 0, len(agents))
 	for _, a := range agents {
-		aName := strVal(a, "name")
-		if strings.Contains(strings.ToLower(aName), nameLower) {
-			matches = append(matches, match{ID: strVal(a, "id"), Name: aName})
-		}
+		candidates = append(candidates, assigneeCandidate{assigneeMatch: assigneeMatch{
+			Type: "agent", ID: strVal(a, "id"), Name: strVal(a, "name"),
+		}})
 	}
 
-	switch len(matches) {
-	case 0:
-		return "", fmt.Errorf("no agent found matching %q", nameOrID)
-	case 1:
-		return matches[0].ID, nil
-	default:
-		var parts []string
-		for _, m := range matches {
-			parts = append(parts, fmt.Sprintf("  %q (%s)", m.Name, truncateID(m.ID)))
-		}
-		return "", fmt.Errorf("ambiguous agent %q; matches:\n%s", nameOrID, strings.Join(parts, "\n"))
-	}
+	_, agentID, err := matchAssignee(nameOrID, assigneeKinds{agent: true}, candidates)
+	return agentID, err
 }

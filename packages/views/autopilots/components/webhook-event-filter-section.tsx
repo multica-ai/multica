@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, Plus, Filter, ExternalLink, CaseSensitive } from "lucide-react";
+import { X, Plus, Filter, ExternalLink } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Button } from "@multica/ui/components/ui/button";
@@ -28,6 +28,7 @@ import {
   type ConditionDraft,
   type ConditionOp,
 } from "./webhook-payload-condition";
+import { isTraditionalChinese } from "../../common/docs-locale";
 
 interface WebhookEventFilterSectionProps {
   filters: WebhookEventFilter[];
@@ -44,11 +45,13 @@ export function WebhookEventFilterSection({
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [draft, setDraft] = useState<ConditionDraft>(EMPTY_CONDITION_DRAFT);
   const draftCondition = buildCondition(draft);
-  const docsHref = i18n.language?.startsWith("zh")
-    ? `https://multica.ai/docs/zh/autopilots#${encodeURIComponent("事件过滤")}`
-    : i18n.language?.startsWith("fr")
-      ? `https://multica.ai/docs/fr/autopilots#${encodeURIComponent("filtres-dévénements")}`
-      : "https://multica.ai/docs/autopilots#event-filters";
+  const docsHref = isTraditionalChinese(i18n.language)
+    ? `https://multica.ai/docs/zh-Hant/autopilots#${encodeURIComponent("事件過濾")}`
+    : i18n.language?.startsWith("zh")
+      ? `https://multica.ai/docs/zh/autopilots#${encodeURIComponent("事件过滤")}`
+      : i18n.language?.startsWith("fr")
+        ? `https://multica.ai/docs/fr/autopilots#${encodeURIComponent("filtres-dévénements")}`
+        : "https://multica.ai/docs/autopilots#event-filters";
 
   const addFilter = () => {
     const event = newEvent.trim();
@@ -168,10 +171,9 @@ export function WebhookEventFilterSection({
                           </span>
                         )}
                         {c.ignore_case && (
-                          <CaseSensitive
-                            aria-label={t(($) => $.dialog.event_filter_condition_ignore_case)}
-                            className="size-3.5 shrink-0 text-muted-foreground"
-                          />
+                          <span className="shrink-0 text-micro text-muted-foreground">
+                            {t(($) => $.dialog.event_filter_condition_ignore_case)}
+                          </span>
                         )}
                         <TooltipHint label={t(($) => $.dialog.event_filter_condition_remove_label)}>
                           <Button

@@ -22,7 +22,7 @@ import {
   Shapes,
   Tag,
   X as XIcon,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
 import type {
@@ -48,7 +48,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
@@ -64,7 +64,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
-import { useProjectWorkflow, workflowAllowsStatus, workflowStep } from "@multica/core/issue-workflows";
+import { useProjectWithWorkflow, useProjectWorkflow, workflowAllowsStatus, workflowStep } from "@multica/core/issue-workflows";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { stepHandlerActor, useStepHandlerLabel } from "../workflows/step-handler";
 import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
@@ -91,6 +91,7 @@ import {
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
 import { ClearablePillButton, PillButton } from "../common/pill-button";
+import { useComposerVoice, VoiceDialogFooter, VoiceMicButton } from "../voice";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PropertyIcon } from "../common/property-icon";
 import {
@@ -101,6 +102,7 @@ import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
+import { CopyParentFields } from "./copy-parent-fields";
 
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
 // DialogContent + everything inside; the surrounding `<Dialog>` is owned by
@@ -276,6 +278,11 @@ export function ManualCreatePanel({
   const [formResetKey, setFormResetKey] = useState(0);
   const titleEditorRef = useRef<TitleEditorRef>(null);
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Dictation lands in the description. No send from the strip: creating
+  // needs a title, which voice does not fill.
+  const voice = useComposerVoice({
+    insert: (text) => descEditorRef.current?.insertText(text) ?? false,
+  });
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
@@ -295,6 +302,7 @@ export function ManualCreatePanel({
     }
     return draft.manual.assigneeId;
   });
+  const [assigneeCleared, setAssigneeCleared] = useState(data?.manual_assignee_cleared === true);
   const [startDate, setStartDate] = useState<string | null>(draft.manual.startDate);
   const [dueDate, setDueDate] = useState<string | null>(
     (data?.due_date as string | undefined) ?? draft.shared.dueDate,
@@ -408,6 +416,7 @@ export function ManualCreatePanel({
   const updatePriority = (v: IssuePriority) => { setPriority(v); setShared({ priority: v }); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
     setAssigneeType(type); setAssigneeId(id);
+    setAssigneeCleared(!id);
     setManual({ assigneeType: type, assigneeId: id });
   };
   const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
@@ -415,9 +424,11 @@ export function ManualCreatePanel({
     setParentIssueId(id);
     setStage(null);
   };
-  // A project using a named workflow only accepts its columns: a status it
-  // does not list moves to todo, which every workflow keeps. (MUL-7420)
-  const createWorkflow = useProjectWorkflow(wsId, projectId);
+  // An issue only takes its workflow's columns — its project's, or Default's
+  // outside a project: a status it does not list moves to todo, which every
+  // workflow keeps. (MUL-7420, MUL-8250)
+  const { workflow: projectWorkflow, defaultWorkflow: workspaceDefault } = useProjectWithWorkflow(wsId, projectId);
+  const createWorkflow = projectId ? projectWorkflow : workspaceDefault;
   useEffect(() => {
     if (createWorkflow && !workflowAllowsStatus(createWorkflow, status)) {
       setStatus("todo");
@@ -864,6 +875,7 @@ export function ManualCreatePanel({
     // project) that was never written through a picker, so a plain flip would
     // otherwise drop it.
     setShared({ projectId, priority, dueDate });
+    setManual({ assigneeType, assigneeId });
     const existingPrompt = draft.agent.prompt;
     if (!existingPrompt.trim()) {
       const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
@@ -890,6 +902,7 @@ export function ManualCreatePanel({
     const carry: Record<string, unknown> = {};
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (carryParentIdentifier) carry.parent_issue_identifier = carryParentIdentifier;
+    if (assigneeCleared) carry.manual_assignee_cleared = true;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
@@ -955,13 +968,31 @@ export function ManualCreatePanel({
             <DialogTitle className="sr-only">{t(($) => $.create_issue.sr_manual)}</DialogTitle>
 
             {/* Header */}
-            <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
+            <div className="flex flex-wrap items-center justify-between gap-y-1 px-5 pt-3 pb-2 shrink-0">
               <div className="flex items-center gap-1.5 text-caption">
                 <span className="text-muted-foreground">{workspaceName}</span>
                 <ChevronRight className="size-3 text-faint-foreground" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="ml-auto flex min-w-0 items-center gap-1">
+                {parentIssue && (
+                  <CopyParentFields
+                    key={parentIssue.id}
+                    parent={parentIssue}
+                    properties={workspaceProperties}
+                    disabled={submitBusy}
+                    onCopy={(copy) => {
+                      if (copy.priority !== undefined) updatePriority(copy.priority);
+                      if (copy.label_ids !== undefined) updateLabelIds(copy.label_ids);
+                      if (copy.start_date !== undefined) updateStartDate(copy.start_date);
+                      if (copy.due_date !== undefined) updateDueDate(copy.due_date);
+                      if (copy.properties) {
+                        setPropertyValues((current) => ({ ...current, ...copy.properties }));
+                        setManual({ propertyValues: { ...useIssueDraftStore.getState().draft.manual.propertyValues, ...copy.properties } });
+                      }
+                    }}
+                  />
+                )}
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1000,7 +1031,7 @@ export function ManualCreatePanel({
             </div>
 
             {/* Title */}
-            <div className="px-5 pb-2 shrink-0">
+            <div className="px-5 pb-2 shrink-0" onFocusCapture={voice.onFocusCapture}>
               <TitleEditor
                 key={formResetKey}
                 ref={titleEditorRef}
@@ -1015,7 +1046,12 @@ export function ManualCreatePanel({
             </div>
 
             {/* Description — takes remaining space */}
-            <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
+            <div
+              {...descDropZoneProps}
+              ref={voice.rootRef}
+              onFocusCapture={voice.onFocusCapture}
+              className="relative flex flex-1 min-h-0 overflow-y-auto px-5"
+            >
               <ContentEditor
                 ref={descEditorRef}
                 defaultValue={draft.manual.description}
@@ -1193,7 +1229,7 @@ export function ManualCreatePanel({
                       data-property-error={propertyErrorId === property.id || undefined}
                       className={cn(
                         propertyErrorId === property.id &&
-                          "rounded-full ring-2 ring-destructive",
+                          "rounded-md ring-2 ring-destructive",
                       )}
                     >
                       <CustomPropertyValueInput
@@ -1227,7 +1263,7 @@ export function ManualCreatePanel({
               {parentIssueId && parentIssueLocked ? (
                 <span
                   data-testid="manual-sub-issue-chip"
-                  className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground"
+                  className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption text-muted-foreground"
                 >
                   {t(($) => $.create_issue.subissue_of, {
                     identifier: parentIssue?.identifier
@@ -1236,11 +1272,11 @@ export function ManualCreatePanel({
                   })}
                 </span>
               ) : parentIssueId && parentIssue ? (
-                <div className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60">
+                <div className="inline-flex items-center rounded-md border text-caption transition-colors hover:bg-accent/60">
                   <button
                     type="button"
                     onClick={() => setParentPickerOpen(true)}
-                    className="flex items-center gap-1.5 py-1 pl-2.5 cursor-pointer"
+                    className="flex items-center gap-1.5 py-1 pl-2 cursor-pointer"
                   >
                     <ArrowUp className="size-3 text-muted-foreground" />
                     <span>
@@ -1265,9 +1301,9 @@ export function ManualCreatePanel({
               {childIssues.map((c) => (
                 <div
                   key={c.id}
-                  className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60"
+                  className="inline-flex items-center rounded-md border text-caption transition-colors hover:bg-accent/60"
                 >
-                  <div className="flex items-center gap-1.5 py-1 pl-2.5">
+                  <div className="flex items-center gap-1.5 py-1 pl-2">
                     <ArrowDown className="size-3 text-muted-foreground" />
                     <span>{t(($) => $.create_issue.subissue_chip, { identifier: c.identifier })}</span>
                   </div>
@@ -1469,41 +1505,41 @@ export function ManualCreatePanel({
 
             {/* Footer — same 2x2-grid-on-phones / single-row-from-`sm` shape
                 as the agent panel; see the note on AgentCreatePanel's footer
-                for why (MUL-6236). TooltipProvider/Tooltip render no DOM and
+                for why (MUL-6236). Tooltip renders no DOM and
                 TooltipContent is portaled, so the Create button stays a direct
                 grid child in both branches below. */}
-            <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-              <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
-                <FileUploadButton
-                  size="sm"
-                  multiple
-                  onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-                />
-              </div>
-              <TooltipHint label={t(($) => $.create_issue.switch_to_agent_tooltip)}>
-                <button
-                  type="button"
-                  onClick={switchToAgent}
-                  disabled={gate.uploading}
-                  aria-disabled={gate.uploading || undefined}
-                  aria-busy={gate.uploading || undefined}
-                  className="relative group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
-                  {t(($) => $.create_issue.switch_to_agent)}
-                  <BorderBeam />
-                </button>
-              </TooltipHint>
-              <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
-                <Switch
-                  size="sm"
-                  checked={keepOpen}
-                  onCheckedChange={setKeepOpen}
-                />
-                {t(($) => $.create_issue.create_another)}
-              </label>
-              {submitState === "missing_title" ? (
-                <TooltipProvider delay={200}>
+            <VoiceDialogFooter voice={voice}>
+              <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+                <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+                  <FileUploadButton
+                    multiple
+                    onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                  />
+                  <VoiceMicButton voice={voice} />
+                </div>
+                <TooltipHint label={t(($) => $.create_issue.switch_to_agent_tooltip)}>
+                  <button
+                    type="button"
+                    onClick={switchToAgent}
+                    disabled={gate.uploading}
+                    aria-disabled={gate.uploading || undefined}
+                    aria-busy={gate.uploading || undefined}
+                    className="relative group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
+                    {t(($) => $.create_issue.switch_to_agent)}
+                    <BorderBeam />
+                  </button>
+                </TooltipHint>
+                <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+                  <Switch
+                    size="sm"
+                    checked={keepOpen}
+                    onCheckedChange={setKeepOpen}
+                  />
+                  {t(($) => $.create_issue.create_another)}
+                </label>
+                {submitState === "missing_title" ? (
                   <Tooltip>
                     {/* No `<span>` wrapper needed now: aria-disabled leaves the
                         button focusable and hoverable, so it can anchor its own
@@ -1511,11 +1547,11 @@ export function ManualCreatePanel({
                     <TooltipTrigger render={createButton} />
                     <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
                   </Tooltip>
-                </TooltipProvider>
-              ) : (
-                createButton
-              )}
-            </div>
+                ) : (
+                  createButton
+                )}
+              </div>
+            </VoiceDialogFooter>
     </>
   );
 }
@@ -1533,7 +1569,7 @@ export function manualDialogContentClass(isExpanded: boolean) {
     // `max-w-[calc(100%-2rem)]`, leaving the card edge to edge on a phone
     // (MUL-6236). `!h-96` stays a hard height; it already fits the shortest
     // phone we support.
-    "!w-full !max-w-[calc(100vw-1.5rem)]",
+    "!w-full !max-w-[calc(100%-1.5rem)]",
     isExpanded
       ? "!h-5/6 !-translate-y-1/2 sm:!max-w-4xl"
       : "!h-96 !-translate-y-1/2 sm:!max-w-2xl",

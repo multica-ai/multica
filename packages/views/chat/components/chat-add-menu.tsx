@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { Check, FolderKanban, Image as ImageIcon, Plus, X } from "lucide-react";
+import { Check, FolderKanban, Image as ImageIcon, Plus, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
@@ -66,7 +66,7 @@ export function ChatAddMenu({
               size="icon-sm"
               disabled={disabled}
               label={t(($) => $.input.add_tooltip)}
-              className="rounded-full text-muted-foreground"
+              className="text-muted-foreground"
             >
               <Plus />
             </IconButton>

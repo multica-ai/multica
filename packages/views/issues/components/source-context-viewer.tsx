@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, ChevronRight, LocateFixed, Maximize2, Minimize2, XIcon } from "lucide-react";
+import { AlertTriangle, ChevronRight, LocateFixed, Maximize2, Minimize2, XIcon } from "@multica/ui/icons";
 import { issueStatusCategory } from "@multica/core/issues";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
@@ -211,8 +211,8 @@ export function SourceContextBadge({
           className={cn(
             "flex w-full max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 transition-[height,max-width] motion-reduce:transition-none",
             viewerExpanded
-              ? "h-[calc(100dvh-2rem)] sm:max-w-[calc(100%-2rem)]"
-              : "h-[min(82dvh,56rem)] sm:max-w-4xl",
+              ? "h-[calc(100%-2rem)] sm:max-w-[calc(100%-2rem)]"
+              : "h-[min(82%,56rem)] sm:max-w-4xl",
           )}
         >
           <DialogHeader className="relative shrink-0 gap-1 border-b px-5 py-4 pr-20 sm:px-6">

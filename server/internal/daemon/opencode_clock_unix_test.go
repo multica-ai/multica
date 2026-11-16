@@ -28,6 +28,8 @@ func TestRunTaskOpenCodeClockSkew(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			redirectTestHome(t, t.TempDir())
+			// The fake CLI speaks `opencode run`; pin that transport.
+			t.Setenv("MULTICA_OPENCODE_TRANSPORT", "run")
 			dir := t.TempDir()
 			bin := filepath.Join(dir, "opencode")
 			argsPath, promptPath := filepath.Join(dir, "args"), filepath.Join(dir, "prompt")

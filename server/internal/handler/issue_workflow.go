@@ -15,10 +15,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -33,18 +33,6 @@ import (
 // owners/admins (MUL-8120). The Default workflow has no owner, so only
 // owners/admins change it. Which workflow a project uses is open to
 // owners/admins and to the project's lead.
-
-// requireProjectWorkflowsV1 gates adopting workflows behind the
-// project_workflows_v1 flag. Reads, edits of existing workflows and switching
-// a project back to Default stay open, so turning the flag off never strands
-// a project on a workflow nobody can maintain.
-func (h *Handler) requireProjectWorkflowsV1(w http.ResponseWriter, r *http.Request) bool {
-	if featureflags.ProjectWorkflowsV1Enabled(r.Context(), h.FeatureFlags) {
-		return true
-	}
-	writeFeatureDisabled(w, "project_workflows_disabled", "Project workflows are not enabled")
-	return false
-}
 
 func isWorkspaceAdmin(member db.Member) bool {
 	return roleAllowed(member.Role, "owner", "admin")
@@ -164,8 +152,10 @@ func issueWorkflowToResponse(row db.IssueWorkflow, def issueworkflow.Definition,
 // projectIDsByWorkflow groups the workspace's projects by the workflow row
 // they use, so a list response can say where each workflow applies. Projects
 // without a workflow, or pointing at a deleted one, count for Default.
-func (h *Handler) projectIDsByWorkflow(ctx context.Context, wsUUID pgtype.UUID, rows []db.IssueWorkflow) (map[string][]string, error) {
-	projects, err := h.Queries.ListProjects(ctx, db.ListProjectsParams{WorkspaceID: wsUUID})
+// Projects the caller may not see (visible returns false) are left out.
+func (h *Handler) projectIDsByWorkflow(ctx context.Context, wsUUID pgtype.UUID, rows []db.IssueWorkflow, visible func(db.Project) bool) (map[string][]string, error) {
+	// Archived projects still run on their workflow, so they count as users.
+	projects, err := h.Queries.ListProjects(ctx, db.ListProjectsParams{WorkspaceID: wsUUID, IncludeArchived: true})
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +170,9 @@ func (h *Handler) projectIDsByWorkflow(ctx context.Context, wsUUID pgtype.UUID, 
 	}
 	out := map[string][]string{}
 	for _, p := range projects {
+		if !visible(p) {
+			continue
+		}
 		key := uuidToString(p.WorkflowID)
 		if !p.WorkflowID.Valid || !known[key] {
 			key = defaultID
@@ -197,7 +190,7 @@ func (h *Handler) workflowStatusCatalog(ctx context.Context, q *db.Queries, wsUU
 	if err := issuestatus.Ensure(ctx, q, wsUUID); err != nil {
 		return nil, err
 	}
-	rows, err := q.ListIssueStatusEntries(ctx, db.ListIssueStatusEntriesParams{WorkspaceID: wsUUID, IncludeArchived: true})
+	rows, err := q.ListIssueStatusEntries(ctx, db.ListIssueStatusEntriesParams{WorkspaceID: wsUUID})
 	if err != nil {
 		return nil, err
 	}
@@ -225,14 +218,11 @@ func (h *Handler) ListIssueWorkflows(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found"); !ok {
 		return
 	}
-	// Default is stored the first time workflows are read with the feature
-	// on, so every client sees the same Default from then on.
-	if featureflags.ProjectWorkflowsV1Enabled(r.Context(), h.FeatureFlags) {
-		if _, err := issueworkflow.EnsureDefault(r.Context(), h.Queries, wsUUID); err != nil {
-			slog.Warn("ListIssueWorkflows ensure default failed", append(logger.RequestAttrs(r), "error", err)...)
-			writeError(w, http.StatusInternalServerError, "failed to list workflows")
-			return
-		}
+	// Store Default on the first read so every client sees the same workflow.
+	if _, err := issueworkflow.EnsureDefault(r.Context(), h.Queries, wsUUID); err != nil {
+		slog.Warn("ListIssueWorkflows ensure default failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to list workflows")
+		return
 	}
 	rows, err := h.Queries.ListIssueWorkflows(r.Context(), wsUUID)
 	if err != nil {
@@ -240,7 +230,11 @@ func (h *Handler) ListIssueWorkflows(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list workflows")
 		return
 	}
-	byWorkflow, err := h.projectIDsByWorkflow(r.Context(), wsUUID, rows)
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	byWorkflow, err := h.projectIDsByWorkflow(r.Context(), wsUUID, rows, func(p db.Project) bool { return hidden.CanSeeProject(p.ID) })
 	if err != nil {
 		slog.Warn("ListIssueWorkflows projects failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list workflows")
@@ -280,10 +274,16 @@ func (h *Handler) GetIssueWorkflow(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) writeIssueWorkflow(w http.ResponseWriter, r *http.Request, status int, row db.IssueWorkflow) {
-	writeJSON(w, status, h.issueWorkflowResponse(r.Context(), row))
+	// Writes reach here after committing, so a failed access lookup lists no
+	// private project rather than failing the response.
+	visible := func(p db.Project) bool { return p.Visibility != projectaccess.VisibilityPrivate }
+	if hidden, err := h.hiddenProjects(r, uuidToString(row.WorkspaceID)); err == nil {
+		visible = func(p db.Project) bool { return hidden.CanSeeProject(p.ID) }
+	}
+	writeJSON(w, status, h.issueWorkflowResponse(r.Context(), row, visible))
 }
 
-func (h *Handler) issueWorkflowResponse(ctx context.Context, row db.IssueWorkflow) IssueWorkflowResponse {
+func (h *Handler) issueWorkflowResponse(ctx context.Context, row db.IssueWorkflow, visible func(db.Project) bool) IssueWorkflowResponse {
 	def, err := issueworkflow.Decode(row)
 	if err != nil {
 		def = issueworkflow.Definition{}
@@ -292,7 +292,7 @@ func (h *Handler) issueWorkflowResponse(ctx context.Context, row db.IssueWorkflo
 	if err != nil {
 		rows = []db.IssueWorkflow{row}
 	}
-	byWorkflow, err := h.projectIDsByWorkflow(ctx, row.WorkspaceID, rows)
+	byWorkflow, err := h.projectIDsByWorkflow(ctx, row.WorkspaceID, rows, visible)
 	if err != nil {
 		byWorkflow = map[string][]string{}
 	}
@@ -305,6 +305,10 @@ type NewWorkflowStatus struct {
 	Name     string `json:"name"`
 	Category string `json:"category"`
 	Color    string `json:"color"`
+	// Icon is presentation-only geometry (see validIssueStatusIcon). Empty
+	// keeps the category default, which is what every status created before
+	// this field existed carries.
+	Icon string `json:"icon,omitempty"`
 }
 
 // IssueWorkflowStepInput names a step by an existing status key or by a
@@ -391,6 +395,9 @@ func createWorkflowStatus(ctx context.Context, qtx *db.Queries, wsUUID pgtype.UU
 	if !ok {
 		category = "started"
 	}
+	if !validIssueStatusIcon(in.Icon) {
+		return db.IssueStatus{}, false, "invalid status icon", nil
+	}
 	color := newStatusDefaultColor[category]
 	if strings.TrimSpace(in.Color) != "" {
 		c, err := normalizeColor(in.Color)
@@ -418,6 +425,7 @@ func createWorkflowStatus(ctx context.Context, qtx *db.Queries, wsUUID pgtype.UU
 		Name:        name,
 		Category:    category,
 		Color:       color,
+		Icon:        in.Icon,
 	})
 	if err != nil && isUniqueViolation(err) {
 		return db.IssueStatus{}, false, fmt.Sprintf("a status named %q already exists", name), nil
@@ -475,9 +483,6 @@ func (h *Handler) CreateIssueWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
 	if !ok {
-		return
-	}
-	if !h.requireProjectWorkflowsV1(w, r) {
 		return
 	}
 	var req IssueWorkflowWriteRequest
@@ -898,7 +903,7 @@ func (h *Handler) publishIssueWorkflowChanged(workspaceID string, actor db.Membe
 // changed and returns the project as the API shapes it.
 func (h *Handler) publishProjectWorkflowUpdate(ctx context.Context, workspaceID string, member db.Member, project db.Project) ProjectResponse {
 	resp := projectToResponse(project)
-	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(ctx, project.WorkspaceID, project.ID)
+	h.fillProjectIssueStats(ctx, &resp, project)
 	resp.ResourceCount = h.loadProjectResourceCount(ctx, project.ID)
 	h.publish(protocol.EventProjectUpdated, workspaceID, "member", uuidToString(member.UserID), map[string]any{"project": resp})
 	return resp
@@ -923,6 +928,9 @@ func (h *Handler) loadProjectForWorkflowWrite(w http.ResponseWriter, r *http.Req
 	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: projectUUID, WorkspaceID: wsUUID})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
+		return db.Project{}, db.Member{}, "", false
+	}
+	if !h.requireProjectVisible(w, r, workspaceID, project.ID, http.StatusNotFound, "project not found") {
 		return db.Project{}, db.Member{}, "", false
 	}
 	if !canManageProjectWorkflow(member, project) {
@@ -957,9 +965,6 @@ func (h *Handler) SetProjectWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	var targetID pgtype.UUID
 	if req.WorkflowID != nil && *req.WorkflowID != "" {
-		if !h.requireProjectWorkflowsV1(w, r) {
-			return
-		}
 		id, ok := parseUUIDOrBadRequest(w, *req.WorkflowID, "workflow_id")
 		if !ok {
 			return
@@ -1108,9 +1113,6 @@ func (h *Handler) SetIssueWorkflowHandoff(w http.ResponseWriter, r *http.Request
 		return
 	}
 	step := issueworkflow.NormalizeHandoff(payloadToStep(chi.URLParam(r, "status"), req.IssueWorkflowStepPayload))
-	if (step.HandsOff() || req.CopyForProjectID != "") && !h.requireProjectWorkflowsV1(w, r) {
-		return
-	}
 	var copyFor pgtype.UUID
 	if req.CopyForProjectID != "" {
 		copyFor, ok = parseUUIDOrBadRequest(w, req.CopyForProjectID, "copy_for_project_id")
@@ -1310,7 +1312,12 @@ func (h *Handler) PreviewIssueWorkflowBrief(w http.ResponseWriter, r *http.Reque
 	projectName := ""
 	if req.ProjectID != "" {
 		if id, err := parseUUIDString(req.ProjectID); err == nil {
-			if p, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: id, WorkspaceID: wsUUID}); err == nil {
+			hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+			if !ok {
+				return
+			}
+			// A project the caller may not see is previewed like an unknown one.
+			if p, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: id, WorkspaceID: wsUUID}); err == nil && hidden.CanSeeProject(p.ID) {
 				projectName = p.Title
 			}
 		}
@@ -1414,6 +1421,9 @@ func (h *Handler) PreviewWorkflowHandoff(w http.ResponseWriter, r *http.Request)
 		}
 		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: projectID, WorkspaceID: issue.WorkspaceID}); err != nil {
 			writeError(w, http.StatusNotFound, "project not found")
+			return
+		}
+		if !h.requireProjectVisible(w, r, uuidToString(issue.WorkspaceID), projectID, http.StatusNotFound, "project not found") {
 			return
 		}
 		params.ProjectID = projectID

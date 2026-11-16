@@ -49,7 +49,7 @@ type WakeupCondition struct {
 	EachStage bool `json:"each_stage,omitempty"`
 	// pull_request: checks_finished | merged | conflicts
 	Event string `json:"event,omitempty"`
-	// other_issue: the watched issue and done | ended | in_review. The
+	// other_issue: the watched issue and done | ended | in_review | blocked. The
 	// identifier is recorded for display; clients never set it.
 	IssueID    string `json:"issue_id,omitempty"`
 	State      string `json:"state,omitempty"`
@@ -199,8 +199,8 @@ func validateCondition(ctx context.Context, tx pgx.Tx, issue db.Issue, raw json.
 		if id == issue.ID {
 			return nil, nil, badCondition("watch another issue, not this one")
 		}
-		if c.State != "done" && c.State != "ended" && c.State != "in_review" {
-			return nil, nil, badCondition("state must be done, ended or in_review")
+		if c.State != "done" && c.State != "ended" && c.State != "in_review" && c.State != "blocked" {
+			return nil, nil, badCondition("state must be done, ended, in_review or blocked")
 		}
 		var identifier string
 		err = tx.QueryRow(ctx, "SELECT ws.issue_prefix||'-'||i.number FROM issue i JOIN workspace ws ON ws.id=i.workspace_id WHERE i.workspace_id=$1 AND i.id=$2", ws, id).Scan(&identifier)
@@ -414,6 +414,8 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 			met = category == "done" || category == "closed"
 		case "in_review":
 			met = status == "in_review"
+		case "blocked":
+			met = status == "blocked"
 		}
 		return met, "issue:" + status, map[string]any{"issue_id": c.IssueID, "status": status}, nil
 	}

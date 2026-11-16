@@ -29,6 +29,7 @@ import { IssueSurface, IssueSurfaceWithStore } from "./issue-surface";
 import { createIssueStatusListStore } from "@multica/core/issue-statuses";
 import { baselineFromQuery } from "@multica/core/issue-views/baseline";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
+import { setCurrentWorkspace } from "@multica/core/platform";
 import { statusTableMethodsFromLegacy } from "./status-table-test-api";
 
 // Mutable so tests can simulate a workspace switch — the workspace layout
@@ -596,7 +597,7 @@ describe("IssueSurface — table pagination ownership", () => {
       "pt-sort-transition",
     );
     const listIssueTableRows = vi.fn((request: IssueTableRowsRequest) =>
-      request.query.sort.field === "created_at"
+      request.query.sort.field === "updated_at"
         ? Promise.resolve({
             query_fingerprint: "sha256:initial-sort",
             group_key: null,
@@ -785,6 +786,9 @@ describe("IssueSurface — filtered empty state", () => {
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getWorkspaceWorkingAgents: vi.fn(() => Promise.resolve([])),
       getChildIssueProgress: vi.fn(() => never()),
+      listIssueUnread: vi.fn(() => Promise.resolve([])),
+      listSubscribedIssueIds: vi.fn(() => Promise.resolve([])),
+      listIssueViews: vi.fn(() => Promise.resolve([])),
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
   });
@@ -793,6 +797,7 @@ describe("IssueSurface — filtered empty state", () => {
     cleanup();
     qc.clear();
     pruneIssueSurfaceViewStates([]);
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", null);
     mockTranslate.mockImplementation(() => "translated");
     vi.restoreAllMocks();
   });
@@ -843,6 +848,155 @@ describe("IssueSurface — filtered empty state", () => {
 
     await screen.findByText("detail.empty_issues_title");
     expect(screen.queryByText("filtered_empty.title")).toBeNull();
+  });
+
+  function subscribedViewSurface() {
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "subscribed");
+    return (
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "workspace", actorKind: "all" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>
+    );
+  }
+
+  it("keeps a built-in view's condition when its filters are cleared", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    act(() => store.setState({ relationFilters: ["subscribed"], agentRunningFilter: true }));
+
+    render(subscribedViewSurface());
+
+    fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
+    expect(store.getState().agentRunningFilter).toBe(false);
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+    await screen.findByText("filtered_empty.title");
+    expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull();
+  });
+
+  it.each(["created_at", "updated_at"] as const)(
+    "clears %s with other user filters while preserving the built-in view's condition and display",
+    async (field) => {
+      const store = getIssueSurfaceViewStore("view:subscribed");
+      act(() => store.setState({
+        dateFilter: { field, from: "2026-01-01", to: "2026-01-02" },
+        priorityFilters: ["high"],
+        agentRunningFilter: true,
+        sortBy: "title",
+        sortDirection: "asc",
+        showSubIssues: false,
+      }));
+
+      render(subscribedViewSurface());
+
+      fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
+
+      expect(store.getState()).toMatchObject({
+        dateFilter: null,
+        priorityFilters: [],
+        agentRunningFilter: false,
+        relationFilters: ["subscribed"],
+        sortBy: "title",
+        sortDirection: "asc",
+        showSubIssues: false,
+      });
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "filtered_empty.clear_button" })).toBeNull(),
+      );
+    },
+  );
+
+  it("clears a date interval on an ordinary surface without adding a relation", async () => {
+    const store = getIssueSurfaceViewStore("project:pf");
+    act(() => store.getState().setDateFilter({ field: "created_at", from: "2026-01-01", to: "2026-01-02" }));
+
+    render(filteredSurface());
+
+    fireEvent.click(await screen.findByRole("button", { name: "filtered_empty.clear_button" }));
+
+    expect(store.getState().dateFilter).toBeNull();
+    expect(store.getState().relationFilters).toEqual([]);
+    await screen.findByText("detail.empty_issues_title");
+  });
+
+  it("keeps a built-in view's condition when a workspace switch reloads its state", async () => {
+    setCurrentWorkspace("acme", "ws-1");
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    render(subscribedViewSurface());
+    await screen.findByText("filtered_empty.title");
+
+    // The next workspace has no saved state for this view, so the reload
+    // resets the store to defaults, without the relation.
+    await act(async () => {
+      setCurrentWorkspace("beta", "ws-1");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+    setCurrentWorkspace(null, null);
+  });
+
+  it("restores a built-in view's condition from state saved without it, and un-negates it", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    act(() => store.setState({ relationFilters: [], negatedFilters: ["relation"] }));
+
+    render(subscribedViewSurface());
+
+    await screen.findByText("filtered_empty.title");
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+    expect(store.getState().negatedFilters).toEqual([]);
+  });
+
+  it("keeps a built-in view to exactly its relations: another one would widen it", async () => {
+    const store = getIssueSurfaceViewStore("view:subscribed");
+    render(subscribedViewSurface());
+    await screen.findByText("filtered_empty.title");
+
+    act(() => store.getState().toggleRelationFilter("assigned"));
+
+    expect(store.getState().relationFilters).toEqual(["subscribed"]);
+  });
+
+  it("keeps Working to running agents: adding idle would list every issue", async () => {
+    const store = getIssueSurfaceViewStore("view:working");
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "working");
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "workspace", actorKind: "all" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(store.getState().agentRunningFilter).toBe(true));
+
+    act(() => store.setState({ agentIdleFilter: true }));
+
+    expect(store.getState()).toMatchObject({ agentRunningFilter: true, agentIdleFilter: false });
+  });
+
+  it("puts back the agent filter Working is defined by", async () => {
+    const store = getIssueSurfaceViewStore("view:working");
+    act(() => store.setState({ agentRunningFilter: false, agentIdleFilter: true }));
+    useActiveIssueViewStore.getState().setActive("ws-1:workspace", "working");
+
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueSurface
+          scope={{ type: "workspace", actorKind: "all" }}
+          modes={["list"]}
+          renderHeader={() => null}
+          batchToolbar="never"
+        />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(store.getState()).toMatchObject({ agentRunningFilter: true, agentIdleFilter: false }));
   });
 });
 

@@ -275,6 +275,9 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_MUSE_PATH", "muse", "MULTICA_MUSE_MODEL"); ok {
 		agents["muse"] = e
 	}
+	if e, ok := probe("MULTICA_DEVIN_PATH", "devin", "MULTICA_DEVIN_MODEL"); ok {
+		agents["devin"] = e
+	}
 	// Qoder CLI ships as the `qodercli` binary (Qoder Desktop does not put it
 	// on PATH; users install it separately, often via an npm global prefix).
 	// It must go through probe() like every other provider so the login-shell
@@ -309,6 +312,12 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {
 		agents["qwen"] = e
 	}
+	if e, ok := probe("MULTICA_AMP_PATH", "amp", "MULTICA_AMP_MODEL"); ok {
+		agents["amp"] = e
+	}
+	if e, ok := probe("MULTICA_DROID_PATH", "droid", "MULTICA_DROID_MODEL"); ok {
+		agents["droid"] = e
+	}
 	// QwenPaw (`qwenpaw`) is the QwenPaw CLI agent, driven over ACP via
 	// `qwenpaw acp`. It takes no model env var: the backend never calls
 	// session/set_model (it would rewrite QwenPaw's shared agent config), so
@@ -336,6 +345,32 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// advertise a knob that silently does nothing.
 	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
 		agents["zeroclaw"] = e
+	}
+	// museapp (muse.ai) is not a CLI: there is no binary to discover. The
+	// daemon advertises a museapp runtime exactly when
+	// MULTICA_MUSEAPP_ENDPOINT points at a Muse receptionist; reachability and
+	// protocol version are verified against the receptionist itself in
+	// probeBuiltinRuntime (there is no --version to run).
+	// MULTICA_MUSEAPP_MODEL is informational only — the backend's wire
+	// protocol has no model parameter, see ModelSelectionSupported.
+	if strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_ENDPOINT")) != "" {
+		agents["museapp"] = AgentEntry{
+			Command: "museapp",
+			Model:   strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_MODEL")),
+		}
+	}
+	if e, ok := probe("MULTICA_ZCODE_PATH", "zcode", "MULTICA_ZCODE_MODEL"); ok {
+		agents["zcode"] = e
+	} else if strings.TrimSpace(os.Getenv("MULTICA_ZCODE_PATH")) == "" {
+		for _, candidate := range zcodeDesktopAppBundlePaths() {
+			if executableCandidate(candidate) {
+				agents["zcode"] = AgentEntry{
+					Path: candidate, Command: "zcode",
+					Model: os.Getenv("MULTICA_ZCODE_MODEL"),
+				}
+				break
+			}
+		}
 	}
 	return agents
 }
@@ -389,9 +424,11 @@ type dshProbeVerdict int
 const (
 	// dshProbeOK: the profile answered with the protocol version this backend drives.
 	dshProbeOK dshProbeVerdict = iota
+	// A configured bridge must be migrated manually, never provisioned over.
+	dshProbeNeedsMigration
 	// dshProbeMissingProfile: the manifest does not name the Multica runtime.
 	// A file that merely exists is not enough — a refused install leaves one.
-	// This is the only verdict that may install a bundle or condemn the runtime.
+	// This is the only verdict that may install a bundle.
 	dshProbeMissingProfile
 	// dshProbeIncompatible: something answered, with a protocol this daemon does
 	// not drive. The profile is installed, so installing over it would replace a
@@ -444,6 +481,9 @@ func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbe
 	// before the manifest: a shutdown is not evidence the profile is missing.
 	if ctx.Err() != nil {
 		return dshProbeUnavailable
+	}
+	if dshMulticaProfileNeedsMigration() {
+		return dshProbeNeedsMigration
 	}
 	// A manifest that does not name the runtime is missing. Decide that before
 	// starting dsh: on current DSH, --probe against the skeleton a refused

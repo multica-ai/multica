@@ -10,6 +10,8 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { AgentRuntime } from "@multica/core/types";
+import enCommon from "../../locales/en/common.json";
+import enLayout from "../../locales/en/layout.json";
 import enRuntimes from "../../locales/en/runtimes.json";
 import { isQoderLocator, QoderDetailPage } from "./qoder-detail-page";
 
@@ -74,7 +76,7 @@ vi.mock("./qoder-configuration", () => ({
 }));
 vi.mock("./usage-section", () => ({ UsageSection: () => null }));
 vi.mock("./runtime-detail", () => ({
-  ServingAgentsCard: ({ agents }: { agents: { id: string; name: string }[] }) => (
+  ServingAgentList: ({ agents }: { agents: { id: string; name: string }[] }) => (
     <ul aria-label="serving agents">
       {agents.map((agent) => (
         <li key={agent.id}>{agent.name}</li>
@@ -127,7 +129,10 @@ function mount() {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   render(
-    <I18nProvider locale="en" resources={{ en: { runtimes: enRuntimes } }}>
+    <I18nProvider
+      locale="en"
+      resources={{ en: { common: enCommon, layout: enLayout, runtimes: enRuntimes } }}
+    >
       <QueryClientProvider client={client}>
         <QoderDetailPage />
       </QueryClientProvider>

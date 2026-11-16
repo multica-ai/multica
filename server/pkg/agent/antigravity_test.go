@@ -966,6 +966,55 @@ func TestAntigravityBackendIgnoresTrailingNetworkErrorAfterDoneResponse(t *testi
 	}
 }
 
+// agy 1.4.6 can retain an earlier interruption in the result of a resumed
+// conversation, even after the current response finishes successfully (#9528).
+func TestAntigravityBackendRecoveredStreamInterruption(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		done     bool
+		exitCode int
+	}{
+		{done: true, exitCode: 0},
+		{done: false, exitCode: 0},
+		{done: true, exitCode: 1},
+	} {
+		t.Run(fmt.Sprintf("response_done=%v/exit=%d", tc.done, tc.exitCode), func(t *testing.T) {
+			t.Parallel()
+			fakePath := filepath.Join(t.TempDir(), "agy")
+			script := strings.ReplaceAll(fakeAgyTrailingNetworkErrorScript(tc.done), antigravityNetworkIssueError,
+				"The stream was interrupted. Please continue the task you were working on.")
+			script = strings.ReplaceAll(script, "exit 1", fmt.Sprintf("exit %d", tc.exitCode))
+			writeTestExecutable(t, fakePath, []byte(script))
+
+			backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+			if err != nil {
+				t.Fatalf("new antigravity backend: %v", err)
+			}
+			session, err := backend.Execute(context.Background(), "follow-up", ExecOptions{
+				ResumeSessionID: "37a6d8f2-8523-46fc-8fc9-87e630cbe295",
+			})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			for range session.Messages {
+			}
+			result, ok := <-session.Result
+			if !ok {
+				t.Fatal("result channel closed without a value")
+			}
+			wantStatus := "failed"
+			completed := tc.done && tc.exitCode == 0
+			if completed {
+				wantStatus = "completed"
+			}
+			if result.Status != wantStatus || result.Output != "Complete answer." || (result.Error == "") != completed {
+				t.Fatalf("result = status %q output %q error %q", result.Status, result.Output, result.Error)
+			}
+		})
+	}
+}
+
 func TestAntigravityBackendIgnoresStaleActiveStepAfterDoneResponse(t *testing.T) {
 	t.Parallel()
 
@@ -1081,6 +1130,7 @@ func TestAntigravityTrailingTransportErrorClassification(t *testing.T) {
 			err:  "  THERE WAS A NETWORK ISSUE CONNECTING TO THE SERVER, PLEASE TRY AGAIN.  ",
 			want: true,
 		},
+		{name: "recovered stream interruption", err: "The stream was interrupted. Please continue the task you were working on.", want: true},
 		{name: "unexpected EOF", err: `Post "https://host/v1": unexpected EOF`, want: true},
 		{name: "connection reset", err: `read tcp 1.2.3.4:443: connection reset by peer`, want: true},
 		{name: "broken pipe", err: `write tcp 1.2.3.4:443: broken pipe`, want: true},
@@ -1150,6 +1200,7 @@ func TestAntigravityCompletedDespiteTrailingNetworkErrorRequiresAllThree(t *test
 		{name: "response whitespace only", err: transport, response: "  \n ", agentResponseDone: true, want: false},
 		{name: "response empty", err: transport, response: "", agentResponseDone: true, want: false},
 		{name: "answer still being written", err: transport, response: "partial", agentResponseDone: false, want: false},
+		{name: "interrupted response whitespace only", err: "The stream was interrupted. Please continue the task you were working on.", response: "  ", agentResponseDone: true, want: false},
 		{name: "provider rejection", err: quota, response: "answer", agentResponseDone: true, want: false},
 		{name: "no error at all", err: "", response: "answer", agentResponseDone: true, want: false},
 	}
@@ -1157,7 +1208,7 @@ func TestAntigravityCompletedDespiteTrailingNetworkErrorRequiresAllThree(t *test
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := antigravityCompletedDespiteTrailingNetworkError(tc.err, tc.response, tc.agentResponseDone)
+			got := antigravityCompletedDespiteTrailingNetworkError(tc.err, tc.response, tc.agentResponseDone, false)
 			if got != tc.want {
 				t.Fatalf("antigravityCompletedDespiteTrailingNetworkError(%q, %q, %v) = %v, want %v",
 					tc.err, tc.response, tc.agentResponseDone, got, tc.want)
@@ -1342,5 +1393,109 @@ func TestAntigravityBackendSumsCompletedStepsWhenCancelled(t *testing.T) {
 	want := TokenUsage{InputTokens: 170, OutputTokens: 17, CacheReadTokens: 30}
 	if got := result.Usage["gemini-3.8-flash-high"]; got != want {
 		t.Fatalf("usage = %+v, want %+v", got, want)
+	}
+}
+
+func TestAntigravityCurrentTurnRecovery(t *testing.T) {
+	t.Parallel()
+	step := func(index int, kind, state, text string) string {
+		return fmt.Sprintf("{\"event\":\"step_update\",\"step_update\":{\"step_index\":%d,\"step_type\":%q,\"state\":%q,\"text_delta\":%q}}\n", index, kind, state, text)
+	}
+	boundary := step(10, "user_input", "DONE", "")
+	answer := step(14, "agent_response", "ACTIVE", "Final answer.") + step(14, "agent_response", "DONE", "\n")
+	const retryError = "Malformed function call: Function call is empty - no input to parse. Retries remaining: 3"
+	const resumeEOF = "API error (attempt 3): request failed: Post \"https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse\": EOF"
+	for _, tc := range []struct {
+		name, steps, status, response, cause string
+		exit                                 int
+		resumed, completed                   bool
+	}{
+		{name: "retry with narration and executor log", steps: boundary + step(11, "agent_response", "DONE", "Working.\n") + step(12, "tool", "DONE", "") + step(13, "error_message", "DONE", "") + answer, completed: true},
+		{name: "partial attempt before retry", steps: boundary + step(11, "agent_response", "ACTIVE", "Partial attempt") + step(13, "error_message", "DONE", "") + answer, completed: true},
+		{name: "canonical response need not equal deltas", steps: boundary + answer, response: "Canonical answer from agy.", completed: true},
+		{name: "historical quota", steps: step(1, "error_message", "DONE", "") + boundary + answer, cause: "RESOURCE_EXHAUSTED (429)", resumed: true, completed: true},
+		{name: "historical unavailable", steps: boundary + answer, cause: "UNAVAILABLE (503)", resumed: true, completed: true},
+		{name: "diagnostic line", steps: "CLI diagnostic\n" + boundary + answer, completed: true},
+		{name: "completed metadata", steps: boundary + answer + step(15, "checkpoint", "DONE", ""), completed: true},
+		{name: "exit 1", steps: boundary + answer, exit: 1},
+		{name: "exit 3", steps: boundary + answer, exit: 3},
+		{name: "active final response", steps: boundary + step(14, "agent_response", "ACTIVE", "Partial answer.")},
+		{name: "newer active response", steps: boundary + answer + step(15, "agent_response", "ACTIVE", "Partial answer.")},
+		{name: "empty final response", steps: boundary + step(14, "agent_response", "DONE", " \n")},
+		{name: "empty result response", steps: boundary + answer, response: " \n"},
+		{name: "unfinished boundary", steps: step(10, "user_input", "ACTIVE", "") + answer},
+		{name: "two boundaries", steps: boundary + step(11, "user_input", "DONE", "") + answer},
+		{name: "missing index", steps: boundary + "{\"event\":\"step_update\",\"step_update\":{\"step_type\":\"tool\",\"state\":\"DONE\"}}\n" + answer},
+		{name: "negative index", steps: boundary + step(-1, "tool", "DONE", "") + answer},
+		{name: "history is not an answer", steps: step(1, "agent_response", "DONE", "Old answer.") + boundary},
+		{name: "error after answer", steps: boundary + answer + step(15, "error_message", "DONE", "")},
+		{name: "unfinished tool after answer", steps: boundary + answer + step(15, "tool", "ACTIVE", "")},
+		{name: "done tool after answer", steps: boundary + answer + step(15, "tool", "DONE", "")},
+		{name: "subagent after answer", steps: boundary + answer + step(15, "subagent", "DONE", "")},
+		{name: "unfinished metadata", steps: boundary + answer + step(15, "checkpoint", "ACTIVE", "")},
+		{name: "quota without recovery", steps: boundary + step(13, "error_message", "DONE", ""), cause: "RESOURCE_EXHAUSTED (429)"},
+		{name: "permission without recovery", steps: boundary + step(13, "error_message", "DONE", ""), cause: "PERMISSION_DENIED (403)"},
+		{name: "cancelled result", steps: boundary + answer, status: "CANCELLED"},
+		{name: "legacy fresh transport", steps: answer, cause: antigravityNetworkIssueError, exit: 1, completed: true},
+		{name: "legacy resumed EOF exit 0", steps: step(1, "agent_response", "DONE", "RESUME-BC-OK"), response: "RESUME-BC-OK\n", cause: resumeEOF, exit: 0, resumed: true, completed: true},
+		{name: "legacy resumed EOF exit 1", steps: step(1, "agent_response", "DONE", "RESUME-BC-OK"), response: "RESUME-BC-OK\n", cause: resumeEOF, exit: 1, resumed: true, completed: true},
+		{name: "legacy trailing error", steps: answer + step(15, "error_message", "DONE", ""), cause: antigravityNetworkIssueError},
+		{name: "legacy trailing tool", steps: answer + step(15, "tool", "ACTIVE", ""), cause: antigravityNetworkIssueError},
+		{name: "legacy unfinished metadata", steps: answer + step(15, "checkpoint", "ACTIVE", ""), cause: antigravityNetworkIssueError},
+		{name: "resumed without boundary", steps: answer, resumed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if tc.status == "" {
+				tc.status = "ERROR"
+			}
+			if tc.response == "" {
+				tc.response = "Working.\nFinal answer.\n"
+			}
+			if tc.cause == "" {
+				tc.cause = retryError
+			}
+			script := `#!/bin/sh
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) printf '%s\n' 'agent executor error: recovered attempt' > "$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat <<'JSONL'
+` + tc.steps + fmt.Sprintf("{\"event\":\"result\",\"result\":{\"status\":%q,\"response\":%q,\"error\":%q}}\nJSONL\nexit %d\n", tc.status, tc.response, tc.cause, tc.exit)
+			fakePath := filepath.Join(t.TempDir(), "agy")
+			writeTestExecutable(t, fakePath, []byte(script))
+			logs := &strings.Builder{}
+			backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: slog.New(slog.NewTextHandler(logs, nil))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := ExecOptions{}
+			if tc.resumed {
+				opts.ResumeSessionID = "fixture-conversation"
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			session, err := backend.Execute(ctx, "fixture prompt", opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range session.Messages {
+			}
+			result := <-session.Result
+			want := "failed"
+			if tc.completed {
+				want = "completed"
+			} else if tc.status == "CANCELLED" {
+				want = "cancelled"
+			}
+			if result.Status != want || result.Output != tc.response || (result.Error == "") != tc.completed {
+				t.Fatalf("result = %+v, want %s preserving canonical response", result, want)
+			}
+			if tc.completed && (!strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), fmt.Sprintf("err=%q", tc.cause))) {
+				t.Fatalf("missing warning with original error: %s", logs.String())
+			}
+		})
 	}
 }

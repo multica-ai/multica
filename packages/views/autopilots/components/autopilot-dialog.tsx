@@ -19,7 +19,7 @@ import {
   Webhook,
   X as XIcon,
   Zap,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   Dialog,
@@ -462,10 +462,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         className={cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!transition-all !duration-300 !ease-out !-translate-y-1/2",
-          "!w-[calc(100vw-2rem)]",
+          "!w-[calc(100%-2rem)]",
           isExpanded
-            ? "!max-w-6xl !h-[calc(100vh-4rem)]"
-            : "!max-w-5xl !h-[min(720px,calc(100vh-4rem))]",
+            ? "!max-w-6xl !h-[calc(100%-4rem)]"
+            : "!max-w-5xl !h-[min(720px,calc(100%-4rem))]",
         )}
       >
         <DialogTitle className="sr-only">
@@ -525,6 +525,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                     type="button"
                     onClick={() => setIsExpanded((v) => !v)}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                    aria-label={isExpanded ? t(($) => $.dialog.collapse) : t(($) => $.dialog.expand)}
                   >
                     {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                   </button>
@@ -541,6 +542,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                     type="button"
                     onClick={() => onOpenChange(false)}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                    aria-label={t(($) => $.dialog.close)}
                   >
                     <XIcon className="size-4" />
                   </button>

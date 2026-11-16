@@ -12,7 +12,7 @@ import {
   Server,
   Trash2,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
@@ -114,7 +114,7 @@ export function RuntimeProfilesDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         className={cn(
-          "flex max-h-[88vh] flex-col gap-0 overscroll-contain p-0",
+          "flex max-h-[88%] flex-col gap-0 overscroll-contain p-0",
           intent === "manage" ? "sm:max-w-3xl" : "sm:max-w-2xl",
         )}
         showCloseButton={false}

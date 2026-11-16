@@ -14,7 +14,7 @@ import {
   Server,
   Trash2,
   X,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { truncateWithEllipsis } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -246,7 +246,7 @@ export function DaemonPanel({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="flex h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
+        className="flex h-[85%] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl"
         showCloseButton={false}
       >
         {/* Header */}

@@ -11,54 +11,31 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countIssuesByProject = `-- name: CountIssuesByProject :one
-SELECT count(*) FROM issue
-WHERE project_id = $1
+const archiveProject = `-- name: ArchiveProject :one
+UPDATE project SET
+    archived_at = now(),
+    archived_by_type = $3,
+    archived_by_id = $4,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND archived_at IS NULL
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id
 `
 
-func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countIssuesByProject, projectID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+type ArchiveProjectParams struct {
+	ID             pgtype.UUID `json:"id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	ArchivedByType pgtype.Text `json:"archived_by_type"`
+	ArchivedByID   pgtype.UUID `json:"archived_by_id"`
 }
 
-const createProject = `-- name: CreateProject :one
-INSERT INTO project (
-    workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority, start_date, due_date, workflow_id
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id
-`
-
-type CreateProjectParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Title       string      `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      string      `json:"status"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
-	Priority    string      `json:"priority"`
-	StartDate   pgtype.Date `json:"start_date"`
-	DueDate     pgtype.Date `json:"due_date"`
-	WorkflowID  pgtype.UUID `json:"workflow_id"`
-}
-
-func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
-	row := q.db.QueryRow(ctx, createProject,
+// Guarded on archived_at IS NULL so a repeated archive keeps the first
+// actor and time; no row means it was already archived (or is gone).
+func (q *Queries) ArchiveProject(ctx context.Context, arg ArchiveProjectParams) (Project, error) {
+	row := q.db.QueryRow(ctx, archiveProject,
+		arg.ID,
 		arg.WorkspaceID,
-		arg.Title,
-		arg.Description,
-		arg.Icon,
-		arg.Status,
-		arg.LeadType,
-		arg.LeadID,
-		arg.Priority,
-		arg.StartDate,
-		arg.DueDate,
-		arg.WorkflowID,
+		arg.ArchivedByType,
+		arg.ArchivedByID,
 	)
 	var i Project
 	err := row.Scan(
@@ -76,6 +53,92 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.StartDate,
 		&i.DueDate,
 		&i.WorkflowID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.Visibility,
+		&i.ArchivedAt,
+		&i.ArchivedByType,
+		&i.ArchivedByID,
+	)
+	return i, err
+}
+
+const countIssuesByProject = `-- name: CountIssuesByProject :one
+SELECT count(*) FROM issue
+WHERE project_id = $1
+`
+
+func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countIssuesByProject, projectID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const createProject = `-- name: CreateProject :one
+INSERT INTO project (
+    workspace_id, title, description, icon, status,
+    lead_type, lead_id, priority, start_date, due_date, workflow_id,
+    creator_type, creator_id
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id
+`
+
+type CreateProjectParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Title       string      `json:"title"`
+	Description pgtype.Text `json:"description"`
+	Icon        pgtype.Text `json:"icon"`
+	Status      string      `json:"status"`
+	LeadType    pgtype.Text `json:"lead_type"`
+	LeadID      pgtype.UUID `json:"lead_id"`
+	Priority    string      `json:"priority"`
+	StartDate   pgtype.Date `json:"start_date"`
+	DueDate     pgtype.Date `json:"due_date"`
+	WorkflowID  pgtype.UUID `json:"workflow_id"`
+	CreatorType pgtype.Text `json:"creator_type"`
+	CreatorID   pgtype.UUID `json:"creator_id"`
+}
+
+func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
+	row := q.db.QueryRow(ctx, createProject,
+		arg.WorkspaceID,
+		arg.Title,
+		arg.Description,
+		arg.Icon,
+		arg.Status,
+		arg.LeadType,
+		arg.LeadID,
+		arg.Priority,
+		arg.StartDate,
+		arg.DueDate,
+		arg.WorkflowID,
+		arg.CreatorType,
+		arg.CreatorID,
+	)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.StartDate,
+		&i.DueDate,
+		&i.WorkflowID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.Visibility,
+		&i.ArchivedAt,
+		&i.ArchivedByType,
+		&i.ArchivedByID,
 	)
 	return i, err
 }
@@ -96,7 +159,7 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -123,6 +186,12 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.StartDate,
 		&i.DueDate,
 		&i.WorkflowID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.Visibility,
+		&i.ArchivedAt,
+		&i.ArchivedByType,
+		&i.ArchivedByID,
 	)
 	return i, err
 }
@@ -130,7 +199,8 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 const getProjectIssueStats = `-- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,
-       count(*) FILTER (WHERE status = ANY($1::text[]))::bigint AS done_count
+       count(*) FILTER (WHERE status = ANY($1::text[]))::bigint AS done_count,
+       max(GREATEST(updated_at, last_activity_at))::timestamptz AS last_issue_activity_at
 FROM issue
 WHERE workspace_id = $2::uuid
   AND project_id = ANY($3::uuid[])
@@ -144,9 +214,10 @@ type GetProjectIssueStatsParams struct {
 }
 
 type GetProjectIssueStatsRow struct {
-	ProjectID  pgtype.UUID `json:"project_id"`
-	TotalCount int64       `json:"total_count"`
-	DoneCount  int64       `json:"done_count"`
+	ProjectID           pgtype.UUID        `json:"project_id"`
+	TotalCount          int64              `json:"total_count"`
+	DoneCount           int64              `json:"done_count"`
+	LastIssueActivityAt pgtype.Timestamptz `json:"last_issue_activity_at"`
 }
 
 func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueStatsParams) ([]GetProjectIssueStatsRow, error) {
@@ -158,7 +229,12 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueS
 	items := []GetProjectIssueStatsRow{}
 	for rows.Next() {
 		var i GetProjectIssueStatsRow
-		if err := rows.Scan(&i.ProjectID, &i.TotalCount, &i.DoneCount); err != nil {
+		if err := rows.Scan(
+			&i.ProjectID,
+			&i.TotalCount,
+			&i.DoneCount,
+			&i.LastIssueActivityAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -170,21 +246,28 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, arg GetProjectIssueS
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
+  AND ($4::boolean OR archived_at IS NULL)
 ORDER BY created_at DESC
 `
 
 type ListProjectsParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Status      pgtype.Text `json:"status"`
-	Priority    pgtype.Text `json:"priority"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	Status          pgtype.Text `json:"status"`
+	Priority        pgtype.Text `json:"priority"`
+	IncludeArchived bool        `json:"include_archived"`
 }
 
 func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error) {
-	rows, err := q.db.Query(ctx, listProjects, arg.WorkspaceID, arg.Status, arg.Priority)
+	rows, err := q.db.Query(ctx, listProjects,
+		arg.WorkspaceID,
+		arg.Status,
+		arg.Priority,
+		arg.IncludeArchived,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -207,6 +290,12 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.StartDate,
 			&i.DueDate,
 			&i.WorkflowID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.Visibility,
+			&i.ArchivedAt,
+			&i.ArchivedByType,
+			&i.ArchivedByID,
 		); err != nil {
 			return nil, err
 		}
@@ -258,6 +347,49 @@ func (q *Queries) LockProjectForDelete(ctx context.Context, arg LockProjectForDe
 	return id, err
 }
 
+const restoreProject = `-- name: RestoreProject :one
+UPDATE project SET
+    archived_at = NULL,
+    archived_by_type = NULL,
+    archived_by_id = NULL,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND archived_at IS NOT NULL
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id
+`
+
+type RestoreProjectParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) RestoreProject(ctx context.Context, arg RestoreProjectParams) (Project, error) {
+	row := q.db.QueryRow(ctx, restoreProject, arg.ID, arg.WorkspaceID)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.StartDate,
+		&i.DueDate,
+		&i.WorkflowID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.Visibility,
+		&i.ArchivedAt,
+		&i.ArchivedByType,
+		&i.ArchivedByID,
+	)
+	return i, err
+}
+
 const updateProject = `-- name: UpdateProject :one
 UPDATE project SET
     title = COALESCE($2, title),
@@ -271,7 +403,7 @@ UPDATE project SET
     due_date = CASE WHEN $15::boolean THEN $16 ELSE due_date END,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id
 `
 
 type UpdateProjectParams struct {
@@ -328,6 +460,12 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.StartDate,
 		&i.DueDate,
 		&i.WorkflowID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.Visibility,
+		&i.ArchivedAt,
+		&i.ArchivedByType,
+		&i.ArchivedByID,
 	)
 	return i, err
 }

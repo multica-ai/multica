@@ -13,8 +13,8 @@ import {
   ListTree,
   Tag,
   UserRound,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { childIssueProgressOptions, issueDetailOptions } from "@multica/core/issues/queries";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
@@ -155,7 +155,7 @@ function PropertyRow({
   label,
   children,
 }: {
-  icon: LucideIcon;
+  icon: IconComponent;
   label: string;
   children: ReactNode;
 }) {

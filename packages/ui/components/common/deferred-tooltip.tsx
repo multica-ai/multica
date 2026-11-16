@@ -9,11 +9,27 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { Tooltip, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import {
+  Tooltip,
+  TooltipContent,
+  TOOLTIP_OPEN_DELAY,
+  isTooltipInstantPhase,
+} from "@multica/ui/components/ui/tooltip";
 
-// Matches the ui TooltipProvider default delay so the deferred first-open
-// feels identical to a native tooltip.
-const TOOLTIP_OPEN_DELAY = 200;
+// Counts key presses page-wide, so a focus can tell whether a key moved it.
+let keyPresses = 0;
+let keyListenerInstalled = false;
+function watchKeyPresses() {
+  if (keyListenerInstalled) return;
+  keyListenerInstalled = true;
+  document.addEventListener(
+    "keydown",
+    () => {
+      keyPresses += 1;
+    },
+    true,
+  );
+}
 
 /**
  * Tooltip whose machinery mounts only on first hover.
@@ -35,17 +51,38 @@ export function DeferredTooltip({
   trigger,
   content,
   side,
+  shouldOpen,
+  openOnFocus = false,
+  contentClassName,
 }: {
   /** The visible trigger element (e.g. an icon button). Cloned with hover
    *  handlers and an anchor ref; its own props are preserved. */
   trigger: ReactElement<Record<string, unknown>>;
   content: ReactNode;
   side?: "top" | "bottom" | "left" | "right";
+  /** Checked against the trigger element when the open delay elapses; the
+   *  tooltip stays closed when it returns false. */
+  shouldOpen?: (el: HTMLElement) => boolean;
+  /** Also open on keyboard focus (and close on blur), gated by the same
+   *  checks as hover. Focus that follows a pointer press stays closed, and
+   *  focus under a hovering pointer leaves the open to the hover delay. */
+  openOnFocus?: boolean;
+  contentClassName?: string;
 }) {
   const anchorRef = useRef<HTMLElement | null>(null);
   const [warm, setWarm] = useState(false);
   const [open, setOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Set by a pointer press so the focus it causes is not treated as keyboard focus.
+  const pointerFocusRef = useRef(false);
+  // Menus move focus to the item under the pointer. Focus that arrives while
+  // hovering with no key pressed since the pointer entered waits for the
+  // hover delay; a Tab under a resting pointer still opens at once.
+  const hoveringRef = useRef(false);
+  const keyPressesAtHoverRef = useRef(0);
+  // The pointer is on a descendant with a tooltip of its own (a lock icon
+  // inside a row link); that tooltip owns the hover, so this one stays shut.
+  const onNestedTriggerRef = useRef(false);
 
   const clearTimer = () => {
     if (timerRef.current !== null) {
@@ -54,6 +91,31 @@ export function DeferredTooltip({
     }
   };
   useEffect(() => clearTimer, []);
+
+  const canOpen = () => {
+    // A trigger whose own menu/popover is open keeps the tooltip hidden;
+    // plain expand/collapse toggles (aria-expanded without a popup) keep it.
+    const el = anchorRef.current;
+    if (!el || onNestedTriggerRef.current) return false;
+    const popupOpen =
+      el.hasAttribute("data-popup-open") ||
+      (el.getAttribute("aria-expanded") === "true" &&
+        (el.getAttribute("aria-haspopup") ?? "false") !== "false");
+    if (popupOpen) return false;
+    return !shouldOpen || shouldOpen(el);
+  };
+
+  // Same delay as every other tooltip, and the same instant hand-off: when
+  // a tooltip is showing or just closed, open without waiting.
+  const armOpen = () => {
+    clearTimer();
+    timerRef.current = setTimeout(
+      () => {
+        if (canOpen()) setOpen(true);
+      },
+      isTooltipInstantPhase() ? 0 : TOOLTIP_OPEN_DELAY,
+    );
+  };
 
   const triggerRef = trigger.props.ref as Ref<HTMLElement> | undefined;
   const element = cloneElement(trigger, {
@@ -64,30 +126,64 @@ export function DeferredTooltip({
     },
     onPointerEnter: (e: React.PointerEvent) => {
       (trigger.props.onPointerEnter as ((e: React.PointerEvent) => void) | undefined)?.(e);
+      if (openOnFocus) watchKeyPresses();
+      hoveringRef.current = true;
+      keyPressesAtHoverRef.current = keyPresses;
       setWarm(true);
-      clearTimer();
-      timerRef.current = setTimeout(() => {
-        // A trigger whose own menu/popover is open keeps the tooltip hidden;
-        // plain expand/collapse toggles (aria-expanded without a popup) keep it.
-        const el = anchorRef.current;
-        const popupOpen =
-          el?.hasAttribute("data-popup-open") ||
-          (el?.getAttribute("aria-expanded") === "true" &&
-            (el.getAttribute("aria-haspopup") ?? "false") !== "false");
-        if (popupOpen) return;
-        setOpen(true);
-      }, TOOLTIP_OPEN_DELAY);
+      armOpen();
+    },
+    onPointerOver: (e: React.PointerEvent) => {
+      (trigger.props.onPointerOver as ((e: React.PointerEvent) => void) | undefined)?.(e);
+      const nested = (e.target as Element).closest?.('[data-trigger="tooltip"]');
+      const onNested = !!nested && nested !== anchorRef.current && !!anchorRef.current?.contains(nested);
+      if (onNested === onNestedTriggerRef.current) return;
+      onNestedTriggerRef.current = onNested;
+      if (onNested) {
+        clearTimer();
+        setOpen(false);
+      } else {
+        armOpen();
+      }
     },
     onPointerLeave: (e: React.PointerEvent) => {
       (trigger.props.onPointerLeave as ((e: React.PointerEvent) => void) | undefined)?.(e);
+      hoveringRef.current = false;
+      onNestedTriggerRef.current = false;
       clearTimer();
       setOpen(false);
     },
     onPointerDown: (e: React.PointerEvent) => {
       (trigger.props.onPointerDown as ((e: React.PointerEvent) => void) | undefined)?.(e);
+      // The press focuses the trigger in this same task; reset afterwards so
+      // a press that moves no focus can't swallow later keyboard focus.
+      pointerFocusRef.current = true;
+      setTimeout(() => {
+        pointerFocusRef.current = false;
+      }, 0);
       clearTimer();
       setOpen(false);
     },
+    ...(openOnFocus
+      ? {
+          onFocus: (e: React.FocusEvent) => {
+            (trigger.props.onFocus as ((e: React.FocusEvent) => void) | undefined)?.(e);
+            const fromPointer = pointerFocusRef.current;
+            pointerFocusRef.current = false;
+            const fromHover =
+              hoveringRef.current && keyPresses === keyPressesAtHoverRef.current;
+            if (fromPointer || fromHover) return;
+            setWarm(true);
+            clearTimer();
+            if (canOpen()) setOpen(true);
+          },
+          onBlur: (e: React.FocusEvent) => {
+            (trigger.props.onBlur as ((e: React.FocusEvent) => void) | undefined)?.(e);
+            pointerFocusRef.current = false;
+            clearTimer();
+            setOpen(false);
+          },
+        }
+      : {}),
   });
 
   return (
@@ -95,7 +191,7 @@ export function DeferredTooltip({
       {element}
       {warm && (
         <Tooltip open={open} onOpenChange={setOpen}>
-          <TooltipContent side={side} anchor={anchorRef}>
+          <TooltipContent side={side} anchor={anchorRef} className={contentClassName}>
             {content}
           </TooltipContent>
         </Tooltip>

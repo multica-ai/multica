@@ -4,6 +4,8 @@ description: Confiez une tâche à un agent et décidez s'il commence à travail
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { AssignDemo } from "@/components/demos/assign-demo";
 
 Lorsqu'un travail doit être pris en charge par un agent dans la durée, assignez-lui la tâche. L'agent lit la description et la discussion de la tâche, effectue le travail avec sa propre configuration et ses skills, puis consigne l'avancement et les résultats dans la même tâche.
 
@@ -11,13 +13,27 @@ Si vous avez seulement besoin que l'agent traite une demande précise sans chang
 
 ## Assigner et lancer une exécution
 
-1. Ouvrez une tâche et cliquez sur **Assigné à**.
-2. Choisissez un agent ou un squad.
-3. Vérifiez l'agent sur le point de démarrer dans la boîte de dialogue de confirmation, puis choisissez **Confirmer l'assignation**.
+<Steps>
+<Step>
 
-![Boîte de dialogue de confirmation de l'assignation : confirmer l'assignation, ou choisir de ne pas démarrer maintenant](/images/docs/assign-confirm-dialog.webp)
+Ouvrez une tâche et cliquez sur **Assigné à**.
 
-Tout ce que l'agent doit savoir sur ce travail doit figurer dans la tâche elle-même — sa description, sa discussion, ou encore la description du projet et les instructions de l'agent.
+</Step>
+<Step>
+
+Choisissez un agent ou un squad.
+
+</Step>
+<Step>
+
+Vérifiez l'agent sur le point de démarrer dans la boîte de dialogue de confirmation, puis choisissez **Confirmer l'assignation**.
+
+</Step>
+</Steps>
+
+<AssignDemo />
+
+Ce que l'agent doit savoir pour ce travail va dans la description et la discussion de la tâche, ou dans la description du projet et les instructions de l'agent.
 
 Lorsque vous assignez la tâche à un squad, le squad devient l'assigné de la tâche et le chef du squad démarre en premier. Il décide s'il confie le travail à d'autres membres, selon le fonctionnement du squad.
 
@@ -36,7 +52,7 @@ Pendant l'exécution, l'agent peut :
 
 Ce qu'il peut réellement faire reste limité par la configuration de l'agent, l'environnement du runtime et votre droit de l'exécuter.
 
-Les agents mettent à jour le statut au fil du travail. Par défaut, ils indiquent le travail en cours au démarrage et la relecture à la livraison. Si le projet utilise un workflow, ils suivent ses étapes et ses consignes. La fin d’une exécution ne termine pas la tâche à elle seule ; répondre à une question ne signifie pas que tout le travail est livré.
+Les agents mettent à jour le statut au fil du travail. Par défaut, ils passent la tâche à En cours au démarrage et à En relecture à la livraison. Si le projet utilise un workflow, ils suivent ses étapes et ses consignes. La fin d’une exécution ne termine pas la tâche à elle seule ; répondre à une question ne signifie pas que tout le travail est livré.
 
 Si le projet passe régulièrement le travail entre plusieurs personnes ou agents, utilisez un [workflow](/workflows) pour organiser les relais. Pour enregistrer une demande fréquente sans changer le responsable, utilisez une [action rapide](/quick-actions).
 
@@ -46,9 +62,9 @@ Si le projet passe régulièrement le travail entre plusieurs personnes ou agent
 
 `backlog` ne lance pas non plus d'exécution lors de l'assignation. L'exécution ne suit qu'une fois la tâche sortie de `backlog`, ou après une demande adressée à l'assigné dans un commentaire ultérieur.
 
-Lorsque la tâche a déjà un agent ou un squad comme responsable, la sortir de `backlog` ouvre la même boîte de dialogue : c'est ce changement de statut qui lance l'exécution, elle propose donc le même bouton **Ne pas démarrer maintenant**, qui déplace la tâche sans réveiller l'agent. La boîte de dialogue apparaît pour toute cible autre que `backlog` lui-même et que les statuts des catégories `done` ou `closed`.
+Lorsque la tâche a déjà un agent ou un squad comme responsable, la sortir de `backlog` ouvre la même boîte de dialogue, car c'est ce changement de statut qui lance l'exécution. Elle propose le même bouton **Ne pas démarrer maintenant**, qui change le statut sans réveiller l'agent. La boîte de dialogue apparaît pour toute cible autre que `backlog` lui-même et que les statuts des catégories `done` ou `closed`.
 
-Seul le statut fixe `backlog` fonctionne ainsi. Un [statut personnalisé](/issues#statuts-personnalisés) de la catégorie `unstarted` ne met **pas** le travail en attente — assigner un agent à une tâche dans ce statut lance immédiatement une exécution. Les tâches déjà en `done` ou `cancelled` lancent quand même une exécution immédiatement lorsqu'elles sont assignées ou réassignées à un agent.
+Seul le statut fixe `backlog` fonctionne ainsi. Un [statut personnalisé](/issues#statuts-personnalisés) de la catégorie `unstarted` ne met **pas** le travail en attente : assigner un agent à une tâche dans ce statut lance immédiatement une exécution. Les tâches déjà en `done` ou `cancelled` lancent quand même une exécution immédiatement lorsqu'elles sont assignées ou réassignées à un agent.
 
 ## Droits d'assignation
 

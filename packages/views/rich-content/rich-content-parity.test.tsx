@@ -195,7 +195,7 @@ beforeEach(() => {
 
 /**
  * The Mermaid leaf's own container — NOT a bare `svg` query, which also matches
- * the lucide icons in code-block chrome.
+ * the icons in code-block chrome.
  */
 const mermaidLeaf = (container: HTMLElement): Element | null =>
   container.querySelector(".mermaid-diagram");

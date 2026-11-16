@@ -69,7 +69,7 @@ const IN_REVIEW = entry({
 
 const QA = entry({ id: "qa", key: "qa", name: "QA", color: "#ec7a2d" });
 
-/** StatusIcon's own glyph, told apart from the lucide check mark beside it. */
+/** StatusIcon's own glyph, told apart from the check mark beside it. */
 const STATUS_ICON = 'svg[viewBox="0 0 14 14"]';
 
 function iconOf(row: Element | null): SVGElement | null {
@@ -96,7 +96,7 @@ afterEach(() => {
 describe("StatusPicker trigger color", () => {
   // The bug: the trigger read the catalog entry's raw color while the list read
   // the resolved one, so a built-in rendered as the server's seeded #22c55e in
-  // one and as the `text-success` token in the other — the same status in two
+  // one and as the `text-status-in-review` token in the other — the same status in two
   // visibly different greens, side by side. (MUL-6440)
   it("paints a built-in from the token, exactly like its row in the list", () => {
     catalogEntries = [IN_REVIEW, { ...QA, icon: "slash" }];
@@ -111,8 +111,8 @@ describe("StatusPicker trigger color", () => {
     // the token and produces the two-greens mismatch.
     expect(trigger?.getAttribute("style")).toBeNull();
     expect(row?.getAttribute("style")).toBeNull();
-    expect(trigger?.getAttribute("class")).toContain("text-success");
-    expect(row?.getAttribute("class")).toContain("text-success");
+    expect(trigger?.getAttribute("class")).toContain("text-status-in-review");
+    expect(row?.getAttribute("class")).toContain("text-status-in-review");
   });
 
   // The other half of the same rule: a CUSTOM status has no token to fall back
@@ -126,7 +126,7 @@ describe("StatusPicker trigger color", () => {
     const trigger = iconOf(container);
     const row = iconOf(optionRow("QA"));
 
-    expect(trigger?.style.color).toBe("rgb(236, 122, 45)");
+    expect(trigger?.style.color).toBe("var(--palette-orange, #ec7a2d)");
     expect(row?.style.color).toBe(trigger?.style.color);
     expect(trigger?.querySelector("line")).not.toBeNull();
     expect(row?.innerHTML).toBe(trigger?.innerHTML);
@@ -217,7 +217,7 @@ describe("StatusPicker in a project that uses a workflow", () => {
     expect(rows).toEqual(["Todo", "QAHands off to Sentinel", "Done"]);
     expect(screen.getByText("Hands off to Sentinel").className).toContain("sr-only");
     expect(screen.getByTestId("avatar-agent-1")).toBeTruthy();
-    expect(screen.getByText("Delivery")).toBeTruthy();
+    expect(screen.queryByText("Delivery")).toBeNull();
     expect(screen.queryByText("In Review")).toBeNull();
   });
 
@@ -258,14 +258,14 @@ describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
     return Array.from(document.querySelectorAll("button[data-picker-item]")).map((el) => el.textContent?.trim());
   }
 
-  it("offers only the Default workflow's statuses, headed as such, without handoff hints", () => {
+  it("offers only the Default workflow's statuses, without a header or handoff hints", () => {
     catalogEntries = [TODO, IN_REVIEW, QA, MERGED, DONE];
     workspaceDefault = DEFAULT;
     renderWithI18n(
       <StatusPicker status="todo" projectId={null} onUpdate={() => {}} open onOpenChange={() => {}} />,
     );
     expect(rows()).toEqual(["Todo", "In Review", "Done"]);
-    expect(screen.getByText("Default statuses · no project")).toBeTruthy();
+    expect(screen.queryByText(/Default statuses/)).toBeNull();
     expect(screen.queryByText(/Hands off to/)).toBeNull();
   });
 
@@ -282,17 +282,20 @@ describe("StatusPicker on an issue outside any project (MUL-8121)", () => {
     expect(checkOf("Todo")?.getAttribute("class")).toContain("invisible");
   });
 
-  it("still reaches every status through search", () => {
+  it("searches only the Default workflow's statuses", () => {
     catalogEntries = [TODO, IN_REVIEW, QA, MERGED, DONE];
     workspaceDefault = DEFAULT;
     const onUpdate = vi.fn();
     renderWithI18n(
       <StatusPicker status="todo" projectId={null} onUpdate={onUpdate} open onOpenChange={() => {}} />,
     );
-    fireEvent.change(screen.getByPlaceholderText("Search status..."), { target: { value: "merg" } });
-    expect(rows()).toEqual(["Merged"]);
-    fireEvent.click(optionRow("Merged"));
-    expect(onUpdate).toHaveBeenCalledWith({ status: "merged" });
+    const search = screen.getByPlaceholderText("Search status...");
+    fireEvent.change(search, { target: { value: "merg" } });
+    expect(rows()).toEqual([]);
+    fireEvent.change(search, { target: { value: "rev" } });
+    expect(rows()).toEqual(["In Review"]);
+    fireEvent.click(optionRow("In Review"));
+    expect(onUpdate).toHaveBeenCalledWith({ status: "in_review" });
   });
 
   it("offers the whole catalog when the surface spans projects", () => {
