@@ -318,6 +318,8 @@ func TestGitHubStateDesktopAndLegacyLinks(t *testing.T) {
 
 func TestGitHubConnectUsesUnifiedState(t *testing.T) {
 	t.Setenv("GITHUB_APP_SLUG", "multica-test")
+	t.Setenv("GITHUB_APP_ID", "11111")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", "configured-key")
 	t.Setenv("GITHUB_APP_CLIENT_ID", "test-client")
 	t.Setenv("GITHUB_APP_CLIENT_SECRET", "test-client-secret")
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")

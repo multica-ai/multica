@@ -25,7 +25,7 @@ var (
 	// user-authorization `code`. Almost always operator-actionable: the App
 	// needs "Request user authorization (OAuth) during installation" enabled.
 	errGitHubUserAuthorizationMissing  = errors.New("github: setup callback carried no user authorization code")
-	errGitHubInstallationNotAuthorized = errors.New("github: installation is not accessible to the installing user")
+	errGitHubInstallationNotAuthorized = errors.New("github: installing user does not control the installation")
 )
 
 const (
@@ -36,8 +36,8 @@ const (
 )
 
 // The signed state authorizes only the workspace. A new installation binding
-// also requires GitHub to confirm the installing user's access; all failures
-// abort the bind before any metadata fetch or database write.
+// also requires GitHub to confirm the installing user's control; visibility
+// through a read-only repository collaboration is insufficient.
 func verifyGitHubInstallationOwnership(ctx context.Context, code string, installationID int64) error {
 	clientID, clientSecret := githubAppClientID(), githubAppClientSecret()
 	if clientID == "" || clientSecret == "" {
@@ -56,7 +56,7 @@ func verifyGitHubInstallationOwnership(ctx context.Context, code string, install
 	// The token never leaves this function and is never stored; revoking it
 	// mirrors how installation tokens are handled elsewhere in this file.
 	defer revokeGitHubUserToken(client, clientID, clientSecret, userToken)
-	return assertUserCanAccessInstallation(ctx, client, userToken, installationID)
+	return assertUserCanManageInstallation(ctx, client, userToken, installationID)
 }
 
 // githubOwnershipErrorCode maps a verification failure to the `github_error`
@@ -118,9 +118,9 @@ func exchangeGitHubUserCode(
 	return body.AccessToken, nil
 }
 
-// assertUserCanAccessInstallation returns nil only when GitHub lists
-// installationID among the installations the token's user can reach.
-func assertUserCanAccessInstallation(
+// GitHub includes collaborator installations in this list, so finding an ID
+// must be followed by account ownership or full repository administration proof.
+func assertUserCanManageInstallation(
 	ctx context.Context,
 	client *http.Client,
 	userToken string,
@@ -149,7 +149,11 @@ func assertUserCanAccessInstallation(
 		}
 		var body struct {
 			Installations []struct {
-				ID int64 `json:"id"`
+				ID      int64 `json:"id"`
+				Account struct {
+					ID   int64  `json:"id"`
+					Type string `json:"type"`
+				} `json:"account"`
 			} `json:"installations"`
 		}
 		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, githubAPIResponseLimit)).Decode(&body)
@@ -159,7 +163,21 @@ func assertUserCanAccessInstallation(
 		}
 		for _, installation := range body.Installations {
 			if installation.ID == installationID {
-				return nil
+				switch installation.Account.Type {
+				case "User":
+					var user struct {
+						ID int64 `json:"id"`
+					}
+					if err := getGitHubOwnershipJSON(ctx, client, "/user", userToken, &user); err != nil {
+						return err
+					}
+					if user.ID > 0 && user.ID == installation.Account.ID {
+						return nil
+					}
+				case "Organization":
+					return assertUserAdministersInstallationRepositories(ctx, client, userToken, installationID)
+				}
+				return errGitHubInstallationNotAuthorized
 			}
 		}
 		if len(body.Installations) < githubUserInstallationsPageSize {
@@ -167,6 +185,95 @@ func assertUserCanAccessInstallation(
 		}
 	}
 	return errGitHubInstallationNotAuthorized
+}
+
+func getGitHubOwnershipJSON(ctx context.Context, client *http.Client, path, token string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(githubAPIBase, "/")+path, nil)
+	if err != nil {
+		return err
+	}
+	setGitHubAPIHeaders(req, token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("github ownership request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("github ownership request: status %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, githubAPIResponseLimit)).Decode(out); err != nil {
+		return fmt.Errorf("decode github ownership response: %w", err)
+	}
+	return nil
+}
+
+func assertUserAdministersInstallationRepositories(ctx context.Context, client *http.Client, userToken string, installationID int64) error {
+	userRepos, err := githubOwnershipRepositoryIDs(ctx, client,
+		fmt.Sprintf("/user/installations/%d/repositories", installationID), userToken, true)
+	if err != nil {
+		return err
+	}
+	token, err := createGitHubInstallationReadToken(ctx, client, installationID)
+	if err != nil {
+		return err
+	}
+	defer revokeGitHubInstallationToken(client, token.Token)
+	appRepos, err := githubOwnershipRepositoryIDs(ctx, client, "/installation/repositories", token.Token, false)
+	if err != nil {
+		return err
+	}
+	if len(userRepos) != len(appRepos) {
+		return errGitHubInstallationNotAuthorized
+	}
+	for id := range appRepos {
+		if _, ok := userRepos[id]; !ok {
+			return errGitHubInstallationNotAuthorized
+		}
+	}
+	return nil
+}
+
+// A complete, nonempty repository set is required. Reject partial pages,
+// missing permissions/counts, and changing pagination rather than proving
+// control over only the subset a collaborator can see.
+func githubOwnershipRepositoryIDs(ctx context.Context, client *http.Client, path, token string, requireAdmin bool) (map[int64]struct{}, error) {
+	ids := make(map[int64]struct{})
+	total := int64(-1)
+	for page := 1; page <= githubUserInstallationsMaxPages; page++ {
+		var body struct {
+			TotalCount   *int64 `json:"total_count"`
+			Repositories []struct {
+				ID          int64 `json:"id"`
+				Permissions struct {
+					Admin bool `json:"admin"`
+				} `json:"permissions"`
+			} `json:"repositories"`
+		}
+		endpoint := fmt.Sprintf("%s?per_page=%d&page=%d", path, githubUserInstallationsPageSize, page)
+		if err := getGitHubOwnershipJSON(ctx, client, endpoint, token, &body); err != nil {
+			return nil, err
+		}
+		if body.TotalCount == nil || *body.TotalCount <= 0 || (total >= 0 && total != *body.TotalCount) {
+			return nil, errGitHubInstallationNotAuthorized
+		}
+		total = *body.TotalCount
+		for _, repo := range body.Repositories {
+			if repo.ID <= 0 || (requireAdmin && !repo.Permissions.Admin) {
+				return nil, errGitHubInstallationNotAuthorized
+			}
+			if _, duplicate := ids[repo.ID]; duplicate {
+				return nil, errGitHubInstallationNotAuthorized
+			}
+			ids[repo.ID] = struct{}{}
+		}
+		if int64(len(ids)) == total {
+			return ids, nil
+		}
+		if int64(len(ids)) > total || len(body.Repositories) == 0 {
+			return nil, errGitHubInstallationNotAuthorized
+		}
+	}
+	return nil, errGitHubInstallationNotAuthorized
 }
 
 // revokeGitHubUserToken drops the short-lived user token as soon as the

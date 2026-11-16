@@ -369,11 +369,12 @@ func githubAppSlug() string { return strings.TrimSpace(os.Getenv("GITHUB_APP_SLU
 // configure one value.
 func githubWebhookSecret() string { return strings.TrimSpace(os.Getenv("GITHUB_WEBHOOK_SECRET")) }
 
-// Connect requires user OAuth credentials to prove installation access.
+// Connect requires user OAuth and App credentials to prove installation control.
 // Webhook ingestion and existing installations do not depend on this flag.
 func isGitHubConfigured() bool {
 	return githubAppSlug() != "" && githubWebhookSecret() != "" &&
-		githubAppClientID() != "" && githubAppClientSecret() != ""
+		githubAppClientID() != "" && githubAppClientSecret() != "" &&
+		isGitHubRepositoryBrowseConfigured()
 }
 
 // isGitHubRepositoryBrowseConfigured is deliberately separate from the
@@ -831,20 +832,21 @@ func parseGitHubPageParam(
 	return value, true
 }
 
-func fetchGitHubInstallationRepositories(
-	ctx context.Context,
-	installationID int64,
-	page, perPage int,
-) (GitHubRepositoriesResponse, error) {
+type githubInstallationReadToken struct {
+	Token               string `json:"token"`
+	RepositorySelection string `json:"repository_selection"`
+}
+
+// Restrict proof and repository browsing tokens to metadata access.
+func createGitHubInstallationReadToken(ctx context.Context, client *http.Client, installationID int64) (githubInstallationReadToken, error) {
 	appJWT, err := signGitHubAppJWT(time.Now())
 	if err != nil {
-		return GitHubRepositoriesResponse{}, err
+		return githubInstallationReadToken{}, err
 	}
 	if appJWT == "" {
-		return GitHubRepositoriesResponse{}, errors.New("github App JWT credentials unavailable")
+		return githubInstallationReadToken{}, errors.New("github App JWT credentials unavailable")
 	}
 
-	client := &http.Client{Timeout: 15 * time.Second}
 	tokenEndpoint := fmt.Sprintf(
 		"%s/app/installations/%d/access_tokens",
 		strings.TrimRight(githubAPIBase, "/"),
@@ -857,28 +859,39 @@ func fetchGitHubInstallationRepositories(
 		strings.NewReader(`{"permissions":{"metadata":"read"}}`),
 	)
 	if err != nil {
-		return GitHubRepositoriesResponse{}, err
+		return githubInstallationReadToken{}, err
 	}
 	setGitHubAPIHeaders(tokenReq, appJWT)
 	tokenReq.Header.Set("Content-Type", "application/json")
 	tokenResp, err := client.Do(tokenReq)
 	if err != nil {
-		return GitHubRepositoriesResponse{}, fmt.Errorf("create installation token: %w", err)
+		return githubInstallationReadToken{}, fmt.Errorf("create installation token: %w", err)
 	}
 	defer tokenResp.Body.Close()
 	if tokenResp.StatusCode != http.StatusCreated {
 		_, _ = io.Copy(io.Discard, io.LimitReader(tokenResp.Body, githubAPIResponseLimit))
-		return GitHubRepositoriesResponse{}, fmt.Errorf("create installation token: github status %d", tokenResp.StatusCode)
+		return githubInstallationReadToken{}, fmt.Errorf("create installation token: github status %d", tokenResp.StatusCode)
 	}
-	var tokenBody struct {
-		Token               string `json:"token"`
-		RepositorySelection string `json:"repository_selection"`
-	}
+	var tokenBody githubInstallationReadToken
 	if err := json.NewDecoder(io.LimitReader(tokenResp.Body, githubAPIResponseLimit)).Decode(&tokenBody); err != nil {
-		return GitHubRepositoriesResponse{}, fmt.Errorf("decode installation token: %w", err)
+		return githubInstallationReadToken{}, fmt.Errorf("decode installation token: %w", err)
 	}
 	if tokenBody.Token == "" {
-		return GitHubRepositoriesResponse{}, errors.New("github returned an empty installation token")
+		return githubInstallationReadToken{}, errors.New("github returned an empty installation token")
+	}
+
+	return tokenBody, nil
+}
+
+func fetchGitHubInstallationRepositories(
+	ctx context.Context,
+	installationID int64,
+	page, perPage int,
+) (GitHubRepositoriesResponse, error) {
+	client := &http.Client{Timeout: 15 * time.Second}
+	tokenBody, err := createGitHubInstallationReadToken(ctx, client, installationID)
+	if err != nil {
+		return GitHubRepositoriesResponse{}, err
 	}
 	defer revokeGitHubInstallationToken(client, tokenBody.Token)
 

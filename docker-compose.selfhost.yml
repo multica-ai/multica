@@ -122,6 +122,7 @@ services:
       # Required for new connections: verify the installing user's access.
       GITHUB_APP_CLIENT_ID: ${GITHUB_APP_CLIENT_ID:-}
       GITHUB_APP_CLIENT_SECRET: ${GITHUB_APP_CLIENT_SECRET:-}
+      # Required for new connections to prove organization repository control.
       # App API credentials. The pull_request webhook is what mirrors a PR
       # onto a card; these are what let the server authenticate as the App
       # and pull the CI / mergeability snapshot that enriches it, plus

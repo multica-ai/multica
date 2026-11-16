@@ -17,6 +17,8 @@ Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab insta
 
 A workspace owner or admin can complete the connection:
 
+A new connection also requires GitHub installation control: a personal installation must belong to the authorizing GitHub user; an organization installation requires admin permission on every repository it covers. Read-only or partial access is insufficient. Select at least one repository for an organization installation before connecting.
+
 <Steps>
 <Step>
 Open **Settings → Code**.
@@ -180,16 +182,16 @@ GITHUB_APP_CLIENT_SECRET=<Client secret>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-All four GitHub variables above are required for new connections. Missing any of them disables Connect; webhook acceptance requires only `GITHUB_WEBHOOK_SECRET`. Existing bindings continue working. Set the first Callback URL to this endpoint and enable installation OAuth before deploying. GitHub does not use a separate Setup URL when installation OAuth is enabled.
+All six GitHub variables in this section are required for new connections, including `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`. Missing any of them disables Connect; webhook acceptance requires only `GITHUB_WEBHOOK_SECRET`. Existing bindings continue working. Set the first Callback URL to this endpoint and enable installation OAuth before deploying. GitHub does not use a separate Setup URL when installation OAuth is enabled.
 
-For the PR card to show CI status and mergeability, also set the next two variables. Multica uses them to authenticate as the App and pull snapshots:
+For new connections, PR-card CI status and mergeability, also set the next two variables. Multica uses a metadata-only installation token to compare the complete installation repository list with the repositories the connecting user administers:
 
 ```dotenv
 GITHUB_APP_ID=<the GitHub App's numeric ID>
 GITHUB_APP_PRIVATE_KEY=<full PEM private key, keeping the BEGIN/END lines and newlines>
 ```
 
-Generate the private key under the GitHub App's **Private keys → Generate a private key**. Without these two variables, PRs still mirror and issues still auto-link and change status on merge; the PR card just shows no CI or merge state.
+Generate the private key under the GitHub App's **Private keys → Generate a private key**. Without these two variables, Connect is disabled. Existing bindings still mirror PRs and update issues from webhooks, but PR cards lack CI and mergeability status.
 
 </Step>
 <Step>
@@ -209,7 +211,7 @@ Restart the API server, then complete the connection in **Settings → Code**.
 
 ## Troubleshooting
 
-- **Connect button disabled**: check all four GitHub variables above, the first Callback URL, and **Request user authorization (OAuth) during installation**.
+- **Connect button disabled**: check all six GitHub variables above, the first Callback URL, and **Request user authorization (OAuth) during installation**.
 - **Webhook returns 401**: confirm the GitHub App and the API use the same webhook secret, then redeliver from GitHub's **Recent Deliveries**.
 - **PR not linked**: check that the repository is in the App's authorized scope, auto-linking is on, the identifier belongs to the current workspace, and nobody removed the PR from the issue.
 - **Identifier in the body but not linked**: put it right after a closing keyword (`Closes MUL-123`), or in the branch name or PR title, or link the PR by hand.
