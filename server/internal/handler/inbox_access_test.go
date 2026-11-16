@@ -31,6 +31,33 @@ func inboxTaskCredential(t *testing.T, taskID, agentID, workspaceID, userID stri
 	return token
 }
 
+// Every Inbox read that returns the owner's notifications is gated by
+// requireInboxOwnerAccess; the access matrix runs against each of them.
+type inboxOwnerRead struct {
+	name, path, query string
+	handler           func(*Handler, http.ResponseWriter, *http.Request)
+}
+
+var inboxOwnerReads = []inboxOwnerRead{
+	{"active", "/api/inbox", "ListInboxItems", (*Handler).ListInbox},
+	{"archived", "/api/inbox/archived", "ListArchivedInboxItems", (*Handler).ListArchivedInbox},
+	{"archived page", "/api/inbox/archived/page", "ListArchivedInboxPage", (*Handler).ListArchivedInboxPage},
+	{"archived facets", "/api/inbox/archived/facets", "ArchivedInboxFacets", (*Handler).GetArchivedInboxFacets},
+}
+
+func (e inboxOwnerRead) serve(h *Handler, cloud *auth.CloudPATVerifier) http.HandlerFunc {
+	return middleware.Auth(testHandler.Queries, nil, cloud, nil)(
+		middleware.RequireWorkspaceMember(testHandler.Queries)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			e.handler(h, w, r)
+		})),
+	).ServeHTTP
+}
+
+func (e inboxOwnerRead) request(token, workspaceID string) *http.Request {
+	return testutil.WithHeaders(testutil.JSONRequest(http.MethodGet, e.path, nil),
+		"Authorization", "Bearer "+token, "X-Workspace-ID", workspaceID)
+}
+
 type inboxAccessFailureDB struct {
 	db.DBTX
 	query                string
@@ -47,8 +74,10 @@ func (d *inboxAccessFailureDB) QueryRow(ctx context.Context, sql string, args ..
 }
 
 func (d *inboxAccessFailureDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	if strings.HasPrefix(sql, "-- name: ListInboxItems :many\n") {
-		d.inboxReads++
+	for _, e := range inboxOwnerReads {
+		if strings.HasPrefix(sql, "-- name: "+e.query+" :many\n") {
+			d.inboxReads++
+		}
 	}
 	return d.DBTX.Query(ctx, sql, args...)
 }
@@ -62,45 +91,42 @@ func TestListInboxAccessLookupErrors(t *testing.T) {
 	})
 	token := inboxTaskCredential(t, taskID, agentID, testWorkspaceID, testUserID)
 	const privateDetails = "private-inbox-database-host-and-query"
-	for _, query := range []string{"GetAgentTask", "GetAgentRuntimeForWorkspace"} {
-		for _, tc := range []struct {
-			name   string
-			err    error
-			status int
-		}{
-			{"missing", pgx.ErrNoRows, http.StatusForbidden},
-			{"wrapped missing", fmt.Errorf("%s: %w", privateDetails, pgx.ErrNoRows), http.StatusForbidden},
-			{"deadline", fmt.Errorf("%s: %w", privateDetails, context.DeadlineExceeded), http.StatusInternalServerError},
-			{"statement timeout", &pgconn.PgError{Code: "57014", Message: privateDetails}, http.StatusInternalServerError},
-			{"connection failure", errors.New(privateDetails), http.StatusInternalServerError},
-		} {
-			t.Run(query+"/"+tc.name, func(t *testing.T) {
-				faults := &inboxAccessFailureDB{DBTX: testPool, query: query, err: tc.err}
-				h := *testHandler
-				h.Queries = db.New(faults)
-				handler := middleware.Auth(testHandler.Queries, nil, nil, nil)(
-					middleware.RequireWorkspaceMember(testHandler.Queries)(http.HandlerFunc(h.ListInbox)),
-				).ServeHTTP
-				body := testutil.Call(t, handler, inboxCredentialRequest(token, testWorkspaceID)).Want(tc.status).Map()
-				if faults.failures != 1 || faults.inboxReads != 0 {
-					t.Fatalf("lookup failures=%d inbox reads=%d; want one failure and no Inbox read", faults.failures, faults.inboxReads)
-				}
-				publicError, ok := body["error"].(string)
-				if len(body) != 1 || !ok || publicError == "" || strings.Contains(fmt.Sprint(body), privateDetails) {
-					t.Fatalf("response must contain only a protected public error: %v", body)
-				}
-				if tc.status == http.StatusInternalServerError && body["error"] != "failed to resolve inbox access" {
-					t.Fatalf("service failure reported as an authorization error: %v", body)
-				}
-			})
+	for _, e := range inboxOwnerReads {
+		for _, query := range []string{"GetAgentTask", "GetAgentRuntimeForWorkspace"} {
+			for _, tc := range []struct {
+				name   string
+				err    error
+				status int
+			}{
+				{"missing", pgx.ErrNoRows, http.StatusForbidden},
+				{"wrapped missing", fmt.Errorf("%s: %w", privateDetails, pgx.ErrNoRows), http.StatusForbidden},
+				{"deadline", fmt.Errorf("%s: %w", privateDetails, context.DeadlineExceeded), http.StatusInternalServerError},
+				{"statement timeout", &pgconn.PgError{Code: "57014", Message: privateDetails}, http.StatusInternalServerError},
+				{"connection failure", errors.New(privateDetails), http.StatusInternalServerError},
+			} {
+				t.Run(e.name+"/"+query+"/"+tc.name, func(t *testing.T) {
+					faults := &inboxAccessFailureDB{DBTX: testPool, query: query, err: tc.err}
+					h := *testHandler
+					h.Queries = db.New(faults)
+					body := testutil.Call(t, e.serve(&h, nil), e.request(token, testWorkspaceID)).Want(tc.status).Map()
+					if faults.failures != 1 || faults.inboxReads != 0 {
+						t.Fatalf("lookup failures=%d inbox reads=%d; want one failure and no Inbox read", faults.failures, faults.inboxReads)
+					}
+					publicError, ok := body["error"].(string)
+					if len(body) != 1 || !ok || publicError == "" || strings.Contains(fmt.Sprint(body), privateDetails) {
+						t.Fatalf("response must contain only a protected public error: %v", body)
+					}
+					if tc.status == http.StatusInternalServerError && body["error"] != "failed to resolve inbox access" {
+						t.Fatalf("service failure reported as an authorization error: %v", body)
+					}
+				})
+			}
 		}
 	}
 }
 
 func inboxAccessHandler(cloud *auth.CloudPATVerifier) http.HandlerFunc {
-	return middleware.Auth(testHandler.Queries, nil, cloud, nil)(
-		middleware.RequireWorkspaceMember(testHandler.Queries)(http.HandlerFunc(testHandler.ListInbox)),
-	).ServeHTTP
+	return inboxOwnerReads[0].serve(testHandler, cloud)
 }
 
 func inboxCredentialRequest(token, workspaceID string) *http.Request {
@@ -152,7 +178,11 @@ func TestListInboxTaskCredentialAccess(t *testing.T) {
 				agentID = dbfx.Agent(t, "Token agent", runtimeID)
 			}
 			token := inboxTaskCredential(t, taskID, agentID, testWorkspaceID, testUserID)
-			testutil.Call(t, inboxAccessHandler(nil), inboxCredentialRequest(token, testWorkspaceID)).Want(tc.want)
+			for _, e := range inboxOwnerReads {
+				t.Run(e.name, func(t *testing.T) {
+					testutil.Call(t, e.serve(testHandler, nil), e.request(token, testWorkspaceID)).Want(tc.want)
+				})
+			}
 		})
 	}
 }
@@ -164,16 +194,19 @@ func TestListInboxRejectsForgedTaskIdentityAndWorkspace(t *testing.T) {
 	allowedTask := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "running", "originator_user_id": testUserID, "accountable_user_id": testUserID})
 	deniedTask := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "running", "originator_user_id": other, "accountable_user_id": other})
 	token := inboxTaskCredential(t, deniedTask, agentID, testWorkspaceID, testUserID)
-	req := inboxCredentialRequest(token, testWorkspaceID)
-	req = testutil.WithHeaders(req, "X-Task-ID", allowedTask, "X-Agent-ID", agentID,
-		"X-Actor-Source", "member", "X-User-ID", other, "X-Originator-User-ID", testUserID)
-	req.URL.RawQuery = "originator_user_id=" + testUserID + "&recipient_id=" + other
-	testutil.Call(t, inboxAccessHandler(nil), req).Want(http.StatusForbidden)
-
 	foreignWorkspace := dbfx.Workspace(t, "Foreign inbox", "inbox-forged-ws-"+uuid.NewString())
 	dbfx.Member(t, foreignWorkspace, testUserID, "owner")
 	allowedToken := inboxTaskCredential(t, allowedTask, agentID, testWorkspaceID, testUserID)
-	testutil.Call(t, inboxAccessHandler(nil), inboxCredentialRequest(allowedToken, foreignWorkspace)).Want(http.StatusForbidden)
+	for _, e := range inboxOwnerReads {
+		t.Run(e.name, func(t *testing.T) {
+			req := testutil.WithHeaders(e.request(token, testWorkspaceID), "X-Task-ID", allowedTask, "X-Agent-ID", agentID,
+				"X-Actor-Source", "member", "X-User-ID", other, "X-Originator-User-ID", testUserID)
+			req.URL.RawQuery = "originator_user_id=" + testUserID + "&recipient_id=" + other
+			testutil.Call(t, e.serve(testHandler, nil), req).Want(http.StatusForbidden)
+
+			testutil.Call(t, e.serve(testHandler, nil), e.request(allowedToken, foreignWorkspace)).Want(http.StatusForbidden)
+		})
+	}
 }
 
 func TestListInboxCloudPATCannotBorrowTaskIdentity(t *testing.T) {
@@ -185,9 +218,13 @@ func TestListInboxCloudPATCannotBorrowTaskIdentity(t *testing.T) {
 	runtimeID := dbfx.Runtime(t, "Cloud inbox runtime")
 	agentID := dbfx.Agent(t, "Cloud inbox agent", runtimeID)
 	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "running", "originator_user_id": testUserID, "accountable_user_id": testUserID})
-	req := testutil.WithHeaders(inboxCredentialRequest("mcn_inbox-test", testWorkspaceID),
-		"X-Actor-Source", "task_token", "X-Task-ID", taskID, "X-Agent-ID", agentID)
-	testutil.Call(t, inboxAccessHandler(verifier), req).Want(http.StatusForbidden)
+	for _, e := range inboxOwnerReads {
+		t.Run(e.name, func(t *testing.T) {
+			req := testutil.WithHeaders(e.request("mcn_inbox-test", testWorkspaceID),
+				"X-Actor-Source", "task_token", "X-Task-ID", taskID, "X-Agent-ID", agentID)
+			testutil.Call(t, e.serve(testHandler, verifier), req).Want(http.StatusForbidden)
+		})
+	}
 }
 
 func TestListInboxHumanCredentialsAndReadOnlyIsolation(t *testing.T) {
@@ -298,4 +335,57 @@ func TestListInboxDelegatedOriginatorAndProjectVisibility(t *testing.T) {
 			counterBefore, counterAfter, counterBefore+2)
 	}
 	t.Logf("delegation issue counter: %d -> %d", counterBefore, counterAfter)
+}
+
+func TestArchivedInboxOwnerReadIsolation(t *testing.T) {
+	other := createPlainMember(t, "inbox-archived-recipient-"+uuid.NewString()+"@example.test")
+	foreignWorkspace := dbfx.Workspace(t, "Foreign archived inbox", "inbox-archived-"+uuid.NewString())
+	dbfx.Member(t, foreignWorkspace, testUserID, "owner")
+	newArchived := func(workspaceID, recipientID string) string {
+		return dbfx.Insert(t, "inbox_item", testutil.Cols{"workspace_id": workspaceID, "archived": true,
+			"recipient_type": "member", "recipient_id": recipientID, "type": "system", "severity": "info", "title": "Private archived notice"})
+	}
+	own := newArchived(testWorkspaceID, testUserID)
+	otherItem := newArchived(testWorkspaceID, other)
+	foreign := newArchived(foreignWorkspace, testUserID)
+	pat := "mul_" + uuid.NewString()
+	dbfx.Insert(t, "personal_access_token", testutil.Cols{"user_id": testUserID, "name": "Archived inbox test", "token_hash": auth.HashToken(pat), "token_prefix": pat[:12]})
+	runtimeID := dbfx.Runtime(t, "Own archived inbox runtime")
+	agentID := dbfx.Agent(t, "Own archived inbox agent", runtimeID)
+	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "running", "originator_user_id": testUserID, "accountable_user_id": testUserID})
+	taskToken := inboxTaskCredential(t, taskID, agentID, testWorkspaceID, testUserID)
+	reads := map[string]func(*testing.T, *http.Request) []InboxItemResponse{
+		"archived": func(t *testing.T, req *http.Request) []InboxItemResponse {
+			var items []InboxItemResponse
+			testutil.Call(t, inboxOwnerReads[1].serve(testHandler, nil), req).Want(http.StatusOK).JSON(&items)
+			return items
+		},
+		"archived page": func(t *testing.T, req *http.Request) []InboxItemResponse {
+			var page archivedInboxPageResponse
+			testutil.Call(t, inboxOwnerReads[2].serve(testHandler, nil), req).Want(http.StatusOK).JSON(&page)
+			return page.Items
+		},
+	}
+	paths := map[string]string{"archived": inboxOwnerReads[1].path, "archived page": inboxOwnerReads[2].path}
+	for _, cred := range []struct{ name, token string }{{"personal PAT", pat}, {"self-triggered task", taskToken}} {
+		for name, read := range reads {
+			t.Run(cred.name+"/"+name, func(t *testing.T) {
+				req := testutil.WithHeaders(testutil.JSONRequest(http.MethodGet, paths[name]+"?recipient_id="+other, nil),
+					"Authorization", "Bearer "+cred.token, "X-Workspace-ID", testWorkspaceID, "X-User-ID", other)
+				found := false
+				for _, item := range read(t, req) {
+					if item.ID == otherItem || item.ID == foreign {
+						t.Fatalf("another recipient or workspace leaked: %s", item.ID)
+					}
+					found = found || item.ID == own
+				}
+				if !found {
+					t.Fatal("own archived notification missing")
+				}
+				if state := loadInboxItemState(t, own); state != (inboxItemState{archived: true}) {
+					t.Fatalf("GET mutated state: %+v", state)
+				}
+			})
+		}
+	}
 }
