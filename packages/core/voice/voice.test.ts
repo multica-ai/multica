@@ -5,6 +5,7 @@ import {
   applyVocabulary,
   dictationSeparator,
   pickClipVoiceModel,
+  pickVoiceModel,
   removeSpokenFillers,
   sanitizeVoiceSettings,
 } from ".";
@@ -127,5 +128,32 @@ describe("pickClipVoiceModel", () => {
 
   it("has nothing when only a streaming model is installed", () => {
     expect(pickClipVoiceModel({ engineAvailable: true, models: [server] }, null)).toBeNull();
+  });
+});
+
+describe("pickVoiceModel", () => {
+  const base = {
+    author: "",
+    licenseUrl: "",
+    languages: ["en"],
+    languageHint: false,
+    sizeBytes: 0,
+    status: "ready" as const,
+    receivedBytes: 0,
+  };
+  const server = { ...base, id: "server", name: "Server", streams: true };
+  const whisper = { ...base, id: "whisper", name: "Whisper" };
+  const models = { engineAvailable: true, models: [server, whisper] };
+
+  it("defaults to the first installed model", () => {
+    expect(pickVoiceModel(models, null)).toBe(server);
+  });
+
+  it("keeps a missing on-device choice on the device", () => {
+    expect(pickVoiceModel(models, "deleted-local")).toBe(whisper);
+  });
+
+  it("uses the streaming model only when nothing else is installed", () => {
+    expect(pickVoiceModel({ engineAvailable: true, models: [server] }, "deleted-local")).toBe(server);
   });
 });

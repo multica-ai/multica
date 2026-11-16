@@ -102,4 +102,3 @@ describe("VoiceInputTab", () => {
     expect(screen.queryByText(/run on this computer/)).not.toBeInTheDocument();
   });
 });
-

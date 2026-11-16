@@ -113,4 +113,3 @@ describe("desktopVoiceRuntime", () => {
       expect(onChange).toHaveBeenLastCalledWith({ engineAvailable: true, models: [SERVER_VOICE_MODEL] });
     }));
 });
-
