@@ -44,6 +44,25 @@ func seedLegacyCache(t *testing.T, repoURL string) (*Cache, string, string) {
 	return cache, legacyPath, filepath.Join(root, "workdir")
 }
 
+func assertWorktreeCache(t *testing.T, worktreePath, barePath string) string {
+	t.Helper()
+	admin := worktreeRegistration(t, worktreePath)
+	actual, err := os.Stat(filepath.Dir(admin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected, err := os.Stat(filepath.Join(barePath, "worktrees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Git may expand a Windows 8.3 temp path to its long spelling. Compare
+	// directory identity so aliases still require the exact expected cache.
+	if !os.SameFile(actual, expected) {
+		t.Fatalf("worktree registration %s does not belong to cache %s", admin, barePath)
+	}
+	return admin
+}
+
 func TestMigrationFailureKeepsUsableLegacyCache(t *testing.T) {
 	t.Parallel()
 	for _, onSync := range []bool{false, true} {
@@ -77,9 +96,7 @@ func TestMigrationFailureKeepsUsableLegacyCache(t *testing.T) {
 			if !attempted || cache.Lookup(migrationWorkspaceID, repoURL) != legacyPath {
 				t.Fatal("rename denial did not retain the legacy cache")
 			}
-			if admin := worktreeRegistration(t, result.Path); !samePath(filepath.Dir(admin), filepath.Join(legacyPath, "worktrees")) {
-				t.Fatalf("checkout did not use the legacy cache: %s", admin)
-			}
+			assertWorktreeCache(t, result.Path, legacyPath)
 			if got, want := gitHead(t, result.Path), gitRefCommit(t, legacyPath, getRemoteDefaultBranch(legacyPath)); got != want {
 				t.Fatalf("checkout has %s, want %s", got, want)
 			}
@@ -183,10 +200,7 @@ func TestMigrateUnusedLegacyCache(t *testing.T) {
 			if got := gitHead(t, result.Path); got != commit {
 				t.Fatalf("checkout has %s, want %s", got, commit)
 			}
-			admin := worktreeRegistration(t, result.Path)
-			if !samePath(filepath.Dir(admin), filepath.Join(shortPath, "worktrees")) {
-				t.Fatalf("checkout still points at the legacy cache: %s", admin)
-			}
+			admin := assertWorktreeCache(t, result.Path, shortPath)
 			if len(filepath.Join(admin, "index")) >= 260 {
 				t.Fatalf("migrated checkout exceeds MAX_PATH: %s", admin)
 			}
