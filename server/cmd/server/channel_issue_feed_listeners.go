@@ -51,7 +51,7 @@ func registerChannelIssueFeedListeners(bus *events.Bus, q issueFeedQueries, feed
 		if !ok {
 			return
 		}
-		wsID, issueID := parseUUID(created.WorkspaceID), parseUUID(created.ID)
+		wsID, issueID := feedUUID(created.WorkspaceID), feedUUID(created.ID)
 		feed.PublishIssueCreated(wsID, issueID, func(ctx context.Context) string {
 			issue, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: wsID})
 			if err != nil {
@@ -76,7 +76,11 @@ func registerChannelIssueFeedListeners(bus *events.Bus, q issueFeedQueries, feed
 		if !ok {
 			return
 		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
+		// HTTP updates carry handler.IssueResponse; background writers (an
+		// agent run moving the issue, PR automation) carry the IssueToMap
+		// map. Only the id and new status are read from the payload; the
+		// rest comes from the stored row.
+		id, status, ok := issueIDAndStatusFromPayload(payload["issue"])
 		if !ok {
 			return
 		}
@@ -86,24 +90,28 @@ func registerChannelIssueFeedListeners(bus *events.Bus, q issueFeedQueries, feed
 			return
 		}
 		prevStatus, _ := payload["prev_status"].(string)
-		feed.PublishIssueUpdate(parseUUID(issue.WorkspaceID), parseUUID(issue.ID), func(ctx context.Context) string {
-			wsID := parseUUID(issue.WorkspaceID)
+		wsID, issueID := feedUUID(e.WorkspaceID), feedUUID(id)
+		feed.PublishIssueUpdate(wsID, issueID, func(ctx context.Context) string {
+			issue, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: wsID})
+			if err != nil {
+				return ""
+			}
 			var lines []string
 			if statusChanged {
-				lines = append(lines, "Status: "+feedStatusName(ctx, q, wsID, prevStatus)+" → "+feedStatusName(ctx, q, wsID, issue.Status))
+				lines = append(lines, "Status: "+feedStatusName(ctx, q, wsID, prevStatus)+" → "+feedStatusName(ctx, q, wsID, status))
 			}
 			if assigneeChanged {
 				assignee := "Unassigned"
-				if issue.AssigneeType != nil && issue.AssigneeID != nil {
-					assignee = feedActorName(ctx, q, wsID, *issue.AssigneeType, *issue.AssigneeID)
+				if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
+					assignee = feedActorName(ctx, q, wsID, issue.AssigneeType.String, util.UUIDToString(issue.AssigneeID))
 				}
 				lines = append(lines, "Assignee: "+assignee)
 			}
-			header := "🔄 " + feedIssueLabel(issue.Identifier, issue.Title)
+			header := "🔄 " + feedIssueLabel(feedIssueIdentifier(ctx, q, wsID, issue.Number), issue.Title)
 			if actor := feedActorName(ctx, q, wsID, e.ActorType, e.ActorID); actor != "" {
 				header += " — updated by " + actor
 			}
-			return feedMessage(header, strings.Join(lines, "\n"), feedIssueLink(ctx, q, wsID, appURL, issue.ID))
+			return feedMessage(header, strings.Join(lines, "\n"), feedIssueLink(ctx, q, wsID, appURL, id))
 		})
 	})
 
@@ -130,9 +138,9 @@ func registerChannelIssueFeedListeners(bus *events.Bus, q issueFeedQueries, feed
 		if authorType == "system" || (commentType != "" && commentType != "comment") {
 			return
 		}
-		wsID := parseUUID(e.WorkspaceID)
-		feed.PublishIssueUpdate(wsID, parseUUID(issueID), func(ctx context.Context) string {
-			issue, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: parseUUID(issueID), WorkspaceID: wsID})
+		wsID := feedUUID(e.WorkspaceID)
+		feed.PublishIssueUpdate(wsID, feedUUID(issueID), func(ctx context.Context) string {
+			issue, err := q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: feedUUID(issueID), WorkspaceID: wsID})
 			if err != nil {
 				return ""
 			}
@@ -144,6 +152,16 @@ func registerChannelIssueFeedListeners(bus *events.Bus, q issueFeedQueries, feed
 			return feedMessage(header, feedCommentExcerpt(content), feedIssueLink(ctx, q, wsID, appURL, issueID))
 		})
 	})
+}
+
+// feedUUID parses an id read from an event. System actors carry an empty id,
+// so a malformed one yields an invalid UUID instead of panicking the listener.
+func feedUUID(s string) pgtype.UUID {
+	id, err := util.ParseUUID(s)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return id
 }
 
 func feedMessage(header, body, link string) string {
@@ -201,7 +219,7 @@ func feedStatusName(ctx context.Context, q issueFeedQueries, wsID pgtype.UUID, s
 }
 
 func feedActorName(ctx context.Context, q issueFeedQueries, wsID pgtype.UUID, actorType, actorID string) string {
-	id := parseUUID(actorID)
+	id := feedUUID(actorID)
 	if !id.Valid {
 		return ""
 	}

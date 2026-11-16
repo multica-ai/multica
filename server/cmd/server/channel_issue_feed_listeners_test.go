@@ -74,10 +74,12 @@ func TestChannelIssueFeed_RendersIssueAndCommentUpdates(t *testing.T) {
 	feed := &fakeIssueFeed{}
 	registerChannelIssueFeedListeners(bus, queries, feed, "https://app.example")
 
-	memberType, memberID := "member", testUserID
+	// The assignee line reads the stored row, not the payload.
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET assignee_type = 'member', assignee_id = $2 WHERE id = $1`, issueID, testUserID); err != nil {
+		t.Fatalf("assign issue: %v", err)
+	}
 	response := handler.IssueResponse{
-		ID: issueID, WorkspaceID: testWorkspaceID, Identifier: identifier, Title: issue.Title,
-		Status: "in_progress", AssigneeType: &memberType, AssigneeID: &memberID,
+		ID: issueID, WorkspaceID: testWorkspaceID, Identifier: identifier, Title: issue.Title, Status: "in_progress",
 	}
 	bus.Publish(events.Event{
 		Type: protocol.EventIssueCreated, WorkspaceID: testWorkspaceID, ActorType: "member", ActorID: testUserID,
@@ -86,7 +88,7 @@ func TestChannelIssueFeed_RendersIssueAndCommentUpdates(t *testing.T) {
 		}},
 	})
 	if got := feed.take(); len(got) != 1 || !got[0].created ||
-		got[0].text != "🆕 "+identifier+" "+issue.Title+" — created by "+user.Name+"\n"+link {
+		got[0].text != "🆕 "+identifier+" "+issue.Title+" — created by "+user.Name+"\nAssignee: "+user.Name+"\n"+link {
 		t.Fatalf("issue created = %+v", got)
 	}
 
@@ -101,6 +103,21 @@ func TestChannelIssueFeed_RendersIssueAndCommentUpdates(t *testing.T) {
 		"\nStatus: Todo → In progress\nAssignee: " + user.Name + "\n" + link
 	if len(got) != 1 || got[0].issueID != issueID || got[0].text != want {
 		t.Fatalf("issue update = %+v\nwant text %q", got, want)
+	}
+
+	// Background writers (an agent run finishing, PR automation) publish the
+	// IssueToMap shape with a system actor.
+	bus.Publish(events.Event{
+		Type: protocol.EventIssueUpdated, WorkspaceID: testWorkspaceID, ActorType: "system",
+		Payload: map[string]any{
+			"issue":          map[string]any{"id": issueID, "workspace_id": testWorkspaceID, "status": "in_review"},
+			"status_changed": true, "prev_status": "in_progress",
+		},
+	})
+	got = feed.take()
+	want = "🔄 " + identifier + " " + issue.Title + "\nStatus: In progress → In review\n" + link
+	if len(got) != 1 || got[0].issueID != issueID || got[0].text != want {
+		t.Fatalf("background issue update = %+v\nwant text %q", got, want)
 	}
 
 	bus.Publish(events.Event{
