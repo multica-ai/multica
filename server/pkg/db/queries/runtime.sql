@@ -627,6 +627,7 @@ WHERE status = 'offline'
     SELECT 1 FROM runtime_profile p
     WHERE p.id = agent_runtime.profile_id AND p.workspace_id = agent_runtime.workspace_id
       AND p.daemon_id IS NULL
+      AND p.created_by = agent_runtime.owner_id
   )
   AND NOT EXISTS (
     SELECT 1
@@ -658,6 +659,7 @@ SELECT EXISTS (
       SELECT 1 FROM runtime_profile p
       WHERE p.id = agent_runtime.profile_id AND p.workspace_id = agent_runtime.workspace_id
         AND p.daemon_id IS NULL
+        AND p.created_by = agent_runtime.owner_id
     )
     AND NOT EXISTS (
       SELECT 1

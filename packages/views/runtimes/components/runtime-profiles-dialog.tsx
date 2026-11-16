@@ -769,21 +769,23 @@ function ProfileDetailsForm({
   const idPrefix = `runtime-profile-${useId().replace(/:/g, "")}`;
   const createProfile = useCreateRuntimeProfile(wsId);
   const updateProfile = useUpdateRuntimeProfile(wsId);
-  const needsMachine = mode === "edit" && !profile?.daemon_id;
+  const canBindMachine = mode === "edit" && !profile?.daemon_id;
   const { data: runtimes = [] } = useQuery({
     ...runtimeListOptions(wsId),
-    enabled: needsMachine,
+    enabled: canBindMachine,
   });
   const machineOptions = useMemo(
-    () => buildRuntimeMachines(runtimes, { now: Date.now() }).flatMap((machine) =>
-      machine.mode === "local" && machine.daemonId
-        ? [{ value: machine.daemonId, label: machine.title }]
-        : [],
-    ),
-    [runtimes],
+    () => [
+      { value: "", label: t(($) => $.profiles.form.machine_placeholder) },
+      ...buildRuntimeMachines(runtimes, { now: Date.now() }).flatMap((machine) =>
+        machine.mode === "local" && machine.daemonId
+          ? [{ value: machine.daemonId, label: machine.title }]
+          : [],
+      ),
+    ],
+    [runtimes, t],
   );
   const [bindingMachine, setBindingMachine] = useState("");
-  const [machineRequired, setMachineRequired] = useState(false);
 
   const [values, setValues] = useState<ProfileFormValues>({
     displayName: profile?.display_name ?? "",
@@ -812,13 +814,12 @@ function ProfileDetailsForm({
     event.preventDefault();
     setFormError(null);
     setDuplicateName(false);
-    setMachineRequired(needsMachine && !bindingMachine);
     const validationErrors = validateProfileForm(values);
     if (!validationErrors.includes("commandLine") && !parsedCommand.ok) {
       validationErrors.push("commandLine");
     }
     setErrors(validationErrors);
-    if (validationErrors.length > 0 || (needsMachine && !bindingMachine)) return;
+    if (validationErrors.length > 0) return;
     if (!parsedCommand.ok) return;
 
     const description = values.description.trim();
@@ -841,7 +842,7 @@ function ProfileDetailsForm({
         const updated = await updateProfile.mutateAsync({
           profileId: profile.id,
           patch: {
-            ...(needsMachine ? { daemon_id: bindingMachine } : {}),
+            ...(canBindMachine && bindingMachine ? { daemon_id: bindingMachine } : {}),
             display_name: values.displayName.trim(),
             command_name: commandName,
             fixed_args: fixedArgs,
@@ -910,7 +911,7 @@ function ProfileDetailsForm({
           </h3>
         )}
 
-        {needsMachine && (
+        {canBindMachine && (
           <div className="space-y-1.5">
             <Label
               htmlFor={`${idPrefix}-machine`}
@@ -920,17 +921,15 @@ function ProfileDetailsForm({
             </Label>
             <Select
               items={machineOptions}
-              value={bindingMachine || null}
+              value={bindingMachine}
               onValueChange={(value) => {
                 setBindingMachine(value ?? "");
-                setMachineRequired(false);
               }}
               disabled={submitting}
             >
               <SelectTrigger
                 id={`${idPrefix}-machine`}
                 className="w-full"
-                aria-invalid={machineRequired}
                 aria-describedby={`${idPrefix}-machine-hint`}
               >
                 <SelectValue placeholder={t(($) => $.profiles.form.machine_placeholder)} />
@@ -946,11 +945,6 @@ function ProfileDetailsForm({
             <p id={`${idPrefix}-machine-hint`} className="text-caption text-muted-foreground">
               {t(($) => $.profiles.form.machine_hint)}
             </p>
-            {machineRequired && (
-              <p role="alert" className="text-caption text-destructive">
-                {t(($) => $.profiles.form.machine_required)}
-              </p>
-            )}
           </div>
         )}
 

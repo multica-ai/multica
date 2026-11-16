@@ -78,6 +78,20 @@ func TestRuntimeProfileBinding_BlocksActiveDependenciesAndRollsBack(t *testing.T
 			if n := dbfx.Count(t, `SELECT count(*) FROM agent_runtime WHERE profile_id=$1`, id); n != 2 {
 				t.Fatal("failed binding removed an instance")
 			}
+			// Editing settings without selecting a machine does not retire copies,
+			// even when binding would be blocked by work on another machine.
+			renamed := "Edited without binding " + uuid.NewString()
+			edit := withURLParams(newRequest("PATCH", "/", map[string]any{
+				"display_name": renamed, "command_name": "wrapper", "fixed_args": []string{"--model", "custom"},
+			}), "id", testWorkspaceID, "profileId", id)
+			var out RuntimeProfileResponse
+			testutil.Call(t, testHandler.UpdateRuntimeProfile, edit).Want(http.StatusOK).JSON(&out)
+			if out.DaemonID != nil || out.DisplayName != renamed || out.CommandName != "wrapper" {
+				t.Fatalf("settings-only edit=%+v", out)
+			}
+			if n := dbfx.Count(t, `SELECT count(*) FROM agent_runtime WHERE profile_id=$1`, id); n != 2 {
+				t.Fatal("settings-only edit removed an instance")
+			}
 		})
 	}
 }

@@ -91,7 +91,7 @@ When a runtime is offline:
 - Runs already queued wait for the runtime to recover; they do not move to another computer. A queued run fails only once the runtime has stopped heartbeating for longer than the reconnect grace **and** the run has itself been queued that long. A runtime that is merely busy keeps its backlog, and work assigned to an already-offline runtime still gets a full grace period to wait.
 - Runs already in progress do not fail right away. They fail with `runtime_offline` only after the runtime's heartbeat has been missing longer than the reconnect grace (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 hours by default); eligible issue or chat runs can retry automatically.
 - When the daemon starts again, it re-registers its runtimes and reclaims runs that did not end cleanly last time.
-- A runtime offline for more than 7 days with no agents bound to it (including archived ones) is cleaned up automatically. Legacy custom profiles without a machine binding keep their existing instances until an administrator selects the machine.
+- A runtime offline for more than 7 days with no active user agents or unfinished tasks is cleaned up automatically; archived agents and task history are preserved. For unbound legacy custom profiles, only instances on machines owned by the profile creator are kept until an administrator selects the machine.
 
 In the demo below, a run assigned while the computer is offline waits in the queue and is claimed only after the computer comes back online.
 
@@ -236,7 +236,7 @@ Only workspace owners and admins can create, edit, or delete custom runtime prof
 
 A new profile belongs only to the computer selected when you create it. Only that computer’s daemon downloads and registers it; other computers are unaffected, even if they have the same command installed. If the command cannot be resolved, its error appears only on the selected computer. Creating a profile does not install the command or sign in to the tool.
 
-For older profiles, open **Edit custom runtime**, select **Machine**, and save. Saving removes unused copies on other machines; active agents or unfinished tasks there block the change. Archived agents and task history are preserved. Until a profile is bound, its existing machine records are kept even after seven days offline so the daemon can reconnect.
+For older profiles, **Machine** in **Edit custom runtime** is optional: leave **Keep current machines** selected to change only the name, command, or other settings. Selecting a machine removes unused copies on other machines; active agents or unfinished tasks there block the binding. Archived agents and task history are preserved. Until the profile is bound, instances on machines owned by its creator are kept so the daemon can reconnect. Other members’ unused copies follow the normal seven-day offline cleanup.
 
 The command field takes an executable and arguments, not a shell script. Plain arguments, quotes, and backslash escapes work; pipes, redirects, `&&`, `;`, backticks, and environment variable expansion do not. When you need those behaviors, put them in a wrapper script and use that script as the command.
 

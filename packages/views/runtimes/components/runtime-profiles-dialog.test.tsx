@@ -2,6 +2,7 @@
 
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { ApiError } from "@multica/core/api";
 import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
@@ -126,6 +127,7 @@ describe("RuntimeProfilesDialog", () => {
   });
 
   it.each([false, true])("binds an existing profile and surfaces usage conflicts (%s)", async (conflict) => {
+    const user = userEvent.setup();
     queryState.runtimes = [{
       id: "rt-1", workspace_id: "ws-1", daemon_id: "keep-machine",
       name: "Codex (Studio Mac)", runtime_mode: "local", provider: "codex",
@@ -137,12 +139,9 @@ describe("RuntimeProfilesDialog", () => {
       "Finish pending tasks on the other machine first.", 409, "Conflict", { code: "runtime_profile_machine_conflict" },
     ));
     const { onClose } = renderDialog({ intent: "edit", initialProfile: profile({ daemon_id: null }) });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Select a machine before saving.");
-    expect(mutationState.updateProfile).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByLabelText("Machine"));
-    fireEvent.click(await screen.findByRole("option", { name: "Studio Mac" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.click(screen.getByLabelText("Machine (optional)"));
+    await user.click(await screen.findByRole("option", { name: "Studio Mac" }));
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(mutationState.updateProfile).toHaveBeenCalledWith({
       profileId: "prof-1", patch: expect.objectContaining({ daemon_id: "keep-machine" }),
     }));
@@ -151,6 +150,34 @@ describe("RuntimeProfilesDialog", () => {
       expect(screen.queryByText("A runtime with this display name already exists.")).not.toBeInTheDocument();
       expect(onClose).not.toHaveBeenCalled();
     } else await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
+  it.each([false, true])("edits a legacy profile without binding a machine (reset selection: %s)", async (resetSelection) => {
+    const user = userEvent.setup();
+    queryState.runtimes = [{
+      id: "rt-1", workspace_id: "ws-1", daemon_id: "keep-machine",
+      name: "Codex (Studio Mac)", runtime_mode: "local", provider: "codex",
+      status: "online", owner_id: "user-1", visibility: "private", metadata: {},
+      launch_header: "codex", device_info: "Studio Mac", profile_id: null,
+      last_seen_at: new Date().toISOString(), created_at: "", updated_at: "",
+    }];
+    const { onClose } = renderDialog({ intent: "edit", initialProfile: profile({ daemon_id: null }) });
+    if (resetSelection) {
+      await user.click(screen.getByLabelText("Machine (optional)"));
+      await user.click(await screen.findByRole("option", { name: "Studio Mac" }));
+      await user.click(screen.getByLabelText("Machine (optional)"));
+      await user.click(await screen.findByRole("option", { name: "Keep current machines" }));
+    }
+    fireEvent.change(screen.getByLabelText("Display name"), { target: { value: "Renamed legacy runtime" } });
+    fireEvent.change(screen.getByLabelText("Command"), { target: { value: "wrapper --model custom" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(mutationState.updateProfile).toHaveBeenCalledWith({
+      profileId: "prof-1", patch: {
+        display_name: "Renamed legacy runtime", command_name: "wrapper",
+        fixed_args: ["--model", "custom"], description: null,
+      },
+    }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
   });
 
   it("shows the custom empty state and keeps built-in protocols collapsed", () => {
@@ -308,7 +335,7 @@ describe("RuntimeProfilesDialog", () => {
     expect(
       screen.getByRole("heading", { name: "New custom runtime" }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/from Studio Mac/)).toBeInTheDocument();
+    expect(screen.getByText("Only Studio Mac will register this custom command.")).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: "View setup guide" }),
     ).toHaveAttribute(
