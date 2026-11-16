@@ -335,6 +335,36 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 - Le `--context` d'un espace de travail est fourni à tous ses agents. `--slug` ne peut plus être modifié après la création. `--issue-prefix` est mis en majuscules ; le changer renumérote toutes les tâches existantes, et les anciens identifiants cités ailleurs ne mènent plus nulle part.
 - `--issue-title-template` ne remplace que `{{date}}` (UTC, `YYYY-MM-DD`) et refuse tout autre `{{...}}`. Le `--timezone` d'un déclencheur planifié vaut UTC par défaut.
 
+### Filtres d'événements webhook [#webhook-event-filters]
+
+Utilisez `--event-filters-file` avec `autopilot trigger-add` ou `trigger-update` pour configurer les filtres d'événements et d'actions d'un déclencheur webhook. Enregistrez un tableau JSON non vide dans `filters.json` :
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+Cet exemple accepte les soumissions de revues de PR et tous les événements push. Omettre `actions` ou fournir un tableau d'actions vide accepte toutes les actions de cet événement.
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-list <autopilot-id> --full-id
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+Lors d'une mise à jour, le fichier remplace toute la liste des filtres. Omettre les deux options de filtrage conserve les filtres enregistrés, même lors d'un changement de libellé ou de l'activation/désactivation du déclencheur. `autopilot get` renvoie les filtres dans le tableau `triggers` au niveau racine.
+
+Pour supprimer tous les filtres et accepter tous les événements, utilisez l'option réservée à la mise à jour :
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` et `--event-filters-file` ne peuvent pas être combinés. Un fichier dont la valeur racine est `null` ou un tableau vide, ou qui contient des champs inconnus, un JSON invalide ou des noms d'événement/d'action vides ou composés uniquement d'espaces, est refusé. Ces options ne s'appliquent qu'aux déclencheurs webhook ; en créer un sans fichier de filtres accepte tous les événements. Voir [Automatisations](/autopilots#filtres-dévénements) pour la correspondance des événements entrants.
+
 ## Vue d'ensemble des commandes
 
 | Commande | Rôle |

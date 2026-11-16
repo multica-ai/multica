@@ -332,6 +332,36 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 - 工作區的 `--context` 會提供給工作區裡的每個 AI 代理。`--slug` 建立後不能修改；`--issue-prefix` 會轉成大寫，修改它會給所有現有任務重新編號，外部引用裡的舊編號隨之失效。
 - `--issue-title-template` 只替換 `{{date}}`（UTC，`YYYY-MM-DD`），其他 `{{...}}` 會被拒絕。定時觸發器的 `--timezone` 預設 UTC。
 
+### Webhook 事件過濾 [#webhook-event-filters]
+
+`autopilot trigger-add` 和 `trigger-update` 可以透過 `--event-filters-file` 配置 Webhook 觸發器的事件和 action 過濾條件。將非空 JSON 陣列儲存為 `filters.json`：
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+這個範例接收 PR 評審提交和所有 push 事件。省略 `actions` 或使用空的 actions 陣列，表示接收該事件的所有 action。
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-list <autopilot-id> --full-id
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+更新時，檔案內容會替換整組過濾條件。不傳這兩個過濾引數就保留原值，修改標籤或啟停觸發器時也一樣。`autopilot get` 在頂層 `triggers` 陣列中返回過濾條件。
+
+要刪除全部過濾條件、恢復接收所有事件，使用僅限更新的引數：
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` 與 `--event-filters-file` 不能同時使用。頂層為 `null` 或空陣列、包含未知欄位、無效 JSON 或空白事件/action 名稱的檔案會被拒絕。這些引數只適用於 Webhook 觸發器；建立時不傳過濾檔案則接收所有事件。事件匹配方式見[自動化](/autopilots#事件過濾)。
+
 ## 命令概覽
 
 | 命令 | 用途 |

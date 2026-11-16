@@ -350,6 +350,36 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 - A workspace's `--context` is provided to every agent in the workspace. `--slug` cannot be changed after creation. `--issue-prefix` is uppercased; changing it renumbers every existing issue, and old identifiers in external references stop resolving.
 - `--issue-title-template` interpolates only `{{date}}` (UTC, `YYYY-MM-DD`) and rejects any other `{{...}}` token. A schedule trigger's `--timezone` defaults to UTC.
 
+### Webhook event filters [#webhook-event-filters]
+
+Use `--event-filters-file` on `autopilot trigger-add` or `trigger-update` to configure a webhook trigger's event and action filters. Save a nonempty JSON array as `filters.json`:
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+This accepts PR review submissions and all push events. Omitting `actions` or using an empty actions array accepts every action for that event.
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-list <autopilot-id> --full-id
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+The file replaces the entire filter list on update. Omitting both filter options preserves the saved filters, including when updating a label or enabling/disabling the trigger. `autopilot get` returns the filters in the top-level `triggers` array.
+
+To remove all filters and accept every event, use the update-only flag:
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` and `--event-filters-file` cannot be combined. Top-level `null` or an empty array, unknown fields, malformed JSON, and blank event/action names are rejected. These options apply only to webhook triggers; creating one without a filter file accepts all events. See [Autopilots](/autopilots#event-filters) for how incoming events are matched.
+
 ## Command overview
 
 | Command | Purpose |

@@ -335,6 +335,36 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 - 워크스페이스의 `--context`는 워크스페이스의 모든 에이전트에게 제공됩니다. `--slug`는 만든 뒤 바꿀 수 없습니다. `--issue-prefix`는 대문자로 바뀌며, 변경하면 기존 태스크 번호가 모두 다시 매겨져 외부에서 참조하던 예전 번호는 더 이상 연결되지 않습니다.
 - `--issue-title-template`은 `{{date}}`(UTC, `YYYY-MM-DD`)만 치환하며 다른 `{{...}}`는 거부합니다. 일정 트리거의 `--timezone` 기본값은 UTC입니다.
 
+### Webhook 이벤트 필터 [#webhook-event-filters]
+
+`autopilot trigger-add` 또는 `trigger-update`에서 `--event-filters-file`로 Webhook 트리거의 이벤트와 action 필터를 설정할 수 있습니다. 비어 있지 않은 JSON 배열을 `filters.json`으로 저장하세요.
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+이 예시는 PR 리뷰 제출과 모든 push 이벤트를 받습니다. `actions`를 생략하거나 빈 배열을 지정하면 해당 이벤트의 모든 action을 받습니다.
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-list <autopilot-id> --full-id
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+업데이트할 때 파일 내용이 필터 목록 전체를 대체합니다. 두 필터 옵션을 모두 생략하면 라벨을 바꾸거나 트리거를 활성화/비활성화할 때도 저장된 필터가 유지됩니다. `autopilot get`은 최상위 `triggers` 배열에서 필터를 반환합니다.
+
+모든 필터를 삭제하고 모든 이벤트를 받으려면 업데이트 전용 옵션을 사용하세요.
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters`와 `--event-filters-file`은 함께 사용할 수 없습니다. 최상위 값이 `null` 또는 빈 배열인 파일이나, 알 수 없는 필드, 잘못된 JSON 또는 비어 있거나 공백으로만 이루어진 이벤트/action 이름이 포함된 파일은 거부됩니다. 이 옵션들은 Webhook 트리거에만 적용됩니다. 필터 파일 없이 생성하면 모든 이벤트를 받습니다. 수신 이벤트의 매칭 방식은 [오토파일럿](/autopilots#event-filters)을 참고하세요.
+
 ## 명령 개요
 
 | 명령 | 용도 |
