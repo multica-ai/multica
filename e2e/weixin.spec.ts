@@ -113,32 +113,33 @@ test("WeChat QR verification, connection listing, and disconnect", async ({
     await channels.getByRole("button", { name: "Add messaging channel" }).first().click();
     const connectDialog = page.getByRole("dialog", { name: "Connect messaging channel" });
     await connectDialog.getByRole("button", { name: "WeChat" }).click();
-    await expect(connectDialog.getByRole("button", { name: "Connect WeChat" })).toBeVisible();
-    await page.screenshot({
-      path: testInfo.outputPath("weixin-agent.png"),
-      fullPage: true,
-    });
-    await page
-      .getByRole("button", { name: "Connect WeChat", exact: true })
-      .click();
-    const dialog = page.getByRole("dialog", {
-      name: "Connect WeChat to WeChat Assistant",
-    });
-    await expect(dialog.getByRole("img", { name: "WeChat connection QR code" })).toBeVisible();
+    // Choosing WeChat shows the QR straight away, with the guide below it.
+    await expect(
+      connectDialog.getByRole("img", { name: "WeChat connection QR code" }),
+    ).toBeVisible();
+    await expect(
+      connectDialog.getByRole("button", { name: "Setup guide" }),
+    ).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("weixin-qr.png"),
       fullPage: true,
     });
-    await expect(dialog.getByLabel("Verification code")).toBeVisible();
+    await expect(connectDialog.getByLabel("Verification code")).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("weixin-verification.png"),
       fullPage: true,
     });
-    await dialog.getByLabel("Verification code").fill("001234");
-    await dialog.getByRole("button", { name: "Verify", exact: true }).click();
-    await expect(connectDialog.getByText("Connected", { exact: true })).toBeVisible();
-    await connectDialog.getByRole("button", { name: "Close" }).click();
+    await connectDialog.getByLabel("Verification code").fill("001234");
+    await connectDialog
+      .getByRole("button", { name: "Verify", exact: true })
+      .click();
+    // A confirmed login closes the dialog and the agent lists the channel.
+    await expect(connectDialog).toBeHidden();
     await expect(page.getByRole("button", { name: "Manage WeChat" })).toBeVisible();
+    await page.screenshot({
+      path: testInfo.outputPath("weixin-agent-connected.png"),
+      fullPage: true,
+    });
     await page.goto(
       `/${workspace.slug}/settings?tab=channels&integration=weixin`,
       { waitUntil: "domcontentloaded" },
