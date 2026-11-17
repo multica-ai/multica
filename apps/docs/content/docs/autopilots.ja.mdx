@@ -91,6 +91,8 @@ Webhook リクエストには次の制約があります。
 
 たとえばイベント名に `workflow_run`、Actions に `completed, failed` を指定すると、この 2 種類の `workflow_run` の結果だけを受け取ります。Multica は一般的なリクエストヘッダーと payload からイベントと action を判定します。GitHub の `X-GitHub-Event` と body の `action` にも対応しています。
 
+CLI の `--event-filters-file` でも、これらのフィルターをすべて設定できます。更新時にフィルターオプションを省略すると既存の設定を保持し、`--clear-event-filters` を指定すると明示的に削除して全イベントを受け入れます。JSON 形式とコマンドは [CLI の例](/cli#webhook-event-filters)を参照してください。
+
 ### Webhook URL を保護する
 
 <Callout type="warning">

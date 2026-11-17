@@ -5,6 +5,7 @@ import { autoUpdate, computePosition, flip, offset, shift, size } from "@floatin
 import { ReactRenderer } from "@tiptap/react";
 import { exitSuggestion, type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
 import type { PluginKey } from "@tiptap/pm/state";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 
 interface SuggestionPopupRenderOptions<
   TItem,
@@ -62,9 +63,10 @@ export function createSuggestionPopupRender<
     };
 
     const isInsideSuggestionSurface = (
-      target: EventTarget | null,
+      eventTarget: EventTarget | null,
       props: SuggestionProps<TItem, TSelected>,
     ) => {
+      const target = contextMenuOrigin(eventTarget);
       if (!(target instanceof Node)) return false;
       return props.editor.view.dom.contains(target) || !!popup?.contains(target);
     };

@@ -615,6 +615,7 @@ func main() {
 	registerSubscriberListeners(bus, pool)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	registerChatReplyNotifications(bus, broadcaster, &membershipChecker{queries: queries})
 	registerIssueUnreadListeners(bus, queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
@@ -765,6 +766,7 @@ func main() {
 	// Source-context cleanup is object-store work, so it gets its own goroutine
 	// instead of a slot in the runtime sweep tick.
 	go runSourceContextSweeper(sweepCtx, taskSvc)
+	go runEnvironmentLogSweeper(sweepCtx, queries)
 	if h.ConnectedApps != nil {
 		go h.ConnectedApps.RunSweeper(sweepCtx)
 	}
@@ -785,6 +787,12 @@ func main() {
 	}
 	if h.TelegramOutbound != nil {
 		h.TelegramOutbound.Start(sweepCtx)
+	}
+	if h.WeixinOutbound != nil {
+		h.WeixinOutbound.Start(sweepCtx)
+	}
+	if h.WeixinInstall != nil {
+		go h.WeixinInstall.RunCleanup(sweepCtx)
 	}
 	// GitHub PR-card API snapshot pipeline (MUL-5265): worker pool + TTL sweeper.
 	// No-op when unconfigured (no App private key).
@@ -946,6 +954,9 @@ func main() {
 			}
 		},
 		JoinTelegram: func() {
+			if h.WeixinOutbound != nil && !h.WeixinOutbound.WaitWithTimeout(5*time.Second) {
+				slog.Warn("weixin outbound workers did not exit within shutdown timeout")
+			}
 			if h.TelegramOutbound != nil && !h.TelegramOutbound.WaitWithTimeout(5*time.Second) {
 				slog.Warn("telegram outbound workers did not exit within shutdown timeout")
 			}

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { isImeComposing } from "@multica/core/utils";
+import { contextMenuOrigin } from "@multica/ui/lib/context-menu-origin";
 import { useT } from "../../i18n";
 
 /**
@@ -13,7 +14,8 @@ import { useT } from "../../i18n";
  * We do NOT commit on the input's `blur` event: the history popover can
  * move focus to sibling rows and nested actions while the user is still
  * interacting with the panel. Instead a document-level `pointerdown`
- * listener commits only when the user actually clicks outside the input.
+ * listener commits only when the user actually clicks outside the input
+ * (a context menu opened on the input is not outside).
  */
 export function SessionRenameInput({
   initialValue,
@@ -43,7 +45,7 @@ export function SessionRenameInput({
     const handlePointerDown = (e: PointerEvent) => {
       const input = inputRef.current;
       if (!input) return;
-      if (input.contains(e.target as Node)) return;
+      if (input.contains(contextMenuOrigin(e.target) as Node)) return;
       onSubmitRef.current(valueRef.current);
     };
     // Capture phase — commit before outside-click handling can close the

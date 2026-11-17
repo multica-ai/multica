@@ -2,6 +2,7 @@ import { act, type ReactNode } from "react";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
+import { DEFAULT_APPEARANCE, useAppearanceStore, useInstalledThemesStore } from "@multica/core/appearance";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses/queries";
 import {
   useCommandBarContextStore,
@@ -9,6 +10,9 @@ import {
   type CommandBarContext,
 } from "@multica/core/command-bar";
 import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
+import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
+import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { WORKSPACE_PAGES } from "@multica/core/paths";
@@ -377,6 +381,8 @@ describe("SearchCommand", () => {
     mockToast.warning.mockReset();
     mockSetTheme.mockReset();
     mockTheme.current = "system";
+    useAppearanceStore.setState(DEFAULT_APPEARANCE);
+    useInstalledThemesStore.setState({ themes: [], folders: {}, fromStore: {} });
     mockCommentCollapseAll.mockReset();
     mockCommentExpandAll.mockReset();
     mockResolvedCollapseAll.mockReset();
@@ -513,7 +519,7 @@ describe("SearchCommand", () => {
       expect(useSearchStore.getState().open).toBe(false);
     });
 
-    it("changes theme through a submenu that marks the current theme", async () => {
+    it("changes the mode through a submenu that marks the current mode and theme", async () => {
       const user = userEvent.setup();
       mockTheme.current = "dark";
       renderSearch();
@@ -521,12 +527,78 @@ describe("SearchCommand", () => {
       await user.click(await rowText("Change theme..."));
 
       expect(within(screen.getByRole("navigation", { name: "Current menu" })).getByText("Change theme")).toBeInTheDocument();
-      expect(renderedValues()).toEqual(["theme:light", "theme:dark", "theme:system"]);
-      expect(screen.getByLabelText("Current theme")).toBeInTheDocument();
+      expect(renderedHeadings()).toEqual(["Mode", "Theme"]);
+      expect(renderedValues()).toEqual([
+        "theme:light",
+        "theme:dark",
+        "theme:system",
+        "color-theme:default",
+        "color-theme:pop",
+        "color-theme:github",
+        "color-theme:blueprint",
+        "color-theme:notion",
+      ]);
+      expect(screen.getByLabelText("Current mode").closest("[cmdk-item]")).toHaveAttribute("data-value", "theme:dark");
+      expect(screen.getByLabelText("Current theme").closest("[cmdk-item]")).toHaveAttribute(
+        "data-value",
+        "color-theme:default",
+      );
 
       await user.click(screen.getByText("Light"));
       expect(mockSetTheme).toHaveBeenCalledWith("light");
       expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("switches the colour theme from the theme submenu", async () => {
+      const user = userEvent.setup();
+      useAppearanceStore.setState({ theme: "github" });
+      renderSearch();
+      await user.type(input(), "主题");
+      await user.click(await rowText("Change theme..."));
+
+      expect(screen.getByLabelText("Current theme").closest("[cmdk-item]")).toHaveAttribute(
+        "data-value",
+        "color-theme:github",
+      );
+      await user.click(screen.getByText("Pop"));
+
+      expect(useAppearanceStore.getState().theme).toBe("pop");
+      expect(mockSetTheme).not.toHaveBeenCalled();
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("finds installed themes by id and truncates a long name", async () => {
+      const user = userEvent.setup();
+      const name = "A very long community theme name, forty!";
+      useInstalledThemesStore.setState({
+        themes: [{ apiVersion: 1, id: "solarized", name, css: "" }],
+        folders: {},
+        fromStore: {},
+      });
+      renderSearch();
+      await user.type(input(), "theme");
+      await user.click(await rowText("Change theme..."));
+      await user.type(screen.getByPlaceholderText("Filter..."), "solar");
+
+      expect(renderedHeadings()).toEqual(["Theme"]);
+      expect(renderedValues()).toEqual(["color-theme:solarized"]);
+      expect(await rowText(name)).toHaveClass("min-w-0", "flex-1", "truncate");
+
+      await user.keyboard("{Enter}");
+      expect(useAppearanceStore.getState().theme).toBe("solarized");
+    });
+
+    it("marks Default when the chosen theme is no longer installed", async () => {
+      const user = userEvent.setup();
+      useAppearanceStore.setState({ theme: "uninstalled" });
+      renderSearch();
+      await user.type(input(), "theme");
+      await user.click(await rowText("Change theme..."));
+
+      expect(screen.getByLabelText("Current theme").closest("[cmdk-item]")).toHaveAttribute(
+        "data-value",
+        "color-theme:default",
+      );
     });
 
     it("Backspace on an empty submenu input returns to the root", async () => {
@@ -727,6 +799,89 @@ describe("SearchCommand", () => {
       fireEvent.click(await rowText("Acme Corp"));
 
       expect(mockPush).toHaveBeenCalledWith("/acme-hq/issues");
+    });
+  });
+
+  describe("views", () => {
+    const makeView = (id: string, name: string, over: Record<string, unknown> = {}) => ({
+      id,
+      workspace_id: "ws-test",
+      owner_id: ME,
+      name,
+      scope_type: "workspace",
+      scope_id: null,
+      visibility: "private",
+      query: {},
+      display: {},
+      ...over,
+    });
+
+    beforeEach(() => {
+      act(() => useActiveIssueViewStore.setState({ active: {} }));
+      seed(issueViewEverywhereOptions("ws-test"), [
+        makeView("view-bugs", "Open bugs"),
+        makeView("view-launch", "Launch blockers", { scope_type: "project", scope_id: "proj-1" }),
+      ]);
+      seed(projectListOptions("ws-test"), { projects: [{ id: "proj-1", title: "Website" }] });
+    });
+
+    const viewRows = () => within(screen.getByRole("group", { name: "Views" })).getAllByRole("option");
+
+    it("opens a saved view on its surface and makes it the active view", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "open bugs");
+      fireEvent.click(await rowText("Open bugs"));
+
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues?view=view-bugs");
+      expect(useActiveIssueViewStore.getState().active).toEqual({ "ws-test:workspace": "view-bugs" });
+      expect(useSearchStore.getState().open).toBe(false);
+    });
+
+    it("names the project a project view opens in", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "launch");
+
+      await waitFor(() => expect(viewRows()[0]).toHaveTextContent("Launch blockersWebsite"));
+      fireEvent.click(viewRows()[0]!);
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/projects/proj-1?view=view-launch");
+    });
+
+    it("opens a built-in view", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "working");
+      fireEvent.click(await rowText("Working"));
+
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/issues?view=working");
+      expect(useActiveIssueViewStore.getState().active).toEqual({ "ws-test:workspace": "working" });
+    });
+
+    it('lists every view under the Views page for "views"', async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "views");
+
+      await waitFor(() => expect(viewRows()).toHaveLength(7));
+      expect(renderedValues().indexOf("page:views")).toBeLessThan(renderedValues().indexOf("view:view-bugs"));
+    });
+
+    it("leaves this tab's active view alone when the view opens in a new tab", async () => {
+      const user = userEvent.setup();
+      const open = vi.spyOn(window, "open").mockReturnValue(null);
+      renderSearch();
+      await user.type(input(), "open bugs");
+      fireEvent.click(await rowText("Open bugs"), { metaKey: true });
+
+      expect(open).toHaveBeenCalledWith(
+        "https://app.multica//ws-test/issues?view=view-bugs",
+        "_blank",
+        "noopener,noreferrer",
+      );
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(useActiveIssueViewStore.getState().active).toEqual({});
+      open.mockRestore();
     });
   });
 

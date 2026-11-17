@@ -60,7 +60,7 @@ func TestBuildSearchQuery_OmitsUnusedExactTotal(t *testing.T) {
 }
 
 func TestBuildProjectSearchQuery_OmitsUnusedExactTotal(t *testing.T) {
-	query, _ := buildProjectSearchQuery("Hello", []string{"Hello"}, false)
+	query, _ := buildProjectSearchQuery("Hello", []string{"Hello"}, false, false)
 
 	if strings.Contains(query, "COUNT(*) OVER()") || strings.Contains(query, "total_count") {
 		t.Fatalf("project search query should not calculate an unused exact total:\n%s", query)
@@ -227,7 +227,7 @@ func TestBuildSearchQuery_SpecialChars(t *testing.T) {
 // --- Project search tests ---
 
 func TestBuildProjectSearchQuery_SingleTerm(t *testing.T) {
-	query, args := buildProjectSearchQuery("Hello", []string{"Hello"}, false)
+	query, args := buildProjectSearchQuery("Hello", []string{"Hello"}, false, false)
 
 	if args[0] != "hello" {
 		t.Errorf("expected phrase arg to be lowercased, got %q", args[0])
@@ -250,7 +250,7 @@ func TestBuildProjectSearchQuery_SingleTerm(t *testing.T) {
 }
 
 func TestBuildProjectSearchQuery_MultiTerm(t *testing.T) {
-	query, args := buildProjectSearchQuery("Foo Bar", []string{"Foo", "Bar"}, false)
+	query, args := buildProjectSearchQuery("Foo Bar", []string{"Foo", "Bar"}, false, false)
 
 	if args[0] != "foo bar" {
 		t.Errorf("expected phrase arg lowercased, got %q", args[0])
@@ -268,7 +268,7 @@ func TestBuildProjectSearchQuery_MultiTerm(t *testing.T) {
 }
 
 func TestBuildProjectSearchQuery_IncludeClosed(t *testing.T) {
-	query, _ := buildProjectSearchQuery("test", []string{"test"}, true)
+	query, _ := buildProjectSearchQuery("test", []string{"test"}, true, false)
 
 	if strings.Contains(query, "NOT IN ('completed', 'cancelled')") {
 		t.Error("query should not exclude completed/cancelled when includeClosed=true")
@@ -522,7 +522,7 @@ func TestBuildSearchQuery_DoneNotDemotedAheadOfRelevance(t *testing.T) {
 // projects above issues — an undemoted cancelled project can be the first row
 // of the entire result list.
 func TestBuildProjectSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) {
-	query, _ := buildProjectSearchQuery("platform", []string{"platform"}, true)
+	query, _ := buildProjectSearchQuery("platform", []string{"platform"}, true, false)
 	orderBy := orderByClause(t, query)
 
 	cancelledAt := strings.Index(orderBy, "p.status = 'cancelled'")
@@ -536,11 +536,34 @@ func TestBuildProjectSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) 
 	if cancelledAt > relevanceEndsAt {
 		t.Errorf("cancelled projects sort after the relevance tiers:\n%s", orderBy)
 	}
-	if !strings.Contains(orderBy, "LOWER(p.title) <> $1") {
+	if !strings.Contains(orderBy, "CASE WHEN LOWER(p.title) = $1 THEN 0") {
 		t.Errorf("exact-title hit is not exempt from the cancelled demotion:\n%s", orderBy)
 	}
 	if !strings.Contains(orderBy, "p.updated_at DESC") {
 		t.Errorf("recency tie-breaker was dropped from project ORDER BY:\n%s", orderBy)
+	}
+}
+
+// Archived projects are hidden from search unless asked for, and when asked
+// for they sink below cancelled ones (MUL-8861).
+func TestBuildProjectSearchQuery_Archived(t *testing.T) {
+	query, _ := buildProjectSearchQuery("platform", []string{"platform"}, true, false)
+	if !strings.Contains(query, "p.archived_at IS NULL") {
+		t.Errorf("default project search does not exclude archived projects:\n%s", query)
+	}
+
+	query, _ = buildProjectSearchQuery("platform", []string{"platform"}, true, true)
+	if strings.Contains(query, "p.archived_at IS NULL") {
+		t.Errorf("include_archived search still excludes archived projects:\n%s", query)
+	}
+	orderBy := orderByClause(t, query)
+	archivedAt := strings.Index(orderBy, "p.archived_at IS NOT NULL THEN 2")
+	cancelledAt := strings.Index(orderBy, "p.status = 'cancelled' THEN 1")
+	if archivedAt == -1 || cancelledAt == -1 {
+		t.Fatalf("project ORDER BY is missing the archived or cancelled demotion:\n%s", orderBy)
+	}
+	if archivedAt > strings.Index(orderBy, "ELSE 5 END") {
+		t.Errorf("archived demotion sorts after the relevance tiers:\n%s", orderBy)
 	}
 }
 

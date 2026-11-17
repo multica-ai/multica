@@ -19,7 +19,7 @@ WITH base AS MATERIALIZED (
                WHEN i.type IN ('new_comment', 'reaction_added') THEN 'comment'
                WHEN i.type IN ('issue_assigned', 'unassigned', 'assignee_changed', 'issue_subscribed') THEN 'assign'
                WHEN i.type = 'review_requested' THEN 'review'
-               WHEN i.type IN ('status_changed', 'priority_changed', 'start_date_changed', 'due_date_changed', 'children_done') THEN 'change'
+               WHEN i.type IN ('issue_created', 'status_changed', 'priority_changed', 'start_date_changed', 'due_date_changed', 'children_done') THEN 'change'
                WHEN i.type IN ('task_completed', 'task_failed', 'agent_blocked', 'agent_completed') THEN 'run'
                ELSE 'system'
            END AS type_group,
@@ -214,7 +214,7 @@ WITH base AS MATERIALIZED (
                WHEN i.type IN ('new_comment', 'reaction_added') THEN 'comment'
                WHEN i.type IN ('issue_assigned', 'unassigned', 'assignee_changed', 'issue_subscribed') THEN 'assign'
                WHEN i.type = 'review_requested' THEN 'review'
-               WHEN i.type IN ('status_changed', 'priority_changed', 'start_date_changed', 'due_date_changed', 'children_done') THEN 'change'
+               WHEN i.type IN ('issue_created', 'status_changed', 'priority_changed', 'start_date_changed', 'due_date_changed', 'children_done') THEN 'change'
                WHEN i.type IN ('task_completed', 'task_failed', 'agent_blocked', 'agent_completed') THEN 'run'
                ELSE 'system'
            END AS type_group,
@@ -290,7 +290,7 @@ WITH base AS MATERIALIZED (
     ORDER BY created_at DESC, id DESC
     LIMIT $19::int
 )
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, selected.issue_status, selected.issue_priority,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, i.snoozed_until, i.snoozed_at, selected.issue_status, selected.issue_priority,
        iss.project_id AS issue_project_id,
        iss.assignee_type AS issue_assignee_type,
        iss.assignee_id AS issue_assignee_id,
@@ -356,6 +356,8 @@ type ListArchivedInboxPageRow struct {
 // MATCHING notification, which is the row the list renders; issue filters and
 // "unread" then test that group. Issue filters never match a notification
 // without an issue, "is not" included. Type groups mirror INBOX_TYPE_GROUPS.
+// review_requested, task_completed, agent_blocked and agent_completed are no
+// longer written, but archived rows from older servers still carry them.
 // Select narrow group representatives before loading bodies or comment anchors.
 func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInboxPageParams) ([]ListArchivedInboxPageRow, error) {
 	rows, err := q.db.Query(ctx, listArchivedInboxPage,
@@ -403,6 +405,8 @@ func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInb
 			&i.InboxItem.ActorID,
 			&i.InboxItem.Details,
 			&i.InboxItem.Section,
+			&i.InboxItem.SnoozedUntil,
+			&i.InboxItem.SnoozedAt,
 			&i.IssueStatus,
 			&i.IssuePriority,
 			&i.IssueProjectID,

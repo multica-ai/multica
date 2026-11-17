@@ -48,9 +48,6 @@
     "workspaces_label": "Espacios de trabajo",
     "create_workspace": "Crear espacio de trabajo",
     "pending_invitations_label": "Invitaciones pendientes",
-    "invitation_workspace_fallback": "Espacio de trabajo",
-    "invitation_join": "Unirse",
-    "invitation_decline": "Rechazar",
     "log_out": "Cerrar sesión",
     "new_issue": "Nueva tarea",
     "pinned_label": "Fijados",
@@ -77,6 +74,12 @@
       "try": "Probar",
       "open": "Abrir",
       "learn_more": "Más información"
+    },
+    "deck": {
+      "tag": "Nuevo",
+      "next": "Siguiente",
+      "done": "Entendido",
+      "page": "Novedad {{current}} de {{total}}"
     }
   },
   "star_prompt": {
@@ -95,29 +98,41 @@
   "rail": {
     "label": "Navegación de la app",
     "sheet_description": "Cambia de sección y de espacio de trabajo.",
-    "inbox": "Bandeja",
     "work": "Trabajo",
     "team": "Equipo",
     "chat": "Chat",
     "autopilots": "Auto",
     "switch_workspace": "Cambiar de espacio de trabajo",
-    "invitation_from": "{{name}} te ha invitado",
     "pin_workspace": "Fijar espacio de trabajo",
     "unpin_workspace": "Desfijar espacio de trabajo",
     "open_in_new_window": "Abrir en una ventana nueva",
     "open_in_new_window_click": "Clic",
     "open_in_other_window": "Ya está abierto en otra ventana",
     "in_other_window": "Otra ventana",
-    "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana"
+    "all_workspaces_open": "Todos los espacios de trabajo ya están abiertos en una ventana",
+    "copy_link": "Copiar enlace",
+    "link_copied": "Enlace copiado",
+    "workspace_settings": "Ajustes del espacio de trabajo",
+    "mark_all_read": "Marcar todo como leído",
+    "mark_all_read_failed": "No se pudo marcar todo como leído",
+    "reset_order": "Restablecer el orden predeterminado",
+    "copy_workspace_link": "Copiar enlace del espacio de trabajo",
+    "workspace_meta_one": "{{slug}} · {{count}} miembro",
+    "workspace_meta_other": "{{slug}} · {{count}} miembros"
+  },
+  "bottom_bar": {
+    "label": "Barra de estado",
+    "working_one": "{{count}} agente trabajando",
+    "working_other": "{{count}} agentes trabajando"
   },
   "panels": {
     "work": {
-      "my_agents": "Trabajo de mis agentes",
-      "all_issues": "Todas las tareas",
-      "unread": "Sin leer",
       "views": "Vistas",
       "new_project": "Nuevo proyecto",
       "new_issue_in_project": "Nueva tarea en {{name}}",
+      "new_issue_no_project": "Nueva tarea sin proyecto",
+      "no_project": "Sin proyecto",
+      "private_project": "Visible solo para los miembros del proyecto",
       "all_projects_one": "{{count}} proyecto en total",
       "all_projects_other": "{{count}} proyectos en total",
       "project_issues": "Tareas en {{name}}",
@@ -131,6 +146,7 @@
       "assignee_me": "Yo",
       "assignee_my_agents": "Mis agentes",
       "assignee_me_and_my_agents": "Yo y mis agentes",
+      "assignee_projects_only": "Solo se aplica a las tareas que se muestran en Proyectos",
       "reset": "Restablecer",
       "load_more": "Cargar más",
       "show_less": "Mostrar menos",
@@ -138,11 +154,13 @@
       "projects_ordering": "Ordenación",
       "projects_order_manual": "Manual",
       "projects_order_name": "Nombre",
-      "projects_order_updated": "Actualizados recientemente",
+      "projects_order_updated": "Actividad reciente",
       "projects_order_created": "Creados recientemente",
       "projects_show": "Mostrar",
       "projects_only_mine": "Solo los proyectos que dirijo",
+      "projects_show_no_project": "Mostrar «Sin proyecto»",
       "projects_show_count": "Número de tareas abiertas",
+      "projects_minimal_icons": "Solo iconos predeterminados",
       "new_view": "Nueva vista",
       "all_views": "Todas las vistas",
       "view_actions": "Acciones de {{name}}",
@@ -151,7 +169,26 @@
       "view_edit": "Editar vista",
       "view_rename": "Renombrar",
       "view_duplicate": "Duplicar",
-      "view_delete": "Eliminar vista"
+      "view_delete": "Eliminar vista",
+      "new_issue_here": "Nueva tarea en este proyecto",
+      "inbox_actions": "Acciones de la bandeja",
+      "inbox_view_snoozed": "Ver pospuestos",
+      "inbox_view_archived": "Ver archivadas",
+      "inbox_empty": "Sin notificaciones",
+      "inbox_settings": "Visualización de la bandeja",
+      "inbox_all": "Todas las notificaciones",
+      "inbox_compact": "Filas compactas",
+      "inbox_open": "Abrir",
+      "inbox_show_count": "Recuento de no leídas",
+      "inbox_rail_badge": "Insignia de no leídas en Trabajo",
+      "inbox_types": "Notificarme sobre",
+      "inbox_types_hint": "Si desactivas un tipo, sus notificaciones dejan de llegar y no se recuperan al volver a activarlo.",
+      "inbox_more_settings": "Toda la configuración de notificaciones",
+      "section_limit": "Filas visibles",
+      "pinned_settings": "Visualización de fijados",
+      "views_settings": "Visualización de vistas",
+      "views_builtin": "Vistas integradas",
+      "views_show_count": "Recuentos"
     },
     "team": {
       "new_agent": "Nuevo agente",
@@ -171,7 +208,8 @@
       "resources": "Recursos",
       "runtimes_online_one": "{{count}} en línea",
       "runtimes_online_other": "{{count}} en línea",
-      "invite_member": "Invitar miembro"
+      "invite_member": "Invitar miembro",
+      "open_issue": "Abrir {{identifier}}"
     },
     "autopilots": {
       "all": "Todas las automatizaciones",
@@ -188,6 +226,8 @@
       "dark": "Oscuro",
       "system": "Sistema"
     },
+    "mode": "Modo",
+    "appearance_settings": "Ajustes de apariencia",
     "language": "Idioma",
     "shortcuts": "Atajos de teclado"
   },
@@ -207,6 +247,7 @@
     "select_row": "Seleccionar fila",
     "row_actions": "Acciones de fila",
     "sort_by": "Ordenar por",
+    "group_by": "Agrupación",
     "direction_asc": "Ascendente",
     "direction_desc": "Descendente",
     "section_columns": "Columnas",
@@ -225,5 +266,19 @@
     "go_to_slide": "Ir a la diapositiva {{index}}",
     "previous": "Anterior",
     "next": "Siguiente"
+  },
+  "context_menu": {
+    "cut": "Cortar",
+    "copy": "Copiar",
+    "paste": "Pegar",
+    "select_all": "Seleccionar todo",
+    "add_to_dictionary": "Añadir al diccionario",
+    "open_link": "Abrir enlace en el navegador",
+    "copy_link_address": "Copiar dirección del enlace",
+    "copy_image": "Copiar imagen",
+    "copy_code": "Copiar código",
+    "copy_table": "Copiar tabla",
+    "copied": "Copiado",
+    "copy_failed": "No se pudo copiar"
   }
 }

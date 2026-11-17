@@ -129,6 +129,26 @@ describe("appearanceRootVariables", () => {
     expect(vars["--font-scale"]).toBe(String(15 / 14));
     expect(vars["--issue-row-height"]).toBe("32px");
   });
+
+  it("spreads density over list rows, group headers, board cards and navigation rows", () => {
+    const names = [
+      "--issue-row-height",
+      "--issue-group-header-height",
+      "--board-card-padding-y",
+      "--board-card-gap",
+      "--nav-item-height",
+      "--nav-item-padding-y",
+    ];
+    const compact = appearanceRootVariables({ ...DEFAULT_APPEARANCE, density: "compact" });
+    const comfortable = appearanceRootVariables({ ...DEFAULT_APPEARANCE, density: "comfortable" });
+    const standard = appearanceRootVariables(DEFAULT_APPEARANCE);
+    for (const name of names) {
+      expect(standard[name]).toBeNull();
+      expect(parseFloat(compact[name]!)).toBeLessThan(parseFloat(comfortable[name]!));
+    }
+    expect(compact).toMatchObject({ "--nav-item-height": "1.75rem", "--board-card-gap": "0.375rem" });
+    expect(comfortable).toMatchObject({ "--nav-item-height": "2.25rem", "--board-card-padding-y": "1rem" });
+  });
 });
 
 describe("appearanceStylesheet", () => {
@@ -154,6 +174,7 @@ describe("appearanceStylesheet", () => {
     expect(appearanceThemeAttributes(pop, prefs)).toEqual({
       "data-theme": "pop",
       "data-theme-option-signal": "sky",
+      "data-theme-option-frame": "paper",
       "data-theme-option-offset-shadow": "on",
       "data-theme-option-status-blocks": null,
       "data-theme-option-outlined-chips": "on",

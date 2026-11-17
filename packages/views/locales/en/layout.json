@@ -52,6 +52,12 @@
       "try": "Try it",
       "open": "Open",
       "learn_more": "Learn more"
+    },
+    "deck": {
+      "tag": "New",
+      "next": "Next",
+      "done": "Got it",
+      "page": "Update {{current}} of {{total}}"
     }
   },
   "star_prompt": {
@@ -79,9 +85,6 @@
     "workspaces_label": "Workspaces",
     "create_workspace": "Create workspace",
     "pending_invitations_label": "Pending invitations",
-    "invitation_workspace_fallback": "Workspace",
-    "invitation_join": "Join",
-    "invitation_decline": "Decline",
     "log_out": "Log out",
     "new_issue": "New Issue",
     "pinned_label": "Pinned",
@@ -95,29 +98,41 @@
   "rail": {
     "label": "App navigation",
     "sheet_description": "Switch spaces and workspaces.",
-    "inbox": "Inbox",
     "work": "Work",
     "team": "Team",
     "chat": "Chat",
     "autopilots": "Auto",
     "switch_workspace": "Switch workspace",
-    "invitation_from": "{{name}} invited you",
     "pin_workspace": "Pin workspace",
     "unpin_workspace": "Unpin workspace",
     "open_in_new_window": "Open in new window",
     "open_in_new_window_click": "Click",
     "open_in_other_window": "Already open in another window",
     "in_other_window": "Other window",
-    "all_workspaces_open": "Every workspace is already open in a window"
+    "all_workspaces_open": "Every workspace is already open in a window",
+    "copy_link": "Copy link",
+    "link_copied": "Link copied",
+    "workspace_settings": "Workspace settings",
+    "mark_all_read": "Mark all as read",
+    "mark_all_read_failed": "Couldn't mark all as read",
+    "reset_order": "Reset to default order",
+    "copy_workspace_link": "Copy workspace link",
+    "workspace_meta_one": "{{slug}} · {{count}} member",
+    "workspace_meta_other": "{{slug}} · {{count}} members"
+  },
+  "bottom_bar": {
+    "label": "Status bar",
+    "working_one": "{{count}} agent working",
+    "working_other": "{{count}} agents working"
   },
   "panels": {
     "work": {
-      "my_agents": "My agents' work",
-      "all_issues": "All issues",
-      "unread": "Unread",
       "views": "Views",
       "new_project": "New project",
       "new_issue_in_project": "New issue in {{name}}",
+      "new_issue_no_project": "New issue without a project",
+      "no_project": "No project",
+      "private_project": "Visible to project members only",
       "all_projects_one": "All {{count}} project",
       "all_projects_other": "All {{count}} projects",
       "project_issues": "Issues in {{name}}",
@@ -131,6 +146,7 @@
       "assignee_me": "Me",
       "assignee_my_agents": "My agents",
       "assignee_me_and_my_agents": "Me and my agents",
+      "assignee_projects_only": "Only applies to issues listed under Projects",
       "reset": "Reset",
       "load_more": "Load more",
       "show_less": "Show less",
@@ -138,11 +154,13 @@
       "projects_ordering": "Ordering",
       "projects_order_manual": "Manual",
       "projects_order_name": "Name",
-      "projects_order_updated": "Recently updated",
+      "projects_order_updated": "Recent activity",
       "projects_order_created": "Recently created",
       "projects_show": "Show",
       "projects_only_mine": "Only projects I lead",
+      "projects_show_no_project": "Show “No project”",
       "projects_show_count": "Open issue count",
+      "projects_minimal_icons": "Default icons only",
       "new_view": "New view",
       "all_views": "All views",
       "view_actions": "Actions for {{name}}",
@@ -151,7 +169,26 @@
       "view_edit": "Edit view",
       "view_rename": "Rename",
       "view_duplicate": "Duplicate",
-      "view_delete": "Delete view"
+      "view_delete": "Delete view",
+      "new_issue_here": "New issue in this project",
+      "inbox_actions": "Inbox actions",
+      "inbox_view_snoozed": "View snoozed",
+      "inbox_view_archived": "View archived",
+      "inbox_empty": "No notifications",
+      "inbox_settings": "Inbox display",
+      "inbox_all": "All notifications",
+      "inbox_compact": "Compact rows",
+      "inbox_open": "Open",
+      "inbox_show_count": "Unread count",
+      "inbox_rail_badge": "Unread badge on Work",
+      "inbox_types": "Notify me about",
+      "inbox_types_hint": "Turned off, a kind of notification is not delivered at all, and nothing from that time comes back when you turn it on again.",
+      "inbox_more_settings": "All notification settings",
+      "section_limit": "Rows shown",
+      "pinned_settings": "Pinned display",
+      "views_settings": "Views display",
+      "views_builtin": "Built-in views",
+      "views_show_count": "Counts"
     },
     "team": {
       "new_agent": "New agent",
@@ -171,7 +208,8 @@
       "resources": "Resources",
       "runtimes_online_one": "{{count}} online",
       "runtimes_online_other": "{{count}} online",
-      "invite_member": "Invite member"
+      "invite_member": "Invite member",
+      "open_issue": "Open {{identifier}}"
     },
     "autopilots": {
       "all": "All autopilots",
@@ -188,6 +226,8 @@
       "dark": "Dark",
       "system": "System"
     },
+    "mode": "Mode",
+    "appearance_settings": "Appearance settings",
     "language": "Language",
     "shortcuts": "Keyboard shortcuts"
   },
@@ -207,6 +247,7 @@
     "select_row": "Select row",
     "row_actions": "Row actions",
     "sort_by": "Sort by",
+    "group_by": "Grouping",
     "direction_asc": "Ascending",
     "direction_desc": "Descending",
     "section_columns": "Columns",
@@ -225,5 +266,19 @@
     "go_to_slide": "Go to slide {{index}}",
     "previous": "Previous",
     "next": "Next"
+  },
+  "context_menu": {
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "select_all": "Select all",
+    "add_to_dictionary": "Add to dictionary",
+    "open_link": "Open link in browser",
+    "copy_link_address": "Copy link address",
+    "copy_image": "Copy image",
+    "copy_code": "Copy code",
+    "copy_table": "Copy table",
+    "copied": "Copied",
+    "copy_failed": "Couldn't copy"
   }
 }

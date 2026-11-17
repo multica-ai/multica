@@ -4,6 +4,7 @@
   "placeholder": "Busca o escribe lo que necesitas hacer...",
   "groups": {
     "pages": "Páginas",
+    "views": "Vistas",
     "commands": "Comandos",
     "members": "Miembros",
     "projects": "Proyectos",
@@ -22,6 +23,7 @@
   },
   "commands": {
     "current_theme_aria": "Tema actual",
+    "current_mode_aria": "Modo actual",
     "new_issue": "Nueva tarea",
     "new_project": "Nuevo proyecto",
     "copy_issue_link": "Copiar enlace de la tarea",
@@ -42,7 +44,6 @@
     "unsubscribed": "Suscripción cancelada",
     "label_added": "Etiqueta {{name}} añadida",
     "label_removed": "Etiqueta {{name}} quitada",
-    "label_failed": "No se ha podido añadir la etiqueta {{name}} a todas las tareas",
     "update_failed": "La actualización falló",
     "assigned": "{{identifier}} asignada a {{name}}"
   },
@@ -128,7 +129,6 @@
     "project": "Proyecto",
     "parent": "Tarea principal",
     "quick_actions": "Acciones rápidas",
-    "theme": "Tema",
     "project_status": "Estado del proyecto",
     "no_project": "Sin proyecto",
     "current": "Actual"

@@ -735,6 +735,21 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 	}
 }
 
+func TestProjectContextNotesArchivedProject(t *testing.T) {
+	t.Parallel()
+	for _, archived := range []bool{false, true} {
+		var b strings.Builder
+		writeProjectContext(&b, TaskContextForEnv{
+			ProjectID:       "22222222-3333-4444-5555-666666666666",
+			ProjectTitle:    "Old Project",
+			ProjectArchived: archived,
+		})
+		if got := strings.Contains(b.String(), "This project is **archived**"); got != archived {
+			t.Errorf("archived=%v: brief archived note present=%v:\n%s", archived, got, b.String())
+		}
+	}
+}
+
 func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

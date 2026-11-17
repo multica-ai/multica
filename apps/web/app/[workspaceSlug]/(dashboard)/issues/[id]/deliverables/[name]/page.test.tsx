@@ -3,6 +3,7 @@ import { act, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getRouteRegex } from "next/dist/shared/lib/router/utils/route-regex";
 import { getRouteMatcher } from "next/dist/shared/lib/router/utils/route-matcher";
+import { getDynamicParam } from "next/dist/shared/lib/router/utils/get-dynamic-param";
 import { paths } from "@multica/core/paths";
 
 const routeProps = vi.hoisted(() => ({
@@ -18,22 +19,27 @@ vi.mock("@multica/views/issues/components", () => ({
 
 import IssueDeliverablePage from "./page";
 
-// Next's own matcher for this route, so the params below are the ones the
-// page really receives.
+// Next's own matcher for this route, then the step the App Router runs on
+// each matched value before a page sees it, so the params below are the ones
+// the page really receives: the matcher decodes the segment and
+// `getDynamicParam` percent-encodes it again.
 const matchRoute = getRouteMatcher(
   getRouteRegex("/[workspaceSlug]/issues/[id]/deliverables/[name]"),
 );
 
+function pageParam(matched: Parameters<typeof getDynamicParam>[0], key: string): string {
+  return getDynamicParam(matched, key, "d", null, null).value as string;
+}
+
 async function renderLink(filename: string) {
   const href = paths.workspace("acme").issueDeliverable("MUL-1", filename);
-  const params = matchRoute(href);
-  if (!params) throw new Error(`route did not match ${href}`);
+  const matched = matchRoute(href);
+  if (!matched) throw new Error(`route did not match ${href}`);
+  const params = { id: pageParam(matched, "id"), name: pageParam(matched, "name") };
   await act(async () => {
     render(
       <Suspense fallback={null}>
-        <IssueDeliverablePage
-          params={Promise.resolve(params as { id: string; name: string })}
-        />
+        <IssueDeliverablePage params={Promise.resolve(params)} />
       </Suspense>,
     );
   });
@@ -49,8 +55,9 @@ describe("deliverable link page", () => {
     "report.html",
     "调研 报告.html",
     "Q3 调研/报告 #2?.html",
-    // Literal percent escapes in the file name: Next has already decoded the
-    // segment once, and a second decode would name a different file.
+    "レポート 最終.html",
+    // Literal percent escapes in the file name: exactly one decode gives the
+    // name back, a second would name a different file.
     "report%20final.html",
     "report%25final.html",
     "100%.html",

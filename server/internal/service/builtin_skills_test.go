@@ -352,15 +352,18 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// These are task nouns, not section headings: a task arrives as "set up an
 	// autopilot", never as "Core model".
 	triggerWords := map[string]string{
-		"references/issues.md":       "issue",
-		"references/sub-issues.md":   "sub-issue",
-		"references/mentions.md":     "mention",
-		"references/agents.md":       "agent",
-		"references/squads.md":       "squad",
-		"references/autopilots.md":   "autopilot",
-		"references/projects.md":     "project",
-		"references/runtimes.md":     "runtime",
-		"references/skill-import.md": "skill import",
+		"references/issues.md":        "issue",
+		"references/sub-issues.md":    "sub-issue",
+		"references/batch-changes.md": "batch",
+		"references/mentions.md":      "mention",
+		"references/agents.md":        "agent",
+		"references/squads.md":        "squad",
+		"references/autopilots.md":    "autopilot",
+		"references/projects.md":      "project",
+		"references/runtimes.md":      "runtime",
+		"references/environments.md":  "local environment",
+		"references/skill-import.md":  "skill import",
+		"references/themes.md":        "theme",
 	}
 
 	skill, ok := findSkill(t, PlatformSkillName)
@@ -433,7 +436,9 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"references/autopilots.md",
 				"references/projects.md",
 				"references/runtimes.md",
+				"references/environments.md",
 				"references/skill-import.md",
+				"references/themes.md",
 				// Invariants deduplicated out of the eight merged bodies. Each
 				// was repeated in most of them; the router is now their only
 				// home, so losing one here loses it everywhere.
@@ -680,6 +685,24 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			},
 		},
 		{
+			file: "references/environments.md",
+			want: []string{
+				".multica/environments.toml",
+				"multica env start <name>",
+				// The port block is what keeps parallel runs from colliding;
+				// an agent that hard-codes a port breaks the second run.
+				"`MULTICA_PORT` through `MULTICA_PORT+9`",
+				// A detaching start command ends the environment at once and
+				// leaves its work unreachable by stop.
+				"`docker compose up -d`",
+				// ttl is a Go duration; the day unit fails to parse.
+				"`7d` is rejected",
+				// Reuse is keyed on the checkout as well as the name, so a run
+				// with its own checkout gets a second instance, not the old one.
+				"the name and the checkout all match",
+			},
+		},
+		{
 			file: "references/projects.md",
 			want: []string{
 				"Projects are durable context containers",
@@ -691,6 +714,25 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Project resources are durable and affect future tasks",
 				"github_repo.resource_ref.url",
 				"resource_ref.ref",
+			},
+		},
+		{
+			// MUL-9248: theme knowledge ships here instead of riding in a
+			// per-request prompt, so any agent can build one from any chat
+			// or issue. The checker gate and the two delivery paths are what
+			// make a delivered theme installable; losing either strands it.
+			file: "references/themes.md",
+			want: []string{
+				"docs/theming.md",
+				"scripts/theme-check.mjs",
+				"Deliver only when it reports **0 errors**",
+				"~/Library/Application Support/Multica/themes",
+				"%APPDATA%\\Multica\\themes",
+				"~/.config/Multica/themes",
+				"does not switch to it",
+				"every save to the theme in use applies",
+				"**Import theme**",
+				"multica attachment upload <path>",
 			},
 		},
 		{

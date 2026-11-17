@@ -17,7 +17,6 @@
     "fumadocs-core": "catalog:",
     "fumadocs-mdx": "catalog:",
     "fumadocs-ui": "catalog:",
-    "mermaid": "catalog:",
     "next": "catalog:",
     "next-themes": "catalog:",
     "react": "catalog:",
@@ -26,11 +25,16 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "catalog:",
+    "@types/mdast": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@typescript/native": "catalog:",
+    "remark-gfm": "catalog:",
+    "remark-mdx": "catalog:",
+    "remark-parse": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
+    "unified": "catalog:",
     "vitest": "catalog:"
   }
 }

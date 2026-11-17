@@ -32,6 +32,9 @@ const (
 	// the extra deferred-task lookup for clients that opt in, and an older
 	// server's missing fields make a newer daemon retain its short fallback.
 	DaemonCapabilityClaimPollHintsV1 = "claim-poll-hints-v1"
+	// DaemonCapabilityForceRecheckV1 requests presence-aware batch claim
+	// acknowledgements on both HTTP and WebSocket.
+	DaemonCapabilityForceRecheckV1 = "force-recheck-v1"
 
 	// DaemonCapabilityPlatformSkillV1 advertises that the daemon's runtime
 	// brief names the merged `multica-platform` skill instead of the
@@ -186,6 +189,10 @@ const (
 	PendingWorkKindModelList        = "model_list"
 	PendingWorkKindLocalSkills      = "local_skills"
 	PendingWorkKindLocalSkillImport = "local_skill_import"
+	// PendingWorkKindEnvironmentCommand asks a daemon that supports it to claim
+	// its queued environment commands instead of heartbeating. Older daemons
+	// heartbeat as for any kind, which claims nothing.
+	PendingWorkKindEnvironmentCommand = "environment_command"
 )
 
 // PendingWorkPayload is sent from server to daemon as a wakeup hint when a
@@ -329,6 +336,22 @@ type ChatDonePayload struct {
 	// follow for this turn (render a placeholder). Never true when
 	// QuickActions is already populated.
 	QuickActionsPending bool `json:"quick_actions_pending,omitempty"`
+	// Present only for a completed direct-chat reply eligible for an OS alert.
+	// Older clients ignore it; older servers omit it without affecting chat.
+	Notification *ChatReplyNotification `json:"notification,omitempty"`
+}
+
+type ChatReplyNotification struct {
+	WorkspaceID string `json:"workspace_id"`
+	Title       string `json:"title"`
+}
+
+type ChatReplyNotificationPayload struct {
+	WorkspaceID   string `json:"workspace_id"`
+	ChatSessionID string `json:"chat_session_id"`
+	MessageID     string `json:"message_id"`
+	Title         string `json:"title"`
+	Body          string `json:"body"`
 }
 
 // Outcome values carried by ChatCancelFinalizedPayload.

@@ -20,14 +20,15 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// privateProjectFixture: a private project with one regular member (insider),
-// a regular workspace member outside it (outsider), the workspace owner
-// (testUserID, not a project member), an issue and a comment inside it, and a
-// public issue outside any project.
+// privateProjectFixture: a private project whose members are the workspace
+// owner (testUserID) and one regular member (insider), a regular workspace
+// member outside it (outsider), a workspace admin outside it (outsideAdmin),
+// an issue and a comment inside it, and a public issue outside any project.
 type privateProjectFixture struct {
 	projectID     string
 	insider       string
 	outsider      string
+	outsideAdmin  string
 	secretIssue   string
 	secretComment string
 	publicIssue   string
@@ -40,7 +41,9 @@ func newPrivateProjectFixture(t *testing.T) privateProjectFixture {
 	f := privateProjectFixture{marker: marker}
 	f.insider = createPlainMember(t, marker+"-insider@multica.test")
 	f.outsider = createPlainMember(t, marker+"-outsider@multica.test")
+	f.outsideAdmin = createWorkspaceAdmin(t, marker+"-admin@multica.test")
 	f.projectID = dbfx.Project(t, marker+" secret project", testutil.Cols{"visibility": projectaccess.VisibilityPrivate})
+	addProjectMemberRow(t, f.projectID, testUserID)
 	addProjectMemberRow(t, f.projectID, f.insider)
 	// Explicit numbers far above the workspace counter keep these rows clear
 	// of the numbers CreateIssue allocates in the same test.
@@ -49,6 +52,26 @@ func newPrivateProjectFixture(t *testing.T) privateProjectFixture {
 	f.secretComment = dbfx.Comment(t, f.secretIssue, marker+" secret comment")
 	f.publicIssue = dbfx.Issue(t, marker+" public issue", testutil.Cols{"number": base + 1})
 	return f
+}
+
+// createWorkspaceAdmin adds a workspace admin who is a member of no private
+// project: the role must not let them see one.
+func createWorkspaceAdmin(t *testing.T, email string) string {
+	t.Helper()
+	userID := createPlainMember(t, email)
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE member SET role = 'admin' WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, userID); err != nil {
+		t.Fatalf("promote admin: %v", err)
+	}
+	return userID
+}
+
+func removeProjectMemberRow(t *testing.T, projectID, userID string) {
+	t.Helper()
+	if _, err := testPool.Exec(context.Background(),
+		`DELETE FROM project_member WHERE project_id = $1 AND user_id = $2`, projectID, userID); err != nil {
+		t.Fatalf("remove project member: %v", err)
+	}
 }
 
 func addProjectMemberRow(t *testing.T, projectID, userID string) {
@@ -79,8 +102,9 @@ func TestPrivateProjectIssueDetailMatrix(t *testing.T) {
 		want   int
 	}{
 		{"project member", f.insider, http.StatusOK},
-		{"workspace owner outside the member list", testUserID, http.StatusOK},
+		{"workspace owner in the member list", testUserID, http.StatusOK},
 		{"workspace member outside the project", f.outsider, http.StatusNotFound},
+		{"workspace admin outside the project", f.outsideAdmin, http.StatusNotFound},
 	} {
 		if got := get(tc.userID, f.secretIssue); got != tc.want {
 			t.Errorf("%s: GET secret issue = %d, want %d", tc.name, got, tc.want)
@@ -138,8 +162,11 @@ func TestPrivateProjectHiddenFromLists(t *testing.T) {
 	if listProjectIDs(f.outsider)[f.projectID] {
 		t.Error("outsider sees the private project in the project list")
 	}
-	if !listProjectIDs(testUserID)[f.projectID] {
-		t.Error("workspace owner does not see the private project in the project list")
+	if listProjectIDs(f.outsideAdmin)[f.projectID] {
+		t.Error("workspace admin outside the project sees it in the project list")
+	}
+	if !listProjectIDs(f.insider)[f.projectID] {
+		t.Error("project member does not see the private project in the project list")
 	}
 
 	search := func(userID string) map[string]bool {
@@ -291,6 +318,11 @@ func TestPrivateProjectVisibilityAndMembersAPI(t *testing.T) {
 	if project.Visibility != projectaccess.VisibilityPrivate {
 		t.Fatalf("visibility = %q", project.Visibility)
 	}
+	// No lead was named and none is invented. The creator manages access to
+	// the project they made, which is what lets a regular member run one.
+	if project.LeadType != nil || project.LeadID != nil {
+		t.Fatalf("lead = %v %v, want none", project.LeadType, project.LeadID)
+	}
 
 	members := func(userID string) *testutil.Response {
 		req := withURLParam(asUser(newRequest(http.MethodGet, "/api/projects/"+project.ID+"/members", nil), userID), "id", project.ID)
@@ -298,45 +330,64 @@ func TestPrivateProjectVisibilityAndMembersAPI(t *testing.T) {
 	}
 	members(f.outsider).Want(http.StatusNotFound)
 	var list struct {
-		Members []ProjectMemberResponse `json:"members"`
+		Members   []ProjectMemberResponse `json:"members"`
+		ManagerID *string                 `json:"manager_id"`
 	}
 	members(f.insider).Want(http.StatusOK).JSON(&list)
 	if len(list.Members) != 1 || list.Members[0].UserID != f.insider {
 		t.Fatalf("members = %+v, want only the creator", list.Members)
 	}
+	if list.ManagerID == nil || *list.ManagerID != f.insider {
+		t.Fatalf("manager_id = %v, want the creator", list.ManagerID)
+	}
 
-	// Only an access manager may add; unknown workspace users are rejected.
 	add := func(userID string, ids ...string) *testutil.Response {
 		req := withURLParam(asUser(newRequest(http.MethodPost, "/api/projects/"+project.ID+"/members", map[string]any{"user_ids": ids}), userID), "id", project.ID)
 		return testutil.Call(t, testHandler.AddProjectMembers, req)
 	}
-	add(f.insider, f.outsider).Want(http.StatusForbidden)
-	members(testUserID).Want(http.StatusOK).JSON(&list)
-	if len(list.Members) != 1 || list.Members[0].UserID != f.insider {
-		t.Fatal("refused add changed project membership")
-	}
-	add(testUserID, "00000000-0000-0000-0000-00000000beef").Want(http.StatusBadRequest)
-	add(testUserID, f.outsider).Want(http.StatusOK)
-
 	remove := func(actor, target string) *testutil.Response {
 		req := testutil.WithURLParams(asUser(newRequest(http.MethodDelete, "/api/projects/"+project.ID+"/members/"+target, nil), actor), "id", project.ID, "userId", target)
 		return testutil.Call(t, testHandler.RemoveProjectMember, req)
 	}
-	// Every removal takes an admin or the lead, including self-removal.
-	remove(f.outsider, f.insider).Want(http.StatusForbidden)
-	remove(f.outsider, f.outsider).Want(http.StatusForbidden)
-	members(f.outsider).Want(http.StatusOK)
-	remove(testUserID, f.outsider).Want(http.StatusNoContent)
-	members(f.outsider).Want(http.StatusNotFound)
-
-	// Only an admin or the lead switches visibility; the owner can.
 	update := func(userID string, body map[string]any) *testutil.Response {
 		req := withURLParam(asUser(newRequest(http.MethodPut, "/api/projects/"+project.ID, body), userID), "id", project.ID)
 		return testutil.Call(t, testHandler.UpdateProject, req)
 	}
-	update(f.insider, map[string]any{"visibility": "workspace"}).Want(http.StatusForbidden)
+
+	// A workspace role is not a way in: the owner and an admin outside the
+	// member list cannot read the project, let alone manage it.
+	for _, manager := range []string{testUserID, f.outsideAdmin} {
+		members(manager).Want(http.StatusNotFound)
+		add(manager, manager).Want(http.StatusNotFound)
+		remove(manager, f.insider).Want(http.StatusNotFound)
+		update(manager, map[string]any{"visibility": "workspace"}).Want(http.StatusNotFound)
+	}
+	members(f.insider).Want(http.StatusOK).JSON(&list)
+	if len(list.Members) != 1 || list.Members[0].UserID != f.insider {
+		t.Fatal("refused requests changed project membership")
+	}
+
+	// The creator adds; unknown workspace users are rejected.
+	add(f.insider, "00000000-0000-0000-0000-00000000beef").Want(http.StatusBadRequest)
+	add(f.insider, f.outsider, testUserID).Want(http.StatusOK)
+
+	// An ordinary project member manages nothing, self-removal included.
+	add(f.outsider, f.outsideAdmin).Want(http.StatusForbidden)
+	remove(f.outsider, f.insider).Want(http.StatusForbidden)
+	remove(f.outsider, f.outsider).Want(http.StatusForbidden)
+	update(f.outsider, map[string]any{"visibility": "workspace"}).Want(http.StatusForbidden)
+	members(f.outsider).Want(http.StatusOK)
+
+	// Once in the member list, a workspace owner manages access too.
+	remove(testUserID, f.outsider).Want(http.StatusNoContent)
+	members(f.outsider).Want(http.StatusNotFound)
+
+	// And a member can be removed whatever their workspace role.
+	remove(f.insider, testUserID).Want(http.StatusNoContent)
+	members(testUserID).Want(http.StatusNotFound)
+
 	var updated ProjectResponse
-	update(testUserID, map[string]any{"visibility": "workspace"}).Want(http.StatusOK).JSON(&updated)
+	update(f.insider, map[string]any{"visibility": "workspace"}).Want(http.StatusOK).JSON(&updated)
 	if updated.Visibility != projectaccess.VisibilityWorkspace {
 		t.Fatalf("visibility after switch = %q", updated.Visibility)
 	}
@@ -451,6 +502,9 @@ func TestPrivateProjectInboxSkipsOutsiders(t *testing.T) {
 	})
 	if err := write(f.outsider); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("outsider notification: err = %v, want skipped", err)
+	}
+	if err := write(f.outsideAdmin); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("notification to a workspace admin outside the project: err = %v, want skipped", err)
 	}
 	if err := write(f.insider); err != nil {
 		t.Fatalf("insider notification: %v", err)
@@ -650,6 +704,8 @@ func TestWorkspaceProjectLeadStaysOpenButGrantsNoAccess(t *testing.T) {
 	}
 }
 
+// The owner and the admin here are project members; the role alone would not
+// let them reach the project.
 func TestPrivateProjectAccessManagersCanAddAndTransferLead(t *testing.T) {
 	for _, actor := range []string{"owner", "admin", "lead"} {
 		t.Run(actor, func(t *testing.T) {
@@ -659,8 +715,8 @@ func TestPrivateProjectAccessManagersCanAddAndTransferLead(t *testing.T) {
 			if actor == "lead" {
 				userID = f.insider
 			} else if actor == "admin" {
-				userID = createPlainMember(t, f.marker+"-admin@multica.test")
-				dbfx.Exec(t, `UPDATE member SET role = 'admin' WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, userID)
+				userID = createWorkspaceAdmin(t, f.marker+"-inside-admin@multica.test")
+				addProjectMemberRow(t, f.projectID, userID)
 			}
 			added := createPlainMember(t, f.marker+"-added@multica.test")
 			req := withURLParam(asUser(newRequest(http.MethodPost, "/api/projects/"+f.projectID+"/members", map[string]any{"user_ids": []string{added}}), userID), "id", f.projectID)
@@ -796,8 +852,9 @@ func TestPrivateProjectWakeupListsSkipOutsiders(t *testing.T) {
 		visible bool
 	}{
 		{"project member", f.insider, true},
-		{"workspace owner outside the member list", testUserID, true},
+		{"workspace owner in the member list", testUserID, true},
 		{"workspace member outside the project", f.outsider, false},
+		{"workspace admin outside the project", f.outsideAdmin, false},
 	} {
 		// The marker is in the secret issue's title and nowhere else, so the
 		// search narrows the page and its total to this fixture's rules.
@@ -821,6 +878,171 @@ func TestPrivateProjectWakeupListsSkipOutsiders(t *testing.T) {
 		}
 		if got := onSecretIssue(tc.userID, testHandler.ListPausedWakeups, "/api/issue-wakeup-paused") > 0; got != tc.visible {
 			t.Errorf("%s: paused wakeups include the secret issue = %v, want %v", tc.name, got, tc.visible)
+		}
+	}
+}
+
+// A run on a private project's issue is listed as restricted to members
+// outside the project, id included. Stopping it by that id must need the same
+// access as reading it.
+func TestPrivateProjectRunCancelNeedsVisibility(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	var agentID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = 'Handler Test Agent'`, testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load seeded agent: %v", err)
+	}
+	queuedRun := func() string {
+		return dbfx.Task(t, agentID, testutil.Cols{"issue_id": f.secretIssue, "runtime_id": testRuntimeID})
+	}
+
+	taskID := queuedRun()
+	rec := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(rec, cancelTaskByUserRequest(t, f.outsider, taskID))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("outsider cancel = %d, want 404", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), f.secretIssue) {
+		t.Errorf("outsider cancel response names the private issue: %s", rec.Body.String())
+	}
+	if got := taskStatus(t, taskID); got != "queued" {
+		t.Errorf("run after outsider cancel = %q, want queued", got)
+	}
+	rec = httptest.NewRecorder()
+	testHandler.CancelTaskByUser(rec, cancelTaskByUserRequest(t, f.outsideAdmin, taskID))
+	if rec.Code != http.StatusNotFound || taskStatus(t, taskID) != "queued" {
+		t.Errorf("workspace admin outside the project: cancel = %d, run = %q; want 404 and queued", rec.Code, taskStatus(t, taskID))
+	}
+
+	for i, tc := range []struct {
+		name   string
+		userID string
+	}{
+		{"project member", f.insider},
+		{"workspace owner in the member list", testUserID},
+	} {
+		// An issue holds one pending run per agent, so the first case stops
+		// the run the outsider could not.
+		if i > 0 {
+			taskID = queuedRun()
+		}
+		rec := httptest.NewRecorder()
+		testHandler.CancelTaskByUser(rec, cancelTaskByUserRequest(t, tc.userID, taskID))
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s: cancel = %d, want 200: %s", tc.name, rec.Code, rec.Body.String())
+		}
+		if got := taskStatus(t, taskID); got != "cancelled" {
+			t.Errorf("%s: run after cancel = %q, want cancelled", tc.name, got)
+		}
+	}
+}
+
+// Sub-issue progress is read for every parent in one call, not through an
+// issue, so its counts have to leave out sub-issues in a project the caller
+// cannot see.
+func TestPrivateProjectChildProgressSkipsHiddenSubIssues(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	dbfx.Issue(t, f.marker+" public child", testutil.Cols{"parent_issue_id": f.publicIssue})
+	dbfx.Issue(t, f.marker+" secret child", testutil.Cols{"project_id": f.projectID, "parent_issue_id": f.publicIssue, "status": "done"})
+	secretOnlyParent := dbfx.Issue(t, f.marker+" parent of one secret child")
+	dbfx.Issue(t, f.marker+" lone secret child", testutil.Cols{"project_id": f.projectID, "parent_issue_id": secretOnlyParent})
+
+	type counts struct{ Total, Done int64 }
+	progress := func(userID string) map[string]counts {
+		t.Helper()
+		var body struct {
+			Progress []struct {
+				ParentIssueID string `json:"parent_issue_id"`
+				Total         int64  `json:"total"`
+				Done          int64  `json:"done"`
+			} `json:"progress"`
+		}
+		req := asUser(newRequest(http.MethodGet, "/api/issues/child-progress", nil), userID)
+		testutil.Call(t, testHandler.ChildIssueProgress, req).Want(http.StatusOK).JSON(&body)
+		out := map[string]counts{}
+		for _, p := range body.Progress {
+			out[p.ParentIssueID] = counts{p.Total, p.Done}
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name       string
+		userID     string
+		mixed      counts
+		secretOnly counts
+	}{
+		{"project member", f.insider, counts{2, 1}, counts{1, 0}},
+		{"workspace owner in the member list", testUserID, counts{2, 1}, counts{1, 0}},
+		{"workspace member outside the project", f.outsider, counts{1, 0}, counts{}},
+		{"workspace admin outside the project", f.outsideAdmin, counts{1, 0}, counts{}},
+	} {
+		got := progress(tc.userID)
+		if got[f.publicIssue] != tc.mixed {
+			t.Errorf("%s: parent with a public and a secret sub-issue = %+v, want %+v", tc.name, got[f.publicIssue], tc.mixed)
+		}
+		if got[secretOnlyParent] != tc.secretOnly {
+			t.Errorf("%s: parent with only a secret sub-issue = %+v, want %+v", tc.name, got[secretOnlyParent], tc.secretOnly)
+		}
+	}
+}
+
+func TestPrivateProjectPullRequestSummariesSkipHiddenIssues(t *testing.T) {
+	f := newPrivateProjectFixture(t)
+	now := time.Now()
+	linkGitHub := func(issueID string, number int) string {
+		prID := dbfx.Insert(t, "github_pull_request", testutil.Cols{
+			"workspace_id": testWorkspaceID, "installation_id": 0,
+			"repo_owner": "acme", "repo_name": f.marker, "pr_number": number,
+			"title": "pr", "state": "open", "html_url": "https://github.test/pr",
+			"pr_created_at": now, "pr_updated_at": now,
+		})
+		dbfx.InsertNoID(t, "issue_pull_request", testutil.Cols{"issue_id": issueID, "pull_request_id": prID},
+			"pull_request_id = $1", prID)
+		return prID
+	}
+	publicPR := linkGitHub(f.publicIssue, 1)
+	secretGitHubPR := linkGitHub(f.secretIssue, 2)
+	secretGitLabPR := dbfx.Insert(t, "vcs_pull_request", testutil.Cols{
+		"workspace_id": testWorkspaceID, "connection_id": testWorkspaceID, "provider": "gitlab",
+		"repo_owner": "acme", "repo_name": f.marker, "pr_number": 3,
+		"title": "mr", "state": "open", "html_url": "https://gitlab.test/mr",
+		"pr_created_at": now, "pr_updated_at": now,
+	})
+	dbfx.InsertNoID(t, "issue_vcs_pull_request", testutil.Cols{"issue_id": f.secretIssue, "pull_request_id": secretGitLabPR},
+		"pull_request_id = $1", secretGitLabPR)
+
+	visible := func(userID string) map[string]bool {
+		t.Helper()
+		var body struct {
+			PullRequests []IssuePullRequestSummaryResponse `json:"pull_requests"`
+		}
+		req := asUser(newRequest(http.MethodGet, "/api/issues/pull-requests", nil), userID)
+		testutil.Call(t, testHandler.ListIssuePullRequestSummaries, req).Want(http.StatusOK).JSON(&body)
+		out := map[string]bool{}
+		for _, pr := range body.PullRequests {
+			out[pr.ID] = true
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		name       string
+		userID     string
+		seesSecret bool
+	}{
+		{"project member", f.insider, true},
+		{"workspace owner in the member list", testUserID, true},
+		{"workspace member outside the project", f.outsider, false},
+		{"workspace admin outside the project", f.outsideAdmin, false},
+	} {
+		got := visible(tc.userID)
+		if !got[publicPR] {
+			t.Errorf("%s: missing the PR linked to a public issue", tc.name)
+		}
+		for _, prID := range []string{secretGitHubPR, secretGitLabPR} {
+			if got[prID] != tc.seesSecret {
+				t.Errorf("%s: sees PR %s on a private-project issue = %v, want %v", tc.name, prID, got[prID], tc.seesSecret)
+			}
 		}
 	}
 }

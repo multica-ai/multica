@@ -8,9 +8,10 @@
  * set from the active locale. */
 @custom-variant cjk (&:is(:lang(zh), :lang(ja), :lang(ko)));
 
-/* The chat launcher overlays the dashboard's bottom-right corner on every
- * workspace page, so anything that runs to that corner has to stop short of
- * it. Named rather than spelled out at each site: the intent is legible, every
+/* Below `md` the chat launcher overlays the dashboard's bottom-right corner on
+ * every workspace page, so anything that runs to that corner has to stop short
+ * of it. From `md` up quick chat is in the bottom bar and the clearance is
+ * zero. Named rather than spelled out at each site: the intent is legible, every
  * site that yields to the launcher is findable by these classes, and the
  * distance stays derived from the launcher's own geometry.
  *
@@ -449,6 +450,15 @@ html[data-sidebar-resizing="true"] {
 
 [data-sonner-toast] [data-icon] {
   margin-top: 2.5px;
+}
+
+/* Sonner's phone layout sizes a toast with the left offset on both sides.
+   The offsets carry the safe-area insets (components/ui/sonner.tsx), which
+   differ left and right on iPhone Duo, so each side takes its own. */
+@media (max-width: 600px) {
+  [data-mc="toaster"] [data-sonner-toaster] [data-sonner-toast] {
+    width: calc(100% - var(--mobile-offset-left) - var(--mobile-offset-right));
+  }
 }
 
 @layer base {

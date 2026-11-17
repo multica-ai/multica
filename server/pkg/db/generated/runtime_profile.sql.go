@@ -77,8 +77,15 @@ func (q *Queries) CreateRuntimeProfile(ctx context.Context, arg CreateRuntimePro
 }
 
 const deleteAgentRuntimesByProfile = `-- name: DeleteAgentRuntimesByProfile :many
+WITH deleted_rate_limits AS (
+    DELETE FROM runtime_rate_limit
+    WHERE runtime_rate_limit.runtime_id IN (
+        SELECT profile_runtime.id FROM agent_runtime AS profile_runtime
+        WHERE profile_runtime.profile_id = $1 AND profile_runtime.workspace_id = $2
+    )
+)
 DELETE FROM agent_runtime
-WHERE profile_id = $1 AND workspace_id = $2
+WHERE agent_runtime.profile_id = $1 AND agent_runtime.workspace_id = $2
 RETURNING id, workspace_id, owner_id, daemon_id, provider
 `
 

@@ -5,8 +5,8 @@ SELECT id FROM project
 WHERE workspace_id = $1 AND visibility = 'private';
 
 -- name: ListHiddenProjectIDsForUser :many
--- Private projects a regular (non owner/admin) workspace member cannot see.
--- Owners and admins see every project; callers skip this query for them.
+-- Private projects a workspace member cannot see: the ones they are not a
+-- member of. A workspace role grants no access (MUL-9284).
 SELECT p.id FROM project p
 WHERE p.workspace_id = sqlc.arg('workspace_id')
   AND p.visibility = 'private'
@@ -61,6 +61,25 @@ WHERE project_id = sqlc.arg('project_id') AND workspace_id = sqlc.arg('workspace
 DELETE FROM project_member
 WHERE workspace_id = sqlc.arg('workspace_id') AND user_id = sqlc.arg('user_id');
 
+-- name: GetProjectAccessManager :one
+-- The one project member who manages a private project's access besides the
+-- workspace owners and admins on its list (MUL-9284): its lead when that is a
+-- person on the list, otherwise its creator when on the list, otherwise its
+-- longest-standing member. The lead itself is free to be an agent or nobody,
+-- so this is what keeps a project with members from having no person in
+-- charge of them. People added together share a join time; among them the
+-- one who added the rest comes first. No row when the list is empty.
+SELECT pm.user_id
+FROM project_member pm
+JOIN project p ON p.id = pm.project_id
+WHERE pm.project_id = sqlc.arg('project_id') AND pm.workspace_id = sqlc.arg('workspace_id')
+ORDER BY COALESCE(p.lead_type = 'member' AND p.lead_id = pm.user_id, false) DESC,
+         COALESCE(p.creator_type = 'member' AND p.creator_id = pm.user_id, false) DESC,
+         pm.created_at ASC,
+         COALESCE(pm.added_by = pm.user_id, false) DESC,
+         pm.user_id ASC
+LIMIT 1;
+
 -- name: UpdateProjectVisibility :one
 UPDATE project SET visibility = sqlc.arg('visibility'), updated_at = now()
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
@@ -101,3 +120,9 @@ ON CONFLICT (entity_type, entity_id) DO UPDATE
 -- Issue -> project for run-history redaction; issues outside a project are
 -- returned with a NULL project_id.
 SELECT id, project_id FROM issue WHERE id = ANY(sqlc.arg('ids')::uuid[]);
+
+-- name: ListAutopilotRunProjectIDs :many
+SELECT r.id, a.project_id
+FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.id = ANY(sqlc.arg('ids')::uuid[]);

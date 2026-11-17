@@ -400,7 +400,8 @@
     "pending_health_warning": "Ожидание синхронизации с демоном",
     "pending_health_error": "Ошибка регистрации",
     "pending_health_disabled": "Отключена",
-    "pending_cli_unknown": "ожидание"
+    "pending_cli_unknown": "ожидание",
+    "col_rate_limits": "Лимиты"
   },
   "profiles": {
     "cta": "Добавить среду выполнения",
@@ -489,7 +490,6 @@
   },
   "usage": {
     "period_label": "Период",
-    "dimension_label": "Измерение",
     "kpi_cost_label": "Стоимость · {{days}} дн.",
     "kpi_cost_delta": "{{sign}}{{pct}}% к пред. периоду",
     "kpi_cache_label": "Экономия на кэше · {{days}} дн.",
@@ -497,8 +497,6 @@
     "kpi_tokens_label": "Токены · {{days}} дн.",
     "kpi_tokens_hint": "вход {{input}} · выход {{output}}",
     "when_title": "Когда эта среда выполнения тратила",
-    "when_tab_daily": "По дням",
-    "when_tab_weekly": "По неделям",
     "when_tab_heatmap": "Тепловая карта",
     "daily_metric_cost": "Стоимость",
     "daily_metric_tokens": "Токены",
@@ -534,6 +532,7 @@
     "cost_by_title_model": "Стоимость по моделям",
     "cost_by_tab_agent": "По агентам",
     "cost_by_tab_model": "По моделям",
+    "cost_by_label": "Группировка",
     "cost_by_caption_agent_one": "{{count}} агент в этой среде выполнения",
     "cost_by_caption_agent_other": "{{count}} агента в этой среде выполнения",
     "cost_by_caption_model_one": "{{count}} модель использована",
@@ -728,5 +727,38 @@
       }
     },
     "title": "Предоставьте агентам компьютер для работы"
+  },
+  "rate_limits": {
+    "title": "Лимиты",
+    "caption": "Сообщает CLI во время выполнения задач",
+    "updated": "Обновлено {{ago}}",
+    "empty_title": "Данных о лимитах пока нет",
+    "empty_hint": "Появятся, когда эта среда выполнения в следующий раз выполнит задачу. У аккаунтов с API-ключом нет лимитов тарифа.",
+    "window_session": "Сессия",
+    "window_session_hours": "Сессия {{hours}} ч",
+    "window_weekly": "Неделя",
+    "window_weekly_opus": "Неделя · Opus",
+    "window_weekly_sonnet": "Неделя · Sonnet",
+    "window_generic": "Другой лимит",
+    "short_session": "Сессия",
+    "short_weekly": "Неделя",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "Другое",
+    "used": "Использовано {{pct}}%",
+    "limited": "Лимит исчерпан",
+    "resets_in": "Сброс через {{duration}}",
+    "resets_at": "Сброс {{time}}",
+    "reset_since": "Сброшен после последнего отчёта",
+    "verdict_ahead": "Опережение темпа на {{pct}}% · закончится примерно через {{duration}}",
+    "verdict_on_pace": "При текущем темпе хватит до сброса",
+    "verdict_limited": "Возобновится после сброса",
+    "credits": "Кредиты",
+    "credits_balance": "Осталось {{balance}}",
+    "credits_unlimited": "Без ограничений",
+    "credits_none": "Нет",
+    "duration_minutes": "{{minutes}} мин",
+    "duration_hours": "{{hours}} ч {{minutes}} мин",
+    "duration_days": "{{days}} д {{hours}} ч"
   }
 }

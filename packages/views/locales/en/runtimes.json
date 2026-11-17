@@ -380,7 +380,8 @@
     "pending_health_warning": "Waiting for daemon sync",
     "pending_health_error": "Registration error",
     "pending_health_disabled": "Disabled",
-    "pending_cli_unknown": "waiting"
+    "pending_cli_unknown": "waiting",
+    "col_rate_limits": "Limits"
   },
   "profiles": {
     "cta": "Add runtime",
@@ -469,7 +470,6 @@
   },
   "usage": {
     "period_label": "Period",
-    "dimension_label": "Dimension",
     "kpi_cost_label": "Cost · {{days}}D",
     "kpi_cost_delta": "{{sign}}{{pct}}% vs prev",
     "kpi_cache_label": "Cache savings · {{days}}D",
@@ -477,8 +477,6 @@
     "kpi_tokens_label": "Tokens · {{days}}D",
     "kpi_tokens_hint": "in {{input}} · out {{output}}",
     "when_title": "When this runtime spent",
-    "when_tab_daily": "Daily",
-    "when_tab_weekly": "Weekly",
     "when_tab_heatmap": "Heatmap",
     "daily_metric_cost": "Cost",
     "daily_metric_tokens": "Tokens",
@@ -514,6 +512,7 @@
     "cost_by_title_model": "Cost by model",
     "cost_by_tab_agent": "By agent",
     "cost_by_tab_model": "By model",
+    "cost_by_label": "Group by",
     "cost_by_caption_agent_one": "{{count}} agent on this runtime",
     "cost_by_caption_agent_other": "{{count}} agents on this runtime",
     "cost_by_caption_model_one": "{{count}} model used",
@@ -688,5 +687,38 @@
       "run_there": "Run on that machine",
       "connected": "{{name}} connected to Multica"
     }
+  },
+  "rate_limits": {
+    "title": "Limits",
+    "caption": "Reported by the CLI while tasks run",
+    "updated": "Updated {{ago}}",
+    "empty_title": "No limit data yet",
+    "empty_hint": "Recorded the next time this runtime runs a task. API-key accounts have no plan limits.",
+    "window_session": "Session",
+    "window_session_hours": "{{hours}}-hour session",
+    "window_weekly": "Weekly",
+    "window_weekly_opus": "Weekly · Opus",
+    "window_weekly_sonnet": "Weekly · Sonnet",
+    "window_generic": "Other limit",
+    "short_session": "Session",
+    "short_weekly": "Week",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "Other",
+    "used": "{{pct}}% used",
+    "limited": "Limit reached",
+    "resets_in": "Resets in {{duration}}",
+    "resets_at": "Resets {{time}}",
+    "reset_since": "Reset since last report",
+    "verdict_ahead": "{{pct}}% ahead of pace · runs out in about {{duration}}",
+    "verdict_on_pace": "On pace to last until reset",
+    "verdict_limited": "Resumes after the reset",
+    "credits": "Credits",
+    "credits_balance": "{{balance}} left",
+    "credits_unlimited": "Unlimited",
+    "credits_none": "None",
+    "duration_minutes": "{{minutes}}m",
+    "duration_hours": "{{hours}}h {{minutes}}m",
+    "duration_days": "{{days}}d {{hours}}h"
   }
 }

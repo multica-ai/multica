@@ -276,7 +276,7 @@ describe("McpTab", () => {
       );
       const submit = screen.getByRole("button", { name: "Add" });
 
-      expect(dialog).toHaveClass("flex", "max-h-[88vh]", "flex-col");
+      expect(dialog).toHaveClass("flex", "max-h-[88%]", "flex-col");
       expect(scrollArea).toHaveClass("overflow-y-auto");
       expect(scrollArea).not.toContainElement(footer);
       expect(footer).toHaveClass("shrink-0", "border-t", "bg-muted/30");

@@ -17,6 +17,13 @@ import {
 import enAgents from "../../locales/en/agents.json";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
+import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores/issue-sidebar-sections-store";
+
+vi.mock("./issue-wakeup-header-chip", () => ({
+  IssueWakeupHeaderChip: ({ onOpen }: { onOpen: () => void }) => (
+    <button type="button" onClick={onOpen}>Review open wakeups</button>
+  ),
+}));
 
 const TEST_RESOURCES = { en: { agents: enAgents, common: enCommon, issues: enIssues } };
 
@@ -127,7 +134,11 @@ vi.mock("@multica/core/paths", async () => {
 const settingsPush = vi.hoisted(() => vi.fn());
 
 // Mock navigation
-vi.mock("../../navigation", () => ({
+vi.mock("../../navigation", async () => ({
+  // Real hold hook (pure React) the header's Inbox actions read through.
+  ...(await vi.importActual<typeof import("../../navigation/use-held-until-arrival")>(
+    "../../navigation/use-held-until-arrival",
+  )),
   AppLink: ({ children, href, ...props }: any) => (
     <a href={href} {...props}>
       {children}
@@ -345,7 +356,6 @@ const mockApiObj = vi.hoisted(() => ({
   addIssueReaction: vi.fn(),
   removeIssueReaction: vi.fn(),
   listAttachments: vi.fn().mockResolvedValue([]),
-  listIssueDeliverables: vi.fn().mockResolvedValue([]),
   addCommentReaction: vi.fn(),
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
@@ -389,6 +399,10 @@ vi.mock("@multica/core/issues/stores", async () => ({
   ...(await vi.importActual<
     typeof import("@multica/core/issues/stores/sub-issues-collapse-store")
   >("@multica/core/issues/stores/sub-issues-collapse-store")),
+  // Real store, in-memory: the sidebar reads its section order and visibility.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/issue-sidebar-sections-store")
+  >("@multica/core/issues/stores/issue-sidebar-sections-store")),
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
@@ -793,6 +807,12 @@ function hasHighlightedCommentBackground(root: ParentNode | null): boolean {
 // Tests
 // ---------------------------------------------------------------------------
 
+
+// Timeline thread rows render inside a stable wrapper (MUL-9409), so row order
+// and adjacency are compared at the wrapper level.
+function threadRow(el: Element): Element {
+  return el.closest("[data-thread-row]") ?? el;
+}
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -805,7 +825,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listPins.mockResolvedValue([]);
     // /timeline returns the entries flat in chronological order (oldest first).
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
-    mockApiObj.listIssueDeliverables.mockResolvedValue([]);
+    mockApiObj.listAttachments.mockResolvedValue([]);
     mockApiObj.listComments.mockResolvedValue([]);
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
@@ -826,6 +846,66 @@ describe("IssueDetail (shared)", () => {
     // Reset project mock — individual tests override per case. Default fixture
     // has project_id: null so getProject is not invoked.
     mockApiObj.getProject.mockReset();
+    useIssueSidebarSectionsStore.getState().reset();
+  });
+
+  describe("sidebar section settings", () => {
+    const wakeupsSlot = (container: HTMLElement) => container.querySelector('[data-issue-sidebar-section="wakeups"]');
+    const wakeupsSwitch = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Customize sidebar" }));
+      return within(await screen.findByRole("dialog")).getByRole("switch", { name: "Wakeups" });
+    };
+
+    it("hides wakeups from settings after the header chip opened them", async () => {
+      const { container } = renderIssueDetail();
+      fireEvent.click(await screen.findByRole("button", { name: "Review open wakeups" }));
+      expect(wakeupsSlot(container)).not.toBeNull();
+
+      fireEvent.click(await wakeupsSwitch());
+      expect(useIssueSidebarSectionsStore.getState().hidden).toContain("wakeups");
+      expect(wakeupsSlot(container)).toBeNull();
+    });
+
+    it("lets settings hide again the wakeups the header chip revealed", async () => {
+      useIssueSidebarSectionsStore.getState().setHidden("wakeups", true);
+      const { container } = renderIssueDetail();
+      fireEvent.click(await screen.findByRole("button", { name: "Review open wakeups" }));
+      expect(wakeupsSlot(container)).not.toBeNull();
+      expect(useIssueSidebarSectionsStore.getState().hidden).toContain("wakeups");
+
+      const toggle = await wakeupsSwitch();
+      fireEvent.click(toggle);
+      expect(useIssueSidebarSectionsStore.getState().hidden).not.toContain("wakeups");
+      fireEvent.click(toggle);
+      expect(useIssueSidebarSectionsStore.getState().hidden).toContain("wakeups");
+      expect(wakeupsSlot(container)).toBeNull();
+    });
+
+    it("ends the header chip's reveal when the reader moves to another issue", async () => {
+      useIssueSidebarSectionsStore.getState().setHidden("wakeups", true);
+      const issue2 = { ...mockIssue, id: "issue-2", title: "Second issue", description: "Second description" };
+      mockApiObj.getIssue.mockImplementation((issueId: string) =>
+        Promise.resolve(issueId === "issue-2" ? issue2 : mockIssue),
+      );
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(["issues", "ws-1", "detail", "issue-2"], issue2);
+      const ui = (issueId: string) => (
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId={issueId} />
+          </QueryClientProvider>
+        </I18nProvider>
+      );
+      const { container, rerender } = render(ui("issue-1"));
+      fireEvent.click(await screen.findByRole("button", { name: "Review open wakeups" }));
+      expect(wakeupsSlot(container)).not.toBeNull();
+
+      rerender(ui("issue-2"));
+      await screen.findByDisplayValue("Second description");
+      rerender(ui("issue-1"));
+      await screen.findByDisplayValue("Add JWT auth to the backend");
+      expect(wakeupsSlot(container)).toBeNull();
+    });
   });
 
   it("passes the issue's agent assignment to the local-directory hint", async () => {
@@ -889,10 +969,11 @@ describe("IssueDetail (shared)", () => {
     const image: Attachment = { id: "historical-chart", workspace_id: "ws-1", issue_id: "issue-1", comment_id: "older-comment",
       chat_session_id: null, chat_message_id: null, uploader_type: "agent", uploader_id: "agent-1",
       filename: "historical-chart.png", content_type: "image/png", size_bytes: 100,
-      url: "/chart.png", download_url: "/chart.png", markdown_url: "/chart.png", created_at: "2026-01-01T00:00:00Z" };
+      url: "/chart.png", download_url: "/chart.png", markdown_url: "/chart.png", created_at: "2026-01-01T00:00:00Z",
+      comment_author_type: "agent", comment_author_id: "agent-1", comment_created_at: "2026-01-01T00:00:00Z" };
     mockApiObj.listTimeline.mockResolvedValue([]);
-    mockApiObj.listIssueDeliverables.mockResolvedValue([{ id: "older-comment", type: "comment", actor_type: "agent",
-      actor_id: "agent-1", created_at: image.created_at, attachments: [image] }]);
+    // The issue attachment list alone supplies the historical file and its origin.
+    mockApiObj.listAttachments.mockResolvedValue([image]);
     const root = {
       id: "older-root", issue_id: "issue-1", author_type: "agent", author_id: "agent-1",
       content: "Historical image discussion", type: "comment", parent_id: null,
@@ -1002,6 +1083,21 @@ describe("IssueDetail (shared)", () => {
     fireEvent.click(menuButton!);
 
     expect(screen.queryByText("Create sub-issue from here")).not.toBeInTheDocument();
+  });
+
+  it("keeps an embedded host's sidebar closed while loading", () => {
+    mockApiObj.getIssue.mockReturnValue(new Promise(() => {}));
+    const queryClient = createTestQueryClient();
+    const view = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueDetail issueId="issue-1" defaultSidebarOpen={false} />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    expect(view.container.querySelector(".w-80.border-l")).toBeNull();
+    view.unmount();
+    queryClient.clear();
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -1628,7 +1724,7 @@ describe("IssueDetail (shared)", () => {
     const agentBlock = container.querySelector(`[data-run-comment-id="${taskId}"]`)!;
     expect(agentBlock).not.toBeNull();
     expect(userBlock.contains(agentBlock)).toBe(false);
-    expect(agentBlock.parentElement).toBe(userBlock.parentElement);
+    expect(threadRow(agentBlock).parentElement).toBe(userBlock.parentElement);
     expect(agentBlock.querySelector(`[data-run-id="${taskId}"]`)).not.toBeNull();
     const running: AgentTask = { ...task, status: "running", started_at: task.created_at, delivered_comment_ids: [root.id] };
     act(() => client.setQueryData(issueKeys.tasks("issue-1"), [running]));
@@ -1696,8 +1792,8 @@ describe("IssueDetail (shared)", () => {
     const firstComment = container.querySelector(`#comment-${first.id}`);
     expect(latestComment).not.toBeNull();
     expect(firstComment).not.toBeNull();
-    expect(latestComment!.nextElementSibling).toBe(run);
-    expect(firstComment!.nextElementSibling).not.toBe(run);
+    expect(threadRow(latestComment!).nextElementSibling).toBe(threadRow(run));
+    expect(threadRow(firstComment!).nextElementSibling).not.toBe(threadRow(run));
   });
 
   it("keeps the running block after its delivered comment and one queued block after later replies", async () => {
@@ -1739,7 +1835,7 @@ describe("IssueDetail (shared)", () => {
     expect(rootContent!.compareDocumentPosition(runningBlock!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(runningBlock!.compareDocumentPosition(firstComment!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(firstComment!.compareDocumentPosition(latestComment!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(latestComment!.nextElementSibling).toBe(queuedBlock);
+    expect(threadRow(latestComment!).nextElementSibling).toBe(threadRow(queuedBlock!));
     expect(container.querySelectorAll(`[data-run-comment-id="${queued.id}"]`)).toHaveLength(1);
   });
 
@@ -1823,9 +1919,9 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => expect(container.querySelectorAll('[data-run-slot-id]')).toHaveLength(3));
     const slots = tasks.map((task) => container.querySelector(`[data-run-slot-id="${task.id}"]`)!);
     const [secondRow, thirdRow] = [second, third].map((request) => container.querySelector(`#comment-${request.id}`)!);
-    expect(secondRow!.previousElementSibling).toBe(slots[0]);
-    expect(secondRow!.nextElementSibling).toBe(slots[1]);
-    expect(thirdRow!.nextElementSibling).toBe(slots[2]);
+    expect(threadRow(secondRow!).previousElementSibling).toBe(threadRow(slots[0]!));
+    expect(threadRow(secondRow!).nextElementSibling).toBe(threadRow(slots[1]!));
+    expect(threadRow(thirdRow!).nextElementSibling).toBe(threadRow(slots[2]!));
     fireEvent.click(within(slots[0] as HTMLElement).getByRole("button", { name: /View activity/ }));
     await within(slots[0] as HTMLElement).findByText("No activity recorded yet.");
     for (const index of [0, 1]) {
@@ -1849,9 +1945,9 @@ describe("IssueDetail (shared)", () => {
     expect(within(slots[0] as HTMLElement).queryByRole("button", { name: /View activity/ })).not.toBeInTheDocument();
     // Answers land at their own time, after the requests; the queued run
     // stays with its request.
-    expect(thirdRow!.nextElementSibling).toBe(slots[2]);
-    expect(slots[2]!.nextElementSibling).toBe(slots[0]);
-    expect(slots[0]!.nextElementSibling).toBe(slots[1]);
+    expect(threadRow(thirdRow!).nextElementSibling).toBe(threadRow(slots[2]!));
+    expect(threadRow(slots[2]!).nextElementSibling).toBe(threadRow(slots[0]!));
+    expect(threadRow(slots[0]!).nextElementSibling).toBe(threadRow(slots[1]!));
     expect(container.querySelector(`[data-run-slot-id="${tasks[2]!.id}"]`)).toBe(slots[2]);
     expect(within(slots[2] as HTMLElement).getByText("Waiting for an available agent.")).toBeInTheDocument();
   });
@@ -1925,7 +2021,7 @@ describe("IssueDetail (shared)", () => {
     const userReply = container.querySelector("#comment-user-reply")!;
     const agentBlock = container.querySelector(`[data-run-comment-id="${task.id}"]`)!;
     expect(userReply.contains(agentBlock)).toBe(false);
-    expect(userReply.nextElementSibling).toBe(agentBlock);
+    expect(threadRow(userReply).nextElementSibling).toBe(threadRow(agentBlock));
     expect(within(agentBlock as HTMLElement).getByRole("button", { name: "Retry run" })).toBeInTheDocument();
     expect(container.querySelectorAll(`[data-run-id="${task.id}"]`)).toHaveLength(1);
   });
@@ -2013,6 +2109,53 @@ describe("IssueDetail (shared)", () => {
       await screen.findByText("Retrying after the deploy");
       await waitFor(() => expect(container.querySelector(`#comment-failure-notice [data-run-id="${task.id}"]`)).not.toBeNull());
       expectStatedOnce(container.querySelector("#comment-failure-notice") as HTMLElement);
+    });
+
+    // A task_failed notification names the task (MUL-9340); the run renders
+    // under its notice's id when it left one, and under the task id otherwise.
+    describe("lands a failed run's notification", () => {
+      const taskId = failedRun().id;
+
+      it.each(["failure-notice", taskId])("in a thread with a notice, through %s", async (target) => {
+        const root = mockTimeline[0]!;
+        const task = failedRun({ trigger_comment_id: root.id, delivered_comment_ids: [root.id] });
+        mockApiObj.listTimeline.mockResolvedValue([root, notice(task, root.id)]);
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(target);
+
+        await waitFor(() => expect(container.querySelector("#comment-failure-notice [data-run-id]")).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector("#comment-failure-notice"))).toBe(true));
+      });
+
+      it("in a thread without a notice, through the task id", async () => {
+        const root = mockTimeline[0]!;
+        const task = failedRun({ trigger_comment_id: root.id, delivered_comment_ids: [root.id] });
+        mockApiObj.listTimeline.mockResolvedValue([root]);
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(task.id);
+
+        await waitFor(() => expect(container.querySelector(`#comment-${task.id}`)).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector(`#comment-${task.id}`))).toBe(true));
+      });
+
+      it("at the top level with a notice, through the task id", async () => {
+        const task = failedRun();
+        mockApiObj.listTimeline.mockResolvedValue([...mockTimeline, notice(task, null)]);
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(task.id);
+
+        await waitFor(() => expect(container.querySelector(`#comment-failure-notice [data-run-comment-id="${task.id}"]`)).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector("#comment-failure-notice"))).toBe(true));
+      });
+
+      it("at the top level without a notice, through the task id", async () => {
+        const task = failedRun();
+        mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+        const { container } = renderIssueDetailWithHighlight(task.id);
+
+        await waitFor(() => expect(container.querySelector(`#comment-${task.id}`)).not.toBeNull());
+        await waitFor(() => expect(hasHighlightedCommentBackground(container.querySelector(`#comment-${task.id}`))).toBe(true));
+      });
     });
   });
 
@@ -2236,6 +2379,75 @@ describe("IssueDetail (shared)", () => {
 
     await screen.findByText("System coordination update.");
     expect(screen.queryByRole("button", { name: "Retry run" })).not.toBeInTheDocument();
+  });
+
+  describe("an issue an agent created for a member (#7995)", () => {
+    const created = (actorType: "agent" | "member", actorId: string): TimelineEntry => ({
+      type: "activity",
+      id: "act-created",
+      actor_type: actorType,
+      actor_id: actorId,
+      action: "created",
+      details: {},
+      created_at: "2026-01-15T00:00:00Z",
+    });
+
+    it("names the requester in the created entry and under the creator", async () => {
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        creator_type: "agent",
+        creator_id: "agent-1",
+        requester_id: "user-1",
+      });
+      mockApiObj.listTimeline.mockResolvedValue([created("agent", "agent-1")]);
+
+      renderIssueDetail();
+
+      expect(await screen.findByText("created this issue on behalf of Test User")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Details"));
+      const creatorRow = screen.getByText("Created by").parentElement!;
+      expect(creatorRow).toHaveTextContent("Claude Agent");
+      expect(within(creatorRow).getByRole("link", { name: "On behalf of Test User" }))
+        .toHaveAttribute("href", "/test/members/user-1");
+      expect(screen.queryByText("Requested by")).not.toBeInTheDocument();
+    });
+
+    it.each([
+      { creatorType: "agent", creatorId: "agent-1", requesterId: null },
+      { creatorType: "agent", creatorId: "agent-1", requesterId: undefined },
+      { creatorType: "member", creatorId: "user-1", requesterId: "user-1" },
+    ] as const)("keeps plain creation for $creatorType with requester $requesterId", async ({ creatorType, creatorId, requesterId }) => {
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        creator_type: creatorType,
+        creator_id: creatorId,
+        requester_id: requesterId,
+      });
+      mockApiObj.listTimeline.mockResolvedValue([created(creatorType, creatorId)]);
+
+      renderIssueDetail();
+
+      expect(await screen.findByText("created this issue")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Details"));
+      expect(screen.queryByText(/On behalf of/)).not.toBeInTheDocument();
+      expect(screen.queryByText("Requested by")).not.toBeInTheDocument();
+    });
+
+    it("uses the existing member-name fallback when the requester is unavailable", async () => {
+      mockApiObj.getIssue.mockResolvedValue({
+        ...mockIssue,
+        creator_type: "agent",
+        creator_id: "agent-1",
+        requester_id: "former-member",
+      });
+      mockApiObj.listTimeline.mockResolvedValue([created("agent", "agent-1")]);
+
+      renderIssueDetail();
+
+      expect(await screen.findByText("created this issue on behalf of Unknown")).toBeInTheDocument();
+      fireEvent.click(screen.getByText("Details"));
+      expect(screen.getByText("Created by").parentElement).toHaveTextContent("On behalf of Unknown");
+    });
   });
 
   it("collapses non-trailing activity blocks and expands the last one by default", async () => {
@@ -2463,7 +2675,7 @@ describe("IssueDetail (shared)", () => {
         screen.getByText(/from In Review to Awaiting Response/i),
       ).toBeInTheDocument();
     });
-    expect(statusChangeIcon("Awaiting Response").style.color).toBe("rgb(255, 0, 0)");
+    expect(statusChangeIcon("Awaiting Response").style.color).toBe("var(--palette-red, #ff0000)");
   });
 
   it("leaves a built-in status-change activity on its semantic token colour", async () => {
@@ -2703,6 +2915,42 @@ describe("IssueDetail (shared)", () => {
       await act(async () => { finishTasks([]); });
       await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
       expect(landedBeforeGrouping).toBe(false);
+    });
+
+    it("restarts a comment landing that a timeline update cancels while it is still aligning", async () => {
+      mockApiObj.listTasksByIssue.mockResolvedValue([]);
+      // The anchor keeps moving for 300ms, like reply heights settling, so the
+      // alignment loop is still running when the update arrives.
+      let driftStart = 0;
+      const drift = () => {
+        driftStart ||= performance.now();
+        return Math.min(performance.now() - driftStart, 300);
+      };
+      const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        const container = this.closest<HTMLElement>("[data-tab-scroll-root]");
+        if (this === container) return new DOMRect(0, 0, 400, 200);
+        if (this.id === "comment-comment-2" && container) {
+          return new DOMRect(0, 250 + drift() - container.scrollTop, 400, 100);
+        }
+        return new DOMRect(0, 0, 0, 0);
+      });
+      try {
+        const { queryClient } = renderIssueDetailWithHighlight("comment-2");
+        await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
+        const container = document.querySelector<HTMLElement>("[data-tab-scroll-root]")!;
+        act(() => {
+          queryClient.setQueryData<TimelineEntry[]>(["issues", "timeline", "issue-1"], (old) => [
+            ...(old ?? []),
+            { ...mockTimeline[0]!, id: "comment-late", content: "Arrived mid-landing", created_at: "2026-01-18T00:00:00Z" },
+          ]);
+        });
+        expect(driftStart).toBeGreaterThan(0);
+        expect(performance.now() - driftStart).toBeLessThan(300);
+        // 250 + 300 drift - 16 top gap: where the comment sits once settled.
+        await waitFor(() => expect(container.scrollTop).toBe(534), { timeout: 2000 });
+      } finally {
+        rect.mockRestore();
+      }
     });
 
     it("folds an assignment reply with its resolved parent and unfolds that thread for a notification", async () => {
@@ -3849,6 +4097,46 @@ describe("IssueDetail (shared)", () => {
   // showed a Subscribe button to people who were already subscribed, and a
   // click landing in that window sent a subscribe instead of the unsubscribe
   // they meant (MUL-5714).
+  describe("subscription inherited from the project", () => {
+    beforeEach(() => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue([
+        {
+          issue_id: "issue-1",
+          user_type: "member" as const,
+          user_id: "user-1",
+          reason: "project" as const,
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ]);
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    });
+
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    it("labels the project source and leaves only this issue", async () => {
+      renderIssueDetail();
+
+      expect(await screen.findByText("Via project")).toBeInTheDocument();
+      const button = await waitFor(() => {
+        const el = screen.getByText("Unsubscribe");
+        expect(el.getAttribute("aria-haspopup")).toBeNull();
+        return el;
+      });
+      fireEvent.click(button);
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
+      );
+      expect(mockApiObj.unsubscribeFromIssueSubtree).not.toHaveBeenCalled();
+    });
+  });
+
   describe("subscription state before the query resolves", () => {
     afterEach(() => {
       document.body.innerHTML = "";
@@ -3888,7 +4176,7 @@ describe("IssueDetail (shared)", () => {
     async function openSubscriberPicker() {
       const heading = await screen.findByText("Activity");
       const header = heading.parentElement?.parentElement;
-      const trigger = header?.querySelector('[data-slot="popover-trigger"]');
+      const trigger = header?.querySelector('[data-trigger="popover"]');
       if (!trigger) throw new Error("subscriber picker trigger not found");
       fireEvent.click(trigger);
       return waitFor(() => {

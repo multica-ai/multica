@@ -5,6 +5,7 @@ export const CHANNEL_INTEGRATIONS = [
   "dingtalk",
   "wecom",
   "telegram",
+  "weixin",
 ] as const;
 
 export type ChannelIntegration = (typeof CHANNEL_INTEGRATIONS)[number];
@@ -30,7 +31,7 @@ export interface SettingsLocation {
   tab: string;
   /** In-page anchor to scroll to (see `SettingsSection`/`SettingsRow`). */
   section: string | null;
-  /** Detail page within Channels. */
+  /** Reserved for settings locations outside messaging. */
   integration: string | null;
 }
 
@@ -64,6 +65,8 @@ export function resolveSettingsLocation(
       return { tab: "code", section, integration: null };
     case "repositories":
       return { tab: "code", section: section ?? "repositories", integration: null };
+    case "channels":
+      return { tab: "channels", section, integration: null };
     case "integrations": {
       const composioCallback =
         params.has("connected") ||
@@ -80,12 +83,12 @@ export function resolveSettingsLocation(
       return {
         tab: "channels",
         section: null,
-        integration: isChannelIntegration(integration) ? integration : null,
+        integration: null,
       };
     }
     default:
       if (isChannelIntegration(tab)) {
-        return { tab: "channels", section: null, integration: tab };
+        return { tab: "channels", section: null, integration: null };
       }
       return { tab, section, integration };
   }
@@ -102,6 +105,7 @@ export function settingsHref(
   params.set("tab", tab);
   params.delete("section");
   params.delete("integration");
+  params.delete("scope");
   if (detail.section) params.set("section", detail.section);
   if (detail.integration) params.set("integration", detail.integration);
   return `${pathname}?${params.toString()}`;

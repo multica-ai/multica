@@ -12,7 +12,20 @@
     "unread_other": "未読のチャット {{count}}件",
     "default": "Multica に質問"
   },
+  "bar": {
+    "history": "チャット履歴",
+    "history_group": {
+      "today": "今日",
+      "week": "過去 7 日間",
+      "older": "それ以前"
+    },
+    "close_chip": "{{title}} を閉じる",
+    "all_chats": "すべてのチャット",
+    "more_other": "他 {{count}} 件のチャット"
+  },
   "input": {
+    "page_context_add": "このページをコンテキストに追加",
+    "page_context_remove": "ページのコンテキストを削除",
     "placeholder_no_agent": "チャットを始めるにはエージェントを作成してください",
     "placeholder_archived": "このセッションはアーカイブされています",
     "placeholder_archived_agent": "このエージェントはアーカイブされています",
@@ -39,10 +52,10 @@
   "queue": {
     "title_other": "キュー内のメッセージ {{count}} 件",
     "clear": "すべて削除",
-    "steer": "指示",
-    "steer_unavailable": "現在の返信が開始されると指示できます",
+    "steer": "今すぐ送信（現在の返信を停止）",
+    "steer_unavailable": "現在の返信が開始すると利用できます",
     "steer_no_permission": "このエージェントを実行する権限がありません",
-    "steer_unavailable_toast": "現在は指示できません。キューを更新しています。",
+    "steer_unavailable_toast": "今すぐ送信できません。キューを更新しています。",
     "edit": "キュー内のメッセージを編集",
     "remove": "キューから削除",
     "more": "その他のキュー操作",
@@ -131,6 +144,7 @@
     "restore_tooltip": "復元",
     "expand_tooltip": "展開",
     "minimize_tooltip": "最小化",
+    "close_tooltip": "閉じる",
     "another_running": "別のチャットが実行中です",
     "another_unread": "別のチャットに未読の返信があります",
     "running": "実行中",
@@ -170,7 +184,6 @@
       "label": "アクションを提案",
       "prompt": "私のワークスペースについて知っていることを踏まえ、最初に役立つアクションを提案してください。"
     },
-    "customize": "開始例をカスタマイズ",
     "uploading": "アップロードが完了してから開始例を使用してください。",
     "draft_in_progress": "開始例を使う前に、下書きを送信するか消去してください。"
   },
@@ -236,8 +249,6 @@
     "no_response_preview": "テキスト返信なし",
     "quick_agents": "よく使う Agent",
     "add": "追加",
-    "add_agent": "よく使う Agent を追加",
-    "unpin_agent": "よく使うから外す",
     "waiting": "返信待ち",
     "pin": "ピン留め",
     "unpin": "ピン留めを解除",

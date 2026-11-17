@@ -6,6 +6,7 @@
   "breadcrumb_aria": "현재 메뉴",
   "groups": {
     "pages": "페이지",
+    "views": "뷰",
     "commands": "명령어",
     "members": "멤버",
     "agents": "에이전트",
@@ -33,6 +34,7 @@
   },
   "commands": {
     "current_theme_aria": "현재 테마",
+    "current_mode_aria": "현재 모드",
     "new_issue": "새 태스크",
     "new_project": "새 프로젝트",
     "new_autopilot": "새 오토파일럿",
@@ -103,7 +105,6 @@
     "project": "프로젝트",
     "parent": "상위 태스크",
     "quick_actions": "빠른 작업",
-    "theme": "테마",
     "project_status": "프로젝트 상태",
     "no_project": "프로젝트 없음",
     "current": "현재"
@@ -122,7 +123,6 @@
     "unsubscribed": "구독을 취소했습니다",
     "label_added": "라벨 {{name}}을 추가했습니다",
     "label_removed": "라벨 {{name}}을 제거했습니다",
-    "label_failed": "일부 태스크에 라벨 {{name}}을 추가하지 못했습니다",
     "update_failed": "업데이트에 실패했습니다",
     "assigned": "{{identifier}}를 {{name}}에게 지정했습니다"
   },

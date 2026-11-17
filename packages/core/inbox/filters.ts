@@ -7,6 +7,7 @@ import {
 } from "../issues/stores/filter-tree";
 import type { InboxItem, InboxItemType, IssuePriority, IssueStatus } from "../types";
 import { groupInboxRows, sortInboxNewestFirst, withCommentAnchor } from "./group";
+import { isInboxItemSnoozed } from "./snooze";
 
 /**
  * Notification kinds, grouped the way a reader thinks about them. Mirrored by
@@ -41,6 +42,7 @@ const TYPE_GROUP: Partial<Record<InboxItemType, InboxTypeGroup>> = {
   assignee_changed: "assign",
   issue_subscribed: "assign",
   review_requested: "review",
+  issue_created: "change",
   status_changed: "change",
   priority_changed: "change",
   start_date_changed: "change",
@@ -362,11 +364,6 @@ export function effectiveInboxFilters(
   return next;
 }
 
-/** @deprecated Use `effectiveInboxFilters` with `archived: true`. */
-export function inboxFiltersForArchive(filters: InboxFilters): InboxFilters {
-  return filters.agent ? withoutInboxFilter(filters, "agent") : filters;
-}
-
 /** Start of the received window, at a local midnight so it holds all day. */
 export function inboxReceivedAfter(received: InboxReceivedFilter, now: Date = new Date()): Date {
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -569,6 +566,8 @@ export function filterInboxItems(
   const tests = compile(filters, now);
   const out: InboxItem[] = [];
   for (const group of groupInboxRows(items)) {
+    // Snoozed since the list loaded; the server leaves the rest out.
+    if (group[0] && isInboxItemSnoozed(group[0], now.getTime())) continue;
     const row = group.find((item) => passes(tests.notification, item));
     if (!row || !passes(tests.issue, row)) continue;
     const key = row.issue_id ?? row.id;

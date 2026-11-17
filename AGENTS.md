@@ -1,5 +1,7 @@
 # Repository Instructions
 
+This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.
+
 Multica is a task management platform where people and agents collaborate on issues. These instructions apply to all coding agents working in this repository.
 
 ## Scope and Reading Order
@@ -41,6 +43,7 @@ Run these from the repository root:
 | Scope | Checks |
 | --- | --- |
 | Frontend excluding mobile | `pnpm typecheck`, `pnpm lint`, `pnpm test` |
+| `.github/` or `scripts/` | `pnpm test:scripts` (every `scripts/**/*.test.mjs`, including CI path selection and gates), plus `bash scripts/<name>.test.sh` for a shell script you changed |
 | Go backend | `make test` |
 | End-to-end | `pnpm exec playwright test` |
 | Combined web/backend verification | `make check` |
@@ -52,6 +55,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 
 - TanStack Query owns API/server data. Zustand owns client state such as filters, drafts, modals, and tab layout; persist only durable preferences/drafts/layout, not server data or ephemeral UI state.
 - Web/desktop shared stores live in `packages/core/`. Desktop platform stores remain in desktop; mobile stores remain in mobile. Do not define stores in `packages/views/`.
+- Desktop tabs in a window share one set of Zustand stores and mount one at a time; a web tab gets its own. State describing how the current page was reached (source list, selection, highlight) must not assume one page: a click that opens a new tab leaves the current page's record intact and still records the target tab's own (`sidebarTabIssuesByWorkspace` in `packages/core/inbox/selection-store.ts`).
 - On web/desktop, workspace identity is route-driven; platform mirrors exist only for request headers, storage namespaces, and reconnects. React Context is for platform plumbing, not a second server-state store.
 - Among stores, only auth/workspace stores may call `api.*` directly; other server interactions belong in queries/mutations.
 - Workspace-scoped query keys include `wsId`; account-level keys remain account-scoped. Hooks needing workspace context accept `wsId` unless guaranteed to run under its provider.
@@ -59,6 +63,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 - WebSocket events patch or invalidate Query caches, not server payloads in Zustand. Clearing client-owned pointers is allowed with one responder and a self-initiated guard when this client can cause the event.
 - Optimistic field patches require a predictable result, rare failure, trivial rollback, and staying on the current screen. Snapshot before patching, roll back on failure, and invalidate uncertain projections on settle.
 - Create/delete/leave and confirmation flows await the server before navigation or cleanup; do not optimistically delete entities. Exceptions: workspace leave (known debt under Desktop Rules) and mobile inbox mark-read (mobile instructions).
+- When the caller can unmount before the request settles (moving to the next item, closing a dialog or menu), attach toasts and follow-up work to the request promise (`mutateAsync().then(onSuccess, onError)`) or to `useMutation`'s own callbacks, not to per-call `mutate(vars, { onSuccess, onError })` callbacks, which React Query skips once the caller unmounts. Test these flows with the real mutation hook and a mocked API, unmounting the caller before the request settles (`packages/views/inbox/components/use-inbox-snooze.test.tsx`, `packages/views/issues/actions/__tests__/issue-inbox-actions.test.tsx`).
 - Message sends use visible pending state and retry on failure.
 
 ## API Compatibility
@@ -120,6 +125,7 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - E2E setup/teardown uses `TestApiClient`.
 - DB-backed Go tests use `server/internal/testutil` fixtures (`dbfx.Issue`, `dbfx.Task`, `dbfx.Insert`) and `testutil.Call(h, req).Want(status).JSON(&out)`. Keep product assertions and case-specific diagnostics in the test, not fixture helpers.
 - DB-backed Go tests share one database with packages running in parallel. When code under test reads across workspaces (sweeps, outbox scans, GC), assert on your fixture's rows (task state, `pending` / `settled` for your IDs), never on the call's totals or result length.
+- Tests of CI configuration assert invariants a gate cannot see on its own, such as no `continue-on-error` in gated jobs, or behavior derived from the configuration, such as path selection and gate mapping. Do not assert the current text of a step, name, or matrix.
 - Default tests must not resolve or execute user-installed agent CLIs; pass test-created fake or missing executable paths. New default agent commands go in `scripts/agent-cli-command-names.txt`.
 - Only run real-agent smoke tests when explicitly authorized. Gate them behind `agentintegration` and check `MULTICA_RUN_REAL_AGENT_SMOKE=1` before executable lookup/account access. Run the specific test: `(cd server && MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration ./pkg/agent -run '<test-name>' -count=1 -v)`.
 
@@ -129,5 +135,6 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - Before adding complexity for a speculative or vanishingly unlikely race or security edge case, explain the concrete failure mode, likelihood, and complexity cost to the user and get their buy-in. Do not silently expand scope for theoretical robustness.
 - Do not add internal compatibility shims, dual writes, fallback paths, or legacy adapters unless requested. This does not relax API response compatibility above.
 - Use names, types, and tests to express behavior. Code comments are English and kept for non-obvious rationale and constraints; remove superseded plans and incident narratives when updating code. Preserve tool directives and mixed-version contracts.
+- When a change alters user-visible behavior, a setting, a default, a shortcut, or an entry point, `rg` `apps/docs/content/docs` for the feature's name and the terms of the old behavior; a newly added label is not in the docs yet. In the same PR, update every affected page and its locale siblings (`inbox.mdx`, `inbox.zh.mdx`, ...). Text the change makes wrong is always fixed here; if the docs only lack the new behavior, you may link a docs follow-up issue from the PR description instead.
 - New global pre-workspace routes use a single word or `/{noun}/{verb}`, not hyphenated root names. Update `server/internal/handler/reserved_slugs.json`, run `pnpm generate:reserved-slugs`, and commit `packages/core/paths/reserved-slugs.ts` when changing reserved slugs.
 - Use atomic conventional commits and the repository PR template. Follow the [pull request requirements](CONTRIBUTING.md#pull-request-requirements): Problem, Goal, Proposal (high-level design understandable without much background), Alternatives (optional), and Screenshots. Attach screenshots or a screen recording for UI or interaction changes (missing both means rejection by default). For releases, follow [.github/RELEASING.md](.github/RELEASING.md); default to a patch bump unless specified otherwise.

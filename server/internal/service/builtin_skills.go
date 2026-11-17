@@ -22,8 +22,8 @@ const (
 )
 
 // PlatformSkillName is the built-in skill carrying Multica's platform
-// contracts — issues, mentions, agents, squads, autopilots, projects, runtimes
-// and skill import — behind one routing SKILL.md. Every agent receives it.
+// contracts — issues, mentions, agents, squads, autopilots, projects, runtimes,
+// local environments and skill import — behind one routing SKILL.md. Every agent receives it.
 //
 // The daemon's runtime brief names the same skill from its own constant: the
 // daemon runs on the user's machine and must not import this package, so the

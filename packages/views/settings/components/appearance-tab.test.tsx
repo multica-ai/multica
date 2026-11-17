@@ -1,15 +1,19 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { configStore } from "@multica/core/config";
 import {
   DEFAULT_APPEARANCE,
+  parseTheme,
   readZip,
   themeFromFiles,
   useAppearanceStore,
   useInstalledThemesStore,
   useThemeFolderStatus,
+  writeZip,
 } from "@multica/core/appearance";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
@@ -22,16 +26,26 @@ const themeState = vi.hoisted(() => ({
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
   useTheme: () => themeState,
 }));
+const api = vi.hoisted(() => ({
+  listStoreThemes: vi.fn(),
+  getStoreThemePackage: vi.fn(),
+  getStoreThemeScreenshot: vi.fn(),
+}));
+vi.mock("@multica/core/api", () => ({ api }));
 
 import { AppearanceTab } from "./appearance-tab";
 
 const TEST_RESOURCES = { en: { common: enCommon, settings: enSettings } };
 
+let queryClient: QueryClient;
+
 function Wrapper({ children }: { children: ReactNode }) {
   return (
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      {children}
-    </I18nProvider>
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        {children}
+      </I18nProvider>
+    </QueryClientProvider>
   );
 }
 
@@ -67,8 +81,11 @@ describe("AppearanceTab", () => {
     themeState.setTheme.mockClear();
     localStorage.clear();
     useAppearanceStore.setState(DEFAULT_APPEARANCE);
-    useInstalledThemesStore.setState({ themes: [], folders: {} });
+    useInstalledThemesStore.setState({ themes: [], folders: {}, fromStore: {} });
     useThemeFolderStatus.setState({ path: null, problems: [] });
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    configStore.getState().setThemeStoreEnabled(false);
+    vi.clearAllMocks();
   });
   afterEach(() => {
     cleanup();
@@ -145,6 +162,62 @@ describe("AppearanceTab", () => {
     expect(contentLatin).toHaveTextContent("Geist Mono");
   });
 
+  describe("content font size", () => {
+    const sizeSliders = () => screen.getAllByRole("slider", { name: "Font size" });
+    const follow = () => screen.getByRole("switch", { name: "Match interface size" });
+    const press = async (slider: HTMLElement, key: string) => {
+      act(() => slider.focus());
+      await userEvent.setup().keyboard(key);
+    };
+    // Base UI keeps edge-aligned thumbs visibility: hidden until a microtask has measured them.
+    const renderTab = async () => {
+      render(<AppearanceTab />, { wrapper: Wrapper });
+      await screen.findAllByRole("slider", { name: "Font size" });
+    };
+
+    it("follows the interface by default, with the same slider", async () => {
+      useAppearanceStore.setState({ fontSize: 15 });
+      await renderTab();
+
+      const [, content] = sizeSliders();
+      expect(content).toHaveValue("15");
+      expect(follow()).toBeChecked();
+      expect(screen.getByText("15 px · Default")).toBeInTheDocument();
+    });
+
+    it("keeps a size equal to the interface independent of later interface changes", async () => {
+      useAppearanceStore.setState({ fontSize: 14, contentSize: 15 });
+      await renderTab();
+      expect(follow()).not.toBeChecked();
+
+      await press(sizeSliders()[1]!, "{ArrowLeft}");
+      expect(state().contentSize).toBe(14);
+      expect(follow()).not.toBeChecked();
+
+      await press(sizeSliders()[0]!, "{ArrowRight}");
+      expect(state()).toMatchObject({ fontSize: 15, contentSize: 14 });
+      expect(sizeSliders()[1]).toHaveValue("14");
+    });
+
+    it("pins the current size when following is turned off, and follows again only when turned on", async () => {
+      const user = userEvent.setup();
+      useAppearanceStore.setState({ fontSize: 13 });
+      await renderTab();
+
+      await user.click(follow());
+      expect(state().contentSize).toBe(13);
+
+      await user.click(follow());
+      expect(state().contentSize).toBe("ui");
+      await press(sizeSliders()[0]!, "{ArrowRight}");
+      expect(sizeSliders()[1]).toHaveValue("14");
+
+      await press(sizeSliders()[1]!, "{ArrowRight}");
+      expect(state().contentSize).toBe(15);
+      expect(follow()).not.toBeChecked();
+    });
+  });
+
   it("names the theme's fonts when the default choice keeps them", () => {
     useAppearanceStore.setState({ theme: "github" });
     const { unmount } = render(<AppearanceTab />, { wrapper: Wrapper });
@@ -174,6 +247,7 @@ describe("AppearanceTab", () => {
     const user = userEvent.setup();
     render(<AppearanceTab />, { wrapper: Wrapper });
 
+    expect(screen.queryByText("Store themes")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Import theme" }));
     expect(await screen.findByRole("menuitem", { name: "Theme file (.zip)" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
@@ -196,9 +270,71 @@ describe("AppearanceTab", () => {
     expect(await screen.findByText("Installed")).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
-    await user.click(screen.getByRole("button", { name: "Remove Paper" }));
+    await user.click(screen.getByRole("button", { name: "Manage" }));
+    const themes = await screen.findByRole("dialog");
+    expect(within(themes).getAllByRole("heading", { level: 3 }).map((h) => h.textContent)).toEqual(["Paper"]);
+    expect(within(themes).getByText("Showing 1 theme")).toBeInTheDocument();
+    expect(themes.querySelector('[data-theme-preview="paper"]')).not.toBeNull();
+    expect(within(themes).queryByRole("switch", { name: "Show installed only" })).toBeNull();
+    await user.click(within(themes).getByRole("button", { name: "Remove Paper" }));
     expect(useInstalledThemesStore.getState().themes).toEqual([]);
     expect(state().theme).toBe("default");
+    expect(within(themes).getByText("No themes are installed yet.")).toBeInTheDocument();
+    expect(api.listStoreThemes).not.toHaveBeenCalled();
+  });
+
+  it("keeps built-in themes in the picker only, and offers Manage once there is something to manage", async () => {
+    const user = userEvent.setup();
+    render(<AppearanceTab />, { wrapper: Wrapper });
+    expect(screen.queryByRole("button", { name: "Manage" })).toBeNull();
+
+    act(() => configStore.getState().setThemeStoreEnabled(true));
+    api.listStoreThemes.mockResolvedValue([]);
+    await user.click(screen.getByRole("button", { name: "Manage" }));
+    const themes = await screen.findByRole("dialog");
+    expect(await within(themes).findByText("No themes are installed yet.")).toBeInTheDocument();
+    expect(within(themes).queryByRole("heading", { name: "Blueprint" })).toBeNull();
+  });
+
+  it("checks the store for updates when asked, and updates every theme that has one", async () => {
+    const encoder = new TextEncoder();
+    const manifest = (version: string) => ({ ...PAPER, version });
+    const old = parseTheme({ manifest: manifest("0.9.0"), css: PAPER_CSS });
+    if (!old.ok) throw new Error("fixture");
+    useInstalledThemesStore.getState().installFromStore(old.theme, "0.9.0");
+    configStore.getState().setThemeStoreEnabled(true);
+    const listed = (version: string) => ({
+      id: "paper",
+      name: "Paper",
+      author: "Someone",
+      repo: "someone/multica-theme-paper",
+      description: "",
+      modes: ["light"],
+      version,
+      size: 100,
+      screenshots: [],
+      downloads: 0,
+    });
+    api.listStoreThemes.mockResolvedValueOnce([listed("0.9.0")]).mockResolvedValue([listed("1.0.0")]);
+    api.getStoreThemePackage.mockResolvedValue(
+      writeZip([
+        { path: "manifest.json", data: encoder.encode(JSON.stringify(manifest("1.0.0"))) },
+        { path: "theme.css", data: encoder.encode(PAPER_CSS) },
+      ]),
+    );
+    const user = userEvent.setup();
+    render(<AppearanceTab />, { wrapper: Wrapper });
+
+    expect(screen.getByText("You have 1 theme from the store.")).toBeInTheDocument();
+    expect(api.listStoreThemes).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Check for updates" }));
+    await waitFor(() => expect(api.listStoreThemes).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("button", { name: "Check for updates" })).toBeEnabled();
+
+    await user.click(screen.getByRole("button", { name: "Check for updates" }));
+    await user.click(await screen.findByRole("button", { name: "Update all (1)" }));
+    await waitFor(() => expect(useInstalledThemesStore.getState().fromStore).toEqual({ paper: "1.0.0" }));
+    expect(await screen.findByRole("button", { name: "Check for updates" })).toBeInTheDocument();
   });
 
   it("duplicates the active theme as a .zip to edit and import, on web", async () => {
@@ -209,8 +345,8 @@ describe("AppearanceTab", () => {
     useAppearanceStore.setState({ theme: "github" });
     render(<AppearanceTab />, { wrapper: Wrapper });
 
-    await user.click(screen.getByRole("button", { name: "More theme actions" }));
-    expect(screen.queryByRole("menuitem", { name: "Open themes folder" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open themes folder" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Import theme" }));
     await user.click(await screen.findByRole("menuitem", { name: "Duplicate “GitHub” as a new theme" }));
 
     expect(click).toHaveBeenCalledTimes(1);
@@ -242,7 +378,7 @@ describe("AppearanceTab", () => {
       desktop.writeThemeFolder.mockResolvedValueOnce({ ok: false, reason: "exists" } as never);
       render(<AppearanceTab />, { wrapper: Wrapper });
 
-      await user.click(screen.getByRole("button", { name: "More theme actions" }));
+      await user.click(screen.getByRole("button", { name: "Import theme" }));
       await user.click(await screen.findByRole("menuitem", { name: "Duplicate “Default” as a new theme" }));
 
       expect(desktop.writeThemeFolder.mock.calls.map((call) => (call as unknown[])[0])).toEqual([
@@ -267,7 +403,6 @@ describe("AppearanceTab", () => {
       useAppearanceStore.setState({ theme: "paper" });
       render(<AppearanceTab />, { wrapper: Wrapper });
 
-      expect(screen.queryByRole("button", { name: "Remove Paper" })).toBeNull();
       expect(screen.getByText(/Some themes in the themes folder don't pass the checks/)).toBeInTheDocument();
       expect(screen.getByText("theme.css line 2: @import is not allowed")).toBeInTheDocument();
 
@@ -275,9 +410,13 @@ describe("AppearanceTab", () => {
       expect(await screen.findByText("Themes folder")).toBeInTheDocument();
       await user.keyboard("{Escape}");
 
-      await user.click(screen.getByRole("button", { name: "More theme actions" }));
-      await user.click(await screen.findByRole("menuitem", { name: "Open themes folder" }));
+      await user.click(screen.getByRole("button", { name: "Open themes folder" }));
       expect(desktop.openThemeFolder).toHaveBeenCalledWith();
+
+      await user.click(screen.getByRole("button", { name: "Manage" }));
+      const themes = await screen.findByRole("dialog");
+      expect(within(themes).getByRole("heading", { name: "Paper" })).toBeInTheDocument();
+      expect(within(themes).queryByRole("button", { name: "Remove Paper" })).toBeNull();
     });
   });
 
@@ -321,6 +460,7 @@ describe("AppearanceTab", () => {
     expect(screen.getByText("The paper itself.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Type" })).toBeInTheDocument();
     expect(screen.getByLabelText("Paper (Dark)")).toHaveValue("#1d1b16");
+    expect(await screen.findByRole("slider", { name: "Width" })).toHaveValue("46");
     expect(screen.getByText("46rem")).toBeInTheDocument();
 
     const font = () => screen.getByRole("textbox", { name: "Heading font" });

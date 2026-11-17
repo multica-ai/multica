@@ -6,6 +6,7 @@
   "breadcrumb_aria": "Текущее меню",
   "groups": {
     "pages": "Страницы",
+    "views": "Представления",
     "commands": "Команды",
     "members": "Участники",
     "agents": "Агенты",
@@ -36,6 +37,7 @@
   },
   "commands": {
     "current_theme_aria": "Текущая тема",
+    "current_mode_aria": "Текущий режим",
     "new_issue": "Новая задача",
     "new_project": "Новый проект",
     "new_autopilot": "Новый автопилот",
@@ -112,7 +114,6 @@
     "project": "Проект",
     "parent": "Родительская задача",
     "quick_actions": "Быстрые действия",
-    "theme": "Тема",
     "project_status": "Статус проекта",
     "no_project": "Без проекта",
     "current": "Текущий"
@@ -131,7 +132,6 @@
     "unsubscribed": "Подписка отменена",
     "label_added": "Добавлена метка «{{name}}»",
     "label_removed": "Удалена метка «{{name}}»",
-    "label_failed": "Не удалось добавить метку «{{name}}» ко всем задачам",
     "update_failed": "Не удалось обновить",
     "assigned": "Задача {{identifier}} назначена: {{name}}"
   },

@@ -380,7 +380,8 @@
     "pending_health_warning": "Esperando la sincronización del daemon",
     "pending_health_error": "Error de registro",
     "pending_health_disabled": "Desactivado",
-    "pending_cli_unknown": "esperando"
+    "pending_cli_unknown": "esperando",
+    "col_rate_limits": "Límites"
   },
   "profiles": {
     "cta": "Añadir runtime",
@@ -469,7 +470,6 @@
   },
   "usage": {
     "period_label": "Periodo",
-    "dimension_label": "Dimensión",
     "kpi_cost_label": "Coste · {{days}}d",
     "kpi_cost_delta": "{{sign}}{{pct}}% vs anterior",
     "kpi_cache_label": "Ahorro por caché · {{days}}d",
@@ -477,8 +477,6 @@
     "kpi_tokens_label": "Tokens · {{days}}d",
     "kpi_tokens_hint": "entrada {{input}} · salida {{output}}",
     "when_title": "Cuándo gastó este runtime",
-    "when_tab_daily": "Diario",
-    "when_tab_weekly": "Semanal",
     "when_tab_heatmap": "Mapa de calor",
     "daily_metric_cost": "Coste",
     "daily_metric_tokens": "Tokens",
@@ -514,6 +512,7 @@
     "cost_by_title_model": "Coste por modelo",
     "cost_by_tab_agent": "Por agente",
     "cost_by_tab_model": "Por modelo",
+    "cost_by_label": "Agrupar por",
     "cost_by_caption_agent_one": "{{count}} agente en este runtime",
     "cost_by_caption_agent_other": "{{count}} agentes en este runtime",
     "cost_by_caption_model_one": "{{count}} modelo usado",
@@ -688,5 +687,38 @@
       "run_there": "Ejecutar en esa máquina",
       "connected": "{{name}} conectado a Multica"
     }
+  },
+  "rate_limits": {
+    "title": "Límites",
+    "caption": "Los informa la CLI mientras se ejecutan tareas",
+    "updated": "Actualizado {{ago}}",
+    "empty_title": "Aún no hay datos de límites",
+    "empty_hint": "Se registran la próxima vez que este runtime ejecute una tarea. Las cuentas con clave de API no tienen límites de plan.",
+    "window_session": "Sesión",
+    "window_session_hours": "Sesión de {{hours}} h",
+    "window_weekly": "Semanal",
+    "window_weekly_opus": "Semanal · Opus",
+    "window_weekly_sonnet": "Semanal · Sonnet",
+    "window_generic": "Otro límite",
+    "short_session": "Sesión",
+    "short_weekly": "Semana",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "Otro",
+    "used": "{{pct}} % usado",
+    "limited": "Límite alcanzado",
+    "resets_in": "Se restablece en {{duration}}",
+    "resets_at": "Se restablece {{time}}",
+    "reset_since": "Restablecido desde el último informe",
+    "verdict_ahead": "{{pct}} % por delante del ritmo · se agota en unos {{duration}}",
+    "verdict_on_pace": "Al ritmo actual dura hasta el restablecimiento",
+    "verdict_limited": "Se reanuda tras el restablecimiento",
+    "credits": "Créditos",
+    "credits_balance": "Quedan {{balance}}",
+    "credits_unlimited": "Ilimitados",
+    "credits_none": "Ninguno",
+    "duration_minutes": "{{minutes}} min",
+    "duration_hours": "{{hours}} h {{minutes}} min",
+    "duration_days": "{{days}} d {{hours}} h"
   }
 }

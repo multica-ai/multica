@@ -4,6 +4,7 @@ import { useId, useState } from "react";
 import { ListChecks, Pencil } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useUpdateIssueSystemWakeup } from "@multica/core/issues";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { SystemWakeup } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
@@ -17,6 +18,8 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { useT } from "../../i18n";
+import { AppLink } from "../../navigation";
+import { wakeupsHref } from "../../autopilots/components/wakeups-tab";
 import { useWakeupText } from "./wakeup-presentation";
 
 const MAX_INSTRUCTION_BYTES = 4000;
@@ -35,6 +38,7 @@ export function SystemWakeupRow({
 }) {
   const { t } = useT("issues");
   const text = useWakeupText();
+  const paths = useWorkspacePaths();
   const update = useUpdateIssueSystemWakeup(workspaceId, issueId);
   const title =
     rule.staged && rule.stage !== null
@@ -124,7 +128,13 @@ export function SystemWakeupRow({
             />
           </div>
           <p className="text-caption text-muted-foreground">
-            {rule.workspace_default ? t(($) => $.wakeups.system.default_on) : t(($) => $.wakeups.system.default_off)}
+            {rule.workspace_default ? t(($) => $.wakeups.system.default_on) : t(($) => $.wakeups.system.default_off)}{" "}
+            <AppLink
+              href={wakeupsHref(paths.autopilots())}
+              className="rounded-xs font-medium text-brand hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              {t(($) => $.wakeups.system.default_change)}
+            </AppLink>
           </p>
         </PopoverContent>
       </Popover>

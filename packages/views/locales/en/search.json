@@ -6,6 +6,7 @@
   "breadcrumb_aria": "Current menu",
   "groups": {
     "pages": "Pages",
+    "views": "Views",
     "commands": "Commands",
     "members": "Members",
     "agents": "Agents",
@@ -34,6 +35,7 @@
   },
   "commands": {
     "current_theme_aria": "Current theme",
+    "current_mode_aria": "Current mode",
     "new_issue": "New issue",
     "new_project": "New project",
     "new_autopilot": "New autopilot",
@@ -106,7 +108,6 @@
     "project": "Project",
     "parent": "Parent issue",
     "quick_actions": "Quick actions",
-    "theme": "Theme",
     "project_status": "Project status",
     "no_project": "No project",
     "current": "Current"
@@ -125,7 +126,6 @@
     "unsubscribed": "Unsubscribed",
     "label_added": "Added label {{name}}",
     "label_removed": "Removed label {{name}}",
-    "label_failed": "Couldn't add label {{name}} to every issue",
     "update_failed": "Update failed",
     "assigned": "Assigned {{identifier}} to {{name}}"
   },

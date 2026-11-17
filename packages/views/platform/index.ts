@@ -24,10 +24,19 @@ export {
   type ThemeFolderWriteResult,
 } from "./theme-folder";
 export {
+  localVoiceAPI,
+  type LocalVoiceAPI,
+} from "./local-voice";
+export {
   restartLocalDaemon,
   useLocalDaemonStatus,
   type LocalDaemonStatus,
 } from "./use-local-daemon-status";
+export {
+  canFocusLocalEnvironments,
+  focusLocalEnvironment,
+  type FocusEnvironmentResult,
+} from "./environment-focus";
 export {
   ScrollRestorationProvider,
   useScrollRestorationAdapter,

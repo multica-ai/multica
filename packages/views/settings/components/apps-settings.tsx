@@ -35,6 +35,7 @@ import { ComposioToolkitLogo } from "../../common/composio-toolkit-logo";
 import { SavedAppRestriction } from "../../common/saved-app-restriction";
 import { useT, useTimeAgo } from "../../i18n";
 import { useNavigation } from "../../navigation";
+import { isDesktopShell } from "../../platform";
 import { AddAppDialog } from "./add-app-dialog";
 import { AppAccountDialog } from "./app-account-dialog";
 import { SettingsCard, SettingsSection } from "./settings-layout";
@@ -82,6 +83,15 @@ export function AppsSettings() {
     navigation.replace(`${navigation.pathname}?${params.toString()}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [connectedParam, errorParam]);
+
+  // Desktop finishes the hosted flow in the system browser, so that return
+  // never reaches this window. Reload the accounts when it is focused again.
+  useEffect(() => {
+    if (!isDesktopShell()) return;
+    const refresh = () => void qc.invalidateQueries({ queryKey: connectedAppsKeys.overview(wsId) });
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [qc, wsId]);
 
   const appBySlug = useMemo(() => {
     const m = new Map<string, AppCatalogEntry>();

@@ -6,7 +6,7 @@ import { AppShellProvider, useAppShell } from "./app-shell-context";
 import { ListColumn } from "./list-column";
 
 vi.mock("../navigation", () => ({
-  useNavigation: () => ({ pathname: "/acme/inbox" }),
+  useNavigation: () => ({ pathname: "/acme/chat" }),
 }));
 
 let shell: ReturnType<typeof useAppShell> = null;
@@ -14,6 +14,9 @@ function Reader() {
   shell = useAppShell();
   return null;
 }
+
+/** No stored width: the theme's, or 280px when it sets none. */
+const UNSTORED_SIDEBAR_WIDTH = "clamp(200px, var(--sidebar-panel-width, 280px), 320px)";
 
 describe("ListColumn", () => {
   it("collapses the list column from its edge, like the space panel", () => {
@@ -61,7 +64,7 @@ describe("ListColumn", () => {
     expect(localStorage.getItem("list_column_width")).toBe("480");
     expect(localStorage.getItem("sidebar_width")).toBeNull();
     expect(wrapper.style.getPropertyValue("--list-column-width")).toBe("480px");
-    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("240px");
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe(UNSTORED_SIDEBAR_WIDTH);
   });
 
   it("restores a stored list width within its bounds", () => {
@@ -103,7 +106,7 @@ describe("ListColumn", () => {
         </SidebarProvider>,
       );
       const column = container.querySelector("[data-slot='list-column']");
-      act(() => shell!.requestPeek("inbox"));
+      act(() => shell!.requestPeek("chat"));
       act(() => vi.advanceTimersByTime(200));
       expect(column).not.toHaveAttribute("inert");
       expect(column).toHaveClass("w-0");
