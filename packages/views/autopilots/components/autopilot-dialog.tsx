@@ -12,6 +12,7 @@ import {
   FolderKanban,
   Maximize2,
   Minimize2,
+  Pencil,
   Play,
   Plus,
   Rocket,
@@ -67,12 +68,11 @@ import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor
 import { browserTimezone } from "../../common/timezone-select";
 import { parseCron, toCron } from "./schedule-editor/cron-mapping";
 import { useScheduleSubmitGate } from "./schedule-editor/validate";
-import { WebhookEventFilterSection } from "./webhook-event-filter-section";
+import { WebhookEventFilterSummary } from "./webhook-event-filter-section";
+import { EditWebhookTriggerDialog } from "./edit-webhook-trigger-dialog";
 import { WebhookUrlField } from "./webhook-url-field";
-import { serializeEventFilters } from "./webhook-payload-condition";
 import { useT } from "../../i18n";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
-import type { WebhookEventFilter } from "@multica/core/types";
 
 // Types
 
@@ -188,34 +188,25 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   })();
   const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialKind);
 
-  // The webhook panel only renders when the first trigger is a webhook, so this
-  // is that row. Its filters are editable here only while it is the sole
-  // webhook: this panel holds one filter list, and with two webhooks it would
-  // show the first as if it were the whole story and save into that one alone.
-  // Every webhook row on the detail page carries its own editor regardless.
+  // Event filters are edited in one place, the per-webhook dialog. The webhook
+  // panel (rendered when the first trigger is a webhook) reads them back and
+  // opens that dialog for the autopilot's only webhook; with two or more it
+  // points at their rows. Read live, so a save there shows here at once.
   const existingWebhook = isCreate
     ? null
     : props.triggers.find((trig) => trig.kind === "webhook") ?? null;
   const webhookTriggerCount = isCreate
     ? 0
     : props.triggers.filter((trig) => trig.kind === "webhook").length;
-  const webhookFiltersLocked = webhookTriggerCount >= 2;
-
-  const initialEventFilters: WebhookEventFilter[] = existingWebhook?.event_filters ?? [];
-  const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>(initialEventFilters);
 
   const initialCronRef = useRef(toCron(initialCfg));
   const initialTimezoneRef = useRef(initialCfg.timezone);
-  const initialEventFiltersRef = useRef(serializeEventFilters(initialEventFilters));
   const scheduleDirty =
     toCron(schedule) !== initialCronRef.current ||
     schedule.timezone !== initialTimezoneRef.current;
-  const eventFiltersDirty =
-    serializeEventFilters(eventFilters) !== initialEventFiltersRef.current;
 
-  const webhookTriggerIdRef = useRef(existingWebhook?.id ?? null);
-  // The row the schedule write targets, snapshotted at mount like the one
-  // above. Null means there is none to patch, so the write creates one.
+  // The row the schedule write targets, snapshotted at mount. Null means there
+  // is none to patch, so the write creates one.
   const scheduleTriggerIdRef = useRef(existingSchedule?.id ?? null);
 
   // Only SCHEDULE rows can make this panel ambiguous, so only they are counted.
@@ -331,7 +322,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             webhookTrigger = await createTrigger.mutateAsync({
               autopilotId: autopilot.id,
               kind: "webhook",
-              event_filters: eventFilters.length > 0 ? eventFilters : undefined,
             });
           } else {
             await createTrigger.mutateAsync({
@@ -399,29 +389,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 timezone: schedule.timezone,
               });
             }
-          } catch (err) {
-            triggerOk = false;
-            triggerErrMessage =
-              err instanceof Error && err.message ? err.message : null;
-          }
-        }
-        // Webhook autopilots have no schedule, but the user can still edit
-        // event_filters from the same dialog. PATCH only when the snapshot
-        // taken on open differs from the live state. Sending an explicit
-        // empty array clears filters server-side (tri-state semantics — see
-        // UpdateAutopilotTriggerRequest in autopilot.go).
-        if (
-          triggerKind === "webhook" &&
-          !webhookFiltersLocked &&
-          eventFiltersDirty &&
-          webhookTriggerIdRef.current
-        ) {
-          try {
-            await updateTrigger.mutateAsync({
-              autopilotId: props.autopilotId,
-              triggerId: webhookTriggerIdRef.current,
-              event_filters: eventFilters,
-            });
           } catch (err) {
             triggerOk = false;
             triggerErrMessage =
@@ -676,10 +643,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               </div>
             ) : (
               <WebhookSection
-                isCreate={isCreate}
-                filtersLocked={webhookFiltersLocked}
-                eventFilters={eventFilters}
-                onEventFiltersChange={setEventFilters}
+                autopilotId={isCreate ? null : props.autopilotId}
+                webhook={existingWebhook}
+                webhookCount={webhookTriggerCount}
               />
             )}
           </aside>
@@ -1037,17 +1003,19 @@ function TriggerKindSection({
 }
 
 function WebhookSection({
-  isCreate,
-  filtersLocked,
-  eventFilters,
-  onEventFiltersChange,
+  autopilotId,
+  webhook,
+  webhookCount,
 }: {
-  isCreate: boolean;
-  filtersLocked: boolean;
-  eventFilters: WebhookEventFilter[];
-  onEventFiltersChange: (filters: WebhookEventFilter[]) => void;
+  // Null while creating: there is no webhook to filter until the autopilot
+  // exists, and its row on the detail page then offers the editor.
+  autopilotId: string | null;
+  webhook: AutopilotTrigger | null;
+  webhookCount: number;
 }) {
   const { t } = useT("autopilots");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const isCreate = autopilotId === null;
   return (
     <div className="space-y-3">
       <div>
@@ -1058,18 +1026,34 @@ function WebhookSection({
             : t(($) => $.dialog.webhook_help_edit)}
         </p>
       </div>
-      {filtersLocked ? (
+      {webhookCount >= 2 ? (
         <div className="rounded-md border border-dashed p-3">
           <p className="text-caption text-muted-foreground">
             {t(($) => $.dialog.webhook_multiple_notice)}
           </p>
         </div>
-      ) : (
-        <WebhookEventFilterSection
-          filters={eventFilters}
-          onChange={onEventFiltersChange}
-        />
-      )}
+      ) : autopilotId && webhook ? (
+        <div className="space-y-1.5">
+          <SectionLabel>{t(($) => $.dialog.event_filter_label)}</SectionLabel>
+          <WebhookEventFilterSummary filters={webhook.event_filters ?? []} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="text-muted-foreground"
+            onClick={() => setFiltersOpen(true)}
+          >
+            <Pencil />
+            {t(($) => $.dialog.webhook_edit_filters)}
+          </Button>
+          <EditWebhookTriggerDialog
+            open={filtersOpen}
+            onOpenChange={setFiltersOpen}
+            autopilotId={autopilotId}
+            trigger={webhook}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

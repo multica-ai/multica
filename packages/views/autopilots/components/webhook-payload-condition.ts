@@ -20,13 +20,6 @@ export function formatConditionValue(c: WebhookPayloadCondition): string {
   return JSON.stringify(c.value);
 }
 
-// formatCondition is the full API form, used as the row's tooltip.
-export function formatCondition(c: WebhookPayloadCondition): string {
-  if (c.op === "exists") return `${c.path} exists`;
-  const value = c.op === "in" ? `[${formatConditionValue(c)}]` : formatConditionValue(c);
-  return `${c.path} ${c.op}${c.ignore_case ? "/i" : ""} ${value}`;
-}
-
 // parseConditionValue reads JSON scalars (true, 42, "42") and falls back to
 // plain text, so `main` and `"main"` both mean the string main.
 export function parseConditionValue(raw: string): WebhookPayloadConditionValue {
@@ -52,8 +45,6 @@ export interface ConditionDraft {
   value: string;
   ignoreCase: boolean;
 }
-
-export const EMPTY_CONDITION_DRAFT: ConditionDraft = { path: "", op: "equals", value: "", ignoreCase: false };
 
 // buildCondition returns null while the draft can't produce a row the
 // server accepts.

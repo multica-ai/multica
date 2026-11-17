@@ -1,11 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_CONDITION_DRAFT,
   buildCondition,
-  formatCondition,
   formatConditionValue,
   parseConditionValue,
+  type ConditionDraft,
 } from "./webhook-payload-condition";
 
 describe("parseConditionValue", () => {
@@ -24,8 +23,11 @@ describe("parseConditionValue", () => {
 });
 
 describe("buildCondition", () => {
-  const draft = (patch: Partial<typeof EMPTY_CONDITION_DRAFT>) => ({
-    ...EMPTY_CONDITION_DRAFT,
+  const draft = (patch: Partial<ConditionDraft>): ConditionDraft => ({
+    path: "",
+    op: "equals",
+    value: "",
+    ignoreCase: false,
     ...patch,
   });
 
@@ -77,15 +79,6 @@ describe("buildCondition", () => {
     const values = Array.from({ length: 101 }, (_, i) => String(i));
     expect(buildCondition(draft({ path: "number", op: "in", value: values.slice(0, 100).join(",") }))?.values).toHaveLength(100);
     expect(buildCondition(draft({ path: "number", op: "in", value: values.join(",") }))).toBeNull();
-  });
-});
-
-describe("formatCondition", () => {
-  it("renders each op as code", () => {
-    expect(formatCondition({ path: "a", op: "equals", value: false })).toBe("a equals false");
-    expect(formatCondition({ path: "a", op: "contains", value: "x", ignore_case: true })).toBe('a contains/i "x"');
-    expect(formatCondition({ path: "a", op: "in", values: ["x", 1] })).toBe('a in ["x", 1]');
-    expect(formatCondition({ path: "a", op: "exists" })).toBe("a exists");
   });
 });
 
