@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
@@ -14,7 +14,7 @@ import {
   useSetChatSessionArchived,
   useSetChatSessionProject,
 } from "./mutations";
-import { chatKeys } from "./queries";
+import { chatKeys, chatSessionsOptions } from "./queries";
 import type { ChatSession } from "../types";
 
 vi.mock("../hooks", () => ({
@@ -81,15 +81,15 @@ describe("useMarkAllChatSessionsRead", () => {
     expect(rows.every((s) => !s.has_unread)).toBe(true);
   });
 
-  // One failed read must not stop the others, but the caller still hears
-  // about it so it can say so.
-  it("reads the rest and rejects when one read fails", async () => {
+  // One failed read must not stop the others; the failed row gets its unread
+  // back and the one that went through stays read.
+  it("restores only the sessions whose read failed", async () => {
     markChatSessionRead.mockImplementation(async (id) => {
       if (id === "s1") throw new Error("boom");
     });
     qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [
-      makeSession({ id: "s1" }),
-      makeSession({ id: "s2" }),
+      makeSession({ id: "s1", unread_count: 2 }),
+      makeSession({ id: "s2", unread_count: 5 }),
     ]);
 
     const { result } = renderHook(() => useMarkAllChatSessionsRead(), {
@@ -98,7 +98,43 @@ describe("useMarkAllChatSessionsRead", () => {
     await act(async () => {
       await expect(result.current.mutateAsync(["s1", "s2"])).rejects.toThrow();
     });
+
     expect(markChatSessionRead).toHaveBeenCalledTimes(2);
+    const rows = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))!;
+    expect(rows.map((s) => [s.id, s.unread_count, s.has_unread])).toEqual([
+      ["s1", 2, true],
+      ["s2", 0, false],
+    ]);
+  });
+
+  // Offline: the read and the follow-up refetch both fail, so the rollback is
+  // all that keeps the badge (and the menu item) from hiding real unread.
+  it("keeps unread when the read and the refetch both fail", async () => {
+    const listChatSessions = vi.fn().mockRejectedValue(new Error("offline"));
+    markChatSessionRead.mockRejectedValue(new Error("offline"));
+    setApiInstance({ listChatSessions, markChatSessionRead } as unknown as ApiClient);
+    qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [
+      makeSession({ id: "s1", unread_count: 2 }),
+    ]);
+
+    const { result } = renderHook(
+      () => {
+        useQuery(chatSessionsOptions(WS_ID));
+        return useMarkAllChatSessionsRead();
+      },
+      { wrapper: createWrapper(qc) },
+    );
+    await act(async () => {
+      await expect(result.current.mutateAsync(["s1"])).rejects.toThrow();
+    });
+    await waitFor(() => {
+      expect(listChatSessions).toHaveBeenCalled();
+      expect(qc.isFetching()).toBe(0);
+    });
+
+    const row = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!;
+    expect(row.unread_count).toBe(2);
+    expect(row.has_unread).toBe(true);
   });
 });
 
