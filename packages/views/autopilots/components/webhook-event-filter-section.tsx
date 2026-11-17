@@ -307,7 +307,10 @@ export function WebhookEventFilterSection({
         </div>
       )}
 
-      <div className="flex gap-2">
+      {/* Actions widen only where the row has room (the per-webhook dialog),
+          so their placeholder isn't clipped there; the autopilot dialog's side
+          panel keeps w-28, which leaves the event placeholder whole. */}
+      <div className="@container/ef-add flex gap-2">
         <input
           type="text"
           value={newEvent}
@@ -332,7 +335,7 @@ export function WebhookEventFilterSection({
             }
           }}
           placeholder={t(($) => $.dialog.event_filter_actions_placeholder)}
-          className="w-28 rounded-md border bg-background px-2.5 py-1.5 text-caption outline-none focus:ring-1 focus:ring-ring"
+          className="w-28 rounded-md border bg-background px-2.5 py-1.5 text-caption outline-none focus:ring-1 focus:ring-ring @sm/ef-add:w-36"
         />
         <button
           type="button"
