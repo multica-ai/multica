@@ -194,6 +194,8 @@ Multica 每次執行都會重新整理其中的 skill 和派生配置。模型�
 
 開始或恢復 Codex 執行前，守護程序會檢查 Codex 是否選中了產生的 `AGENTS.md`，以及能否在 `project_doc_max_bytes` 限制內完整讀取它。預設限制為 32 KiB，由專案的所有指令檔案共用。如果檔案被其他檔案覆蓋、超出剩餘大小限制，或無法確認實際生效的設定，執行會在模型回合開始前停止。診斷會標明檔案和限制，不輸出指令內容。
 
+如果 Codex 將目前專案標記為不受信任，或停用的專案設定可能在工作階段開始時改變指令載入方式，守護程序會停止，並提示你在 Codex 中檢查專案的信任設定。Multica 不會自動授予信任。
+
 可以精簡 AI 代理或儲存庫指令，檢查是否有優先順序更高的 `AGENTS.override.md`，或在 Codex 設定或 AI 代理自訂參數中明確提高限制，例如 `-c project_doc_max_bytes=65536`。Multica 會保留你設定的限制和儲存庫檔案。詳見 [Codex 指令探索規則](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
 
 ### Codex 原生記憶與子 AI 代理 [#codex-memory]

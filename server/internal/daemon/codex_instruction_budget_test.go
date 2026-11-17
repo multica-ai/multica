@@ -40,7 +40,7 @@ while IFS= read -r line; do
   case "$line" in
     *'"method":"config/read"'*)
       echo config/read >> "$SYNTHETIC_CODEX_TRACE"
-      printf '{"id":%s,"result":{"config":%s}}\n' "$id" "$SYNTHETIC_CODEX_CONFIG";;
+      printf '{"id":%s,"result":{"config":%s,"layers":[]}}\n' "$id" "$SYNTHETIC_CODEX_CONFIG";;
     *'"method":"thread/start"'*)
       echo thread/start >> "$SYNTHETIC_CODEX_TRACE"
       printf '{"id":%s,"result":{"thread":{"id":"thread-synthetic"}}}\n' "$id";;

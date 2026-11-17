@@ -193,6 +193,8 @@ Multica actualise les skills et la configuration dérivée à chaque exécution.
 
 Avant de démarrer ou de reprendre une exécution Codex, le daemon vérifie que Codex sélectionne le fichier `AGENTS.md` généré et peut le lire entièrement dans la limite `project_doc_max_bytes` (32 Kio par défaut, partagés entre les fichiers d'instructions du projet). Si le fichier est masqué, dépasse le budget restant ou si la configuration effective ne peut pas être vérifiée, l'exécution s'arrête avant le démarrage d'un tour du modèle. Le diagnostic indique le fichier et la limite sans afficher le contenu des instructions.
 
+Si Codex considère le projet actif comme non fiable, ou si une configuration de projet désactivée peut modifier le chargement des instructions au démarrage du fil, le daemon s’arrête et vous demande de vérifier la confiance du projet dans Codex. Multica n’accorde pas automatiquement cette confiance.
+
 Réduisez les instructions de l'agent ou du dépôt, vérifiez si un fichier `AGENTS.override.md` les masque, ou augmentez explicitement la limite dans la configuration Codex ou les arguments personnalisés de l'agent, par exemple `-c project_doc_max_bytes=65536`. Multica conserve votre limite et les fichiers du dépôt. Voir [la découverte des instructions Codex](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
 
 ### Mémoire native et sous-agents de Codex [#codex-memory]

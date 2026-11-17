@@ -16,9 +16,26 @@ import (
 const codexDefaultProjectDocBytes int64 = 32 * 1024
 
 type codexInstructionConfig struct {
-	MaxBytes      *int64    `json:"project_doc_max_bytes"`
-	FallbackNames []string  `json:"project_doc_fallback_filenames"`
-	RootMarkers   *[]string `json:"project_root_markers"`
+	MaxBytes      *int64                       `json:"project_doc_max_bytes"`
+	FallbackNames []string                     `json:"project_doc_fallback_filenames"`
+	RootMarkers   *[]string                    `json:"project_root_markers"`
+	Projects      map[string]codexProjectTrust `json:"projects"`
+}
+
+type codexProjectTrust struct {
+	TrustLevel string `json:"trust_level"`
+}
+
+type codexInstructionRead struct {
+	Config *codexInstructionConfig `json:"config"`
+	Layers []struct {
+		Name struct {
+			Type   string `json:"type"`
+			Folder string `json:"dotCodexFolder"`
+		} `json:"name"`
+		DisabledReason *string                    `json:"disabledReason"`
+		Config         map[string]json.RawMessage `json:"config"`
+	} `json:"layers"`
 }
 
 // Ask the native loader rather than duplicating CLI/profile/project precedence.
@@ -28,25 +45,23 @@ func (c *codexClient) checkManagedInstructions(ctx context.Context, opts ExecOpt
 	if opts.CodexInstructionsPath == "" {
 		return nil
 	}
-	read := func(cwd string) (codexInstructionConfig, error) {
-		params := map[string]any{"includeLayers": false}
+	read := func(cwd string) (codexInstructionRead, error) {
+		params := map[string]any{"includeLayers": cwd != ""}
 		if cwd != "" {
 			params["cwd"] = cwd
 		}
 		response, err := c.request(ctx, "config/read", params)
 		if err != nil {
 			if ctx.Err() != nil {
-				return codexInstructionConfig{}, ctx.Err()
+				return codexInstructionRead{}, ctx.Err()
 			}
-			return codexInstructionConfig{}, errors.New("codex instruction budget could not be verified: effective configuration unavailable; check the Codex runtime configuration")
+			return codexInstructionRead{}, errors.New("codex instruction budget could not be verified: effective configuration unavailable; check the Codex runtime configuration")
 		}
-		var envelope struct {
-			Config *codexInstructionConfig `json:"config"`
+		var envelope codexInstructionRead
+		if json.Unmarshal(response, &envelope) != nil || envelope.Config == nil || (cwd != "" && envelope.Layers == nil) {
+			return codexInstructionRead{}, errors.New("codex instruction budget could not be verified: invalid effective configuration")
 		}
-		if json.Unmarshal(response, &envelope) != nil || envelope.Config == nil {
-			return codexInstructionConfig{}, errors.New("codex instruction budget could not be verified: invalid effective configuration")
-		}
-		return *envelope.Config, nil
+		return envelope, nil
 	}
 	base, err := read("")
 	if err != nil {
@@ -60,8 +75,28 @@ func (c *codexClient) checkManagedInstructions(ctx context.Context, opts ExecOpt
 	if err != nil {
 		return err
 	}
-	config.RootMarkers = base.RootMarkers
-	return checkCodexInstructionFiles(cwd, opts.CodexInstructionsPath, config)
+	if codexActiveProjectUntrusted(cwd, config.Config.Projects) {
+		return fmt.Errorf("codex managed instruction file %q is disabled by the active project's untrusted setting; review project trust in Codex before retrying", opts.CodexInstructionsPath)
+	}
+	// A fresh thread can enable previously disabled project configuration.
+	// Keep the gate before both resume and its possible fresh-start fallback.
+	overridden := make(map[string]bool)
+	for _, layer := range config.Layers {
+		for _, key := range []string{"project_doc_max_bytes", "project_doc_fallback_filenames", "projects"} {
+			if _, present := layer.Config[key]; !present {
+				continue
+			}
+			if layer.DisabledReason == nil {
+				if key != "projects" {
+					overridden[key] = true
+				}
+			} else if layer.Name.Type == "project" && !overridden[key] {
+				return fmt.Errorf("codex instruction budget could not be verified: disabled project configuration at %q can change instruction loading when a thread starts; review project trust in Codex before retrying", layer.Name.Folder)
+			}
+		}
+	}
+	config.Config.RootMarkers = base.Config.RootMarkers
+	return checkCodexInstructionFiles(cwd, opts.CodexInstructionsPath, *config.Config)
 }
 
 // Mirrors Codex's project-only byte accounting: one selected file per directory,
@@ -87,7 +122,11 @@ func checkCodexInstructionFiles(cwd, managedPath string, config codexInstruction
 	for dir := cwd; ; dir = filepath.Dir(dir) {
 		found := false
 		for _, marker := range markers {
-			if _, err := os.Stat(filepath.Join(dir, marker)); err == nil {
+			path := marker
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(dir, path)
+			}
+			if _, err := os.Stat(path); err == nil {
 				found = true
 				break
 			}
@@ -109,6 +148,7 @@ func checkCodexInstructionFiles(cwd, managedPath string, config codexInstruction
 	}
 	names := []string{"AGENTS.override.md", "AGENTS.md"}
 	for _, name := range config.FallbackNames {
+		name = strings.TrimSpace(name)
 		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\x00") ||
 			(runtime.GOOS == "windows" && strings.ContainsAny(name, "\\:")) || slices.Contains(names, name) {
 			continue
