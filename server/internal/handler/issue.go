@@ -3226,8 +3226,8 @@ type CreateIssueRequest struct {
 	OriginType *string `json:"origin_type,omitempty"`
 	OriginID   *string `json:"origin_id,omitempty"`
 
-	AllowDuplicate         bool `json:"allow_duplicate,omitempty"`
-	PRAutoCompleteDisabled bool `json:"pr_auto_complete_disabled,omitempty"`
+	AllowDuplicate         *bool `json:"allow_duplicate,omitempty"`
+	PRAutoCompleteDisabled bool  `json:"pr_auto_complete_disabled,omitempty"`
 }
 
 // CreateIssueResponse echoes the atomic PR setting without expanding issue reads.

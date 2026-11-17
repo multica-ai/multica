@@ -141,7 +141,9 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
-同じプロジェクト・同じ親タスクの下に、タイトルが同じ（大文字小文字と余分な空白は区別しない）未完了のタスクがすでにあると、`issue create` は作成を拒否してそのタスクを示します。それでも作る場合は `--allow-duplicate` を付けます。あるタスクを別のタスクの重複にするには `multica issue status MUL-124 cancelled --duplicate-of MUL-123` を使います。
+デフォルトでは、同じプロジェクト・同じ親タスクの下に、タイトルが同じ（大文字小文字と余分な空白は区別しない）未完了のタスクがすでにあると、`issue create` は作成を拒否してそのタスクを示します。それでも作る場合は `--allow-duplicate` を付けます。あるタスクを別のタスクの重複にするには `multica issue status MUL-124 cancelled --duplicate-of MUL-123` を使います。
+
+セルフホストの管理者は `MULTICA_ALLOW_DUPLICATE_ISSUES=true` で既定の動作を変更できます。flag の省略はサーバー設定を継承し、`--allow-duplicate=false` は明示的に重複検査を要求します。API の `allow_duplicate: true` / `false` がサーバー設定より優先され、省略または `null` は継承します。[環境変数](/environment-variables)を参照してください。
 
 複数の PR を順番に作成するタスクでは、`issue create --title "..." --pr-auto-complete off` または `issue update <id> --pr-auto-complete off` で、マージ時も状態を維持できます。`--pr-auto-complete on` はワークスペースのルールを復元し、次の PR イベントから有効になります。`issue pull-requests <id>` は、PR が未関連付けでもタスクとワークスペースの設定、移行先の状態、判定結果を表示します。対応サーバーは作成トランザクション内で設定を保存し、旧サーバーには追加の PUT を送ります。失敗時は作成済み ID と再試行用の update コマンドが表示されるため、create を繰り返さないでください。
 

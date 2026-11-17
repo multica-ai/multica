@@ -1121,40 +1121,43 @@ func TestRunIssueCreateRejectsDuplicateAndFilterPropertySyntaxBeforePost(t *test
 }
 
 func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
-	var body map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/issues" {
-			http.NotFound(w, r)
-			return
-		}
-		if r.Method != http.MethodPost {
-			t.Errorf("method = %s, want POST", r.Method)
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode body: %v", err)
-		}
-		json.NewEncoder(w).Encode(map[string]any{
-			"id":         "issue-1",
-			"identifier": "MUL-1",
-			"title":      "Duplicate allowed",
-			"status":     "todo",
-			"priority":   "none",
+	for _, flag := range []string{"omitted", "false", "true"} {
+		t.Run(flag, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/issues" {
+					http.NotFound(w, r)
+					return
+				}
+				if r.Method != http.MethodPost {
+					t.Errorf("method = %s, want POST", r.Method)
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode body: %v", err)
+				}
+				json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "title": "Duplicate allowed", "status": "todo", "priority": "none"})
+			}))
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+			cmd := newIssueCreateTestCmd()
+			_ = cmd.Flags().Set("title", "Duplicate allowed")
+			if flag != "omitted" {
+				_ = cmd.Flags().Set("allow-duplicate", flag)
+			}
+			if err := runIssueCreate(cmd, nil); err != nil {
+				t.Fatalf("runIssueCreate: %v", err)
+			}
+			got, present := body["allow_duplicate"]
+			if flag == "omitted" {
+				if present {
+					t.Fatalf("omitted flag sent allow_duplicate = %#v", got)
+				}
+			} else if !present || got != (flag == "true") {
+				t.Fatalf("allow_duplicate = %#v (present %v), want explicit %s", got, present, flag)
+			}
 		})
-	}))
-	defer srv.Close()
-
-	t.Setenv("MULTICA_SERVER_URL", srv.URL)
-	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
-
-	cmd := newIssueCreateTestCmd()
-	_ = cmd.Flags().Set("title", "Duplicate allowed")
-	_ = cmd.Flags().Set("allow-duplicate", "true")
-	if err := runIssueCreate(cmd, nil); err != nil {
-		t.Fatalf("runIssueCreate: %v", err)
-	}
-	if got := body["allow_duplicate"]; got != true {
-		t.Fatalf("allow_duplicate = %#v, want true in request body", got)
 	}
 }
 

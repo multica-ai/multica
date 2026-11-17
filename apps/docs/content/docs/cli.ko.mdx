@@ -141,7 +141,9 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
-같은 프로젝트, 같은 상위 태스크 아래에 제목이 같은(대소문자와 여분의 공백은 구분하지 않음) 닫히지 않은 태스크가 이미 있으면 `issue create`는 생성을 거부하고 그 태스크를 알려 줍니다. 그래도 만들려면 `--allow-duplicate`를 붙이세요. 한 태스크를 다른 태스크의 중복으로 표시하려면 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`을 실행합니다.
+기본적으로 같은 프로젝트, 같은 상위 태스크 아래에 제목이 같은(대소문자와 여분의 공백은 구분하지 않음) 닫히지 않은 태스크가 이미 있으면 `issue create`는 생성을 거부하고 그 태스크를 알려 줍니다. 그래도 만들려면 `--allow-duplicate`를 붙이세요. 한 태스크를 다른 태스크의 중복으로 표시하려면 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`을 실행합니다.
+
+셀프 호스팅 관리자는 `MULTICA_ALLOW_DUPLICATE_ISSUES=true`로 기본 동작을 바꿀 수 있습니다. flag를 생략하면 서버 설정을 상속하고 `--allow-duplicate=false`는 중복 검사를 명시적으로 요구합니다. API의 `allow_duplicate: true` / `false`가 서버 기본값보다 우선하며 생략 또는 `null`은 상속합니다. [환경 변수](/environment-variables)를 참조하세요.
 
 여러 PR을 순서대로 만드는 태스크는 `issue create --title "..." --pr-auto-complete off` 또는 `issue update <id> --pr-auto-complete off`로 병합 후에도 상태를 유지할 수 있습니다. `--pr-auto-complete on`으로 워크스페이스 규칙을 복원하면 다음 PR 이벤트부터 적용됩니다. `issue pull-requests <id>`는 연결된 PR이 없어도 태스크 설정, 워크스페이스 설정, 대상 상태와 판단 결과를 표시합니다. 지원 서버는 생성 트랜잭션 안에서 설정을 저장하고, 이전 서버에는 추가 PUT을 보냅니다. 실패하면 생성된 태스크 ID와 재시도할 update 명령이 표시되므로 create를 반복하지 마세요.
 

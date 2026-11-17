@@ -43,6 +43,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API 監聽埠 |
 | `JWT_SECRET` | 生產環境必填 | 登入 JWT、部分簽名流程使用的金鑰；生產環境對空值或已知佔位值拒絕啟動 |
 | `APP_ENV` | 空 | 生產環境設為 `production` |
+| `MULTICA_ALLOW_DUPLICATE_ISSUES` | `false` | 伺服器統一設定是否預設允許建立標題與活躍任務相同的獨立任務。未設定、`false` 或無效值均保留保護；設為 `true` 並重新啟動 API 後，所有工作區和建立入口（包括渠道 `/issue`）預設允許重複標題。API 明確傳入 `allow_duplicate: true` 或 `false` 優先於預設值；省略或 `null` 則繼承預設值。CLI 的 `--allow-duplicate` 允許重複，`--allow-duplicate=false` 要求檢查，省略則繼承伺服器設定。Webhook 配送與執行的持久化冪等保護，以及自動化手動/排程觸發獨立的近期重複檢查均保持不變 |
 | `AUTH_TOKEN_TTL` | `720h`（30 天） | 瀏覽器 JWT 與 cookie 有效期；接受 Go duration 或正整數秒數。會話會滑動續期：剩餘有效期過半後，持續使用的會話會被續期而不是到期。低於 `60s` 的取值會按 `60s` 處理 |
 | `LOG_LEVEL` | 應用預設 | 日誌級別 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到終止訊號後，開始優雅退出前等待多久 |

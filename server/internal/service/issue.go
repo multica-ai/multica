@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/attribution"
@@ -41,17 +44,28 @@ type IssueService struct {
 	// cmd/server/router.go after construction; nil in tests / self-hosted
 	// without the metrics listener — obsmetrics.RecordEvent treats a nil
 	// Metrics as "PostHog only", so leaving it unset is safe.
-	Metrics     *obsmetrics.BusinessMetrics
-	TaskService *TaskService
+	Metrics                 *obsmetrics.BusinessMetrics
+	TaskService             *TaskService
+	AllowDuplicateByDefault bool
 }
 
 func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.Client, ts *TaskService) *IssueService {
+	allowDuplicate := false
+	if raw := strings.TrimSpace(os.Getenv("MULTICA_ALLOW_DUPLICATE_ISSUES")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			slog.Warn("invalid MULTICA_ALLOW_DUPLICATE_ISSUES; keeping duplicate issue protection")
+		} else {
+			allowDuplicate = parsed
+		}
+	}
 	return &IssueService{
-		Queries:     q,
-		TxStarter:   tx,
-		Bus:         bus,
-		Analytics:   ac,
-		TaskService: ts,
+		Queries:                 q,
+		TxStarter:               tx,
+		Bus:                     bus,
+		Analytics:               ac,
+		TaskService:             ts,
+		AllowDuplicateByDefault: allowDuplicate,
 	}
 }
 
@@ -84,8 +98,9 @@ type IssueCreateParams struct {
 	// Properties is keyed only by property-definition UUID. Create validates
 	// and canonicalizes every value while holding the same per-definition locks
 	// used by the standalone PUT path, then inserts the complete bag atomically.
-	Properties     map[pgtype.UUID]json.RawMessage
-	AllowDuplicate bool
+	Properties map[pgtype.UUID]json.RawMessage
+	// AllowDuplicate overrides the server default when non-nil.
+	AllowDuplicate *bool
 	// PRAutoCompleteDisabled is persisted before the issue becomes visible.
 	PRAutoCompleteDisabled bool
 	// Stage groups this issue into an ordered barrier group under its parent
@@ -140,8 +155,8 @@ type IssueCreateOpts struct {
 
 // ErrActiveDuplicate signals that the duplicate guard found an active
 // issue with the same (workspace, project, parent, title) tuple and
-// AllowDuplicate was false. The IssueCreateResult.DuplicateIssue field is
-// populated when this error is returned so callers can render the
+// the effective policy disallowed duplicates. IssueCreateResult.DuplicateIssue
+// is populated when this error is returned so callers can render the
 // conflict (HTTP 409, Lark card, etc.).
 var ErrActiveDuplicate = errors.New("active duplicate issue exists")
 
@@ -397,7 +412,11 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 		return IssueCreateResult{}, err
 	}
 
-	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
+	allowDuplicate := s.AllowDuplicateByDefault
+	if p.AllowDuplicate != nil {
+		allowDuplicate = *p.AllowDuplicate
+	}
+	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, projectID, p.ParentIssueID, p.Title, allowDuplicate)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("duplicate guard: %w", err)
 	}

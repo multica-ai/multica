@@ -141,7 +141,9 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
-同一專案、同一父任務下已有標題相同（不區分大小寫，忽略多餘空格）且未關閉的任務時，`issue create` 會拒絕建立並給出那個任務。確實要再建一個，加 `--allow-duplicate`；要把一個任務標為另一個的重複，用 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`。
+預設情況下，同一專案、同一父任務下已有標題相同（不區分大小寫，忽略多餘空格）且未關閉的任務時，`issue create` 會拒絕建立並給出那個任務。確實要再建一個，加 `--allow-duplicate`；要把一個任務標為另一個的重複，用 `multica issue status MUL-124 cancelled --duplicate-of MUL-123`。
+
+自託管管理員可用 `MULTICA_ALLOW_DUPLICATE_ISSUES=true` 更改預設行為。省略 flag 時繼承伺服器設定；`--allow-duplicate=false` 明確要求重複檢查。API 明確傳入 `allow_duplicate: true` 或 `false` 可覆蓋伺服器預設值；省略或 `null` 則繼承。參見[環境變數](/environment-variables)。
 
 一個任務要依次提交多個 PR 時，用 `issue create --title "..." --pr-auto-complete off` 或 `issue update <id> --pr-auto-complete off`，讓這個任務在 PR 合併後保持原狀態。用 `--pr-auto-complete on` 恢復工作區規則，從下一次 PR 事件起生效。`issue pull-requests <id>` 會顯示任務開關、工作區開關、目標狀態和判斷結果，沒有關聯 PR 時也會顯示。支援該欄位的伺服器會在建立交易內儲存開關；舊伺服器會補呼叫一次 PUT，失敗時 CLI 會提供已建立的任務 ID 和重試用的 update 命令，請勿重複建立。
 

@@ -1819,8 +1819,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
 		body["due_date"] = v
 	}
-	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
-		body["allow_duplicate"] = true
+	if cmd.Flags().Changed("allow-duplicate") {
+		v, _ := cmd.Flags().GetBool("allow-duplicate")
+		body["allow_duplicate"] = v
 	}
 	aType, aID, hasAssignee, resolveErr := pickIssueCreateAssignee(ctx, client, cmd)
 	if resolveErr != nil {

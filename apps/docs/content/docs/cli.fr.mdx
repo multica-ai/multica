@@ -141,7 +141,9 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
-Si une tâche ouverte portant le même titre (sans tenir compte de la casse ni des espaces en trop) existe déjà sous le même projet et le même parent, `issue create` refuse et indique cette tâche. Pour en créer une autre malgré tout, ajoutez `--allow-duplicate`. Pour marquer une tâche comme doublon d'une autre, utilisez `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
+Par défaut, si une tâche ouverte portant le même titre (sans tenir compte de la casse ni des espaces en trop) existe déjà sous le même projet et le même parent, `issue create` refuse et indique cette tâche. Pour en créer une autre malgré tout, ajoutez `--allow-duplicate`. Pour marquer une tâche comme doublon d'une autre, utilisez `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
+
+Les administrateurs d’une instance auto-hébergée peuvent changer ce comportement avec `MULTICA_ALLOW_DUPLICATE_ISSUES=true`. Sans flag, le CLI hérite du serveur ; `--allow-duplicate=false` exige explicitement la protection. Une valeur API `allow_duplicate: true` ou `false` est prioritaire ; une valeur omise ou `null` hérite du serveur. Voir les [variables d’environnement](/environment-variables).
 
 Pour livrer plusieurs PR successives, utilisez `issue create --title "..." --pr-auto-complete off` ou `issue update <id> --pr-auto-complete off` pour conserver le statut de cette tâche après fusion. `--pr-auto-complete on` rétablit la règle de l'espace de travail au prochain événement PR. `issue pull-requests <id>` affiche le réglage de la tâche, celui de l'espace de travail, le statut cible et la décision, même sans PR liée. Les serveurs compatibles enregistrent le réglage dans la transaction de création ; les anciens reçoivent un PUT supplémentaire. En cas d'échec, le CLI indique l'ID créé et la commande update à réessayer : ne répétez pas create.
 

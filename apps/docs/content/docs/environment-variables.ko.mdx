@@ -43,6 +43,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API listen port |
 | `JWT_SECRET` | 프로덕션에서 필수 | 로그인 JWT와 일부 서명 절차에서 사용하는 키. 프로덕션에서는 비어 있거나 알려진 자리표시자 값으로 부팅 거부 |
 | `APP_ENV` | 비어 있음 | 프로덕션 환경에서는 `production`으로 설정 |
+| `MULTICA_ALLOW_DUPLICATE_ISSUES` | `false` | 동일한 제목의 활성 태스크를 별도로 생성할 수 있는지 서버 전체에 설정합니다. 미설정, `false`, 잘못된 값은 보호를 유지합니다. `true`로 설정하고 API를 다시 시작하면 모든 워크스페이스와 생성 경로(채널 `/issue` 포함)에서 중복 제목을 허용합니다. API의 명시적인 `allow_duplicate: true` / `false`가 우선하며 생략 또는 `null`은 서버 기본값을 상속합니다. CLI의 `--allow-duplicate`는 중복을 허용하고 `--allow-duplicate=false`는 검사를 요구하며 생략하면 서버 설정을 상속합니다. Webhook 전달·실행의 영구 멱등성 및 자동화 수동·예약 트리거의 별도 최근 중복 검사는 유지합니다 |
 | `AUTH_TOKEN_TTL` | `720h`(30일) | 브라우저 JWT와 cookie 유효 기간. Go duration 또는 양의 정수 초 허용. 세션은 유효 기간의 절반이 지나면 슬라이딩 갱신되어, 계속 사용하는 동안에는 만료되지 않습니다. `60s` 미만은 `60s`로 조정됩니다 |
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 종료 신호를 받은 뒤 graceful shutdown을 시작하기 전 대기 시간 |

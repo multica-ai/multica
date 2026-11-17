@@ -141,7 +141,9 @@ multica issue comment add MUL-123 --content-file note.md --steer <task-id>
 multica issue comment add MUL-123 --content-file note.md --steer-active
 ```
 
-If an open issue with the same title (case-insensitive, extra spaces ignored) already exists under the same project and parent, `issue create` refuses and points to that issue. To create another one anyway, add `--allow-duplicate`. To mark an issue as a duplicate of another, run `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
+By default, if an open issue with the same title (case-insensitive, extra spaces ignored) already exists under the same project and parent, `issue create` refuses and points to that issue. To create another one anyway, add `--allow-duplicate`. To mark an issue as a duplicate of another, run `multica issue status MUL-124 cancelled --duplicate-of MUL-123`.
+
+Self-host administrators can change this default with `MULTICA_ALLOW_DUPLICATE_ISSUES=true`. An omitted flag inherits the server setting; `--allow-duplicate=false` explicitly requires duplicate protection. API clients use `allow_duplicate: true` or `false` to override the server default; omitted or `null` inherits it. See [environment variables](/environment-variables).
 
 For sequential PR delivery, use `issue create --title "..." --pr-auto-complete off` or `issue update <id> --pr-auto-complete off` to keep that issue's status when PRs merge. Use `--pr-auto-complete on` to restore the workspace rule; this takes effect at the next PR event. `issue pull-requests <id>` shows the issue override, workspace setting, target status, and decision state, even with no linked PRs. Supported servers save the creation override atomically; older servers receive a follow-up PUT. If that fails, the CLI reports the created issue ID and an update command to retry, so do not repeat the create.
 

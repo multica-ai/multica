@@ -43,6 +43,7 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `PORT` | `8080` | API listen port |
 | `JWT_SECRET` | required in production | Secret for sign-in JWTs and some signing flows; production refuses to boot on empty or known placeholders |
 | `APP_ENV` | empty | Set to `production` in production |
+| `MULTICA_ALLOW_DUPLICATE_ISSUES` | `false` | Server default for allowing separate issues with the same active title. Unset, `false`, or an invalid value keeps protection. Set `true` and restart the API to allow duplicates across workspaces and creation clients, including channel `/issue` commands. Explicit API `allow_duplicate: true` or `false` overrides the default; omitted or `null` inherits it. CLI `--allow-duplicate` allows duplicates; `--allow-duplicate=false` requires protection; omitting the flag inherits the server default. Durable webhook delivery/run idempotency and the separate manual/scheduled Autopilot recent-duplicate guard remain unchanged |
 | `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds. Sessions slide: one in continuous use is re-issued rather than expiring, from the halfway point of its lifetime onward. Values below `60s` are clamped to `60s` |
 | `LOG_LEVEL` | application default | Log level |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | How long to wait after a termination signal before graceful shutdown begins |
