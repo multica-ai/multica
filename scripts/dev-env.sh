@@ -632,17 +632,59 @@ api_identity_matches() {
   [ "$launched_at" = 0 ] || api_started_after "$health" "$launched_at"
 }
 
+# `go run` compiles the api once, at launch, so a later edit never reaches it,
+# and an uncommitted edit leaves the commit /health reports unchanged.
+# `start_api` records "<launcher pid> <fingerprint>" for the api it launched,
+# and an api of the current commit is current only when both still match.
+api_build_file() { printf '%s/api.build' "$STATE_DIR"; }
+
+stream_sha256() {
+  if command -v shasum >/dev/null 2>&1; then shasum -a 256; else sha256sum; fi | awk '{print $1}'
+}
+
+# Hashes everything in server/ that differs from HEAD: the diff of tracked
+# files, plus the paths and contents of untracked files that are not ignored.
+api_source_fingerprint() {
+  local dir=${DIR:-$REPO_ROOT} untracked
+  untracked="$(git -C "$dir" ls-files --others --exclude-standard -- server 2>/dev/null || true)"
+  {
+    git -C "$dir" diff --no-ext-diff --no-textconv --binary HEAD -- server 2>/dev/null || true
+    if [ -n "$untracked" ]; then
+      printf '%s\n' "$untracked"
+      printf '%s\n' "$untracked" | git -C "$dir" hash-object --stdin-paths 2>/dev/null || true
+    fi
+  } | stream_sha256
+}
+
+# Prints why the api, already matched on commit, was not launched from the
+# server/ sources the checkout has now, or nothing when it was.
+api_stale_reason() {
+  local recorded launcher
+  recorded="$(cat "$(api_build_file)" 2>/dev/null || true)"
+  launcher="$(component_pid api || true)"
+  if [ -z "$recorded" ] || [ "${recorded%% *}" != "$launcher" ]; then
+    printf 'has no recorded source fingerprint, so it may predate uncommitted server/ changes'
+  elif [ "${recorded#* }" != "$(api_source_fingerprint)" ]; then
+    printf 'was compiled before server/ changed (uncommitted changes differ)'
+  fi
+  return 0
+}
+
 start_api() {
-  local launched_at health waited=0 expected_commit
+  local launched_at health waited=0 expected_commit fingerprint reason
   expected_commit="$(checkout_commit)"
   if health="$(health_json)" && [ -n "$health" ] && component_pid api >/dev/null; then
     if api_identity_matches "$health" "$expected_commit"; then
-      record_component_listener api "$BACKEND_PORT" >/dev/null \
-        || die "The API listener changed while its identity was being verified. Refusing to reuse it."
-      ok "api already running on :$BACKEND_PORT (pid $(json_field "$health" pid), commit $expected_commit)"
-      return 0
-    fi
-    if health_belongs_to_api "$health"; then
+      reason="$(api_stale_reason)"
+      if [ -z "$reason" ]; then
+        record_component_listener api "$BACKEND_PORT" >/dev/null \
+          || die "The API listener changed while its identity was being verified. Refusing to reuse it."
+        ok "api already running on :$BACKEND_PORT (pid $(json_field "$health" pid), commit $expected_commit)"
+        return 0
+      fi
+      warn "api on :$BACKEND_PORT (pid $(json_field "$health" pid)) $reason; restarting it."
+      stop_component api
+    elif health_belongs_to_api "$health"; then
       warn "api on :$BACKEND_PORT is ours but not commit $expected_commit; restarting it."
       stop_component api
     else
@@ -655,7 +697,11 @@ Run 'make down' here first — a leftover instance answers /health with 200 and 
   fi
 
   launched_at="$(now_epoch)"
+  # Taken before the compile starts, so an edit made while it runs reads as
+  # stale next time instead of being assumed compiled in.
+  fingerprint="$(api_source_fingerprint)"
   launch_detached api make -C "$REPO_ROOT" -s api-dev ENV_FILE="$ENV_FILE"
+  printf '%s %s\n' "$(cat "$(pid_file api)")" "$fingerprint" > "$(api_build_file)"
   info "api launching (pid $(cat "$(pid_file api)")), log: $(log_file api)"
 
   while [ "$waited" -lt 300 ]; do
@@ -1222,11 +1268,17 @@ stop_component() {
 component_state() {
   case "$1" in
     api)
-      local health expected_commit reported_commit
+      local health expected_commit reported_commit reason
       health="$(health_json || true)"
       expected_commit="$(checkout_commit)"
       reported_commit="$(json_field "$health" commit || true)"
       if [ -n "$health" ] && api_identity_matches "$health" "$expected_commit"; then
+        reason="$(api_stale_reason)"
+        if [ -n "$reason" ]; then
+          printf 'stale|http://localhost:%s|pid %s %s; run make up to restart' "$BACKEND_PORT" \
+            "$(json_field "$health" pid || echo '?')" "$reason"
+          return 0
+        fi
         printf 'running|http://localhost:%s|pid %s commit %s started %s' "$BACKEND_PORT" \
           "$(json_field "$health" pid || echo '?')" \
           "$reported_commit" \

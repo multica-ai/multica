@@ -172,10 +172,12 @@ assert_stop_handles_listener() {
   )
 }
 
-# Launcher 100 owns listener 200; listener 999 is someone else's.
+# Launcher 100 owns listener 200; listener 999 is someone else's. The api's
+# sources fingerprint as fp-now, and `make up` recorded `api_build` for it
+# ("-" for no record).
 assert_component_state() {
   local case_name=$1 component=$2 listener=$3 reported_commit=$4 probe_ok=$5
-  local expected_state=$6 expected_detail=$7
+  local expected_state=$6 expected_detail=$7 api_build=${8:-100 fp-now}
   (
     # shellcheck disable=SC1090
     source "$root_dir/scripts/dev-env.sh"
@@ -186,12 +188,14 @@ assert_component_state() {
     TEST_LISTENER=$listener
     TEST_COMMIT=$reported_commit
     TEST_PROBE_OK=$probe_ok
+    [ "$api_build" = - ] || printf '%s\n' "$api_build" > "$(api_build_file)"
 
     component_pid() { printf '100'; }
     port_listener_pid() { printf '%s' "$TEST_LISTENER"; }
     process_group_id() { [ "$1" = 200 ] && printf '100' || printf '%s' "$1"; }
     process_parent_id() { printf '1'; }
     checkout_commit() { printf 'bbb2222'; }
+    api_source_fingerprint() { printf 'fp-now'; }
     health_json() {
       printf '{"pid":%s,"commit":"%s","started_at":"2026-01-01T00:00:00Z"}' "$TEST_LISTENER" "$TEST_COMMIT"
     }
@@ -259,6 +263,109 @@ assert_start_web() {
       || fail "$case_name events = $(cat "$events"), want $expected_events"
   )
 }
+
+# Launcher 100 owns listener 200, which reports `reported_commit`; a relaunch
+# gets launcher 101 and the same listener. The api's sources fingerprint as
+# fp-now, and `make up` previously recorded `api_build` ("-" for no record).
+assert_start_api() {
+  local case_name=$1 reported_commit=$2 api_build=$3 expected_output=$4
+  local expected_events=$5 expected_build=$6
+  (
+    # shellcheck disable=SC1090
+    source "$root_dir/scripts/dev-env.sh"
+    STATE_DIR="$tmp_dir/start-api-$case_name"
+    LOG_DIR="$STATE_DIR"
+    mkdir -p "$STATE_DIR"
+    BACKEND_PORT=18080
+    ENV_FILE=.env.example
+    local events="$STATE_DIR/events"
+    : > "$events"
+    printf '100\n' > "$(pid_file api)"
+    [ "$api_build" = - ] || printf '%s\n' "$api_build" > "$(api_build_file)"
+    TEST_COMMIT=$reported_commit
+
+    component_pid() { cat "$(pid_file api)"; }
+    port_listener_pid() { printf '200'; }
+    port_free() { :; }
+    process_group_id() { [ "$1" = 200 ] && component_pid api || printf '%s' "$1"; }
+    process_parent_id() { printf '1'; }
+    checkout_commit() { printf 'bbb2222'; }
+    api_source_fingerprint() { printf 'fp-now'; }
+    health_json() {
+      printf '{"pid":200,"commit":"%s","started_at":"2026-01-01T00:00:00Z"}' "$TEST_COMMIT"
+    }
+    now_epoch() { printf '1000'; }
+    sleep() { :; }
+    stop_component() { printf 'stop %s\n' "$1" >> "$events"; }
+    launch_detached() {
+      printf 'launch %s\n' "$1" >> "$events"
+      printf '101\n' > "$(pid_file api)"
+      TEST_COMMIT=bbb2222
+    }
+
+    local status=0
+    ( start_api ) > "$out" 2>&1 || status=$?
+    [ "$status" = 0 ] \
+      || { sed 's/^/  /' "$out" >&2; fail "$case_name start_api exited $status"; }
+    require_contains "$out" "$expected_output"
+    [ "$(cat "$events")" = "$expected_events" ] \
+      || fail "$case_name events = $(cat "$events"), want $expected_events"
+    [ "$(cat "$(api_build_file)" 2>/dev/null)" = "$expected_build" ] \
+      || fail "$case_name recorded api build = '$(cat "$(api_build_file)" 2>/dev/null)', want '$expected_build'"
+  )
+}
+
+# The fingerprint follows server/'s uncommitted state in a real repository:
+# tracked edits, staged edits and untracked files count, ignored files and
+# changes outside server/ do not, and undoing an edit restores it.
+assert_api_source_fingerprint() (
+  local repo="$tmp_dir/fingerprint-repo" clean
+  mkdir -p "$repo/server/bin"
+  git -C "$repo" init -q
+  printf 'package main\n' > "$repo/server/main.go"
+  printf 'bin/\n' > "$repo/server/.gitignore"
+  printf 'readme\n' > "$repo/README.md"
+  git -C "$repo" add -A
+  git -C "$repo" -c user.name=t -c user.email=t@example.com commit -qm init
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  DIR="$repo"
+  fingerprint_is() {
+    local label=$1 relation=$2 actual
+    actual="$(api_source_fingerprint)"
+    [ -n "$actual" ] || fail "fingerprint $label: empty"
+    if [ "$relation" = same ]; then
+      [ "$actual" = "$clean" ] || fail "fingerprint $label: changed, want it unchanged"
+    else
+      [ "$actual" != "$clean" ] || fail "fingerprint $label: unchanged, want it changed"
+    fi
+    printf '%s' "$actual"
+  }
+  clean="$(api_source_fingerprint)"
+  [ -n "$clean" ] || fail "fingerprint of a clean tree is empty"
+  [ "$(api_source_fingerprint)" = "$clean" ] || fail "fingerprint is not stable"
+
+  printf 'built\n' > "$repo/server/bin/multica"
+  printf 'edited\n' >> "$repo/README.md"
+  fingerprint_is "ignored file and edit outside server/" same >/dev/null
+
+  printf '// edit\n' >> "$repo/server/main.go"
+  fingerprint_is "tracked edit" changed >/dev/null
+  git -C "$repo" add server/main.go
+  fingerprint_is "staged edit" changed >/dev/null
+  git -C "$repo" reset -q
+  git -C "$repo" checkout -q -- server/main.go
+  fingerprint_is "reverted edit" same >/dev/null
+
+  local first
+  printf 'package main\n' > "$repo/server/new.go"
+  first="$(fingerprint_is "untracked file" changed)"
+  printf '// edit\n' >> "$repo/server/new.go"
+  [ "$(fingerprint_is "edited untracked file" changed)" != "$first" ] \
+    || fail "fingerprint did not follow an edit to an untracked file"
+  rm "$repo/server/new.go"
+  fingerprint_is "removed untracked file" same >/dev/null
+)
 
 # ---------------------------------------------------------------------------
 # An empty registry is a normal state, not an error.
@@ -413,6 +520,9 @@ assert_component_state api-current api 200 bbb2222 1 running "commit bbb2222"
 assert_component_state api-stale api 200 aaa1111 1 stale "running aaa1111, checkout at bbb2222; run make up"
 assert_component_state api-foreign api 999 bbb2222 1 mismatch "not this checkout/process"
 assert_component_state api-foreign-old api 999 aaa1111 1 mismatch "not this checkout/process"
+assert_component_state api-dirty api 200 bbb2222 1 stale "pid 200 was compiled before server/ changed (uncommitted changes differ); run make up" "100 fp-old"
+assert_component_state api-unrecorded api 200 bbb2222 1 stale "has no recorded source fingerprint" -
+assert_component_state api-other-launcher api 200 bbb2222 1 stale "has no recorded source fingerprint" "300 fp-now"
 assert_component_state web-running web 200 - 1 running "pid 200"
 assert_component_state web-busy web 200 - 0 busy "pid 200 is ours but not responding"
 assert_component_state web-foreign web 999 - 1 mismatch "listener pid 999 is not owned"
@@ -425,6 +535,15 @@ assert_start_web compiling 200 3 0 "web already running on :13000 (pid 200)" ""
 assert_start_web hung 200 never 0 "did not answer within 300s; restarting it" $'stop web\nlaunch web'
 assert_start_web foreign 999 0 1 "Port 13000 is busy: pid 999" ""
 assert_start_web foreign-silent 999 never 1 "Port 13000 is busy: pid 999" ""
+
+# `go run` compiles the api once, so `make up` restarts an api of the current
+# commit when server/ has uncommitted changes it was not compiled from, and
+# keeps it when nothing changed.
+assert_api_source_fingerprint
+assert_start_api unchanged bbb2222 "100 fp-now" "api already running on :18080 (pid 200, commit bbb2222)" "" "100 fp-now"
+assert_start_api dirty bbb2222 "100 fp-old" "was compiled before server/ changed (uncommitted changes differ); restarting it" $'stop api\nlaunch api' "101 fp-now"
+assert_start_api unrecorded bbb2222 - "has no recorded source fingerprint" $'stop api\nlaunch api' "101 fp-now"
+assert_start_api old-commit aaa1111 "100 fp-now" "is ours but not commit bbb2222; restarting it" $'stop api\nlaunch api' "101 fp-now"
 
 # ---------------------------------------------------------------------------
 # Daemon: `daemon start` is a no-op while one is running, so `make up` has to
