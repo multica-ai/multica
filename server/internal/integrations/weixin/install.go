@@ -245,6 +245,25 @@ func (s *InstallService) Poll(ctx context.Context, session, workspace, initiator
 	return s.Get(ctx, session, workspace, initiator)
 }
 
+func canManageAgent(member db.Member, agent db.Agent) bool {
+	return member.Role == "owner" || member.Role == "admin" ||
+		(member.Role == "member" && agent.OwnerID.Valid && agent.OwnerID == member.UserID)
+}
+
+// Check again when a QR scan completes, since agent access can change while
+// the session is open.
+func authorizeLogin(ctx context.Context, q *db.Queries, session db.WeixinLoginSession) (db.Member, error) {
+	member, err := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: session.InitiatorUserID, WorkspaceID: session.WorkspaceID})
+	if err != nil {
+		return db.Member{}, ErrAccess
+	}
+	agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: session.AgentID, WorkspaceID: session.WorkspaceID})
+	if err != nil || agent.ArchivedAt.Valid || !canManageAgent(member, agent) {
+		return db.Member{}, ErrAccess
+	}
+	return member, nil
+}
+
 func (s *InstallService) complete(ctx context.Context, session db.WeixinLoginSession, result qrStatus) error {
 	tx, err := s.tx.Begin(ctx)
 	if err != nil {
@@ -255,13 +274,9 @@ func (s *InstallService) complete(ctx context.Context, session db.WeixinLoginSes
 	if _, err := q.LockWeixinLoginSession(ctx, db.LockWeixinLoginSessionParams{ID: session.ID, LeaseToken: session.LeaseToken}); err != nil {
 		return ErrNotFound
 	}
-	member, err := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: session.InitiatorUserID, WorkspaceID: session.WorkspaceID})
-	if err != nil || member.Role != "owner" && member.Role != "admin" {
-		return ErrAccess
-	}
-	agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: session.AgentID, WorkspaceID: session.WorkspaceID})
-	if err != nil || agent.ArchivedAt.Valid {
-		return ErrAccess
+	member, err := authorizeLogin(ctx, q, session)
+	if err != nil {
+		return err
 	}
 	if err := q.LockChannelInstallationAppIDSlot(ctx, db.LockChannelInstallationAppIDSlotParams{ChannelType: string(TypeWeixin), AppID: result.BotID}); err != nil {
 		return err
@@ -271,7 +286,7 @@ func (s *InstallService) complete(ctx context.Context, session db.WeixinLoginSes
 		return err
 	}
 	if err == nil && owner.Status == "active" && owner.WorkspaceExists && owner.AgentExists && (owner.WorkspaceID != session.WorkspaceID || owner.AgentID != session.AgentID) {
-		return s.conflict(ctx, q, session.WorkspaceID, owner.WorkspaceID, owner.AgentID)
+		return s.conflict(ctx, q, member, session.WorkspaceID, owner.WorkspaceID, owner.AgentID)
 	}
 	if _, err := q.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{ChannelType: string(TypeWeixin), AppID: result.BotID, WorkspaceID: session.WorkspaceID, AgentID: session.AgentID}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
@@ -283,7 +298,7 @@ func (s *InstallService) complete(ctx context.Context, session db.WeixinLoginSes
 	if err == nil {
 		previous := DecodePublicConfig(old.Config)
 		if old.Status == "active" && (previous.BotID != result.BotID || previous.UserID != result.UserID || old.InstallerUserID != session.InitiatorUserID) {
-			return s.conflict(ctx, q, session.WorkspaceID, old.WorkspaceID, old.AgentID)
+			return s.conflict(ctx, q, member, session.WorkspaceID, old.WorkspaceID, old.AgentID)
 		}
 		if previous.BotID != result.BotID || previous.UserID != result.UserID || old.InstallerUserID != session.InitiatorUserID {
 			if _, err := q.ClearChannelInstallationBotScopedRows(ctx, old.ID); err != nil {
@@ -312,12 +327,12 @@ func (s *InstallService) complete(ctx context.Context, session db.WeixinLoginSes
 	return tx.Commit(ctx)
 }
 
-func (s *InstallService) conflict(ctx context.Context, q *db.Queries, requestedWorkspace, ownerWorkspace, agentID pgtype.UUID) error {
+func (s *InstallService) conflict(ctx context.Context, q *db.Queries, member db.Member, requestedWorkspace, ownerWorkspace, agentID pgtype.UUID) error {
 	if requestedWorkspace != ownerWorkspace {
 		return ErrConflict
 	}
 	agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: agentID, WorkspaceID: requestedWorkspace})
-	if err != nil {
+	if err != nil || !canManageAgent(member, agent) {
 		return ErrConflict
 	}
 	return &ConflictError{AgentID: util.UUIDToString(agent.ID), AgentName: agent.Name}
@@ -337,13 +352,8 @@ func (s *InstallService) confirmExisting(ctx context.Context, session db.WeixinL
 	if _, err := q.LockWeixinLoginSession(ctx, db.LockWeixinLoginSessionParams{ID: session.ID, LeaseToken: session.LeaseToken}); err != nil {
 		return ErrNotFound
 	}
-	member, err := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: session.InitiatorUserID, WorkspaceID: session.WorkspaceID})
-	if err != nil || member.Role != "owner" && member.Role != "admin" {
-		return ErrAccess
-	}
-	agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: session.AgentID, WorkspaceID: session.WorkspaceID})
-	if err != nil || agent.ArchivedAt.Valid {
-		return ErrAccess
+	if _, err := authorizeLogin(ctx, q, session); err != nil {
+		return err
 	}
 	inst, err := q.GetWeixinInstallationForAgent(ctx, db.GetWeixinInstallationForAgentParams{WorkspaceID: session.WorkspaceID, AgentID: session.AgentID})
 	if err != nil || inst.ID != id || inst.Status != "active" || inst.InstallerUserID != session.InitiatorUserID || !bytes.Equal(inst.Config, state.InstallationConfig) {
@@ -364,7 +374,7 @@ func (s *InstallService) List(ctx context.Context, workspace pgtype.UUID) ([]db.
 	return s.q.ListChannelInstallationsByWorkspace(ctx, db.ListChannelInstallationsByWorkspaceParams{WorkspaceID: workspace, ChannelType: string(TypeWeixin)})
 }
 
-func (s *InstallService) Revoke(ctx context.Context, installation, workspace pgtype.UUID) error {
+func (s *InstallService) Revoke(ctx context.Context, installation, workspace, actor pgtype.UUID) error {
 	tx, err := s.tx.Begin(ctx)
 	if err != nil {
 		return err
@@ -377,6 +387,21 @@ func (s *InstallService) Revoke(ctx context.Context, installation, workspace pgt
 	}
 	if err != nil {
 		return err
+	}
+	member, err := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: actor, WorkspaceID: workspace})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrAccess
+	}
+	if err != nil {
+		return err
+	}
+	agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: row.AgentID, WorkspaceID: workspace})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	// For an orphaned installation the zero-value agent leaves cleanup to workspace admins.
+	if !canManageAgent(member, agent) {
+		return ErrAccess
 	}
 	if err := q.SetChannelInstallationStatus(ctx, db.SetChannelInstallationStatusParams{ID: row.ID, Status: "revoked"}); err != nil {
 		return err

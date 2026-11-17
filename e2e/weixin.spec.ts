@@ -3,16 +3,21 @@ import { TestApiClient } from "./fixtures";
 
 // Real Multica login and workspace with a fixture agent and channel responses.
 // Never needs a WeChat account or launches an agent CLI.
-test("WeChat QR verification, connection listing, and disconnect", async ({
+test("An agent owner can connect and disconnect WeChat as a workspace member", async ({
   page,
 }, testInfo) => {
+  const admin = new TestApiClient();
   const api = new TestApiClient();
   const run = `${Date.now()}-${process.pid}`;
+  await admin.login(`e2e-weixin-admin-${run}@example.test`, "Workspace Owner");
+  const workspace = await admin.ensureWorkspace("WeChat review", `weixin-${run}`);
   const identity = await api.login(
-    `e2e-weixin-${run}@multica.ai`,
-    "WeChat E2E",
+    `e2e-weixin-member-${run}@example.test`,
+    "Agent Owner",
   );
-  const workspace = await api.ensureWorkspace("WeChat review", `weixin-${run}`);
+  await admin.addMemberByEmail(api.getEmail());
+  api.setWorkspaceId(workspace.id);
+  api.setWorkspaceSlug(workspace.slug);
   await api.markUserOnboarded();
   const token = api.getToken();
   if (!token) throw new Error("test login returned no token");
@@ -112,7 +117,10 @@ test("WeChat QR verification, connection listing, and disconnect", async ({
     const channels = page.locator("#messaging-channels");
     await channels.getByRole("button", { name: "Add messaging channel" }).first().click();
     const connectDialog = page.getByRole("dialog", { name: "Connect messaging channel" });
-    await connectDialog.getByRole("button", { name: "WeChat" }).click();
+    const wechat = connectDialog.getByRole("button", { name: "WeChat", exact: true });
+    await expect(wechat).toBeEnabled();
+    await connectDialog.screenshot({ path: testInfo.outputPath("weixin-member-platform.png") });
+    await wechat.click();
     // Choosing WeChat shows the QR straight away, with the guide below it.
     await expect(
       connectDialog.getByRole("img", { name: "WeChat connection QR code" }),
@@ -120,10 +128,7 @@ test("WeChat QR verification, connection listing, and disconnect", async ({
     await expect(
       connectDialog.getByRole("button", { name: "Setup guide" }),
     ).toBeVisible();
-    await page.screenshot({
-      path: testInfo.outputPath("weixin-qr.png"),
-      fullPage: true,
-    });
+    await connectDialog.screenshot({ path: testInfo.outputPath("weixin-qr.png") });
     await expect(connectDialog.getByLabel("Verification code")).toBeVisible();
     await page.screenshot({
       path: testInfo.outputPath("weixin-verification.png"),
@@ -156,5 +161,6 @@ test("WeChat QR verification, connection listing, and disconnect", async ({
     await expect(page.getByRole("button", { name: "Manage WeChat" })).toHaveCount(0);
   } finally {
     await api.cleanup();
+    await admin.deleteWorkspace();
   }
 });

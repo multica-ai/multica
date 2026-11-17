@@ -2008,9 +2008,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/weixin/installations", h.ListWeixinInstallations)
-				})
-				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Post("/weixin/logins", h.BeginWeixinLogin)
 					r.Post("/weixin/logins/{loginId}/poll", h.PollWeixinLogin)
 					r.Delete("/weixin/logins/{loginId}", h.CancelWeixinLogin)
