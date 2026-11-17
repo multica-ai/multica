@@ -9,7 +9,7 @@ import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
 const mockDeleteInstallation = vi.hoisted(() => vi.fn());
-const mockGetConnectURL = vi.hoisted(() => vi.fn());
+const mockConnectGitHub = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
 
 const workspaceRef = vi.hoisted(() => ({
@@ -66,11 +66,14 @@ vi.mock("@multica/core/api", () => ({
   api: {
     updateWorkspace: mockUpdateWorkspace,
     deleteGitHubInstallation: mockDeleteInstallation,
-    getGitHubConnectURL: mockGetConnectURL,
+    getGitHubConnectURL: mockConnectGitHub,
   },
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 // The repository list and self-hosted rows have their own tests.
+vi.mock("./use-connect-github", () => ({
+  useConnectGitHub: () => ({ connecting: false, connect: mockConnectGitHub, connectedInstallationID: "", reset: vi.fn() }),
+}));
 vi.mock("./repositories-section", () => ({ RepositoriesSection: () => null }));
 vi.mock("./code-vcs", () => ({ VCSConnectionRows: () => <div>VCS rows</div> }));
 // The merge rule editor has its own test on the statuses it offers.
@@ -121,19 +124,12 @@ function connect() {
 }
 
 describe("CodeTab — GitHub", () => {
-  it("offers to connect GitHub and opens the install flow", async () => {
-    mockGetConnectURL.mockResolvedValue({ configured: true, url: "https://github.com/apps/x" });
-    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+  it("offers to connect GitHub through the shared connection action", async () => {
     const user = userEvent.setup();
     render(<CodeTab />, { wrapper: Wrapper });
-
     expect(screen.getByText("Not connected")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Connect GitHub" }));
-
-    await waitFor(() =>
-      expect(open).toHaveBeenCalledWith("https://github.com/apps/x", "_blank", "noopener"),
-    );
-    open.mockRestore();
+    expect(mockConnectGitHub).toHaveBeenCalledOnce();
   });
 
   it("names the account and who connected it", () => {
@@ -141,7 +137,53 @@ describe("CodeTab — GitHub", () => {
     render(<CodeTab />, { wrapper: Wrapper });
 
     expect(screen.getByText("Connected")).toBeInTheDocument();
-    expect(screen.getByText(/Connected to acme · Connected by Ada/)).toBeInTheDocument();
+    expect(screen.getByText("Connected to acme")).toBeInTheDocument();
+    expect(screen.getByText("Connected by Ada")).toBeInTheDocument();
+  });
+
+  it("keeps adding available with two connections and attributes each connection", async () => {
+    connect();
+    installationsRef.current.installations.push({ id: "inst-2", account_login: "other-org", connected_by: "Grace" });
+    const user = userEvent.setup();
+    render(<CodeTab />, { wrapper: Wrapper });
+
+    expect(screen.getByText("Connected by Ada")).toBeInTheDocument();
+    expect(screen.getByText("Connected by Grace")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add account or organization" }));
+    expect(mockConnectGitHub).toHaveBeenCalledOnce();
+    expect(mockDeleteInstallation).not.toHaveBeenCalled();
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it.each([["acme", "inst-1"], ["other-org", "inst-2"]])(
+    "disconnects only %s and leaves the other connection and workspace settings intact",
+    async (login, id) => {
+      connect();
+      installationsRef.current.installations.push({ id: "inst-2", account_login: "other-org", connected_by: "Grace" });
+      const user = userEvent.setup();
+      const { rerender } = render(<CodeTab />, { wrapper: Wrapper });
+
+      await user.click(screen.getByRole("button", { name: `Disconnect ${login}` }));
+      const dialog = await screen.findByRole("alertdialog");
+      expect(dialog).toHaveTextContent(login!);
+      expect(mockDeleteInstallation).not.toHaveBeenCalled();
+      await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+      await waitFor(() => expect(mockDeleteInstallation).toHaveBeenCalledExactlyOnceWith("workspace-1", id));
+      expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+      installationsRef.current.installations = installationsRef.current.installations.filter((installation) => installation.id !== id);
+      rerender(<CodeTab />);
+      expect(screen.getByText(id === "inst-1" ? "Connected to other-org" : "Connected to acme")).toBeInTheDocument();
+    },
+  );
+
+  it("shows both connections without management controls when can_manage is false", () => {
+    connect();
+    installationsRef.current.installations.push({ id: "inst-2", account_login: "other-org", connected_by: "Grace" });
+    installationsRef.current.can_manage = false;
+    render(<CodeTab />, { wrapper: Wrapper });
+    expect(screen.getByText("Connected to acme")).toBeInTheDocument();
+    expect(screen.getByText("Connected to other-org")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Disconnect|Add account|GitHub actions/ })).toBeNull();
   });
 
   it("pauses GitHub from the row menu, keeping the other settings", async () => {
@@ -202,8 +244,7 @@ describe("CodeTab — GitHub", () => {
     const user = userEvent.setup();
     render(<CodeTab />, { wrapper: Wrapper });
 
-    await user.click(screen.getByRole("button", { name: "GitHub actions" }));
-    await user.click(await screen.findByRole("menuitem", { name: "Disconnect" }));
+    await user.click(screen.getByRole("button", { name: "Disconnect acme" }));
     expect(mockDeleteInstallation).not.toHaveBeenCalled();
     const dialog = await screen.findByRole("alertdialog");
     await user.click(within(dialog).getByRole("button", { name: "Disconnect" }));
@@ -211,6 +252,31 @@ describe("CodeTab — GitHub", () => {
     await waitFor(() =>
       expect(mockDeleteInstallation).toHaveBeenCalledWith("workspace-1", "inst-1"),
     );
+  });
+
+  it.each(["cancel", "confirm"])("keeps the account name in the outgoing confirmation on %s", async (action) => {
+    connect();
+    installationsRef.current.installations.push({ id: "inst-2", account_login: "other-org" });
+    mockDeleteInstallation.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<CodeTab />, { wrapper: Wrapper });
+
+    await user.click(screen.getByRole("button", { name: "Disconnect acme" }));
+    const dialog = await screen.findByRole("alertdialog");
+    // Keep the outgoing node: jsdom does not run the dialog's exit animation.
+    const description = within(dialog).getByText(/^Disconnect acme from this workspace\?/);
+    await user.click(within(dialog).getByRole("button", { name: action === "cancel" ? "Cancel" : "Disconnect" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+
+    expect(description).toHaveTextContent("Disconnect acme from this workspace?");
+    if (action === "cancel") {
+      expect(mockDeleteInstallation).not.toHaveBeenCalled();
+    } else {
+      expect(mockDeleteInstallation).toHaveBeenCalledExactlyOnceWith("workspace-1", "inst-1");
+    }
+
+    await user.click(screen.getByRole("button", { name: "Disconnect other-org" }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Disconnect other-org from this workspace?");
   });
 
   it("shows members the connection read-only and who can change it", () => {

@@ -1,4 +1,10 @@
 {
+  "daemon_setup": {
+    "loading": "연결 설정을 불러오는 중...",
+    "error": "연결 설정을 불러오지 못했습니다. 네트워크 연결을 확인하세요. 자동으로 다시 시도합니다.",
+    "unknown": "서버의 연결 설정을 확인할 수 없습니다. 관리자에게 서버 업데이트를 요청하세요.",
+    "incomplete": "연결 설정이 완전하지 않습니다. 관리자에게 서버의 공개 URL 설정을 요청하세요."
+  },
   "avatar_upload": {
     "change": "아바타 변경",
     "remove": "제거",
@@ -8,7 +14,8 @@
     "upload_image": "이미지 업로드",
     "emoji_label": "이모지",
     "more_emojis": "이모지 더 보기…",
-    "emoji_loading": "불러오는 중…"
+    "emoji_loading": "불러오는 중…",
+    "text_icon": "텍스트 아이콘"
   },
   "avatar_crop": {
     "title": "아바타 편집",
@@ -23,6 +30,14 @@
     "loading": "불러오는 중…",
     "load_failed": "이미지를 불러오지 못했어요"
   },
+  "text_avatar": {
+    "title": "텍스트 아이콘",
+    "preview": "미리보기",
+    "text_label": "텍스트",
+    "text_hint": "1–2자(영문, 숫자, 한자 등). 초과한 글자는 잘립니다.",
+    "color_label": "색상",
+    "render_failed": "아이콘을 만들지 못했습니다. 다시 시도해 주세요."
+  },
   "color_picker": {
     "saturation": "채도와 명도",
     "hue": "색조",
@@ -35,6 +50,7 @@
   "cancel": "취소",
   "delete": "삭제",
   "confirm": "확인",
+  "more_actions": "추가 작업",
   "loading": "로딩 중...",
   "time": {
     "just_now": "방금 전",

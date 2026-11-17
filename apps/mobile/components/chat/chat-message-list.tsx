@@ -1,44 +1,11 @@
 /**
- * Chat message list — user / assistant bubbles, oldest at top, newest at
- * bottom. Initial render lands at the bottom; new arrivals auto-scroll
- * when the user is anchored near the bottom; reading history is never
- * yanked down.
+ * Chronological FlashList chat with initial bottom positioning and MVCP.
+ * Follow new messages only while the user is near the bottom; preserve reading
+ * position through asynchronous Markdown and image resizing.
  *
- * Behavioral parity (apps/mobile/CLAUDE.md):
- *   - Render ALL message roles. Unknown role values are downgraded to
- *     "assistant" by ChatMessageSchema's `.catch()`, so this list never
- *     needs to silently drop a row.
- *   - Render `failure_reason` messages with destructive styling — same
- *     boolean as web's destructive bubble + failureReasonLabel().
- *
- * v1 simplifications:
- *   - No "Replied in Ns" badge under assistant bubbles (elapsed_ms is
- *     parsed but not displayed). Easy v2 add — show below the bubble.
- *   - Attachments bound to a message but NOT referenced inline in `content`
- *     render as standalone cards below the bubble via `CommentAttachmentList`
- *     (same component the comment thread uses; mirrors web reusing
- *     `AttachmentList` in chat). Inline `![](url)` / `[name](url)` still flow
- *     through the markdown renderer and are de-duped out of the card list.
- *
- * Interaction: long-press inside a bubble fires a native iOS
- * `ActionSheetIOS` (Copy / Select Text / Cancel). While the sheet is on
- * screen the targeted bubble's border highlights. The assistant branch
- * has no border baseline because its bubble has no shell — adding a 2px
- * baseline would shift layout per message. See `useChatMessageLongPress`
- * in `./message-long-press.tsx`.
- *
- * List engine: FlashList v2 (Shopify). FlatList was the original choice
- * (per the now-outdated "no FlashList" baseline in apps/mobile/CLAUDE.md
- * — written before FlashList v2 stabilised). FlatList's `scrollToEnd` is
- * janky on variable-height lists by RN's own docs admission, and our
- * markdown bubbles render in multiple async passes (Shiki highlight,
- * image natural-size, lightbox provider injection) — each pass used to
- * fire onContentSizeChange and trigger another forced scroll, causing
- * the "open chat → feels stuck" jank. FlashList v2 replaces the manual
- * scroll dance with `maintainVisibleContentPosition`
- * (default-on; locks visible item across content changes) +
- * `startRenderingFromBottom` (initial paint at bottom, no setTimeout
- * hacks). Cell recycling also keeps scroll-up smooth.
+ * Render all normalized message roles and failure styling. Attachments not used
+ * inline appear as standalone cards. Long-press actions highlight the target
+ * without adding a border that would shift the layout.
  */
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
@@ -54,11 +21,14 @@ import type {
 } from "@multica/core/types";
 import type { AgentAvailability } from "@multica/core/agents";
 import { continuousCorners } from "@/lib/radius";
+import { THEME } from "@/lib/theme";
+import { useColorScheme } from "@/lib/use-color-scheme";
 import { taskMessagesOptions } from "@/data/queries/chat";
 import { Text } from "@/components/ui/text";
 import { Markdown } from "@/lib/markdown";
 import { ImageSequenceProvider } from "@/lib/markdown/image-sequence";
 import { failureReasonKey } from "@/lib/failure-reason-label";
+import type { QueuedChatMessage } from "@/lib/chat-queued-messages";
 import { formatElapsedMs } from "@/lib/format-elapsed";
 import { cn } from "@/lib/utils";
 import { useChatSelectStore } from "@/data/chat-select-store";
@@ -99,13 +69,15 @@ interface Props {
   /** Live timeline rows for the in-flight task. Already fetched by the
    *  parent so this list doesn't have to manage its own subscription. */
   liveTaskMessages?: TaskMessagePayload[];
+  /** Follow-ups waiting for their turn, rendered after the live reply. */
+  queuedMessages?: QueuedChatMessage[];
   /** Resolved availability — drives the StatusPill's "Offline" /
    *  "Reconnecting" stages. Pass `undefined` while loading. */
   availability?: AgentAvailability;
 }
 
 export function ChatMessageList({
-  messages,
+  messages: allMessages,
   loading,
   hasSessions,
   agent,
@@ -114,12 +86,19 @@ export function ChatMessageList({
   quickActionsDisabled = false,
   pendingTask,
   liveTaskMessages,
+  queuedMessages = [],
   availability,
 }: Props) {
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
   // Pressable below. When null, the Pressable stays disabled and every tap
   // passes through to the list cells / bubble long-press wrappers normally.
   const selectingId = useChatSelectStore((s) => s.selectingId);
+  // A wakeup turn's input is the runtime's, not a message the person wrote;
+  // its content is withheld, so it would render as an empty bubble.
+  const messages = useMemo(
+    () => allMessages.filter((m) => m.message_kind !== "wakeup"),
+    [allMessages],
+  );
 
   // Every image in this session, in message order (MUL-5752), so tapping one
   // opens the lightbox at its position and a swipe walks the rest.
@@ -212,16 +191,21 @@ export function ChatMessageList({
       )}
       ItemSeparatorComponent={MessageSeparator}
       ListFooterComponent={
-        showLiveSection ? (
+        showLiveSection || queuedMessages.length > 0 ? (
           <View style={{ paddingTop: 12 }} className="gap-2">
             {showLiveTimeline ? (
               <ChatTimeline items={liveTaskMessages ?? []} isStreaming />
             ) : null}
-            <StatusPill
-              pendingTask={pendingTask}
-              taskMessages={liveTaskMessages}
-              availability={availability}
-            />
+            {showLiveSection ? (
+              <StatusPill
+                pendingTask={pendingTask}
+                taskMessages={liveTaskMessages}
+                availability={availability}
+              />
+            ) : null}
+            {queuedMessages.map((row) => (
+              <QueuedMessageRow key={row.task_id} message={row} />
+            ))}
           </View>
         ) : null
       }
@@ -262,6 +246,48 @@ export function ChatMessageList({
 
 function MessageSeparator() {
   return <View style={{ height: 12 }} />;
+}
+
+/**
+ * A follow-up waiting for its turn. Sits after the live reply, where it will
+ * run, dimmed and captioned so it does not read as part of the current
+ * reply. Read-only on mobile: removing or editing queued messages stays on
+ * web and desktop. Once its turn starts the server row returns to the
+ * transcript in this position.
+ */
+function QueuedMessageRow({ message }: { message: QueuedChatMessage }) {
+  const { t } = useT("chat");
+  const { colorScheme } = useColorScheme();
+  return (
+    <View className="self-end max-w-[80%] items-end gap-1 opacity-60">
+      <View
+        className="gap-1.5 rounded-xl border-2 border-transparent bg-muted px-3.5 py-2"
+        style={continuousCorners}
+      >
+        {message.content.trim() ? (
+          <Markdown
+            content={message.content}
+            attachments={message.attachments}
+            compact
+          />
+        ) : null}
+        <CommentAttachmentList
+          attachments={message.attachments}
+          content={message.content}
+        />
+      </View>
+      <View className="flex-row items-center gap-1 px-1">
+        <Ionicons
+          name="time-outline"
+          size={12}
+          color={THEME[colorScheme].mutedForeground}
+        />
+        <Text className="text-xs text-muted-foreground">
+          {t("status.queued")}
+        </Text>
+      </View>
+    </View>
+  );
 }
 
 function MessageRow({

@@ -121,15 +121,16 @@ export function CommentCard({
   // Inbox deep-link target inside a resolved thread expands automatically —
   // otherwise tapping a notification would just reveal a bar with no content
   // and force the user to tap again.
-  useEffect(() => {
-    if (!resolved || !highlightedCommentId) return;
-    if (
-      highlightedCommentId === entry.id ||
-      replies.some((r) => r.id === highlightedCommentId)
-    ) {
-      setExpanded(true);
-    }
-  }, [resolved, highlightedCommentId, entry.id, replies]);
+  const highlightsThread = !!highlightedCommentId && (
+    highlightedCommentId === entry.id ||
+    replies.some((r) => r.id === highlightedCommentId)
+  );
+  const autoExpandTarget = resolved && highlightsThread ? highlightedCommentId : null;
+  const [previousExpandTarget, setPreviousExpandTarget] = useState<typeof autoExpandTarget>(null);
+  if (previousExpandTarget !== autoExpandTarget) {
+    setPreviousExpandTarget(autoExpandTarget);
+    if (autoExpandTarget) setExpanded(true);
+  }
 
   const visibleReplies = replies.filter((reply) => !isDeletedComment(reply));
   // A deleted reply renders nothing, so a notification pointing at one has no

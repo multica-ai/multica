@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -30,6 +31,38 @@ import (
 // expected error ranks below writeErr need it; the scanner-overflow and
 // structured-stream-error cases rank above it and are unaffected.
 const drainStdin = "cat > /dev/null"
+
+func TestCursorExecuteConnectionStalledDiagnostics(t *testing.T) {
+	t.Parallel()
+	script := `#!/bin/sh
+` + drainStdin + `
+i=0
+while [ "$i" -lt 500 ]; do
+  printf '%s\n' '{"type":"system","subtype":"init","session_id":"sess-stalled"}'
+  i=$((i + 1))
+done
+printf '%s\n' 'RetriableError: Connection stalled' >&2
+exit 1
+`
+	result := executeFakeCursor(t, script)
+	if result.Status != "failed" || result.Output != "" {
+		t.Fatalf("stalled run must remain a failure without final output: %+v", result)
+	}
+	if result.SessionID != "sess-stalled" {
+		t.Fatalf("session id = %q, want sess-stalled", result.SessionID)
+	}
+	for _, want := range []string{"event_count=500", "cursor stderr: RetriableError: Connection stalled", cursorIncompleteFinalizationWarning} {
+		if !strings.Contains(result.Error, want) {
+			t.Errorf("error = %q, want substring %q", result.Error, want)
+		}
+	}
+	if got := taskfailure.Classify(result.Error); got != taskfailure.ReasonAgentProviderNetwork {
+		t.Fatalf("adapter error classified as %s, want provider_network", got)
+	}
+	if got := taskfailure.NormalizeDaemonReason(taskfailure.ReasonAgentProviderServerError.String(), result.Error); got != taskfailure.ReasonAgentProviderNetwork {
+		t.Fatalf("legacy daemon reason normalized to %s, want provider_network", got)
+	}
+}
 
 func TestCursorExecuteStopsAfterTerminalResult(t *testing.T) {
 	t.Parallel()
@@ -386,5 +419,51 @@ func TestCursorExecuteWithoutContextTagKeepsUserConfigDir(t *testing.T) {
 	seen, _ := os.ReadFile(mark)
 	if got := strings.TrimSpace(string(seen)); !strings.HasPrefix(got, "/user/cursor|") || !strings.Contains(got, "--model grok-4.7-high") {
 		t.Fatalf("cursor saw %q; want the user's CURSOR_CONFIG_DIR and --model untouched", got)
+	}
+}
+
+func TestCursorExecuteRelativeProfileUsesTaskDirectory(t *testing.T) {
+	daemonDir := t.TempDir()
+	taskDir := t.TempDir()
+	t.Chdir(daemonDir)
+	for _, dir := range []string{daemonDir, taskDir} {
+		profile := filepath.Join(dir, "profile")
+		if err := os.Mkdir(profile, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		data, err := json.Marshal(map[string]string{"profileOrigin": dir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(profile, cursorCLIConfigFile), data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := filepath.Join(t.TempDir(), "seen.json")
+	fakePath := filepath.Join(t.TempDir(), "cursor-agent")
+	writeTestExecutable(t, fakePath, []byte("#!/bin/sh\n"+drainStdin+"\ncp \"$CURSOR_CONFIG_DIR/cli-config.json\" \""+seen+"\"\n"+fakeCursorResult))
+	backend, err := New("cursor", Config{ExecutablePath: fakePath, Logger: slog.Default(), Env: map[string]string{"CURSOR_CONFIG_DIR": "profile"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(t.Context(), "hello", ExecOptions{Cwd: taskDir, Model: "grok-4.7[500k]", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	if result := <-session.Result; result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	data, err := os.ReadFile(seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		t.Fatal(err)
+	}
+	if config["profileOrigin"] != taskDir {
+		t.Fatalf("selected profile = %v, want task profile %q", config["profileOrigin"], taskDir)
 	}
 }

@@ -50,11 +50,6 @@ func shouldEnqueueSquadLeaderOnCommentForTest(ctx context.Context, issue db.Issu
 	return triggersContainIssueAssigneeSquadLeader(triggers)
 }
 
-func shouldEnqueueSquadLeaderOnReplyForTest(ctx context.Context, issue db.Issue, content string, parent *db.Comment, authorType, authorID string) bool {
-	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, content, parent, authorType, authorID, commentTriggerComputeOptions{})
-	return triggersContainIssueAssigneeSquadLeader(triggers)
-}
-
 func triggersContainIssueAssigneeSquadLeader(triggers []commentAgentTrigger) bool {
 	for _, trigger := range triggers {
 		if trigger.Source == commentTriggerSourceIssueAssignee && trigger.Squad != nil {
@@ -306,6 +301,31 @@ func TestShouldEnqueueSquadLeaderOnComment_AgentAuthoredWorkerCommentsWakeLeader
 			t.Fatalf("explicit mention: expected no assigned-leader fallback, got wake")
 		}
 	})
+
+	// Case 5: a worker result that @mentions a human or @all only notifies
+	// people — it must still close the loop back to the leader, while the
+	// leader's own self-trigger guard keeps holding for the same content.
+	memberMention := "[@Bob](mention://member/" + testUserID + ")"
+	for _, tc := range []struct{ name, content string }{
+		{"member mention", memberMention + " please review the PR"},
+		{"mention all", "[@all](mention://all/all) PR is up"},
+		{"member mention and all", memberMention + " [@all](mention://all/all) PR is up"},
+	} {
+		content := tc.content
+		t.Run("worker comment with "+tc.name+" wakes leader", func(t *testing.T) {
+			clearTasks()
+			if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, content, "agent", fx.OtherID); !got {
+				t.Fatalf("worker comment %q: expected leader to wake, got skip", content)
+			}
+		})
+		t.Run("leader comment with "+tc.name+" does not self-trigger", func(t *testing.T) {
+			clearTasks()
+			insertLeaderTask(true, "completed")
+			if got := shouldEnqueueSquadLeaderOnCommentForTest(ctx, fx.Issue, content, "agent", fx.LeaderID); got {
+				t.Fatalf("leader self-trigger %q: expected skip, got wake", content)
+			}
+		})
+	}
 }
 
 // TestCreateComment_SquadPlainReplyToMemberParentKeepsRootMentionOwner drives the

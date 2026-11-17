@@ -1,0 +1,132 @@
+---
+title: Statistiques
+description: Voir ce que coûtent les agents, combien de tokens ils consomment, combien de temps ils tournent, et quelles exécutions échouent et pourquoi.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { UsageDemo } from "@/components/demos/usage-demo";
+
+La page **Statistiques** de la barre latérale regroupe la consommation des agents de tout l'espace de travail : coût, tokens, temps d'exécution, nombre d'exécutions et exécutions en échec. Tous les membres de l'espace de travail peuvent l'ouvrir. La consommation de chaque runtime se trouve sur sa page de détail, et le coût d'une tâche dans sa boîte de dialogue **Exécutions** ; les deux sont décrits plus bas.
+
+## Organisation de la page
+
+La page a deux onglets, **Consommation** et **Erreurs**, qui partagent les deux filtres en haut à droite :
+
+- **Période** : `1d`, `7d`, `30d` (par défaut), `90d`, `180d`. `1d` signifie aujourd'hui, à partir de minuit dans votre fuseau horaire, et non les dernières 24 heures.
+- **Projet** : **Tous les projets** par défaut. Avec un projet sélectionné, seules les exécutions des tâches de ce projet comptent ; celles qui n'appartiennent à aucune tâche, comme les exécutions de chat, sont exclues.
+
+Les jours sont découpés selon votre fuseau horaire : celui choisi dans **Paramètres → Préférences → Fuseau horaire**, ou celui du navigateur si vous n'en avez pas choisi. L'en-tête affiche ce fuseau et l'heure de la dernière mise à jour. Le serveur agrège les chiffres toutes les 5 minutes et une page ouverte se rafraîchit au même rythme ; une exécution qui vient de se terminer peut donc mettre quelques minutes à apparaître. Le bouton d'actualisation récupère tout de suite les derniers chiffres.
+
+Passer sur l'onglet Erreurs ajoute `?tab=errors` à l'adresse : le lien que vous envoyez à un collègue s'ouvre directement sur cet onglet.
+
+## Onglet Consommation
+
+Quatre chiffres en haut :
+
+| Carte | Contenu |
+| --- | --- |
+| **Coût** | Coût estimé en USD ; voir [Calcul du coût](#calcul-du-coût) |
+| **Tokens** | Total des tokens d'entrée, de sortie, de lecture et d'écriture de cache, avec l'entrée et la sortie détaillées en dessous |
+| **Temps d'exécution** | Durée cumulée des exécutions terminées, du début à la fin de chacune |
+| **Exécutions** | Exécutions terminées sur la période, et combien ont échoué |
+
+Le temps d'exécution et le nombre d'exécutions ne comptent que les exécutions réellement démarrées (terminées, en échec ou annulées en cours de route) ; une exécution annulée alors qu'elle attendait encore dans la file n'est pas comptée.
+
+La carte de tendance affiche Tokens, Coût, Temps ou Exécutions sur un même axe temporel, en **Quotidien** ou **Hebdomadaire**. `30d` et `90d` proposent les deux ; `1d` et `7d` sont uniquement quotidiens, `180d` uniquement hebdomadaire. Les semaines commencent le lundi, et la semaine en cours, pas encore terminée, est dessinée plus pâle ; au survol, la barre est marquée comme partielle avec le nombre de jours écoulés sur 7.
+
+Le **Classement** liste les tokens, le coût, le temps et les exécutions de chaque agent, triés selon l'une de ces quatre valeurs. Il affiche les 10 premiers ; **Tout afficher** montre le reste. Deux lignes peuvent regrouper plusieurs agents :
+
+- **Agents supprimés** : la consommation des agents supprimés depuis, fusionnée en une ligne pour que les lignes s'additionnent toujours aux totaux du haut.
+- **Autres agents** : les agents que vous ne pouvez pas voir, fusionnés en une ligne. Les propriétaires et administrateurs de l'espace de travail voient tous les agents créés par les membres ; un membre ordinaire ne voit pas les agents privés des autres, dont la consommation n'apparaît qu'ici, sans nom.
+
+Quand une partie des exécutions d'un agent n'a pas transmis de tokens, ses Tokens et son Coût sont précédés de `≥`, et une ligne sous son nom indique combien d'exécutions n'ont pas transmis leur consommation.
+
+Dans la démo ci-dessous, une équipe ops a trois agents. Regardez d'abord la tendance du coût, puis qui dépense le plus, et cherchez enfin la cause des échecs dans l'onglet Erreurs.
+
+<UsageDemo />
+
+## Onglet Erreurs
+
+En haut : **Exécutions en échec**, **Taux d'échec** et **Agents touchés**. Le taux est calculé sur toutes les exécutions terminées dans la période, et la carte indique les deux nombres en dessous.
+
+Ensuite :
+
+- **Erreurs quotidiennes** (ou hebdomadaires) : chaque couleur d'une barre est une catégorie d'échec.
+- **Répartition des échecs** : tous les échecs de la période, répartis par catégorie. **Afficher les codes d'erreur** affiche à la place les codes de motif d'échec bruts, à rechercher dans les journaux ou à coller dans une tâche.
+- **Principaux fautifs** : classés par nombre d'échecs par défaut, au-delà des 8 premiers derrière un bouton. Classés par **Taux**, les agents qui ont moins de 10 exécutions passent en dernier : sur si peu d'exécutions, un taux ne dit pas grand-chose. Cliquer sur le nom d'un agent ouvre sa page de détail, avec ses exécutions récentes et le motif de chaque échec.
+
+Les codes de motif d'échec se répartissent en sept catégories :
+
+| Catégorie | Comprend | Solution habituelle |
+| --- | --- | --- |
+| Authentification | Échec d'authentification ou accès refusé chez le fournisseur, configuration manquante comme une clé API | Se reconnecter dans l'outil de codage IA, ou compléter la configuration |
+| Limite de débit | Limitation de débit, capacité insuffisante, quota ou solde épuisé | Réessayer plus tard, ou relever la limite |
+| Délai dépassé | Délai d'exécution dépassé, outil qui ne répond plus, Codex bloqué | Réduire la tâche, ou ajuster le délai |
+| Fournisseur | Erreurs serveur du fournisseur, pannes réseau, modèle indisponible, requête refusée | Réessayer plus tard, ou passer à un modèle disponible |
+| Runtime | Runtime hors ligne, redémarrage du daemon, expiration dans la file, échec du téléchargement du bundle de skills, outil introuvable ou trop ancien, échec de préparation de l'environnement | Vérifier l'ordinateur qui a exécuté la tâche |
+| Agent | Plantage du processus de l'outil, sortie illisible, dépassement de contexte, limite d'itérations, agent signalant qu'il ne peut pas continuer | Lire la transcription, ajuster la tâche et relancer |
+| Autre | Échecs impossibles à classer | Consulter le code d'erreur brut et la transcription |
+
+Pour le sens de chaque code et la manière de le traiter, voir [Exécutions · Référence des motifs d'échec](/tasks#référence-des-motifs-déchec).
+
+## Calcul du coût
+
+Tous les coûts affichés dans Statistiques sont des estimations en USD, pas une facture de l'outil de codage IA ni du fournisseur de modèle :
+
+- Multica embarque une table des tarifs publiés des modèles, avec un prix par million de tokens pour l'entrée, la sortie, la lecture et l'écriture de cache, qu'il multiplie par les tokens transmis.
+- Quand l'outil de codage IA communique son propre coût (c'est le cas de Grok Build, par exemple), ce chiffre est repris tel quel au lieu d'une estimation.
+- Les tokens des modèles absents de la table sont comptés, mais leur coût vaut $0. Vous pouvez [définir des tarifs personnalisés](#tarifs-personnalisés) pour ces modèles depuis la consommation d'un runtime.
+- Certains modèles appliquent un tarif plus élevé au-delà d'une certaine longueur de prompt. Les données agrégées ne disent pas quelle était la longueur de chaque requête, tout est donc compté au tarif standard, et ces exécutions peuvent être sous-estimées.
+
+Les tokens sont transmis par l'outil de codage IA. Quand un outil n'en transmet aucun, l'exécution compte quand même dans le temps d'exécution et le nombre d'exécutions, mais n'ajoute ni tokens ni coût. Par exemple, le GitHub Copilot CLI actuel n'indique pas de nombre de tokens dans sa sortie ; les agents qui l'utilisent affichent donc `≥` et le nombre d'exécutions non transmises dans le classement.
+
+## Consommation d'un runtime
+
+Ouvrez **Runtimes** et entrez dans la page de détail d'un runtime pour voir sa consommation. Celle d'un runtime privé n'est visible que par son propriétaire ; celle d'un runtime public est visible par tous les membres.
+
+- En haut : **Coût**, **Économies de cache** et **Tokens**. Le coût est comparé à la période précédente de même durée. Les économies de cache estiment combien les lectures de cache auraient coûté de plus au tarif d'entrée normal, avec le taux de succès du cache en dessous.
+- **Quand ce runtime a dépensé** : coût ou tokens par jour ou par semaine. La vue **Carte de chaleur** colore un carré par jour des 26 dernières semaines selon son coût, sans tenir compte de la période choisie au-dessus.
+- **Par agent** et **Par modèle** : à quels agents et à quels modèles est allé le coût de la période.
+- **Tableau du détail quotidien** : se déplie en une ligne par date et par modèle, avec chaque type de tokens.
+
+La page d'un runtime propose `7d`, `30d`, `90d` et `180d`.
+
+## Tarifs personnalisés
+
+Quand la période choisie contient des modèles absents de la table des tarifs, la consommation du runtime affiche au-dessus des chiffres un avis indiquant combien de modèles n'ont pas de tarif maintenu et que leurs tokens sont exclus du coût. Cliquez sur **Définir des tarifs personnalisés**, saisissez pour chaque modèle les tarifs d'entrée, de sortie, de lecture et d'écriture de cache en USD par million de tokens, puis enregistrez. Une fois que tous les modèles ont un tarif, un bouton **Modifier les tarifs personnalisés** reste en place pour les changer plus tard. Pour retirer le tarif d'un modèle, videz tous ses champs et enregistrez, ou cliquez sur le bouton de suppression à côté.
+
+<Callout type="info">
+Les tarifs personnalisés sont stockés uniquement dans le navigateur ou l'application de bureau de cet appareil. Ils ne sont pas synchronisés avec votre compte ni partagés avec les autres membres, et s'appliquent à tous les espaces de travail de cet appareil. Les autres membres voient toujours $0 pour ces modèles.
+</Callout>
+
+Les tarifs personnalisés ne s'appliquent qu'aux modèles absents de la table : ils ne remplacent pas un tarif intégré, ni un coût que l'outil de codage IA a communiqué lui-même. Après l'enregistrement, Statistiques, la consommation des runtimes et les boîtes de dialogue Exécutions des tâches sont recalculées avec les nouveaux tarifs sur cet appareil.
+
+## Coût d'une tâche
+
+Le **Journal d'exécution** de la barre latérale de chaque tâche affiche son **Dépensé**, ses **Tokens** et son **Travail d'agent**, ainsi qu'une barre de coût par exécution. Cliquez sur le total, sur une barre de coût ou sur **Ouvrir la chronologie** pour ouvrir la boîte de dialogue **Exécutions** :
+
+- Le résumé du haut montre **Dépensé**, **Tokens** (et la part venue du cache), **Sortie**, **Travail d'agent** et **Exécutions**. Le travail d'agent est la somme des durées des exécutions ; la durée affichée à côté va du début de la première exécution à la fin de la dernière. À côté du nombre d'exécutions figurent celles en échec, annulées et en cours.
+- La vue **Par exécution** du graphique trace une barre par exécution pour le coût, les tokens ou le travail d'agent ; la vue **Cumul** trace le coût cumulé au fil du temps.
+- Les bandes **Par agent** et **Par modèle** montrent à qui et à quels modèles le coût est allé.
+- En dessous, les exécutions sont listées par jour ; **Détails de l'exécution** montre le détail du coût d'une exécution et ce que ses lectures de cache ont fait économiser.
+
+Le bas de la boîte de dialogue rappelle que le coût est estimé et nomme les modèles sans tarif.
+
+## Depuis la CLI
+
+```bash
+multica issue usage <issue-id>
+multica runtime usage <runtime-id> --days 30
+```
+
+`issue usage` affiche les totaux de tokens d'une tâche (entrée, sortie, lecture de cache, écriture de cache) et les nombres d'exécutions. `RUNS` est le nombre d'exécutions terminées, `METERED_RUNS` celles qui ont transmis leur consommation, `UNREPORTED` celles qui ne l'ont pas fait ; dès qu'une exécution n'a rien transmis, les totaux de tokens sont précédés de `>=`, car le chiffre réel ne peut être que plus élevé.
+
+`runtime usage` liste les tokens d'un runtime par date, fournisseur et modèle. `--days` vaut 90 par défaut, 365 au maximum.
+
+Aucun des deux tableaux ne contient d'estimation de coût ; ajoutez `--output json` pour obtenir les données brutes renvoyées par l'API.
+
+## Étapes suivantes
+
+- [Exécutions](/tasks) — le journal d'exécution, les motifs d'échec et les relances.
+- [Daemon et runtimes](/daemon-runtimes) — sur quel ordinateur une exécution tourne.
+- [Membres et rôles](/members-roles) — qui peut voir quels agents.

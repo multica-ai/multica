@@ -182,9 +182,10 @@ func (s *AutopilotService) createAutopilotRunWithQuota(
 		if err := tx.Commit(ctx); err != nil {
 			return db.AutopilotRun{}, false, fmt.Errorf("commit blocked quota admission: %w", err)
 		}
-		// Inbox delivery is presentation-only. It runs after the admission
-		// transaction commits so a malformed notification marker or failed insert
-		// can never turn the quota response into a 500 or roll back blocked counts.
+		// Overage recording and Inbox delivery are presentation-only. They run
+		// after the admission transaction commits so a failed write can never turn
+		// the quota response into a 500 or roll back blocked counts.
+		s.recordAutopilotQuotaExceeded(ctx, policy, workspaceID, period)
 		s.deliverAutopilotQuotaRejectionNotice(ctx, policy, workspaceID, source, params)
 		s.recordAutopilotQuotaDecision(policy.action, source, "blocked")
 		return db.AutopilotRun{}, false, &AutopilotQuotaExceededError{
@@ -192,8 +193,8 @@ func (s *AutopilotService) createAutopilotRunWithQuota(
 			Limit: policy.limit, ResetAt: policy.resetAt,
 		}
 	}
-	// Observe-only would-blocks stay in the bounded decision metric. Durable
-	// blocked counts back the usage API only for decisions that reject work.
+	// Observe admits the run. The would-block is recorded per workspace after
+	// commit; blocked_counts stay reserved for decisions that reject work.
 	reservation, err := qtx.CreateAutopilotQuotaReservation(ctx, db.CreateAutopilotQuotaReservationParams{
 		WorkspaceID: workspaceID, PeriodStart: periodArgs.PeriodStart, PeriodEnd: periodArgs.PeriodEnd,
 		PolicyRevision: policy.policyRevision, SubscriptionVersion: policy.subscriptionVersion,
@@ -218,9 +219,33 @@ func (s *AutopilotService) createAutopilotRunWithQuota(
 	result := "admitted"
 	if wouldBlock {
 		result = "would_block"
+		s.recordAutopilotQuotaExceeded(ctx, policy, workspaceID, period)
+	} else {
+		EntitlementOverages{Queries: s.Queries}.SyncLimit(
+			ctx, workspaceID, entitlement.GateAutopilotRuns, policy.periodStart, policy.periodEnd, policy.limit,
+		)
 	}
 	s.recordAutopilotQuotaDecision(policy.action, source, result)
 	return run, false, nil
+}
+
+// recordAutopilotQuotaExceeded stores an over-limit attempt. period holds the
+// counts seen before the attempt, so the attempt itself is the +1.
+func (s *AutopilotService) recordAutopilotQuotaExceeded(
+	ctx context.Context,
+	policy autopilotQuotaPolicy,
+	workspaceID pgtype.UUID,
+	period db.AutopilotQuotaPeriod,
+) {
+	EntitlementOverages{Queries: s.Queries}.Record(ctx, LimitExceededAttempt{
+		WorkspaceID:    workspaceID,
+		Gate:           entitlement.GateAutopilotRuns,
+		Action:         policy.action,
+		PeriodStart:    policy.periodStart,
+		PeriodEnd:      policy.periodEnd,
+		Limit:          policy.limit,
+		AttemptedUsage: period.UsedCount + period.ReservedCount + 1,
+	})
 }
 
 func (s *AutopilotService) recordAutopilotQuotaDecision(action entitlement.Action, source, result string) {
@@ -245,7 +270,21 @@ func settleAutopilotQuota(ctx context.Context, q *db.Queries, reservationID pgty
 	return err == nil, err
 }
 
-func (s *AutopilotService) completeAutopilotRun(ctx context.Context, params db.UpdateAutopilotRunCompletedParams) (db.AutopilotRun, error) {
+// autopilotRunCompletion and autopilotRunFailure carry the terminal inputs
+// that UpdateAutopilotRunTerminalWithQuota settles atomically with the run's
+// quota reservation.
+type autopilotRunCompletion struct {
+	ID     pgtype.UUID
+	Result []byte
+}
+
+type autopilotRunFailure struct {
+	ID            pgtype.UUID
+	FailureReason pgtype.Text
+	ReasonCode    pgtype.Text
+}
+
+func (s *AutopilotService) completeAutopilotRun(ctx context.Context, params autopilotRunCompletion) (db.AutopilotRun, error) {
 	row, err := s.Queries.UpdateAutopilotRunTerminalWithQuota(ctx, db.UpdateAutopilotRunTerminalWithQuotaParams{
 		TerminalStatus: "completed",
 		Result:         params.Result,
@@ -255,7 +294,7 @@ func (s *AutopilotService) completeAutopilotRun(ctx context.Context, params db.U
 	return autopilotRunFromTerminalRow(row), err
 }
 
-func (s *AutopilotService) failAutopilotRun(ctx context.Context, params db.UpdateAutopilotRunFailedParams) (db.AutopilotRun, error) {
+func (s *AutopilotService) failAutopilotRun(ctx context.Context, params autopilotRunFailure) (db.AutopilotRun, error) {
 	row, err := s.Queries.UpdateAutopilotRunTerminalWithQuota(ctx, db.UpdateAutopilotRunTerminalWithQuotaParams{
 		TerminalStatus: "failed",
 		FailureReason:  params.FailureReason,

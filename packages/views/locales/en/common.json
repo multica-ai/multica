@@ -1,4 +1,10 @@
 {
+  "daemon_setup": {
+    "loading": "Loading connection settings...",
+    "error": "Couldn't load connection settings. Check your connection; retrying automatically.",
+    "unknown": "This server hasn't confirmed its connection settings. Ask your administrator to update the server.",
+    "incomplete": "Connection settings are incomplete. Ask your administrator to configure this server's public URLs."
+  },
   "avatar_upload": {
     "change": "Change avatar",
     "remove": "Remove",
@@ -8,7 +14,8 @@
     "upload_image": "Upload image",
     "emoji_label": "Emoji",
     "more_emojis": "More emojis…",
-    "emoji_loading": "Loading…"
+    "emoji_loading": "Loading…",
+    "text_icon": "Text icon"
   },
   "avatar_crop": {
     "title": "Edit avatar",
@@ -23,6 +30,14 @@
     "loading": "Loading…",
     "load_failed": "Couldn't load image"
   },
+  "text_avatar": {
+    "title": "Text icon",
+    "preview": "Preview",
+    "text_label": "Text",
+    "text_hint": "1–2 characters: letters, digits or Chinese. Longer text is cut.",
+    "color_label": "Color",
+    "render_failed": "Couldn't create the icon. Please try again."
+  },
   "color_picker": {
     "saturation": "Saturation and brightness",
     "hue": "Hue",
@@ -35,6 +50,7 @@
   "cancel": "Cancel",
   "delete": "Delete",
   "confirm": "Confirm",
+  "more_actions": "More actions",
   "loading": "Loading...",
   "time": {
     "just_now": "just now",

@@ -12,7 +12,7 @@ import {
   MoreHorizontal,
   Settings2,
   X as XIcon,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -24,6 +24,8 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { api, ApiError } from "@multica/core/api";
@@ -32,6 +34,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AppLink, resolveClickIntent } from "../navigation";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { isProjectArchived } from "@multica/core/projects";
 import {
   useQuickCreateStore,
   type QuickCreateActorType,
@@ -50,6 +53,7 @@ import {
 } from "@multica/core/runtimes";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
+import { DeferredTooltip } from "../common/deferred-tooltip";
 import {
   contentReferencesAttachment,
   type Agent,
@@ -59,6 +63,7 @@ import {
 } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { ClearablePillButton, PillButton } from "../common/pill-button";
+import { useComposerVoice, VoiceDialogFooter, VoiceMicButton } from "../voice";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { DueDatePicker, PriorityIcon, PriorityPicker } from "../issues/components";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
@@ -84,7 +89,6 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
-import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
 type ActorSelection =
   | { type: "agent"; id: string }
@@ -136,10 +140,10 @@ export function AgentCreatePanel({
     : undefined;
   const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
   const sourceContextFailureMessage = useSourceContextFailureMessage();
-  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   // Pull `isSuccess` so the stale-id sweep below can distinguish "still
   // loading" from "loaded as empty". Reading length alone treats both as
@@ -174,7 +178,9 @@ export function AgentCreatePanel({
   const visibleSquads = useMemo(
     () =>
       squads.filter(
-        (s) => !s.archived_at && visibleAgentIds.has(s.leader_id),
+        (s) =>
+          !s.archived_at &&
+          visibleAgentIds.has(s.leader_id),
       ),
     [squads, visibleAgentIds],
   );
@@ -271,10 +277,11 @@ export function AgentCreatePanel({
   // Project has exactly two seeds, both carrying explicit user intent: the
   // project page (or manual panel) the modal was opened from, and the user's
   // own unfinished draft. It is deliberately NOT seeded from the last create
-  // — see quick-create-store (MUL-5862).
+  // — see quick-create-store (MUL-5862). An opener that passes `project_id:
+  // null` ("No project") means none, so the draft's does not fill in.
   const [projectId, setProjectId] = useState<string | null>(() => {
-    const seed = (data?.project_id as string | undefined) ?? draft.shared.projectId;
-    return seed ?? null;
+    if (data && "project_id" in data) return (data.project_id as string | null | undefined) ?? null;
+    return draft.shared.projectId ?? null;
   });
   const [priority, setPriority] = useState<IssuePriority>(
     (data?.priority as IssuePriority | undefined) ?? draft.shared.priority,
@@ -303,12 +310,13 @@ export function AgentCreatePanel({
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
-  // another session. Clear local state AND the unfinished draft — the draft
-  // is the only persisted copy left, and leaving it would make the next open
-  // re-seed and submit the same dead value.
+  // another session; an archived one takes no new issues either. Clear local
+  // state AND the unfinished draft — the draft is the only persisted copy
+  // left, and leaving it would make the next open re-seed and submit the same
+  // dead value.
   useEffect(() => {
     if (!projectsLoaded || projectId === null) return;
-    if (projects.some((p) => p.id === projectId)) return;
+    if (projects.some((p) => p.id === projectId && !isProjectArchived(p))) return;
     setProjectId(null);
     if (draft.shared.projectId === projectId) {
       setShared({ projectId: undefined });
@@ -330,7 +338,6 @@ export function AgentCreatePanel({
   // (git-describe shape) are exempted inside checkQuickCreateCliVersion
   // — frontend and server share the same signal there, so they agree by
   // construction across web/desktop/staging without comparing env flags.
-  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const selectedRuntime = useMemo(
     () =>
       selectedAgent?.runtime_id
@@ -347,7 +354,11 @@ export function AgentCreatePanel({
   // can't pre-check, defer to the server's authoritative gate
   // (checkQuickCreateDaemonVersion, which reads the row by id regardless of
   // role) instead of failing closed in the UI.
-  const canPrecheckVersion = selectedAgent?.runtime_id != null && selectedRuntime != null;
+  // Qoder Cloud Agents runs through the managed bridge, which has no CLI.
+  const canPrecheckVersion =
+    selectedAgent?.runtime_id != null &&
+    selectedRuntime != null &&
+    selectedRuntime.provider !== "qoder_cloud";
   const runtimeCliVersion = readRuntimeCliVersion(selectedRuntime?.metadata);
   const baseVersionCheck = useMemo(
     () => checkQuickCreateCliVersion(runtimeCliVersion),
@@ -364,7 +375,13 @@ export function AgentCreatePanel({
     (baseVersionCheck.state !== "ok" ||
       (usesExplicitFields && fieldVersionCheck.state !== "ok"));
 
-  const initialPrompt = draft.agent.prompt || (data?.prompt as string) || "";
+  // An opener's prompt (⌘K "Hand to agent") is newer than any unfinished
+  // draft, so it wins, and is written through so a mode switch keeps it.
+  const seedPrompt = typeof data?.prompt === "string" && data.prompt.trim() ? data.prompt : null;
+  const initialPrompt = seedPrompt ?? (draft.agent.prompt || "");
+  useEffect(() => {
+    if (seedPrompt) setAgent({ prompt: seedPrompt });
+  }, [seedPrompt, setAgent]);
   // The editor is uncontrolled — we read the latest markdown via the ref at
   // submit/switch time. `hasContent` mirrors emptiness so the Create button
   // can disable correctly without a controlled-input rerender on every keystroke.
@@ -383,6 +400,12 @@ export function AgentCreatePanel({
     handleUpload: handleUploadFile,
     gate,
   } = useIssueCreateUploads("agent", uploadGate, editorRef);
+  // The Qoder bridge cannot read attachments, so the issue it creates would be
+  // assigned to an agent whose run fails immediately. Block instead of
+  // silently dropping the attachment; the server re-checks.
+  const qoderAttachmentBlocked =
+    selectedRuntime?.provider === "qoder_cloud" &&
+    pendingAttachments.some((a) => contentReferencesAttachment(draft.agent.prompt, a));
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -422,6 +445,12 @@ export function AgentCreatePanel({
       // The button already disables on !actor / versionBlocked, but the
       // ⌘+Enter path bypasses it — re-guard here and keep the draft in place.
       if (!actor || versionBlocked || (anchorCommentId && !sourcePreview)) return false;
+      if (
+        selectedRuntime?.provider === "qoder_cloud" &&
+        pendingAttachments.some((a) => contentReferencesAttachment(md, a))
+      ) {
+        return false;
+      }
       // Flush the prompt editor's pending debounce before snapshotting — see
       // ManualCreatePanel.
       const pendingPrompt = editorRef.current?.flushPendingUpdate?.();
@@ -478,10 +507,6 @@ export function AgentCreatePanel({
             current_version?: string;
             min_version?: string;
           };
-          if (body.code === "issue_limit_reached") {
-            showIssueLimitUpgradePrompt();
-            return false;
-          }
           if (body.code === "agent_unavailable") {
             setError(body.reason || t(($) => $.create_issue.agent.error_agent_unavailable_fallback));
             return false;
@@ -567,6 +592,11 @@ export function AgentCreatePanel({
     void composer.submit();
   };
   const submitting = composer.submitting;
+  const canCreate = !!actor && !versionBlocked && !qoderAttachmentBlocked && !(anchorCommentId && !sourcePreview);
+  const voice = useComposerVoice({
+    insert: (text) => editorRef.current?.insertText(text) ?? false,
+    submit: canCreate ? submit : undefined,
+  });
 
   // Switch to the manual form WITHOUT destroying the agent draft. The agent
   // slot (prompt + actor) is left untouched so a later manual→agent flip
@@ -587,7 +617,7 @@ export function AgentCreatePanel({
       const md = editorRef.current?.getMarkdown() ?? "";
       if (md) setManual({ description: md });
     }
-    if (!draft.manual.assigneeId && actor) {
+    if (data?.manual_assignee_cleared !== true && !draft.manual.assigneeId && actor) {
       setManual({ assigneeType: actor.type, assigneeId: actor.id });
     }
     setLastMode("manual");
@@ -595,6 +625,7 @@ export function AgentCreatePanel({
     const carry: Record<string, unknown> = {};
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
+    if (data?.manual_assignee_cleared === true) carry.manual_assignee_cleared = true;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
@@ -610,6 +641,43 @@ export function AgentCreatePanel({
     onClose();
   };
 
+  const createButton = (
+    <Button
+      size="sm"
+      onClick={submit}
+      disabled={!hasContent || !actor || submitting || versionBlocked || qoderAttachmentBlocked || gate.uploading || (!!anchorCommentId && !sourcePreview)}
+      aria-disabled={gate.uploading || versionBlocked || undefined}
+      // Sending is a busy state too, not just uploading.
+      aria-busy={gate.uploading || submitting || undefined}
+      // Keeps the button hoverable so its tooltip can say why it is blocked.
+      focusableWhenDisabled={versionBlocked}
+      className={cn(
+        "justify-self-end min-w-28",
+        versionBlocked && "aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
+        justSent && "!bg-emerald-600 !text-white",
+      )}
+    >
+      {submitting ? t(($) => $.create_issue.agent.sending) : gate.uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
+        <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
+      ) : (
+        <>
+          {t(($) => $.create_issue.agent.submit)}
+          {sendShortcut ? (
+            // Touch phones have no ⌘ key and the narrowest footer row
+            // to spare — drop the hint at the same breakpoint the
+            // footer reflows at.
+            <ShortcutKeycaps
+              shortcut={sendShortcut}
+              decorative
+              className="ml-1 max-sm:hidden"
+              keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
+            />
+          ) : null}
+        </>
+      )}
+    </Button>
+  );
+
   return (
     <>
         <DialogTitle className="sr-only">{t(($) => $.create_issue.sr_agent)}</DialogTitle>
@@ -621,29 +689,39 @@ export function AgentCreatePanel({
             <ChevronRight className="size-3 text-faint-foreground" />
             <span className="font-medium">{t(($) => $.create_issue.agent_breadcrumb)}</span>
           </div>
-          {/* Native `title` instead of Base UI Tooltip — Tooltip opens on
+          {/* DeferredTooltip instead of Base UI Tooltip — Tooltip opens on
               keyboard focus, and the dialog's focus trap briefly lands focus
               on the first focusable element on mount, causing the tooltip to
-              auto-pop every open. Same workaround applies to expand. */}
+              auto-pop every open. DeferredTooltip opens on pointer hover only. */}
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => setIsExpanded(!isExpanded)}
-              title={isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
-              aria-label={isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
-              className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-            >
-              {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              title={t(($) => $.common.close)}
-              aria-label={t(($) => $.common.close)}
-              className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
-            >
-              <XIcon className="size-4" />
-            </button>
+            <DeferredTooltip
+              side="bottom"
+              content={isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
+              trigger={
+                <button
+                  type="button"
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  aria-label={isExpanded ? t(($) => $.common.collapse_tooltip) : t(($) => $.common.expand_tooltip)}
+                  className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                >
+                  {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+                </button>
+              }
+            />
+            <DeferredTooltip
+              side="bottom"
+              content={t(($) => $.common.close)}
+              trigger={
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label={t(($) => $.common.close)}
+                  className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                >
+                  <XIcon className="size-4" />
+                </button>
+              }
+            />
           </div>
         </div>
 
@@ -678,6 +756,12 @@ export function AgentCreatePanel({
           </div>
         )}
 
+        {selectedAgent && qoderAttachmentBlocked && (
+          <div className="mx-5 mb-2 shrink-0 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-caption text-amber-700 dark:text-amber-300">
+            {t(($) => $.create_issue.agent.qoder_attachments_unsupported)}
+          </div>
+        )}
+
         {/* Prompt — same rich editor Advanced uses, so paste/drop images,
             mentions, and formatting all work. The dropZone wrapper enables
             drag-and-drop file uploads alongside paste. */}
@@ -687,6 +771,8 @@ export function AgentCreatePanel({
             editor unbounded and pushed the modal past the viewport. */}
         <div
           {...dropZoneProps}
+          ref={voice.rootRef}
+          onFocusCapture={voice.onFocusCapture}
           className="relative px-5 pb-3 flex flex-1 min-h-[140px] overflow-y-auto"
         >
           <ContentEditor
@@ -748,6 +834,7 @@ export function AgentCreatePanel({
                   clearLabel={tProjects(($) => $.picker.clear_aria)}
                 />
               }
+              tooltip={tIssues(($) => $.detail.prop_project)}
               align="start"
               open={fieldPickerOpen === "project" ? true : undefined}
               onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
@@ -765,6 +852,7 @@ export function AgentCreatePanel({
                 }
               }}
               triggerRender={<PillButton />}
+              tooltip={tIssues(($) => $.detail.prop_priority)}
               align="start"
               open={fieldPickerOpen === "priority" ? true : undefined}
               onOpenChange={(open) => setFieldPickerOpen(open ? "priority" : null)}
@@ -781,22 +869,22 @@ export function AgentCreatePanel({
                 setShared({ dueDate: next });
               }}
               triggerRender={<PillButton />}
+              tooltip={tIssues(($) => $.detail.prop_due_date)}
               align="start"
               open={fieldPickerOpen === "due_date" ? true : undefined}
               onOpenChange={(open) => setFieldPickerOpen(open ? "due_date" : null)}
             />
           )}
           <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <PillButton
-                  aria-label={t(($) => $.create_issue.agent.more_fields_aria)}
-                  title={t(($) => $.create_issue.agent.more_fields_aria)}
-                >
-                  <MoreHorizontal className="size-3.5" />
-                </PillButton>
-              }
-            />
+            <TooltipHint label={t(($) => $.create_issue.agent.more_fields_aria)}>
+              <DropdownMenuTrigger
+                render={
+                  <PillButton aria-label={t(($) => $.create_issue.agent.more_fields_aria)}>
+                    <MoreHorizontal className="size-3.5" />
+                  </PillButton>
+                }
+              />
+            </TooltipHint>
             <DropdownMenuContent align="start" className="w-52">
               {!visibleFields.includes("project") && projectId === null && (
                 <DropdownMenuItem onClick={() => setFieldPickerOpen("project")}>
@@ -833,7 +921,7 @@ export function AgentCreatePanel({
           {parentIssueId && (
             <span
               data-testid="agent-sub-issue-chip"
-              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground"
+              className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-caption text-muted-foreground"
               title={t(($) => $.create_issue.agent.sub_issue_of, {
                 identifier: parentIssueIdentifier ?? "",
               })}
@@ -855,79 +943,56 @@ export function AgentCreatePanel({
               attach group reproduces what `justify-between` did when the
               children were two wrapper divs, and `justify-self-end` goes
               inert on flex items. */}
-        <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-          <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
-            {/* Deliberately NOT disabled while uploading: each file is its
-                own queue entry, so queueing a second one is safe and waiting
-                for the first to land just to attach the next is busywork. */}
-            <FileUploadButton
-              size="sm"
-              multiple
-              onSelect={(file) => editorRef.current?.uploadFile(file)}
-            />
-            {keepOpen && sentCount > 0 && (
-              <span className="text-caption text-emerald-600 dark:text-emerald-400">
-                {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
-              </span>
+        <VoiceDialogFooter voice={voice}>
+          <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+            <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+              {/* Deliberately NOT disabled while uploading: each file is its
+                  own queue entry, so queueing a second one is safe and waiting
+                  for the first to land just to attach the next is busywork. */}
+              <FileUploadButton
+                multiple
+                onSelect={(file) => editorRef.current?.uploadFile(file)}
+              />
+              <VoiceMicButton voice={voice} />
+              {keepOpen && sentCount > 0 && (
+                <span className="text-caption text-emerald-600 dark:text-emerald-400">
+                  {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
+                </span>
+              )}
+            </div>
+            <TooltipHint label={t(($) => $.create_issue.switch_to_manual_tooltip)}>
+              <button
+                type="button"
+                onClick={switchToManual}
+                disabled={gate.uploading}
+                aria-disabled={gate.uploading || undefined}
+                aria-busy={gate.uploading || undefined}
+                className="flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ArrowLeftRight className="size-3.5" />
+                {t(($) => $.create_issue.switch_to_manual)}
+              </button>
+            </TooltipHint>
+            <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+              <Switch
+                size="sm"
+                checked={keepOpen}
+                onCheckedChange={setKeepOpen}
+              />
+              {t(($) => $.create_issue.create_another)}
+            </label>
+            {versionBlocked ? (
+              <Tooltip>
+                <TooltipTrigger render={createButton} />
+                <TooltipContent side="top">
+                  {t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              createButton
             )}
           </div>
-          <button
-            type="button"
-            onClick={switchToManual}
-            disabled={gate.uploading}
-            aria-disabled={gate.uploading || undefined}
-            aria-busy={gate.uploading || undefined}
-            title={t(($) => $.create_issue.switch_to_manual_tooltip)}
-            className="flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <ArrowLeftRight className="size-3.5" />
-            {t(($) => $.create_issue.switch_to_manual)}
-          </button>
-          <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
-            <Switch
-              size="sm"
-              checked={keepOpen}
-              onCheckedChange={setKeepOpen}
-            />
-            {t(($) => $.create_issue.create_another)}
-          </label>
-          <Button
-            size="sm"
-            onClick={submit}
-            disabled={!hasContent || !actor || submitting || versionBlocked || gate.uploading || (!!anchorCommentId && !sourcePreview)}
-            aria-disabled={gate.uploading || undefined}
-            // Sending is a busy state too, not just uploading.
-            aria-busy={gate.uploading || submitting || undefined}
-            title={
-              versionBlocked
-                ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
-                : undefined
-            }
-            className={cn(
-              "justify-self-end min-w-28",
-              justSent && "!bg-emerald-600 !text-white",
-            )}
-          >
-            {submitting ? t(($) => $.create_issue.agent.sending) : gate.uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
-              <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
-            ) : (
-              <>
-                {t(($) => $.create_issue.agent.submit)}
-                {sendShortcut ? (
-                  // Touch phones have no ⌘ key and the narrowest footer row
-                  // to spare — drop the hint at the same breakpoint the
-                  // footer reflows at.
-                  <ShortcutKeycaps
-                    shortcut={sendShortcut}
-                    decorative
-                    className="ml-1 max-sm:hidden"
-                    keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
-                  />
-                ) : null}
-              </>
-            )}
-          </Button>
-        </div>
+        </VoiceDialogFooter>
     </>
   );
 }

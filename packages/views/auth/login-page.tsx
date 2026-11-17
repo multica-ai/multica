@@ -25,9 +25,7 @@ import { api } from "@multica/core/api";
 import type { User } from "@multica/core/types";
 import { useT } from "../i18n";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 interface GoogleAuthConfig {
   clientId: string;
@@ -64,12 +62,11 @@ interface LoginPageProps {
   extra?: ReactNode;
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 export function redirectToCliCallback(url: string, token: string, state: string) {
   const separator = url.includes("?") ? "&" : "?";
+  // eslint-disable-next-line no-restricted-syntax -- CLI login runs in the web app only; the token must reach the CLI's local listener in this tab
   window.location.href = `${url}${separator}token=${encodeURIComponent(token)}&state=${encodeURIComponent(state)}`;
 }
 
@@ -94,9 +91,7 @@ export function validateCliCallback(cliCallback: string): boolean {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 export function LoginPage({
   logo,
@@ -294,12 +289,11 @@ export function LoginPage({
       prompt: "select_account",
     });
     if (google.state) params.set("state", google.state);
+    // eslint-disable-next-line no-restricted-syntax -- web OAuth redirect; Desktop passes onGoogleLogin and returns above
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
 
-  // -------------------------------------------------------------------------
   // CLI confirm step
-  // -------------------------------------------------------------------------
 
   if (step === "cli_confirm" && existingUser) {
     return (
@@ -341,9 +335,7 @@ export function LoginPage({
     );
   }
 
-  // -------------------------------------------------------------------------
   // Code verification step
-  // -------------------------------------------------------------------------
 
   if (step === "code") {
     return (
@@ -413,9 +405,7 @@ export function LoginPage({
     );
   }
 
-  // -------------------------------------------------------------------------
   // Email step
-  // -------------------------------------------------------------------------
 
   return (
     <div className="flex min-h-svh items-center justify-center">

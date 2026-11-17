@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { RowActionsMenu } from "./row-actions-menu";
+import { RowActionsMenu, RowActionsPointMenu } from "./row-actions-menu";
 
 describe("RowActionsMenu", () => {
   it("names its trigger so a screen reader can announce the row's actions", () => {
@@ -54,4 +54,15 @@ describe("RowActionsMenu", () => {
 
     expect(container).toBeEmptyDOMElement();
   });
+});
+
+it("does not open an empty cursor menu", () => {
+  render(
+    <RowActionsPointMenu
+      menu={{ open: true, point: { x: 30, y: 40 } }}
+      onOpenChange={vi.fn()}
+      groups={[[], []]}
+    />,
+  );
+  expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 });

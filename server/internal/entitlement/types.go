@@ -12,13 +12,12 @@ const SchemaVersion = 1
 type GateName string
 
 const (
-	GateIssueCount    GateName = "issue_count"
 	GateAutopilotRuns GateName = "autopilot_runs"
 )
 
 func (n GateName) valid() bool {
 	switch n {
-	case GateIssueCount, GateAutopilotRuns:
+	case GateAutopilotRuns:
 		return true
 	default:
 		return false
@@ -27,6 +26,8 @@ func (n GateName) valid() bool {
 
 type Action string
 
+// Cloud chooses one of these per gate. ActionObserve is also Multica's local
+// downgrade of a stale cached ActionEnforce.
 const (
 	ActionOff     Action = "off"
 	ActionObserve Action = "observe"
@@ -75,10 +76,14 @@ type Decision struct {
 	CloudValidUntil     time.Time
 }
 
-// Provider is the only interface issue-count and autopilot consumers
-// need. It deliberately has no error return: every failure is represented by a
+// Provider is the only interface the autopilot consumer
+// needs. It deliberately has no error return: every failure is represented by a
 // fail-open Decision with ActionOff (or ActionObserve for a bounded stale
 // snapshot that can no longer enforce).
+//
+// Consumers handle the three actions the same way for every gate: off skips
+// the gate entirely, observe admits the operation and records an over-limit
+// attempt, enforce rejects it.
 type Provider interface {
 	Gate(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
 }

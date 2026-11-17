@@ -8,7 +8,7 @@ import {
   ChevronRight,
   Lock,
   Monitor,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { isRuntimeUsableForUser } from "@multica/core/runtimes";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { ActorAvatar } from "../../../common/actor-avatar";

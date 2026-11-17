@@ -39,8 +39,25 @@ func UnresumableHistory(errText string) bool {
 	if errText == "" {
 		return false
 	}
+	if invalidHistoryRe.MatchString(errText) {
+		return true
+	}
 	return emptyContentRe.MatchString(errText) && historyMessageLocatorRe.MatchString(errText)
 }
+
+// invalidHistoryRe matches a runtime stating outright that the conversation
+// history it loaded is invalid. Kiro writes a transcript ending in a cancelled
+// ToolResults with no assistant reply when a provider failure interrupts a
+// tool call, then panics on every later prompt with
+//
+//	first agent loop request should never fail: AgentLoopResponse(Custom("invalid conversation history received"))
+//
+// (MUL-8188). Unlike the empty-message shape this needs no second signal: the
+// phrase itself names the transcript as the defect.
+//
+// Keep in sync with the GetLastTaskSession / GetLastChatTaskSession resume
+// queries (pkg/db/queries), which apply the same text guard server-side.
+var invalidHistoryRe = regexp.MustCompile(`(?i)invalid conversation history`)
 
 // AuthMethodUnresolved reports whether an agent error is the provider
 // SDK refusing to resolve its own credentials — no api_key, no auth_token, and

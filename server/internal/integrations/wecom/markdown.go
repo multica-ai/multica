@@ -69,91 +69,19 @@ func breakLinkAdjacency(s string) string {
 	return channel.BreakMarkdownLinkAdjacency(s)
 }
 
-// breakLinkReferenceDefinitions stops member-authored text from *defining* a
-// link the bot's card then resolves. Pushed through a live tenant, a comment
-// body containing
+// breakLinkReferenceDefinitions inserts a space between ] and : to stop
+// member-authored reference definitions from creating links under the bot's name.
+// Breaking inside the label would not work because label matching normalizes space.
 //
-//	[重置密码]: https://evil.example
-//	[重置密码]
+// Only block scaffolding may precede a valid label, and the destination must be
+// capable of leaving the client's host. Relative destinations remain unchanged
+// to preserve forms such as "[Bug]: 登录失败". Labels may span lines; the same
+// container prefix must be used when locating a next-line destination.
 //
-// came back with the first line gone — swallowed as a definition — and the
-// second rendered as a blue underlined link to evil.example. Nothing in it is
-// adjacent, so breakLinkAdjacency passes the whole attack through untouched.
-// Killing the definition kills the shortcut "[label]", the collapsed
-// "[label][]" and the full "[text][label]" alike: all three resolve through
-// the same map, and with no definition in the message none of them can.
-//
-// # The rule
-//
-// A "]" is separated from the ":" that follows it when all three hold:
-//
-//  1. Only block scaffolding precedes the opening "[" on its line —
-//     indentation, ">" blockquote markers, list bullets. Necessary, not
-//     decorative: a definition inside a blockquote or a list item still
-//     populates the whole document's reference map and resolves outside it.
-//  2. The brackets form a CommonMark link label: closed by the first
-//     unescaped "]", no unescaped "[" inside, at least one non-whitespace
-//     character, at most 999. The label may span lines and still resolve, so
-//     the scan does too.
-//  3. What follows the colon is plausibly a link *destination* — see
-//     looksLikeLinkDestination.
-//
-// Conditions 1 and 3 are halves of one question and are kept honest by one
-// answer: containerPrefixBefore reports the block containers holding the
-// label, and looksLikeLinkDestination is handed that same containerPrefix so
-// it can step back into them when the destination sits on the next line.
-// Teaching one half about a container and not the other is what leaves a
-// definition intact — see the comment on containerPrefix.
-//
-// Condition 3 is the whole design. Breaking every "]:" would be simpler and is
-// the wrong trade: "[Bug]: 登录失败" is a form real people write, and it comes
-// back from here byte-identical because 登录失败 names no host — as a
-// destination it is relative, so it resolves against whatever base the client
-// itself is on and cannot aim the reader at someone else's server. That is the
-// line the rule draws: a destination that leaves for another host is broken, a
-// destination that cannot is left alone.
-//
-// # What it deliberately lets through
-//
-//   - Relative destinations. "[文件]: report.pdf", "[页面]: /inbox",
-//     "[Owner]: R&D", "[Regex]: \d+" and "[Bug]: 登录失败" all still define a
-//     reference, and the label can still come out as a link — but pointing at
-//     the client's own base, not at an attacker. Paid knowingly to keep the
-//     human form intact.
-//   - "[foo]:(https://evil.example)". CommonMark keeps the parens inside the
-//     href, so it is not a URL anyone navigates to. A leading "(" is skipped
-//     anyway before the destination is examined, in case this renderer is
-//     looser, because skipping one costs nothing.
-//
-// # Where it over-fires, and why that is the safe side
-//
-// It models block containers only as a count of ">" markers, so it fires on a
-// "[x]: https://…" line that CommonMark would fold into the preceding
-// paragraph or read as indented code, and on a next-line destination whose
-// blockquote nesting is shallower than the definition's. It does not check the
-// spec's "nothing may follow the destination" rule either, so
-// "[x]: https://evil.example 请点击" is broken too though CommonMark would
-// leave it as prose. Every one of those costs a single space on a line that
-// already carries a URL. Under-firing costs a working link under the bot's
-// name, so the approximation runs this way round on purpose — the more so
-// because this renderer is demonstrably not CommonMark-exact (it reads
-// "\[ … \]" as a display-math delimiter).
-//
-// # Where the break goes
-//
-// Between the "]" and the ":". CommonMark requires the colon to follow the
-// label immediately, so one space ends the definition; verified against a
-// CommonMark parser in markdown_test.go, including inside a blockquote and
-// with the destination on the next line. It cannot go inside the label —
-// reference labels are matched on whitespace-collapsed, case-folded text, so
-// "[ 重置密码]" would still match "[重置密码]" and the definition would live.
-// It cannot be a backslash for the reason above. And it cannot go before the
-// "[": there is no character that pushes a line out of block position without
-// either showing up as content or, four spaces on, opening a code block.
-//
-// Like breakLinkAdjacency this adds one rune per occurrence, so callers that
-// budget a length cap must call it before measuring; and its output holds no
-// "]:" it would fire on again, so a second pass is a no-op.
+// Container detection intentionally over-approximates CommonMark: an extra space
+// is preferable to leaving an external reference active. See markdown_test.go for
+// inline, collapsed, shortcut, and nested-container cases. Apply before measuring
+// message length; the transformation adds a rune per match and is idempotent.
 func breakLinkReferenceDefinitions(s string) string {
 	if !strings.Contains(s, "]:") {
 		return s

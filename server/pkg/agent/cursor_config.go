@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 )
 
 const cursorCLIConfigFile = "cli-config.json"
@@ -26,32 +25,43 @@ func splitCursorContextModel(model string) (id, contextValue string, ok bool) {
 	return model[:loc[0]], model[loc[0]+1 : loc[1]-1], true
 }
 
-// cursorSourceConfigDir returns the directory holding the user's
-// cli-config.json, following Cursor's documented lookup: CURSOR_CONFIG_DIR,
-// then $XDG_CONFIG_HOME/cursor on Linux/BSD, then ~/.cursor.
-func cursorSourceConfigDir(env map[string]string) (string, error) {
+// cursorSourceConfigDir selects the run's profile by environment precedence.
+// An explicit override never falls back to another user's configuration.
+func cursorSourceConfigDir(env map[string]string, cwd string) (string, error) {
 	getenv := func(key string) string {
 		if v, ok := env[key]; ok {
 			return v
 		}
 		return os.Getenv(key)
 	}
-	var candidates []string
-	if dir := getenv("CURSOR_CONFIG_DIR"); dir != "" {
-		candidates = append(candidates, dir)
-	}
-	if xdg := getenv("XDG_CONFIG_HOME"); xdg != "" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
-		candidates = append(candidates, filepath.Join(xdg, "cursor"))
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, ".cursor"))
-	}
-	for _, dir := range candidates {
-		if _, err := os.Stat(filepath.Join(dir, cursorCLIConfigFile)); err == nil {
-			return dir, nil
+	dir := getenv("CURSOR_CONFIG_DIR")
+	if dir == "" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		if xdg := getenv("XDG_CONFIG_HOME"); xdg != "" {
+			dir = filepath.Join(xdg, "cursor")
 		}
 	}
-	return "", fmt.Errorf("no Cursor %s found (checked %s); run cursor-agent once to create it", cursorCLIConfigFile, strings.Join(candidates, ", "))
+	if dir == "" {
+		homeKey := "HOME"
+		if runtime.GOOS == "windows" {
+			homeKey = "USERPROFILE"
+		}
+		home := getenv(homeKey)
+		if home == "" {
+			return "", fmt.Errorf("cannot resolve Cursor config: %s is empty", homeKey)
+		}
+		dir = filepath.Join(home, ".cursor")
+	}
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(cwd, dir)
+	}
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", fmt.Errorf("resolve cursor config dir: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, cursorCLIConfigFile)); err != nil {
+		return "", fmt.Errorf("read selected Cursor config: %w", err)
+	}
+	return dir, nil
 }
 
 // prepareCursorContextConfigDir builds a per-run CURSOR_CONFIG_DIR under

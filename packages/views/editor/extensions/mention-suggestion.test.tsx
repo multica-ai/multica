@@ -3,6 +3,7 @@ import { createRef, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { issueKeys, PAGINATED_CATEGORIES } from "@multica/core/issues/queries";
+import { projectKeys } from "@multica/core/projects/queries";
 import { statusCategoryOfKey } from "@multica/core/issues";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { IssueStatusCategory, ListIssuesCache } from "@multica/core/types";
@@ -121,6 +122,7 @@ function fakeQc(data: {
     leader_id: string;
   }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
+  projects?: Array<{ id: string; title: string; status: string; archived_at: string | null }>;
 }): QueryClient {
   const map = new Map<string, unknown>();
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
@@ -154,6 +156,10 @@ function fakeQc(data: {
     JSON.stringify(issueKeys.list("ws-1")),
     { byStatus } satisfies ListIssuesCache,
   );
+  map.set(JSON.stringify(projectKeys.list("ws-1")), {
+    projects: data.projects ?? [],
+    total: data.projects?.length ?? 0,
+  });
   return {
     getQueryData: (key: readonly unknown[]) => map.get(JSON.stringify(key)),
     getQueriesData: <T,>(filter: { queryKey: readonly unknown[] }) => {
@@ -204,6 +210,7 @@ describe("createMentionSuggestion", () => {
   beforeEach(() => {
     searchIssuesMock.mockReset();
     searchProjectsMock.mockReset();
+    searchProjectsMock.mockResolvedValue({ projects: [], total: 0 });
     Element.prototype.scrollIntoView = vi.fn();
   });
 
@@ -343,7 +350,7 @@ describe("createMentionSuggestion", () => {
     );
   });
 
-  it("loads server issue and project matches when project search is enabled", async () => {
+  it("loads server issue and project matches in the chat context picker", async () => {
     searchIssuesMock.mockResolvedValue({ issues: [], total: 0 });
     searchProjectsMock.mockResolvedValue({
       projects: [
@@ -360,7 +367,7 @@ describe("createMentionSuggestion", () => {
 
     render(
       <I18nWrapper>
-        <MentionList items={[]} query="road" command={vi.fn()} includeProjectSearch />
+        <MentionList items={[]} query="road" command={vi.fn()} contextSearch />
       </I18nWrapper>,
     );
 
@@ -369,6 +376,121 @@ describe("createMentionSuggestion", () => {
     });
     expect(searchIssuesMock).toHaveBeenCalledWith(expect.objectContaining({ q: "road", limit: 8 }));
     expect(searchProjectsMock).toHaveBeenCalledWith(expect.objectContaining({ q: "road", limit: 8 }));
+  });
+
+  it("offers server project matches in their own section outside chat", async () => {
+    searchIssuesMock.mockResolvedValue({
+      issues: [{ id: "i-1", identifier: "MUL-1", title: "Road test", status: "todo" }],
+      total: 1,
+    });
+    searchProjectsMock.mockResolvedValue({
+      projects: [{ id: "p-roadmap", title: "Roadmap", description: null, icon: null, status: "planned" }],
+      total: 1,
+    });
+
+    render(<I18nWrapper><MentionList items={[]} query="road" command={vi.fn()} /></I18nWrapper>);
+
+    await waitFor(() => {
+      expect(screen.getByText("Roadmap")).toBeInTheDocument();
+    });
+    const headings = Array.from(document.querySelectorAll<HTMLElement>("div.uppercase")).map(
+      (el) => el.textContent,
+    );
+    expect(headings).toEqual(["Issues", "Projects"]);
+    expect(searchIssuesMock).toHaveBeenCalledWith(expect.objectContaining({ q: "road", limit: 20 }));
+    expect(searchProjectsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ q: "road", limit: 8, include_archived: true }),
+    );
+  });
+
+  it("keeps project rows visible when issue matches alone would fill the list", async () => {
+    searchProjectsMock.mockResolvedValue({
+      projects: [{ id: "p-roadmap", title: "Roadmap", description: null, icon: null, status: "planned" }],
+      total: 1,
+    });
+    searchIssuesMock.mockResolvedValue({ issues: [], total: 0 });
+    const items: MentionItem[] = Array.from({ length: 25 }, (_, n) => ({
+      id: `i-${n}`,
+      label: `MUL-${n}`,
+      type: "issue" as const,
+      description: `road ${n}`,
+      status: "todo" as const,
+    }));
+
+    render(<I18nWrapper><MentionList items={items} query="road" command={vi.fn()} /></I18nWrapper>);
+
+    await waitFor(() => {
+      expect(screen.getByText("Roadmap")).toBeInTheDocument();
+    });
+    expect(document.querySelectorAll("button")).toHaveLength(20);
+  });
+
+  it("keeps the selected issue when a late project result takes a reserved slot", async () => {
+    let resolveProjects!: (value: unknown) => void;
+    searchProjectsMock.mockReturnValue(new Promise((resolve) => { resolveProjects = resolve; }));
+    searchIssuesMock.mockResolvedValue({ issues: [], total: 0 });
+    const items: MentionItem[] = Array.from({ length: 20 }, (_, n) => ({
+      id: `i-${n}`,
+      label: `MUL-${n}`,
+      type: "issue" as const,
+      description: `road ${n}`,
+      status: "todo" as const,
+    }));
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="road" command={command} />
+      </I18nWrapper>,
+    );
+    act(() => {
+      ref.current!.onKeyDown({ event: new KeyboardEvent("keydown", { key: "ArrowUp" }) });
+    });
+    await waitFor(() => expect(searchProjectsMock).toHaveBeenCalled());
+    await act(async () => {
+      resolveProjects({
+        projects: [{ id: "p-roadmap", title: "Roadmap", description: null, icon: null, status: "planned" }],
+        total: 1,
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Roadmap")).toBeInTheDocument();
+    });
+    act(() => {
+      ref.current!.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Enter" }) });
+    });
+
+    expect(command).toHaveBeenCalledWith(expect.objectContaining({ id: "i-19" }));
+  });
+
+  it("keeps server issue matches when the project search fails", async () => {
+    searchIssuesMock.mockResolvedValue({
+      issues: [{ id: "i-7", identifier: "MUL-7", title: "Road test", status: "todo" }],
+      total: 1,
+    });
+    searchProjectsMock.mockRejectedValue(new Error("503"));
+
+    render(<I18nWrapper><MentionList items={[]} query="road" command={vi.fn()} /></I18nWrapper>);
+
+    await waitFor(() => {
+      expect(screen.getByText("MUL-7")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("No results")).not.toBeInTheDocument();
+  });
+
+  it("matches cached live projects synchronously and leaves archived ones to the server", () => {
+    const qc = fakeQc({
+      projects: [
+        { id: "p-live", title: "Roadmap", status: "planned", archived_at: null },
+        { id: "p-old", title: "Roadmap 2024", status: "completed", archived_at: "2025-01-01T00:00:00Z" },
+        { id: "p-other", title: "Hiring", status: "planned", archived_at: null },
+      ],
+    });
+
+    const items = createMentionSuggestion(qc).items!(itemArgs("road")) as MentionItem[];
+
+    expect(items.filter((i) => i.type === "project").map((i) => i.id)).toEqual(["p-live"]);
   });
 
   it("does not call searchIssues for an empty query", () => {
@@ -463,7 +585,7 @@ describe("createMentionSuggestion", () => {
 
     render(
       <I18nWrapper>
-        <MentionList ref={ref} items={items} query="" command={command} includeProjectSearch />
+        <MentionList ref={ref} items={items} query="" command={command} contextSearch />
       </I18nWrapper>,
     );
 
@@ -685,7 +807,7 @@ describe("createMentionSuggestion", () => {
       .getByText("MUL-6956")
       .closest("button")
       ?.querySelector("svg");
-    expect(statusIcon).toHaveStyle({ color: "#f97316" });
+    expect(statusIcon?.style.color).toBe("var(--palette-orange, #f97316)");
   });
 
   it("does not inject current/recent chat context into the normal @ results", () => {
@@ -1048,7 +1170,7 @@ describe("MentionList cancelled demotion", () => {
 
     render(
       <I18nWrapper>
-        <MentionList items={items} query="" command={vi.fn()} includeProjectSearch />
+        <MentionList items={items} query="" command={vi.fn()} contextSearch />
       </I18nWrapper>,
     );
 
@@ -1126,7 +1248,7 @@ describe("MentionList cancelled demotion", () => {
 
       render(
         <I18nWrapper>
-          <MentionList items={[]} query="thing" command={vi.fn()} includeProjectSearch />
+          <MentionList items={[]} query="thing" command={vi.fn()} contextSearch />
         </I18nWrapper>,
       );
 
@@ -1155,7 +1277,7 @@ describe("MentionList cancelled demotion", () => {
 
       render(
         <I18nWrapper>
-          <MentionList items={[]} query="thing" command={vi.fn()} includeProjectSearch />
+          <MentionList items={[]} query="thing" command={vi.fn()} contextSearch />
         </I18nWrapper>,
       );
 
@@ -1188,7 +1310,7 @@ describe("MentionList cancelled demotion", () => {
 
       render(
         <I18nWrapper>
-          <MentionList items={items} query="" command={vi.fn()} includeProjectSearch />
+          <MentionList items={items} query="" command={vi.fn()} contextSearch />
         </I18nWrapper>,
       );
 
@@ -1215,7 +1337,7 @@ describe("MentionList cancelled demotion", () => {
 
       render(
         <I18nWrapper>
-          <MentionList items={items} query="" command={vi.fn()} includeProjectSearch />
+          <MentionList items={items} query="" command={vi.fn()} contextSearch />
         </I18nWrapper>,
       );
 
@@ -1293,7 +1415,7 @@ describe("MentionList cancelled demotion", () => {
 
       render(
         <I18nWrapper>
-          <MentionList items={[]} query="Search revamp" command={vi.fn()} includeProjectSearch />
+          <MentionList items={[]} query="Search revamp" command={vi.fn()} contextSearch />
         </I18nWrapper>,
       );
 
@@ -1304,13 +1426,17 @@ describe("MentionList cancelled demotion", () => {
       expect(headings()).not.toContain("Cancelled");
     });
 
-    it("keeps a cancelled direct hit visible behind a full window of live candidates", async () => {
+    it.each([
+      ["MUL-99", "MUL-99"],
+      ["V2-99", "v2-99"],
+      ["V2-99", "99"],
+    ])("keeps cancelled %s visible behind a full window when searching %s", async (identifier, query) => {
       // 20 non-cancelled cached candidates already fill every slot. Exempting
       // the direct hit from the demotion would leave it at position 21 and the
       // truncation would still delete it, so it has to be pinned to the front.
       searchIssuesMock.mockResolvedValue({
         issues: [
-          { id: "i-hit", identifier: "MUL-99", title: "Abandoned plan", status: "cancelled" },
+          { id: "i-hit", identifier, title: "Abandoned plan", status: "cancelled" },
         ],
         total: 1,
       });
@@ -1322,15 +1448,15 @@ describe("MentionList cancelled demotion", () => {
         status: "todo" as const,
       }));
 
-      render(<I18nWrapper><MentionList items={items} query="MUL-99" command={vi.fn()} /></I18nWrapper>);
+      render(<I18nWrapper><MentionList items={items} query={query} command={vi.fn()} /></I18nWrapper>);
 
       await waitFor(() => {
-        expect(screen.getByText("MUL-99")).toBeInTheDocument();
+        expect(screen.getByText(identifier)).toBeInTheDocument();
       });
 
       const labels = rowLabels();
       expect(labels).toHaveLength(20);
-      expect(labels[0]).toBe("MUL-99");
+      expect(labels[0]).toBe(identifier);
       // A live candidate gave up the last slot, not the record the user typed.
       expect(labels).not.toContain("MUL-219");
     });

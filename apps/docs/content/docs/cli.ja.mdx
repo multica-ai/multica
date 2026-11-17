@@ -4,12 +4,14 @@ description: Multica CLI をインストールしてサインインし、ター�
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Tab, Tabs } from "fumadocs-ui/components/tabs";
 
 Multica CLI は、ローカルのランタイムを接続する役割と、ターミナルからワークスペース、タスク、エージェント、オートパイロットを管理する役割の両方を担います。このページではよく使う操作の流れを紹介します。現在のバージョンがサポートするフラグは、常に各コマンド自身の `--help` が正です。
 
 ## インストール
 
-**macOS / Linux**
+<Tabs groupId="os" persist items={["macOS / Linux", "Windows"]}>
+<Tab value="macOS / Linux">
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
@@ -21,11 +23,17 @@ Homebrew がインストールされていれば、次のコマンドでもイ�
 brew install multica-ai/tap/multica
 ```
 
-**Windows PowerShell**
+</Tab>
+<Tab value="Windows">
+
+PowerShell で実行します:
 
 ```powershell
 irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
 ```
+
+</Tab>
+</Tabs>
 
 インストールを確認します:
 
@@ -35,19 +43,26 @@ multica version
 
 ## 初回接続
 
-Multica Cloud に接続する:
+接続先のサービスを選びます:
+
+<Tabs items={["Multica Cloud", "セルフホストインスタンス"]}>
+<Tab value="Multica Cloud">
 
 ```bash
 multica setup
 ```
 
-セルフホストインスタンスに接続する:
+</Tab>
+<Tab value="セルフホストインスタンス">
 
 ```bash
 multica setup self-host \
   --server-url https://api.example.com \
   --app-url https://app.example.com
 ```
+
+</Tab>
+</Tabs>
 
 `setup` はサーバーアドレスを保存し、ブラウザを開いてサインインを完了し、デーモンを起動します。完了したら確認します:
 
@@ -110,12 +125,114 @@ multica issue comment add MUL-123 --content-stdin < review.md
 multica issue comment update <comment-id> --expected-revision 2 --content-file revised-review.md
 ```
 
-1 回の実行のメッセージを表示する、または実行を停止する:
+1 回の実行のメッセージを表示、実行を停止、または再試行する:
 
 ```bash
 multica issue run-messages <task-id> --issue MUL-123
 multica issue cancel-task <task-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123
+multica issue rerun-task <run-id> --issue MUL-123 --fresh
 ```
+
+後続の実行をキューに入れる代わりに、進行中の実行にコメントを追加する（追加メッセージを受け付ける実行のみ。コメントで起動できるエージェントに限る）:
+
+```bash
+multica issue comment add MUL-123 --content-file note.md --steer <task-id>
+multica issue comment add MUL-123 --content-file note.md --steer-active
+```
+
+同じプロジェクト・同じ親タスクの下に、タイトルが同じ（大文字小文字と余分な空白は区別しない）未完了のタスクがすでにあると、`issue create` は作成を拒否してそのタスクを示します。それでも作る場合は `--allow-duplicate` を付けます。あるタスクを別のタスクの重複にするには `multica issue status MUL-124 cancelled --duplicate-of MUL-123` を使います。
+
+複数の PR を順番に作成するタスクでは、`issue create --title "..." --pr-auto-complete off` または `issue update <id> --pr-auto-complete off` で、マージ時も状態を維持できます。`--pr-auto-complete on` はワークスペースのルールを復元し、次の PR イベントから有効になります。`issue pull-requests <id>` は、PR が未関連付けでもタスクとワークスペースの設定、移行先の状態、判定結果を表示します。対応サーバーは作成トランザクション内で設定を保存し、旧サーバーには追加の PUT を送ります。失敗時は作成済み ID と再試行用の update コマンドが表示されるため、create を繰り返さないでください。
+
+### 一括更新
+
+複数のタスクに同じ変更を適用できます。`--ids-stdin` ではタスク番号または UUID を標準入力から1行ずつ読み取ります。
+
+```bash
+multica issue batch update MUL-123 MUL-124 --priority high --add-label QA --dry-run
+multica issue batch update MUL-123 MUL-124 --priority high --add-label QA
+multica issue batch update MUL-123 MUL-124 --property "Severity=High" --unset-property Reviewer
+```
+
+`--add-label` と `--remove-label` は他のラベルを変えません。`--clear-labels` は追加の前に全ラベルを消します。`--property` で値を設定し、`--unset-property` で消します。複数値のプロパティは値全体を置き換えます。ステータス、担当者、プロジェクト、日付、親タスク、ステージも変更できます。`--no-start` を付けるとエージェントの実行を開始せずに変更を適用します。
+
+タスクごとに `updated`、`unchanged`、または理由付きの `skipped` が返ります。1件でもスキップされると結果を出力して非ゼロで終了しますが、成功した変更は残ります。修正後はスキップされたタスクだけを再試行してください。`--dry-run` は検証と変更予定の表示だけを行い、書き込みません。
+
+### タスクを削除する
+
+1 件のタスクを削除するか、複数のタスク番号または完全な UUID を渡して一括削除します。
+
+```bash
+multica issue delete MUL-123
+multica issue delete MUL-123 MUL-124 --yes --output json
+```
+
+削除は元に戻せません。コメントと添付ファイルが削除され、進行中の実行はキャンセルされ、関連する自動化の実行は失敗扱いになります。削除したタスクを参照する重複マークは解除されます。サブタスクは親との関連が外れますが、削除されません。確認の前にすべての ID を解決し、存在しないタスクやアクセスできないタスクがあれば、削除せずにコマンドを中止します。
+
+コマンドは確認を求めます。`--yes` で確認を省略できます。指定しない場合、確認に答えられない非対話実行は、何も削除せずにエラーで終了します。
+
+`--dry-run` は削除権限を含めて削除予定を確認します。書き込みや確認プロンプトはありません。
+
+```bash
+multica issue delete MUL-123 MUL-124 --dry-run --output json
+```
+
+### タイムライン
+
+`issue get` はタスクの現在の状態を返します。`issue timeline` はステータス、優先度、担当者、タイトル、日付の変更と実行結果を時系列に並べ、コメントも混ぜて表示します。「いつ in_review に移ったか」「今のステータスにどれだけ留まっているか」を調べるときに使います。
+
+```bash
+multica issue timeline MUL-123 --action status_changed
+multica issue timeline MUL-123 --activity-only --output json
+multica issue timeline MUL-123 --since 2026-08-19T00:00:00Z
+```
+
+`--activity-only` はコメントを除き、すべてのアクティビティ記録を残します。`--action` は指定したアクションだけを返し、繰り返し指定でき、`--activity-only` を含意します。サーバーが読み込む履歴には上限があり、切り詰められた場合は stderr に警告が出ます。その結果から滞在時間を推定しないでください。
+
+### 長いコメントスレッドを読む
+
+コメントの多いタスクを 1 件ずつ読むと、エージェントは多くのトークンを使います。まずスレッドをざっと見て、必要なものだけを開きます。
+
+```bash
+multica issue comment list MUL-123 --roots-only --summary --output json --compact
+multica issue comment list MUL-123 --thread <comment-id> --tail 5 --output json --compact
+```
+
+- `--roots-only` はトップレベルのコメントだけを返し、それぞれに返信数と最終アクティビティ時刻が付きます。
+- `--summary` は各コメントを短いプレビューに切り詰めます。
+- `--compact` は JSON 出力にだけ効き、情報のないフィールド（繰り返される `issue_id`、空の配列など）を省きます。
+- `--recent N` は最近動きのあった N 件のスレッドを、すべての返信付きで返します。返信が多いと出力は長くなります。
+- 解決済みのスレッドは既定で最初のコメントと結論に折りたたまれます。全文が必要なら `--full` を付けます。
+
+一覧も必要なフィールドだけに絞れます：`multica issue list --output json --fields id,identifier,title,status`。絞り込みは CLI 側で行われるので、減るのは出力とコンテキストで、リクエストの量は変わりません。
+
+最終更新日時でタスクを絞り込むには、RFC3339 形式の `--updated-since` と `--updated-until` を両方指定します。サーバーは、現在の `updated_at` が `since` 以上、`until` 未満のタスクを返します：`[since, until)`。既存のフィルター、並べ替え、ページネーションと組み合わせて使えます。ページ間で同じ期間を指定してください。ページネーションはスナップショットを提供しないため、同時に更新が行われると結果が変わる場合があります。
+
+```bash
+multica issue list --updated-since 2026-11-05T10:00:00Z \
+  --updated-until 2026-11-05T10:01:00Z \
+  --sort created_at --direction asc --limit 100 --offset 0 \
+  --output json --fields id,workspace_id,project_id,title
+```
+
+### ウェイクアップ
+
+ウェイクアップは、イベントが起きたとき、条件が成り立ったとき、または指定の時刻に、エージェントの通常の実行を始めます。詳しいルールは[タスクのウェイクアップ](/issue-wakeups)を参照してください。
+
+```bash
+multica issue wakeup events
+multica issue wakeup create MUL-123 --agent-id <agent-id> \
+  --event comment.created --filter-actor-type member --filter-actor-id <user-id> \
+  --instruction "返信が来たら、その内容で見積書を更新する"
+multica issue wakeup create MUL-123 --agent-id <agent-id> \
+  --kind every --every 1h --expires-in 72h \
+  --instruction "仕入れ先から返信が来ているか確認する"
+multica issue wakeup list MUL-123
+multica issue wakeup runs MUL-123 <wakeup-id>
+```
+
+ターミナルからメンバーとして作成するときは `--agent-id` が必要です。エージェントが自分の実行の中で作成した場合は、既定でそのエージェント自身を起こします。
 
 ## エージェントとスキル
 
@@ -141,6 +258,23 @@ multica skill import --url <skill-url> --on-conflict skip
 
 `overwrite` はスキルの作成者だけが使え、元の ID とエージェントの紐付けを維持します。
 
+環境変数や MCP 設定にはトークンが含まれることがよくあります。コマンドラインに値を直接書くとシェルの履歴や `ps` の出力に残るので、`-file` または `-stdin` の形で渡してください。
+
+```bash
+multica agent create --name "運用アシスタント" --runtime-id <runtime-id> \
+  --custom-env-file ./agent-env.json \
+  --mcp-config-file ./mcp.json \
+  --custom-args '["--max-turns", "40"]'
+
+multica agent env set <agent-id> --custom-env-stdin < agent-env.json
+multica agent update <agent-id> --mcp-config-file ./mcp.json
+```
+
+- `--custom-env` 系のフラグは `agent create` にしかありません。後から変えるときは `agent env set` を使います。これは全体を置き換え、値を `****` にしたキーは元の値を保ちます。
+- `agent update --mcp-config null` で MCP 設定を消去します。
+- `--custom-args` は JSON 配列で、起動引数の最後に置かれます。モデルは `--model` で選んでください。カスタム引数の中の `--model` を受け付けないツールもあります。
+- エージェントを呼び出せる人は `--permission-mode` で決めます。`private` は所有者だけ、`public_to` は `--public-to-workspace` または `--public-to-member <user-id>` と組み合わせます。`--visibility private|workspace` は古い書き方で、`--permission-mode` に対応付けられます。両方を指定した場合は `--permission-mode` が優先されます。
+
 ## デーモンとランタイム
 
 ```bash
@@ -156,22 +290,110 @@ multica runtime usage <runtime-id>
 multica runtime activity <runtime-id>
 ```
 
+```bash
+multica daemon autostart enable
+multica runtime usage <runtime-id> --days 30
+multica runtime update <runtime-id> --target-version <version> --wait
+multica runtime profile create --display-name "社内 Claude ラッパー" \
+  --command-name ccms --runtime-type claude
+```
+
+`daemon autostart` は現在のプロファイルをログイン時に起動するよう登録します。プラットフォームごとの違いは[ログイン時の自動起動](/daemon-runtimes#autostart)を参照してください。`runtime usage` は既定で 90 日分を集計し、`--days` は最大 365 です。`runtime update` はそのコンピューターのデーモンに CLI を指定のバージョンへ更新させ、`--wait` を付けると更新の完了を待ちます。更新の失敗、更新のタイムアウト、待機自体のタイムアウトでは、終了コードが非ゼロになります。`runtime profile create` は互換ツールを `--runtime-type` で指定します（古い `--protocol-family` も使えます）。固定引数は今のところ Web アプリでしか設定できません。 `runtime profile create` は既定で現在のマシンに紐づけます。別の登録済みローカルマシンを選択するには `--daemon-id <id>` を指定します。 既存の未設定プロファイルは `multica runtime profile update <profile-id> --daemon-id <id>` でマシンに紐づけられます。
+
 アクティブなエージェントがまだ紐付いているランタイムの削除は、デフォルトで拒否されます。`multica runtime delete <id> --cascade` は、それらのエージェントをランタイムから解除して設定と履歴を保持し、アクティブな実行をキャンセルします。
 
 仕組みとカスタムプロファイルについては[デーモンとランタイム](/daemon-runtimes)を参照してください。
+
+## 環境 [#environments]
+
+```bash
+multica env start web
+multica env start web --wait=false
+multica env list
+multica env stop web
+```
+
+`multica env`（長い形式は `multica environment`）は、リポジトリが `.multica/environments.toml` に宣言した環境を起動します。環境はデーモンが管理するため、実行が終わっても動き続け、タスクのサイドバーに表示され、TTL が切れると停止します。`start` は環境が応答するまで待ってから URL を表示します。これらのコマンドは実行中のタスクの認証情報を使うので、エージェントの実行の中でしか使えません。自分のコンピューターからはタスクのサイドバーを使ってください。ファイルの形式と例は[環境](/environments)を参照してください。
+
+## プロジェクト、ワークスペース、オートパイロット
+
+```bash
+multica project create --title "夏のキャンペーン" --lead "李雷" \
+  --repo https://github.com/acme/campaign-site
+multica project resource add <project-id> --type github_repo \
+  --url https://github.com/acme/brand-assets --default-branch-hint main
+
+multica workspace create --name "運用チーム" --slug ops --issue-prefix OPS
+multica workspace update --context-stdin < team-context.md
+
+multica autopilot create --title "週次の売上レポート" --agent "運用アシスタント" \
+  --mode create_issue --issue-title-template "売上レポート {{date}}"
+multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/Tokyo
+```
+
+- `--lead` にはメンバーまたはエージェントの名前を指定します。`--default-branch-hint` はリポジトリの既定ブランチをエージェントに伝えるだけで、ブランチは切り替えません。
+- ワークスペースの `--context` は、ワークスペース内のすべてのエージェントに渡されます。`--slug` は作成後に変更できません。`--issue-prefix` は大文字に変換され、変更すると既存のすべてのタスクが振り直され、外部から参照している古い番号は使えなくなります。
+- `--issue-title-template` で置き換えられるのは `{{date}}`（UTC、`YYYY-MM-DD`）だけで、ほかの `{{...}}` は拒否されます。スケジュールトリガーの `--timezone` は既定で UTC です。
+
+### Webhook イベントフィルター [#webhook-event-filters]
+
+`autopilot trigger-add` または `trigger-update` の `--event-filters-file` で、Webhook トリガーのイベントと action のフィルターを設定できます。空でない JSON 配列を `filters.json` として保存します。
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+各行にはアプリと同じ本文フィールドの `conditions` も指定できます。例えば、次のルールは `main` を対象とするドラフト以外の PR のみ受け付けます：
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+ルールごとに条件は最大 20 個、フィールドのパスは 256 文字、`in` の候補リストは 100 個までです。上限を超える条件でトリガーを作成・更新すると HTTP 400 が返されます。
+
+この例では、PR レビューの送信とすべての push イベントを受け入れます。`actions` を省略するか空の配列を指定すると、そのイベントのすべての action を受け入れます。
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-list <autopilot-id> --full-id
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+更新時はファイルの内容でフィルター一覧全体を置き換えます。両方のフィルターオプションを省略すると、ラベルの変更やトリガーの有効化・無効化でも保存済みのフィルターを保持します。`autopilot get` はトップレベルの `triggers` 配列でフィルターを返します。
+
+すべてのフィルターを削除して全イベントを受け入れるには、更新専用のオプションを使います。
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` と `--event-filters-file` は同時に指定できません。トップレベルが `null` または空の配列であるファイルや、不明なフィールド、不正な JSON、空または空白のみのイベント名・action 名を含むファイルは拒否されます。これらのオプションは Webhook トリガー専用です。フィルターファイルを指定せずに作成すると全イベントを受け入れます。受信イベントの照合方法は[オートパイロット](/autopilots#event-filters)を参照してください。
 
 ## コマンド概要
 
 | コマンド | 用途 |
 | --- | --- |
-| `issue` | タスクの作成、更新、割り当て、検索。コメント、購読者、ラベル、プロパティ、実行履歴の管理 |
+| `issue` | タスクの作成、更新、割り当て、検索。コメント、購読者、ラベル、プロパティ、ウェイクアップ、タイムライン、実行履歴の管理 |
 | `project` | プロジェクトとそのリソースを管理 |
+| `inbox` | 既読状態を変えずに自分の通知を読み取る |
 | `label`、`property` | ワークスペースのラベルとカスタムプロパティを管理 |
+| `view` | 保存したビューを読み取り、ビューに表示されるタスクを一覧 |
 | `agent`、`skill`、`squad` | エージェント、スキル、スクワッドを管理 |
 | `autopilot` | オートパイロット、トリガー、実行履歴を管理 |
 | `workspace` | ワークスペースの作成、表示、切り替えとメンバーの招待 |
 | `repo` | ワークスペースのリポジトリを管理し、ローカルにチェックアウト |
 | `daemon`、`runtime` | ローカルデーモンの起動と停止。ランタイムの表示と管理 |
+| `env` | リポジトリが宣言した環境の起動・停止・一覧（エージェントの実行の中でのみ） |
 | `attachment` | 添付ファイルのアップロードとダウンロード |
 | `user profile` | 現在のユーザーのプロフィールを表示・更新 |
 | `auth`、`login`、`setup` | サインイン、認証状態の確認、接続の初期化 |
@@ -226,17 +448,23 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 
 | コマンド | サブコマンド | 用途 | 主なフラグ |
 | --- | --- | --- | --- |
-| `issue` | `list` | タスクを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--metadata`（繰り返し可）、`--property`（繰り返し可、`"名前=値"`；`__none__` は未設定に一致）、`--limit`、`--offset`、`--sort`（`property:<名前または id>` に対応）、`--full-id`、`--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します） |
+| `issue` | `list` | タスクを一覧 | `--status`、`--priority`、`--assignee`、`--project`、`--updated-since` / `--updated-until`（RFC3339 の期間指定、両方必須）、`--metadata`（繰り返し可）、`--property`（繰り返し可、`"名前=値"` または `"Score>=3"`、`"Due<2026-01-01"`、`"Notes~=text"` のような比較；`__none__` は未設定に一致）、`--limit`、`--offset`、`--sort`（`property:<名前または id>` に対応）、`--full-id`、`--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します）、`--fields`（JSON のみ；カンマ区切りで残すフィールドを指定） |
 | | `get <id>` | 単一のタスクを表示 | `--resolve-properties`（JSON のみ；保存された id に加えてプロパティ名・選択肢名・メンバー名を返します） |
-| | `create` | タスクを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可） |
-| | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--position`、`--no-start` |
+| | `create` | タスクを作成 | `--title`（必須）、`--description` / `--description-stdin` / `--description-file`、`--pr-auto-complete on/off`、`--status`、`--priority`、`--assignee`、`--parent`、`--stage`、`--project`、`--start-date`、`--due-date`、`--attachment`（繰り返し可）、`--property`（繰り返し可）、`--allow-duplicate`（同じタイトルの未完了タスクがあっても作成） |
+| | `update <id>` | タスクのフィールドを更新 | `create` と同系のフィールドに加え `--position`、`--no-start`、`--duplicate-of` |
+| | `batch update <id>...` | 複数のタスクに同じ変更を適用 | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
+| | `delete <id>...` | 1 件以上のタスクを完全に削除 | `--yes` で確認を省略。タスク番号または完全な UUID を指定; `--dry-run` |
 | | `assign <id>` | 割り当てまたは割り当て解除 | `--to`（メンバー、エージェント、スクワッドを名前であいまいマッチ）、`--to-id`、`--unassign`、`--no-start` |
-| | `status <id> <status>` | ステータスを変更 | `--no-start` |
+| | `status <id> <status>` | ステータスを変更 | `--no-start`、`--duplicate-of` |
 | | `reorder <id>` | カラム内で移動 | |
-| | `search <query>` | タスクを検索 | `--limit`、`--include-closed` |
+| | `search <query>` | タスクを検索 | `--limit`、`--include-closed`、`--project` |
 | | `children <id>` | サブタスクをステージごとに一覧 | |
 | | `pull-requests <id>` | 関連付けられた PR を一覧 | |
-| | `comment list/add/delete/resolve/unresolve` | コメントを管理 | `add`: `--content` / `--content-stdin` / `--content-file`、`--parent`、`--attachment`；`list`: `--since`、`--thread`、`--tail` |
+| | `pull-requests link <id> <pr-url>` | タイトルとブランチにタスクキーがない同期済み PR を関連付け | `unlink` で外した PR の復元にも使えます |
+| | `pull-requests unlink <id> <pr>` | 関連付けた PR を外し、以後自動で関連付けない | `<pr>` は PR の URL、番号、または id |
+| | `comment list/add/update/delete/resolve/unresolve` | コメントを管理 | `add`: `--content` / `--content-stdin` / `--content-file`、`--parent`、`--attachment`；`update`: `--expected-revision`（必須）、`--content` / `--content-stdin` / `--content-file`；`list`: `--since`、`--thread`、`--tail`、`--recent`、`--roots-only`、`--summary`、`--compact`、`--full` |
+| | `timeline <id>` | アクティビティ記録とコメントを時系列で表示 | `--action`（繰り返し可）、`--activity-only`、`--since`、`--tail` |
+| | `wakeup events/list/get/create/update/disable/trigger/delete/checkin/runs` | タスクのウェイクアップを管理。詳しくは[タスクのウェイクアップ](/issue-wakeups) | `create` / `update`: `--agent-id`、`--kind`（`event`、`at`、`every`、`cron`）、`--event`、`--at` / `--after`、`--every`、`--cron`、`--timezone`、`--until-*` 条件、`--expires-in` / `--expires-at`、`--instruction` / `--instruction-file`；`checkin`: `--note` |
 | | `subscriber list/add/remove <issue-id>` | 購読者を管理 | `--user`、`--user-id`（省略時は現在のユーザー） |
 | | `label list/add/remove <issue-id>` | タスクのラベルを管理 | |
 | | `metadata list/get/set/delete <issue-id>` | タスクレベルのキー・バリューメタデータを管理 | |
@@ -244,25 +472,29 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `runs <issue-id>` | 実行履歴を表示 | `--full-id` |
 | | `run-messages <task-id>` | 1 回の実行のメッセージを表示 | `--since`、`--issue` |
 | | `usage <issue-id>` | 集計されたトークン使用量を表示 | |
-| | `rerun <id>` | 現在の担当者で実行を再キューイング | |
+| | `rerun-task <run-id>` | 元のエージェントとトリガーのコンテキストで指定した実行を再試行 | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | 進行中またはキュー中の実行をキャンセル | `--issue` |
-| `project` | `list/get/create/update/delete` | プロジェクトを管理 | |
+| `project` | `get/create/update/delete` | プロジェクトを管理 | `create`: `--title`（必須）、`--lead`、`--status`、`--icon`、`--start-date`、`--due-date`、`--repo`（繰り返し可）、`--visibility`（`workspace` または `private`）、`--member`（繰り返し可、`--visibility private` と併用）；`update`: `--visibility`、`--member`（プロジェクトをプライベートにする場合も、すでにプライベートの場合もリストに追加） |
+| | `list` | プロジェクトを一覧表示・絞り込み | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
-| | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
+| | `archive/restore <id>` | プロジェクトをアーカイブ／復元。アーカイブ済みのプロジェクトは `list` に表示されず、新しいタスクを受け付けず、そこにタスクを作成する自動化は一時停止される | `list --archived` でアーカイブ済みのプロジェクトのみを表示 |
+| | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--default-branch-hint`、`--ref`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
+| | `member list/add/remove` | プライベートプロジェクトのメンバーを一覧・追加・削除。追加と削除はリストに載っている `owner`/`admin` とプロジェクトのアクセス管理者のみ。エージェントはアクセス権を変更できない | `add <project-id> <member>...`、`remove <project-id> <member>`。メンバーは名前、メールアドレス、またはユーザー ID |
 | `label` | `list/get/create/update/delete` | ワークスペースのラベルを管理 | `list`: `--resource-type`（`issue` または `skill`）、`--full-id`；`create`: `--name`、`--color`、`--resource-type`（`issue` または `skill`）、`--description` |
-| `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`）、`--option`（繰り返し可、select 系のみ）；`list`: `--include-archived`；タイプは作成後に変更できません |
-| `agent` | `list/get/create/update/archive/restore` | エージェントを管理 | `--name`、`--runtime-id`（`create` では必須）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
+| `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`、`multi_text`、`multi_url`）、`--option`（繰り返し可、select 系のみ）；`list`: `--include-archived`；タイプは作成後に変更できません |
+| `view` | `list/get/issues/create/update/duplicate/delete` | 開けるビュー（自分のものとワークスペースで共有されたもの）を読み取り、`issues` でビューに表示されるタスクを保存された並び順で一覧（保存されたフィルターはすべてサーバー側で適用）。`create`・`update`・`duplicate`・`delete` はアプリと同じ形式でビューを書き込むため、サイドバーに表示され、アプリで引き続き編集できます。`update` は指定した項目だけを変更し、読み取り後に他の人が変更したビューは上書きせずに拒否します。変更・削除できるのは所有者（共有ビューはワークスペースのオーナーと管理者も）だけです。エージェントの実行中は、ビューと「自分」の条件はランタイム所有者のものになります | `<view>` は ID、ID プレフィックス、または完全な名前を受け付けます；`list`: `--scope`（`workspace`、`my`、`project`）、`--project`、`--full-id`；`issues`: `--limit`（最大 100）、`--cursor`（前のページの `next_cursor`）、`--today`（相対的な期日フィルターの基準日、既定は今日）、`--fields`（JSON のみ）、`--full-id`；`create`: `--name`、`--scope`、`--project`、`--scope-variant`、`--visibility`；`create/update/duplicate` のフィルター: `--status`、`--priority`、`--assignee`、`--creator`、`--label`、`--project-filter`、`--property "Name=Value"`、`--negate <filter>` など；表示: `--view-mode`、`--grouping`、`--sort`、`--direction`、`--show-sub-issues` など；`--definition-file`、`--clear-filters`、`--dry-run` |
+| `agent` | `list/get/create/update/archive/restore` | エージェントを管理 | `--name`、`--runtime-id`（`create` では必須）、`--instructions`、`--conversation-starters`、`--model`、`--thinking-level`、`--custom-env` / `--custom-env-file` / `--custom-env-stdin`（`create` のみ）、`--custom-args`、`--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`、`--permission-mode`、`--visibility`（古い書き方）、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 新しいエージェントとして複製。元のエージェントは変更されません | `--name`（デフォルトは元の名前 + ` (copy)`）、`--runtime-id`（別のランタイムへ複製する場合は `--model` の同時指定が必須）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` などの機密設定は複製されないため、`create` と同じフラグで再指定してください |
 | | `tasks <id>` | エージェントの実行を表示 | |
 | | `avatar <id>` | アバターをアップロード | |
-| | `env get/set <agent-id>` | カスタム環境変数の読み書き（owner と admin のみ） | |
+| | `env get/set <agent-id>` | カスタム環境変数の読み書き（エージェントの所有者、またはワークスペースの owner/admin。読み取りはすべて記録される） | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`。全体を置き換え、値が `****` のキーは元の値を保つ |
 | | `skills list/set/add <agent-id>` | 紐付けられたスキルを管理 | `--skill-ids`（`set` は全置換、`add` は追加） |
 | | `mcp list/add/enable/disable/remove <agent-id>` | ワークスペース MCP サーバーをこのエージェントに割り当て | server id は `workspace mcp list` から取得。ライブラリの項目はここで追加するまで機能しません。`disable` は割り当てを残したまま送信を停止します |
-| `autopilot` | `list/get/create/update/delete` | オートパイロットを管理 | `create`: `--title`、`--agent`、`--mode`（いずれも必須）、`--project`、`--subscriber`（繰り返し可） |
+| `autopilot` | `list/get/create/update/delete` | オートパイロットを管理 | `create`: `--title`、`--mode`（どちらも必須）、`--agent` / `--squad` / `--squad-id` のいずれか1つ（必須）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（繰り返し可） |
 | | `trigger <id>` | 手動で 1 回トリガー | |
 | | `runs <id>` | 実行履歴を表示 | |
-| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | スケジュールと webhook のトリガーを管理 | |
-| `workspace` | `list/get/create/update/switch` | ワークスペースを管理。`switch` は現在のプロファイルのデフォルトワークスペースを設定 | |
+| | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | スケジュールと webhook のトリガーを管理 | `trigger-add`: `--kind`（`schedule` または `webhook`）、`--cron`、`--timezone`（既定は UTC）、`--label` |
+| `workspace` | `list/get/create/update/switch` | ワークスペースを管理。`switch` は現在のプロファイルのデフォルトワークスペースを設定 | `create`: `--name`、`--slug`（いずれも必須）、`--issue-prefix`、`--description`、`--context` / `--context-stdin`；`update` は slug 以外の同じ項目を変更 |
 | | `mcp list/add/update/remove` | ワークスペースの MCP サーバーライブラリを管理 | 書き込みは owner/admin のみ。ここに追加したサーバーはどのエージェントにも割り当てられません — `multica agent mcp add` で割り当てます。`list` は名前と transport のみを表示し、保存されたエントリは書き込み専用でどのロールにも返りません。`--server-config-file` / `--server-config-stdin` はトークンをシェル履歴から守ります |
 | | `member list/invite <email>` | メンバーの表示と招待 | `invite`: `--role`（member または admin。デフォルトは member） |
 | `repo` | `list/add/remove/checkout` | ワークスペースのリポジトリを管理し、ローカルにチェックアウト | `--url`（繰り返し可）；`checkout`: `--ref` |
@@ -275,6 +507,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `member list/add/set-role/remove` | スクワッドのメンバーを管理 | |
 | | `activity <issue-id> <outcome>` | リーダーの評価を記録 | |
 | `chat` | `history`、`thread [id]` | エージェントが現在処理している外部チャットセッションを読み取り | `--limit`、`--before` |
+| `inbox` | `list` | 既読にせずに[現在の通知を読み取る](/inbox) | `--project`、`--type`、`--output`（`table` または `json`）；フィルターはローカルで適用 |
 
 ### Runtime
 
@@ -284,9 +517,11 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `stop` / `status` / `restart` | 停止、状態の確認、再起動（`restart` は `start` と同じフラグ） | |
 | | `logs` | デーモンのログを表示 | `--follow`、`--lines` |
 | | `disk-usage` | ローカルのディスク使用量を表示 | `--by-workspace`、`--by-task`、`--top` |
-| `runtime` | `list/usage/activity/update/rename/delete` | ランタイムを表示・管理 | `delete`: `--cascade`（紐付くエージェントを解除してデータを保持し、その実行をキャンセル） |
-| | `profile list/create/update/delete` | カスタムランタイムプロファイルを管理 | |
+| | `autostart enable/disable/status` | 現在のプロファイルのログイン時自動起動を登録・解除 | `status`: `--output` |
+| `runtime` | `list/usage/activity/update/rename/delete` | ランタイムを表示・管理 | `usage`: `--days`（既定 90、最大 365）；`update`: `--target-version`（必須）、`--wait`；`delete`: `--cascade`（紐付くエージェントを解除してデータを保持し、その実行をキャンセル） |
+| | `profile list/create/update/delete` | カスタムランタイムプロファイルを管理 | `create`: `--display-name`、`--command-name`（いずれも必須）、`--runtime-type`（または古い `--protocol-family`）、`--description`；`update`: `--enabled` |
 | | `profile set-path/unset-path <profile-id>` | ローカルの実行ファイルパスを固定（ローカルのみ有効。サーバーには送信されません） | |
+| `env` | `start <name>` / `stop <name>` / `list` | このタスクの宣言された環境を起動・停止・一覧表示。エージェントの実行の中でのみ使えます。[環境](/environments)を参照 | `start`: `--wait`（既定 `true`）；すべて: `--output`（`table` または `json`） |
 
 ### Additional
 
@@ -303,17 +538,9 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 
 ## 別のコーディングエージェントから Multica を操作する
 
-作業の多くを Codex、Claude Code、Cursor の中で進めているなら、ターミナルに切り替えず
-そこから Multica を操作できます。[Multica CLI skill](https://github.com/multica-ai/multica-cli)
-は、このページのコマンドを安全に扱う方法をそれらのエージェントに教えます。タスクと
-コメントスレッドをトークンを浪費せずに読み、コメントはファイル経由で書き、メンション・
-ステータス変更・アサインが伴う副作用を正しく扱います。
+作業の多くを Codex、Claude Code、Cursor の中で進めているなら、ターミナルに切り替えずそこから Multica を操作できます。[Multica CLI skill](https://github.com/multica-ai/multica-cli) は、このページのコマンドを安全に扱う方法をそれらのエージェントに教えます。タスクとコメントスレッドをトークンを浪費せずに読み、コメントはファイル経由で書き、メンション・ステータス変更・アサインが伴う副作用を正しく扱います。
 
-認証済みの CLI を通してのみ動作し、それ自体は何の権限も与えません。権限は引き続き
-ログイン、選択中のプロファイル、ワークスペースに由来します。CLI は v0.4.26 以降が必要です。
-Claude Code のプラグインマーケットプレイス、Codex の skill インストーラー、Cursor、
-その他 Markdown の指示を読み込むツールへのインストール方法は、リポジトリの README を
-参照してください。
+認証済みの CLI を通してのみ動作し、それ自体は何の権限も与えません。権限は引き続きログイン、選択中のプロファイル、ワークスペースに由来します。CLI は v0.4.26 以降が必要です。Claude Code のプラグインマーケットプレイス、Codex の skill インストーラー、Cursor、その他 Markdown の指示を読み込むツールへのインストール方法は、リポジトリの README を参照してください。
 
 ## 次のステップ
 

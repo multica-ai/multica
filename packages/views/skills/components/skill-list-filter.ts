@@ -1,5 +1,6 @@
 import type { Agent, AgentRuntime, MemberWithUser, SkillSummary } from "@multica/core/types";
 import type { SkillListFilters } from "@multica/core/skills/stores";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import type { OriginInfo } from "../lib/origin";
 
 export interface SkillRow {
@@ -11,18 +12,28 @@ export interface SkillRow {
   canEdit: boolean;
 }
 
+export function matchesSkillSearch(row: SkillRow, search: string): boolean {
+  const query = search.trim().toLowerCase();
+  if (!query) return true;
+  const { name, description } = row.skill;
+  return (
+    name.toLowerCase().includes(query) ||
+    matchesPinyin(name, query) ||
+    (!!description &&
+      (description.toLowerCase().includes(query) ||
+        matchesPinyin(description, query)))
+  );
+}
+
 /**
  * Pure row-filter predicate: returns true if the row matches all active
- * filter dimensions plus name search. Empty arrays are inactive. Label
- * matching is OR-within-labels, matching Issue list semantics.
+ * filter dimensions. Empty arrays are inactive. Label matching is
+ * OR-within-labels, matching Issue list semantics.
  */
 export function rowMatchesFilters(
   row: SkillRow,
   filters: SkillListFilters,
-  query: string,
 ): boolean {
-  const q = query.trim().toLowerCase();
-  if (q && !row.skill.name.toLowerCase().includes(q)) return false;
   if (filters.usage.length > 0) {
     const usage = row.agents.length > 0 ? "used" : "unused";
     if (!filters.usage.includes(usage)) return false;

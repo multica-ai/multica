@@ -162,7 +162,7 @@ func TestResolveTaskModelSelectionReadsTheCatalogAtMostOnce(t *testing.T) {
 			name:      "codex without a model fails closed without reading",
 			provider:  "codex",
 			in:        taskModelSelection{ThinkingLevel: "high", ServiceTier: "priority"},
-			want:      taskModelSelection{},
+			want:      taskModelSelection{ThinkingLevelWarning: `Thinking level "high" was not applied: codex requires an explicit model. The runtime will use its default thinking level.`},
 			wantReads: 0,
 		},
 		{
@@ -266,7 +266,7 @@ func TestResolveTaskModelSelectionPassesThroughUnverifiedCatalogs(t *testing.T) 
 		{
 			name: "claude CLI without --effort still drops the level", provider: "claude", catalog: claudeFallback([]string{}),
 			in:   taskModelSelection{Model: "claude-opus-5-5", ThinkingLevel: "high"},
-			want: taskModelSelection{Model: "claude-opus-5-5"},
+			want: taskModelSelection{Model: "claude-opus-5-5", ThinkingLevelWarning: `Thinking level "high" was not applied: the installed CLI does not support thinking-level control. The runtime will use its default thinking level.`},
 		},
 		{
 			name: "grok", provider: "grok",

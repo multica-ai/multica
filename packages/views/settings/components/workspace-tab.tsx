@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Copy } from "lucide-react";
+import { Copy } from "@multica/ui/icons";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Label } from "@multica/ui/components/ui/label";
 import {
   Dialog,
@@ -46,6 +47,7 @@ import type { Workspace } from "@multica/core/types";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
+import { PrivateProjectsSection } from "./private-projects-section";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -334,6 +336,7 @@ export function WorkspaceTab() {
                 name={workspace.name}
                 size={64}
                 disabled={!canManageWorkspace}
+                textIconEnabled
                 ariaLabel={t(($) => $.workspace.change_logo_aria)}
                 onUploaded={async (url) => {
                   try {
@@ -434,10 +437,10 @@ export function WorkspaceTab() {
           >
             <span className="flex items-center gap-1">
               <code className="font-mono text-label text-foreground">{workspace.slug}</code>
-              <Button
+              <IconButton
                 variant="ghost"
                 size="icon-xs"
-                aria-label={t(($) => $.workspace.copy_slug)}
+                label={t(($) => $.workspace.copy_slug)}
                 onClick={async () => {
                   if (!(await copyText(workspace.slug))) {
                     toast.error(t(($) => $.workspace.copy_failed));
@@ -445,7 +448,7 @@ export function WorkspaceTab() {
                 }}
               >
                 <Copy />
-              </Button>
+              </IconButton>
             </span>
           </SettingsRow>
 
@@ -476,6 +479,8 @@ export function WorkspaceTab() {
           </SettingsRow>
         </SettingsCard>
       </SettingsSection>
+
+      {membersFetched && isOwner ? <PrivateProjectsSection /> : null}
 
       {/* Danger Zone — gated on the member query settling so the owner-only
           Delete button and the sole-owner Leave guidance don't flash in

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS cloud_agent_connection_provider_index;

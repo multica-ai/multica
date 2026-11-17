@@ -121,7 +121,7 @@ func TestPrepareCursorContextConfigDirLeavesUserConfigAlone(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(source, "skills"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	resolved, err := cursorSourceConfigDir(map[string]string{"CURSOR_CONFIG_DIR": source})
+	resolved, err := cursorSourceConfigDir(map[string]string{"CURSOR_CONFIG_DIR": source}, "")
 	if err != nil || resolved != source {
 		t.Fatalf("cursorSourceConfigDir = %q, %v; want %q", resolved, err, source)
 	}
@@ -195,5 +195,22 @@ func TestPrepareCursorContextConfigDirRelativeSource(t *testing.T) {
 	defer os.RemoveAll(dir)
 	if _, err := os.ReadFile(filepath.Join(dir, "mcp.json")); err != nil {
 		t.Fatalf("relative config source must keep MCP config readable: %v", err)
+	}
+}
+
+func TestCursorSourceConfigDirDoesNotFallBackFromExplicitProfile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	fallback := filepath.Join(home, ".cursor")
+	if err := os.Mkdir(fallback, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fallback, cursorCLIConfigFile), []byte(cursorTestCLIConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profile := t.TempDir()
+	if dir, err := cursorSourceConfigDir(map[string]string{"CURSOR_CONFIG_DIR": profile}, ""); err == nil {
+		t.Fatalf("missing explicit profile selected %q instead of failing", dir)
 	}
 }

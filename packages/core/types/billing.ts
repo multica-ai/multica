@@ -181,7 +181,6 @@ export interface CreateBillingPortalSessionResponse {
   url: string;
 }
 
-// ---------------------------------------------------------------------------
 // Workspace subscriptions (`/api/cloud-subscriptions/*`)
 //
 // Workspace-scoped, unlike the account-level wallet types above. The server
@@ -210,7 +209,6 @@ export interface WorkspaceSubscriptionEntitlements {
   status: string;
   seats: number;
   limits: {
-    issueCount: WorkspaceEntitlementLimit;
     autopilotRuns: WorkspaceEntitlementLimit;
   };
   currentPeriodEnd: string | null;
@@ -240,11 +238,6 @@ export interface WorkspaceSubscriptionSummary {
     portal: boolean;
     purchaseSeats: boolean;
   };
-}
-
-export interface IssueLimitUsage {
-  used: number;
-  limit: number;
 }
 
 export interface WorkspaceSeatCapacity {

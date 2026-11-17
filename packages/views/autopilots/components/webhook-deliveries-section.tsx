@@ -12,7 +12,7 @@ import {
   Copy,
   Check,
   Webhook,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import {
   autopilotDeliveriesOptions,
@@ -30,13 +30,16 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { TruncatedTooltip } from "@multica/ui/components/common/truncated-tooltip";
 import { toast } from "sonner";
 import { useLocale, useT } from "../../i18n";
+import { ObjectSection, ObjectSectionCard, ObjectSectionEmpty } from "../../layout/object-page";
 import type {
   WebhookDelivery,
   WebhookDeliveryStatus,
   WebhookSignatureStatus,
 } from "@multica/core/types";
+import { formatConditionValue } from "./webhook-payload-condition";
 
 // --- Status visuals -------------------------------------------------------
 
@@ -50,8 +53,8 @@ type StatusVisual = {
 };
 
 const STATUS_VISUAL: Record<WebhookDeliveryStatus, StatusVisual> = {
-  queued: { color: "text-blue-500", icon: Loader2, spin: true },
-  dispatched: { color: "text-emerald-500", icon: CheckCircle2 },
+  queued: { color: "text-info", icon: Loader2, spin: true },
+  dispatched: { color: "text-success", icon: CheckCircle2 },
   // Signature failures and pre-flight bouncebacks land here. Read as a
   // failure visually, the dialog footer explains the reason.
   rejected: { color: "text-destructive", icon: ShieldOff },
@@ -119,10 +122,10 @@ export function WebhookDeliveriesSection({
   if (!hasWebhookTrigger) return null;
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-body font-medium text-muted-foreground uppercase tracking-wider">
-        {t(($) => $.deliveries.section_title)}
-      </h2>
+    <ObjectSection
+      title={t(($) => $.deliveries.section_title)}
+      count={isLoading ? undefined : deliveries.length}
+    >
       {isLoading ? (
         <div className="space-y-1">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -130,11 +133,9 @@ export function WebhookDeliveriesSection({
           ))}
         </div>
       ) : deliveries.length === 0 ? (
-        <div className="rounded-md border border-dashed p-4 text-center text-body text-muted-foreground">
-          {t(($) => $.deliveries.empty)}
-        </div>
+        <ObjectSectionEmpty icon={Webhook} description={t(($) => $.deliveries.empty)} />
       ) : (
-        <div className="rounded-md border overflow-hidden">
+        <ObjectSectionCard>
           {deliveries.map((delivery) => (
             <DeliveryRow
               key={delivery.id}
@@ -142,9 +143,9 @@ export function WebhookDeliveriesSection({
               autopilotId={autopilotId}
             />
           ))}
-        </div>
+        </ObjectSectionCard>
       )}
-    </section>
+    </ObjectSection>
   );
 }
 
@@ -173,7 +174,7 @@ function DeliveryRow({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-body hover:bg-accent/30 transition-colors"
+        className="flex min-h-10 w-full items-center gap-3 px-3 py-2 text-left text-body hover:bg-accent/30 transition-colors"
       >
         <StatusIcon
           className={cn(
@@ -188,8 +189,11 @@ function DeliveryRow({
         <span className="w-20 shrink-0 text-caption text-muted-foreground truncate">
           {providerLabel}
         </span>
-        <span className="flex-1 min-w-0 text-caption text-muted-foreground truncate font-mono">
-          {delivery.event || t(($) => $.webhook_payload.unknown_event)}
+        <span className="flex-1 min-w-0 text-caption text-muted-foreground">
+          <span className="block truncate font-mono">
+            {delivery.event || t(($) => $.webhook_payload.unknown_event)}
+          </span>
+          <DeliveryIgnoreReason delivery={delivery} />
         </span>
         {delivery.replayed_from_delivery_id && (
           <Badge variant="secondary" className="shrink-0">
@@ -252,8 +256,8 @@ function DeliveryDetailDialog({
       {/* max-h + overflow-y-auto: webhook bodies + headers + response can
           easily exceed viewport height. Without a cap the dialog grows past
           the screen edge and the bottom (e.g. Replay button) becomes
-          unreachable. 85vh leaves breathing room around the dialog. */}
-      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          unreachable. 85% leaves breathing room around the dialog. */}
+      <DialogContent className="max-w-2xl max-h-[85%] overflow-y-auto">
         <DialogTitle className="flex items-center gap-2">
           <Webhook className="h-4 w-4 text-muted-foreground" />
           {t(($) => $.deliveries.detail.title)}
@@ -334,7 +338,9 @@ function DeliveryDetailDialog({
             )}
           </dl>
 
-          {full.error && (
+          {full.status === "ignored" && <DeliveryIgnoreDetails delivery={full} />}
+
+          {full.error && full.status !== "ignored" && (
             <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-caption text-destructive">
               <div className="font-medium">
                 {t(($) => $.deliveries.detail.error_label)}
@@ -361,6 +367,66 @@ function DeliveryDetailDialog({
   );
 }
 
+function useDeliveryIgnoreReason(delivery: WebhookDelivery): string | null {
+  const { t } = useT("autopilots");
+  if (delivery.status !== "ignored") return null;
+  // Servers predating reason_code stored these codes in error.
+  const code = delivery.reason_code ?? delivery.error;
+  switch (code) {
+    case "payload_filtered": return t(($) => $.deliveries.ignore.payload_filtered);
+    case "event_filtered": return t(($) => $.deliveries.ignore.event_filtered);
+    case "trigger_disabled": return t(($) => $.deliveries.ignore.trigger_disabled);
+    case "autopilot_paused": return t(($) => $.deliveries.ignore.autopilot_paused);
+    case "autopilot_archived": return t(($) => $.deliveries.ignore.autopilot_archived);
+    case "quota_exceeded": return t(($) => $.deliveries.ignore.quota_exceeded);
+    default: return code;
+  }
+}
+
+function DeliveryIgnoreReason({ delivery }: { delivery: WebhookDelivery }) {
+  const reason = useDeliveryIgnoreReason(delivery);
+  if (!reason) return null;
+  const path = delivery.payload_condition_failure?.condition.path;
+  const label = path ? `${reason} · ${path}` : reason;
+  return (
+    <TruncatedTooltip content={label}>
+      <span className="block truncate text-micro">{label}</span>
+    </TruncatedTooltip>
+  );
+}
+
+function DeliveryIgnoreDetails({ delivery }: { delivery: WebhookDelivery }) {
+  const { t } = useT("autopilots");
+  const reason = useDeliveryIgnoreReason(delivery);
+  const failure = delivery.payload_condition_failure;
+  if (!reason) return null;
+  return (
+    <section aria-label={t(($) => $.deliveries.ignore.title)} className="min-w-0 space-y-2 rounded-md border bg-muted/30 px-3 py-2 text-caption">
+      <div className="font-medium">{t(($) => $.deliveries.ignore.title)}</div>
+      <p className="text-muted-foreground">{reason}</p>
+      {failure && (
+        <>
+          <p className="break-all">
+            <code>{failure.condition.path}</code>{" "}
+            {t(($) => $.dialog.event_filter_condition_ops[failure.condition.op])}{" "}
+            {failure.condition.op !== "exists" && <code>{formatConditionValue(failure.condition)}</code>}
+            {failure.condition.ignore_case && <span className="ml-1 text-muted-foreground">({t(($) => $.dialog.event_filter_condition_ignore_case)})</span>}
+          </p>
+          <dl className="space-y-1">
+            <dt className="text-muted-foreground">{t(($) => $.deliveries.ignore.actual_value)}</dt>
+            <dd className="break-all font-mono">
+              {failure.missing
+                ? t(($) => $.deliveries.ignore.missing)
+                : failure.actual_values.length === 0 ? "[]" : failure.actual_values.join(", ")}
+            </dd>
+          </dl>
+          {failure.truncated && <p className="text-muted-foreground">{t(($) => $.deliveries.ignore.truncated)}</p>}
+        </>
+      )}
+    </section>
+  );
+}
+
 function MetaRow({
   label,
   value,
@@ -373,15 +439,16 @@ function MetaRow({
   return (
     <div className="flex flex-col">
       <dt className="text-muted-foreground">{label}</dt>
-      <dd
-        className={cn(
-          "truncate text-foreground",
-          mono && "font-mono",
-        )}
-        title={value}
-      >
-        {value}
-      </dd>
+      <TruncatedTooltip content={value} focusable>
+        <dd
+          className={cn(
+            "truncate text-foreground",
+            mono && "font-mono",
+          )}
+        >
+          {value}
+        </dd>
+      </TruncatedTooltip>
     </div>
   );
 }

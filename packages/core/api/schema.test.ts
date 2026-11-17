@@ -1,7 +1,9 @@
+// @vitest-environment node
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { ApiClient, ApiError } from "./client";
 import { parseWithFallback } from "./schema";
+import { CreateIssueResponseSchema } from "./schemas";
 
 // Helper: stub fetch with a single JSON response. Status defaults to 200.
 function stubFetchJson(body: unknown, status = 200) {
@@ -24,7 +26,30 @@ afterEach(() => {
 // app in past incidents. The contract is: a malformed response degrades to
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
+  describe("workspace pin responses", () => {
+    it("defaults missing or malformed pinned_at to null and falls back on malformed lists", async () => {
+      const ws = { id: "ws-1", name: "One", slug: "one", description: null, context: null, settings: {}, repos: [], issue_prefix: "ONE", avatar_url: null, created_at: "2026-01-01", updated_at: "2026-01-01" };
+      const client = new ApiClient("https://api.example.test");
+      stubFetchJson([ws, { ...ws, id: "ws-2", pinned_at: 123 }]);
+      expect((await client.listWorkspaces()).map((item) => item.pinned_at)).toEqual([null, null]);
+      stubFetchJson({ invalid: true });
+      await expect(client.listWorkspaces()).resolves.toEqual([]);
+      stubFetchJson({ pinned_at: 123 });
+      await expect(client.setWorkspacePinned("ws-1", true)).resolves.toEqual({ pinned_at: null });
+      expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({ method: "PUT", body: JSON.stringify({ pinned: true }) });
+    });
+  });
+
   describe("GitHub repository import", () => {
+    it("accepts attributed connections alongside legacy rows without a connector name", async () => {
+      const installation = { id: "inst-1", workspace_id: "ws-1", account_login: "alice", account_type: "User", account_avatar_url: null, created_at: "2026-11-17T00:00:00Z" };
+      stubFetchJson({ installations: [installation, { ...installation, id: "inst-2", account_login: "acme-org", connected_by: "Ada" }], can_manage: false });
+      const response = await new ApiClient("https://api.example.test").listGitHubInstallations("ws-1");
+      expect(response.installations).toEqual([installation, { ...installation, id: "inst-2", account_login: "acme-org", connected_by: "Ada" }]);
+      expect(response.can_manage).toBe(false);
+      expect(response.installations.every((row) => row.installation_id === undefined)).toBe(true);
+    });
+
     it("falls back safely when installation or repository responses are malformed", async () => {
       stubFetchJson({ installations: "not-an-array", configured: true });
       const client = new ApiClient("https://api.example.test");
@@ -45,18 +70,34 @@ describe("ApiClient schema fallback", () => {
       });
     });
 
-    it("adds the allowlisted repository return target to the connect request", async () => {
+    it.each([undefined, "all", "selected", "future-selection", 42])("handles repository selection metadata safely (%s)", async (selection) => {
+      stubFetchJson({ repositories: [], total_count: 0, next_page: null, repository_selection: selection });
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.listGitHubInstallationRepositories("ws-1", "install-1");
+      expect(response.repository_selection).toBe(selection === undefined ? undefined : selection === "all" || selection === "selected" ? selection : "unknown");
+    });
+
+    it.each([undefined, "desktop-nonce", 42])("accepts missing or malformed connect correlation metadata (%s)", async (connectionID) => {
+      stubFetchJson({ configured: true, url: "https://github.com/apps/test/installations/new", connection_id: connectionID });
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.getGitHubConnectURL("ws-1", { desktop: true });
+      expect(response.configured).toBe(true);
+      expect(response.connection_id).toBe(typeof connectionID === "string" ? connectionID : undefined);
+      expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("https://api.example.test/api/workspaces/ws-1/github/connect?desktop=1");
+    });
+
+    it("uses the unified GitHub connect endpoint", async () => {
       stubFetchJson({
         configured: true,
         url: "https://github.com/apps/multica/installations/new",
       });
       const client = new ApiClient("https://api.example.test");
 
-      await client.getGitHubConnectURL("ws-1", "repositories");
+      await client.getGitHubConnectURL("ws-1");
 
       const fetchMock = vi.mocked(fetch);
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://api.example.test/api/workspaces/ws-1/github/connect?return_to=repositories",
+        "https://api.example.test/api/workspaces/ws-1/github/connect",
         expect.any(Object),
       );
     });
@@ -155,6 +196,32 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listSkills();
       expect(res).toEqual([]);
+    });
+
+    it.each([{ body: { skills: [] } }, { body: null }, { body: [{ id: "missing-identity" }] }])(
+      "rejects malformed skill lists for absence checks while preserving rendering fallback: %j",
+      async ({ body }) => {
+        stubFetchJson(body);
+        const client = new ApiClient("https://api.example.test");
+        await expect(client.listSkills()).resolves.toEqual([]);
+        stubFetchJson(body);
+        await expect(client.listSkills({ requireValidResponse: true })).rejects.toThrow("Invalid skill list response");
+      },
+    );
+
+    it("does not accept a defaulted 204 response as proof of absence", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(null, { status: 204 })));
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listSkills()).resolves.toEqual([]);
+      await expect(client.listSkills({ requireValidResponse: true })).rejects.toThrow("Invalid skill list response");
+    });
+
+    it("accepts a verified empty list and older valid rows for absence checks", async () => {
+      const client = new ApiClient("https://api.example.test");
+      stubFetchJson([]);
+      await expect(client.listSkills({ requireValidResponse: true })).resolves.toEqual([]);
+      stubFetchJson([baseSkill]);
+      await expect(client.listSkills({ requireValidResponse: true })).resolves.toMatchObject([{ id: "skill-1", name: "review-helper" }]);
     });
 
     it("treats a missing labels field as an empty array (older backends)", async () => {
@@ -300,6 +367,11 @@ describe("ApiClient schema fallback", () => {
       const issue = await client.createIssue({ title: "Created" });
       expect(issue.id).toBe("issue-1");
       expect(issue.labels).toBeUndefined();
+    });
+
+    it.each([true, false, undefined, null, "off"])("validates the create PR override %s without breaking older responses", (value) => {
+      const parsed = CreateIssueResponseSchema.parse({ ...validIssue, pr_auto_complete_disabled: value });
+      expect(parsed.pr_auto_complete_disabled).toBe(typeof value === "boolean" ? value : undefined);
     });
 
     it("validates a well-formed labels array", async () => {
@@ -900,7 +972,82 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listWecomInstallations", () => {
+    it("falls back to a safe empty shape when the response is malformed", async () => {
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res).toEqual({ installations: [], configured: false });
+    });
+
+    // The settings tab shows the QR install entry point only when this is
+    // exactly true, so the flag has to survive parsing.
+    it("keeps both install flags, and treats a missing one as off", async () => {
+      stubFetchJson({
+        installations: [{ id: "wc-1", status: "active" }],
+        configured: true,
+        install_supported: true,
+        scan_install_supported: true,
+        future_field: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res.install_supported).toBe(true);
+      expect(res.scan_install_supported).toBe(true);
+
+      // A server that predates the scan flow sends neither, and must not be
+      // read as "scanning is available".
+      stubFetchJson({ installations: [], configured: true });
+      const older = await client.listWecomInstallations("ws-1");
+      expect(older.scan_install_supported).toBeUndefined();
+      expect(older.scan_install_supported === true).toBe(false);
+    });
+
+    // The flag has to be VALIDATED, not merely passed through: this object is
+    // loose, so an undeclared key would survive parsing untouched.
+    it("does not let a non-boolean scan flag through unvalidated", async () => {
+      stubFetchJson({
+        installations: [],
+        configured: true,
+        scan_install_supported: "yes",
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listWecomInstallations("ws-1");
+      expect(res.scan_install_supported).toBeUndefined();
+    });
+  });
+
   describe("getConfig", () => {
+    it("preserves an omitted daemon setup target for legacy self-host detection", async () => {
+      stubFetchJson({
+        daemon_server_url: "https://api.example.com",
+        daemon_app_url: "https://app.example.com",
+      });
+      const config = await new ApiClient("https://api.example.test").getConfig();
+      expect(config.daemon_setup_target).toBeUndefined();
+      expect(config.daemon_server_url).toBe("https://api.example.com");
+      expect(config.daemon_app_url).toBe("https://app.example.com");
+    });
+
+    it.each([null, 123, {}, "unexpected", "unknown"])(
+      "does not infer Cloud from an unrecognized daemon setup target: %j",
+      async (target) => {
+        stubFetchJson({
+          daemon_setup_target: target,
+          daemon_server_url: "https://api.example.com",
+          daemon_app_url: "https://app.example.com",
+        });
+        const config = await new ApiClient("https://api.example.test").getConfig();
+        expect(config.daemon_setup_target).toBe("unknown");
+      },
+    );
+
+    it.each(["cloud", "self_host"])("preserves the confirmed daemon setup target %s", async (target) => {
+      stubFetchJson({ cdn_domain: "", daemon_setup_target: target });
+      const config = await new ApiClient("https://api.example.test").getConfig();
+      expect(config.daemon_setup_target).toBe(target);
+    });
+
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({
         cdn_domain: "cdn.example.com",
@@ -954,6 +1101,36 @@ describe("ApiClient schema fallback", () => {
       const subs = await client.listIssueSubscribers("issue-1");
       expect(subs).toEqual([]);
     });
+
+    const subscriber = (delivery?: unknown) => ({
+      issue_id: "issue-1",
+      user_type: "member",
+      user_id: "user-1",
+      reason: "commenter",
+      created_at: "2026-01-01T00:00:00Z",
+      ...(delivery === undefined ? {} : { delivery }),
+    });
+
+    it("keeps each valid delivery tier", async () => {
+      stubFetchJson(["all", "key_updates", "delegated"].map(subscriber));
+      const client = new ApiClient("https://api.example.test");
+      const subs = await client.listIssueSubscribers("issue-1");
+      expect(subs.map((s) => s.delivery)).toEqual(["all", "key_updates", "delegated"]);
+    });
+
+    it.each([
+      { name: "missing", delivery: undefined },
+      { name: "unknown", delivery: "muted" },
+      { name: "malformed", delivery: 42 },
+      { name: "null", delivery: null },
+    ])("keeps the row without a tier when delivery is $name", async ({ delivery }) => {
+      stubFetchJson([subscriber(delivery)]);
+      const client = new ApiClient("https://api.example.test");
+      const subs = await client.listIssueSubscribers("issue-1");
+      expect(subs).toHaveLength(1);
+      expect(subs[0]).toMatchObject({ user_id: "user-1", reason: "commenter" });
+      expect(subs[0]!.delivery).toBeUndefined();
+    });
   });
 
   describe("listChildIssues", () => {
@@ -988,6 +1165,51 @@ describe("ApiClient schema fallback", () => {
 
       await expect(client.getChildIssueProgress()).resolves.toEqual({
         progress: [],
+      });
+    });
+  });
+
+  describe("listIssuePullRequestSummaries", () => {
+    it("drops a malformed row instead of blanking every card's PR chips", async () => {
+      stubFetchJson({
+        pull_requests: [
+          {
+            issue_id: "issue-1",
+            id: "pr-1",
+            repo_owner: "acme",
+            repo_name: "widget",
+            number: 1,
+            state: "merged",
+            html_url: "https://github.com/acme/widget/pull/1",
+          },
+          { issue_id: "issue-1", id: "pr-2", number: "two" },
+        ],
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listIssuePullRequestSummaries()).resolves.toEqual({
+        pull_requests: [
+          {
+            issue_id: "issue-1",
+            id: "pr-1",
+            provider: "github",
+            repo_owner: "acme",
+            repo_name: "widget",
+            number: 1,
+            title: "",
+            state: "merged",
+            html_url: "https://github.com/acme/widget/pull/1",
+          },
+        ],
+      });
+    });
+
+    it("falls back to no PRs when the list is not an array", async () => {
+      stubFetchJson({ pull_requests: "invalid" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listIssuePullRequestSummaries()).resolves.toEqual({
+        pull_requests: [],
       });
     });
   });
@@ -1340,35 +1562,12 @@ describe("workspace subscription contract", () => {
     status: "active",
     seats: 3,
     limits: {
-      issue_count: { mode: "unlimited" },
       autopilot_runs: { mode: "unlimited" },
     },
     current_period_end: "2026-09-01T00:00:00Z",
     snapshot_expires_at: null,
     version: 7,
   };
-
-  it("maps limited issue usage and accepts a no-content unlimited response", async () => {
-    stubFetchJson({
-      used: 11,
-      limit: 17,
-    });
-    const client = new ApiClient("https://api.example.test");
-
-    await expect(client.getIssueLimitUsage()).resolves.toEqual({
-      used: 11,
-      limit: 17,
-    });
-
-    stubFetchJson({ used: 11 });
-    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
-    );
-    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
-  });
 
   it("maps a full summary to camelCase without inventing values", async () => {
     stubFetchJson({

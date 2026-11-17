@@ -111,7 +111,9 @@ function hasDesktopDownloadBridge(): boolean {
  *   the Linux/Ubuntu issue where HTML files are rendered inline instead
  *   of being downloaded.
  */
-export function useDownloadAttachment(): (attachmentId: string) => Promise<void> {
+export function useDownloadAttachment(
+  source: "workspace" | "markdown-link" = "workspace",
+): (attachmentId: string) => Promise<void> {
   const { t } = useT("editor");
   const workspaceSlug = useWorkspaceSlug();
   return useCallback(
@@ -120,7 +122,9 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
 
       if (hasDesktopDownloadBridge()) {
         try {
-          const fresh = await api.getAttachment(attachmentId);
+          const fresh = await (source === "markdown-link"
+            ? api.getAttachmentForDownload(attachmentId)
+            : api.getAttachment(attachmentId));
           // Prefer the forced-attachment URL (Content-Disposition: attachment in
           // every storage mode) so the native save writes the file rather than
           // opening media inline; fall back to the load-intent `download_url` for
@@ -151,7 +155,9 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
         // failures still produce the existing toast instead of a silent failed
         // navigation) and where the server hands back the download URLs it mints
         // for this response.
-        const fresh = await api.getAttachment(attachmentId);
+        const fresh = await (source === "markdown-link"
+          ? api.getAttachmentForDownload(attachmentId)
+          : api.getAttachment(attachmentId));
         if (typeof document === "undefined") {
           failed();
           return;
@@ -190,6 +196,6 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
         failed();
       }
     },
-    [t, workspaceSlug],
+    [t, workspaceSlug, source],
   );
 }

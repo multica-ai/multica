@@ -61,14 +61,6 @@ const writeDeadline = 10 * time.Second
 // handshakeTimeout bounds the initial TCP + WS handshake dial.
 const handshakeTimeout = 15 * time.Second
 
-// unsupportedMsgTypeReceipt is the one line sent back for a message this
-// adapter cannot read at all. It used to say "我目前只能处理文字消息" — text
-// only — which stopped being true the moment photos, files, videos and
-// 图文混排 started routing: a person who has just watched the bot answer a
-// screenshot, then gets told it only handles text, reads that as the bot
-// being broken rather than as this one kind not being supported.
-const unsupportedMsgTypeReceipt = "抱歉，我暂时无法处理这类消息。"
-
 // wecomChannel is one installation's aibot smart-bot WebSocket connection.
 // The engine.Supervisor builds one per active installation via the
 // registered Factory and drives lease / reconnect lifecycle; Connect blocks
@@ -101,6 +93,10 @@ type wecomChannel struct {
 	// through mx(), which substitutes the no-op sink for a channel built
 	// without one.
 	metrics Metrics
+
+	// languages resolves the chat a receipt goes back to into the language
+	// it is written in. Nil puts every reader on the deployment default.
+	languages languageLookup
 }
 
 var _ channel.Channel = (*wecomChannel)(nil)
@@ -448,6 +444,15 @@ func (c *wecomChannel) subscribe(ctx context.Context, conn wsConn, sender *wsSen
 	}
 }
 
+// receiptCopy is the unsupported-kind receipt in the language of the chat it
+// goes back to: the sender's profile language in a 1:1, the deployment's in a
+// room, which has no shared profile (language.go). It costs a lookup, and only
+// a message nothing here can read ever pays it.
+func (c *wecomChannel) receiptCopy(ctx context.Context, msg channel.InboundMessage) string {
+	return copyFor(localeFor(ctx, c.languages, c.installationID,
+		aibotChatTypeFromChannel(msg.Source.ChatType), msg.Source.SenderID)).UnsupportedMsgType
+}
+
 // dispatchFrame routes one server frame. Only aibot_msg_callback ever
 // escalates back to the loop's caller (as a handler infra failure);
 // events are logged + acked and everything else is silently dropped.
@@ -475,8 +480,7 @@ func (c *wecomChannel) dispatchFrame(ctx context.Context, env frameEnvelope, sen
 			// one-line receipt and stop. Best-effort: a send failure degrades
 			// to the prior silent drop.
 			log.Debug("wecom: unsupported message kind, replying with a receipt", "msg_type", mc.MsgType, "msg_id", mc.MsgID)
-			c.sendUnsupportedReceipt(ctx, sender, mc.MsgID, msg.Source.ChatID,
-				aibotChatTypeFromChannel(msg.Source.ChatType), unsupportedMsgTypeReceipt, log)
+			c.sendUnsupportedReceipt(ctx, sender, mc.MsgID, msg, log)
 			return nil
 		}
 		if err := c.handler(ctx, msg); err != nil {
@@ -617,6 +621,10 @@ type ChannelDeps struct {
 	// turned off gets.
 	Metrics Metrics
 
+	// Languages resolves the chat a receipt goes back to into its copy
+	// language (language.go). Nil puts every reader on the deployment default.
+	Languages languageLookup
+
 	// Dialer overrides the default gorilla dialer. Tests point it at an
 	// httptest server; production leaves this nil.
 	Dialer Dialer
@@ -652,12 +660,14 @@ type ChannelDeps struct {
 // the database unreachable the choice is a possible duplicate against a bot
 // that looks broken, and silence is the worse of the two. That is the same
 // stance the send itself takes.
+//
+// The copy is resolved only after the claim, so a redelivery stopped at the
+// claim does not pay for the language lookup.
 func (c *wecomChannel) sendUnsupportedReceipt(
 	ctx context.Context,
 	sender *wsSender,
-	messageID, chatID string,
-	chatType int,
-	content string,
+	messageID string,
+	msg channel.InboundMessage,
 	log *slog.Logger,
 ) {
 	var (
@@ -681,7 +691,8 @@ func (c *wecomChannel) sendUnsupportedReceipt(
 		}
 	}
 
-	if err := sender.sendText(chatID, chatType, content); err != nil {
+	chatType := aibotChatTypeFromChannel(msg.Source.ChatType)
+	if err := sender.sendText(msg.Source.ChatID, chatType, c.receiptCopy(ctx, msg)); err != nil {
 		log.Debug("wecom: unsupported-kind receipt send failed", "error", err, "msg_id", messageID)
 		if claimed {
 			// Nothing was delivered, so the claim must not stand: it would
@@ -708,17 +719,21 @@ func (c *wecomChannel) sendUnsupportedReceipt(
 // adapter — no engine edit (same contract as lark.RegisterFeishu /
 // slack.RegisterSlack).
 func RegisterWecom(reg *channel.Registry, deps ChannelDeps) {
+	logger := deps.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	if deps.Dedup == nil {
 		// Not fatal — answering twice is what main does today — but it has no
 		// other symptom: nothing errors, and the duplicate only shows up in
 		// somebody's chat, one per redelivery, each spending a push from that
 		// conversation's quota.
-		logger := deps.Logger
-		if logger == nil {
-			logger = slog.Default()
-		}
 		logger.Warn("wecom: no deduper wired; a redelivered unreadable message will be answered again " +
 			"on every delivery (set ChannelDeps.Dedup to NewDeduper(store))")
+	}
+	if deps.Languages == nil {
+		logger.Warn("wecom: no language lookup wired; the receipt for a message the bot cannot read will use " +
+			"the deployment language whatever the sender's profile says (set ChannelDeps.Languages)")
 	}
 	reg.Register(TypeWecom, newWecomFactory(deps))
 }
@@ -749,6 +764,7 @@ func newWecomFactory(deps ChannelDeps) channel.Factory {
 		return &wecomChannel{
 			installationID: cfg.ID,
 			dedup:          deps.Dedup,
+			languages:      deps.Languages,
 			botID:          creds.BotID,
 			secret:         creds.Secret,
 			botDisplayName: ic.BotDisplayName,

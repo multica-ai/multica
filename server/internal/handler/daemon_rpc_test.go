@@ -22,7 +22,7 @@ func TestDaemonRPCHandler_TasksClaim(t *testing.T) {
 	taskID := seedQueuedIssueTask(t, ctx, a, rt, i)
 
 	identity := daemonws.ClientIdentity{
-		DaemonID:     "ws-daemon",
+		// User-credential connection (the runtime owner): no daemon id.
 		UserID:       testUserID,
 		WorkspaceID:  testWorkspaceID,
 		WorkspaceIDs: []string{testWorkspaceID},

@@ -36,7 +36,7 @@ func TestHydrateCodexSkillsWipeKeepsJunctionTarget(t *testing.T) {
 		t.Fatalf("expected a junction, got a symlink (mode %v)", fi.Mode())
 	}
 
-	if err := hydrateCodexSkills(codexHome, nil, nil, testLogger()); err != nil {
+	if _, err := hydrateCodexSkills(codexHome, nil, nil, testLogger()); err != nil {
 		t.Fatalf("hydrateCodexSkills: %v", err)
 	}
 

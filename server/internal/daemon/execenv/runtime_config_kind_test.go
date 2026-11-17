@@ -231,7 +231,7 @@ func TestQuickCreateBriefOwnsRunAndOutputRules(t *testing.T) {
 
 	for _, want := range []string{
 		// exactly one create, no retry — a retry would duplicate the issue
-		"Run exactly one `multica issue create --output json` invocation",
+		"Run exactly one `" + multicaCLICommand() + " issue create --output json` invocation",
 		"Do not retry for any reason",
 		// no issue to query, transition, or comment on
 		"Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add`",

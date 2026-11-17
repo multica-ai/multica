@@ -11,7 +11,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { ApiError, errorCode } from "@multica/core/api";
 import { autopilotQuotaUsageOptions } from "@multica/core/autopilots";
 import {
@@ -19,7 +19,6 @@ import {
   useCreateWorkspaceSubscriptionPortal,
   usePreviewWorkspaceSeatPurchase,
   usePurchaseWorkspaceSeats,
-  issueLimitUsageOptions,
   workspaceSubscriptionPricesOptions,
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
@@ -48,6 +47,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   Dialog,
   DialogContent,
@@ -333,12 +333,6 @@ function BillingTabContent() {
     summaryQuery.isError ||
     (!summaryQuery.isPending && summaryQuery.data == null);
   const quotaUsageQuery = useQuery(autopilotQuotaUsageOptions(wsId));
-  const issueLimitUsageQuery = useQuery({
-    ...issueLimitUsageOptions(wsId),
-    enabled:
-      wsId.length > 0 &&
-      entitlements?.limits.issueCount.mode === "limited",
-  });
   const hasSeatCapacity = hasActiveWorkspaceSeatCapacity(summaryQuery.data);
   const canUpgrade = summaryQuery.data?.availableActions.checkout === true;
   const pricesQuery = useQuery({
@@ -819,14 +813,6 @@ function BillingTabContent() {
       ? formatDateTime(quotaUsage.resetAt, locale)
       : null;
   const numberFormatter = new Intl.NumberFormat(locale);
-  const issueCountLimit = entitlements.limits.issueCount;
-  const issueLimitUsage = issueLimitUsageQuery.data;
-  const issueLimitValue =
-    issueCountLimit.mode === "unlimited"
-      ? t(($) => $.workspace.limits.unlimited)
-      : issueLimitUsage?.limit === issueCountLimit.limit
-        ? `${numberFormatter.format(issueLimitUsage.used)} / ${numberFormatter.format(issueLimitUsage.limit)}`
-        : numberFormatter.format(issueCountLimit.limit);
   const isMutating =
     checkoutMutation.isPending ||
     portalMutation.isPending ||
@@ -1197,11 +1183,6 @@ function BillingTabContent() {
       >
         <SettingsCard>
           <SettingsRow
-            label={t(($) => $.workspace.limits.issues)}
-          >
-            <span className="tabular-nums">{issueLimitValue}</span>
-          </SettingsRow>
-          <SettingsRow
             label={t(($) => $.workspace.limits.autopilots)}
           >
             {quotaUsage.kind === "unlimited" ? (
@@ -1461,13 +1442,13 @@ function BillingTabContent() {
                   <Popover>
                     <PopoverTrigger
                       render={
-                        <Button
+                        <IconButton
                           variant="ghost"
                           size="icon-xs"
-                          aria-label={t(($) => $.workspace.seats.available_help)}
+                          label={t(($) => $.workspace.seats.available_help)}
                         >
                           <Info className="size-3.5" />
-                        </Button>
+                        </IconButton>
                       }
                     />
                     <PopoverContent align="start">

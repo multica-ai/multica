@@ -180,9 +180,7 @@ func verifyAttachmentCapability(attachmentID, rawExp, rawSig, intent string, now
 	return hmac.Equal(got, want)
 }
 
-// ---------------------------------------------------------------------------
 // DownloadAttachmentWithCapability — GET /api/attachments/{id}/signed-download
-// ---------------------------------------------------------------------------
 //
 // Registered as a PUBLIC route. The capability in the query IS the credential,
 // and a native download request has nothing for middleware.Auth to read, so

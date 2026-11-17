@@ -1,7 +1,8 @@
 import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
-import { app, type BrowserWindow, ipcMain } from "electron";
+import { app, type BrowserWindow, type MessageBoxOptions, ipcMain } from "electron";
 import type {
   ManualUpdateCheckResult,
+  UpdaterDownloadState,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import {
@@ -10,6 +11,8 @@ import {
   saveUpdaterPreferences,
   updaterPreferencesPath,
 } from "./updater-preferences";
+import type { DaemonInstallPrep } from "./update-install-gate";
+import { classifyUpdaterError } from "./updater-errors";
 
 // Silent background updates: electron-updater downloads on its own as soon
 // as `update-available` fires; we only surface UI when the package is fully
@@ -25,6 +28,7 @@ autoUpdater.autoInstallOnAppQuit = true;
 // `latest-arm64.yml` instead of the x64 metadata.
 if (process.platform === "win32" && process.arch === "arm64") {
   autoUpdater.channel = "latest-arm64";
+  autoUpdater.allowDowngrade = false;
 }
 
 interface ChannelConfigurableUpdater {
@@ -53,10 +57,49 @@ configureMacX64UpdateChannel(autoUpdater);
 
 const STARTUP_CHECK_DELAY_MS = 5_000;
 const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+// quitAndInstall only quits once the installer has been spawned. If the app is
+// still running this long afterwards, the install bailed and the daemon we
+// stopped for it must be brought back.
+const INSTALL_QUIT_WATCHDOG_MS = 10_000;
+
+// Injected so the updater does not own the daemon manager's state.
+export interface UpdaterDaemonGate {
+  prepare: (options: {
+    interruptActiveTasks: boolean;
+  }) => Promise<DaemonInstallPrep>;
+  resumeAfterAbortedInstall: () => void;
+  confirmInstallWhileBusy: (activeTasks: number) => Promise<boolean>;
+}
+
+export interface SetupAutoUpdaterOptions {
+  daemonGate?: UpdaterDaemonGate;
+  platform?: NodeJS.Platform;
+}
+
+export function createElectronBusyInstallPrompt(
+  showMessageBox: (
+    options: MessageBoxOptions,
+  ) => Promise<{ response: number }>,
+): (activeTasks: number) => Promise<boolean> {
+  return async (activeTasks) => {
+    const tasks = activeTasks === 1 ? "1 agent task is" : `${activeTasks} agent tasks are`;
+    const { response } = await showMessageBox({
+      type: "question",
+      buttons: ["Install now", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+      title: "Install update",
+      message: `${tasks} running on this computer.`,
+      detail: "Installing now stops the local runtime and interrupts these tasks.",
+    });
+    return response === 0;
+  };
+}
 
 type RendererChannel =
   | "updater:update-available"
   | "updater:download-progress"
+  | "updater:download-state"
   | "updater:update-downloaded";
 
 function isDestroyedObjectError(err: unknown): boolean {
@@ -80,36 +123,46 @@ function sendToLiveRenderer(
   }
 }
 
-// Single-flight guard around checkForUpdates(). With autoDownload=true the
-// startup, periodic, and manual triggers can all kick off downloads, and
-// overlapping calls have caused duplicate download warnings in the past
-// (see electronjs.org/docs/latest/api/auto-updater). Coalesce concurrent
-// callers onto the same in-flight promise.
-let inFlightCheck: Promise<unknown> | null = null;
-function checkForUpdatesOnce(): Promise<unknown> {
-  if (inFlightCheck) return inFlightCheck;
-  const p = autoUpdater
-    .checkForUpdates()
-    .then((result) => {
-      // checkForUpdates resolves as soon as metadata is fetched; the actual
-      // download (when autoDownload=true) is exposed on result.downloadPromise.
-      // Without a handler a download failure becomes an unhandled rejection
-      // in the main process — Node may terminate it on future versions.
-      void (result as { downloadPromise?: Promise<unknown> } | null)?.downloadPromise?.catch(
-        (err) => {
-          console.error("Failed to download update:", err);
-        },
-      );
+export function setupAutoUpdater(
+  getMainWindows: () => readonly BrowserWindow[],
+  options: SetupAutoUpdaterOptions = {},
+): void {
+  // Every main window mounts the update banner, so each one hears progress.
+  const broadcast = (channel: RendererChannel, payload: unknown) => {
+    for (const win of getMainWindows()) sendToLiveRenderer(win, channel, payload);
+  };
+  let downloadState: UpdaterDownloadState = { status: "idle" };
+  const setDownloadState = (state: UpdaterDownloadState) => {
+    downloadState = state;
+    broadcast("updater:download-state", state);
+  };
+  const reportDownloadFailure = (err: unknown) => {
+    if (downloadState.status === "downloading") {
+      setDownloadState({ status: "error", reason: classifyUpdaterError(err) });
+    }
+  };
+  // Startup, periodic, and manual checks share one in-flight metadata request.
+  let inFlightCheck: ReturnType<typeof autoUpdater.checkForUpdates> | null = null;
+  function checkForUpdatesOnce(): ReturnType<typeof autoUpdater.checkForUpdates> {
+    if (inFlightCheck) return inFlightCheck;
+    const pending = autoUpdater.checkForUpdates().then((result) => {
+      // Metadata resolves before the automatic download. Handle rejection even
+      // when a provider does not emit an error event for that failure.
+      void result?.downloadPromise?.catch((err) => {
+        console.error("Failed to download update:", err);
+        reportDownloadFailure(err);
+      });
       return result;
-    })
-    .finally(() => {
-      if (inFlightCheck === p) inFlightCheck = null;
+    }).finally(() => {
+      if (inFlightCheck === pending) inFlightCheck = null;
     });
-  inFlightCheck = p;
-  return p;
-}
-
-export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
+    inFlightCheck = pending;
+    return pending;
+  }
+  const platform = options.platform ?? process.platform;
+  // Only Windows locks a running executable against replacement; macOS and
+  // Linux keep their existing update path untouched.
+  const daemonGate = platform === "win32" ? (options.daemonGate ?? null) : null;
   const preferencesFilePath = updaterPreferencesPath(app.getPath("userData"));
   let automaticUpdatesEnabled =
     DEFAULT_UPDATER_PREFERENCES.automaticUpdates;
@@ -169,23 +222,85 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     }
   };
 
+  let updateReadyToInstall = false;
+  let installFlow: Promise<void> | null = null;
+  let quitRequested = false;
+  let finishing = false;
+  let appQuitting = false;
+
+  const finish = (install: boolean, manual: boolean): void => {
+    finishing = true;
+    const previousAutoInstall = autoUpdater.autoInstallOnAppQuit;
+    if (!install) autoUpdater.autoInstallOnAppQuit = false;
+    setTimeout(() => {
+      if (appQuitting) return;
+      finishing = false;
+      quitRequested = false;
+      autoUpdater.autoInstallOnAppQuit = previousAutoInstall;
+      daemonGate?.resumeAfterAbortedInstall();
+    }, INSTALL_QUIT_WATCHDOG_MS);
+    if (install && manual) autoUpdater.quitAndInstall(false, true);
+    else app.quit();
+  };
+
+  // All entry points join this promise. Once stopping starts, nobody cancels
+  // or replaces its PID wait, and no other flow can resume the daemon.
+  const installWithDaemonGate = (manual: boolean): Promise<void> => {
+    if (installFlow) return installFlow;
+    if (finishing || !daemonGate) return Promise.resolve();
+    installFlow = (async () => {
+      let install = true;
+      try {
+        const prep = await daemonGate.prepare({ interruptActiveTasks: false });
+        if (prep.kind === "busy") {
+          install = manual && await daemonGate.confirmInstallWhileBusy(prep.activeTasks);
+          if (install) await daemonGate.prepare({ interruptActiveTasks: true });
+        }
+      } catch (err) {
+        // Preserve the existing installer fallback if preparation fails.
+        console.error("[updater] daemon preparation failed; installing anyway:", err);
+      }
+      if (install) finish(true, manual);
+      else {
+        daemonGate.resumeAfterAbortedInstall();
+        if (quitRequested) finish(false, false);
+      }
+    })().finally(() => { installFlow = null; });
+    return installFlow;
+  };
+
+  if (daemonGate) {
+    app.on("will-quit", () => { appQuitting = true; });
+    app.on("before-quit", (event) => {
+      if (finishing || !updateReadyToInstall || !autoUpdater.autoInstallOnAppQuit) return;
+      event.preventDefault();
+      quitRequested = true;
+      void installWithDaemonGate(false).catch((err) => {
+        console.error("[updater] quit-time installation failed:", err);
+      });
+    });
+  }
+
   autoUpdater.on("update-available", (info) => {
+    setDownloadState({ status: "downloading", version: info.version });
     // Forwarded for renderer-side state tracking only; the notification UI
     // does not render an "available" affordance with autoDownload=true.
-    sendToLiveRenderer(getMainWindow(), "updater:update-available", {
+    broadcast("updater:update-available", {
       version: info.version,
       releaseNotes: info.releaseNotes,
     });
   });
 
   autoUpdater.on("download-progress", (progress) => {
-    sendToLiveRenderer(getMainWindow(), "updater:download-progress", {
+    broadcast("updater:download-progress", {
       percent: progress.percent,
     });
   });
 
   autoUpdater.on("update-downloaded", (info: UpdateDownloadedEvent) => {
-    sendToLiveRenderer(getMainWindow(), "updater:update-downloaded", {
+    updateReadyToInstall = true;
+    setDownloadState({ status: "downloaded", version: info.version });
+    broadcast("updater:update-downloaded", {
       version: info.version,
       releaseNotes: info.releaseNotes,
     });
@@ -193,7 +308,10 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
 
   autoUpdater.on("error", (err) => {
     console.error("Auto-updater error:", err);
+    reportDownloadFailure(err);
   });
+
+  ipcMain.handle("updater:get-download-state", (): UpdaterDownloadState => downloadState);
 
   // Retained for IPC back-compat with older renderer bundles. With
   // autoDownload=true the renderer no longer triggers this path.
@@ -201,8 +319,12 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     return autoUpdater.downloadUpdate();
   });
 
-  ipcMain.handle("updater:install", () => {
-    autoUpdater.quitAndInstall(false, true);
+  ipcMain.handle("updater:install", async () => {
+    if (!daemonGate) {
+      autoUpdater.quitAndInstall(false, true);
+      return;
+    }
+    await installWithDaemonGate(true);
   });
 
   ipcMain.handle(
@@ -258,11 +380,14 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
         currentVersion,
         latestVersion: result?.updateInfo.version ?? currentVersion,
         available: result?.isUpdateAvailable ?? false,
+        downloadState,
       };
     } catch (err) {
+      console.error("Manual update check failed:", err);
       return {
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: "Unable to check for updates. Please try again later.",
+        reason: classifyUpdaterError(err),
       };
     }
   });

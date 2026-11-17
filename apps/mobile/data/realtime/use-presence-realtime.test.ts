@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { usePresenceRealtime } from "./use-presence-realtime";
+
 const { invalidateQueries, subscriptionSetups } = vi.hoisted(() => ({
   invalidateQueries: vi.fn(),
-  subscriptionSetups: [] as Array<
-    (ws: MockWS, wsId: string) => Array<() => void>
-  >,
+  subscriptionSetups: [] as ((ws: MockWS, wsId: string) => (() => void)[])[],
 }));
 
 type EventHandler = (payload: unknown) => void;
@@ -20,13 +20,11 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@/lib/use-ws-subscriptions", () => ({
   useWSSubscriptions: (
-    setup: (ws: MockWS, wsId: string) => Array<() => void>,
+    setup: (ws: MockWS, wsId: string) => (() => void)[],
   ) => {
     subscriptionSetups.push(setup);
   },
 }));
-
-import { usePresenceRealtime } from "./use-presence-realtime";
 
 describe("usePresenceRealtime", () => {
   beforeEach(() => {

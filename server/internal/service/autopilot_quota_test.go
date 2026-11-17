@@ -88,6 +88,7 @@ func newAutopilotQuotaFixture(t *testing.T, action entitlement.Action, limit int
 	t.Cleanup(func() {
 		pool.Exec(context.Background(), `DELETE FROM autopilot_quota_reservation WHERE workspace_id = $1`, workspaceID)
 		pool.Exec(context.Background(), `DELETE FROM autopilot_quota_period WHERE workspace_id = $1`, workspaceID)
+		pool.Exec(context.Background(), `DELETE FROM entitlement_limit_overage WHERE workspace_id = $1`, workspaceID)
 	})
 	return fixture
 }
@@ -707,7 +708,7 @@ func TestAutopilotQuotaObserveToEnforceAndOffFinalization(t *testing.T) {
 	// under observe/enforce. Terminal finalization relies on the persisted slot.
 	fixture.setPolicy(entitlement.ActionOff, fixture.periodStart, fixture.periodEnd, 1)
 	for _, run := range runs {
-		if _, err := fixture.service.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
+		if _, err := fixture.service.failAutopilotRun(ctx, autopilotRunFailure{
 			ID: run.ID, FailureReason: pgtype.Text{String: "test cleanup", Valid: true},
 		}); err != nil {
 			t.Fatalf("finalize while policy off: %v", err)
@@ -725,6 +726,124 @@ func TestAutopilotQuotaObserveToEnforceAndOffFinalization(t *testing.T) {
 	}
 }
 
+// The same limit under off, observe and enforce: off neither blocks nor
+// records, observe admits every run but records each would-block for the
+// workspace, enforce rejects and records.
+func TestAutopilotQuotaRecordsOverLimitAttemptsPerWorkspace(t *testing.T) {
+	fixture := newAutopilotQuotaFixture(t, entitlement.ActionOff, 1)
+	ctx := context.Background()
+	overages := EntitlementOverages{Queries: fixture.queries}
+	create := func(key string) error {
+		_, _, err := fixture.service.createAutopilotRunWithQuota(ctx, fixture.workspaceID, "schedule", key, fixture.createRunArgs)
+		return err
+	}
+	workspaceOverages := func() []LimitOverage {
+		t.Helper()
+		rows, err := overages.ForWorkspace(ctx, fixture.workspaceID)
+		if err != nil {
+			t.Fatalf("ForWorkspace: %v", err)
+		}
+		return rows
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := create(fmt.Sprintf("off-%d", i)); err != nil {
+			t.Fatalf("off admission %d: %v", i, err)
+		}
+	}
+	if rows := workspaceOverages(); len(rows) != 0 {
+		t.Fatalf("off recorded overages: %+v", rows)
+	}
+
+	fixture.setPolicy(entitlement.ActionObserve, fixture.periodStart, fixture.periodEnd, 1)
+	for i := 0; i < 3; i++ {
+		if err := create(fmt.Sprintf("observe-%d", i)); err != nil {
+			t.Fatalf("observe admission %d must not be blocked: %v", i, err)
+		}
+	}
+	rows := workspaceOverages()
+	if len(rows) != 1 {
+		t.Fatalf("observe overages = %+v, want one period row", rows)
+	}
+	got := rows[0]
+	if got.Gate != entitlement.GateAutopilotRuns || got.Limit != 1 || got.PeakUsage != 3 || got.Over != 2 ||
+		got.ObservedCount != 2 || got.EnforcedCount != 0 ||
+		!got.PeriodStart.Equal(fixture.periodStart) || !got.PeriodEnd.Equal(fixture.periodEnd) ||
+		got.FirstExceededAt.IsZero() || got.LastExceededAt.Before(got.FirstExceededAt) {
+		t.Fatalf("observe overage = %+v", got)
+	}
+	usage, err := fixture.service.AutopilotQuotaUsage(ctx, fixture.workspaceID)
+	if err != nil || len(usage.BlockedCounts) != 0 || usage.Reached != nil {
+		t.Fatalf("observe usage = %+v, %v; observe must not count as blocked", usage, err)
+	}
+
+	fixture.setPolicy(entitlement.ActionEnforce, fixture.periodStart, fixture.periodEnd, 1)
+	var quotaErr *AutopilotQuotaExceededError
+	if err := create("enforce-0"); !errors.As(err, &quotaErr) {
+		t.Fatalf("enforce admission error = %v, want quota exceeded", err)
+	}
+	got = workspaceOverages()[0]
+	if got.ObservedCount != 2 || got.EnforcedCount != 1 || got.PeakUsage != 4 || got.Over != 3 {
+		t.Fatalf("enforce overage = %+v", got)
+	}
+
+	byPeriod, err := overages.ForPeriod(ctx, entitlement.GateAutopilotRuns, fixture.periodStart, fixture.periodEnd)
+	if err != nil {
+		t.Fatalf("ForPeriod: %v", err)
+	}
+	found := false
+	for _, row := range byPeriod {
+		if row.WorkspaceID == fixture.workspace {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("ForPeriod = %+v, missing workspace %s", byPeriod, fixture.workspace)
+	}
+
+	// A mid-period upgrade that raises the limit above the peak clears Over
+	// while keeping the history of attempts.
+	fixture.setPolicy(entitlement.ActionObserve, fixture.periodStart, fixture.periodEnd, 3)
+	if err := create("observe-after-upgrade"); err != nil {
+		t.Fatalf("observe after upgrade: %v", err)
+	}
+	got = workspaceOverages()[0]
+	if got.Limit != 3 || got.PeakUsage != 4 || got.Over != 1 || got.ObservedCount != 3 {
+		t.Fatalf("overage after upgrade = %+v", got)
+	}
+
+	// An upgrade above the peak followed by a run inside the new limit must
+	// clear Over even though that run is not itself over the limit. History
+	// (counts, peak, times) stays.
+	before := got
+	fixture.setPolicy(entitlement.ActionObserve, fixture.periodStart, fixture.periodEnd, 10)
+	if err := create("observe-within-raised-limit"); err != nil {
+		t.Fatalf("observe within raised limit: %v", err)
+	}
+	got = workspaceOverages()[0]
+	if got.Limit != 10 || got.Over != 0 || got.PeakUsage != before.PeakUsage ||
+		got.ObservedCount != before.ObservedCount || got.EnforcedCount != before.EnforcedCount ||
+		!got.LastExceededAt.Equal(before.LastExceededAt) {
+		t.Fatalf("overage after upgrade above peak = %+v, before = %+v", got, before)
+	}
+	byPeriod, err = overages.ForPeriod(ctx, entitlement.GateAutopilotRuns, fixture.periodStart, fixture.periodEnd)
+	if err != nil {
+		t.Fatalf("ForPeriod after upgrade: %v", err)
+	}
+	for _, row := range byPeriod {
+		if row.WorkspaceID == fixture.workspace && (row.Limit != 10 || row.Over != 0) {
+			t.Fatalf("ForPeriod after upgrade = %+v", row)
+		}
+	}
+}
+
+func TestLimitOverageNeverReportsNegativeOver(t *testing.T) {
+	rows := limitOveragesFromRows([]db.EntitlementLimitOverage{{LimitValue: 10, PeakUsage: 4}})
+	if len(rows) != 1 || rows[0].Over != 0 {
+		t.Fatalf("rows = %+v, want Over clamped to zero", rows)
+	}
+}
+
 func TestAutopilotQuotaConsumedCreateIssueCannotBeRefunded(t *testing.T) {
 	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 2)
 	ctx := context.Background()
@@ -738,7 +857,7 @@ func TestAutopilotQuotaConsumedCreateIssueCannotBeRefunded(t *testing.T) {
 	if _, err := settleAutopilotQuota(ctx, fixture.queries, cancelled.QuotaReservationID, true); err != nil {
 		t.Fatalf("consume cancelled run: %v", err)
 	}
-	if _, err := fixture.service.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
+	if _, err := fixture.service.failAutopilotRun(ctx, autopilotRunFailure{
 		ID: cancelled.ID, FailureReason: pgtype.Text{String: "issue cancelled", Valid: true},
 	}); err != nil {
 		t.Fatalf("fail consumed run: %v", err)
@@ -777,7 +896,7 @@ func TestAutopilotQuotaTerminalUpdateNeedsNoTransactionStarter(t *testing.T) {
 		t.Fatalf("create off-path run: %v", err)
 	}
 	serviceWithoutTx := &AutopilotService{Queries: fixture.queries}
-	updated, err := serviceWithoutTx.completeAutopilotRun(ctx, db.UpdateAutopilotRunCompletedParams{ID: run.ID})
+	updated, err := serviceWithoutTx.completeAutopilotRun(ctx, autopilotRunCompletion{ID: run.ID})
 	if err != nil {
 		t.Fatalf("complete off-path run: %v", err)
 	}
@@ -798,7 +917,7 @@ func TestAutopilotQuotaSettlementStaysInOriginalPeriod(t *testing.T) {
 	secondStart := fixture.periodEnd
 	secondEnd := secondStart.Add(19 * time.Hour)
 	fixture.setPolicy(entitlement.ActionEnforce, secondStart, secondEnd, 1)
-	if _, err := fixture.service.completeAutopilotRun(ctx, db.UpdateAutopilotRunCompletedParams{ID: run.ID}); err != nil {
+	if _, err := fixture.service.completeAutopilotRun(ctx, autopilotRunCompletion{ID: run.ID}); err != nil {
 		t.Fatalf("complete after period rollover: %v", err)
 	}
 
@@ -861,7 +980,9 @@ func TestAutopilotQuotaReconcilerSettlesTerminalOnlyOnce(t *testing.T) {
 	}
 	// Simulate a crash after the run reached terminal state but before the old
 	// two-step finalizer settled its reservation.
-	if _, err := fixture.queries.UpdateAutopilotRunCompleted(ctx, db.UpdateAutopilotRunCompletedParams{ID: terminal.ID}); err != nil {
+	if _, err := fixture.pool.Exec(ctx, `
+		UPDATE autopilot_run SET status = 'completed', completed_at = now() WHERE id = $1
+	`, terminal.ID); err != nil {
 		t.Fatalf("seed terminal crash window: %v", err)
 	}
 

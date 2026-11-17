@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
@@ -91,14 +91,12 @@ describe("InlineCommentRun", () => {
     await screen.findByText("Checking the PR");
     fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
     const preview = screen.getAllByText("Checking the PR").find((node) => node.closest("summary"))!;
-    expect(preview).toHaveAttribute("title", "Checking the PR");
     expect(screen.queryByTestId("step-body")).not.toBeInTheDocument();
     act(() => client.setQueryData(chatKeys.taskMessages(id), [
       message,
       { ...message, seq: 2, content: " changes.\nReviewing migration safety." },
     ]));
     await waitFor(() => expect(preview).toHaveTextContent("Checking the PR changes."));
-    expect(preview).toHaveAttribute("title", "Checking the PR changes.");
     fireEvent.click(preview.closest("summary")!, { detail: 0 });
     expect(await screen.findByTestId("step-body")).toHaveTextContent("Checking the PR changes. Reviewing migration safety.");
   });
@@ -118,7 +116,6 @@ describe("InlineCommentRun", () => {
     const preview = screen.getByText("read_file · .../db/queries.sql");
     const summary = preview.closest("summary")!;
     expect(summary).toHaveTextContent("4 steps");
-    expect(preview).toHaveAttribute("title", "read_file · .../db/queries.sql");
     fireEvent.click(summary, { detail: 0 });
     expect(await screen.findByText(".../db/queries.sql")).toBeInTheDocument();
     expect(screen.getByText(".../db/models.go")).toBeInTheDocument();
@@ -135,7 +132,7 @@ describe("InlineCommentRun", () => {
     setup(task());
     await screen.findByText("Checking logs");
     fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
-    expect(screen.getByText("Checking [REDACTED GITHUB TOKEN]")).toHaveAttribute("title", "Checking [REDACTED GITHUB TOKEN]");
+    expect(screen.getByText("Checking [REDACTED GITHUB TOKEN]").closest("summary")).not.toBeNull();
     expect(screen.getByText("Agent message").closest("summary")).not.toBeNull();
     expect(document.body.innerHTML).not.toContain(secret);
   });
@@ -156,7 +153,6 @@ describe("InlineCommentRun", () => {
     expect(header.firstChild).toBe(textNode);
     fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
     const preview = screen.getAllByText("Checking the runtime logs.").find((node) => node.closest("summary"))!;
-    expect(preview).toHaveAttribute("title", "Checking the runtime logs.");
     const details = preview.closest("details")!;
     expect(details).not.toHaveAttribute("open");
     expect(screen.queryByTestId("step-body")).not.toBeInTheDocument();
@@ -174,7 +170,7 @@ describe("InlineCommentRun", () => {
     await screen.findByText(/REDACTED/);
     fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
     const preview = screen.getAllByText(/REDACTED/).find((node) => node.closest("summary"))!;
-    expect(preview.getAttribute("title")).toContain("REDACTED");
+    expect(preview.textContent).toContain("REDACTED");
     expect(document.body.innerHTML).not.toContain("ghp_");
     expect(preview.textContent!.length).toBeLessThanOrEqual(201);
   });
@@ -261,11 +257,28 @@ describe("InlineCommentRun", () => {
     expect(expanded).toBe(before);
     expect(expanded).toHaveFocus();
     expect(expanded).toHaveAttribute("aria-expanded", "true");
-    await screen.findByRole("button", { name: "Open full log" });
+    await screen.findByText("pnpm test");
     fireEvent.click(expanded, { detail: 0 });
     expect(screen.getByRole("button", { name: /View activity/ })).toHaveFocus();
     expect(screen.getByRole("button", { name: /View activity/ })).toHaveAttribute("aria-expanded", "false");
   });
+  it.each(["running", "completed", "failed"] as const)("opens the full log from the %s run row without expanding it", async (status) => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
+    setup(task({ status, completed_at: status === "running" ? null : "2026-09-07T00:01:23Z" }));
+    const trigger = screen.getByRole("button", { name: "Open full log" });
+    expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+    fireEvent.click(trigger);
+    await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent("Full transcript"));
+    expect(screen.getByRole("button", { name: /View activity/ })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it.each(["queued", "dispatched", "waiting_local_directory"] as const)("offers no full log before a %s run starts", (status) => {
+    vi.mocked(api.listTaskMessages).mockResolvedValue([]);
+    setup(task({ status }));
+    fireEvent.click(screen.getByRole("button", { name: /View activity/ }));
+    expect(screen.queryByRole("button", { name: "Open full log" })).not.toBeInTheDocument();
+  });
+
   it("shows real activity, expands in place, follows WS data and retains the open transcript at completion", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
     const current = task();
@@ -446,5 +459,60 @@ describe("InlineCommentRun", () => {
 
     rerender(task({ status: "cancelled", completed_at: "2026-09-07T00:01:23Z" }));
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
+  });
+
+  describe("cut-off status text", () => {
+    // jsdom has no layout or Tailwind: make every `truncate` element report
+    // clipped overflow, as the sr-only status line does while a run is live.
+    const originalComputedStyle = window.getComputedStyle;
+    const descriptors = {
+      scrollWidth: Object.getOwnPropertyDescriptor(Element.prototype, "scrollWidth"),
+      clientWidth: Object.getOwnPropertyDescriptor(Element.prototype, "clientWidth"),
+    };
+    const clipped = (el: Element) => el.classList.contains("truncate");
+    beforeEach(() => {
+      Object.defineProperty(Element.prototype, "scrollWidth", {
+        configurable: true,
+        get(this: Element) { return clipped(this) ? 200 : 0; },
+      });
+      Object.defineProperty(Element.prototype, "clientWidth", {
+        configurable: true,
+        get(this: Element) { return clipped(this) ? 1 : 0; },
+      });
+      vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) => {
+        const style = originalComputedStyle(el, pseudo);
+        if (!clipped(el)) return style;
+        return { overflowX: "hidden", overflowY: "hidden" } as CSSStyleDeclaration;
+      });
+    });
+    afterEach(() => {
+      vi.mocked(window.getComputedStyle).mockRestore();
+      for (const [key, descriptor] of Object.entries(descriptors)) {
+        if (descriptor) Object.defineProperty(Element.prototype, key, descriptor);
+      }
+    });
+
+    it("keeps a live run's hidden status out of the tab order and adds it once the run ends", async () => {
+      vi.mocked(api.listTaskMessages).mockResolvedValue(messages);
+      const user = userEvent.setup();
+      const current = task();
+      const { rerender } = setup(current);
+      await screen.findByText("pnpm test");
+      const status = () => document.querySelector("[data-run-status] .truncate")!;
+      expect(status()).not.toHaveAttribute("tabindex");
+
+      await user.tab();
+      expect(screen.getByRole("button", { name: /View activity/ })).toHaveFocus();
+
+      rerender({ ...current, status: "completed", completed_at: "2026-09-07T00:01:23Z" }, true);
+      await screen.findByText("Completed");
+      expect(status()).toHaveAttribute("tabindex", "0");
+
+      (document.activeElement as HTMLElement).blur();
+      await user.tab();
+      expect(status()).toHaveFocus();
+      await user.tab();
+      expect(screen.getByRole("button", { name: /View activity/ })).toHaveFocus();
+    });
   });
 });

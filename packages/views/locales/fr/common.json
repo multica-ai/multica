@@ -1,4 +1,10 @@
 {
+  "daemon_setup": {
+    "loading": "Chargement des paramètres de connexion...",
+    "error": "Impossible de charger les paramètres de connexion. Vérifiez votre connexion ; une nouvelle tentative sera effectuée automatiquement.",
+    "unknown": "Ce serveur n’a pas confirmé ses paramètres de connexion. Demandez à votre administrateur de mettre à jour le serveur.",
+    "incomplete": "Les paramètres de connexion sont incomplets. Demandez à votre administrateur de configurer les URL publiques de ce serveur."
+  },
   "avatar_upload": {
     "change": "Changer d'avatar",
     "remove": "Supprimer",
@@ -8,7 +14,8 @@
     "upload_image": "Envoyer une image",
     "emoji_label": "Emoji",
     "more_emojis": "Plus d'emojis…",
-    "emoji_loading": "Chargement…"
+    "emoji_loading": "Chargement…",
+    "text_icon": "Icône texte"
   },
   "avatar_crop": {
     "title": "Modifier l'avatar",
@@ -23,6 +30,14 @@
     "loading": "Chargement…",
     "load_failed": "Impossible de charger l'image"
   },
+  "text_avatar": {
+    "title": "Icône texte",
+    "preview": "Aperçu",
+    "text_label": "Texte",
+    "text_hint": "1–2 caractères : lettres, chiffres ou chinois. Le reste est coupé.",
+    "color_label": "Couleur",
+    "render_failed": "Impossible de créer l’icône. Veuillez réessayer."
+  },
   "color_picker": {
     "saturation": "Saturation et luminosité",
     "hue": "Teinte",
@@ -35,6 +50,7 @@
   "cancel": "Annuler",
   "delete": "Supprimer",
   "confirm": "Confirmer",
+  "more_actions": "Plus d'actions",
   "loading": "Chargement...",
   "time": {
     "just_now": "à l'instant",
