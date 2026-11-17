@@ -569,18 +569,31 @@ describe("SlashCommandList empty states", () => {
 });
 
 describe("buildBuiltinCommandItems", () => {
-  it("returns the full built-in command set for an empty query", () => {
-    expect(buildBuiltinCommandItems("")).toEqual(BUILTIN_COMMANDS);
+  it("returns only quick actions and /note for an empty query with many skills", () => {
+    const skills = Array.from({ length: 18 }, (_, index) => ({
+      id: `skill-${index}`,
+      name: `skill-${index}`,
+      description: "",
+    }));
+    const actions = [{ id: "qa-1", name: "Request changes", description: "Review this" }];
+
+    expect(buildBuiltinCommandItems("", actions, skills)).toEqual([
+      { id: "quick-action:qa-1", label: "Request changes", description: "Review this" },
+      BUILTIN_COMMANDS[0],
+    ]);
   });
 
-  it("merges quick actions, skills, and /note with namespaced item ids", () => {
+  it("merges matching quick actions, skills, and /note for a nonempty query", () => {
     expect(buildBuiltinCommandItems(
-      "",
-      [{ id: "qa-1", name: "review", description: "Review this" }],
-      [{ id: "skill-1", name: "deploy", description: "Ship changes" }],
+      "no",
+      [
+        { id: "qa-1", name: "notify", description: "Notify the team" },
+        { id: "qa-2", name: "review", description: "Review this" },
+      ],
+      [{ id: "skill-1", name: "note-deploy", description: "Ship changes" }],
     )).toEqual([
-      { id: "quick-action:qa-1", label: "review", description: "Review this" },
-      { id: "skill:skill-1", label: "deploy", description: "Ship changes" },
+      { id: "quick-action:qa-1", label: "notify", description: "Notify the team" },
+      { id: "skill:skill-1", label: "note-deploy", description: "Ship changes" },
       BUILTIN_COMMANDS[0],
     ]);
   });
@@ -601,7 +614,7 @@ describe("buildBuiltinCommandItems", () => {
     expect(result.every((item) => item.id.startsWith("skill:"))).toBe(true);
   });
 
-  it.each(["", "n", "no"])("reserves /note for query %j with 25 matching skills", (query) => {
+  it.each(["n", "no"])("reserves /note for query %j with 25 matching skills", (query) => {
     const skills = Array.from({ length: 25 }, (_, index) => ({
       id: `skill-${index}`,
       name: `skill-${index}`,
@@ -625,8 +638,9 @@ describe("buildBuiltinCommandItems", () => {
     expect(buildBuiltinCommandItems("ote")).toEqual([]);
   });
 
-  it("returns nothing for a query that matches no command", () => {
-    expect(buildBuiltinCommandItems("deploy")).toEqual([]);
+  it("returns nothing for a query that matches no command or skill", () => {
+    const skills = [{ id: "skill-1", name: "code-review", description: "Review code" }];
+    expect(buildBuiltinCommandItems("zzz", [], skills)).toEqual([]);
   });
 });
 

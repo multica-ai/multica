@@ -204,7 +204,7 @@ interface ContentEditorBaseProps {
   /**
    * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
    * lists the active agent's skills (chat); "command" merges Issue quick
-   * actions, target-agent skills, and built-ins such as /note.
+   * actions, skills matching a nonempty query, and built-ins such as /note.
    */
   slashCommandMode?: "skill" | "command";
   /**

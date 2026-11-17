@@ -239,7 +239,8 @@ export function useQuickActionMenu(
 
   const previewAgents = triggerPreview?.agents;
   // Empty composers have a synthetic current preview with no targets. Keep
-  // synchronous resolution there so typing the first `/` still offers skills.
+  // synchronous resolution there so the first nonempty query need not wait
+  // for a network round-trip before offering skills.
   const hasCurrentPreview = triggerPreview?.isCurrent && commentTriggerPreviewSignature(previewContent) !== "empty";
   const getSkills = useCallback((editor: Editor): AgentSkillSummary[] => {
     if (!hasIssueContext || targetMissing) return [];

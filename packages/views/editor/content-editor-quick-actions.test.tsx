@@ -12,6 +12,8 @@ import { NavigationProvider } from "../navigation/context";
 import { useQuickActionMenu } from "../issues/hooks/use-quick-action-menu";
 import { useCommentTriggerPreview } from "../issues/hooks/use-comment-trigger-preview";
 import { ContentEditor } from "./content-editor";
+import { CommentInput } from "../issues/components/comment-input";
+import { ReplyInput } from "../issues/components/reply-input";
 
 const listQuickActions = vi.hoisted(() => vi.fn());
 const renderQuickAction = vi.hoisted(() => vi.fn());
@@ -29,13 +31,20 @@ vi.mock("@multica/core/auth", () => ({
 
 vi.mock("@multica/core/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/api")>();
-  return { ...actual, api: { ...actual.api, listQuickActions, renderQuickAction, getIssue, listAgents, listSquads, listMembers, previewCommentTriggers } };
+  return { ...actual, api: { ...actual.api, getBaseUrl: () => "https://api.example.test", listQuickActions, renderQuickAction, getIssue, listAgents, listSquads, listMembers, previewCommentTriggers } };
 });
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
   useCurrentWorkspace: () => ({ id: "ws", slug: "test" }),
   useWorkspaceSlug: () => "test",
-  useWorkspacePaths: () => ({ issueDetail: (id: string) => `/test/issues/${id}` }),
+  useWorkspacePaths: () => ({
+    issueDetail: (id: string) => `/test/issues/${id}`,
+    memberDetail: (id: string) => `/test/members/${id}`,
+  }),
+}));
+vi.mock("@multica/core/hooks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/hooks")>()),
+  useWorkspaceId: () => "ws",
 }));
 
 function makeIssue(
@@ -121,12 +130,26 @@ function Composer() {
   );
 }
 
-async function mount(initialActions?: QuickAction[]) {
+async function mount(
+  initialActions?: QuickAction[],
+  composer: "standalone" | "comment" | "reply" = "standalone",
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   if (initialActions) {
     client.setQueryData(quickActionKeys.list("ws"), { quick_actions: initialActions });
   }
   clients.push(client);
+  const composerUi = composer === "comment" ? (
+    <CommentInput issueId="issue-1" onSubmit={vi.fn().mockResolvedValue(true)} />
+  ) : composer === "reply" ? (
+    <ReplyInput
+      issueId="issue-1"
+      parentId="comment-1"
+      avatarType="member"
+      avatarId="user-1"
+      onSubmit={vi.fn().mockResolvedValue(true)}
+    />
+  ) : <Composer />;
   const result = renderWithI18n(
     <NavigationProvider value={{
       push: vi.fn(),
@@ -137,9 +160,12 @@ async function mount(initialActions?: QuickAction[]) {
       hash: "",
       getShareableUrl: (path) => path,
     }}>
-      <QueryClientProvider client={client}><Composer /></QueryClientProvider>
+      <QueryClientProvider client={client}>{composerUi}</QueryClientProvider>
     </NavigationProvider>,
   );
+  if (composer !== "standalone") {
+    fireEvent.click(screen.getByTestId(`${composer}-composer-shell`));
+  }
   const dom = await waitFor(() => {
     const el = result.container.querySelector<HTMLElement & { editor: Editor }>(".ProseMirror");
     expect(el?.editor).toBeDefined();
@@ -353,21 +379,20 @@ describe("comment quick-action catalog updates in the real editor", () => {
 
 describe("Issue agent-scoped skills in the real editor", () => {
   it.each([false, true])("refreshes the open menu from a current preview (empty: %s)", async (empty) => {
-    const assignee = makeAgent("assignee", [{ id: "fallback", name: "fallback", description: "" }]);
+    const assignee = makeAgent("assignee", [{ id: "fallback", name: "fallback-preview", description: "" }]);
     const target = makeAgent("target", [
       { id: "preview", name: "preview", description: "" },
       { id: "disabled", name: "disabled", description: "", enabled: false },
     ]);
     getIssue.mockResolvedValue(makeIssue("agent", assignee.id));
     listAgents.mockResolvedValue([assignee, target]);
-    let resolve!: (value: CommentTriggerPreview) => void;
-    previewCommentTriggers.mockReturnValue(new Promise((done) => { resolve = done; }));
+    const { promise, resolve } = Promise.withResolvers<CommentTriggerPreview>();
+    previewCommentTriggers.mockReturnValue(promise);
     const { editor, dom } = await mount();
 
-    // The empty signature is current but must not suppress the cold-/ fallback.
     expect(previewCommentTriggers).not.toHaveBeenCalled();
-    await type(editor, "/");
-    await waitFor(() => expect(screen.getByRole("button", { name: "/fallback" })).toBeVisible());
+    await type(editor, "/p");
+    await waitFor(() => expect(screen.getByRole("button", { name: "/fallback-preview" })).toBeVisible());
     await waitFor(() => expect(previewCommentTriggers).toHaveBeenCalled());
     const selection = editor.state.selection.toJSON();
 
@@ -376,12 +401,11 @@ describe("Issue agent-scoped skills in the real editor", () => {
       blocked: [],
     }));
 
-    await waitFor(() => expect(screen.queryByRole("button", { name: "/fallback" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("button", { name: "/fallback-preview" })).not.toBeInTheDocument());
     if (!empty) expect(screen.getByRole("button", { name: "/preview" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "/disabled" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /\/note/ })).toBeVisible();
     expect(dom.editor).toBe(editor);
-    expect(editor.getText()).toBe("/");
+    expect(editor.getText()).toBe("/p");
     expect(editor.state.selection.toJSON()).toEqual(selection);
   });
 
@@ -403,7 +427,7 @@ describe("Issue agent-scoped skills in the real editor", () => {
         { type: "text", text: " " },
       ]);
     });
-    await type(editor, "/");
+    await type(editor, "/ne");
     await waitFor(() => expect(screen.getByRole("button", { name: "/next" })).toBeVisible());
     expect(screen.queryByRole("button", { name: "/old" })).not.toBeInTheDocument();
     await waitFor(() => expect(previewCommentTriggers).toHaveBeenCalledTimes(2));
@@ -436,11 +460,11 @@ describe("Issue agent-scoped skills in the real editor", () => {
         { type: "text", text: " " },
       ]);
     });
-    await type(editor, "/");
+    await type(editor, "/d");
 
     await waitFor(() => expect(screen.getByRole("button", { name: "/deploy" })).toBeVisible());
     expect(screen.getByRole("button", { name: "/delayed-feedback" })).toBeVisible();
-    expect(screen.getByRole("button", { name: /\/note/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /\/note/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "/fallback" })).not.toBeInTheDocument();
 
     fireEvent.keyDown(dom, { key: "ArrowDown" });
@@ -474,28 +498,82 @@ describe("Issue agent-scoped skills in the real editor", () => {
   );
 
   it("refreshes an open menu on agent and Issue cache updates without resetting the editor", async () => {
-    const first = makeAgent("first", [{ id: "one", name: "one", description: "" }]);
-    const second = makeAgent("second", [{ id: "two", name: "two", description: "" }]);
+    const first = makeAgent("first", [{ id: "one", name: "target-one", description: "" }]);
+    const second = makeAgent("second", [{ id: "two", name: "target-two", description: "" }]);
     getIssue.mockResolvedValue(makeIssue("agent", first.id));
     listAgents.mockResolvedValue([first, second]);
     const { client, dom, editor } = await mount();
-    await type(editor, "/");
-    await waitFor(() => expect(screen.getByRole("button", { name: "/one" })).toBeVisible());
+    await type(editor, "/target");
+    await waitFor(() => expect(screen.getByRole("button", { name: "/target-one" })).toBeVisible());
 
     await act(async () => client.setQueryData(workspaceKeys.agents("ws"), [
-      makeAgent("first", [{ id: "updated", name: "updated", description: "" }]),
+      makeAgent("first", [{ id: "updated", name: "target-updated", description: "" }]),
       second,
     ]));
-    await waitFor(() => expect(screen.getByRole("button", { name: "/updated" })).toBeVisible());
-    expect(screen.queryByRole("button", { name: "/one" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "/target-updated" })).toBeVisible());
+    expect(screen.queryByRole("button", { name: "/target-one" })).not.toBeInTheDocument();
 
     await act(async () => client.setQueryData(
       issueKeys.detail("ws", "issue-1"),
       makeIssue("agent", second.id),
     ));
-    await waitFor(() => expect(screen.getByRole("button", { name: "/two" })).toBeVisible());
-    expect(screen.queryByRole("button", { name: "/updated" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "/target-two" })).toBeVisible());
+    expect(screen.queryByRole("button", { name: "/target-updated" })).not.toBeInTheDocument();
     expect(dom.editor).toBe(editor);
-    expect(editor.getText()).toBe("/");
+    expect(editor.getText()).toBe("/target");
   });
+});
+
+describe("Issue composer slash query lifecycle", () => {
+  const skills = [
+    { id: "code-review", name: "code-review", description: "" },
+    { id: "write-tests", name: "write-tests", description: "" },
+    ...Array.from({ length: 13 }, (_, index) => ({
+      id: `extra-${index}`,
+      name: `extra-${index}`,
+      description: "",
+    })),
+  ];
+  const requestChanges = { ...action, id: "request-changes", name: "Request changes" };
+
+  async function expectOnlyQuickActionsAndNote() {
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "/Request changes" })).toBeVisible();
+      expect(screen.getByRole("button", { name: /^\/note/ })).toBeVisible();
+      expect(document.querySelector("[data-kind='slash']")?.querySelectorAll("button")).toHaveLength(2);
+    });
+  }
+
+  it.each(["comment", "reply"] as const)(
+    "hides skills for bare and non-matching queries and restores the bare menu in the %s composer",
+    async (composer) => {
+      const target = makeAgent("target", skills);
+      getIssue.mockResolvedValue(makeIssue("agent", target.id));
+      listAgents.mockResolvedValue([target]);
+      listQuickActions.mockResolvedValue({ quick_actions: [requestChanges] });
+      const { editor } = await mount([requestChanges], composer);
+
+      await type(editor, "/");
+      await expectOnlyQuickActionsAndNote();
+      expect(screen.queryByRole("button", { name: "/code-review" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "/write-tests" })).not.toBeInTheDocument();
+
+      await type(editor, "co");
+      await waitFor(() => expect(screen.getByRole("button", { name: "/code-review" })).toBeVisible());
+      expect(document.querySelector("[data-kind='slash']")?.querySelectorAll("button")).toHaveLength(1);
+      fireEvent.click(screen.getByRole("button", { name: "/code-review" }));
+      expect(editor.getMarkdown()).toBe("[/code-review](slash://skill/code-review) ");
+
+      await type(editor, "/zzzz");
+      await waitFor(() => expect(document.querySelector("[data-kind='slash']")).not.toBeInTheDocument());
+
+      await act(async () => {
+        const { from, to } = editor.state.selection;
+        editor.commands.deleteRange({ from: from - 4, to });
+      });
+      await expectOnlyQuickActionsAndNote();
+      expect(screen.queryByRole("button", { name: "/code-review" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "/write-tests" })).not.toBeInTheDocument();
+    },
+  );
 });

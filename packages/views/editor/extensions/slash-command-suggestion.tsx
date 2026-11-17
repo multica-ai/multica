@@ -333,11 +333,11 @@ export function buildBuiltinCommandItems(
       label: action.name,
       description: action.description || undefined,
     }));
-  const skillItems: SlashCommandItem[] = rankSkillMatches(skills, q).map((skill) => ({
+  const skillItems: SlashCommandItem[] = q ? rankSkillMatches(skills, q).map((skill) => ({
     id: `${SKILL_ITEM_PREFIX}${skill.id}`,
     label: skill.name,
     description: skill.description ?? "",
-  }));
+  })) : [];
   const builtinItems = BUILTIN_COMMANDS.filter((command) =>
     command.label.toLowerCase().startsWith(q),
   );
@@ -351,7 +351,7 @@ export interface BuiltinCommandSuggestionOptions {
    * every keystroke and catalog notification without remounting the editor.
    */
   getQuickActions?: () => { id: string; name: string; description?: string }[];
-  /** Reads enabled skills for the draft's current target agents, synchronously. */
+  /** Reads enabled skills for the draft's current target agents when the query is nonempty. */
   getSkills?: (editor: Editor) => AgentSkillSummary[];
   subscribeQuickActions?: (refresh: () => void) => () => void;
   /**
@@ -375,7 +375,7 @@ export function createBuiltinCommandSuggestion(
     items: ({ editor, query }) => buildBuiltinCommandItems(
       query,
       options.getQuickActions?.() ?? [],
-      options.getSkills?.(editor) ?? [],
+      query ? (options.getSkills?.(editor) ?? []) : [],
     ),
     command: ({ editor, range, props }) => {
       if (isQuickActionItem(props)) {
@@ -428,7 +428,7 @@ export function createBuiltinCommandSuggestion(
         items: buildBuiltinCommandItems(
           props.query,
           options.getQuickActions?.() ?? [],
-          options.getSkills?.(props.editor) ?? [],
+          props.query ? (options.getSkills?.(props.editor) ?? []) : [],
         ),
         query: props.query,
         command: props.command,
