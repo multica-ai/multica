@@ -169,7 +169,6 @@
     },
     "limits": {
       "title": "用量與限額",
-      "issues": "任務數量",
       "autopilots": "自動化執行",
       "unlimited": "不限",
       "per_month": "每月 {{count}} 次",

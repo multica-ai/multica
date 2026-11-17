@@ -1553,6 +1553,7 @@ describe("workspace subscription contract", () => {
     status: "active",
     seats: 3,
     limits: {
+      // Retired limit Cloud may still send; the client ignores it.
       issue_count: { mode: "unlimited" },
       autopilot_runs: { mode: "unlimited" },
     },
@@ -1560,28 +1561,6 @@ describe("workspace subscription contract", () => {
     snapshot_expires_at: null,
     version: 7,
   };
-
-  it("maps limited issue usage and accepts a no-content unlimited response", async () => {
-    stubFetchJson({
-      used: 11,
-      limit: 17,
-    });
-    const client = new ApiClient("https://api.example.test");
-
-    await expect(client.getIssueLimitUsage()).resolves.toEqual({
-      used: 11,
-      limit: 17,
-    });
-
-    stubFetchJson({ used: 11 });
-    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
-    );
-    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
-  });
 
   it("maps a full summary to camelCase without inventing values", async () => {
     stubFetchJson({

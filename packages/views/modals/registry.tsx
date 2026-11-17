@@ -15,7 +15,7 @@ import { RenameProjectModal } from "./rename-project";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
 import { RunConfirmModal } from "./run-confirm";
 import { WorkflowHandoffModal } from "./workflow-handoff";
-import { IssueLimitUpgradeDialog } from "./issue-limit-upgrade-dialog";
+import { LimitRecoveryDialog } from "./limit-recovery-dialog";
 
 export function ModalRegistry() {
   const modal = useModalStore((s) => s.modal);
@@ -85,7 +85,7 @@ export function ModalRegistry() {
   return (
     <>
       {activeModal}
-      <IssueLimitUpgradeDialog />
+      <LimitRecoveryDialog />
     </>
   );
 }

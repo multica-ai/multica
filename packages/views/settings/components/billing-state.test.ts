@@ -17,7 +17,6 @@ const freeEntitlements: WorkspaceSubscriptionEntitlements = {
   status: "inactive",
   seats: 3,
   limits: {
-    issueCount: { mode: "limited", limit: 17 },
     autopilotRuns: { mode: "limited", limit: 7 },
   },
   currentPeriodEnd: null,

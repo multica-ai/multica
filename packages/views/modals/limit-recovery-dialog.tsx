@@ -13,7 +13,7 @@ import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flag
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   useModalStore,
-  type IssueLimitRecoveryReason,
+  type LimitRecoveryReason,
 } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { WorkspaceSubscriptionSummary } from "@multica/core/types";
@@ -37,22 +37,22 @@ function createPortalIdempotencyKey(wsId: string): string {
   const suffix =
     globalThis.crypto?.randomUUID?.() ??
     `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return `issue-limit-portal-${wsId}-${suffix}`.slice(0, 255);
+  return `limit-recovery-portal-${wsId}-${suffix}`.slice(0, 255);
 }
 
 /**
- * Centered recovery surface shared by manual create, Quick Create, and quota
+ * Centered recovery surface for Cloud-enforced limits, opened from quota
  * notices in Inbox. The modal reason changes copy, never authorization.
  * Cloud's complete action set is the only input that decides which billing
  * action appears; no local role, plan, subscription, or quota inference does.
  */
-export function IssueLimitUpgradeDialog() {
+export function LimitRecoveryDialog() {
   const recoveryWorkspaceId = useModalStore(
-    (state) => state.issueLimitRecoveryWorkspaceId,
+    (state) => state.limitRecoveryWorkspaceId,
   );
-  const dismiss = useModalStore((state) => state.dismissIssueLimitRecovery);
+  const dismiss = useModalStore((state) => state.dismissLimitRecovery);
   const recoveryReason = useModalStore(
-    (state) => state.issueLimitRecoveryReason,
+    (state) => state.limitRecoveryReason,
   );
   const { t } = useT("modals");
   const wsId = useWorkspaceId();
@@ -88,21 +88,8 @@ export function IssueLimitUpgradeDialog() {
     setPortalFailed(false);
   }, [visible, wsId]);
 
-  const closeForBillingAction = () => {
-    dismiss();
-
-    // Recovery can also open from Inbox. Only close an underlying issue-create
-    // modal when following its billing action; leave every other modal alone.
-    const modalStore = useModalStore.getState();
-    if (
-      modalStore.modal === "create-issue" ||
-      modalStore.modal === "quick-create-issue"
-    ) {
-      modalStore.close();
-    }
-  };
   const openBilling = () => {
-    closeForBillingAction();
+    dismiss();
     navigation.push(`${paths.settings()}?tab=billing`);
   };
   const openPortal = async () => {
@@ -117,7 +104,7 @@ export function IssueLimitUpgradeDialog() {
         return;
       }
       portalIntentKeyRef.current = null;
-      closeForBillingAction();
+      dismiss();
       openExternal(response.url, { webTarget: "same-tab" });
     } catch {
       setPortalFailed(true);
@@ -220,72 +207,46 @@ interface RecoveryCopy {
 
 function getRecoveryCopy(
   t: ModalsT,
-  reason: IssueLimitRecoveryReason,
+  reason: LimitRecoveryReason,
 ): RecoveryCopy {
-  if (reason === "autopilot_quota") {
-    return {
-      title: t(($) => $.create_issue.autopilot_quota_limit.title),
-      billingDisabledDescription: t(
-        ($) =>
-          $.create_issue.autopilot_quota_limit.billing_disabled_description,
-      ),
-      upgradeDescription: t(
-        ($) => $.create_issue.autopilot_quota_limit.upgrade_description,
-      ),
-      portalDescription: t(
-        ($) => $.create_issue.autopilot_quota_limit.portal_description,
-      ),
-      contactDescription: t(
-        ($) => $.create_issue.autopilot_quota_limit.contact_description,
-      ),
-      billingDescription: t(
-        ($) => $.create_issue.autopilot_quota_limit.billing_description,
-      ),
-      billingUnavailableDescription: t(
-        ($) =>
-          $.create_issue.autopilot_quota_limit.billing_unavailable_description,
-      ),
-      checkingDescription: t(
-        ($) => $.create_issue.autopilot_quota_limit.checking_description,
-      ),
-      upgradeAction: t(
-        ($) => $.create_issue.autopilot_quota_limit.upgrade_action,
-      ),
-      portalAction: t(
-        ($) => $.create_issue.autopilot_quota_limit.portal_action,
-      ),
-      billingAction: t(
-        ($) => $.create_issue.autopilot_quota_limit.billing_action,
-      ),
-    };
+  switch (reason) {
+    case "autopilot_quota":
+      return {
+        title: t(($) => $.create_issue.autopilot_quota_limit.title),
+        billingDisabledDescription: t(
+          ($) =>
+            $.create_issue.autopilot_quota_limit.billing_disabled_description,
+        ),
+        upgradeDescription: t(
+          ($) => $.create_issue.autopilot_quota_limit.upgrade_description,
+        ),
+        portalDescription: t(
+          ($) => $.create_issue.autopilot_quota_limit.portal_description,
+        ),
+        contactDescription: t(
+          ($) => $.create_issue.autopilot_quota_limit.contact_description,
+        ),
+        billingDescription: t(
+          ($) => $.create_issue.autopilot_quota_limit.billing_description,
+        ),
+        billingUnavailableDescription: t(
+          ($) =>
+            $.create_issue.autopilot_quota_limit.billing_unavailable_description,
+        ),
+        checkingDescription: t(
+          ($) => $.create_issue.autopilot_quota_limit.checking_description,
+        ),
+        upgradeAction: t(
+          ($) => $.create_issue.autopilot_quota_limit.upgrade_action,
+        ),
+        portalAction: t(
+          ($) => $.create_issue.autopilot_quota_limit.portal_action,
+        ),
+        billingAction: t(
+          ($) => $.create_issue.autopilot_quota_limit.billing_action,
+        ),
+      };
   }
-  return {
-    title: t(($) => $.create_issue.issue_limit.title),
-    billingDisabledDescription: t(
-      ($) => $.create_issue.issue_limit.billing_disabled_description,
-    ),
-    upgradeDescription: t(
-      ($) => $.create_issue.issue_limit.upgrade_description,
-    ),
-    portalDescription: t(
-      ($) => $.create_issue.issue_limit.portal_description,
-    ),
-    contactDescription: t(
-      ($) => $.create_issue.issue_limit.contact_description,
-    ),
-    billingDescription: t(
-      ($) => $.create_issue.issue_limit.billing_description,
-    ),
-    billingUnavailableDescription: t(
-      ($) => $.create_issue.issue_limit.billing_unavailable_description,
-    ),
-    checkingDescription: t(
-      ($) => $.create_issue.issue_limit.checking_description,
-    ),
-    upgradeAction: t(($) => $.create_issue.issue_limit.upgrade_action),
-    portalAction: t(($) => $.create_issue.issue_limit.portal_action),
-    billingAction: t(($) => $.create_issue.issue_limit.billing_action),
-  };
 }
 
 function resolveRecoveryPresentation({

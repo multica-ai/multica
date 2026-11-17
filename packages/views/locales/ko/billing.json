@@ -169,7 +169,6 @@
     },
     "limits": {
       "title": "사용량 및 한도",
-      "issues": "태스크 수",
       "autopilots": "자동화 실행",
       "unlimited": "무제한",
       "per_month": "월 {{count}}회",

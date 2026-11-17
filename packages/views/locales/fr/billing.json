@@ -171,7 +171,6 @@
     },
     "limits": {
       "title": "Consommation et limites",
-      "issues": "Tâches",
       "autopilots": "Exécutions d'automatisation",
       "unlimited": "Illimité",
       "per_month": "{{count}} / mois",

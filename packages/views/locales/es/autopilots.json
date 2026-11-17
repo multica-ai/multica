@@ -79,7 +79,6 @@
     "run_blocked_attribution": "No disparado: la ejecución no pudo atribuirse a un miembro responsable",
     "run_blocked_already_active": "No disparado: una ejecución reciente ya cubre esto",
     "run_blocked_quota_exceeded": "No disparado: se alcanzó el límite de ejecuciones de este periodo",
-    "run_blocked_issue_limit_reached": "No disparado: el espacio de trabajo alcanzó su límite de tareas",
     "run_blocked_generic": "No se ha disparado: la ejecución se ha bloqueado",
     "section_triggers": "Disparadores",
     "section_run_history": "Historial de ejecuciones",

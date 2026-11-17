@@ -171,7 +171,6 @@
     },
     "limits": {
       "title": "Usage and limits",
-      "issues": "Issues",
       "autopilots": "Automation runs",
       "unlimited": "Unlimited",
       "per_month": "{{count}} / month",

@@ -169,7 +169,6 @@
     },
     "limits": {
       "title": "使用量と上限",
-      "issues": "タスク数",
       "autopilots": "自動化の実行",
       "unlimited": "無制限",
       "per_month": "月 {{count}} 回",

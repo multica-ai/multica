@@ -171,7 +171,6 @@
     },
     "limits": {
       "title": "Uso y límites",
-      "issues": "Tareas",
       "autopilots": "Ejecuciones de automatización",
       "unlimited": "Ilimitado",
       "per_month": "{{count}} / mes",

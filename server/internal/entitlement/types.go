@@ -12,13 +12,12 @@ const SchemaVersion = 1
 type GateName string
 
 const (
-	GateIssueCount    GateName = "issue_count"
 	GateAutopilotRuns GateName = "autopilot_runs"
 )
 
 func (n GateName) valid() bool {
 	switch n {
-	case GateIssueCount, GateAutopilotRuns:
+	case GateAutopilotRuns:
 		return true
 	default:
 		return false
@@ -75,8 +74,8 @@ type Decision struct {
 	CloudValidUntil     time.Time
 }
 
-// Provider is the only interface issue-count and autopilot consumers
-// need. It deliberately has no error return: every failure is represented by a
+// Provider is the only interface the autopilot consumer
+// needs. It deliberately has no error return: every failure is represented by a
 // fail-open Decision with ActionOff (or ActionObserve for a bounded stale
 // snapshot that can no longer enforce).
 type Provider interface {
