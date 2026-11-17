@@ -93,10 +93,12 @@ func TestChatSubmissionProfileAndGCTeardown(t *testing.T) {
 	for _, path := range []string{"profile", "gc"} {
 		t.Run(path, func(t *testing.T) {
 			fx := workspaceFixture(t)
-			runtimeID := fx.Runtime(t, "Submission "+path+" runtime", testutil.Cols{"owner_id": testUserID})
+			daemonID := "submission-" + uuid.NewString()
+			runtimeID := fx.Runtime(t, "Submission "+path+" runtime", testutil.Cols{"owner_id": testUserID, "daemon_id": daemonID, "runtime_mode": "local"})
 			var profileID string
 			if path == "profile" {
 				profile := submissionStatus(t, testServer.URL, testToken, testWorkspaceID, "POST", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles", map[string]any{
+					"daemon_id":    daemonID,
 					"display_name": "Submission profile " + uuid.NewString(), "protocol_family": "codex", "command_name": "offline-submission-test",
 				}, http.StatusCreated)
 				profileID = profile["id"].(string)

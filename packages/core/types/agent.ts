@@ -160,6 +160,7 @@ export type RuntimeProfileVisibility = "workspace" | "private";
 export interface RuntimeProfile {
   id: string;
   workspace_id: string;
+  daemon_id?: string | null;
   display_name: string;
   protocol_family: RuntimeProtocolFamily;
   runtime_type?: RuntimeProfileType;
@@ -178,6 +179,7 @@ export interface RuntimeProfile {
 // Optional fields are omitted entirely when unset (never sent as null/empty)
 // so the server applies its own defaults.
 export interface CreateRuntimeProfileRequest {
+  daemon_id?: string;
   display_name: string;
   protocol_family?: RuntimeProtocolFamily;
   runtime_type?: RuntimeProfileType;
@@ -191,6 +193,7 @@ export interface CreateRuntimeProfileRequest {
 // PATCH body — every field optional; `protocol_family` is intentionally
 // absent because it is immutable.
 export interface UpdateRuntimeProfileRequest {
+  daemon_id?: string;
   display_name?: string;
   command_name?: string;
   description?: string | null;

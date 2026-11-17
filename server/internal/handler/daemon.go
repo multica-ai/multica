@@ -472,6 +472,7 @@ func (h *Handler) inheritMachineCustomName(ctx context.Context, q *db.Queries, r
 }
 
 var errRuntimeProfileDisabled = errors.New("runtime profile is disabled")
+var errRuntimeProfileMachine = errors.New("runtime profile belongs to another machine")
 
 // upsertRuntimeWithProfile serializes custom-runtime registration with profile
 // deletion. The profile row remains KEY SHARE locked until the runtime upsert
@@ -497,11 +498,32 @@ func (h *Handler) upsertRuntimeWithProfile(
 	if err != nil {
 		return row, profile, fmt.Errorf("lock runtime profile: %w", err)
 	}
+	params := build(profile)
+	if profile.DaemonID.Valid {
+		if profile.DaemonID != params.DaemonID {
+			return row, profile, errRuntimeProfileMachine
+		}
+	} else {
+		// Existing unscoped profiles may refresh only instances that already
+		// exist. A stale daemon must not spread a legacy profile to a new host.
+		found, err := qtx.RuntimeProfileHasDaemonInstance(ctx, db.RuntimeProfileHasDaemonInstanceParams{
+			WorkspaceID: workspaceID,
+			ProfileID:   profileID,
+			DaemonID:    params.DaemonID,
+		})
+		if err != nil {
+			return row, profile, err
+		}
+		if !found {
+			return row, profile, errRuntimeProfileMachine
+		}
+	}
+
 	if !profile.Enabled {
 		return row, profile, errRuntimeProfileDisabled
 	}
 
-	row, err = qtx.UpsertAgentRuntimeWithProfile(ctx, build(profile))
+	row, err = qtx.UpsertAgentRuntimeWithProfile(ctx, params)
 	if err != nil {
 		// The profile lookup above already turned "unknown profile" into
 		// ErrNoRows; here ErrNoRows can only mean the ownership fence
@@ -841,6 +863,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, errRuntimeProfileDisabled) {
 				writeError(w, http.StatusConflict, "runtime profile is disabled: "+runtime.ProfileID)
 				return
+			}
+			if errors.Is(err, errRuntimeProfileMachine) {
+				// Old daemons may still submit a previously shared profile.
+				// Ignore it without blocking built-in runtime registration.
+				continue
 			}
 			if err != nil {
 				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(

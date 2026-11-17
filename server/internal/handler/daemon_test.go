@@ -797,6 +797,7 @@ func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 	}
 	ctx := context.Background()
 	profileID := insertRuntimeProfileFixture(t, ctx, "Missing Custom Codex", "codex", "missing-codex")
+	dbfx.Exec(t, `UPDATE runtime_profile SET daemon_id = $1 WHERE id = $2`, "test-daemon-profile-failure", profileID)
 
 	req := newOwnerDaemonRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id": testWorkspaceID,
@@ -4959,7 +4960,7 @@ func TestDaemonRegister_ProfileUsesStoredRuntimeIdentity(t *testing.T) {
 	}
 	ctx := context.Background()
 	profileID := insertRuntimeProfileFixture(t, ctx, "Custom OMP", "pi", "wrapper")
-	if _, err := testPool.Exec(ctx, `UPDATE runtime_profile SET runtime_type = 'omp' WHERE id = $1`, profileID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE runtime_profile SET runtime_type = 'omp', daemon_id = 'test-omp-profile' WHERE id = $1`, profileID); err != nil {
 		t.Fatal(err)
 	}
 	req := newOwnerDaemonRequest("POST", "/api/daemon/register", map[string]any{
