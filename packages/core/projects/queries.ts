@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 
 export const projectKeys = {
@@ -15,6 +15,7 @@ export const projectKeys = {
   // Under detail so the issue mutations that invalidate projectKeys.all also
   // refresh the trend and breakdown.
   progress: (wsId: string, id: string) => [...projectKeys.detail(wsId, id), "progress"] as const,
+  activity: (wsId: string, id: string) => [...projectKeys.detail(wsId, id), "activity"] as const,
 };
 
 // The cached list includes archived projects: it doubles as the id → project
@@ -40,6 +41,17 @@ export function projectProgressOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: projectKeys.progress(wsId, id),
     queryFn: () => api.getProjectProgress(id),
+  });
+}
+
+// Newest first, a page at a time. Under detail, so issue changes refresh it
+// with the progress.
+export function projectActivityOptions(wsId: string, id: string, pageSize = 30) {
+  return infiniteQueryOptions({
+    queryKey: [...projectKeys.activity(wsId, id), pageSize],
+    queryFn: ({ pageParam }) => api.listProjectActivity(id, { before: pageParam, limit: pageSize }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
 }
 

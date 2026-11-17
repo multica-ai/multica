@@ -2,10 +2,10 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../platform/storage";
 
-export type ProjectTab = "overview" | "issues";
+export type ProjectTab = "overview" | "issues" | "activity";
 
 export function isProjectTab(value: unknown): value is ProjectTab {
-  return value === "overview" || value === "issues";
+  return value === "overview" || value === "issues" || value === "activity";
 }
 
 // Older entries are dropped past this many projects so the saved map stays small.
