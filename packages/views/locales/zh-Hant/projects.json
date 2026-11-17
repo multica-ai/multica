@@ -259,5 +259,12 @@
     "toast_completed": "「{{name}}」已完成",
     "notice": "此專案已歸檔：不會出現在專案列表和選擇器中，也不能新增任務；既有任務仍可檢視和編輯。",
     "prop_label": "歸檔"
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "沒有活躍專案",
+      "all": "尚無專案",
+      "closed": "暫無已關閉專案"
+    }
   }
 }

@@ -10,6 +10,7 @@ import {
   Rows3,
   Trash2,
 } from "@multica/ui/icons";
+import { matchesProjectLifecycle, PROJECT_LIFECYCLE_VIEWS } from "@multica/core/projects/lifecycle";
 import { useQuery } from "@tanstack/react-query";
 import {
   boardGroupBy,
@@ -20,6 +21,7 @@ import {
   useUpdateProject,
   useProjectViewStore,
   type ProjectColumnKey,
+  type ProjectScope,
   type ProjectGroupBy,
   type ProjectLayout,
   type ProjectListFilters,
@@ -82,7 +84,11 @@ import {
 import { ProjectIcon } from "./project-icon";
 import { ProjectsIntro } from "./projects-intro";
 import { useT } from "../../i18n";
-import { DeleteProjectsDialog, ProjectRowActions } from "./project-row-actions";
+import {
+  DeleteProjectsDialog,
+  ProjectRowActions,
+  type ProjectDeletionContext,
+} from "./project-row-actions";
 import { useArchiveProjects, useRestoreProjects } from "./project-archive";
 import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
@@ -168,22 +174,16 @@ function ProjectInlineCell({
 
 // Header tools — scope menu, filter, display (view, sort, columns).
 
-// Scope splits the lifecycle in two: still being worked on, or closed. The
-// status filter narrows further within it. Archived projects sit outside the
-// lifecycle scopes, in their own. (MUL-8861)
-type ProjectScope = "all" | "active" | "closed" | "archived";
-const PROJECT_SCOPES: ProjectScope[] = ["all", "active", "closed", "archived"];
-const CLOSED_STATUSES: ReadonlySet<ProjectStatus> = new Set(["completed", "cancelled"]);
+const PROJECT_SCOPES: ProjectScope[] = [...PROJECT_LIFECYCLE_VIEWS, "archived"];
 
 function statusInScope(status: ProjectStatus, scope: ProjectScope): boolean {
   if (scope === "all" || scope === "archived") return true;
-  return CLOSED_STATUSES.has(status) === (scope === "closed");
+  return matchesProjectLifecycle(status, scope);
 }
 
 function inScope(project: Project, scope: ProjectScope): boolean {
   if (isProjectArchived(project)) return scope === "archived";
-  if (scope === "archived") return false;
-  return statusInScope(project.status, scope);
+  return scope !== "archived" && matchesProjectLifecycle(project.status, scope);
 }
 
 const LAYOUTS: { layout: ProjectLayout; Icon: typeof Rows3 }[] = [
@@ -227,16 +227,20 @@ function ProjectBatchToolbar({
   pinnedIds,
   canDelete,
   onClear,
+  context,
 }: {
   rows: Project[];
   pinnedIds: Set<string>;
   canDelete: boolean;
   onClear: () => void;
+  context: ProjectDeletionContext;
 }) {
   const { t } = useT("projects");
   const createPin = useCreatePin();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const { requestArchive, dialog: archiveDialog } = useArchiveProjects();
+  const { requestArchive, dialog: archiveDialog } = useArchiveProjects(
+    JSON.stringify(context),
+  );
   const restore = useRestoreProjects();
 
   const anyUnpinned = rows.some((p) => !pinnedIds.has(p.id));
@@ -298,6 +302,7 @@ function ProjectBatchToolbar({
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         onDeleted={onClear}
+        context={context}
         onArchiveInstead={() => requestArchive(rows, { onArchived: onClear, immediate: true })}
       />
       {archiveDialog}
@@ -308,6 +313,11 @@ function ProjectBatchToolbar({
 // Page
 
 export function ProjectsPage() {
+  const wsId = useWorkspaceId();
+  return <ProjectsBrowser key={wsId} />;
+}
+
+function ProjectsBrowser() {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -361,9 +371,8 @@ export function ProjectsPage() {
     return s;
   }, [pins]);
 
-  const [scope, setScope] = useState<ProjectScope>("all");
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
-
+  const scope = useProjectViewStore((s) => s.lifecycleView);
+  const setScope = persisted(useProjectViewStore((s) => s.setLifecycleView));
   const activeFilterCount = countActiveFilters(filters);
   const hasActiveFilters = activeFilterCount > 0;
   const query = search.trim().toLowerCase();
@@ -569,6 +578,16 @@ export function ProjectsPage() {
     setSelectedIds(new Set());
   };
 
+  const selectionKey = JSON.stringify([wsId, scope, layout, groupBy, search, filters]);
+  const [selection, setSelection] = useState<{ key: string; ids: ReadonlySet<string> }>({ key: selectionKey, ids: new Set() });
+  const visibleIds = new Set(visible.map((p) => p.id));
+  const selectedIds = new Set(selection.key === selectionKey
+    ? [...selection.ids].filter((id) => visibleIds.has(id)) : []);
+  const setSelectedIds = (ids: ReadonlySet<string>) => setSelection({ key: selectionKey, ids });
+  if (selection.key !== selectionKey || selection.ids.size !== selectedIds.size) {
+    setSelection({ key: selectionKey, ids: selectedIds });
+  }
+
   const selectedProjects = visible.filter((p) => selectedIds.has(p.id));
 
   const columns = useMemo<CollectionColumn<Project>[]>(
@@ -739,6 +758,7 @@ export function ProjectsPage() {
     onDirectionChange: setSortDirection,
   };
 
+  const emptyMessage = hasActiveFilters || hasSearch ? t(($) => $.page.no_matches) : scope === "archived" ? t(($) => $.page.no_archived) : t(($) => $.lifecycle.empty[scope]);
   const showEmpty = !isLoading && projects.length === 0;
   const countBadge = (n: number) => (
     <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
@@ -757,9 +777,7 @@ export function ProjectsPage() {
   const noMatches = (
     <CollectionNoMatches
       title={
-        scope === "archived" && !hasActiveFilters && !hasSearch
-          ? t(($) => $.page.no_archived)
-          : t(($) => $.page.no_matches)
+        emptyMessage
       }
       onReset={resetNarrowing}
       hasFilters={hasActiveFilters}
@@ -945,7 +963,7 @@ export function ProjectsPage() {
             />
           ) : isLoading ? (
             <ProjectBoardLoading />
-          ) : visible.length === 0 && (hasActiveFilters || hasSearch || scope === "archived") ? (
+          ) : visible.length === 0 && (hasActiveFilters || hasSearch || scope !== "all") ? (
             noMatches
           ) : (
             <ProjectBoard
@@ -958,6 +976,19 @@ export function ProjectsPage() {
           )}
 
           <ProjectBatchToolbar
+            context={{
+              key: JSON.stringify([
+                selectionKey,
+                sortField,
+                sortDirection,
+                hiddenColumns,
+                currentUser?.id,
+                role,
+                selectedProjects.length > 0 && selectedProjects.every(mayDelete),
+              ]),
+              projects,
+              selectedIds: selectedProjects.map((project) => project.id),
+            }}
             rows={selectedProjects}
             pinnedIds={pinnedProjectIds}
             canDelete={selectedProjects.length > 0 && selectedProjects.every(mayDelete)}

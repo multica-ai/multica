@@ -19,6 +19,7 @@ import {
   type ProjectLayout,
   type ProjectListFilters,
   type ProjectSortDirection,
+  type ProjectScope,
   type ProjectSortField,
   type ProjectViewState,
 } from "./stores/view-store";
@@ -27,6 +28,7 @@ export const PROJECTS_PAGE_SCOPE = { scope_type: "projects_page" } as const;
 
 /** The All Projects page's display settings, kept per user so every device opens it the same way. */
 export interface ProjectsPagePrefs {
+  lifecycleView: ProjectScope;
   layout: ProjectLayout;
   groupBy: ProjectGroupBy;
   sortField: ProjectSortField;
@@ -43,6 +45,7 @@ const strings = z.array(z.unknown()).catch([]).transform((v) => v.filter((s): s 
 // Another client version may have saved values this one does not know; those
 // fields come out undefined and this device's own value stays.
 const ProjectsPagePrefsDocSchema = z.object({
+  lifecycleView: oneOf<ProjectScope>(["active", "closed", "all", "archived"]),
   layout: oneOf<ProjectLayout>(["table", "board"]),
   groupBy: oneOf(PROJECT_GROUP_BY_VALUES),
   sortField: oneOf(Object.keys(PROJECT_SORT_DEFAULT_DIRECTION) as ProjectSortField[]),
@@ -64,13 +67,16 @@ export function projectsPagePrefsFromDoc(doc: Record<string, unknown>): Projects
   const parsed = parseWithFallback<Record<string, unknown>>(doc, ProjectsPagePrefsDocSchema, {}, {
     endpoint: "issue-view-preferences:projects_page",
   });
-  return Object.fromEntries(
+  const prefs = Object.fromEntries(
     Object.entries(parsed).filter(([, value]) => value !== undefined),
   ) as ProjectsPagePrefsPatch;
+  if (!prefs.lifecycleView && prefs.filters?.statuses.length) prefs.lifecycleView = "all";
+  return prefs;
 }
 
 export function projectsPagePrefsOf(state: ProjectViewState): ProjectsPagePrefs {
   return {
+    lifecycleView: state.lifecycleView,
     layout: state.layout,
     groupBy: state.groupBy,
     sortField: state.sortField,

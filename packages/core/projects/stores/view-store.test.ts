@@ -45,12 +45,13 @@ describe("useProjectViewStore", () => {
     const raw = localStorage.getItem("multica_projects_view:acme");
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw as string);
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     expect(Object.keys(parsed.state).sort()).toEqual([
       "filters",
       "groupBy",
       "hiddenColumns",
       "layout",
+      "lifecycleView",
       "sortDirection",
       "sortField",
     ]);
@@ -125,7 +126,7 @@ describe("useProjectViewStore", () => {
 describe("migrateProjectViewState", () => {
   it("leaves current-version state alone", () => {
     const state = { layout: "board", hiddenColumns: [] };
-    expect(migrateProjectViewState(state, 1)).toBe(state);
+    expect(migrateProjectViewState(state, 2)).toBe(state);
   });
 
   it("keeps the other saved prefs while mapping viewMode", () => {
@@ -134,6 +135,66 @@ describe("migrateProjectViewState", () => {
         { viewMode: "compact", sortField: "name", hiddenColumns: ["issues", "start_date"] },
         0,
       ),
-    ).toEqual({ layout: "table", sortField: "name", hiddenColumns: ["issues", "start_date"] });
+    ).toEqual({ lifecycleView: "active", layout: "table", sortField: "name", hiddenColumns: ["issues", "start_date"] });
+  });
+});
+
+
+describe("project lifecycle preferences", () => {
+  it("defaults to Active and moves explicit status filters to All", () => {
+    useProjectViewStore.getState().setLifecycleView("active");
+    useProjectViewStore.getState().toggleFilter("statuses", "completed");
+    expect(useProjectViewStore.getState()).toMatchObject({
+      lifecycleView: "all", filters: { statuses: ["completed"] },
+    });
+    useProjectViewStore.getState().toggleFilter("priorities", "high");
+    useProjectViewStore.getState().setLifecycleView("closed");
+    expect(useProjectViewStore.getState()).toMatchObject({
+      lifecycleView: "closed", filters: { statuses: [], priorities: ["high"] },
+    });
+    useProjectViewStore.getState().clearFilters();
+    expect(useProjectViewStore.getState().lifecycleView).toBe("closed");
+  });
+
+  it("loads old status filters in All and isolates saved lifecycle views per workspace", async () => {
+    localStorage.setItem("multica_projects_view:acme", JSON.stringify({
+      state: { filters: { statuses: ["completed", "cancelled"] } }, version: 0,
+    }));
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    expect(useProjectViewStore.getState().lifecycleView).toBe("all");
+    expect(useProjectViewStore.getState().filters.statuses).toEqual(["completed", "cancelled"]);
+    useProjectViewStore.getState().setLifecycleView("closed");
+    setCurrentWorkspace("beta", "ws_b");
+    await flush();
+    expect(useProjectViewStore.getState().lifecycleView).toBe("active");
+    expect(useProjectViewStore.getState().filters.statuses).toEqual([]);
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    expect(useProjectViewStore.getState().lifecycleView).toBe("closed");
+  });
+  it("migrates the former Completed preference to the single Closed history entry", async () => {
+    localStorage.setItem("multica_projects_view:acme", JSON.stringify({
+      state: { lifecycleView: "completed", sortField: "name", sortDirection: "asc", viewMode: "comfortable" }, version: 0,
+    }));
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    expect(useProjectViewStore.getState()).toMatchObject({
+      lifecycleView: "closed", sortField: "name", sortDirection: "asc", layout: "board",
+      filters: { statuses: [], priorities: [], leads: [] },
+    });
+  });
+
+});
+
+
+it.each([0, 1])("preserves an Archived preference from persisted version %s", async (version) => {
+  localStorage.setItem("multica_projects_view:acme", JSON.stringify({
+    state: { lifecycleView: "archived", viewMode: "comfortable", filters: { statuses: ["completed"] } }, version,
+  }));
+  setCurrentWorkspace("acme", "ws_a");
+  await flush();
+  expect(useProjectViewStore.getState()).toMatchObject({
+    lifecycleView: "archived", layout: "board", filters: { statuses: ["completed"] },
   });
 });

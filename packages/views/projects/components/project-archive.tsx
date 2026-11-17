@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Archive } from "@multica/ui/icons";
@@ -48,7 +48,7 @@ interface ArchiveRequestOptions {
  * otherwise a dialog first says what stays and what pauses. Render `dialog`
  * once next to the trigger.
  */
-export function useArchiveProjects(): {
+export function useArchiveProjects(contextKey?: string): {
   requestArchive: (rows: Project[], options?: ArchiveRequestOptions) => void;
   dialog: ReactNode;
 } {
@@ -63,6 +63,15 @@ export function useArchiveProjects(): {
     onArchived?: () => void;
   } | null>(null);
   const [archiving, setArchiving] = useState(false);
+  const context = JSON.stringify([wsId, contextKey]);
+  const currentContext = useRef<string | null>(context);
+  currentContext.current = context;
+
+  useEffect(() => {
+    currentContext.current = context;
+    setPending(null);
+    return () => { currentContext.current = null; };
+  }, [context]);
 
   const archive = useCallback(
     async (rows: Project[], onArchived?: () => void) => {
@@ -98,6 +107,7 @@ export function useArchiveProjects(): {
 
   const requestArchive = useCallback(
     (rows: Project[], options?: ArchiveRequestOptions) => {
+      const requestContext = currentContext.current;
       const targets = rows.filter((p) => !p.archived_at);
       if (targets.length === 0) return;
       if (options?.immediate) {
@@ -116,6 +126,7 @@ export function useArchiveProjects(): {
           // The count only decides whether to confirm; the server pauses
           // whatever is active regardless.
         }
+        if (currentContext.current !== requestContext) return;
         if (openIssueCount(targets) === 0 && autopilotCount === 0) {
           await archive(targets, options?.onArchived);
           return;

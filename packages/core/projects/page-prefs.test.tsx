@@ -31,6 +31,7 @@ describe("projectsPagePrefsFromDoc", () => {
         filters: { statuses: ["planned", 2], priorities: "high" },
       }),
     ).toEqual({
+      lifecycleView: "all",
       layout: "board",
       sortField: "due_date",
       hiddenColumns: ["issues"],
@@ -61,6 +62,7 @@ describe("useProjectsPagePrefsSync", () => {
   beforeEach(() => {
     qc = createQueryClient();
     useProjectViewStore.setState({
+      lifecycleView: "active",
       layout: "table",
       groupBy: "none",
       sortField: "last_activity",

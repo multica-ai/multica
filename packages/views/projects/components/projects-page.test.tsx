@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   openModal: vi.fn(),
   savePrefs: vi.fn(),
   projectViewState: {
+    lifecycleView: "active",
+    setLifecycleView: vi.fn(),
     layout: "table",
     groupBy: "none",
     search: "",
@@ -272,12 +274,11 @@ function makeAdapter(
 }
 
 function renderProjects(adapter = makeAdapter()) {
-  renderWithI18n(
+  return renderWithI18n(
     <NavigationProvider value={adapter}>
       <ProjectsPage />
     </NavigationProvider>,
   );
-  return adapter;
 }
 
 function projectRow() {
@@ -303,6 +304,10 @@ beforeEach(() => {
   mocks.projectViewState.setGroupBy.mockClear();
   mocks.projectViewState.setSearch.mockClear();
   mocks.projectViewState.clearFilters.mockClear();
+  mocks.projectViewState.lifecycleView = "active";
+  mocks.projectViewState.setLifecycleView.mockImplementation((view: string) => {
+    mocks.projectViewState.lifecycleView = view;
+  });
   mocks.projectViewState.layout = "table";
   mocks.projectViewState.groupBy = "none";
   mocks.projectViewState.search = "";
@@ -476,18 +481,11 @@ describe("ProjectsPage header", () => {
     mocks.projects = [PROJECT, CLOSED];
     renderProjects();
 
-    expect(screen.getByRole("heading", { level: 1, name: "All projects" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Active projects/ })).toHaveTextContent("1");
-    expect(screen.getByText("Old Roadmap")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /^Active projects/ }));
     expect(screen.getByRole("heading", { level: 1, name: "Active projects" })).toBeInTheDocument();
-    expect(screen.getByText(PROJECT.title)).toBeInTheDocument();
     expect(screen.queryByText("Old Roadmap")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^Closed projects/ }));
-    expect(screen.queryByText(PROJECT.title)).not.toBeInTheDocument();
-    expect(screen.getByText("Old Roadmap")).toBeInTheDocument();
+    expect(mocks.projectViewState.setLifecycleView).toHaveBeenCalledWith("closed");
   });
 
   it("keeps archived projects out of every scope but Archived", async () => {
@@ -501,7 +499,7 @@ describe("ProjectsPage header", () => {
       archived_by_id: "user-1",
     };
     mocks.projects = [PROJECT, CLOSED, ARCHIVED];
-    renderProjects();
+    const view = renderProjects();
 
     expect(screen.queryByText("Shelved Launch")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Archived projects/ })).toHaveTextContent("1");
@@ -510,6 +508,8 @@ describe("ProjectsPage header", () => {
     expect(screen.queryByText("Shelved Launch")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^Archived projects/ }));
+    expect(mocks.projectViewState.setLifecycleView).toHaveBeenCalledWith("archived");
+    view.rerender(<NavigationProvider value={makeAdapter()}><ProjectsPage /></NavigationProvider>);
     expect(screen.getByRole("heading", { level: 1, name: "Archived projects" })).toBeInTheDocument();
     expect(screen.getByText("Shelved Launch")).toBeInTheDocument();
     expect(screen.queryByText("Old Roadmap")).not.toBeInTheDocument();
@@ -529,6 +529,7 @@ describe("ProjectsPage header", () => {
     const user = userEvent.setup();
     mocks.projects = [PROJECT, CLOSED];
     mocks.projectViewState.search = "  ROADMAP ";
+    mocks.projectViewState.lifecycleView = "all";
     renderProjects();
 
     expect(screen.queryByText(PROJECT.title)).not.toBeInTheDocument();
@@ -603,6 +604,7 @@ describe("ProjectsPage grouping and board", () => {
   it("splits the table into status sections, skipping empty ones", () => {
     mocks.projects = [PROJECT, PLANNED, CLOSED];
     mocks.projectViewState.groupBy = "status";
+    mocks.projectViewState.lifecycleView = "all";
     renderProjects();
 
     expect(screen.getAllByRole("rowheader").map((band) => band.textContent)).toEqual([
@@ -616,7 +618,8 @@ describe("ProjectsPage grouping and board", () => {
     const user = userEvent.setup();
     mocks.projects = [PROJECT, PLANNED, CLOSED];
     mocks.projectViewState.layout = "board";
-    renderProjects();
+    mocks.projectViewState.lifecycleView = "all";
+    const view = renderProjects();
 
     expect(screen.queryByRole("grid")).not.toBeInTheDocument();
     const inProgress = screen.getByRole("region", { name: "In Progress" });
@@ -625,6 +628,7 @@ describe("ProjectsPage grouping and board", () => {
     expect(screen.getByRole("region", { name: "Completed" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^Active projects/ }));
+    view.rerender(<NavigationProvider value={makeAdapter()}><ProjectsPage /></NavigationProvider>);
     expect(screen.queryByRole("region", { name: "Completed" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Cancelled" })).not.toBeInTheDocument();
   });
@@ -725,6 +729,7 @@ describe("ProjectsPage dates", () => {
       { ...PROJECT, id: "late", title: "Late project", due_date: "2020-03-05" },
       { ...PROJECT, id: "done", title: "Done project", status: "completed", due_date: "2020-03-06" },
     ];
+    mocks.projectViewState.lifecycleView = "all";
     renderProjects();
 
     expect(screen.getByText("Mar 5, 2020")).toHaveClass("text-destructive");

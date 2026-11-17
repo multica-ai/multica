@@ -264,5 +264,12 @@
     "toast_completed": "« {{name}} » est terminé",
     "notice": "Ce projet est archivé. Il n'apparaît plus dans les listes ni les sélecteurs de projets et n'accepte plus de nouvelles tâches ; ses tâches restent consultables et modifiables.",
     "prop_label": "Archivé"
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "Aucun projet actif",
+      "all": "Aucun projet pour le moment",
+      "closed": "Aucun projet fermé"
+    }
   }
 }

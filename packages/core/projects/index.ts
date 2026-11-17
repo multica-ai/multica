@@ -23,6 +23,7 @@ export {
   PROJECT_SORT_DEFAULT_DIRECTION,
   PROJECT_DEFAULT_HIDDEN_COLUMNS,
   EMPTY_PROJECT_FILTERS,
+  type ProjectScope,
   boardGroupBy,
   type ProjectLayout,
   type ProjectGroupBy,

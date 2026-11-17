@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Archive, ArchiveRestore, ExternalLink, Link2, Pencil, Pin, PinOff, Trash2 } from "@multica/ui/icons";
@@ -33,17 +33,25 @@ import { useIntentNavigate, useNavigation } from "../../navigation";
 import { CollectionRowMenu } from "../../layout/collection-list";
 import { useArchiveProjects, useRestoreProjects } from "./project-archive";
 
+export interface ProjectDeletionContext {
+  key: string;
+  projects: Project[];
+  selectedIds: string[];
+}
+
 export function DeleteProjectsDialog({
   rows,
   open,
   onOpenChange,
   onDeleted,
+  context,
   onArchiveInstead,
 }: {
   rows: Project[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDeleted?: () => void;
+  context?: ProjectDeletionContext;
   /** Offers archiving as the reversible alternative; omitted when every row is already archived. */
   onArchiveInstead?: () => void;
 }) {
@@ -51,6 +59,33 @@ export function DeleteProjectsDialog({
   const canArchiveInstead = !!onArchiveInstead && rows.some((p) => !p.archived_at);
   const deleteProject = useDeleteProject();
   const [deleting, setDeleting] = useState(false);
+  const previousContext = useRef(context);
+  const contextInvalidated = useRef(false);
+  const deletedIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    const contextKey = (value: ProjectDeletionContext | undefined) => value && JSON.stringify([
+      value.key,
+      value.projects.filter((project) => !deletedIds.current.has(project.id)),
+      value.selectedIds.filter((id) => !deletedIds.current.has(id)),
+    ]);
+    // Account for this batch's successful deletions even when Query notifies
+    // React after a later deletion has failed and the retry dialog is idle.
+    if (contextKey(previousContext.current) !== contextKey(context)) {
+      contextInvalidated.current = true;
+    }
+    // Remember changes while a request is pending, even if permissions or
+    // selection return to their previous values before the request settles.
+    if (contextInvalidated.current && !deleting) {
+      onOpenChange(false);
+      contextInvalidated.current = false;
+    }
+    previousContext.current = context;
+    if (!open) {
+      deletedIds.current.clear();
+      contextInvalidated.current = false;
+    }
+  }, [context, deleting, onOpenChange, open]);
 
   const handleDelete = async () => {
     if (deleting) return;
@@ -58,6 +93,7 @@ export function DeleteProjectsDialog({
     try {
       for (const project of rows) {
         await deleteProject.mutateAsync(project.id);
+        deletedIds.current.add(project.id);
       }
       onOpenChange(false);
       onDeleted?.();

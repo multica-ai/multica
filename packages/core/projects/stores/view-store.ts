@@ -1,17 +1,20 @@
 "use client";
 
+import type { ProjectLifecycleView } from "../lifecycle";
+
 import {
   createCollectionViewStore,
   type CollectionSortDirection,
   type CollectionViewCore,
 } from "../../collections/view-store";
 
+export type ProjectScope = ProjectLifecycleView | "archived";
+
 // Projects has two layouts: a table and a board. Sort, filters, search and
 // grouping feed both; hiddenColumns only applies to the table. In the table
 // grouping splits the rows into sections; on the board it picks the columns,
-// so the board always has one (status unless another is chosen). No scope
-// axis (lead is optional and often an agent); status is better expressed as a
-// filter. Search stays session-local.
+// so the board always has one (status unless another is chosen). Lifecycle
+// scope and explicit status filters share a preference. Search stays session-local.
 export type ProjectLayout = "table" | "board";
 
 export type ProjectGroupBy = "none" | "status" | "priority" | "lead";
@@ -97,6 +100,8 @@ export interface ProjectViewState
     ProjectColumnKey,
     ProjectListFilters
   > {
+  lifecycleView: ProjectScope;
+  setLifecycleView: (view: ProjectScope) => void;
   layout: ProjectLayout;
   groupBy: ProjectGroupBy;
   setLayout: (layout: ProjectLayout) => void;
@@ -110,13 +115,25 @@ export interface ProjectViewState
  * for them too, as it does for everyone else.
  */
 export function migrateProjectViewState(persisted: unknown, version: number): unknown {
-  if (version >= 1 || !persisted || typeof persisted !== "object") return persisted;
-  const { viewMode, ...rest } = persisted as { viewMode?: unknown; hiddenColumns?: unknown };
-  const hidden = Array.isArray(rest.hiddenColumns) ? (rest.hiddenColumns as string[]) : null;
+  if (version >= 2 || !persisted || typeof persisted !== "object") return persisted;
+  const { viewMode, ...rest } = persisted as Omit<Partial<ProjectViewState>, "lifecycleView"> & {
+    viewMode?: unknown;
+    lifecycleView?: string;
+  };
+  const hidden = Array.isArray(rest.hiddenColumns) ? rest.hiddenColumns : null;
+  const layout = rest.layout ?? (viewMode === "comfortable" ? "board" : "table");
+  const lifecycleView = rest.lifecycleView === "active" || rest.lifecycleView === "all" || rest.lifecycleView === "archived"
+    ? rest.lifecycleView
+    : rest.lifecycleView === "closed" || rest.lifecycleView === "completed"
+      ? "closed"
+      : rest.filters?.statuses?.length ? "all" : "active";
   return {
     ...rest,
-    layout: viewMode === "comfortable" ? "board" : "table",
-    ...(hidden ? { hiddenColumns: hidden.includes("start_date") ? hidden : [...hidden, "start_date"] } : {}),
+    layout,
+    lifecycleView,
+    ...(hidden && (version === 0 || viewMode !== undefined)
+      ? { hiddenColumns: hidden.includes("start_date") ? hidden : [...hidden, "start_date"] }
+      : {}),
   };
 }
 
@@ -124,21 +141,27 @@ export const useProjectViewStore = createCollectionViewStore<
   ProjectSortField,
   ProjectColumnKey,
   ProjectListFilters,
-  { layout: ProjectLayout; groupBy: ProjectGroupBy },
+  { layout: ProjectLayout; groupBy: ProjectGroupBy; lifecycleView: ProjectScope },
   {
+    setLifecycleView: (view: ProjectScope) => void;
     setLayout: (layout: ProjectLayout) => void;
     setGroupBy: (groupBy: ProjectGroupBy) => void;
   }
 >({
   name: "multica_projects_view",
-  version: 1,
+  version: 2,
   migrate: migrateProjectViewState,
   defaultSortField: "last_activity",
   sortDefaultDirection: PROJECT_SORT_DEFAULT_DIRECTION,
   defaultHiddenColumns: PROJECT_DEFAULT_HIDDEN_COLUMNS,
   emptyFilters: EMPTY_PROJECT_FILTERS,
-  extraState: { layout: "table", groupBy: "none" },
+  extraState: { layout: "table", groupBy: "none", lifecycleView: "active" },
+  onToggleFilter: (_state, key) => key === "statuses" ? { lifecycleView: "all" } : {},
   extraActions: (set) => ({
+    setLifecycleView: (lifecycleView) => set((state) => ({
+      lifecycleView,
+      filters: { ...state.filters, statuses: [] },
+    })),
     setLayout: (layout) => set({ layout }),
     setGroupBy: (groupBy) => set({ groupBy }),
   }),

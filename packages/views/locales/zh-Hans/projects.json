@@ -259,5 +259,12 @@
     "toast_completed": "「{{name}}」已完成",
     "notice": "该项目已归档：不会出现在项目列表和选择器中，也不能新建任务；已有任务仍可查看和编辑。",
     "prop_label": "归档"
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "没有活跃项目",
+      "all": "暂无项目",
+      "closed": "暂无已关闭项目"
+    }
   }
 }

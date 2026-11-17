@@ -264,5 +264,12 @@
     "toast_completed": "“{{name}}” is completed",
     "notice": "This project is archived. It's hidden from project lists and pickers and accepts no new issues; its issues stay readable and editable.",
     "prop_label": "Archived"
+  },
+  "lifecycle": {
+    "empty": {
+      "active": "No active projects",
+      "all": "No projects yet",
+      "closed": "No closed projects"
+    }
   }
 }
