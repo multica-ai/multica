@@ -140,8 +140,10 @@ Cursor 依專案目錄保存 MCP 的 OAuth 登入，而每次執行都有自己�
 如果某個服務仍需登入，執行紀錄裡會寫明是哪個服務，並提供要在執行環境所在電腦上執行的指令，例如：
 
 ```bash
-cd <執行的 workdir> && CURSOR_DATA_DIR=<執行的 cursor-data> cursor-agent mcp login mobbin
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
 ```
+
+指令在登入檔旁邊一個單獨保留的登入目錄裡執行，所以執行自己的目錄被清理後也仍然可用。
 
 登入從這個 AI 代理的下一次執行開始生效，目前這次執行用不上。如果想改用你自己的登入檔，在 AI 代理的環境變數裡把 `CURSOR_MCP_AUTH_SOURCE` 設為某個 `mcp-auth.json` 的絕對路徑，或包含它的 Cursor 專案目錄；它優先於依 AI 代理保留的檔案。同一個 AI 代理的兩次執行如果剛好同時重新整理同一個 token，仍可能讓對方被登出，發生時重新登入即可。
 

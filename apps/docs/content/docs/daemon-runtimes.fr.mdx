@@ -139,8 +139,10 @@ Cursor enregistre les connexions OAuth MCP par répertoire de projet, et chaque 
 Si un serveur demande encore une connexion, la transcription de l'exécution indique lequel et donne la commande à lancer sur l'ordinateur du runtime, par exemple :
 
 ```bash
-cd <workdir de l'exécution> && CURSOR_DATA_DIR=<cursor-data de l'exécution> cursor-agent mcp login mobbin
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
 ```
+
+La commande s'exécute dans un dossier de connexion conservé à côté du fichier de connexion de l'agent ; elle fonctionne donc même après le nettoyage du répertoire de l'exécution.
 
 La connexion s'applique à partir de l'exécution suivante de l'agent ; l'exécution en cours ne la prend pas en compte. Pour utiliser votre propre fichier de connexion, définissez `CURSOR_MCP_AUTH_SOURCE` dans les variables d'environnement de l'agent avec le chemin absolu d'un `mcp-auth.json` ou du répertoire de projet Cursor qui le contient ; il est prioritaire sur le fichier par agent. Deux exécutions d'un même agent qui rafraîchissent le même jeton au même moment peuvent encore se déconnecter l'une l'autre ; reconnectez-vous si cela arrive.
 

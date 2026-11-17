@@ -139,8 +139,10 @@ Cursor は MCP の OAuth ログインをプロジェクトディレクトリご�
 まだログインが必要なサーバーがあると、実行のトランスクリプトにサーバー名と、ランタイムのコンピューターで実行するコマンドが表示されます。例：
 
 ```bash
-cd <実行の workdir> && CURSOR_DATA_DIR=<実行の cursor-data> cursor-agent mcp login mobbin
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
 ```
+
+コマンドはログインファイルの隣に保持されるログイン用ディレクトリで実行するため、実行自体のディレクトリが片付けられた後でも使えます。
 
 ログインはエージェントの次の実行から有効になり、現在の実行には反映されません。自分のログインファイルを使いたい場合は、エージェントの環境変数で `CURSOR_MCP_AUTH_SOURCE` に `mcp-auth.json` またはそれを含む Cursor プロジェクトディレクトリの絶対パスを設定します。エージェントごとのファイルより優先されます。同じエージェントの 2 つの実行が同じトークンを同時に更新すると、互いにログアウトさせることがあります。その場合はもう一度ログインしてください。
 

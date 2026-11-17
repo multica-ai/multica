@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,39 +71,86 @@ func TestCursorMcpLoginNoticeQuotesAndDefaults(t *testing.T) {
 func TestReportCursorMcpLoginNoticePostsOnlyWhenLoginMissing(t *testing.T) {
 	t.Parallel()
 
-	dataDir := t.TempDir()
-	workDir := t.TempDir()
+	root := t.TempDir()
+	taskRoot := filepath.Join(root, "task")
+	workDir := filepath.Join(taskRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	dataDir := filepath.Join(taskRoot, "cursor-data")
 	authPath := execenv.CursorMcpAuthPath(dataDir, workDir)
 	if err := os.MkdirAll(filepath.Dir(authPath), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	notice := cursorMcpLoginNotice{WorkDir: workDir, CursorDataDir: dataDir, GOOS: "darwin"}
+	store := filepath.Join(root, "profile", "cursor-mcp-auth", "agent-1", "mcp-auth.json")
+	check := cursorMcpLoginCheck{
+		TaskWorkDir:       workDir,
+		TaskCursorDataDir: dataDir,
+		AuthStore:         store,
+		McpConfig:         json.RawMessage(`{"mcpServers":{"mobbin":{"url":"https://api.mobbin.com/mcp"}}}`),
+		GOOS:              "darwin",
+	}
 
 	d, rec := newTranscriptRecorder(t)
 	var seq atomic.Int32
-	if d.reportCursorMcpLoginNotice(context.Background(), "task-1", notice, &seq, quietTaskLog()) {
+	if d.reportCursorMcpLoginNotice(context.Background(), "task-1", check, &seq, quietTaskLog()) {
 		t.Fatal("no auth file should post nothing")
 	}
 
 	if err := os.WriteFile(authPath, []byte(`{"mobbin":{"clientInfo":{"client_id":"c"}}}`), 0o600); err != nil {
 		t.Fatalf("write challenge: %v", err)
 	}
-	if !d.reportCursorMcpLoginNotice(context.Background(), "task-1", notice, &seq, quietTaskLog()) {
+	if !d.reportCursorMcpLoginNotice(context.Background(), "task-1", check, &seq, quietTaskLog()) {
 		t.Fatal("a missing login should post a notice")
 	}
 	rows := rec.snapshot()
+	loginDir := filepath.Join(filepath.Dir(store), "login")
 	if len(rows) != 1 || rows[0].Type != "text" || rows[0].Seq != 1 ||
-		!strings.Contains(rows[0].Content, "mcp login mobbin") || !strings.Contains(rows[0].Content, dataDir) {
-		t.Fatalf("persisted notice = %+v", rows)
+		!strings.Contains(rows[0].Content, "mcp login mobbin") || !strings.Contains(rows[0].Content, loginDir) ||
+		strings.Contains(rows[0].Content, taskRoot) {
+		t.Fatalf("notice should point at the agent's login workspace, not the task: %+v", rows)
 	}
 
-	if err := os.WriteFile(authPath, []byte(`{"mobbin":{"tokens":{"access_token":"a","refresh_token":"r"}}}`), 0o600); err != nil {
-		t.Fatalf("write login: %v", err)
+	// The command must still work once the task directory is gone.
+	if err := os.RemoveAll(taskRoot); err != nil {
+		t.Fatalf("remove task: %v", err)
 	}
-	if d.reportCursorMcpLoginNotice(context.Background(), "task-2", notice, &seq, quietTaskLog()) {
-		t.Fatal("a logged-in server should post nothing")
+	loginWork := filepath.Join(loginDir, "workdir")
+	if _, err := os.Stat(filepath.Join(loginWork, ".cursor", "mcp.json")); err != nil {
+		t.Fatalf("login workspace config missing after task cleanup: %v", err)
 	}
-	if rows := rec.snapshot(); len(rows) != 1 {
-		t.Fatalf("logged-in check posted rows: %+v", rows)
+	loginAuth := execenv.CursorMcpAuthPath(filepath.Join(loginDir, "cursor-data"), loginWork)
+	if err := os.WriteFile(loginAuth, []byte(`{"mobbin":{"tokens":{"access_token":"a","refresh_token":"r"}}}`), 0o600); err != nil {
+		t.Fatalf("log in through workspace: %v", err)
 	}
+	if got := readTestFile(t, store); !strings.Contains(got, `"access_token":"a"`) {
+		t.Fatalf("login did not land in the agent store: %s", got)
+	}
+}
+
+func TestCursorMcpLoginNoticeFallsBackToTaskWithoutStore(t *testing.T) {
+	t.Parallel()
+
+	dataDir := t.TempDir()
+	workDir := t.TempDir()
+	authPath := execenv.CursorMcpAuthPath(dataDir, workDir)
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(authPath, []byte(`{"mobbin":{"clientInfo":{"client_id":"c"}}}`), 0o600); err != nil {
+		t.Fatalf("write challenge: %v", err)
+	}
+	notice := cursorMcpLoginNoticeFor(cursorMcpLoginCheck{TaskWorkDir: workDir, TaskCursorDataDir: dataDir}, quietTaskLog())
+	if notice.WorkDir != workDir || notice.CursorDataDir != dataDir || len(notice.Servers) != 1 {
+		t.Fatalf("notice without a store = %+v, want the task directories", notice)
+	}
+}
+
+func readTestFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
 }

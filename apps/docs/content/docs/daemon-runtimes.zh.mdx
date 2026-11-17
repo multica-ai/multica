@@ -140,8 +140,10 @@ Cursor 按项目目录保存 MCP 的 OAuth 登录，而每次运行都有自己�
 如果某个服务仍需登录，运行记录里会写明是哪个服务，并给出要在运行时所在电脑上执行的命令，例如：
 
 ```bash
-cd <运行的 workdir> && CURSOR_DATA_DIR=<运行的 cursor-data> cursor-agent mcp login mobbin
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
 ```
+
+命令在登录文件旁边一个单独保留的登录目录里执行，所以运行自己的目录被清理后也仍然可用。
 
 登录从这个智能体的下一次运行开始生效，当前这次运行用不上。如果想改用你自己的登录文件，在智能体的环境变量里把 `CURSOR_MCP_AUTH_SOURCE` 设为某个 `mcp-auth.json` 的绝对路径，或包含它的 Cursor 项目目录；它优先于按智能体保留的文件。同一个智能体的两次运行如果恰好同时刷新同一个 token，仍可能把对方挤下线，出现时重新登录即可。
 

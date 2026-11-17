@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -12,10 +13,12 @@ import (
 
 // cursorMcpLoginNotice is the run-record message for MCP servers that need an
 // OAuth login before this agent can use them. The login has to happen on the
-// runtime machine, from the task's workdir and CURSOR_DATA_DIR, because that is
-// the mcp-auth.json the agent's later tasks share.
+// runtime machine, in a Cursor project whose mcp-auth.json is the login the
+// agent's tasks share.
 type cursorMcpLoginNotice struct {
-	Servers       []string
+	Servers []string
+	// WorkDir and CursorDataDir are where the login command runs: the agent's
+	// login workspace, or the task's own directories when that cannot be built.
 	WorkDir       string
 	CursorDataDir string
 	// Executable is the cursor-agent the daemon launches. Empty falls back to
@@ -23,6 +26,19 @@ type cursorMcpLoginNotice struct {
 	Executable string
 	Host       string
 	GOOS       string
+}
+
+// cursorMcpLoginCheck is what a task needs to detect a missing login and point
+// the user at a login workspace that outlives the task.
+type cursorMcpLoginCheck struct {
+	TaskWorkDir       string
+	TaskCursorDataDir string
+	AuthSource        string
+	AuthStore         string
+	McpConfig         json.RawMessage
+	Executable        string
+	Host              string
+	GOOS              string
 }
 
 func (n cursorMcpLoginNotice) String() string {
@@ -71,10 +87,38 @@ func powerShellLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
+// cursorMcpLoginNoticeFor returns the notice for the servers that still need a
+// login, or a zero notice when none do.
+func cursorMcpLoginNoticeFor(check cursorMcpLoginCheck, taskLog *slog.Logger) cursorMcpLoginNotice {
+	servers := execenv.CursorMcpServersNeedingLogin(check.TaskCursorDataDir, check.TaskWorkDir)
+	if len(servers) == 0 {
+		return cursorMcpLoginNotice{}
+	}
+	notice := cursorMcpLoginNotice{
+		Servers:       servers,
+		WorkDir:       check.TaskWorkDir,
+		CursorDataDir: check.TaskCursorDataDir,
+		Executable:    check.Executable,
+		Host:          check.Host,
+		GOOS:          check.GOOS,
+	}
+	if check.AuthStore == "" {
+		return notice
+	}
+	workDir, dataDir, err := execenv.PrepareCursorMcpLoginWorkspace(check.AuthSource, check.AuthStore, check.McpConfig, servers)
+	if err != nil {
+		taskLog.Warn("cursor mcp login workspace unavailable; pointing the login at the task directory", "error", err)
+		return notice
+	}
+	notice.WorkDir = workDir
+	notice.CursorDataDir = dataDir
+	return notice
+}
+
 // reportCursorMcpLoginNotice posts the login notice for the servers that still
 // need one, and reports whether it posted.
-func (d *Daemon) reportCursorMcpLoginNotice(ctx context.Context, taskID string, notice cursorMcpLoginNotice, msgSeq *atomic.Int32, taskLog *slog.Logger) bool {
-	notice.Servers = execenv.CursorMcpServersNeedingLogin(notice.CursorDataDir, notice.WorkDir)
+func (d *Daemon) reportCursorMcpLoginNotice(ctx context.Context, taskID string, check cursorMcpLoginCheck, msgSeq *atomic.Int32, taskLog *slog.Logger) bool {
+	notice := cursorMcpLoginNoticeFor(check, taskLog)
 	text := notice.String()
 	if text == "" {
 		return false

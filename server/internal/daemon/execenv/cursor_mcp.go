@@ -196,6 +196,60 @@ func CursorMcpServersNeedingLogin(cursorDataDir, workDir string) []string {
 	return names
 }
 
+// PrepareCursorMcpLoginWorkspace builds the agent's standing Cursor project for
+// `cursor-agent mcp login`, next to its auth store, and returns its workdir and
+// CURSOR_DATA_DIR. A task's own directory is no place to log in from: local
+// directory runs remove the generated .cursor/mcp.json at cleanup and worktree
+// runs remove the whole workdir. Only the managed servers that need a login are
+// written, and the project's mcp-auth.json resolves to the same login the
+// agent's tasks use (mcpAuthSource, else mcpAuthStore). Servers from the user's
+// own ~/.cursor configuration load from any directory.
+func PrepareCursorMcpLoginWorkspace(mcpAuthSource, mcpAuthStore string, mcpConfig json.RawMessage, servers []string) (string, string, error) {
+	if mcpAuthStore == "" {
+		return "", "", fmt.Errorf("cursor mcp auth store is required")
+	}
+	envRoot := filepath.Join(filepath.Dir(mcpAuthStore), "login")
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(envRoot, 0o700); err != nil {
+		return "", "", fmt.Errorf("create cursor mcp login workspace: %w", err)
+	}
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		return "", "", fmt.Errorf("create cursor mcp login workspace: %w", err)
+	}
+	// Cursor treats the nearest enclosing git repository as the project, so a
+	// repository above the profile dir would send the login somewhere else.
+	resolved, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve cursor mcp login workspace: %w", err)
+	}
+	if root := cursorProjectRoot(workDir); root != resolved {
+		return "", "", fmt.Errorf("cursor mcp login workspace resolves to enclosing project %s", root)
+	}
+
+	managed, err := parseCursorManagedMcpServers(mcpConfig)
+	if err != nil && hasManagedCursorMcpConfig(mcpConfig) {
+		return "", "", err
+	}
+	selected := map[string]json.RawMessage{}
+	for _, name := range servers {
+		if server, ok := managed[name]; ok {
+			selected[name] = server
+		}
+	}
+	loginConfig, err := json.Marshal(cursorMcpConfigFile{McpServers: selected})
+	if err != nil {
+		return "", "", fmt.Errorf("marshal cursor mcp login config: %w", err)
+	}
+	cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, loginConfig, mcpAuthSource, mcpAuthStore, nil, nil)
+	if err != nil {
+		return "", "", err
+	}
+	if _, err := os.Lstat(CursorMcpAuthPath(cursorDataDir, workDir)); err != nil {
+		return "", "", fmt.Errorf("link cursor mcp login workspace to the agent's login: %w", err)
+	}
+	return workDir, cursorDataDir, nil
+}
+
 // linkCursorMcpAuthStore points the task's mcp-auth.json at the agent's
 // persistent store. A hard link is the fallback where symlinks need privileges
 // (Windows); it still shares one file because Cursor rewrites it in place.

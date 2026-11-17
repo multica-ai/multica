@@ -139,8 +139,10 @@ Cursor는 MCP OAuth 로그인을 프로젝트 디렉터리마다 저장하고, �
 아직 로그인이 필요한 서버가 있으면 실행 기록에 서버 이름과 런타임 컴퓨터에서 실행할 명령이 표시됩니다. 예:
 
 ```bash
-cd <실행 workdir> && CURSOR_DATA_DIR=<실행 cursor-data> cursor-agent mcp login mobbin
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
 ```
+
+명령은 로그인 파일 옆에 따로 보존되는 로그인 디렉터리에서 실행되므로, 실행 자체의 디렉터리가 정리된 뒤에도 쓸 수 있습니다.
 
 로그인은 에이전트의 다음 실행부터 적용되며 현재 실행에는 반영되지 않습니다. 내 로그인 파일을 쓰려면 에이전트 환경 변수에서 `CURSOR_MCP_AUTH_SOURCE`를 `mcp-auth.json` 또는 그 파일이 있는 Cursor 프로젝트 디렉터리의 절대 경로로 설정하세요. 에이전트별 파일보다 우선합니다. 같은 에이전트의 두 실행이 같은 토큰을 동시에 갱신하면 서로를 로그아웃시킬 수 있으니, 그럴 때는 다시 로그인하세요.
 

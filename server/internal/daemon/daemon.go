@@ -9423,19 +9423,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
 	d.reportThinkingLevelWarning(ctx, task.ID, selection.ThinkingLevelWarning, &msgSeq, taskLog)
-	var pendingCursorLoginNotice *cursorMcpLoginNotice
+	var pendingCursorLoginCheck *cursorMcpLoginCheck
 	if provider == "cursor" && env.CursorDataDir != "" {
-		notice := cursorMcpLoginNotice{
-			WorkDir:       env.WorkDir,
-			CursorDataDir: env.CursorDataDir,
-			Host:          d.cfg.DeviceName,
-			GOOS:          runtime.GOOS,
+		check := cursorMcpLoginCheck{
+			TaskWorkDir:       env.WorkDir,
+			TaskCursorDataDir: env.CursorDataDir,
+			AuthSource:        cursorMcpAuthSource,
+			AuthStore:         cursorMcpAuthStore,
+			McpConfig:         effectiveMcpConfig,
+			Host:              d.cfg.DeviceName,
+			GOOS:              runtime.GOOS,
 		}
 		if !usesCustomProfileCommand {
-			notice.Executable = entry.Path
+			check.Executable = entry.Path
 		}
-		if !d.reportCursorMcpLoginNotice(ctx, task.ID, notice, &msgSeq, taskLog) {
-			pendingCursorLoginNotice = &notice
+		if !d.reportCursorMcpLoginNotice(ctx, task.ID, check, &msgSeq, taskLog) {
+			pendingCursorLoginCheck = &check
 		}
 	}
 	outputObserver := &taskOutputObserver{}
@@ -9560,8 +9563,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// Cursor records a server's OAuth challenge only after connecting to it, so
 	// an agent's first run can only learn about a missing login here.
-	if pendingCursorLoginNotice != nil {
-		d.reportCursorMcpLoginNotice(ctx, task.ID, *pendingCursorLoginNotice, &msgSeq, taskLog)
+	if pendingCursorLoginCheck != nil {
+		d.reportCursorMcpLoginNotice(ctx, task.ID, *pendingCursorLoginCheck, &msgSeq, taskLog)
 	}
 
 	// MUL-8188: a resumed run that was cancelled after minutes of total

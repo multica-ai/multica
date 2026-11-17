@@ -450,6 +450,143 @@ func TestCursorMcpLoginInOneTaskClearsNoticeForNextTask(t *testing.T) {
 	}
 }
 
+// loginThroughWorkspaceAfterTaskCleanup is the user path the run-record notice
+// describes: the task's workdir is cleaned up, then `cursor-agent mcp login`
+// runs in the login workspace, then the agent's next task must see the login.
+func loginThroughWorkspaceAfterTaskCleanup(t *testing.T, store, authSource string, mcpConfig json.RawMessage, cleanup func()) (string, string) {
+	t.Helper()
+	cleanup()
+
+	loginWork, loginData, err := PrepareCursorMcpLoginWorkspace(authSource, store, mcpConfig, []string{"oauth"})
+	if err != nil {
+		t.Fatalf("PrepareCursorMcpLoginWorkspace: %v", err)
+	}
+	var cfg cursorMcpConfigFile
+	if err := json.Unmarshal([]byte(readFile(t, filepath.Join(loginWork, ".cursor", "mcp.json"))), &cfg); err != nil {
+		t.Fatalf("login workspace mcp.json: %v", err)
+	}
+	if len(cfg.McpServers) != 1 || cfg.McpServers["oauth"] == nil {
+		t.Fatalf("login workspace servers = %v, want only the server needing login", cfg.McpServers)
+	}
+	if _, err := os.Stat(filepath.Join(loginData, "projects", cursorSlugifyPath(cursorProjectRoot(loginWork)), "mcp-approvals.json")); err != nil {
+		t.Fatalf("login workspace approvals missing: %v", err)
+	}
+	login := `{"oauth":{"clientInfo":{"client_id":"c"},"tokens":{"access_token":"a","refresh_token":"r"}}}`
+	if err := os.WriteFile(CursorMcpAuthPath(loginData, loginWork), []byte(login), 0o600); err != nil {
+		t.Fatalf("log in through workspace: %v", err)
+	}
+	return loginWork, login
+}
+
+func TestCursorMcpLoginWorkspaceSurvivesInPlaceCleanup(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := filepath.Join(root, "profile", cursorMcpAuthStoreRoot, "agent-1", cursorMcpAuthFile)
+	mcpConfig := json.RawMessage(`{"mcpServers":{"oauth":{"url":"https://mcp.example.com/mcp"},"apps":{"url":"http://127.0.0.1:1/mcp","headers":{"Authorization":"Bearer task-token"}}}}`)
+
+	userDir := newTestRepo(t)
+	envRoot := filepath.Join(root, "task-1")
+	manifest := &sidecarManifest{}
+	dataDir, err := prepareCursorMcpConfig(envRoot, userDir, mcpConfig, "", store, manifest, nil)
+	if err != nil {
+		t.Fatalf("prepare in-place task: %v", err)
+	}
+	if err := os.WriteFile(CursorMcpAuthPath(dataDir, userDir), []byte(`{"oauth":{"clientInfo":{"client_id":"c"}}}`), 0o600); err != nil {
+		t.Fatalf("write challenge: %v", err)
+	}
+	if err := writeSidecarManifest(envRoot, manifest); err != nil {
+		t.Fatalf("writeSidecarManifest: %v", err)
+	}
+
+	_, login := loginThroughWorkspaceAfterTaskCleanup(t, store, "", mcpConfig, func() {
+		if err := CleanupSidecars(envRoot); err != nil {
+			t.Fatalf("CleanupSidecars: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(userDir, ".cursor", "mcp.json")); !os.IsNotExist(err) {
+			t.Fatalf("in-place cleanup should remove the task's .cursor/mcp.json, stat err=%v", err)
+		}
+	})
+
+	nextRoot := filepath.Join(root, "task-2")
+	nextData, err := prepareCursorMcpConfig(nextRoot, userDir, mcpConfig, "", store, &sidecarManifest{}, nil)
+	if err != nil {
+		t.Fatalf("prepare next in-place task: %v", err)
+	}
+	if got := CursorMcpServersNeedingLogin(nextData, userDir); got != nil {
+		t.Fatalf("next task still needs login: %v", got)
+	}
+	if got := readFile(t, CursorMcpAuthPath(nextData, userDir)); got != login {
+		t.Fatalf("next task auth = %s, want the workspace login", got)
+	}
+}
+
+func TestCursorMcpLoginWorkspaceSurvivesWorktreeRemoval(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := filepath.Join(root, "profile", cursorMcpAuthStoreRoot, "agent-1", cursorMcpAuthFile)
+	mcpConfig := json.RawMessage(`{"mcpServers":{"oauth":{"url":"https://mcp.example.com/mcp"}}}`)
+
+	repo := newTestRepo(t)
+	prepareWorktree := func(name string) (string, string, string) {
+		t.Helper()
+		envRoot := filepath.Join(root, name)
+		worktree := filepath.Join(envRoot, "workdir")
+		gitRun(t, repo, "worktree", "add", "-b", "agent/"+name, worktree)
+		dataDir, err := prepareCursorMcpConfig(envRoot, worktree, mcpConfig, "", store, &sidecarManifest{}, nil)
+		if err != nil {
+			t.Fatalf("prepare %s: %v", name, err)
+		}
+		return envRoot, worktree, dataDir
+	}
+
+	firstRoot, firstWork, firstData := prepareWorktree("task-1")
+	if err := os.WriteFile(CursorMcpAuthPath(firstData, firstWork), []byte(`{"oauth":{"clientInfo":{"client_id":"c"}}}`), 0o600); err != nil {
+		t.Fatalf("write challenge: %v", err)
+	}
+
+	_, login := loginThroughWorkspaceAfterTaskCleanup(t, store, "", mcpConfig, func() {
+		if err := removeLocalWorktreeDir(repo, firstWork, nil); err != nil {
+			t.Fatalf("removeLocalWorktreeDir: %v", err)
+		}
+		if err := os.RemoveAll(firstRoot); err != nil {
+			t.Fatalf("remove task env: %v", err)
+		}
+	})
+
+	_, nextWork, nextData := prepareWorktree("task-2")
+	if got := CursorMcpServersNeedingLogin(nextData, nextWork); got != nil {
+		t.Fatalf("next task still needs login: %v", got)
+	}
+	if got := readFile(t, CursorMcpAuthPath(nextData, nextWork)); got != login {
+		t.Fatalf("next task auth = %s, want the workspace login", got)
+	}
+}
+
+func TestCursorMcpLoginWorkspaceWritesToExplicitAuthSource(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := filepath.Join(root, "profile", cursorMcpAuthStoreRoot, "agent-1", cursorMcpAuthFile)
+	sourceDir := filepath.Join(root, "user-cursor-project")
+	if err := os.MkdirAll(sourceDir, 0o700); err != nil {
+		t.Fatalf("mkdir source: %v", err)
+	}
+	source := filepath.Join(sourceDir, cursorMcpAuthFile)
+	if err := os.WriteFile(source, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+
+	_, login := loginThroughWorkspaceAfterTaskCleanup(t, store, sourceDir, json.RawMessage(`{"mcpServers":{"oauth":{"url":"https://mcp.example.com/mcp"}}}`), func() {})
+	if got := readFile(t, source); got != login {
+		t.Fatalf("explicit source = %s, want the workspace login", got)
+	}
+	if _, err := os.Stat(store); !os.IsNotExist(err) {
+		t.Fatalf("agent store should stay untouched while an explicit source is set, stat err=%v", err)
+	}
+}
+
 func TestCursorMcpAuthStorePathRequiresAgent(t *testing.T) {
 	t.Parallel()
 
