@@ -69,6 +69,15 @@ export interface ProjectProgressAssignee {
   started: number;
 }
 
+/** Issues carrying one label; an issue with several labels counts under each. */
+export interface ProjectProgressLabel {
+  /** Null for the issues with no label. */
+  label_id: string | null;
+  scope: number;
+  completed: number;
+  started: number;
+}
+
 /** One weekly sample; `date` is a calendar day ("YYYY-MM-DD"), the last one is today. */
 export interface ProjectProgressPoint {
   date: string;
@@ -85,8 +94,29 @@ export interface ProjectProgressForecast {
 export interface ProjectProgressDetail {
   progress: ProjectProgress;
   by_assignee: ProjectProgressAssignee[];
+  by_label: ProjectProgressLabel[];
   history: ProjectProgressPoint[];
   forecast: ProjectProgressForecast | null;
+}
+
+/** One activity on an issue in the project, with the issue it happened on. */
+export interface ProjectActivityEntry {
+  id: string;
+  issue_id: string;
+  issue_identifier: string;
+  issue_title: string;
+  issue_status: string;
+  actor_type: string;
+  actor_id: string;
+  action: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ProjectActivityPage {
+  entries: ProjectActivityEntry[];
+  /** Reads the next older page; null on the last one. */
+  next_cursor: string | null;
 }
 
 export interface Project {

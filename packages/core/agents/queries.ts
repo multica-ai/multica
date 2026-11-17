@@ -17,6 +17,7 @@ export const workspaceWorkingAgentsKeys = {
     type?: WorkspaceWorkingAgentType,
     mineRelation?: WorkspaceWorkingAgentMineRelation,
     parentIssueId?: string,
+    projectId?: string,
   ) =>
     [
       ...workspaceWorkingAgentsKeys.all(wsId),
@@ -26,7 +27,9 @@ export const workspaceWorkingAgentsKeys = {
         ? `mine:${mineRelation}`
         : parentIssueId
           ? `parent:${parentIssueId}`
-          : "workspace",
+          : projectId
+            ? `project:${projectId}`
+            : "workspace",
     ] as const,
 };
 
@@ -64,8 +67,8 @@ export function agentTaskSnapshotOptions(wsId: string) {
   });
 }
 
-// Working-agent summaries, optionally narrowed to a My Issues relation or to
-// one issue's direct children. Task lifecycle WebSocket events invalidate
+// Working-agent summaries, optionally narrowed to a My Issues relation, to
+// one issue's direct children or to one project's issues. Task lifecycle WebSocket events invalidate
 // every narrowing immediately; the short stale time is the reconnect /
 // missed-event safety net.
 export function workspaceWorkingAgentsOptions(
@@ -73,6 +76,7 @@ export function workspaceWorkingAgentsOptions(
   type?: WorkspaceWorkingAgentType,
   mineRelation?: WorkspaceWorkingAgentMineRelation,
   parentIssueId?: string,
+  projectId?: string,
 ) {
   return queryOptions({
     queryKey: workspaceWorkingAgentsKeys.list(
@@ -80,9 +84,10 @@ export function workspaceWorkingAgentsOptions(
       type,
       mineRelation,
       parentIssueId,
+      projectId,
     ),
     queryFn: () =>
-      api.getWorkspaceWorkingAgents(type, mineRelation, parentIssueId),
+      api.getWorkspaceWorkingAgents(type, mineRelation, parentIssueId, projectId),
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
