@@ -227,6 +227,7 @@ describe("ProjectsSection", () => {
       "Open in new tab",
       "Pin to sidebar",
       "Copy link",
+      "Copy link with title",
       "Archive",
     ]);
 
