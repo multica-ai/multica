@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { ChevronDown } from "@multica/ui/icons";
+import { Bot, ChevronDown } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -12,16 +12,18 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import type { Project, UpdateProjectRequest } from "@multica/core/types";
+import type { Project, ProjectStatus, UpdateProjectRequest } from "@multica/core/types";
 import type { ProjectTab } from "@multica/core/projects/tab-store";
 import { PageHeader } from "../../layout/page-header";
 import { TitleEditor, ContentEditor } from "../../editor";
 import { useT } from "../../i18n";
 import { ProjectIcon } from "./project-icon";
+import { ProjectPropertyPills } from "./project-properties";
+import { ProjectResourcesSection } from "./project-resources-section";
 
 const TAB_TRIGGER_CLASS = "h-full rounded-none px-2.5 group-data-horizontal/tabs:after:bottom-0";
 
-/** Overview / Issues switch, sized to sit in a page header and underline at its bottom edge. */
+/** Overview / Issues / Activity switch, sized to sit in a page header and underline at its bottom edge. */
 export function ProjectTabs({
   tab,
   onTabChange,
@@ -46,21 +48,26 @@ export function ProjectTabs({
           {t(($) => $.detail.tab_issues)}
           <span className="tabular-nums text-muted-foreground">{issueCount}</span>
         </TabsTrigger>
+        <TabsTrigger value="activity" className={TAB_TRIGGER_CLASS}>
+          {t(($) => $.detail.tab_activity)}
+        </TabsTrigger>
       </TabsList>
     </Tabs>
   );
 }
 
-/** Header for the Overview tab: the same project menu as the Issues tab, without view controls. */
+/** Header for the Overview and Activity tabs: the same project menu as the Issues tab, without view controls. */
 export function ProjectOverviewHeader({
   project,
   tabs,
   menu,
+  badge,
   trailing,
 }: {
   project: Project;
   tabs: ReactNode;
   menu: ReactNode;
+  badge?: ReactNode;
   trailing: ReactNode;
 }) {
   return (
@@ -86,6 +93,7 @@ export function ProjectOverviewHeader({
             {menu}
           </DropdownMenuContent>
         </DropdownMenu>
+        {badge}
         {tabs}
       </div>
       <div className="flex shrink-0 items-center gap-1">{trailing}</div>
@@ -94,15 +102,19 @@ export function ProjectOverviewHeader({
 }
 
 /**
- * The project as a document: icon, title and the full-width description that
- * agents receive as project context.
+ * The project as a document: icon, title and properties, then what agents
+ * receive as project context — the description and the resources.
  */
 export function ProjectOverviewBody({
   project,
   onUpdate,
+  onStatusChange,
+  onOpenWorkflow,
 }: {
   project: Project;
   onUpdate: (data: UpdateProjectRequest) => void;
+  onStatusChange: (status: ProjectStatus) => void;
+  onOpenWorkflow: () => void;
 }) {
   const { t } = useT("projects");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
@@ -143,8 +155,23 @@ export function ProjectOverviewBody({
           }}
         />
 
-        <section className="mt-8">
-          <h2 className="mb-2 text-label font-medium">{t(($) => $.detail.section_description)}</h2>
+        <div className="mt-4">
+          <ProjectPropertyPills
+            project={project}
+            onUpdate={onUpdate}
+            onStatusChange={onStatusChange}
+            onOpenWorkflow={onOpenWorkflow}
+          />
+        </div>
+
+        <section className="mt-10">
+          <div className="mb-2 flex items-center gap-2">
+            <h2 className="text-label font-medium">{t(($) => $.detail.section_description)}</h2>
+            <span className="inline-flex items-center gap-1 rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
+              <Bot className="size-3" aria-hidden="true" />
+              {t(($) => $.detail.agent_context_badge)}
+            </span>
+          </div>
           <ContentEditor
             key={project.id}
             value={project.description || ""}
@@ -156,6 +183,10 @@ export function ProjectOverviewBody({
             {t(($) => $.detail.description_hint)}
           </p>
         </section>
+
+        <div className="mt-10">
+          <ProjectResourcesSection projectId={project.id} variant="document" />
+        </div>
       </div>
     </div>
   );

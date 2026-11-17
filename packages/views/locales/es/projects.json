@@ -125,7 +125,24 @@
       "forecast_none": "Hay muy pocas tareas completadas recientemente para prever una fecha de fin.",
       "by_assignee": "Por responsable",
       "agent_tag": "Agente",
-      "unassigned": "Sin asignar"
+      "unassigned": "Sin asignar",
+      "axis_assignee": "Responsable",
+      "axis_label": "Etiqueta",
+      "by_label": "Por etiqueta",
+      "no_labels": "Aún no hay incidencias.",
+      "unlabeled": "Sin etiqueta"
+    },
+    "tab_activity": "Actividad",
+    "agent_context_badge": "Contexto del agente",
+    "section_breakdown": "Desglose",
+    "section_working": "Agentes trabajando",
+    "working_empty": "Ahora mismo no hay agentes trabajando en las incidencias de este proyecto.",
+    "section_activity": "Actividad reciente",
+    "activity": {
+      "empty": "Las incidencias de este proyecto aún no tienen actividad.",
+      "load_more": "Cargar más",
+      "view_all": "Ver todo",
+      "hint": "Cambios de estado, responsable, prioridad y fechas en las incidencias de este proyecto."
     }
   },
   "resources": {
@@ -188,7 +205,8 @@
     "toast_ref_update_failed": "No se ha podido actualizar la rama",
     "ref_error_commit": "Eso es un commit, no una rama. Para una revisión concreta, usa --ref con multica repo checkout.",
     "ref_default_label": "Rama por defecto",
-    "ref_running_note": "Las ejecuciones ya en curso no se ven afectadas."
+    "ref_running_note": "Las ejecuciones ya en curso no se ven afectadas.",
+    "document_hint": "Repositorios y carpetas en los que trabajan los agentes cuando se ejecutan en este proyecto."
   },
   "delete_dialog": {
     "offline_error": "Estás sin conexión. Vuelve a conectarte e intenta eliminar de nuevo.",

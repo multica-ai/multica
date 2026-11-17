@@ -11,6 +11,7 @@ import type { Project } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { useProjectTabStore } from "@multica/core/projects/tab-store";
+import { getIssueSurfaceViewStore } from "@multica/core/issues/stores";
 import { ProjectDetail } from "./project-detail";
 
 const mocks = vi.hoisted(() => ({
@@ -171,6 +172,22 @@ vi.mock("./project-resources-section", () => ({
   ProjectResourcesSection: () => null,
 }));
 
+vi.mock("./project-insights", () => ({
+  ProjectInsights: ({ onFilter, onShowActivity }: {
+    onFilter: (filter: unknown) => void;
+    onShowActivity: () => void;
+  }) => (
+    <div data-testid="project-insights">
+      <button type="button" onClick={() => onFilter({ kind: "label", id: "label-1" })}>Filter by Design</button>
+      <button type="button" onClick={onShowActivity}>View all activity</button>
+    </div>
+  ),
+}));
+
+vi.mock("./project-activity", () => ({
+  ProjectActivityPage: () => <div data-testid="project-activity-page" />,
+}));
+
 vi.mock("./project-start-date-picker", () => ({
   ProjectStartDatePicker: () => null,
 }));
@@ -313,6 +330,39 @@ describe("ProjectDetail tabs", () => {
     expect(screen.queryByTestId("issue-view-header")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Description" })).toBeInTheDocument();
     expect(within(screen.getByRole("complementary")).queryByText("Description")).not.toBeInTheDocument();
+  });
+
+  it("puts the properties on the Overview and keeps the sidebar for insights", () => {
+    renderProjectDetail();
+    const properties = screen.getByTestId("project-properties");
+    expect(within(properties).getByRole("button", { name: "No lead" })).toBeInTheDocument();
+    const sidebar = screen.getByRole("complementary");
+    expect(within(sidebar).getByTestId("project-insights")).toBeInTheDocument();
+    expect(within(sidebar).queryByText("Properties")).not.toBeInTheDocument();
+  });
+
+  it("shows the activity feed for ?tab=activity", async () => {
+    renderProjectDetail("tab=activity");
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("project-activity-page")).toBeInTheDocument();
+    expect(screen.queryByTestId("project-properties")).not.toBeInTheDocument();
+  });
+
+  it("opens the Activity tab from the sidebar digest", async () => {
+    renderProjectDetail();
+    await userEvent.click(screen.getByRole("button", { name: "View all activity" }));
+    expect(mocks.replace).toHaveBeenCalledWith("/test-workspace/projects/project-1?tab=activity");
+  });
+
+  it("opens the Issues tab filtered to a breakdown row", async () => {
+    const store = getIssueSurfaceViewStore("project:project-1");
+    store.setState({ statusFilters: ["todo"] });
+    renderProjectDetail();
+    await userEvent.click(screen.getByRole("button", { name: "Filter by Design" }));
+    expect(store.getState().labelFilters).toEqual(["label-1"]);
+    expect(store.getState().statusFilters).toEqual([]);
+    expect(mocks.replace).toHaveBeenCalledWith("/test-workspace/projects/project-1?tab=issues");
+    store.getState().clearFilters();
   });
 
   it("shows the issue views for ?tab=issues and remembers that choice", () => {
