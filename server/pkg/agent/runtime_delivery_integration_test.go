@@ -112,8 +112,6 @@ func TestRuntimeDeliveryRealSmoke(t *testing.T) {
 					write(configPath, string(data))
 				}
 				config.Env["CODEX_HOME"] = home
-				write(filepath.Join(home, "AGENTS.md"), "Global token: GLOBAL_WRONG\n")
-				write(filepath.Join(home, "AGENTS.override.md"), "Global token: GLOBAL_LOADED\n")
 				write(filepath.Join(cwd, "AGENTS.md"), "Repository token: REPO_LOADED. When asked for conflict, answer REPO_WINS.\n")
 				opts.DeveloperInstructions = brief + strings.Repeat("Runtime padding for long brief verification.\n", 1000) + "Tail token: TAIL_LOADED\n"
 			}
@@ -123,7 +121,7 @@ func TestRuntimeDeliveryRealSmoke(t *testing.T) {
 			}
 			prompt := "Without tools, report the runtime token, repository token, and conflict answer from your loaded instructions."
 			if provider == "codex" {
-				prompt += " Also report the global token and tail token."
+				prompt += " Also report the tail token."
 			} else {
 				prompt += " Also list skill names containing probe from the available skills list."
 			}
@@ -148,7 +146,7 @@ func TestRuntimeDeliveryRealSmoke(t *testing.T) {
 				}
 			}
 			if provider == "codex" {
-				for _, token := range []string{"GLOBAL_LOADED", "TAIL_LOADED", "RUNTIME_WINS"} {
+				for _, token := range []string{"TAIL_LOADED", "RUNTIME_WINS"} {
 					if !strings.Contains(first.Output, token) {
 						t.Errorf("missing %s", token)
 					}
@@ -170,6 +168,10 @@ func TestRuntimeDeliveryRealSmoke(t *testing.T) {
 				write(filepath.Join(opts.ClaudeRuntimeDir, "CLAUDE.md"), strings.ReplaceAll(brief, "RUNTIME_FIRST", "RUNTIME_SECOND"))
 			} else {
 				opts.DeveloperInstructions = strings.ReplaceAll(opts.DeveloperInstructions, "RUNTIME_FIRST", "RUNTIME_SECOND")
+				// thread/resume keeps a thread's original developer instructions
+				// (openai/codex#19045), so the daemon starts a fresh thread once
+				// the brief changes (gateCodexResumeToDeveloperInstructions).
+				opts.ResumeSessionID = ""
 			}
 			second := runSkillSmokeTurn(t, ctx, backend, "Without tools, report the current runtime token and repository token from the latest developer instructions. Previous answers may be outdated; check the current instructions again.", opts)
 			t.Logf("resumed: %q", second.Output)

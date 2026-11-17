@@ -7399,6 +7399,28 @@ func gateCodexResumeToRolloutPresence(task *Task, taskCtx *execenv.TaskContextFo
 	task.PriorSessionResumeUnavailable = true
 }
 
+// gateCodexResumeToDeveloperInstructions drops a Codex resume whose thread
+// would keep outdated runtime instructions. With external delivery the brief
+// travels as developerInstructions, which thread/resume does not apply to an
+// existing thread (openai/codex#19045, reproduced on 0.169.0 in MUL-9445), so
+// a thread is resumable only when it is recorded as having started with this
+// exact brief. The brief is byte-identical per (agent, issue, provider)
+// (MUL-5377), so this drops a resume only after the agent's identity, skills,
+// or project context changed — or once for threads from before the record
+// existed. The loss is disclosed through the same continuity notice as the
+// other Codex resume gates (MUL-4424).
+func gateCodexResumeToDeveloperInstructions(task *Task, taskCtx *execenv.TaskContextForEnv, store, instructions string, taskLog *slog.Logger) {
+	if task.PriorSessionID == "" || execenv.CodexDeveloperInstructionsMatch(store, task.PriorSessionID, instructions) {
+		return
+	}
+	taskLog.Info("starting a fresh codex thread: prior thread was not started with the current runtime instructions",
+		"session_id", task.PriorSessionID)
+	task.PriorSessionID = ""
+	taskCtx.PriorSessionResumed = false
+	taskCtx.PriorSessionResumeUnavailable = true
+	task.PriorSessionResumeUnavailable = true
+}
+
 const (
 	// codexRolloutFlushWait bounds how long the daemon waits for Codex to finish
 	// writing a session's rollout into the per-task store before treating that
@@ -9053,6 +9075,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			return TaskResult{}, fmt.Errorf("protect worktree runtime config: %w", err)
 		}
 	}
+	if provider == "codex" && env.RuntimeDir != "" {
+		gateCodexResumeToDeveloperInstructions(&task, &taskCtx, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx), runtimeBrief, taskLog)
+	}
 	// An exempt turn runs in the user's directory without having queued for it,
 	// so a sibling coding task may be writing to the same tree right now. That
 	// is the one thing it cannot work out from its own context — tell it.
@@ -9678,6 +9703,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			"session_id", result.SessionID, "codex_home", env.CodexHome, "status", result.Status)
 		result.SessionID = ""
 		sessionRolloutMissing = true
+	}
+	if result.SessionID != "" && provider == "codex" && execOpts.DeveloperInstructions != "" {
+		// Record what this thread was started (or kept) with, so the next run
+		// resumes it only while the brief is unchanged. A failed write fails
+		// closed: the next run starts a fresh thread and says so.
+		if err := execenv.RecordCodexDeveloperInstructions(execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx), result.SessionID, execOpts.DeveloperInstructions); err != nil {
+			taskLog.Warn("record codex developer instructions failed; the next run will start a fresh thread", "session_id", result.SessionID, "error", err)
+		}
 	}
 	// Stamp the withhold flag onto whichever TaskResult the status switch below
 	// returns (SessionID is already blanked above); reportTaskResult forwards it

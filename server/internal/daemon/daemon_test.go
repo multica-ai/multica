@@ -6979,3 +6979,44 @@ func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
 		t.Errorf("custom = %v, want only the selector's value removed", strippedCustom)
 	}
 }
+
+// A Codex thread keeps the developer instructions it started with across
+// thread/resume (openai/codex#19045), so a worktree task resumes only a thread
+// recorded with the exact brief it would send now, and discloses the reset
+// otherwise (MUL-9445).
+func TestGateCodexResumeToDeveloperInstructions(t *testing.T) {
+	store := t.TempDir()
+	if err := execenv.RecordCodexDeveloperInstructions(store, "same-brief", "brief v1"); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name        string
+		sessionID   string
+		brief       string
+		wantSession string
+	}{
+		{name: "unchanged brief keeps resume", sessionID: "same-brief", brief: "brief v1", wantSession: "same-brief"},
+		{name: "changed brief starts fresh", sessionID: "same-brief", brief: "brief v2", wantSession: ""},
+		{name: "thread without a record starts fresh", sessionID: "legacy-agents-md", brief: "brief v1", wantSession: ""},
+		{name: "no prior session is a no-op", sessionID: "", brief: "brief v1", wantSession: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := Task{PriorSessionID: tt.sessionID}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
+
+			gateCodexResumeToDeveloperInstructions(&task, &taskCtx, store, tt.brief, slog.Default())
+
+			if task.PriorSessionID != tt.wantSession {
+				t.Fatalf("PriorSessionID = %q, want %q", task.PriorSessionID, tt.wantSession)
+			}
+			if taskCtx.PriorSessionResumed != (tt.wantSession != "") {
+				t.Fatalf("PriorSessionResumed = %v", taskCtx.PriorSessionResumed)
+			}
+			dropped := tt.sessionID != "" && tt.wantSession == ""
+			if task.PriorSessionResumeUnavailable != dropped || taskCtx.PriorSessionResumeUnavailable != dropped {
+				t.Fatalf("resume-unavailable notice = %v/%v, want %v", task.PriorSessionResumeUnavailable, taskCtx.PriorSessionResumeUnavailable, dropped)
+			}
+		})
+	}
+}

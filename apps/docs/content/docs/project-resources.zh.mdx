@@ -100,7 +100,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 </Tab>
 <Tab value="worktree（并行运行）" id="worktree">
 
-使用内置 Claude Code 2.1.281+ 或 Codex 0.169.0+ 时，Multica 把运行时说明、技能和任务元数据放在检出目录之外。你对 `CLAUDE.md` 和 `AGENTS.md` 的正常修改仍可照常提交。旧版或版本未知的 CLI 继续使用文件注入，并记录警告；其他 provider 和 `in_place` 保持现有行为。结束时，Multica 会检查本次运行的每个提交，发现运行时内容就给出警告，不改写历史。
+使用内置 Claude Code 2.1.281+ 或 Codex 0.169.0+ 时，Multica 把运行时说明、技能和任务元数据放在检出目录之外。你对 `CLAUDE.md` 和 `AGENTS.md` 的正常修改仍可照常提交。旧版或版本未知的 CLI 继续使用文件注入，并记录警告；其他 provider 和 `in_place` 保持现有行为。Codex 的对话只在运行时说明不变时延续；说明变化后（例如智能体的技能或项目上下文变了），下一次运行会开启新对话，并告知智能体。结束时，Multica 会检查本次运行的每个提交，发现运行时内容就给出警告，不改写历史。
 
 每次运行拿到你仓库的一个独立 [git worktree](https://git-scm.com/docs/git-worktree)，建在运行时自己的工作区目录里。同一目录上的运行并发执行，谁都不用排队，也都不会写你的工作副本。
 

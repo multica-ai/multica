@@ -99,7 +99,7 @@ A plain non-git directory can only use this mode: worktree mode covers git repos
 </Tab>
 <Tab value="worktree (Parallel)" id="worktree">
 
-With built-in Claude Code 2.1.281+ or Codex 0.169.0+, Multica keeps runtime instructions, skills, and task metadata outside the checkout. Your own edits to `CLAUDE.md` and `AGENTS.md` remain ordinary Git changes. Older or unknown CLI versions retain file injection and log a warning. Other providers and `in_place` keep their existing behavior. At finalization, Multica checks every commit made during the run for runtime content and warns if it finds any; it does not rewrite history.
+With built-in Claude Code 2.1.281+ or Codex 0.169.0+, Multica keeps runtime instructions, skills, and task metadata outside the checkout. Your own edits to `CLAUDE.md` and `AGENTS.md` remain ordinary Git changes. Older or unknown CLI versions retain file injection and log a warning. Other providers and `in_place` keep their existing behavior. A Codex conversation continues only while these runtime instructions are unchanged; after they change (for example, the agent's skills or the project context), the next run starts a new conversation and tells the agent. At finalization, Multica checks every commit made during the run for runtime content and warns if it finds any; it does not rewrite history.
 
 Each run gets its own [git worktree](https://git-scm.com/docs/git-worktree) of your repo, created inside the runtime's own workspace directory. Runs on the same directory run concurrently without waiting, and none of them write to your working copy.
 
