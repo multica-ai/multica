@@ -130,6 +130,7 @@ func TestNotification_CurrentMembership(t *testing.T) {
 						fx.Cleanup(t, `DELETE FROM issue_subscriber WHERE issue_id = $1`, subscriberIssue)
 					}
 					addTestSubscriber(t, subscriberIssue, "member", recipient, "manual")
+					enableStatusChanges(t, recipient)
 					e.Type = protocol.EventIssueUpdated
 					issue.Status = "done"
 					payload["issue"], payload["status_changed"], payload["prev_status"] = issue, true, "todo"

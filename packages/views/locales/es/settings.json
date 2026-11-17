@@ -850,7 +850,7 @@
     },
     "others_issues": {
       "label": "Tareas de otras personas",
-      "description": "Tareas asignadas a otra persona o a su agente, que sigues solo porque las creaste, comentaste o te mencionaron. Las actualizaciones clave son las @menciones, las respuestas en hilos en los que participaste y los estados que necesitan a una persona, como en revisión, bloqueada o terminada.",
+      "description": "Tareas asignadas a otra persona o a su agente, que sigues solo porque las creaste, comentaste o te mencionaron. Las actualizaciones clave son las @menciones, las respuestas en hilos en los que participaste y, con Cambios de estado activado, los estados que necesitan a una persona, como en revisión, bloqueada o terminada.",
       "key_updates": "Solo actualizaciones clave",
       "all": "Toda la actividad"
     },

@@ -56,7 +56,9 @@ var parentBubbleNotifTypes = map[string]bool{
 // comment lands on the row a handoff would light anyway.
 //
 // An agent that cannot proceed reaches the human as a blocked status change,
-// which the handoff rule in deliverDelegated already delivers.
+// which the handoff rule in deliverDelegated delivers to a member who turned
+// status changes on, and as the comment explaining the blocker, which always
+// arrives.
 var delegatedAlwaysNotifTypes = map[string]bool{
 	"mentioned":   true,
 	"new_comment": true,

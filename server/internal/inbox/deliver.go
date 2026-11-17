@@ -50,7 +50,7 @@ func Deliver(ctx context.Context, queries *db.Queries, pub Publisher, n Notifica
 		if prefs == nil {
 			prefs = LoadPreferences(ctx, queries, n.Params.WorkspaceID, []pgtype.UUID{n.Params.RecipientID})
 		}
-		if p, ok := prefs[util.UUIDToString(n.Params.RecipientID)]; ok && Muted(p, n.Params.Type) {
+		if Muted(prefs[util.UUIDToString(n.Params.RecipientID)], n.Params.Type) {
 			return db.InboxItem{}, false, nil
 		}
 	}
