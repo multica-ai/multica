@@ -1,10 +1,7 @@
 /**
  * Projects browse page. Flat FlatList over the workspace's projects.
  *
- * Title and `+` button live in the native iOS Stack header (declared via
- * Stack.Screen options in parent `_layout.tsx`, overridden here to add
- * `headerRight`). Rendering an in-body title row on top of the native bar
- * would stack two "Projects" labels vertically.
+ * The tab-root header owns the title, top safe area and create button.
  *
  * Sort: client-side by `updated_at` desc — most recently touched at top.
  * Mirrors web's default list ordering. WS `project:*` events keep the cache
@@ -19,11 +16,11 @@ import {
   RefreshControl,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
-import { Stack, router } from "expo-router";
+import { router } from "expo-router";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
+import { Header } from "@/components/ui/header";
 import { IconButton } from "@/components/ui/icon-button";
 import { ProjectRow } from "@/components/project/project-row";
 import { projectListOptions } from "@/data/queries/projects";
@@ -51,14 +48,9 @@ export default function ProjectsPage() {
     if (wsSlug) router.push(`/${wsSlug}/project/new`);
   }, [wsSlug]);
 
-  const headerRight = useCallback(() => {
-    return <PlusButton onPress={goCreate} />;
-  }, [goCreate]);
-
   return (
-    <SafeAreaView className="flex-1 bg-background" edges={[]}>
-      <Stack.Screen options={{ headerRight }} />
-
+    <View className="flex-1 bg-background">
+      <Header title={t("navigation:tabs.projects")} right={<PlusButton onPress={goCreate} />} />
       {isLoading ? (
         <View className="flex-1 items-center justify-center">
           <ActivityIndicator />
@@ -97,7 +89,7 @@ export default function ProjectsPage() {
           contentContainerClassName="pb-6"
         />
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 

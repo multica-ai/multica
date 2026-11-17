@@ -2,14 +2,14 @@
   "back": "返回",
   "tabs": {
     "inbox": "收件箱",
+    "issues": "任务",
+    "projects": "项目",
     "my_issues": "我的任务",
     "chat": "聊天",
     "more": "更多"
   },
   "more_menu": {
     "pinned": "已固定",
-    "issues": "任务",
-    "projects": "项目",
     "account_settings": "账号设置"
   },
   "routes": {

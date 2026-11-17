@@ -13,10 +13,10 @@
  * top comment.
  *
  * Rendering split by `item_type`:
- *   - issue → existing `<IssueRow>` (used by my-issues / more/issues /
+ *   - issue → existing `<IssueRow>` (used by my-issues / issues /
  *     project-related-issues), `showStatus` because pins are heterogeneous
  *     (no section grouping by status).
- *   - project → existing `<ProjectRow>` (used by more/projects).
+ *   - project → existing `<ProjectRow>` (used by the Projects tab).
  *
  * Missing / no-permission rows: the detail query may 404 (issue/project
  * deleted, user lost access, server returned a parseWithFallback fallback

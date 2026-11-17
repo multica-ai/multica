@@ -2,14 +2,14 @@
   "back": "Back",
   "tabs": {
     "inbox": "Inbox",
+    "issues": "Issues",
+    "projects": "Projects",
     "my_issues": "My Issues",
     "chat": "Chat",
     "more": "More"
   },
   "more_menu": {
     "pinned": "Pinned",
-    "issues": "Issues",
-    "projects": "Projects",
     "account_settings": "Account settings"
   },
   "routes": {

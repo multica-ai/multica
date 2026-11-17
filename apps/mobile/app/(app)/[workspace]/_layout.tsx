@@ -317,20 +317,6 @@ export default function WorkspaceLayout() {
             WorkspaceCard. Two-step (pick → iOS Alert confirm → switch). */}
         <Stack.Screen name="switch-workspace" options={SHEET_OPTIONS} />
         <Stack.Screen
-          name="more/issues"
-            options={{
-              title: t("navigation:routes.issues"),
-              headerBackTitle: t("back"),
-            }}
-        />
-        <Stack.Screen
-          name="more/projects"
-            options={{
-              title: t("navigation:routes.projects"),
-              headerBackTitle: t("back"),
-            }}
-        />
-        <Stack.Screen
           name="more/agents"
             options={{
               title: t("navigation:routes.agents"),

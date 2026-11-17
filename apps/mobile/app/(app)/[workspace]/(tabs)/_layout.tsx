@@ -9,7 +9,7 @@
  * DropdownMenu popover anchored above the tab. The popover is rendered
  * by `<MoreTabDropdownAnchor />` as a sibling of `<Tabs>`, NOT as a
  * `tabBarButton` replacement: keeping the real tab button intact means
- * the icon + "More" label render identically to the other three tabs.
+ * the icon + "More" label render identically to the other tabs.
  * We just open the dropdown imperatively from `listeners.tabPress` via
  * the exposed `TriggerRef.open()`.
  *
@@ -94,13 +94,27 @@ export default function TabsLayout() {
           }}
         />
         <Tabs.Screen
-          name="my-issues"
+          name="issues"
           options={{
-            title: t("tabs.my_issues"),
+            title: t("tabs.issues"),
             tabBarIcon: ({ color, size, focused }) => (
               <PlatformIcon
-                ios={focused ? "checklist" : "checklist.unchecked"}
-                android={focused ? "checkbox" : "checkbox-outline"}
+                ios="list.bullet"
+                android={focused ? "list" : "list-outline"}
+                size={size}
+                color={color}
+              />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="projects"
+          options={{
+            title: t("tabs.projects"),
+            tabBarIcon: ({ color, size, focused }) => (
+              <PlatformIcon
+                ios={focused ? "square.stack.fill" : "square.stack"}
+                android={focused ? "layers" : "layers-outline"}
                 size={size}
                 color={color}
               />
@@ -147,6 +161,7 @@ export default function TabsLayout() {
             },
           })}
         />
+        <Tabs.Screen name="my-issues" options={{ href: null }} />
       </Tabs>
 
       <MoreTabDropdownAnchor triggerRef={moreTriggerRef} />

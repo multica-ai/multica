@@ -31,10 +31,8 @@ import type {
 } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
-// Header chrome (back + "Issues" title) comes from the parent Stack
-// (`apps/mobile/app/(app)/[workspace]/_layout.tsx:269`). The Filter
-// affordance now lives in <ScopeToolbar> below, matching web's
-// IssuesHeader pattern (scope + filter share a row).
+import { Header } from "@/components/ui/header";
+import { HeaderActions } from "@/components/ui/app-header-actions";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { IssueRow } from "@/components/issue/issue-row";
 import { IssuesLoading } from "@/components/issue/issues-loading";
@@ -124,6 +122,7 @@ export default function IssuesPage() {
 
   return (
     <View className="flex-1 bg-background">
+      <Header title={t("navigation:tabs.issues")} right={<HeaderActions />} />
       <ScopeToolbar
         scopes={scopeItems}
         scope={scope}

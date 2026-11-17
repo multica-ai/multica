@@ -105,8 +105,8 @@ Increase `EXPO_ANDROID_VERSION_CODE` for each distributed update. Keep the
 application ID and signing key stable:
 
 ```bash
-EXPO_ANDROID_VERSION_CODE=3 pnpm -C apps/mobile android:release
-adb install -r apps/mobile/dist/android/production/multica-0.1.3-6.apk
+EXPO_ANDROID_VERSION_CODE=7 pnpm -C apps/mobile android:release
+adb install -r apps/mobile/dist/android/production/multica-0.1.4-7.apk
 ```
 
 ## Verification

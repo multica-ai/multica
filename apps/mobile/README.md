@@ -7,6 +7,10 @@ signing, production/staging/private endpoints and standalone APK verification.
 `pnpm -C apps/mobile android:release` builds a signed production APK using your
 external keystore. The iPhone instructions below require macOS/Xcode.
 
+The bottom bar opens Inbox, Issues, Projects, Chat and More directly.
+My Issues is hidden from the bar. More contains account settings, the workspace
+switcher and pinned items.
+
 ## Just want to use it on your phone? (no development)
 
 Multica isn't on the App Store yet — until that changes, anyone who wants it on their iPhone builds from source. One command:

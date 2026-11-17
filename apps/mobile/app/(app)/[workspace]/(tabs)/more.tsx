@@ -1,6 +1,6 @@
 /**
  * Stub route. The "More" tab in (tabs)/_layout.tsx intercepts tabPress and
- * pushes /[workspace]/menu (formSheet route) instead of navigating here,
+ * opens the More dropdown instead of navigating here,
  * so this screen is never rendered through normal use. expo-router still
  * requires a file to exist at this path to register the Tabs.Screen entry.
  *

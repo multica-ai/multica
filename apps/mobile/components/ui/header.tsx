@@ -10,7 +10,7 @@
  * (`bg-background`, `text-foreground`, `border-border`) so dark mode flips
  * via NativeWind without any logic here.
  *
- * For push screens (issue/[id], more/issues, etc.) keep using the native
+ * For push screens (issue/[id], project/[id], etc.) keep using the native
  * Stack header — that's where the iOS back button + swipe-to-dismiss come
  * from. This component is for tab roots only.
  */
