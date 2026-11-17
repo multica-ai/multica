@@ -17,6 +17,7 @@ const (
 	PathTaskMessages  = "/tasks/{task_id}/messages"
 	PathStorageScope  = "/storage/{scope}"
 	PathStorageValue  = "/storage/{scope}/{key}"
+	PathChannelSend   = "/channels/{channel_type}/send"
 )
 
 type ContractKind string
@@ -66,4 +67,5 @@ var Operations = []Operation{
 	{Method: http.MethodGet, Path: PathStorageValue, Contract: ContractPluginExtension, Policy: OperationPolicy{Credentials: pluginCredentials, Risk: RiskRead, Audit: AuditNotRequired, RateLimits: pluginRateLimits}},
 	{Method: http.MethodPut, Path: PathStorageValue, Contract: ContractPluginExtension, Policy: OperationPolicy{Credentials: pluginCredentials, Risk: RiskContentWrite, Audit: AuditPlanned, RateLimits: pluginRateLimits}},
 	{Method: http.MethodDelete, Path: PathStorageValue, Contract: ContractPluginExtension, Policy: OperationPolicy{Credentials: pluginCredentials, Risk: RiskContentWrite, Audit: AuditPlanned, RateLimits: pluginRateLimits}},
+	{Method: http.MethodPost, Path: PathChannelSend, Contract: ContractPluginExtension, Policy: OperationPolicy{Credentials: pluginCredentials, Scope: "channels:send", Risk: RiskContentWrite, Audit: AuditPlanned, RateLimits: pluginRateLimits}},
 }
