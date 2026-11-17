@@ -198,6 +198,8 @@ func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemRespons
 }
 
 func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
+	r, cancel := h.inboxReadRequest(r)
+	defer cancel()
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -215,18 +217,20 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 	// Notifications about private-project issues are not written for
 	// outsiders (CreateInboxItem); this read filter also drops older rows once
 	// the reader loses access.
-	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	hidden, ok := h.requestInboxHiddenProjects(w, r, workspaceID)
 	if !ok {
 		return
 	}
-	items, err := h.Queries.ListInboxItems(r.Context(), db.ListInboxItemsParams{
-		WorkspaceID:      wsUUID,
-		RecipientType:    "member",
-		RecipientID:      parseUUID(userID),
-		HiddenProjectIds: hidden.Param(),
+	items, err := runInboxRead(r.Context(), h, "list", func(ctx context.Context, q *db.Queries) ([]db.ListInboxItemsRow, error) {
+		return q.ListInboxItems(ctx, db.ListInboxItemsParams{
+			WorkspaceID:      wsUUID,
+			RecipientType:    "member",
+			RecipientID:      parseUUID(userID),
+			HiddenProjectIds: hidden.Param(),
+		})
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list inbox")
+		writeInboxReadError(w, err, "failed to list inbox")
 		return
 	}
 
@@ -256,7 +260,7 @@ func (h *Handler) requireInboxOwnerAccess(w http.ResponseWriter, r *http.Request
 			return deny()
 		}
 		slog.Warn("resolve inbox access failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to resolve inbox access")
+		writeInboxReadError(w, err, "failed to resolve inbox access")
 		return false
 	}
 	// A cloud-node PAT has no authenticated task binding or human trigger.
@@ -298,6 +302,8 @@ func (h *Handler) requireInboxOwnerAccess(w http.ResponseWriter, r *http.Request
 // groups and returns only each group's newest row plus its optional comment
 // anchor — see the query comment for both the bound and the grouping contract.
 func (h *Handler) ListArchivedInbox(w http.ResponseWriter, r *http.Request) {
+	r, cancel := h.inboxReadRequest(r)
+	defer cancel()
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -312,18 +318,20 @@ func (h *Handler) ListArchivedInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	hidden, ok := h.requestInboxHiddenProjects(w, r, workspaceID)
 	if !ok {
 		return
 	}
-	items, err := h.Queries.ListArchivedInboxItems(r.Context(), db.ListArchivedInboxItemsParams{
-		WorkspaceID:      wsUUID,
-		RecipientType:    "member",
-		RecipientID:      parseUUID(userID),
-		HiddenProjectIds: hidden.Param(),
+	items, err := runInboxRead(r.Context(), h, "archived", func(ctx context.Context, q *db.Queries) ([]db.ListArchivedInboxItemsRow, error) {
+		return q.ListArchivedInboxItems(ctx, db.ListArchivedInboxItemsParams{
+			WorkspaceID:      wsUUID,
+			RecipientType:    "member",
+			RecipientID:      parseUUID(userID),
+			HiddenProjectIds: hidden.Param(),
+		})
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list archived inbox")
+		writeInboxReadError(w, err, "failed to list archived inbox")
 		return
 	}
 
@@ -493,6 +501,8 @@ func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
+	r, cancel := h.inboxReadRequest(r)
+	defer cancel()
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -503,18 +513,20 @@ func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	hidden, ok := h.requestInboxHiddenProjects(w, r, workspaceID)
 	if !ok {
 		return
 	}
-	count, err := h.Queries.CountUnreadInbox(r.Context(), db.CountUnreadInboxParams{
-		WorkspaceID:      wsUUID,
-		RecipientType:    "member",
-		RecipientID:      parseUUID(userID),
-		HiddenProjectIds: hidden.Param(),
+	count, err := runInboxRead(r.Context(), h, "unread_count", func(ctx context.Context, q *db.Queries) (int64, error) {
+		return q.CountUnreadInbox(ctx, db.CountUnreadInboxParams{
+			WorkspaceID:      wsUUID,
+			RecipientType:    "member",
+			RecipientID:      parseUUID(userID),
+			HiddenProjectIds: hidden.Param(),
+		})
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to count unread inbox")
+		writeInboxReadError(w, err, "failed to count unread inbox")
 		return
 	}
 
@@ -535,17 +547,24 @@ type InboxWorkspaceUnreadResponse struct {
 // account-level by nature: it ignores the active workspace and keys only on
 // the authenticated user.
 func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
+	r, cancel := h.inboxReadRequest(r)
+	defer cancel()
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
 	}
 
-	rows, err := h.Queries.CountUnreadInboxByWorkspace(r.Context(), parseUUID(userID))
+	value, err := h.inboxReadGuard().Summary(r.Context(), userID, func(ctx context.Context) (any, error) {
+		return runInboxRead(ctx, h, "summary", func(ctx context.Context, q *db.Queries) ([]db.CountUnreadInboxByWorkspaceRow, error) {
+			return q.CountUnreadInboxByWorkspace(ctx, parseUUID(userID))
+		})
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to summarize unread inbox")
+		writeInboxReadError(w, err, "failed to summarize unread inbox")
 		return
 	}
 
+	rows := value.([]db.CountUnreadInboxByWorkspaceRow)
 	resp := make([]InboxWorkspaceUnreadResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = InboxWorkspaceUnreadResponse{

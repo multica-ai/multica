@@ -3193,8 +3193,8 @@ export class ApiClient {
   }
 
   // Inbox
-  async listInbox(): Promise<InboxItem[]> {
-    const raw = await this.fetch<unknown>("/api/inbox");
+  async listInbox(signal?: AbortSignal): Promise<InboxItem[]> {
+    const raw = await this.fetch<unknown>("/api/inbox", { signal });
     return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
       endpoint: "GET /api/inbox",
     });
@@ -3252,8 +3252,8 @@ export class ApiClient {
   }
 
   // The viewer's snoozed issues, soonest back first (MUL-9333).
-  async listSnoozedInbox(): Promise<SnoozedInboxIssue[]> {
-    const raw = await this.fetch<unknown>("/api/inbox/snoozed");
+  async listSnoozedInbox(signal?: AbortSignal): Promise<SnoozedInboxIssue[]> {
+    const raw = await this.fetch<unknown>("/api/inbox/snoozed", { signal });
     return parseWithFallback(raw, SnoozedInboxListSchema, EMPTY_SNOOZED_INBOX, {
       endpoint: "GET /api/inbox/snoozed",
     });
@@ -3275,8 +3275,8 @@ export class ApiClient {
   // to that has unread inbox items. Backs the workspace-switcher dot for
   // OTHER workspaces. Schema-guarded so a contract drift hides the dot rather
   // than crashing the sidebar.
-  async getInboxUnreadSummary(): Promise<InboxWorkspaceUnread[]> {
-    const raw = await this.fetch<unknown>("/api/inbox/unread-summary");
+  async getInboxUnreadSummary(signal?: AbortSignal): Promise<InboxWorkspaceUnread[]> {
+    const raw = await this.fetch<unknown>("/api/inbox/unread-summary", { signal });
     return parseWithFallback(raw, InboxUnreadSummarySchema, EMPTY_INBOX_UNREAD_SUMMARY, {
       endpoint: "GET /api/inbox/unread-summary",
     });
