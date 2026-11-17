@@ -184,6 +184,9 @@
     "url_copied": "已复制 Webhook URL",
     "url_copy_failed": "复制失败",
     "edit_schedule": "编辑时间表",
+    "edit_webhook": "编辑 Webhook",
+    "event_filter_summary_all": "接收所有事件",
+    "event_filter_summary_conditions_other": "{{count}} 个条件",
     "rotate_url": "重新生成 URL",
     "rotate_confirm_title": "重新生成 Webhook URL",
     "rotate_confirm_description": "当前 URL 将立即失效。所有调用它的外部系统都需要更新为新 URL。继续吗？",
@@ -285,6 +288,12 @@
     "toast_updated": "时间表已更新",
     "toast_update_failed": "更新时间表失败"
   },
+  "edit_webhook_dialog": {
+    "title": "编辑 Webhook",
+    "label_placeholder": "例如：GitHub PR",
+    "toast_updated": "Webhook 已更新",
+    "toast_update_failed": "更新 Webhook 失败"
+  },
   "dialog": {
     "sr_create": "新建自动化",
     "sr_edit": "编辑自动化",
@@ -363,6 +372,7 @@
     "event_filter_condition_values_placeholder": "main, release",
     "event_filter_condition_ignore_case": "忽略大小写",
     "schedule_multiple_notice": "该自动化有 {{count}} 条时间表。关闭此弹窗，在下方「触发器」中逐条编辑。",
+    "webhook_multiple_notice": "该自动化有多个 Webhook。关闭此弹窗，在下方「触发器」中逐条编辑。",
     "schedule_empty": "还没有时间表——这个自动化只在手动触发时运行。",
     "schedule_add": "添加时间表",
     "error_title_required": "请填写自动化名称。",

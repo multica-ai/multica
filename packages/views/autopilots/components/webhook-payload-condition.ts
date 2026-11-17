@@ -1,4 +1,5 @@
 import type {
+  WebhookEventFilter,
   WebhookPayloadCondition,
   WebhookPayloadConditionValue,
 } from "@multica/core/types";
@@ -78,4 +79,18 @@ export function buildCondition(draft: ConditionDraft): WebhookPayloadCondition |
   }
   if (draft.ignoreCase) condition.ignore_case = true;
   return condition;
+}
+
+// serializeEventFilters returns a stable JSON string so an editor can compare
+// the filters it holds against the snapshot taken on open without depending
+// on reference equality. Normalizes empty actions and conditions to [] so
+// omitted-vs-explicit-empty doesn't show as a phantom change.
+export function serializeEventFilters(filters: WebhookEventFilter[]): string {
+  return JSON.stringify(
+    filters.map((f) => ({
+      event: f.event,
+      actions: f.actions ?? [],
+      conditions: f.conditions ?? [],
+    })),
+  );
 }

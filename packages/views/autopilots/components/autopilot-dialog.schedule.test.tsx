@@ -325,3 +325,59 @@ describe("AutopilotDialog schedule section on an autopilot with several triggers
     expect(mockCreateTrigger).not.toHaveBeenCalled();
   });
 });
+
+// The webhook panel renders for an autopilot whose first trigger is a webhook.
+// It holds one filter list, so with two webhooks it used to show and save the
+// first as if it were the only one. It now hands those to the trigger rows,
+// each of which edits its own webhook.
+describe("AutopilotDialog webhook section", () => {
+  beforeEach(() => {
+    mockUpdateAutopilot.mockReset().mockResolvedValue({ id: AUTOPILOT_ID });
+    mockCreateTrigger.mockReset().mockResolvedValue({ id: "trg-new" });
+    mockUpdateTrigger.mockReset().mockResolvedValue({ id: "trg-hook" });
+  });
+
+  const webhook = (overrides: Partial<AutopilotTrigger> = {}) =>
+    trigger({
+      id: "trg-hook",
+      kind: "webhook",
+      cron_expression: null,
+      timezone: null,
+      webhook_token: "tok-1",
+      event_filters: [{ event: "pull_request" }],
+      ...overrides,
+    });
+
+  it("edits the filters of the autopilot's only webhook", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([webhook(), trigger({ id: "trg-sched" })]);
+
+    await user.click(screen.getByRole("button", { name: "Remove filter" }));
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).toEqual({
+      autopilotId: AUTOPILOT_ID,
+      triggerId: "trg-hook",
+      event_filters: [],
+    });
+  });
+
+  it("sends the reader to the trigger rows instead of editing the first of several webhooks", async () => {
+    const user = userEvent.setup();
+    renderEditDialog([webhook(), webhook({ id: "trg-hook-2", webhook_token: "tok-2" })]);
+
+    expect(
+      screen.getByText(
+        "This autopilot has more than one webhook. Close this dialog and edit each one under Triggers below.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove filter" })).not.toBeInTheDocument();
+
+    await user.click(saveButton());
+
+    // Other fields still save; the webhooks are left to their rows.
+    await waitFor(() => expect(mockUpdateAutopilot).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger).not.toHaveBeenCalled();
+  });
+});

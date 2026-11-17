@@ -45,7 +45,7 @@ import { AutopilotDemo } from "@/components/demos/autopilot-demo";
 
 ## 按時間執行
 
-時間表編輯器可以選擇執行時間、重複日期、時間視窗和時區，並預覽接下來的執行時間。一條自動化可以新增多個時間表；單獨啟停某個觸發器要用 CLI 的 `autopilot trigger-update`，引數見 [CLI 命令](/cli)。
+時間表編輯器可以選擇執行時間、重複日期、時間視窗和時區，並預覽接下來的執行時間。一條自動化可以新增多個時間表；要修改或單獨啟停某個觸發器，點「觸發器」中該行的編輯按鈕，或用 CLI 的 `autopilot trigger-update`，引數見 [CLI 命令](/cli)。
 
 規則更復雜時，直接編輯標準 5 欄位 cron：
 
@@ -87,7 +87,7 @@ Webhook 請求的約束：
 
 ### 過濾事件 [#事件過濾]
 
-同一個來源會傳送多種事件時，給觸發器加上事件過濾。每行一個事件名，加可選的 action 列表；任意一行命中就執行，全部留空則接收所有事件。
+同一個來源會傳送多種事件時，給觸發器加上事件過濾。每行一個事件名，加可選的 action 列表；任意一行命中就執行，全部留空則接收所有事件。要編輯某個 Webhook 的過濾，點「觸發器」中該行的 **編輯 Webhook**。
 
 例如，事件名填寫 `workflow_run`，Actions 填寫 `completed, failed`，只會接收這兩類 `workflow_run` 結果。Multica 會從常見請求頭和 payload 中識別事件與 action，包括 GitHub 的 `X-GitHub-Event` 和 body 中的 `action`。
 

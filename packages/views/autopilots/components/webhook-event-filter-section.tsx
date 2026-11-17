@@ -307,7 +307,10 @@ export function WebhookEventFilterSection({
         </div>
       )}
 
-      <div className="flex gap-2">
+      {/* Actions widen only where the row has room (the per-webhook dialog),
+          so their placeholder isn't clipped there; the autopilot dialog's side
+          panel keeps w-28, which leaves the event placeholder whole. */}
+      <div className="@container/ef-add flex gap-2">
         <input
           type="text"
           value={newEvent}
@@ -332,7 +335,7 @@ export function WebhookEventFilterSection({
             }
           }}
           placeholder={t(($) => $.dialog.event_filter_actions_placeholder)}
-          className="w-28 rounded-md border bg-background px-2.5 py-1.5 text-caption outline-none focus:ring-1 focus:ring-ring"
+          className="w-28 rounded-md border bg-background px-2.5 py-1.5 text-caption outline-none focus:ring-1 focus:ring-ring @sm/ef-add:w-36"
         />
         <button
           type="button"
@@ -352,6 +355,50 @@ export function WebhookEventFilterSection({
       <p className="text-micro text-muted-foreground">
         {t(($) => $.dialog.event_filter_hint)}
       </p>
+    </div>
+  );
+}
+
+// How many rules the trigger row spells out before folding the rest into "+N".
+const SUMMARY_RULE_LIMIT = 3;
+
+// The read-only readback of a webhook's filters on its trigger row, so the row
+// says what it will ignore without opening the editor. No filters is a state
+// worth stating: it means every delivery starts a run.
+export function WebhookEventFilterSummary({ filters }: { filters: WebhookEventFilter[] }) {
+  const { t } = useT("autopilots");
+  const shown = filters.slice(0, SUMMARY_RULE_LIMIT);
+  const hidden = filters.length - shown.length;
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-caption text-muted-foreground">
+      <Filter className="size-3 shrink-0" aria-label={t(($) => $.dialog.event_filter_label)} />
+      {filters.length === 0 ? (
+        <span>{t(($) => $.trigger_row.event_filter_summary_all)}</span>
+      ) : (
+        <>
+          {shown.map((f, idx) => {
+            const conditionCount = f.conditions?.length ?? 0;
+            const actions = f.actions && f.actions.length > 0 ? f.actions.join(", ") : null;
+            const conditions =
+              conditionCount > 0
+                ? t(($) => $.trigger_row.event_filter_summary_conditions, { count: conditionCount })
+                : null;
+            const text = [f.event, actions, conditions].filter(Boolean).join(" · ");
+            return (
+              <span
+                key={idx}
+                title={text}
+                className="inline-block max-w-full truncate rounded-xs border bg-background px-1.5"
+              >
+                <span className="font-mono text-foreground">{f.event}</span>
+                {actions && <span> {actions}</span>}
+                {conditions && <span> · {conditions}</span>}
+              </span>
+            );
+          })}
+          {hidden > 0 && <span>+{hidden}</span>}
+        </>
+      )}
     </div>
   );
 }

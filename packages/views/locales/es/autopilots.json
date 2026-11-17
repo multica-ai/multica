@@ -184,6 +184,10 @@
     "url_copied": "URL del webhook copiada",
     "url_copy_failed": "No se ha podido copiar",
     "edit_schedule": "Editar programación",
+    "edit_webhook": "Editar webhook",
+    "event_filter_summary_all": "Acepta todos los eventos",
+    "event_filter_summary_conditions_one": "{{count}} condición",
+    "event_filter_summary_conditions_other": "{{count}} condiciones",
     "rotate_url": "Rotar URL",
     "rotate_confirm_title": "Rotar URL del webhook",
     "rotate_confirm_description": "La URL actual dejará de funcionar inmediatamente. Cualquier sistema externo que la llame debe actualizarse con la nueva URL. ¿Continuar?",
@@ -285,6 +289,12 @@
     "toast_updated": "Programación actualizada",
     "toast_update_failed": "No se ha podido actualizar la programación"
   },
+  "edit_webhook_dialog": {
+    "title": "Editar webhook",
+    "label_placeholder": "p. ej., Pull requests de GitHub",
+    "toast_updated": "Webhook actualizado",
+    "toast_update_failed": "No se ha podido actualizar el webhook"
+  },
   "dialog": {
     "sr_create": "Nueva automatización",
     "sr_edit": "Editar automatización",
@@ -346,6 +356,7 @@
     "event_filter_remove_label": "Quitar filtro",
     "event_filter_hint": "Solo se procesan eventos que coinciden con una regla y todas sus condiciones. Deja vacío para aceptar todos los eventos.",
     "schedule_multiple_notice": "Esta automatización tiene {{count}} programaciones. Cierra este diálogo y edita cada una en Disparadores, más abajo.",
+    "webhook_multiple_notice": "Esta automatización tiene varios webhooks. Cierra este diálogo y edita cada uno en Disparadores, más abajo.",
     "schedule_empty": "Sin programación: esta automatización solo se ejecuta cuando se dispara manualmente.",
     "schedule_add": "Añadir programación",
     "error_title_required": "Introduce un nombre para esta automatización.",

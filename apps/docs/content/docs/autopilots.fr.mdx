@@ -45,7 +45,7 @@ Le mode **Exécution seule** exige que le runtime soit disponible au moment du d
 
 ## Exécuter selon une planification
 
-L'éditeur de planification vous permet de choisir l'heure d'exécution, les jours de répétition, la plage horaire et le fuseau horaire, et affiche un aperçu des prochaines exécutions. Une automatisation peut avoir plusieurs planifications ; l'activation ou la désactivation d'un déclencheur individuel se fait avec la commande CLI `autopilot trigger-update` — voir [Utiliser le CLI](/cli) pour les paramètres.
+L'éditeur de planification vous permet de choisir l'heure d'exécution, les jours de répétition, la plage horaire et le fuseau horaire, et affiche un aperçu des prochaines exécutions. Une automatisation peut avoir plusieurs planifications ; pour modifier, activer ou désactiver un déclencheur individuel, cliquez sur le bouton de modification de sa ligne dans **Déclencheurs**, ou utilisez la commande CLI `autopilot trigger-update` — voir [Utiliser le CLI](/cli) pour les paramètres.
 
 Lorsque vous avez besoin de règles plus complexes, modifiez directement le cron standard à 5 champs :
 
@@ -87,7 +87,7 @@ Contraintes applicables aux requêtes webhook :
 
 ### Filtres d'événements
 
-Lorsqu'une même source envoie plusieurs types d'événements, ajoutez des filtres d'événements au déclencheur. Chaque ligne contient un nom d'événement et une liste facultative d'actions ; une exécution est déclenchée si une ligne correspond, et laisser toutes les lignes vides accepte tous les événements.
+Lorsqu'une même source envoie plusieurs types d'événements, ajoutez des filtres d'événements au déclencheur. Chaque ligne contient un nom d'événement et une liste facultative d'actions ; une exécution est déclenchée si une ligne correspond, et laisser toutes les lignes vides accepte tous les événements. Pour modifier les filtres d'un webhook, cliquez sur **Modifier le webhook** sur sa ligne dans **Déclencheurs**.
 
 Par exemple, avec `workflow_run` comme nom d'événement et `completed, failed` comme actions, seuls ces deux types de résultats `workflow_run` sont acceptés. Multica reconnaît l'événement et l'action à partir des en-têtes de requête et des champs de charge utile courants, notamment l'en-tête `X-GitHub-Event` de GitHub et le champ `action` du corps.
 

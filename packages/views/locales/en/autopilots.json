@@ -184,6 +184,10 @@
     "url_copied": "Webhook URL copied",
     "url_copy_failed": "Failed to copy",
     "edit_schedule": "Edit schedule",
+    "edit_webhook": "Edit webhook",
+    "event_filter_summary_all": "Accepts all events",
+    "event_filter_summary_conditions_one": "{{count}} condition",
+    "event_filter_summary_conditions_other": "{{count}} conditions",
     "rotate_url": "Rotate URL",
     "rotate_confirm_title": "Rotate webhook URL",
     "rotate_confirm_description": "The current URL will stop working immediately. Any external systems calling it must be updated with the new URL. Continue?",
@@ -285,6 +289,12 @@
     "toast_updated": "Schedule updated",
     "toast_update_failed": "Failed to update schedule"
   },
+  "edit_webhook_dialog": {
+    "title": "Edit webhook",
+    "label_placeholder": "e.g. GitHub pull requests",
+    "toast_updated": "Webhook updated",
+    "toast_update_failed": "Failed to update webhook"
+  },
   "dialog": {
     "sr_create": "New Autopilot",
     "sr_edit": "Edit Autopilot",
@@ -363,6 +373,7 @@
     "event_filter_condition_values_placeholder": "main, release",
     "event_filter_condition_ignore_case": "Ignore case",
     "schedule_multiple_notice": "This autopilot has {{count}} schedules. Close this dialog and edit each one under Triggers below.",
+    "webhook_multiple_notice": "This autopilot has more than one webhook. Close this dialog and edit each one under Triggers below.",
     "schedule_empty": "No schedule — this autopilot only runs when triggered manually.",
     "schedule_add": "Add schedule",
     "error_title_required": "Enter a name for this autopilot.",

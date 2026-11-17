@@ -184,6 +184,9 @@
     "url_copied": "已複製 Webhook URL",
     "url_copy_failed": "複製失敗",
     "edit_schedule": "編輯時間表",
+    "edit_webhook": "編輯 Webhook",
+    "event_filter_summary_all": "接收所有事件",
+    "event_filter_summary_conditions_other": "{{count}} 個條件",
     "rotate_url": "重新生成 URL",
     "rotate_confirm_title": "重新生成 Webhook URL",
     "rotate_confirm_description": "當前 URL 將立即失效。所有呼叫它的外部系統都需要更新為新 URL。繼續嗎？",
@@ -285,6 +288,12 @@
     "toast_updated": "時間表已更新",
     "toast_update_failed": "更新時間表失敗"
   },
+  "edit_webhook_dialog": {
+    "title": "編輯 Webhook",
+    "label_placeholder": "例如：GitHub PR",
+    "toast_updated": "Webhook 已更新",
+    "toast_update_failed": "更新 Webhook 失敗"
+  },
   "dialog": {
     "sr_create": "新建自動化",
     "sr_edit": "編輯自動化",
@@ -346,6 +355,7 @@
     "event_filter_remove_label": "移除過濾條件",
     "event_filter_hint": "只處理符合規則且本文符合全部條件的事件。留空則接收所有事件。",
     "schedule_multiple_notice": "該自動化有 {{count}} 條時間表。關閉此彈窗，在下方「觸發器」中逐條編輯。",
+    "webhook_multiple_notice": "該自動化有多個 Webhook。關閉此彈窗，在下方「觸發器」中逐條編輯。",
     "schedule_empty": "還沒有時間表——這個自動化只在手動觸發時執行。",
     "schedule_add": "新增時間表",
     "error_title_required": "請填寫自動化名稱。",
