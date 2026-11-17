@@ -106,6 +106,7 @@
   "mention": {
     "group_users": "Users",
     "group_issues": "Issues",
+    "group_projects": "Projects",
     "all_members": "All members",
     "agent_badge": "Agent",
     "squad_badge": "Squad",
