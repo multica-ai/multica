@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -329,5 +330,180 @@ func TestChatWakeupLimitsCancelAndArchive(t *testing.T) {
 	f.svc.EndForArchivedSession(ctx, f.source.ChatSessionID)
 	if n := f.fx.Count(t, "SELECT count(*) FROM chat_wakeup WHERE chat_session_id = $1 AND status = 'active'", f.session); n != 0 {
 		t.Fatalf("%d wakeup(s) still active after archive", n)
+	}
+}
+
+func TestChatWakeupAnswersTheSenderNotTheSessionOwner(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	sender := f.fx.User(t, "Group sender", fmt.Sprintf("sender-%d@example.test", time.Now().UnixNano()))
+	f.fx.Member(t, f.fx.WorkspaceID, sender, "member")
+	f.fx.Exec(t, "UPDATE agent_task_queue SET initiator_user_id = $1, originator_user_id = $1, accountable_user_id = $1 WHERE id = $2", sender, util.UUIDToString(f.source.ID))
+	f.source.InitiatorUserID = util.MustParseUUID(sender)
+	f.source.OriginatorUserID = f.source.InitiatorUserID
+	f.fx.Exec(t, "UPDATE agent SET owner_id = $1 WHERE id = $2", sender, util.UUIDToString(f.source.AgentID))
+
+	w := f.create(t, ChatWakeupInput{AfterSeconds: 60})
+	if w.RequesterID != f.source.InitiatorUserID {
+		t.Fatalf("requester = %s, want the sender %s", util.UUIDToString(w.RequesterID), sender)
+	}
+	f.at(f.clock.Add(2 * time.Minute))
+	task, _ := f.turn(t, f.process(t, w.ID))
+	if task.InitiatorUserID != w.RequesterID {
+		t.Fatalf("wakeup turn initiator = %s, want the sender", util.UUIDToString(task.InitiatorUserID))
+	}
+}
+
+func TestChatWakeupEndsWhenTheRequesterMayNoLongerRunTheAgent(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	ctx := context.Background()
+	member := f.fx.User(t, "Member", fmt.Sprintf("member-%d@example.test", time.Now().UnixNano()))
+	f.fx.Member(t, f.fx.WorkspaceID, member, "member")
+	f.fx.Exec(t, "UPDATE agent_task_queue SET initiator_user_id = $1 WHERE id = $2", member, util.UUIDToString(f.source.ID))
+	f.source.InitiatorUserID = util.MustParseUUID(member)
+	f.fx.Exec(t, "UPDATE agent SET owner_id = $1 WHERE id = $2", member, util.UUIDToString(f.source.AgentID))
+	w := f.create(t, ChatWakeupInput{AfterSeconds: 60})
+
+	f.fx.Exec(t, "UPDATE agent SET owner_id = $1, permission_mode = 'private' WHERE id = $2", f.fx.UserID, util.UUIDToString(f.source.AgentID))
+	if allowed, err := f.svc.Tasks.MemberMayInvokeAgent(ctx, f.source.AgentID, w.RequesterID); err != nil || allowed {
+		t.Fatalf("fixture: member still may run the agent (allowed=%v, err=%v)", allowed, err)
+	}
+	f.at(f.clock.Add(2 * time.Minute))
+	got := f.process(t, w.ID)
+	if got.LastTaskID.Valid || got.Status != "failed" || got.EndReason.String != "permission_revoked" {
+		t.Fatalf("wakeup after the requester lost access = %+v", got)
+	}
+}
+
+func TestChatWakeupHonorsPrivateProjects(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	ctx := context.Background()
+	member := f.fx.User(t, "Member", fmt.Sprintf("member-%d@example.test", time.Now().UnixNano()))
+	f.fx.Member(t, f.fx.WorkspaceID, member, "member")
+	f.fx.Exec(t, "UPDATE agent_task_queue SET initiator_user_id = $1 WHERE id = $2", member, util.UUIDToString(f.source.ID))
+	f.source.InitiatorUserID = util.MustParseUUID(member)
+	f.fx.Exec(t, "UPDATE agent SET owner_id = $1 WHERE id = $2", member, util.UUIDToString(f.source.AgentID))
+
+	secret := f.fx.Project(t, "Secret", testutil.Cols{"visibility": "private"})
+	hidden := f.fx.Issue(t, "Secret issue", testutil.Cols{"project_id": secret})
+	if access, err := projectaccess.ForMember(ctx, f.q, util.MustParseUUID(f.fx.WorkspaceID), util.MustParseUUID(member)); err != nil || access.CanSeeProject(util.MustParseUUID(secret)) {
+		t.Fatalf("fixture: member can see the private project (err=%v)", err)
+	}
+	cond, _ := json.Marshal(map[string]any{"type": "issue_reply", "issue_id": hidden})
+	if _, err := f.svc.Create(ctx, f.source, ChatWakeupInput{Title: "Watch", Instruction: "Report the reply", Condition: cond}); !errors.Is(err, ErrChatWakeupInput) {
+		t.Fatalf("watching a hidden issue: err = %v, want an input error", err)
+	}
+
+	// Visible when created, private by the time it fires.
+	project := f.fx.Project(t, "Open for now")
+	issue := f.fx.Issue(t, "Watch then hide", testutil.Cols{"project_id": project})
+	cond, _ = json.Marshal(map[string]any{"type": "issue_reply", "issue_id": issue})
+	w := f.create(t, ChatWakeupInput{Condition: cond})
+	f.fx.Exec(t, "UPDATE project SET visibility = 'private' WHERE id = $1", project)
+	f.fx.Insert(t, "comment", testutil.Cols{"workspace_id": f.fx.WorkspaceID, "issue_id": issue, "author_id": f.fx.UserID, "author_type": "member", "content": "posted after it went private"})
+	f.dueNow(t, w.ID)
+	got := f.process(t, w.ID)
+	if got.LastTaskID.Valid || got.Status != "failed" || got.EndReason.String != "access_lost" {
+		t.Fatalf("wakeup watching a now-private issue = %+v", got)
+	}
+}
+
+func TestChatWakeupReplyGoesWhereTheRequestCameFrom(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("web request stays in Multica", func(t *testing.T) {
+		f := newChatWakeupFixture(t)
+		seedChannelTaskBinding(t, f.fx.Pool, f.session)
+		w := f.create(t, ChatWakeupInput{AfterSeconds: 60})
+		f.at(f.clock.Add(2 * time.Minute))
+		task, input := f.turn(t, f.process(t, w.ID))
+		if input.ChannelIngested {
+			t.Fatal("a wakeup asked for on Web was routed to the IM channel")
+		}
+		if _, err := f.q.GetChannelTaskDelivery(ctx, task.ID); err == nil {
+			t.Fatal("a wakeup asked for on Web got an IM delivery snapshot")
+		}
+	})
+
+	t.Run("IM request answers in its thread after /new", func(t *testing.T) {
+		f := newChatWakeupFixture(t)
+		seedChannelTaskBinding(t, f.fx.Pool, f.session)
+		f.fx.Exec(t, `
+			INSERT INTO channel_task_delivery (task_id, binding_id, installation_id, channel_type, channel_chat_id, chat_type, channel_message_id, channel_thread_id, route_revision)
+			SELECT $1, id, installation_id, channel_type, channel_chat_id, chat_type, 'msg-asked', 'thread-asked', route_revision
+			FROM channel_chat_session_binding WHERE chat_session_id = $2`, util.UUIDToString(f.source.ID), f.session)
+		w := f.create(t, ChatWakeupInput{AfterSeconds: 60})
+		f.fx.Exec(t, "UPDATE channel_chat_session_binding SET retired_at = now() WHERE chat_session_id = $1", f.session)
+
+		f.at(f.clock.Add(2 * time.Minute))
+		task, input := f.turn(t, f.process(t, w.ID))
+		if !input.ChannelIngested {
+			t.Fatal("a wakeup asked for in IM was not delivered back to IM")
+		}
+		delivery, err := f.q.GetChannelTaskDelivery(ctx, task.ID)
+		if err != nil {
+			t.Fatalf("wakeup turn delivery: %v", err)
+		}
+		if delivery.ChannelMessageID.String != "msg-asked" || delivery.ChannelThreadID.String != "thread-asked" {
+			t.Fatalf("wakeup turn delivery = %+v, want the asking message's thread", delivery)
+		}
+	})
+}
+
+func TestChatWakeupFirstCheckIsNoLaterThanTheDeadline(t *testing.T) {
+	now := time.Now()
+	p, err := (ChatWakeupInput{IntervalSeconds: 7200, ExpiresInSeconds: 3600}).plan(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.nextEval.Equal(p.expiresAt) {
+		t.Fatalf("first check %s, deadline %s: want the check at the deadline", p.nextEval, p.expiresAt)
+	}
+}
+
+func TestChatWakeupRetriesAFailedReport(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	ctx := context.Background()
+	w := f.create(t, ChatWakeupInput{AfterSeconds: 60})
+	f.at(f.clock.Add(2 * time.Minute))
+	fired := f.process(t, w.ID)
+	first, _ := f.turn(t, fired)
+
+	if _, err := f.svc.Retry(ctx, f.source.ChatSessionID, w.ID); !errors.Is(err, ErrChatWakeupInput) {
+		t.Fatalf("retry while the report is queued: err = %v", err)
+	}
+	f.fx.Exec(t, "UPDATE agent_task_queue SET status = 'failed', completed_at = now() WHERE id = $1", util.UUIDToString(first.ID))
+	listed, err := f.q.ListChatWakeupsForSession(ctx, f.source.ChatSessionID)
+	if err != nil || len(listed) != 1 || listed[0].LastTaskStatus != "failed" {
+		t.Fatalf("listed wakeups = %+v (%v), want the failed report visible", listed, err)
+	}
+
+	retried, err := f.svc.Retry(ctx, f.source.ChatSessionID, w.ID)
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if retried.Status != "fired" || retried.LastTaskID == first.ID {
+		t.Fatalf("retried wakeup = %+v", retried)
+	}
+	second, input := f.turn(t, retried)
+	if !strings.Contains(input.Content, "Tell the user what shipped") || second.InitiatorUserID != w.RequesterID {
+		t.Fatalf("retried turn = %+v\n%s", second, input.Content)
+	}
+
+	f.fx.Exec(t, "UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1", util.UUIDToString(second.ID))
+	if _, err := f.svc.Retry(ctx, f.source.ChatSessionID, w.ID); !errors.Is(err, ErrChatWakeupInput) {
+		t.Fatalf("retry after a delivered report: err = %v", err)
+	}
+}
+
+func TestChatWakeupOutlivingItsConversationIsDropped(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	w := f.create(t, ChatWakeupInput{AfterSeconds: 60})
+	f.fx.Exec(t, "DELETE FROM chat_session WHERE id = $1", f.session)
+	f.at(f.clock.Add(2 * time.Minute))
+	if err := f.svc.process(context.Background(), w.ID); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if n := f.fx.Count(t, "SELECT count(*) FROM chat_wakeup WHERE id = $1", util.UUIDToString(w.ID)); n != 0 {
+		t.Fatal("a wakeup whose conversation is gone was kept")
 	}
 }

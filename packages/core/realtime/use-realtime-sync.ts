@@ -137,6 +137,7 @@ import type {
   ChatQuickActionsFailureState,
   ChatCancelFinalizedPayload,
   ChatWakeupChangedPayload,
+  ChatWakeup,
   ChatMessage,
   ChatMessageEventPayload,
   ChatPendingTask,
@@ -1892,6 +1893,15 @@ export function useRealtimeSync(
       }
     });
 
+    // A wakeup's row shows how its report turn is going (last_task_status),
+    // so task lifecycle in a conversation with started wakeups refreshes it.
+    const refreshWakeupTurns = (sessionId: string) => {
+      const cached = qc.getQueryData<ChatWakeup[]>(chatKeys.wakeups(sessionId));
+      if (cached?.some((w) => w.last_task_id)) {
+        qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      }
+    };
+
     // Lifecycle events are invalidation hints. They intentionally omit queue
     // previews and message ids, so only the pending-task endpoint can author
     // the complete queue shape.
@@ -1934,6 +1944,7 @@ export function useRealtimeSync(
       );
       invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
     });
 
@@ -1985,6 +1996,7 @@ export function useRealtimeSync(
       );
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidateChatMessageQueries(qc, payload.chat_session_id);
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
       invalidateSessionLists();
     });
@@ -2001,6 +2013,7 @@ export function useRealtimeSync(
         (old) => removePendingChatTask(old, payload.task_id),
       );
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
     });
 
@@ -2023,6 +2036,7 @@ export function useRealtimeSync(
       );
       invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
       // FailTask persisted a failure chat_message, so the thread list's
       // last_message / unread_count / sort order changed too. Mirror the

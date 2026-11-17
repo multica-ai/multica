@@ -37,31 +37,43 @@ WHERE workspace_id = @workspace_id AND requester_id = @requester_id AND status =
 
 -- name: ListChatWakeupsForSession :many
 -- Active wakeups plus the ones that ended in the last week, newest first. The
--- last run's status lets a client tell a report that failed from one that is
--- still running.
+-- last turn's status (after any auto-retry) lets a client tell a report that
+-- is waiting, running, delivered or failed apart.
 SELECT
     w.*,
     COALESCE(t.status, '')::text AS last_task_status
 FROM chat_wakeup AS w
-LEFT JOIN agent_task_queue AS t ON t.id = w.last_task_id
+LEFT JOIN LATERAL (
+    SELECT status FROM agent_task_queue
+    WHERE chat_session_id = w.chat_session_id
+      AND (id = w.last_task_id OR chat_input_task_id = w.last_task_id)
+    ORDER BY created_at DESC
+    LIMIT 1
+) AS t ON w.last_task_id IS NOT NULL
 WHERE w.chat_session_id = @chat_session_id
   AND (w.status = 'active' OR w.ended_at > now() - interval '7 days')
 ORDER BY (w.status = 'active') DESC, w.created_at DESC
 LIMIT 50;
 
--- name: ListChatWakeupsForRequester :many
--- Every conversation's wakeups for one person in one workspace: the active
--- ones and those that ended in the last week. Archived conversations are
--- skipped; their wakeups ended when they were archived.
+-- name: ListChatWakeupsForSessionOwner :many
+-- The wakeups of every conversation one person owns in one workspace: the
+-- active ones and those that ended in the last week. Archived conversations
+-- are skipped; their wakeups ended when they were archived.
 SELECT
     w.*,
     COALESCE(t.status, '')::text AS last_task_status,
     s.title AS chat_session_title
 FROM chat_wakeup AS w
 JOIN chat_session AS s ON s.id = w.chat_session_id
-LEFT JOIN agent_task_queue AS t ON t.id = w.last_task_id
+LEFT JOIN LATERAL (
+    SELECT status FROM agent_task_queue
+    WHERE chat_session_id = w.chat_session_id
+      AND (id = w.last_task_id OR chat_input_task_id = w.last_task_id)
+    ORDER BY created_at DESC
+    LIMIT 1
+) AS t ON w.last_task_id IS NOT NULL
 WHERE w.workspace_id = @workspace_id
-  AND w.requester_id = @requester_id
+  AND s.creator_id = @owner_id
   AND s.status = 'active'
   AND (w.status = 'active' OR w.ended_at > now() - interval '7 days')
 ORDER BY (w.status = 'active') DESC, w.created_at DESC
@@ -100,6 +112,16 @@ SET last_task_id = @task_id,
     ended_at = CASE WHEN @end_status::text = '' THEN ended_at ELSE now() END,
     next_eval_at = @next_eval_at,
     last_check_note = NULL,
+    last_error = NULL,
+    updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: RecordChatWakeupRetry :one
+-- The person re-ran an ended wakeup's failed turn. Status and end stay.
+UPDATE chat_wakeup
+SET last_task_id = @task_id,
+    last_fired_at = now(),
     last_error = NULL,
     updated_at = now()
 WHERE id = @id
@@ -160,4 +182,28 @@ DELETE FROM chat_message
 WHERE id = $1 AND message_kind = 'wakeup';
 
 -- name: GetChatWakeupTaskStatus :one
-SELECT status FROM agent_task_queue WHERE id = $1;
+-- The status of a wakeup turn, following its auto-retries: they share the
+-- turn's input owner, and the newest one is the turn's current state.
+SELECT status FROM agent_task_queue
+WHERE chat_session_id = @chat_session_id
+  AND (id = @task_id OR chat_input_task_id = @task_id)
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: DeleteChatWakeupsBySession :exec
+-- chat_wakeup has no chat_session FK; DeleteChatSession removes them in its
+-- transaction.
+DELETE FROM chat_wakeup WHERE chat_session_id = $1;
+
+-- name: DeleteChatWakeup :exec
+-- Drops a wakeup whose conversation no longer exists.
+DELETE FROM chat_wakeup WHERE id = $1;
+
+-- name: DeleteChatWakeupsBySystemRuntimeAgents :exec
+-- System agents' sessions cascade away with the agents on runtime teardown;
+-- their wakeups go first, while the join can still find them.
+DELETE FROM chat_wakeup
+WHERE chat_session_id IN (
+    SELECT cs.id FROM chat_session cs JOIN agent a ON a.id = cs.agent_id
+    WHERE a.runtime_id = $1 AND a.kind = 'system'
+);

@@ -280,12 +280,24 @@
     "last_check": "마지막 확인: {{note}}",
     "cancel": "웨이크업 취소",
     "cancel_failed": "웨이크업을 취소하지 못했습니다",
+    "retry": "다시 시도",
+    "retry_failed": "웨이크업을 다시 시도하지 못했습니다",
     "status": {
       "active": "대기 중",
       "fired": "보고함",
       "expired": "기한 도달",
       "cancelled": "취소됨",
       "failed": "실행하지 못함"
+    },
+    "report": {
+      "waiting": "보고 대기 중",
+      "running": "보고 중…",
+      "failed": "보고하지 못했습니다"
+    },
+    "failure": {
+      "permission_revoked": "요청한 사람이 더 이상 이 에이전트를 실행할 수 없습니다",
+      "access_lost": "지켜보던 항목이 비공개 프로젝트로 이동했습니다",
+      "dispatch_failed": "에이전트를 실행할 수 없습니다"
     },
     "kind": {
       "condition": "조건 충족 시",

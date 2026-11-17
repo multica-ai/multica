@@ -285,12 +285,24 @@
     "last_check": "Last check: {{note}}",
     "cancel": "Cancel wakeup",
     "cancel_failed": "Couldn't cancel the wakeup",
+    "retry": "Retry",
+    "retry_failed": "Couldn't retry the wakeup",
     "status": {
       "active": "Waiting",
       "fired": "Reported back",
       "expired": "Deadline reached",
       "cancelled": "Cancelled",
       "failed": "Couldn't run"
+    },
+    "report": {
+      "waiting": "Waiting to report",
+      "running": "Reporting…",
+      "failed": "Couldn't report"
+    },
+    "failure": {
+      "permission_revoked": "The person who asked can no longer run this agent",
+      "access_lost": "What it watched moved to a private project",
+      "dispatch_failed": "The agent couldn't run"
     },
     "kind": {
       "condition": "When it happens",

@@ -280,12 +280,24 @@
     "last_check": "上次檢查：{{note}}",
     "cancel": "取消喚醒",
     "cancel_failed": "無法取消喚醒",
+    "retry": "重試",
+    "retry_failed": "無法重試此喚醒",
     "status": {
       "active": "等待中",
       "fired": "已回報",
       "expired": "已到期",
       "cancelled": "已取消",
       "failed": "未能執行"
+    },
+    "report": {
+      "waiting": "等待回報",
+      "running": "正在回報…",
+      "failed": "回報失敗"
+    },
+    "failure": {
+      "permission_revoked": "發起人已無權執行此智慧代理",
+      "access_lost": "所關注的內容已移入私有專案",
+      "dispatch_failed": "智慧代理無法執行"
     },
     "kind": {
       "condition": "條件滿足時",

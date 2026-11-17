@@ -272,20 +272,40 @@ func (h *Handler) ListChatSessionWakeups(w http.ResponseWriter, r *http.Request)
 	h.listChatWakeups(w, r, session.ID)
 }
 
-func (h *Handler) CancelChatSessionWakeup(w http.ResponseWriter, r *http.Request) {
+// chatSessionWakeupForUser resolves a member-facing wakeup action. The
+// conversation's owner may act on any of its wakeups, and the person who asked
+// for one (in a group chat, not necessarily the owner) may act on theirs.
+func (h *Handler) chatSessionWakeupForUser(w http.ResponseWriter, r *http.Request) (pgtype.UUID, pgtype.UUID, bool) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
-		return
+		return pgtype.UUID{}, pgtype.UUID{}, false
 	}
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, ctxWorkspaceID(r.Context()), chi.URLParam(r, "sessionId"))
+	sessionID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "sessionId"), "session id")
 	if !ok {
-		return
+		return pgtype.UUID{}, pgtype.UUID{}, false
 	}
 	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "wakeupId"), "wakeup id")
 	if !ok {
+		return pgtype.UUID{}, pgtype.UUID{}, false
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	wakeup, err := h.Queries.GetChatWakeupInSession(r.Context(), db.GetChatWakeupInSessionParams{ID: id, ChatSessionID: sessionID})
+	if err == nil && uuidToString(wakeup.WorkspaceID) == workspaceID && uuidToString(wakeup.RequesterID) == userID {
+		return sessionID, id, true
+	}
+	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, chi.URLParam(r, "sessionId"))
+	if !ok {
+		return pgtype.UUID{}, pgtype.UUID{}, false
+	}
+	return session.ID, id, true
+}
+
+func (h *Handler) CancelChatSessionWakeup(w http.ResponseWriter, r *http.Request) {
+	sessionID, id, ok := h.chatSessionWakeupForUser(w, r)
+	if !ok {
 		return
 	}
-	ended, err := h.chatWakeups().Cancel(r.Context(), session.ID, id, "user")
+	ended, err := h.chatWakeups().Cancel(r.Context(), sessionID, id, "user")
 	if err != nil {
 		chatWakeupError(w, err)
 		return
@@ -293,7 +313,21 @@ func (h *Handler) CancelChatSessionWakeup(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, chatWakeupToResponse(ended))
 }
 
-// ListMyChatWakeups lists the caller's wakeups across their conversations in
+// RetryChatSessionWakeup re-runs a wakeup whose report turn failed.
+func (h *Handler) RetryChatSessionWakeup(w http.ResponseWriter, r *http.Request) {
+	sessionID, id, ok := h.chatSessionWakeupForUser(w, r)
+	if !ok {
+		return
+	}
+	retried, err := h.chatWakeups().Retry(r.Context(), sessionID, id)
+	if err != nil {
+		chatWakeupError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, chatWakeupToResponse(retried))
+}
+
+// ListMyChatWakeups lists the wakeups across the caller's conversations in
 // this workspace.
 func (h *Handler) ListMyChatWakeups(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
@@ -304,11 +338,11 @@ func (h *Handler) ListMyChatWakeups(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	requester, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	owner, ok := parseUUIDOrBadRequest(w, userID, "user id")
 	if !ok {
 		return
 	}
-	rows, err := h.Queries.ListChatWakeupsForRequester(r.Context(), db.ListChatWakeupsForRequesterParams{WorkspaceID: workspaceID, RequesterID: requester})
+	rows, err := h.Queries.ListChatWakeupsForSessionOwner(r.Context(), db.ListChatWakeupsForSessionOwnerParams{WorkspaceID: workspaceID, OwnerID: owner})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list chat wakeups")
 		return

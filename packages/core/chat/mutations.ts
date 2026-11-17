@@ -84,6 +84,27 @@ export function useCancelChatWakeup() {
   });
 }
 
+/**
+ * Re-run a wakeup whose report turn failed. The new turn arrives through
+ * chat:wakeup_changed like any other wakeup turn.
+ */
+export function useRetryChatWakeup() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ sessionId, wakeupId }: { sessionId: string; wakeupId: string }) =>
+      api.retryChatWakeup(sessionId, wakeupId),
+    onError: (err, { sessionId }) => {
+      logger.warn("retryChatWakeup.error", { sessionId, err });
+    },
+    onSettled: (_data, _err, { sessionId }) => {
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.myWakeups(wsId) });
+    },
+  });
+}
+
 /** Pin an agent to the quick-agent bar (optimistic append). */
 export function usePinChatAgent() {
   const qc = useQueryClient();

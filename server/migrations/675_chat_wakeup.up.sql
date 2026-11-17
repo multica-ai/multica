@@ -15,13 +15,18 @@
 -- condition holds starts one last turn so the agent can say where things
 -- stand instead of going quiet.
 --
--- requester_id is the person the turn answers to: the session creator.
-CREATE TABLE chat_wakeup (
+-- requester_id is the person the turn answers to: whoever sent the message
+-- that asked for it, which in a group chat need not be the session creator.
+--
+-- No foreign keys (repo rule): DeleteChatSession, workspace teardown and
+-- system-agent deletion remove a session's wakeups in the same transaction,
+-- and the dispatcher drops a wakeup whose session is gone.
+CREATE TABLE IF NOT EXISTS chat_wakeup (
     id UUID PRIMARY KEY,
-    workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-    chat_session_id UUID NOT NULL REFERENCES chat_session(id) ON DELETE CASCADE,
-    agent_id UUID NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
-    requester_id UUID NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    workspace_id UUID NOT NULL,
+    chat_session_id UUID NOT NULL,
+    agent_id UUID NOT NULL,
+    requester_id UUID NOT NULL,
     source_task_id UUID,
     source_message_id UUID,
     title TEXT NOT NULL,
@@ -51,9 +56,7 @@ CREATE TABLE chat_wakeup (
     CHECK ((kind = 'check') = (interval_seconds IS NOT NULL))
 );
 
-CREATE INDEX idx_chat_wakeup_due ON chat_wakeup (next_eval_at) WHERE status = 'active';
-CREATE INDEX idx_chat_wakeup_session ON chat_wakeup (chat_session_id, created_at DESC);
-CREATE INDEX idx_chat_wakeup_requester ON chat_wakeup (workspace_id, requester_id, created_at DESC);
+-- Indexes are built concurrently in 676–678.
 
 -- The hidden input row of a wakeup turn names its wakeup, so clients can head
 -- the reply with what brought the agent back. NULL for every other row.

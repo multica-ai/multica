@@ -353,6 +353,9 @@ deleted_draft_restores AS (
     DELETE FROM chat_draft_restore
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
 ),
+deleted_chat_wakeups AS (
+    DELETE FROM chat_wakeup WHERE workspace_id = $1
+),
 -- Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
 -- than the session set because that column exists precisely so this statement
 -- does not have to join through chat_session, which it deletes in this same CTE.

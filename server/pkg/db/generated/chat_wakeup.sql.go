@@ -195,6 +195,16 @@ func (q *Queries) DeferChatWakeup(ctx context.Context, arg DeferChatWakeupParams
 	return err
 }
 
+const deleteChatWakeup = `-- name: DeleteChatWakeup :exec
+DELETE FROM chat_wakeup WHERE id = $1
+`
+
+// Drops a wakeup whose conversation no longer exists.
+func (q *Queries) DeleteChatWakeup(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChatWakeup, id)
+	return err
+}
+
 const deleteChatWakeupInput = `-- name: DeleteChatWakeupInput :exec
 DELETE FROM chat_message
 WHERE id = $1 AND message_kind = 'wakeup'
@@ -202,6 +212,32 @@ WHERE id = $1 AND message_kind = 'wakeup'
 
 func (q *Queries) DeleteChatWakeupInput(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteChatWakeupInput, id)
+	return err
+}
+
+const deleteChatWakeupsBySession = `-- name: DeleteChatWakeupsBySession :exec
+DELETE FROM chat_wakeup WHERE chat_session_id = $1
+`
+
+// chat_wakeup has no chat_session FK; DeleteChatSession removes them in its
+// transaction.
+func (q *Queries) DeleteChatWakeupsBySession(ctx context.Context, chatSessionID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChatWakeupsBySession, chatSessionID)
+	return err
+}
+
+const deleteChatWakeupsBySystemRuntimeAgents = `-- name: DeleteChatWakeupsBySystemRuntimeAgents :exec
+DELETE FROM chat_wakeup
+WHERE chat_session_id IN (
+    SELECT cs.id FROM chat_session cs JOIN agent a ON a.id = cs.agent_id
+    WHERE a.runtime_id = $1 AND a.kind = 'system'
+)
+`
+
+// System agents' sessions cascade away with the agents on runtime teardown;
+// their wakeups go first, while the join can still find them.
+func (q *Queries) DeleteChatWakeupsBySystemRuntimeAgents(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChatWakeupsBySystemRuntimeAgents, runtimeID)
 	return err
 }
 
@@ -450,122 +486,25 @@ func (q *Queries) GetChatWakeupInputForTask(ctx context.Context, taskID pgtype.U
 }
 
 const getChatWakeupTaskStatus = `-- name: GetChatWakeupTaskStatus :one
-SELECT status FROM agent_task_queue WHERE id = $1
+SELECT status FROM agent_task_queue
+WHERE chat_session_id = $1
+  AND (id = $2 OR chat_input_task_id = $2)
+ORDER BY created_at DESC
+LIMIT 1
 `
 
-func (q *Queries) GetChatWakeupTaskStatus(ctx context.Context, id pgtype.UUID) (string, error) {
-	row := q.db.QueryRow(ctx, getChatWakeupTaskStatus, id)
+type GetChatWakeupTaskStatusParams struct {
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	TaskID        pgtype.UUID `json:"task_id"`
+}
+
+// The status of a wakeup turn, following its auto-retries: they share the
+// turn's input owner, and the newest one is the turn's current state.
+func (q *Queries) GetChatWakeupTaskStatus(ctx context.Context, arg GetChatWakeupTaskStatusParams) (string, error) {
+	row := q.db.QueryRow(ctx, getChatWakeupTaskStatus, arg.ChatSessionID, arg.TaskID)
 	var status string
 	err := row.Scan(&status)
 	return status, err
-}
-
-const listChatWakeupsForRequester = `-- name: ListChatWakeupsForRequester :many
-SELECT
-    w.id, w.workspace_id, w.chat_session_id, w.agent_id, w.requester_id, w.source_task_id, w.source_message_id, w.title, w.instruction, w.kind, w.condition, w.condition_state, w.interval_seconds, w.fire_at, w.next_eval_at, w.expires_at, w.status, w.end_reason, w.ended_at, w.check_count, w.last_check_note, w.last_checked_at, w.last_checkin_task_id, w.last_task_id, w.last_fired_at, w.last_error, w.created_at, w.updated_at,
-    COALESCE(t.status, '')::text AS last_task_status,
-    s.title AS chat_session_title
-FROM chat_wakeup AS w
-JOIN chat_session AS s ON s.id = w.chat_session_id
-LEFT JOIN agent_task_queue AS t ON t.id = w.last_task_id
-WHERE w.workspace_id = $1
-  AND w.requester_id = $2
-  AND s.status = 'active'
-  AND (w.status = 'active' OR w.ended_at > now() - interval '7 days')
-ORDER BY (w.status = 'active') DESC, w.created_at DESC
-LIMIT 100
-`
-
-type ListChatWakeupsForRequesterParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	RequesterID pgtype.UUID `json:"requester_id"`
-}
-
-type ListChatWakeupsForRequesterRow struct {
-	ID                pgtype.UUID        `json:"id"`
-	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
-	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
-	AgentID           pgtype.UUID        `json:"agent_id"`
-	RequesterID       pgtype.UUID        `json:"requester_id"`
-	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
-	SourceMessageID   pgtype.UUID        `json:"source_message_id"`
-	Title             string             `json:"title"`
-	Instruction       string             `json:"instruction"`
-	Kind              string             `json:"kind"`
-	Condition         json.RawMessage    `json:"condition"`
-	ConditionState    string             `json:"condition_state"`
-	IntervalSeconds   pgtype.Int8        `json:"interval_seconds"`
-	FireAt            pgtype.Timestamptz `json:"fire_at"`
-	NextEvalAt        pgtype.Timestamptz `json:"next_eval_at"`
-	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
-	Status            string             `json:"status"`
-	EndReason         pgtype.Text        `json:"end_reason"`
-	EndedAt           pgtype.Timestamptz `json:"ended_at"`
-	CheckCount        int32              `json:"check_count"`
-	LastCheckNote     pgtype.Text        `json:"last_check_note"`
-	LastCheckedAt     pgtype.Timestamptz `json:"last_checked_at"`
-	LastCheckinTaskID pgtype.UUID        `json:"last_checkin_task_id"`
-	LastTaskID        pgtype.UUID        `json:"last_task_id"`
-	LastFiredAt       pgtype.Timestamptz `json:"last_fired_at"`
-	LastError         pgtype.Text        `json:"last_error"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
-	LastTaskStatus    string             `json:"last_task_status"`
-	ChatSessionTitle  string             `json:"chat_session_title"`
-}
-
-// Every conversation's wakeups for one person in one workspace: the active
-// ones and those that ended in the last week. Archived conversations are
-// skipped; their wakeups ended when they were archived.
-func (q *Queries) ListChatWakeupsForRequester(ctx context.Context, arg ListChatWakeupsForRequesterParams) ([]ListChatWakeupsForRequesterRow, error) {
-	rows, err := q.db.Query(ctx, listChatWakeupsForRequester, arg.WorkspaceID, arg.RequesterID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListChatWakeupsForRequesterRow{}
-	for rows.Next() {
-		var i ListChatWakeupsForRequesterRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.ChatSessionID,
-			&i.AgentID,
-			&i.RequesterID,
-			&i.SourceTaskID,
-			&i.SourceMessageID,
-			&i.Title,
-			&i.Instruction,
-			&i.Kind,
-			&i.Condition,
-			&i.ConditionState,
-			&i.IntervalSeconds,
-			&i.FireAt,
-			&i.NextEvalAt,
-			&i.ExpiresAt,
-			&i.Status,
-			&i.EndReason,
-			&i.EndedAt,
-			&i.CheckCount,
-			&i.LastCheckNote,
-			&i.LastCheckedAt,
-			&i.LastCheckinTaskID,
-			&i.LastTaskID,
-			&i.LastFiredAt,
-			&i.LastError,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.LastTaskStatus,
-			&i.ChatSessionTitle,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listChatWakeupsForSession = `-- name: ListChatWakeupsForSession :many
@@ -573,7 +512,13 @@ SELECT
     w.id, w.workspace_id, w.chat_session_id, w.agent_id, w.requester_id, w.source_task_id, w.source_message_id, w.title, w.instruction, w.kind, w.condition, w.condition_state, w.interval_seconds, w.fire_at, w.next_eval_at, w.expires_at, w.status, w.end_reason, w.ended_at, w.check_count, w.last_check_note, w.last_checked_at, w.last_checkin_task_id, w.last_task_id, w.last_fired_at, w.last_error, w.created_at, w.updated_at,
     COALESCE(t.status, '')::text AS last_task_status
 FROM chat_wakeup AS w
-LEFT JOIN agent_task_queue AS t ON t.id = w.last_task_id
+LEFT JOIN LATERAL (
+    SELECT status FROM agent_task_queue
+    WHERE chat_session_id = w.chat_session_id
+      AND (id = w.last_task_id OR chat_input_task_id = w.last_task_id)
+    ORDER BY created_at DESC
+    LIMIT 1
+) AS t ON w.last_task_id IS NOT NULL
 WHERE w.chat_session_id = $1
   AND (w.status = 'active' OR w.ended_at > now() - interval '7 days')
 ORDER BY (w.status = 'active') DESC, w.created_at DESC
@@ -613,8 +558,8 @@ type ListChatWakeupsForSessionRow struct {
 }
 
 // Active wakeups plus the ones that ended in the last week, newest first. The
-// last run's status lets a client tell a report that failed from one that is
-// still running.
+// last turn's status (after any auto-retry) lets a client tell a report that
+// is waiting, running, delivered or failed apart.
 func (q *Queries) ListChatWakeupsForSession(ctx context.Context, chatSessionID pgtype.UUID) ([]ListChatWakeupsForSessionRow, error) {
 	rows, err := q.db.Query(ctx, listChatWakeupsForSession, chatSessionID)
 	if err != nil {
@@ -654,6 +599,120 @@ func (q *Queries) ListChatWakeupsForSession(ctx context.Context, chatSessionID p
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.LastTaskStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChatWakeupsForSessionOwner = `-- name: ListChatWakeupsForSessionOwner :many
+SELECT
+    w.id, w.workspace_id, w.chat_session_id, w.agent_id, w.requester_id, w.source_task_id, w.source_message_id, w.title, w.instruction, w.kind, w.condition, w.condition_state, w.interval_seconds, w.fire_at, w.next_eval_at, w.expires_at, w.status, w.end_reason, w.ended_at, w.check_count, w.last_check_note, w.last_checked_at, w.last_checkin_task_id, w.last_task_id, w.last_fired_at, w.last_error, w.created_at, w.updated_at,
+    COALESCE(t.status, '')::text AS last_task_status,
+    s.title AS chat_session_title
+FROM chat_wakeup AS w
+JOIN chat_session AS s ON s.id = w.chat_session_id
+LEFT JOIN LATERAL (
+    SELECT status FROM agent_task_queue
+    WHERE chat_session_id = w.chat_session_id
+      AND (id = w.last_task_id OR chat_input_task_id = w.last_task_id)
+    ORDER BY created_at DESC
+    LIMIT 1
+) AS t ON w.last_task_id IS NOT NULL
+WHERE w.workspace_id = $1
+  AND s.creator_id = $2
+  AND s.status = 'active'
+  AND (w.status = 'active' OR w.ended_at > now() - interval '7 days')
+ORDER BY (w.status = 'active') DESC, w.created_at DESC
+LIMIT 100
+`
+
+type ListChatWakeupsForSessionOwnerParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+type ListChatWakeupsForSessionOwnerRow struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	RequesterID       pgtype.UUID        `json:"requester_id"`
+	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
+	SourceMessageID   pgtype.UUID        `json:"source_message_id"`
+	Title             string             `json:"title"`
+	Instruction       string             `json:"instruction"`
+	Kind              string             `json:"kind"`
+	Condition         json.RawMessage    `json:"condition"`
+	ConditionState    string             `json:"condition_state"`
+	IntervalSeconds   pgtype.Int8        `json:"interval_seconds"`
+	FireAt            pgtype.Timestamptz `json:"fire_at"`
+	NextEvalAt        pgtype.Timestamptz `json:"next_eval_at"`
+	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
+	Status            string             `json:"status"`
+	EndReason         pgtype.Text        `json:"end_reason"`
+	EndedAt           pgtype.Timestamptz `json:"ended_at"`
+	CheckCount        int32              `json:"check_count"`
+	LastCheckNote     pgtype.Text        `json:"last_check_note"`
+	LastCheckedAt     pgtype.Timestamptz `json:"last_checked_at"`
+	LastCheckinTaskID pgtype.UUID        `json:"last_checkin_task_id"`
+	LastTaskID        pgtype.UUID        `json:"last_task_id"`
+	LastFiredAt       pgtype.Timestamptz `json:"last_fired_at"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LastTaskStatus    string             `json:"last_task_status"`
+	ChatSessionTitle  string             `json:"chat_session_title"`
+}
+
+// The wakeups of every conversation one person owns in one workspace: the
+// active ones and those that ended in the last week. Archived conversations
+// are skipped; their wakeups ended when they were archived.
+func (q *Queries) ListChatWakeupsForSessionOwner(ctx context.Context, arg ListChatWakeupsForSessionOwnerParams) ([]ListChatWakeupsForSessionOwnerRow, error) {
+	rows, err := q.db.Query(ctx, listChatWakeupsForSessionOwner, arg.WorkspaceID, arg.OwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChatWakeupsForSessionOwnerRow{}
+	for rows.Next() {
+		var i ListChatWakeupsForSessionOwnerRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ChatSessionID,
+			&i.AgentID,
+			&i.RequesterID,
+			&i.SourceTaskID,
+			&i.SourceMessageID,
+			&i.Title,
+			&i.Instruction,
+			&i.Kind,
+			&i.Condition,
+			&i.ConditionState,
+			&i.IntervalSeconds,
+			&i.FireAt,
+			&i.NextEvalAt,
+			&i.ExpiresAt,
+			&i.Status,
+			&i.EndReason,
+			&i.EndedAt,
+			&i.CheckCount,
+			&i.LastCheckNote,
+			&i.LastCheckedAt,
+			&i.LastCheckinTaskID,
+			&i.LastTaskID,
+			&i.LastFiredAt,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LastTaskStatus,
+			&i.ChatSessionTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -815,6 +874,58 @@ func (q *Queries) RecordChatWakeupFire(ctx context.Context, arg RecordChatWakeup
 		arg.NextEvalAt,
 		arg.ID,
 	)
+	var i ChatWakeup
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ChatSessionID,
+		&i.AgentID,
+		&i.RequesterID,
+		&i.SourceTaskID,
+		&i.SourceMessageID,
+		&i.Title,
+		&i.Instruction,
+		&i.Kind,
+		&i.Condition,
+		&i.ConditionState,
+		&i.IntervalSeconds,
+		&i.FireAt,
+		&i.NextEvalAt,
+		&i.ExpiresAt,
+		&i.Status,
+		&i.EndReason,
+		&i.EndedAt,
+		&i.CheckCount,
+		&i.LastCheckNote,
+		&i.LastCheckedAt,
+		&i.LastCheckinTaskID,
+		&i.LastTaskID,
+		&i.LastFiredAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const recordChatWakeupRetry = `-- name: RecordChatWakeupRetry :one
+UPDATE chat_wakeup
+SET last_task_id = $1,
+    last_fired_at = now(),
+    last_error = NULL,
+    updated_at = now()
+WHERE id = $2
+RETURNING id, workspace_id, chat_session_id, agent_id, requester_id, source_task_id, source_message_id, title, instruction, kind, condition, condition_state, interval_seconds, fire_at, next_eval_at, expires_at, status, end_reason, ended_at, check_count, last_check_note, last_checked_at, last_checkin_task_id, last_task_id, last_fired_at, last_error, created_at, updated_at
+`
+
+type RecordChatWakeupRetryParams struct {
+	TaskID pgtype.UUID `json:"task_id"`
+	ID     pgtype.UUID `json:"id"`
+}
+
+// The person re-ran an ended wakeup's failed turn. Status and end stay.
+func (q *Queries) RecordChatWakeupRetry(ctx context.Context, arg RecordChatWakeupRetryParams) (ChatWakeup, error) {
+	row := q.db.QueryRow(ctx, recordChatWakeupRetry, arg.TaskID, arg.ID)
 	var i ChatWakeup
 	err := row.Scan(
 		&i.ID,

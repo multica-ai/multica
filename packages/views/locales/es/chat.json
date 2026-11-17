@@ -285,12 +285,24 @@
     "last_check": "Última revisión: {{note}}",
     "cancel": "Cancelar recordatorio",
     "cancel_failed": "No se pudo cancelar el recordatorio",
+    "retry": "Reintentar",
+    "retry_failed": "No se pudo reintentar el aviso",
     "status": {
       "active": "Esperando",
       "fired": "Informado",
       "expired": "Plazo alcanzado",
       "cancelled": "Cancelado",
       "failed": "No se pudo ejecutar"
+    },
+    "report": {
+      "waiting": "Esperando para informar",
+      "running": "Informando…",
+      "failed": "No se pudo informar"
+    },
+    "failure": {
+      "permission_revoked": "Quien lo pidió ya no puede ejecutar este agente",
+      "access_lost": "Lo que vigilaba pasó a un proyecto privado",
+      "dispatch_failed": "El agente no pudo ejecutarse"
     },
     "kind": {
       "condition": "Cuando ocurra",

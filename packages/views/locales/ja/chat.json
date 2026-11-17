@@ -280,12 +280,24 @@
     "last_check": "前回の確認：{{note}}",
     "cancel": "ウェイクアップをキャンセル",
     "cancel_failed": "ウェイクアップをキャンセルできませんでした",
+    "retry": "再試行",
+    "retry_failed": "ウェイクアップを再試行できませんでした",
     "status": {
       "active": "待機中",
       "fired": "報告済み",
       "expired": "期限切れ",
       "cancelled": "キャンセル済み",
       "failed": "実行できませんでした"
+    },
+    "report": {
+      "waiting": "報告待ち",
+      "running": "報告中…",
+      "failed": "報告できませんでした"
+    },
+    "failure": {
+      "permission_revoked": "依頼者はこのエージェントを実行できなくなりました",
+      "access_lost": "監視対象が非公開プロジェクトに移動しました",
+      "dispatch_failed": "エージェントを実行できませんでした"
     },
     "kind": {
       "condition": "条件が満たされたら",

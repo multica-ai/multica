@@ -170,6 +170,11 @@ func (in ChatWakeupInput) plan(now time.Time) (chatWakeupPlan, error) {
 		if checks := expires.Sub(now) / time.Duration(p.interval.Int64*int64(time.Second)); checks > chatWakeupMaxChecks {
 			return p, chatWakeupInputError("this would run %d checks; a wakeup checks at most %d times, so use a longer interval or an earlier deadline", checks, chatWakeupMaxChecks)
 		}
+		// A deadline inside the first interval still brings the agent back at
+		// the deadline.
+		if p.nextEval.After(expires) {
+			p.nextEval = expires
+		}
 	}
 	p.expiresAt = expires
 	return p, nil
@@ -204,6 +209,19 @@ func (s *ChatWakeupService) chatTurnSession(ctx context.Context, q *db.Queries, 
 		return db.ChatSession{}, chatWakeupInputError("this conversation is archived")
 	}
 	return session, nil
+}
+
+// chatTurnRequester is the person a chat turn answers: the member who sent
+// its message, which in a group chat need not be the session creator. A
+// wakeup turn carries its wakeup's requester forward the same way.
+func chatTurnRequester(task db.AgentTaskQueue, session db.ChatSession) pgtype.UUID {
+	switch {
+	case task.InitiatorUserID.Valid:
+		return task.InitiatorUserID
+	case task.OriginatorUserID.Valid:
+		return task.OriginatorUserID
+	}
+	return session.CreatorID
 }
 
 // sourceMessage finds the person's message a new wakeup answers: the creating
@@ -247,20 +265,38 @@ func (s *ChatWakeupService) Create(ctx context.Context, task db.AgentTaskQueue, 
 		return db.ChatWakeup{}, err
 	}
 
+	requester := chatTurnRequester(task, session)
+
 	var created db.ChatWakeup
 	err = s.inTx(ctx, func(tx pgx.Tx, qtx *db.Queries) error {
+		// Serializes with DeleteChatSession, which removes the session's
+		// wakeups under its own lock on this row.
+		locked, err := qtx.LockChatSessionForEnqueue(ctx, session.ID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return chatWakeupInputError("this conversation no longer exists")
+		}
+		if err != nil {
+			return err
+		}
+		if locked.Status != "active" {
+			return chatWakeupInputError("this conversation is archived")
+		}
 		if n, err := qtx.CountActiveChatWakeupsForSession(ctx, session.ID); err != nil {
 			return err
 		} else if n >= ChatWakeupMaxPerSession {
 			return fmt.Errorf("%w: this conversation already has %d active wakeups; list them with `multica chat wakeup list`, and ask the user which one to cancel", ErrChatWakeupLimit, n)
 		}
-		if n, err := qtx.CountActiveChatWakeupsForRequester(ctx, db.CountActiveChatWakeupsForRequesterParams{WorkspaceID: session.WorkspaceID, RequesterID: session.CreatorID}); err != nil {
+		if n, err := qtx.CountActiveChatWakeupsForRequester(ctx, db.CountActiveChatWakeupsForRequesterParams{WorkspaceID: session.WorkspaceID, RequesterID: requester}); err != nil {
 			return err
 		} else if n >= ChatWakeupMaxPerRequester {
 			return fmt.Errorf("%w: this person already has %d active wakeups across their conversations", ErrChatWakeupLimit, n)
 		}
 		if plan.kind == "condition" {
-			normalized, err := s.validateChatCondition(ctx, tx, session.WorkspaceID, plan.condition, now)
+			agent, err := qtx.GetAgent(ctx, session.AgentID)
+			if err != nil {
+				return err
+			}
+			normalized, err := s.validateChatCondition(ctx, tx, qtx, session.WorkspaceID, requester, agent.OwnerID, plan.condition, now)
 			if err != nil {
 				return err
 			}
@@ -271,7 +307,7 @@ func (s *ChatWakeupService) Create(ctx context.Context, task db.AgentTaskQueue, 
 			WorkspaceID:     session.WorkspaceID,
 			ChatSessionID:   session.ID,
 			AgentID:         session.AgentID,
-			RequesterID:     session.CreatorID,
+			RequesterID:     requester,
 			SourceTaskID:    task.ID,
 			SourceMessageID: sourceMessage(ctx, qtx, task),
 			Title:           title,
@@ -349,7 +385,11 @@ func (s *ChatWakeupService) Update(ctx context.Context, task db.AgentTaskQueue, 
 			return chatWakeupInputError("a wakeup cannot change between condition, time and check; cancel it and create a new one")
 		}
 		if plan.kind == "condition" {
-			if plan.condition, err = s.validateChatCondition(ctx, tx, session.WorkspaceID, plan.condition, now); err != nil {
+			agent, err := qtx.GetAgent(ctx, current.AgentID)
+			if err != nil {
+				return err
+			}
+			if plan.condition, err = s.validateChatCondition(ctx, tx, qtx, session.WorkspaceID, current.RequesterID, agent.OwnerID, plan.condition, now); err != nil {
 				return err
 			}
 		}
@@ -487,11 +527,21 @@ type chatWakeupDecision struct {
 	reason   string
 	observed map[string]any
 	snapshot db.ChatWakeup
+	// retry re-runs an ended wakeup's failed turn at the person's request.
+	retry bool
 }
+
+// Why a wakeup ended without a turn, shown to the person.
+var (
+	errChatWakeupForbidden  = errors.New("the person who asked can no longer run this agent")
+	errChatWakeupAccessLost = errors.New("what this wakeup watched moved to a private project the person who asked, or the agent's owner, cannot see")
+	errChatWakeupNoAgent    = errors.New("the agent could not run: it is archived or has no runtime")
+)
 
 // process decides whether a due wakeup starts a turn now and, if so, starts it.
 func (s *ChatWakeupService) process(ctx context.Context, id pgtype.UUID) error {
 	var decision *chatWakeupDecision
+	var locked db.ChatWakeup
 	err := s.inTx(ctx, func(tx pgx.Tx, qtx *db.Queries) error {
 		w, err := qtx.LockChatWakeup(ctx, id)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -500,6 +550,7 @@ func (s *ChatWakeupService) process(ctx context.Context, id pgtype.UUID) error {
 		if err != nil {
 			return err
 		}
+		locked = w
 		now := s.clock()
 		if w.Status != "active" || w.NextEvalAt.Time.After(now) {
 			return nil
@@ -513,18 +564,34 @@ func (s *ChatWakeupService) process(ctx context.Context, id pgtype.UUID) error {
 		decision.snapshot, err = qtx.GetChatWakeup(ctx, id)
 		return err
 	})
+	if errors.Is(err, errChatWakeupAccessLost) {
+		return s.fail(ctx, locked, "access_lost", err)
+	}
 	if err != nil || decision == nil {
 		return err
 	}
-	return s.fire(ctx, *decision)
+	_, err = s.fire(ctx, *decision)
+	return err
 }
 
 func (s *ChatWakeupService) decide(ctx context.Context, tx pgx.Tx, qtx *db.Queries, w db.ChatWakeup, now time.Time) (*chatWakeupDecision, error) {
+	if w.Kind == "condition" {
+		agent, err := qtx.GetAgent(ctx, w.AgentID)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkChatConditionAccess(ctx, tx, qtx, w.WorkspaceID, w.RequesterID, agent.OwnerID, w.Condition); err != nil {
+			if errors.Is(err, errChatConditionHidden) {
+				return nil, errChatWakeupAccessLost
+			}
+			return nil, err
+		}
+	}
 	if w.Kind == "at" {
 		return &chatWakeupDecision{reason: ChatWakeupReasonTime, snapshot: w}, nil
 	}
 	if w.Kind == "check" && w.LastTaskID.Valid {
-		status, err := qtx.GetChatWakeupTaskStatus(ctx, w.LastTaskID)
+		status, err := qtx.GetChatWakeupTaskStatus(ctx, db.GetChatWakeupTaskStatusParams{ChatSessionID: w.ChatSessionID, TaskID: w.LastTaskID})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, err
 		}
@@ -582,17 +649,53 @@ func isTerminalTaskStatus(status string) bool {
 	return false
 }
 
+// authorizeTurn re-applies, at the moment a turn would start, the invocation
+// rule a chat send checks: the requester is still a member who may run this
+// agent.
+func (s *ChatWakeupService) authorizeTurn(ctx context.Context, w db.ChatWakeup) error {
+	q := s.Tasks.Queries
+	if _, err := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: w.RequesterID, WorkspaceID: w.WorkspaceID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errChatWakeupForbidden
+		}
+		return err
+	}
+	allowed, err := s.Tasks.MemberMayInvokeAgent(ctx, w.AgentID, w.RequesterID)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return errChatWakeupForbidden
+	}
+	return nil
+}
+
 // fire starts the wakeup's turn. Preparation (attribution, connected apps)
 // happens outside the transaction, like every other chat enqueue; the
 // transaction then re-checks that nobody changed the wakeup meanwhile.
-func (s *ChatWakeupService) fire(ctx context.Context, d chatWakeupDecision) error {
+//
+// A scheduled turn that can no longer run ends the wakeup as failed, with the
+// reason on it. A retry instead reports the reason to the person who asked.
+func (s *ChatWakeupService) fire(ctx context.Context, d chatWakeupDecision) (db.ChatWakeup, error) {
 	w := d.snapshot
-	prepared, err := s.Tasks.PrepareChatTaskEnqueue(ctx, w.AgentID, w.RequesterID)
-	if err != nil {
-		if errors.Is(err, ErrChatTaskAgentArchived) || errors.Is(err, ErrChatTaskAgentNoRuntime) {
-			return s.fail(ctx, w, err)
+	refuse := func(reason string, cause error) (db.ChatWakeup, error) {
+		if d.retry {
+			return db.ChatWakeup{}, chatWakeupInputError("%s", cause.Error())
 		}
-		return err
+		return db.ChatWakeup{}, s.fail(ctx, w, reason, cause)
+	}
+	if err := s.authorizeTurn(ctx, w); err != nil {
+		if errors.Is(err, errChatWakeupForbidden) {
+			return refuse("permission_revoked", err)
+		}
+		return db.ChatWakeup{}, err
+	}
+	prepared, err := s.Tasks.PrepareChatTaskEnqueue(ctx, w.AgentID, w.RequesterID)
+	if errors.Is(err, ErrChatTaskAgentArchived) || errors.Is(err, ErrChatTaskAgentNoRuntime) {
+		return refuse("dispatch_failed", errChatWakeupNoAgent)
+	}
+	if err != nil {
+		return db.ChatWakeup{}, err
 	}
 	content := s.turnInput(ctx, w, d.reason, d.observed)
 	var task db.AgentTaskQueue
@@ -602,15 +705,23 @@ func (s *ChatWakeupService) fire(ctx context.Context, d chatWakeupDecision) erro
 		if err != nil {
 			return err
 		}
-		if current.Status != "active" || current.UpdatedAt != w.UpdatedAt {
+		if current.UpdatedAt != w.UpdatedAt || (current.Status != "active" && !d.retry) {
 			return nil
 		}
-		task, err = s.Tasks.enqueueChatWakeupTaskTx(ctx, qtx, current.ChatSessionID, current.ID, current.RequesterID, content, prepared)
-		if errors.Is(err, ErrChatSessionArchived) {
+		task, err = s.Tasks.enqueueChatWakeupTaskTx(ctx, qtx, current, content, prepared)
+		switch {
+		case errors.Is(err, ErrChatSessionArchived) && d.retry:
+			return chatWakeupInputError("this conversation is archived")
+		case errors.Is(err, ErrChatSessionArchived):
 			fired, err = qtx.EndChatWakeup(ctx, db.EndChatWakeupParams{ID: current.ID, Status: "cancelled", EndReason: pgtype.Text{String: "session_archived", Valid: true}})
 			return err
+		case errors.Is(err, errChatSessionGone):
+			return qtx.DeleteChatWakeup(ctx, current.ID)
+		case err != nil:
+			return err
 		}
-		if err != nil {
+		if d.retry {
+			fired, err = qtx.RecordChatWakeupRetry(ctx, db.RecordChatWakeupRetryParams{ID: current.ID, TaskID: task.ID})
 			return err
 		}
 		endStatus, endReason := "", ""
@@ -633,27 +744,26 @@ func (s *ChatWakeupService) fire(ctx context.Context, d chatWakeupDecision) erro
 		return err
 	})
 	if errors.Is(err, ErrChatTaskAgentArchived) || errors.Is(err, ErrChatTaskAgentNoRuntime) {
-		return s.fail(ctx, w, err)
+		return refuse("dispatch_failed", errChatWakeupNoAgent)
 	}
 	if err != nil {
-		return err
+		return db.ChatWakeup{}, err
 	}
 	if task.ID.Valid {
 		s.Tasks.finalizeChatWakeupEnqueue(ctx, task)
-		slog.Info("chat wakeup fired", "wakeup_id", util.UUIDToString(w.ID), "reason", d.reason,
+		slog.Info("chat wakeup fired", "wakeup_id", util.UUIDToString(w.ID), "reason", d.reason, "retry", d.retry,
 			"chat_session_id", util.UUIDToString(w.ChatSessionID), "task_id", util.UUIDToString(task.ID))
 	}
 	if fired.ID.Valid {
 		s.publish(ctx, fired, task.ID)
 	}
-	return nil
+	return fired, nil
 }
 
-func (s *ChatWakeupService) fail(ctx context.Context, w db.ChatWakeup, cause error) error {
-	msg := "The agent could not run: it is archived or has no runtime"
+func (s *ChatWakeupService) fail(ctx context.Context, w db.ChatWakeup, reason string, cause error) error {
 	ended, err := s.Tasks.Queries.EndChatWakeup(ctx, db.EndChatWakeupParams{
-		ID: w.ID, Status: "failed", EndReason: pgtype.Text{String: "dispatch_failed", Valid: true},
-		LastError: pgtype.Text{String: msg, Valid: true},
+		ID: w.ID, Status: "failed", EndReason: pgtype.Text{String: reason, Valid: true},
+		LastError: pgtype.Text{String: cause.Error(), Valid: true},
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -661,9 +771,51 @@ func (s *ChatWakeupService) fail(ctx context.Context, w db.ChatWakeup, cause err
 	if err != nil {
 		return err
 	}
-	slog.Info("chat wakeup failed", "wakeup_id", util.UUIDToString(w.ID), "error", cause)
+	slog.Info("chat wakeup failed", "wakeup_id", util.UUIDToString(w.ID), "reason", reason)
 	s.publish(ctx, ended, pgtype.UUID{})
 	return nil
+}
+
+// Retry re-runs the turn of an ended wakeup whose turn failed or was
+// stopped, so a report lost to a runtime problem is not lost for good. The
+// wakeup's checks run again: the person must still be able to run the agent.
+func (s *ChatWakeupService) Retry(ctx context.Context, sessionID, id pgtype.UUID) (db.ChatWakeup, error) {
+	q := s.Tasks.Queries
+	w, err := q.GetChatWakeupInSession(ctx, db.GetChatWakeupInSessionParams{ID: id, ChatSessionID: sessionID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.ChatWakeup{}, ErrChatWakeupNotFound
+	}
+	if err != nil {
+		return db.ChatWakeup{}, err
+	}
+	// A check the agent finished has nothing left to report.
+	if (w.Status != "fired" && w.Status != "expired") || !w.LastTaskID.Valid || (w.Kind == "check" && w.Status == "fired") {
+		return db.ChatWakeup{}, chatWakeupInputError("only a wakeup whose report failed can be retried")
+	}
+	status, err := q.GetChatWakeupTaskStatus(ctx, db.GetChatWakeupTaskStatusParams{ChatSessionID: w.ChatSessionID, TaskID: w.LastTaskID})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return db.ChatWakeup{}, err
+	}
+	if err == nil && status != "failed" && status != "cancelled" {
+		return db.ChatWakeup{}, chatWakeupInputError("only a wakeup whose report failed can be retried")
+	}
+	reason := ChatWakeupReasonCondition
+	switch {
+	case w.Status == "expired":
+		reason = ChatWakeupReasonExpired
+	case w.Kind == "at":
+		reason = ChatWakeupReasonTime
+	case w.Kind == "check":
+		reason = ChatWakeupReasonCheck
+	}
+	fired, err := s.fire(ctx, chatWakeupDecision{reason: reason, snapshot: w, retry: true})
+	if err != nil {
+		return db.ChatWakeup{}, err
+	}
+	if !fired.ID.Valid {
+		return q.GetChatWakeup(ctx, id)
+	}
+	return fired, nil
 }
 
 // turnInput writes the hidden input of a wakeup turn: what the agent asked to
@@ -748,12 +900,16 @@ func (s *ChatWakeupService) publish(ctx context.Context, w db.ChatWakeup, taskID
 	if taskID.Valid {
 		payload.TaskID = util.UUIDToString(taskID)
 	}
+	session, err := s.Tasks.Queries.GetChatSession(ctx, w.ChatSessionID)
+	if err != nil {
+		return
+	}
 	s.Tasks.Bus.Publish(events.Event{
 		Type:               protocol.EventChatWakeupChanged,
 		WorkspaceID:        util.UUIDToString(w.WorkspaceID),
 		ActorType:          "system",
 		ChatSessionID:      util.UUIDToString(w.ChatSessionID),
-		ChatSessionOwnerID: util.UUIDToString(w.RequesterID),
+		ChatSessionOwnerID: util.UUIDToString(session.CreatorID),
 		Payload:            payload,
 	})
 }

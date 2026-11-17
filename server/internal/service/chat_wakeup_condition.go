@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -53,10 +54,84 @@ type errChatConditionPending struct{ msg string }
 
 func (e errChatConditionPending) Error() string { return e.msg }
 
+// errChatConditionHidden means the condition reads an issue or run in a
+// private project the wakeup's requester or the agent's owner cannot see.
+var errChatConditionHidden = errors.New("chat wakeup condition is in a private project")
+
+// chatConditionProjects lists the projects whose content a condition reads.
+// children_done reports only counts of sub-issues, so the parent's project is
+// the one that matters there.
+func chatConditionProjects(ctx context.Context, tx pgx.Tx, q *db.Queries, workspaceID pgtype.UUID, c ChatWakeupCondition) ([]pgtype.UUID, error) {
+	switch c.Type {
+	case "issue", "children_done", "issue_reply":
+		var project pgtype.UUID
+		err := tx.QueryRow(ctx, "SELECT project_id FROM issue WHERE id=$1 AND workspace_id=$2", c.IssueID, workspaceID).Scan(&project)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return []pgtype.UUID{project}, err
+	case "run":
+		id, err := util.ParseUUID(c.TaskID)
+		if err != nil {
+			return nil, err
+		}
+		task, err := q.GetAgentTask(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return projectaccess.TaskProjects(ctx, q, task)
+	}
+	return nil, nil
+}
+
+// checkChatConditionAccess applies the private-project rule every run obeys:
+// the requester and the agent's owner must both see what the condition reads.
+func checkChatConditionAccess(ctx context.Context, tx pgx.Tx, q *db.Queries, workspaceID, requesterID, agentOwnerID pgtype.UUID, raw []byte) error {
+	var c ChatWakeupCondition
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return err
+	}
+	projects, err := chatConditionProjects(ctx, tx, q, workspaceID, c)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(projects, func(p pgtype.UUID) bool { return p.Valid }) {
+		return nil
+	}
+	hidden, err := projectaccess.ForPrincipals(ctx, q, workspaceID, requesterID, agentOwnerID)
+	if err != nil {
+		return fmt.Errorf("resolve project access: %w", err)
+	}
+	for _, p := range projects {
+		if p.Valid && !hidden.CanSeeProject(p) {
+			return errChatConditionHidden
+		}
+	}
+	return nil
+}
+
 // validateChatCondition normalizes a condition against the session's
 // workspace. It rejects anything the platform could never evaluate, so a typo
-// fails at creation instead of waiting out the whole deadline.
-func (s *ChatWakeupService) validateChatCondition(ctx context.Context, tx pgx.Tx, workspaceID pgtype.UUID, raw json.RawMessage, now time.Time) (json.RawMessage, error) {
+// fails at creation instead of waiting out the whole deadline, and anything in
+// a private project the requester or the agent's owner cannot see.
+func (s *ChatWakeupService) validateChatCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, workspaceID, requesterID, agentOwnerID pgtype.UUID, raw json.RawMessage, now time.Time) (json.RawMessage, error) {
+	normalized, err := s.normalizeChatCondition(ctx, tx, workspaceID, raw, now)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkChatConditionAccess(ctx, tx, q, workspaceID, requesterID, agentOwnerID, normalized); err != nil {
+		if errors.Is(err, errChatConditionHidden) {
+			return nil, badChatCondition("this is in a private project that the person who asked, or this agent's owner, cannot see")
+		}
+		return nil, err
+	}
+	return normalized, nil
+}
+
+func (s *ChatWakeupService) normalizeChatCondition(ctx context.Context, tx pgx.Tx, workspaceID pgtype.UUID, raw json.RawMessage, now time.Time) (json.RawMessage, error) {
 	var c ChatWakeupCondition
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()

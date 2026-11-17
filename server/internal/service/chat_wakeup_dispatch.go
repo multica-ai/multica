@@ -12,24 +12,31 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// errChatSessionGone means a wakeup outlived its conversation.
+var errChatSessionGone = errors.New("chat session no longer exists")
+
 // enqueueChatWakeupTaskTx starts one turn in a wakeup's conversation, inside
 // the caller's transaction. The turn's input is a hidden wakeup row the
 // daemon reads like any other input batch.
 //
-// A conversation still routed to an IM channel gets the same delivery
-// snapshot as a channel turn, and the wakeup row is marked channel_ingested:
-// outbound adapters deliver only channel-originated turns, an empty reply is
-// dropped silently, and a cancelled turn settles as "Stopped." instead of
-// restoring the hidden text into a composer. A retired route (the person ran
-// /new) has nowhere to deliver; that turn stays in Multica.
+// The reply goes where the request came from. A wakeup created by a turn that
+// arrived from an IM channel copies that turn's delivery snapshot (room,
+// thread, quoted message), so the report lands in the same place even after
+// the person started a new topic with /new; its row is marked
+// channel_ingested, which also makes an empty reply silent and a cancelled
+// turn settle as "Stopped." A wakeup created from Web stays in Multica, like
+// any Web turn, even when the conversation also has an IM route.
 func (s *TaskService) enqueueChatWakeupTaskTx(
 	ctx context.Context,
 	qtx *db.Queries,
-	sessionID, wakeupID, initiatorUserID pgtype.UUID,
+	w db.ChatWakeup,
 	content string,
 	prepared PreparedChatTaskEnqueue,
 ) (db.AgentTaskQueue, error) {
-	session, err := qtx.LockChatSessionForEnqueue(ctx, sessionID)
+	session, err := qtx.LockChatSessionForEnqueue(ctx, w.ChatSessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.AgentTaskQueue{}, errChatSessionGone
+	}
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("lock chat session: %w", err)
 	}
@@ -51,7 +58,15 @@ func (s *TaskService) enqueueChatWakeupTaskTx(
 	if bindingErr != nil && !errors.Is(bindingErr, pgx.ErrNoRows) {
 		return db.AgentTaskQueue{}, fmt.Errorf("lock channel chat binding: %w", bindingErr)
 	}
-	deliver := bindingErr == nil && !binding.RetiredAt.Valid
+	deliver := false
+	if w.SourceTaskID.Valid {
+		switch _, err := qtx.GetChannelTaskDelivery(ctx, w.SourceTaskID); {
+		case err == nil:
+			deliver = true
+		case !errors.Is(err, pgx.ErrNoRows):
+			return db.AgentTaskQueue{}, fmt.Errorf("load source channel delivery: %w", err)
+		}
+	}
 	var contextRevision int64
 	forceFresh := false
 	if bindingErr == nil {
@@ -71,8 +86,8 @@ func (s *TaskService) enqueueChatWakeupTaskTx(
 		RuntimeID:            agent.RuntimeID,
 		Priority:             2,
 		ChatSessionID:        session.ID,
-		InitiatorUserID:      initiatorUserID,
-		OriginatorUserID:     initiatorUserID,
+		InitiatorUserID:      w.RequesterID,
+		OriginatorUserID:     w.RequesterID,
 		AccountableUserID:    prepared.accountableUser,
 		ForceFreshSession:    pgtype.Bool{Bool: forceFresh, Valid: true},
 		RuntimeMcpOverlay:    prepared.runtimeOverlay.Overlay,
@@ -88,10 +103,10 @@ func (s *TaskService) enqueueChatWakeupTaskTx(
 		return db.AgentTaskQueue{}, fmt.Errorf("create chat wakeup task: %w", err)
 	}
 	if deliver {
-		if _, err := qtx.CreateChannelTaskDeliveryFromSession(ctx, db.CreateChannelTaskDeliveryFromSessionParams{
-			TaskID: task.ID, ChatSessionID: session.ID, ContextRevision: contextRevision,
+		if err := qtx.CopyChannelTaskDelivery(ctx, db.CopyChannelTaskDeliveryParams{
+			ChildTaskID: task.ID, ParentTaskID: w.SourceTaskID,
 		}); err != nil {
-			return db.AgentTaskQueue{}, fmt.Errorf("snapshot channel task delivery: %w", err)
+			return db.AgentTaskQueue{}, fmt.Errorf("copy source channel delivery: %w", err)
 		}
 	}
 	task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
@@ -107,7 +122,7 @@ func (s *TaskService) enqueueChatWakeupTaskTx(
 		MessageKind:            pgtype.Text{String: protocol.ChatMessageKindWakeup, Valid: true},
 		ChannelIngested:        pgtype.Bool{Bool: deliver, Valid: true},
 		ChannelContextRevision: pgtype.Int8{Int64: contextRevision, Valid: contextRevision > 0},
-		WakeupID:               wakeupID,
+		WakeupID:               w.ID,
 	}); err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("create chat wakeup input: %w", err)
 	}

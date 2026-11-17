@@ -5,9 +5,11 @@ import type { ChatMessage, ChatWakeup } from "@multica/core/types";
 import enChat from "../../locales/en/chat.json";
 
 const cancelMutate = vi.hoisted(() => vi.fn());
+const retryMutate = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/chat/mutations", () => ({
   useCancelChatWakeup: () => ({ mutate: cancelMutate }),
+  useRetryChatWakeup: () => ({ mutate: retryMutate, isPending: false }),
 }));
 
 import { ChatQueue } from "./chat-queue";
@@ -16,6 +18,7 @@ import {
   ChatWakeupDivider,
   ChatWakeupStrip,
   isWakeupRunningOut,
+  wakeupReportState,
 } from "./chat-wakeups";
 
 const TEST_RESOURCES = { en: { chat: enChat } };
@@ -165,6 +168,34 @@ describe("ChatWakeupCards", () => {
     expect(screen.getByText("Will report back: PR #42 merged")).toBeInTheDocument();
     expect(screen.getByText(/ends in 20 hours/)).toBeInTheDocument();
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
+  });
+
+  it("says reported back only once the report turn finished, and offers a retry when it failed", () => {
+    const fired = (id: string, last_task_status?: string) =>
+      wakeup({ id, title: id, status: "fired", last_task_id: `task-${id}`, last_task_status });
+    renderWithI18n(
+      <ChatWakeupCards
+        wakeups={[fired("queued", "queued"), fired("running", "running"), fired("done", "completed"), fired("broken", "failed")]}
+      />,
+    );
+    expect(screen.getByText("Waiting to report")).toBeInTheDocument();
+    expect(screen.getByText("Reporting…")).toBeInTheDocument();
+    expect(screen.getByText("Reported back")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't report")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retryMutate).toHaveBeenCalledWith({ sessionId: "session-1", wakeupId: "broken" }, expect.anything());
+  });
+});
+
+describe("wakeupReportState", () => {
+  it("follows the report turn of a wakeup that came back", () => {
+    const base = { id: "w", status: "fired" as const, last_task_id: "t" };
+    expect(wakeupReportState(wakeup({ ...base, last_task_status: "dispatched" }))).toBe("waiting");
+    expect(wakeupReportState(wakeup({ ...base, last_task_status: "running" }))).toBe("running");
+    expect(wakeupReportState(wakeup({ ...base, last_task_status: "cancelled" }))).toBe("failed");
+    expect(wakeupReportState(wakeup({ ...base, last_task_status: "completed" }))).toBeNull();
+    expect(wakeupReportState(wakeup({ id: "w", status: "active", last_task_id: "t", last_task_status: "failed" }))).toBeNull();
   });
 });
 

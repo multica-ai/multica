@@ -4365,6 +4365,12 @@ export class ApiClient {
     });
   }
 
+  async retryChatWakeup(sessionId: string, wakeupId: string): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/wakeups/${wakeupId}/retry`, {
+      method: "POST",
+    });
+  }
+
   async listMyChatWakeups(): Promise<ChatWakeup[]> {
     let raw: unknown;
     try {

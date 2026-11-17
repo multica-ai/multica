@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlarmClock, X } from "@multica/ui/icons";
+import { AlarmClock, RotateCcw, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
+import { Button } from "@multica/ui/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { cn } from "@multica/ui/lib/utils";
 import { chatWakeupsOptions } from "@multica/core/chat/queries";
-import { useCancelChatWakeup } from "@multica/core/chat/mutations";
+import { useCancelChatWakeup, useRetryChatWakeup } from "@multica/core/chat/mutations";
 import type { ChatMessage, ChatWakeup } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
@@ -55,6 +56,31 @@ export function isWakeupRunningOut(w: ChatWakeup, now: number): boolean {
   return total > 0 && left / total < 0.2;
 }
 
+export type WakeupReportState = "waiting" | "running" | "failed";
+
+/**
+ * How the report turn of a wakeup that came back is going. Null once it
+ * reported, or when the wakeup has not come back.
+ */
+export function wakeupReportState(w: ChatWakeup): WakeupReportState | null {
+  if ((w.status !== "fired" && w.status !== "expired") || !w.last_task_id) return null;
+  // A check the agent finished ended inside its own reporting turn.
+  if (w.kind === "check" && w.status === "fired") return null;
+  switch (w.last_task_status) {
+    case undefined:
+    case "":
+    case "completed":
+      return null;
+    case "running":
+      return "running";
+    case "failed":
+    case "cancelled":
+      return "failed";
+    default:
+      return "waiting";
+  }
+}
+
 function activeFirst(wakeups: ChatWakeup[]): ChatWakeup[] {
   return wakeups
     .filter((w) => w.status === "active")
@@ -66,7 +92,21 @@ function useWakeupText() {
   const locale = useLocale();
   return {
     t,
-    status: (w: ChatWakeup) => t(($) => $.wakeup.status[w.status]),
+    status: (w: ChatWakeup) => {
+      const report = wakeupReportState(w);
+      return report ? t(($) => $.wakeup.report[report]) : t(($) => $.wakeup.status[w.status]);
+    },
+    /** Why a wakeup ended without coming back. */
+    failure: (w: ChatWakeup) => {
+      if (w.status !== "failed") return "";
+      switch (w.end_reason) {
+        case "permission_revoked":
+        case "access_lost":
+        case "dispatch_failed":
+          return t(($) => $.wakeup.failure[w.end_reason as "permission_revoked" | "access_lost" | "dispatch_failed"]);
+      }
+      return w.last_error ?? "";
+    },
     kind: (w: ChatWakeup) => t(($) => $.wakeup.kind[w.kind]),
     /** The one time a reader needs: when it fires, or when it gives up. */
     timing: (w: ChatWakeup, now: number) => {
@@ -93,11 +133,43 @@ function useCancel(sessionId: string) {
     );
 }
 
+function useRetry(sessionId: string) {
+  const { t } = useT("chat");
+  const retry = useRetryChatWakeup();
+  return {
+    pending: retry.isPending,
+    run: (wakeupId: string) =>
+      retry.mutate(
+        { sessionId, wakeupId },
+        { onError: () => toast.error(t(($) => $.wakeup.retry_failed)) },
+      ),
+  };
+}
+
+function RetryButton({ wakeup, sessionId }: { wakeup: ChatWakeup; sessionId: string }) {
+  const { t } = useT("chat");
+  const retry = useRetry(sessionId);
+  return (
+    <Button
+      variant="ghost"
+      size="xs"
+      className="shrink-0"
+      disabled={retry.pending}
+      onClick={() => retry.run(wakeup.id)}
+    >
+      <RotateCcw aria-hidden />
+      {t(($) => $.wakeup.retry)}
+    </Button>
+  );
+}
+
 function WakeupRow({ wakeup, sessionId, now }: { wakeup: ChatWakeup; sessionId: string; now: number }) {
   const text = useWakeupText();
   const cancel = useCancel(sessionId);
   const urgent = isWakeupRunningOut(wakeup, now);
   const active = wakeup.status === "active";
+  const report = wakeupReportState(wakeup);
+  const failure = text.failure(wakeup);
   const details = [text.kind(wakeup), text.timing(wakeup, now), text.nextCheck(wakeup, now)].filter(Boolean);
   return (
     <div data-slot="chat-wakeup-row" className="flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5">
@@ -107,7 +179,13 @@ function WakeupRow({ wakeup, sessionId, now }: { wakeup: ChatWakeup; sessionId: 
       />
       <div className="min-w-0 flex-1">
         <div className={cn("truncate text-body", !active && "text-muted-foreground")}>{wakeup.title}</div>
-        <div className={cn("text-caption text-muted-foreground", urgent && "text-warning")}>
+        <div
+          className={cn(
+            "text-caption text-muted-foreground",
+            urgent && "text-warning",
+            report === "failed" && "text-destructive",
+          )}
+        >
           {active ? details.join(" · ") : text.status(wakeup)}
         </div>
         {wakeup.last_check_note && active && (
@@ -115,10 +193,9 @@ function WakeupRow({ wakeup, sessionId, now }: { wakeup: ChatWakeup; sessionId: 
             {text.t(($) => $.wakeup.last_check, { note: wakeup.last_check_note })}
           </div>
         )}
-        {wakeup.status === "failed" && wakeup.last_error && (
-          <div className="truncate text-caption text-destructive">{wakeup.last_error}</div>
-        )}
+        {failure && <div className="truncate text-caption text-destructive">{failure}</div>}
       </div>
+      {report === "failed" && <RetryButton wakeup={wakeup} sessionId={sessionId} />}
       {active && (
         <IconButton
           variant="ghost"
@@ -280,6 +357,7 @@ export function ChatWakeupCards({ wakeups }: { wakeups: ChatWakeup[] }) {
       {wakeups.map((w) => {
         const active = w.status === "active";
         const urgent = isWakeupRunningOut(w, now);
+        const failed = wakeupReportState(w) === "failed";
         return (
           <div
             key={w.id}
@@ -289,9 +367,12 @@ export function ChatWakeupCards({ wakeups }: { wakeups: ChatWakeup[] }) {
             <span className="min-w-0 flex-1 truncate">
               {text.t(($) => $.wakeup.card, { title: w.title })}
             </span>
-            <span className={cn("shrink-0 text-muted-foreground", urgent && "text-warning")}>
+            <span
+              className={cn("shrink-0 text-muted-foreground", urgent && "text-warning", failed && "text-destructive")}
+            >
               {active ? text.timing(w, now) : text.status(w)}
             </span>
+            {failed && <RetryButton wakeup={w} sessionId={w.chat_session_id} />}
           </div>
         );
       })}

@@ -786,6 +786,10 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete chat session draft restores")
 		return
 	}
+	if err := qtx.DeleteChatWakeupsBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session wakeups")
+		return
+	}
 
 	// Same no-FK chore, for the agent configuration a builder conversation was
 	// editing. A no-op for ordinary chats, which never have one.
