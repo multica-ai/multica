@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { forwardRef, type ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -52,6 +52,7 @@ vi.mock("../../editor", async () => ({
 }));
 
 import { CommentCard } from "./comment-card";
+import { useCommentCollapseStore } from "@multica/core/issues/stores";
 
 function comment(id: string, parentId: string | null): TimelineEntry {
   return {
@@ -74,12 +75,14 @@ function renderThread(
   root: TimelineEntry,
   replies: TimelineEntry[],
   onCopyLink?: (commentId: string) => void,
+  defaultCollapsed = false,
 ) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return renderWithI18n(
     <QueryClientProvider client={qc}>
       <CommentCard
         issueId="issue-1"
+        defaultCollapsed={defaultCollapsed}
         entry={root}
         replies={replies}
         currentUserId="user-1"
@@ -124,5 +127,28 @@ describe("CommentCard — copy comment link", () => {
 
     await screen.findByText("Copy");
     expect(screen.queryByText("Copy link")).toBeNull();
+  });
+});
+
+describe("CommentCard starting fold state", () => {
+  beforeEach(() => {
+    useCommentCollapseStore.setState({ collapsedByIssue: {}, expandedByIssue: {} });
+  });
+
+  it("uses a folded default and lets the reader expand it", () => {
+    renderThread(comment("root", null), [comment("reply", "root")], undefined, true);
+    const expand = screen.getByRole("button", { name: "Expand thread" });
+    expect(expand).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("body reply")).not.toBeInTheDocument();
+    fireEvent.click(expand);
+    expect(screen.getByRole("button", { name: "Collapse thread" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("body reply")).toBeInTheDocument();
+  });
+
+  it("keeps an explicitly opened thread open under a folded default", () => {
+    useCommentCollapseStore.getState().setCollapsed("issue-1", "root", false);
+    renderThread(comment("root", null), [comment("reply", "root")], undefined, true);
+    expect(screen.getByRole("button", { name: "Collapse thread" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("body reply")).toBeInTheDocument();
   });
 });

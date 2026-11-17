@@ -45,6 +45,7 @@ import {
   BUILT_IN_THEMES,
   CJK_FONTS,
   CODE_FONTS,
+  COMMENT_THREAD_DEFAULTS,
   CONTENT_LEADINGS,
   CONTENT_SIZES,
   DEFAULT_APPEARANCE,
@@ -1165,15 +1166,17 @@ function CjkFontSelect({
 
 function LayoutSection() {
   const { t } = useT("settings");
-  const { density, reduceMotion, highContrast, set } = useAppearanceStore(
+  const { density, commentThreadDefault, reduceMotion, highContrast, set } = useAppearanceStore(
     useShallow((s) => ({
       density: s.density,
+      commentThreadDefault: s.commentThreadDefault,
       reduceMotion: s.reduceMotion,
       highContrast: s.highContrast,
       set: s.set,
     })),
   );
   const densityLabel = t(($) => $.appearance.density.title);
+  const commentThreadsLabel = t(($) => $.appearance.comment_threads.title);
   return (
     <SettingsSection title={t(($) => $.appearance.layout.title)} anchor="layout">
       <SettingsCard>
@@ -1188,6 +1191,21 @@ function LayoutSection() {
               onChange={(next) => set({ density: next })}
               buttonClassName="px-3 py-1 text-label"
               options={DENSITIES.map((id) => [id, t(($) => $.appearance.density[id])] as const)}
+            />
+          </div>
+        </SettingsRow>
+        <SettingsRow
+          label={commentThreadsLabel}
+          description={t(($) => $.appearance.comment_threads.description)}
+          anchor="comment-threads"
+          size="none"
+        >
+          <div role="group" aria-label={commentThreadsLabel} className="max-sm:[&>div]:grid-flow-row">
+            <SegmentedToggle
+              value={commentThreadDefault}
+              onChange={(next) => set({ commentThreadDefault: next })}
+              buttonClassName="px-3 py-1 text-label"
+              options={COMMENT_THREAD_DEFAULTS.map((id) => [id, t(($) => $.appearance.comment_threads[id])] as const)}
             />
           </div>
         </SettingsRow>

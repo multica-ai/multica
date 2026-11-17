@@ -6,6 +6,7 @@ import {
   collectThreadReplies,
   resolvedThreadRootIds,
   rootCommentIds,
+  latestUnresolvedThreadId,
 } from "./thread-utils";
 
 function comment(id: string, createdAt: string, parentId: string | null): TimelineEntry {
@@ -143,5 +144,30 @@ describe("collectThreadParticipants", () => {
     const system = { ...comment("system", "2026-06-11T10:03:00Z", "root"), actor_type: "system" };
     const replies = collectThreadReplies("root", bucketByParent([repeat, agent, member, system]));
     expect(collectThreadParticipants(root, replies)).toEqual([root, agent, member]);
+  });
+});
+
+
+describe("latestUnresolvedThreadId", () => {
+  it("uses root chronology rather than the latest reply, activity, or display order", () => {
+    const entries = [
+      comment("newest", "2026-11-17T12:00:00Z", null),
+      comment("reply", "2026-11-17T14:00:00Z", "older"),
+      activity("activity", "2026-11-17T15:00:00Z"),
+      comment("older", "2026-11-17T11:00:00Z", null),
+    ];
+    expect(latestUnresolvedThreadId(entries)).toBe("newest");
+  });
+
+  it("keeps resolved-thread bars outside the starting-fold preference", () => {
+    const resolved = { ...comment("resolved", "2026-11-17T13:00:00Z", null), resolved_at: "2026-11-17T14:00:00Z" };
+    expect(latestUnresolvedThreadId([comment("open", "2026-11-17T12:00:00Z", null), resolved])).toBe("open");
+    expect(latestUnresolvedThreadId([resolved])).toBeNull();
+    expect(latestUnresolvedThreadId([])).toBeNull();
+  });
+
+  it("breaks equal creation times by root id", () => {
+    const when = "2026-11-17T12:00:00Z";
+    expect(latestUnresolvedThreadId([comment("z", when, null), comment("a", when, null)])).toBe("z");
   });
 });

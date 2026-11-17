@@ -1,5 +1,7 @@
 "use client";
 
+import { useAppearanceStore } from "@multica/core/appearance";
+
 import { subIssueCreateDefaults } from "@multica/core/issues";
 import {
   issueBehavesAs,
@@ -119,7 +121,7 @@ import { useCommentAnnotations } from "./use-comment-annotations";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { ThreadMinimap, type ThreadMinimapThread } from "./thread-minimap";
-import { collectThreadParticipants, collectThreadReplies, deriveThreadResolution } from "./thread-utils";
+import { collectThreadParticipants, collectThreadReplies, deriveThreadResolution, latestUnresolvedThreadId } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { IssueWakeupHeaderChip } from "./issue-wakeup-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
@@ -1863,6 +1865,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // this, every WS event (including reactions, edits, AI streaming on an
   // unrelated thread) hands every card a brand-new prop reference and forces
   // every thread subtree to re-render in lockstep.
+  const commentThreadDefault = useAppearanceStore((state) => state.commentThreadDefault);
+  const newestCommentThreadId = useMemo(() => latestUnresolvedThreadId(displayTimeline), [displayTimeline]);
   const prevThreadRepliesRef = useRef<Map<string, TimelineEntry[]>>(new Map());
   const timelineView = useMemo(() => {
     // Group entries: top-level = activities + root comments; replies are
@@ -2249,6 +2253,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   );
   const jumpToThread = useCallback(
     (threadId: string) => {
+      useCommentCollapseStore.getState().setCollapsed(id, threadId, false);
       // Flat mode mounts every row, so the anchor is always in the DOM.
       if (isFlatTimeline) return jumpToComment(threadId);
       // Virtualized mode: the target row may not be mounted, so scroll by
@@ -2258,7 +2263,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
       virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
       flashJumpTarget(threadId);
     },
-    [isFlatTimeline, items, jumpToComment, flashJumpTarget],
+    [id, isFlatTimeline, items, jumpToComment, flashJumpTarget],
   );
   // Minimap jump to a reply. A reply's anchor exists only while its thread is
   // open, so first undo whatever hides it — the reader's own collapse, a root
@@ -2274,7 +2279,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
       const root = rootItem && rootItem.kind !== "activity-group" ? rootItem.entry : undefined;
       if (!rootId || !root) return;
       const collapse = useCommentCollapseStore.getState();
-      if (collapse.isCollapsed(id, rootId)) collapse.toggle(id, rootId);
+      collapse.setCollapsed(id, rootId, false);
       if (!expandedResolved.has(rootId)) {
         const resolution = deriveThreadResolution(root, timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES);
         if (resolution.kind === "root" || (resolution.kind === "reply" && resolution.resolutionId !== replyId)) {
@@ -2372,7 +2377,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
       const headsThread = run.hasReply && run.commentId === rootItem.id;
       if (root && !headsThread) {
         const collapse = useCommentCollapseStore.getState();
-        if (collapse.isCollapsed(id, root.id)) collapse.toggle(id, root.id);
+        collapse.setCollapsed(id, root.id, false);
       }
       if (
         root && !expandedResolved.has(root.id) &&
@@ -2607,7 +2612,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     const targetId = highlightTargetId ?? highlightCommentId;
     const rootId = highlightRootId ?? targetId;
     const collapse = useCommentCollapseStore.getState();
-    if (collapse.isCollapsed(id, rootId)) collapse.toggle(id, rootId);
+    collapse.setCollapsed(id, rootId, false);
     if (rootId) {
       // Root resolved → the whole thread is a folded bar.
       const rootItem = items[targetIdx];
@@ -3547,6 +3552,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
         <div className="pb-3" id={`comment-${item.id}`}>
           <CommentCard
             issueId={id}
+            defaultCollapsed={!isResolved && !find.open && (commentThreadDefault === "collapsed" || (commentThreadDefault === "latest" && item.id !== newestCommentThreadId))}
             replyScrollParent={isFlatTimeline ? null : scrollContainerEl}
             runs={commentRuns.get(item.id) ?? EMPTY_COMMENT_RUNS}
             enteringRunIds={enteringRunIds}

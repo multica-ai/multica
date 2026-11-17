@@ -10,6 +10,7 @@ import { ApiError } from "@multica/core/api/client";
 import { toast } from "sonner";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
 import { useCommentCollapseStore } from "@multica/core/issues/stores";
+import { DEFAULT_APPEARANCE, useAppearanceStore } from "@multica/core/appearance";
 import {
   DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
   useSubIssueDisplayStore,
@@ -418,28 +419,7 @@ vi.mock("@multica/core/issues/stores", async () => ({
     },
   ),
   selectRecentIssues: () => () => [],
-  // Reactive in-memory stand-in: a quick-jump to a reply reopens a thread the
-  // reader collapsed, so the card has to re-render when `toggle` runs.
-  useCommentCollapseStore: (await vi.importActual<typeof import("zustand")>("zustand")).create<{
-    collapsedByIssue: Record<string, string[]>;
-    isCollapsed: (issueId: string, commentId: string) => boolean;
-    toggle: (issueId: string, commentId: string) => void;
-  }>()((set, get) => ({
-    collapsedByIssue: {},
-    isCollapsed: (issueId, commentId) => get().collapsedByIssue[issueId]?.includes(commentId) ?? false,
-    toggle: (issueId, commentId) =>
-      set((s) => {
-        const current = s.collapsedByIssue[issueId] ?? [];
-        return {
-          collapsedByIssue: {
-            ...s.collapsedByIssue,
-            [issueId]: current.includes(commentId)
-              ? current.filter((c) => c !== commentId)
-              : [...current, commentId],
-          },
-        };
-      }),
-  })),
+  useCommentCollapseStore: (await vi.importActual<typeof import("@multica/core/issues/stores/comment-collapse-store")>("@multica/core/issues/stores/comment-collapse-store")).useCommentCollapseStore,
   useCommentDraftStore: Object.assign(
     (selector?: any) => {
       const state = {
@@ -608,7 +588,8 @@ beforeEach(() => {
   // The resolved-expand store is module-global (not per-mount like the old
   // useState); reset so one test's expansions can't leak into the next.
   useResolvedExpandStore.setState({ expandedByIssue: {} });
-  useCommentCollapseStore.setState({ collapsedByIssue: {} });
+  useCommentCollapseStore.setState({ collapsedByIssue: {}, expandedByIssue: {} });
+  useAppearanceStore.setState(DEFAULT_APPEARANCE);
 });
 
 // Mock modals
@@ -3310,8 +3291,12 @@ describe("IssueDetail (shared)", () => {
 
     // "Show in comments" for a file shares the rail's path, so a file posted
     // in a reply is reachable whatever hides that reply (MUL-7649).
-    it("reopens a collapsed thread when a file's reply is located from the overview", async () => {
-      useCommentCollapseStore.setState({ collapsedByIssue: { "issue-1": ["comment-1"] } });
+    it.each(["manual", "default"] as const)("reopens a collapsed thread when a file's reply is located from the overview (%s)", async (source) => {
+      if (source === "manual") {
+        useCommentCollapseStore.setState({ collapsedByIssue: { "issue-1": ["comment-1"] } });
+      } else {
+        useAppearanceStore.getState().set({ commentThreadDefault: "collapsed" });
+      }
       const csv: Attachment = {
         id: "csv",
         workspace_id: "ws-1",
