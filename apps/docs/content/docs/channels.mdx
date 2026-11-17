@@ -1,6 +1,6 @@
 ---
 title: Chat integrations
-description: Connect Multica agents to Feishu, Lark, Slack, DingTalk, WeCom, Telegram, or ShareCRM and use them from the chat tools your team already uses.
+description: Connect Multica agents to Feishu, Lark, Slack, DingTalk, WeCom, Telegram, ShareCRM, or WeChat and use them from the chat tools your team already uses.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -8,7 +8,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
 Chat integrations let the team ask an agent questions in a DM, @-mention it in a group chat, or create issues from the chat window, without opening Multica.
 
-Feishu/Lark, Slack, DingTalk, WeCom, Telegram, and ShareCRM are supported today. They share the same session, identity, and execution mechanics but install differently.
+Feishu/Lark, Slack, DingTalk, WeCom, Telegram, ShareCRM, and WeChat are available. WeChat accepts private messages only from the account that scans the connection QR code. They share the same session, identity, and execution mechanics but install differently.
 
 ## Choose a platform
 
@@ -41,6 +41,8 @@ Step-by-step guides:
 - [DingTalk Bot integration](/dingtalk-bot-integration)
 - [Telegram Bot integration](/telegram-bot-integration)
 - [ShareCRM Bot integration](/sharecrm-bot-integration)
+
+[WeChat Bot](/weixin-bot-integration) connects by QR code and binds the scanner to the initiating Multica user. It does not use the first-message binding-link flow below.
 
 ## How a message is processed
 
@@ -101,6 +103,7 @@ MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_WEIXIN_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_SHARECRM_SECRET_KEY=<base64-encoded 32-byte key>
 ```
 
@@ -122,4 +125,5 @@ ShareCRM uses per-installation SSE connections under the channel supervisor leas
 - [DingTalk Bot integration](/dingtalk-bot-integration) — create a Stream-mode robot and paste its credentials into Multica.
 - [Telegram Bot integration](/telegram-bot-integration) — create a Bot with @BotFather and paste its token into Multica.
 - [ShareCRM Bot integration](/sharecrm-bot-integration) — paste ShareCRM App ID and App Secret into Multica.
+- [WeChat Bot integration](/weixin-bot-integration) — scan a QR code to connect a WeChat account.
 - [Chat](/chat) — the conversation and execution model behind every Bot.

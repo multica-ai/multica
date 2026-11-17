@@ -1356,6 +1356,7 @@ type PendingChatTaskResponse struct {
 	// as today's bare "Waiting for local directory".
 	WaitReason    string                   `json:"wait_reason,omitempty"`
 	SupportsQueue bool                     `json:"supports_queue"`
+	CanSupplement bool                     `json:"can_supplement"`
 	QueuedTasks   []QueuedChatTaskResponse `json:"queued_tasks,omitempty"`
 }
 
@@ -1713,8 +1714,29 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:     timestampToString(head.CreatedAt),
 		WaitReason:    waitReasonForStatus(head.Status, head.WaitReason),
 		SupportsQueue: true,
+		CanSupplement: h.canSupplementChatTask(r, session, head.ID, head.Status),
 		QueuedTasks:   queued,
 	})
+}
+
+func (h *Handler) canSupplementChatTask(r *http.Request, session db.ChatSession, taskID pgtype.UUID, status string) bool {
+	if status != "running" {
+		return false
+	}
+	if _, err := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), session.ID); !errors.Is(err, pgx.ErrNoRows) {
+		return false
+	}
+	capability, err := h.Queries.GetTaskSupplementCapability(r.Context(), taskID)
+	if err != nil || capability.Capability != protocol.DaemonCapabilityTaskSupplementV1 {
+		return false
+	}
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, uuidToString(session.WorkspaceID))
+	if actorType != "member" {
+		return false
+	}
+	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+	return err == nil && h.canInvokeAgent(r.Context(), agent, actorType, actorID, userID, uuidToString(session.WorkspaceID))
 }
 
 // PrioritizeQueuedChatTask moves one queued follow-up ahead of its FIFO peers.

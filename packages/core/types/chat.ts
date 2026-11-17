@@ -308,6 +308,8 @@ export interface ChatPendingTask {
   wait_reason?: string;
   /** Explicit capability gate; absent on servers predating follow-up queues. */
   supports_queue?: boolean;
+  /** This caller can add text to the exact running turn; absent on older servers. */
+  can_supplement?: boolean;
   /**
    * Ordered follow-ups behind the root task. The root may itself still have
    * database status `queued` before claim, but is never duplicated here.

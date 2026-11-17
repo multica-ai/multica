@@ -107,6 +107,8 @@ Une fois une limite atteinte, les nouvelles exécutions restent en file d'attent
 
 La consommation de tokens, les coûts et les échecs des exécutions sont regroupés par espace de travail sur la page [Statistiques](/analytics) ; `multica runtime usage <runtime-id>` affiche la consommation de tokens d'un seul runtime.
 
+Pour les runtimes Claude Code et Codex, la page du runtime affiche aussi les **Limites** : la part déjà utilisée des fenêtres de 5 heures et hebdomadaire du forfait du compte de la CLI, leur prochaine réinitialisation, et si la consommation va plus vite que le temps écoulé. La CLI les signale pendant l'exécution des tâches : les valeurs datent donc de la dernière exécution du runtime. Les comptes à clé API n'ont pas de limites de forfait.
+
 ## Configuration MCP locale [#local-mcp]
 
 Quand aucune configuration MCP n'est enregistrée sur un agent, Multica ne transmet aucun réglage MCP et l'outil lit comme d'habitude sa propre configuration sur cette machine.

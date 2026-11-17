@@ -34,8 +34,9 @@ echo "Hermes Agent v0.22.5 (2026.9.24)"
 		logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
 		agentVersions: map[string]string{},
 	}
-	version, reason, verdict := d.probeBuiltinRuntime(context.Background(), "hermes",
+	probe := d.probeBuiltinRuntime(context.Background(), "hermes",
 		AgentEntry{Path: path, Command: "hermes"})
+	version, reason, verdict := probe.version, probe.reason, probe.verdict
 	if verdict != builtinProbeOK {
 		t.Fatalf("verdict = %v (reason %q), want OK", verdict, reason)
 	}

@@ -376,7 +376,8 @@
     "pending_health_warning": "Daemon 同期待ち",
     "pending_health_error": "登録エラー",
     "pending_health_disabled": "無効",
-    "pending_cli_unknown": "待機中"
+    "pending_cli_unknown": "待機中",
+    "col_rate_limits": "上限"
   },
   "profiles": {
     "cta": "ランタイムを追加",
@@ -674,5 +675,38 @@
       "run_there": "そのマシンで実行",
       "connected": "{{name}} が Multica に接続されました"
     }
+  },
+  "rate_limits": {
+    "title": "利用上限",
+    "caption": "タスク実行中に CLI が報告",
+    "updated": "{{ago}}に更新",
+    "empty_title": "まだ上限のデータがありません",
+    "empty_hint": "このランタイムが次にタスクを実行したときに記録されます。API キーのアカウントにはプランの上限がありません。",
+    "window_session": "セッション",
+    "window_session_hours": "{{hours}} 時間セッション",
+    "window_weekly": "週間",
+    "window_weekly_opus": "週間 · Opus",
+    "window_weekly_sonnet": "週間 · Sonnet",
+    "window_generic": "その他の上限",
+    "short_session": "セッション",
+    "short_weekly": "週間",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "その他",
+    "used": "{{pct}}% 使用",
+    "limited": "上限に到達",
+    "resets_in": "{{duration}}後にリセット",
+    "resets_at": "{{time}} にリセット",
+    "reset_since": "前回の報告後にリセット済み",
+    "verdict_ahead": "ペースより {{pct}}% 速い · 約 {{duration}}で上限",
+    "verdict_on_pace": "このペースならリセットまで持ちます",
+    "verdict_limited": "リセット後に再開",
+    "credits": "クレジット",
+    "credits_balance": "残り {{balance}}",
+    "credits_unlimited": "無制限",
+    "credits_none": "なし",
+    "duration_minutes": "{{minutes}} 分",
+    "duration_hours": "{{hours}} 時間 {{minutes}} 分",
+    "duration_days": "{{days}} 日 {{hours}} 時間"
   }
 }

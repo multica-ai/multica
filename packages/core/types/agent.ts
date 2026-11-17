@@ -1068,6 +1068,41 @@ export interface RuntimeHourlyActivity {
   count: number;
 }
 
+// Subscription rate limits of the account a runtime's agent CLI runs under
+// (`GET /api/runtimes/:id/rate-limits`, MUL-9427), as the CLI last reported
+// them during a task. Window kinds and statuses fall back to "other" / ""
+// when a newer server sends a value this client does not know.
+export type RuntimeRateLimitWindowKind =
+  | "session"
+  | "weekly"
+  | "weekly_opus"
+  | "weekly_sonnet"
+  | "other";
+
+export type RuntimeRateLimitStatus = "allowed" | "warning" | "rejected" | "";
+
+export interface RuntimeRateLimitWindow {
+  kind: RuntimeRateLimitWindowKind;
+  /** 0-100; can run slightly past 100. Absent when the CLI did not say. */
+  used_percent?: number;
+  /** 0 when unknown. */
+  window_minutes: number;
+  resets_at?: string;
+  status: RuntimeRateLimitStatus;
+}
+
+export interface RuntimeRateLimits {
+  plan_type: string;
+  status: RuntimeRateLimitStatus;
+  windows: RuntimeRateLimitWindow[];
+  credits?: { has_credits: boolean; unlimited: boolean; balance: string };
+  observed_at: string;
+}
+
+export interface RuntimeRateLimitsResponse {
+  rate_limits: RuntimeRateLimits | null;
+}
+
 // One (agent, provider, model) row of the "Cost by agent" tab on the runtime
 // detail page. provider + model stay on the wire because cost is computed
 // client-side from a per-model pricing table (provider disambiguates bare

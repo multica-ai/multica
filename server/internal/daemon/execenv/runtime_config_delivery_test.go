@@ -360,6 +360,7 @@ func TestChannelDisplayName(t *testing.T) {
 	cases := map[string]string{
 		ChannelTypeSlack:    "Slack",
 		ChannelTypeFeishu:   "Feishu/Lark",
+		ChannelTypeWeixin:   "WeChat",
 		ChannelTypeSharecrm: "ShareCRM",
 		"":                  "",
 		// An unmapped channel names itself rather than reading as "unknown".
