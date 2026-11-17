@@ -271,7 +271,7 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Rename issue")).toBeInTheDocument();
     expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
-    expect(screen.getByText("Copy title as link")).toBeInTheDocument();
+    expect(screen.getByText("Copy link with title")).toBeInTheDocument();
     expect(screen.getByText("Create sub-issue")).toBeInTheDocument();
     expect(screen.getByText("Relations")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
@@ -291,7 +291,7 @@ describe("IssueActionsDropdown", () => {
     );
 
     fireEvent.click(screen.getByTestId("trigger"));
-    fireEvent.click(await screen.findByText("Copy title as link"));
+    fireEvent.click(await screen.findByText("Copy link with title"));
 
     expect(copyTextAndHtmlMock).toHaveBeenCalledWith(
       "[TES-1 Example](https://app.example/test/issues/TES-1)",
@@ -829,7 +829,7 @@ describe("Sidebar variant (MUL-8425)", () => {
       "Pin to sidebar",
       "Mark as unread",
       "Copy link",
-      "Copy title as link",
+      "Copy link with title",
       "Copy identifier",
     ]);
     expect(screen.getByTestId("row")).toHaveAttribute("data-popup-open");

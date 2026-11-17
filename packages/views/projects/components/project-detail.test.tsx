@@ -372,18 +372,18 @@ describe("ProjectDetail subscription", () => {
   });
 });
 
-describe("ProjectDetail copy title as link", () => {
+describe("ProjectDetail copy link with title", () => {
   it("copies the project title as a Markdown link and an HTML anchor", async () => {
     const user = userEvent.setup();
     renderProjectDetail();
 
-    await user.click(screen.getByRole("button", { name: "Copy title as link" }));
+    await user.click(screen.getByRole("button", { name: "Copy link with title" }));
 
     expect(mocks.copyTextAndHtml).toHaveBeenCalledWith(
       "[Launch Plan](https://app.example/test-workspace/projects/project-1)",
       '<a href="https://app.example/test-workspace/projects/project-1">Launch Plan</a>',
     );
-    expect(mocks.toastSuccess).toHaveBeenCalledWith("Title copied as link");
+    expect(mocks.toastSuccess).toHaveBeenCalledWith("Link copied with title");
   });
 
   it("reports a failed copy without a success toast", async () => {
@@ -391,7 +391,7 @@ describe("ProjectDetail copy title as link", () => {
     const user = userEvent.setup();
     renderProjectDetail();
 
-    await user.click(screen.getByRole("button", { name: "Copy title as link" }));
+    await user.click(screen.getByRole("button", { name: "Copy link with title" }));
 
     expect(mocks.toastError).toHaveBeenCalledWith("Failed to copy link");
     expect(mocks.toastSuccess).not.toHaveBeenCalled();

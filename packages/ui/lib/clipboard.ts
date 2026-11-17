@@ -97,7 +97,7 @@ export async function copyText(text: string): Promise<boolean> {
 /**
  * Copy text in two clipboard channels: a plain-text rendering and an HTML one.
  *
- * Used by "Copy title as link", where rich targets (docs, email, chat) should
+ * Used by "Copy link with title", where rich targets (docs, email, chat) should
  * paste the anchor while plain-text targets get the Markdown link. Targets
  * that only understand plain text, and browsers without the async Clipboard
  * API or `ClipboardItem`, receive the plain-text channel through `copyText`.

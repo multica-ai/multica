@@ -397,7 +397,7 @@ describe("ProjectsPage sharing", () => {
         getShareableUrl: (path) => `https://app.example${path}`,
       }));
       const copyLink = screen.getByRole("button", { name: "Copy link" });
-      const copyTitle = screen.getByRole("button", { name: "Copy title as link" });
+      const copyTitle = screen.getByRole("button", { name: "Copy link with title" });
       expect(copyLink.nextElementSibling).toBe(copyTitle);
 
       await user.click(copyTitle);
@@ -406,7 +406,7 @@ describe("ProjectsPage sharing", () => {
         "[Launch Plan](https://app.example/test-workspace/projects/project-1)",
         '<a href="https://app.example/test-workspace/projects/project-1">Launch Plan</a>',
       );
-      expect(mocks.toastSuccess).toHaveBeenCalledWith("Title copied as link");
+      expect(mocks.toastSuccess).toHaveBeenCalledWith("Link copied with title");
       expect(adapter.push).not.toHaveBeenCalled();
 
       await user.click(copyLink);
@@ -421,7 +421,7 @@ describe("ProjectsPage sharing", () => {
     const user = userEvent.setup();
     renderProjects();
 
-    await user.click(screen.getByRole("button", { name: "Copy title as link" }));
+    await user.click(screen.getByRole("button", { name: "Copy link with title" }));
 
     expect(mocks.toastError).toHaveBeenCalledWith("Failed to copy link");
     expect(mocks.toastSuccess).not.toHaveBeenCalled();
