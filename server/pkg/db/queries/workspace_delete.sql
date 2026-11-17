@@ -646,6 +646,10 @@ WHERE autopilot_quota_reservation.workspace_id = $1;
 DELETE FROM autopilot_quota_period
 WHERE autopilot_quota_period.workspace_id = $1;
 
+-- name: DeleteWorkspaceEntitlementLimitOverages :exec
+DELETE FROM entitlement_limit_overage
+WHERE entitlement_limit_overage.workspace_id = $1;
+
 -- name: DeleteWorkspaceAutopilotChildren :exec
 WITH
 deleted_triggers AS (
