@@ -43,7 +43,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API 监听端口 |
 | `JWT_SECRET` | 生产环境必填 | 登录 JWT、部分签名流程使用的密钥；生产环境对空值或已知占位值拒绝启动 |
 | `APP_ENV` | 空 | 生产环境设为 `production` |
-| `MULTICA_ALLOW_DUPLICATE_ISSUES` | `false` | 服务器统一设置是否默认允许创建标题与活跃任务相同的独立任务。未设置、`false` 或无效值均保留保护；设为 `true` 并重启 API 后，所有工作区和创建入口（包括渠道 `/issue`）默认允许重复标题。API 显式传入 `allow_duplicate: true` 或 `false` 优先于默认值；省略或 `null` 则继承默认值。CLI 的 `--allow-duplicate` 允许重复，`--allow-duplicate=false` 要求检查，省略则继承服务器设置。Webhook 配送与运行的持久化幂等保护，以及自动化手动/定时触发独立的近期重复检查均保持不变 |
+| `MULTICA_ALLOW_DUPLICATE_ISSUES` | `false` | 服务器统一设置是否默认允许创建标题与活跃任务相同的独立任务。未设置、`false` 或无效值均保留保护；设为 `true` 并重启 API 后，所有工作区和创建入口（包括渠道 `/issue`）默认允许重复标题。API 显式传入 `allow_duplicate: true` 或 `false` 优先于默认值；省略或 `null` 则继承默认值。CLI 的 `--allow-duplicate` 允许重复，`--allow-duplicate=false` 要求检查，省略则继承服务器设置。Webhook 配送与运行的持久化幂等保护，以及自动化手动/定时触发独立的近期重复检查均保持不变. 启用前还需升级独立部署的 `qoder-runtime`：旧版桥接程序在快速创建请求响应丢失后重试时依赖标题检查。服务器托管的桥接程序会随 API 服务器一起更新。 |
 | `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数。会话会滑动续期：剩余有效期过半后，持续使用的会话会被续期而不是到期。低于 `60s` 的取值会按 `60s` 处理 |
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |

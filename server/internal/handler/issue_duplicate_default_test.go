@@ -99,3 +99,38 @@ func TestIssueServiceDuplicateDefaultWithoutHTTP(t *testing.T) {
 		t.Fatal("service reused the existing issue")
 	}
 }
+
+func TestQuickCreateRetryKeepsSingleOriginIssueWithDuplicateDefault(t *testing.T) {
+	t.Setenv("MULTICA_ALLOW_DUPLICATE_ISSUES", "true")
+	h := *testHandler
+	s := testHandler.IssueService
+	h.IssueService = service.NewIssueService(s.Queries, s.TxStarter, s.Bus, s.Analytics, s.TaskService)
+	runtime := handlerTestRuntimeID(t)
+	agent := dbfx.Agent(t, "Duplicate replay agent", runtime)
+	task := dbfx.Task(t, agent, testutil.Cols{
+		"runtime_id": runtime, "status": "running", "originator_user_id": testUserID, "accountable_user_id": testUserID,
+		"context": fmt.Sprintf(`{"type":"quick_create","workspace_id":%q}`, testWorkspaceID),
+	})
+	title := fmt.Sprintf("Quick-create replay %d", time.Now().UnixNano())
+	dbfx.Issue(t, title)
+	body := map[string]any{"title": title, "origin_type": "quick_create", "origin_id": task}
+	post := func() *testutil.Response {
+		req := newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, body)
+		req.Header.Set("X-Agent-ID", agent)
+		req.Header.Set("X-Task-ID", task)
+		return testutil.Call(t, h.CreateIssue, req)
+	}
+	var created IssueResponse
+	post().Want(http.StatusCreated).JSON(&created)
+	dbfx.Cleanup(t, "DELETE FROM issue WHERE id = $1", created.ID)
+	// The bridge cannot observe a lost first response; retry with its explicit guard.
+	body["allow_duplicate"] = false
+	post().Want(http.StatusConflict)
+	var count int
+	if err := testPool.QueryRow(context.Background(), "SELECT COUNT(*) FROM issue WHERE workspace_id = $1 AND origin_type = 'quick_create' AND origin_id = $2", testWorkspaceID, task).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("issues for retried origin = %d, want 1", count)
+	}
+}

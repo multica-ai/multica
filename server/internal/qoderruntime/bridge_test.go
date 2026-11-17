@@ -408,6 +408,9 @@ func TestQuickCreateRunCreatesIssue(t *testing.T) {
 	if err := h.b.step(ctx); err != nil {
 		t.Fatal(err)
 	}
+	if _, present := h.issue["allow_duplicate"]; present {
+		t.Fatal("initial quick-create must inherit the server default")
+	}
 	want := map[string]any{"title": "Speed up inbox", "description": "Inbox loads slowly", "priority": "high", "due_date": "2026-11-01", "project_id": "project-1", "assignee_type": "agent", "assignee_id": "agent-uuid", "origin_type": "quick_create", "origin_id": "task-1"}
 	for k, v := range want {
 		if h.issue[k] != v {
@@ -613,6 +616,9 @@ func TestQuickCreateRetryAcceptsOwnDuplicate(t *testing.T) {
 	h.issueBody = `{"code":"active_duplicate_issue","error":"duplicate"}`
 	if err := h.b.step(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+	if got, present := h.issue["allow_duplicate"]; !present || got != false {
+		t.Fatalf("retry allow_duplicate = %#v (present %v), want explicit false", got, present)
 	}
 	if h.failure != nil || !strings.Contains(fmt.Sprint(h.complete["output"]), "Speed up inbox") {
 		t.Fatalf("retry should complete: complete=%#v failure=%#v", h.complete, h.failure)

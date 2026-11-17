@@ -43,7 +43,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `PORT` | `8080` | API のリッスンポート |
 | `JWT_SECRET` | 本番環境で必須 | ログイン JWT と一部の署名フローに使うシークレット。本番では空または既知のプレースホルダーだと起動を拒否 |
 | `APP_ENV` | 空 | プロダクションでは `production` を設定 |
-| `MULTICA_ALLOW_DUPLICATE_ISSUES` | `false` | 同じタイトルのアクティブなタスクを別途作成できるかをサーバー全体で設定します。未設定、`false`、無効な値では保護を維持します。`true` にして API を再起動すると、すべてのワークスペースと作成経路（チャネルの `/issue` を含む）で重複を許可します。API で明示した `allow_duplicate: true` / `false` が優先され、省略または `null` はサーバー設定を継承します。CLI の `--allow-duplicate` は重複を許可し、`--allow-duplicate=false` は検査を要求し、省略するとサーバー設定を継承します。Webhook 配信・実行の永続的な冪等性と、自動化の手動・スケジュール起動に対する独立した直近の重複検査は変更しません |
+| `MULTICA_ALLOW_DUPLICATE_ISSUES` | `false` | 同じタイトルのアクティブなタスクを別途作成できるかをサーバー全体で設定します。未設定、`false`、無効な値では保護を維持します。`true` にして API を再起動すると、すべてのワークスペースと作成経路（チャネルの `/issue` を含む）で重複を許可します。API で明示した `allow_duplicate: true` / `false` が優先され、省略または `null` はサーバー設定を継承します。CLI の `--allow-duplicate` は重複を許可し、`--allow-duplicate=false` は検査を要求し、省略するとサーバー設定を継承します。Webhook 配信・実行の永続的な冪等性と、自動化の手動・スケジュール起動に対する独立した直近の重複検査は変更しません. 有効にする前に、単独で配置した `qoder-runtime` も更新してください。古いブリッジはクイック作成の応答が失われた後の再試行でタイトル検査に依存します。サーバー管理のブリッジは API サーバーと一緒に更新されます。 |
 | `AUTH_TOKEN_TTL` | `720h`（30 日） | ブラウザ JWT と cookie の有効期間。Go duration または正の整数秒を受け付けます。セッションは有効期間の半分を過ぎるとスライド更新され、使い続けている限り失効しません。`60s` 未満は `60s` に補正されます |
 | `LOG_LEVEL` | アプリのデフォルト | ログレベル |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 終了シグナル受信後、グレースフルシャットダウンを開始するまでの待機時間 |

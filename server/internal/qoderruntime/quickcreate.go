@@ -119,6 +119,11 @@ func (b *Bridge) createQuickIssue(ctx context.Context, r *run) error {
 		body["attachment_ids"] = qc.AttachmentIDs
 	}
 	retry := qc.Submitted
+	if retry {
+		// A submitted request may have committed before its response was lost.
+		// Preserve the duplicate guard even when the server allows new title duplicates.
+		body["allow_duplicate"] = false
+	}
 	qc.Submitted = true
 	if err := b.persist(); err != nil {
 		return err
