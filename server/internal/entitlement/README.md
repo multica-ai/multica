@@ -39,16 +39,13 @@ The client reads:
   period. A malformed notification policy is ignored without invalidating an
   otherwise valid enforcement gate.
 
-Deploy Cloud policy revision 2 before the Multica consumer. The consumer treats
-a missing notification policy as notices-disabled while continuing to enforce
-the quota. The reverse order is safe because older consumers ignore the
-additive notification fields.
+No deployment order is required for the optional notification policy. The
+consumer treats a missing policy as notices-disabled while continuing to
+enforce the quota.
 
-Responses tolerate unknown JSON fields for additive compatibility, including
-gates this consumer does not read: Cloud may keep sending the retired
-`issue_count` gate to older consumers, and it is ignored here. Unknown
-schema/action, malformed fields, a missing `autopilot_runs` gate, HTTP failures, and timeouts fail
-open.
+Responses tolerate unknown JSON fields and gates for additive compatibility.
+Unknown schema/action, malformed fields, a missing `autopilot_runs` gate, HTTP
+failures, and timeouts fail open.
 
 ## Cache and degradation
 
