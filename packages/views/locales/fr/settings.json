@@ -966,7 +966,7 @@
     "section_general": "Détails de l'espace de travail",
     "logo_label": "Logo de l'espace de travail",
     "change_logo_aria": "Changer le logo de l'espace de travail",
-    "click_logo_hint": "Cliquez sur le logo pour envoyer une nouvelle image",
+    "click_logo_hint": "Cliquez sur le logo pour importer une image ou créer une icône texte",
     "toast_logo_failed": "Échec de l'envoi du logo de l'espace de travail",
     "name_label": "Nom",
     "description_label": "Description",

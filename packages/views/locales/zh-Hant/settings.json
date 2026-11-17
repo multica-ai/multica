@@ -957,7 +957,7 @@
     "section_general": "工作區資訊",
     "logo_label": "工作區圖示",
     "change_logo_aria": "更換工作區圖示",
-    "click_logo_hint": "點選圖示上傳新圖片",
+    "click_logo_hint": "點擊圖示上傳圖片，或產生文字圖示",
     "toast_logo_failed": "上傳工作區圖示失敗",
     "name_label": "名稱",
     "description_label": "描述",

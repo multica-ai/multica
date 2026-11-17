@@ -966,7 +966,7 @@
     "section_general": "Workspace details",
     "logo_label": "Workspace logo",
     "change_logo_aria": "Change workspace logo",
-    "click_logo_hint": "Click the logo to upload a new image",
+    "click_logo_hint": "Click the logo to upload an image or create a text icon",
     "toast_logo_failed": "Failed to upload workspace logo",
     "name_label": "Name",
     "description_label": "Description",
