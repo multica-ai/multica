@@ -12,6 +12,11 @@ const sampleProjectProgress = `{
 		{"assignee_type": "agent", "assignee_id": "xyz", "scope": 6, "completed": 3, "started": 2},
 		{"assignee_type": null, "assignee_id": null, "scope": 2, "completed": 0, "started": 0}
 	],
+	"by_label": [
+		{"label_id": "l1", "scope": 4, "completed": 1, "started": 1},
+		{"label_id": "gone", "scope": 1, "completed": 0, "started": 0},
+		{"label_id": null, "scope": 3, "completed": 2, "started": 0}
+	],
 	"history": [
 		{"date": "2026-10-12", "scope": 6, "started": 0, "completed": 0},
 		{"date": "2026-11-09", "scope": 11, "started": 3, "completed": 5}
@@ -66,6 +71,45 @@ func TestProjectProgressTables(t *testing.T) {
 	}
 }
 
+func TestProjectProgressLabelTable(t *testing.T) {
+	resp := decodeSampleProgress(t)
+	_, rows := projectProgressLabelTable(resp, map[string]string{"l1": "ios"})
+	want := [][]string{{"ios", "1/4 (25%)", "1"}, {"gone", "0/1 (0%)", "0"}, {"no label", "2/3 (66%)", "0"}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("by label = %v, want %v", rows, want)
+	}
+}
+
+func TestProjectActivityTable(t *testing.T) {
+	var resp map[string]any
+	if err := json.Unmarshal([]byte(`{"entries": [
+		{"created_at": "2026-11-15T08:00:00Z", "issue_identifier": "DEV-12", "issue_title": "Feedback form",
+		 "actor_type": "member", "actor_id": "m1", "action": "status_changed", "details": {"from": "todo", "to": "in_progress"}},
+		{"created_at": "2026-11-14T08:00:00Z", "issue_identifier": "DEV-9", "issue_title": "Subtasks",
+		 "actor_type": "agent", "actor_id": "xyz", "action": "assignee_changed", "details": {"to_type": "agent", "to_id": "xyz"}},
+		{"created_at": "2026-11-13T08:00:00Z", "issue_identifier": "DEV-8", "issue_title": "Offline",
+		 "actor_type": "system", "actor_id": "", "action": "created", "details": {}}
+	], "next_cursor": null}`), &resp); err != nil {
+		t.Fatal(err)
+	}
+	actors := actorDisplayLookup{state: &actorDisplayLookupState{
+		members:       map[string]string{"m1": "Lin"},
+		agents:        map[string]string{"xyz": "CodeBot"},
+		membersLoaded: true,
+		agentsLoaded:  true,
+		squadsLoaded:  true,
+	}}
+	_, rows := projectActivityTable(resp, actors)
+	want := [][]string{
+		{"2026-11-15T08:00:00Z", "DEV-12", "Feedback form", "member:Lin", "status_changed", "todo → in_progress"},
+		{"2026-11-14T08:00:00Z", "DEV-9", "Subtasks", "agent:CodeBot", "assignee_changed", "→ agent:CodeBot"},
+		{"2026-11-13T08:00:00Z", "DEV-8", "Offline", "system", "created", ""},
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("activity = %v, want %v", rows, want)
+	}
+}
+
 func TestProjectOverviewTable(t *testing.T) {
 	overview := map[string]any{
 		"project": map[string]any{
@@ -74,6 +118,9 @@ func TestProjectOverviewTable(t *testing.T) {
 		},
 		"progress":  decodeSampleProgress(t),
 		"resources": []any{map[string]any{"id": "r1"}},
+		"working_agents": []any{
+			map[string]any{"name": "CodeBot", "running_task_count": float64(2)},
+		},
 	}
 	actors := actorDisplayLookup{state: &actorDisplayLookupState{
 		agents:        map[string]string{"xyz": "CodeBot"},
@@ -89,7 +136,7 @@ func TestProjectOverviewTable(t *testing.T) {
 	want := map[string]string{
 		"TITLE": "Mobile 2.0", "LEAD": "agent:CodeBot", "DUE": "2026-12-18",
 		"PROGRESS": "5/11 (45%)", "FORECAST": "2026-12-13 (1.25/week)", "RESOURCES": "1",
-		"DESCRIPTION": "Rebuild the mobile app.",
+		"WORKING": "CodeBot (2)", "DESCRIPTION": "Rebuild the mobile app.",
 	}
 	for k, v := range want {
 		if got[k] != v {

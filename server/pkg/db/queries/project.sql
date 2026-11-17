@@ -92,7 +92,12 @@ WHERE workspace_id = sqlc.arg('workspace_id')::uuid
 GROUP BY project_id;
 
 -- name: ListProjectProgressIssues :many
-SELECT id, status, assignee_type, assignee_id, created_at
+SELECT id, status, assignee_type, assignee_id, created_at,
+       ARRAY(
+           SELECT il.label_id FROM issue_to_label il
+           WHERE il.issue_id = issue.id
+           ORDER BY il.label_id
+       )::uuid[] AS label_ids
 FROM issue
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND project_id = sqlc.arg('project_id')::uuid;
@@ -105,3 +110,21 @@ WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND action = 'status_changed'
   AND created_at >= sqlc.arg('since')::timestamptz
 ORDER BY created_at, id;
+
+-- name: ListProjectActivity :many
+-- The newest activity on a project's issues, newest first, keyset-paged on
+-- (created_at, id). Only the given actions are read, so autosaves and run
+-- bookkeeping stay out of the project feed. A zero cursor reads from the top.
+SELECT a.id, a.issue_id, a.actor_type, a.actor_id, a.action, a.details, a.created_at,
+       i.number AS issue_number, i.title AS issue_title, i.status AS issue_status
+FROM activity_log a
+JOIN issue i ON i.id = a.issue_id
+WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND i.project_id = sqlc.arg('project_id')::uuid
+  AND a.action = ANY(sqlc.arg('actions')::text[])
+  AND (
+      sqlc.narg('before_at')::timestamptz IS NULL
+      OR (a.created_at, a.id) < (sqlc.narg('before_at')::timestamptz, sqlc.narg('before_id')::uuid)
+  )
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT sqlc.arg('row_limit');

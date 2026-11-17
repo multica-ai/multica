@@ -307,8 +307,92 @@ func (q *Queries) ListIssueStatusChangesSince(ctx context.Context, arg ListIssue
 	return items, nil
 }
 
+const listProjectActivity = `-- name: ListProjectActivity :many
+SELECT a.id, a.issue_id, a.actor_type, a.actor_id, a.action, a.details, a.created_at,
+       i.number AS issue_number, i.title AS issue_title, i.status AS issue_status
+FROM activity_log a
+JOIN issue i ON i.id = a.issue_id
+WHERE i.workspace_id = $1::uuid
+  AND i.project_id = $2::uuid
+  AND a.action = ANY($3::text[])
+  AND (
+      $4::timestamptz IS NULL
+      OR (a.created_at, a.id) < ($4::timestamptz, $5::uuid)
+  )
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT $6
+`
+
+type ListProjectActivityParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	Actions     []string           `json:"actions"`
+	BeforeAt    pgtype.Timestamptz `json:"before_at"`
+	BeforeID    pgtype.UUID        `json:"before_id"`
+	RowLimit    int32              `json:"row_limit"`
+}
+
+type ListProjectActivityRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	Action      string             `json:"action"`
+	Details     []byte             `json:"details"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	IssueNumber int32              `json:"issue_number"`
+	IssueTitle  string             `json:"issue_title"`
+	IssueStatus string             `json:"issue_status"`
+}
+
+// The newest activity on a project's issues, newest first, keyset-paged on
+// (created_at, id). Only the given actions are read, so autosaves and run
+// bookkeeping stay out of the project feed. A zero cursor reads from the top.
+func (q *Queries) ListProjectActivity(ctx context.Context, arg ListProjectActivityParams) ([]ListProjectActivityRow, error) {
+	rows, err := q.db.Query(ctx, listProjectActivity,
+		arg.WorkspaceID,
+		arg.ProjectID,
+		arg.Actions,
+		arg.BeforeAt,
+		arg.BeforeID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListProjectActivityRow{}
+	for rows.Next() {
+		var i ListProjectActivityRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Action,
+			&i.Details,
+			&i.CreatedAt,
+			&i.IssueNumber,
+			&i.IssueTitle,
+			&i.IssueStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProjectProgressIssues = `-- name: ListProjectProgressIssues :many
-SELECT id, status, assignee_type, assignee_id, created_at
+SELECT id, status, assignee_type, assignee_id, created_at,
+       ARRAY(
+           SELECT il.label_id FROM issue_to_label il
+           WHERE il.issue_id = issue.id
+           ORDER BY il.label_id
+       )::uuid[] AS label_ids
 FROM issue
 WHERE workspace_id = $1::uuid
   AND project_id = $2::uuid
@@ -325,6 +409,7 @@ type ListProjectProgressIssuesRow struct {
 	AssigneeType pgtype.Text        `json:"assignee_type"`
 	AssigneeID   pgtype.UUID        `json:"assignee_id"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	LabelIds     []pgtype.UUID      `json:"label_ids"`
 }
 
 func (q *Queries) ListProjectProgressIssues(ctx context.Context, arg ListProjectProgressIssuesParams) ([]ListProjectProgressIssuesRow, error) {
@@ -342,6 +427,7 @@ func (q *Queries) ListProjectProgressIssues(ctx context.Context, arg ListProject
 			&i.AssigneeType,
 			&i.AssigneeID,
 			&i.CreatedAt,
+			&i.LabelIds,
 		); err != nil {
 			return nil, err
 		}
