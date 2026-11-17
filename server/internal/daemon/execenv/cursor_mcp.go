@@ -158,6 +158,44 @@ func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, 
 	return cursorDataDir, nil
 }
 
+// CursorMcpAuthPath is the mcp-auth.json Cursor reads for a task's workdir
+// under cursorDataDir.
+func CursorMcpAuthPath(cursorDataDir, workDir string) string {
+	return filepath.Join(cursorDataDir, "projects", cursorSlugifyPath(cursorProjectRoot(workDir)), cursorMcpAuthFile)
+}
+
+// CursorMcpServersNeedingLogin returns, sorted, the MCP servers whose OAuth
+// login is missing in the task's mcp-auth.json. When a server answers with an
+// OAuth challenge, Cursor registers a client and records it under the server
+// name; until someone logs in, that entry has no tokens. Servers that never
+// asked for OAuth have no entry. A missing or unreadable file reports nothing.
+func CursorMcpServersNeedingLogin(cursorDataDir, workDir string) []string {
+	if cursorDataDir == "" {
+		return nil
+	}
+	data, err := os.ReadFile(CursorMcpAuthPath(cursorDataDir, workDir))
+	if err != nil {
+		return nil
+	}
+	var entries map[string]struct {
+		Tokens *struct {
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+		} `json:"tokens"`
+	}
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return nil
+	}
+	var names []string
+	for name, entry := range entries {
+		if entry.Tokens == nil || (entry.Tokens.AccessToken == "" && entry.Tokens.RefreshToken == "") {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // linkCursorMcpAuthStore points the task's mcp-auth.json at the agent's
 // persistent store. A hard link is the fallback where symlinks need privileges
 // (Windows); it still shares one file because Cursor rewrites it in place.

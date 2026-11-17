@@ -132,6 +132,18 @@ CodeBuddy, Kimi CLI, and Pi load their user-level configuration themselves at st
 
 The merge happens on the runtime's computer; the commands, URLs, headers, and environment values of local servers are never uploaded. The "Inherited from runtime" list on the agent's **MCP** tab shows only each server's name, transport, source, and whether it is enabled; one shadowed by a same-named agent server is marked "Overridden by Multica". If a local configuration file cannot be parsed, the daemon logs a warning and that run uses only the agent's configuration.
 
+### Cursor MCP logins [#cursor-mcp-login]
+
+Cursor stores MCP OAuth logins per project directory, and every run has its own directory. When a Cursor agent has an MCP configuration, the daemon therefore keeps one login file per agent on the runtime's computer, `cursor-mcp-auth/<agent-id>/mcp-auth.json` in the Multica config directory, and links each run to it. Log in to a server such as Mobbin once and the agent's later runs on that computer use the login. It is separate from your own Cursor's login, so a run never signs you out there. Every run of the agent on that computer uses it, including runs other members trigger.
+
+If a server still needs a login, the run's transcript says which one and gives the command to run on the runtime's computer, for example:
+
+```bash
+cd <run workdir> && CURSOR_DATA_DIR=<run cursor-data> cursor-agent mcp login mobbin
+```
+
+The login applies from the agent's next run; the current run does not pick it up. To use a login file of your own instead, set `CURSOR_MCP_AUTH_SOURCE` in the agent's environment variables to an absolute path to an `mcp-auth.json` or the Cursor project directory containing it; it takes priority over the per-agent file. Two runs of one agent that refresh the same token at the same moment can still sign each other out; log in again if that happens.
+
 ## Cleanup and retention [#cleanup]
 
 The daemon runs its first cleanup about 30 seconds after starting, then every 2 hours. Directories in use by a running run are never cleaned. `multica daemon disk-usage` shows usage per workspace or per run. The durations below are defaults; the matching `MULTICA_GC_*` variables are in [Environment variables](/environment-variables#gc).
@@ -168,6 +180,7 @@ A cache is removed only when all three hold: no workspace or project references 
 | Codex session records (one per agent per issue) | `multica-sessions/` in the Codex home (default `~/.codex`) | Removed after 14 days unused; later runs on that issue can no longer resume the earlier Codex session |
 | Hermes session records | `hermes-sessions/` in the Multica config directory (default `~/.multica`; `~/.multica/profiles/<name>` for a named profile) | Removed after 14 days unused |
 | Hermes memory (one per agent) | `hermes-state/` in the same directory | Removed after 90 days unused |
+| Cursor MCP logins (one per agent) | `cursor-mcp-auth/` in the same directory | Kept |
 | Each run's private temporary directory (`TMPDIR`) | `multica-task-*` in the system temp directory | Removed when the run ends; if the daemon was killed, a later cleanup removes it |
 
 Hermes issue and chat tasks use their conversation's session directory as an isolated `HERMES_HOME`, with a regular `state.db` and its SQLite journals inside it. This works with both in-process ACP and gateway-backed Hermes. Existing session stores are reused, and task-local history is migrated before the next run starts.

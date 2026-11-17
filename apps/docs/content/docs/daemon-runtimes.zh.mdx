@@ -133,6 +133,18 @@ CodeBuddy、Kimi CLI 和 Pi 启动时会自己加载用户级配置，并与 Mul
 
 合并在运行时所在的电脑上完成，本机服务器的命令、URL、请求头和环境变量不会上传。智能体 **MCP** 标签页的"从运行时继承"一栏只显示服务器名称、传输方式、来源和是否启用；被智能体同名服务器覆盖的会标为"已由 Multica 覆盖"。本机配置文件无法解析时，守护进程记一条警告日志，这次运行只使用智能体的配置。
 
+### Cursor 的 MCP 登录 [#cursor-mcp-login]
+
+Cursor 按项目目录保存 MCP 的 OAuth 登录，而每次运行都有自己的目录。因此当 Cursor 智能体有 MCP 配置时，daemon 会在运行时所在电脑上为每个智能体保留一份登录文件，即 Multica 配置目录下的 `cursor-mcp-auth/<agent-id>/mcp-auth.json`，并让每次运行都链接到它。对 Mobbin 这样的服务登录一次，这个智能体之后在这台电脑上的运行都能用。它和你自己 Cursor 里的登录分开，运行不会把你那边挤下线。这个智能体在这台电脑上的所有运行都会用到它，包括其他成员触发的运行。
+
+如果某个服务仍需登录，运行记录里会写明是哪个服务，并给出要在运行时所在电脑上执行的命令，例如：
+
+```bash
+cd <运行的 workdir> && CURSOR_DATA_DIR=<运行的 cursor-data> cursor-agent mcp login mobbin
+```
+
+登录从这个智能体的下一次运行开始生效，当前这次运行用不上。如果想改用你自己的登录文件，在智能体的环境变量里把 `CURSOR_MCP_AUTH_SOURCE` 设为某个 `mcp-auth.json` 的绝对路径，或包含它的 Cursor 项目目录；它优先于按智能体保留的文件。同一个智能体的两次运行如果恰好同时刷新同一个 token，仍可能把对方挤下线，出现时重新登录即可。
+
 ## 清理与保留 [#cleanup]
 
 守护进程启动约 30 秒后清理一次，之后每 2 小时一次。正在执行的运行用到的目录不会被清理。`multica daemon disk-usage` 可以按工作区或按运行查看占用。下文的时长都是默认值，对应的 `MULTICA_GC_*` 变量见[环境变量](/environment-variables#gc)。
@@ -169,6 +181,7 @@ CodeBuddy、Kimi CLI 和 Pi 启动时会自己加载用户级配置，并与 Mul
 | Codex 会话记录（每个智能体、每个任务一份） | Codex 目录（默认 `~/.codex`）下的 `multica-sessions/` | 14 天未使用后删除；之后这个任务的运行无法续接原来的 Codex 会话 |
 | Hermes 会话记录 | Multica 配置目录（默认 `~/.multica`，命名 profile 为 `~/.multica/profiles/<name>`）下的 `hermes-sessions/` | 14 天未使用后删除 |
 | Hermes 记忆（每个智能体一份） | 同一目录下的 `hermes-state/` | 90 天未使用后删除 |
+| Cursor 的 MCP 登录（每个智能体一份） | 同一目录下的 `cursor-mcp-auth/` | 保留 |
 | 每次运行的私有临时目录（`TMPDIR`） | 系统临时目录下的 `multica-task-*` | 运行结束后删除，守护进程被强制结束时由之后的清理补删 |
 
 Hermes 在任务和聊天中的运行会将会话持久目录作为隔离的 `HERMES_HOME`，`state.db` 及其 SQLite 日志文件均为目录内的普通文件。这个布局同时支持旧版进程内 ACP 和新版由 Gateway 执行的 ACP。已有会话记录会直接复用，旧运行目录中的会话历史会在下次运行前迁移。

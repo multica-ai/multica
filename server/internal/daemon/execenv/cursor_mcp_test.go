@@ -251,11 +251,6 @@ func TestPrepareCursorMcpConfigRemovesPriorAuthOnOptOut(t *testing.T) {
 	}
 }
 
-func cursorTaskAuthPath(t *testing.T, cursorDataDir, workDir string) string {
-	t.Helper()
-	return filepath.Join(cursorDataDir, "projects", cursorSlugifyPath(cursorProjectRoot(workDir)), cursorMcpAuthFile)
-}
-
 func TestPrepareCursorMcpConfigLoginPersistsAcrossTasksViaAgentStore(t *testing.T) {
 	t.Parallel()
 
@@ -281,7 +276,7 @@ func TestPrepareCursorMcpConfigLoginPersistsAcrossTasksViaAgentStore(t *testing.
 
 	// Cursor writes a login through the task's file in place.
 	login := []byte(`{"fetch":{"tokens":{"access_token":"a","refresh_token":"r"}}}`)
-	if err := os.WriteFile(cursorTaskAuthPath(t, firstData, firstWork), login, 0o600); err != nil {
+	if err := os.WriteFile(CursorMcpAuthPath(firstData, firstWork), login, 0o600); err != nil {
 		t.Fatalf("write login: %v", err)
 	}
 
@@ -289,7 +284,7 @@ func TestPrepareCursorMcpConfigLoginPersistsAcrossTasksViaAgentStore(t *testing.
 	if _, err := prepareCursorMcpConfig(firstRoot, firstWork, mcpConfig, "", store, nil, nil); err != nil {
 		t.Fatalf("re-prepare first task: %v", err)
 	}
-	if data, err := os.ReadFile(cursorTaskAuthPath(t, firstData, firstWork)); err != nil || string(data) != string(login) {
+	if data, err := os.ReadFile(CursorMcpAuthPath(firstData, firstWork)); err != nil || string(data) != string(login) {
 		t.Fatalf("reused task auth = %q, %v; want login", data, err)
 	}
 
@@ -303,16 +298,16 @@ func TestPrepareCursorMcpConfigLoginPersistsAcrossTasksViaAgentStore(t *testing.
 	if err != nil {
 		t.Fatalf("prepare second task: %v", err)
 	}
-	if data, err := os.ReadFile(cursorTaskAuthPath(t, secondData, secondWork)); err != nil || string(data) != string(login) {
+	if data, err := os.ReadFile(CursorMcpAuthPath(secondData, secondWork)); err != nil || string(data) != string(login) {
 		t.Fatalf("second task auth = %q, %v; want login", data, err)
 	}
 
 	// A token refresh in one task is what the other task reads next.
 	refreshed := []byte(`{"fetch":{"tokens":{"access_token":"b","refresh_token":"r2"}}}`)
-	if err := os.WriteFile(cursorTaskAuthPath(t, secondData, secondWork), refreshed, 0o600); err != nil {
+	if err := os.WriteFile(CursorMcpAuthPath(secondData, secondWork), refreshed, 0o600); err != nil {
 		t.Fatalf("write refresh: %v", err)
 	}
-	if data, err := os.ReadFile(cursorTaskAuthPath(t, firstData, firstWork)); err != nil || string(data) != string(refreshed) {
+	if data, err := os.ReadFile(CursorMcpAuthPath(firstData, firstWork)); err != nil || string(data) != string(refreshed) {
 		t.Fatalf("first task auth after refresh = %q, %v; want refreshed", data, err)
 	}
 
@@ -347,7 +342,7 @@ func TestPrepareCursorMcpConfigExplicitAuthSourceOverridesAgentStore(t *testing.
 	if err != nil {
 		t.Fatalf("prepareCursorMcpConfig: %v", err)
 	}
-	if data, err := os.ReadFile(cursorTaskAuthPath(t, cursorDataDir, workDir)); err != nil || string(data) != `{"from":"source"}` {
+	if data, err := os.ReadFile(CursorMcpAuthPath(cursorDataDir, workDir)); err != nil || string(data) != `{"from":"source"}` {
 		t.Fatalf("task auth = %q, %v; want explicit source", data, err)
 	}
 	if _, err := os.Stat(store); !os.IsNotExist(err) {
@@ -359,8 +354,99 @@ func TestPrepareCursorMcpConfigExplicitAuthSourceOverridesAgentStore(t *testing.
 	if err != nil {
 		t.Fatalf("prepareCursorMcpConfig without source: %v", err)
 	}
-	if data, err := os.ReadFile(cursorTaskAuthPath(t, cursorDataDir, workDir)); err != nil || string(data) != "{}\n" {
+	if data, err := os.ReadFile(CursorMcpAuthPath(cursorDataDir, workDir)); err != nil || string(data) != "{}\n" {
 		t.Fatalf("task auth = %q, %v; want empty agent store", data, err)
+	}
+}
+
+func TestCursorMcpServersNeedingLogin(t *testing.T) {
+	t.Parallel()
+
+	dataDir := t.TempDir()
+	workDir := t.TempDir()
+	if got := CursorMcpServersNeedingLogin(dataDir, workDir); got != nil {
+		t.Fatalf("missing file = %v, want nil", got)
+	}
+	if got := CursorMcpServersNeedingLogin("", workDir); got != nil {
+		t.Fatalf("no data dir = %v, want nil", got)
+	}
+
+	authPath := CursorMcpAuthPath(dataDir, workDir)
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// Shapes captured from cursor-agent 2026.11.13: a server that challenged
+	// for OAuth gets clientInfo (and scopeStepUp) without tokens.
+	if err := os.WriteFile(authPath, []byte(`{
+		"mobbin": {"clientInfo": {"client_id": "c"}, "scopeStepUp": {"stepUpScopes": []}},
+		"plugin-mobbin-mobbin": {"clientInfo": {"client_id": "c"}},
+		"linear": {"tokens": {"access_token": "a", "refresh_token": "r", "token_type": "bearer"}, "clientInfo": {"client_id": "c"}},
+		"expired": {"tokens": {"refresh_token": "r"}},
+		"emptied": {"tokens": {}}
+	}`), 0o600); err != nil {
+		t.Fatalf("write auth: %v", err)
+	}
+	want := []string{"emptied", "mobbin", "plugin-mobbin-mobbin"}
+	if got := CursorMcpServersNeedingLogin(dataDir, workDir); !reflect.DeepEqual(got, want) {
+		t.Fatalf("needing login = %v, want %v", got, want)
+	}
+
+	if err := os.WriteFile(authPath, []byte(`not json`), 0o600); err != nil {
+		t.Fatalf("write malformed: %v", err)
+	}
+	if got := CursorMcpServersNeedingLogin(dataDir, workDir); got != nil {
+		t.Fatalf("malformed file = %v, want nil", got)
+	}
+}
+
+func TestCursorMcpLoginInOneTaskClearsNoticeForNextTask(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := filepath.Join(root, "profile", cursorMcpAuthStoreRoot, "agent-1", cursorMcpAuthFile)
+	mcpConfig := json.RawMessage(`{"mcpServers":{"multica_apps":{"url":"http://127.0.0.1:1/mcp"}}}`)
+	prepare := func(name string) (string, string) {
+		t.Helper()
+		envRoot := filepath.Join(root, name)
+		workDir := filepath.Join(envRoot, "workdir")
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", name, err)
+		}
+		dataDir, err := prepareCursorMcpConfig(envRoot, workDir, mcpConfig, "", store, nil, nil)
+		if err != nil {
+			t.Fatalf("prepare %s: %v", name, err)
+		}
+		return dataDir, workDir
+	}
+
+	firstData, firstWork := prepare("task-1")
+	if got := CursorMcpServersNeedingLogin(firstData, firstWork); got != nil {
+		t.Fatalf("fresh store = %v, want nothing to report", got)
+	}
+	// Cursor meets Mobbin's OAuth challenge during the first run.
+	if err := os.WriteFile(CursorMcpAuthPath(firstData, firstWork), []byte(`{"mobbin":{"clientInfo":{"client_id":"c"}}}`), 0o600); err != nil {
+		t.Fatalf("write challenge: %v", err)
+	}
+	if got := CursorMcpServersNeedingLogin(firstData, firstWork); !reflect.DeepEqual(got, []string{"mobbin"}) {
+		t.Fatalf("after challenge = %v, want [mobbin]", got)
+	}
+
+	secondData, secondWork := prepare("task-2")
+	if got := CursorMcpServersNeedingLogin(secondData, secondWork); !reflect.DeepEqual(got, []string{"mobbin"}) {
+		t.Fatalf("next task before login = %v, want [mobbin]", got)
+	}
+
+	// `cursor-agent mcp login mobbin`, run with the first task's workdir and
+	// CURSOR_DATA_DIR, writes the tokens through that task's link.
+	if err := os.WriteFile(CursorMcpAuthPath(firstData, firstWork), []byte(`{"mobbin":{"clientInfo":{"client_id":"c"},"tokens":{"access_token":"a","refresh_token":"r"}}}`), 0o600); err != nil {
+		t.Fatalf("write login: %v", err)
+	}
+	thirdData, thirdWork := prepare("task-3")
+	if got := CursorMcpServersNeedingLogin(thirdData, thirdWork); got != nil {
+		t.Fatalf("next task after login = %v, want nothing to report", got)
+	}
+	if got := CursorMcpServersNeedingLogin(secondData, secondWork); got != nil {
+		t.Fatalf("task prepared before login = %v, want it to see the login too", got)
 	}
 }
 
