@@ -59,18 +59,18 @@ multica daemon start
 
 ### AI 代理的預設本機目錄 [#agent-default-directory]
 
-在 daemon 的啟動環境中設定 `MULTICA_AGENT_LOCAL_DIRECTORIES`，將完整的 AI 代理 UUID 對應至這台電腦上的絕對路徑：
+在守護程序的啟動環境中設定 `MULTICA_AGENT_LOCAL_DIRECTORIES`，將完整的 AI 代理 UUID 對應至這台電腦上的絕對路徑：
 
 ```bash
 export MULTICA_AGENT_LOCAL_DIRECTORIES='{"12ab5678-1234-4567-890a-123456789abc":"/path/to/workspace"}'
 multica daemon restart
 ```
 
-此對應適用於沒有專案 `local_directory` 綁定的任務、聊天及自動化執行。專案綁定優先，包括綁定至其他 daemon 的目錄。小隊協調 AI 代理仍使用受管理的工作目錄；未設定的 AI 代理維持原有行為。
+此對應適用於沒有專案 `local_directory` 綁定的任務、聊天及自動化執行。專案綁定優先，包括綁定至其他守護程序的目錄。小隊協調 AI 代理仍使用受管理的工作目錄；未設定的 AI 代理維持原有行為。
 
-執行沿用 `in_place` 流程：可讀取目錄中的指令、skill 及工具設定，也可修改檔案。任務與自動化的寫入執行共用既有路徑鎖，聊天執行仍免於該鎖。清理時，daemon 不會刪除使用者目錄。
+執行沿用 `in_place` 流程：可讀取目錄中的指令、skill 及工具設定，也可修改檔案。任務與自動化的寫入執行共用既有路徑鎖，聊天執行仍免於該鎖。清理時，守護程序不會刪除使用者目錄。
 
-JSON 格式錯誤、AI 代理 UUID 無效、路徑空白或使用相對路徑時，daemon 會拒絕啟動。執行開始時，目錄必須存在且可寫入。修改啟動環境後需重新啟動 daemon；此對應不是伺服器端的 AI 代理設定。
+JSON 格式錯誤、AI 代理 UUID 無效、路徑空白或使用相對路徑時，守護程序會拒絕啟動。執行開始時，目錄必須存在且可寫入。修改啟動環境後需重新啟動守護程序；此對應不是伺服器端的 AI 代理設定。
 
 啟動時，守護程序檢測 `PATH` 中受支援的 AI 程式設計工具，為你有權連線的工作區註冊執行時。工具剛安裝或剛登入時，重啟守護程序就會重新檢測。
 

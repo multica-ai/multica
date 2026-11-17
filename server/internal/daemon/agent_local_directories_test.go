@@ -23,6 +23,12 @@ func TestParseAgentLocalDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pathJSON, err := json.Marshal(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate := `{"` + directoryTestAgentID + `":` + string(pathJSON) + `,"` + directoryTestAgentID + `":` + string(pathJSON) + `}`
+	malformedID := `{"` + strings.ReplaceAll(directoryTestAgentID, "-", "_") + `":` + string(pathJSON) + `}`
 	for _, tc := range []struct {
 		name, input string
 		want        map[string]string
@@ -32,8 +38,12 @@ func TestParseAgentLocalDirectories(t *testing.T) {
 		{name: "empty object", input: "{}", want: map[string]string{}},
 		{name: "canonical agent ID", input: string(encoded), want: map[string]string{directoryTestAgentID: directory}},
 		{name: "invalid JSON", input: "{", bad: true},
+		{name: "duplicate UUID key", input: duplicate, bad: true},
+		{name: "malformed UUID separators", input: malformedID, bad: true},
 		{name: "null", input: "null", bad: true},
 		{name: "array", input: "[]", bad: true},
+		{name: "trailing object", input: "{}{}", bad: true},
+		{name: "trailing garbage", input: "{} invalid", bad: true},
 		{name: "string", input: `"directory"`, bad: true},
 		{name: "invalid agent ID", input: `{"agent":"/tmp/work"}`, bad: true},
 		{name: "non-string path", input: `{"` + directoryTestAgentID + `":42}`, bad: true},

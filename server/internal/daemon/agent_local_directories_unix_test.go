@@ -79,6 +79,9 @@ cat >/dev/null
 			d.cfg.AgentLocalDirectories = nil
 			prior := task
 			prior.ID = task.ID + "-prior"
+			priorAgent := *task.Agent
+			priorAgent.CustomEnv = map[string]string{"DIRECTORY_CAPTURE": t.TempDir()}
+			prior.Agent = &priorAgent
 			previous, err := d.runTask(t.Context(), prior, "claude", 0, logger)
 			if err != nil || previous.Status != "completed" {
 				t.Fatalf("prior managed run: %+v, %v", previous, err)
