@@ -184,6 +184,9 @@
     "url_copied": "Webhook URL을 복사했습니다",
     "url_copy_failed": "URL을 복사하지 못했습니다",
     "edit_schedule": "일정 수정",
+    "edit_webhook": "Webhook 수정",
+    "event_filter_summary_all": "모든 이벤트 수락",
+    "event_filter_summary_conditions_other": "조건 {{count}}개",
     "rotate_url": "URL 재발급",
     "rotate_confirm_title": "Webhook URL 재발급",
     "rotate_confirm_description": "현재 URL은 즉시 동작을 멈춥니다. 이 URL을 호출하는 외부 시스템은 새 URL로 업데이트해야 합니다. 계속할까요?",
@@ -285,6 +288,12 @@
     "toast_updated": "일정을 수정했습니다",
     "toast_update_failed": "일정 수정에 실패했습니다"
   },
+  "edit_webhook_dialog": {
+    "title": "Webhook 수정",
+    "label_placeholder": "예: GitHub 풀 리퀘스트",
+    "toast_updated": "Webhook을 수정했습니다",
+    "toast_update_failed": "Webhook 수정에 실패했습니다"
+  },
   "dialog": {
     "sr_create": "새 오토파일럿",
     "sr_edit": "오토파일럿 수정",
@@ -363,6 +372,7 @@
     "event_filter_condition_values_placeholder": "main, release",
     "event_filter_condition_ignore_case": "대소문자 무시",
     "schedule_multiple_notice": "이 오토파일럿에는 일정이 {{count}}개 있습니다. 이 대화상자를 닫고 아래 '트리거'에서 각각 수정하세요.",
+    "webhook_multiple_notice": "이 오토파일럿에는 Webhook이 여러 개 있습니다. 이 대화상자를 닫고 아래 '트리거'에서 각각 수정하세요.",
     "schedule_empty": "일정이 없습니다. 이 오토파일럿은 수동으로 실행할 때만 동작합니다.",
     "schedule_add": "일정 추가",
     "error_title_required": "오토파일럿 이름을 입력하세요.",

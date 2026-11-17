@@ -184,6 +184,12 @@
     "url_copied": "URL вебхука скопирован",
     "url_copy_failed": "Не удалось скопировать",
     "edit_schedule": "Изменить расписание",
+    "edit_webhook": "Изменить вебхук",
+    "event_filter_summary_all": "Принимает все события",
+    "event_filter_summary_conditions_one": "{{count}} условие",
+    "event_filter_summary_conditions_few": "{{count}} условия",
+    "event_filter_summary_conditions_many": "{{count}} условий",
+    "event_filter_summary_conditions_other": "{{count}} условия",
     "rotate_url": "Обновить URL",
     "rotate_confirm_title": "Обновить URL вебхука",
     "rotate_confirm_description": "Текущий URL перестанет работать немедленно. Все внешние системы, вызывающие его, нужно обновить на новый URL. Продолжить?",
@@ -285,6 +291,12 @@
     "toast_updated": "Расписание обновлено",
     "toast_update_failed": "Не удалось обновить расписание"
   },
+  "edit_webhook_dialog": {
+    "title": "Изменить вебхук",
+    "label_placeholder": "например, PR из GitHub",
+    "toast_updated": "Вебхук обновлён",
+    "toast_update_failed": "Не удалось обновить вебхук"
+  },
   "dialog": {
     "sr_create": "Новый автопилот",
     "sr_edit": "Редактирование автопилота",
@@ -346,6 +358,7 @@
     "event_filter_remove_label": "Удалить фильтр",
     "event_filter_hint": "Обрабатываются события, соответствующие правилу и всем его условиям. Оставьте пустым, чтобы принимать все события.",
     "schedule_multiple_notice": "У этого автопилота {{count}} расписаний. Закройте это окно и измените каждое из них в разделе «Триггеры» ниже.",
+    "webhook_multiple_notice": "У этого автопилота несколько вебхуков. Закройте это окно и измените каждый из них в разделе «Триггеры» ниже.",
     "schedule_empty": "Нет расписания — этот автопилот запускается только вручную.",
     "schedule_add": "Добавить расписание",
     "error_title_required": "Введите название для этого автопилота.",
