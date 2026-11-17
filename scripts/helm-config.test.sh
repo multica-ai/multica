@@ -95,4 +95,53 @@ capacity_config="$(
 )"
 require_rendered_value "$capacity_config" 'MULTICA_CLOUD_URL: "https://multica-cloud.internal"'
 
+# Image digests. A tag-only install must render exactly as before: no digest
+# means repository:tag (appVersion for backend/frontend when tag is empty).
+backend_digest="sha256:$(printf 'a%.0s' {1..64})"
+postgres_digest="sha256:$(printf 'b%.0s' {1..64})"
+chart_app_version="$(sed -n 's/^appVersion:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$CHART_DIR/Chart.yaml")"
+
+default_images="$(helm template multica "$CHART_DIR" | grep 'image:')"
+require_rendered_value "$default_images" "image: \"ghcr.io/multica-ai/multica-backend:$chart_app_version\""
+require_rendered_value "$default_images" "image: \"ghcr.io/multica-ai/multica-web:$chart_app_version\""
+require_rendered_value "$default_images" 'image: "pgvector/pgvector:pg17"'
+reject_rendered_value "$default_images" '@sha256:'
+
+tagged_images="$(
+  helm template multica "$CHART_DIR" \
+    --set-string images.backend.tag=v1.2.3 \
+    --set-string images.frontend.tag=v1.2.4 \
+    --set-string images.postgres.tag=pg16 | grep 'image:'
+)"
+require_rendered_value "$tagged_images" 'image: "ghcr.io/multica-ai/multica-backend:v1.2.3"'
+require_rendered_value "$tagged_images" 'image: "ghcr.io/multica-ai/multica-web:v1.2.4"'
+require_rendered_value "$tagged_images" 'image: "pgvector/pgvector:pg16"'
+
+# Mixed: pinned images render repository@digest (the digest wins over a tag),
+# unpinned images keep repository:tag.
+mixed_images="$(
+  helm template multica "$CHART_DIR" \
+    --set-string images.backend.tag=v1.2.3 \
+    --set-string images.backend.digest="$backend_digest" \
+    --set-string images.frontend.tag=v1.2.4 \
+    --set-string images.postgres.digest="$postgres_digest" | grep 'image:'
+)"
+require_rendered_value "$mixed_images" "image: \"ghcr.io/multica-ai/multica-backend@$backend_digest\""
+require_rendered_value "$mixed_images" 'image: "ghcr.io/multica-ai/multica-web:v1.2.4"'
+require_rendered_value "$mixed_images" "image: \"pgvector/pgvector@$postgres_digest\""
+reject_rendered_value "$mixed_images" 'multica-backend:v1.2.3'
+
+# `helm upgrade --reuse-values` from a chart that predates digests renders
+# without the key at all.
+legacy_images="$(helm template multica "$CHART_DIR" --set images.backend.digest=null | grep 'image:')"
+require_rendered_value "$legacy_images" "image: \"ghcr.io/multica-ai/multica-backend:$chart_app_version\""
+
+for invalid_digest in "sha256:abc" "${backend_digest}0" "sha256:$(printf 'A%.0s' {1..64})" "sha512:$(printf 'a%.0s' {1..128})" "v1.2.3"; do
+  if invalid_output="$(helm template multica "$CHART_DIR" --set-string images.frontend.digest="$invalid_digest" 2>&1)"; then
+    echo "Expected Helm to reject images.frontend.digest=$invalid_digest"
+    exit 1
+  fi
+  require_rendered_value "$invalid_output" 'images.frontend.digest must be a sha256 digest'
+done
+
 echo "helm config rendering ok"

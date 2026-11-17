@@ -39,7 +39,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: "{{ .Values.images.postgres.repository }}:{{ .Values.images.postgres.tag }}"
+          image: {{ include "multica.image" (dict "name" "postgres" "image" .Values.images.postgres "tag" .Values.images.postgres.tag) | quote }}
           imagePullPolicy: {{ .Values.images.postgres.pullPolicy }}
           ports:
             - containerPort: 5432
