@@ -994,7 +994,10 @@
     "context_load_not_delivered": "No entregado",
     "context_receipt_direct_bytes": "Entrada directa: {{size}}",
     "context_receipt_file_bytes": "Archivos en disco: {{size}}",
-    "context_receipt_package": "Paquete"
+    "context_receipt_package": "Paquete",
+    "context_receipt_instruction_file_bytes": "Archivos de instrucciones: {{size}}",
+    "context_receipt_skill_package_bytes": "Paquetes de skills: {{size}}",
+    "context_receipt_other_file_bytes": "Otros archivos: {{size}}"
   },
   "task_failure": {
     "cancelled_by_system": "Cancelada por el sistema",

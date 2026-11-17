@@ -1062,7 +1062,10 @@
     "context_load_not_delivered": "Не передано",
     "context_receipt_direct_bytes": "Прямой ввод: {{size}}",
     "context_receipt_file_bytes": "Файлы на диске: {{size}}",
-    "context_receipt_package": "Пакет"
+    "context_receipt_package": "Пакет",
+    "context_receipt_instruction_file_bytes": "Файлы инструкций: {{size}}",
+    "context_receipt_skill_package_bytes": "Пакеты навыков: {{size}}",
+    "context_receipt_other_file_bytes": "Другие файлы: {{size}}"
   },
   "task_failure": {
     "cancelled_by_system": "Отменено системой",

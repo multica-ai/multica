@@ -987,7 +987,10 @@
     "context_load_not_delivered": "未送達",
     "context_receipt_direct_bytes": "直接輸入：{{size}}",
     "context_receipt_file_bytes": "磁碟檔案：{{size}}",
-    "context_receipt_package": "套件總量"
+    "context_receipt_package": "套件總量",
+    "context_receipt_instruction_file_bytes": "執行說明檔案：{{size}}",
+    "context_receipt_skill_package_bytes": "skill 套件：{{size}}",
+    "context_receipt_other_file_bytes": "其他檔案：{{size}}"
   },
   "task_failure": {
     "cancelled_by_system": "已由系統取消",

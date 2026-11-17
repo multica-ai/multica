@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { taskContextReceiptOptions } from "@multica/core/agents";
@@ -42,11 +43,26 @@ export function topLevelSources(receipt: ContextReceipt): ContextReceiptSource[]
 }
 
 /** Delivery describes preparation, independently of later file-load evidence. */
-export function receiptDeliveryBytes(receipt: ContextReceipt): { direct: number; files: number } {
-  const totals = { direct: 0, files: 0 };
+export function receiptDeliveryBytes(receipt: ContextReceipt) {
+  const totals = { direct: 0, files: 0, instructionFiles: 0, skillPackages: 0, otherFiles: 0 };
   for (const source of topLevelSources(receipt)) {
     if (source.delivery === "inline" || source.delivery === "prompt") totals.direct += source.bytes;
-    else if (source.delivery === "file") totals.files += source.bytes;
+    else if (source.delivery === "file") {
+      totals.files += source.bytes;
+      switch (source.kind) {
+        case "runtime_brief":
+        case "existing_instructions":
+        case "agent_instructions":
+        case "project_description":
+          totals.instructionFiles += source.bytes;
+          break;
+        case "skill":
+          totals.skillPackages += source.bytes;
+          break;
+        default:
+          totals.otherFiles += source.bytes;
+      }
+    }
   }
   return totals;
 }
@@ -59,6 +75,15 @@ function sourcePath(source: ContextReceiptSource): string | undefined {
     return source.path.replace(/(^|[/\\])SKILL\.md$/, "$1") || ".";
   }
   return source.path;
+}
+
+function DeliveryPath({ path }: { path: string }) {
+  // Explicit breaks preserve separators and copied text, including URI schemes.
+  return path.split(/([/\\]+)/).map((part, index) => (
+    <Fragment key={index}>
+      {part}{/[/\\]$/.test(part) && <wbr />}
+    </Fragment>
+  ));
 }
 
 /** Rows the reader should look at first: delivery we cannot vouch for. */
@@ -124,7 +149,16 @@ export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground">
           <span>{t(($) => $.transcript.context_receipt_direct_bytes, { size: formatBytes(bytes.direct) })}</span>
-          <span>{t(($) => $.transcript.context_receipt_file_bytes, { size: formatBytes(bytes.files) })}</span>
+          <div className="min-w-0">
+            <div>{t(($) => $.transcript.context_receipt_file_bytes, { size: formatBytes(bytes.files) })}</div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-micro">
+              <span>{t(($) => $.transcript.context_receipt_instruction_file_bytes, { size: formatBytes(bytes.instructionFiles) })}</span>
+              <span>{t(($) => $.transcript.context_receipt_skill_package_bytes, { size: formatBytes(bytes.skillPackages) })}</span>
+              {bytes.otherFiles > 0 && (
+                <span>{t(($) => $.transcript.context_receipt_other_file_bytes, { size: formatBytes(bytes.otherFiles) })}</span>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -199,7 +233,7 @@ export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
                   className={s.delivery === "file" ? "font-mono text-foreground [overflow-wrap:anywhere]" : "truncate text-muted-foreground"}
                   title={sourcePath(s)}
                 >
-                  {deliveryLabel(s, t)}
+                  {s.delivery === "file" ? <DeliveryPath path={deliveryLabel(s, t)} /> : deliveryLabel(s, t)}
                 </div>
               </td>
               <td className="py-1">

@@ -846,7 +846,10 @@
     "context_load_not_delivered": "전달 안 됨",
     "context_receipt_direct_bytes": "직접 입력: {{size}}",
     "context_receipt_file_bytes": "디스크 파일: {{size}}",
-    "context_receipt_package": "패키지"
+    "context_receipt_package": "패키지",
+    "context_receipt_instruction_file_bytes": "지침 파일: {{size}}",
+    "context_receipt_skill_package_bytes": "스킬 패키지: {{size}}",
+    "context_receipt_other_file_bytes": "기타 파일: {{size}}"
   },
   "task_failure": {
     "cancelled_by_system": "시스템에서 취소함",

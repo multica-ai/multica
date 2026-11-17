@@ -1012,7 +1012,10 @@
     "context_load_not_delivered": "Not delivered",
     "context_receipt_direct_bytes": "Direct input: {{size}}",
     "context_receipt_file_bytes": "Files on disk: {{size}}",
-    "context_receipt_package": "Package"
+    "context_receipt_package": "Package",
+    "context_receipt_instruction_file_bytes": "Instruction files: {{size}}",
+    "context_receipt_skill_package_bytes": "Skill packages: {{size}}",
+    "context_receipt_other_file_bytes": "Other files: {{size}}"
   },
   "task_failure": {
     "cancelled_by_system": "Cancelled by the system",
