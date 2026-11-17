@@ -64,10 +64,10 @@ While the recipient is running, a label under the comment box says how the messa
 
 After you send, the comment shows "Waiting for … to read it", which changes to "Read by …" once the agent has read it. The step list in the execution log also marks the step where it was read. If delivery fails, you can retry or send it as a new run instead.
 
-- Only text can join a running run. A message with attachments is handled after the run ends.
+- Only text without skill links can join a running run. A message with attachments or skill links is handled after the run ends.
 - Steering needs support from the agent's AI coding tool. Without it, **Add to current run** isn't offered.
 - Set the default in **Settings → Preferences** under **When replying to a running agent**. You can still change it for any message before sending.
-- In Chat, sending a text message during a supported reply steers that reply without stopping it. Messages with attachments, messages sent before the reply starts, and messages sent to runtimes without steering support are queued automatically; see [Chat](/chat#send-messages-while-a-reply-is-in-progress).
+- In Chat, sending a text message without skill links during a supported reply steers that reply without stopping it. Messages with attachments or skill links, messages sent before the reply starts, and messages sent to runtimes without steering support are queued automatically; see [Chat](/chat#send-messages-while-a-reply-is-in-progress).
 
 ## Coalescing consecutive comments
 

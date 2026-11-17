@@ -2498,7 +2498,7 @@ func (s *TaskService) sendDirectChatMessage(
 		// Only plain human messages use the text-only supplement transport.
 		// Locking the turn serializes the binding with every terminal transition.
 		var task db.AgentTaskQueue
-		if steer && uploaderType == "member" && len(attachmentIDs) == 0 {
+		if steer && uploaderType == "member" && len(attachmentIDs) == 0 && !strings.Contains(content, "](slash://skill/") {
 			task, err = qtx.LockRunningChatTaskForSupplement(ctx, session.ID)
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("find running chat turn: %w", err)
@@ -2508,7 +2508,13 @@ func (s *TaskService) sendDirectChatMessage(
 		if out.Steered {
 			out.Queued = false
 		} else {
+			// Record the direct sender, not the run's accountable human: an agent
+			// using the chat API can have a human originator too. Old tasks without
+			// this stamp keep text-only skill hints. Retries copy the task context.
+			// A string-to-string map has no fallible JSON encoders.
+			chatContext, _ := json.Marshal(map[string]string{"chat_input_actor_type": uploaderType})
 			task, err = qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
+				Context:              chatContext,
 				ID:                   dbid.NewV7(),
 				AgentID:              session.AgentID,
 				RuntimeID:            carrier.RuntimeID,

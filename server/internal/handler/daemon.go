@@ -3942,6 +3942,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		resp.ChatMessage = strings.Join(parts, "\n\n")
+		resp.ChatSkillMessage = memberChatSkillMessage(task.Context, unanswered)
 		if task.RetryOfTaskID.Valid && resp.PriorSessionID != "" {
 			// Keep the full input for cold starts and the daemon's local fresh
 			// retry. Only a positively identified provider session can omit

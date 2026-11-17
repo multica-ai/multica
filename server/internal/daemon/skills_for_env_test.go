@@ -29,7 +29,7 @@ func TestConvertSkillsForEnvPreservesBuiltinIdentity(t *testing.T) {
 				Files:   []SkillFileData{{Path: "references/sub-issues.md", Content: "Sub-issue contracts."}},
 			}
 			want := []execenv.SkillContextForEnv{{
-				Name: skill.Name, BuiltinName: tc.wantBuiltin, Description: skill.Description, Content: skill.Content,
+				ID: skill.ID, Name: skill.Name, BuiltinName: tc.wantBuiltin, Description: skill.Description, Content: skill.Content,
 				Files: []execenv.SkillFileContextForEnv{{Path: skill.Files[0].Path, Content: skill.Files[0].Content}},
 			}}
 			if got := convertSkillsForEnv([]SkillData{skill}); !reflect.DeepEqual(got, want) {

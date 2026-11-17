@@ -714,7 +714,8 @@ export function ChatInput({
   const canSubmitNow = !disabled && !noAgent && (!isRunning || !!allowSubmitWhileRunning);
   const showRunHint = isRunning && allowSubmitWhileRunning && canSteerWhileRunning !== undefined
     && !hasNothingToSend && !disabled && !noAgent;
-  const willSteer = canSteerWhileRunning && draftUploads.length === 0;
+  const willSteer = canSteerWhileRunning && draftUploads.length === 0
+    && !inputDraft.includes("](slash://skill/");
   const voice = useComposerVoice({
     insert: (text) => editorRef.current?.insertText(text) ?? false,
     submit: canSubmitNow ? () => void submit() : undefined,

@@ -9032,7 +9032,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			promptOptions = append(promptOptions, WithWorktreeCommitsAllLeftovers())
 		}
 	}
-	prompt := BuildPrompt(task, provider, promptOptions...)
+	prompt, skillInvocation := buildRuntimePrompt(task, provider, env.SkillDirectories, promptOptions...)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -9205,7 +9205,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			runtimeBrief = freshBrief
 			runtimeBriefWritten = true
 		}
-		prompt = BuildPrompt(task, provider, promptOptions...)
+		prompt, skillInvocation = buildRuntimePrompt(task, provider, env.SkillDirectories, promptOptions...)
 	}
 	backend, err := agent.ResolveBackend(provider, backendConfig)
 	if err != nil {
@@ -9278,6 +9278,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
 	execOpts := agent.ExecOptions{
+		SkillInvocation:            skillInvocation,
 		EnableTaskSupplement:       taskSupplementNegotiated,
 		CursorHookCommand:          cursorHookCommand,
 		Cwd:                        env.WorkDir,
@@ -9487,7 +9488,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}
-		freshPrompt := BuildPrompt(task, provider, promptOptions...)
+		freshPrompt, freshSkills := buildRuntimePrompt(task, provider, env.SkillDirectories, promptOptions...)
+		execOpts.SkillInvocation = freshSkills
 
 		receiptInput.Prompt = freshPrompt
 		receiptInput.RuntimeBrief = freshBrief
@@ -11132,6 +11134,7 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 	result := make([]execenv.SkillContextForEnv, len(skills))
 	for i, s := range skills {
 		result[i] = execenv.SkillContextForEnv{
+			ID:          s.ID,
 			Name:        s.Name,
 			Description: s.Description,
 			Content:     s.Content,
