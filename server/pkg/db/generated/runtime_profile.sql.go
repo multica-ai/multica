@@ -44,7 +44,7 @@ type CreateRuntimeProfileParams struct {
 }
 
 // Custom Runtime profiles, bound to one daemon in a workspace.
-// See migrations 120 and 665. Relational integrity (workspace,
+// See migrations 120 and 674. Relational integrity (workspace,
 // created_by) is enforced in the application layer — there are no DB FKs.
 func (q *Queries) CreateRuntimeProfile(ctx context.Context, arg CreateRuntimeProfileParams) (RuntimeProfile, error) {
 	row := q.db.QueryRow(ctx, createRuntimeProfile,
