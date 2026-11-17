@@ -203,6 +203,9 @@ export type {
   CancelTaskResponse,
   ChatDraftRestore,
   ChatDraftRestoresResponse,
+  ChatWakeup,
+  ChatWakeupKind,
+  ChatWakeupStatus,
 } from "./chat";
 export type { StorageAdapter } from "./storage";
 export type {

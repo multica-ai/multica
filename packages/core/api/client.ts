@@ -111,6 +111,7 @@ import type {
   ChatMessage,
   ChatMessagesPage,
   ChatDraftRestoresResponse,
+  ChatWakeup,
   ChatPendingTask,
   PrioritizeQueuedChatTaskResponse,
   PendingChatTasksResponse,
@@ -303,6 +304,7 @@ import {
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
+  ChatWakeupListSchema,
   ChatMessageListSchema,
   ChatMessagesPageSchema,
   ChatPendingTaskSchema,
@@ -462,6 +464,7 @@ import {
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
   EMPTY_CANCEL_TASK_RESPONSE,
   EMPTY_CHAT_DRAFT_RESTORES,
+  EMPTY_CHAT_WAKEUP_LIST,
   CreateFeedbackResponseSchema,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   InboxUnreadSummarySchema,
@@ -4345,6 +4348,45 @@ export class ApiClient {
   async consumeChatDraftRestore(sessionId: string, restoreId: string): Promise<void> {
     await this.fetch(`/api/chat/sessions/${sessionId}/draft-restores/${restoreId}`, {
       method: "DELETE",
+    });
+  }
+
+  /** A 404 means the backend predates chat wakeups: nothing to show. */
+  async listChatSessionWakeups(sessionId: string): Promise<ChatWakeup[]> {
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/wakeups`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return [];
+      throw err;
+    }
+    return parseWithFallback(raw, ChatWakeupListSchema, EMPTY_CHAT_WAKEUP_LIST, {
+      endpoint: "GET /api/chat/sessions/{id}/wakeups",
+    });
+  }
+
+  async cancelChatWakeup(sessionId: string, wakeupId: string): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/wakeups/${wakeupId}/cancel`, {
+      method: "POST",
+    });
+  }
+
+  async retryChatWakeup(sessionId: string, wakeupId: string): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/wakeups/${wakeupId}/retry`, {
+      method: "POST",
+    });
+  }
+
+  async listMyChatWakeups(): Promise<ChatWakeup[]> {
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(`/api/chat/my-wakeups`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return [];
+      throw err;
+    }
+    return parseWithFallback(raw, ChatWakeupListSchema, EMPTY_CHAT_WAKEUP_LIST, {
+      endpoint: "GET /api/chat/my-wakeups",
     });
   }
 
