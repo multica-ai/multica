@@ -586,6 +586,8 @@ function isOptionalPropSet(
   }
 }
 
+const SIDEBAR_SUB_ISSUES_LIMIT = 10;
+
 // groupSubIssuesByStage orders a parent's children for display: staged groups
 // ascending by stage, then the unstaged group (stage === null) last. Callers
 // render a per-group stage header only when the set is actually staged.
@@ -2532,6 +2534,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     });
   }, [setSubIssuesCollapsed, scrollContainerEl]);
   const doneChildCount = childIssues.filter((child) => issueBehavesAs(child, "done")).length;
+  const sidebarChildIssues = useMemo(() => groupSubIssuesByStage(childIssues)
+    .flatMap(({ items }) => items)
+    .slice(0, SIDEBAR_SUB_ISSUES_LIMIT), [childIssues]);
 
   // The sub-issue list owns its selection, reset per issue. Rows, select-all
   // and the inline batch toolbar must read the same one: a peek renders this
@@ -3363,7 +3368,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
         />
         {sidebarSubIssuesOpen && (
           <ul className="px-2">
-            {childIssues.map((child) => (
+            {sidebarChildIssues.map((child) => (
               <li key={child.id}>
                 <AppLink
                   href={paths.issueDetail(child.id)}
@@ -3385,6 +3390,19 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                 </AppLink>
               </li>
             ))}
+            {childIssues.length > SIDEBAR_SUB_ISSUES_LIMIT && (
+              <li>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start text-muted-foreground"
+                  onClick={jumpToSubIssues}
+                >
+                  {t(($) => $.detail.sub_issues_view_all, { total: childIssues.length })}
+                </Button>
+              </li>
+            )}
           </ul>
         )}
       </div>

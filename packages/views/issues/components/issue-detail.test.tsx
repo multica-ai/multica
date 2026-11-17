@@ -3719,6 +3719,59 @@ describe("IssueDetail (shared)", () => {
       expect(sidebar.getAllByRole("link")).toHaveLength(3);
     });
 
+    it("limits the sidebar to ten children in inline stage order and jumps to all twenty-five", async () => {
+      const children = Array.from({ length: 25 }, (_, i) => subIssue({
+        id: `child-${i + 1}`,
+        number: i + 1,
+        identifier: `TES-${i + 1}`,
+        title: `Child ${i + 1}`,
+        stage: i % 3 === 0 ? 2 : i % 3 === 1 ? 1 : null,
+        status: i >= 20 ? "verified" : "todo",
+        status_category: i >= 20 ? "done" : "unstarted",
+      }));
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: children });
+      const { container } = renderIssueDetail();
+      await findInlineChild("Child 25");
+      const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      const links = sidebar.getAllByRole("link");
+      expect(links).toHaveLength(10);
+      expect(links.map((link) => link.getAttribute("href"))).toEqual(
+        [2, 5, 8, 11, 14, 17, 20, 23, 1, 4].map((n) => `/test/issues/child-${n}`),
+      );
+      expect(sidebar.getByText("5/25")).toBeInTheDocument();
+      expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuemax", "25");
+      expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "5");
+      const viewAll = sidebar.getByRole("button", { name: "View all (25)" });
+
+      const section = container.querySelector<HTMLDivElement>('[class~="group/sub-issues"]')!;
+      fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
+      expect(inlineChildren().queryByText("Child 25")).not.toBeInTheDocument();
+      const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
+      scroller.scrollTop = 600;
+      vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+      vi.spyOn(section, "getBoundingClientRect").mockReturnValue({ top: -200 } as DOMRect);
+      fireEvent.click(viewAll);
+
+      expect(await findInlineChild("Child 25")).toBeInTheDocument();
+      expect(inlineChildren().getAllByText(/^Child \d+$/)).toHaveLength(25);
+      await waitFor(() => expect(scroller.scrollTop).toBe(284));
+    });
+
+    it("shows all ten sidebar children without an overflow button at the limit", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: Array.from({ length: 10 }, (_, i) => subIssue({
+          id: `child-${i + 1}`,
+          identifier: `TES-${i + 1}`,
+          title: `Child ${i + 1}`,
+        })),
+      });
+      const { container } = renderIssueDetail();
+      await findInlineChild("Child 10");
+      const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      expect(sidebar.getAllByRole("link")).toHaveLength(10);
+      expect(sidebar.queryByRole("button", { name: /View all/ })).not.toBeInTheDocument();
+    });
+
     it("leaves the sidebar slot empty while loading and when no children exist", async () => {
       let resolveChildren!: (value: { issues: Issue[] }) => void;
       mockApiObj.listChildIssues.mockImplementation(() => new Promise((resolve) => {

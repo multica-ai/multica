@@ -593,6 +593,7 @@
     "quick_jump_label": "Быстрая навигация",
     "description_nav_label": "Описание задачи",
     "sub_issues_nav_progress": "Завершено: {{done}}/{{total}}",
+    "sub_issues_view_all": "Показать все ({{total}})",
     "thread_nav_label": "Перейти к треду комментариев",
     "thread_nav_resolved_label": "{{title}} (решено)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
