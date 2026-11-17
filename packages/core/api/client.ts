@@ -1133,6 +1133,15 @@ export class ApiClient {
     return res.json() as Promise<T>;
   }
 
+  /**
+   * A JSON request to an endpoint this client has no method for, with the
+   * same auth, workspace scoping and errors. For packages that own their
+   * endpoints (packages/ee); parse the result before using it.
+   */
+  request(path: string, init?: RequestInit): Promise<unknown> {
+    return this.fetch<unknown>(path, init);
+  }
+
   // Auth
   async sendCode(email: string): Promise<void> {
     await this.fetch("/auth/send-code", {
