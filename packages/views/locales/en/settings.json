@@ -1030,7 +1030,7 @@
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting…",
     "disconnect_confirm_title": "Disconnect GitHub App",
-    "disconnect_confirm_description": "Multica will stop receiving webhooks for this installation. Existing PR mirrors and links are kept; reconnect any time to resume updates.",
+    "disconnect_confirm_description": "Disconnect {{login}} from this workspace? Updates for this account will stop. Existing PR records and links are kept; other connections are unaffected.",
     "disconnect_confirm_cancel": "Cancel",
     "disconnect_confirm_action": "Disconnect",
     "not_configured": "GitHub integration is not configured for this deployment. Operators must set",
@@ -1051,7 +1051,18 @@
     "feature_auto_link_description": "Links a PR to the issue whose ID, e.g. {{example}}, is in its title or branch name, or follows “Closes” in its description.",
     "status_paused": "Paused",
     "pause": "Pause GitHub features",
-    "resume": "Resume GitHub features"
+    "resume": "Resume GitHub features",
+    "add_account": "Add account or organization",
+    "disconnect_account": "Disconnect {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub did not return user authorization. Retry connecting and complete authorization. If it repeats for an existing installation, ask your Multica operator for help.",
+      "installation_not_authorized": "Use the owning GitHub account for a personal installation, or an account with admin access to every authorized repository for an organization. Select at least one repository.",
+      "invalid_state": "This GitHub connection request expired or is invalid. Start the connection again from Settings → Code.",
+      "incomplete_callback": "GitHub returned an incomplete connection response. Start the connection again from Settings → Code.",
+      "bad_workspace": "Could not find the workspace for this connection. Open the intended workspace and retry from Settings → Code.",
+      "verification_failed": "Could not verify your GitHub installation access. Retry connecting; if it repeats, ask your Multica operator to check the GitHub App configuration.",
+      "persist_failed": "Could not save the GitHub connection. Retry from Settings → Code; if it repeats, contact your Multica operator."
+    }
   },
   "vcs": {
     "section_title": "Self-hosted Git",

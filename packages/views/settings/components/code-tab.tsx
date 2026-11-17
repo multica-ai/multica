@@ -21,7 +21,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useConfigStore } from "@multica/core/config";
@@ -78,13 +77,12 @@ export function CodeTab() {
   const configured = installationData?.configured ?? false;
   const canManageGitHub = installationData?.can_manage === true;
   const connected = installations.length > 0;
-  const primaryInstallation = installations[0] ?? null;
 
   const flags = deriveGitHubSettings(workspace);
   const [savingKey, setSavingKey] = useState<GitHubSettingsKey | null>(null);
   const githubConnection = useConnectGitHub(wsId);
   const { connecting, connect: handleConnect } = githubConnection;
-  const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
+  const [disconnectTarget, setDisconnectTarget] = useState<(typeof installations)[number] | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
   async function persistSetting(key: GitHubSettingsKey, next: boolean) {
@@ -110,7 +108,7 @@ export function CodeTab() {
     if (!disconnectTarget || disconnecting) return;
     setDisconnecting(true);
     try {
-      await api.deleteGitHubInstallation(wsId, disconnectTarget);
+      await api.deleteGitHubInstallation(wsId, disconnectTarget.id);
       await qc.invalidateQueries({ queryKey: ["github", wsId] });
       toast.success(t(($) => $.github.toast_disconnected));
       setDisconnectTarget(null);
@@ -134,17 +132,7 @@ export function CodeTab() {
   const pausedNote = !flags.enabled ? (
     <span className="block">{t(($) => $.github.master_description_off)}</span>
   ) : null;
-  const githubDetail = connected ? (
-    <>
-      {t(($) => $.github.connected_to, {
-        login: installations.map((i) => i.account_login).join(", "),
-      })}
-      {primaryInstallation?.connected_by
-        ? ` · ${t(($) => $.github.connected_by, { name: primaryInstallation.connected_by })}`
-        : null}
-      {pausedNote}
-    </>
-  ) : !canManageGitHub ? (
+  const githubDetail = connected ? pausedNote : !canManageGitHub ? (
     <>
       {t(($) => $.github.contact_admin_to_connect)}
       {pausedNote}
@@ -176,6 +164,7 @@ export function CodeTab() {
         <SettingsCard>
           <SettingsRow
             anchor="github"
+            size="none"
             label={
               <span className="flex min-w-0 items-center gap-3">
                 <HostMark>
@@ -191,22 +180,21 @@ export function CodeTab() {
           >
             {canManageGitHub ? (
               <span className="flex items-center gap-1">
-                {connected ? null : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleConnect}
-                    disabled={connecting || !configured}
-                    aria-busy={connecting || undefined}
-                  >
-                    {connecting
-                      ? t(($) => $.github.connect_opening)
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleConnect}
+                  disabled={connecting || !configured}
+                  aria-busy={connecting || undefined}
+                >
+                  {connecting
+                    ? t(($) => $.github.connect_opening)
+                    : connected
+                      ? t(($) => $.github.add_account)
                       : t(($) => $.github.connect_github)}
-                  </Button>
-                )}
+                </Button>
                 {/* Resume stays reachable after a disconnect: the pause is a
-                    workspace setting, and Co-authored-by works without an App.
-                    Only disconnecting needs an installation. */}
+                    workspace setting, and Co-authored-by works without an App. */}
                 {connected || !flags.enabled ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger
@@ -230,24 +218,38 @@ export function CodeTab() {
                           ? t(($) => $.github.pause)
                           : t(($) => $.github.resume)}
                       </DropdownMenuItem>
-                      {primaryInstallation ? (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            variant="destructive"
-                            onClick={() => setDisconnectTarget(primaryInstallation.id)}
-                          >
-                            <Unplug />
-                            {t(($) => $.github.disconnect)}
-                          </DropdownMenuItem>
-                        </>
-                      ) : null}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 ) : null}
               </span>
             ) : null}
           </SettingsRow>
+          {installations.map((installation) => (
+            <SettingsRow
+              key={installation.id}
+              className="pl-16"
+              label={
+                <span className="break-words">
+                  {t(($) => $.github.connected_to, { login: installation.account_login })}
+                </span>
+              }
+              description={installation.connected_by
+                ? t(($) => $.github.connected_by, { name: installation.connected_by })
+                : undefined}
+            >
+              {canManageGitHub ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  aria-label={t(($) => $.github.disconnect_account, { login: installation.account_login })}
+                  onClick={() => setDisconnectTarget(installation)}
+                >
+                  <Unplug />
+                  {t(($) => $.github.disconnect)}
+                </Button>
+              ) : null}
+            </SettingsRow>
+          ))}
           {vcsAvailable ? <VCSConnectionRows /> : null}
         </SettingsCard>
       </SettingsSection>
@@ -319,7 +321,7 @@ export function CodeTab() {
           <AlertDialogHeader>
             <AlertDialogTitle>{t(($) => $.github.disconnect_confirm_title)}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t(($) => $.github.disconnect_confirm_description)}
+              {t(($) => $.github.disconnect_confirm_description, { login: disconnectTarget?.account_login ?? "" })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

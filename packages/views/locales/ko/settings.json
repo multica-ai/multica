@@ -1021,7 +1021,7 @@
     "disconnect": "연결 해제",
     "disconnecting": "연결 해제 중...",
     "disconnect_confirm_title": "GitHub App 연결 해제",
-    "disconnect_confirm_description": "Multica가 이 설치의 Webhook 수신을 중단합니다. 기존 PR 미러와 연결은 유지되며, 언제든 다시 연결해 업데이트를 재개할 수 있습니다.",
+    "disconnect_confirm_description": "이 워크스페이스에서 {{login}} 연결을 해제할까요? 이 계정의 업데이트가 중단됩니다. 기존 PR 기록과 링크는 유지되며 다른 연결에는 영향을 주지 않습니다.",
     "disconnect_confirm_cancel": "취소",
     "disconnect_confirm_action": "연결 해제",
     "not_configured": "이 배포에는 GitHub 연동이 설정되어 있지 않습니다. 운영자가 다음 값을 설정해야 합니다:",
@@ -1042,7 +1042,18 @@
     "feature_auto_link_description": "제목이나 브랜치 이름에 태스크 번호(예: {{example}})가 있거나 설명에 \"Closes {{example}}\"가 있는 PR을 해당 태스크에 연결합니다.",
     "status_paused": "일시 중지됨",
     "pause": "GitHub 기능 일시 중지",
-    "resume": "GitHub 기능 재개"
+    "resume": "GitHub 기능 재개",
+    "add_account": "계정 또는 조직 추가",
+    "disconnect_account": "{{login}} 연결 해제",
+    "errors": {
+      "missing_authorization": "GitHub에서 사용자 인증을 반환하지 않았습니다. 다시 연결하고 인증을 완료하세요. 기존 설치에서 반복되면 Multica 운영자에게 문의하세요.",
+      "installation_not_authorized": "개인 설치에는 소유자의 GitHub 계정을 사용하세요. 조직 설치에는 승인된 모든 저장소의 관리자 권한이 있는 계정을 사용하고 저장소를 하나 이상 선택하세요.",
+      "invalid_state": "GitHub 연결 요청이 만료되었거나 유효하지 않습니다. 설정 → 코드에서 다시 연결하세요.",
+      "incomplete_callback": "GitHub 연결 응답이 불완전합니다. 설정 → 코드에서 다시 연결하세요.",
+      "bad_workspace": "연결할 워크스페이스를 찾을 수 없습니다. 대상 워크스페이스를 열고 설정 → 코드에서 다시 시도하세요.",
+      "verification_failed": "GitHub 설치 관리 권한을 확인하지 못했습니다. 다시 연결하고 반복되면 Multica 운영자에게 GitHub App 설정 확인을 요청하세요.",
+      "persist_failed": "GitHub 연결을 저장하지 못했습니다. 설정 → 코드에서 다시 시도하고 반복되면 Multica 운영자에게 문의하세요."
+    }
   },
   "vcs": {
     "section_title": "셀프 호스팅 Git",

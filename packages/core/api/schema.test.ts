@@ -41,6 +41,15 @@ describe("ApiClient schema fallback", () => {
   });
 
   describe("GitHub repository import", () => {
+    it("accepts attributed connections alongside legacy rows without a connector name", async () => {
+      const installation = { id: "inst-1", workspace_id: "ws-1", account_login: "alice", account_type: "User", account_avatar_url: null, created_at: "2026-11-17T00:00:00Z" };
+      stubFetchJson({ installations: [installation, { ...installation, id: "inst-2", account_login: "acme-org", connected_by: "Ada" }], can_manage: false });
+      const response = await new ApiClient("https://api.example.test").listGitHubInstallations("ws-1");
+      expect(response.installations).toEqual([installation, { ...installation, id: "inst-2", account_login: "acme-org", connected_by: "Ada" }]);
+      expect(response.can_manage).toBe(false);
+      expect(response.installations.every((row) => row.installation_id === undefined)).toBe(true);
+    });
+
     it("falls back safely when installation or repository responses are malformed", async () => {
       stubFetchJson({ installations: "not-an-array", configured: true });
       const client = new ApiClient("https://api.example.test");
