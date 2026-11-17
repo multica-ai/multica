@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -192,6 +194,97 @@ func TestNotificationPreferencesReportStatusChangesMutedByDefault(t *testing.T) 
 	call(http.MethodPatch, map[string]string{"status_changes": "all"})
 	if got := call(http.MethodGet, nil); got["status_changes"] != "all" || got["comments"] != "muted" {
 		t.Fatalf("GET after turning status changes on = %#v", got)
+	}
+}
+
+// A client built before PATCH (MUL-4798) replaces the whole object and leaves
+// a group out to mean "on". Its status changes stay on through persistence,
+// read-back and delivery, while an explicit "muted" still turns them off
+// (MUL-9449).
+func TestLegacyPutKeepsOmittedStatusChangesOn(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	reset := func() {
+		_, _ = testPool.Exec(ctx, `
+			DELETE FROM notification_preference
+			WHERE workspace_id = $1 AND user_id = $2
+		`, testWorkspaceID, testUserID)
+	}
+	t.Cleanup(reset)
+
+	for _, tc := range []struct {
+		name      string
+		sent      map[string]string
+		stored    string
+		delivered bool
+	}{
+		{"nothing muted", map[string]string{}, "all", true},
+		{"another group muted", map[string]string{"comments": "muted"}, "all", true},
+		{"status changes muted", map[string]string{"status_changes": "muted"}, "muted", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reset()
+
+			recorder := httptest.NewRecorder()
+			testHandler.UpdateNotificationPreferences(recorder, notificationPreferenceRequest(t, http.MethodPut, tc.sent))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("PUT: status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+
+			var raw []byte
+			if err := testPool.QueryRow(ctx, `
+				SELECT preferences FROM notification_preference
+				WHERE workspace_id = $1 AND user_id = $2
+			`, testWorkspaceID, testUserID).Scan(&raw); err != nil {
+				t.Fatalf("load persisted preference: %v", err)
+			}
+			var stored map[string]string
+			if err := json.Unmarshal(raw, &stored); err != nil {
+				t.Fatalf("decode persisted preference: %v", err)
+			}
+			if stored["status_changes"] != tc.stored {
+				t.Fatalf("persisted %#v, want status_changes %q", stored, tc.stored)
+			}
+			for group, value := range tc.sent {
+				if stored[group] != value {
+					t.Fatalf("persisted %#v, want the sent %s=%q kept", stored, group, value)
+				}
+			}
+
+			get := httptest.NewRecorder()
+			testHandler.GetNotificationPreferences(get, notificationPreferenceRequest(t, http.MethodGet, nil))
+			var response struct {
+				Preferences map[string]string `json:"preferences"`
+			}
+			if err := json.NewDecoder(get.Body).Decode(&response); err != nil {
+				t.Fatalf("decode GET response: %v", err)
+			}
+			if response.Preferences["status_changes"] != tc.stored {
+				t.Fatalf("GET = %#v, want status_changes %q", response.Preferences, tc.stored)
+			}
+
+			issueID := dbfx.Issue(t, "Legacy PUT status change", testutil.Cols{"workspace_id": testWorkspaceID})
+			dbfx.Cleanup(t, `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
+			_, inserted, err := inbox.Deliver(ctx, testHandler.Queries, nil, inbox.Notification{Params: db.CreateInboxItemParams{
+				WorkspaceID:   parseUUID(testWorkspaceID),
+				RecipientType: "member",
+				RecipientID:   parseUUID(testUserID),
+				Type:          "status_changed",
+				Severity:      "info",
+				IssueID:       parseUUID(issueID),
+				Title:         "Legacy PUT status change",
+				Details:       []byte(`{}`),
+			}})
+			if err != nil {
+				t.Fatalf("deliver status_changed: %v", err)
+			}
+			if inserted != tc.delivered {
+				t.Fatalf("status_changed delivered = %v, want %v", inserted, tc.delivered)
+			}
+		})
 	}
 }
 

@@ -86,7 +86,9 @@ type updateNotifPrefRequest struct {
 	Preferences map[string]string `json:"preferences"`
 }
 
-func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+// decodeNotificationPreferenceRequest reads and validates the preferences in
+// a write request.
+func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request) (map[string]string, bool) {
 	var req updateNotifPrefRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -109,7 +111,11 @@ func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	prefsJSON, err := json.Marshal(req.Preferences)
+	return req.Preferences, true
+}
+
+func marshalNotificationPreferences(w http.ResponseWriter, prefs map[string]string) ([]byte, bool) {
+	prefsJSON, err := json.Marshal(prefs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to marshal preferences")
 		return nil, false
@@ -144,7 +150,13 @@ func (h *Handler) UpdateNotificationPreferences(w http.ResponseWriter, r *http.R
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
-	prefsJSON, ok := decodeNotificationPreferenceRequest(w, r)
+	prefs, ok := decodeNotificationPreferenceRequest(w, r)
+	if !ok {
+		return
+	}
+	// Only clients built before PATCH existed send this full replacement, and
+	// they leave a group out to mean "on".
+	prefsJSON, ok := marshalNotificationPreferences(w, inbox.WithLegacyDefaults(prefs))
 	if !ok {
 		return
 	}
@@ -170,7 +182,11 @@ func (h *Handler) PatchNotificationPreferences(w http.ResponseWriter, r *http.Re
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
-	prefsJSON, ok := decodeNotificationPreferenceRequest(w, r)
+	prefs, ok := decodeNotificationPreferenceRequest(w, r)
+	if !ok {
+		return
+	}
+	prefsJSON, ok := marshalNotificationPreferences(w, prefs)
 	if !ok {
 		return
 	}

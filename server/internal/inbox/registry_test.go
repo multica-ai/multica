@@ -99,6 +99,22 @@ func TestWithDefaults(t *testing.T) {
 	}
 }
 
+// The replace-all write path keeps an omitted default-muted group on, as the
+// clients that use it mean, and leaves explicit values alone.
+func TestWithLegacyDefaults(t *testing.T) {
+	if got := WithLegacyDefaults(map[string]string{}); len(got) != 1 || got["status_changes"] != "all" {
+		t.Fatalf("WithLegacyDefaults({}) = %v, want status_changes all", got)
+	}
+	sent := map[string]string{"status_changes": "muted", "comments": "muted"}
+	got := WithLegacyDefaults(sent)
+	if got["status_changes"] != "muted" || got["comments"] != "muted" || len(got) != 2 {
+		t.Fatalf("WithLegacyDefaults(%v) = %v, sent values must win", sent, got)
+	}
+	if len(sent) != 2 {
+		t.Fatalf("WithLegacyDefaults modified its argument: %v", sent)
+	}
+}
+
 // App results follow the agent-activity group; the requests that stop an
 // agent until the person answers can never be muted.
 func TestConnectedAppTypeGroups(t *testing.T) {

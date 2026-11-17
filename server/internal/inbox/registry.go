@@ -99,6 +99,22 @@ var mutedByDefault = map[string]bool{
 	GroupStatusChanges: true,
 }
 
+// WithLegacyDefaults returns prefs with every group that is muted by default
+// and absent from prefs set to "all". A full replacement from a client built
+// before those defaults changed omits a group to mean "on", so the
+// replace-all write path stores that meaning explicitly. prefs is not
+// modified.
+func WithLegacyDefaults(prefs map[string]string) map[string]string {
+	result := make(map[string]string, len(prefs)+len(mutedByDefault))
+	for group := range mutedByDefault {
+		result[group] = "all"
+	}
+	for k, v := range prefs {
+		result[k] = v
+	}
+	return result
+}
+
 // Muted reports whether a member's parsed preferences mute notifType. nil
 // prefs, a member without a stored row, applies every group's default.
 func Muted(prefs map[string]string, notifType string) bool {
