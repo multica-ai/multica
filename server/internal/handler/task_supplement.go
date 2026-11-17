@@ -478,7 +478,15 @@ func (h *Handler) ClaimTaskSupplement(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var activation struct {
+		ActiveTurnGuidance string `json:"active_turn_guidance"`
+	}
 	if task.ChatSessionID.Valid && !task.IssueID.Valid {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&activation)
+		if activation.ActiveTurnGuidance != "" {
+			h.activateHermesChatSupplement(w, r, task, activation.ActiveTurnGuidance)
+			return
+		}
 		row, err := h.Queries.ClaimNextChatTaskSupplement(r.Context(), task.ID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusOK, map[string]any{})
@@ -629,4 +637,24 @@ func (h *Handler) publishCommentSupplementUpdate(ctx context.Context, workspaceI
 	resp := commentToResponse(comment, nil, nil)
 	applyCommentSupplements(&resp, h.listCommentSupplements(ctx, workspaceID, []pgtype.UUID{commentID})[uuidToString(commentID)])
 	h.publish(protocol.EventCommentUpdated, uuidToString(workspaceID), "system", "", map[string]any{"comment": resp})
+}
+
+// The daemon calls this only after the running process advertised native
+// /steer support and emitted activity for the running primary prompt.
+func (h *Handler) activateHermesChatSupplement(w http.ResponseWriter, r *http.Request, task db.AgentTaskQueue, contract string) {
+	if contract != "hermes-acp-steer-v1" {
+		writeError(w, http.StatusBadRequest, "unsupported guidance contract")
+		return
+	}
+	_, err := h.Queries.ActivateHermesChatSupplement(r.Context(), task.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusConflict, "chat execution is not eligible")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not activate chat guidance")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"supplement_capability": protocol.DaemonCapabilityTaskSupplementV1})
 }

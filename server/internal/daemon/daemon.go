@@ -9439,7 +9439,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	execOpts := agent.ExecOptions{
 		SkillInvocation:            skillInvocation,
-		EnableTaskSupplement:       taskSupplementNegotiated,
+		EnableTaskSupplement:       taskSupplementNegotiated || (provider == "hermes" && task.ChatSessionID != "" && task.IssueID == ""),
 		SupplementHookCommand:      supplementHookCommand,
 		Cwd:                        env.WorkDir,
 		PiSkillPaths:               env.PiSkillPaths,

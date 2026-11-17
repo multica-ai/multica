@@ -219,6 +219,8 @@ type Session struct {
 	// Adapters bound their own transport calls; a hook-based adapter may wait
 	// for the next provider boundary until ctx or the execution is cancelled.
 	Supplement func(context.Context, string) error
+	// SupplementRequiresNegotiation defers chat capability activation until native steering is advertised for the live session.
+	SupplementRequiresNegotiation bool
 	// SupplementReady reports whether Supplement currently targets a live,
 	// provider-confirmed turn. The daemon must not claim durable input before
 	// this becomes true: claiming during provider initialization would convert
