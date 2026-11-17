@@ -70,8 +70,8 @@ vi.mock("@multica/core/billing", () => ({
   }),
 }));
 
-import { IssueLimitUpgradeDialog } from "./issue-limit-upgrade-dialog";
-import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
+import { LimitRecoveryDialog } from "./limit-recovery-dialog";
+import { useLimitRecoveryPrompt } from "./use-limit-recovery-prompt";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, modals: enModals },
@@ -87,33 +87,33 @@ const actions = (
 });
 
 function PromptHarness() {
-  const showPrompt = useIssueLimitUpgradePrompt();
+  const showPrompt = useLimitRecoveryPrompt("autopilot_quota");
   return (
     <>
       <button type="button" onClick={showPrompt}>
         Show recovery
       </button>
-      <IssueLimitUpgradeDialog />
+      <LimitRecoveryDialog />
     </>
   );
 }
 
 function LayeredPromptHarness() {
-  const [createOpen, setCreateOpen] = useState(true);
-  const showPrompt = useIssueLimitUpgradePrompt();
+  const [underlyingOpen, setUnderlyingOpen] = useState(true);
+  const showPrompt = useLimitRecoveryPrompt("autopilot_quota");
 
   return (
     <>
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={underlyingOpen} onOpenChange={setUnderlyingOpen}>
         <DialogContent showCloseButton={false}>
-          <DialogTitle>Create an issue</DialogTitle>
-          <DialogDescription>Your draft remains here.</DialogDescription>
+          <DialogTitle>Underlying dialog</DialogTitle>
+          <DialogDescription>It stays open below recovery.</DialogDescription>
           <button type="button" onClick={showPrompt}>
             Show recovery
           </button>
         </DialogContent>
       </Dialog>
-      <IssueLimitUpgradeDialog />
+      <LimitRecoveryDialog />
     </>
   );
 }
@@ -144,11 +144,11 @@ async function openPrompt() {
 
 function queryRecoveryDialog() {
   return screen.queryByRole("dialog", {
-    name: "This workspace has reached its issue limit",
+    name: "This workspace has reached its autopilot run limit",
   });
 }
 
-describe("IssueLimitUpgradeDialog", () => {
+describe("LimitRecoveryDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     featureState.billingEnabled = true;
@@ -159,8 +159,8 @@ describe("IssueLimitUpgradeDialog", () => {
     useModalStore.setState({
       modal: null,
       data: null,
-      issueLimitRecoveryWorkspaceId: null,
-      issueLimitRecoveryReason: "issue_limit",
+      limitRecoveryWorkspaceId: null,
+      limitRecoveryReason: "autopilot_quota",
     });
     mockSummaryQuery.mockImplementation(async () => {
       if (summaryState.pending) return summaryState.pending;
@@ -177,8 +177,8 @@ describe("IssueLimitUpgradeDialog", () => {
     useModalStore.setState({
       modal: null,
       data: null,
-      issueLimitRecoveryWorkspaceId: null,
-      issueLimitRecoveryReason: "issue_limit",
+      limitRecoveryWorkspaceId: null,
+      limitRecoveryReason: "autopilot_quota",
     });
   });
 
@@ -199,14 +199,14 @@ describe("IssueLimitUpgradeDialog", () => {
     expect(screen.getAllByRole("button", { name: "Close" })).toHaveLength(1);
   });
 
-  it("uses autopilot-specific copy when Inbox opens the shared recovery surface", async () => {
+  it("opens and dismisses through the modal store", async () => {
     summaryState.value = { availableActions: actions({ checkout: true }) };
     renderPrompt();
 
     act(() => {
       useModalStore
         .getState()
-        .showIssueLimitRecovery("ws-test", "autopilot_quota");
+        .showLimitRecovery("ws-test", "autopilot_quota");
     });
 
     expect(
@@ -218,7 +218,7 @@ describe("IssueLimitUpgradeDialog", () => {
       await screen.findByText("Upgrade to Pro to restore autopilot runs."),
     ).toBeInTheDocument();
 
-    act(() => useModalStore.getState().dismissIssueLimitRecovery());
+    act(() => useModalStore.getState().dismissLimitRecovery());
     await waitFor(() => {
       expect(
         screen.queryByRole("dialog", {
@@ -228,7 +228,7 @@ describe("IssueLimitUpgradeDialog", () => {
     });
   });
 
-  it("closes only recovery when Escape is pressed above a create dialog", async () => {
+  it("closes only recovery when Escape is pressed above another dialog", async () => {
     summaryState.value = { availableActions: actions({ checkout: true }) };
     renderPrompt({ layered: true });
     const user = await openPrompt();
@@ -237,7 +237,7 @@ describe("IssueLimitUpgradeDialog", () => {
 
     await waitFor(() => expect(queryRecoveryDialog()).not.toBeInTheDocument());
     expect(
-      screen.getByRole("dialog", { name: "Create an issue" }),
+      screen.getByRole("dialog", { name: "Underlying dialog" }),
     ).toBeInTheDocument();
   });
 
@@ -254,7 +254,7 @@ describe("IssueLimitUpgradeDialog", () => {
 
     await waitFor(() => expect(queryRecoveryDialog()).not.toBeInTheDocument());
     expect(
-      screen.getByRole("dialog", { name: "Create an issue" }),
+      screen.getByRole("dialog", { name: "Underlying dialog" }),
     ).toBeInTheDocument();
   });
 
@@ -279,17 +279,6 @@ describe("IssueLimitUpgradeDialog", () => {
     expect(queryRecoveryDialog()).not.toBeInTheDocument();
   });
 
-  it("keeps the create modal open when recovery is merely dismissed", async () => {
-    summaryState.value = { availableActions: actions({ checkout: true }) };
-    useModalStore.getState().open("create-issue");
-    renderPrompt();
-    const user = await openPrompt();
-
-    await user.click(screen.getByRole("button", { name: "Close" }));
-
-    expect(useModalStore.getState().modal).toBe("create-issue");
-  });
-
   it("dismisses recovery instead of carrying it into another workspace", async () => {
     summaryState.value = { availableActions: actions({ checkout: true }) };
     const { client, rerender } = renderPrompt();
@@ -300,7 +289,7 @@ describe("IssueLimitUpgradeDialog", () => {
 
     await waitFor(() => {
       expect(
-        useModalStore.getState().issueLimitRecoveryWorkspaceId,
+        useModalStore.getState().limitRecoveryWorkspaceId,
       ).toBeNull();
     });
     expect(queryRecoveryDialog()).not.toBeInTheDocument();
@@ -308,7 +297,6 @@ describe("IssueLimitUpgradeDialog", () => {
 
   it("offers Upgrade to Pro only when Cloud authorizes checkout", async () => {
     summaryState.value = { availableActions: actions({ checkout: true }) };
-    useModalStore.getState().open("create-issue");
     renderPrompt();
     const user = await openPrompt();
 
@@ -316,14 +304,12 @@ describe("IssueLimitUpgradeDialog", () => {
       await screen.findByRole("button", { name: "Upgrade to Pro" }),
     );
 
-    expect(useModalStore.getState().modal).toBeNull();
     expect(mockPush).toHaveBeenCalledWith("/ws-test/settings?tab=billing");
     await waitFor(() => expect(queryRecoveryDialog()).not.toBeInTheDocument());
   });
 
   it("opens Billing Portal for a past-due manager authorized for portal", async () => {
     summaryState.value = { availableActions: actions({ portal: true }) };
-    useModalStore.getState().open("quick-create-issue");
     renderPrompt();
     const user = await openPrompt();
 
@@ -333,7 +319,7 @@ describe("IssueLimitUpgradeDialog", () => {
 
     await waitFor(() => expect(mockCreatePortal).toHaveBeenCalledTimes(1));
     expect(mockCreatePortal.mock.calls[0]?.[0]).toMatch(
-      /^issue-limit-portal-ws-test-/,
+      /^limit-recovery-portal-ws-test-/,
     );
     await waitFor(() => {
       expect(mockOpenExternal).toHaveBeenCalledWith(
@@ -341,12 +327,11 @@ describe("IssueLimitUpgradeDialog", () => {
         { webTarget: "same-tab" },
       );
     });
-    expect(useModalStore.getState().modal).toBeNull();
+    await waitFor(() => expect(queryRecoveryDialog()).not.toBeInTheDocument());
   });
 
   it("keeps a Billing recovery action when Portal cannot be opened", async () => {
     summaryState.value = { availableActions: actions({ portal: true }) };
-    useModalStore.getState().open("create-issue");
     mockCreatePortal.mockRejectedValue(new Error("portal unavailable"));
     renderPrompt();
     const user = await openPrompt();
@@ -358,7 +343,6 @@ describe("IssueLimitUpgradeDialog", () => {
     expect(
       await screen.findByRole("button", { name: "View Billing" }),
     ).toBeInTheDocument();
-    expect(useModalStore.getState().modal).toBe("create-issue");
     expect(queryRecoveryDialog()).toBeInTheDocument();
   });
 
@@ -409,7 +393,7 @@ describe("IssueLimitUpgradeDialog", () => {
 
     expect(
       screen.getByText(
-        "Delete an existing issue to free space, or contact your workspace administrator.",
+        "Wait for the current allowance to reset, or contact your workspace administrator.",
       ),
     ).toBeInTheDocument();
     expect(

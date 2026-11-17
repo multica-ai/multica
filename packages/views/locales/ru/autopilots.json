@@ -79,7 +79,6 @@
     "run_blocked_attribution": "Не запущен — не удалось определить ответственного участника для запуска",
     "run_blocked_already_active": "Не запущен — недавний запуск уже покрывает это",
     "run_blocked_quota_exceeded": "Не запущен — достигнут лимит запусков за этот период",
-    "run_blocked_issue_limit_reached": "Не запущен — рабочее пространство достигло лимита задач",
     "run_blocked_generic": "Не запущен — запуск заблокирован",
     "section_triggers": "Триггеры",
     "section_run_history": "История запусков",

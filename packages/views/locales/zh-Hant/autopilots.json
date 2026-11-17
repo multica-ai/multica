@@ -81,7 +81,6 @@
     "run_blocked_attribution": "未觸發——無法確定本次執行的負責成員",
     "run_blocked_already_active": "未觸發——最近已有一次執行覆蓋了本次",
     "run_blocked_quota_exceeded": "未觸發——本週期的執行額度已用盡",
-    "run_blocked_issue_limit_reached": "未觸發——工作區任務總數已達到上限",
     "run_blocked_generic": "未觸發——本次執行已被攔截",
     "section_triggers": "觸發器",
     "section_run_history": "執行歷史",
