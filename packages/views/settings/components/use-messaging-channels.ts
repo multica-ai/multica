@@ -91,7 +91,7 @@ export function useMessagingChannels() {
   const canManage = (channel: ChannelIntegration, agent: Agent) =>
     !!member &&
     (isAdmin ||
-      ((channel === "lark" || channel === "dingtalk") &&
+      ((channel === "lark" || channel === "dingtalk" || channel === "weixin") &&
         agent.owner_id === userId));
   const available = (channel: ChannelIntegration) =>
     queries[channel].data?.configured === true &&

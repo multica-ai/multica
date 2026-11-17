@@ -241,7 +241,7 @@ describe("agent messaging channels", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("gives an agent owner Lark and DingTalk, with admin-only platforms labelled", async () => {
+  it("gives an agent owner Feishu, DingTalk and WeChat, with admin-only platforms labelled", async () => {
     state.role = "member";
     show(<AgentChannelsSection agent={agent} />);
     await waitFor(() =>
@@ -258,6 +258,9 @@ describe("agent messaging channels", () => {
     ).toBeEnabled();
     expect(
       within(dialog).getByRole("button", { name: /^DingTalk$/ }),
+    ).toBeEnabled();
+    expect(
+      within(dialog).getByRole("button", { name: /^WeChat$/ }),
     ).toBeEnabled();
     expect(
       within(dialog).getByRole("button", { name: /Slack Ask an admin/ }),
@@ -349,6 +352,7 @@ describe("agent messaging channels", () => {
   it.each(["lark", "slack", "dingtalk", "wecom", "telegram", "weixin"] as const)(
     "confirms %s disconnect and preserves the connection on failure",
     async (channel) => {
+      if (channel === "weixin") state.role = "member";
       const methods = {
         lark: ["listLarkInstallations", "deleteLarkInstallation"],
         slack: ["listSlackInstallations", "deleteSlackInstallation"],
@@ -397,7 +401,8 @@ const platformName = {
 } as const;
 
 describe("shared connection dialog", () => {
-  it("shows the WeChat QR as soon as WeChat is chosen and cancels it on close", async () => {
+  it("shows the WeChat QR to the agent owner and cancels it on close", async () => {
+    state.role = "member";
     const login = {
       id: "login-1",
       status: "wait",
