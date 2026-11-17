@@ -18,6 +18,7 @@ import enAgents from "../../locales/en/agents.json";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores/issue-sidebar-sections-store";
+import { useSubIssuesCollapseStore } from "@multica/core/issues/stores/sub-issues-collapse-store";
 
 vi.mock("./issue-wakeup-header-chip", () => ({
   IssueWakeupHeaderChip: ({ onOpen }: { onOpen: () => void }) => (
@@ -3664,6 +3665,7 @@ describe("IssueDetail (shared)", () => {
 
   describe("sub-issues list", () => {
     beforeEach(() => {
+      useSubIssuesCollapseStore.setState({ collapsedIssueIds: new Set() });
       useSubIssueDisplayStore.setState({
         rowProperties: { ...DEFAULT_SUB_ISSUE_ROW_PROPERTIES },
         rowPropertyIds: [],
@@ -3719,88 +3721,94 @@ describe("IssueDetail (shared)", () => {
       expect(sidebar.getAllByRole("link")).toHaveLength(3);
     });
 
-    it("limits the sidebar to ten children in inline stage order and jumps to all twenty-five", async () => {
-      const children = Array.from({ length: 25 }, (_, i) => subIssue({
-        id: `child-${i + 1}`,
-        number: i + 1,
-        identifier: `TES-${i + 1}`,
-        title: `Child ${i + 1}`,
-        stage: i % 3 === 0 ? 2 : i % 3 === 1 ? 1 : null,
-        status: i >= 20 ? "verified" : "todo",
-        status_category: i >= 20 ? "done" : "unstarted",
-      }));
-      mockApiObj.listChildIssues.mockResolvedValue({ issues: children });
+    const stagedSidebarChildren = () => Array.from({ length: 25 }, (_, i) => subIssue({
+      id: `child-${i + 1}`,
+      number: i + 1,
+      identifier: `TES-${i + 1}`,
+      title: `Child ${i + 1}`,
+      stage: i % 3 === 0 ? 2 : i % 3 === 1 ? 1 : null,
+      status: i === 1 || i >= 20 ? "verified" : i === 2 ? "declined" : i === 5 ? "cancelled" : "todo",
+      status_category: i === 1 || i >= 20 ? "done" : i === 2 ? "closed" : undefined,
+    }));
+
+    it.each([false, true])("expands unfinished-first sidebar children in place (mobile: %s)", async (isMobile) => {
+      mockViewport.isMobile = isMobile;
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: stagedSidebarChildren() });
       const { container } = renderIssueDetail();
       await findInlineChild("Child 25");
-      const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
-      const links = sidebar.getAllByRole("link");
-      expect(links).toHaveLength(10);
-      expect(links.map((link) => link.getAttribute("href"))).toEqual(
-        [2, 5, 8, 11, 14, 17, 20, 23, 1, 4].map((n) => `/test/issues/child-${n}`),
-      );
-      expect(sidebar.getByText("5/25")).toBeInTheDocument();
+      const section = container.querySelector<HTMLDivElement>('[class~="group/sub-issues"]')!;
+      const inlineOrder = inlineChildren().getAllByText(/^Child \d+$/).map((row) => row.textContent);
+      fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
+      const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
+      scroller.scrollTop = 600;
+      vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+      vi.spyOn(section, "getBoundingClientRect").mockReturnValue({ top: -200 } as DOMRect);
+      let sheet: HTMLElement | undefined;
+      if (isMobile) {
+        fireEvent.click(screen.getByRole("button", { name: enIssues.detail.sidebar_tooltip }));
+        sheet = await screen.findByRole("dialog");
+      }
+      const sidebar = within(document.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      const childLinks = () => sidebar.getAllByRole("link").map((link) => link.getAttribute("href"));
+      const urls = (numbers: number[]) => numbers.map((n) => `/test/issues/child-${n}`);
+      const firstTen = [5, 8, 11, 14, 17, 20, 1, 4, 7, 10];
+      expect(childLinks()).toEqual(urls(firstTen));
+      expect(sidebar.getByText("6/25")).toBeInTheDocument();
       expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuemax", "25");
-      expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "5");
-      const viewAll = sidebar.getByRole("button", { name: "View all (25)" });
-
-      const section = container.querySelector<HTMLDivElement>('[class~="group/sub-issues"]')!;
-      fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
+      expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "6");
+      const showMore = sidebar.getByRole("button", { name: "Show 15 more" });
+      expect(showMore).toHaveAttribute("aria-expanded", "false");
+      fireEvent.click(showMore);
+      expect(childLinks()).toEqual(urls([
+        5, 8, 11, 14, 17, 20, 1, 4, 7, 10, 13, 16, 19, 9, 12, 15, 18,
+        2, 23, 22, 25, 3, 6, 21, 24,
+      ]));
       expect(inlineChildren().queryByText("Child 25")).not.toBeInTheDocument();
-      const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
-      scroller.scrollTop = 600;
-      vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
-      vi.spyOn(section, "getBoundingClientRect").mockReturnValue({ top: -200 } as DOMRect);
-      fireEvent.click(viewAll);
-
-      expect(await findInlineChild("Child 25")).toBeInTheDocument();
-      expect(inlineChildren().getAllByText(/^Child \d+$/)).toHaveLength(25);
-      await waitFor(() => expect(scroller.scrollTop).toBe(284));
+      expect(scroller.scrollTop).toBe(600);
+      if (isMobile) {
+        expect(screen.getByRole("dialog")).toBe(sheet);
+        expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeNull();
+      }
+      const collapse = sidebar.getByRole("button", { name: "Collapse" });
+      expect(collapse).toHaveAttribute("aria-expanded", "true");
+      fireEvent.click(collapse);
+      expect(childLinks()).toEqual(urls(firstTen));
+      expect(sidebar.getByRole("button", { name: "Show 15 more" })).toHaveAttribute("aria-expanded", "false");
+      expect(sidebar.getByText("6/25")).toBeInTheDocument();
+      expect(scroller.scrollTop).toBe(600);
+      expect(inlineChildren().queryByText("Child 25")).not.toBeInTheDocument();
+      if (isMobile) {
+        expect(screen.getByRole("dialog")).toBe(sheet);
+        expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeNull();
+        fireEvent.keyDown(sheet!, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      }
+      fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
+      expect(inlineChildren().getAllByText(/^Child \d+$/).map((row) => row.textContent)).toEqual(inlineOrder);
     });
 
-    it("closes the narrow-screen sidebar before expanding and jumping to all children", async () => {
-      mockViewport.isMobile = true;
-      mockApiObj.listChildIssues.mockResolvedValue({
-        issues: Array.from({ length: 25 }, (_, i) => subIssue({
-          id: `child-${i + 1}`,
-          identifier: `TES-${i + 1}`,
-          title: `Child ${i + 1}`,
-        })),
-      });
-      const { container } = renderIssueDetail();
-      await findInlineChild("Child 25");
-      const section = container.querySelector<HTMLDivElement>('[class~="group/sub-issues"]')!;
-      fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
-      expect(inlineChildren().queryByText("Child 25")).not.toBeInTheDocument();
-
-      const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
-      scroller.scrollTop = 600;
-      vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
-      vi.spyOn(section, "getBoundingClientRect").mockReturnValue({ top: -200 } as DOMRect);
-      fireEvent.click(screen.getByRole("button", { name: enIssues.detail.sidebar_tooltip }));
-      const sheet = await screen.findByRole("dialog");
-      const sidebar = within(sheet.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
-      expect(sidebar.getAllByRole("link")).toHaveLength(10);
-      fireEvent.click(sidebar.getByRole("button", { name: "View all (25)" }));
-
-      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-      expect(await findInlineChild("Child 25")).toBeVisible();
-      expect(inlineChildren().getAllByText(/^Child \d+$/)).toHaveLength(25);
-      await waitFor(() => expect(scroller.scrollTop).toBe(284));
-    });
-
-    it("shows all ten sidebar children without an overflow button at the limit", async () => {
-      mockApiObj.listChildIssues.mockResolvedValue({
-        issues: Array.from({ length: 10 }, (_, i) => subIssue({
-          id: `child-${i + 1}`,
-          identifier: `TES-${i + 1}`,
-          title: `Child ${i + 1}`,
-        })),
-      });
+    it("keeps inline stage order including completed children at the ten-child limit", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: stagedSidebarChildren().slice(0, 10) });
       const { container } = renderIssueDetail();
       await findInlineChild("Child 10");
       const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      expect(sidebar.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(
+        [2, 5, 8, 1, 4, 7, 10, 3, 6, 9].map((n) => `/test/issues/child-${n}`),
+      );
+      expect(sidebar.queryByRole("button", { name: /Show .* more|Collapse|View all/ })).not.toBeInTheDocument();
+      expect(sidebar.getByText("1/10")).toBeInTheDocument();
+    });
+
+    it("shows the remaining count when only one child is hidden", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: stagedSidebarChildren().slice(0, 11) });
+      const { container } = renderIssueDetail();
+      await findInlineChild("Child 11");
+      const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
       expect(sidebar.getAllByRole("link")).toHaveLength(10);
-      expect(sidebar.queryByRole("button", { name: /View all/ })).not.toBeInTheDocument();
+      fireEvent.click(sidebar.getByRole("button", { name: "Show 1 more" }));
+      expect(sidebar.getAllByRole("link")).toHaveLength(11);
+      fireEvent.click(sidebar.getByRole("button", { name: "Collapse" }));
+      expect(sidebar.getAllByRole("link")).toHaveLength(10);
     });
 
     it("leaves the sidebar slot empty while loading and when no children exist", async () => {

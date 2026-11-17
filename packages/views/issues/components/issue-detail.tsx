@@ -1560,6 +1560,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [sidebarSubIssuesOpen, setSidebarSubIssuesOpen] = useState(true);
+  const [sidebarSubIssuesExpanded, setSidebarSubIssuesExpanded] = useState(false);
+  const sidebarSubIssuesListId = useId();
+  useEffect(() => setSidebarSubIssuesExpanded(false), [id]);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const githubSettings = useGitHubSettings();
   const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
@@ -2534,9 +2537,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     });
   }, [setSubIssuesCollapsed, scrollContainerEl]);
   const doneChildCount = childIssues.filter((child) => issueBehavesAs(child, "done")).length;
-  const sidebarChildIssues = useMemo(() => groupSubIssuesByStage(childIssues)
-    .flatMap(({ items }) => items)
-    .slice(0, SIDEBAR_SUB_ISSUES_LIMIT), [childIssues]);
+  const sidebarChildIssues = useMemo(() => {
+    let ordered = groupSubIssuesByStage(childIssues).flatMap(({ items }) => items);
+    if (ordered.length > SIDEBAR_SUB_ISSUES_LIMIT) {
+      const unfinished = ordered.filter((child) => !issueBehavesAsAny(child, ["done", "closed"]));
+      const finished = ordered.filter((child) => issueBehavesAsAny(child, ["done", "closed"]));
+      ordered = [...unfinished, ...finished];
+    }
+    return sidebarSubIssuesExpanded ? ordered : ordered.slice(0, SIDEBAR_SUB_ISSUES_LIMIT);
+  }, [childIssues, sidebarSubIssuesExpanded]);
 
   // The sub-issue list owns its selection, reset per issue. Rows, select-all
   // and the inline batch toolbar must read the same one: a peek renders this
@@ -3367,7 +3376,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
           }
         />
         {sidebarSubIssuesOpen && (
-          <ul className="px-2">
+          <ul id={sidebarSubIssuesListId} className="px-2">
             {sidebarChildIssues.map((child) => (
               <li key={child.id}>
                 <AppLink
@@ -3397,12 +3406,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                   variant="ghost"
                   size="sm"
                   className="w-full justify-start text-muted-foreground"
-                  onClick={() => {
-                    if (isMobile) setMobileSidebarOpen(false);
-                    jumpToSubIssues();
-                  }}
+                  aria-expanded={sidebarSubIssuesExpanded}
+                  aria-controls={sidebarSubIssuesListId}
+                  onClick={() => setSidebarSubIssuesExpanded((expanded) => !expanded)}
                 >
-                  {t(($) => $.detail.sub_issues_view_all, { total: childIssues.length })}
+                  {sidebarSubIssuesExpanded
+                    ? t(($) => $.detail.sub_issues_show_less)
+                    : t(($) => $.detail.sub_issues_show_more, { count: childIssues.length - SIDEBAR_SUB_ISSUES_LIMIT })}
                 </Button>
               </li>
             )}
