@@ -13,11 +13,13 @@
  * implementation consensus, not a bug we can wait out.
  *
  * The fix is in-iframe: append a tiny script to the document that listens for
- * fragment-link clicks and calls `scrollIntoView` itself. The script runs in
- * the iframe's own opaque origin — same capabilities the user's HTML already
- * has under `allow-scripts`; it cannot reach the parent. The shim only
- * intercepts `href="#..."` clicks, defers to any preventDefault handler the
- * user's HTML installed, and stays out of the way when the target id is
+ * fragment-link clicks, sets the document's own hash, and calls `scrollIntoView`.
+ * Setting the hash preserves :target, hashchange, and session history before
+ * scrolling (a :target rule may be what makes the destination visible).
+ * The script runs in the iframe's own opaque origin — same capabilities the
+ * user's HTML already has under `allow-scripts`; it cannot reach the parent.
+ * The shim only intercepts `href="#..."` clicks, defers to any preventDefault
+ * handler the user's HTML installed, and stays out of the way when the target id is
  * missing (so SPA / tab-style routers in the document can still handle it).
  */
 const FRAGMENT_NAV_SHIM = `<script>
@@ -39,6 +41,7 @@ const FRAGMENT_NAV_SHIM = `<script>
     }
     if (!dest) return;
     e.preventDefault();
+    window.location.hash = href;
     dest.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 })();
