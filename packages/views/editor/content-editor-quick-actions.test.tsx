@@ -1,15 +1,16 @@
 import type { Editor } from "@tiptap/core";
-import type { PropsWithChildren } from "react";
+import { useState, type PropsWithChildren } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Agent, Issue, ListQuickActionsResponse, MemberWithUser, QuickAction } from "@multica/core/types";
+import type { Agent, CommentTriggerPreview, Issue, ListQuickActionsResponse, MemberWithUser, QuickAction } from "@multica/core/types";
 import { quickActionKeys } from "@multica/core/quick-actions";
 import { issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { renderWithI18n } from "../test/i18n";
 import { NavigationProvider } from "../navigation/context";
 import { useQuickActionMenu } from "../issues/hooks/use-quick-action-menu";
+import { useCommentTriggerPreview } from "../issues/hooks/use-comment-trigger-preview";
 import { ContentEditor } from "./content-editor";
 
 const listQuickActions = vi.hoisted(() => vi.fn());
@@ -18,6 +19,7 @@ const getIssue = vi.hoisted(() => vi.fn());
 const listAgents = vi.hoisted(() => vi.fn());
 const listSquads = vi.hoisted(() => vi.fn());
 const listMembers = vi.hoisted(() => vi.fn());
+const previewCommentTriggers = vi.hoisted(() => vi.fn());
 const toastError = vi.hoisted(() => vi.fn());
 
 vi.mock("sonner", () => ({ toast: { error: toastError } }));
@@ -27,7 +29,7 @@ vi.mock("@multica/core/auth", () => ({
 
 vi.mock("@multica/core/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/api")>();
-  return { ...actual, api: { ...actual.api, listQuickActions, renderQuickAction, getIssue, listAgents, listSquads, listMembers } };
+  return { ...actual, api: { ...actual.api, listQuickActions, renderQuickAction, getIssue, listAgents, listSquads, listMembers, previewCommentTriggers } };
 });
 vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
@@ -52,6 +54,7 @@ function makeAgent(id: string, skills: Agent["skills"]): Agent {
   return {
     id,
     skills,
+    runtime_id: "runtime-1",
     archived_at: null,
     owner_id: null,
     permission_mode: "public_to",
@@ -69,6 +72,7 @@ beforeEach(() => {
     { user_id: "user-1", role: "member", name: "User" } as MemberWithUser,
   ]);
   toastError.mockReset();
+  previewCommentTriggers.mockReset().mockReturnValue(new Promise(() => {}));
 });
 
 const clients: QueryClient[] = [];
@@ -104,9 +108,12 @@ function pendingCatalog() {
 }
 
 function Composer() {
+  const [content, setContent] = useState("");
+  const triggerPreview = useCommentTriggerPreview({ issueId: "issue-1", content });
   return (
     <ContentEditor
-      quickActionMenu={useQuickActionMenu("issue-1")}
+      onUpdate={setContent}
+      quickActionMenu={useQuickActionMenu("issue-1", { triggerPreview, previewContent: content })}
       enableSlashCommands
       slashCommandMode="command"
       showBubbleMenu={false}
@@ -345,6 +352,64 @@ describe("comment quick-action catalog updates in the real editor", () => {
 });
 
 describe("Issue agent-scoped skills in the real editor", () => {
+  it.each([false, true])("refreshes the open menu from a current preview (empty: %s)", async (empty) => {
+    const assignee = makeAgent("assignee", [{ id: "fallback", name: "fallback", description: "" }]);
+    const target = makeAgent("target", [
+      { id: "preview", name: "preview", description: "" },
+      { id: "disabled", name: "disabled", description: "", enabled: false },
+    ]);
+    getIssue.mockResolvedValue(makeIssue("agent", assignee.id));
+    listAgents.mockResolvedValue([assignee, target]);
+    let resolve!: (value: CommentTriggerPreview) => void;
+    previewCommentTriggers.mockReturnValue(new Promise((done) => { resolve = done; }));
+    const { editor, dom } = await mount();
+
+    // The empty signature is current but must not suppress the cold-/ fallback.
+    expect(previewCommentTriggers).not.toHaveBeenCalled();
+    await type(editor, "/");
+    await waitFor(() => expect(screen.getByRole("button", { name: "/fallback" })).toBeVisible());
+    await waitFor(() => expect(previewCommentTriggers).toHaveBeenCalled());
+    const selection = editor.state.selection.toJSON();
+
+    await act(async () => resolve({
+      agents: empty ? [] : [{ id: target.id, name: "Target", source: "assignee", reason: "" }],
+      blocked: [],
+    }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "/fallback" })).not.toBeInTheDocument());
+    if (!empty) expect(screen.getByRole("button", { name: "/preview" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "/disabled" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /\/note/ })).toBeVisible();
+    expect(dom.editor).toBe(editor);
+    expect(editor.getText()).toBe("/");
+    expect(editor.state.selection.toJSON()).toEqual(selection);
+  });
+
+  it("uses live synchronous targets while a changed mention is debouncing or loading", async () => {
+    const previous = makeAgent("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", [{ id: "old", name: "old", description: "" }]);
+    const next = makeAgent("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", [{ id: "next", name: "next", description: "" }]);
+    getIssue.mockResolvedValue(makeIssue("agent", previous.id));
+    listAgents.mockResolvedValue([previous, next]);
+    previewCommentTriggers.mockResolvedValueOnce({ agents: [
+      { id: previous.id, name: "Previous", source: "assignee", reason: "" },
+    ], blocked: [] });
+    const { editor } = await mount();
+    await type(editor, "draft");
+    await waitFor(() => expect(previewCommentTriggers).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      editor.commands.setContent("");
+      editor.commands.insertContent([
+        { type: "mention", attrs: { type: "agent", id: next.id, label: "Next", mentionSuggestionChar: "@" } },
+        { type: "text", text: " " },
+      ]);
+    });
+    await type(editor, "/");
+    await waitFor(() => expect(screen.getByRole("button", { name: "/next" })).toBeVisible());
+    expect(screen.queryByRole("button", { name: "/old" })).not.toBeInTheDocument();
+    await waitFor(() => expect(previewCommentTriggers).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "/next" })).toBeVisible();
+  });
+
   it("uses a just-inserted mention and inserts the selected skill capsule as Markdown", async () => {
     const explicit = makeAgent("explicit", [
       { id: "deploy-skill", name: "deploy", description: "" },

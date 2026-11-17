@@ -112,7 +112,8 @@ function ReplyInput({
   const canSend = !targetMissing && (annotations.length ? hasReplyIntent(content, annotations) : !isEmpty);
   // Saving the first pending annotation will fix the target before submission.
   const previewParentId = annotations.length === 0 ? annotationComposer?.pending.sourceCommentId ?? parentId : parentId;
-  const triggerPreview = useCommentTriggerPreview({ issueId, parentId: previewParentId, content: !targetMissing && (canSend || annotationComposer?.pending.note.trim()) ? composedContent : "" });
+  const previewContent = !targetMissing && (canSend || annotationComposer?.pending.note.trim()) ? composedContent : "";
+  const triggerPreview = useCommentTriggerPreview({ issueId, parentId: previewParentId, content: previewContent });
   // Uploads for this reply session (MUL-5181) — owned by the coordinator. With
   // a draftKey they persist in the draft store so scroll-out/close no longer
   // drops an in-flight upload; without one (no persistence context) they fall
@@ -153,6 +154,8 @@ function ReplyInput({
     enabled: lazy.active,
     parentId: previewParentId,
     targetMissing,
+    triggerPreview,
+    previewContent,
   });
   useImperativeHandle(handleRef, () => ({ focus: () => lazy.activate() }), [lazy]);
   const { isDragOver, dropZoneProps } = useFileDropZone({

@@ -73,7 +73,8 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
   const previewAnnotations = useMemo(() => annotationsWithPending(annotations, annotationComposer?.pending), [annotations, annotationComposer?.pending]);
   const composedContent = useMemo(() => composeAnnotatedReply(content, previewAnnotations), [content, previewAnnotations]);
   const canSend = annotations.length ? hasReplyIntent(content, annotations) : !isEmpty;
-  const triggerPreview = useCommentTriggerPreview({ issueId, content: canSend || annotationComposer?.pending.note.trim() ? composedContent : "" });
+  const previewContent = canSend || annotationComposer?.pending.note.trim() ? composedContent : "";
+  const triggerPreview = useCommentTriggerPreview({ issueId, content: previewContent });
   // Uploads for this composer session (MUL-5181). Owned by the module-level
   // coordinator and persisted in the draft store, so closing/scrolling the
   // composer away no longer drops an in-flight upload — its result lands in the
@@ -109,7 +110,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
     editorRef,
   });
   // Inactive shells must not mount query observers or duplicate cold reads.
-  const quickActionMenu = useQuickActionMenu(issueId, { enabled: lazy.active });
+  const quickActionMenu = useQuickActionMenu(issueId, { enabled: lazy.active, triggerPreview, previewContent });
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: lazy.uploadOrQueue,
   });

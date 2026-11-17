@@ -19,6 +19,7 @@ import {
   squadListOptions,
 } from "@multica/core/workspace/queries";
 import { useT } from "../../i18n";
+import { commentTriggerPreviewSignature, type UseCommentTriggerPreviewResult } from "./use-comment-trigger-preview";
 
 export interface IssueSlashSkillContext {
   issue?: Pick<Issue, "assignee_type" | "assignee_id">;
@@ -146,6 +147,7 @@ export function resolveIssueSlashSkills(
     if (
       !agent ||
       agent.archived_at ||
+      !agent.runtime_id ||
       !canAssignAgentToIssue(agent, { userId, role: memberRole }).allowed
     ) continue;
     for (const skill of agent.skills) {
@@ -177,10 +179,12 @@ export function resolveIssueSlashSkills(
  */
 export function useQuickActionMenu(
   issueId?: string,
-  { enabled = true, parentId, targetMissing = false }: {
+  { enabled = true, parentId, targetMissing = false, triggerPreview, previewContent = "" }: {
     enabled?: boolean;
     parentId?: string;
     targetMissing?: boolean;
+    triggerPreview?: Pick<UseCommentTriggerPreviewResult, "agents" | "isCurrent">;
+    previewContent?: string;
   } = {},
 ) {
   const { t } = useT("issues");
@@ -233,8 +237,23 @@ export function useQuickActionMenu(
     return content;
   }, [actions, t]);
 
+  const previewAgents = triggerPreview?.agents;
+  // Empty composers have a synthetic current preview with no targets. Keep
+  // synchronous resolution there so typing the first `/` still offers skills.
+  const hasCurrentPreview = triggerPreview?.isCurrent && commentTriggerPreviewSignature(previewContent) !== "empty";
   const getSkills = useCallback((editor: Editor): AgentSkillSummary[] => {
-    if (!hasIssueContext) return [];
+    if (!hasIssueContext || targetMissing) return [];
+    if (hasCurrentPreview) {
+      const agentsById = new Map((agents ?? []).map((agent) => [agent.id, agent]));
+      const seenSkillIds = new Set<string>();
+      return (previewAgents ?? []).flatMap(({ id }) =>
+        (agentsById.get(id)?.skills ?? []).filter((skill) => {
+          if (skill.enabled === false || seenSkillIds.has(skill.id)) return false;
+          seenSkillIds.add(skill.id);
+          return true;
+        }),
+      );
+    }
     const timeline = parentId && issueId
       ? queryClient.getQueryData<TimelineEntry[]>(issueKeys.timeline(issueId))
       : undefined;
@@ -252,7 +271,7 @@ export function useQuickActionMenu(
       timeline,
       tasks,
     });
-  }, [hasIssueContext, issue, agents, squads, members, queryClient, issueId, parentId, targetMissing]);
+  }, [hasIssueContext, issue, agents, squads, members, queryClient, issueId, parentId, targetMissing, hasCurrentPreview, previewAgents]);
 
   return useMemo(
     () => ({ getQuickActions, getQuickActionContent, getSkills }),

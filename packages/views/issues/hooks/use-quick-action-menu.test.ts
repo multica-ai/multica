@@ -23,6 +23,7 @@ function agent(
   return {
     id,
     skills,
+    runtime_id: "runtime-1",
     archived_at: null,
     owner_id: null,
     permission_mode: "public_to",
@@ -86,6 +87,21 @@ function timelineComment(
 }
 
 describe("resolveIssueSlashSkills", () => {
+  it.each([undefined, ""])("excludes an agent with runtime_id %s without falling back", (runtimeId) => {
+    const unavailable = agent("unavailable", [skill("unavailable-skill")], { runtime_id: runtimeId });
+    const assignee = agent("assignee", [skill("assignee-skill")]);
+    const data = context({
+      issue: { assignee_type: "agent", assignee_id: assignee.id },
+      agents: [unavailable, assignee],
+    });
+
+    expect(resolveIssueSlashSkills(docWithMentions(mention("agent", unavailable.id)), data)).toEqual([]);
+    expect(resolveIssueSlashSkills(docWithMentions(), {
+      ...data,
+      issue: { assignee_type: "agent", assignee_id: unavailable.id },
+    })).toEqual([]);
+  });
+
   it("reads a newly inserted explicit agent synchronously and locks out the assignee", () => {
     const editor = makeEditor();
     const target = agent("explicit", [skill("explicit-skill")]);
