@@ -3,12 +3,12 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Archive, ArchiveRestore, BellOff, BellRing, Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, Type } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, BellOff, BellRing, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, Type } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText, copyTextAndHtml } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
-import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { ProjectStatus } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
 import { projectDetailOptions, projectSubscriptionOptions } from "@multica/core/projects/queries";
@@ -22,9 +22,11 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssuesScope } from "@multica/core/issues/stores";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useActorName } from "@multica/core/workspace/hooks";
-import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
-import { ProjectProgressSection } from "./project-progress-section";
+import type { BreakdownFilter } from "./project-progress-section";
+import { ProjectInsights } from "./project-insights";
+import { ProjectActivityPage } from "./project-activity";
+import { getIssueSurfaceViewStore } from "@multica/core/issues/stores";
+import { issueScopeKey } from "@multica/core/issues/surface/scope";
 import { ProjectOverviewBody, ProjectOverviewHeader, ProjectTabs } from "./project-overview";
 import {
   defaultProjectTab,
@@ -32,15 +34,7 @@ import {
   useProjectTabStore,
   type ProjectTab,
 } from "@multica/core/projects/tab-store";
-import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, currentPath, useNavigation } from "../../navigation";
-import { PriorityIcon } from "../../issues/components/priority-icon";
-import { ProjectResourcesSection } from "./project-resources-section";
-import { ProjectStartDatePicker } from "./project-start-date-picker";
-import { ProjectDueDatePicker } from "./project-due-date-picker";
-import { ProjectAccessControl } from "./project-access";
-import { ProjectLeadPicker } from "./project-lead-picker";
-import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
 import { ProjectWorkflowMenuItem, ProjectWorkflowSheet } from "../../workflows/project-workflow-sheet";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -49,11 +43,8 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
   Tooltip,
@@ -81,7 +72,6 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
 import { titleLinkPayload } from "../../common/title-link";
-import { useProjectStatusLabels, useProjectPriorityLabels, useFormatRelativeDate } from "./labels";
 import {
   ArchivedProjectNotice,
   ArchivedProjectTag,
@@ -91,41 +81,10 @@ import {
 } from "./project-archive";
 import { PAGE_GUTTER } from "../../layout/page-header";
 
-// Property row — sidebar property display
-
-function PropRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex min-h-8 items-center gap-2 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors">
-      <span className="w-16 shrink-0 text-caption text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-caption truncate">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-// The project's workflow (MUL-7420).
-function ProjectWorkflowPropRow({ project, onOpen }: { project: Project; onOpen: () => void }) {
-  const { t } = useT("issues");
-  return (
-    <PropRow label={t(($) => $.workflows.project.label)}>
-      <ProjectWorkflowControl project={project} onOpen={onOpen} />
-    </PropRow>
-  );
-}
-
 // ProjectDetail
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
-  const statusLabels = useProjectStatusLabels();
-  const priorityLabels = useProjectPriorityLabels();
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
@@ -135,7 +94,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { requestArchive, dialog: archiveDialog } = useArchiveProjects();
   const restore = useRestoreProjects();
   const offerArchive = useOfferArchiveOnComplete();
-  const formatRelativeDate = useFormatRelativeDate();
   const { data: project, isLoading } = useQuery({
     ...projectDetailOptions(wsId, projectId),
     enabled: !deleted,
@@ -163,7 +121,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
   const deleting = deleteProject.isPending;
   const { data: pinnedItems = [] } = useQuery({
@@ -193,8 +150,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   };
   const isMobile = useIsMobile();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [propertiesOpen, setPropertiesOpen] = useState(true);
-  const [progressOpen, setProgressOpen] = useState(true);
 
   // Overview / Issues. An explicit ?tab= wins and is remembered; otherwise the
   // project opens on the tab this person last left it on.
@@ -290,6 +245,24 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     [project, handleUpdateField, offerArchive],
   );
 
+  // A breakdown row opens the Issues tab showing just that slice.
+  const showFilteredIssues = useCallback(
+    (filter: BreakdownFilter) => {
+      const store = getIssueSurfaceViewStore(issueScopeKey(issueScope));
+      store.getState().clearFilters();
+      if (filter.kind === "assignee") {
+        store.setState({ assigneeFilters: [{ type: filter.type, id: filter.id }] });
+      } else if (filter.kind === "unassigned") {
+        store.setState({ includeNoAssignee: true });
+      } else {
+        store.setState({ labelFilters: [filter.id] });
+      }
+      setMobileSidebarOpen(false);
+      handleTabChange("issues");
+    },
+    [issueScope, handleTabChange],
+  );
+
   const handleDelete = useCallback(() => {
     if (!project || deleteProject.isPending) return;
     deleteProject.mutate(project.id, {
@@ -339,124 +312,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }
 
   const archived = !!project.archived_at;
-  const statusCfg = PROJECT_STATUS_CONFIG[project.status];
 
   const sidebarContent = (
-    <div className="space-y-5">
-      {/* Properties */}
-      <div>
-        <button
-          type="button"
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setPropertiesOpen(!propertiesOpen)}
-        >
-          {t(($) => $.detail.section_properties)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
-        </button>
-        {propertiesOpen && <div className="space-y-0.5 pl-2">
-          <PropRow label={t(($) => $.table.status)}>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
-                    <span className={cn("size-2 rounded-full", statusCfg.dotColor)} />
-                    <span>{statusLabels[project.status]}</span>
-                  </button>
-                }
-              />
-              <DropdownMenuContent align="start" className="w-44">
-                {PROJECT_STATUS_ORDER.map((s) => (
-                  <DropdownMenuItem key={s} onClick={() => handleStatusChange(s as ProjectStatus)}>
-                    <span className={cn("size-2 rounded-full", PROJECT_STATUS_CONFIG[s].dotColor)} />
-                    <span>{statusLabels[s]}</span>
-                    {s === project.status && <Check className="ml-auto h-3.5 w-3.5" />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </PropRow>
-          <PropRow label={t(($) => $.table.priority)}>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
-                    <PriorityIcon priority={project.priority} />
-                    <span>{priorityLabels[project.priority]}</span>
-                  </button>
-                }
-              />
-              <DropdownMenuContent align="start" className="w-44">
-                {PROJECT_PRIORITY_ORDER.map((p) => (
-                  <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p as ProjectPriority })}>
-                    <PriorityIcon priority={p} />
-                    <span>{priorityLabels[p]}</span>
-                    {p === project.priority && <Check className="ml-auto h-3.5 w-3.5" />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </PropRow>
-          {<PropRow label={t(($) => $.access.label)}>
-            <ProjectAccessControl project={project} />
-          </PropRow>}
-          <PropRow label={t(($) => $.table.lead)}>
-            <ProjectLeadPicker
-              project={project}
-              handleUpdate={handleUpdateField}
-              renderTrigger={(leadName) => (
-                <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
-                  {project.lead_type && project.lead_id ? (
-                    <>
-                      <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard showStatusDot />
-                      <span className="cursor-pointer">{leadName}</span>
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">{t(($) => $.lead.no_lead)}</span>
-                  )}
-                </button>
-              )}
-            />
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_start_date)}>
-            <ProjectStartDatePicker startDate={project.start_date} onUpdate={handleUpdateField} />
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_due_date)}>
-            <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
-          </PropRow>
-          <ProjectWorkflowPropRow project={project} onOpen={openWorkflowSheet} />
-          {archived && (
-            <PropRow label={t(($) => $.archive.prop_label)}>
-              <span className="tabular-nums">{formatRelativeDate(project.archived_at!)}</span>
-              {project.archived_by_type && project.archived_by_id && (
-                <>
-                  <span className="text-muted-foreground">·</span>
-                  <ActorAvatar actorType={project.archived_by_type} actorId={project.archived_by_id} size="sm" enableHoverCard />
-                  <span className="truncate">{getActorName(project.archived_by_type, project.archived_by_id)}</span>
-                </>
-              )}
-            </PropRow>
-          )}
-        </div>}
-      </div>
-
-      {/* Progress */}
-      <div>
-        <button
-          type="button"
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${progressOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setProgressOpen(!progressOpen)}
-        >
-          {t(($) => $.detail.section_progress)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${progressOpen ? "rotate-90" : ""}`} />
-        </button>
-        {progressOpen && <div className="pl-2">
-          <ProjectProgressSection project={project} />
-        </div>}
-      </div>
-
-      {/* Resources */}
-      <ProjectResourcesSection projectId={projectId} />
-    </div>
+    <ProjectInsights
+      project={project}
+      onFilter={showFilteredIssues}
+      onShowActivity={() => {
+        setMobileSidebarOpen(false);
+        handleTabChange("activity");
+      }}
+    />
   );
 
   const projectMenu = (
@@ -574,12 +439,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     >
       <ResizablePanel id="content" minSize="50%">
         <div ref={rightSidebarShortcutTargetRef} className="flex h-full flex-col">
-          {tab === "overview" ? (
+          {tab !== "issues" ? (
             <>
               <ProjectOverviewHeader
                 project={project}
                 tabs={projectTabs}
                 menu={projectMenu}
+                badge={archived ? <ArchivedProjectTag /> : undefined}
                 trailing={sidebarToggle}
               />
               {archived && (
@@ -587,7 +453,16 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   <ArchivedProjectNotice project={project} />
                 </div>
               )}
-              <ProjectOverviewBody project={project} onUpdate={handleUpdateField} />
+              {tab === "overview" ? (
+                <ProjectOverviewBody
+                  project={project}
+                  onUpdate={handleUpdateField}
+                  onStatusChange={handleStatusChange}
+                  onOpenWorkflow={openWorkflowSheet}
+                />
+              ) : (
+                <ProjectActivityPage projectId={project.id} />
+              )}
             </>
           ) : (
             <IssueSurface

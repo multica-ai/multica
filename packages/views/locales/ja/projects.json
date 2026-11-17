@@ -121,7 +121,24 @@
       "forecast_none": "最近の完了が少ないため、完了日を予測できません。",
       "by_assignee": "担当者別",
       "agent_tag": "エージェント",
-      "unassigned": "未割り当て"
+      "unassigned": "未割り当て",
+      "axis_assignee": "担当者",
+      "axis_label": "ラベル",
+      "by_label": "ラベル別",
+      "no_labels": "まだ課題がありません。",
+      "unlabeled": "ラベルなし"
+    },
+    "tab_activity": "アクティビティ",
+    "agent_context_badge": "エージェントのコンテキスト",
+    "section_breakdown": "内訳",
+    "section_working": "作業中のエージェント",
+    "working_empty": "このプロジェクトの課題で実行中のエージェントはいません。",
+    "section_activity": "最近のアクティビティ",
+    "activity": {
+      "empty": "このプロジェクトの課題にはまだアクティビティがありません。",
+      "load_more": "さらに読み込む",
+      "view_all": "すべて表示",
+      "hint": "このプロジェクトの課題のステータス、担当者、優先度、日付の変更。"
     }
   },
   "resources": {
@@ -184,7 +201,8 @@
     "toast_ref_update_failed": "ブランチを更新できませんでした",
     "ref_error_commit": "これはコミットで、ブランチではありません。特定のリビジョンが必要なら multica repo checkout --ref を使ってください。",
     "ref_default_label": "デフォルトブランチ",
-    "ref_running_note": "進行中のタスクには影響しません。"
+    "ref_running_note": "進行中のタスクには影響しません。",
+    "document_hint": "このプロジェクトでエージェントが実行時に使うリポジトリとフォルダ。"
   },
   "delete_dialog": {
     "offline_error": "オフラインです。接続を回復してから、もう一度削除してください。",

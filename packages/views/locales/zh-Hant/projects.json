@@ -121,7 +121,24 @@
       "forecast_none": "近期完成的任務太少，暫時無法預測完成日期。",
       "by_assignee": "按負責人",
       "agent_tag": "AI 代理",
-      "unassigned": "未指派"
+      "unassigned": "未指派",
+      "axis_assignee": "負責人",
+      "axis_label": "標籤",
+      "by_label": "按標籤",
+      "no_labels": "還沒有任務。",
+      "unlabeled": "無標籤"
+    },
+    "tab_activity": "活動",
+    "agent_context_badge": "智慧體上下文",
+    "section_breakdown": "分佈",
+    "section_working": "智慧體在做",
+    "working_empty": "目前沒有智慧體在處理這個專案的任務。",
+    "section_activity": "動態",
+    "activity": {
+      "empty": "這個專案的任務還沒有動態。",
+      "load_more": "載入更多",
+      "view_all": "查看全部",
+      "hint": "專案內所有任務的狀態、負責人、優先級和日期變化。"
     }
   },
   "resources": {
@@ -184,7 +201,8 @@
     "toast_ref_update_failed": "分支更新失敗",
     "ref_error_commit": "這是 commit，不是分支。需要指定某個版本時，請用 multica repo checkout --ref。",
     "ref_default_label": "預設分支",
-    "ref_running_note": "進行中的任務不受影響。"
+    "ref_running_note": "進行中的任務不受影響。",
+    "document_hint": "智慧體在這個專案裡執行時使用的倉庫和資料夾。"
   },
   "delete_dialog": {
     "offline_error": "目前處於離線狀態，請連線後重試刪除。",

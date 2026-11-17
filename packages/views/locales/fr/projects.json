@@ -125,7 +125,24 @@
       "forecast_none": "Trop peu de tâches terminées récemment pour prévoir une date de fin.",
       "by_assignee": "Par responsable",
       "agent_tag": "Agent",
-      "unassigned": "Non assigné"
+      "unassigned": "Non assigné",
+      "axis_assignee": "Assigné",
+      "axis_label": "Étiquette",
+      "by_label": "Par étiquette",
+      "no_labels": "Aucun ticket pour l'instant.",
+      "unlabeled": "Sans étiquette"
+    },
+    "tab_activity": "Activité",
+    "agent_context_badge": "Contexte des agents",
+    "section_breakdown": "Répartition",
+    "section_working": "Agents au travail",
+    "working_empty": "Aucun agent ne travaille sur les tickets de ce projet pour le moment.",
+    "section_activity": "Activité récente",
+    "activity": {
+      "empty": "Aucune activité sur les tickets de ce projet pour l'instant.",
+      "load_more": "Charger plus",
+      "view_all": "Tout voir",
+      "hint": "Changements de statut, d'assignation, de priorité et de dates sur les tickets de ce projet."
     }
   },
   "resources": {
@@ -188,7 +205,8 @@
     "toast_ref_update_failed": "Impossible de mettre à jour la branche",
     "ref_error_commit": "Ceci est un commit, pas une branche. Pour une révision précise, utilisez multica repo checkout --ref.",
     "ref_default_label": "Branche par défaut",
-    "ref_running_note": "Les tâches en cours ne sont pas affectées."
+    "ref_running_note": "Les tâches en cours ne sont pas affectées.",
+    "document_hint": "Dépôts et dossiers dans lesquels les agents travaillent quand ils s'exécutent dans ce projet."
   },
   "delete_dialog": {
     "offline_error": "Vous êtes hors ligne. Reconnectez-vous, puis réessayez la suppression.",
