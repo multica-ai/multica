@@ -1021,7 +1021,7 @@
     "disconnect": "断开",
     "disconnecting": "断开中...",
     "disconnect_confirm_title": "断开 GitHub App",
-    "disconnect_confirm_description": "Multica 将不再接收该安装的 webhook。已有的 PR 镜像与关联会保留，再次连接即可恢复同步。",
+    "disconnect_confirm_description": "要从此工作区断开 {{login}} 吗？此账号的更新将停止，已有 PR 记录与关联会保留，其他连接不受影响。",
     "disconnect_confirm_cancel": "取消",
     "disconnect_confirm_action": "断开",
     "not_configured": "当前部署没有配置 GitHub 集成。运维需要设置",
@@ -1042,7 +1042,18 @@
     "feature_auto_link_description": "PR 标题或分支名含任务编号（如 {{example}}），或正文里写了 \"Closes {{example}}\" 时，自动关联到对应任务。",
     "status_paused": "已暂停",
     "pause": "暂停 GitHub 功能",
-    "resume": "恢复 GitHub 功能"
+    "resume": "恢复 GitHub 功能",
+    "add_account": "添加账号或组织",
+    "disconnect_account": "断开 {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub 未返回用户授权。请重新连接并完成授权。如果已有安装反复出现此问题，请联系 Multica 运维人员。",
+      "installation_not_authorized": "个人安装请使用所属的 GitHub 账号；组织安装请使用对所有已授权仓库都有管理员权限的账号，并至少选择一个仓库。",
+      "invalid_state": "GitHub 连接请求已过期或无效。请从设置 → 代码重新连接。",
+      "incomplete_callback": "GitHub 返回的连接信息不完整。请从设置 → 代码重新连接。",
+      "bad_workspace": "找不到此次连接的工作区。请打开目标工作区，从设置 → 代码重试。",
+      "verification_failed": "无法验证你对 GitHub 安装的管理权限。请重新连接；若仍失败，请联系 Multica 运维人员检查 GitHub App 配置。",
+      "persist_failed": "无法保存 GitHub 连接。请从设置 → 代码重试；若仍失败，请联系 Multica 运维人员。"
+    }
   },
   "vcs": {
     "section_title": "自托管 Git",

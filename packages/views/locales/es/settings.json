@@ -1030,7 +1030,7 @@
     "disconnect": "Desconectar",
     "disconnecting": "Desconectando…",
     "disconnect_confirm_title": "Desconectar la GitHub App",
-    "disconnect_confirm_description": "Multica dejará de recibir webhooks de esta instalación. Los mirrors de PR y los enlaces existentes se conservan; vuelve a conectar cuando quieras para reanudar las actualizaciones.",
+    "disconnect_confirm_description": "¿Desconectar {{login}} de este espacio de trabajo? Se detendrán las actualizaciones de esta cuenta. Se conservarán los PR y enlaces existentes; las demás conexiones no se verán afectadas.",
     "disconnect_confirm_cancel": "Cancelar",
     "disconnect_confirm_action": "Desconectar",
     "not_configured": "La integración con GitHub no está configurada en esta instalación. Los operadores deben definir",
@@ -1051,7 +1051,18 @@
     "feature_auto_link_description": "Enlaza un PR con la tarea cuyo ID, p. ej. {{example}}, aparece en su título o nombre de rama, o tras “Closes” en su descripción.",
     "pause": "Pausar funciones de GitHub",
     "resume": "Reanudar funciones de GitHub",
-    "status_paused": "En pausa"
+    "status_paused": "En pausa",
+    "add_account": "Añadir cuenta u organización",
+    "disconnect_account": "Desconectar {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub no devolvió la autorización del usuario. Vuelve a conectar y completa la autorización. Si se repite con una instalación existente, contacta con tu operador de Multica.",
+      "installation_not_authorized": "Para una instalación personal, usa la cuenta de GitHub propietaria. Para una organización, usa una cuenta con permisos de administrador en todos los repositorios autorizados y selecciona al menos uno.",
+      "invalid_state": "Esta solicitud de conexión de GitHub ha caducado o no es válida. Reinicia la conexión desde Configuración → Código.",
+      "incomplete_callback": "GitHub devolvió una respuesta de conexión incompleta. Reinicia la conexión desde Configuración → Código.",
+      "bad_workspace": "No se encontró el espacio de trabajo de esta conexión. Abre el espacio deseado y reintenta desde Configuración → Código.",
+      "verification_failed": "No se pudo verificar tu acceso a la instalación de GitHub. Reintenta; si se repite, pide a tu operador de Multica que revise la configuración de la GitHub App.",
+      "persist_failed": "No se pudo guardar la conexión de GitHub. Reintenta desde Configuración → Código; si se repite, contacta con tu operador de Multica."
+    }
   },
   "vcs": {
     "section_title": "Proveedores de Git (self-hosted)",
