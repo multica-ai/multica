@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -304,6 +306,7 @@ func TestRuntimeGC_ProfileBackedInstanceKeepsProfile(t *testing.T) {
 	ctx := context.Background()
 	profileID := createRuntimeGCFixtureProfile(t, ctx, "preserved")
 	runtimeID := createRuntimeGCFixtureRuntime(t, ctx, "profile-backed")
+	workspaceFixture(t).Exec(t, `UPDATE runtime_profile SET daemon_id = $2 WHERE id = $1`, profileID, "gc-bound-machine")
 	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET profile_id = $2 WHERE id = $1`, runtimeID, profileID); err != nil {
 		t.Fatalf("bind runtime profile: %v", err)
 	}
@@ -321,6 +324,63 @@ func TestRuntimeGC_ProfileBackedInstanceKeepsProfile(t *testing.T) {
 	}
 	if profiles != 1 {
 		t.Fatalf("runtime profile rows=%d, want preserved", profiles)
+	}
+}
+
+func TestRuntimeGC_LegacyProfileProtectsOnlyCreatorsMachines(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	for _, tc := range []struct {
+		name, dependency                    string
+		creatorOwns, noCreator, wantDeleted bool
+	}{
+		{name: "creator anchor", creatorOwns: true},
+		{name: "other member copy", wantDeleted: true},
+		{name: "unknown creator", noCreator: true, wantDeleted: true},
+		{name: "other member active agent", dependency: "agent"},
+		{name: "other member unfinished task", dependency: "task"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := workspaceFixture(t)
+			var creator any = testUserID
+			if tc.noCreator {
+				creator = nil
+			} else if !tc.creatorOwns {
+				creator = fx.User(t, "Profile creator", uuid.NewString()+"@example.com")
+				fx.Member(t, testWorkspaceID, creator.(string), "member")
+			}
+			profile := fx.Insert(t, "runtime_profile", testutil.Cols{"workspace_id": testWorkspaceID, "display_name": "Legacy GC " + uuid.NewString(), "protocol_family": "codex", "command_name": "codex", "created_by": creator})
+			runtime := fx.Runtime(t, "Legacy offline machine", testutil.Cols{"daemon_id": "legacy-gc-" + uuid.NewString(), "runtime_mode": "local", "profile_id": profile, "status": "offline", "last_seen_at": testutil.Raw("now()-interval '10 days'")})
+			if tc.dependency != "" {
+				cols := testutil.Cols{}
+				if tc.dependency == "task" {
+					cols["archived_at"] = testutil.Raw("now()")
+				}
+				agent := fx.Agent(t, "Protected agent", runtime, cols)
+				if tc.dependency == "task" {
+					fx.Task(t, agent, testutil.Cols{"runtime_id": runtime})
+				}
+			}
+			candidates, err := db.New(testPool).ListStaleOfflineRuntimeGCCandidates(context.Background(), db.ListStaleOfflineRuntimeGCCandidatesParams{StaleSeconds: offlineRuntimeTTLSeconds, MaxPerTick: 1000})
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, candidate := range candidates {
+				found = found || candidate == parseUUID(runtime)
+			}
+			if found != tc.wantDeleted {
+				t.Fatalf("GC candidate=%v, want %v", found, tc.wantDeleted)
+			}
+			result, err := gcRuntime(context.Background(), testPool, db.New(testPool), parseUUID(runtime))
+			if err != nil || result.deleted != tc.wantDeleted {
+				t.Fatalf("GC result=%+v, err=%v, want deleted=%v", result, err, tc.wantDeleted)
+			}
+			if n := fx.Count(t, `SELECT count(*) FROM agent_runtime WHERE id=$1`, runtime); (n == 0) != tc.wantDeleted {
+				t.Fatalf("runtime rows=%d, want deleted=%v", n, tc.wantDeleted)
+			}
+		})
 	}
 }
 

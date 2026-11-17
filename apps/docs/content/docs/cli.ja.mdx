@@ -298,7 +298,7 @@ multica runtime profile create --display-name "社内 Claude ラッパー" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` は現在のプロファイルをログイン時に起動するよう登録します。プラットフォームごとの違いは[ログイン時の自動起動](/daemon-runtimes#autostart)を参照してください。`runtime usage` は既定で 90 日分を集計し、`--days` は最大 365 です。`runtime update` はそのコンピューターのデーモンに CLI を指定のバージョンへ更新させ、`--wait` を付けると更新の完了を待ちます。更新の失敗、更新のタイムアウト、待機自体のタイムアウトでは、終了コードが非ゼロになります。`runtime profile create` は互換ツールを `--runtime-type` で指定します（古い `--protocol-family` も使えます）。固定引数は今のところ Web アプリでしか設定できません。
+`daemon autostart` は現在のプロファイルをログイン時に起動するよう登録します。プラットフォームごとの違いは[ログイン時の自動起動](/daemon-runtimes#autostart)を参照してください。`runtime usage` は既定で 90 日分を集計し、`--days` は最大 365 です。`runtime update` はそのコンピューターのデーモンに CLI を指定のバージョンへ更新させ、`--wait` を付けると更新の完了を待ちます。更新の失敗、更新のタイムアウト、待機自体のタイムアウトでは、終了コードが非ゼロになります。`runtime profile create` は互換ツールを `--runtime-type` で指定します（古い `--protocol-family` も使えます）。固定引数は今のところ Web アプリでしか設定できません。 `runtime profile create` は既定で現在のマシンに紐づけます。別の登録済みローカルマシンを選択するには `--daemon-id <id>` を指定します。 既存の未設定プロファイルは `multica runtime profile update <profile-id> --daemon-id <id>` でマシンに紐づけられます。
 
 アクティブなエージェントがまだ紐付いているランタイムの削除は、デフォルトで拒否されます。`multica runtime delete <id> --cascade` は、それらのエージェントをランタイムから解除して設定と履歴を保持し、アクティブな実行をキャンセルします。
 

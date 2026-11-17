@@ -12,7 +12,20 @@ export const runtimeKeys = {
   // by-hour now follows the viewer's tz, like the other reports.
   usageByHour: (rid: string, days: number, tz: string) =>
     ["runtimes", "usage", "by-hour", rid, days, tz] as const,
+  rateLimits: (rid: string) => ["runtimes", "rate-limits", rid] as const,
 };
+
+// The daemon posts a runtime's rate limits while its tasks run, so the
+// snapshot only moves while something is running. A slow poll keeps an open
+// page roughly in step without a realtime event.
+export function runtimeRateLimitsOptions(runtimeId: string) {
+  return queryOptions({
+    queryKey: runtimeKeys.rateLimits(runtimeId),
+    queryFn: () => api.getRuntimeRateLimits(runtimeId),
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+  });
+}
 
 // `tz` is the viewer's IANA name — all reports follow the viewer's tz.
 export function runtimeUsageOptions(

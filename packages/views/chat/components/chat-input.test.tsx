@@ -1028,18 +1028,32 @@ describe("ChatInput project context", () => {
     expect(onSend).toHaveBeenCalledWith("use the new location", undefined, expect.any(Function), []);
   });
 
-  it("keeps Stop available while queued content is uploading", async () => {
+  it("shows whether a draft will join the current run", () => {
+    const props = { isRunning: true, allowSubmitWhileRunning: true, canSteerWhileRunning: true };
+    const { rerender } = renderInput(props);
+    expect(screen.queryByText("Add to current run")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "also check this" } });
+    expect(screen.getByRole("status")).toHaveTextContent("Add to current run");
+    rerender(element({ ...props, canSteerWhileRunning: false }));
+    expect(screen.getByRole("status")).toHaveTextContent("Start after this run");
+    rerender(element({ ...props, canSteerWhileRunning: undefined }));
+    expect(screen.queryByText("Add to current run")).not.toBeInTheDocument();
+    expect(screen.queryByText("Start after this run")).not.toBeInTheDocument();
+  });
+
+  it("keeps Stop available and explains queuing while content is uploading", async () => {
     let resolveUpload!: (value: UploadResult) => void;
     mockApiUploadFile.mockImplementation(
       () => new Promise<UploadResult>((resolve) => (resolveUpload = resolve)),
     );
     const onStop = vi.fn();
-    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onStop });
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, canSteerWhileRunning: true, onStop });
 
     fireEvent.change(screen.getByTestId("editor"), {
       target: { value: "follow-up with attachment" },
     });
     expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Add to current run");
 
     await act(async () => {
       dropHandlers.onDrop?.([
@@ -1049,6 +1063,7 @@ describe("ChatInput project context", () => {
     });
 
     const stopButton = await screen.findByRole("button", { name: "Stop" });
+    expect(screen.getByRole("status")).toHaveTextContent("Start after this run");
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
     fireEvent.click(stopButton);
     expect(onStop).toHaveBeenCalledTimes(1);
