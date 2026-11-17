@@ -100,6 +100,21 @@ Desktop では、このコンピューター上で音声を文字に変換し、
 - Linux で自動更新が有効なのは `.AppImage` だけです。`.deb` と `.rpm` は新しいパッケージをダウンロードして上書きインストールします。
 - 自動更新が失敗した場合も、同様にダウンロードページから対応するインストーラーを取得して上書きインストールしてください。
 
+## Chromium の起動スイッチ [#chromium-switches]
+
+中クリックの自動スクロールなど Chromium の設定を変更するには、`$XDG_CONFIG_HOME` に UTF-8 の `multica-flags.conf` を作成します。変数が未設定または空の場合は、macOS/Linux では `~/.config/multica-flags.conf`、Windows では `%USERPROFILE%\.config\multica-flags.conf` を使います。必要に応じてフォルダーを作成し、拡張子は正確に `.conf` にしてください。
+
+```text
+# One Chromium switch per line
+--enable-blink-features=MiddleClickAutoscroll
+```
+
+空行と `#` で始まる行は無視されます。それ以外の各行は単一の `--switch` または `--switch=value` です。値の中の空白、引用符、`#`、環境変数への参照、シェル構文はそのまま渡され、シェル展開や空白による分割は行われません。名前の大文字と小文字は区別せず、ファイル内で最後の指定を使います。ランチャーで指定したスイッチがファイルより優先され、ファイルの指定はアプリの既定値より優先されます。
+
+変更後は Desktop を完全に終了してから起動し直してください。リンクから開く場合も同じです。ファイルがない場合は何も記録しません。読み込めないファイル、不正な行、アプリ固有の `--multica-*`/`--appimage-*` 引数、拒否されたスイッチは値を含まない起動診断を出し、ほかの有効な行は適用します。URL はスイッチではありません。起動や表示に問題が出た場合は、該当行またはファイルを削除してください。
+
+対応するスイッチは Electron が判断します。ログが示すのは受け渡しであり、未知のスイッチに効果があることではありません。`--inspect` などメインスクリプトより前に処理されるスイッチは、引き続き実際のランチャー引数が必要です。このファイルは Multica 固有の引数や `desktop.json` の接続設定を変更しません。[Electron のスイッチリファレンス](https://www.electronjs.org/docs/latest/api/command-line-switches)も参照してください。
+
 ## セルフホストインスタンスへの接続
 
 Desktop はデフォルトで Multica Cloud に接続します。セルフホストインスタンスに接続するには、ホームディレクトリの `.multica` の中に `desktop.json` を作成し、次の内容を書きます:

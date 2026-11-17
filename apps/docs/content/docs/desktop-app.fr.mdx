@@ -100,6 +100,21 @@ Les mises à jour sont distribuées par système d'exploitation et par architect
 - sous Linux, la mise à jour automatique ne fonctionne qu'avec `.AppImage` ; mettez à jour `.deb` et `.rpm` en installant un nouveau paquet par-dessus l'ancien ;
 - si la mise à jour automatique échoue, réinstallez de la même façon par-dessus avec le programme d'installation correspondant, disponible sur la page de téléchargement.
 
+## Options Chromium au démarrage [#chromium-switches]
+
+Pour un réglage Chromium comme le défilement automatique au clic du milieu, créez un fichier UTF-8 `multica-flags.conf` dans `$XDG_CONFIG_HOME`. Si cette variable est absente ou vide, utilisez `~/.config/multica-flags.conf` sur macOS/Linux, ou `%USERPROFILE%\.config\multica-flags.conf` sur Windows. Créez le dossier si nécessaire et conservez exactement l’extension `.conf`.
+
+```text
+# One Chromium switch per line
+--enable-blink-features=MiddleClickAutoscroll
+```
+
+Les lignes vides et celles qui commencent par `#` sont ignorées. Chaque autre ligne contient un seul `--switch` ou `--switch=value` ; espaces, guillemets, `#`, références aux variables d’environnement et syntaxe shell dans une valeur restent littéraux. Aucune expansion shell ni séparation aux espaces n’a lieu. Les noms ne distinguent pas la casse ; la dernière occurrence du fichier l’emporte. Une option déjà fournie par le lanceur a priorité sur le fichier, qui a priorité sur les valeurs par défaut de l’application.
+
+Quittez complètement Desktop, puis relancez-le pour appliquer les changements, y compris lors d’une ouverture depuis un lien. Un fichier absent ne produit aucun message. Un fichier illisible, une ligne incorrecte, les arguments applicatifs `--multica-*`/`--appimage-*` et les options rejetées produisent un diagnostic de démarrage sans leurs valeurs ; les autres entrées valides restent appliquées. Les URL ne sont pas des options. Supprimez la ligne concernée ou le fichier si une option perturbe le démarrage ou l’affichage.
+
+Electron détermine les options prises en charge : le journal confirme leur transmission, pas l’effet d’une option inconnue. Les options traitées avant le script principal, comme `--inspect`, doivent toujours être fournies par le lanceur. Ce fichier ne modifie ni les arguments propres à Multica ni les paramètres de connexion de `desktop.json`. Voir [la référence des options Electron](https://www.electronjs.org/docs/latest/api/command-line-switches).
+
 ## Se connecter à une instance auto-hébergée
 
 Desktop se connecte par défaut à Multica Cloud. Pour vous connecter à une instance auto-hébergée, créez `desktop.json` dans le répertoire `.multica` de votre répertoire personnel, avec ce contenu :

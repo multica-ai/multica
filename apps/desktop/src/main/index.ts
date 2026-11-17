@@ -23,6 +23,7 @@ import { setupLocalDirectory } from "./local-directory";
 import { setupThemeFolder } from "./theme-folder";
 import { setupVoiceInput } from "./voice";
 import { configureLinuxFileDialogs } from "./linux-file-dialog";
+import { applyDesktopFlags } from "./desktop-flags";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { devToolbarPreferencesPath, installDevToolbarToggle } from "./dev-toolbar-toggle";
@@ -95,6 +96,9 @@ import {
   parseNativeNotificationPayload,
 } from "./notification-gate";
 
+// Before anything can log: release builds write to stdout/stderr too.
+ignoreBrokenStdio();
+applyDesktopFlags(app.commandLine);
 configureLinuxFileDialogs(app.commandLine);
 
 // Guards against registering the will-download handler more than once on the
@@ -154,9 +158,6 @@ if (process.platform !== "win32") {
     join(homedir(), ".local/bin"),
   ]);
 }
-
-// Before anything can log: release builds write to stdout/stderr too.
-ignoreBrokenStdio();
 
 const PROTOCOL = "multica";
 const devLog = is.dev ? createBestEffortDevLog() : undefined;

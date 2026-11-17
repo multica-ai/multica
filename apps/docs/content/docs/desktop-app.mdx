@@ -102,6 +102,21 @@ Updates are distributed per OS and CPU architecture:
 - on Linux, auto-update only works for `.AppImage`; update `.deb` and `.rpm` by installing a new package over the old one;
 - if auto-update fails, likewise install over the top with the matching installer from the downloads page.
 
+## Chromium startup switches [#chromium-switches]
+
+For Chromium settings such as middle-click autoscroll, create a UTF-8 `multica-flags.conf` in `$XDG_CONFIG_HOME`. If that variable is unset or empty, use `~/.config/multica-flags.conf` on macOS/Linux, or `%USERPROFILE%\.config\multica-flags.conf` on Windows. Create the directory if needed and keep the exact `.conf` filename.
+
+```text
+# One Chromium switch per line
+--enable-blink-features=MiddleClickAutoscroll
+```
+
+Blank lines and lines starting with `#` are ignored. Each remaining line is one `--switch` or `--switch=value`; spaces, quotes, `#`, environment-variable references, and shell syntax inside a value stay literal. No shell expansion or whitespace splitting occurs. Repeated names are case-insensitive and the last file entry wins. A switch already passed by the launcher wins over the file, and file switches win over app defaults.
+
+Quit Desktop completely and reopen it to apply changes, including when launching from a link. A missing file is silent. Unreadable files, malformed lines, app-specific `--multica-*`/`--appimage-*` arguments, and rejected switches produce startup diagnostics without their values; other valid entries still apply. URLs are not switches. Remove an offending line or the file if a switch causes startup or rendering problems.
+
+Electron decides which switches it supports; the log confirms forwarding, not that an unknown switch has an effect. Switches consumed before the main script, such as `--inspect`, still require actual launcher arguments. This file does not change Multica's own arguments or the `desktop.json` connection settings. See [Electron's switch reference](https://www.electronjs.org/docs/latest/api/command-line-switches).
+
 ## Connecting to a self-hosted instance
 
 Desktop connects to Multica Cloud by default. To connect to a self-hosted instance, create `desktop.json` inside the `.multica` directory of your home directory with this content:

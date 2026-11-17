@@ -100,6 +100,21 @@ Desktop 可以在本機把語音轉成文字，填入聊天、評論、回覆和
 - Linux 上自動更新只對 `.AppImage` 生效，`.deb` 和 `.rpm` 透過下載新安裝包覆蓋安裝；
 - 自動更新失敗時，同樣從下載頁獲取對應安裝包覆蓋安裝。
 
+## Chromium 啟動參數 [#chromium-switches]
+
+如需設定中鍵自動捲動等 Chromium 行為，可在 `$XDG_CONFIG_HOME` 中建立 UTF-8 編碼的 `multica-flags.conf`。如果該環境變數未設定或為空，macOS/Linux 使用 `~/.config/multica-flags.conf`，Windows 使用 `%USERPROFILE%\.config\multica-flags.conf`。目錄不存在時先建立目錄，並保留正確的 `.conf` 副檔名。
+
+```text
+# One Chromium switch per line
+--enable-blink-features=MiddleClickAutoscroll
+```
+
+空行與以 `#` 開頭的行會被忽略。其餘每行只寫一個 `--switch` 或 `--switch=value`；值中的空格、引號、`#`、環境變數參照及 Shell 語法均原樣傳遞，不做 Shell 展開，也不依空格拆分。參數名稱不區分大小寫，同名參數以檔案中的最後一條為準。啟動命令中已有的參數優先於檔案，檔案中的參數優先於應用程式預設值。
+
+修改後需完全結束 Desktop 再重新開啟，從連結啟動時也一樣。檔案不存在時不輸出日誌。無法讀取的檔案、格式錯誤的行、應用程式專用的 `--multica-*`/`--appimage-*` 參數或被拒絕的參數會產生不包含參數值的啟動診斷，其他有效項目仍會套用。URL 不是啟動參數。如果某個參數導致無法啟動或顯示異常，請刪除對應行或整個檔案。
+
+參數是否受支援由 Electron 決定；日誌只證明已傳遞，不代表未知參數一定生效。`--inspect` 等在主指令碼執行前就會處理的參數，仍須透過實際啟動命令傳入。此檔案不改變 Multica 自身的參數，也不改變 `desktop.json` 中的連線設定。詳見 [Electron 啟動參數文件](https://www.electronjs.org/docs/latest/api/command-line-switches)。
+
 ## 連線自託管例項
 
 Desktop 預設連線 Multica Cloud。連線自託管例項時，在使用者目錄的 `.multica` 下建立 `desktop.json`，內容如下：

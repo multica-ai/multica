@@ -102,6 +102,21 @@ Desktop 可以在本机把语音转成文字，填入聊天、评论、回复和
 - Linux 上自动更新只对 `.AppImage` 生效，`.deb` 和 `.rpm` 通过下载新安装包覆盖安装；
 - 自动更新失败时，同样从下载页获取对应安装包覆盖安装。
 
+## Chromium 启动参数 [#chromium-switches]
+
+如需配置中键自动滚动等 Chromium 行为，可在 `$XDG_CONFIG_HOME` 中创建 UTF-8 编码的 `multica-flags.conf`。如果该环境变量未设置或为空，macOS/Linux 使用 `~/.config/multica-flags.conf`，Windows 使用 `%USERPROFILE%\.config\multica-flags.conf`。目录不存在时先创建目录，并保留准确的 `.conf` 文件扩展名。
+
+```text
+# One Chromium switch per line
+--enable-blink-features=MiddleClickAutoscroll
+```
+
+空行和以 `#` 开头的行会被忽略。其余每行只写一个 `--switch` 或 `--switch=value`；值中的空格、引号、`#`、环境变量引用和 Shell 语法均按原样传递，不做 Shell 展开，也不按空格拆分。参数名不区分大小写，同名参数以文件中的最后一条为准。启动命令中已有的参数优先于文件，文件中的参数优先于应用默认值。
+
+修改后需完全退出 Desktop 再重新打开，从链接启动时也一样。文件不存在时不输出日志。文件无法读取、行格式错误、应用专用的 `--multica-*`/`--appimage-*` 参数或被拒绝的参数会产生不包含参数值的启动诊断，其他有效条目仍会应用。URL 不属于启动参数。如果某个参数导致无法启动或渲染异常，请删除对应行或整个文件。
+
+参数是否受支持由 Electron 决定；日志只证明已传递，不代表未知参数一定生效。`--inspect` 等在主脚本执行前就会被处理的参数仍需通过实际启动命令传入。此文件不改变 Multica 自身的参数，也不改变 `desktop.json` 中的连接配置。详见 [Electron 启动参数文档](https://www.electronjs.org/docs/latest/api/command-line-switches)。
+
 ## 连接自托管实例
 
 Desktop 默认连接 Multica Cloud。连接自托管实例时，在用户目录的 `.multica` 下创建 `desktop.json`，内容如下：
