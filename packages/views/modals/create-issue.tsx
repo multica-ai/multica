@@ -54,6 +54,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useUploadGate, useComposerSubmit } from "../editor";
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
+import { useCreateWorkflowHandler } from "./use-create-workflow-handler";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
@@ -290,18 +291,26 @@ export function ManualCreatePanel({
   const [priority, setPriority] = useState<IssuePriority>(
     (data?.priority as IssuePriority | undefined) ?? draft.shared.priority,
   );
-  const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(() => {
+  const [pickedAssigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(() => {
     if (data && "assignee_type" in data) {
       return (data.assignee_type as IssueAssigneeType | null) ?? undefined;
     }
     return draft.manual.assigneeType;
   });
-  const [assigneeId, setAssigneeId] = useState<string | undefined>(() => {
+  const [pickedAssigneeId, setAssigneeId] = useState<string | undefined>(() => {
     if (data && "assignee_id" in data) {
       return (data.assignee_id as string | null) ?? undefined;
     }
     return draft.manual.assigneeId;
   });
+  const [assigneeEdited, setAssigneeEdited] = useState(() =>
+    Boolean(data && ("assignee_type" in data || "assignee_id" in data))
+    || data?.manual_assignee_cleared === true
+    || (draft.manual.assigneeEdited ?? (
+      draft.manual.assigneeId !== useIssueDraftStore.getState().lastAssigneeId
+      || draft.manual.assigneeType !== useIssueDraftStore.getState().lastAssigneeType
+    )),
+  );
   const [assigneeCleared, setAssigneeCleared] = useState(data?.manual_assignee_cleared === true);
   const [startDate, setStartDate] = useState<string | null>(draft.manual.startDate);
   const [dueDate, setDueDate] = useState<string | null>(
@@ -318,6 +327,11 @@ export function ManualCreatePanel({
     }
     return draft.shared.projectId;
   });
+  const workflowHandler = useCreateWorkflowHandler(projectId, status);
+  // Omit an automatic assignee at submit so the server applies the handoff.
+  const useWorkflowHandoff = !assigneeEdited && workflowHandler !== null;
+  const assigneeType = useWorkflowHandoff ? workflowHandler.type : pickedAssigneeType;
+  const assigneeId = useWorkflowHandoff ? workflowHandler.id : pickedAssigneeId;
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -417,7 +431,8 @@ export function ManualCreatePanel({
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
     setAssigneeType(type); setAssigneeId(id);
     setAssigneeCleared(!id);
-    setManual({ assigneeType: type, assigneeId: id });
+    setAssigneeEdited(true);
+    setManual({ assigneeType: type, assigneeId: id, assigneeEdited: true });
   };
   const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
   const updateParent = (id?: string) => {
@@ -485,6 +500,7 @@ export function ManualCreatePanel({
       status,
       assigneeType,
       assigneeId,
+      assigneeEdited: false,
       startDate: null,
       labelIds: [],
       propertyValues: {},
@@ -500,6 +516,7 @@ export function ManualCreatePanel({
     // anything `hasDraft` alone would not consider content) keeps the draft
     // recoverable, while a continuation nobody touched is still discarded.
     beginBatchContinuation();
+    setAssigneeEdited(false);
     descEditorRef.current?.clearContent();
     setFormResetKey((key) => key + 1);
     batchContinuationRef.current = true;
@@ -562,8 +579,8 @@ export function ManualCreatePanel({
               description,
               status,
               priority,
-              assignee_type: assigneeType,
-              assignee_id: assigneeId,
+              assignee_type: useWorkflowHandoff ? undefined : assigneeType,
+              assignee_id: useWorkflowHandoff ? undefined : assigneeId,
               start_date: startDate || undefined,
               due_date: dueDate || undefined,
               attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
@@ -580,8 +597,8 @@ export function ManualCreatePanel({
           description,
           status,
           priority,
-          assignee_type: assigneeType,
-          assignee_id: assigneeId,
+          assignee_type: useWorkflowHandoff ? undefined : assigneeType,
+          assignee_id: useWorkflowHandoff ? undefined : assigneeId,
           start_date: startDate || undefined,
           due_date: dueDate || undefined,
           attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
@@ -875,7 +892,7 @@ export function ManualCreatePanel({
     // project) that was never written through a picker, so a plain flip would
     // otherwise drop it.
     setShared({ projectId, priority, dueDate });
-    setManual({ assigneeType, assigneeId });
+    setManual({ assigneeType: pickedAssigneeType, assigneeId: pickedAssigneeId, assigneeEdited });
     const existingPrompt = draft.agent.prompt;
     if (!existingPrompt.trim()) {
       const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
@@ -883,6 +900,7 @@ export function ManualCreatePanel({
       if (seeded) setAgent({ prompt: seeded });
     }
     if (
+      assigneeEdited &&
       !draft.agent.actorId &&
       assigneeId &&
       (assigneeType === "agent" || assigneeType === "squad")

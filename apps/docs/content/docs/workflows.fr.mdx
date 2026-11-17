@@ -72,6 +72,8 @@ Changez le statut d’une tâche ou faites glisser sa carte vers une autre colon
 
 Si vous créez une tâche dans un projet sans choisir de responsable et que son statut prévoit un passage de relais, elle est confiée directement au responsable de cette étape ; un agent commence aussitôt. La fenêtre de création indique à qui elle sera confiée. Pour la créer sans rien lancer, placez-la dans Backlog.
 
+Dans la fenêtre de création, le passage de relais du projet est prioritaire sur le dernier responsable utilisé. La création avec agent sélectionne par défaut l'agent ou l'équipe de l'étape Todo ; la création manuelle suit le statut choisi. Un responsable choisi manuellement est conservé quand vous changez de projet. Sans passage de relais, les valeurs par défaut restent les mêmes ; le responsable du projet est utilisé uniquement si le workflow le désigne.
+
 Si le responsable précédent est un agent dont l’exécution est encore en cours ou en attente, la confirmation propose en plus de l’arrêter ou de l’annuler, option cochée par défaut. Laissez-la cochée, sauf si vous voulez que les deux agents travaillent en même temps ; ses commentaires publiés et le travail déjà enregistré sont conservés.
 
 **Une fois terminé, passer à** et **En cas de rejet, renvoyer à** indiquent à l’agent où déplacer la tâche ensuite. La fin d’une exécution ne fait pas avancer la tâche à elle seule : c’est le membre ou l’agent responsable de l’étape qui met à jour son statut. Quand un agent fait entrer la tâche dans l’étape suivante, le passage de relais de cette étape se déclenche de la même façon.

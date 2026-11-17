@@ -11,6 +11,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
+const mockWorkflowHandler = vi.hoisted(() => vi.fn<
+  (projectId: string | null | undefined, status: string) => { type: "agent" | "squad" | "member"; id: string } | null
+>(() => null));
+vi.mock("./use-create-workflow-handler", () => ({ useCreateWorkflowHandler: mockWorkflowHandler }));
+
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
 type VoiceOptions = { insert: (text: string) => boolean; submit?: () => void };
 const voiceOptions = vi.hoisted(() => ({ last: null as VoiceOptions | null }));
@@ -555,8 +560,43 @@ describe("AgentCreatePanel", () => {
     expect(screen.getByText(/can't read attachments/i)).toBeInTheDocument();
   });
 
+  it("follows a project handoff when it arrives after the last-used actor", async () => {
+    mockProjectsQuery.data = [{ id: "proj-1", title: "Website", icon: null }];
+    mockSquadsData.list = [{ id: "squad-1", name: "Website Squad", leader_id: "agent-1", archived_at: null }];
+    mockQuickCreateStore.lastActorType = "agent";
+    mockQuickCreateStore.lastActorId = "agent-1";
+    const props = { onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { project_id: "proj-1" } };
+    const view = renderPanel(props);
+    mockWorkflowHandler.mockReturnValue({ type: "squad", id: "squad-1" });
+    view.rerender(<I18nProvider locale="en" resources={TEST_RESOURCES}><AgentCreatePanel {...props} /></I18nProvider>);
+    fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
+    await waitFor(() => expect(mockQuickCreateIssue).toHaveBeenCalledWith(expect.objectContaining({ squad_id: "squad-1", project_id: "proj-1" })));
+  });
+
+  it("updates the default on project change but keeps an explicit actor pick", async () => {
+    mockProjectsQuery.data = [{ id: "proj-1", title: "Website", icon: null }];
+    mockSquadsData.list = [{ id: "squad-1", name: "Website Squad", leader_id: "agent-1", archived_at: null }];
+    mockWorkflowHandler.mockImplementation((project) => project ? { type: "squad", id: "squad-1" } : null);
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+    fireEvent.click(screen.getByTestId("project-picker"));
+    fireEvent.click(screen.getByRole("button", { name: "Bohan" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear project" }));
+    fireEvent.click(screen.getByTestId("project-picker"));
+    fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
+    await waitFor(() => expect(mockQuickCreateIssue).toHaveBeenCalledWith(expect.objectContaining({ agent_id: "agent-1", project_id: "proj-1" })));
+  });
+
+  it.each(["member", "missing-agent"])("keeps the previous default for a %s handoff in agent mode", async (kind) => {
+    mockProjectsQuery.data = [{ id: "proj-1", title: "Website", icon: null }];
+    mockWorkflowHandler.mockReturnValue(kind === "member" ? { type: "member", id: "user-1" } : { type: "agent", id: "missing" });
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { project_id: "proj-1" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
+    await waitFor(() => expect(mockQuickCreateIssue).toHaveBeenCalledWith(expect.objectContaining({ agent_id: "agent-1" })));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWorkflowHandler.mockReturnValue(null);
     mockQuickCreateStore.lastActorType = null;
     mockQuickCreateStore.lastActorId = null;
     mockQuickCreateStore.lastProjectId = null;

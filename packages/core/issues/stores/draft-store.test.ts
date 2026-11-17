@@ -232,6 +232,16 @@ describe("issue draft store — last assignee", () => {
     expect(useIssueDraftStore.getState().draft.agent.prompt).toBe("");
   });
 
+  it("resets explicit assignment intent after creating an issue", () => {
+    const store = useIssueDraftStore.getState();
+    store.setLastAssignee("agent", "agent-1");
+    store.setManual({ assigneeType: "agent", assigneeId: "agent-1", assigneeEdited: true });
+    store.clearDraft();
+    const { manual } = useIssueDraftStore.getState().draft;
+    expect(manual.assigneeId).toBe("agent-1");
+    expect(manual.assigneeEdited).toBeUndefined();
+  });
+
   it("setLastAssignee(undefined) lets the user opt back out of a default", () => {
     const { setLastAssignee, clearDraft } = useIssueDraftStore.getState();
 

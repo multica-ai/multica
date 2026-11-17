@@ -85,6 +85,7 @@ import {
   useComposerSubmit,
 } from "../editor";
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
+import { useCreateWorkflowHandler } from "./use-create-workflow-handler";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
@@ -210,7 +211,7 @@ export function AgentCreatePanel({
   // through to the next seed in the chain.
   const resolveActor = useCallback(
     (
-      type: QuickCreateActorType | "agent" | "squad" | null | undefined,
+      type: QuickCreateActorType | "member" | null | undefined,
       id: string | null | undefined,
     ): ActorSelection | null => {
       if (!type || !id) return null;
@@ -225,16 +226,32 @@ export function AgentCreatePanel({
     [visibleSquads, visibleAgentIds],
   );
 
+  // Unfinished selections live in the shared issue-create draft. The
+  // last-successful actor remains a separate fallback, so closing a draft
+  // never overwrites the default established by an actual create.
+  //
+  // Project has exactly two seeds, both carrying explicit user intent: the
+  // project page (or manual panel) the modal was opened from, and the user's
+  // own unfinished draft. It is deliberately NOT seeded from the last create
+  // — see quick-create-store (MUL-5862). An opener that passes `project_id:
+  // null` ("No project") means none, so the draft's does not fill in.
+  const [projectId, setProjectId] = useState<string | null>(() => {
+    if (data && "project_id" in data) return (data.project_id as string | null | undefined) ?? null;
+    return draft.shared.projectId ?? null;
+  });
+  const workflowHandler = useCreateWorkflowHandler(projectId, "todo");
+
   const seedActor = useCallback((): ActorSelection | null => {
     // Caller-provided seed wins (e.g. shell pre-seeds with `agent_id` /
-    // `squad_id`), then the persisted agent draft, the last successful pick,
-    // and finally the first visible agent.
+    // `squad_id`), then the persisted agent draft, project handoff, last
+    // successful pick, and finally the first visible agent.
     const dataAgent = data?.agent_id as string | undefined;
     const dataSquad = data?.squad_id as string | undefined;
     return (
       resolveActor("agent", dataAgent) ||
       resolveActor("squad", dataSquad) ||
       resolveActor(draft.agent.actorType, draft.agent.actorId) ||
+      resolveActor(workflowHandler?.type, workflowHandler?.id) ||
       resolveActor(lastActorType, lastActorId) ||
       (visibleAgents[0]
         ? ({ type: "agent", id: visibleAgents[0].id } as const)
@@ -246,18 +263,18 @@ export function AgentCreatePanel({
     data?.squad_id,
     draft.agent.actorType,
     draft.agent.actorId,
+    workflowHandler?.type,
+    workflowHandler?.id,
     lastActorType,
     lastActorId,
     visibleAgents,
   ]);
 
-  const [actor, setActor] = useState<ActorSelection | null>(() => seedActor());
-
-  // Re-seed once visible lists resolve (queries may be empty on first render).
-  useEffect(() => {
-    if (actor && resolveActor(actor.type, actor.id)) return;
-    setActor(seedActor());
-  }, [actor, resolveActor, seedActor]);
+  const [pickedActor, setActor] = useState<ActorSelection | null>(null);
+  // Derive automatic defaults so a late workflow response or a project change
+  // can replace the last-used actor without overriding a user's selection.
+  const actor = (pickedActor && resolveActor(pickedActor.type, pickedActor.id)) || seedActor();
+  const actorExplicit = Boolean(pickedActor || data?.agent_id || data?.squad_id || draft.agent.actorId);
 
   const selectedAgent = useMemo<Agent | undefined>(() => {
     if (!actor) return undefined;
@@ -272,19 +289,6 @@ export function AgentCreatePanel({
     return visibleSquads.find((s) => s.id === actor.id);
   }, [actor, visibleSquads]);
 
-  // Unfinished selections live in the shared issue-create draft. The
-  // last-successful actor remains a separate fallback, so closing a draft
-  // never overwrites the default established by an actual create.
-  //
-  // Project has exactly two seeds, both carrying explicit user intent: the
-  // project page (or manual panel) the modal was opened from, and the user's
-  // own unfinished draft. It is deliberately NOT seeded from the last create
-  // — see quick-create-store (MUL-5862). An opener that passes `project_id:
-  // null` ("No project") means none, so the draft's does not fill in.
-  const [projectId, setProjectId] = useState<string | null>(() => {
-    if (data && "project_id" in data) return (data.project_id as string | null | undefined) ?? null;
-    return draft.shared.projectId ?? null;
-  });
   const [priority, setPriority] = useState<IssuePriority>(
     (data?.priority as IssuePriority | undefined) ?? draft.shared.priority,
   );
@@ -584,6 +588,7 @@ export function AgentCreatePanel({
         // Stay open for continuous creation — clear the editor so the user can
         // immediately type the next prompt.
         editorRef.current?.clearContent();
+        setActor(null);
         setHasContent(false);
         setSentCount((c) => c + 1);
         setJustSent(true);
@@ -623,8 +628,8 @@ export function AgentCreatePanel({
       const md = editorRef.current?.getMarkdown() ?? "";
       if (md) setManual({ description: md });
     }
-    if (data?.manual_assignee_cleared !== true && !draft.manual.assigneeId && actor) {
-      setManual({ assigneeType: actor.type, assigneeId: actor.id });
+    if (actorExplicit && data?.manual_assignee_cleared !== true && !draft.manual.assigneeId && actor) {
+      setManual({ assigneeType: actor.type, assigneeId: actor.id, assigneeEdited: true });
     }
     setLastMode("manual");
     setActiveMode("manual");

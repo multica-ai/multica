@@ -72,6 +72,8 @@ Change an issue's status or drag its card to another column. If that step has a 
 
 When you create an issue in a project without picking an assignee, and its status has a handoff, the issue goes straight to that step's handler; an agent starts right away. The create dialog shows who it will be handed to. To create it without starting anything yet, put it in Backlog.
 
+In the create dialog, the project's handoff takes precedence over the last-used assignee. Create with agent defaults to the Todo step's agent or squad; manual creation follows the selected status. Picks you make yourself are kept when you change projects. Projects without a handoff keep the existing defaults; a project lead is used only when the workflow hands off to the lead.
+
 When the previous assignee is an agent with a run underway or waiting to start, the confirmation adds an option to stop or cancel it, selected by default. Leave it selected unless you want both agents working at once; the comments and work it already saved are kept.
 
 **When done, move to** and **If rejected, send back to** tell the agent where to move the issue next. A run finishing does not move the issue by itself: the member or agent handling the step updates its status. When an agent moves the issue into the next step, that step's handoff runs just as it would for a member.

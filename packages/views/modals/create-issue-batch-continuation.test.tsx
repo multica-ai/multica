@@ -6,6 +6,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 type VoiceOptions = { insert: (text: string) => boolean; submit?: () => void };
+const mockWorkflowHandler = vi.hoisted(() => vi.fn<
+  (projectId: string | null | undefined, status: string) => { type: "agent" | "squad" | "member"; id: string } | null
+>(() => null));
+vi.mock("./use-create-workflow-handler", () => ({ useCreateWorkflowHandler: mockWorkflowHandler }));
+
 const voiceOptions = vi.hoisted(() => ({ last: null as VoiceOptions | null }));
 
 // Voice input has its own tests; here only its wiring to the editor matters.

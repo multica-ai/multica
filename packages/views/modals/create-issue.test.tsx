@@ -18,6 +18,11 @@ import enModals from "../locales/en/modals.json";
 import enEditor from "../locales/en/editor.json";
 import enIssues from "../locales/en/issues.json";
 
+const mockWorkflowHandler = vi.hoisted(() => vi.fn<
+  (projectId: string | null | undefined, status: string) => { type: "agent" | "squad" | "member"; id: string } | null
+>(() => null));
+vi.mock("./use-create-workflow-handler", () => ({ useCreateWorkflowHandler: mockWorkflowHandler }));
+
 const TEST_RESOURCES = {
   // `editor` carries the shared upload-gate copy ("Uploading…").
   en: { common: enCommon, modals: enModals, editor: enEditor, issues: enIssues },
@@ -147,6 +152,7 @@ const emptyIssueDraft = () => ({
     startDate: null as string | null,
     assigneeType: undefined as "agent" | "squad" | "member" | undefined,
     assigneeId: undefined as string | undefined,
+    assigneeEdited: undefined as boolean | undefined,
     labelIds: [] as string[],
     propertyValues: {} as Record<string, string | number | boolean | string[]>,
   },
@@ -487,7 +493,12 @@ vi.mock("../issues/components", () => ({
     <div data-testid="priority-picker" onClick={() => onUpdate({ priority: "high" })} />
   ),
   StagePicker: () => <div data-testid="stage-picker" />,
-  AssigneePicker: () => <div data-testid="assignee-picker" />,
+  AssigneePicker: ({ assigneeId, onUpdate }: any) => (
+    <div data-testid="assignee-picker" data-assignee-id={assigneeId ?? "none"}>
+      <button type="button" onClick={() => onUpdate({ assignee_type: "agent", assignee_id: "agent-picked" })}>Pick agent</button>
+      <button type="button" onClick={() => onUpdate({ assignee_type: null, assignee_id: null })}>Clear assignee</button>
+    </div>
+  ),
   // Surface open/onOpenChange so tests can assert progressive-disclosure
   // behavior (mounted only when the user has opted in or has a value).
   StartDatePicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
@@ -668,8 +679,54 @@ function renderModal(element: React.ReactElement) {
 }
 
 describe("CreateIssueModal", () => {
+  it("defaults to the project handler and lets the server apply its handoff", async () => {
+    mockDraftStore.lastAssigneeType = "agent";
+    mockDraftStore.lastAssigneeId = "agent-last";
+    mockDraftStore.draft.manual.assigneeType = "agent";
+    mockDraftStore.draft.manual.assigneeId = "agent-last";
+    mockWorkflowHandler.mockImplementation((project) => project ? { type: "agent", id: "agent-workflow" } : null);
+    renderModal(<ManualCreatePanel onClose={vi.fn()} isExpanded={false} setIsExpanded={vi.fn()} data={{ project_id: "proj-1" }} />);
+    expect(screen.getByTestId("assignee-picker")).toHaveAttribute("data-assignee-id", "agent-workflow");
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Follow the workflow" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Create issue$/i }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+      project_id: "proj-1", assignee_type: undefined, assignee_id: undefined,
+    })));
+  });
+
+  it("preserves a manual assignee when the project's handoff arrives later", async () => {
+    renderModal(<ManualCreatePanel onClose={vi.fn()} isExpanded={false} setIsExpanded={vi.fn()} data={{ project_id: "proj-1" }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Pick agent" }));
+    mockWorkflowHandler.mockReturnValue({ type: "agent", id: "agent-workflow" });
+    fireEvent.click(screen.getByTestId("project-picker"));
+    expect(screen.getByTestId("assignee-picker")).toHaveAttribute("data-assignee-id", "agent-picked");
+    expect(mockDraftStore.draft.manual.assigneeEdited).toBe(true);
+  });
+
+  it("keeps a saved explicit assignee when reopening a project draft", () => {
+    mockDraftStore.draft.manual.assigneeType = "agent";
+    mockDraftStore.draft.manual.assigneeId = "agent-picked";
+    mockDraftStore.draft.manual.assigneeEdited = true;
+    mockWorkflowHandler.mockReturnValue({ type: "agent", id: "agent-workflow" });
+    renderModal(<ManualCreatePanel onClose={vi.fn()} isExpanded={false} setIsExpanded={vi.fn()} data={{ project_id: "proj-1" }} />);
+    expect(screen.getByTestId("assignee-picker")).toHaveAttribute("data-assignee-id", "agent-picked");
+  });
+
+  it("follows project changes until the user explicitly clears the assignee", () => {
+    mockWorkflowHandler.mockImplementation((project) => project ? { type: "agent", id: "agent-workflow" } : null);
+    renderModal(<ManualCreatePanel onClose={vi.fn()} isExpanded={false} setIsExpanded={vi.fn()} />);
+    expect(screen.getByTestId("assignee-picker")).toHaveAttribute("data-assignee-id", "none");
+    fireEvent.click(screen.getByTestId("project-picker"));
+    expect(screen.getByTestId("assignee-picker")).toHaveAttribute("data-assignee-id", "agent-workflow");
+    fireEvent.click(screen.getByRole("button", { name: "Clear assignee" }));
+    fireEvent.click(screen.getByTestId("project-picker"));
+    expect(screen.getByTestId("assignee-picker")).toHaveAttribute("data-assignee-id", "none");
+    expect(mockDraftStore.draft.manual.assigneeEdited).toBe(true);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mockWorkflowHandler.mockReturnValue(null);
     mockParentIssue.value = null;
     mockQuickCreateStore.keepOpen = false;
     mockCreateSettingsStore.manualCreateFields = DEFAULT_MANUAL_FIELDS;
@@ -1024,6 +1081,7 @@ describe("CreateIssueModal", () => {
       status: "in_progress",
       assigneeType: "member",
       assigneeId: "alice",
+      assigneeEdited: false,
       startDate: null,
       labelIds: [],
       propertyValues: {},
