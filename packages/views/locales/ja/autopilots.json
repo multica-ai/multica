@@ -377,7 +377,8 @@
         "description": "タスクを作成せず、静かに実行します"
       }
     },
-    "event_filter_condition_all": "かつ本文がすべての条件を満たす"
+    "event_filter_condition_all": "かつ本文がすべての条件を満たす",
+    "event_filter_condition_limits": "パスは {{path}} 文字まで、候補リストは {{values}} 個までです。"
   },
   "schedule_editor": {
     "time_label": "時刻",

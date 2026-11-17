@@ -358,6 +358,8 @@ Chaque ligne peut aussi contenir des `conditions`, avec les mêmes règles sur l
 }
 ```
 
+Chaque règle accepte au maximum 20 conditions. Un chemin est limité à 256 caractères et une liste `in` à 100 valeurs. La création ou la modification d’un déclencheur avec une condition trop longue renvoie HTTP 400.
+
 Cet exemple accepte les soumissions de revues de PR et tous les événements push. Omettre `actions` ou fournir un tableau d'actions vide accepte toutes les actions de cet événement.
 
 ```bash

@@ -67,6 +67,17 @@ describe("buildCondition", () => {
     });
     expect(buildCondition(draft({ path: "base.ref", op: "in", value: " , " }))).toBeNull();
   });
+
+  it.each(["a", "界", "😀"])("allows 256 path characters and rejects 257 (%s)", (character) => {
+    expect(buildCondition(draft({ path: character.repeat(256), op: "exists" }))).not.toBeNull();
+    expect(buildCondition(draft({ path: character.repeat(257), op: "exists" }))).toBeNull();
+  });
+
+  it("allows 100 in values and rejects 101", () => {
+    const values = Array.from({ length: 101 }, (_, i) => String(i));
+    expect(buildCondition(draft({ path: "number", op: "in", value: values.slice(0, 100).join(",") }))?.values).toHaveLength(100);
+    expect(buildCondition(draft({ path: "number", op: "in", value: values.join(",") }))).toBeNull();
+  });
 });
 
 describe("formatCondition", () => {

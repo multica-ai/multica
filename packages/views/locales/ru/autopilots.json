@@ -377,7 +377,8 @@
     "event_filter_condition_value_placeholder": "например, main",
     "event_filter_condition_values_placeholder": "main, release",
     "event_filter_condition_ignore_case": "Без учёта регистра",
-    "event_filter_condition_all": "И содержимое соответствует всем условиям"
+    "event_filter_condition_all": "И содержимое соответствует всем условиям",
+    "event_filter_condition_limits": "Путь: до {{path}} символов. Список: до {{values}} значений."
   },
   "schedule_editor": {
     "time_label": "Время",

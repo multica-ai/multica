@@ -7,8 +7,10 @@ export type ConditionOp = WebhookPayloadCondition["op"];
 
 export const CONDITION_OPS: ConditionOp[] = ["equals", "not_equals", "contains", "in", "exists"];
 
-// Mirrors the server cap so the editor never builds a row the API rejects.
+// Mirror server limits so the editor never builds a row the API rejects.
 export const MAX_CONDITIONS = 20;
+export const MAX_CONDITION_PATH_LENGTH = 256;
+export const MAX_CONDITION_VALUES = 100;
 
 // formatConditionValue shows strings quoted and booleans/numbers bare, so
 // the stored type stays visible.
@@ -57,6 +59,7 @@ export const EMPTY_CONDITION_DRAFT: ConditionDraft = { path: "", op: "equals", v
 export function buildCondition(draft: ConditionDraft): WebhookPayloadCondition | null {
   const path = draft.path.trim();
   if (!path || path.split(".").some((seg) => seg === "")) return null;
+  if (Array.from(path).length > MAX_CONDITION_PATH_LENGTH) return null;
   if (draft.op === "exists") return { path, op: "exists" };
   if (!draft.value.trim()) return null;
   const condition: WebhookPayloadCondition = { path, op: draft.op };
@@ -64,10 +67,9 @@ export function buildCondition(draft: ConditionDraft): WebhookPayloadCondition |
     const values = draft.value
       .split(",")
       .map((v) => v.trim())
-      .filter((v) => v.length > 0)
-      .map(parseConditionValue);
-    if (values.length === 0) return null;
-    condition.values = values;
+      .filter((v) => v.length > 0);
+    if (values.length === 0 || values.length > MAX_CONDITION_VALUES) return null;
+    condition.values = values.map(parseConditionValue);
   } else if (draft.op === "contains") {
     const parsed = parseConditionValue(draft.value);
     condition.value = typeof parsed === "string" ? parsed : draft.value.trim();

@@ -373,6 +373,8 @@ Each row may also include `conditions`, using the same payload-field rules as th
 }
 ```
 
+Each rule supports up to 20 conditions. A field path can contain at most 256 characters, and an `in` list can contain at most 100 values. Creating or updating a trigger with an oversized condition returns HTTP 400.
+
 This accepts PR review submissions and all push events. Omitting `actions` or using an empty actions array accepts every action for that event.
 
 ```bash

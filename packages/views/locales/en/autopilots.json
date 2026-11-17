@@ -377,7 +377,8 @@
         "description": "Silent run, no issue created"
       }
     },
-    "event_filter_condition_all": "And payload matches all conditions"
+    "event_filter_condition_all": "And payload matches all conditions",
+    "event_filter_condition_limits": "Paths: up to {{path}} characters. Lists: up to {{values}} values."
   },
   "schedule_editor": {
     "time_label": "Time",

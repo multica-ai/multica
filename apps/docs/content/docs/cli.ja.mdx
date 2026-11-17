@@ -358,6 +358,8 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 }
 ```
 
+ルールごとに条件は最大 20 個、フィールドのパスは 256 文字、`in` の候補リストは 100 個までです。上限を超える条件でトリガーを作成・更新すると HTTP 400 が返されます。
+
 この例では、PR レビューの送信とすべての push イベントを受け入れます。`actions` を省略するか空の配列を指定すると、そのイベントのすべての action を受け入れます。
 
 ```bash

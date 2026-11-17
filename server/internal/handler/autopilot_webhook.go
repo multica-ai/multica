@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -662,9 +663,12 @@ const (
 
 const webhookPathWildcard = "*"
 
-// maxWebhookPayloadConditions bounds the per-filter work done on the
-// unauthenticated-adjacent ingress path.
-const maxWebhookPayloadConditions = 20
+// Payload condition limits bound rule evaluation before run admission.
+const (
+	maxWebhookPayloadConditions          = 20
+	maxWebhookPayloadConditionPathLength = 256
+	maxWebhookPayloadConditionValues     = 100
+)
 
 // validateWebhookEventFilters enforces the contract at the HTTP boundary so
 // that malformed shapes never reach the database. The matcher (read path)
@@ -695,6 +699,9 @@ func validateWebhookPayloadCondition(c WebhookPayloadCondition) error {
 	if strings.TrimSpace(c.Path) == "" {
 		return errors.New("path must not be empty")
 	}
+	if utf8.RuneCountInString(c.Path) > maxWebhookPayloadConditionPathLength {
+		return fmt.Errorf("path must not exceed %d characters", maxWebhookPayloadConditionPathLength)
+	}
 	for _, seg := range strings.Split(c.Path, ".") {
 		if seg == "" {
 			return errors.New("path must not contain empty segments")
@@ -712,6 +719,9 @@ func validateWebhookPayloadCondition(c WebhookPayloadCondition) error {
 	case payloadOpIn:
 		if len(c.Values) == 0 {
 			return errors.New("values must not be empty")
+		}
+		if len(c.Values) > maxWebhookPayloadConditionValues {
+			return fmt.Errorf("values must not exceed %d entries", maxWebhookPayloadConditionValues)
 		}
 		for _, v := range c.Values {
 			if !isScalarConditionValue(v) {

@@ -377,7 +377,8 @@
         "description": "태스크를 만들지 않고 조용히 실행합니다"
       }
     },
-    "event_filter_condition_all": "본문이 모든 조건을 충족해야 함"
+    "event_filter_condition_all": "본문이 모든 조건을 충족해야 함",
+    "event_filter_condition_limits": "경로는 최대 {{path}}자, 후보 목록은 최대 {{values}}개입니다."
   },
   "schedule_editor": {
     "time_label": "시간",

@@ -377,7 +377,8 @@
     "event_filter_condition_value_placeholder": "例如 main",
     "event_filter_condition_values_placeholder": "main, release",
     "event_filter_condition_ignore_case": "忽略大小寫",
-    "event_filter_condition_all": "且本文符合全部條件"
+    "event_filter_condition_all": "且本文符合全部條件",
+    "event_filter_condition_limits": "欄位路徑最多 {{path}} 個字元，候選值清單最多 {{values}} 項。"
   },
   "schedule_editor": {
     "time_label": "時間",

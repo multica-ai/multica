@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { X, Plus, Filter, ExternalLink } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -23,6 +23,8 @@ import {
   CONDITION_OPS,
   EMPTY_CONDITION_DRAFT,
   MAX_CONDITIONS,
+  MAX_CONDITION_PATH_LENGTH,
+  MAX_CONDITION_VALUES,
   buildCondition,
   formatCondition,
   formatConditionValue,
@@ -41,6 +43,7 @@ export function WebhookEventFilterSection({
   onChange,
 }: WebhookEventFilterSectionProps) {
   const { t, i18n } = useT("autopilots");
+  const conditionLimitsId = useId();
   const payloadSupported = useConfigStore((state) => state.webhookPayloadConditionsSupported);
   const [newEvent, setNewEvent] = useState("");
   const [newActions, setNewActions] = useState("");
@@ -210,6 +213,7 @@ export function WebhookEventFilterSection({
                       value={draft.path}
                       onChange={(e) => setDraft({ ...draft, path: e.target.value })}
                       aria-label={t(($) => $.dialog.event_filter_condition_path_label)}
+                      aria-describedby={conditionLimitsId}
                       placeholder={t(($) => $.dialog.event_filter_condition_path_placeholder)}
                       className="h-7 w-full rounded-md border bg-background px-2.5 text-caption font-mono outline-none focus:ring-1 focus:ring-ring"
                     />
@@ -248,6 +252,7 @@ export function WebhookEventFilterSection({
                             }
                           }}
                           aria-label={t(($) => $.dialog.event_filter_condition_value_label)}
+                          aria-describedby={conditionLimitsId}
                           placeholder={
                             draft.op === "in"
                               ? t(($) => $.dialog.event_filter_condition_values_placeholder)
@@ -257,6 +262,12 @@ export function WebhookEventFilterSection({
                         />
                       )}
                     </div>
+                    <p id={conditionLimitsId} className="text-micro text-muted-foreground">
+                      {t(($) => $.dialog.event_filter_condition_limits, {
+                        path: MAX_CONDITION_PATH_LENGTH,
+                        values: MAX_CONDITION_VALUES,
+                      })}
+                    </p>
                     <div className="flex items-center gap-1.5">
                       {draft.op !== "exists" && (
                         <label className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">

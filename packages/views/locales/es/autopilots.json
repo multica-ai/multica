@@ -377,7 +377,8 @@
     "event_filter_condition_value_placeholder": "p. ej., main",
     "event_filter_condition_values_placeholder": "main, release",
     "event_filter_condition_ignore_case": "Ignorar mayúsculas",
-    "event_filter_condition_all": "Y el contenido cumple todas las condiciones"
+    "event_filter_condition_all": "Y el contenido cumple todas las condiciones",
+    "event_filter_condition_limits": "Rutas: hasta {{path}} caracteres. Listas: hasta {{values}} valores."
   },
   "schedule_editor": {
     "time_label": "Hora",

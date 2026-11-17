@@ -377,7 +377,8 @@
         "description": "Exécution silencieuse, aucune tâche créée"
       }
     },
-    "event_filter_condition_all": "Et la charge utile remplit toutes les conditions"
+    "event_filter_condition_all": "Et la charge utile remplit toutes les conditions",
+    "event_filter_condition_limits": "Chemins : {{path}} caractères maximum. Listes : {{values}} valeurs maximum."
   },
   "schedule_editor": {
     "time_label": "Heure",

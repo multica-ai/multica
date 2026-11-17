@@ -106,6 +106,8 @@ Each row can also carry `conditions` on payload fields: click **Add condition** 
 }
 ```
 
+Each rule supports up to 20 conditions. A field path can contain at most 256 characters, and an `in` list can contain at most 100 values. Creating or updating a trigger with an oversized condition returns HTTP 400.
+
 An empty array expanded by `*` satisfies `not_equals`; a missing path still fails. Event/action mismatches are recorded as `event_filtered`; matching events whose payload conditions fail are recorded as `payload_filtered`. Both return HTTP 200 without creating a run or issue. The delivery list shows the reason and first failing field; the detail shows the saved condition and actual value at receipt. Changing the trigger later does not change this snapshot. Previews are limited to 10 values of 256 characters each; open the raw body for the full value.
 
 You can also configure these filters entirely through the CLI with `--event-filters-file`. Updating without either filter option preserves existing filters; `--clear-event-filters` explicitly removes them and accepts all events. See the [CLI examples](/cli#webhook-event-filters) for the JSON format and commands.

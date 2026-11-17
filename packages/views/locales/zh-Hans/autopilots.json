@@ -377,7 +377,8 @@
         "description": "静默运行，不创建任务"
       }
     },
-    "event_filter_condition_all": "且正文满足全部条件"
+    "event_filter_condition_all": "且正文满足全部条件",
+    "event_filter_condition_limits": "字段路径最多 {{path}} 个字符，候选值列表最多 {{values}} 项。"
   },
   "schedule_editor": {
     "time_label": "时间",
