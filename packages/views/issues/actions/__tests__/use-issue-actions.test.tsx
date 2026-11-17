@@ -180,6 +180,7 @@ describe("useIssueActions", () => {
 
     expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", status: "done" },
+      expect.any(Object),
     );
   });
 
@@ -215,6 +216,7 @@ describe("useIssueActions", () => {
 
     expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "agent", assignee_id: "agent-1" },
+      expect.any(Object),
     );
     expect(mockOpenModal).not.toHaveBeenCalled();
   });
@@ -254,6 +256,7 @@ describe("useIssueActions", () => {
 
     expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", status: "in_progress" },
+      expect.any(Object),
     );
     expect(mockOpenModal).not.toHaveBeenCalled();
   });
@@ -270,6 +273,7 @@ describe("useIssueActions", () => {
 
     expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
+      expect.any(Object),
     );
     expect(mockOpenModal).not.toHaveBeenCalled();
   });

@@ -4,7 +4,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { setApiInstance } from "@multica/core/api";
-import type { ApiClient } from "@multica/core/api/client";
+import { ApiError, type ApiClient } from "@multica/core/api/client";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { toast } from "sonner";
 import { getTestResources } from "../../../test/i18n";
@@ -70,8 +70,8 @@ afterEach(cleanup);
 
 for (const source of sources) {
   describe(source.name, () => {
-    function setup() {
-      const qc = new QueryClient({ defaultOptions: {
+    function setup(client?: QueryClient) {
+      const qc = client ?? new QueryClient({ defaultOptions: {
         queries: { retry: false, staleTime: Infinity }, mutations: { retry: false },
       } });
       const wrapper = ({ children }: { children: ReactNode }) => (
@@ -79,27 +79,30 @@ for (const source of sources) {
           <QueryClientProvider client={qc}>{children}</QueryClientProvider>
         </I18nProvider>
       );
-      return renderHook(source.useSave, { wrapper });
+      return Object.assign(renderHook(source.useSave, { wrapper }), { qc });
     }
 
-    it("delivers successful save and settlement after the initiating component unmounts", async () => {
+    it("does not navigate from a delayed success after leaving the initiating view", async () => {
       const request = deferred<Issue>();
       updateIssue.mockReturnValueOnce(request.promise);
-      const callbacks = { onSuccess: vi.fn(), onError: vi.fn(), onSettled: vi.fn() };
+      let page = "issue";
+      const callbacks = { onSuccess: vi.fn(() => { page = "next issue"; }), onError: vi.fn(), onSettled: vi.fn() };
       const hook = setup();
       act(() => hook.result.current({ priority: "high" }, callbacks));
       await waitFor(() => expect(updateIssue).toHaveBeenCalledWith(issue.id, { priority: "high" }));
       expect(callbacks.onSuccess).not.toHaveBeenCalled();
       hook.unmount();
+      page = "agents";
       const saved = { ...issue, priority: "high" as const, revision: 2 };
       await act(async () => request.resolve(saved));
-      await waitFor(() => expect(callbacks.onSuccess).toHaveBeenCalledExactlyOnceWith(saved));
-      expect(callbacks.onSettled).toHaveBeenCalledTimes(1);
+      expect(callbacks.onSuccess).not.toHaveBeenCalled();
+      expect(callbacks.onSettled).not.toHaveBeenCalled();
+      expect(page).toBe("agents");
       expect(callbacks.onError).not.toHaveBeenCalled();
       expect(toast.error).not.toHaveBeenCalled();
     });
 
-    it("reports a rejected save and settles after the initiating component unmounts", async () => {
+    it("reports a rejected save after unmount without updating the closed view", async () => {
       const request = deferred<Issue>();
       updateIssue.mockReturnValueOnce(request.promise);
       const callbacks = { onSuccess: vi.fn(), onError: vi.fn(), onSettled: vi.fn() };
@@ -110,12 +113,12 @@ for (const source of sources) {
       const error = new Error("The issue could not be saved");
       await act(async () => request.reject(error));
       await waitFor(() => expect(toast.error).toHaveBeenCalledExactlyOnceWith(error.message));
-      expect(callbacks.onError).toHaveBeenCalledExactlyOnceWith(error);
-      expect(callbacks.onSettled).toHaveBeenCalledTimes(1);
+      expect(callbacks.onError).not.toHaveBeenCalled();
+      expect(callbacks.onSettled).not.toHaveBeenCalled();
       expect(callbacks.onSuccess).not.toHaveBeenCalled();
     });
 
-    it("retains each request's callbacks when a newer update settles first", async () => {
+    it("reports an earlier failure without running superseded UI callbacks", async () => {
       const first = deferred<Issue>();
       const second = deferred<Issue>();
       updateIssue.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
@@ -131,10 +134,54 @@ for (const source of sources) {
       await waitFor(() => expect(secondCallbacks.onSuccess).toHaveBeenCalledExactlyOnceWith(saved));
       const error = new Error("The earlier update failed");
       await act(async () => first.reject(error));
-      await waitFor(() => expect(firstCallbacks.onError).toHaveBeenCalledExactlyOnceWith(error));
-      expect(toast.error).toHaveBeenCalledExactlyOnceWith(error.message);
-      expect(firstCallbacks.onSettled).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(toast.error).toHaveBeenCalledExactlyOnceWith(error.message));
+      expect(firstCallbacks.onError).not.toHaveBeenCalled();
+      expect(firstCallbacks.onSettled).not.toHaveBeenCalled();
       expect(secondCallbacks.onSettled).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not let a closed editor submit its queued description after a newer editor saves", async () => {
+      const first = deferred<Issue>();
+      let persisted = "D1";
+      updateIssue.mockImplementation((_id: string, update: Partial<UpdateIssueRequest>) => {
+        if (update.description === "D1") return first.promise;
+        persisted = update.description!;
+        return Promise.resolve({ ...issue, description: persisted, revision: 3 });
+      });
+      const oldEditor = setup();
+      const saveFromOldEditor = oldEditor.result.current;
+      act(() => saveFromOldEditor({ description: "D1" }, {
+        onSuccess: () => saveFromOldEditor({ description: "D2", description_base: "D1" }),
+      }));
+      await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1));
+      oldEditor.unmount();
+      const newEditor = setup(oldEditor.qc);
+      act(() => newEditor.result.current({ description: "D3" }));
+      await waitFor(() => expect(persisted).toBe("D3"));
+      await act(async () => first.resolve({ ...issue, description: "D1", revision: 2 }));
+      expect(updateIssue).toHaveBeenCalledTimes(2);
+      expect(persisted).toBe("D3");
+    });
+
+    it("keeps the newer title conflict when an older successful response arrives", async () => {
+      const first = deferred<Issue>();
+      const second = deferred<Issue>();
+      updateIssue.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      let conflictDraft: string | null = null;
+      const hook = setup();
+      act(() => hook.result.current({ title: "First edit" }, {
+        onSuccess: () => { conflictDraft = null; },
+      }));
+      await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1));
+      act(() => hook.result.current({ title: "Newer edit" }, {
+        onError: () => { conflictDraft = "Newer edit"; },
+      }));
+      await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(2));
+      await act(async () => second.reject(new ApiError("Title changed", 409, "Conflict", { code: "revision_conflict" })));
+      await waitFor(() => expect(conflictDraft).toBe("Newer edit"));
+      await act(async () => first.resolve({ ...issue, title: "First edit", revision: 2 }));
+      expect(conflictDraft).toBe("Newer edit");
+      expect(toast.error).toHaveBeenCalledTimes(1);
     });
   });
 }

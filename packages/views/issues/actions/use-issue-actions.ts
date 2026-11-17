@@ -106,22 +106,25 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
           ...options,
         });
       } else {
+        // Keep UI callbacks observer-scoped; error feedback belongs to the request.
         void updateIssue
-          .mutateAsync({ id: issueId, ...updates })
-          .then(
-            (saved) => options?.onSuccess?.(saved),
-            (err: unknown) => {
-              toast.error(
-                errorCode(err) === "revision_conflict"
-                  ? t(($) => $.revision.conflict)
-                  : err instanceof Error && err.message
-                  ? err.message
-                  : t(($) => $.detail.update_failed),
-              );
-              options?.onError?.(err);
+          .mutateAsync(
+            { id: issueId, ...updates },
+            {
+              onSuccess: (issue) => options?.onSuccess?.(issue),
+              onError: (err) => options?.onError?.(err),
+              onSettled: () => options?.onSettled?.(),
             },
           )
-          .finally(() => options?.onSettled?.());
+          .catch((err: unknown) => {
+            toast.error(
+              errorCode(err) === "revision_conflict"
+                ? t(($) => $.revision.conflict)
+                : err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            );
+          });
       }
     },
     [issue, issueId, entryOf, surfaceActions, updateIssue, openModal, t],

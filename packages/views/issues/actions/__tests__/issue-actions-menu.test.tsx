@@ -342,6 +342,7 @@ describe("IssueActionsDropdown", () => {
 
     expect(updateIssueMock).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
+      expect.anything(),
     );
     await waitFor(() => expect(screen.queryByText("Status")).not.toBeInTheDocument());
   });
@@ -652,6 +653,7 @@ describe("IssueActionsContextMenu", () => {
 
     expect(updateIssueMock).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
+      expect.anything(),
     );
     await waitFor(() => expect(screen.queryByText("Rename issue")).not.toBeInTheDocument());
   });
