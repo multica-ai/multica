@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -36,19 +37,23 @@ func openPool(t *testing.T) *pgxpool.Pool {
 // setupResolverFixture inserts a workspace with a known slug and returns its
 // UUID. The caller is responsible for calling the returned cleanup func.
 func setupResolverFixture(t *testing.T, pool *pgxpool.Pool) (workspaceID string, cleanup func()) {
+	return setupResolverFixtureWithSlug(t, pool, testResolverSlug)
+}
+
+func setupResolverFixtureWithSlug(t *testing.T, pool *pgxpool.Pool, slug string) (workspaceID string, cleanup func()) {
 	t.Helper()
 	ctx := context.Background()
 	// Pre-cleanup in case a previous run didn't finish.
-	_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, testResolverSlug)
+	_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
 
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO workspace (name, slug, description, issue_prefix) VALUES ($1, $2, '', 'MRT') RETURNING id`,
-		"Middleware Resolver Test", testResolverSlug,
+		"Middleware Resolver Test", slug,
 	).Scan(&workspaceID); err != nil {
 		t.Fatalf("insert workspace: %v", err)
 	}
 	return workspaceID, func() {
-		_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, testResolverSlug)
+		_, _ = pool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
 	}
 }
 
@@ -187,5 +192,117 @@ func TestResolveWorkspaceIDFromRequest(t *testing.T) {
 				t.Fatalf("expected %q, got %q", tc.want, got)
 			}
 		})
+	}
+}
+
+func TestWorkspaceSlugCacheExpiresEntries(t *testing.T) {
+	cache := newWorkspaceSlugCache(time.Minute)
+	cache.set("acme", "00000000-0000-0000-0000-000000000001")
+
+	if got, ok := cache.get("acme"); !ok || got == "" {
+		t.Fatalf("expected cached entry, got %q ok=%v", got, ok)
+	}
+
+	cache.mu.Lock()
+	entry := cache.entries["acme"]
+	entry.expiresAt = time.Now().Add(-time.Second)
+	cache.entries["acme"] = entry
+	cache.mu.Unlock()
+
+	if got, ok := cache.get("acme"); ok {
+		t.Fatalf("expected expired entry to miss, got %q", got)
+	}
+	if _, ok := cache.entries["acme"]; ok {
+		t.Fatal("expected expired entry to be removed")
+	}
+}
+
+func TestResolveWorkspaceUUIDCachesSlugLookup(t *testing.T) {
+	pool := openPool(t)
+	defer pool.Close()
+	queries := db.New(pool)
+
+	const slug = "middleware-resolver-cache-hit"
+	workspaceID, cleanup := setupResolverFixtureWithSlug(t, pool, slug)
+	defer cleanup()
+
+	cache := newWorkspaceSlugCache(time.Minute)
+	resolve := resolveWorkspaceUUIDWithCache(queries, cache)
+
+	req := httptest.NewRequest("GET", "/api/anything", nil)
+	q := req.URL.Query()
+	q.Set("workspace_slug", slug)
+	req.URL.RawQuery = q.Encode()
+
+	got, err := resolve(req)
+	if err != nil {
+		t.Fatalf("first resolve returned error: %v", err)
+	}
+	if got != workspaceID {
+		t.Fatalf("expected %q, got %q", workspaceID, got)
+	}
+
+	_, _ = pool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	got, err = resolve(req)
+	if err != nil {
+		t.Fatalf("cached resolve returned error: %v", err)
+	}
+	if got != workspaceID {
+		t.Fatalf("expected cached %q, got %q", workspaceID, got)
+	}
+}
+
+func TestResolveWorkspaceUUIDDoesNotCacheMiss(t *testing.T) {
+	pool := openPool(t)
+	defer pool.Close()
+	queries := db.New(pool)
+
+	const slug = "middleware-resolver-cache-miss"
+	_, _ = pool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	cache := newWorkspaceSlugCache(time.Minute)
+	resolve := resolveWorkspaceUUIDWithCache(queries, cache)
+
+	req := httptest.NewRequest("GET", "/api/anything", nil)
+	req.Header.Set("X-Workspace-Slug", slug)
+
+	if got, err := resolve(req); err != errWorkspaceNotFound {
+		t.Fatalf("expected workspace not found, got id %q error %v", got, err)
+	}
+
+	workspaceID, cleanup := setupResolverFixtureWithSlug(t, pool, slug)
+	defer cleanup()
+
+	got, err := resolve(req)
+	if err != nil {
+		t.Fatalf("resolve after creating workspace returned error: %v", err)
+	}
+	if got != workspaceID {
+		t.Fatalf("expected %q, got %q", workspaceID, got)
+	}
+}
+
+func TestResolveWorkspaceUUIDTaskTokenBypassesSlugCache(t *testing.T) {
+	const slug = "middleware-resolver-task-token-cache"
+
+	cache := newWorkspaceSlugCache(time.Minute)
+	resolve := resolveWorkspaceUUIDWithCache(nil, cache)
+
+	const boundWorkspaceID = "00000000-0000-0000-0000-000000000001"
+	req := httptest.NewRequest("GET", "/api/anything", nil)
+	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Workspace-ID", boundWorkspaceID)
+	req.Header.Set("X-Workspace-Slug", slug)
+
+	got, err := resolve(req)
+	if err != nil {
+		t.Fatalf("task token resolve returned error: %v", err)
+	}
+	if got != boundWorkspaceID {
+		t.Fatalf("expected bound workspace %q, got %q", boundWorkspaceID, got)
+	}
+	if cached, ok := cache.get(slug); ok {
+		t.Fatalf("task token path should not populate slug cache, got %q", cached)
 	}
 }
