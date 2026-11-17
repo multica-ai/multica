@@ -1471,7 +1471,13 @@
       "up_to_date": "You're on the latest version.",
       "downloading": "v{{version}} is downloading in the background — you'll be notified when it's ready to install.",
       "check_now": "Check now",
-      "checking": "Checking…"
+      "checking": "Checking…",
+      "check_unavailable": "Unable to check for updates right now. Please try again later.",
+      "check_network": "Cannot reach the update service. Check your connection and try again.",
+      "check_failed": "Unable to check for updates. Please try again.",
+      "download_failed": "Update download failed. You can keep using the current version and retry.",
+      "download_ready": "v{{version}} is ready to install.",
+      "retry": "Retry"
     },
     "daemon": {
       "title": "Daemon",

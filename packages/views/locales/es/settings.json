@@ -1471,7 +1471,13 @@
       "up_to_date": "Tienes la última versión.",
       "downloading": "v{{version}} se está descargando en segundo plano: te avisaremos cuando esté lista para instalar.",
       "check_now": "Buscar ahora",
-      "checking": "Comprobando…"
+      "checking": "Comprobando…",
+      "check_unavailable": "No se pueden buscar actualizaciones ahora. Inténtalo más tarde.",
+      "check_network": "No se puede conectar con el servicio de actualizaciones. Revisa tu conexión e inténtalo de nuevo.",
+      "check_failed": "No se pudieron buscar actualizaciones. Inténtalo de nuevo.",
+      "download_failed": "La descarga falló. Puedes seguir usando la versión actual e intentarlo de nuevo.",
+      "download_ready": "v{{version}} está lista para instalar.",
+      "retry": "Reintentar"
     },
     "daemon": {
       "title": "Daemon",

@@ -1460,7 +1460,13 @@
       "up_to_date": "已是最新版本。",
       "downloading": "v{{version}} 正在后台下载——准备好安装时会通知你。",
       "check_now": "立即检查",
-      "checking": "检查中..."
+      "checking": "检查中...",
+      "check_unavailable": "暂时无法检查更新，请稍后重试。",
+      "check_network": "无法连接更新服务，请检查网络后重试。",
+      "check_failed": "检查更新失败，请重试。",
+      "download_failed": "更新下载失败，可以继续使用当前版本并重试。",
+      "download_ready": "v{{version}} 已可安装。",
+      "retry": "重试"
     },
     "daemon": {
       "title": "守护进程",
