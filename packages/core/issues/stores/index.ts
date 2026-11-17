@@ -22,6 +22,7 @@ export {
   type IssuesScopePageKey,
 } from "./issues-scope-store";
 export { useCommentCollapseStore } from "./comment-collapse-store";
+export { useCommentShareStore } from "./comment-share-store";
 export {
   useIssueSidebarSectionsStore,
   selectIssueSidebarOrder,

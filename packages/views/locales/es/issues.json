@@ -2103,5 +2103,19 @@
     "focus_failed": "No se pudo cambiar a {{name}}",
     "retry": "Reintentar",
     "dismiss": "Descartar"
+  },
+  "share_image": {
+    "action": "Compartir como imagen",
+    "selected": "Seleccionados: {{count}}",
+    "create": "Crear imagen",
+    "cancel": "Cancelar",
+    "select_thread": "Seleccionar hilo",
+    "dialog_title": "Compartir imagen",
+    "copy": "Copiar imagen",
+    "copied": "Imagen copiada",
+    "copy_failed": "No se pudo copiar la imagen",
+    "download": "Descargar",
+    "failed": "No se pudo crear la imagen",
+    "footer": "Multica · {{time}}"
   }
 }

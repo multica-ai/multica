@@ -2103,5 +2103,19 @@
     "focus_failed": "Impossible de basculer vers {{name}}",
     "retry": "Réessayer",
     "dismiss": "Ignorer"
+  },
+  "share_image": {
+    "action": "Partager en image",
+    "selected": "Sélectionnés : {{count}}",
+    "create": "Créer l'image",
+    "cancel": "Annuler",
+    "select_thread": "Sélectionner le fil",
+    "dialog_title": "Partager l'image",
+    "copy": "Copier l'image",
+    "copied": "Image copiée",
+    "copy_failed": "Impossible de copier l'image",
+    "download": "Télécharger",
+    "failed": "Impossible de créer l'image",
+    "footer": "Multica · {{time}}"
   }
 }

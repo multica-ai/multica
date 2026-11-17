@@ -7,7 +7,7 @@ import { renderWithI18n } from "../../test/i18n";
 
 // Comment "more actions" menu layout, in four groups: respond (Reply, Add
 // reaction, Edit), act on the thread (Resolve, Create sub-issue), share (Copy,
-// Copy link), and Delete alone at the bottom. Edit and Delete only show on
+// Copy link, Share as image), and Delete alone at the bottom. Edit and Delete only show on
 // comments the viewer may change.
 
 vi.mock("@multica/core/api", () => ({
@@ -127,6 +127,7 @@ describe("CommentCard — actions menu layout", () => {
       SEPARATOR,
       "Copy",
       "Copy link",
+      "Share as image",
       SEPARATOR,
       "Delete",
     ]);
@@ -146,6 +147,7 @@ describe("CommentCard — actions menu layout", () => {
       SEPARATOR,
       "Copy",
       "Copy link",
+      "Share as image",
       SEPARATOR,
       "Delete",
     ]);
@@ -163,6 +165,7 @@ describe("CommentCard — actions menu layout", () => {
       SEPARATOR,
       "Copy",
       "Copy link",
+      "Share as image",
     ]);
   });
 
@@ -177,6 +180,7 @@ describe("CommentCard — actions menu layout", () => {
       SEPARATOR,
       "Copy",
       "Copy link",
+      "Share as image",
     ]);
   });
 });
@@ -199,6 +203,7 @@ describe("CommentCard — right-click", () => {
       "Create sub-issue from here",
       "Copy",
       "Copy link",
+      "Share as image",
       "Delete",
     ]);
   });
@@ -227,11 +232,31 @@ describe("CommentCard — menus opened inside a comment", () => {
       "Create sub-issue from here",
       "Copy",
       "Copy link",
+      "Share as image",
       "Delete",
     ]);
     expect(scope.selectionActions("quoted").map((action) => action.label)).toEqual([
       "Add to reply",
       "Create sub-issue from selection",
     ]);
+  });
+});
+
+describe("CommentCard — share as image", () => {
+  it("picks the thread from a reply's menu and toggles it with the checkbox", async () => {
+    const { useCommentShareStore } = await import("@multica/core/issues/stores");
+    useCommentShareStore.getState().clear();
+    renderThread(comment("root", null), [comment("reply", "root")]);
+    expect(screen.queryByRole("checkbox", { name: "Select thread" })).toBeNull();
+
+    await openMenuLayout(1);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Share as image" }));
+    expect(useCommentShareStore.getState()).toMatchObject({ issueId: "issue-1", selected: ["root"] });
+
+    const checkbox = await screen.findByRole("checkbox", { name: "Select thread" });
+    expect(checkbox).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(checkbox);
+    expect(useCommentShareStore.getState().selected).toEqual([]);
+    useCommentShareStore.getState().clear();
   });
 });

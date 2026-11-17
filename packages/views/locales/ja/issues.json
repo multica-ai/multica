@@ -2016,5 +2016,19 @@
     "focus_failed": "{{name}} に切り替えられませんでした",
     "retry": "再試行",
     "dismiss": "閉じる"
+  },
+  "share_image": {
+    "action": "画像として共有",
+    "selected": "選択中: {{count}}",
+    "create": "画像を作成",
+    "cancel": "キャンセル",
+    "select_thread": "スレッドを選択",
+    "dialog_title": "画像を共有",
+    "copy": "画像をコピー",
+    "copied": "画像をコピーしました",
+    "copy_failed": "画像をコピーできませんでした",
+    "download": "ダウンロード",
+    "failed": "画像を作成できませんでした",
+    "footer": "Multica · {{time}}"
   }
 }

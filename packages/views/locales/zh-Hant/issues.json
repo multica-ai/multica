@@ -2016,5 +2016,19 @@
     "focus_failed": "無法切到 {{name}}",
     "retry": "重試",
     "dismiss": "忽略"
+  },
+  "share_image": {
+    "action": "分享為圖片",
+    "selected": "已選 {{count}} 個討論",
+    "create": "產生圖片",
+    "cancel": "取消",
+    "select_thread": "選擇討論",
+    "dialog_title": "分享圖片",
+    "copy": "複製圖片",
+    "copied": "圖片已複製",
+    "copy_failed": "複製圖片失敗",
+    "download": "下載",
+    "failed": "產生圖片失敗",
+    "footer": "Multica · {{time}}"
   }
 }

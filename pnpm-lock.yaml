@@ -1214,6 +1214,9 @@ importers:
       micromark-extension-math:
         specifier: ^3.1.0
         version: 3.1.0
+      modern-screenshot:
+        specifier: ^4.7.0
+        version: 4.7.0
       motion:
         specifier: 'catalog:'
         version: 12.38.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -9647,6 +9650,9 @@ packages:
 
   mlly@1.8.2:
     resolution: {integrity: sha512-d+ObxMQFmbt10sretNDytwt85VrbkhhUA/JBGm1MPaWJ65Cl4wOgLaB1NYvJSZ0Ef03MMEU/0xpPMXUIQ29UfA==}
+
+  modern-screenshot@4.7.0:
+    resolution: {integrity: sha512-9YxN+ddPSMMlhylOv25VHzXrl9u67QRxoh7+SEewGtgUw7t6hHTrjptSDJUSne9oG4Xk/h2cwG15nIt4Hc9ujg==}
 
   motion-dom@12.38.0:
     resolution: {integrity: sha512-pdkHLD8QYRp8VfiNLb8xIBJis1byQ9gPT3Jnh2jqfFtAsWUA3dEepDlsWe/xMpO8McV+VdpKVcp+E+TGJEtOoA==}
@@ -21798,6 +21804,8 @@ snapshots:
       pathe: 2.0.3
       pkg-types: 1.3.1
       ufo: 1.6.3
+
+  modern-screenshot@4.7.0: {}
 
   motion-dom@12.38.0:
     dependencies:

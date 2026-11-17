@@ -115,6 +115,7 @@ import { issueTasksOptions } from "@multica/core/issues/queries";
 import { SourceContextBadge } from "./source-context-viewer";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { CommentInput } from "./comment-input";
+import { CommentShareBar } from "./comment-share-image-dialog";
 import { useCommentAnnotations } from "./use-comment-annotations";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -4409,6 +4410,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             {stickyComposer && jumpToLatest.visible && (
               <JumpToLatestButton onClick={onJumpToLatest} label={jumpToLatestLabel} hasNew={!!firstNewCommentId} />
             )}
+            <CommentShareBar
+              issueId={id}
+              identifier={issue.identifier}
+              title={issue.title}
+              timeline={displayTimeline}
+              threadReplies={timelineView.threadReplies}
+            />
             <CommentInput
               key={id}
               issueId={id}

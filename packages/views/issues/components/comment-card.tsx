@@ -1,9 +1,10 @@
 "use client";
 
 import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, CornerUpLeft, ListChevronsDownUp, Copy, Link2, Loader2, MessageSquare, MessageSquarePlus, MoreHorizontal, Pencil, Plus, RotateCcw, SmilePlus, Trash2 } from "@multica/ui/icons";
+import { CheckCircle2, ChevronRight, CornerUpLeft, ListChevronsDownUp, Copy, Image, Link2, Loader2, MessageSquare, MessageSquarePlus, MoreHorizontal, Pencil, Plus, RotateCcw, SmilePlus, Trash2 } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -54,7 +55,7 @@ import {
   selectStandaloneAttachments,
   standaloneAttachmentGroup,
 } from "@multica/core/attachments/image-sequence";
-import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { useCommentCollapseStore, useCommentDraftStore, useCommentShareStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
@@ -644,6 +645,7 @@ function useCommentMenuGroups({
   onReply,
   onAddReaction,
   onCopyLink,
+  onShareImage,
   onCreateSubIssue,
   onDelete,
 }: {
@@ -656,6 +658,8 @@ function useCommentMenuGroups({
   onReply?: () => void;
   onAddReaction: () => void;
   onCopyLink?: (commentId: string) => void;
+  /** Starts picking threads for a share image, with this comment's thread. */
+  onShareImage?: () => void;
   onCreateSubIssue?: (commentId: string, prompt?: string) => void;
   onDelete: () => void;
 }): RowActionItem[][] {
@@ -692,6 +696,9 @@ function useCommentMenuGroups({
   }];
   if (onCopyLink) {
     share.push({ key: "copy-link", icon: <Link2 className="h-3.5 w-3.5" />, label: t(($) => $.comment.copy_link_action), onSelect: () => onCopyLink(entry.id) });
+  }
+  if (onShareImage) {
+    share.push({ key: "share-image", icon: <Image className="h-3.5 w-3.5" />, label: t(($) => $.share_image.action), onSelect: onShareImage });
   }
   const remove: RowActionItem[] = canDelete
     ? [{ key: "delete", icon: <Trash2 className="h-3.5 w-3.5" />, label: t(($) => $.comment.delete_action), danger: true, onSelect: onDelete }]
@@ -761,6 +768,7 @@ function CommentRow({
   onCreateSubIssue,
   onResolveToggle,
   onCopyLink,
+  onShareImage,
   onFocusReply,
 }: {
   runHeader?: ReactNode;
@@ -782,6 +790,7 @@ function CommentRow({
   onCreateSubIssue?: (commentId: string, prompt?: string) => void;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
   onCopyLink?: (commentId: string) => void;
+  onShareImage?: () => void;
   /** Moves the caret into the thread's reply box. */
   onFocusReply?: () => void;
 }) {
@@ -816,6 +825,7 @@ function CommentRow({
     onReply: onFocusReply && afterClose.schedule(onFocusReply),
     onAddReaction: afterClose.schedule(() => setReactionOpen(true)),
     onCopyLink,
+    onShareImage,
     onCreateSubIssue,
     onDelete: () => setConfirmDelete(true),
   });
@@ -1208,6 +1218,11 @@ function CommentCardImpl({
   );
 
   const edit = useEditAttachmentState(issueId, entry, onEdit);
+  const shareSelecting = useCommentShareStore((s) => s.issueId === issueId);
+  const shareSelected = useCommentShareStore((s) => s.issueId === issueId && s.selected.includes(entry.id));
+  const startShare = useCommentShareStore((s) => s.start);
+  const toggleShare = useCommentShareStore((s) => s.toggle);
+  const shareThread = () => startShare(issueId, entry.id);
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const receipts = commentSupplementReceipts(entry);
@@ -1238,6 +1253,7 @@ function CommentCardImpl({
     onReply: currentUserId ? afterClose.schedule(focusReply) : undefined,
     onAddReaction: afterClose.schedule(() => setReactionOpen(true)),
     onCopyLink,
+    onShareImage: shareThread,
     onCreateSubIssue,
     onDelete: () => setConfirmDelete(true),
   });
@@ -1315,6 +1331,7 @@ function CommentCardImpl({
             onCreateSubIssue={onCreateSubIssue}
             onResolveToggle={onResolveToggle}
             onCopyLink={onCopyLink}
+            onShareImage={shareThread}
             onFocusReply={currentUserId ? focusReply : undefined}
           />
         </div>
@@ -1390,7 +1407,7 @@ function CommentCardImpl({
     // overflow-clip (not -hidden) clips the rounded corners WITHOUT creating a
     // scroll container, so the sticky collapse affordances below resolve to the
     // timeline's scroll parent instead of this card. See PR #3623.
-    <Card data-mc="comment" data-author-type={entry.actor_type} ref={cardRef} {...annotation.captureProps} className="!py-0 !gap-0 overflow-clip transition-colors duration-700">
+    <Card data-mc="comment" data-author-type={entry.actor_type} ref={cardRef} {...annotation.captureProps} className={cn("!py-0 !gap-0 overflow-clip transition-colors duration-700", shareSelected && "ring-2 ring-primary")}>
       {annotation.popup}
       {onCollapseResolved && (
         <button
@@ -1428,6 +1445,13 @@ function CommentCardImpl({
             className={cn("px-4 max-md:px-3", !open ? "py-3" : stickyHeader ? "pt-3 pb-1" : "pt-3 pb-2")}
           >
             <div className="flex items-center gap-2.5">
+              {shareSelecting && (
+                <Checkbox
+                  checked={shareSelected}
+                  onCheckedChange={() => toggleShare(entry.id)}
+                  aria-label={t(($) => $.share_image.select_thread)}
+                />
+              )}
               {deleted ? (
                 // The thread's root was deleted; its replies still hang off it.
                 <span className="min-w-0 truncate text-body italic text-muted-foreground">

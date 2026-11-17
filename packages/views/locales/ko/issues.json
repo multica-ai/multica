@@ -2016,5 +2016,19 @@
     "focus_failed": "{{name}}(으)로 전환할 수 없습니다",
     "retry": "다시 시도",
     "dismiss": "닫기"
+  },
+  "share_image": {
+    "action": "이미지로 공유",
+    "selected": "선택됨: {{count}}",
+    "create": "이미지 만들기",
+    "cancel": "취소",
+    "select_thread": "스레드 선택",
+    "dialog_title": "이미지 공유",
+    "copy": "이미지 복사",
+    "copied": "이미지를 복사했습니다",
+    "copy_failed": "이미지를 복사하지 못했습니다",
+    "download": "다운로드",
+    "failed": "이미지를 만들지 못했습니다",
+    "footer": "Multica · {{time}}"
   }
 }

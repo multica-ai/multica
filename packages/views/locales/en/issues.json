@@ -2103,5 +2103,19 @@
     "focus_failed": "Couldn't switch to {{name}}",
     "retry": "Retry",
     "dismiss": "Dismiss"
+  },
+  "share_image": {
+    "action": "Share as image",
+    "selected": "Selected: {{count}}",
+    "create": "Create image",
+    "cancel": "Cancel",
+    "select_thread": "Select thread",
+    "dialog_title": "Share image",
+    "copy": "Copy image",
+    "copied": "Image copied",
+    "copy_failed": "Couldn't copy the image",
+    "download": "Download",
+    "failed": "Couldn't create the image",
+    "footer": "Multica · {{time}}"
   }
 }
