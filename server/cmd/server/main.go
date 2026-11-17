@@ -620,6 +620,7 @@ func main() {
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
+	var inboxReadMetrics *obsmetrics.InboxReadMetrics
 	var httpMetrics *obsmetrics.HTTPMetrics
 	var businessMetrics *obsmetrics.BusinessMetrics
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
@@ -635,6 +636,7 @@ func main() {
 			Version:     version,
 			Commit:      commit,
 		})
+		inboxReadMetrics = metricsRegistry.InboxRead
 		httpMetrics = metricsRegistry.HTTP
 		businessMetrics = metricsRegistry.Business
 		channelMediaMetrics = metricsRegistry.ChannelMedia
@@ -682,6 +684,7 @@ func main() {
 	}
 
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
+		InboxReadMetrics:    inboxReadMetrics,
 		HTTPMetrics:         httpMetrics,
 		BusinessMetrics:     businessMetrics,
 		ChannelLeaseMetrics: channelLeaseMetrics,

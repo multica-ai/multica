@@ -223,6 +223,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 }
 
 type RouterOptions struct {
+	InboxReadMetrics    *obsmetrics.InboxReadMetrics
 	HTTPMetrics         *obsmetrics.HTTPMetrics
 	BusinessMetrics     *obsmetrics.BusinessMetrics
 	ChannelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
@@ -463,6 +464,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	invitationRateLimits.Recipient.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_RECIPIENT_24H", invitationRateLimits.Recipient.Limit)
 	h.InvitationRateLimiters = handler.NewMemoryInvitationRateLimiters(invitationRateLimits)
 	h.Metrics = opts.BusinessMetrics
+	h.InboxReads.Metrics = opts.InboxReadMetrics
 	h.FeatureFlags = opts.FeatureFlags
 	h.ThemeStore = themeStoreFromEnv()
 	h.TaskService.FeatureFlags = opts.FeatureFlags

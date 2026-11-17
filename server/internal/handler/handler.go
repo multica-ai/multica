@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/inboxread"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
@@ -219,6 +220,7 @@ type RuntimeRecoveryNotifier interface {
 }
 
 type Handler struct {
+	InboxReads             *inboxread.Guard
 	Queries                *db.Queries
 	ReadSelector           *dbreader.Selector
 	DB                     dbExecutor
@@ -524,6 +526,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		ReadSelector:                 dbreader.NewPrimaryOnly(queries),
 		DB:                           executor,
 		TxStarter:                    txStarter,
+		InboxReads:                   inboxread.New(inboxread.ConfigFromEnv()),
 		Hub:                          hub,
 		DaemonHub:                    daemonHub,
 		DaemonProfileRefresh:         daemonProfileRefresh,
