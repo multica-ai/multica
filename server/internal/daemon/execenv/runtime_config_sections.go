@@ -531,11 +531,11 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 		b.WriteString("\n\n")
 	}
 	if len(ctx.ProjectResources) > 0 {
-		path := ctx.ProjectResourcesPath
-		if path == "" {
-			path = ".multica/project/resources.json"
+		if ctx.ProjectResourcesOutsideCheckout {
+			b.WriteString("Project resources (also written to `.multica/project/resources.json` in the task directory that contains this checkout):\n\n")
+		} else {
+			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
 		}
-		fmt.Fprintf(b, "Project resources (also written to `%s`):\n\n", path)
 		for _, r := range ctx.ProjectResources {
 			fmt.Fprintf(b, "- %s\n", formatProjectResource(r))
 		}

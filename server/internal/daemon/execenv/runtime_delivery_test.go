@@ -47,8 +47,11 @@ func TestRuntimeWorktreeLeavesNoFilesInCheckout(t *testing.T) {
 			if got := gitRun(t, env.WorkDir, "status", "--porcelain", "--ignored"); got != "" {
 				t.Fatalf("runtime dirtied checkout: %s", got)
 			}
-			if !strings.Contains(brief, filepath.Join(env.RootDir, ".multica", "project", "resources.json")) {
-				t.Fatal("brief references wrong resources file")
+			if strings.Contains(brief, env.RootDir) {
+				t.Fatal("brief embeds the task root path")
+			}
+			if !strings.Contains(brief, "`.multica/project/resources.json` in the task directory that contains this checkout") {
+				t.Fatal("brief does not point at the external resources file")
 			}
 			if _, err := os.Stat(filepath.Join(env.RootDir, TaskContextMarkerRelPath)); err != nil {
 				t.Fatal(err)
@@ -89,6 +92,26 @@ func TestRuntimeWorktreeLeavesNoFilesInCheckout(t *testing.T) {
 			}
 			if got := env.SkillReceipts(provider, []SkillContextForEnv{{ID: "skill", Name: "runtime-probe"}}); len(got) != 1 || !got[0].Available {
 				t.Fatalf("runtime skills missing from receipt: %+v", got)
+			}
+		})
+	}
+}
+
+// A continued worktree gets a new task root on every run. The brief must not
+// follow it: MUL-5377 requires byte-identical briefs per (agent, issue,
+// provider), and a resumed Codex thread keeps the developer instructions it
+// started with, so any task-root path in them would point at a reclaimed
+// directory.
+func TestRuntimeWorktreeBriefByteIdenticalAcrossTaskRoots(t *testing.T) {
+	for _, provider := range []string{"claude", "codex"} {
+		t.Run(provider, func(t *testing.T) {
+			_, first, firstBrief := prepareRuntimeWorktree(t, provider, true)
+			_, second, secondBrief := prepareRuntimeWorktree(t, provider, true)
+			if first.RootDir == second.RootDir {
+				t.Fatal("fixture did not produce distinct task roots")
+			}
+			if firstBrief != secondBrief {
+				t.Fatalf("brief changed with the task root:\n--- first\n%s\n--- second\n%s", firstBrief, secondBrief)
 			}
 		})
 	}
@@ -175,6 +198,31 @@ func TestRuntimeWorktreeClaudeSkillCollision(t *testing.T) {
 	}
 }
 
+// In a linked worktree without its own .claude/skills, Claude Code loads the
+// main checkout's project skills, including gitignored ones the worktree
+// never receives. A runtime skill must not collide with those either, or
+// Claude would rename it and the brief would name a skill that does not exist.
+func TestRuntimeWorktreeClaudeSkillAvoidsMainCheckoutSkills(t *testing.T) {
+	repo := newTestRepo(t)
+	writeFile(t, filepath.Join(repo, ".gitignore"), ".claude/skills/\n")
+	gitRun(t, repo, "add", ".gitignore")
+	gitRun(t, repo, "commit", "-m", "ignore personal skills")
+	writeFile(t, filepath.Join(repo, ".claude", "skills", "runtime-probe", "SKILL.md"), "Ignored user skill")
+	ctx := TaskContextForEnv{AgentSkills: []SkillContextForEnv{{ID: "skill", Name: "runtime-probe", Content: "Multica skill"}}}
+	env, err := Prepare(PrepareParams{WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace", TaskID: "11112222-3333-4444-5555-666677778888", Provider: "claude", RuntimeVersion: "2.1.281", LocalWorktree: &LocalWorktreeParams{LocalPath: repo}, Task: ctx}, worktreeTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer env.LocalWorktree.Discard(worktreeTestLogger())
+	defer env.Cleanup(true)
+	if _, err := os.Stat(filepath.Join(env.LocalWorktree.Path, ".claude", "skills")); !os.IsNotExist(err) {
+		t.Fatalf("fixture needs a worktree without .claude/skills (err=%v)", err)
+	}
+	if !slices.Equal(env.PreparedSkillNames, []string{"runtime-probe-multica"}) {
+		t.Fatalf("names=%v", env.PreparedSkillNames)
+	}
+}
+
 func TestRuntimeDeliveryLegacyScope(t *testing.T) {
 	for _, tc := range []struct {
 		provider, version string
@@ -204,7 +252,10 @@ func TestRuntimeDeliveryLegacyScope(t *testing.T) {
 	}
 }
 
-func TestRuntimeWorktreeCodexPreservesGlobalGuidance(t *testing.T) {
+// External delivery changes how the brief reaches Codex, not which user-level
+// guidance it loads: like every other Codex task, the task-local CODEX_HOME
+// gets no global AGENTS.md / AGENTS.override.md.
+func TestRuntimeWorktreeCodexKeepsGlobalGuidanceParity(t *testing.T) {
 	source := t.TempDir()
 	t.Setenv("CODEX_HOME", source)
 	writeFile(t, filepath.Join(source, "AGENTS.md"), "Global fallback")
@@ -216,13 +267,12 @@ func TestRuntimeWorktreeCodexPreservesGlobalGuidance(t *testing.T) {
 	}
 	defer env.Cleanup(true)
 	defer env.LocalWorktree.Discard(worktreeTestLogger())
-	for _, name := range []string{"AGENTS.md", "AGENTS.override.md"} {
-		if readFile(t, filepath.Join(source, name)) != readFile(t, filepath.Join(env.CodexHome, name)) {
-			t.Errorf("global %s lost", name)
-		}
+	if env.RuntimeDir == "" {
+		t.Fatal("fixture did not select external delivery")
 	}
-	writeFile(t, filepath.Join(env.CodexHome, "AGENTS.override.md"), "Task edit")
-	if got := readFile(t, filepath.Join(source, "AGENTS.override.md")); got != "Global override" {
-		t.Fatal("task changed source guidance")
+	for _, name := range []string{"AGENTS.md", "AGENTS.override.md"} {
+		if _, err := os.Lstat(filepath.Join(env.CodexHome, name)); !os.IsNotExist(err) {
+			t.Errorf("task CODEX_HOME gained global %s (err=%v)", name, err)
+		}
 	}
 }

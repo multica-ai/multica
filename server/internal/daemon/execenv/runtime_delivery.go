@@ -15,7 +15,7 @@ func (env *Environment) InjectRuntimeConfig(provider string, ctx TaskContextForE
 	if env.RuntimeDir == "" {
 		return InjectRuntimeConfig(env.WorkDir, provider, ctx)
 	}
-	ctx.ProjectResourcesPath = filepath.Join(env.RootDir, ".multica", "project", "resources.json")
+	ctx.ProjectResourcesOutsideCheckout = true
 	brief := buildMetaSkillContent(provider, ctx)
 	if provider == "claude" {
 		return brief, writeRuntimeConfigFile(filepath.Join(env.RuntimeDir, "CLAUDE.md"), brief)
@@ -59,6 +59,11 @@ func (env *Environment) prepareRuntimeContext(provider string, ctx TaskContextFo
 				break
 			}
 		}
+		// Claude Code 2.1.277+ loads the main checkout's project skills in a
+		// linked worktree whose root has no .claude/skills — which, with the
+		// runtime skills moved out, includes this one. Those may be untracked,
+		// so the worktree cannot show them; reserve their names too.
+		roots = append(roots, skillsDirPath(env.LocalWorktree.GitRoot, provider))
 		return writeSkillFilesWithReservedNames(skillsDirPath(env.RuntimeDir, provider), ctx.AgentSkills, manifest, env.SkillDirectories, roots...)
 	}
 	return resolveSkillSlugs(ctx.AgentSkills), nil

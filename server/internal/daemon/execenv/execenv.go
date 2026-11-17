@@ -167,8 +167,13 @@ type TaskContextForEnv struct {
 	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
 	ProjectArchived               bool                    // project is archived; rendered as a note in the Project Context section
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
-	ProjectResourcesPath          string                  // explicit task-local path when resources live outside WorkDir
-	ChatSessionID                 string                  // non-empty for chat tasks
+	// ProjectResourcesOutsideCheckout reports that resources.json lives in the
+	// task directory containing the checkout rather than under WorkDir. It is a
+	// flag, not a path: the brief must stay byte-identical across task roots
+	// (MUL-5377), and a resumed Codex thread keeps the instructions it started
+	// with, so an absolute task path would go stale.
+	ProjectResourcesOutsideCheckout bool
+	ChatSessionID                   string // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
 	// "feishu", "wecom"); empty for a web/mobile chat. It names the surface in
 	// the brief's copy; what that surface can DELIVER is the separate field
@@ -673,15 +678,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
 		}
 		env.CodexHome = codexHome
-		if env.RuntimeDir != "" {
-			// Preserve Codex's own override/fallback discovery order in the
-			// isolated home; runtime instructions use a separate channel.
-			for _, name := range []string{"AGENTS.md", "AGENTS.override.md"} {
-				if err := syncCopiedFile(filepath.Join(resolveSharedCodexHome(), name), filepath.Join(codexHome, name)); err != nil {
-					return nil, fmt.Errorf("copy global Codex instructions: %w", err)
-				}
-			}
-		}
+		// The task-local CODEX_HOME deliberately carries no global AGENTS.md /
+		// AGENTS.override.md, for every Codex task: moving the brief to
+		// developerInstructions changes the channel, not which user-level
+		// guidance a task sees (MUL-9445).
 	}
 
 	if params.Provider == "claude" {
