@@ -59,6 +59,18 @@ SELECT * FROM agent_runtime
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockAgentRuntimeForClaimDelivery :one
+-- The claim delivery gate's lock on the runtime it re-reads owner_id and
+-- visibility from. FOR NO KEY UPDATE still blocks every UPDATE and DELETE of
+-- the row, so a re-registration or visibility flip waits for the gate to
+-- commit. Unlike FOR UPDATE it does not block FOR KEY SHARE, which every task
+-- insert takes on its runtime (lock_task_owner_rows and the foreign key) while
+-- already holding the agent row. The gate takes the agent row after this one,
+-- so FOR UPDATE here deadlocked a chat send racing a delivery (MUL-9501).
+SELECT * FROM agent_runtime
+WHERE id = $1
+FOR NO KEY UPDATE;
+
 -- name: GetAgentRuntimeForWorkspace :one
 SELECT * FROM agent_runtime
 WHERE id = $1 AND workspace_id = $2;
