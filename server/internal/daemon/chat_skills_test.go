@@ -45,6 +45,67 @@ func TestBuildRuntimePromptExplicitSkills(t *testing.T) {
 	}
 }
 
+func TestBuildRuntimePromptAgentChatKeepsBoundSkillHints(t *testing.T) {
+	message := "[/spoofed](slash://skill/one) and [/unbound](slash://skill/other)"
+	for _, tc := range []struct {
+		name, want string
+		installed  bool
+	}{
+		{name: "name hint", want: "Review Code"},
+		{name: "directory hint", want: "review-code", installed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := chatSkillTask(message)
+			task.ChatSkillMessage = new(string)
+			task.InitiatorType = "member" // Delegation can inherit a human originator.
+			var dirs map[string]string
+			if tc.installed {
+				dirs = map[string]string{"one": filepath.Join(t.TempDir(), "review-code")}
+			}
+			prompt, invocation := buildRuntimePrompt(task, "claude", dirs)
+			if invocation != nil || strings.Contains(prompt, "FIRST BODY") || strings.Contains(prompt, "SECOND BODY") {
+				t.Fatalf("agent chat must only receive name hints: invocation=%+v prompt=%s", invocation, prompt)
+			}
+			if !strings.Contains(prompt, "Explicitly selected skills:\n- "+tc.want+"\n\n") || !strings.Contains(prompt, "User message:\n"+message) {
+				t.Fatalf("agent chat lost its bound hint or original message: %s", prompt)
+			}
+		})
+	}
+}
+
+func TestBuildRuntimePromptPreservesSkillTargetMapping(t *testing.T) {
+	message := "对 A 用 [/spoofed-one](slash://skill/one)，对 B 用 [/spoofed-two](slash://skill/two)，再对 C 用 [/again](slash://skill/one)"
+	want := "对 A 用 /review-code，对 B 用 /review-code-multica-2，再对 C 用 /review-code"
+	for _, surface := range []string{"chat", "issue comment"} {
+		t.Run(surface, func(t *testing.T) {
+			task := chatSkillTask(message)
+			if surface == "issue comment" {
+				task = issueSkillTask(message)
+			}
+			prompt, invocation := buildRuntimePrompt(task, "claude", issueSkillDirs(t))
+			if invocation == nil || invocation.UserMessage != want || !strings.Contains(prompt, want) {
+				t.Fatalf("skill/object mapping lost: invocation=%+v prompt=%s", invocation, prompt)
+			}
+			if strings.Contains(prompt, "spoofed") || strings.Contains(prompt, "slash://skill/") {
+				t.Fatalf("selected labels/links must be replaced by actual directory names: %s", prompt)
+			}
+		})
+	}
+}
+
+func TestBuildRuntimePromptChatPureCapsuleHasNoArguments(t *testing.T) {
+	for _, message := range []string{
+		"[/spoofed](slash://skill/one)",
+		" \n[/spoofed](slash://skill/one)\n\t",
+		"[/one](slash://skill/one) [/two](slash://skill/two)",
+	} {
+		_, invocation := buildRuntimePrompt(chatSkillTask(message), "claude", issueSkillDirs(t))
+		if invocation == nil || invocation.UserMessage != "" {
+			t.Fatalf("capsule-only chat must invoke without arguments: %+v", invocation)
+		}
+	}
+}
+
 func TestBuildRuntimePromptDoesNotPromoteUntrustedContent(t *testing.T) {
 	link := "[/review](slash://skill/one)"
 	dirs := map[string]string{"one": filepath.Join(t.TempDir(), "review-code")}
@@ -135,17 +196,22 @@ func TestBuildRuntimePromptRetainsUnselectedAndQuotedLinks(t *testing.T) {
 	}
 }
 
-func TestChatSkillHintsDoNotPromoteKnownNonMemberOrQuotedInput(t *testing.T) {
-	for _, message := range []string{"", "> [/review](slash://skill/one)", "`[/review](slash://skill/one)`"} {
-		task := chatSkillTask("[/review](slash://skill/one)")
-		task.ChatSkillMessage = &message
-		if got := buildChatPrompt(task); strings.Contains(got, "Explicitly selected skills:") {
-			t.Errorf("non-member or quoted content earned an explicit hint: %s", got)
+func TestChatSkillHintsIgnoreQuotedAndCodeInput(t *testing.T) {
+	for _, message := range []string{"> [/review](slash://skill/one)", "`[/review](slash://skill/one)`", "```md\n[/review](slash://skill/one)\n```"} {
+		for _, member := range []bool{false, true} {
+			task := chatSkillTask(message)
+			if !member {
+				task.ChatSkillMessage = new(string)
+			}
+			prompt, invocation := buildRuntimePrompt(task, "claude", issueSkillDirs(t))
+			if invocation != nil || strings.Contains(prompt, "Explicitly selected skills:") || !strings.Contains(prompt, message) {
+				t.Errorf("member=%t quoted/code input changed: invocation=%+v prompt=%s", member, invocation, prompt)
+			}
 		}
 	}
 }
 
-func TestBuildRuntimePromptResumeRetryStripsResumeMessage(t *testing.T) {
+func TestBuildRuntimePromptResumeRetryReplacesResumeLinks(t *testing.T) {
 	dirs := map[string]string{"one": filepath.Join(t.TempDir(), "review-code")}
 	kickoff := "System kickoff [/two](slash://skill/two)\n\n"
 	message := "[/review](slash://skill/one) original objective"
@@ -171,9 +237,9 @@ func TestBuildRuntimePromptResumeRetryStripsResumeMessage(t *testing.T) {
 				t.Fatal("resumed retry lost the invocation")
 			}
 			// The resume view drops delivered guidance, keeps the kickoff
-			// context and pending guidance verbatim, and loses only the
-			// selected link.
-			want := tc.prefix + " original objective\n\npending guidance"
+			// context and pending guidance verbatim, and replaces only the
+			// selected link with its actual directory name.
+			want := tc.prefix + "/review-code original objective\n\npending guidance"
 			if invocation.UserMessage != want {
 				t.Fatalf("resumed user = %q, want %q", invocation.UserMessage, want)
 			}
@@ -184,13 +250,13 @@ func TestBuildRuntimePromptResumeRetryStripsResumeMessage(t *testing.T) {
 				t.Fatalf("caller resume payload mutated: %v", task.ChatResumeMessage)
 			}
 			// A cold retry keeps the whole member batch — delivered
-			// guidance included — with the same selected link stripped.
+			// guidance included — with the same selected link replaced.
 			task.PriorSessionID = ""
 			prompt, invocation = buildRuntimePrompt(task, "claude", dirs)
 			if invocation == nil {
 				t.Fatal("cold retry lost the invocation")
 			}
-			want = tc.prefix + " original objective\n\ndelivered guidance\n\npending guidance"
+			want = tc.prefix + "/review-code original objective\n\ndelivered guidance\n\npending guidance"
 			if invocation.UserMessage != want {
 				t.Fatalf("cold user = %q, want %q", invocation.UserMessage, want)
 			}

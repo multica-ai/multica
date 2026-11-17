@@ -929,9 +929,9 @@ func buildChatPromptWithOptions(task Task, opts promptOpts) string {
 	return b.String()
 }
 
-// explicitSkillSelectionBlock renders the validated member skill selections
-// for a turn prompt. Shared by the chat and comment prompt builders so both
-// surfaces name skills identically, by materialized directory name when the
+// explicitSkillSelectionBlock renders bound skill names for a turn prompt.
+// Shared by the chat and comment prompt builders so both surfaces name
+// skills identically, by materialized directory name when the
 // daemon recorded one and by the agent's skill name otherwise. A ref whose
 // skill is not bound to this agent renders nothing — an unknown id in user
 // text must not announce a skill.

@@ -68,6 +68,11 @@ func chatSkillMatches(task Task) []slashSkillMatch {
 		// Keep their existing hint, but never issue a native command/injection.
 		return slashSkillMatches(task.ChatMessage)
 	}
+	if *task.ChatSkillMessage == "" {
+		// Known non-member chat keeps bound name hints without earning an
+		// invocation. Quoted/code links are not current selections.
+		return activeSlashSkillMatches(task.ChatMessage)
+	}
 	return activeSlashSkillMatches(*task.ChatSkillMessage)
 }
 
@@ -147,7 +152,7 @@ func buildRuntimePrompt(task Task, provider string, directories map[string]strin
 		assigned[skill.ID] = skill
 	}
 	invocation := &agent.SkillInvocation{}
-	selected := make(map[string]bool)
+	selected := make(map[string]string)
 	for _, ref := range refs {
 		skill, ok := assigned[ref.ID]
 		dir := directories[ref.ID]
@@ -157,7 +162,7 @@ func buildRuntimePrompt(task Task, provider string, directories map[string]strin
 		invocation.Skills = append(invocation.Skills, agent.ExplicitSkill{
 			Name: filepath.Base(dir), Directory: dir, Body: execenv.SkillBody(skill.Content),
 		})
-		selected[ref.ID] = true
+		selected[ref.ID] = filepath.Base(dir)
 	}
 	if len(invocation.Skills) == 0 {
 		return BuildPrompt(task, provider, options...), nil
@@ -170,8 +175,8 @@ func buildRuntimePrompt(task Task, provider string, directories map[string]strin
 
 // chatRuntimePrompt finishes a direct chat turn's invocation: the member
 // message is a contiguous part of the claimed batch, and only selected links
-// inside it are stripped before the prompt is rebuilt.
-func chatRuntimePrompt(task Task, source memberSkillText, selected map[string]bool, invocation *agent.SkillInvocation, provider string, options ...PromptOption) (string, *agent.SkillInvocation) {
+// inside it are replaced by resolved names before the prompt is rebuilt.
+func chatRuntimePrompt(task Task, source memberSkillText, selected map[string]string, invocation *agent.SkillInvocation, provider string, options ...PromptOption) (string, *agent.SkillInvocation) {
 	skillMessage := source.text
 	// Direct chat input is a contiguous suffix of the claimed batch; an older
 	// or inconsistent server payload must not let this field replace user text.
@@ -179,26 +184,26 @@ func chatRuntimePrompt(task Task, source memberSkillText, selected map[string]bo
 	if start < 0 {
 		return BuildPrompt(task, provider, options...), nil
 	}
-	// Strip only selected links in the actual member text. Unknown IDs and
+	// Replace only selected links in the actual member text. Unknown IDs and
 	// quoted links remain visible, and cannot become a leading CLI command.
 	prefix, suffix := task.ChatMessage[:start], task.ChatMessage[start+len(skillMessage):]
-	user := stripSelectedSkillLinks(skillMessage, source.matches, selected)
+	user := replaceSelectedSkillLinks(skillMessage, source.matches, selected)
 	task.ChatMessage = prefix + user + suffix
 	invocation.UserMessage = task.ChatMessage
 	// A resumed retry renders ChatResumeMessage instead of the full batch —
 	// the server already dropped guidance delivered to PriorSessionID there —
 	// and the trailing command block must not repeat it either. The member
 	// batch is shorter in that view, so locate it by the boundary just
-	// verified on the full batch and strip its selected links on its own
+	// verified on the full batch and replace its selected links on its own
 	// terms. The local task value re-points the field, so the caller's
 	// payload stays intact for a later cold retry rebuilding from the task.
 	if task.PriorSessionID != "" && task.ChatResumeMessage != nil {
 		resume := *task.ChatResumeMessage
 		if len(resume) >= len(prefix)+len(suffix) && strings.HasPrefix(resume, prefix) && strings.HasSuffix(resume, suffix) {
 			body := resume[len(prefix) : len(resume)-len(suffix)]
-			stripped := prefix + stripSelectedSkillLinks(body, activeSlashSkillMatches(body), selected) + suffix
-			task.ChatResumeMessage = &stripped
-			invocation.UserMessage = stripped
+			rewritten := prefix + replaceSelectedSkillLinks(body, activeSlashSkillMatches(body), selected) + suffix
+			task.ChatResumeMessage = &rewritten
+			invocation.UserMessage = rewritten
 		}
 	}
 	invocation.Prompt = BuildPrompt(task, provider, options...)
@@ -208,27 +213,27 @@ func chatRuntimePrompt(task Task, source memberSkillText, selected map[string]bo
 }
 
 // issueRuntimePrompt finishes a comment-triggered issue turn's invocation.
-// Hit links are stripped from the human member comments embedded in the
+// Hit links are replaced in the human member comments embedded in the
 // comment prompt, and UserMessage carries every member ask of the run —
 // including coalesced member comments that carried no skill link — for
 // Claude's trailing slash-command block. PlatformPrompt equals the complete
 // comment prompt: unlike chat there is no separate user-message section to
 // omit, and the issue context, thread metadata and --parent reply routing
 // must survive intact.
-func issueRuntimePrompt(task Task, texts []memberSkillText, selected map[string]bool, invocation *agent.SkillInvocation, provider string, options ...PromptOption) (string, *agent.SkillInvocation) {
+func issueRuntimePrompt(task Task, texts []memberSkillText, selected map[string]string, invocation *agent.SkillInvocation, provider string, options ...PromptOption) (string, *agent.SkillInvocation) {
 	// texts pairs every member comment of this run — coalesced comments
 	// oldest first, then the trigger comment — with the matches
-	// memberSkillTexts already found in it, so each comment is stripped
+	// memberSkillTexts already found in it, so each comment is rewritten
 	// exactly once.
 	var user []string
 	next := 0
-	stripped := func(content string) string {
+	rewritten := func(content string) string {
 		var matches []slashSkillMatch
 		if next < len(texts) {
 			matches = texts[next].matches
 			next++
 		}
-		text := stripSelectedSkillLinks(content, matches, selected)
+		text := replaceSelectedSkillLinks(content, matches, selected)
 		if message := strings.TrimSpace(text); message != "" {
 			user = append(user, message)
 		}
@@ -236,15 +241,15 @@ func issueRuntimePrompt(task Task, texts []memberSkillText, selected map[string]
 	}
 	// The task value is a copy, but its slice fields share the caller's
 	// backing array — the retry path rebuilds from the same task, and a
-	// stripped comment there would hide its links from the second pass.
+	// rewritten comment there would hide its links from the second pass.
 	task.CoalescedComments = append([]CoalescedCommentData(nil), task.CoalescedComments...)
 	for i, cc := range task.CoalescedComments {
 		if cc.AuthorType == "member" && cc.Content != "" {
-			task.CoalescedComments[i].Content = stripped(cc.Content)
+			task.CoalescedComments[i].Content = rewritten(cc.Content)
 		}
 	}
 	if task.TriggerAuthorType == "member" && task.TriggerCommentContent != "" {
-		content := stripped(task.TriggerCommentContent)
+		content := rewritten(task.TriggerCommentContent)
 		if strings.TrimSpace(content) == "" {
 			// A pure skill-capsule comment strips to nothing. The comment
 			// prompt treats an empty trigger body as "server could not fetch
@@ -262,15 +267,26 @@ func issueRuntimePrompt(task Task, texts []memberSkillText, selected map[string]
 	return invocation.FallbackPrompt(), invocation
 }
 
-func stripSelectedSkillLinks(message string, matches []slashSkillMatch, selected map[string]bool) string {
+func replaceSelectedSkillLinks(message string, matches []slashSkillMatch, selected map[string]string) string {
 	var user strings.Builder
 	end := 0
+	replaced, hasArguments := false, false
 	for _, match := range matches {
-		if !selected[match.ref.ID] {
+		name, ok := selected[match.ref.ID]
+		if !ok {
 			continue
 		}
-		user.WriteString(message[end:match.start])
+		before := message[end:match.start]
+		hasArguments = hasArguments || strings.TrimSpace(before) != ""
+		user.WriteString(before)
+		user.WriteString("/" + name)
 		end = match.end
+		replaced = true
+	}
+	// A message made entirely of selections invokes without arguments;
+	// otherwise keep each resolved name beside the user's target text.
+	if replaced && !hasArguments && strings.TrimSpace(message[end:]) == "" {
+		return ""
 	}
 	user.WriteString(message[end:])
 	return user.String()

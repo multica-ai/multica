@@ -38,7 +38,7 @@ func TestBuildRuntimePromptIssueMemberComments(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Explicitly selected skills:\n- review-code\n- review-code-multica-2\n",
-		"earlier ask with\n", "please review", "--parent comment-trigger", dirs["one"], dirs["two"],
+		"earlier ask with /review-code\n", "/review-code-multica-2 please review", "--parent comment-trigger", dirs["one"], dirs["two"],
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt missing %q: %s", want, prompt)
@@ -52,9 +52,9 @@ func TestBuildRuntimePromptIssueMemberComments(t *testing.T) {
 	if !strings.Contains(prompt, "agent also picked [/two](slash://skill/two)") {
 		t.Errorf("agent coalesced comment must keep its link verbatim: %s", prompt)
 	}
-	if invocation.UserMessage != "earlier ask with\n\nplease review" {
+	if invocation.UserMessage != "earlier ask with /review-code\n\n/review-code-multica-2 please review" {
 		// The member texts join chronologically (coalesced first, trigger
-		// last), each with its acted-on link stripped.
+		// last), each with its acted-on link replaced by its resolved name.
 		t.Fatalf("UserMessage=%q", invocation.UserMessage)
 	}
 	// Issue runs keep the complete comment prompt as the platform block: the
@@ -125,8 +125,8 @@ func TestBuildRuntimePromptIssueCoalescedAuthorGate(t *testing.T) {
 	if invocation == nil || len(invocation.Skills) != 1 || invocation.Skills[0].Name != "review-code" {
 		t.Fatalf("member coalesced pick ignored: %+v", invocation)
 	}
-	if invocation.UserMessage != "run review" {
-		t.Fatalf("UserMessage must carry only the stripped member text: %q", invocation.UserMessage)
+	if invocation.UserMessage != "/review-code run review" {
+		t.Fatalf("UserMessage must carry only the rewritten member text: %q", invocation.UserMessage)
 	}
 	if !strings.Contains(prompt, "Explicitly selected skills:\n- review-code\n") {
 		t.Errorf("prompt missing selection list: %s", prompt)
@@ -226,7 +226,7 @@ func TestBuildRuntimePromptIssueUserMessageJoinsMemberTexts(t *testing.T) {
 	if invocation == nil {
 		t.Fatal("selection missing")
 	}
-	if invocation.UserMessage != "and double-check the tests\n\nplease review" {
+	if invocation.UserMessage != "and double-check the tests\n\n/review-code-multica-2 please review" {
 		t.Fatalf("UserMessage must join member asks without blank segments: %q", invocation.UserMessage)
 	}
 }
