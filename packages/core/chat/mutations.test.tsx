@@ -10,6 +10,7 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import {
   useConsumeChatDraftRestore,
+  useMarkAllChatSessionsRead,
   useSetChatSessionArchived,
   useSetChatSessionProject,
 } from "./mutations";
@@ -43,6 +44,63 @@ function createWrapper(qc: QueryClient) {
     return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
   };
 }
+
+describe("useMarkAllChatSessionsRead", () => {
+  let qc: QueryClient;
+  let markChatSessionRead: ReturnType<typeof vi.fn<(id: string) => Promise<void>>>;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    markChatSessionRead = vi.fn();
+    setApiInstance({ markChatSessionRead } as unknown as ApiClient);
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("reads each session and zeroes their unread", async () => {
+    markChatSessionRead.mockResolvedValue(undefined);
+    qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [
+      makeSession({ id: "s1", unread_count: 3 }),
+      makeSession({ id: "s2", unread_count: 4 }),
+      makeSession({ id: "s3", unread_count: 0, has_unread: false }),
+    ]);
+
+    const { result } = renderHook(() => useMarkAllChatSessionsRead(), {
+      wrapper: createWrapper(qc),
+    });
+    await act(async () => {
+      await result.current.mutateAsync(["s1", "s2"]);
+    });
+
+    expect(markChatSessionRead.mock.calls.map(([id]) => id)).toEqual(["s1", "s2"]);
+    const rows = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))!;
+    expect(rows.map((s) => s.unread_count)).toEqual([0, 0, 0]);
+    expect(rows.every((s) => !s.has_unread)).toBe(true);
+  });
+
+  // One failed read must not stop the others, but the caller still hears
+  // about it so it can say so.
+  it("reads the rest and rejects when one read fails", async () => {
+    markChatSessionRead.mockImplementation(async (id) => {
+      if (id === "s1") throw new Error("boom");
+    });
+    qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [
+      makeSession({ id: "s1" }),
+      makeSession({ id: "s2" }),
+    ]);
+
+    const { result } = renderHook(() => useMarkAllChatSessionsRead(), {
+      wrapper: createWrapper(qc),
+    });
+    await act(async () => {
+      await expect(result.current.mutateAsync(["s1", "s2"])).rejects.toThrow();
+    });
+    expect(markChatSessionRead).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("useSetChatSessionArchived", () => {
   let qc: QueryClient;

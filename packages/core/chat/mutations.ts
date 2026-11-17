@@ -219,6 +219,41 @@ export function useMarkChatSessionRead() {
 }
 
 /**
+ * Clears unread on every chat session that has any, one read per session (the
+ * server has no bulk read, and each read broadcasts its own chat:session_read
+ * to other devices). All rows drop to 0 optimistically; if any read fails the
+ * mutation rejects and the refetch restores the true counts.
+ */
+export function useMarkAllChatSessionsRead() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: async (sessionIds: string[]) => {
+      logger.info("markAllChatSessionsRead.start", { count: sessionIds.length });
+      const results = await Promise.allSettled(sessionIds.map((id) => api.markChatSessionRead(id)));
+      const failed = results.filter((r) => r.status === "rejected");
+      if (failed.length > 0) {
+        throw new Error(`failed to mark ${failed.length} of ${sessionIds.length} chats read`);
+      }
+    },
+    onMutate: async (sessionIds) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+      const ids = new Set(sessionIds);
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) =>
+        old?.map((s) => (ids.has(s.id) ? { ...s, has_unread: false, unread_count: 0 } : s)),
+      );
+    },
+    onError: (err) => {
+      logger.error("markAllChatSessionsRead.error", { err });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+/**
  * Renames a chat session. Optimistically swaps the title in the cached
  * list so the dropdown reflects the new label immediately; rolls back on
  * error. The matching `chat:session_updated` WS event keeps other
