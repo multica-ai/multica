@@ -74,6 +74,7 @@ make up               # Démarre l'environnement de ce checkout (C=api,web,daemo
 make status           # Affiche ce qui tourne et prouve qu'il s'agit de cet environnement
 make list             # Liste tous les environnements de cette machine
 make down             # Arrête les processus, conserve la base de données
+make down C=daemon    # Arrête uniquement les composants indiqués
 make destroy          # Arrête, puis supprime la base de données et libère l'emplacement
 make gc               # Nettoie les environnements expirés ou dont le répertoire n'existe plus
 make dev              # Prépare et démarre le checkout courant au premier plan

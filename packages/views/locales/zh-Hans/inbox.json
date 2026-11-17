@@ -40,7 +40,8 @@
     "archive": "归档",
     "unarchive": "取消归档",
     "open_in_new_tab": "在新标签页打开",
-    "delete": "删除"
+    "delete": "删除",
+    "unsubscribe_archive": "取消订阅并归档"
   },
   "list": {
     "loading_selection": "正在加载通知…",
@@ -122,8 +123,21 @@
   "toasts": {
     "source_context_retry_started": "已使用原始上下文开始重试",
     "archived": "已归档通知",
+    "archived_many_other": "已归档 {{count}} 条通知",
     "unarchived": "已恢复通知",
-    "deleted": "通知已删除"
+    "deleted": "通知已删除",
+    "unsubscribed_archived": "已取消订阅并归档",
+    "unsubscribed_archived_subtree": "已取消订阅此任务及其子任务",
+    "unsubscribed_hint": "之后的普通动态不会再进收件箱，@你时仍会通知",
+    "undo": "撤销"
+  },
+  "kept": {
+    "archived": "已归档",
+    "leaves": "离开后移出收件箱",
+    "filtered": "不再符合筛选",
+    "notification_archived": "通知已归档",
+    "next": "下一条",
+    "next_tooltip": "打开下一条：{{title}}"
   },
   "errors": {
     "archived_lookup_failed": "无法加载链接指向的通知",
@@ -140,7 +154,9 @@
     "unarchive_failed": "取消归档失败",
     "archived_load_failed": "无法加载已归档通知",
     "filters_load_failed": "无法加载筛选项",
-    "delete_failed": "无法删除通知，请重试。"
+    "delete_failed": "无法删除通知，请重试。",
+    "unsubscribe_archive_failed": "取消订阅失败",
+    "undo_unsubscribe_failed": "撤销失败"
   },
   "delete_dialog": {
     "title": "删除通知？",
@@ -148,6 +164,12 @@
     "issue_description": "当前视图中此任务的通知将被永久删除，任务和运行记录不受影响。",
     "cancel": "取消",
     "active_issue_description": "此任务在收件箱中的通知将被永久删除。此前归档的通知会保留，并重新显示在归档视图中。任务和运行记录不受影响。"
+  },
+  "unsubscribe": {
+    "title": "取消订阅并归档：不再收到它的订阅通知，@你时仍会通知",
+    "this_issue": "仅此任务",
+    "subtree_other": "此任务及其 {{count}} 个子任务",
+    "subtree_unknown": "此任务及其子任务"
   },
   "snooze": {
     "action": "延后",

@@ -60,7 +60,6 @@ import {
 } from "./hooks/use-inline-media-url";
 import { useDownloadAttachment } from "./use-download-attachment";
 import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
-import { InstallThemeButton, canBeThemeZip } from "./install-theme-button";
 import { useAttachmentDownloadState } from "./hooks/use-attachment-download-state";
 import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
 import { imageDimensions } from "./utils/image-metadata";
@@ -440,11 +439,6 @@ export function Attachment({
     );
   }
 
-  const themeAction =
-    !editable && !state.uploading && state.attachmentId && canBeThemeZip(state.filename, state.record?.size_bytes) ? (
-      <InstallThemeButton attachmentId={state.attachmentId} filename={state.filename} />
-    ) : undefined;
-
   if (layout === "card") {
     return (
       <>
@@ -461,7 +455,6 @@ export function Attachment({
           onPreview={openPreview}
           onDownload={handleDownload}
           onDelete={editable ? onDelete : undefined}
-          action={themeAction}
         />
         {preview.modal}
       </>
@@ -479,7 +472,6 @@ export function Attachment({
         onPreview={openPreview}
         onDownload={handleDownload}
         onDelete={editable ? onDelete : undefined}
-        action={themeAction}
         scopeRef={scopeRef}
       />
       {preview.modal}

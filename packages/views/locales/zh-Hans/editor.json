@@ -53,9 +53,11 @@
     "zoom_actual": "实际大小"
   },
   "attachment": {
-    "install_theme": "安装主题",
-    "install_theme_failed": "无法读取附件，请稍后重试。",
     "download_failed": "下载链接获取失败，请稍后重试。",
+    "copy_contents": "复制全文",
+    "contents_copied": "已复制全文",
+    "copy_failed": "无法复制全文",
+    "more_actions": "更多操作",
     "preview": "预览",
     "preview_loading": "加载预览中…",
     "preview_failed": "预览加载失败",
@@ -100,6 +102,7 @@
   "mention": {
     "group_users": "用户",
     "group_issues": "任务",
+    "group_projects": "项目",
     "all_members": "所有成员",
     "agent_badge": "智能体",
     "squad_badge": "小队",

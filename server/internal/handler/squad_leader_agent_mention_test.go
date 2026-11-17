@@ -33,7 +33,7 @@ func TestLeaderAgentMentionPreservesSelfTriggerRules(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			f := newSupplementFixture(t, "claude", "running", false)
 			squadID := assignMentionFixtureSquad(t, f)
-			dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id = $2, accountable_user_id = $2, originator_source = 'comment_source' WHERE id = $1`, f.taskID, testUserID)
+			dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id = $2, accountable_user_id = $2, originator_source = 'comment_source', delivered_comment_ids = ARRAY[trigger_comment_id] WHERE id = $1`, f.taskID, testUserID)
 			dbfx.Exec(t, `UPDATE agent_task_queue SET is_leader_task = $2, squad_id = $3 WHERE id = $1`,
 				f.taskID, mode != "same-squad-worker", squadID)
 			issueID := f.issueID
@@ -49,9 +49,17 @@ func TestLeaderAgentMentionPreservesSelfTriggerRules(t *testing.T) {
 			var created CommentResponse
 			testutil.Call(t, testHandler.CreateComment, r).Want(http.StatusCreated).JSON(&created)
 			n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task AND squad_id = $3`, issueID, f.agentID, squadID)
-			if mode == "leader" {
+			if mode != "cross-issue-leader" {
 				if n != 0 {
-					t.Fatalf("leader self-mention queued %d more leader turns: %+v", n, created.TriggerOutcomes)
+					t.Fatalf("same-issue %s self-mention queued %d more leader turns: %+v", mode, n, created.TriggerOutcomes)
+				}
+				outcome := findCommentOutcome(t, created.TriggerOutcomes, f.agentID)
+				if outcome.Status != DispatchDeferred || outcome.ReasonCode != ReasonAlreadyActive {
+					t.Fatalf("same-issue self-mention outcome: %+v", outcome)
+				}
+				completeTaskViaDaemon(t, f.taskID)
+				if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`, issueID, f.agentID); n != 0 {
+					t.Fatalf("same-issue %s self-mention replay queued %d turns", mode, n)
 				}
 			} else if n != 1 {
 				t.Fatalf("legitimate %s handoff queued %d leader turns: %+v", mode, n, created.TriggerOutcomes)

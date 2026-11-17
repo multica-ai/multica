@@ -233,7 +233,7 @@ function InvitationRow({
         highlighted ? "border-brand/50 bg-brand/5" : "border-border bg-card",
       )}
     >
-      <WorkspaceAvatar name={name} size="lg" className="rounded-md" />
+      <WorkspaceAvatar name={name} size="lg" radius="md" />
       <div className="min-w-0 flex-1 space-y-1">
         <div className="truncate font-medium">{name}</div>
         <div className="truncate text-caption text-muted-foreground">

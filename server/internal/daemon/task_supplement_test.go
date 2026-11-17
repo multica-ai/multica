@@ -214,3 +214,21 @@ func TestClaimTaskSupplementAdvertisesAuthorRendering(t *testing.T) {
 		t.Fatalf("claim = %+v", supplement)
 	}
 }
+
+func TestChatSupplementRetryPromptUsesResumeInputOnlyWithPriorSession(t *testing.T) {
+	resume := "original objective\n\npending guidance"
+	task := Task{ChatSessionID: "chat", PriorSessionID: "provider-session", ChatMessage: resume + "\n\ndelivered guidance", ChatResumeMessage: &resume}
+	if prompt := buildChatPrompt(task); strings.Contains(prompt, "delivered guidance") || !strings.Contains(prompt, "pending guidance") {
+		t.Fatalf("resume prompt: %s", prompt)
+	}
+	// The same task can fall back to a fresh provider session inside the daemon.
+	task.PriorSessionID = ""
+	if prompt := buildChatPrompt(task); !strings.Contains(prompt, "delivered guidance") {
+		t.Fatal("cold retry dropped guidance")
+	}
+	// A server without the optional field continues using its full input.
+	task.PriorSessionID, task.ChatResumeMessage = "provider-session", nil
+	if prompt := buildChatPrompt(task); !strings.Contains(prompt, "delivered guidance") {
+		t.Fatal("legacy payload lost input")
+	}
+}

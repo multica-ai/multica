@@ -53,9 +53,11 @@
     "zoom_actual": "Taille réelle"
   },
   "attachment": {
-    "install_theme": "Installer le thème",
-    "install_theme_failed": "Impossible de lire la pièce jointe. Réessayez dans un instant.",
     "download_failed": "Impossible d'obtenir un lien de téléchargement. Réessayez dans un instant.",
+    "copy_contents": "Copier le contenu",
+    "contents_copied": "Contenu copié",
+    "copy_failed": "Impossible de copier le contenu",
+    "more_actions": "Plus d’actions",
     "preview": "Aperçu",
     "preview_loading": "Chargement de l'aperçu…",
     "preview_failed": "Impossible de charger l'aperçu",
@@ -104,6 +106,7 @@
   "mention": {
     "group_users": "Utilisateurs",
     "group_issues": "Tâches",
+    "group_projects": "Projets",
     "all_members": "Tous les membres",
     "agent_badge": "Agent",
     "squad_badge": "Squad",

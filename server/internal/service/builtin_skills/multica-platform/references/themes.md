@@ -72,10 +72,11 @@ Desktop watches a themes folder in its user data:
 - **Anywhere else**, or when the user is on the web or another computer: zip
   the theme with `manifest.json` at the top of the zip as `<id>.zip`, and
   attach it to your reply (`multica attachment upload <path>` in a chat,
-  `--attachment <path>` on `multica issue comment add`). The attachment shows
-  **Install theme**, which runs the same checks and asks before installing.
-  For a follow-up, raise `version` and attach a new zip; installing it
-  replaces the previous one.
+  `--attachment <path>` on `multica issue comment add`). Tell the user to
+  download it and install it under Settings → Appearance → Make your own →
+  **Import theme** → Theme file (.zip), which runs the same checks and asks
+  before installing. For a follow-up, raise `version` and attach a new zip;
+  importing it replaces the previous one.
 
 In the reply, say where the theme went (the folder, or the attachment) and,
 for the folder, that it needs picking once; what the checker reported; and

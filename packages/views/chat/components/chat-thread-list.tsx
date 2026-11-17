@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlarmClock,
   Archive,
   ArchiveRestore,
   ChevronLeft,
@@ -23,7 +24,12 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
 import { api } from "@multica/core/api";
-import { pendingChatTasksOptions, chatKeys, sortChatSessions } from "@multica/core/chat/queries";
+import {
+  pendingChatTasksOptions,
+  chatKeys,
+  myChatWakeupsOptions,
+  sortChatSessions,
+} from "@multica/core/chat/queries";
 import {
   useDeleteChatSession,
   useSetChatSessionArchived,
@@ -160,6 +166,11 @@ export function ChatThreadList({
   const queryClient = useQueryClient();
 
   const { data: pending } = useQuery(pendingChatTasksOptions(wsId));
+  const { data: myWakeups } = useQuery(myChatWakeupsOptions(wsId));
+  const waitingSessionIds = useMemo(
+    () => new Set((myWakeups ?? []).filter((w) => w.status === "active").map((w) => w.chat_session_id)),
+    [myWakeups],
+  );
   const pendingTaskBySessionId = useMemo(
     () => new Map((pending?.tasks ?? []).map((task) => [task.chat_session_id, task])),
     [pending],
@@ -353,6 +364,12 @@ export function ChatThreadList({
       );
     } else if (last?.failure_reason) {
       previewNode = <span className="block truncate text-destructive">{t(($) => $.list.failed)}</span>;
+    } else if (last?.message_kind === "wakeup") {
+      previewNode = (
+        <span className="block truncate italic text-muted-foreground">
+          {t(($) => $.list.wakeup_preview)}
+        </span>
+      );
     } else if (last?.message_kind === "no_response") {
       // A no_response turn stores a non-empty English fallback as its content,
       // so the preview is never blank even on older clients; new clients show a
@@ -444,6 +461,12 @@ export function ChatThreadList({
               <Pin
                 aria-label={t(($) => $.list.pinned)}
                 className="size-3 shrink-0 -rotate-45 fill-current text-muted-foreground"
+              />
+            )}
+            {waitingSessionIds.has(session.id) && (
+              <AlarmClock
+                aria-label={t(($) => $.list.wakeup_active)}
+                className="size-3 shrink-0 text-brand"
               />
             )}
             {isRenaming ? (

@@ -95,6 +95,41 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 /**
+ * Copy text in two clipboard channels: a plain-text rendering and an HTML one.
+ *
+ * Used by "Copy link with title", where rich targets (docs, email, chat) should
+ * paste the anchor while plain-text targets get the Markdown link. Targets
+ * that only understand plain text, and browsers without the async Clipboard
+ * API or `ClipboardItem`, receive the plain-text channel through `copyText`.
+ *
+ * @returns `true` on success, `false` on failure.
+ */
+export async function copyTextAndHtml(
+  text: string,
+  html: string,
+): Promise<boolean> {
+  if (
+    typeof navigator !== "undefined" &&
+    navigator.clipboard?.write &&
+    typeof ClipboardItem !== "undefined"
+  ) {
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([text], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+        }),
+      ]);
+      return true;
+    } catch {
+      // Permission denied / document not focused / item rejected — fall back
+      // to plain text so the link still lands on the clipboard.
+    }
+  }
+  return copyText(text);
+}
+
+/**
  * Copy the image at `url` to the clipboard as a PNG.
  *
  * Reads the bytes with `fetch`, so the URL has to be readable from script:

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { notificationPreferenceKeys } from "@multica/core/notification-preferences/queries";
@@ -19,12 +20,16 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
 }));
+const { mutate } = vi.hoisted(() => ({ mutate: vi.fn() }));
 vi.mock("@multica/core/notification-preferences/mutations", () => ({
-  useUpdateNotificationPreferences: () => ({ mutate: vi.fn() }),
+  useUpdateNotificationPreferences: () => ({ mutate }),
 }));
 vi.mock("./browser-notification-setting", () => ({ BrowserNotificationSetting: () => null }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mutate.mockReset();
+});
 
 function renderTab(preferences: Record<string, string> = {}) {
   const qc = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
@@ -53,6 +58,7 @@ describe("Inbox notification settings", () => {
       "Mentions",
       "Reactions",
       "Issues you subscribe to",
+      "Other people's issues",
       "Status changes",
       "Comments",
       "Priority & Due date",
@@ -63,6 +69,34 @@ describe("Inbox notification settings", () => {
     ]);
     expect(within(inbox).getByRole("switch", { name: "Priority & Due date" })).not.toBeChecked();
     expect(within(inbox).getByRole("switch", { name: "Comments" })).toBeChecked();
+  });
+
+  it("leaves status changes off until you turn them on", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    const statusChanges = within(screen.getByRole("region", { name: "Inbox" })).getByRole("switch", {
+      name: "Status changes",
+    });
+    expect(statusChanges).not.toBeChecked();
+
+    await user.click(statusChanges);
+    expect(mutate).toHaveBeenCalledWith({ status_changes: "all" }, expect.anything());
+  });
+
+  it("shows status changes on once you turned them on", () => {
+    renderTab({ status_changes: "all" });
+    const inbox = screen.getByRole("region", { name: "Inbox" });
+    expect(within(inbox).getByRole("switch", { name: "Status changes" })).toBeChecked();
+  });
+
+  it.each<{ preferences: Record<string, string>; shown: string }>([
+    { preferences: {}, shown: "Key updates only" },
+    { preferences: { others_issues: "key_updates" }, shown: "Key updates only" },
+    { preferences: { others_issues: "all" }, shown: "All activity" },
+  ])("shows how much of other people's issues reaches you: %j", ({ preferences, shown }) => {
+    renderTab(preferences);
+    const inbox = screen.getByRole("region", { name: "Inbox" });
+    expect(within(inbox).getByRole("combobox", { name: "Other people's issues" })).toHaveTextContent(shown);
   });
 
   it("explains how notifications leave the Inbox, with a way to the archived ones", () => {

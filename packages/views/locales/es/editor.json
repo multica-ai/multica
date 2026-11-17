@@ -53,9 +53,11 @@
     "zoom_actual": "Tamaño real"
   },
   "attachment": {
-    "install_theme": "Instalar tema",
-    "install_theme_failed": "No se pudo leer el adjunto. Inténtalo de nuevo en un momento.",
     "download_failed": "No se ha podido obtener un enlace de descarga. Inténtalo de nuevo en un momento.",
+    "copy_contents": "Copiar contenido",
+    "contents_copied": "Contenido copiado",
+    "copy_failed": "No se pudo copiar el contenido",
+    "more_actions": "Más acciones",
     "preview": "Vista previa",
     "preview_loading": "Cargando vista previa…",
     "preview_failed": "No se ha podido cargar la vista previa",
@@ -104,6 +106,7 @@
   "mention": {
     "group_users": "Usuarios",
     "group_issues": "Tareas",
+    "group_projects": "Proyectos",
     "all_members": "Todos los miembros",
     "agent_badge": "Agente",
     "squad_badge": "Squad",

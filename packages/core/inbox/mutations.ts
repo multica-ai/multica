@@ -4,6 +4,8 @@ import { api } from "../api";
 import { inboxKeys, mapArchivedInboxCache, patchArchivedInboxCaches, type ArchivedInboxCache } from "./queries";
 import { onInboxInvalidate, onInboxSummaryInvalidate } from "./ws-updaters";
 import { useWorkspaceId } from "../hooks";
+import { issueKeys } from "../issues/queries";
+import { refreshSubscribedIssues } from "../issues/subscribed";
 import type { InboxItem, SnoozedInboxIssue } from "../types";
 
 /**
@@ -220,6 +222,88 @@ export function useUnarchiveInbox() {
   });
 }
 
+export type InboxUnsubscribeScope = "issue" | "subtree";
+
+/** Subscription state changed for the viewer: re-read everything derived from it. */
+function refreshAfterSubscriptionWrite(qc: QueryClient, wsId: string) {
+  refreshInboxAfterWrite(qc, wsId);
+  qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+  void refreshSubscribedIssues(qc, wsId);
+}
+
+/**
+ * Leave the issue an inbox item is about, then archive the item: the one-step
+ * "stop telling me about this" for issues the viewer is only watching.
+ *
+ * Unsubscribes first so a failed unsubscribe never archives — an archived row
+ * whose issue keeps notifying would read as the action having worked. The row
+ * leaves the list optimistically, like a plain archive.
+ */
+export interface UnsubscribeArchiveVariables {
+  id: string;
+  issueId: string;
+  scope: InboxUnsubscribeScope;
+}
+
+/**
+ * The callbacks are the mutation's own, not `mutate`'s: the surfaces that fire
+ * this move on to the next notification at once, and per-call callbacks die
+ * with the component that made the call, taking the confirmation and its Undo
+ * (or the error) with them.
+ */
+export interface UnsubscribeArchiveCallbacks {
+  onSuccess?: (variables: UnsubscribeArchiveVariables) => void;
+  onError?: (error: Error, variables: UnsubscribeArchiveVariables) => void;
+}
+
+export function useUnsubscribeArchiveInbox(callbacks: UnsubscribeArchiveCallbacks = {}) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: async ({ id, issueId, scope }: UnsubscribeArchiveVariables) => {
+      if (scope === "subtree") await api.unsubscribeFromIssueSubtree(issueId);
+      else await api.unsubscribeFromIssue(issueId);
+      await api.archiveInbox(id);
+    },
+    onMutate: async ({ issueId }) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+        old?.map((item) => (item.issue_id === issueId ? { ...item, archived: true } : item)),
+      );
+      return { prev };
+    },
+    onSuccess: (_data, vars) => callbacks.onSuccess?.(vars),
+    onError: (err, vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+      callbacks.onError?.(err, vars);
+    },
+    onSettled: () => refreshAfterSubscriptionWrite(qc, wsId),
+  });
+}
+
+/**
+ * Undo for `useUnsubscribeArchiveInbox` with scope "issue": restore the
+ * subscription as it was, then the item. A plain function rather than a hook,
+ * because it runs from a toast that outlives the page that showed it.
+ *
+ * Restoring is not subscribing again: that would rewrite a commenter, delegated
+ * or project-inherited subscription to manual, and the issue would start
+ * delivering more than it did before the user left it.
+ */
+export async function undoUnsubscribeArchiveInbox(
+  qc: QueryClient,
+  wsId: string,
+  { id, issueId }: { id: string; issueId: string },
+): Promise<void> {
+  try {
+    await api.undoUnsubscribeFromIssue(issueId);
+    await api.unarchiveInbox(id);
+  } finally {
+    refreshAfterSubscriptionWrite(qc, wsId);
+  }
+}
+
 export function useMarkAllInboxRead() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -278,6 +362,24 @@ export function useArchiveCompletedInbox() {
       refreshInboxAfterWrite(qc, wsId);
     },
   });
+}
+
+/**
+ * Undo for a batch archive: restore the notifications it took, one request
+ * per row, since a restore brings back the whole issue's group. A plain
+ * function rather than a hook, because it runs from a toast that outlives the
+ * page that showed it.
+ */
+export async function undoArchiveInboxBatch(
+  qc: QueryClient,
+  wsId: string,
+  ids: readonly string[],
+): Promise<void> {
+  try {
+    await Promise.all(ids.map((id) => api.unarchiveInbox(id)));
+  } finally {
+    refreshInboxAfterWrite(qc, wsId);
+  }
 }
 
 /**

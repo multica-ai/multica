@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { VirtuosoMockContext } from "react-virtuoso";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { Agent, ChatSession } from "@multica/core/types";
@@ -53,7 +54,8 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
   return {
     ...actual,
-    useQuery: () => ({ data: { tasks: [] } }),
+    useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) =>
+      queryKey.includes("my-wakeups") ? { data: [] } : { data: { tasks: [] } },
     useQueryClient: () => ({ setQueryData: vi.fn(), invalidateQueries: vi.fn() }),
   };
 });
@@ -325,7 +327,7 @@ describe("ChatThreadList right-click menu", () => {
     archiveMutate.mockClear();
   });
 
-  it("opens the row's actions at the cursor and acts on that row", async () => {
+  it("keeps the row's actions available after pointer departure and acts on that row", async () => {
     const { onArchive, onSelectSession } = renderList("s1");
 
     fireEvent.contextMenu(screen.getByText("Chat s2"), { clientX: 30, clientY: 90 });
@@ -334,9 +336,52 @@ describe("ChatThreadList right-click menu", () => {
       Array.from(menu.querySelectorAll('[role="menuitem"]'), (el) => el.textContent?.trim()),
     ).toEqual([enChat.list.pin, ARCHIVE_LABEL, enChat.header.rename]);
 
+    fireEvent.mouseLeave(menu.parentElement!, { relatedTarget: document.body });
+    expect(screen.getByRole("menu")).toBeVisible();
+
     fireEvent.click(screen.getByRole("menuitem", { name: ARCHIVE_LABEL }));
     expect(onArchive).toHaveBeenCalledTimes(1);
     expect(onArchive.mock.calls[0]![0]).toMatchObject({ id: "s2" });
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("dismisses with Escape and reopens actions for a different chat", async () => {
+    const { onArchive } = renderList("s1");
+    fireEvent.contextMenu(screen.getByText("Chat s2"), { clientX: 30, clientY: 90 });
+    fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    fireEvent.contextMenu(screen.getByText("Chat s3"), { clientX: 40, clientY: 140 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: ARCHIVE_LABEL }));
+    expect(onArchive).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: "s3" }));
+  });
+
+  it("dismisses on an outside press without running a row action", async () => {
+    const { onArchive, onSelectSession } = renderList("s1");
+    fireEvent.contextMenu(screen.getByText("Chat s2"), { clientX: 30, clientY: 90 });
+    await screen.findByRole("menu");
+    await userEvent.click(document.body);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onArchive).not.toHaveBeenCalled();
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it("keeps the modal dismissal layer after pointer departure", async () => {
+    const { onArchive, onSelectSession } = renderList("s1");
+    fireEvent.contextMenu(screen.getByText("Chat s2"), { clientX: 30, clientY: 90 });
+    const menu = await screen.findByRole("menu");
+    // The real Base UI backdrop prevents an outside press reaching the row below.
+    const backdrop = document.querySelector<HTMLElement>(
+      'div[role="presentation"][data-base-ui-inert]',
+    )!;
+    expect(backdrop).toBeInTheDocument();
+
+    fireEvent.mouseLeave(menu.parentElement!, { relatedTarget: document.body });
+    expect(backdrop).toBeInTheDocument();
+    await userEvent.click(backdrop);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(onArchive).not.toHaveBeenCalled();
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 });

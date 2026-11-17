@@ -52,10 +52,10 @@
   "queue": {
     "title_other": "キュー内のメッセージ {{count}} 件",
     "clear": "すべて削除",
-    "steer": "指示",
-    "steer_unavailable": "現在の返信が開始されると指示できます",
+    "steer": "今すぐ送信（現在の返信を停止）",
+    "steer_unavailable": "現在の返信が開始すると利用できます",
     "steer_no_permission": "このエージェントを実行する権限がありません",
-    "steer_unavailable_toast": "現在は指示できません。キューを更新しています。",
+    "steer_unavailable_toast": "今すぐ送信できません。キューを更新しています。",
     "edit": "キュー内のメッセージを編集",
     "remove": "キューから削除",
     "more": "その他のキュー操作",
@@ -256,7 +256,9 @@
     "archive": "アーカイブ",
     "unarchive": "アーカイブ解除",
     "archived_title": "アーカイブ済み",
-    "row_actions_aria": "チャットの操作"
+    "row_actions_aria": "チャットの操作",
+    "wakeup_preview": "報告に戻りました",
+    "wakeup_active": "報告待ち"
   },
   "header": {
     "agent_settings": "エージェント設定",
@@ -264,5 +266,52 @@
     "delete": "チャットを削除",
     "archive": "チャットをアーカイブ",
     "unarchive": "アーカイブを解除"
+  },
+  "wakeup": {
+    "panel_title": "ウェイクアップ",
+    "panel_empty": "この会話にウェイクアップはありません",
+    "panel_ended": "最近終了",
+    "limits_hint": "ウェイクアップには必ず期限があります。待機は既定で 24 時間、最長 7 日です。先に期限が来た場合、エージェントは一度戻って現状を報告します。",
+    "strip_waiting": "待機中：{{title}}",
+    "card": "あとで報告：{{title}}",
+    "ends": "{{relative}}に期限",
+    "reminder_at": "{{relative}}にリマインド",
+    "next_check": "次の確認は{{relative}}",
+    "last_check": "前回の確認：{{note}}",
+    "cancel": "ウェイクアップをキャンセル",
+    "cancel_failed": "ウェイクアップをキャンセルできませんでした",
+    "retry": "再試行",
+    "retry_failed": "ウェイクアップを再試行できませんでした",
+    "status": {
+      "active": "待機中",
+      "fired": "報告済み",
+      "expired": "期限切れ",
+      "cancelled": "キャンセル済み",
+      "failed": "実行できませんでした"
+    },
+    "report": {
+      "waiting": "報告待ち",
+      "running": "報告中…",
+      "failed": "報告できませんでした"
+    },
+    "failure": {
+      "permission_revoked": "依頼者はこのエージェントを実行できなくなりました",
+      "access_lost": "監視対象が非公開プロジェクトに移動しました",
+      "dispatch_failed": "エージェントを実行できませんでした"
+    },
+    "kind": {
+      "condition": "条件が満たされたら",
+      "at": "リマインダー",
+      "check": "定期確認"
+    },
+    "divider": {
+      "condition": "報告に戻りました · 条件達成",
+      "at": "報告に戻りました · 指定時刻",
+      "check": "報告に戻りました · 確認",
+      "expired": "報告に戻りました · 期限到来",
+      "generic": "報告に戻りました"
+    },
+    "queue_label": "ウェイクアップ：{{title}}",
+    "queue_fallback": "ウェイクアップ"
   }
 }

@@ -55,6 +55,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 
 - TanStack Query owns API/server data. Zustand owns client state such as filters, drafts, modals, and tab layout; persist only durable preferences/drafts/layout, not server data or ephemeral UI state.
 - Web/desktop shared stores live in `packages/core/`. Desktop platform stores remain in desktop; mobile stores remain in mobile. Do not define stores in `packages/views/`.
+- Desktop tabs in a window share one set of Zustand stores and mount one at a time; a web tab gets its own. State describing how the current page was reached (source list, selection, highlight) must not assume one page: a click that opens a new tab leaves the current page's record intact and still records the target tab's own (`sidebarTabIssuesByWorkspace` in `packages/core/inbox/selection-store.ts`).
 - On web/desktop, workspace identity is route-driven; platform mirrors exist only for request headers, storage namespaces, and reconnects. React Context is for platform plumbing, not a second server-state store.
 - Among stores, only auth/workspace stores may call `api.*` directly; other server interactions belong in queries/mutations.
 - Workspace-scoped query keys include `wsId`; account-level keys remain account-scoped. Hooks needing workspace context accept `wsId` unless guaranteed to run under its provider.
@@ -62,6 +63,7 @@ Docs-only changes can use link/reference checks and `git diff --check`; state th
 - WebSocket events patch or invalidate Query caches, not server payloads in Zustand. Clearing client-owned pointers is allowed with one responder and a self-initiated guard when this client can cause the event.
 - Optimistic field patches require a predictable result, rare failure, trivial rollback, and staying on the current screen. Snapshot before patching, roll back on failure, and invalidate uncertain projections on settle.
 - Create/delete/leave and confirmation flows await the server before navigation or cleanup; do not optimistically delete entities. Exceptions: workspace leave (known debt under Desktop Rules) and mobile inbox mark-read (mobile instructions).
+- When the caller can unmount before the request settles (moving to the next item, closing a dialog or menu), attach toasts and follow-up work to the request promise (`mutateAsync().then(onSuccess, onError)`) or to `useMutation`'s own callbacks, not to per-call `mutate(vars, { onSuccess, onError })` callbacks, which React Query skips once the caller unmounts. Test these flows with the real mutation hook and a mocked API, unmounting the caller before the request settles (`packages/views/inbox/components/use-inbox-snooze.test.tsx`, `packages/views/issues/actions/__tests__/issue-inbox-actions.test.tsx`).
 - Message sends use visible pending state and retry on failure.
 
 ## API Compatibility
@@ -79,6 +81,15 @@ Installed desktop clients may talk to newer backends. Preserve response compatib
 - Register every concurrent index build in `server/cmd/migrate/main.go` so an interrupted build's INVALID index is dropped before retry: up-direction builds in `concurrentIndexCleanups`, down-direction rebuilds in `concurrentDownIndexCleanups` (version → index name).
 - Before pushing a migration, rebase onto the latest `origin/main`, number it as the current highest prefix plus one, and run `go test ./cmd/migrate ./internal/migrations` from `server/`.
 - Conditionally skipped migrations are still recorded in `schema_migrations`. Later DDL touching conditional objects must be idempotent (`IF EXISTS` / `IF NOT EXISTS`); document recovery if the missing object would break runtime behavior.
+
+## Row Lock Order
+
+Task writes and runtime-side paths lock the same `agent`, `agent_runtime`, `workspace`, and `issue` rows; two paths taking a pair in opposite orders with conflicting modes deadlock (MUL-9501).
+
+- Task enqueue order: the `agent` row first, then `lock_task_owner_rows` (migration 284) inside the writing statement takes FOR KEY SHARE on the workspace, issue, and runtime rows. New enqueue paths keep this order.
+- A path that locks `agent_runtime` before `agent` must let that FOR KEY SHARE through. To exclude only UPDATE/DELETE of the runtime, use FOR NO KEY UPDATE (`LockAgentRuntimeForClaimDelivery`, `LockAgentRuntimeForAccessChange`). Use FOR UPDATE (`LockAgentRuntime`) only when new rows must be stopped from referencing the runtime: runtime delete and teardown.
+- A new path that takes these rows in the reverse order ships with a test that forces the interleaving, as `server/internal/handler/chat_send_claim_deadlock_test.go` does.
+- Known, unfixed: runtime delete and teardown (`TeardownRuntime`, the runtime delete handlers, the runtime GC sweeper) take `LockAgentRuntime`, then the agents via `ListUserAgentsByRuntimeForUpdate` — the reverse of enqueue order. It can only deadlock with an enqueue while that runtime is being deleted.
 
 ## Backend UUID Rules
 

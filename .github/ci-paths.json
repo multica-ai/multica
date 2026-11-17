@@ -31,6 +31,7 @@
   "backend": [
     "server/**",
     "packages/core/runtimes/cli-version.ts",
+    "packages/core/types/inbox.ts",
     ".multica/environments.toml",
     "examples/plugins/**",
     ".env.example",
@@ -48,6 +49,7 @@
   "sqlc": [
     "server/pkg/db/queries/**",
     "server/pkg/db/generated/**",
+    "server/ee/**",
     "server/migrations/**",
     "server/sqlc.yaml",
     "Makefile",
@@ -100,6 +102,11 @@
     ".github/ci-paths.json"
   ],
   "scripts": [
+    ".goreleaser.yml",
+    ".github/workflows/release.yml",
+    ".github/workflows/promote-release.yml",
+    "scripts/promote-release.mjs",
+    "scripts/promote-release.test.mjs",
     "scripts/generate-attachment-text-preview.mjs",
     "scripts/generate-reserved-slugs.mjs",
     "scripts/selfhost-config.test.sh",

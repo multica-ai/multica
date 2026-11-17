@@ -1,7 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import { ApiError } from "@multica/core/api";
 import type { AgentTask, InboxItem } from "@multica/core/types";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
@@ -22,6 +21,7 @@ const listData: { active: InboxItem[]; archived: InboxItem[]; lookup?: InboxItem
   tasks: [],
 };
 
+const NO_SNOOZED: never[] = [];
 const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
 const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
 const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn() }));
@@ -33,7 +33,8 @@ vi.mock("@tanstack/react-query", () => ({
     return ({
     data: options.queryKey.includes("archived")
       ? { items: listData.lookup ?? listData.archived, hasMore: false, nextCursor: null }
-      : options.queryKey.includes("agent-task-snapshot") ? listData.tasks : listData.active,
+      : options.queryKey.includes("agent-task-snapshot") ? listData.tasks
+      : options.queryKey.includes("snoozed") ? NO_SNOOZED : listData.active,
     isLoading: false,
     isError: false,
     refetch: vi.fn(),
@@ -76,6 +77,7 @@ vi.mock("@multica/core/inbox/queries", () => ({
   inboxListOptions: () => ({ queryKey: ["inbox", "workspace-1", "list"] }),
   archivedInboxPagesOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "pages"] }),
   archivedInboxLookupOptions: () => ({ queryKey: ["inbox", "workspace-1", "archived", "lookup"] }),
+  snoozedInboxOptions: () => ({ queryKey: ["inbox", "workspace-1", "snoozed"] }),
   deduplicateInboxItems: (items: InboxItem[]) => items.filter((i) => !i.archived),
   deduplicateArchivedInboxItems: (items: InboxItem[]) => items.filter((i) => i.archived),
   useInboxUnreadCount: () => 2,
@@ -88,27 +90,31 @@ const markUnreadMutate = vi.fn();
 const archiveMutate = vi.fn();
 const unarchiveMutate = vi.fn();
 const retrySourceContextMutateAsync = vi.fn();
-const showIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 const showAutopilotQuotaRecoveryPrompt = vi.hoisted(() => vi.fn());
 
-vi.mock("../../modals/use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: (reason?: string) =>
-    reason === "autopilot_quota"
-      ? showAutopilotQuotaRecoveryPrompt
-      : showIssueLimitUpgradePrompt,
+vi.mock("../../modals/use-limit-recovery-prompt", () => ({
+  useLimitRecoveryPrompt: () => showAutopilotQuotaRecoveryPrompt,
 }));
 
 vi.mock("@multica/core/inbox/mutations", () => {
-  const mutation = () => ({ mutate: vi.fn() });
+  const mutation = () => ({ mutate: vi.fn(), mutateAsync: vi.fn(() => Promise.resolve()) });
+  // The shared archive handlers await the request; settle it through the spy's callbacks.
+  const settled = (spy: typeof archiveMutate) => (id: string) =>
+    new Promise<void>((resolve, reject) => spy(id, { onSuccess: resolve, onError: reject }));
   return {
     useMarkInboxRead: () => ({ mutate: markReadMutate }),
     useMarkInboxUnread: () => ({ mutate: markUnreadMutate }),
-    useArchiveInbox: () => ({ mutate: archiveMutate }),
-    useUnarchiveInbox: () => ({ mutate: unarchiveMutate }),
+    useArchiveInbox: () => ({ mutate: archiveMutate, mutateAsync: settled(archiveMutate) }),
+    useUnarchiveInbox: () => ({ mutate: unarchiveMutate, mutateAsync: settled(unarchiveMutate) }),
+    useSnoozeInbox: mutation,
+    useUnsnoozeInbox: mutation,
+    cachedInboxSnoozedUntil: () => null,
     useMarkAllInboxRead: mutation,
     useArchiveAllInbox: mutation,
     useArchiveAllReadInbox: mutation,
     useArchiveCompletedInbox: mutation,
+    useUnsubscribeArchiveInbox: mutation,
+    undoUnsubscribeArchiveInbox: vi.fn(),
     useRetrySourceContextQuickCreate: () => ({
       mutateAsync: retrySourceContextMutateAsync,
       isPending: false,
@@ -226,7 +232,7 @@ vi.mock("./autopilot-quota-notice", () => ({
     </button>
   ),
 }));
-vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }) }));
+vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }), useLocale: () => "en" }));
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {
   return {
@@ -252,7 +258,7 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
 }
 
 function reset() {
-  useInboxSelectionStore.setState({ lastResolvedKeyByWorkspace: {} });
+  useInboxSelectionStore.setState({ lastResolvedKeyByWorkspace: {}, heldRows: {}, leftRowKeyByWorkspace: {} });
   listData.active = [];
   listData.archived = [];
   listData.lookup = undefined;
@@ -269,7 +275,6 @@ function reset() {
   unarchiveMutate.mockClear();
   retrySourceContextMutateAsync.mockReset();
   retrySourceContextMutateAsync.mockResolvedValue({});
-  showIssueLimitUpgradePrompt.mockClear();
   showAutopilotQuotaRecoveryPrompt.mockClear();
   modalState.modal = null;
   vi.mocked(toast.success).mockClear();
@@ -870,40 +875,6 @@ describe("InboxPage", () => {
     fireEvent.click(screen.getByTestId("autopilot-quota-recovery"));
 
     expect(showAutopilotQuotaRecoveryPrompt).toHaveBeenCalledTimes(1);
-    expect(showIssueLimitUpgradePrompt).not.toHaveBeenCalled();
-  });
-
-  it("shows issue-limit recovery when a source-context retry is rejected", async () => {
-    reset();
-    retrySourceContextMutateAsync.mockRejectedValue(
-      new ApiError(
-        "workspace has reached its issue limit",
-        402,
-        "Payment Required",
-        { code: "issue_limit_reached" },
-      ),
-    );
-    listData.active = [
-      item({
-        id: "source-context-limit",
-        issue_id: null,
-        type: "quick_create_failed",
-        details: {
-          task_id: "task-1",
-          source_context_id: "context-1",
-          original_prompt: "make a child",
-        },
-      }),
-    ];
-
-    render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-    fireEvent.click(screen.getByTestId("retry-source-context"));
-
-    await act(async () => undefined);
-    expect(showIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
-    expect(showAutopilotQuotaRecoveryPrompt).not.toHaveBeenCalled();
-    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("marks the opened notification read", () => {
@@ -963,6 +934,24 @@ describe("InboxPage", () => {
     rerender(<InboxPage />);
 
     expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
+    expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
+  });
+
+  it("keeps a phone's open notification in place once it is archived some other way", () => {
+    reset();
+    searchParams = new URLSearchParams("issue=issue-a");
+    listData.active = [
+      item({ id: "inbox-a", issue_id: "issue-a" }),
+      item({ id: "inbox-b", issue_id: "issue-b" }),
+    ];
+    const { rerender } = render(<InboxPage />);
+    expect(issueDetailProps.at(-1)?.notice).toBeFalsy();
+
+    listData.active = [item({ id: "inbox-b", issue_id: "issue-b" })];
+    rerender(<InboxPage />);
+
+    expect(screen.getByTestId("issue-detail")).toHaveTextContent("issue-a");
+    expect(issueDetailProps.at(-1)?.notice).toBeTruthy();
     expect(replace).not.toHaveBeenCalledWith("/acme/inbox");
   });
 
@@ -1188,35 +1177,36 @@ describe("InboxPage", () => {
       onError?: (err: unknown) => void;
     };
 
-    function settle(
+    async function settle(
       spy: typeof archiveMutate,
       outcome: "success" | "error",
       err: unknown = new Error("boom"),
     ) {
       const options = spy.mock.calls.at(-1)?.[1] as MutateOptions | undefined;
-      act(() => {
+      await act(async () => {
         if (outcome === "success") options?.onSuccess?.();
         else options?.onError?.(err);
       });
     }
 
-    it("confirms an archive from the row action", () => {
+    it("confirms an archive from the row action, with an undo", async () => {
       renderWithActiveItem();
       act(() => rowActions?.onAction("inbox-a"));
-      settle(archiveMutate, "success");
+      await settle(archiveMutate, "success");
+      expect(toast.success).toHaveBeenCalledWith("Inbox", { action: { label: "Inbox", onClick: expect.any(Function) } });
 
       expect(toast.success).toHaveBeenCalledTimes(1);
     });
 
-    it("confirms an archive driven by the shortcut", () => {
+    it("confirms an archive driven by the shortcut", async () => {
       renderWithOpenItem();
       fireEvent.keyDown(document, { key: "e" });
-      settle(archiveMutate, "success");
+      await settle(archiveMutate, "success");
 
       expect(toast.success).toHaveBeenCalledTimes(1);
     });
 
-    it("confirms a restore", () => {
+    it("confirms a restore", async () => {
       reset();
       searchParams = new URLSearchParams("view=archived");
       listData.archived = [
@@ -1225,15 +1215,15 @@ describe("InboxPage", () => {
 
       render(<InboxPage />);
       act(() => rowActions?.onAction("archived-1"));
-      settle(unarchiveMutate, "success");
+      await settle(unarchiveMutate, "success");
 
       expect(toast.success).toHaveBeenCalledTimes(1);
     });
 
-    it("reports a failed archive as a failure only", () => {
+    it("reports a failed archive as a failure only", async () => {
       renderWithActiveItem();
       act(() => rowActions?.onAction("inbox-a"));
-      settle(archiveMutate, "error");
+      await settle(archiveMutate, "error");
 
       expect(toast.error).toHaveBeenCalledTimes(1);
       expect(toast.success).not.toHaveBeenCalled();
