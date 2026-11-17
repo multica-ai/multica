@@ -607,7 +607,7 @@ class ApiClient {
         // collapse to the first value only.
         if (v.length > 0) search.set(k, v.map(String).join(","));
       } else {
-        search.set(k, String(v));
+        search.set(k === "sort_by" ? "sort" : k === "sort_direction" ? "direction" : k, String(v));
       }
     }
     const qs = search.toString();

@@ -85,6 +85,31 @@ describe("groupIssuesByStatus", () => {
 });
 
 describe("status grouping order", () => {
+  it("uses the requested workspace order despite reversed catalog positions", () => {
+    const keys = ["done", "blocked", "in_review", "in_progress", "todo", "backlog"];
+    const entries = keys.map((key, position) => ({ key, position })) as IssueStatusEntry[];
+    const rows = keys.map((key) => issue(key, key));
+    expect(groupIssuesByStatus(rows, entries, "workflow").map((section) => section.status)).toEqual([
+      "backlog", "todo", "in_progress", "in_review", "blocked", "done",
+    ]);
+  });
+
+  it("recognizes requested custom stage names while retaining unknown and cancelled sections", () => {
+    const entries = [
+      { key: "planning", name: "Plan", category: "unstarted", position: 7 },
+      { key: "working", name: "In Processing", category: "started", position: 6 },
+      { key: "reviewing", name: "In Reviewing", category: "started", position: 5 },
+      { key: "qa", name: "Quality", category: "started", position: 4 },
+    ] as IssueStatusEntry[];
+    const rows = [
+      ...entries.map((entry) => issue(entry.key, entry.key, entry.category)),
+      ...["done", "blocked", "todo", "cancelled"].map((key) => issue(key, key)),
+    ];
+    expect(groupIssuesByStatus(rows, entries, "workflow").map((section) => section.status)).toEqual([
+      "planning", "todo", "working", "qa", "reviewing", "blocked", "done", "cancelled",
+    ]);
+  });
+
   it("honors positions for custom and built-in rows inside fixed categories", () => {
     const entries = [
       { key: "qa", category: "started", position: -1 },

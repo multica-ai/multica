@@ -11,6 +11,11 @@ The bottom bar opens Inbox, Issues, Projects, Chat and More directly.
 My Issues is hidden from the bar. More contains account settings, the workspace
 switcher and pinned items.
 
+Issue lists load every server page. The workspace Issues tab orders status
+sections as Plan/Backlog, Todo, In Progress, In Review, Blocked and Done.
+Tap a status heading to collapse or expand its rows; its full count stays visible.
+Custom and cancelled statuses remain visible in their own sections.
+
 ## Just want to use it on your phone? (no development)
 
 Multica isn't on the App Store yet — until that changes, anyone who wants it on their iPhone builds from source. One command:

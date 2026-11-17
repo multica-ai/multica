@@ -112,7 +112,8 @@
   },
   "errors": {
     "create_failed": "创建任务失败",
-    "load_failed": "任务加载失败：{{message}}"
+    "load_failed": "任务加载失败：{{message}}",
+    "incomplete_list": "未能加载全部任务，请重试。"
   },
   "empty": {
     "filtered": "没有符合当前筛选条件的任务。",

@@ -77,6 +77,15 @@ describe("api.listIssues requester compatibility", () => {
     expect(fetchMock).toHaveBeenCalledTimes(supported ? 1 : 2);
     if (!supported) expect(String(fetchMock.mock.calls[1]?.[0])).toContain("creator_id=me");
   });
+  it("sends page ordering using the server's sort and direction parameters", async () => {
+    const fetchMock = vi.fn(async (_url: string) => Response.json({ issues: [], total: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.listIssues({ limit: 100, offset: 200, sort_by: "created_at", sort_direction: "asc" });
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      limit: "100", offset: "200", sort: "created_at", direction: "asc",
+    });
+  });
 });
 
 describe("api.sendChatMessage steering", () => {

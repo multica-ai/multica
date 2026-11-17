@@ -112,7 +112,8 @@
   },
   "errors": {
     "create_failed": "建立任務失敗",
-    "load_failed": "任務載入失敗：{{message}}"
+    "load_failed": "任務載入失敗：{{message}}",
+    "incomplete_list": "無法載入全部任務，請重試。"
   },
   "empty": {
     "filtered": "沒有符合當前篩選條件的任務。",

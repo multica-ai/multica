@@ -7,7 +7,7 @@
  * or invalidates local lists; each client receives its own server events.
  */
 import { queryOptions } from "@tanstack/react-query";
-import { api } from "@/data/api";
+import { fetchAllIssues } from "./all-issues";
 import {
   issueKeys,
   type MyIssuesFilter,
@@ -35,9 +35,6 @@ export const myIssueListOptions = (
 ) =>
   queryOptions({
     queryKey: issueKeys.myList(wsId, scope, filter),
-    queryFn: async ({ signal }) => {
-      const res = await api.listIssues(filter, { signal });
-      return res.issues;
-    },
+    queryFn: ({ signal }) => fetchAllIssues(wsId, filter, signal),
     enabled: !!wsId,
   });

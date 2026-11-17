@@ -114,7 +114,8 @@
   },
   "errors": {
     "create_failed": "Failed to create issue",
-    "load_failed": "Failed to load issues: {{message}}"
+    "load_failed": "Failed to load issues: {{message}}",
+    "incomplete_list": "Could not load all issues. Please try again."
   },
   "empty": {
     "filtered": "No issues match the current filters.",
