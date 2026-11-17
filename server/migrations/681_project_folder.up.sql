@@ -7,7 +7,7 @@
 -- the same transaction, and workspace teardown removes the folders with the
 -- projects. Clients treat a folder_id they cannot resolve as no folder.
 --
--- The name index is built concurrently in 684.
+-- The name index is built concurrently in 682.
 CREATE TABLE IF NOT EXISTS project_folder (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL,
