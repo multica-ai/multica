@@ -25,22 +25,40 @@ func (s *taskSlotLease) release() {
 }
 
 func (s *taskSlotLease) acquire(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
+	if acquired, err := s.tryAcquire(ctx); acquired || err != nil {
 		return err
-	}
-	if s.held {
-		return nil
 	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case index := <-s.slots:
-		s.index = index
-		s.held = true
-		if err := ctx.Err(); err != nil {
-			s.release()
-			return err
-		}
-		return nil
+		return s.adopt(ctx, index)
 	}
+}
+
+func (s *taskSlotLease) tryAcquire(ctx context.Context) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if s.held {
+		return true, nil
+	}
+	select {
+	case index := <-s.slots:
+		err := s.adopt(ctx, index)
+		return err == nil, err
+	default:
+		return false, nil
+	}
+}
+
+func (s *taskSlotLease) adopt(ctx context.Context, index int) error {
+	s.index = index
+	s.held = true
+	// A ready token can win a select at the same time as cancellation.
+	if err := ctx.Err(); err != nil {
+		s.release()
+		return err
+	}
+	return nil
 }

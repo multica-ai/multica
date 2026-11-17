@@ -115,3 +115,31 @@ func TestTaskSlotLeaseAcquireObservesCancellationWhileBlocked(t *testing.T) {
 		t.Fatalf("free slots = %d, want 1", got)
 	}
 }
+
+func TestTaskSlotLeaseTryAcquireDoesNotWait(t *testing.T) {
+	t.Parallel()
+	slots := newTaskSlotSemaphore(1)
+	lease := newTaskSlotLease(slots, <-slots, nil)
+	lease.release()
+	other := <-slots
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if acquired, err := lease.tryAcquire(ctx); acquired || err != nil {
+		t.Fatalf("occupied slot: acquired=%v error=%v", acquired, err)
+	}
+	slots <- other
+	if acquired, err := lease.tryAcquire(ctx); !acquired || err != nil {
+		t.Fatalf("available slot: acquired=%v error=%v", acquired, err)
+	}
+	if acquired, err := lease.tryAcquire(ctx); !acquired || err != nil {
+		t.Fatalf("already held slot: acquired=%v error=%v", acquired, err)
+	}
+	lease.release()
+	cancel()
+	if acquired, err := lease.tryAcquire(ctx); acquired || !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled admission: acquired=%v error=%v", acquired, err)
+	}
+	if len(slots) != 1 {
+		t.Fatal("cancelled nonblocking admission consumed capacity")
+	}
+}

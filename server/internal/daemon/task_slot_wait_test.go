@@ -14,6 +14,18 @@ import (
 	"time"
 )
 
+type executionCapacityWaitWriter struct {
+	signal chan struct{}
+	once   sync.Once
+}
+
+func (w *executionCapacityWaitWriter) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), "local_directory: waiting for execution capacity") {
+		w.once.Do(func() { close(w.signal) })
+	}
+	return len(p), nil
+}
+
 func TestRunBatchPollerDirectoryWaitReleasesExecutionCapacity(t *testing.T) {
 	t.Parallel()
 
@@ -178,6 +190,7 @@ func TestDirectoryWaitCancellationWhileReacquiringSlot(t *testing.T) {
 				t.Fatal(err)
 			}
 			waiting := make(chan struct{})
+			waitingCapacity := make(chan struct{})
 			var waitingOnce sync.Once
 			var serverCancelled atomic.Bool
 			var prepareLeases atomic.Int64
@@ -205,7 +218,7 @@ func TestDirectoryWaitCancellationWhileReacquiringSlot(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
 			}))
 			t.Cleanup(srv.Close)
-			d := New(Config{ServerBaseURL: srv.URL, DaemonID: "daemon"}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+			d := New(Config{ServerBaseURL: srv.URL, DaemonID: "daemon"}, slog.New(slog.NewTextHandler(&executionCapacityWaitWriter{signal: waitingCapacity}, &slog.HandlerOptions{Level: slog.LevelDebug})))
 			d.cancelPollInterval = 10 * time.Millisecond
 			d.prepareLeaseRefresh = 5 * time.Millisecond
 			releaseHolder, err := d.localPathLocks.Acquire(context.Background(), realDir, "holder", nil)
@@ -249,20 +262,20 @@ func TestDirectoryWaitCancellationWhileReacquiringSlot(t *testing.T) {
 				t.Fatal("directory wait did not release its execution slot")
 			}
 			releaseHolder()
-			deadline := time.After(3 * time.Second)
-			for d.localPathLocks.Holder(realDir) != "waiter" {
-				select {
-				case <-deadline:
-					t.Fatal("waiter did not acquire the freed directory")
-				case <-time.After(time.Millisecond):
-				}
+			select {
+			case <-waitingCapacity:
+			case <-time.After(3 * time.Second):
+				t.Fatal("waiter did not reach execution-capacity admission")
+			}
+			if holder := d.localPathLocks.Holder(realDir); holder != "" {
+				t.Fatalf("waiter kept directory %q while waiting for execution capacity", holder)
 			}
 			previousLeases := prepareLeases.Load()
 			leaseDeadline := time.After(3 * time.Second)
 			for prepareLeases.Load() <= previousLeases {
 				select {
 				case <-leaseDeadline:
-					t.Fatal("prepare lease stopped while the waiter owned its directory but lacked an execution slot")
+					t.Fatal("prepare lease stopped while the task waited for execution capacity")
 				case <-time.After(time.Millisecond):
 				}
 			}
@@ -352,5 +365,95 @@ func TestDirectoryFastPathsRetainExecutionSlot(t *testing.T) {
 				t.Fatal("task did not return its slot on completion")
 			}
 		})
+	}
+}
+
+func TestDirectDirectoryWaitDoesNotBlockWorktreeSnapshot(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := json.Marshal(localDirectoryRef{LocalPath: dir, DaemonID: "daemon"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting := make(chan struct{})
+	waitingCapacity := make(chan struct{})
+	var waitingOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/wait-local-directory") {
+			waitingOnce.Do(func() { close(waiting) })
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "dispatched"})
+	}))
+	t.Cleanup(srv.Close)
+	d := New(Config{ServerBaseURL: srv.URL, DaemonID: "daemon"}, slog.New(slog.NewTextHandler(&executionCapacityWaitWriter{signal: waitingCapacity}, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	d.cancelPollInterval = time.Hour
+	releaseInitial, err := d.localPathLocks.Acquire(context.Background(), realDir, "initial", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	slots := newTaskSlotSemaphore(1)
+	lease := newTaskSlotLease(slots, <-slots, nil)
+	directDone := make(chan bool, 1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		release, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, Task{ID: "direct", ProjectResources: []ProjectResourceData{{ID: "resource", ResourceType: localDirectoryResourceType, ResourceRef: ref}}}, d.logger, lease)
+		if release != nil {
+			release()
+		}
+		lease.release()
+		directDone <- abort
+	}()
+	t.Cleanup(func() {
+		cancel()
+		releaseInitial()
+		wg.Wait()
+	})
+	select {
+	case <-waiting:
+	case <-ctx.Done():
+		t.Fatal("Direct task did not park behind the initial directory holder")
+	}
+	var snapshotSlot int
+	select {
+	case snapshotSlot = <-slots:
+	case <-ctx.Done():
+		t.Fatal("Direct waiter did not return its execution capacity")
+	}
+	snapshotDone := make(chan error, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer func() { slots <- snapshotSlot }()
+		select {
+		case <-waitingCapacity:
+		case <-ctx.Done():
+			snapshotDone <- ctx.Err()
+			return
+		}
+		// Worktree preparation already owns its execution slot when it takes
+		// this same mutex to snapshot a source also used in Direct mode.
+		release, err := d.localPathLocks.Acquire(ctx, realDir, "snapshot", nil)
+		if release != nil {
+			release()
+		}
+		snapshotDone <- err
+	}()
+	releaseInitial()
+	if err := <-snapshotDone; err != nil || ctx.Err() != nil {
+		t.Fatalf("worktree snapshot could not progress while Direct waited for its slot: %v", err)
+	}
+	if abort := <-directDone; abort || ctx.Err() != nil {
+		t.Fatal("Direct task did not reacquire its directory and capacity after the snapshot")
+	}
+	if got := len(slots); got != 1 {
+		t.Fatalf("free slots after mixed-mode preparation = %d, want 1", got)
 	}
 }
