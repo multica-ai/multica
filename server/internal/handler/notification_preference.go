@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -70,7 +71,7 @@ func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Requ
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"workspace_id": workspaceID,
-				"preferences":  map[string]any{},
+				"preferences":  inbox.WithDefaults(nil),
 			})
 			return
 		}
@@ -78,16 +79,7 @@ func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to get notification preferences")
 		return
 	}
-
-	var prefs map[string]string
-	if err := json.Unmarshal(pref.Preferences, &prefs); err != nil {
-		prefs = map[string]string{}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"workspace_id": workspaceID,
-		"preferences":  prefs,
-	})
+	writeNotificationPreferenceResponse(w, workspaceID, pref)
 }
 
 type updateNotifPrefRequest struct {
@@ -125,6 +117,9 @@ func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request)
 	return prefsJSON, true
 }
 
+// writeNotificationPreferenceResponse answers with the stored preferences plus
+// the groups muted by default (inbox.WithDefaults), so every client renders
+// those switches as off whichever defaults it was built with.
 func writeNotificationPreferenceResponse(
 	w http.ResponseWriter,
 	workspaceID string,
@@ -137,7 +132,7 @@ func writeNotificationPreferenceResponse(
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"workspace_id": workspaceID,
-		"preferences":  prefs,
+		"preferences":  inbox.WithDefaults(prefs),
 	})
 }
 

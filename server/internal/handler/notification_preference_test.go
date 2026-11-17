@@ -61,7 +61,7 @@ func TestPatchNotificationPreferencesMergesWithoutReplacing(t *testing.T) {
 	testHandler.UpdateNotificationPreferences(
 		putRecorder,
 		notificationPreferenceRequest(t, http.MethodPut, map[string]string{
-			"status_changes": "muted",
+			"updates": "muted",
 		}),
 	)
 	if putRecorder.Code != http.StatusOK {
@@ -90,8 +90,8 @@ func TestPatchNotificationPreferencesMergesWithoutReplacing(t *testing.T) {
 	if response.WorkspaceID != testWorkspaceID {
 		t.Fatalf("workspace_id = %q, want %q", response.WorkspaceID, testWorkspaceID)
 	}
-	if response.Preferences["status_changes"] != "muted" {
-		t.Fatalf("status_changes was replaced: %#v", response.Preferences)
+	if response.Preferences["updates"] != "muted" {
+		t.Fatalf("updates was replaced: %#v", response.Preferences)
 	}
 	if response.Preferences["comments"] != "muted" {
 		t.Fatalf("comments patch missing: %#v", response.Preferences)
@@ -123,8 +123,75 @@ func TestPatchNotificationPreferencesMergesWithoutReplacing(t *testing.T) {
 	if err := json.Unmarshal(persisted, &preferences); err != nil {
 		t.Fatalf("decode persisted preference: %v", err)
 	}
-	if preferences["status_changes"] != "all" || preferences["comments"] != "muted" {
+	if preferences["status_changes"] != "all" || preferences["comments"] != "muted" || preferences["updates"] != "muted" {
 		t.Fatalf("unexpected persisted preferences: %#v", preferences)
+	}
+}
+
+// Status changes are muted by default (MUL-9449). Responses say so explicitly,
+// because installed clients read a missing key as "all" and would show the
+// switch on; storage stays sparse.
+func TestNotificationPreferencesReportStatusChangesMutedByDefault(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	reset := func() {
+		_, _ = testPool.Exec(ctx, `
+			DELETE FROM notification_preference
+			WHERE workspace_id = $1 AND user_id = $2
+		`, testWorkspaceID, testUserID)
+	}
+	reset()
+	t.Cleanup(reset)
+
+	call := func(method string, prefs map[string]string) map[string]string {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		switch method {
+		case http.MethodGet:
+			testHandler.GetNotificationPreferences(recorder, notificationPreferenceRequest(t, method, nil))
+		case http.MethodPatch:
+			testHandler.PatchNotificationPreferences(recorder, notificationPreferenceRequest(t, method, prefs))
+		}
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s: status=%d body=%s", method, recorder.Code, recorder.Body.String())
+		}
+		var response struct {
+			Preferences map[string]string `json:"preferences"`
+		}
+		if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+			t.Fatalf("%s: decode response: %v", method, err)
+		}
+		return response.Preferences
+	}
+
+	if got := call(http.MethodGet, nil); len(got) != 1 || got["status_changes"] != "muted" {
+		t.Fatalf("GET without a row = %#v, want status_changes muted", got)
+	}
+
+	if got := call(http.MethodPatch, map[string]string{"comments": "muted"}); got["status_changes"] != "muted" || got["comments"] != "muted" {
+		t.Fatalf("PATCH comments = %#v, want comments and the default status_changes muted", got)
+	}
+	var stored map[string]string
+	var raw []byte
+	if err := testPool.QueryRow(ctx, `
+		SELECT preferences FROM notification_preference
+		WHERE workspace_id = $1 AND user_id = $2
+	`, testWorkspaceID, testUserID).Scan(&raw); err != nil {
+		t.Fatalf("load persisted preference: %v", err)
+	}
+	if err := json.Unmarshal(raw, &stored); err != nil {
+		t.Fatalf("decode persisted preference: %v", err)
+	}
+	if _, ok := stored["status_changes"]; ok {
+		t.Fatalf("the default was persisted: %#v", stored)
+	}
+
+	call(http.MethodPatch, map[string]string{"status_changes": "all"})
+	if got := call(http.MethodGet, nil); got["status_changes"] != "all" || got["comments"] != "muted" {
+		t.Fatalf("GET after turning status changes on = %#v", got)
 	}
 }
 

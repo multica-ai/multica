@@ -103,7 +103,7 @@ describe("useUpdateNotificationPreferences", () => {
     queryClient.setQueryData(notificationPreferenceKeys.all(WORKSPACE_ID), {
       workspace_id: WORKSPACE_ID,
       preferences: {
-        status_changes: "muted",
+        assignments: "muted",
         comments: "muted",
       },
     });
@@ -118,7 +118,7 @@ describe("useUpdateNotificationPreferences", () => {
 
     await waitFor(() => {
       expect(updateNotificationPreferences).toHaveBeenCalledWith(
-        { status_changes: "all" },
+        { assignments: "all" },
         WORKSPACE_SLUG,
       );
     });
@@ -170,14 +170,14 @@ describe("useUpdateNotificationPreferences", () => {
     );
 
     act(() => {
-      result.current.mutate({ status_changes: "muted" });
+      result.current.mutate({ assignments: "muted" });
     });
     await waitFor(() => {
       expect(
         queryClient.getQueryData<NotificationPreferenceResponse>(
           notificationPreferenceKeys.all(WORKSPACE_ID),
         )?.preferences,
-      ).toEqual({ status_changes: "muted" });
+      ).toEqual({ assignments: "muted" });
     });
 
     rerender();
@@ -198,13 +198,13 @@ describe("useUpdateNotificationPreferences", () => {
     rerender();
     first.resolve({
       workspace_id: WORKSPACE_ID,
-      preferences: { status_changes: "muted" },
+      preferences: { assignments: "muted" },
     });
     await waitFor(() => {
       expect(updateNotificationPreferences).toHaveBeenCalledTimes(2);
     });
     expect(updateNotificationPreferences.mock.calls[1]).toEqual([
-      { status_changes: "all" },
+      { assignments: "all" },
       WORKSPACE_SLUG,
     ]);
 

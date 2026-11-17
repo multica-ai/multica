@@ -552,7 +552,7 @@
     "delegated_subscription_badge": "由智能体代你关注",
     "delegated_subscription_hint": "你的智能体代你创建了这个任务，因此你在关注它。待评审、完成或受阻时会通知你。",
     "key_updates_subscription_badge": "仅关键更新",
-    "key_updates_subscription_hint": "这是别人负责的任务，你是因为创建、评论或被 @ 才订阅的。只有 @你、回复你参与的讨论，以及待评审、受阻、完成时会通知你。",
+    "key_updates_subscription_hint": "这是别人负责的任务，你是因为创建、评论或被 @ 才订阅的。只有 @你、回复你参与的讨论，以及（打开状态变更时）待评审、受阻、完成时会通知你。",
     "key_updates_follow_all": "接收全部动态",
     "key_updates_follow_all_done": "之后会收到这个任务的全部动态",
     "key_updates_settings": "修改默认设置",
