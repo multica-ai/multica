@@ -563,6 +563,18 @@ describe("ApiClient schema fallback", () => {
       })).rejects.toMatchObject({ body: { code: "source_context_server_unsupported" } });
     });
 
+    it("rejects a malformed task rerun response", async () => {
+      stubFetchJson({ id: 42 }, 202);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.rerunTask("task-1", { fresh: true })).rejects.toThrow(
+        "Invalid task rerun response",
+      );
+      expect(fetch).toHaveBeenCalledWith(
+        "https://api.example.test/api/tasks/task-1/rerun",
+        expect.objectContaining({ method: "POST", body: JSON.stringify({ fresh: true }) }),
+      );
+    });
+
     it("rejects a malformed source-context retry response", async () => {
       stubFetchJson({ id: 42 }, 202);
       const client = new ApiClient("https://api.example.test");

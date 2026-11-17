@@ -857,6 +857,7 @@
     "retry_task_aria": "Reintentar ejecución",
     "retry_failed": "No se ha podido reintentar la ejecución",
     "retry_blocked": "No se reintentó: no tienes permiso para usar este agente",
+    "fresh_session_tooltip": "Volver a ejecutar en una sesión nueva",
     "transcript_tooltip": "Ver transcripción",
     "cancel_failed": "No se ha podido cancelar la ejecución",
     "trigger_retry": "Reintento",
@@ -907,6 +908,14 @@
     "running_note": " El trabajo en ejecución puede tardar unos segundos en detenerse del todo.",
     "keep": "Seguir ejecutando",
     "confirm": "Detener ejecución"
+  },
+  "fresh_session_dialog": {
+    "title": "¿Volver a ejecutar en una sesión nueva?",
+    "body": "El agente empieza de cero, sin la conversación de esta ejecución, en un directorio de trabajo nuevo. Las ejecuciones y los comentarios anteriores se conservan en la tarea. Si el agente sigue ejecutándose en esta tarea, la nueva ejecución espera a que termine.",
+    "cancel": "Cancelar",
+    "confirm": "Volver a ejecutar",
+    "started": "Nueva ejecución en cola en una sesión nueva",
+    "failed": "No se pudo volver a ejecutar en una sesión nueva"
   },
   "batch": {
     "selected": "{{count}} seleccionadas",
