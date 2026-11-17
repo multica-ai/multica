@@ -25,6 +25,8 @@ var historicalShareCRMOriginVersions = []string{
 	"662_issue_origin_sharecrm_chat_validate",
 	"665_issue_origin_sharecrm_chat",
 	"666_issue_origin_sharecrm_chat_validate",
+	"673_issue_origin_sharecrm_chat",
+	"674_issue_origin_sharecrm_chat_validate",
 }
 
 func TestIssueOriginUpgradeLedgerPaths(t *testing.T) {
@@ -72,6 +74,16 @@ func TestIssueOriginUpgradeLedgerPaths(t *testing.T) {
 			},
 			prepare: func(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 				prepareWeixinOnlyIssue(t, ctx, pool)
+			},
+		},
+		{
+			name: "shipped_673_674_sharecrm",
+			ledger: []string{
+				"673_issue_origin_sharecrm_chat",
+				"674_issue_origin_sharecrm_chat_validate",
+			},
+			prepare: func(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+				prepareShareCRMIssue(t, ctx, pool, true)
 			},
 		},
 	}
@@ -171,8 +183,11 @@ func TestEmptyDatabaseUpgradeAllowsChannelOriginsAndIsIdempotent(t *testing.T) {
 	assertValidatedChannelOrigins(t, ctx, pool)
 	insertChannelIssue(t, ctx, pool, "sharecrm_chat")
 	insertChannelIssue(t, ctx, pool, "weixin_chat")
-	assertLedger(t, ctx, pool, "675_runtime_rate_limit", true)
+	assertLedger(t, ctx, pool, "673_runtime_rate_limit", true)
 	assertLedger(t, ctx, pool, "665_runtime_rate_limit", false)
+	assertLedger(t, ctx, pool, "675_runtime_rate_limit", false)
+	assertLedger(t, ctx, pool, "681_issue_origin_sharecrm_chat", true)
+	assertLedger(t, ctx, pool, "682_issue_origin_sharecrm_chat_validate", true)
 	assertLedger(t, ctx, pool, "665_weixin_state", true)
 	assertRelation(t, ctx, pool, "runtime_rate_limit")
 	assertRelation(t, ctx, pool, "weixin_login_session")
@@ -198,13 +213,10 @@ func TestEmptyDatabaseUpgradeAllowsChannelOriginsAndIsIdempotent(t *testing.T) {
 	assertValidatedChannelOrigins(t, ctx, pool)
 }
 
-func TestRuntimeRateLimitRenumberDoesNotRebuildOrDropLegacyTable(t *testing.T) {
+func TestCurrentShareCRMReleaseUpgradesWithoutRebuildingRateLimit(t *testing.T) {
 	ctx, pool, schema := newOriginSandbox(t)
+	prepareShareCRMIssue(t, ctx, pool, true)
 	if _, err := pool.Exec(ctx, `
-		CREATE TABLE schema_migrations (
-			version TEXT PRIMARY KEY,
-			applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-		);
 		CREATE TABLE runtime_rate_limit (
 			runtime_id UUID PRIMARY KEY,
 			workspace_id UUID NOT NULL,
@@ -213,16 +225,25 @@ func TestRuntimeRateLimitRenumberDoesNotRebuildOrDropLegacyTable(t *testing.T) {
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
 		INSERT INTO runtime_rate_limit (runtime_id, workspace_id, snapshot, observed_at)
-		VALUES ('00000000-0000-4000-8000-000000000041', '00000000-0000-4000-8000-000000000042', '{}', now());
-		INSERT INTO schema_migrations (version) VALUES ('665_runtime_rate_limit')
+		VALUES ('00000000-0000-4000-8000-000000000041', '00000000-0000-4000-8000-000000000042', '{"kept":true}', now())
 	`); err != nil {
 		t.Fatal(err)
 	}
+	insertLedger(t, ctx, pool, append(append([]string{}, historicalShareCRMOriginVersions...),
+		"667_issue_origin_weixin_chat",
+		"668_issue_origin_weixin_chat_validate",
+		"675_runtime_rate_limit",
+	))
 	var originalOID uint32
 	if err := pool.QueryRow(ctx, `SELECT 'runtime_rate_limit'::regclass::oid`).Scan(&originalOID); err != nil {
 		t.Fatal(err)
 	}
-	files := realMigrationFiles(t, []string{"675_runtime_rate_limit"}, "up")
+	before := snapshotOrigins(t, ctx, pool)
+	files := realMigrationFiles(t, []string{
+		"673_runtime_rate_limit",
+		"681_issue_origin_sharecrm_chat",
+		"682_issue_origin_sharecrm_chat_validate",
+	}, "up")
 	options := runOptions{
 		Direction: "up", Files: files,
 		SchemaMigrationsTable: schema + ".schema_migrations",
@@ -239,63 +260,20 @@ func TestRuntimeRateLimitRenumberDoesNotRebuildOrDropLegacyTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if currentOID != originalOID {
-		t.Fatal("upgrade rebuilt runtime_rate_limit")
+		t.Fatal("upgrade rebuilt runtime_rate_limit already recorded as 675_runtime_rate_limit")
 	}
-	assertLedger(t, ctx, pool, "665_runtime_rate_limit", true)
-	assertLedger(t, ctx, pool, "675_runtime_rate_limit", true)
 	var snapshots int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM runtime_rate_limit`).Scan(&snapshots); err != nil || snapshots != 1 {
 		t.Fatalf("snapshots = %d, error = %v", snapshots, err)
 	}
-
-	options.Direction = "down"
-	options.Files = realMigrationFiles(t, []string{"675_runtime_rate_limit"}, "down")
-	if err := runMigrations(ctx, pool, options); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.QueryRow(ctx, `SELECT 'runtime_rate_limit'::regclass::oid`).Scan(&currentOID); err != nil {
-		t.Fatal(err)
-	}
-	if currentOID != originalOID {
-		t.Fatal("down of 675 dropped the table still recorded as 665_runtime_rate_limit")
-	}
-	assertLedger(t, ctx, pool, "675_runtime_rate_limit", false)
-	assertLedger(t, ctx, pool, "665_runtime_rate_limit", true)
-}
-
-func TestRuntimeRateLimitRenumberCreatesAndDropsOnFreshDatabase(t *testing.T) {
-	ctx, pool, schema := newOriginSandbox(t)
-	if _, err := pool.Exec(ctx, `
-		CREATE TABLE schema_migrations (
-			version TEXT PRIMARY KEY,
-			applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-		)
-	`); err != nil {
-		t.Fatal(err)
-	}
-	options := runOptions{
-		Direction:             "up",
-		Files:                 realMigrationFiles(t, []string{"675_runtime_rate_limit"}, "up"),
-		SchemaMigrationsTable: schema + ".schema_migrations",
-		AdvisoryLockKey:       testLockKey(),
-	}
-	if err := runMigrations(ctx, pool, options); err != nil {
-		t.Fatal(err)
-	}
-	assertRelation(t, ctx, pool, "runtime_rate_limit")
+	assertOriginsKept(t, ctx, pool, before)
+	assertNewChannelWrites(t, ctx, pool)
 	assertLedger(t, ctx, pool, "675_runtime_rate_limit", true)
-	options.Direction = "down"
-	options.Files = realMigrationFiles(t, []string{"675_runtime_rate_limit"}, "down")
-	if err := runMigrations(ctx, pool, options); err != nil {
-		t.Fatal(err)
-	}
-	var exists bool
-	if err := pool.QueryRow(ctx, `SELECT to_regclass('runtime_rate_limit') IS NOT NULL`).Scan(&exists); err != nil {
-		t.Fatal(err)
-	}
-	if exists {
-		t.Fatal("fresh 675 down left runtime_rate_limit behind")
-	}
+	assertLedger(t, ctx, pool, "673_runtime_rate_limit", true)
+	assertLedger(t, ctx, pool, "673_issue_origin_sharecrm_chat", true)
+	assertLedger(t, ctx, pool, "674_issue_origin_sharecrm_chat_validate", true)
+	assertLedger(t, ctx, pool, "681_issue_origin_sharecrm_chat", true)
+	assertLedger(t, ctx, pool, "682_issue_origin_sharecrm_chat_validate", true)
 }
 
 func prepareShareCRMIssue(t *testing.T, ctx context.Context, pool *pgxpool.Pool, validated bool) {
@@ -343,8 +321,8 @@ func runOriginMigrations(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	versions := []string{
 		"667_issue_origin_weixin_chat",
 		"668_issue_origin_weixin_chat_validate",
-		"673_issue_origin_sharecrm_chat",
-		"674_issue_origin_sharecrm_chat_validate",
+		"681_issue_origin_sharecrm_chat",
+		"682_issue_origin_sharecrm_chat_validate",
 	}
 	if err := runMigrations(ctx, pool, runOptions{
 		Direction:             "up",

@@ -129,6 +129,7 @@ func TestNotification_ProjectSubscriber_IssueEvents(t *testing.T) {
 	bothEmail := "notif-project-both@multica.ai"
 	bothID := createNotificationMember(t, bothEmail)
 	t.Cleanup(func() { cleanupTestUser(t, bothEmail) })
+	enableStatusChanges(t, watcherID, bothID)
 
 	projectID := createTestProject(t)
 	issueID := createProjectIssue(t, projectID)

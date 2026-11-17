@@ -298,7 +298,7 @@ multica runtime profile create --display-name "社内 Claude ラッパー" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` は現在のプロファイルをログイン時に起動するよう登録します。プラットフォームごとの違いは[ログイン時の自動起動](/daemon-runtimes#autostart)を参照してください。`runtime usage` は既定で 90 日分を集計し、`--days` は最大 365 です。`runtime update` はそのコンピューターのデーモンに CLI を指定のバージョンへ更新させ、`--wait` を付けると更新の完了を待ちます。更新の失敗、更新のタイムアウト、待機自体のタイムアウトでは、終了コードが非ゼロになります。`runtime profile create` は互換ツールを `--runtime-type` で指定します（古い `--protocol-family` も使えます）。固定引数は今のところ Web アプリでしか設定できません。
+`daemon autostart` は現在のプロファイルをログイン時に起動するよう登録します。プラットフォームごとの違いは[ログイン時の自動起動](/daemon-runtimes#autostart)を参照してください。`runtime usage` は既定で 90 日分を集計し、`--days` は最大 365 です。`runtime update` はそのコンピューターのデーモンに CLI を指定のバージョンへ更新させ、`--wait` を付けると更新の完了を待ちます。更新の失敗、更新のタイムアウト、待機自体のタイムアウトでは、終了コードが非ゼロになります。`runtime profile create` は互換ツールを `--runtime-type` で指定します（古い `--protocol-family` も使えます）。固定引数は今のところ Web アプリでしか設定できません。 `runtime profile create` は既定で現在のマシンに紐づけます。別の登録済みローカルマシンを選択するには `--daemon-id <id>` を指定します。 既存の未設定プロファイルは `multica runtime profile update <profile-id> --daemon-id <id>` でマシンに紐づけられます。
 
 アクティブなエージェントがまだ紐付いているランタイムの削除は、デフォルトで拒否されます。`multica runtime delete <id> --cascade` は、それらのエージェントをランタイムから解除して設定と履歴を保持し、アクティブな実行をキャンセルします。
 
@@ -345,6 +345,20 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
   {"event": "push"}
 ]
 ```
+
+各行にはアプリと同じ本文フィールドの `conditions` も指定できます。例えば、次のルールは `main` を対象とするドラフト以外の PR のみ受け付けます：
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+ルールごとに条件は最大 20 個、フィールドのパスは 256 文字、`in` の候補リストは 100 個までです。上限を超える条件でトリガーを作成・更新すると HTTP 400 が返されます。
 
 この例では、PR レビューの送信とすべての push イベントを受け入れます。`actions` を省略するか空の配列を指定すると、そのイベントのすべての action を受け入れます。
 
@@ -476,7 +490,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `env get/set <agent-id>` | カスタム環境変数の読み書き（エージェントの所有者、またはワークスペースの owner/admin。読み取りはすべて記録される） | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`。全体を置き換え、値が `****` のキーは元の値を保つ |
 | | `skills list/set/add <agent-id>` | 紐付けられたスキルを管理 | `--skill-ids`（`set` は全置換、`add` は追加） |
 | | `mcp list/add/enable/disable/remove <agent-id>` | ワークスペース MCP サーバーをこのエージェントに割り当て | server id は `workspace mcp list` から取得。ライブラリの項目はここで追加するまで機能しません。`disable` は割り当てを残したまま送信を停止します |
-| `autopilot` | `list/get/create/update/delete` | オートパイロットを管理 | `create`: `--title`、`--agent`、`--mode`（いずれも必須）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（繰り返し可） |
+| `autopilot` | `list/get/create/update/delete` | オートパイロットを管理 | `create`: `--title`、`--mode`（どちらも必須）、`--agent` / `--squad` / `--squad-id` のいずれか1つ（必須）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（繰り返し可） |
 | | `trigger <id>` | 手動で 1 回トリガー | |
 | | `runs <id>` | 実行履歴を表示 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | スケジュールと webhook のトリガーを管理 | `trigger-add`: `--kind`（`schedule` または `webhook`）、`--cron`、`--timezone`（既定は UTC）、`--label` |

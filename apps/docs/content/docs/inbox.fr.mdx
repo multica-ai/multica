@@ -21,7 +21,8 @@ Sur téléphone, le panneau Travail se trouve dans le tiroir. Sa section Boîte 
 Les notifications courantes incluent :
 
 - une tâche vous est assignée, ou vous est retirée ;
-- une tâche à laquelle vous êtes abonné reçoit un nouveau commentaire, ou son assigné, son statut, sa priorité ou ses dates changent (sur les tâches des autres, seulement les mises à jour clés par défaut ; voir plus bas) ;
+- une tâche à laquelle vous êtes abonné reçoit un nouveau commentaire, ou son assigné, sa priorité ou ses dates changent (sur les tâches des autres, seulement les mises à jour clés par défaut ; voir plus bas) ;
+- une tâche à laquelle vous êtes abonné change de statut, si vous avez activé **Changements de statut**, désactivé par défaut ;
 - quelqu'un vous @mentionne dans la description ou un commentaire d'une tâche ;
 - une tâche ou un commentaire que vous avez créé reçoit une réaction ;
 - une exécution d'agent échoue sur une tâche à laquelle vous êtes abonné ;
@@ -44,12 +45,12 @@ Ces participants sont automatiquement abonnés à une tâche :
 Changer l'assigné ne supprime pas les abonnements existants. Abonnez-vous ou désabonnez-vous à tout moment depuis la page de la tâche ; après le désabonnement, les mises à jour ordinaires n'arrivent plus dans votre boîte de réception, mais les @mentions directes vous notifient toujours individuellement.
 
 <Callout type="info">
-Lorsque le statut d'une sous-tâche change, les abonnés de la tâche parente sont également notifiés. Les commentaires, la priorité et les changements de dates d'une sous-tâche ne remontent pas à la tâche parente.
+Avec **Changements de statut** activé, le changement de statut d'une sous-tâche notifie aussi les abonnés de la tâche parente. Les commentaires, la priorité et les changements de dates d'une sous-tâche ne remontent pas à la tâche parente.
 </Callout>
 
 ## Tâches des autres
 
-Sur une tâche assignée à quelqu'un d'autre ou à son agent, un abonnement obtenu parce que vous l'avez créée, commentée ou y avez été mentionné n'apporte par défaut que les mises à jour clés : les @mentions, les réponses dans les fils auxquels vous avez participé et les statuts qui demandent une personne, comme `in_review`, `blocked` ou `done`. Les commentaires courants et les autres changements restent sur la tâche. Les tâches auxquelles vous vous êtes abonné vous-même, celles que vous suivez par leur projet et celles assignées à vous ou à vos agents apportent toujours toute l'activité.
+Sur une tâche assignée à quelqu'un d'autre ou à son agent, un abonnement obtenu parce que vous l'avez créée, commentée ou y avez été mentionné n'apporte par défaut que les mises à jour clés : les @mentions, les réponses dans les fils auxquels vous avez participé et, avec **Changements de statut** activé, les statuts qui demandent une personne, comme `in_review`, `blocked` ou `done`. Les commentaires courants et les autres changements restent sur la tâche. Les tâches auxquelles vous vous êtes abonné vous-même, celles que vous suivez par leur projet et celles assignées à vous ou à vos agents apportent toujours tous les types de notification que vous avez activés.
 
 La page de la tâche signale un tel abonnement par **Mises à jour clés**. Son menu propose **Recevoir toute l'activité**, qui en fait un abonnement explicite à cette tâche ; il n'est ensuite plus possible de revenir aux mises à jour clés pour cette tâche, seulement de se désabonner. **Modifier la valeur par défaut** ouvre **Paramètres → Notifications**, où **Tâches des autres**, en tête de **Tâches que vous suivez**, fait passer toutes ces tâches à **Toute l'activité**.
 
@@ -104,7 +105,7 @@ Reporter retire une tâche de votre boîte de réception jusqu'à l'heure choisi
 Tant qu'une tâche est reportée :
 
 - ses nouvelles notifications attendent avec elle et ne comptent pas dans le badge non lu. À son retour, la ligne indique **Report terminé** et le nombre de nouveautés arrivées entre-temps ;
-- elle revient plus tôt si quelqu'un vous mentionne nommément, si elle vous est assignée, si une exécution échoue, si une app demande votre action ou si toutes ses sous-tâches sont terminées. Les mentions `@all` et d'escouade ne la réveillent pas ;
+- elle revient plus tôt si quelqu'un vous mentionne nommément, si elle vous est assignée, si une exécution échoue, si une app demande votre action ou si toutes ses sous-tâches sont terminées. Les mentions `@all` ne la réveillent pas ;
 - **Tout marquer comme lu** et les actions d'archivage groupé l'ignorent. L'archiver met fin au report, tout comme terminer vous-même la tâche quand **Archiver les tâches que vous terminez** est activé ;
 - ouvrir la tâche depuis ailleurs ne la marque pas comme lue et ne met pas fin au report. Son en-tête indique quand elle revient ; ouvrez-le pour la faire revenir maintenant (`H`) ou changer l'heure.
 
@@ -145,7 +146,7 @@ En dessous, **Me notifier pour** active ou désactive chaque type de notificatio
 | **Projets que vous suivez** | Nouvelles tâches |
 | **Agents** | Activité des agents (exécutions en échec, et actions d'app demandées par un agent qui sont bloquées ou expirent) |
 
-Un type désactivé ne crée aucune notification, et le réactiver ne fait pas revenir ce que vous avez manqué ; les changements restent enregistrés sur la tâche. Quelques types, comme les résultats de création rapide et les mises en pause d'automatisation, ne relèvent pas de ces groupes et sont toujours envoyés. Les notifications système et du navigateur contrôlent les bannières sur le bureau et ne modifient pas la boîte de réception elle-même.
+**Changements de statut** est désactivé par défaut ; tous les autres types sont activés. Un type désactivé ne crée aucune notification, et le réactiver ne fait pas revenir ce que vous avez manqué ; les changements restent enregistrés sur la tâche. Quelques types, comme les résultats de création rapide et les mises en pause d'automatisation, ne relèvent pas de ces groupes et sont toujours envoyés. Les notifications système et du navigateur contrôlent les bannières sur le bureau et ne modifient pas la boîte de réception elle-même.
 
 ## Étapes suivantes
 

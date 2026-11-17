@@ -32,6 +32,8 @@ func TestSubscriberDeliveryMatchesFanout(t *testing.T) {
 	delegate := member("delivery-delegate@multica.ai")
 	optedIn := member("delivery-opted-in@multica.ai")
 	setOthersIssuesPref(t, optedIn, "all")
+	// Status changes are muted by default; this test is about the tiers.
+	enableStatusChanges(t, owner, bystander, follower, projectWatcher, delegate, optedIn)
 
 	projectID := createTestProject(t)
 	f := workspaceFixture(t)

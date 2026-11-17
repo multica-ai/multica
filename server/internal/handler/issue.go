@@ -3069,9 +3069,6 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
 	if err != nil {
-		if writeIssueLimitReached(w, err) {
-			return
-		}
 		if errors.Is(err, service.ErrProjectAccessDenied) {
 			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonProjectAccessBlocked)
 			return
@@ -3731,9 +3728,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if writeIssueCreatePropertyError(w, err) {
-		return
-	}
-	if writeIssueLimitReached(w, err) {
 		return
 	}
 	if writeIssueNumberCollision(w, err) {

@@ -14,7 +14,8 @@
     "upload_image": "画像をアップロード",
     "emoji_label": "絵文字",
     "more_emojis": "他の絵文字…",
-    "emoji_loading": "読み込み中…"
+    "emoji_loading": "読み込み中…",
+    "text_icon": "文字アイコン"
   },
   "avatar_crop": {
     "title": "アバターを編集",
@@ -28,6 +29,14 @@
     "uploading": "アップロード中…",
     "loading": "読み込み中…",
     "load_failed": "画像を読み込めませんでした"
+  },
+  "text_avatar": {
+    "title": "文字アイコン",
+    "preview": "プレビュー",
+    "text_label": "文字",
+    "text_hint": "1〜2文字（英字・数字・漢字など）。超えた分は切り捨てられます。",
+    "color_label": "色",
+    "render_failed": "アイコンを作成できませんでした。もう一度お試しください。"
   },
   "color_picker": {
     "saturation": "彩度と明度",

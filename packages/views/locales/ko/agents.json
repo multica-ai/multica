@@ -813,7 +813,7 @@
     "tool_kind_misc": "기타",
     "trigger_wakeup": "깨우기",
     "context_receipt_title": "받은 컨텍스트",
-    "context_receipt_summary_other": "소스 {{count}}개 · {{size}}",
+    "context_receipt_summary_other": "소스 {{count}}개",
     "context_receipt_model": "모델",
     "context_receipt_session": "세션",
     "context_receipt_session_resumed": "이전 세션을 재개함 (그 기록도 컨텍스트에 포함)",
@@ -827,7 +827,7 @@
     "context_receipt_col_delivery": "전달 방식",
     "context_receipt_col_load": "로드",
     "context_receipt_same_as_brief": "런타임 안내와 동일",
-    "context_receipt_footnote": "에이전트 시작 전에 daemon이 기록했습니다. 크기와 짧은 해시만 저장하며 내용은 저장하지 않습니다. \"검증됨\"은 이 런타임 버전에서 파일을 로드하는 것이 확인되었다는 뜻입니다. 스킬 크기와 해시는 실제로 기록된 전체 패키지를 기준으로 합니다.",
+    "context_receipt_footnote": "에이전트 시작 전에 daemon이 기록합니다. 크기와 짧은 해시만 저장하며 내용은 저장하지 않습니다. \"검증됨\"은 이 런타임 버전이 파일을 읽는지 테스트했음을 뜻합니다. skill 크기와 해시는 기록된 전체 패키지를 포함하며 파일 바이트 수는 모델이 실제로 읽은 내용을 뜻하지 않습니다.",
     "context_source_runtime_brief": "런타임 안내",
     "context_source_agent_instructions": "에이전트 지침",
     "context_source_project_description": "프로젝트 설명",
@@ -843,7 +843,13 @@
     "context_load_verified": "검증됨",
     "context_load_verified_other_version": "{{version}}에서만 검증됨",
     "context_load_unverified": "검증 안 됨",
-    "context_load_not_delivered": "전달 안 됨"
+    "context_load_not_delivered": "전달 안 됨",
+    "context_receipt_direct_bytes": "직접 입력: {{size}}",
+    "context_receipt_file_bytes": "디스크 파일: {{size}}",
+    "context_receipt_package": "패키지",
+    "context_receipt_instruction_file_bytes": "지침 파일: {{size}}",
+    "context_receipt_skill_package_bytes": "스킬 패키지: {{size}}",
+    "context_receipt_other_file_bytes": "기타 파일: {{size}}"
   },
   "task_failure": {
     "cancelled_by_system": "시스템에서 취소함",

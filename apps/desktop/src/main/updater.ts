@@ -2,6 +2,7 @@ import { autoUpdater, type UpdateDownloadedEvent } from "electron-updater";
 import { app, type BrowserWindow, type MessageBoxOptions, ipcMain } from "electron";
 import type {
   ManualUpdateCheckResult,
+  UpdaterDownloadState,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import {
@@ -11,6 +12,7 @@ import {
   updaterPreferencesPath,
 } from "./updater-preferences";
 import type { DaemonInstallPrep } from "./update-install-gate";
+import { classifyUpdaterError } from "./updater-errors";
 
 // Silent background updates: electron-updater downloads on its own as soon
 // as `update-available` fires; we only surface UI when the package is fully
@@ -26,6 +28,7 @@ autoUpdater.autoInstallOnAppQuit = true;
 // `latest-arm64.yml` instead of the x64 metadata.
 if (process.platform === "win32" && process.arch === "arm64") {
   autoUpdater.channel = "latest-arm64";
+  autoUpdater.allowDowngrade = false;
 }
 
 interface ChannelConfigurableUpdater {
@@ -96,6 +99,7 @@ export function createElectronBusyInstallPrompt(
 type RendererChannel =
   | "updater:update-available"
   | "updater:download-progress"
+  | "updater:download-state"
   | "updater:update-downloaded";
 
 function isDestroyedObjectError(err: unknown): boolean {
@@ -119,35 +123,6 @@ function sendToLiveRenderer(
   }
 }
 
-// Single-flight guard around checkForUpdates(). With autoDownload=true the
-// startup, periodic, and manual triggers can all kick off downloads, and
-// overlapping calls have caused duplicate download warnings in the past
-// (see electronjs.org/docs/latest/api/auto-updater). Coalesce concurrent
-// callers onto the same in-flight promise.
-let inFlightCheck: Promise<unknown> | null = null;
-function checkForUpdatesOnce(): Promise<unknown> {
-  if (inFlightCheck) return inFlightCheck;
-  const p = autoUpdater
-    .checkForUpdates()
-    .then((result) => {
-      // checkForUpdates resolves as soon as metadata is fetched; the actual
-      // download (when autoDownload=true) is exposed on result.downloadPromise.
-      // Without a handler a download failure becomes an unhandled rejection
-      // in the main process — Node may terminate it on future versions.
-      void (result as { downloadPromise?: Promise<unknown> } | null)?.downloadPromise?.catch(
-        (err) => {
-          console.error("Failed to download update:", err);
-        },
-      );
-      return result;
-    })
-    .finally(() => {
-      if (inFlightCheck === p) inFlightCheck = null;
-    });
-  inFlightCheck = p;
-  return p;
-}
-
 export function setupAutoUpdater(
   getMainWindows: () => readonly BrowserWindow[],
   options: SetupAutoUpdaterOptions = {},
@@ -156,6 +131,34 @@ export function setupAutoUpdater(
   const broadcast = (channel: RendererChannel, payload: unknown) => {
     for (const win of getMainWindows()) sendToLiveRenderer(win, channel, payload);
   };
+  let downloadState: UpdaterDownloadState = { status: "idle" };
+  const setDownloadState = (state: UpdaterDownloadState) => {
+    downloadState = state;
+    broadcast("updater:download-state", state);
+  };
+  const reportDownloadFailure = (err: unknown) => {
+    if (downloadState.status === "downloading") {
+      setDownloadState({ status: "error", reason: classifyUpdaterError(err) });
+    }
+  };
+  // Startup, periodic, and manual checks share one in-flight metadata request.
+  let inFlightCheck: ReturnType<typeof autoUpdater.checkForUpdates> | null = null;
+  function checkForUpdatesOnce(): ReturnType<typeof autoUpdater.checkForUpdates> {
+    if (inFlightCheck) return inFlightCheck;
+    const pending = autoUpdater.checkForUpdates().then((result) => {
+      // Metadata resolves before the automatic download. Handle rejection even
+      // when a provider does not emit an error event for that failure.
+      void result?.downloadPromise?.catch((err) => {
+        console.error("Failed to download update:", err);
+        reportDownloadFailure(err);
+      });
+      return result;
+    }).finally(() => {
+      if (inFlightCheck === pending) inFlightCheck = null;
+    });
+    inFlightCheck = pending;
+    return pending;
+  }
   const platform = options.platform ?? process.platform;
   // Only Windows locks a running executable against replacement; macOS and
   // Linux keep their existing update path untouched.
@@ -279,6 +282,7 @@ export function setupAutoUpdater(
   }
 
   autoUpdater.on("update-available", (info) => {
+    setDownloadState({ status: "downloading", version: info.version });
     // Forwarded for renderer-side state tracking only; the notification UI
     // does not render an "available" affordance with autoDownload=true.
     broadcast("updater:update-available", {
@@ -295,6 +299,7 @@ export function setupAutoUpdater(
 
   autoUpdater.on("update-downloaded", (info: UpdateDownloadedEvent) => {
     updateReadyToInstall = true;
+    setDownloadState({ status: "downloaded", version: info.version });
     broadcast("updater:update-downloaded", {
       version: info.version,
       releaseNotes: info.releaseNotes,
@@ -303,7 +308,10 @@ export function setupAutoUpdater(
 
   autoUpdater.on("error", (err) => {
     console.error("Auto-updater error:", err);
+    reportDownloadFailure(err);
   });
+
+  ipcMain.handle("updater:get-download-state", (): UpdaterDownloadState => downloadState);
 
   // Retained for IPC back-compat with older renderer bundles. With
   // autoDownload=true the renderer no longer triggers this path.
@@ -372,11 +380,14 @@ export function setupAutoUpdater(
         currentVersion,
         latestVersion: result?.updateInfo.version ?? currentVersion,
         available: result?.isUpdateAvailable ?? false,
+        downloadState,
       };
     } catch (err) {
+      console.error("Manual update check failed:", err);
       return {
         ok: false,
-        error: err instanceof Error ? err.message : String(err),
+        error: "Unable to check for updates. Please try again later.",
+        reason: classifyUpdaterError(err),
       };
     }
   });

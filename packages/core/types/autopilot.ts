@@ -64,9 +64,24 @@ export interface Autopilot {
   can_manage_access?: boolean;
 }
 
+export type WebhookPayloadConditionValue = string | number | boolean;
+
+// A payload condition tests one field of the webhook body. `path` walks
+// objects with dots; numeric segments index arrays and `*` matches any
+// element. A missing path never matches.
+export interface WebhookPayloadCondition {
+  path: string;
+  op: "equals" | "not_equals" | "contains" | "in" | "exists";
+  value?: WebhookPayloadConditionValue;
+  values?: WebhookPayloadConditionValue[];
+  ignore_case?: boolean;
+}
+
 export interface WebhookEventFilter {
   event: string;
   actions?: string[];
+  // Every condition must hold for the filter to match.
+  conditions?: WebhookPayloadCondition[];
 }
 
 export interface AutopilotSubscriber {
@@ -243,6 +258,15 @@ export type WebhookSignatureStatus =
   | "invalid"
   | "missing";
 
+export interface WebhookPayloadConditionFailure {
+  filter_index: number;
+  condition_index: number;
+  condition: WebhookPayloadCondition;
+  actual_values: string[];
+  missing: boolean;
+  truncated: boolean;
+}
+
 export interface WebhookDelivery {
   id: string;
   workspace_id: string;
@@ -263,6 +287,7 @@ export interface WebhookDelivery {
   replayed_from_delivery_id: string | null;
   error: string | null;
   reason_code: string | null;
+  payload_condition_failure?: WebhookPayloadConditionFailure | null;
   replay_idempotency_key: string | null;
   received_at: string;
   last_attempt_at: string;

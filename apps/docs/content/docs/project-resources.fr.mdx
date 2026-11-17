@@ -156,6 +156,8 @@ Une exécution qui n'a pas pu enregistrer sa branche, par exemple parce qu'elle 
 </Accordion>
 <Accordion title="Rien n'est perdu en silence" id="nothing-is-silently-lost">
 
+Pendant une exécution en worktree, un fichier d'instructions du runtime suivi par Git, comme `CLAUDE.md` ou `AGENTS.md`, est marqué `skip-worktree` dans l'index privé de la tâche. Le brief injecté reste ainsi hors des commits de l'agent, sans modifier votre checkout. Les modifications intentionnelles de ce fichier restent non commitées jusqu'au rétablissement du suivi lors du nettoyage, puis suivent les règles de livraison ci-dessous. Les fichiers du runtime non suivis et les répertoires de compétences doivent toujours être exclus des commits de l'agent.
+
 Rien de ce que l'agent laisse non commité n'est supprimé avec le worktree, y compris lorsque l'exécution échoue en cours de route. Sa destination dépend de ce que l'agent a fait pendant l'exécution :
 
 - **L'agent n'a fait aucun commit :** tout ce qu'il a laissé et qui n'est pas ignoré par git est commité sur la branche. Les hooks de commit de votre dépôt ne s'exécutent pas pour ce commit.

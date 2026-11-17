@@ -1,0 +1,45 @@
+name: Promote release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Stable release tag to validate and promote (vX.Y.Z)
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    if: github.repository == 'multica-ai/multica'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: promote-stable-release
+      cancel-in-progress: false
+    steps:
+      # Use the reviewed gate on main, including for retries of older tags.
+      # Never run code from a caller-supplied tag with the write token.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts --filter multica
+      - name: Validate artifacts and promote Latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          GH_REPO: multica-ai/multica
+        run: node scripts/promote-release.mjs

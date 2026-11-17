@@ -14,7 +14,8 @@
     "upload_image": "上傳圖片",
     "emoji_label": "表情",
     "more_emojis": "更多表情…",
-    "emoji_loading": "載入中…"
+    "emoji_loading": "載入中…",
+    "text_icon": "文字圖示"
   },
   "avatar_crop": {
     "title": "編輯頭像",
@@ -28,6 +29,14 @@
     "uploading": "上傳中…",
     "loading": "載入中…",
     "load_failed": "圖片載入失敗"
+  },
+  "text_avatar": {
+    "title": "文字圖示",
+    "preview": "預覽",
+    "text_label": "文字",
+    "text_hint": "1–2 個字，字母、數字、漢字都可以，多出的會截掉。",
+    "color_label": "顏色",
+    "render_failed": "圖示產生失敗，請重試。"
   },
   "color_picker": {
     "saturation": "飽和度與明度",

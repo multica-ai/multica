@@ -174,6 +174,13 @@ SELECT * FROM agent_task_queue WHERE context->>'wakeup_id'= @wakeup_id::text AND
 -- COALESCE keeps the column's gen_random_uuid() default reachable, so a caller
 -- that passes no id still inserts — it just gets a random v4, exactly as before.
 -- The same pattern is used by every INSERT listed in pkg/dbid's write table.
+WITH enqueue_agent AS MATERIALIZED (
+    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    FROM agent a
+    WHERE a.id = sqlc.arg(agent_id)
+      AND lock_task_owner_rows(a.id, sqlc.narg(issue_id), COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+    FOR KEY SHARE OF a
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
@@ -182,7 +189,7 @@ INSERT INTO agent_task_queue (
     workflow_step, id
 )
 SELECT
-    $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
+    sqlc.arg(agent_id), enqueue_agent.runtime_id, sqlc.narg(issue_id), 'queued', sqlc.arg(priority), sqlc.narg(trigger_comment_id),
     COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
@@ -209,11 +216,11 @@ SELECT
     -- makes after someone else moved the issue is refused like the run's own
     -- would be. A wakeup a member registered starts from the issue's status.
     COALESCE(
-        (SELECT s.workflow_step FROM agent_task_queue s WHERE s.id = sqlc.narg(delegated_from_task_id) AND s.issue_id = $3),
-        (SELECT i.status FROM issue i WHERE i.id = $3)
+        (SELECT s.workflow_step FROM agent_task_queue s WHERE s.id = sqlc.narg(delegated_from_task_id) AND s.issue_id = sqlc.narg(issue_id)),
+        (SELECT i.status FROM issue i WHERE i.id = sqlc.narg(issue_id))
     ),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, $3, $2)
+FROM enqueue_agent
 RETURNING *;
 
 -- name: LocklessWakeup :one

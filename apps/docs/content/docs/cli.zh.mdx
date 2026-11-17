@@ -298,7 +298,7 @@ multica runtime profile create --display-name "内部 Claude 封装" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` 为当前 profile 登记开机自启，平台差异见[开机自启](/daemon-runtimes#autostart)。`runtime usage` 默认统计 90 天，`--days` 最多 365。`runtime update` 让那台电脑上的守护进程把 CLI 更新到指定版本，`--wait` 等待更新结束；更新失败、更新超时或等待本身超时时，命令会以非零状态退出。`runtime profile create` 用 `--runtime-type` 指定兼容的工具（旧的 `--protocol-family` 仍可用）；固定参数目前只能在网页端填写。
+`daemon autostart` 为当前 profile 登记开机自启，平台差异见[开机自启](/daemon-runtimes#autostart)。`runtime usage` 默认统计 90 天，`--days` 最多 365。`runtime update` 让那台电脑上的守护进程把 CLI 更新到指定版本，`--wait` 等待更新结束；更新失败、更新超时或等待本身超时时，命令会以非零状态退出。`runtime profile create` 用 `--runtime-type` 指定兼容的工具（旧的 `--protocol-family` 仍可用）；固定参数目前只能在网页端填写。 `runtime profile create` 默认绑定当前机器；使用 `--daemon-id <id>` 可以选择另一台已登记的本地机器。 旧配置可以通过 `multica runtime profile update <profile-id> --daemon-id <id>` 绑定机器。
 
 删除仍绑定活跃智能体的运行时时，命令默认拒绝。`multica runtime delete <id> --cascade` 会解绑这些智能体、保留其配置与历史记录，并取消它们的活动运行。
 
@@ -345,6 +345,20 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
   {"event": "push"}
 ]
 ```
+
+每行还可以包含 `conditions`，使用与界面相同的正文字段规则。例如，下面的规则只接收目标分支为 `main` 的非草稿 PR：
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+每条规则最多 20 个条件，字段路径最多 256 个字符，`in` 候选值列表最多 100 项。创建或更新触发器时，超出上限的条件会返回 HTTP 400。
 
 这个示例接收 PR 评审提交和所有 push 事件。省略 `actions` 或使用空的 actions 数组，表示接收该事件的所有 action。
 
@@ -488,7 +502,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `env get/set <agent-id>` | 读写自定义环境变量（智能体所有者或工作区 owner/admin；每次读取都会记录） | `set`：`--custom-env` / `--custom-env-file` / `--custom-env-stdin`，整体替换，值为 `****` 的键保留原值 |
 | | `skills list/set/add <agent-id>` | 管理绑定的 skill | `--skill-ids`（`set` 全量替换，`add` 增量添加） |
 | | `mcp list/add/enable/disable/remove <agent-id>` | 给该 agent 分配工作区 MCP 服务 | server id 从 `workspace mcp list` 获取。库里的条目在这里添加之前不会生效；`disable` 只停止下发，保留分配 |
-| `autopilot` | `list/get/create/update/delete` | 管理自动化 | `create`：`--title`、`--agent`、`--mode`（均必填）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（可重复） |
+| `autopilot` | `list/get/create/update/delete` | 管理自动化 | `create`：`--title`、`--mode`（均必填）、`--agent` / `--squad` / `--squad-id`（三选一，必填）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（可重复） |
 | | `trigger <id>` | 手动触发一次 | |
 | | `runs <id>` | 查看运行历史 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 管理定时和 webhook 触发器 | `trigger-add`：`--kind`（`schedule` 或 `webhook`）、`--cron`、`--timezone`（默认 UTC）、`--label` |

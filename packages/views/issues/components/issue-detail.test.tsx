@@ -18,6 +18,7 @@ import enAgents from "../../locales/en/agents.json";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores/issue-sidebar-sections-store";
+import { useSubIssuesCollapseStore } from "@multica/core/issues/stores/sub-issues-collapse-store";
 
 vi.mock("./issue-wakeup-header-chip", () => ({
   IssueWakeupHeaderChip: ({ onOpen }: { onOpen: () => void }) => (
@@ -3664,6 +3665,7 @@ describe("IssueDetail (shared)", () => {
 
   describe("sub-issues list", () => {
     beforeEach(() => {
+      useSubIssuesCollapseStore.setState({ collapsedIssueIds: new Set() });
       useSubIssueDisplayStore.setState({
         rowProperties: { ...DEFAULT_SUB_ISSUE_ROW_PROPERTIES },
         rowPropertyIds: [],
@@ -3690,6 +3692,160 @@ describe("IssueDetail (shared)", () => {
       ...overrides,
     });
 
+    const inlineChildren = () => within(document.querySelector<HTMLElement>('[class~="group/sub-issues"]')!);
+    const findInlineChild = (title: string) => waitFor(() => inlineChildren().getByText(title));
+
+    it("offers direct sidebar child links and an independent disclosure", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({ id: "child-open", identifier: "TES-11", title: "Open destination", status: "todo" }),
+          subIssue({ id: "child-done", identifier: "TES-12", title: "Custom completion", status: "verified", status_category: "done" }),
+          subIssue({ id: "child-cancelled", identifier: "TES-13", title: "Cancelled destination", status: "cancelled" }),
+        ],
+      });
+      const { container } = renderIssueDetail();
+      await waitFor(() => expect(container.querySelector('[data-issue-sidebar-section="sub_issues"]')).not.toBeNull());
+      const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      expect(sidebar.getAllByRole("link")).toHaveLength(3);
+      expect(sidebar.getByRole("link", { name: /TES-11 Open destination/ })).toHaveAttribute("href", "/test/issues/child-open");
+      expect(sidebar.getByRole("link", { name: /TES-13 Cancelled destination/ })).toBeInTheDocument();
+      expect(sidebar.getByRole("progressbar", { name: "Sub-issues" })).toHaveAttribute("aria-valuenow", "1");
+      expect(sidebar.getByRole("progressbar", { name: "Sub-issues" })).toHaveAttribute("aria-valuemax", "3");
+      const toggle = sidebar.getByRole("button", { name: "Sub-issues" });
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(sidebar.queryAllByRole("link")).toHaveLength(0);
+      expect(inlineChildren().getByText("Open destination")).toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(sidebar.getAllByRole("link")).toHaveLength(3);
+    });
+
+    const stagedSidebarChildren = () => Array.from({ length: 25 }, (_, i) => subIssue({
+      id: `child-${i + 1}`,
+      number: i + 1,
+      identifier: `TES-${i + 1}`,
+      title: `Child ${i + 1}`,
+      stage: i % 3 === 0 ? 2 : i % 3 === 1 ? 1 : null,
+      status: i === 1 || i >= 20 ? "verified" : i === 2 ? "declined" : i === 5 ? "cancelled" : "todo",
+      status_category: i === 1 || i >= 20 ? "done" : i === 2 ? "closed" : undefined,
+    }));
+
+    it.each([false, true])("expands unfinished-first sidebar children in place (mobile: %s)", async (isMobile) => {
+      mockViewport.isMobile = isMobile;
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: stagedSidebarChildren() });
+      const { container } = renderIssueDetail();
+      await findInlineChild("Child 25");
+      const section = container.querySelector<HTMLDivElement>('[class~="group/sub-issues"]')!;
+      const inlineOrder = inlineChildren().getAllByText(/^Child \d+$/).map((row) => row.textContent);
+      fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
+      const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
+      scroller.scrollTop = 600;
+      vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+      vi.spyOn(section, "getBoundingClientRect").mockReturnValue({ top: -200 } as DOMRect);
+      let sheet: HTMLElement | undefined;
+      if (isMobile) {
+        fireEvent.click(screen.getByRole("button", { name: enIssues.detail.sidebar_tooltip }));
+        sheet = await screen.findByRole("dialog");
+      }
+      const sidebar = within(document.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      const childLinks = () => sidebar.getAllByRole("link").map((link) => link.getAttribute("href"));
+      const urls = (numbers: number[]) => numbers.map((n) => `/test/issues/child-${n}`);
+      const firstTen = [5, 8, 11, 14, 17, 20, 1, 4, 7, 10];
+      expect(childLinks()).toEqual(urls(firstTen));
+      expect(sidebar.getByText("6/25")).toBeInTheDocument();
+      expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuemax", "25");
+      expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "6");
+      const showMore = sidebar.getByRole("button", { name: "Show 15 more" });
+      expect(showMore).toHaveAttribute("aria-expanded", "false");
+      fireEvent.click(showMore);
+      expect(childLinks()).toEqual(urls([
+        5, 8, 11, 14, 17, 20, 1, 4, 7, 10, 13, 16, 19, 9, 12, 15, 18,
+        2, 23, 22, 25, 3, 6, 21, 24,
+      ]));
+      expect(inlineChildren().queryByText("Child 25")).not.toBeInTheDocument();
+      expect(scroller.scrollTop).toBe(600);
+      if (isMobile) {
+        expect(screen.getByRole("dialog")).toBe(sheet);
+        expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeNull();
+      }
+      const collapse = sidebar.getByRole("button", { name: "Collapse" });
+      expect(collapse).toHaveAttribute("aria-expanded", "true");
+      fireEvent.click(collapse);
+      expect(childLinks()).toEqual(urls(firstTen));
+      expect(sidebar.getByRole("button", { name: "Show 15 more" })).toHaveAttribute("aria-expanded", "false");
+      expect(sidebar.getByText("6/25")).toBeInTheDocument();
+      expect(scroller.scrollTop).toBe(600);
+      expect(inlineChildren().queryByText("Child 25")).not.toBeInTheDocument();
+      if (isMobile) {
+        expect(screen.getByRole("dialog")).toBe(sheet);
+        expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeNull();
+        fireEvent.keyDown(sheet!, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      }
+      fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
+      expect(inlineChildren().getAllByText(/^Child \d+$/).map((row) => row.textContent)).toEqual(inlineOrder);
+    });
+
+    it("keeps inline stage order including completed children at the ten-child limit", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: stagedSidebarChildren().slice(0, 10) });
+      const { container } = renderIssueDetail();
+      await findInlineChild("Child 10");
+      const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      expect(sidebar.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(
+        [2, 5, 8, 1, 4, 7, 10, 3, 6, 9].map((n) => `/test/issues/child-${n}`),
+      );
+      expect(sidebar.queryByRole("button", { name: /Show .* more|Collapse|View all/ })).not.toBeInTheDocument();
+      expect(sidebar.getByText("1/10")).toBeInTheDocument();
+    });
+
+    it("shows the remaining count when only one child is hidden", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: stagedSidebarChildren().slice(0, 11) });
+      const { container } = renderIssueDetail();
+      await findInlineChild("Child 11");
+      const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      expect(sidebar.getAllByRole("link")).toHaveLength(10);
+      fireEvent.click(sidebar.getByRole("button", { name: "Show 1 more" }));
+      expect(sidebar.getAllByRole("link")).toHaveLength(11);
+      fireEvent.click(sidebar.getByRole("button", { name: "Collapse" }));
+      expect(sidebar.getAllByRole("link")).toHaveLength(10);
+    });
+
+    it("leaves the sidebar slot empty while loading and when no children exist", async () => {
+      let resolveChildren!: (value: { issues: Issue[] }) => void;
+      mockApiObj.listChildIssues.mockImplementation(() => new Promise((resolve) => {
+        resolveChildren = resolve;
+      }));
+      const { container } = renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      const sidebar = () => container.querySelector('[data-issue-sidebar-section="sub_issues"]');
+      expect(sidebar()?.childElementCount).toBe(0);
+      await act(async () => resolveChildren({ issues: [] }));
+      expect(sidebar()?.childElementCount).toBe(0);
+    });
+
+    it("removes cached sidebar links after a child query loses access", async () => {
+      let rejectChildren!: (reason: unknown) => void;
+      mockApiObj.listChildIssues.mockImplementation(() => new Promise((_resolve, reject) => {
+        rejectChildren = reject;
+      }));
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(issueKeys.children("ws-1", "issue-1"), [
+        subIssue({ id: "child-private", identifier: "TES-11", title: "Previously authorized child" }),
+      ]);
+      const { container } = render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+      const sidebar = () => container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!;
+      await waitFor(() => expect(within(sidebar()).getByRole("link", { name: /Previously authorized child/ })).toBeInTheDocument());
+      await act(async () => rejectChildren(new ApiError("Access denied", 403, "Forbidden")));
+      await waitFor(() => expect(sidebar().childElementCount).toBe(0));
+    });
+
     it("jumps from the outline to the expanded sub-issues section without comments", async () => {
       // Preview/order behavior lives in thread-minimap.test.tsx; this tests the real section.
       mockApiObj.listTimeline.mockResolvedValue([]);
@@ -3697,10 +3853,10 @@ describe("IssueDetail (shared)", () => {
         issues: [subIssue({ id: "child-1", title: "Child destination" })],
       });
       const { container } = renderIssueDetail();
-      await screen.findByText("Child destination");
+      await findInlineChild("Child destination");
       const section = container.querySelector<HTMLDivElement>(".group\\/sub-issues")!;
       fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
-      expect(screen.queryByText("Child destination")).not.toBeInTheDocument();
+      expect(within(section).queryByText("Child destination")).not.toBeInTheDocument();
 
       const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
       scroller.scrollTop = 600;
@@ -3709,7 +3865,7 @@ describe("IssueDetail (shared)", () => {
       fireEvent.click(within(screen.getByRole("navigation", { name: "Quick navigation" }))
         .getByRole("button", { name: "Sub-issues" }));
 
-      expect(await screen.findByText("Child destination")).toBeInTheDocument();
+      expect(await findInlineChild("Child destination")).toBeInTheDocument();
       await waitFor(() => expect(scroller.scrollTop).toBe(284));
     });
 
@@ -3740,7 +3896,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Fix login flow");
+      await findInlineChild("Fix login flow");
       // Label chips ride inside the row link.
       expect(screen.getByText("backend")).toBeInTheDocument();
       expect(screen.getByText("auth")).toBeInTheDocument();
@@ -3750,7 +3906,7 @@ describe("IssueDetail (shared)", () => {
       const due = screen.getByText("Jan 1");
       expect(due.closest("span")?.className).toContain("text-destructive");
       // Bare row shows no due date / no progress chip of its own.
-      const bareRow = screen.getByText("Ship dashboards").closest("a");
+      const bareRow = inlineChildren().getByText("Ship dashboards").closest("a");
       expect(bareRow?.textContent).not.toContain("/");
     });
 
@@ -3777,7 +3933,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Fix login flow");
+      await findInlineChild("Fix login flow");
       expect(screen.queryByText("backend")).not.toBeInTheDocument();
       expect(screen.queryByText("Jan 1")).not.toBeInTheDocument();
     });
@@ -3819,7 +3975,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Fix login flow");
+      await findInlineChild("Fix login flow");
       // Chip renders only on the row that has a value for the property.
       expect(await screen.findByText("Sprint 3")).toBeInTheDocument();
       expect(screen.getAllByText("Sprint 3")).toHaveLength(1);
@@ -3872,7 +4028,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Wrapped up");
+      await findInlineChild("Wrapped up");
       const due = screen.getByText("Jan 1");
       expect(due.closest("span")?.className).not.toContain("text-destructive");
       expect(due.closest("span")?.className).toContain("text-muted-foreground");
