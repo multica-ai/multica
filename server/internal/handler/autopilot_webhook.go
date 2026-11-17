@@ -892,6 +892,17 @@ func webhookActionCandidates(eventAction string, payload json.RawMessage) []stri
 					add(v)
 				}
 			}
+			// Pipeline status is separate from MR/Issue actions and states.
+			if obj["object_kind"] == "pipeline" {
+				if status, ok := attrs["status"].(string); ok {
+					add(status)
+				}
+			}
+		}
+		if obj["object_kind"] == "build" {
+			if status, ok := obj["build_status"].(string); ok {
+				add(status)
+			}
 		}
 	}
 	out := make([]string, 0, len(seen))
