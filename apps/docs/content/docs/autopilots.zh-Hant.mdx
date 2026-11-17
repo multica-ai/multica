@@ -91,7 +91,18 @@ Webhook 請求的約束：
 
 例如，事件名填寫 `workflow_run`，Actions 填寫 `completed, failed`，只會接收這兩類 `workflow_run` 結果。Multica 會從常見請求頭和 payload 中識別事件與 action，包括 GitHub 的 `X-GitHub-Event` 和 body 中的 `action`。
 
-GitLab 的事件名填寫 `X-Gitlab-Event` 請求頭的完整值。只在失敗時執行，可以將 **Actions** 設為 `failed`，事件名填寫 `Pipeline Hook`（`object_kind: "pipeline"`，狀態讀取 `object_attributes.status`）或 `Job Hook`（`object_kind: "build"`，狀態讀取 `build_status`）。`success`、`running` 等其他狀態會被過濾；Actions 留空則接收該事件的所有狀態。這兩個 CI 狀態欄位僅用於各自的物件類型，參見 [GitLab 事件 payload](https://docs.gitlab.com/user/project/integrations/webhook_events/#pipeline-events)。
+GitLab 的事件名就是 GitLab 傳送的 `X-Gitlab-Event` 請求頭原值，例如 `Merge Request Hook`、`Issue Hook`、`Note Hook`，空格和大小寫都要一致；payload 裡的 `object_kind`（`merge_request`）不會命中。Actions 中的每個值會同時與 `object_attributes.action` 和 `object_attributes.state` 比較，任意一個相等即命中。下面這條規則接收新建、更新和重新開啟的 merge request，忽略合併和關閉：
+
+```json
+{ "event": "Merge Request Hook", "actions": ["open", "update", "reopen"] }
+```
+
+Actions 請填寫動作詞（`open`、`update`、`reopen`、`merge`、`close`），不要填寫狀態詞（`opened`、`merged`、`closed`）。比對是精確比較，兩種寫法之間不會互相轉換；狀態詞會命中所有讓物件處於該狀態的事件。向開啟中的 merge request 推送提交會傳送 `"action": "update"` 和 `"state": "opened"`，核准會傳送 `"action": "approval"` 和同樣的狀態，所以填寫 `opened` 時，這些事件和新建 merge request 一樣都會啟動執行。
+
+- `Issue Hook` 加 `close`：接收被關閉的 issue。
+- `Note Hook` 加 `create`：接收新留言；編輯留言傳送的是 `update`。
+- GitLab 規則的 Actions 留空時，接收該事件名下的所有事件。
+- 只在失敗時執行，可以將 **Actions** 設為 `failed`，事件名填寫 `Pipeline Hook`（`object_kind: "pipeline"`，狀態讀取 `object_attributes.status`）或 `Job Hook`（`object_kind: "build"`，狀態讀取 `build_status`）。`success`、`running` 等其他狀態會被過濾；Actions 留空則接收該事件的所有狀態。這兩個 CI 狀態欄位僅用於各自的物件類型，參見 [GitLab 事件 payload](https://docs.gitlab.com/user/project/integrations/webhook_events/#pipeline-events)。
 
 每條規則還可以設定針對本文欄位的 `conditions`：點選該規則的 **新增條件**，或透過 API 設定。同一條規則的全部條件都要符合，多條規則之間符合任意一條即可。`path` 用點號存取事件本文，數字表示陣列索引，`*` 表示任意元素（例如 `pull_request.labels.*.name`）。操作支援 `equals`、`not_equals`、`contains`、`in` 和 `exists`，`ignore_case` 忽略文字大小寫。使用 `*` 時，前四種操作中除 `not_equals` 外，只要有一個元素符合即可；`not_equals` 要求沒有元素等於指定值。`exists` 忽略 `null`。字串與布林值必須使用正確類型，例如 `"false"` 與 `false` 不同。
 

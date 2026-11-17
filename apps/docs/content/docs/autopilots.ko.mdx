@@ -91,7 +91,18 @@ Webhook 요청에는 다음 제약이 있습니다.
 
 예를 들어 이벤트 이름에 `workflow_run`, Actions에 `completed, failed`를 입력하면 이 두 종류의 `workflow_run` 결과만 받습니다. Multica는 GitHub의 `X-GitHub-Event`와 body의 `action`을 포함해 일반적인 요청 header와 payload에서 이벤트와 action을 식별합니다.
 
-GitLab에서는 `X-Gitlab-Event` 헤더의 전체 값을 이벤트 이름으로 지정합니다. 실패할 때만 실행하려면 **Actions**를 `failed`로 설정하고 이벤트 이름에 `Pipeline Hook`(`object_kind: "pipeline"`, 상태는 `object_attributes.status`) 또는 `Job Hook`(`object_kind: "build"`, 상태는 `build_status`)을 입력하세요. `success`, `running` 등 다른 상태는 필터링되며, Actions를 비우면 해당 이벤트의 모든 상태를 받습니다. 이 CI 상태 필드는 각각의 객체 유형에만 적용됩니다. [GitLab 이벤트 payload](https://docs.gitlab.com/user/project/integrations/webhook_events/#pipeline-events)를 참고하세요.
+GitLab의 이벤트 이름은 GitLab이 보내는 `X-Gitlab-Event` 요청 header 값 그대로이며, `Merge Request Hook`, `Issue Hook`, `Note Hook`처럼 공백과 대소문자까지 일치해야 합니다. payload의 `object_kind`(`merge_request`)로는 일치하지 않습니다. Actions의 각 값은 `object_attributes.action`과 `object_attributes.state` 모두와 비교되며, 둘 중 하나라도 같으면 규칙이 일치합니다. 아래 규칙은 새로 만들어지거나 업데이트되거나 다시 열린 merge request를 받고, 병합과 닫기는 무시합니다.
+
+```json
+{ "event": "Merge Request Hook", "actions": ["open", "update", "reopen"] }
+```
+
+Actions에는 상태 단어(`opened`, `merged`, `closed`)가 아니라 동작 단어(`open`, `update`, `reopen`, `merge`, `close`)를 입력하세요. 값은 정확히 비교되며 한 형태가 다른 형태로 변환되지 않습니다. 상태 단어는 대상을 그 상태로 두는 모든 이벤트와 일치합니다. 열린 merge request에 커밋을 push하면 `"action": "update"`와 `"state": "opened"`가, 승인하면 `"action": "approval"`와 같은 상태가 전송되므로, `opened`를 입력하면 새 merge request뿐 아니라 이런 이벤트마다 실행이 시작됩니다.
+
+- `Issue Hook`에 `close`를 지정하면 닫힌 issue를 받습니다.
+- `Note Hook`에 `create`를 지정하면 새 댓글을 받습니다. 댓글을 수정하면 `update`가 전송됩니다.
+- Actions가 비어 있는 GitLab 규칙은 해당 이벤트 이름의 모든 이벤트를 받습니다.
+- 실패할 때만 실행하려면 **Actions**를 `failed`로 설정하고 이벤트 이름에 `Pipeline Hook`(`object_kind: "pipeline"`, 상태는 `object_attributes.status`) 또는 `Job Hook`(`object_kind: "build"`, 상태는 `build_status`)을 입력하세요. `success`, `running` 등 다른 상태는 필터링되며, Actions를 비우면 해당 이벤트의 모든 상태를 받습니다. 이 CI 상태 필드는 각각의 객체 유형에만 적용됩니다. [GitLab 이벤트 payload](https://docs.gitlab.com/user/project/integrations/webhook_events/#pipeline-events)를 참고하세요.
 
 각 규칙에는 payload 필드에 대한 `conditions`도 지정할 수 있습니다. 규칙의 **조건 추가**를 클릭하거나 API로 설정하세요. 모든 조건을 만족해야 해당 규칙이 일치하며, 걸러진 이벤트는 실행이 시작되기 전에 무시됩니다. `path`는 점으로 payload를 따라가며, 숫자는 배열 인덱스이고 `*`는 임의의 요소를 뜻합니다(`pull_request.labels.*.name`). `op`는 `equals`, `not_equals`, `contains`, `in`, `exists` 중 하나이며, `ignore_case`는 텍스트에 적용됩니다. `*`를 쓰면 `equals`, `contains`, `in`, `exists`는 요소 하나라도 일치하면 성립하고, `not_equals`는 어떤 요소도 일치하지 않을 때 성립합니다. 필드가 없으면 일치하지 않으며, `exists`는 `null`을 무시합니다. 예를 들어 아래 규칙은 준비된 상태이고 `needs-review` 라벨이 있으며 `main` 또는 `release`를 대상으로 하고 봇이 열지 않은 pull request만 받습니다.
 

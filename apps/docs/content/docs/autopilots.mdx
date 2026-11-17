@@ -91,7 +91,18 @@ When one source sends several event types, add event filters to the trigger. Cli
 
 For example, with `workflow_run` as the event name and `completed, failed` as the actions, only those two kinds of `workflow_run` results are accepted. Multica recognizes the event and action from common request headers and payload fields, including GitHub's `X-GitHub-Event` and the `action` field in the body.
 
-For GitLab, use the full `X-Gitlab-Event` header value as the event name. To run only on failures, set **Actions** to `failed` with either `Pipeline Hook` (`object_kind: "pipeline"`, status from `object_attributes.status`) or `Job Hook` (`object_kind: "build"`, status from `build_status`). Other statuses, such as `success` and `running`, are filtered out; leaving Actions empty accepts every status for that event. These CI status fields apply only to their respective object kinds. See [GitLab's event payloads](https://docs.gitlab.com/user/project/integrations/webhook_events/#pipeline-events).
+For GitLab, the event name is the `X-Gitlab-Event` header value exactly as GitLab sends it, such as `Merge Request Hook`, `Issue Hook`, or `Note Hook`, including spaces and capitals; the payload's `object_kind` (`merge_request`) doesn't match. Each listed action is compared with both `object_attributes.action` and `object_attributes.state`, and the rule matches if either value is listed. This rule accepts new, updated, and reopened merge requests and ignores merges and closes:
+
+```json
+{ "event": "Merge Request Hook", "actions": ["open", "update", "reopen"] }
+```
+
+List action words (`open`, `update`, `reopen`, `merge`, `close`) rather than state words (`opened`, `merged`, `closed`). Values are compared exactly and never translated from one form to the other, and a state word matches every event that leaves the object in that state. Pushing a commit to an open merge request sends `"action": "update"` with `"state": "opened"`, and an approval sends `"action": "approval"` with the same state, so `opened` starts a run for each of these as well as for new merge requests.
+
+- `Issue Hook` with `close` accepts closed issues.
+- `Note Hook` with `create` accepts new comments; edited comments send `update`.
+- A GitLab rule with no actions accepts every event with that event name.
+- To run only on failures, set **Actions** to `failed` with either `Pipeline Hook` (`object_kind: "pipeline"`, status from `object_attributes.status`) or `Job Hook` (`object_kind: "build"`, status from `build_status`). Other statuses, such as `success` and `running`, are filtered out; leaving Actions empty accepts every status for that event. These CI status fields apply only to their respective object kinds. See [GitLab's event payloads](https://docs.gitlab.com/user/project/integrations/webhook_events/#pipeline-events).
 
 Each rule can also carry `conditions` on payload fields: click **Add condition** on the rule, or set them through the API. Every condition must hold for the rule to match; a filtered event is ignored before any run starts. `path` walks the payload with dots, where a number indexes an array and `*` means any element (`pull_request.labels.*.name`). `op` is `equals`, `not_equals`, `contains`, `in` or `exists`, and `ignore_case` applies to text. With `*`, `equals`, `contains`, `in` and `exists` hold if any element matches, and `not_equals` holds if none does. A missing field never matches, and `exists` ignores `null`. For example, this rule only accepts ready pull requests labelled `needs-review` that target `main` or `release` and weren't opened by a bot:
 
