@@ -49,6 +49,10 @@ const (
 	ReasonInvalidPolicy     Reason = "invalid_policy"
 	ReasonVersionRegression Reason = "version_regression"
 	ReasonStub              Reason = "stub"
+	// ReasonFeatureMissing and ReasonFeatureInvalid fail one paid feature open
+	// without touching the rest of an otherwise valid policy.
+	ReasonFeatureMissing Reason = "feature_missing"
+	ReasonFeatureInvalid Reason = "feature_invalid"
 )
 
 // Gate is the effective instruction for one generic enforcement point. Limits
@@ -86,6 +90,59 @@ type Decision struct {
 // attempt, enforce rejects it.
 type Provider interface {
 	Gate(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
+}
+
+// FeatureName is a stable paid-feature key. Unlike a GateName it meters
+// nothing: it says whether a workspace may add to the feature's configuration.
+type FeatureName string
+
+const (
+	FeaturePrivateProjects FeatureName = "private_projects"
+)
+
+// Features lists every paid feature this consumer understands.
+func Features() []FeatureName {
+	return []FeatureName{FeaturePrivateProjects}
+}
+
+func (n FeatureName) Valid() bool {
+	switch n {
+	case FeaturePrivateProjects:
+		return true
+	default:
+		return false
+	}
+}
+
+// FeatureDecision is the effective restriction on one paid feature:
+//
+//   - off: the feature is fully usable.
+//   - observe: fully usable; each attempt to add to its configuration is
+//     recorded. A stale cached enforce is also downgraded to observe, with
+//     Reason stale, so a Cloud outage never keeps blocking.
+//   - enforce: existing configuration keeps working and can always be reduced
+//     or removed; attempts to add to it are rejected.
+//
+// Reads never consult a FeatureDecision. Access control built on a paid
+// feature (who sees a private project, who may invoke an agent) stays exactly
+// as configured whatever the decision is.
+type FeatureDecision struct {
+	Action              Action
+	Reason              Reason
+	PolicyRevision      int64
+	SubscriptionVersion int64
+	CloudValidUntil     time.Time
+}
+
+// Restricted reports whether additions to the feature are rejected.
+func (d FeatureDecision) Restricted() bool { return d.Action == ActionEnforce }
+
+// FeatureProvider is the source of paid-feature decisions. The Cloud policy
+// client implements it today; a self-hosted license provider can replace it
+// without changing any caller. Like Provider it has no error return: every
+// failure is a fail-open decision.
+type FeatureProvider interface {
+	Feature(ctx context.Context, workspaceID uuid.UUID, name FeatureName) FeatureDecision
 }
 
 // Observer is a low-cardinality instrumentation seam. Implementations must not
