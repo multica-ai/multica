@@ -432,6 +432,7 @@ assert_start_web foreign-silent 999 never 1 "Port 13000 is busy: pid 999" ""
 # ---------------------------------------------------------------------------
 head_commit="$(git -C "$root_dir" rev-parse HEAD)"
 old_commit=0123456789abcdef0123456789abcdef01234567
+old_short="$(git -C "$root_dir" rev-parse --short "$old_commit")"
 daemon_fake="$tmp_dir/daemon-fake"
 mkdir -p "$daemon_fake/server/bin" "$daemon_fake/go-bin"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$daemon_fake/go-bin/go"
@@ -483,11 +484,11 @@ assert_start_daemon() (
   esac
 )
 assert_start_daemon current "$head_commit" current "$head_commit" 0 "daemon already running for profile dev-test (pid 5001" kept
-assert_start_daemon old-commit "$old_commit" current "$head_commit" 0 "runs commit 0123456789, checkout is at" restarted
+assert_start_daemon old-commit "$old_commit" current "$head_commit" 0 "runs commit $old_short, checkout is at" restarted
 assert_start_daemon dirty-edit "$head_commit" "5001 not-this-binary" "$head_commit" 0 "uncommitted changes differ" restarted
 assert_start_daemon unrecorded "$head_commit" - "$head_commit" 0 "was not started from" restarted
 assert_start_daemon other-pid "$head_commit" "4000 x" "$head_commit" 0 "interrupts 1 active task(s)" restarted
-assert_start_daemon wrong-start "$old_commit" current "$old_commit" 1 "reports commit 0123456789 after start" -
+assert_start_daemon wrong-start "$old_commit" current "$old_commit" 1 "reports commit $old_short after start" -
 
 # `make status` shows the daemon's commit, and calls a daemon that `make up`
 # would restart stale instead of running.
@@ -507,7 +508,7 @@ assert_daemon_state() (
   case "$row" in *"$expected"*) ;; *) fail "$case_name: daemon state row '$row', want '$expected'" ;; esac
 )
 assert_daemon_state current "$head_commit" current running "pid 5001 commit $(git -C "$root_dir" rev-parse --short HEAD) up 3m0s"
-assert_daemon_state old-commit "$old_commit" current stale "runs commit 0123456789, checkout is at"
+assert_daemon_state old-commit "$old_commit" current stale "runs commit $old_short, checkout is at"
 assert_daemon_state unrecorded "$head_commit" - stale "run make up C=daemon to restart"
 
 # ---------------------------------------------------------------------------
