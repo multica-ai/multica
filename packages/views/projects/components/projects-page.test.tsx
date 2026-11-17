@@ -17,6 +17,10 @@ const mocks = vi.hoisted(() => ({
   createPin: vi.fn(),
   deletePin: vi.fn(),
   openModal: vi.fn(),
+  copyText: vi.fn(),
+  copyTextAndHtml: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
   savePrefs: vi.fn(),
   projectViewState: {
     layout: "table",
@@ -36,6 +40,15 @@ const mocks = vi.hoisted(() => ({
     toggleFilter: vi.fn(),
     clearFilters: vi.fn(),
   },
+}));
+
+vi.mock("@multica/ui/lib/clipboard", () => ({
+  copyText: mocks.copyText,
+  copyTextAndHtml: mocks.copyTextAndHtml,
+}));
+
+vi.mock("sonner", () => ({
+  toast: { success: mocks.toastSuccess, error: mocks.toastError },
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -298,6 +311,10 @@ beforeEach(() => {
   mocks.createPin.mockClear();
   mocks.deletePin.mockClear();
   mocks.openModal.mockClear();
+  mocks.copyText.mockReset().mockResolvedValue(true);
+  mocks.copyTextAndHtml.mockReset().mockResolvedValue(true);
+  mocks.toastSuccess.mockReset();
+  mocks.toastError.mockReset();
   mocks.savePrefs.mockClear();
   mocks.projectViewState.setLayout.mockClear();
   mocks.projectViewState.setGroupBy.mockClear();
@@ -368,6 +385,47 @@ describe("ProjectsPage rename", () => {
       expect(push).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("ProjectsPage sharing", () => {
+  it.each(["table", "board"])(
+    "copies the title link immediately after Copy link in the %s row menu",
+    async (layout) => {
+      mocks.projectViewState.layout = layout;
+      const user = userEvent.setup();
+      const adapter = renderProjects(makeAdapter({
+        getShareableUrl: (path) => `https://app.example${path}`,
+      }));
+      const copyLink = screen.getByRole("button", { name: "Copy link" });
+      const copyTitle = screen.getByRole("button", { name: "Copy link with title" });
+      expect(copyLink.nextElementSibling).toBe(copyTitle);
+
+      await user.click(copyTitle);
+
+      expect(mocks.copyTextAndHtml).toHaveBeenCalledWith(
+        "[Launch Plan](https://app.example/test-workspace/projects/project-1)",
+        '<a href="https://app.example/test-workspace/projects/project-1">Launch Plan</a>',
+      );
+      expect(mocks.toastSuccess).toHaveBeenCalledWith("Link copied with title");
+      expect(adapter.push).not.toHaveBeenCalled();
+
+      await user.click(copyLink);
+      expect(mocks.copyText).toHaveBeenCalledWith(
+        "https://app.example/test-workspace/projects/project-1",
+      );
+    },
+  );
+
+  it("reports a failed title-link copy without a success toast", async () => {
+    mocks.copyTextAndHtml.mockResolvedValueOnce(false);
+    const user = userEvent.setup();
+    renderProjects();
+
+    await user.click(screen.getByRole("button", { name: "Copy link with title" }));
+
+    expect(mocks.toastError).toHaveBeenCalledWith("Failed to copy link");
+    expect(mocks.toastSuccess).not.toHaveBeenCalled();
+  });
 });
 
 describe("ProjectsPage table row navigation", () => {

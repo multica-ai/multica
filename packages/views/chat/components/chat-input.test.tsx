@@ -1041,6 +1041,24 @@ describe("ChatInput project context", () => {
     expect(screen.queryByText("Start after this run")).not.toBeInTheDocument();
   });
 
+  it("shows queuing for a selected skill and restores steering when it is removed", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    const props = { isRunning: true, allowSubmitWhileRunning: true, canSteerWhileRunning: true, onSend };
+    const { rerender } = renderInput(props);
+    const editor = screen.getByTestId("editor");
+    const content = "[/release-notes](slash://skill/550e8400-e29b-41d4-a716-446655440000) Write release notes";
+
+    fireEvent.change(editor, { target: { value: content } });
+    expect(screen.getByRole("status")).toHaveTextContent("Start after this run");
+    expect(screen.queryByText("Add to current run")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith(content, undefined, expect.any(Function), []));
+
+    fireEvent.change(editor, { target: { value: "Write release notes" } });
+    rerender(element(props));
+    expect(screen.getByRole("status")).toHaveTextContent("Add to current run");
+  });
+
   it("keeps Stop available and explains queuing while content is uploading", async () => {
     let resolveUpload!: (value: UploadResult) => void;
     mockApiUploadFile.mockImplementation(

@@ -247,6 +247,18 @@
       "disabled_invalid_signature": "Rejeu impossible — la signature était invalide",
       "disabled_rejected": "Impossible de rejouer une livraison rejetée",
       "disabled_queued": "Encore en file d'attente — rejouez une fois qu'elle sera traitée"
+    },
+    "ignore": {
+      "title": "Motif du filtrage",
+      "payload_filtered": "Conditions de la charge utile non remplies",
+      "event_filtered": "Événement ou action non correspondant",
+      "trigger_disabled": "Déclencheur désactivé",
+      "autopilot_paused": "Automatisation en pause",
+      "autopilot_archived": "Automatisation archivée",
+      "quota_exceeded": "Quota d’exécutions atteint",
+      "actual_value": "Valeur réelle",
+      "missing": "Champ absent",
+      "truncated": "Aperçu tronqué. Consultez le contenu brut pour la valeur complète."
     }
   },
   "add_trigger_dialog": {
@@ -332,7 +344,24 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_add": "Ajouter",
     "event_filter_remove_label": "Retirer le filtre",
-    "event_filter_hint": "Ne traiter que les webhooks correspondant à ces événements. Laissez vide pour tous les accepter.",
+    "event_filter_hint": "Seuls les événements correspondant à une règle et à toutes ses conditions sont traités. Laissez vide pour tout accepter.",
+    "event_filter_condition_remove_label": "Retirer la condition",
+    "event_filter_condition_add_label": "Ajouter une condition",
+    "event_filter_condition_cancel": "Annuler",
+    "event_filter_condition_ops": {
+      "equals": "est",
+      "not_equals": "n'est pas",
+      "contains": "contient",
+      "in": "est parmi",
+      "exists": "existe"
+    },
+    "event_filter_condition_path_label": "Champ de la charge utile",
+    "event_filter_condition_path_placeholder": "ex. pull_request.labels.*.name",
+    "event_filter_condition_op_label": "Opérateur",
+    "event_filter_condition_value_label": "Valeur",
+    "event_filter_condition_value_placeholder": "ex. main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "Ignorer la casse",
     "schedule_multiple_notice": "Cette automatisation a {{count}} planifications. Fermez cette fenêtre et modifiez chacune dans la liste Déclencheurs ci-dessous.",
     "schedule_empty": "Aucune planification — cette automatisation ne s'exécute que sur déclenchement manuel.",
     "schedule_add": "Ajouter une planification",
@@ -347,7 +376,9 @@
         "label": "Exécution seule",
         "description": "Exécution silencieuse, aucune tâche créée"
       }
-    }
+    },
+    "event_filter_condition_all": "Et la charge utile remplit toutes les conditions",
+    "event_filter_condition_limits": "Chemins : {{path}} caractères maximum. Listes : {{values}} valeurs maximum."
   },
   "schedule_editor": {
     "time_label": "Heure",

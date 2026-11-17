@@ -247,6 +247,18 @@
       "disabled_invalid_signature": "無法重放——簽名校驗失敗",
       "disabled_rejected": "無法重放已拒絕的投遞",
       "disabled_queued": "投遞仍在排隊，處理完成後再重放"
+    },
+    "ignore": {
+      "title": "忽略原因",
+      "payload_filtered": "本文條件不符",
+      "event_filtered": "事件或動作不符",
+      "trigger_disabled": "觸發器已停用",
+      "autopilot_paused": "自動化已暫停",
+      "autopilot_archived": "自動化已封存",
+      "quota_exceeded": "已達執行配額",
+      "actual_value": "實際值",
+      "missing": "欄位不存在",
+      "truncated": "預覽已截斷，完整值請見原始本文。"
     }
   },
   "add_trigger_dialog": {
@@ -332,7 +344,7 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_add": "新增",
     "event_filter_remove_label": "移除過濾條件",
-    "event_filter_hint": "只處理匹配這些事件的 webhook。留空則接受所有事件。",
+    "event_filter_hint": "只處理符合規則且本文符合全部條件的事件。留空則接收所有事件。",
     "schedule_multiple_notice": "該自動化有 {{count}} 條時間表。關閉此彈窗，在下方「觸發器」中逐條編輯。",
     "schedule_empty": "還沒有時間表——這個自動化只在手動觸發時執行。",
     "schedule_add": "新增時間表",
@@ -347,7 +359,26 @@
         "label": "僅執行",
         "description": "靜默執行，不建立任務"
       }
-    }
+    },
+    "event_filter_condition_remove_label": "移除條件",
+    "event_filter_condition_add_label": "新增條件",
+    "event_filter_condition_cancel": "取消",
+    "event_filter_condition_ops": {
+      "equals": "是",
+      "not_equals": "不是",
+      "contains": "包含",
+      "in": "是其中之一",
+      "exists": "存在"
+    },
+    "event_filter_condition_path_label": "本文欄位",
+    "event_filter_condition_path_placeholder": "例如 pull_request.labels.*.name",
+    "event_filter_condition_op_label": "運算子",
+    "event_filter_condition_value_label": "值",
+    "event_filter_condition_value_placeholder": "例如 main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "忽略大小寫",
+    "event_filter_condition_all": "且本文符合全部條件",
+    "event_filter_condition_limits": "欄位路徑最多 {{path}} 個字元，候選值清單最多 {{values}} 項。"
   },
   "schedule_editor": {
     "time_label": "時間",

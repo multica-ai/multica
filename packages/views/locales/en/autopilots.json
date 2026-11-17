@@ -247,6 +247,18 @@
       "disabled_invalid_signature": "Can't replay — signature was invalid",
       "disabled_rejected": "Can't replay a rejected delivery",
       "disabled_queued": "Still queued — replay once it settles"
+    },
+    "ignore": {
+      "title": "Ignore reason",
+      "payload_filtered": "Payload conditions not met",
+      "event_filtered": "Event or action did not match",
+      "trigger_disabled": "Trigger disabled",
+      "autopilot_paused": "Autopilot paused",
+      "autopilot_archived": "Autopilot archived",
+      "quota_exceeded": "Run quota reached",
+      "actual_value": "Actual value",
+      "missing": "Field missing",
+      "truncated": "Preview truncated. See the raw body for the full value."
     }
   },
   "add_trigger_dialog": {
@@ -332,7 +344,24 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_add": "Add",
     "event_filter_remove_label": "Remove filter",
-    "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
+    "event_filter_hint": "Only process events matching a rule and all its payload conditions. Leave empty to accept all events.",
+    "event_filter_condition_remove_label": "Remove condition",
+    "event_filter_condition_add_label": "Add condition",
+    "event_filter_condition_cancel": "Cancel",
+    "event_filter_condition_ops": {
+      "equals": "is",
+      "not_equals": "is not",
+      "contains": "contains",
+      "in": "is one of",
+      "exists": "exists"
+    },
+    "event_filter_condition_path_label": "Payload field",
+    "event_filter_condition_path_placeholder": "e.g. pull_request.labels.*.name",
+    "event_filter_condition_op_label": "Operator",
+    "event_filter_condition_value_label": "Value",
+    "event_filter_condition_value_placeholder": "e.g. main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "Ignore case",
     "schedule_multiple_notice": "This autopilot has {{count}} schedules. Close this dialog and edit each one under Triggers below.",
     "schedule_empty": "No schedule — this autopilot only runs when triggered manually.",
     "schedule_add": "Add schedule",
@@ -347,7 +376,9 @@
         "label": "Run only",
         "description": "Silent run, no issue created"
       }
-    }
+    },
+    "event_filter_condition_all": "And payload matches all conditions",
+    "event_filter_condition_limits": "Paths: up to {{path}} characters. Lists: up to {{values}} values."
   },
   "schedule_editor": {
     "time_label": "Time",

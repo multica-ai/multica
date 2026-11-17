@@ -247,6 +247,18 @@
       "disabled_invalid_signature": "无法重放——签名校验失败",
       "disabled_rejected": "无法重放已拒绝的投递",
       "disabled_queued": "投递仍在排队，处理完成后再重放"
+    },
+    "ignore": {
+      "title": "忽略原因",
+      "payload_filtered": "正文条件不满足",
+      "event_filtered": "事件或动作不匹配",
+      "trigger_disabled": "触发器已禁用",
+      "autopilot_paused": "自动化已暂停",
+      "autopilot_archived": "自动化已归档",
+      "quota_exceeded": "已达到运行配额",
+      "actual_value": "实际值",
+      "missing": "字段不存在",
+      "truncated": "预览已截断，完整值见原始正文。"
     }
   },
   "add_trigger_dialog": {
@@ -332,7 +344,24 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_add": "添加",
     "event_filter_remove_label": "移除过滤条件",
-    "event_filter_hint": "只处理匹配这些事件的 webhook。留空则接受所有事件。",
+    "event_filter_hint": "只处理匹配规则且正文满足全部条件的事件。留空则接收所有事件。",
+    "event_filter_condition_remove_label": "移除条件",
+    "event_filter_condition_add_label": "添加条件",
+    "event_filter_condition_cancel": "取消",
+    "event_filter_condition_ops": {
+      "equals": "是",
+      "not_equals": "不是",
+      "contains": "包含",
+      "in": "是其中之一",
+      "exists": "存在"
+    },
+    "event_filter_condition_path_label": "Payload 字段",
+    "event_filter_condition_path_placeholder": "例如 pull_request.labels.*.name",
+    "event_filter_condition_op_label": "运算符",
+    "event_filter_condition_value_label": "值",
+    "event_filter_condition_value_placeholder": "例如 main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "忽略大小写",
     "schedule_multiple_notice": "该自动化有 {{count}} 条时间表。关闭此弹窗，在下方「触发器」中逐条编辑。",
     "schedule_empty": "还没有时间表——这个自动化只在手动触发时运行。",
     "schedule_add": "添加时间表",
@@ -347,7 +376,9 @@
         "label": "仅运行",
         "description": "静默运行，不创建任务"
       }
-    }
+    },
+    "event_filter_condition_all": "且正文满足全部条件",
+    "event_filter_condition_limits": "字段路径最多 {{path}} 个字符，候选值列表最多 {{values}} 项。"
   },
   "schedule_editor": {
     "time_label": "时间",

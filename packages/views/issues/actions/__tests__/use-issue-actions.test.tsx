@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
 import { statusCategoryOfKey } from "@multica/core/issues";
 import type { Issue, IssueStatusEntry } from "@multica/core/types";
+import * as clipboard from "@multica/ui/lib/clipboard";
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -163,6 +164,10 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("useIssueActions", () => {
   it("updateField dispatches useUpdateIssue.mutate with the correct payload", () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
@@ -296,6 +301,30 @@ describe("useIssueActions", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
       "https://app.multica.com/test/issues/issue-1",
     );
+  });
+
+  it("copyTitleAsLink copies the identifier and title as a Markdown link", async () => {
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyTitleAsLink();
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      "[TES-1 Example](https://app.multica.com/test/issues/TES-1)",
+    );
+  });
+
+  it("copyTitleAsLink reports a failed copy without a success toast", async () => {
+    vi.spyOn(clipboard, "copyTextAndHtml").mockResolvedValueOnce(false);
+    const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyTitleAsLink();
+    });
+
+    expect(toast.error).toHaveBeenCalledOnce();
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it("copyCommentLink writes the issue's shareable URL anchored at the comment", async () => {
