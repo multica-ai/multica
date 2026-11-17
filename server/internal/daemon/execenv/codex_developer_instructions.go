@@ -4,9 +4,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Codex app-server keeps the developer instructions a thread started with:
@@ -66,4 +70,36 @@ func CodexDeveloperInstructionsMatch(store, sessionID, instructions string) bool
 		return false
 	}
 	return strings.TrimSpace(string(data)) == codexDeveloperInstructionsDigest(instructions)
+}
+
+// ComposeCodexDeveloperInstructions returns the developer instructions a
+// Codex thread should start with when the brief travels over the app-server
+// channel. Codex resolves `params.developer_instructions.or(config)`
+// (codex-rs/core/src/config/mod.rs, rust-v0.169.0): a non-empty parameter
+// replaces the user's configured developer_instructions instead of extending
+// it. The task home's config.toml is the copy Codex will load, so its value is
+// kept first and the brief follows. On error the brief is returned alone.
+func ComposeCodexDeveloperInstructions(codexHome, brief string) (string, error) {
+	if codexHome == "" {
+		return brief, nil
+	}
+	path := filepath.Join(codexHome, "config.toml")
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return brief, nil
+	}
+	if err != nil {
+		return brief, fmt.Errorf("read %s: %w", path, err)
+	}
+	var cfg struct {
+		DeveloperInstructions string `toml:"developer_instructions"`
+	}
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return brief, fmt.Errorf("parse %s: %w", path, err)
+	}
+	configured := strings.TrimSpace(cfg.DeveloperInstructions)
+	if configured == "" {
+		return brief, nil
+	}
+	return configured + "\n\n" + brief, nil
 }

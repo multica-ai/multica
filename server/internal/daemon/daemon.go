@@ -7409,6 +7409,20 @@ func gateCodexResumeToRolloutPresence(task *Task, taskCtx *execenv.TaskContextFo
 	task.PriorSessionResumeUnavailable = true
 }
 
+// composeCodexDeveloperInstructions returns what a Codex thread should receive
+// as developer instructions. The app-server parameter replaces the
+// developer_instructions configured in config.toml rather than adding to it,
+// so the user's own value is kept in front of the brief. An unreadable config
+// falls back to the brief alone: Codex itself refuses to start on a config it
+// cannot parse, so there is nothing to preserve.
+func composeCodexDeveloperInstructions(codexHome, brief string, taskLog *slog.Logger) string {
+	instructions, err := execenv.ComposeCodexDeveloperInstructions(codexHome, brief)
+	if err != nil {
+		taskLog.Warn("read configured codex developer_instructions failed; sending the runtime brief alone", "error", err)
+	}
+	return instructions
+}
+
 // gateCodexResumeToDeveloperInstructions drops a Codex resume whose thread
 // would keep outdated runtime instructions. With external delivery the brief
 // travels as developerInstructions, which thread/resume does not apply to an
@@ -9083,8 +9097,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			return TaskResult{}, fmt.Errorf("protect worktree runtime config: %w", err)
 		}
 	}
+	// The text a Codex thread actually receives as developer instructions: the
+	// user's own configured developer_instructions plus the brief. The resume
+	// gate and the per-thread record both use this final text.
+	var codexDeveloperInstructions string
 	if provider == "codex" && env.RuntimeDir != "" {
-		gateCodexResumeToDeveloperInstructions(&task, &taskCtx, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx), runtimeBrief, taskLog)
+		codexDeveloperInstructions = composeCodexDeveloperInstructions(env.CodexHome, runtimeBrief, taskLog)
+		gateCodexResumeToDeveloperInstructions(&task, &taskCtx, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx), codexDeveloperInstructions, taskLog)
 	}
 	// An exempt turn runs in the user's directory without having queued for it,
 	// so a sibling coding task may be writing to the same tree right now. That
@@ -9408,7 +9427,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			execOpts.ClaudeRuntimeDir = env.RuntimeDir
 		}
 		if provider == "codex" {
-			execOpts.DeveloperInstructions = runtimeBrief
+			execOpts.DeveloperInstructions = codexDeveloperInstructions
 		}
 	}
 	// Some providers do not reliably load the per-task runtime config files we
@@ -9599,7 +9618,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			runtimeBrief = freshBrief
 			runtimeBriefWritten = true
 			if env.RuntimeDir != "" && provider == "codex" {
-				execOpts.DeveloperInstructions = runtimeBrief
+				execOpts.DeveloperInstructions = composeCodexDeveloperInstructions(env.CodexHome, runtimeBrief, taskLog)
 			}
 			if providerNeedsInlineSystemPrompt(provider) {
 				execOpts.SystemPrompt = runtimeBrief
@@ -9614,9 +9633,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if execOpts.SystemPrompt != "" {
 			// A failed file rewrite leaves the prior inline payload in use.
 			receiptInput.RuntimeBrief = execOpts.SystemPrompt
-		}
-		if execOpts.DeveloperInstructions != "" {
-			receiptInput.RuntimeBrief = execOpts.DeveloperInstructions
 		}
 		receiptInput.BriefWritten = runtimeBriefWritten
 		receiptInput.ResumedSession = false

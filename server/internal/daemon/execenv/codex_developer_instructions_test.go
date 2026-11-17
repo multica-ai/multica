@@ -44,3 +44,24 @@ func TestCodexDeveloperInstructionsRecord(t *testing.T) {
 		t.Fatal("a session id without safe characters must be refused")
 	}
 }
+
+// The app-server parameter replaces config.toml's developer_instructions, so
+// the user's configured value must ride along in front of the brief.
+func TestComposeCodexDeveloperInstructions(t *testing.T) {
+	home := t.TempDir()
+	if got, err := ComposeCodexDeveloperInstructions(home, "BRIEF"); err != nil || got != "BRIEF" {
+		t.Fatalf("no config: %q, %v", got, err)
+	}
+	writeFile(t, filepath.Join(home, "config.toml"), "model = \"gpt\"\n")
+	if got, err := ComposeCodexDeveloperInstructions(home, "BRIEF"); err != nil || got != "BRIEF" {
+		t.Fatalf("config without developer_instructions: %q, %v", got, err)
+	}
+	writeFile(t, filepath.Join(home, "config.toml"), "developer_instructions = \"\"\"\nAlways run the linter.\n\"\"\"\n")
+	if got, err := ComposeCodexDeveloperInstructions(home, "BRIEF"); err != nil || got != "Always run the linter.\n\nBRIEF" {
+		t.Fatalf("configured instructions: %q, %v", got, err)
+	}
+	writeFile(t, filepath.Join(home, "config.toml"), "developer_instructions = [\n")
+	if got, err := ComposeCodexDeveloperInstructions(home, "BRIEF"); err == nil || got != "BRIEF" {
+		t.Fatalf("broken config: %q, %v", got, err)
+	}
+}
