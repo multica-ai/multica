@@ -87,7 +87,7 @@ const { cancelRunMock, updateIssueMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@multica/core/issues/mutations", () => ({
-  useUpdateIssue: () => ({ mutate: updateIssueMock }),
+  useUpdateIssue: () => ({ mutate: updateIssueMock, mutateAsync: updateIssueMock }),
   useCancelIssueRun: () => ({ mutateAsync: cancelRunMock }),
 }));
 
@@ -247,7 +247,7 @@ beforeEach(() => {
   apiMocks.markIssueUnread.mockResolvedValue({ unread: true });
   cancelRunMock.mockReset();
   cancelRunMock.mockResolvedValue(undefined);
-  updateIssueMock.mockReset();
+  updateIssueMock.mockReset().mockResolvedValue(mockIssue);
 });
 
 describe("IssueActionsDropdown", () => {
@@ -342,7 +342,6 @@ describe("IssueActionsDropdown", () => {
 
     expect(updateIssueMock).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
-      expect.anything(),
     );
     await waitFor(() => expect(screen.queryByText("Status")).not.toBeInTheDocument());
   });
@@ -653,7 +652,6 @@ describe("IssueActionsContextMenu", () => {
 
     expect(updateIssueMock).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
-      expect.anything(),
     );
     await waitFor(() => expect(screen.queryByText("Rename issue")).not.toBeInTheDocument());
   });

@@ -58,11 +58,11 @@ export function useIssueSurfaceActions({
       updates: Partial<UpdateIssueRequest>,
       options?: IssueSurfaceMutationOptions,
     ) => {
-      updateIssueMutation.mutate(
-        { id: issueId, ...updates },
-        {
-          onSuccess: (issue) => options?.onSuccess?.(issue),
-          onError: (err) => {
+      void updateIssueMutation
+        .mutateAsync({ id: issueId, ...updates })
+        .then(
+          (issue) => options?.onSuccess?.(issue),
+          (err: unknown) => {
             toast.error(
               errorCode(err) === "revision_conflict"
                 ? tIssues(($) => $.revision.conflict)
@@ -73,9 +73,8 @@ export function useIssueSurfaceActions({
             );
             options?.onError?.(err);
           },
-          onSettled: () => options?.onSettled?.(),
-        },
-      );
+        )
+        .finally(() => options?.onSettled?.());
     },
     [t, tIssues, updateIssueMutation],
   );

@@ -106,11 +106,11 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
           ...options,
         });
       } else {
-        updateIssue.mutate(
-          { id: issueId, ...updates },
-          {
-            onSuccess: options?.onSuccess,
-            onError: (err) => {
+        void updateIssue
+          .mutateAsync({ id: issueId, ...updates })
+          .then(
+            (saved) => options?.onSuccess?.(saved),
+            (err: unknown) => {
               toast.error(
                 errorCode(err) === "revision_conflict"
                   ? t(($) => $.revision.conflict)
@@ -120,9 +120,8 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
               );
               options?.onError?.(err);
             },
-            onSettled: () => options?.onSettled?.(),
-          },
-        );
+          )
+          .finally(() => options?.onSettled?.());
       }
     },
     [issue, issueId, entryOf, surfaceActions, updateIssue, openModal, t],
