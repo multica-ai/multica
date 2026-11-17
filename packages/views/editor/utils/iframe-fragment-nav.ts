@@ -13,9 +13,10 @@
  * implementation consensus, not a bug we can wait out.
  *
  * The fix is in-iframe: append a tiny script to the document that listens for
- * fragment-link clicks, sets the document's own hash, and calls `scrollIntoView`.
- * Setting the hash preserves :target, hashchange, and session history before
- * scrolling (a :target rule may be what makes the destination visible).
+ * fragment-link clicks, replaces the document's own fragment, and scrolls.
+ * This activates :target and fires hashchange before scrolling, without adding
+ * session history entries. Chromium retains iframe history after unmount, so
+ * adding entries would leave invisible Back steps when a preview closes.
  * The script runs in the iframe's own opaque origin — same capabilities the
  * user's HTML already has under `allow-scripts`; it cannot reach the parent.
  * The shim only intercepts `href="#..."` clicks, defers to any preventDefault
@@ -41,7 +42,7 @@ const FRAGMENT_NAV_SHIM = `<script>
     }
     if (!dest) return;
     e.preventDefault();
-    window.location.hash = href;
+    window.location.replace(window.location.href.split('#')[0] + href);
     dest.scrollIntoView({ behavior: 'smooth', block: 'start' });
   });
 })();
