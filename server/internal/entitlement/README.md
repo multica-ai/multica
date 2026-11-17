@@ -17,7 +17,7 @@ The client reads:
 
 - `schema_version`: only version 1 is accepted.
 - `policy_revision`: the effective-instruction generation, currently fixed at
-  `2` by Cloud and not deployment configuration. Cloud advances it when the
+  `3` by Cloud and not deployment configuration. Cloud advances it when the
   meaning or set of actionable instructions changes, including additive
   instructions; `schema_version` changes only for incompatible wire parsing.
 - `subscription_version`: the workspace's monotonic subscription revision. A
@@ -30,9 +30,10 @@ The client reads:
   for enforcement expiry.
 - `valid_until`: diagnostic Cloud wall-clock time only; it is never used to
   extend enforcement.
-- `gates`: effective `off` or `enforce` instructions and parameters. Cloud does
-  not expose an `observe` rollout mode; `observe` exists only as Multica's local
-  downgrade of an expired cached `enforce` instruction.
+- `gates`: effective `off`, `observe`, or `enforce` instructions and
+  parameters. Cloud chooses the action per gate; `observe` carries the same
+  limit and period parameters as `enforce`. Multica also downgrades an expired
+  cached `enforce` instruction to `observe` locally (see below).
 - `gates.*.notifications`: an optional, additive delivery policy. The autopilot
   quota consumer recognizes `first_rejection_per_period` and delivers one
   workspace notice for the first rejected execution in the Cloud-defined quota
@@ -43,9 +44,35 @@ No deployment order is required for the optional notification policy. The
 consumer treats a missing policy as notices-disabled while continuing to
 enforce the quota.
 
+Deploy this consumer before Cloud policy revision 3, which is the first to send
+`observe`. A consumer released before revision 3 rejects `observe` as an
+unknown action and fails the whole policy open to `off`.
+
 Responses tolerate unknown JSON fields and gates for additive compatibility.
 Unknown schema/action, malformed fields, a missing `autopilot_runs` gate, HTTP
 failures, and timeouts fail open.
+
+## Actions
+
+Every consumer handles the three actions the same way:
+
+| Action | Admits the operation | Records an over-limit attempt |
+| --- | --- | --- |
+| `off` | yes, without reading quota tables | no |
+| `observe` | yes, even past the limit | yes, `observed_count` |
+| `enforce` | only within the limit | yes, `enforced_count` |
+
+Over-limit attempts are stored per workspace, gate, and Cloud-defined period
+in `entitlement_limit_overage` (`service.EntitlementOverages`). Each row keeps
+the latest limit, the peak usage an attempt would have reached, the observed
+and enforced counts, and the first and last attempt times, so
+`peak_usage - limit_value` is how far a workspace went over. A later admission
+inside the limit also syncs a changed limit onto an existing row, so an upgrade
+mid-period clears the overage without erasing the history. Rollout reach,
+over-limit notices, and grace periods read this table; metrics stay
+low-cardinality and never carry workspace IDs. Recording runs after the
+admission transaction commits and is best-effort: a failed write is logged and
+never changes the admission decision.
 
 ## Cache and degradation
 
