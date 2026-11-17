@@ -19,7 +19,7 @@ type hermesGuidanceSession struct {
 	supportsSteer   bool
 	active          bool
 	stopped         bool
-	pendingAck      string
+	pendingAcks     map[string]int
 }
 
 func (s *hermesGuidanceSession) notification(method string, data json.RawMessage) {
@@ -77,6 +77,13 @@ func (s *hermesGuidanceSession) finish(json.RawMessage) {
 	s.stopped = true
 }
 
+func (s *hermesGuidanceSession) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopped = true
+	s.pendingAcks = nil
+}
+
 // The native slash acknowledgement is presentation, not the model's answer.
 // Match this instruction's complete acknowledgement rather than a generic prefix.
 func (s *hermesGuidanceSession) acceptUpdate(kind string, data json.RawMessage) bool {
@@ -93,7 +100,16 @@ func (s *hermesGuidanceSession) acceptUpdate(kind string, data json.RawMessage) 
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.pendingAck == "" || strings.TrimSpace(update.Content.Text) != s.pendingAck
+	ack := strings.TrimSpace(update.Content.Text)
+	if count := s.pendingAcks[ack]; count > 0 {
+		if count == 1 {
+			delete(s.pendingAcks, ack)
+		} else {
+			s.pendingAcks[ack] = count - 1
+		}
+		return false
+	}
+	return true
 }
 
 func (s *hermesGuidanceSession) send(ctx context.Context, text string) error {
@@ -109,9 +125,14 @@ func (s *hermesGuidanceSession) send(ctx context.Context, text string) error {
 		preview = preview[:80]
 		suffix = "..."
 	}
-	s.pendingAck = "⏩ Steer queued for the active turn: " + string(preview) + suffix
+	if s.pendingAcks == nil {
+		s.pendingAcks = make(map[string]int)
+	}
+	// A timeout cannot retract a written command. Keep each expected native
+	// acknowledgement until observed or the session ends, including commands
+	// with identical previews and commands whose RPC has already completed.
+	s.pendingAcks["⏩ Steer queued for the active turn: "+string(preview)+suffix]++
 	s.mu.Unlock()
-	defer func() { s.mu.Lock(); s.pendingAck = ""; s.mu.Unlock() }()
 	rpcCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	// One ordinary ACP request, never retried. A refusal/timeout uses Multica's

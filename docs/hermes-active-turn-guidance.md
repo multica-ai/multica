@@ -32,6 +32,10 @@ only for that command's normal ACP response, not for model incorporation. A norm
 excluded from the assistant transcript, and the command response cannot finish
 the primary prompt or replace its output/usage.
 
+Expected acknowledgement signatures survive RPC completion or timeout until
+observed or session closure. Each exact preview is consumed once per command,
+including identical previews; ordinary text with a similar prefix is preserved.
+
 No private capability, immutable owner-turn notification, guidance-status lookup
 or Hermes incorporation receipt is requested. The adapter does not resend a
 command after transport loss. Refusal, cancellation, malformed results and a

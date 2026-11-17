@@ -67,7 +67,7 @@ func TestHermesNativePeerProcess(t *testing.T) {
 				switch mode {
 				case "refused":
 					write(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32603, "message": "unsupported_control"}})
-				case "lost": // No reply: the SDK must not retry this command.
+				case "lost", "late-ack": // No reply: the SDK must not retry this command.
 				case "cancelled":
 					response(req.ID, map[string]string{"stopReason": "cancelled"})
 				default:
@@ -92,6 +92,11 @@ func TestHermesNativePeerProcess(t *testing.T) {
 					}
 					update("native-session", "agent_message_chunk", "primary answer")
 					response(id, map[string]any{"stopReason": "end_turn", "usage": map[string]int{"inputTokens": 17, "outputTokens": 8}, "_meta": map[string]string{"modelId": "native-model"}})
+					if mode == "late-ack" {
+						// The signature must survive both command timeout and the
+						// primary response, until the stdout drain completes.
+						update("native-session", "agent_message_chunk", "⏩ Steer queued for the active turn: literal input\n")
+					}
 				}(req.ID)
 			}
 		default:
@@ -105,7 +110,7 @@ func TestHermesNativeSteerProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX process shim")
 	}
-	for _, mode := range []string{"normal", "refused", "cancelled", "lost", "unsupported", "wrong-session", "disabled"} {
+	for _, mode := range []string{"normal", "refused", "cancelled", "lost", "late-ack", "unsupported", "wrong-session", "disabled"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			gate := filepath.Join(dir, "release")
