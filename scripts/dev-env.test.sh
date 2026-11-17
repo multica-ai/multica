@@ -346,6 +346,15 @@ if [ "$status" -ne 0 ]; then
 fi
 require_contains "$out" "stopped"
 
+# `make down C=daemon` must reach the script as a component filter. Dropping C
+# here stops api and web too, which is what `make up C=...` users do not expect.
+make -s -n -C "$root_dir" down C=daemon > "$out" 2>&1 || fail "make -n down C=daemon failed"
+require_contains "$out" "dev-env.sh down --components daemon"
+if make -s -n -C "$root_dir" destroy C=daemon > "$out" 2>&1; then
+  fail "make destroy C=daemon must refuse instead of destroying the whole environment"
+fi
+require_contains "$out" "make down C=daemon"
+
 # Commands launched through env-exec must not inherit the daemon-task identity
 # hints that make human/profile CLI commands reject --profile.
 write_manifest "clean-env-903" "$root_dir" 903

@@ -70,7 +70,7 @@ endef
 ##@ Help
 
 help: ## Show available make targets and common local workflows
-	@awk 'BEGIN {FS = ":.*## "; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nQuick start:\n  \033[36mmake up\033[0m           Start this checkout'"'"'s environment (C=api,web,daemon,desktop)\n  \033[36mmake status\033[0m       Show what is running, and prove it is yours\n  \033[36mmake down\033[0m         Stop it again, keeping the database\n  \033[36mmake check\033[0m        Run the full local verification pipeline\n\nCheckout modes:\n  Main checkout uses \033[36m.env\033[0m\n  Worktrees use \033[36m.env.worktree\033[0m (generate with \033[36mmake worktree-env\033[0m)\n\n"} \
+	@awk 'BEGIN {FS = ":.*## "; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nQuick start:\n  \033[36mmake up\033[0m           Start this checkout'"'"'s environment (C=api,web,daemon,desktop)\n  \033[36mmake status\033[0m       Show what is running, and prove it is yours\n  \033[36mmake down\033[0m         Stop it again, keeping the database (C=daemon stops just that)\n  \033[36mmake check\033[0m        Run the full local verification pipeline\n\nCheckout modes:\n  Main checkout uses \033[36m.env\033[0m\n  Worktrees use \033[36m.env.worktree\033[0m (generate with \033[36mmake worktree-env\033[0m)\n\n"} \
 		/^##@/ {printf "\n\033[1m%s\033[0m\n", substr($$0, 5); next} \
 		/^[a-zA-Z0-9_.-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -164,12 +164,13 @@ selfhost-stop: ## Stop the self-hosted Docker Compose stack
 #   make up C=desktop           Electron against this environment's backend
 #   make up C=desktop ARGS=--cdp  ...signed in, with a DevTools port for Playwright
 #   make up ARGS=--ephemeral    agent-owned, expires, collected by `make gc`
+#   make down C=daemon          stop only the daemon; api and web keep running
 
 up: ## Start this checkout's environment (C=api,web,daemon,desktop; default api,web)
 	@bash scripts/dev-env.sh up $(if $(C),--components $(C)) $(ARGS)
 
-down: ## Stop this environment's processes, keeping its database and profile
-	@bash scripts/dev-env.sh down $(ARGS)
+down: ## Stop this environment's processes, keeping its database and profile (C=daemon,...; default all)
+	@bash scripts/dev-env.sh down $(if $(C),--components $(C)) $(ARGS)
 
 status: ## Show what is running for this environment, with proof of identity
 	@bash scripts/dev-env.sh status $(ARGS)
@@ -178,6 +179,7 @@ list: ## List every registered development environment on this machine
 	@bash scripts/dev-env.sh list $(ARGS)
 
 destroy: ## Stop this environment, drop its database and profile, free its slot
+	$(if $(C),$(error destroy always removes the whole environment and does not take C=; use `make down C=$(C)` to stop components))
 	@bash scripts/dev-env.sh destroy $(ARGS)
 
 gc: ## Collect environments whose directory is gone or whose TTL expired

@@ -6,6 +6,7 @@
 #   make status                  # what is running, and is it mine
 #   make list                    # every environment on this machine
 #   make down                    # stop the processes, keep the data
+#   make down C=daemon           # stop only some components
 #   make destroy                 # stop, then delete database + profile + slot
 #
 # Three rules the old flow got wrong, and why they are here:
@@ -1569,7 +1570,11 @@ cmd_down() {
     case " $ALL_COMPONENTS " in *" $comp "*) ;; *) die "Unknown component '$comp'. Valid: $ALL_COMPONENTS" ;; esac
     stop_component "$comp"
   done
-  printf '\n%s✓ %s stopped.%s Database, profile and slot kept — `make up` restarts in seconds.\n' "$C_GREEN" "$NAME" "$C_OFF"
+  if [ "$requested" = "$ALL_COMPONENTS" ]; then
+    printf '\n%s✓ %s stopped.%s Database, profile and slot kept — `make up` restarts in seconds.\n' "$C_GREEN" "$NAME" "$C_OFF"
+  else
+    printf '\n%s✓ %s: stopped %s.%s Other components were left as they were — `make status` shows them.\n' "$C_GREEN" "$NAME" "$requested" "$C_OFF"
+  fi
 }
 
 cmd_destroy() {
@@ -1826,8 +1831,9 @@ wide-markdown issue content. desktop starts signed in. --cdp exposes a Chrome
 DevTools Protocol port (printed by up and status --json) for Playwright's
 connectOverCDP; the port is kept for later runs until --no-cdp.
 
-down keeps the database, the CLI profile and the allocated slot.
-destroy consumes them.
+down keeps the database, the CLI profile and the allocated slot; with
+--components (make down C=daemon) it stops only those and leaves the rest
+running. destroy consumes them and always acts on the whole environment.
 EOF
 }
 

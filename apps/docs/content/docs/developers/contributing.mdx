@@ -74,6 +74,7 @@ make up               # Start this checkout's environment (C=api,web,daemon,desk
 make status           # Show what is running and prove it is this environment
 make list             # List every environment on this machine
 make down             # Stop the processes, keep the database
+make down C=daemon    # Stop only the listed components
 make destroy          # Stop, then drop the database and free the slot
 make gc               # Collect expired or directory-less environments
 make dev              # Prepare and start the current checkout in the foreground
