@@ -346,6 +346,20 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 ]
 ```
 
+각 행에는 앱과 같은 본문 필드 규칙을 사용하는 `conditions`도 지정할 수 있습니다. 예를 들어 다음 규칙은 `main`을 대상으로 하는 초안이 아닌 PR만 수락합니다:
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+규칙당 조건은 최대 20개, 필드 경로는 256자, `in` 후보 목록은 100개까지입니다. 한도를 초과하는 조건으로 트리거를 만들거나 수정하면 HTTP 400을 반환합니다.
+
 이 예시는 PR 리뷰 제출과 모든 push 이벤트를 받습니다. `actions`를 생략하거나 빈 배열을 지정하면 해당 이벤트의 모든 action을 받습니다.
 
 ```bash

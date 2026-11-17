@@ -247,6 +247,18 @@
       "disabled_invalid_signature": "署名が無効だったため再実行できません",
       "disabled_rejected": "拒否された配信は再実行できません",
       "disabled_queued": "まだキュー待ちです。処理が落ち着いてから再実行してください"
+    },
+    "ignore": {
+      "title": "無視した理由",
+      "payload_filtered": "本文の条件を満たしていません",
+      "event_filtered": "イベントまたはアクションが一致しません",
+      "trigger_disabled": "トリガーは無効です",
+      "autopilot_paused": "自動化は一時停止中です",
+      "autopilot_archived": "自動化はアーカイブ済みです",
+      "quota_exceeded": "実行の上限に達しました",
+      "actual_value": "実際の値",
+      "missing": "フィールドがありません",
+      "truncated": "プレビューは省略されています。完全な値は元の本文で確認できます。"
     }
   },
   "add_trigger_dialog": {
@@ -332,7 +344,24 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_add": "追加",
     "event_filter_remove_label": "フィルターを削除",
-    "event_filter_hint": "これらのイベントに一致する Webhook のみを処理します。空にするとすべて許可します。",
+    "event_filter_hint": "ルールと本文のすべての条件に一致するイベントのみ処理します。空欄の場合はすべて受け付けます。",
+    "event_filter_condition_remove_label": "条件を削除",
+    "event_filter_condition_add_label": "条件を追加",
+    "event_filter_condition_cancel": "キャンセル",
+    "event_filter_condition_ops": {
+      "equals": "等しい",
+      "not_equals": "等しくない",
+      "contains": "含む",
+      "in": "いずれか",
+      "exists": "存在する"
+    },
+    "event_filter_condition_path_label": "Payload のフィールド",
+    "event_filter_condition_path_placeholder": "例: pull_request.labels.*.name",
+    "event_filter_condition_op_label": "演算子",
+    "event_filter_condition_value_label": "値",
+    "event_filter_condition_value_placeholder": "例: main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "大文字と小文字を区別しない",
     "schedule_multiple_notice": "このオートパイロットにはスケジュールが {{count}} 件あります。このダイアログを閉じて、下の「トリガー」から個別に編集してください。",
     "schedule_empty": "スケジュールはありません。このオートパイロットは手動で実行したときだけ動きます。",
     "schedule_add": "スケジュールを追加",
@@ -347,7 +376,9 @@
         "label": "実行のみ",
         "description": "タスクを作成せず、静かに実行します"
       }
-    }
+    },
+    "event_filter_condition_all": "かつ本文がすべての条件を満たす",
+    "event_filter_condition_limits": "パスは {{path}} 文字まで、候補リストは {{values}} 個までです。"
   },
   "schedule_editor": {
     "time_label": "時刻",

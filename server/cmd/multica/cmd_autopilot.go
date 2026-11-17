@@ -837,6 +837,10 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
+	if err := requireWebhookPayloadConditionsSupport(ctx, client, filters); err != nil {
+		return err
+	}
+
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
 	if err != nil {
 		return fmt.Errorf("resolve autopilot: %w", err)
@@ -963,6 +967,10 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
+	if err := requireWebhookPayloadConditionsSupport(ctx, client, filters); err != nil {
+		return err
+	}
+
 	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
 	if err != nil {
 		return fmt.Errorf("resolve autopilot: %w", err)
@@ -987,8 +995,36 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 }
 
 type autopilotEventFilter struct {
-	Event   string   `json:"event"`
-	Actions []string `json:"actions,omitempty"`
+	Event      string                      `json:"event"`
+	Actions    []string                    `json:"actions,omitempty"`
+	Conditions []autopilotPayloadCondition `json:"conditions,omitempty"`
+}
+
+type autopilotPayloadCondition struct {
+	Path       string `json:"path"`
+	Op         string `json:"op"`
+	Value      any    `json:"value,omitempty"`
+	Values     []any  `json:"values,omitempty"`
+	IgnoreCase bool   `json:"ignore_case,omitempty"`
+}
+
+func requireWebhookPayloadConditionsSupport(ctx context.Context, client *cli.APIClient, filters []autopilotEventFilter) error {
+	for _, filter := range filters {
+		if len(filter.Conditions) == 0 {
+			continue
+		}
+		var config struct {
+			Supported bool `json:"webhook_payload_conditions_supported"`
+		}
+		if err := client.GetJSON(ctx, "/api/config", &config); err != nil {
+			return fmt.Errorf("check webhook payload condition support: %w", err)
+		}
+		if !config.Supported {
+			return fmt.Errorf("this server version does not support webhook payload conditions; update the server before saving them")
+		}
+		break
+	}
+	return nil
 }
 
 func autopilotEventFiltersInput(cmd *cobra.Command) ([]autopilotEventFilter, error) {

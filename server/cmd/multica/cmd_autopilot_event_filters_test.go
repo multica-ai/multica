@@ -27,7 +27,7 @@ func resetAutopilotFilterFlags(t *testing.T, cmd *cobra.Command) {
 }
 
 func TestAutopilotEventFiltersRequests(t *testing.T) {
-	const filters = `[{"event":"pull_request_review","actions":["submitted"]},{"event":"push"}]`
+	const filters = `[{"event":"pull_request_review","actions":["submitted"],"conditions":[{"path":"pull_request.draft","op":"equals","value":false},{"path":"pull_request.base.ref","op":"in","values":["main","release"],"ignore_case":true}]},{"event":"push"}]`
 	for _, tc := range []struct {
 		name, file, label string
 		create, clear     bool
@@ -70,6 +70,10 @@ func TestAutopilotEventFiltersRequests(t *testing.T) {
 			var got map[string]any
 			requests := 0
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet && r.URL.Path == "/api/config" {
+					_ = json.NewEncoder(w).Encode(map[string]bool{"webhook_payload_conditions_supported": true})
+					return
+				}
 				requests++
 				wantMethod, wantPath := http.MethodPatch, "/api/autopilots/11111111-1111-1111-1111-111111111111/triggers/22222222-2222-2222-2222-222222222222"
 				if tc.create {
@@ -111,6 +115,41 @@ func TestAutopilotEventFiltersRequests(t *testing.T) {
 				t.Fatalf("unrelated update changed filters: %#v", got)
 			}
 		})
+	}
+}
+
+func TestAutopilotEventFiltersRefusesPayloadConditionsOnOlderServer(t *testing.T) {
+	for _, create := range []bool{false, true} {
+		cmd := autopilotTriggerUpdateCmd
+		if create {
+			cmd = autopilotTriggerAddCmd
+		}
+		resetAutopilotFilterFlags(t, cmd)
+		if create {
+			_ = cmd.Flags().Set("kind", "webhook")
+		}
+		path := filepath.Join(t.TempDir(), "filters.json")
+		if err := os.WriteFile(path, []byte(`[{"event":"pull_request","conditions":[{"path":"draft","op":"equals","value":false}]}]`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		_ = cmd.Flags().Set("event-filters-file", path)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || r.URL.Path != "/api/config" {
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		setCLITestServerEnv(t, srv.URL)
+		var err error
+		if create {
+			err = runAutopilotTriggerAdd(cmd, []string{"11111111-1111-1111-1111-111111111111"})
+		} else {
+			err = runAutopilotTriggerUpdate(cmd, []string{"11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"})
+		}
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), "does not support webhook payload conditions") {
+			t.Fatalf("expected unsupported-server error, got %v", err)
+		}
 	}
 }
 

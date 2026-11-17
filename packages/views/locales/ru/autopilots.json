@@ -247,6 +247,18 @@
       "disabled_invalid_signature": "Нельзя повторить — подпись была неверной",
       "disabled_rejected": "Нельзя повторить отклонённую доставку",
       "disabled_queued": "Ещё в очереди — повторите, когда она обработается"
+    },
+    "ignore": {
+      "title": "Причина пропуска",
+      "payload_filtered": "Условия содержимого не выполнены",
+      "event_filtered": "Событие или действие не соответствует",
+      "trigger_disabled": "Триггер отключён",
+      "autopilot_paused": "Автоматизация приостановлена",
+      "autopilot_archived": "Автоматизация архивирована",
+      "quota_exceeded": "Квота запусков исчерпана",
+      "actual_value": "Фактическое значение",
+      "missing": "Поле отсутствует",
+      "truncated": "Предпросмотр обрезан. Полное значение доступно в исходном содержимом."
     }
   },
   "add_trigger_dialog": {
@@ -332,7 +344,7 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_add": "Добавить",
     "event_filter_remove_label": "Удалить фильтр",
-    "event_filter_hint": "Обрабатывать только вебхуки, соответствующие этим событиям. Оставьте пустым, чтобы принимать все.",
+    "event_filter_hint": "Обрабатываются события, соответствующие правилу и всем его условиям. Оставьте пустым, чтобы принимать все события.",
     "schedule_multiple_notice": "У этого автопилота {{count}} расписаний. Закройте это окно и измените каждое из них в разделе «Триггеры» ниже.",
     "schedule_empty": "Нет расписания — этот автопилот запускается только вручную.",
     "schedule_add": "Добавить расписание",
@@ -347,7 +359,26 @@
         "label": "Только запуск",
         "description": "Тихий запуск, задача не создаётся"
       }
-    }
+    },
+    "event_filter_condition_remove_label": "Удалить условие",
+    "event_filter_condition_add_label": "Добавить условие",
+    "event_filter_condition_cancel": "Отмена",
+    "event_filter_condition_ops": {
+      "equals": "равно",
+      "not_equals": "не равно",
+      "contains": "содержит",
+      "in": "одно из",
+      "exists": "существует"
+    },
+    "event_filter_condition_path_label": "Поле содержимого",
+    "event_filter_condition_path_placeholder": "например, pull_request.labels.*.name",
+    "event_filter_condition_op_label": "Оператор",
+    "event_filter_condition_value_label": "Значение",
+    "event_filter_condition_value_placeholder": "например, main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "Без учёта регистра",
+    "event_filter_condition_all": "И содержимое соответствует всем условиям",
+    "event_filter_condition_limits": "Путь: до {{path}} символов. Список: до {{values}} значений."
   },
   "schedule_editor": {
     "time_label": "Время",

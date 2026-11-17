@@ -346,6 +346,20 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
 ]
 ```
 
+每行还可以包含 `conditions`，使用与界面相同的正文字段规则。例如，下面的规则只接收目标分支为 `main` 的非草稿 PR：
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+每条规则最多 20 个条件，字段路径最多 256 个字符，`in` 候选值列表最多 100 项。创建或更新触发器时，超出上限的条件会返回 HTTP 400。
+
 这个示例接收 PR 评审提交和所有 push 事件。省略 `actions` 或使用空的 actions 数组，表示接收该事件的所有 action。
 
 ```bash

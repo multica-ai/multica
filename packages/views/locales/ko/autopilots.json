@@ -247,6 +247,18 @@
       "disabled_invalid_signature": "서명이 유효하지 않아 재실행할 수 없습니다",
       "disabled_rejected": "거부된 전달은 재실행할 수 없습니다",
       "disabled_queued": "아직 대기 중입니다. 처리된 후 재실행하세요"
+    },
+    "ignore": {
+      "title": "무시한 이유",
+      "payload_filtered": "본문 조건 불충족",
+      "event_filtered": "이벤트 또는 동작 불일치",
+      "trigger_disabled": "트리거 비활성화됨",
+      "autopilot_paused": "자동화 일시 중지됨",
+      "autopilot_archived": "자동화 보관됨",
+      "quota_exceeded": "실행 할당량 도달",
+      "actual_value": "실제 값",
+      "missing": "필드 없음",
+      "truncated": "미리보기가 잘렸습니다. 전체 값은 원본 본문에서 확인하세요."
     }
   },
   "add_trigger_dialog": {
@@ -332,7 +344,24 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_add": "추가",
     "event_filter_remove_label": "필터 제거",
-    "event_filter_hint": "이 이벤트와 일치하는 Webhook만 처리합니다. 비워 두면 모두 허용합니다.",
+    "event_filter_hint": "규칙과 모든 본문 조건에 일치하는 이벤트만 처리합니다. 비워 두면 모든 이벤트를 수락합니다.",
+    "event_filter_condition_remove_label": "조건 제거",
+    "event_filter_condition_add_label": "조건 추가",
+    "event_filter_condition_cancel": "취소",
+    "event_filter_condition_ops": {
+      "equals": "같음",
+      "not_equals": "같지 않음",
+      "contains": "포함",
+      "in": "다음 중 하나",
+      "exists": "존재"
+    },
+    "event_filter_condition_path_label": "Payload 필드",
+    "event_filter_condition_path_placeholder": "예: pull_request.labels.*.name",
+    "event_filter_condition_op_label": "연산자",
+    "event_filter_condition_value_label": "값",
+    "event_filter_condition_value_placeholder": "예: main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "대소문자 무시",
     "schedule_multiple_notice": "이 오토파일럿에는 일정이 {{count}}개 있습니다. 이 대화상자를 닫고 아래 '트리거'에서 각각 수정하세요.",
     "schedule_empty": "일정이 없습니다. 이 오토파일럿은 수동으로 실행할 때만 동작합니다.",
     "schedule_add": "일정 추가",
@@ -347,7 +376,9 @@
         "label": "실행만",
         "description": "태스크를 만들지 않고 조용히 실행합니다"
       }
-    }
+    },
+    "event_filter_condition_all": "본문이 모든 조건을 충족해야 함",
+    "event_filter_condition_limits": "경로는 최대 {{path}}자, 후보 목록은 최대 {{values}}개입니다."
   },
   "schedule_editor": {
     "time_label": "시간",

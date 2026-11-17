@@ -91,6 +91,22 @@ Webhook 請求的約束：
 
 例如，事件名填寫 `workflow_run`，Actions 填寫 `completed, failed`，只會接收這兩類 `workflow_run` 結果。Multica 會從常見請求頭和 payload 中識別事件與 action，包括 GitHub 的 `X-GitHub-Event` 和 body 中的 `action`。
 
+每行還可以設定針對本文欄位的 `conditions`：點選 **新增條件**，或透過 API 設定。同一行的全部條件都要符合，多行之間符合任意一行即可。`path` 用點號存取事件本文，數字表示陣列索引，`*` 表示任意元素（例如 `pull_request.labels.*.name`）。操作支援 `equals`、`not_equals`、`contains`、`in` 和 `exists`，`ignore_case` 忽略文字大小寫。使用 `*` 時，前四種操作中除 `not_equals` 外，只要有一個元素符合即可；`not_equals` 要求沒有元素等於指定值。`exists` 忽略 `null`。字串與布林值必須使用正確類型，例如 `"false"` 與 `false` 不同。
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+每條規則最多 20 個條件，欄位路徑最多 256 個字元，`in` 候選值清單最多 100 項。建立或更新觸發器時，超出上限的條件會回傳 HTTP 400。
+
+`*` 展開空陣列時，`not_equals` 成立；路徑不存在時仍不符。事件或動作不符記為 `event_filtered`，事件符合但本文條件不符記為 `payload_filtered`。兩者都回傳 HTTP 200，不建立執行或任務。投遞清單顯示原因和第一個不符合條件的欄位，詳情顯示接收時儲存的條件及實際值。之後修改規則不會改變這份記錄。預覽最多顯示 10 個值，每個值最多 256 個字元；完整值請見原始本文。
+
 也可以透過 CLI 的 `--event-filters-file` 完整配置這些條件。更新時不傳過濾引數就保留原值；`--clear-event-filters` 明確清空條件、恢復接收所有事件。JSON 格式和命令見 [CLI 範例](/cli#webhook-event-filters)。
 
 ### 保護 Webhook URL
