@@ -7204,13 +7204,15 @@ func (q *Queries) MarkChatFinalizeDeferred(ctx context.Context, id pgtype.UUID) 
 
 const mergeCommentIntoPendingTask = `-- name: MergeCommentIntoPendingTask :one
 UPDATE agent_task_queue
-SET coalesced_comment_ids = (
+SET is_leader_task = CASE WHEN $1::uuid IS NOT NULL THEN true ELSE is_leader_task END,
+    squad_id = COALESCE($1::uuid, squad_id),
+    coalesced_comment_ids = (
         SELECT COALESCE(array_agg(DISTINCT e), '{}')
         FROM unnest(array_append(coalesced_comment_ids, trigger_comment_id)) AS e
-        WHERE e IS NOT NULL AND e <> $1::uuid
+        WHERE e IS NOT NULL AND e <> $2::uuid
     ),
-    trigger_comment_id = $1::uuid,
-    trigger_summary = COALESCE($2, trigger_summary),
+    trigger_comment_id = $2::uuid,
+    trigger_summary = COALESCE($3, trigger_summary),
     -- Re-attribution is ATOMIC (MUL-4302): folding a newly-arrived comment moves the
     -- WHOLE attribution snapshot to that comment's human — person columns, source
     -- label, delegation lineage, rule version, and evidence — computed by the caller
@@ -7218,20 +7220,23 @@ SET coalesced_comment_ids = (
     -- run showing B accountable while still pointing at A's stale source / evidence /
     -- level. accountable comes from the resolved Result (finalizeAttribution already
     -- guaranteed originator ⟹ accountable == originator; the cross-column CHECK backs it).
-    originator_user_id = $3::uuid,
-    accountable_user_id = $4::uuid,
-    originator_source = $5,
-    delegated_from_task_id = $6::uuid,
-    rule_version_id = $7::uuid,
-    trigger_evidence_kind = $8,
-    trigger_evidence_ref_id = $9::uuid,
-    runtime_mcp_overlay = $10,
-    runtime_connected_apps = $11
+    originator_user_id = $4::uuid,
+    accountable_user_id = $5::uuid,
+    originator_source = $6,
+    delegated_from_task_id = $7::uuid,
+    rule_version_id = $8::uuid,
+    trigger_evidence_kind = $9,
+    trigger_evidence_ref_id = $10::uuid,
+    runtime_mcp_overlay = $11,
+    runtime_connected_apps = $12
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
-    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $12
-      AND t.agent_id = $13
-      AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid)
+    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $13
+      AND t.agent_id = $14
+      -- Do not replace a different squad's role on the waiting run.
+      AND ($1::uuid IS NULL
+           OR t.squad_id IS NULL OR t.squad_id = $1::uuid)
+      AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($2::uuid)
       AND (
           t.status = 'queued'
           OR (t.status = 'deferred' AND t.context->>'channel_issue_media_pending' = 'true')
@@ -7242,16 +7247,20 @@ WHERE id = (
       -- into it would give a new-HEAD comment old-HEAD review coverage. Empty/
       -- absent head_sha (no linked PR) matches any task, preserving coalescing.
       AND (
-          COALESCE($14::text, '') = ''
-          OR t.context->>'head_sha' = $14::text
+          COALESCE($15::text, '') = ''
+          OR t.context->>'head_sha' = $15::text
       )
     ORDER BY t.created_at DESC
     LIMIT 1
 )
+AND (status = 'queued' OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true'))
+AND ($1::uuid IS NULL
+     OR squad_id IS NULL OR squad_id = $1::uuid)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
 type MergeCommentIntoPendingTaskParams struct {
+	WorkerReportSquadID     pgtype.UUID `json:"worker_report_squad_id"`
 	NewTriggerCommentID     pgtype.UUID `json:"new_trigger_comment_id"`
 	NewTriggerSummary       pgtype.Text `json:"new_trigger_summary"`
 	NewOriginatorUserID     pgtype.UUID `json:"new_originator_user_id"`
@@ -7310,8 +7319,11 @@ type MergeCommentIntoPendingTaskParams struct {
 // dispatched/running). The caller must NOT blindly enqueue a fresh task in that
 // case — a dispatched sibling would trip the unique index — it defers to
 // completion reconciliation unless no active task exists at all.
+// Re-check after acquiring the update lock: a concurrent claim may have
+// delivered this row since the candidate subquery observed it as queued.
 func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeCommentIntoPendingTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, mergeCommentIntoPendingTask,
+		arg.WorkerReportSquadID,
 		arg.NewTriggerCommentID,
 		arg.NewTriggerSummary,
 		arg.NewOriginatorUserID,

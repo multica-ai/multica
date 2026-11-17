@@ -1820,7 +1820,9 @@ WHERE context->>'wakeup_id' IS NULL AND issue_id = @issue_id
 -- case — a dispatched sibling would trip the unique index — it defers to
 -- completion reconciliation unless no active task exists at all.
 UPDATE agent_task_queue
-SET coalesced_comment_ids = (
+SET is_leader_task = CASE WHEN sqlc.narg('worker_report_squad_id')::uuid IS NOT NULL THEN true ELSE is_leader_task END,
+    squad_id = COALESCE(sqlc.narg('worker_report_squad_id')::uuid, squad_id),
+    coalesced_comment_ids = (
         SELECT COALESCE(array_agg(DISTINCT e), '{}')
         FROM unnest(array_append(coalesced_comment_ids, trigger_comment_id)) AS e
         WHERE e IS NOT NULL AND e <> @new_trigger_comment_id::uuid
@@ -1847,6 +1849,9 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
       AND t.agent_id = @agent_id
+      -- Do not replace a different squad's role on the waiting run.
+      AND (sqlc.narg('worker_report_squad_id')::uuid IS NULL
+           OR t.squad_id IS NULL OR t.squad_id = sqlc.narg('worker_report_squad_id')::uuid)
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@new_trigger_comment_id::uuid)
       AND (
           t.status = 'queued'
@@ -1864,6 +1869,11 @@ WHERE id = (
     ORDER BY t.created_at DESC
     LIMIT 1
 )
+-- Re-check after acquiring the update lock: a concurrent claim may have
+-- delivered this row since the candidate subquery observed it as queued.
+AND (status = 'queued' OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true'))
+AND (sqlc.narg('worker_report_squad_id')::uuid IS NULL
+     OR squad_id IS NULL OR squad_id = sqlc.narg('worker_report_squad_id')::uuid)
 RETURNING *;
 
 -- name: RegisterPlannedCommentForActiveTask :one

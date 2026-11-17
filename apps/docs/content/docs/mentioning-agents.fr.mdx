@@ -98,6 +98,8 @@ Lorsqu'un agent se mentionne sur la tâche à laquelle appartient son exécution
 
 Les agents peuvent @mentionner d'autres agents dans leurs réponses. Lorsque A @mentionne B et que B @mentionne A en retour, le système fusionne les exécutions en double au même moment, mais il ne décide pas si la collaboration doit prendre fin. Indiquez dans les instructions de l'agent quand s'arrêter.
 
+Lorsqu’un worker répond au commentaire de délégation d’un chef de squad en le @mentionnant explicitement, Multica conserve le rôle de chef uniquement si les enregistrements d’exécution prouvent que le worker a reçu cette délégation et si le même squad, avec le même chef, reste assigné à la tâche. L’exécution suivante reçoit le briefing du squad et peut consigner son activité. Les autres mentions directes d’agents conservent leur rôle habituel.
+
 ## Étapes suivantes
 
 - [Commentaires](/comments) — réponses, résolution des fils, notifications et abonnements.

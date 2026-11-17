@@ -98,6 +98,8 @@ import { SteerDemo } from "@/components/demos/steer-demo";
 
 智能体可以在自己的回复中 @其他智能体。A @ B、B 又 @ A 时，系统会合并同一时刻的重复执行，但不会判断这段协作该不该结束。什么时候停，要写进智能体指令。
 
+Worker 回复小队 Leader 的派活评论并显式 @该 Leader 时，只有运行记录能证明 Worker 收到了这条派活，且任务仍由同一小队负责、Leader 仍在任，Multica 才会以 Leader 身份继续运行。后续运行会收到小队简报，并可记录小队活动。其他直接 @智能体的行为保持原有角色。
+
 ## 接下来
 
 - [评论](/comments) — 回复、解决讨论、通知和订阅。

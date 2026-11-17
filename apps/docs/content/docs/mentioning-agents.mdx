@@ -98,6 +98,8 @@ When an agent mentions itself on the issue its current run belongs to, the comme
 
 Agents can @-mention other agents in their replies. When A @-mentions B and B @-mentions A back, the system merges duplicate runs at the same moment, but it does not decide whether the collaboration should end. Write when to stop into the agent instructions.
 
+When a worker replies to a squad leader's delegation and explicitly @-mentions that leader, Multica continues the leader role only if the run records prove the worker received that delegation and the same squad still owns the issue with that leader. The follow-up receives the squad briefing and can record squad activity. Other direct agent mentions keep their usual role.
+
 ## Next steps
 
 - [Comments](/comments) — replies, resolving discussions, notifications, and subscriptions.

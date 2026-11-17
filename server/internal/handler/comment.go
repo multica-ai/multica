@@ -2446,7 +2446,15 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		return commentMergeError
 	}
 	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, attr.UserID, trigger.Agent)
+	// Only a verified worker report may promote a waiting personal run. The
+	// update and claim race on the same row: a claimed run keeps its delivered
+	// role and the report is registered for completion reconciliation instead.
+	var leaderSquadID pgtype.UUID
+	if (trigger.Source == commentTriggerSourceMentionAgent || trigger.Source == commentTriggerSourceMentionSquadLeader) && trigger.NonLeaderAgentReply && trigger.Squad != nil {
+		leaderSquadID = trigger.Squad.ID
+	}
 	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+		WorkerReportSquadID:     leaderSquadID,
 		IssueID:                 issue.ID,
 		AgentID:                 trigger.Agent.ID,
 		NewTriggerCommentID:     newTriggerCommentID,
@@ -2636,6 +2644,10 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 			return err
 		}
 	case commentTriggerSourceMentionAgent:
+		if trigger.Squad != nil {
+			_, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID, service.OriginNamed)
+			return err
+		}
 		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID, service.OriginNamed); err != nil {
 			logCommentEnqueueFailure("enqueue mention agent task failed", err,
 				"issue_id", uuidToString(issue.ID),
@@ -2700,7 +2712,22 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	// `all` is neither "agent" nor "squad", so it is skipped inside
 	// resolveMentionedAgentCommentTriggers and never enqueues a run of its own.
 	if hasAgentOrSquadMention(mentions) {
-		return h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
+		triggers, targets := h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
+		if actorType == "agent" {
+			for i := range triggers {
+				trigger := &triggers[i]
+				if trigger.Source != commentTriggerSourceMentionAgent && trigger.Source != commentTriggerSourceMentionSquadLeader {
+					continue
+				}
+				squad := h.squadLeaderRoleForWorkerMention(ctx, issue, parentComment, actorID, trigger.Agent, opts)
+				if squad == nil || (trigger.Squad != nil && trigger.Squad.ID != squad.ID) {
+					continue
+				}
+				trigger.Squad = squad
+				trigger.NonLeaderAgentReply = true
+			}
+		}
+		return triggers, targets
 	}
 	if util.HasMentionAll(mentions) {
 		return nil, nil

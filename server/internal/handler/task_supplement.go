@@ -214,6 +214,16 @@ func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue,
 			kept = append(kept, trigger)
 			continue
 		}
+		// A report requiring the coordinator role cannot be delivered into a
+		// personal turn whose claim already omitted the squad briefing. Leave it
+		// on the normal follow-up path instead of treating steering as coverage.
+		if (trigger.Source == commentTriggerSourceMentionAgent || trigger.Source == commentTriggerSourceMentionSquadLeader) && trigger.NonLeaderAgentReply && trigger.Squad != nil {
+			task, err := h.Queries.GetAgentTask(ctx, taskID)
+			if err != nil || !task.IsLeaderTask || task.SquadID != trigger.Squad.ID {
+				kept = append(kept, trigger)
+				continue
+			}
+		}
 		// Some trigger routes (a worker's reply reaching its assigned leader)
 		// do not pass the invoke gate, so an agent author is re-checked here.
 		if actorType == "agent" && !h.agentMaySteer(ctx, trigger.Agent, actorID, originatorUserID, uuidToString(issue.WorkspaceID)) {
