@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/extension"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/gitca"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -2314,6 +2315,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/brief", h.PreviewIssueWorkflowBrief)
 				})
 			})
+
+			// Commercial (server/ee) workspace routes; none in an open-source build.
+			extension.MountWorkspaceRoutes(r, h)
 
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {

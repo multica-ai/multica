@@ -26,7 +26,7 @@ Work that a single issue can describe does not need a project. Projects fit a gr
 
 ## Browse projects
 
-Open **All projects** and use the display menu to choose **Table** or **Board**. Both layouts support search and filters for status, priority, and lead. Group by status, priority, or lead; the table can also stay ungrouped. On the board, dragging a project to another column changes that field.
+Open **All projects** and use the display menu to choose **Table** or **Board**. Both layouts support search and filters for status, priority, and lead. Group by status, priority, lead, or [folder](#folders); the table can also stay ungrouped. On the board, dragging a project to another column changes that field.
 
 The table can show start date, due date, progress, and last activity. Sort by those fields, name, status, priority, or creation time. Layout, grouping, sorting, visible columns, and filters are saved per user and workspace across devices; search text is not saved.
 
@@ -110,11 +110,21 @@ A private project may have no `owner` or `admin` on its list, or no members left
 
 Click **Join** and confirm to add yourself to the member list. You appear in the list like any member, its existing members get an inbox notification, and as an owner on the list you can manage its access. Joining does not change the lead. A project whose members have all left is recovered the same way: join it, then manage or delete it from the project page.
 
+## Folders
+
+Folders group related projects, such as everything for one launch or one team, so the sidebar's Projects section stays short. Folders are shared: every member sees the same folders, and any member can create, rename, or delete one and move projects in and out of it. A project is in at most one folder, and folders do not nest. A folder only organizes projects; it does not change who can see them.
+
+- **Create a folder**: click **+** on the sidebar's Projects section and choose **New folder**, or choose **Move to folder → New folder…** in a project's menu to create one with that project in it.
+- **Move a project**: choose **Move to folder** in the project's menu, or drag the project onto a folder in the sidebar, or out of it. When creating a project, pick its folder in the create dialog; **+** on a folder row creates a project in that folder.
+- **Rename or delete a folder**: right-click it in the sidebar. Deleting a folder moves its projects back to the top level; nothing else changes.
+
+Which folders are open in your sidebar, and the order of folders and projects, are personal and do not affect other members. The Projects section's filters apply inside folders: a folder whose projects are all filtered out is hidden, while an empty folder stays visible so you can fill it. On **All projects**, group by **Folder** to see each folder's projects together; on the board, dragging a project to another column moves it to that folder.
+
 ## Pin to the sidebar
 
 A pinned project appears in your sidebar. Pinning is a personal preference and does not affect other members.
 
-In the Projects section settings, **Default icons only** replaces custom project icons with the default folder icon in that section. It is off by default and does not change the projects themselves.
+In the Projects section settings, **Default icons only** replaces custom project icons with the default project icon in that section. It is off by default and does not change the projects themselves.
 
 ## Archive and restore
 

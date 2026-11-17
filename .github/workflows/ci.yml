@@ -89,8 +89,8 @@ jobs:
       - name: Verify generated SQL is up to date
         run: |
           make sqlc
-          git diff --exit-code -- server/pkg/db/generated
-          untracked="$(git ls-files --others --exclude-standard -- server/pkg/db/generated)"
+          git diff --exit-code -- server/pkg/db/generated server/ee
+          untracked="$(git ls-files --others --exclude-standard -- server/pkg/db/generated server/ee)"
           if [ -n "$untracked" ]; then
             printf 'Untracked generated SQL files:\n%s\n' "$untracked"
             exit 1
@@ -426,6 +426,10 @@ jobs:
 
       - name: Build
         run: cd server && go build -race ./...
+
+      # The open-source server, without the commercial packages in server/ee.
+      - name: Build without ee
+        run: cd server && go build -race -tags oss ./cmd/...
 
       # The `agentintegration` files execute real agent CLIs, so no CI job runs
       # them. Nothing compiled them either, which let them rot silently: a

@@ -33,6 +33,7 @@ import { useIntentNavigate, useNavigation } from "../../navigation";
 import { CollectionRowMenu } from "../../layout/collection-list";
 import { titleLinkPayload } from "../../common/title-link";
 import { useArchiveProjects, useRestoreProjects } from "./project-archive";
+import { getProjectFoldersExtension } from "../../extensions";
 
 export function DeleteProjectsDialog({
   rows,
@@ -163,6 +164,7 @@ export function ProjectRowActions({
   const { t } = useT("projects");
   const { t: tCommon } = useT("common");
   const { t: tLayout } = useT("layout");
+  const ProjectFolderItems = getProjectFoldersExtension()?.ProjectMenuItems;
   const wsPaths = useWorkspacePaths();
   const intentNavigate = useIntentNavigate();
   const { getShareableUrl } = useNavigation();
@@ -229,6 +231,7 @@ export function ProjectRowActions({
           <ExternalLink className="size-3.5" />
           {tCommon(($) => $.navigation.open_in_new_tab)}
         </DropdownMenuItem>
+        {ProjectFolderItems && <ProjectFolderItems project={project} />}
         <DropdownMenuSeparator />
         <DropdownMenuItem onClick={togglePin}>
           {pinned ? (

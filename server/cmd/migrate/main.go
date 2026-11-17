@@ -144,6 +144,7 @@ var concurrentIndexCleanups = map[string]string{
 	"677_chat_wakeup_session_idx":                               "idx_chat_wakeup_session",
 	"678_chat_wakeup_requester_idx":                             "idx_chat_wakeup_requester",
 	"680_entitlement_limit_overage_scope_idx":                   "uq_entitlement_limit_overage_scope",
+	"682_project_folder_name_idx":                               "uq_project_folder_workspace_name",
 	"671_weixin_account_state_unique_index":                     "weixin_account_state_pkey",
 	"669_weixin_login_session_unique_index":                     "weixin_login_session_pkey",
 	"666_weixin_login_expiry_idx":                               "weixin_login_expiry_idx",
