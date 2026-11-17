@@ -52,6 +52,7 @@ import { ChatWindowMessages } from "./chat-window-messages";
 import { ChatInput } from "./chat-input";
 import { useChatAnnotations } from "./use-chat-annotations";
 import { ChatQueue } from "./chat-queue";
+import { ChatWakeupStrip, useChatWakeups } from "./chat-wakeups";
 import { ChatAppRequests } from "../../common/app-requests";
 import { EmptyState } from "./chat-empty-state";
 import { SessionRenameInput } from "./session-rename-input";
@@ -92,6 +93,7 @@ export function ChatWindow() {
   useQuickActionsPendingTimeout(activeSessionId ?? null, quickActionsPending);
   // Toast when an accepted refresh later fails in the daemon (async half).
   useQuickActionsFailureToast(activeSessionId ?? null);
+  const wakeups = useChatWakeups(activeSessionId);
 
   // The window adds its own focus moments — opening it, and Ask Multica starting
   // a new chat — on top of the controller's new-chat nonce. Both counters only
@@ -399,8 +401,11 @@ export function ChatWindow() {
         <ChatAppRequests sessionId={activeSessionId} />
       </div>
 
+      <ChatWakeupStrip sessionId={activeSessionId} wakeups={wakeups} />
+
       <ChatQueue
         tasks={queuedTasks}
+        wakeups={wakeups}
         headStatus={pendingTask?.status}
         onSendNow={c.handleSendQueuedTaskNow}
         sendNowDisabled={c.isAgentAccessRevoked}

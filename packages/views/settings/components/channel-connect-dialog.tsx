@@ -27,7 +27,7 @@ import {
 import { useMessagingChannels } from "./use-messaging-channels";
 import { LarkChannelAuthorization } from "./lark-channel-authorization";
 import { WecomChannelAuthorization } from "./wecom-channel-authorization";
-import { WeixinAgentBindButton } from "./weixin-tab";
+import { WeixinChannelAuthorization } from "./weixin-channel-authorization";
 
 export function ChannelConnectDialog({
   agents,
@@ -106,6 +106,10 @@ function ChannelConnectSteps({
     setChannel(id);
     setAuthorizing(true);
   };
+  const openGuide = () =>
+    openExternal(
+      `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/${channel}-bot-integration`,
+    );
   const scanWecom =
     channel === "wecom" &&
     queries.wecom.data?.scan_install_supported === true &&
@@ -225,17 +229,11 @@ function ChannelConnectSteps({
         </>
       ) : (
         <>
-          <Button
-            variant="link"
-            className="w-fit p-0"
-            onClick={() =>
-              openExternal(
-                `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/${channel === "lark" ? "lark" : channel}-bot-integration`,
-              )
-            }
-          >
-            {t(($) => $.channels.setup_guide)}
-          </Button>
+          {channel === "weixin" ? null : (
+            <Button variant="link" className="w-fit p-0" onClick={openGuide}>
+              {t(($) => $.channels.setup_guide)}
+            </Button>
+          )}
           {channel === "wecom" && queries.wecom.data?.scan_install_supported ? (
             <div className="space-y-1.5">
               <Label htmlFor="channel-method">
@@ -270,7 +268,13 @@ function ChannelConnectSteps({
               onClose={onClose}
             />
           ) : channel === "weixin" ? (
-            <WeixinAgentBindButton agentId={agent.id} agentName={agent.name} onBusyChange={onBusyChange} />
+            // The QR is the whole step, so its guide moves below it.
+            <WeixinChannelAuthorization
+              wsId={wsId}
+              agentId={agent.id}
+              onOpenGuide={openGuide}
+              onClose={onClose}
+            />
           ) : scanWecom ? (
             <WecomChannelAuthorization
               wsId={wsId}

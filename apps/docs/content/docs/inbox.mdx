@@ -21,7 +21,8 @@ On a phone, the Work panel sits in the drawer. Its Inbox section ends with **All
 Common notifications include:
 
 - an issue is assigned to you, or moved away from you;
-- an issue you subscribe to gets a new comment, or its assignee, status, priority, or dates change (on other people's issues, only key updates by default; see below);
+- an issue you subscribe to gets a new comment, or its assignee, priority, or dates change (on other people's issues, only key updates by default; see below);
+- an issue you subscribe to changes status, once you turn on **Status changes**, which is off by default;
 - someone @-mentions you in an issue description or comment;
 - an issue or comment you created gets a reaction;
 - an agent run fails on an issue you subscribe to;
@@ -44,12 +45,12 @@ These participants subscribe to an issue automatically:
 Changing the assignee does not remove existing subscriptions. Subscribe or unsubscribe anytime on the issue page; after unsubscribing, ordinary updates stop reaching your inbox, while direct @-mentions still notify you individually.
 
 <Callout type="info">
-When a sub-issue's status changes, subscribers of the parent issue are notified as well. Sub-issue comments, priority, and date changes do not bubble up to the parent.
+With **Status changes** on, a sub-issue's status change also notifies subscribers of the parent issue. Sub-issue comments, priority, and date changes do not bubble up to the parent.
 </Callout>
 
 ## Other people's issues
 
-On an issue assigned to someone else or to their agent, a subscription you picked up by creating, commenting on, or being mentioned in it brings only key updates by default: @-mentions, replies in threads you took part in, and statuses that need a person, such as `in_review`, `blocked`, or `done`. Routine comments and other changes stay on the issue. Issues you subscribed to yourself, issues you follow through their project, and issues assigned to you or your agents still bring all activity.
+On an issue assigned to someone else or to their agent, a subscription you picked up by creating, commenting on, or being mentioned in it brings only key updates by default: @-mentions, replies in threads you took part in, and, with **Status changes** on, statuses that need a person, such as `in_review`, `blocked`, or `done`. Routine comments and other changes stay on the issue. Issues you subscribed to yourself, issues you follow through their project, and issues assigned to you or your agents still bring every kind of notification you have turned on.
 
 The issue page marks such a subscription **Key updates only**. Its menu offers **Get all activity**, which turns it into an explicit subscription to this issue; there's no way back to key updates for that issue afterwards, only unsubscribing. **Change the default** opens **Settings → Notifications**, where **Other people's issues**, at the top of **Issues you subscribe to**, switches all such issues to **All activity**.
 
@@ -104,7 +105,7 @@ Snooze takes an issue out of your inbox until a time you pick, then brings it ba
 While an issue is snoozed:
 
 - new notifications on it wait with it and don't count toward the unread badge. When it comes back, the row says **Snooze ended** and how many updates arrived meanwhile;
-- it comes back early when someone mentions you by name, it is assigned to you, a run fails, an app asks for your action, or all its sub-issues finish. `@all` and squad mentions don't wake it;
+- it comes back early when someone mentions you by name, it is assigned to you, a run fails, an app asks for your action, or all its sub-issues finish. `@all` mentions don't wake it;
 - **Mark all as read** and the archive-all actions leave it alone. Archiving it ends the snooze, and so does completing the issue yourself while **Archive issues you complete** is on;
 - opening the issue from anywhere else doesn't read it or end the snooze. Its header shows when it comes back; open that to bring it back now (`H`) or change the time.
 
@@ -145,7 +146,7 @@ Below them, **Notify me about** turns each kind of notification on or off. These
 | **Projects you subscribe to** | New issues |
 | **Agents** | Agent activity (failed runs, and app actions an agent asked for that are blocked or expire) |
 
-A kind that's turned off creates no notification, and turning it back on doesn't bring back what you missed; the changes are still recorded on the issue. A few types, such as quick-create results and autopilot pauses, sit outside these groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
+**Status changes** starts off; every other kind starts on. A kind that's turned off creates no notification, and turning it back on doesn't bring back what you missed; the changes are still recorded on the issue. A few types, such as quick-create results and autopilot pauses, sit outside these groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
 
 ## Next steps
 

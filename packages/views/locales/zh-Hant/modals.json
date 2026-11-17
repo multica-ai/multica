@@ -182,19 +182,6 @@
     "toast_failed": "建立任務失敗",
     "toast_duplicate_title": "已存在同名任務",
     "toast_duplicate_view": "檢視已有任務",
-    "issue_limit": {
-      "title": "該工作區的任務總數已達到上限",
-      "checking_description": "正在查詢該工作區可用的帳單操作…",
-      "upgrade_description": "升級到 Pro 後可繼續建立任務。",
-      "portal_description": "開啟帳單門戶管理該工作區的訂閱，以恢復任務建立。",
-      "contact_description": "請聯絡工作區所有者或管理員升級到 Pro。",
-      "billing_description": "請前往帳單設定檢視該工作區可用的升級選項。",
-      "billing_unavailable_description": "暫時無法載入帳單操作，請前往帳單設定重試。",
-      "billing_disabled_description": "請刪除已有任務以釋放名額，或聯絡工作區管理員。",
-      "upgrade_action": "升級到 Pro",
-      "portal_action": "開啟帳單門戶",
-      "billing_action": "檢視帳單"
-    },
     "autopilot_quota_limit": {
       "title": "該工作區的自動化執行次數已達到上限",
       "checking_description": "正在查詢該工作區可用的帳單操作…",

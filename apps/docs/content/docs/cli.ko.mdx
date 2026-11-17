@@ -298,7 +298,7 @@ multica runtime profile create --display-name "사내 Claude 래퍼" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart`는 현재 profile이 로그인할 때 시작되도록 등록합니다. 플랫폼별 차이는 [로그인 시 자동 시작](/daemon-runtimes#autostart)을 참고하세요. `runtime usage`는 기본적으로 90일을 집계하며 `--days`는 최대 365입니다. `runtime update`는 해당 컴퓨터의 데몬이 CLI를 지정한 버전으로 업데이트하게 하고, `--wait`를 붙이면 업데이트가 끝날 때까지 기다립니다. 업데이트 실패, 업데이트 시간 초과 또는 대기 자체의 시간 초과 시 종료 코드는 0이 아닙니다. `runtime profile create`는 호환 도구를 `--runtime-type`으로 지정합니다(예전 `--protocol-family`도 쓸 수 있음). 고정 인수는 현재 웹 앱에서만 설정할 수 있습니다.
+`daemon autostart`는 현재 profile이 로그인할 때 시작되도록 등록합니다. 플랫폼별 차이는 [로그인 시 자동 시작](/daemon-runtimes#autostart)을 참고하세요. `runtime usage`는 기본적으로 90일을 집계하며 `--days`는 최대 365입니다. `runtime update`는 해당 컴퓨터의 데몬이 CLI를 지정한 버전으로 업데이트하게 하고, `--wait`를 붙이면 업데이트가 끝날 때까지 기다립니다. 업데이트 실패, 업데이트 시간 초과 또는 대기 자체의 시간 초과 시 종료 코드는 0이 아닙니다. `runtime profile create`는 호환 도구를 `--runtime-type`으로 지정합니다(예전 `--protocol-family`도 쓸 수 있음). 고정 인수는 현재 웹 앱에서만 설정할 수 있습니다. `runtime profile create`는 기본적으로 현재 컴퓨터에 연결합니다. 다른 등록된 로컬 컴퓨터를 선택하려면 `--daemon-id <id>`를 지정하세요. 기존 설정은 `multica runtime profile update <profile-id> --daemon-id <id>`로 컴퓨터에 연결할 수 있습니다.
 
 활성 에이전트가 계속 연결된 런타임을 삭제하면 명령이 기본적으로 거부됩니다. `multica runtime delete <id> --cascade`는 에이전트의 런타임 연결을 해제하고 설정과 기록을 보존하며 활성 실행을 취소합니다.
 
@@ -345,6 +345,20 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
   {"event": "push"}
 ]
 ```
+
+각 행에는 앱과 같은 본문 필드 규칙을 사용하는 `conditions`도 지정할 수 있습니다. 예를 들어 다음 규칙은 `main`을 대상으로 하는 초안이 아닌 PR만 수락합니다:
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+규칙당 조건은 최대 20개, 필드 경로는 256자, `in` 후보 목록은 100개까지입니다. 한도를 초과하는 조건으로 트리거를 만들거나 수정하면 HTTP 400을 반환합니다.
 
 이 예시는 PR 리뷰 제출과 모든 push 이벤트를 받습니다. `actions`를 생략하거나 빈 배열을 지정하면 해당 이벤트의 모든 action을 받습니다.
 
@@ -476,7 +490,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `env get/set <agent-id>` | 사용자 지정 환경 변수 읽기/쓰기(에이전트 소유자 또는 워크스페이스 owner/admin. 읽을 때마다 기록됨) | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`. 전체를 교체하며 값이 `****`인 키는 기존 값 유지 |
 | | `skills list/set/add <agent-id>` | 연결된 스킬 관리 | `--skill-ids`(`set`은 전체 교체, `add`는 증분 추가) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | 워크스페이스 MCP 서버를 이 에이전트에 할당 | server id는 `workspace mcp list`에서 확인. 라이브러리 항목은 여기서 추가하기 전까지 동작하지 않으며, `disable`은 할당을 유지한 채 전달만 중단합니다 |
-| `autopilot` | `list/get/create/update/delete` | 자동화 관리 | `create`: `--title`, `--agent`, `--mode`(모두 필수), `--description`, `--issue-title-template`, `--project`, `--subscriber`(반복 가능) |
+| `autopilot` | `list/get/create/update/delete` | 자동화 관리 | `create`: `--title`, `--mode`(둘 다 필수), `--agent` / `--squad` / `--squad-id` 중 하나만(필수), `--description`, `--issue-title-template`, `--project`, `--subscriber`(반복 가능) |
 | | `trigger <id>` | 수동으로 한 번 트리거 | |
 | | `runs <id>` | 실행 기록 확인 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 일정 및 webhook 트리거 관리 | `trigger-add`: `--kind`(`schedule` 또는 `webhook`), `--cron`, `--timezone`(기본값 UTC), `--label` |

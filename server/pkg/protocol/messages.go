@@ -308,6 +308,10 @@ const (
 	// the opening self-describes: chat renders the starter cards under this
 	// kind instead of quick-action chips (MUL-5765).
 	ChatMessageKindOnboardingOpening = "onboarding_opening"
+	// ChatMessageKindWakeup is the server-authored input of a turn a chat
+	// wakeup started. Its content is for the runtime; clients render a
+	// divider naming the wakeup (wakeup_id) instead of the text.
+	ChatMessageKindWakeup = "wakeup"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat
@@ -426,6 +430,16 @@ type ChatSessionDeletedPayload struct {
 // chat session changes (today: title via inline rename). Other tabs/devices
 // patch the session row in their cached list so the dropdown stays in sync
 // without a full refetch.
+// ChatWakeupChangedPayload says one chat wakeup was created, changed, fired or
+// ended. Receivers refetch the session's wakeups; TaskID is set when the
+// change started a turn, so they can also pick up its hidden input row.
+type ChatWakeupChangedPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	WakeupID      string `json:"wakeup_id"`
+	Status        string `json:"status"`
+	TaskID        string `json:"task_id,omitempty"`
+}
+
 type ChatSessionUpdatedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	Title         string `json:"title"`

@@ -89,14 +89,59 @@ func Group(notifType string) (group string, ok bool) {
 	return group, ok
 }
 
-// Muted reports whether a member's parsed preferences mute notifType. A
-// missing key means the default "all": preferences are stored sparse.
+// mutedByDefault are the groups a member hears nothing from until they turn
+// them on. Every other group defaults to "all". Preferences are stored sparse,
+// so a missing key means its group's default.
+//
+// Status changes are routine churn on most issues, so they start muted
+// (MUL-9449). An explicit "all" is how a member opts back in.
+var mutedByDefault = map[string]bool{
+	GroupStatusChanges: true,
+}
+
+// WithLegacyDefaults returns prefs with every group that is muted by default
+// and absent from prefs set to "all". A full replacement from a client built
+// before those defaults changed omits a group to mean "on", so the
+// replace-all write path stores that meaning explicitly. prefs is not
+// modified.
+func WithLegacyDefaults(prefs map[string]string) map[string]string {
+	result := make(map[string]string, len(prefs)+len(mutedByDefault))
+	for group := range mutedByDefault {
+		result[group] = "all"
+	}
+	for k, v := range prefs {
+		result[k] = v
+	}
+	return result
+}
+
+// Muted reports whether a member's parsed preferences mute notifType. nil
+// prefs, a member without a stored row, applies every group's default.
 func Muted(prefs map[string]string, notifType string) bool {
 	group := typeGroups[notifType]
 	if group == "" {
 		return false
 	}
-	return prefs[group] == "muted"
+	value, ok := prefs[group]
+	if !ok {
+		return mutedByDefault[group]
+	}
+	return value == "muted"
+}
+
+// WithDefaults returns prefs with every group that is muted by default
+// written out. The preferences API answers with it so a client built before a
+// group's default changed, which reads a missing key as "all", still shows
+// what the server delivers. prefs is not modified.
+func WithDefaults(prefs map[string]string) map[string]string {
+	result := make(map[string]string, len(prefs)+len(mutedByDefault))
+	for group := range mutedByDefault {
+		result[group] = "muted"
+	}
+	for k, v := range prefs {
+		result[k] = v
+	}
+	return result
 }
 
 // Preferences holds the parsed notification preferences of a set of members
@@ -105,8 +150,8 @@ type Preferences map[string]map[string]string
 
 // LoadPreferences reads the preferences of userIDs in one query, for a fanout
 // that delivers to many members. A read failure is logged and yields no
-// preferences, so the fanout delivers rather than drops. The result is never
-// nil, which is how Deliver tells "loaded" from "not loaded".
+// preferences, so every recipient gets the defaults. The result is never nil,
+// which is how Deliver tells "loaded" from "not loaded".
 func LoadPreferences(ctx context.Context, queries *db.Queries, workspaceID pgtype.UUID, userIDs []pgtype.UUID) Preferences {
 	result := Preferences{}
 	if len(userIDs) == 0 {

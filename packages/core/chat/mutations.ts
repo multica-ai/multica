@@ -6,6 +6,7 @@ import { createLogger } from "../logger";
 import type {
   ChatSession,
   ChatPinnedAgent,
+  ChatWakeup,
   ChatDraftRestoresResponse,
   ChatQuickActionsPendingState,
 } from "../types";
@@ -45,6 +46,61 @@ export function useConsumeChatDraftRestore() {
       // Exhausted the retries. The draft is safe (it is in the composer) and the
       // ledger keeps the row from being re-offered; the next mount reconciles it.
       logger.warn("consumeChatDraftRestore.error", { sessionId, restoreId, err });
+    },
+  });
+}
+
+/**
+ * Cancel a wakeup an agent created in this conversation. Optimistically drops
+ * it from the active set; chat:wakeup_changed then brings back the ended row.
+ */
+export function useCancelChatWakeup() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ sessionId, wakeupId }: { sessionId: string; wakeupId: string }) =>
+      api.cancelChatWakeup(sessionId, wakeupId),
+    onMutate: async ({ sessionId, wakeupId }) => {
+      await qc.cancelQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      const prev = qc.getQueryData<ChatWakeup[]>(chatKeys.wakeups(sessionId));
+      qc.setQueryData<ChatWakeup[]>(chatKeys.wakeups(sessionId), (old) =>
+        old?.map((w) =>
+          w.id === wakeupId
+            ? { ...w, status: "cancelled", end_reason: "cancelled_by_user", ended_at: new Date().toISOString() }
+            : w,
+        ),
+      );
+      return { prev };
+    },
+    onError: (err, { sessionId }, ctx) => {
+      logger.warn("cancelChatWakeup.error", { sessionId, err });
+      if (ctx?.prev) qc.setQueryData(chatKeys.wakeups(sessionId), ctx.prev);
+    },
+    onSettled: (_data, _err, { sessionId }) => {
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.myWakeups(wsId) });
+    },
+  });
+}
+
+/**
+ * Re-run a wakeup whose report turn failed. The new turn arrives through
+ * chat:wakeup_changed like any other wakeup turn.
+ */
+export function useRetryChatWakeup() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ sessionId, wakeupId }: { sessionId: string; wakeupId: string }) =>
+      api.retryChatWakeup(sessionId, wakeupId),
+    onError: (err, { sessionId }) => {
+      logger.warn("retryChatWakeup.error", { sessionId, err });
+    },
+    onSettled: (_data, _err, { sessionId }) => {
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.myWakeups(wsId) });
     },
   });
 }

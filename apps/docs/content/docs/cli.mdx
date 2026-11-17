@@ -313,7 +313,7 @@ multica runtime profile create --display-name "Internal Claude wrapper" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version; `--wait` waits for completion and exits non-zero if the update fails or times out, or if the wait itself times out. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app.
+`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version; `--wait` waits for completion and exits non-zero if the update fails or times out, or if the wait itself times out. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app. `runtime profile create` binds the profile to this machine by default; use `--daemon-id <id>` to select another registered local machine. Bind an older, unscoped profile with `multica runtime profile update <profile-id> --daemon-id <id>`.
 
 Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` unbinds those agents, preserves their configuration and history, and cancels their active runs.
 
@@ -360,6 +360,20 @@ Use `--event-filters-file` on `autopilot trigger-add` or `trigger-update` to con
   {"event": "push"}
 ]
 ```
+
+Each row may also include `conditions`, using the same payload-field rules as the app. For example, this row accepts only non-draft pull requests targeting `main`:
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+Each rule supports up to 20 conditions. A field path can contain at most 256 characters, and an `in` list can contain at most 100 values. Creating or updating a trigger with an oversized condition returns HTTP 400.
 
 This accepts PR review submissions and all push events. Omitting `actions` or using an empty actions array accepts every action for that event.
 
@@ -511,7 +525,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `env get/set <agent-id>` | Read and write custom environment variables (agent owner or workspace owner/admin; every read is recorded) | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`; replaces the whole set, and keys whose value is `****` keep their existing value |
 | | `skills list/set/add <agent-id>` | Manage attached skills | `--skill-ids` (`set` replaces the full list, `add` appends) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | Assign workspace MCP servers to this agent | Take the server id from `workspace mcp list`. A library entry does nothing until it is added here; `disable` stops sending it without dropping the assignment |
-| `autopilot` | `list/get/create/update/delete` | Manage automations | `create`: `--title`, `--agent`, `--mode` (all required), `--description`, `--issue-title-template`, `--project`, `--subscriber` (repeatable) |
+| `autopilot` | `list/get/create/update/delete` | Manage automations | `create`: `--title`, `--mode` (both required), exactly one of `--agent` / `--squad` / `--squad-id` (required), `--description`, `--issue-title-template`, `--project`, `--subscriber` (repeatable) |
 | | `trigger <id>` | Trigger a run manually | |
 | | `runs <id>` | View run history | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | `trigger-add`: `--kind` (`schedule` or `webhook`), `--cron`, `--timezone` (default UTC), `--label` |

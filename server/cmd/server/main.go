@@ -620,6 +620,7 @@ func main() {
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
+	var inboxReadMetrics *obsmetrics.InboxReadMetrics
 	var httpMetrics *obsmetrics.HTTPMetrics
 	var businessMetrics *obsmetrics.BusinessMetrics
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
@@ -635,6 +636,7 @@ func main() {
 			Version:     version,
 			Commit:      commit,
 		})
+		inboxReadMetrics = metricsRegistry.InboxRead
 		httpMetrics = metricsRegistry.HTTP
 		businessMetrics = metricsRegistry.Business
 		channelMediaMetrics = metricsRegistry.ChannelMedia
@@ -682,6 +684,7 @@ func main() {
 	}
 
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
+		InboxReadMetrics:    inboxReadMetrics,
 		HTTPMetrics:         httpMetrics,
 		BusinessMetrics:     businessMetrics,
 		ChannelLeaseMetrics: channelLeaseMetrics,
@@ -861,6 +864,9 @@ func main() {
 	}
 	if err := schedulerMgr.Register(scheduler.ChildEventSweepJob(&service.IssueWakeupService{Tasks: taskSvc})); err != nil {
 		slog.Error("scheduler: register child-done sweep", "error", err)
+	}
+	if err := schedulerMgr.Register(scheduler.ChatWakeupJob(&service.ChatWakeupService{Tasks: taskSvc})); err != nil {
+		slog.Error("scheduler: register chat wakeups", "error", err)
 	}
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)

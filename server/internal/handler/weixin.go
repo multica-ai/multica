@@ -77,6 +77,9 @@ func (h *Handler) BeginWeixinLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "agent not found in this workspace")
 		return
 	}
+	if !h.canManageAgent(w, r, row) {
+		return
+	}
 	view, err := h.WeixinInstall.Begin(r.Context(), workspace, agent, initiator)
 	if err != nil {
 		writeWeixinError(w, err)
@@ -86,7 +89,7 @@ func (h *Handler) BeginWeixinLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST because a confirmed provider response commits the binding. Both the
-// session and its QR view are scoped to the initiating signed-in admin.
+// session and its QR view are scoped to the initiating user.
 func (h *Handler) PollWeixinLogin(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if h.WeixinInstall == nil {
@@ -172,7 +175,11 @@ func (h *Handler) RevokeWeixinInstallation(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if err := h.WeixinInstall.Revoke(r.Context(), installation, workspace); err != nil {
+	actor, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	if err := h.WeixinInstall.Revoke(r.Context(), installation, workspace, actor); err != nil {
 		writeWeixinError(w, err)
 		return
 	}

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/integrations/weixin"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -82,4 +84,23 @@ func TestWeixinExpiredAuthorizationProjection(t *testing.T) {
 	if got := weixinInstallationResponse(row); got.Status != "revoked" {
 		t.Fatal("manual disconnect shown as expired")
 	}
+}
+
+func TestBeginWeixinLoginRejectsUnrelatedMember(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID, _, otherMember := privateAgentTestFixture(t)
+	box, err := secretbox.New(bytes.Repeat([]byte{1}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	install, err := weixin.NewInstallService(testHandler.Queries, testPool, box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{Queries: testHandler.Queries, WeixinInstall: install}
+	req := newRequestAs(otherMember, http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/weixin/logins?agent_id="+agentID, nil)
+	req = withURLParam(req, "id", testWorkspaceID)
+	testutil.Call(t, h.BeginWeixinLogin, req).Want(http.StatusForbidden)
 }

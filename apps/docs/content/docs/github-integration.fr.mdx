@@ -34,6 +34,10 @@ Revenez sur Multica une fois l'installation terminée.
 </Step>
 </Steps>
 
+Choisissez **Ajouter un compte ou une organisation** dans la ligne GitHub ou le menu **Ajouter un dépôt** pour connecter une autre installation sans déconnecter les précédentes. Chaque connexion affiche le compte et la personne qui l’a connectée ; le sélecteur de dépôts permet de changer de compte. **Mettre en pause les fonctionnalités GitHub** s’applique à toutes les connexions de l’espace de travail.
+
+Si GitHub ne renvoie pas d’autorisation utilisateur, Multica ne peut pas vérifier une nouvelle connexion, même si l’App est déjà installée ou connectée à un autre espace. Reconnectez-vous et terminez l’autorisation ; si cela se répète, demandez à votre opérateur Multica de vérifier les réglages d’autorisation utilisateur de l’App. Modifier uniquement l’accès aux dépôts peut ne pas suffire.
+
 L'état de la connexion s'affiche sur la même page. Les membres ordinaires peuvent consulter cet état, mais ne peuvent ni connecter, ni déconnecter, ni modifier les interrupteurs.
 
 <Callout type="info">
@@ -111,7 +115,7 @@ La façon dont une PR a été associée ne change rien : le titre, le nom de bra
 
 La vérification a lieu lorsqu'un événement de PR touche la tâche : une PR associée est fusionnée, une PR est associée, ou une association est retirée. Rouvrir une tâche ne la fait pas repasser au statut cible ; c'est la prochaine PR associée fusionnée qui le fait. Modifier le réglage ne change pas les tâches dont les PR ont été fusionnées auparavant.
 
-Le changement de statut est inscrit dans la chronologie comme une action système qui nomme les PR, et les membres abonnés à la tâche sont notifiés.
+Le changement de statut est inscrit dans la chronologie comme une action système qui nomme les PR, et les membres abonnés à la tâche sont notifiés s'ils ont activé les notifications de changement de statut.
 
 ## Plusieurs espaces de travail
 
@@ -123,7 +127,7 @@ Si un même identifiant correspond à une tâche dans plusieurs des espaces de t
 
 ## Déconnecter
 
-Choisir **Déconnecter** dans le menu **⋯** de la ligne GitHub, sur **Paramètres → Code**, supprime seulement la relation entre l'espace de travail Multica courant et l'installation ; cela ne désinstalle pas l'App de GitHub à votre place. Les enregistrements de PR existants sont conservés, et les nouveaux événements cessent d'arriver dans cet espace de travail.
+Dans **Paramètres → Code**, choisissez **Déconnecter** à côté du compte à retirer. Seule la connexion de cette installation à l’espace courant est supprimée ; les autres continuent de recevoir des événements. L’App reste installée sur GitHub et les PR et liens existants sont conservés.
 
 Pour révoquer l'autorisation d'accès aux dépôts côté GitHub, désinstallez l'App ou ajustez son périmètre de dépôts depuis la page des installations de GitHub Apps de votre compte personnel ou de votre organisation. Après la désinstallation, tous les espaces de travail Multica liés à cette installation cessent de recevoir des événements.
 

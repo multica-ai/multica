@@ -1332,6 +1332,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceAutopilotQuotaPeriods(ctx, requester.WorkspaceID) },
 		},
 		{
+			name: "delete entitlement limit overages",
+			run:  func() error { return qtx.DeleteWorkspaceEntitlementLimitOverages(ctx, requester.WorkspaceID) },
+		},
+		{
 			name: "delete chat messages",
 			run:  func() error { return qtx.DeleteWorkspaceChatMessages(ctx, requester.WorkspaceID) },
 		},

@@ -19,7 +19,6 @@ import {
   useCreateWorkspaceSubscriptionPortal,
   usePreviewWorkspaceSeatPurchase,
   usePurchaseWorkspaceSeats,
-  issueLimitUsageOptions,
   workspaceSubscriptionPricesOptions,
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
@@ -334,12 +333,6 @@ function BillingTabContent() {
     summaryQuery.isError ||
     (!summaryQuery.isPending && summaryQuery.data == null);
   const quotaUsageQuery = useQuery(autopilotQuotaUsageOptions(wsId));
-  const issueLimitUsageQuery = useQuery({
-    ...issueLimitUsageOptions(wsId),
-    enabled:
-      wsId.length > 0 &&
-      entitlements?.limits.issueCount.mode === "limited",
-  });
   const hasSeatCapacity = hasActiveWorkspaceSeatCapacity(summaryQuery.data);
   const canUpgrade = summaryQuery.data?.availableActions.checkout === true;
   const pricesQuery = useQuery({
@@ -820,14 +813,6 @@ function BillingTabContent() {
       ? formatDateTime(quotaUsage.resetAt, locale)
       : null;
   const numberFormatter = new Intl.NumberFormat(locale);
-  const issueCountLimit = entitlements.limits.issueCount;
-  const issueLimitUsage = issueLimitUsageQuery.data;
-  const issueLimitValue =
-    issueCountLimit.mode === "unlimited"
-      ? t(($) => $.workspace.limits.unlimited)
-      : issueLimitUsage?.limit === issueCountLimit.limit
-        ? `${numberFormatter.format(issueLimitUsage.used)} / ${numberFormatter.format(issueLimitUsage.limit)}`
-        : numberFormatter.format(issueCountLimit.limit);
   const isMutating =
     checkoutMutation.isPending ||
     portalMutation.isPending ||
@@ -1197,11 +1182,6 @@ function BillingTabContent() {
         title={t(($) => $.workspace.limits.title)}
       >
         <SettingsCard>
-          <SettingsRow
-            label={t(($) => $.workspace.limits.issues)}
-          >
-            <span className="tabular-nums">{issueLimitValue}</span>
-          </SettingsRow>
           <SettingsRow
             label={t(($) => $.workspace.limits.autopilots)}
           >

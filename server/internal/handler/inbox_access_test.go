@@ -100,15 +100,19 @@ func TestListInboxAccessLookupErrors(t *testing.T) {
 			}{
 				{"missing", pgx.ErrNoRows, http.StatusForbidden},
 				{"wrapped missing", fmt.Errorf("%s: %w", privateDetails, pgx.ErrNoRows), http.StatusForbidden},
-				{"deadline", fmt.Errorf("%s: %w", privateDetails, context.DeadlineExceeded), http.StatusInternalServerError},
-				{"statement timeout", &pgconn.PgError{Code: "57014", Message: privateDetails}, http.StatusInternalServerError},
+				{"deadline", fmt.Errorf("%s: %w", privateDetails, context.DeadlineExceeded), http.StatusServiceUnavailable},
+				{"statement timeout", &pgconn.PgError{Code: "57014", Message: privateDetails}, http.StatusServiceUnavailable},
 				{"connection failure", errors.New(privateDetails), http.StatusInternalServerError},
 			} {
 				t.Run(e.name+"/"+query+"/"+tc.name, func(t *testing.T) {
 					faults := &inboxAccessFailureDB{DBTX: testPool, query: query, err: tc.err}
 					h := *testHandler
 					h.Queries = db.New(faults)
-					body := testutil.Call(t, e.serve(&h, nil), e.request(token, testWorkspaceID)).Want(tc.status).Map()
+					response := testutil.Call(t, e.serve(&h, nil), e.request(token, testWorkspaceID)).Want(tc.status)
+					if tc.status == http.StatusServiceUnavailable && response.Header().Get("Retry-After") != "1" {
+						t.Fatal("temporary access-lookup failure must supply Retry-After")
+					}
+					body := response.Map()
 					if faults.failures != 1 || faults.inboxReads != 0 {
 						t.Fatalf("lookup failures=%d inbox reads=%d; want one failure and no Inbox read", faults.failures, faults.inboxReads)
 					}

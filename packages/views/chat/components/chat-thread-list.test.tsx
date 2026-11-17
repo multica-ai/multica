@@ -54,7 +54,8 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
   return {
     ...actual,
-    useQuery: () => ({ data: { tasks: [] } }),
+    useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) =>
+      queryKey.includes("my-wakeups") ? { data: [] } : { data: { tasks: [] } },
     useQueryClient: () => ({ setQueryData: vi.fn(), invalidateQueries: vi.fn() }),
   };
 });

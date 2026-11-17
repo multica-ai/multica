@@ -34,6 +34,10 @@ Return to Multica after the installation completes.
 </Step>
 </Steps>
 
+Use **Add account or organization** in the GitHub row or the **Add repository** menu to connect another installation without disconnecting an existing one. Each connection lists its account and who connected it; the repository picker lets you switch between accounts. **Pause GitHub features** applies to all connections in the workspace.
+
+If GitHub returns no user authorization, Multica cannot verify a new connection, even if the App is already installed or connected to another workspace. Retry connecting and complete authorization; if this repeats, ask your Multica operator to check the App’s user authorization settings. Changing repository access alone may not complete a new connection.
+
 The connection status shows on the same page. Regular members can view the status but can't connect, disconnect, or change the switches.
 
 <Callout type="info">
@@ -111,7 +115,7 @@ How a PR was linked doesn't matter: the title, the branch name, and a `Closes MU
 
 The check runs when a PR event touches the issue: a linked PR merges, a PR is linked, or a link is removed. Reopening an issue doesn't move it back; the next linked PR that merges does. Changing the setting doesn't move issues whose PRs merged earlier.
 
-The status change is written to the timeline as a system action naming the PRs, and members subscribed to the issue are notified.
+The status change is written to the timeline as a system action naming the PRs, and members subscribed to the issue are notified if they turned on status change notifications.
 
 ## Multiple workspaces
 
@@ -123,7 +127,7 @@ If one identifier matches an issue in more than one of the connected workspaces 
 
 ## Disconnect
 
-Choosing **Disconnect** from the GitHub row's **⋯** menu on **Settings → Code** only removes the relationship between the current Multica workspace and the installation; it does not uninstall the App from GitHub for you. Existing PR records are kept, and new events stop flowing into that workspace.
+On **Settings → Code**, choose **Disconnect** beside the account you want to remove. Only that installation’s connection to the current workspace is removed; other connections keep receiving events. The App remains installed on GitHub, and existing PR records and links are kept.
 
 To revoke repository authorization on the GitHub side, uninstall the App or adjust its repository scope from your personal or organization GitHub App installations page. After uninstalling, every Multica workspace linked to that installation stops receiving events.
 

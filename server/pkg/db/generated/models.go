@@ -617,6 +617,7 @@ type ChatMessage struct {
 	ChannelOutboundChatID         pgtype.Text        `json:"channel_outbound_chat_id"`
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
 	ChannelTypingSettled          bool               `json:"channel_typing_settled"`
+	WakeupID                      pgtype.UUID        `json:"wakeup_id"`
 }
 
 type ChatPinnedAgent struct {
@@ -668,6 +669,37 @@ type ChatTaskSupplement struct {
 	AuthorID      pgtype.UUID        `json:"author_id"`
 	Status        string             `json:"status"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChatWakeup struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID     pgtype.UUID        `json:"chat_session_id"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	RequesterID       pgtype.UUID        `json:"requester_id"`
+	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
+	SourceMessageID   pgtype.UUID        `json:"source_message_id"`
+	Title             string             `json:"title"`
+	Instruction       string             `json:"instruction"`
+	Kind              string             `json:"kind"`
+	Condition         json.RawMessage    `json:"condition"`
+	ConditionState    string             `json:"condition_state"`
+	IntervalSeconds   pgtype.Int8        `json:"interval_seconds"`
+	FireAt            pgtype.Timestamptz `json:"fire_at"`
+	NextEvalAt        pgtype.Timestamptz `json:"next_eval_at"`
+	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
+	Status            string             `json:"status"`
+	EndReason         pgtype.Text        `json:"end_reason"`
+	EndedAt           pgtype.Timestamptz `json:"ended_at"`
+	CheckCount        int32              `json:"check_count"`
+	LastCheckNote     pgtype.Text        `json:"last_check_note"`
+	LastCheckedAt     pgtype.Timestamptz `json:"last_checked_at"`
+	LastCheckinTaskID pgtype.UUID        `json:"last_checkin_task_id"`
+	LastTaskID        pgtype.UUID        `json:"last_task_id"`
+	LastFiredAt       pgtype.Timestamptz `json:"last_fired_at"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ClientUsageDaily struct {
@@ -809,6 +841,21 @@ type DingtalkGroupRoute struct {
 	Revision          int64              `json:"revision"`
 	DiscoveredAt      pgtype.Timestamptz `json:"discovered_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type EntitlementLimitOverage struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Gate            string             `json:"gate"`
+	PeriodStart     pgtype.Timestamptz `json:"period_start"`
+	PeriodEnd       pgtype.Timestamptz `json:"period_end"`
+	LimitValue      int64              `json:"limit_value"`
+	PeakUsage       int64              `json:"peak_usage"`
+	ObservedCount   int64              `json:"observed_count"`
+	EnforcedCount   int64              `json:"enforced_count"`
+	FirstExceededAt pgtype.Timestamptz `json:"first_exceeded_at"`
+	LastExceededAt  pgtype.Timestamptz `json:"last_exceeded_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Feedback struct {
@@ -1614,6 +1661,7 @@ type RuntimeProfile struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	RuntimeType    string             `json:"runtime_type"`
+	DaemonID       pgtype.Text        `json:"daemon_id"`
 }
 
 type RuntimeRateLimit struct {

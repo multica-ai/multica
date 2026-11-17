@@ -298,7 +298,7 @@ multica runtime profile create --display-name "Wrapper Claude interne" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` enregistre le profil courant pour qu'il démarre à l'ouverture de session ; les différences entre plateformes sont décrites dans [Démarrage à l'ouverture de session](/daemon-runtimes#autostart). `runtime usage` couvre 90 jours par défaut, et `--days` va jusqu'à 365. `runtime update` demande au daemon de cette machine de mettre sa CLI à jour vers la version indiquée ; `--wait` attend la fin de la mise à jour et renvoie un code de sortie non nul si elle échoue ou expire, ou si l’attente elle-même expire. `runtime profile create` indique l'outil compatible avec `--runtime-type` (l'ancien `--protocol-family` fonctionne encore) ; les arguments fixes ne se définissent pour l'instant que dans l'application web.
+`daemon autostart` enregistre le profil courant pour qu'il démarre à l'ouverture de session ; les différences entre plateformes sont décrites dans [Démarrage à l'ouverture de session](/daemon-runtimes#autostart). `runtime usage` couvre 90 jours par défaut, et `--days` va jusqu'à 365. `runtime update` demande au daemon de cette machine de mettre sa CLI à jour vers la version indiquée ; `--wait` attend la fin de la mise à jour et renvoie un code de sortie non nul si elle échoue ou expire, ou si l’attente elle-même expire. `runtime profile create` indique l'outil compatible avec `--runtime-type` (l'ancien `--protocol-family` fonctionne encore) ; les arguments fixes ne se définissent pour l'instant que dans l'application web. `runtime profile create` lie le profil à cette machine par défaut ; utilisez `--daemon-id <id>` pour choisir une autre machine locale enregistrée. Pour lier un ancien profil, utilisez `multica runtime profile update <profile-id> --daemon-id <id>`.
 
 La suppression d'un runtime auquel des agents actifs sont encore liés est refusée par défaut. `multica runtime delete <id> --cascade` dissocie ces agents, préserve leur configuration et leur historique, et annule leurs exécutions actives.
 
@@ -345,6 +345,20 @@ Utilisez `--event-filters-file` avec `autopilot trigger-add` ou `trigger-update`
   {"event": "push"}
 ]
 ```
+
+Chaque ligne peut aussi contenir des `conditions`, avec les mêmes règles sur la charge utile que dans l’application. Par exemple, cette règle accepte les pull requests non brouillon ciblant `main` :
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+Chaque règle accepte au maximum 20 conditions. Un chemin est limité à 256 caractères et une liste `in` à 100 valeurs. La création ou la modification d’un déclencheur avec une condition trop longue renvoie HTTP 400.
 
 Cet exemple accepte les soumissions de revues de PR et tous les événements push. Omettre `actions` ou fournir un tableau d'actions vide accepte toutes les actions de cet événement.
 
@@ -484,7 +498,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `env get/set <agent-id>` | Lire et écrire les variables d'environnement personnalisées (propriétaire de l'agent ou owner/admin de l'espace de travail ; chaque lecture est enregistrée) | `set` : `--custom-env` / `--custom-env-file` / `--custom-env-stdin` ; remplace l'ensemble, et les clés dont la valeur est `****` gardent leur valeur |
 | | `skills list/set/add <agent-id>` | Gérer les skills rattachés | `--skill-ids` (`set` remplace toute la liste, `add` ajoute à la suite) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | Assigner des serveurs MCP de l'espace de travail à cet agent | Récupérez l'ID du serveur avec `workspace mcp list`. Une entrée de la bibliothèque n'a aucun effet tant qu'elle n'est pas ajoutée ici ; `disable` cesse de l'envoyer sans supprimer l'assignation |
-| `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--agent`, `--mode` (tous obligatoires), `--description`, `--issue-title-template`, `--project`, `--subscriber` (répétable) |
+| `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--mode` (obligatoires), exactement une option parmi `--agent` / `--squad` / `--squad-id` (obligatoire), `--description`, `--issue-title-template`, `--project`, `--subscriber` (répétable) |
 | | `trigger <id>` | Déclencher une exécution manuellement | |
 | | `runs <id>` | Afficher l'historique des exécutions | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Gérer les déclencheurs de planification et webhook | `trigger-add` : `--kind` (`schedule` ou `webhook`), `--cron`, `--timezone` (UTC par défaut), `--label` |

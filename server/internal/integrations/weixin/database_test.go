@@ -228,6 +228,8 @@ func TestLoginExpiryReplacementAndRevokedMembership(t *testing.T) {
 	}
 	next = x.begin(t)
 	x.f.Exec(t, `UPDATE member SET role='member' WHERE workspace_id=$1 AND user_id=$2`, x.workspace, x.user)
+	other := x.f.User(t, "Other agent owner", util.UUIDToString(dbid.NewV7())+"@example.test")
+	x.f.Exec(t, `UPDATE agent SET owner_id=$1 WHERE id=$2`, other, x.agent)
 	if _, err := x.svc.Poll(context.Background(), next, x.workspace, x.user, ""); !errors.Is(err, ErrAccess) {
 		t.Fatalf("demoted admin installed: %v", err)
 	}
@@ -241,11 +243,17 @@ func TestLoginBotOwnershipAndRevoke(t *testing.T) {
 	if _, err := y.svc.Poll(context.Background(), y.begin(t), y.workspace, y.user, ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("bot taken by another workspace: %v", err)
 	}
-	if err := x.svc.Revoke(context.Background(), inst.ID, y.workspace); !errors.Is(err, ErrNotFound) {
+	if err := x.svc.Revoke(context.Background(), inst.ID, y.workspace, y.user); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-workspace revoke: %v", err)
 	}
-	if err := x.svc.Revoke(context.Background(), inst.ID, x.workspace); err != nil {
-		t.Fatal(err)
+	other := x.f.User(t, "Unrelated member", util.UUIDToString(dbid.NewV7())+"@example.test")
+	x.f.Member(t, x.f.WorkspaceID, other, "member")
+	if err := x.svc.Revoke(context.Background(), inst.ID, x.workspace, testUUID(t, other)); !errors.Is(err, ErrAccess) {
+		t.Fatalf("unrelated member revoke: %v", err)
+	}
+	x.f.Exec(t, `UPDATE member SET role='member' WHERE workspace_id=$1 AND user_id=$2`, x.workspace, x.user)
+	if err := x.svc.Revoke(context.Background(), inst.ID, x.workspace, x.user); err != nil {
+		t.Fatalf("agent owner revoke: %v", err)
 	}
 	y.connect(t)
 	if count := x.f.Count(t, "SELECT count(*) FROM weixin_account_state WHERE installation_id=$1", inst.ID); count != 0 {
@@ -255,6 +263,7 @@ func TestLoginBotOwnershipAndRevoke(t *testing.T) {
 
 func TestLoginTokensAreScopedAndBoundRedirectPreservesInstallation(t *testing.T) {
 	x := newDatabaseFixture(t)
+	x.f.Exec(t, `UPDATE member SET role='member' WHERE workspace_id=$1 AND user_id=$2`, x.workspace, x.user)
 	inst := x.connect(t)
 	if _, err := x.q.SaveWeixinCursor(context.Background(), db.SaveWeixinCursorParams{InstallationID: inst.ID, BotID: DecodePublicConfig(inst.Config).BotID, GetUpdatesBuf: "saved-cursor"}); err != nil {
 		t.Fatal(err)
@@ -295,13 +304,15 @@ func TestBoundRedirectRejectsMissingRevokedOrChangedInstallation(t *testing.T) {
 			id := x.begin(t)
 			switch kind {
 			case "revoked":
-				if err := x.svc.Revoke(context.Background(), inst.ID, x.workspace); err != nil {
+				if err := x.svc.Revoke(context.Background(), inst.ID, x.workspace, x.user); err != nil {
 					t.Fatal(err)
 				}
 			case "changed":
 				x.f.Exec(t, `UPDATE channel_installation SET config=config || '{"changed":true}'::jsonb WHERE id=$1`, inst.ID)
 			case "demoted":
 				x.f.Exec(t, `UPDATE member SET role='member' WHERE workspace_id=$1 AND user_id=$2`, x.workspace, x.user)
+				other := x.f.User(t, "Other agent owner", util.UUIDToString(dbid.NewV7())+"@example.test")
+				x.f.Exec(t, `UPDATE agent SET owner_id=$1 WHERE id=$2`, other, x.agent)
 			}
 			x.status.Store(qrStatus{Status: "binded_redirect"})
 			if _, err := x.svc.Poll(context.Background(), id, x.workspace, x.user, ""); err == nil {
@@ -311,7 +322,7 @@ func TestBoundRedirectRejectsMissingRevokedOrChangedInstallation(t *testing.T) {
 	}
 }
 
-func TestLoginConflictNamesOnlyCurrentWorkspaceAgent(t *testing.T) {
+func TestLoginConflictNamesOnlyManageableAgents(t *testing.T) {
 	x := newDatabaseFixture(t)
 	x.connect(t)
 	other := testUUID(t, x.f.Agent(t, "Another agent", ""))
@@ -323,6 +334,18 @@ func TestLoginConflictNamesOnlyCurrentWorkspaceAgent(t *testing.T) {
 	var conflict *ConflictError
 	if !errors.As(err, &conflict) || conflict.AgentID != util.UUIDToString(x.agent) || conflict.AgentName != "WeChat test agent" {
 		t.Fatalf("missing conflict owner: %v", err)
+	}
+	member := x.f.User(t, "Another agent owner", util.UUIDToString(dbid.NewV7())+"@example.test")
+	x.f.Member(t, x.f.WorkspaceID, member, "member")
+	x.f.Exec(t, `UPDATE agent SET owner_id=$1 WHERE id=$2`, member, other)
+	memberID := testUUID(t, member)
+	view, err = x.svc.Begin(context.Background(), x.workspace, other, memberID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = x.svc.Poll(context.Background(), testUUID(t, view.ID), x.workspace, memberID, "")
+	if !errors.Is(err, ErrConflict) || errors.As(err, &conflict) {
+		t.Fatalf("member conflict disclosed another owner's agent: %v", err)
 	}
 	y := newDatabaseFixture(t)
 	y.status.Store(x.status.Load().(qrStatus))
@@ -386,7 +409,7 @@ func TestTypingTracksDurableInputsAndRetryAcrossReplicas(t *testing.T) {
 	x.f.Exec(t, `UPDATE agent_task_queue SET status='cancelled' WHERE id=$1`, retry)
 	assertActive(false)
 	x.f.Exec(t, `UPDATE agent_task_queue SET status='running' WHERE id=$1`, retry)
-	if err := x.svc.Revoke(ctx, inst.ID, x.workspace); err != nil {
+	if err := x.svc.Revoke(ctx, inst.ID, x.workspace, x.user); err != nil {
 		t.Fatal(err)
 	}
 	assertActive(false)
@@ -471,7 +494,7 @@ func TestOutboundDedupUnknownAndRouting(t *testing.T) {
 			x.f.Cleanup(t, `DELETE FROM channel_reply_delivery WHERE turn_id=$1`, taskID)
 			x.f.Cleanup(t, `DELETE FROM channel_outbound_message WHERE installation_id=$1`, inst.ID)
 			if scenario == "revoked" {
-				if err := x.svc.Revoke(ctx, inst.ID, x.workspace); err != nil {
+				if err := x.svc.Revoke(ctx, inst.ID, x.workspace, x.user); err != nil {
 					t.Fatal(err)
 				}
 			}

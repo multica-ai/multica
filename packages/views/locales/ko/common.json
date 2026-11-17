@@ -14,7 +14,8 @@
     "upload_image": "이미지 업로드",
     "emoji_label": "이모지",
     "more_emojis": "이모지 더 보기…",
-    "emoji_loading": "불러오는 중…"
+    "emoji_loading": "불러오는 중…",
+    "text_icon": "텍스트 아이콘"
   },
   "avatar_crop": {
     "title": "아바타 편집",
@@ -28,6 +29,14 @@
     "uploading": "업로드 중…",
     "loading": "불러오는 중…",
     "load_failed": "이미지를 불러오지 못했어요"
+  },
+  "text_avatar": {
+    "title": "텍스트 아이콘",
+    "preview": "미리보기",
+    "text_label": "텍스트",
+    "text_hint": "1–2자(영문, 숫자, 한자 등). 초과한 글자는 잘립니다.",
+    "color_label": "색상",
+    "render_failed": "아이콘을 만들지 못했습니다. 다시 시도해 주세요."
   },
   "color_picker": {
     "saturation": "채도와 명도",

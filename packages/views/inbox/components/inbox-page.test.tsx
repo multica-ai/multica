@@ -1,7 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import { ApiError } from "@multica/core/api";
 import type { AgentTask, InboxItem } from "@multica/core/types";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
@@ -91,14 +90,10 @@ const markUnreadMutate = vi.fn();
 const archiveMutate = vi.fn();
 const unarchiveMutate = vi.fn();
 const retrySourceContextMutateAsync = vi.fn();
-const showIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 const showAutopilotQuotaRecoveryPrompt = vi.hoisted(() => vi.fn());
 
-vi.mock("../../modals/use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: (reason?: string) =>
-    reason === "autopilot_quota"
-      ? showAutopilotQuotaRecoveryPrompt
-      : showIssueLimitUpgradePrompt,
+vi.mock("../../modals/use-limit-recovery-prompt", () => ({
+  useLimitRecoveryPrompt: () => showAutopilotQuotaRecoveryPrompt,
 }));
 
 vi.mock("@multica/core/inbox/mutations", () => {
@@ -280,7 +275,6 @@ function reset() {
   unarchiveMutate.mockClear();
   retrySourceContextMutateAsync.mockReset();
   retrySourceContextMutateAsync.mockResolvedValue({});
-  showIssueLimitUpgradePrompt.mockClear();
   showAutopilotQuotaRecoveryPrompt.mockClear();
   modalState.modal = null;
   vi.mocked(toast.success).mockClear();
@@ -881,40 +875,6 @@ describe("InboxPage", () => {
     fireEvent.click(screen.getByTestId("autopilot-quota-recovery"));
 
     expect(showAutopilotQuotaRecoveryPrompt).toHaveBeenCalledTimes(1);
-    expect(showIssueLimitUpgradePrompt).not.toHaveBeenCalled();
-  });
-
-  it("shows issue-limit recovery when a source-context retry is rejected", async () => {
-    reset();
-    retrySourceContextMutateAsync.mockRejectedValue(
-      new ApiError(
-        "workspace has reached its issue limit",
-        402,
-        "Payment Required",
-        { code: "issue_limit_reached" },
-      ),
-    );
-    listData.active = [
-      item({
-        id: "source-context-limit",
-        issue_id: null,
-        type: "quick_create_failed",
-        details: {
-          task_id: "task-1",
-          source_context_id: "context-1",
-          original_prompt: "make a child",
-        },
-      }),
-    ];
-
-    render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-    fireEvent.click(screen.getByTestId("retry-source-context"));
-
-    await act(async () => undefined);
-    expect(showIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
-    expect(showAutopilotQuotaRecoveryPrompt).not.toHaveBeenCalled();
-    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("marks the opened notification read", () => {

@@ -460,3 +460,10 @@ jobs:
           # Windows signing later.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always
+
+  promote:
+    needs: [verify, desktop]
+    if: needs.verify.outputs.is_stable == 'true'
+    uses: ./.github/workflows/promote-release.yml
+    with:
+      tag: ${{ needs.verify.outputs.tag_name }}
