@@ -107,18 +107,12 @@ export function useDeleteFolder(wsId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => folderApi.remove(id),
-    onMutate: async (id) => {
-      await qc.cancelQueries({ queryKey: folderKeys.list(wsId) });
-      const prev = qc.getQueryData<ProjectFolderList>(folderKeys.list(wsId));
+    onSuccess: (_data, id) => {
       qc.setQueryData<ProjectFolderList>(folderKeys.list(wsId), (old) =>
         old
           ? { folders: old.folders.filter((f) => f.id !== id), filed: old.filed.filter((p) => p.folder_id !== id) }
           : old,
       );
-      return { prev };
-    },
-    onError: (_err, _id, ctx) => {
-      if (ctx?.prev) qc.setQueryData(folderKeys.list(wsId), ctx.prev);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: folderKeys.list(wsId) }),
   });

@@ -168,6 +168,50 @@ it("offers rename, delete and a new project from a folder's menu", async () => {
   expect(screen.getByRole("menuitem", { name: "Delete folder" })).toBeVisible();
 });
 
+function FolderNames() {
+  const { folders, folderOf } = useProjectFoldersState("ws");
+  return <output aria-label="folders">{folders.map((f) => f.name).join(",") + "|" + [...folderOf.values()].join(",")}</output>;
+}
+
+async function deleteGrowth(answer: () => Promise<undefined>) {
+  request.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (init?.method === "DELETE") return answer();
+    if (path === "/api/project-folders") return list;
+    return undefined;
+  });
+  const user = userEvent.setup();
+  renderWithI18n(
+    <QueryClientProvider client={qc}>
+      <FolderNames />
+      <Host />
+    </QueryClientProvider>,
+  );
+  const names = screen.getByRole("status", { name: "folders" });
+  await waitFor(() => expect(names).toHaveTextContent("Growth,Sales|f1"));
+  act(() => useFolderDialogStore.getState().open({ kind: "delete", folder: { id: "f1", name: "Growth" } }));
+  await user.click(await screen.findByRole("button", { name: "Delete folder" }));
+  await waitFor(() => expect(request).toHaveBeenCalledWith("/api/project-folders/f1", { method: "DELETE" }));
+  return names;
+}
+
+it("keeps a folder and its projects until the server deletes it", async () => {
+  let finish!: () => void;
+  const names = await deleteGrowth(() => new Promise((resolve) => (finish = () => resolve(undefined))));
+  expect(names).toHaveTextContent("Growth,Sales|f1");
+  expect(screen.getByRole("dialog")).toBeVisible();
+
+  list = { folders: [{ id: "f2", name: "Sales" }], filed: [] };
+  act(() => finish());
+  await waitFor(() => expect(names).toHaveTextContent("Sales|"));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+it("keeps a folder and its projects when deleting it fails", async () => {
+  const names = await deleteGrowth(() => Promise.reject(new Error("offline")));
+  expect(await screen.findByRole("dialog")).toBeVisible();
+  expect(names).toHaveTextContent("Growth,Sales|f1");
+});
+
 it("refetches folders when another member changes them", async () => {
   function Sidebar() {
     useProjectFoldersState("ws");
