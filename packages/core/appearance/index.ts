@@ -67,6 +67,9 @@ export type ContentLeading = (typeof CONTENT_LEADINGS)[number];
 export const DENSITIES = ["compact", "default", "comfortable"] as const;
 export type Density = (typeof DENSITIES)[number];
 
+export const COMMENT_THREAD_DEFAULTS = ["expanded", "collapsed", "latest"] as const;
+export type CommentThreadDefault = (typeof COMMENT_THREAD_DEFAULTS)[number];
+
 export interface AppearancePreferences {
   theme: string;
   /** Option values per theme id, so switching themes keeps each one's choices. */
@@ -80,6 +83,7 @@ export interface AppearancePreferences {
   contentLeading: ContentLeading;
   codeFont: CodeFont;
   density: Density;
+  commentThreadDefault: CommentThreadDefault;
   reduceMotion: boolean;
   highContrast: boolean;
 }
@@ -96,6 +100,7 @@ export const DEFAULT_APPEARANCE: AppearancePreferences = {
   contentLeading: "default",
   codeFont: "geist",
   density: "default",
+  commentThreadDefault: "expanded",
   reduceMotion: false,
   highContrast: false,
 };
@@ -170,6 +175,7 @@ export function sanitizeAppearance(stored: unknown): AppearancePreferences {
     contentLeading: pick("contentLeading", oneOf(CONTENT_LEADINGS)),
     codeFont: pick("codeFont", oneOf(CODE_FONTS)),
     density: pick("density", oneOf(DENSITIES)),
+    commentThreadDefault: pick("commentThreadDefault", oneOf(COMMENT_THREAD_DEFAULTS)),
     reduceMotion: pick("reduceMotion", (v): v is boolean => typeof v === "boolean"),
     highContrast: pick("highContrast", (v): v is boolean => typeof v === "boolean"),
   };
@@ -361,6 +367,7 @@ export function selectAppearance(state: AppearanceState): AppearancePreferences 
     contentLeading: state.contentLeading,
     codeFont: state.codeFont,
     density: state.density,
+    commentThreadDefault: state.commentThreadDefault,
     reduceMotion: state.reduceMotion,
     highContrast: state.highContrast,
   };
