@@ -1,6 +1,6 @@
 ---
 title: 聊天集成
-description: 把 Multica 智能体接入飞书、Lark、Slack、钉钉、企业微信、Telegram 或纷享销客，在团队已有的聊天工具中使用。
+description: 把 Multica 智能体接入飞书、Lark、Slack、钉钉、企业微信、Telegram、纷享销客或微信，在团队已有的聊天工具中使用。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -8,7 +8,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
 接入聊天工具后，团队不用打开 Multica，就能在私聊里向智能体提问、在群聊中 @ 它，或者直接在聊天窗口创建任务。
 
-目前支持飞书/Lark、Slack、钉钉、企业微信、Telegram 和纷享销客。它们使用相同的会话、身份和执行机制，但安装方式不同。
+目前支持飞书/Lark、Slack、钉钉、企业微信、Telegram、纷享销客和微信。微信只接收扫描连接二维码账号的私聊。它们使用相同的会话、身份和执行机制，但安装方式不同。
 
 ## 选择平台
 
@@ -41,6 +41,8 @@ Telegram 会把图片、文件、视频和音频作为附件转交给智能体�
 - [钉钉 Bot 接入](/dingtalk-bot-integration)
 - [Telegram Bot 接入](/telegram-bot-integration)
 - [纷享销客 Bot 接入](/sharecrm-bot-integration)
+
+[微信 Bot](/weixin-bot-integration) 通过扫码连接，将扫码账号绑定到发起连接的 Multica 用户，不使用下方首次发送消息时的绑定链接流程。
 
 ## 消息的执行流程
 
@@ -101,6 +103,7 @@ MULTICA_SLACK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_DINGTALK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_WECOM_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_TELEGRAM_SECRET_KEY=<base64 编码的 32 字节密钥>
+MULTICA_WEIXIN_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_SHARECRM_SECRET_KEY=<base64 编码的 32 字节密钥>
 ```
 
@@ -122,4 +125,5 @@ MULTICA_SHARECRM_SECRET_KEY=<base64 编码的 32 字节密钥>
 - [钉钉 Bot 接入](/dingtalk-bot-integration)
 - [Telegram Bot 接入](/telegram-bot-integration)
 - [纷享销客 Bot 接入](/sharecrm-bot-integration)
+- [微信 Bot 接入](/weixin-bot-integration)
 - [与智能体对话](/chat)

@@ -107,6 +107,8 @@ Once a limit is reached, new runs keep queueing. Adjust a single agent's concurr
 
 Token usage, cost, and failures across runs are summarized per workspace on the [Analytics](/analytics) page; `multica runtime usage <runtime-id>` shows token usage for a single runtime.
 
+For Claude Code and Codex runtimes, the runtime's page also shows **Limits**: how much of the plan's 5-hour session and weekly windows the CLI account has used, when each resets, and whether usage is running ahead of the time elapsed. The CLI reports these while it runs tasks, so the numbers are as of the runtime's latest run. API-key accounts have no plan limits to show.
+
 ## Local MCP configuration [#local-mcp]
 
 When an agent has no MCP configuration saved, Multica passes no MCP settings and the tool reads its own configuration on that computer as usual.

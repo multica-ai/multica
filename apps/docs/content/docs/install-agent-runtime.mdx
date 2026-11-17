@@ -131,7 +131,9 @@ Prefer a bundle your own team publishes or builds: this value is installed into 
 
 **DSH Desktop.** If you installed DeepSeek Harness Desktop instead of the npm package, the daemon also looks for the CLI shims that app generates, under its own per-user data directory — `~/Library/Application Support/DSH Desktop` on macOS, `%APPDATA%\DSH Desktop` on Windows. On Windows that is roaming application data, not the install directory: the app installs to Program Files or `%LOCALAPPDATA%\Programs`, but the CLI it drives lives beside its other per-user state. The version segment in those paths is a generated id, so the daemon enumerates them and prefers the newest. Nothing else is needed on `PATH` — a generated shim runs the Desktop app's own runtime by absolute path. If DSH Desktop is installed somewhere non-default, point `MULTICA_DSH_PATH` at the shim.
 
-The daemon registers DeepSeek Harness only after `dsh --profile multica --probe` succeeds, and reports the missing profile on `/health` when it does not.
+**After upgrading DSH.** If the probe reports incompatible profile-local core packages, back up the manifest named in the daemon diagnostic. Review overrides for `@deepseek-ai/dsh-agent`, `@deepseek-ai/dsh-session`, `@deepseek-ai/dsh-tools`, and `@deepseek-ai/dsh-llm`: use the application-supplied core packages where possible, or align overrides with the installed DSH version. Keep required independent plugins and hooks; do not delete every dependency. Run `dsh --profile multica --probe` again after repairing the profile. Multica reports this confirmed compatibility refusal as requiring manual profile repair and does not overwrite the existing profile.
+
+The daemon registers DeepSeek Harness only after `dsh --profile multica --probe` succeeds. Its `/health` diagnostic distinguishes a missing profile, confirmed manual profile repair, protocol incompatibility, and an unavailable probe. Startup failures include the detected CLI version, manifest location, and redacted diagnostic output when available.
 
 </Accordion>
 <Accordion title="Devin CLI" id="devin-cli">

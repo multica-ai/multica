@@ -140,6 +140,9 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
+	"671_weixin_account_state_unique_index":                     "weixin_account_state_pkey",
+	"669_weixin_login_session_unique_index":                     "weixin_login_session_pkey",
+	"666_weixin_login_expiry_idx":                               "weixin_login_expiry_idx",
 	"662_chat_task_supplement_message":                          "uq_chat_task_supplement_message",
 	"663_chat_task_supplement_task":                             "idx_chat_task_supplement_task",
 	"664_chat_task_supplement_workspace":                        "idx_chat_task_supplement_workspace",

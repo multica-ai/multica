@@ -1,3 +1,4 @@
+import { WeChat } from "@multica/ui/icons";
 import { DingTalkMark } from "./dingtalk-mark";
 import { LarkMark } from "./lark-mark";
 import { ShareCRMMark } from "./sharecrm-mark";
@@ -11,6 +12,7 @@ type IntegrationChannel =
   | "dingtalk"
   | "wecom"
   | "telegram"
+  | "weixin"
   | "sharecrm";
 
 // Every channel gets its own brand mark, never a generic lucide glyph: the icon
@@ -24,6 +26,7 @@ export function IntegrationChannelIcon({ channel }: { channel: IntegrationChanne
     slack: <SlackMark className="h-4 w-4" />,
     dingtalk: <DingTalkMark className="h-5 w-5" />,
     wecom: <WecomMark className="h-4 w-4" />,
+    weixin: <WeChat className="h-4 w-4" />,
     telegram: <TelegramMark className="h-4 w-4" />,
     sharecrm: <ShareCRMMark className="h-4 w-4" />,
   }[channel];

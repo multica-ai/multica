@@ -376,7 +376,8 @@
     "pending_health_warning": "Daemon 동기화 대기 중",
     "pending_health_error": "등록 오류",
     "pending_health_disabled": "비활성화됨",
-    "pending_cli_unknown": "대기 중"
+    "pending_cli_unknown": "대기 중",
+    "col_rate_limits": "한도"
   },
   "profiles": {
     "cta": "런타임 추가",
@@ -674,5 +675,38 @@
       "run_there": "해당 머신에서 실행",
       "connected": "{{name}}이(가) Multica에 연결됨"
     }
+  },
+  "rate_limits": {
+    "title": "한도",
+    "caption": "작업 실행 중 CLI가 보고",
+    "updated": "{{ago}} 업데이트",
+    "empty_title": "아직 한도 데이터가 없습니다",
+    "empty_hint": "이 런타임이 다음에 작업을 실행할 때 기록됩니다. API 키 계정에는 요금제 한도가 없습니다.",
+    "window_session": "세션",
+    "window_session_hours": "{{hours}}시간 세션",
+    "window_weekly": "주간",
+    "window_weekly_opus": "주간 · Opus",
+    "window_weekly_sonnet": "주간 · Sonnet",
+    "window_generic": "기타 한도",
+    "short_session": "세션",
+    "short_weekly": "주간",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "기타",
+    "used": "{{pct}}% 사용",
+    "limited": "한도 도달",
+    "resets_in": "{{duration}} 후 초기화",
+    "resets_at": "{{time}} 초기화",
+    "reset_since": "마지막 보고 이후 초기화됨",
+    "verdict_ahead": "예상보다 {{pct}}% 빠름 · 약 {{duration}} 후 소진",
+    "verdict_on_pace": "현재 속도면 초기화까지 충분합니다",
+    "verdict_limited": "초기화 후 재개",
+    "credits": "크레딧",
+    "credits_balance": "잔액 {{balance}}",
+    "credits_unlimited": "무제한",
+    "credits_none": "없음",
+    "duration_minutes": "{{minutes}}분",
+    "duration_hours": "{{hours}}시간 {{minutes}}분",
+    "duration_days": "{{days}}일 {{hours}}시간"
   }
 }

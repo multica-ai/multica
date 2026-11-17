@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ListEnd, Scan, TriangleAlert, X } from "@multica/ui/icons";
+import { Scan, TriangleAlert, X } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -76,7 +76,6 @@ interface ChatInputProps {
     attachmentIds: string[] | undefined,
     commitInput: (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => void,
     draftAttachments: Attachment[],
-    options?: { queue?: boolean },
   ) => void | boolean | Promise<void | boolean>;
   restoreDraftRequest?: {
     id: string;
@@ -116,6 +115,8 @@ interface ChatInputProps {
   isRunning?: boolean;
   /** Enabled only after the server explicitly advertises follow-up queues. */
   allowSubmitWhileRunning?: boolean;
+  /** Server-confirmed permission and capability for this exact running turn. */
+  canSteerWhileRunning?: boolean;
   disabled?: boolean;
   /** True when the user has no agent available — disables the editor and
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
@@ -185,6 +186,7 @@ export function ChatInput({
   onStop,
   isRunning,
   allowSubmitWhileRunning,
+  canSteerWhileRunning,
   disabled,
   noAgent,
   agentArchived,
@@ -207,6 +209,7 @@ export function ChatInput({
 }: ChatInputProps) {
   const { t } = useT("chat");
   const { t: tEditor } = useT("editor");
+  const { t: tIssues } = useT("issues");
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
@@ -494,7 +497,6 @@ export function ChatInput({
   // stale `true` behind for the next one.
   const editorScrubbedRef = useRef(false);
 
-  const queueNextSendRef = useRef(false);
   const { submitting, submit } = useComposerSubmit({
     editorRef,
     uploadGate: gate,
@@ -510,8 +512,6 @@ export function ChatInput({
       return hasReplyIntent(raw, current) ? composeAnnotatedReply(raw, current) : "";
     },
     onSubmit: async (content: string): Promise<boolean> => {
-      const queue = queueNextSendRef.current;
-      queueNextSendRef.current = false;
       editorScrubbedRef.current = false;
       // Same tick as `normalize`, so this is exactly what `content` quotes.
       const annotationKeyAtSend = annotationDraftKey;
@@ -626,9 +626,7 @@ export function ChatInput({
         commitInput,
         draftAttachments.filter((attachment) => uniqueActiveIds.includes(attachment.id)),
       ] as const;
-      const accepted = queue
-        ? await onSend(...sendArgs, { queue: true })
-        : await onSend(...sendArgs);
+      const accepted = await onSend(...sendArgs);
       // Owner rejected the send (or threw, which useComposerSubmit also treats
       // as a rejection): the draft was never committed, so it stays put for
       // retry. Only a commit — here or by the owner — clears it.
@@ -714,6 +712,9 @@ export function ChatInput({
     !isProjectUpdating;
   const selectedProject = projects.find((project) => project.id === projectId);
   const canSubmitNow = !disabled && !noAgent && (!isRunning || !!allowSubmitWhileRunning);
+  const showRunHint = isRunning && allowSubmitWhileRunning && canSteerWhileRunning !== undefined
+    && !hasNothingToSend && !disabled && !noAgent;
+  const willSteer = canSteerWhileRunning && draftUploads.length === 0;
   const voice = useComposerVoice({
     insert: (text) => editorRef.current?.insertText(text) ?? false,
     submit: canSubmitNow ? () => void submit() : undefined,
@@ -790,6 +791,13 @@ export function ChatInput({
           togglePageContext();
         }}
       >
+        {showRunHint && (
+          <p role="status" className={cn("px-3 pt-2 text-caption", willSteer ? "text-brand" : "text-muted-foreground")}>
+            {willSteer
+              ? tIssues(($) => $.comment.recipient_steer)
+              : tIssues(($) => $.comment.recipient_after_run)}
+          </p>
+        )}
         {annotationDraftKey && annotations.length > 0 && (
           <div className="px-3 pt-2">
             <ReplyAnnotations draftKey={annotationDraftKey} annotations={annotations} disabled={submitting}
@@ -919,19 +927,6 @@ export function ChatInput({
               className="text-muted-foreground aria-pressed:bg-accent aria-pressed:text-foreground"
             >
               <Scan />
-            </IconButton>
-          )}
-          {isRunning && allowSubmitWhileRunning && !hasNothingToSend && !gate.uploading && (
-            <IconButton
-              type="button"
-              label={t(($) => $.input.queue_send_tooltip)}
-              disabled={submitting || gate.uploading || !!disabled || !!noAgent}
-              onClick={() => {
-                queueNextSendRef.current = true;
-                void submit().finally(() => { queueNextSendRef.current = false; });
-              }}
-            >
-              <ListEnd />
             </IconButton>
           )}
           <SubmitButton

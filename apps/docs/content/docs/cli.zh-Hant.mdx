@@ -368,6 +368,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | 建立、更新、分配和搜尋任務；管理評論、訂閱、標籤、屬性、喚醒、時間線與執行記錄 |
 | `project` | 管理專案、專案資源和專案使用的工作流 |
+| `inbox` | 讀取自己的通知，不改變已讀狀態 |
 | `workflow` | 管理工作流：狀態以及每個狀態交給誰處理 |
 | `issue-status` | 管理工作區狀態目錄：狀態及其顏色和圖示 |
 | `label`、`property` | 管理工作區標籤和自定義屬性 |
@@ -501,6 +502,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `member list/add/set-role/remove` | 管理小隊成員 | |
 | | `activity <issue-id> <outcome>` | 記錄隊長評價 | |
 | `chat` | `history`、`thread [id]` | 讀取 AI 代理當前正在處理的外部聊天會話 | `--limit`、`--before` |
+| `inbox` | `list` | [讀取目前通知](/inbox)，不標為已讀 | `--project`、`--type`、`--output`（`table` 或 `json`）；篩選在本機套用 |
 
 ### Runtime
 

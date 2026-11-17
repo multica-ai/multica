@@ -221,6 +221,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
 		seenUsage := make(map[string]struct{})
+		rateLimits := newRateLimitTracker(opts.OnRateLimits)
 		eventCount := 0
 		invalidEventCount := 0
 		assistantEventCount := 0
@@ -318,6 +319,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "user":
 				if b.handleUser(msg, msgCh) {
 					sawAsyncLaunch = true
+				}
+			case "rate_limit_event":
+				if update, ok := parseClaudeRateLimitEvent(msg.RateLimitInfo); ok {
+					rateLimits.apply(update)
 				}
 			case "system":
 				if msg.SessionID != "" {
@@ -742,6 +747,9 @@ type claudeSDKMessage struct {
 
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`
+
+	// rate_limit_event fields
+	RateLimitInfo json.RawMessage `json:"rate_limit_info,omitempty"`
 
 	// control request fields
 	RequestID string          `json:"request_id,omitempty"`

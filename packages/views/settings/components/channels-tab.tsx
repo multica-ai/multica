@@ -182,6 +182,7 @@ export function ChannelsTab() {
               {t(($) => $.slack.section_title)},{" "}
               {t(($) => $.wecom.section_title)},{" "}
               {t(($) => $.telegram.section_title)},{" "}
+              {t(($) => $.weixin.section_title)},{" "}
               {t(($) => $.sharecrm.section_title)}
             </span>
             <span className="text-muted-foreground">

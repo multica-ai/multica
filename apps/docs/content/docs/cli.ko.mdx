@@ -371,6 +371,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | 태스크 생성, 업데이트, 할당, 검색. 댓글, 구독, 라벨, 속성, 깨우기, 타임라인, 실행 기록 관리 |
 | `project` | 프로젝트와 프로젝트 리소스 관리 |
+| `inbox` | 읽음 상태를 바꾸지 않고 내 알림 읽기 |
 | `label`, `property` | 워크스페이스 라벨과 사용자 지정 속성 관리 |
 | `view` | 저장된 뷰를 읽고 뷰에 보이는 태스크 나열 |
 | `agent`, `skill`, `squad` | 에이전트, 스킬, 스쿼드 관리 |
@@ -492,6 +493,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `member list/add/set-role/remove` | 스쿼드 멤버 관리 | |
 | | `activity <issue-id> <outcome>` | 리더 평가 기록 | |
 | `chat` | `history`, `thread [id]` | 에이전트가 현재 처리 중인 외부 채팅 대화 읽기 | `--limit`, `--before` |
+| `inbox` | `list` | 읽음으로 표시하지 않고 [현재 알림 읽기](/inbox) | `--project`, `--type`, `--output` (`table` 또는 `json`); 필터는 로컬에서 적용 |
 
 ### Runtime
 
