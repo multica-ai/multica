@@ -69,6 +69,7 @@ In the execution log you can:
 - Click **View transcript** on a row to see the agent's messages, tool calls, and error output. For a run still in progress the transcript keeps streaming while the dialog stays open, and a **Newest first** toggle flips the event order.
 - Stop runs that are queued, starting, waiting for a local directory, or working.
 - Retry a failed or cancelled run.
+- Rerun a finished run in a new session.
 
 The demo below walks through a full cycle: a run queues, starts, and fails; you retry it and the new run completes. Once the new run starts, you can also try stopping it midway.
 
@@ -142,6 +143,8 @@ The `agent_error.` prefix is omitted in this table.
 Clicking the retry button on a row in the execution log invokes **the agent that handled that run at the time**. Even if the issue has since been reassigned, the retry does not switch to the new assignee.
 
 A retry keeps the files the previous run already wrote to the local directory whenever possible. If the original session is still safe and the same runtime claims the retry, it continues that session. Errors that poison the session, such as context overflow or invalid requests, start a new session on top of the original working directory instead. When the original directory no longer exists, a fresh working directory is used.
+
+To start over without the old context, click **Rerun in a new session** on a finished row and confirm. The run's agent starts again in a new session and a new working directory, and earlier runs and comments stay on the issue. If that agent is still running on the issue, the new run waits for it to finish. The run's transcript shows **New session** in its context details.
 
 Find the source run and retry it from the CLI:
 
