@@ -8111,19 +8111,24 @@ func resolveTaskModelSelection(
 }
 
 func (d *Daemon) reportThinkingLevelWarning(ctx context.Context, taskID, warning string, msgSeq *atomic.Int32, taskLog *slog.Logger) {
-	if warning == "" {
+	d.reportTaskNotice(ctx, taskID, warning, msgSeq, taskLog)
+}
+
+// reportTaskNotice writes a daemon-authored text row into the run transcript.
+func (d *Daemon) reportTaskNotice(ctx context.Context, taskID, notice string, msgSeq *atomic.Int32, taskLog *slog.Logger) {
+	if notice == "" {
 		return
 	}
 	message := TaskMessageData{
 		Seq:       int(msgSeq.Add(1)),
 		Type:      "text",
-		Content:   redact.Text(warning) + "\n\n",
+		Content:   redact.Text(notice) + "\n\n",
 		CreatedAt: time.Now(),
 	}
 	reportCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := d.client.ReportTaskMessages(reportCtx, taskID, []TaskMessageData{message}); err != nil {
-		taskLog.Warn("failed to report thinking-level warning", "error", err)
+		taskLog.Warn("failed to report task notice", "error", err)
 	}
 }
 
@@ -8435,6 +8440,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentMcpConfig json.RawMessage
 	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
+	var cursorMcpAuthStore string
 	remoteMCPConfig, remoteMCPDiagnostics, remoteMCPBrokers, remoteMCPErr := startTaskRemoteMCPBrokers(
 		prepareCtx, ctx, task.ID, provider, task.RemoteMCPConnections,
 		func(resolveCtx context.Context, contributionID string) (http.Header, error) {
@@ -8498,6 +8504,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		if provider == "cursor" {
 			cursorMcpAuthSource = strings.TrimSpace(task.Agent.CustomEnv[execenv.CursorMcpAuthSourceEnv])
+			cursorMcpAuthStore = execenv.CursorMcpAuthStorePath(d.cfg.Profile, task.AgentID)
 		}
 	}
 	// Decode openclaw-specific runtime_config knobs once so reuse / prepare /
@@ -8648,6 +8655,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			OpenclawBin:           openclawBin,
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
+			CursorMcpAuthStore:    cursorMcpAuthStore,
 			OpenclawGateway:       openclawGateway,
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
@@ -8698,6 +8706,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			OpenclawBin:           openclawBin,
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
+			CursorMcpAuthStore:    cursorMcpAuthStore,
 			OpenclawGateway:       openclawGateway,
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
@@ -9423,6 +9432,24 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
 	d.reportThinkingLevelWarning(ctx, task.ID, selection.ThinkingLevelWarning, &msgSeq, taskLog)
+	var pendingCursorLoginCheck *cursorMcpLoginCheck
+	if provider == "cursor" && env.CursorDataDir != "" {
+		check := cursorMcpLoginCheck{
+			TaskWorkDir:       env.WorkDir,
+			TaskCursorDataDir: env.CursorDataDir,
+			AuthSource:        cursorMcpAuthSource,
+			AuthStore:         cursorMcpAuthStore,
+			McpConfig:         effectiveMcpConfig,
+			Host:              d.cfg.DeviceName,
+			GOOS:              runtime.GOOS,
+		}
+		if !usesCustomProfileCommand {
+			check.Executable = entry.Path
+		}
+		if !d.reportCursorMcpLoginNotice(ctx, task.ID, check, &msgSeq, taskLog) {
+			pendingCursorLoginCheck = &check
+		}
+	}
 	outputObserver := &taskOutputObserver{}
 	ctx = withTaskOutputObserver(ctx, outputObserver)
 	// STOE-30: mirror the agent's cumulative token counters into task_usage
@@ -9543,6 +9570,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	phaseRecorder.Mark(taskPhaseTurnCompleted)
+
+	// Cursor records a server's OAuth challenge only after connecting to it, so
+	// an agent's first run can only learn about a missing login here.
+	if pendingCursorLoginCheck != nil {
+		d.reportCursorMcpLoginNotice(ctx, task.ID, *pendingCursorLoginCheck, &msgSeq, taskLog)
+	}
 
 	// MUL-8188: a resumed run that was cancelled after minutes of total
 	// silence resumed a session the runtime cannot drive. Retire it so the

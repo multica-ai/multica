@@ -133,6 +133,20 @@ CodeBuddy、Kimi CLI 和 Pi 啟動時會自己載入使用者級配置，並與 
 
 合併在執行時所在的電腦上完成，本機伺服器的命令、URL、請求頭和環境變數不會上傳。AI 代理 **MCP** 標籤頁的"從執行時繼承"一欄只顯示伺服器名稱、傳輸方式、來源和是否啟用；被 AI 代理同名伺服器覆蓋的會標為"已由 Multica 覆蓋"。本機配置檔案無法解析時，守護程序記一條警告日誌，這次執行只使用 AI 代理的配置。
 
+### Cursor 的 MCP 登入 [#cursor-mcp-login]
+
+Cursor 依專案目錄保存 MCP 的 OAuth 登入，而每次執行都有自己的目錄。因此當 Cursor AI 代理有 MCP 設定時，daemon 會在執行環境所在電腦上為每個 AI 代理保留一份登入檔，即 Multica 設定目錄下的 `cursor-mcp-auth/<agent-id>/mcp-auth.json`，並讓每次執行都連結到它。對 Mobbin 這類服務登入一次，這個 AI 代理之後在這台電腦上的執行都能使用。它和你自己 Cursor 裡的登入分開，執行不會讓你那邊被登出。這個 AI 代理在這台電腦上的所有執行都會用到它，包括其他成員觸發的執行。
+
+如果某個服務仍需登入，執行紀錄裡會寫明是哪個服務，並提供要在執行環境所在電腦上執行的指令，例如：
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
+```
+
+指令在登入檔旁邊一個單獨保留的登入目錄裡執行，所以執行自己的目錄被清理後也仍然可用。
+
+登入從這個 AI 代理的下一次執行開始生效，目前這次執行用不上。如果想改用你自己的登入檔，在 AI 代理的環境變數裡把 `CURSOR_MCP_AUTH_SOURCE` 設為某個 `mcp-auth.json` 的絕對路徑，或包含它的 Cursor 專案目錄；它優先於依 AI 代理保留的檔案。同一個 AI 代理的兩次執行如果剛好同時重新整理同一個 token，仍可能讓對方被登出，發生時重新登入即可。
+
 ## 清理與保留 [#cleanup]
 
 守護程序啟動約 30 秒後清理一次，之後每 2 小時一次。正在執行的執行用到的目錄不會被清理。`multica daemon disk-usage` 可以按工作區或按執行檢視佔用。下文的時長都是預設值，對應的 `MULTICA_GC_*` 變數見[環境變數](/environment-variables#gc)。
@@ -169,6 +183,7 @@ CodeBuddy、Kimi CLI 和 Pi 啟動時會自己載入使用者級配置，並與 
 | Codex 會話記錄（每個 AI 代理、每個任務一份） | Codex 目錄（預設 `~/.codex`）下的 `multica-sessions/` | 14 天未使用後刪除；之後這個任務的執行無法續接原來的 Codex 會話 |
 | Hermes 會話記錄 | Multica 配置目錄（預設 `~/.multica`，命名 profile 為 `~/.multica/profiles/<name>`）下的 `hermes-sessions/` | 14 天未使用後刪除 |
 | Hermes 記憶（每個 AI 代理一份） | 同一目錄下的 `hermes-state/` | 90 天未使用後刪除 |
+| Cursor 的 MCP 登入（每個 AI 代理一份） | 同一目錄下的 `cursor-mcp-auth/` | 保留 |
 | 每次執行的私有臨時目錄（`TMPDIR`） | 系統臨時目錄下的 `multica-task-*` | 執行結束後刪除，守護程序被強制結束時由之後的清理補刪 |
 
 Hermes 在任務和聊天中的執行會將會話持久目錄作為隔離的 `HERMES_HOME`，`state.db` 及其 SQLite 日誌檔案均為目錄內的普通檔案。這個佈局同時支援舊版程序內 ACP 和新版由 Gateway 執行的 ACP。已有會話記錄會直接重複使用，舊執行目錄中的會話歷史會在下次執行前遷移。

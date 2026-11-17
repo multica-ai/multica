@@ -132,6 +132,20 @@ CodeBuddy, Kimi CLI et Pi chargent eux-mêmes leur configuration de niveau utili
 
 La fusion a lieu sur la machine du runtime : les commandes, URL, en-têtes et variables d'environnement des serveurs locaux ne sont jamais envoyés. La liste « Hérité du runtime » de l'onglet **MCP** de l'agent n'affiche que le nom, le transport, la source et l'état activé de chaque serveur ; un serveur masqué par un serveur de l'agent du même nom porte la mention « Remplacé par Multica ». Si un fichier de configuration local ne peut pas être analysé, le daemon consigne un avertissement et l'exécution n'utilise que la configuration de l'agent.
 
+### Connexions MCP de Cursor [#cursor-mcp-login]
+
+Cursor enregistre les connexions OAuth MCP par répertoire de projet, et chaque exécution a son propre répertoire. Lorsqu'un agent Cursor a une configuration MCP, le daemon conserve donc un fichier de connexion par agent sur l'ordinateur du runtime, `cursor-mcp-auth/<agent-id>/mcp-auth.json` dans le répertoire de configuration Multica, et y relie chaque exécution. Connectez-vous une fois à un serveur comme Mobbin et les exécutions suivantes de l'agent sur cet ordinateur utilisent cette connexion. Elle est distincte de la connexion de votre propre Cursor : une exécution ne vous y déconnecte jamais. Toutes les exécutions de l'agent sur cet ordinateur l'utilisent, y compris celles lancées par d'autres membres.
+
+Si un serveur demande encore une connexion, la transcription de l'exécution indique lequel et donne la commande à lancer sur l'ordinateur du runtime, par exemple :
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
+```
+
+La commande s'exécute dans un dossier de connexion conservé à côté du fichier de connexion de l'agent ; elle fonctionne donc même après le nettoyage du répertoire de l'exécution.
+
+La connexion s'applique à partir de l'exécution suivante de l'agent ; l'exécution en cours ne la prend pas en compte. Pour utiliser votre propre fichier de connexion, définissez `CURSOR_MCP_AUTH_SOURCE` dans les variables d'environnement de l'agent avec le chemin absolu d'un `mcp-auth.json` ou du répertoire de projet Cursor qui le contient ; il est prioritaire sur le fichier par agent. Deux exécutions d'un même agent qui rafraîchissent le même jeton au même moment peuvent encore se déconnecter l'une l'autre ; reconnectez-vous si cela arrive.
+
 ## Nettoyage et conservation [#cleanup]
 
 Le daemon fait un premier nettoyage environ 30 secondes après son démarrage, puis toutes les 2 heures. Les répertoires utilisés par une exécution en cours ne sont jamais nettoyés. `multica daemon disk-usage` affiche l'occupation par espace de travail ou par exécution. Les durées ci-dessous sont les valeurs par défaut ; les variables `MULTICA_GC_*` correspondantes figurent dans [Variables d'environnement](/environment-variables#gc).
@@ -168,6 +182,7 @@ Un cache n'est supprimé que si les trois conditions sont réunies : aucun espac
 | Historiques de session Codex (un par agent et par tâche) | `multica-sessions/` dans le répertoire Codex (par défaut `~/.codex`) | Supprimés après 14 jours sans usage ; les exécutions suivantes sur cette tâche ne peuvent plus reprendre l'ancienne session Codex |
 | Historiques de session Hermes | `hermes-sessions/` dans le répertoire de configuration Multica (par défaut `~/.multica` ; `~/.multica/profiles/<name>` pour un profil nommé) | Supprimés après 14 jours sans usage |
 | Mémoire Hermes (une par agent) | `hermes-state/` dans le même répertoire | Supprimée après 90 jours sans usage |
+| Connexions MCP de Cursor (une par agent) | `cursor-mcp-auth/` dans le même répertoire | Conservées |
 | Répertoire temporaire privé de chaque exécution (`TMPDIR`) | `multica-task-*` dans le répertoire temporaire du système | Supprimé à la fin de l'exécution ; si le daemon a été tué, un nettoyage ultérieur s'en charge |
 
 Les exécutions Hermes liées à une tâche ou à un chat utilisent le répertoire persistant de leur conversation comme `HERMES_HOME` isolé, avec un fichier `state.db` ordinaire et ses journaux SQLite à l’intérieur. Cette disposition fonctionne aussi bien avec l’ACP exécuté dans le processus qu’avec l’ACP passant par la Gateway. Les historiques existants sont réutilisés et les historiques locaux sont migrés avant l’exécution suivante.
