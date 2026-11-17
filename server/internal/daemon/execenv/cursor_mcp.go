@@ -9,10 +9,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 const (
@@ -25,7 +28,35 @@ const (
 
 	cursorWorkspaceTrustedFile = ".workspace-trusted"
 	cursorMcpAuthFile          = "mcp-auth.json"
+
+	// cursorMcpAuthStoreRoot is the directory under the daemon's Multica
+	// profile dir that holds each agent's persistent Cursor MCP OAuth state.
+	cursorMcpAuthStoreRoot = "cursor-mcp-auth"
 )
+
+// CursorMcpAuthStorePath returns the agent's persistent Cursor mcp-auth.json on
+// this machine, or "" when there is no agent to key on or the Multica profile
+// dir cannot be resolved.
+//
+// Cursor keys MCP OAuth state by project directory, and every task runs in a
+// new one, so without a store an MCP login made in one task never reaches the
+// next. The store is linked into each task rather than copied: Cursor rewrites
+// the file in place, so all tasks of the agent spend the same single-use
+// refresh tokens instead of rotating each other out. It is separate from the
+// user's own ~/.cursor login, which therefore never gets signed out by a task.
+// Concurrent tasks of one agent may still race a refresh; the store is
+// last-writer-wins, like Cursor's own file.
+func CursorMcpAuthStorePath(daemonProfile, agentID string) string {
+	agent := sanitizePathSegment(agentID)
+	if agent == "" {
+		return ""
+	}
+	profileDir, err := cli.ProfileDir(daemonProfile)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(profileDir, cursorMcpAuthStoreRoot, agent, cursorMcpAuthFile)
+}
 
 type cursorMcpConfigFile struct {
 	McpServers map[string]json.RawMessage `json:"mcpServers"`
@@ -48,7 +79,11 @@ type cursorRemoteMcpApprovalServer struct {
 // prepareCursorMcpConfig writes the Cursor-native MCP sidecars for agents that
 // have an explicit managed mcp_config saved. A nil/null mcp_config means "let
 // Cursor behave normally", so no .cursor/mcp.json or CURSOR_DATA_DIR is created.
-func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, mcpAuthSource string, manifest *sidecarManifest) (string, error) {
+//
+// The task's mcp-auth.json is rebuilt on every run: an explicit mcpAuthSource
+// wins, otherwise it links to the agent's mcpAuthStore, otherwise it stays
+// task-local.
+func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, mcpAuthSource, mcpAuthStore string, manifest *sidecarManifest, logger *slog.Logger) (string, error) {
 	if !hasManagedCursorMcpConfig(mcpConfig) {
 		return "", nil
 	}
@@ -107,13 +142,60 @@ func prepareCursorMcpConfig(envRoot, workDir string, mcpConfig json.RawMessage, 
 	if err := os.WriteFile(filepath.Join(projectDataDir, cursorWorkspaceTrustedFile), trustData, 0o600); err != nil {
 		return "", fmt.Errorf("write cursor workspace trust: %w", err)
 	}
-	if strings.TrimSpace(mcpAuthSource) != "" {
+	switch {
+	case strings.TrimSpace(mcpAuthSource) != "":
 		if err := seedCursorMcpAuthFile(projectDataDir, mcpAuthSource); err != nil {
 			return "", err
+		}
+	case mcpAuthStore != "":
+		if err := linkCursorMcpAuthStore(projectDataDir, mcpAuthStore); err != nil {
+			if logger != nil {
+				logger.Warn("execenv: link cursor mcp auth store failed; MCP logins stay task-local", "store", mcpAuthStore, "error", err)
+			}
 		}
 	}
 
 	return cursorDataDir, nil
+}
+
+// linkCursorMcpAuthStore points the task's mcp-auth.json at the agent's
+// persistent store. A hard link is the fallback where symlinks need privileges
+// (Windows); it still shares one file because Cursor rewrites it in place.
+func linkCursorMcpAuthStore(projectDataDir, store string) error {
+	if err := ensureCursorMcpAuthStore(store); err != nil {
+		return err
+	}
+	target := filepath.Join(projectDataDir, cursorMcpAuthFile)
+	symlinkErr := os.Symlink(store, target)
+	if symlinkErr == nil {
+		return nil
+	}
+	if err := os.Link(store, target); err != nil {
+		return errors.Join(symlinkErr, err)
+	}
+	return nil
+}
+
+func ensureCursorMcpAuthStore(store string) error {
+	if err := os.MkdirAll(filepath.Dir(store), 0o700); err != nil {
+		return fmt.Errorf("create cursor mcp auth store dir: %w", err)
+	}
+	f, err := os.OpenFile(store, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, fs.ErrExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create cursor mcp auth store: %w", err)
+	}
+	_, writeErr := f.WriteString("{}\n")
+	if closeErr := f.Close(); writeErr == nil {
+		writeErr = closeErr
+	}
+	if writeErr != nil {
+		_ = os.Remove(store)
+		return fmt.Errorf("create cursor mcp auth store: %w", writeErr)
+	}
+	return nil
 }
 
 func seedCursorMcpAuthFile(projectDataDir, source string) error {
