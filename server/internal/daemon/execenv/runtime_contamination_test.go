@@ -90,3 +90,18 @@ func TestRuntimeContaminationHandlesLargeBlobsAndSubmodules(t *testing.T) {
 		t.Fatalf("unexpected findings: %+v", warnings)
 	}
 }
+
+func TestLocalWorktreeOutcomeDeliveryWarning(t *testing.T) {
+	if got := (LocalWorktreeOutcome{Branch: "agent/x"}).DeliveryWarning(); got != "" {
+		t.Fatalf("clean outcome warned: %q", got)
+	}
+	got := (LocalWorktreeOutcome{
+		RuntimeWarnings:  []RuntimeContamination{{Commit: "abc123", Path: "CLAUDE.md"}},
+		RuntimeScanError: "git cat-file: boom",
+	}).DeliveryWarning()
+	for _, want := range []string{"`abc123`: `CLAUDE.md`", "could not finish checking", "git cat-file: boom"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("warning %q lacks %q", got, want)
+		}
+	}
+}

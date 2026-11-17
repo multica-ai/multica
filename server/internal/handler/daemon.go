@@ -4987,6 +4987,11 @@ type TaskCompleteRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// DeliveryWarning: a problem the daemon found in the delivered branch
+	// after the agent exited (MUL-9445). Posted as its own comment, because
+	// the agent's result comment usually suppresses the output fallback.
+	// Older daemons omit it.
+	DeliveryWarning string `json:"delivery_warning,omitempty"`
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
@@ -5004,6 +5009,7 @@ func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
 	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+	req.DeliveryWarning = util.SanitizeTextForPostgres(req.DeliveryWarning)
 }
 
 func sanitizeTaskFailRequest(req *TaskFailRequest) {

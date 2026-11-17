@@ -175,3 +175,40 @@ func TestCompleteTaskAfterFailedOrCancelledPublishesNothing(t *testing.T) {
 		})
 	}
 }
+
+// A delivery warning is found after the agent exits, usually after it posted
+// its result — which suppresses the output fallback. The warning must still
+// reach the issue as its own comment, once, even when the callback replays
+// (MUL-9445).
+func TestCompleteTaskDeliveryWarningPostedAfterAgentResult(t *testing.T) {
+	d := newDeliveryFixture(t)
+	task := d.runningTask(t, nil)
+	d.f.Comment(t, util.UUIDToString(d.source), "Delivered the change.", testutil.Cols{"author_type": "agent", "author_id": d.agentID})
+
+	result, err := json.Marshal(protocol.TaskCompletedPayload{
+		Output:          "Delivered the change.",
+		DeliveryWarning: "Warning: the delivered branch contains Multica runtime configuration in its commit history.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, _, err := d.s.CompleteTaskWithTransition(context.Background(), task, result, "", "", "", false, "", ""); err != nil {
+			t.Fatalf("complete task: %v", err)
+		}
+	}
+	if got := d.f.Count(t, "SELECT count(*) FROM comment WHERE issue_id=$1 AND source_task_id=$2 AND type='system' AND content LIKE 'Warning: the delivered branch%'", d.source, task); got != 1 {
+		t.Fatalf("got %d delivery warning comments, want 1", got)
+	}
+	if got := d.f.Count(t, "SELECT count(*) FROM comment WHERE issue_id=$1 AND source_task_id=$2 AND type<>'system'", d.source, task); got != 0 {
+		t.Fatalf("the agent's own result must still suppress the output fallback, got %d", got)
+	}
+
+	clean := d.runningTask(t, nil)
+	if !d.complete(t, clean, "") {
+		t.Fatal("the completion callback did not transition the task")
+	}
+	if got := d.f.Count(t, "SELECT count(*) FROM comment WHERE source_task_id=$1", clean); got != 0 {
+		t.Fatalf("a clean delivery posted %d comments", got)
+	}
+}

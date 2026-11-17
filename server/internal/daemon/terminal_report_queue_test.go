@@ -593,3 +593,49 @@ func TestRunBatchPollerReleasesSlotAfterTerminalRetryExhaustion(t *testing.T) {
 		t.Fatalf("pending reports = %+v, want only exhausted task t1", items)
 	}
 }
+
+// A delivery warning must survive the durable outbox and reach the server on
+// the complete callback apart from the agent's output; a failed task folds it
+// into the error message, without letting it steer failure classification
+// (MUL-9445).
+func TestTerminalReportCarriesDeliveryWarning(t *testing.T) {
+	report := terminalTaskReport{kind: terminalTaskReportComplete, taskID: "task-warn", output: "done", deliveryWarning: "Warning: runtime configuration"}
+	record, err := persistedTerminalReport(report, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded persistedTerminalTaskReport
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := decoded.terminalReport()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.deliveryWarning != report.deliveryWarning || restored.output != report.output {
+		t.Fatalf("restored report = %+v", restored)
+	}
+
+	d := New(Config{ServerBaseURL: "https://api.example.test", WorkspacesRoot: t.TempDir(), DaemonID: "daemon-warning"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	var sent []terminalTaskReport
+	d.terminalReportSend = func(_ context.Context, got terminalTaskReport, _ []time.Duration) error {
+		sent = append(sent, got)
+		return nil
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	d.reportTaskResult(context.Background(), "task-complete", TaskResult{Status: "completed", Comment: "done", DeliveryWarning: "Warning: runtime configuration"}, logger)
+	d.reportTaskResult(context.Background(), "task-fail", TaskResult{Status: "blocked", Comment: "agent crashed", FailureReason: "agent_error", DeliveryWarning: "Warning: runtime configuration"}, logger)
+	if len(sent) != 2 {
+		t.Fatalf("sent %d reports", len(sent))
+	}
+	if sent[0].output != "done" || sent[0].deliveryWarning != "Warning: runtime configuration" {
+		t.Fatalf("complete report = %+v", sent[0])
+	}
+	if sent[1].errorMessage != "agent crashed\n\nWarning: runtime configuration" || sent[1].failureReason != "agent_error" || sent[1].deliveryWarning != "" {
+		t.Fatalf("fail report = %+v", sent[1])
+	}
+}

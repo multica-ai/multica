@@ -180,3 +180,22 @@ func (p *runtimeBlobProbe) Write(data []byte) (int, error) {
 	p.tail = append(p.tail[:0], window...)
 	return len(data), nil
 }
+
+// DeliveryWarning renders what the contamination scan found for the user, or
+// "" when the delivered branch is clean and the scan completed.
+func (o LocalWorktreeOutcome) DeliveryWarning() string {
+	var b strings.Builder
+	if len(o.RuntimeWarnings) > 0 {
+		b.WriteString("Warning: the delivered branch contains Multica runtime configuration in its commit history. Remove it before merging:")
+		for _, hit := range o.RuntimeWarnings {
+			fmt.Fprintf(&b, "\n- `%s`: `%s`", hit.Commit, hit.Path)
+		}
+	}
+	if o.RuntimeScanError != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("Warning: Multica could not finish checking the delivered branch for runtime configuration: " + o.RuntimeScanError)
+	}
+	return b.String()
+}

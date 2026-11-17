@@ -284,6 +284,9 @@ type terminalTaskReport struct {
 	// run on the issue or chat can select it again, however many clean rows
 	// still reference it.
 	retiredSessionID string
+	// deliveryWarning rides the complete callback only; a failure folds it
+	// into errorMessage, which is already posted to the issue.
+	deliveryWarning string
 }
 
 type terminalReportSendFunc func(context.Context, terminalTaskReport, []time.Duration) error
@@ -6661,6 +6664,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			durableWorkDir:        result.DurableWorkDir,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
+			deliveryWarning:       result.DeliveryWarning,
 		})
 		if err == nil {
 			return
@@ -6690,10 +6694,16 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			}
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
+		errorMessage := result.Comment
+		if result.DeliveryWarning != "" {
+			// Classified above from the agent's own text only; the failure
+			// message is posted to the issue, so the warning rides along.
+			errorMessage = strings.TrimSpace(errorMessage + "\n\n" + result.DeliveryWarning)
+		}
 		if err := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:           terminalTaskReportFail,
 			taskID:         taskID,
-			errorMessage:   result.Comment,
+			errorMessage:   errorMessage,
 			sessionID:      result.SessionID,
 			workDir:        result.WorkDir,
 			durableWorkDir: result.DurableWorkDir,
@@ -6804,7 +6814,7 @@ func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTask
 	}
 	switch report.kind {
 	case terminalTaskReportComplete:
-		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
+		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.deliveryWarning, schedule)
 	case terminalTaskReportFail:
 		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, schedule)
 	default:
@@ -8848,16 +8858,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				taskResult.EnvRoot = env.RootDir
 			}
 			outcome, finalizeErr := env.LocalWorktree.Finalize(taskLog)
-			if len(outcome.RuntimeWarnings) > 0 {
-				var warning strings.Builder
-				warning.WriteString("\n\nWarning: the delivered branch contains Multica runtime configuration in its commit history:")
-				for _, hit := range outcome.RuntimeWarnings {
-					fmt.Fprintf(&warning, "\n- %s: %s", hit.Commit, hit.Path)
+			if warning := outcome.DeliveryWarning(); warning != "" {
+				if task.IssueID != "" {
+					taskResult.DeliveryWarning = warning
+				} else {
+					// A chat reply is the task output itself, so it always reaches
+					// the user; there is no separate comment thread to post into.
+					taskResult.Comment = strings.TrimSpace(taskResult.Comment + "\n\n" + warning)
 				}
-				taskResult.Comment += warning.String()
-			}
-			if outcome.RuntimeScanError != "" {
-				taskResult.Comment += "\n\nWarning: runtime contamination detection could not complete: " + outcome.RuntimeScanError
 			}
 			if outcome.Branch != "" {
 				taskResult.BranchName = outcome.Branch

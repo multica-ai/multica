@@ -225,6 +225,9 @@ type TaskCompletedPayload struct {
 	TaskID string `json:"task_id"`
 	PRURL  string `json:"pr_url,omitempty"`
 	Output string `json:"output,omitempty"`
+	// DeliveryWarning is posted to the issue on its own, whether or not the
+	// agent already commented (MUL-9445).
+	DeliveryWarning string `json:"delivery_warning,omitempty"`
 }
 
 // ChatQuickActionsPayload supplements one completed chat turn with the

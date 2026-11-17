@@ -346,8 +346,14 @@ type TaskResult struct {
 	// abandoned as unresumable (GH #6066). Forwarded on every terminal path,
 	// including the completed one: a fresh-session retry that SUCCEEDS is
 	// precisely when the abandoned id would otherwise stay selectable.
-	RetiredSessionID string           `json:"-"`
-	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	RetiredSessionID string `json:"-"`
+	// DeliveryWarning reports what Finalize found wrong with the delivered
+	// branch (runtime configuration in its commits, or a scan that could not
+	// finish). It travels apart from Comment: on an issue task the agent has
+	// usually posted its own result, which suppresses the output fallback, so
+	// the server posts this as its own comment (MUL-9445).
+	DeliveryWarning string           `json:"-"`
+	Usage           []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
 }
 
 // PluginHookTool is one agent-trigger plugin hook, as the agent will see it.

@@ -5018,6 +5018,19 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 		}
 	}
 
+	// A delivery warning is the daemon's finding about the delivered branch,
+	// made after the agent exited (MUL-9445). It must not depend on the output
+	// fallback above, which the agent's own result comment suppresses, so it is
+	// posted on its own, threaded like the fallback.
+	if task.IssueID.Valid {
+		var payload protocol.TaskCompletedPayload
+		if err := json.Unmarshal(result, &payload); err == nil {
+			if warning := strings.TrimSpace(payload.DeliveryWarning); warning != "" {
+				s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(warning), "system", task.TriggerCommentID, task.ID)
+			}
+		}
+	}
+
 	// Quick-create tasks: locate the issue the agent just created and push
 	// an inbox confirmation to the requester. The agent has no issue / chat
 	// link, so the regular completion paths above don't apply. We find the
