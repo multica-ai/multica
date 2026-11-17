@@ -465,3 +465,103 @@ func TestSplitWebhookEvent(t *testing.T) {
 		}
 	}
 }
+
+// ── GitLab object_attributes action extraction ─────────────────────────────
+
+// TestWebhookActionCandidates_GitLabObjectAttributes verifies that action and
+// state are extracted from the nested object_attributes field in GitLab
+// webhook payloads. Before this fix, action filtering was a no-op for GitLab
+// because the code only looked at top-level fields (GitHub-style).
+func TestWebhookActionCandidates_GitLabObjectAttributes(t *testing.T) {
+	// GitLab MR open event: action and state are inside object_attributes.
+	payload := json.RawMessage(`{
+		"object_kind": "merge_request",
+		"object_attributes": {
+			"action": "open",
+			"state": "opened",
+			"title": "Test MR"
+		}
+	}`)
+	candidates := webhookActionCandidates("", payload)
+	found := make(map[string]bool, len(candidates))
+	for _, c := range candidates {
+		found[c] = true
+	}
+	if !found["open"] {
+		t.Errorf("expected 'open' in candidates, got %v", candidates)
+	}
+	if !found["opened"] {
+		t.Errorf("expected 'opened' in candidates, got %v", candidates)
+	}
+}
+
+func TestWebhookActionCandidates_GitLabMergedEvent(t *testing.T) {
+	payload := json.RawMessage(`{
+		"object_kind": "merge_request",
+		"object_attributes": {
+			"action": "merge",
+			"state": "merged"
+		}
+	}`)
+	candidates := webhookActionCandidates("", payload)
+	found := make(map[string]bool, len(candidates))
+	for _, c := range candidates {
+		found[c] = true
+	}
+	if !found["merge"] {
+		t.Errorf("expected 'merge' in candidates, got %v", candidates)
+	}
+	if !found["merged"] {
+		t.Errorf("expected 'merged' in candidates, got %v", candidates)
+	}
+}
+
+func TestWebhookActionCandidates_GitHubTopLevelStillWorks(t *testing.T) {
+	// Ensure the fix doesn't break GitHub-style top-level action extraction.
+	payload := json.RawMessage(`{"action": "opened", "pull_request": {"number": 7}}`)
+	candidates := webhookActionCandidates("", payload)
+	found := false
+	for _, c := range candidates {
+		if c == "opened" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 'opened' in candidates for GitHub payload, got %v", candidates)
+	}
+}
+
+// TestWebhookEventAllowedByTriggerScope_GitLabMRActionFilter pins the fix for
+// GitLab MR action filtering. Before the fix, action filters never matched
+// GitLab payloads because action/state lived inside object_attributes.
+func TestWebhookEventAllowedByTriggerScope_GitLabMRActionFilter(t *testing.T) {
+	// Filter: only allow open/update/reopen for Merge Request Hook.
+	filters := []byte(`[{"event":"Merge Request Hook","actions":["open","update","reopen"]}]`)
+
+	// MR open event should pass.
+	openEnv := WebhookEnvelope{
+		Event:        "gitlab.Merge Request Hook",
+		EventPayload: json.RawMessage(`{"object_kind":"merge_request","object_attributes":{"action":"open","state":"opened"}}`),
+	}
+	if !evaluateWebhookTriggerScope(filters, openEnv).Allowed {
+		t.Fatal("GitLab MR open should be allowed by filter [open, update, reopen]")
+	}
+
+	// MR merge event should be filtered out.
+	mergeEnv := WebhookEnvelope{
+		Event:        "gitlab.Merge Request Hook",
+		EventPayload: json.RawMessage(`{"object_kind":"merge_request","object_attributes":{"action":"merge","state":"merged"}}`),
+	}
+	if evaluateWebhookTriggerScope(filters, mergeEnv).Allowed {
+		t.Fatal("GitLab MR merge should be filtered out by filter [open, update, reopen]")
+	}
+
+	// MR close event should be filtered out.
+	closeEnv := WebhookEnvelope{
+		Event:        "gitlab.Merge Request Hook",
+		EventPayload: json.RawMessage(`{"object_kind":"merge_request","object_attributes":{"action":"close","state":"closed"}}`),
+	}
+	if evaluateWebhookTriggerScope(filters, closeEnv).Allowed {
+		t.Fatal("GitLab MR close should be filtered out by filter [open, update, reopen]")
+	}
+}
