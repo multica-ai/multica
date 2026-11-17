@@ -4,7 +4,7 @@ import { EMPTY_INBOX_FILTERS, archivedInboxQuery, type ArchivedInboxFilters } fr
 import { groupInboxItemsByIssue } from "./group";
 import { isInboxItemSnoozed } from "./snooze";
 import { infiniteQueryOptions, keepPreviousData, queryOptions, useQuery } from "@tanstack/react-query";
-import { api, ApiError } from "../api";
+import { api } from "../api";
 import type { InboxItem, InboxWorkspaceUnread, SnoozedInboxIssue } from "../types";
 import { focusManager } from "@tanstack/react-query";
 
@@ -21,17 +21,10 @@ export const inboxKeys = {
   unreadSummary: () => ["inbox", "unread-summary"] as const,
 };
 
-// A busy server supplies Retry-After. Keep the cached result and let the next
-// inbox event refresh it; immediate Query retries would amplify the overload.
-function retryInboxRead(failureCount: number, error: Error) {
-  return !(error instanceof ApiError && error.status === 503) && failureCount < 1;
-}
-
 export function inboxListOptions(wsId: string) {
   return queryOptions({
     queryKey: inboxKeys.list(wsId),
     queryFn: ({ signal }) => api.listInbox(signal),
-    retry: retryInboxRead,
   });
 }
 
@@ -43,7 +36,6 @@ export function snoozedInboxOptions(wsId: string) {
   return queryOptions({
     queryKey: inboxKeys.snoozed(wsId),
     queryFn: ({ signal }) => api.listSnoozedInbox(signal),
-    retry: retryInboxRead,
   });
 }
 
@@ -142,7 +134,6 @@ export function inboxUnreadSummaryOptions() {
   return queryOptions({
     queryKey: inboxKeys.unreadSummary(),
     queryFn: ({ signal }) => api.getInboxUnreadSummary(signal),
-    retry: retryInboxRead,
     enabled: () => focusManager.isFocused(),
     refetchOnWindowFocus: true,
   });

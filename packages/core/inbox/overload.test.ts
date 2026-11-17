@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, expect, it, vi } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
 import { ApiClient, ApiError, setApiInstance } from "../api";
 import { createQueryClient } from "../query-client";
 import { inboxKeys, inboxUnreadSummaryOptions } from "./queries";
@@ -51,5 +52,28 @@ it("Query cancellation aborts the superseded summary HTTP request", async () => 
     await qc.cancelQueries({ queryKey: inboxKeys.unreadSummary() });
     await result;
     expect(signal?.aborted).toBe(true);
+  } finally { qc.clear(); }
+});
+
+it("does not depend on an API error class to recognize overload", async () => {
+  const busy = Object.assign(new Error("busy"), { status: 503 });
+  const getInboxUnreadSummary = vi.fn().mockRejectedValue(busy);
+  setApiInstance({ getInboxUnreadSummary } as unknown as ApiClient);
+  const qc = createQueryClient();
+  try {
+    await expect(qc.fetchQuery(inboxUnreadSummaryOptions())).rejects.toBe(busy);
+    expect(getInboxUnreadSummary).toHaveBeenCalledTimes(1);
+  } finally { qc.clear(); }
+});
+
+it("respects the retry settings of a custom QueryClient", async () => {
+  const failed = new Error("unavailable");
+  const getInboxUnreadSummary = vi.fn().mockRejectedValueOnce(failed).mockResolvedValue([]);
+  setApiInstance({ getInboxUnreadSummary } as unknown as ApiClient);
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  try {
+    await expect(qc.fetchQuery(inboxUnreadSummaryOptions())).rejects.toBe(failed);
+    expect(getInboxUnreadSummary).toHaveBeenCalledTimes(1);
+    await expect(qc.fetchQuery(inboxUnreadSummaryOptions())).resolves.toEqual([]);
   } finally { qc.clear(); }
 });

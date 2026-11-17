@@ -5,11 +5,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/inboxread"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
@@ -132,4 +135,107 @@ func TestInboxReadErrorContract(t *testing.T) {
 			t.Fatal("wrote a body after cancellation")
 		}
 	}
+}
+
+// This local database stress test verifies connection isolation with three
+// independent API budgets. It does not measure staging CPU or daemon API SLOs.
+func TestInboxReadThreeInstancesBoundSlowSQL(t *testing.T) {
+	const instances, requestsPerInstance = 3, 30 // 10x a list/summary/snoozed refresh.
+	var pools [instances]*pgxpool.Pool
+	var guards [instances]*inboxread.Guard
+	var active, peak [instances]atomic.Int32
+	var accepted, refused atomic.Int32
+	started := make(chan struct{}, instances*2)
+	results := make(chan error, instances*requestsPerInstance)
+	for instance := range instances {
+		cfg := testPool.Config().Copy()
+		cfg.MaxConns, cfg.MinConns = 25, 0
+		pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(pool.Close)
+		if err := pool.Ping(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		pools[instance] = pool
+		guards[instance] = inboxread.New(inboxread.Config{Concurrency: 2})
+	}
+	for instance := range instances {
+		for range requestsPerInstance {
+			go func() {
+				err := guards[instance].Run(context.Background(), "list", pools[instance], func(ctx context.Context, tx pgx.Tx) error {
+					n := active[instance].Add(1)
+					defer active[instance].Add(-1)
+					for previous := peak[instance].Load(); n > previous; previous = peak[instance].Load() {
+						if peak[instance].CompareAndSwap(previous, n) {
+							break
+						}
+					}
+					select {
+					case started <- struct{}{}:
+					default:
+					}
+					_, err := tx.Exec(ctx, "SELECT pg_sleep(2)")
+					return err
+				})
+				if err == nil {
+					accepted.Add(1)
+				} else if inboxread.IsUnavailable(err) {
+					refused.Add(1)
+					err = nil
+				}
+				results <- err
+			}()
+		}
+	}
+	for range instances * 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("slow reads did not start")
+		}
+	}
+	var controls sync.WaitGroup
+	controlResults := make(chan error, instances)
+	var maxControlLatency [instances]time.Duration
+	for instance := range instances {
+		controls.Go(func() {
+			for range 50 {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				start := time.Now()
+				var value int
+				err := pools[instance].QueryRow(ctx, "SELECT 1").Scan(&value)
+				cancel()
+				maxControlLatency[instance] = max(maxControlLatency[instance], time.Since(start))
+				if err != nil {
+					controlResults <- err
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			controlResults <- nil
+		})
+	}
+	controls.Wait()
+	for range instances {
+		if err := <-controlResults; err != nil {
+			t.Errorf("unrelated database read failed: %v", err)
+		}
+	}
+	for range instances * requestsPerInstance {
+		if err := <-results; err != nil {
+			t.Error(err)
+		}
+	}
+	for instance := range instances {
+		if n := peak[instance].Load(); n > 2 {
+			t.Errorf("instance %d ran %d inbox queries", instance, n)
+		}
+		t.Logf("instance=%d peak_inbox_queries=%d max_control_latency=%s", instance, peak[instance].Load(), maxControlLatency[instance])
+	}
+	if refused.Load() == 0 {
+		t.Error("burst did not exercise overload rejection")
+	}
+	t.Logf("inbox_requests=%d accepted=%d unavailable=%d control_reads=%d", instances*requestsPerInstance, accepted.Load(), refused.Load(), instances*50)
 }

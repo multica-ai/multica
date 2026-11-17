@@ -15,21 +15,24 @@ Once SQL begins, HTTP cancellation does not release its permit early: the SQL
 finishes or PostgreSQL stops it before the detached Go query deadline. Transport
 failures retain capacity through the possible remaining server query budget.
 
-Concurrent summary requests for the same authenticated account share one
-execution using singleflight. There is no result cache. Shared execution has an
-independent deadline so a canceled tab does not cancel another tab's request.
-If a caller joins after a read starts, the shared execution reads again before
-publishing, within the same total deadline and admission budget. This prevents
-an event after a mutation from adopting the old query snapshot as fresh data.
+Summary requests are coalesced per authenticated account and generation. There
+is no result cache. Requests arriving before a generation starts share its
+result. Later arrivals share the next generation, which starts after the
+current one finishes and has its own execution budget. A successful generation
+returns immediately to its callers. A later refresh neither discards that
+result nor accepts its old SQL snapshot as fresh data. There is at most one
+running generation and one pending generation per account, both subject to the
+shared admission budget. HTTP callers retain their own 5 s request deadline;
+canceling one caller does not cancel its generation's work.
 Summary callers, including canceled callers retained until completion, are
 bounded to execution concurrency plus twenty per process.
 
 Capacity exhaustion, connection acquisition deadlines and database statement
 timeouts return `503` with `Retry-After: 1`. Other database errors remain `500`.
-Web and desktop forward cancellation for list, snoozed and summary HTTP reads.
-These queries retain cached data on a failed refresh and skip automatic retries
-on 503; a subsequent inbox event or explicit refresh can fetch again. Existing
-archive queries already disable retries. Older clients may still retry, but
+Web, desktop and mobile forward cancellation and skip automatic inbox retries
+on 503. They retain cached data on a failed refresh; a subsequent inbox event
+or explicit refresh can fetch again. Existing archive queries already disable
+retries. Older clients may still retry, but
 server execution and waiting remain bounded.
 
 ## Configuration and monitoring
@@ -71,6 +74,21 @@ isolation, shared execution, all seven HTTP routes, and frontend cache/cancellat
 behavior. Local checks do not substitute for the planned staging acceptance:
 three API pods, normal daemon traffic, tenfold inbox refresh traffic and injected
 2 s SQL delays. Confirm admission limits, primary CPU and daemon SLOs there.
+
+`TestInboxReadThreeInstancesBoundSlowSQL` provides a repeatable local stress
+check on the checkout's isolated test database: three independent 25-connection
+pools and guards, a burst of 30 inbox reads per instance (10x a three-read
+refresh), 2 s SQL delays and 150 concurrent control reads. It checks execution
+limits, overload rejection and capacity for unrelated database reads. Run with
+the checkout's test `DATABASE_URL` configured:
+
+```sh
+cd server
+go test -race ./internal/handler -run TestInboxReadThreeInstancesBoundSlowSQL -count=1 -v
+```
+
+This checks database admission locally; it does not exercise daemon HTTP
+endpoints, measure staging CPU or validate a three-pod rollout.
 
 Redis and read replicas are not dependencies of this guard. SQL optimization
 and indexes remain a separate PR. Application rollback requires no database

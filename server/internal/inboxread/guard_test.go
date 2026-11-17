@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -156,7 +157,8 @@ func TestSummaryCancellationIsolationAndNoCache(t *testing.T) {
 func TestSummaryWaitersRemainBoundedAfterCancellation(t *testing.T) {
 	g := New(Config{Concurrency: 1})
 	gate := make(chan struct{})
-	query := func(context.Context) (any, error) { <-gate; return nil, nil }
+	var executions atomic.Int32
+	query := func(context.Context) (any, error) { executions.Add(1); <-gate; return nil, nil }
 	for index := range cap(g.summaryWaiters) {
 		ctx, cancel := context.WithCancel(context.Background())
 		returned := make(chan error, 1)
@@ -172,6 +174,9 @@ func TestSummaryWaitersRemainBoundedAfterCancellation(t *testing.T) {
 	}
 	close(gate)
 	eventually(t, func() bool { return len(g.summaryWaiters) == 0 })
+	if executions.Load() > 2 {
+		t.Fatalf("queued callers were not coalesced: %d executions", executions.Load())
+	}
 }
 
 func TestConfigDefaultsAndInvalidValues(t *testing.T) {
@@ -219,8 +224,8 @@ func TestSummaryLateRefreshDoesNotReusePreMutationSnapshot(t *testing.T) {
 		}
 		return snapshot, nil
 	}
-	results := make(chan any, 2)
-	read := func() {
+	first, second := make(chan any, 1), make(chan any, 1)
+	read := func(results chan<- any) {
 		value, err := g.Summary(context.Background(), "user", query)
 		if err != nil {
 			results <- err
@@ -228,25 +233,86 @@ func TestSummaryLateRefreshDoesNotReusePreMutationSnapshot(t *testing.T) {
 			results <- value
 		}
 	}
-	go read()
+	go read(first)
 	<-started
 	current.Store(1) // A committed mutation and its subsequent refresh event.
-	go read()
+	go read(second)
 	eventually(t, func() bool {
 		g.summaryMu.Lock()
 		defer g.summaryMu.Unlock()
-		return g.summaryVersions["user"].arrivals == 2
+		return g.summaryCalls["user"].next != nil
 	})
 	close(finish)
-	for range 2 {
-		if value := <-results; value != int32(1) {
-			t.Fatalf("refresh accepted stale snapshot: %v", value)
-		}
+	if value := <-first; value != int32(0) {
+		t.Fatalf("original generation lost its successful result: %v", value)
+	}
+	if value := <-second; value != int32(1) {
+		t.Fatalf("refresh accepted stale snapshot: %v", value)
 	}
 	if calls.Load() != 2 {
 		t.Fatalf("expected one follow-up read, got %d", calls.Load())
 	}
-	if len(g.summaryVersions) != 0 {
+	g.summaryMu.Lock()
+	defer g.summaryMu.Unlock()
+	if len(g.summaryCalls) != 0 {
 		t.Fatal("completed summary version leaked")
+	}
+}
+
+func TestSummarySlowReadReturnsEachGenerationWithItsOwnBudget(t *testing.T) {
+	g := New(Config{Concurrency: 2})
+	starter := &testStarter{}
+	var runs atomic.Int32
+	var executing atomic.Int32
+	started := make(chan struct{})
+	secondGate := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseSecond := func() { releaseOnce.Do(func() { close(secondGate) }) }
+	defer releaseSecond()
+	type result struct {
+		value any
+		err   error
+	}
+	query := func(ctx context.Context) (any, error) {
+		var value int32
+		err := g.Run(ctx, "summary", starter, func(context.Context, pgx.Tx) error {
+			if n := executing.Add(1); n != 1 {
+				t.Errorf("same account ran %d queries concurrently", n)
+			}
+			defer executing.Add(-1)
+			value = runs.Add(1)
+			if value == 1 {
+				close(started)
+			} else {
+				<-secondGate // The first caller must return before this read finishes.
+			}
+			time.Sleep(1500 * time.Millisecond)
+			return nil
+		})
+		return value, err
+	}
+	first, second := make(chan result, 1), make(chan result, 1)
+	go func() { value, err := g.Summary(context.Background(), "user", query); first <- result{value, err} }()
+	<-started
+	time.Sleep(300 * time.Millisecond)
+	go func() { value, err := g.Summary(context.Background(), "user", query); second <- result{value, err} }()
+	for _, waiter := range []struct {
+		result <-chan result
+		want   int32
+	}{{first, 1}, {second, 2}} {
+		select {
+		case got := <-waiter.result:
+			if got.err != nil || got.value != waiter.want {
+				t.Fatalf("generation result = %+v, want %d", got, waiter.want)
+			}
+			if waiter.want == 1 {
+				releaseSecond()
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("generation did not finish")
+		}
+	}
+	if runs.Load() != 2 {
+		t.Fatalf("SQL executions = %d, want 2", runs.Load())
 	}
 }

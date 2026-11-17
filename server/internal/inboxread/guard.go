@@ -16,7 +16,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/multica-ai/multica/server/internal/metrics"
-	"golang.org/x/sync/singleflight"
 )
 
 var ErrBusy = errors.New("inbox read capacity unavailable")
@@ -64,15 +63,26 @@ type Guard struct {
 	active           chan struct{}
 	queued           chan struct{}
 	summaryWaiters   chan struct{}
-	summaries        singleflight.Group
 	summaryMu        sync.Mutex
-	summaryVersions  map[string]*summaryVersion
+	summaryCalls     map[string]*summaryQueue
 	statementTimeout time.Duration
 	requestTimeout   time.Duration
 	Metrics          *metrics.InboxReadMetrics
 }
 
-type summaryVersion struct{ arrivals uint64 }
+type summaryQueue struct {
+	current *summaryGeneration
+	next    *summaryGeneration
+}
+
+type summaryGeneration struct {
+	ctx     context.Context
+	query   func(context.Context) (any, error)
+	started bool // protected by summaryMu
+	done    chan struct{}
+	value   any
+	err     error
+}
 
 func New(cfg Config) *Guard {
 	if cfg.Concurrency <= 0 {
@@ -88,7 +98,7 @@ func New(cfg Config) *Guard {
 		active:           make(chan struct{}, cfg.Concurrency),
 		queued:           make(chan struct{}, queueLimit),
 		summaryWaiters:   make(chan struct{}, cfg.Concurrency+queueLimit),
-		summaryVersions:  make(map[string]*summaryVersion),
+		summaryCalls:     make(map[string]*summaryQueue),
 		statementTimeout: cfg.StatementTimeout,
 		requestTimeout:   cfg.RequestTimeout,
 	}
@@ -206,9 +216,11 @@ func (g *Guard) Run(ctx context.Context, operation string, starter TxStarter, qu
 	return tx.Commit(queryCtx)
 }
 
-// Summary coalesces only overlapping reads by authenticated account. It caches
-// nothing. Even canceled waiters occupy admission until the shared call ends,
-// bounding singleflight's retained result channels and detached workers.
+// Summary coalesces requests into generations per authenticated account. A
+// caller arriving after execution starts waits for the next generation, whose
+// independent budget begins after the current generation finishes. Successful
+// earlier callers never wait for a later refresh. Canceled callers retain their
+// admission slot until their generation completes, bounding retained work.
 func (g *Guard) Summary(ctx context.Context, userID string, query func(context.Context) (any, error)) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -220,46 +232,60 @@ func (g *Guard) Summary(ctx context.Context, userID string, query func(context.C
 		return nil, ErrBusy
 	}
 	g.summaryMu.Lock()
-	version := g.summaryVersions[userID]
-	if version == nil {
-		version = &summaryVersion{}
-		g.summaryVersions[userID] = version
-	}
-	version.arrivals++
-	ch := g.summaries.DoChan(userID, func() (any, error) {
-		sharedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), g.requestTimeout)
-		defer cancel()
-		for {
-			g.summaryMu.Lock()
-			arrivals := version.arrivals
-			g.summaryMu.Unlock()
-			value, err := query(sharedCtx)
-			g.summaryMu.Lock()
-			// A late caller may be a refresh after a mutation. Its read
-			// must start after it arrived, rather than reuse an old SQL
-			// snapshot forever under the client's infinite staleTime.
-			if err != nil || version.arrivals == arrivals || sharedCtx.Err() != nil {
-				// Unlink under the registration lock before publishing, so
-				// a caller cannot join between the final check and return.
-				g.summaries.Forget(userID)
-				delete(g.summaryVersions, userID)
-				g.summaryMu.Unlock()
-				if err == nil && sharedCtx.Err() != nil {
-					err = sharedCtx.Err()
-				}
-				return value, err
-			}
-			g.summaryMu.Unlock()
+	queue := g.summaryCalls[userID]
+	var generation *summaryGeneration
+	if queue == nil {
+		generation = newSummaryGeneration(ctx, query)
+		queue = &summaryQueue{current: generation}
+		g.summaryCalls[userID] = queue
+		go g.runSummary(userID, queue)
+	} else if !queue.current.started {
+		generation = queue.current
+	} else {
+		if queue.next == nil {
+			queue.next = newSummaryGeneration(ctx, query)
 		}
-	})
+		generation = queue.next
+	}
 	g.summaryMu.Unlock()
 	select {
-	case result := <-ch:
+	case <-generation.done:
 		<-g.summaryWaiters
-		return result.Val, result.Err
+		return generation.value, generation.err
 	case <-ctx.Done():
-		go func() { <-ch; <-g.summaryWaiters }()
+		go func() { <-generation.done; <-g.summaryWaiters }()
 		return nil, ctx.Err()
+	}
+}
+
+func newSummaryGeneration(ctx context.Context, query func(context.Context) (any, error)) *summaryGeneration {
+	return &summaryGeneration{ctx: context.WithoutCancel(ctx), query: query, done: make(chan struct{})}
+}
+
+func (g *Guard) runSummary(userID string, queue *summaryQueue) {
+	for {
+		g.summaryMu.Lock()
+		generation := queue.current
+		generation.started = true
+		g.summaryMu.Unlock()
+
+		sharedCtx, cancel := context.WithTimeout(generation.ctx, g.requestTimeout)
+		value, err := generation.query(sharedCtx)
+		if err == nil {
+			err = sharedCtx.Err()
+		}
+		cancel()
+
+		g.summaryMu.Lock()
+		generation.value, generation.err = value, err
+		close(generation.done)
+		if queue.next == nil {
+			delete(g.summaryCalls, userID)
+			g.summaryMu.Unlock()
+			return
+		}
+		queue.current, queue.next = queue.next, nil
+		g.summaryMu.Unlock()
 	}
 }
 
