@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type leaderMentionFixture struct {
@@ -217,16 +218,23 @@ func TestWorkerLeaderMention_ClaimedPersonalRunFollowup(t *testing.T) {
 	if first == nil || first.ID != pendingID || first.IsLeaderTask {
 		t.Fatal("expected an already-claimed personal run")
 	}
+	dbfx.Exec(t, `UPDATE agent_runtime SET provider='claude' WHERE id=$1`, f.runtime)
+	if _, err := testHandler.TaskService.StartTask(context.Background(), parseUUID(pendingID)); err != nil {
+		t.Fatal(err)
+	}
+	dbfx.Exec(t, `INSERT INTO task_supplement_capability(task_id,workspace_id,issue_id,capability) VALUES($1,$2,$3,$4)`, pendingID, testWorkspaceID, f.issue, protocol.DaemonCapabilityTaskSupplementV1)
+	dbfx.Cleanup(t, `DELETE FROM task_supplement_capability WHERE task_id=$1`, pendingID)
+	dbfx.Cleanup(t, `DELETE FROM task_supplement WHERE task_id=$1`, pendingID)
 	report := f.report(t, mention(f.leader)+" please evaluate these results", true)
+	if steeredAgent(report, f.leader) {
+		t.Fatal("coordinator report was steered into a personal turn")
+	}
 	old, err := testHandler.Queries.GetAgentTask(context.Background(), parseUUID(pendingID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if old.IsLeaderTask {
 		t.Fatal("changed the role after its claim was delivered")
-	}
-	if _, err := testHandler.TaskService.StartTask(context.Background(), parseUUID(pendingID)); err != nil {
-		t.Fatal(err)
 	}
 	completeWorkerReplyRun(t, pendingID)
 	next := claimWorkerReplyRun(t, f.runtime)
