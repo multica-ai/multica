@@ -196,6 +196,10 @@ describe("wakeupReportState", () => {
     expect(wakeupReportState(wakeup({ ...base, last_task_status: "cancelled" }))).toBe("failed");
     expect(wakeupReportState(wakeup({ ...base, last_task_status: "completed" }))).toBeNull();
     expect(wakeupReportState(wakeup({ id: "w", status: "active", last_task_id: "t", last_task_status: "failed" }))).toBeNull();
+    // finish runs inside the check's turn, before its reply is written.
+    const finished = { id: "w", kind: "check" as const, status: "fired" as const, last_task_id: "t" };
+    expect(wakeupReportState(wakeup({ ...finished, last_task_status: "running" }))).toBe("running");
+    expect(wakeupReportState(wakeup({ ...finished, last_task_status: "failed" }))).toBe("failed");
   });
 });
 

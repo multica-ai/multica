@@ -507,3 +507,78 @@ func TestChatWakeupOutlivingItsConversationIsDropped(t *testing.T) {
 		t.Fatal("a wakeup whose conversation is gone was kept")
 	}
 }
+
+// A wakeup turn can sit in the queue while its runtime is offline; the claim
+// re-checks it, and so does the claim of an auto-retry of it.
+func TestChatWakeupClaimRechecksTheRequester(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	ctx := context.Background()
+	member := f.fx.User(t, "Member", fmt.Sprintf("member-%d@example.test", time.Now().UnixNano()))
+	f.fx.Member(t, f.fx.WorkspaceID, member, "member")
+	f.fx.Exec(t, "UPDATE agent_task_queue SET initiator_user_id = $1 WHERE id = $2", member, util.UUIDToString(f.source.ID))
+	f.source.InitiatorUserID = util.MustParseUUID(member)
+	f.fx.Exec(t, "UPDATE agent SET owner_id = $1 WHERE id = $2", member, util.UUIDToString(f.source.AgentID))
+
+	reminder := f.create(t, ChatWakeupInput{AfterSeconds: 60})
+	project := f.fx.Project(t, "Open for now")
+	issue := f.fx.Issue(t, "Ship it", testutil.Cols{"project_id": project})
+	cond, _ := json.Marshal(map[string]any{"type": "issue", "issue_id": issue, "state": "done"})
+	watcher := f.create(t, ChatWakeupInput{Condition: cond})
+	f.fx.Exec(t, "UPDATE issue SET status = 'done' WHERE id = $1", issue)
+
+	f.at(f.clock.Add(2 * time.Minute))
+	reminderTurn, _ := f.turn(t, f.process(t, reminder.ID))
+	f.dueNow(t, watcher.ID)
+	watcherTurn, _ := f.turn(t, f.process(t, watcher.ID))
+	retryID := f.fx.Task(t, util.UUIDToString(f.source.AgentID), testutil.Cols{
+		"runtime_id": util.UUIDToString(f.source.RuntimeID), "chat_session_id": f.session, "status": "queued",
+		"chat_input_task_id": util.UUIDToString(reminderTurn.ID),
+	})
+	autoRetry, err := f.q.GetAgentTask(ctx, util.MustParseUUID(retryID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, task := range []db.AgentTaskQueue{reminderTurn, autoRetry, watcherTurn, f.source} {
+		if err := f.svc.CheckClaim(ctx, task); err != nil {
+			t.Fatalf("claim of %s while allowed: %v", util.UUIDToString(task.ID), err)
+		}
+	}
+
+	f.fx.Exec(t, "UPDATE project SET visibility = 'private' WHERE id = $1", project)
+	if err := f.svc.CheckClaim(ctx, watcherTurn); !errors.Is(err, ErrChatWakeupClaimForbidden) {
+		t.Fatalf("claim after the watched issue went private: err = %v", err)
+	}
+	f.fx.Exec(t, "UPDATE agent SET owner_id = $1, permission_mode = 'private' WHERE id = $2", f.fx.UserID, util.UUIDToString(f.source.AgentID))
+	for _, task := range []db.AgentTaskQueue{reminderTurn, autoRetry} {
+		if err := f.svc.CheckClaim(ctx, task); !errors.Is(err, ErrChatWakeupClaimForbidden) {
+			t.Fatalf("claim of %s after the requester lost the agent: err = %v", util.UUIDToString(task.ID), err)
+		}
+	}
+}
+
+// finish runs inside the check's turn, before its reply is written, so a turn
+// that fails afterwards has not reported and can be retried.
+func TestChatWakeupFinishedCheckWhoseReportFailedCanRetry(t *testing.T) {
+	f := newChatWakeupFixture(t)
+	ctx := context.Background()
+	w := f.create(t, ChatWakeupInput{IntervalSeconds: 600, ExpiresInSeconds: 3600})
+	f.at(f.clock.Add(11 * time.Minute))
+	task, _ := f.turn(t, f.process(t, w.ID))
+	f.fx.Exec(t, "UPDATE agent_task_queue SET status = 'running' WHERE id = $1", util.UUIDToString(task.ID))
+	if _, err := f.svc.Finish(ctx, task, w.ID); err != nil {
+		t.Fatal(err)
+	}
+	f.fx.Exec(t, "UPDATE agent_task_queue SET status = 'failed', completed_at = now() WHERE id = $1", util.UUIDToString(task.ID))
+
+	retried, err := f.svc.Retry(ctx, f.source.ChatSessionID, w.ID)
+	if err != nil {
+		t.Fatalf("retry of a finished check whose report failed: %v", err)
+	}
+	if retried.Status != "fired" || retried.LastTaskID == task.ID {
+		t.Fatalf("retried check = %+v", retried)
+	}
+	_, input := f.turn(t, retried)
+	if strings.Contains(input.Content, "checkin") || !strings.Contains(input.Content, "retries that report") {
+		t.Fatalf("retry of a finished check must ask for the report, not another check:\n%s", input.Content)
+	}
+}

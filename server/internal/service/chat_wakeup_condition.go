@@ -61,15 +61,21 @@ var errChatConditionHidden = errors.New("chat wakeup condition is in a private p
 // chatConditionProjects lists the projects whose content a condition reads.
 // children_done reports only counts of sub-issues, so the parent's project is
 // the one that matters there.
-func chatConditionProjects(ctx context.Context, tx pgx.Tx, q *db.Queries, workspaceID pgtype.UUID, c ChatWakeupCondition) ([]pgtype.UUID, error) {
+func chatConditionProjects(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, c ChatWakeupCondition) ([]pgtype.UUID, error) {
 	switch c.Type {
 	case "issue", "children_done", "issue_reply":
-		var project pgtype.UUID
-		err := tx.QueryRow(ctx, "SELECT project_id FROM issue WHERE id=$1 AND workspace_id=$2", c.IssueID, workspaceID).Scan(&project)
-		if errors.Is(err, pgx.ErrNoRows) {
+		id, err := util.ParseUUID(c.IssueID)
+		if err != nil {
+			return nil, err
+		}
+		issue, err := q.GetIssue(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && issue.WorkspaceID != workspaceID) {
 			return nil, nil
 		}
-		return []pgtype.UUID{project}, err
+		if err != nil {
+			return nil, err
+		}
+		return []pgtype.UUID{issue.ProjectID}, nil
 	case "run":
 		id, err := util.ParseUUID(c.TaskID)
 		if err != nil {
@@ -89,12 +95,12 @@ func chatConditionProjects(ctx context.Context, tx pgx.Tx, q *db.Queries, worksp
 
 // checkChatConditionAccess applies the private-project rule every run obeys:
 // the requester and the agent's owner must both see what the condition reads.
-func checkChatConditionAccess(ctx context.Context, tx pgx.Tx, q *db.Queries, workspaceID, requesterID, agentOwnerID pgtype.UUID, raw []byte) error {
+func checkChatConditionAccess(ctx context.Context, q *db.Queries, workspaceID, requesterID, agentOwnerID pgtype.UUID, raw []byte) error {
 	var c ChatWakeupCondition
 	if err := json.Unmarshal(raw, &c); err != nil {
 		return err
 	}
-	projects, err := chatConditionProjects(ctx, tx, q, workspaceID, c)
+	projects, err := chatConditionProjects(ctx, q, workspaceID, c)
 	if err != nil {
 		return err
 	}
@@ -122,7 +128,7 @@ func (s *ChatWakeupService) validateChatCondition(ctx context.Context, tx pgx.Tx
 	if err != nil {
 		return nil, err
 	}
-	if err := checkChatConditionAccess(ctx, tx, q, workspaceID, requesterID, agentOwnerID, normalized); err != nil {
+	if err := checkChatConditionAccess(ctx, q, workspaceID, requesterID, agentOwnerID, normalized); err != nil {
 		if errors.Is(err, errChatConditionHidden) {
 			return nil, badChatCondition("this is in a private project that the person who asked, or this agent's owner, cannot see")
 		}

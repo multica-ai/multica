@@ -580,7 +580,7 @@ func (s *ChatWakeupService) decide(ctx context.Context, tx pgx.Tx, qtx *db.Queri
 		if err != nil {
 			return nil, err
 		}
-		if err := checkChatConditionAccess(ctx, tx, qtx, w.WorkspaceID, w.RequesterID, agent.OwnerID, w.Condition); err != nil {
+		if err := checkChatConditionAccess(ctx, qtx, w.WorkspaceID, w.RequesterID, agent.OwnerID, w.Condition); err != nil {
 			if errors.Is(err, errChatConditionHidden) {
 				return nil, errChatWakeupAccessLost
 			}
@@ -670,6 +670,49 @@ func (s *ChatWakeupService) authorizeTurn(ctx context.Context, w db.ChatWakeup) 
 	return nil
 }
 
+// ErrChatWakeupClaimForbidden means a queued wakeup turn may no longer run:
+// its requester lost access to the agent, or to what the wakeup watched.
+var ErrChatWakeupClaimForbidden = errors.New("chat wakeup turn is no longer authorized")
+
+// CheckClaim re-applies a wakeup turn's checks when a daemon claims it. A turn
+// can wait in the queue for as long as its runtime is offline, and its hidden
+// input may quote what the wakeup watched. Auto-retries share the original
+// turn's input, so they are checked the same way.
+func (s *ChatWakeupService) CheckClaim(ctx context.Context, task db.AgentTaskQueue) error {
+	q := s.Tasks.Queries
+	row, ok, err := chatWakeupTurnInput(ctx, q, task)
+	if err != nil || !ok || !row.WakeupID.Valid {
+		return err
+	}
+	w, err := q.GetChatWakeup(ctx, row.WakeupID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrChatWakeupClaimForbidden
+	}
+	if err != nil {
+		return err
+	}
+	if err := s.authorizeTurn(ctx, w); err != nil {
+		if errors.Is(err, errChatWakeupForbidden) {
+			return ErrChatWakeupClaimForbidden
+		}
+		return err
+	}
+	if w.Kind != "condition" {
+		return nil
+	}
+	agent, err := q.GetAgent(ctx, w.AgentID)
+	if err != nil {
+		return err
+	}
+	if err := checkChatConditionAccess(ctx, q, w.WorkspaceID, w.RequesterID, agent.OwnerID, w.Condition); err != nil {
+		if errors.Is(err, errChatConditionHidden) {
+			return ErrChatWakeupClaimForbidden
+		}
+		return err
+	}
+	return nil
+}
+
 // fire starts the wakeup's turn. Preparation (attribution, connected apps)
 // happens outside the transaction, like every other chat enqueue; the
 // transaction then re-checks that nobody changed the wakeup meanwhile.
@@ -697,7 +740,7 @@ func (s *ChatWakeupService) fire(ctx context.Context, d chatWakeupDecision) (db.
 	if err != nil {
 		return db.ChatWakeup{}, err
 	}
-	content := s.turnInput(ctx, w, d.reason, d.observed)
+	content := s.turnInput(ctx, w, d.reason, d.observed, d.retry)
 	var task db.AgentTaskQueue
 	var fired db.ChatWakeup
 	err = s.inTx(ctx, func(_ pgx.Tx, qtx *db.Queries) error {
@@ -788,8 +831,7 @@ func (s *ChatWakeupService) Retry(ctx context.Context, sessionID, id pgtype.UUID
 	if err != nil {
 		return db.ChatWakeup{}, err
 	}
-	// A check the agent finished has nothing left to report.
-	if (w.Status != "fired" && w.Status != "expired") || !w.LastTaskID.Valid || (w.Kind == "check" && w.Status == "fired") {
+	if (w.Status != "fired" && w.Status != "expired") || !w.LastTaskID.Valid {
 		return db.ChatWakeup{}, chatWakeupInputError("only a wakeup whose report failed can be retried")
 	}
 	status, err := q.GetChatWakeupTaskStatus(ctx, db.GetChatWakeupTaskStatusParams{ChatSessionID: w.ChatSessionID, TaskID: w.LastTaskID})
@@ -820,7 +862,7 @@ func (s *ChatWakeupService) Retry(ctx context.Context, sessionID, id pgtype.UUID
 
 // turnInput writes the hidden input of a wakeup turn: what the agent asked to
 // come back for, why it is awake, and the person's original words.
-func (s *ChatWakeupService) turnInput(ctx context.Context, w db.ChatWakeup, reason string, observed map[string]any) string {
+func (s *ChatWakeupService) turnInput(ctx context.Context, w db.ChatWakeup, reason string, observed map[string]any, retry bool) string {
 	var b strings.Builder
 	b.WriteString("[WAKEUP] A wakeup you created in this conversation started this turn. It is not a new message from the user.\n\n")
 	fmt.Fprintf(&b, "Wakeup: %s\nWhat you said you would wait for: %s\n", util.UUIDToString(w.ID), w.Title)
@@ -836,9 +878,16 @@ func (s *ChatWakeupService) turnInput(ctx context.Context, w db.ChatWakeup, reas
 	case ChatWakeupReasonTime:
 		b.WriteString("Why you are awake: the time you set has come.\n")
 	case ChatWakeupReasonCheck:
-		b.WriteString("Why you are awake: it is time for the next check.\n")
+		if w.Status == "active" {
+			b.WriteString("Why you are awake: it is time for the next check.\n")
+		} else {
+			b.WriteString("Why you are awake: a check found what it was waiting for and you finished the wakeup.\n")
+		}
 	case ChatWakeupReasonExpired:
 		fmt.Fprintf(&b, "Why you are awake: the deadline (%s) passed before it happened. This is the wakeup's last turn.\n", w.ExpiresAt.Time.UTC().Format(time.RFC3339))
+	}
+	if retry {
+		b.WriteString("This turn retries that report: the earlier turn failed or was stopped before the user got it.\n")
 	}
 	if len(observed) > 0 {
 		data, _ := json.Marshal(observed)
@@ -858,7 +907,7 @@ func (s *ChatWakeupService) turnInput(ctx context.Context, w db.ChatWakeup, reas
 	switch {
 	case reason == ChatWakeupReasonExpired:
 		b.WriteString("Tell the user where things stand and why it has not happened yet, and ask whether to keep waiting. If they want you to, create a new wakeup in that later turn.\n")
-	case reason == ChatWakeupReasonCheck:
+	case reason == ChatWakeupReasonCheck && w.Status == "active":
 		fmt.Fprintf(&b, "If nothing needs the user's attention yet, run `multica chat wakeup checkin %s --note \"<what you saw>\"` and end without a reply: nothing is sent and the next check runs on schedule. When what you are watching for has happened, reply to the user and run `multica chat wakeup finish %s`.\n", id, id)
 	}
 	return b.String()

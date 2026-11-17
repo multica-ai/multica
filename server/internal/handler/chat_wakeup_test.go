@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // seedChatWakeup stores an active reminder in a conversation, asked for by
@@ -85,5 +89,52 @@ func TestDeleteChatSession_PrunesChatWakeups(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("wakeups must be pruned with their session, count = %d", count)
+	}
+}
+
+// A wakeup turn queued while its runtime was offline does not run once the
+// requester has lost the agent: the real claim endpoint fails it instead.
+func TestClaimTaskByRuntime_ChatWakeupRechecksRequester(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Offline wakeup runtime")
+	agentID, _ := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Offline wakeup agent")
+	sessionID := createHandlerTestChatSession(t, agentID)
+	sender := createWorkspaceMemberUser(t, "Wakeup sender", fmt.Sprintf("offline-wakeup-%d@multica.test", time.Now().UnixNano()))
+	dbfx.Exec(t, `UPDATE agent SET permission_mode = 'public_to' WHERE id = $1`, agentID)
+	dbfx.Exec(t, `INSERT INTO agent_invocation_target (agent_id, target_type, target_id) VALUES ($1, 'member', $2) ON CONFLICT DO NOTHING`, agentID, sender)
+	sourceID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "chat_session_id": sessionID, "status": "completed", "initiator_user_id": sender, "originator_user_id": sender, "accountable_user_id": sender})
+	dbfx.Exec(t, `UPDATE agent_task_queue SET chat_input_task_id = id WHERE id = $1`, sourceID)
+	dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": sessionID, "role": "user", "content": "Remind me later", "task_id": sourceID})
+	source, err := testHandler.Queries.GetAgentTask(ctx, parseUUID(sourceID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := &service.ChatWakeupService{Tasks: testHandler.TaskService}
+	wakeup, err := svc.Create(ctx, source, service.ChatWakeupInput{Title: "Follow up", Instruction: "Report back", AfterSeconds: 60})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM chat_wakeup WHERE id = $1`, wakeup.ID) })
+	dbfx.Exec(t, `UPDATE chat_wakeup SET fire_at = now() - interval '1 second', next_eval_at = now() - interval '1 second', expires_at = now() - interval '1 second' WHERE id = $1`, wakeup.ID)
+	if err := svc.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wakeup, err = testHandler.Queries.GetChatWakeup(ctx, wakeup.ID)
+	if err != nil || !wakeup.LastTaskID.Valid {
+		t.Fatalf("no queued wakeup turn: %+v, %v", wakeup, err)
+	}
+
+	dbfx.Exec(t, `UPDATE agent SET permission_mode = 'private' WHERE id = $1`, agentID)
+	req := withURLParam(newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil), "runtimeId", runtimeID)
+	resp := testutil.Call(t, testHandler.ClaimTaskByRuntime, req)
+	if strings.Contains(resp.Body.String(), "[WAKEUP]") || strings.Contains(resp.Body.String(), uuidToString(wakeup.LastTaskID)) {
+		t.Fatalf("revoked requester's wakeup turn was dispatched (status %d)", resp.Code)
+	}
+	task, err := testHandler.Queries.GetAgentTask(ctx, wakeup.LastTaskID)
+	if err != nil || task.Status != "failed" {
+		t.Fatalf("wakeup turn after a refused claim = %q (%v), want failed", task.Status, err)
 	}
 }

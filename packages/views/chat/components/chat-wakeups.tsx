@@ -64,8 +64,6 @@ export type WakeupReportState = "waiting" | "running" | "failed";
  */
 export function wakeupReportState(w: ChatWakeup): WakeupReportState | null {
   if ((w.status !== "fired" && w.status !== "expired") || !w.last_task_id) return null;
-  // A check the agent finished ended inside its own reporting turn.
-  if (w.kind === "check" && w.status === "fired") return null;
   switch (w.last_task_status) {
     case undefined:
     case "":
