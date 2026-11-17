@@ -863,7 +863,9 @@ func isKnownProvider(prefix string) bool {
 }
 
 // webhookActionCandidates extracts possible action values from the event
-// action suffix and from well-known payload fields.
+// action suffix and from well-known payload fields. It checks both the
+// top-level payload (GitHub-style) and the object_attributes nested object
+// (GitLab-style) so that action filtering works across providers.
 func webhookActionCandidates(eventAction string, payload json.RawMessage) []string {
 	seen := map[string]struct{}{}
 	add := func(v string) {
@@ -876,9 +878,19 @@ func webhookActionCandidates(eventAction string, payload json.RawMessage) []stri
 	add(eventAction)
 	var obj map[string]any
 	if err := json.Unmarshal(payload, &obj); err == nil {
+		// Top-level fields (GitHub-style: {"action": "opened", ...}).
 		for _, key := range []string{"action", "state", "conclusion", "status"} {
 			if v, ok := obj[key].(string); ok {
 				add(v)
+			}
+		}
+		// Nested object_attributes (GitLab-style:
+		// {"object_attributes": {"action": "open", "state": "opened", ...}}).
+		if attrs, ok := obj["object_attributes"].(map[string]any); ok {
+			for _, key := range []string{"action", "state"} {
+				if v, ok := attrs[key].(string); ok {
+					add(v)
+				}
 			}
 		}
 	}
