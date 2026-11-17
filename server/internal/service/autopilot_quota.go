@@ -220,6 +220,10 @@ func (s *AutopilotService) createAutopilotRunWithQuota(
 	if wouldBlock {
 		result = "would_block"
 		s.recordAutopilotQuotaExceeded(ctx, policy, workspaceID, period)
+	} else {
+		EntitlementOverages{Queries: s.Queries}.SyncLimit(
+			ctx, workspaceID, entitlement.GateAutopilotRuns, policy.periodStart, policy.periodEnd, policy.limit,
+		)
 	}
 	s.recordAutopilotQuotaDecision(policy.action, source, result)
 	return run, false, nil

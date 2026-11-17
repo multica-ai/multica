@@ -66,7 +66,9 @@ Over-limit attempts are stored per workspace, gate, and Cloud-defined period
 in `entitlement_limit_overage` (`service.EntitlementOverages`). Each row keeps
 the latest limit, the peak usage an attempt would have reached, the observed
 and enforced counts, and the first and last attempt times, so
-`peak_usage - limit_value` is how far a workspace went over. Rollout reach,
+`peak_usage - limit_value` is how far a workspace went over. A later admission
+inside the limit also syncs a changed limit onto an existing row, so an upgrade
+mid-period clears the overage without erasing the history. Rollout reach,
 over-limit notices, and grace periods read this table; metrics stay
 low-cardinality and never carry workspace IDs. Recording runs after the
 admission transaction commits and is best-effort: a failed write is logged and

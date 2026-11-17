@@ -33,3 +33,16 @@ WHERE gate = @gate
   AND period_start = @period_start
   AND period_end = @period_end
 ORDER BY peak_usage - limit_value DESC, workspace_id;
+
+-- name: SyncEntitlementLimitOverageLimit :exec
+-- Keeps an existing row's limit current when the period's limit changes
+-- without a new over-limit attempt (an upgrade mid-period), so Over is not
+-- reported against a stale limit. Counts and times are left as history.
+UPDATE entitlement_limit_overage
+SET limit_value = @limit_value,
+    updated_at = now()
+WHERE workspace_id = @workspace_id
+  AND gate = @gate
+  AND period_start = @period_start
+  AND period_end = @period_end
+  AND limit_value <> @limit_value;

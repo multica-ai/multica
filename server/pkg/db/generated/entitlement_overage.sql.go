@@ -159,3 +159,36 @@ func (q *Queries) RecordEntitlementLimitExceeded(ctx context.Context, arg Record
 	)
 	return i, err
 }
+
+const syncEntitlementLimitOverageLimit = `-- name: SyncEntitlementLimitOverageLimit :exec
+UPDATE entitlement_limit_overage
+SET limit_value = $1,
+    updated_at = now()
+WHERE workspace_id = $2
+  AND gate = $3
+  AND period_start = $4
+  AND period_end = $5
+  AND limit_value <> $1
+`
+
+type SyncEntitlementLimitOverageLimitParams struct {
+	LimitValue  int64              `json:"limit_value"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Gate        string             `json:"gate"`
+	PeriodStart pgtype.Timestamptz `json:"period_start"`
+	PeriodEnd   pgtype.Timestamptz `json:"period_end"`
+}
+
+// Keeps an existing row's limit current when the period's limit changes
+// without a new over-limit attempt (an upgrade mid-period), so Over is not
+// reported against a stale limit. Counts and times are left as history.
+func (q *Queries) SyncEntitlementLimitOverageLimit(ctx context.Context, arg SyncEntitlementLimitOverageLimitParams) error {
+	_, err := q.db.Exec(ctx, syncEntitlementLimitOverageLimit,
+		arg.LimitValue,
+		arg.WorkspaceID,
+		arg.Gate,
+		arg.PeriodStart,
+		arg.PeriodEnd,
+	)
+	return err
+}

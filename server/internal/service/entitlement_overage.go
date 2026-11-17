@@ -80,6 +80,33 @@ func (o EntitlementOverages) Record(ctx context.Context, attempt LimitExceededAt
 	}
 }
 
+// SyncLimit updates the limit on an existing over-limit record when an
+// admission inside the limit sees a different one, e.g. after an upgrade
+// mid-period. Without it Over would keep being measured against the old
+// limit. Best-effort like Record; a workspace with no record is a no-op.
+func (o EntitlementOverages) SyncLimit(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	gate entitlement.GateName,
+	periodStart, periodEnd time.Time,
+	limit int64,
+) {
+	err := o.Queries.SyncEntitlementLimitOverageLimit(ctx, db.SyncEntitlementLimitOverageLimitParams{
+		WorkspaceID: workspaceID,
+		Gate:        string(gate),
+		PeriodStart: pgtype.Timestamptz{Time: periodStart.UTC(), Valid: true},
+		PeriodEnd:   pgtype.Timestamptz{Time: periodEnd.UTC(), Valid: true},
+		LimitValue:  limit,
+	})
+	if err != nil {
+		slog.Warn("entitlement over-limit record limit was not synced; admission decision is unchanged",
+			"workspace_id", util.UUIDToString(workspaceID),
+			"gate", string(gate),
+			"error", err,
+		)
+	}
+}
+
 // ForWorkspace lists every period in which a workspace went over a limit,
 // newest period first.
 func (o EntitlementOverages) ForWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]LimitOverage, error) {

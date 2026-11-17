@@ -811,6 +811,30 @@ func TestAutopilotQuotaRecordsOverLimitAttemptsPerWorkspace(t *testing.T) {
 	if got.Limit != 3 || got.PeakUsage != 4 || got.Over != 1 || got.ObservedCount != 3 {
 		t.Fatalf("overage after upgrade = %+v", got)
 	}
+
+	// An upgrade above the peak followed by a run inside the new limit must
+	// clear Over even though that run is not itself over the limit. History
+	// (counts, peak, times) stays.
+	before := got
+	fixture.setPolicy(entitlement.ActionObserve, fixture.periodStart, fixture.periodEnd, 10)
+	if err := create("observe-within-raised-limit"); err != nil {
+		t.Fatalf("observe within raised limit: %v", err)
+	}
+	got = workspaceOverages()[0]
+	if got.Limit != 10 || got.Over != 0 || got.PeakUsage != before.PeakUsage ||
+		got.ObservedCount != before.ObservedCount || got.EnforcedCount != before.EnforcedCount ||
+		!got.LastExceededAt.Equal(before.LastExceededAt) {
+		t.Fatalf("overage after upgrade above peak = %+v, before = %+v", got, before)
+	}
+	byPeriod, err = overages.ForPeriod(ctx, entitlement.GateAutopilotRuns, fixture.periodStart, fixture.periodEnd)
+	if err != nil {
+		t.Fatalf("ForPeriod after upgrade: %v", err)
+	}
+	for _, row := range byPeriod {
+		if row.WorkspaceID == fixture.workspace && (row.Limit != 10 || row.Over != 0) {
+			t.Fatalf("ForPeriod after upgrade = %+v", row)
+		}
+	}
 }
 
 func TestLimitOverageNeverReportsNegativeOver(t *testing.T) {
