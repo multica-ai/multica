@@ -2177,6 +2177,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
+		printIssueRunOutcome(result)
 		headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY"}
 		rows := [][]string{{
 			issueDisplayKey(result),
@@ -2310,12 +2311,23 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "Issue %s status changed to %s.\n", issueDisplayKey(result), status)
 	}
+	printIssueRunOutcome(result)
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+func printIssueRunOutcome(result map[string]any) {
+	if enqueued, reported := result["run_enqueued"].(bool); reported {
+		if enqueued {
+			fmt.Fprintln(os.Stderr, "Agent run: queued.")
+		} else {
+			fmt.Fprintf(os.Stderr, "Agent run: not_enqueued. Check `multica issue runs %s --active` before requesting work in a comment.\n", issueDisplayKey(result))
+		}
+	}
 }
 
 // duplicateOfFlag returns the --duplicate-of reference, or "" when the flag is

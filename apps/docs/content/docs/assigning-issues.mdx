@@ -56,6 +56,10 @@ Agents update the issue’s status as work progresses. By default, they move the
 
 For a project that repeatedly passes work between people or agents, use a [workflow](/workflows) to arrange the handoffs. To save a request you often send without changing the assignee, use a [quick action](/quick-actions).
 
+Returning an agent- or squad-assigned issue from the built-in `in_review` status to `todo` requests rework. If the assignee has no pending or active run on that issue, it queues one without changing the assignee. Repeating `todo` does not queue another run. Single-issue status pickers ask for confirmation; **Don't start yet**, or `multica issue status <issue-id> todo --no-start` in the CLI, saves only the status change.
+
+The update response includes `run_enqueued`. The CLI reports `queued` or `not_enqueued` separately from the saved status.
+
 ## Assign without starting
 
 **Don't start yet** in the confirmation dialog saves the assignee without creating a run this time. Use it to settle ownership first and start once the background or dependencies are ready.

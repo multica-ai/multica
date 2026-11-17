@@ -1709,6 +1709,7 @@ export const IssueSchema = z.object({
   // this field to make a decision — useStatusLabel resolves the label from the
   // catalog — so dropping it costs a fallback to the key. (MUL-6749)
   status_name: z.string().optional().catch(undefined),
+  run_enqueued: z.boolean().optional().catch(undefined),
   priority: z.string(),
   assignee_type: z.string().nullable(),
   assignee_id: z.string().nullable(),

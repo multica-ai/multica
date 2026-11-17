@@ -206,6 +206,8 @@ export interface Issue {
    * server always sends the field. (MUL-6749)
    */
   status_name?: string;
+  /** Update response only: whether this mutation actually queued an agent run. */
+  run_enqueued?: boolean;
   priority: IssuePriority;
   assignee_type: IssueAssigneeType | null;
   assignee_id: string | null;

@@ -84,9 +84,9 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       options?: IssueSurfaceMutationOptions,
     ) => {
       if (!issueId) return;
-      // The two writes that can hand work to an agent — giving it an owner, and
-      // promoting it out of the parking lot — confirm first, through the shared
-      // gate every single-issue entry point routes on (runConfirmIntent). The
+      // Assigning an owner, promoting from backlog, and requesting rework
+      // confirm through the shared gate every single-issue entry point
+      // routes on (runConfirmIntent). The
       // modal applies the change itself; everything else applies directly.
       //
       // Not wired into drag-and-drop or the batch toolbar, which keep applying
