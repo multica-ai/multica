@@ -498,7 +498,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `env get/set <agent-id>` | Lire et écrire les variables d'environnement personnalisées (propriétaire de l'agent ou owner/admin de l'espace de travail ; chaque lecture est enregistrée) | `set` : `--custom-env` / `--custom-env-file` / `--custom-env-stdin` ; remplace l'ensemble, et les clés dont la valeur est `****` gardent leur valeur |
 | | `skills list/set/add <agent-id>` | Gérer les skills rattachés | `--skill-ids` (`set` remplace toute la liste, `add` ajoute à la suite) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | Assigner des serveurs MCP de l'espace de travail à cet agent | Récupérez l'ID du serveur avec `workspace mcp list`. Une entrée de la bibliothèque n'a aucun effet tant qu'elle n'est pas ajoutée ici ; `disable` cesse de l'envoyer sans supprimer l'assignation |
-| `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--agent`, `--mode` (tous obligatoires), `--description`, `--issue-title-template`, `--project`, `--subscriber` (répétable) |
+| `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--mode` (obligatoires), exactement une option parmi `--agent` / `--squad` / `--squad-id` (obligatoire), `--description`, `--issue-title-template`, `--project`, `--subscriber` (répétable) |
 | | `trigger <id>` | Déclencher une exécution manuellement | |
 | | `runs <id>` | Afficher l'historique des exécutions | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Gérer les déclencheurs de planification et webhook | `trigger-add` : `--kind` (`schedule` ou `webhook`), `--cron`, `--timezone` (UTC par défaut), `--label` |
