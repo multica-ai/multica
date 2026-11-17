@@ -20,6 +20,8 @@ type ActivityLog struct {
 	Action      string             `json:"action"`
 	Details     []byte             `json:"details"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	IssueNumber pgtype.Int4        `json:"issue_number"`
+	IssueTitle  pgtype.Text        `json:"issue_title"`
 }
 
 type Agent struct {
@@ -1010,6 +1012,8 @@ type Issue struct {
 	OriginType         pgtype.Text        `json:"origin_type"`
 	OriginID           pgtype.UUID        `json:"origin_id"`
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
+	ReviewerType       pgtype.Text        `json:"reviewer_type"`
+	ReviewerID         pgtype.UUID        `json:"reviewer_id"`
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
 	Stage              pgtype.Int4        `json:"stage"`
@@ -1031,6 +1035,33 @@ type IssueChildEvent struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	ClaimedAt    pgtype.Timestamptz `json:"claimed_at"`
 	ProcessedAt  pgtype.Timestamptz `json:"processed_at"`
+}
+
+type IssueArchive struct {
+	ArchiveID         int64              `json:"archive_id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	IssueNumber       int32              `json:"issue_number"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	IssueRow          []byte             `json:"issue_row"`
+	ActorID           pgtype.UUID        `json:"actor_id"`
+	ActorType         string             `json:"actor_type"`
+	ClientFingerprint pgtype.Text        `json:"client_fingerprint"`
+	SourceIp          *netip.Addr        `json:"source_ip"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
+	SessionIdentity   string             `json:"session_identity"`
+	EffectiveUser     string             `json:"effective_user"`
+	ClientAddr        *netip.Addr        `json:"client_addr"`
+	ClientPort        pgtype.Int4        `json:"client_port"`
+	ApplicationName   pgtype.Text        `json:"application_name"`
+	BackendPid        pgtype.Int4        `json:"backend_pid"`
+	Txid              pgtype.Int8        `json:"txid"`
+}
+
+type IssueArchiveComment struct {
+	ArchiveID  int64              `json:"archive_id"`
+	IssueID    pgtype.UUID        `json:"issue_id"`
+	CommentRow []byte             `json:"comment_row"`
+	DeletedAt  pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type IssueDependency struct {
