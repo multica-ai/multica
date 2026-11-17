@@ -5,16 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -53,24 +52,6 @@ func waitForWaiterPIDBlockedBy(t *testing.T, holderPID int, timeout time.Duratio
 	}
 }
 
-func createChatSessionForAgent(t *testing.T, ctx context.Context, agentID, title string) string {
-	t.Helper()
-	var sessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, explicitly_created_at)
-		VALUES ($1, $2, $3, $4, now())
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, title).Scan(&sessionID); err != nil {
-		t.Fatalf("create chat session: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM chat_message WHERE chat_session_id = $1`, sessionID)
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE chat_session_id = $1`, sessionID)
-		testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, sessionID)
-	})
-	return sessionID
-}
-
 // A direct chat send holds the agent row (FOR UPDATE) when CreateChatTask's
 // owner fence asks for FOR KEY SHARE on the agent's runtime row. The claim
 // delivery gate locks that runtime row first and then the agent row. When the
@@ -88,7 +69,10 @@ func TestDirectChatSendDoesNotDeadlockWithClaimDeliveryGate(t *testing.T) {
 	}
 	ctx := context.Background()
 	agentID, claimedSessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "claim gate deadlock: claimed")
-	sendSessionID := createChatSessionForAgent(t, ctx, agentID, "claim gate deadlock: send")
+	sendSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":                 "claim gate deadlock: send",
+		"explicitly_created_at": testutil.Raw("now()"),
+	})
 
 	claimedTaskID := sendDirectChat(t, ctx, agentID, claimedSessionID, "claimed turn")
 	claimed, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(runtimeID))
@@ -191,7 +175,10 @@ func TestDirectChatConcurrentSendsAcrossSessionsWhileDaemonClaims(t *testing.T) 
 	})
 	sessionIDs := []string{firstSessionID}
 	for i := 1; i < sessions; i++ {
-		sessionIDs = append(sessionIDs, createChatSessionForAgent(t, ctx, agentID, fmt.Sprintf("concurrent sends %d", i)))
+		sessionIDs = append(sessionIDs, dbfx.ChatSession(t, agentID, testutil.Cols{
+			"title":                 fmt.Sprintf("concurrent sends %d", i),
+			"explicitly_created_at": testutil.Raw("now()"),
+		}))
 	}
 	chatSessions := make([]db.ChatSession, len(sessionIDs))
 	for i, id := range sessionIDs {
@@ -230,12 +217,11 @@ func TestDirectChatConcurrentSendsAcrossSessionsWhileDaemonClaims(t *testing.T) 
 			defer claims.Done()
 			<-start
 			for {
-				w := httptest.NewRecorder()
-				req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
-				rctx := chi.NewRouteContext()
-				rctx.URLParams.Add("runtimeId", runtimeID)
-				req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-				testHandler.ClaimTaskByRuntime(w, req)
+				req := testutil.WithURLParams(
+					newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil),
+					"runtimeId", runtimeID,
+				)
+				w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req)
 				if w.Code != http.StatusOK {
 					claimErrs <- fmt.Errorf("claim returned %d: %s", w.Code, w.Body.String())
 					return
