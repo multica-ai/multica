@@ -572,7 +572,8 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 	if err := w.RestoreRuntimeConfigTracking(); err != nil {
 		outcome.Branch = ""
 		outcome.PreservedPath = w.Path
-		return outcome, err
+		return outcome, fmt.Errorf("%w; the work is preserved in the worktree at %s (listed by `git worktree list` in %s)",
+			err, w.Path, w.GitRoot)
 	}
 
 	unlock, err := lockGitRoot(w.GitRoot, logger)

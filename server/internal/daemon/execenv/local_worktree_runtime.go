@@ -1,7 +1,9 @@
 package execenv
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -17,9 +19,21 @@ func (w *LocalWorktree) ProtectRuntimeConfig(provider string) error {
 	if path == "" {
 		return nil
 	}
-	rel, err := filepath.Rel(w.Path, path)
+	// Injection follows symlinks, so protect the file that received the brief.
+	path, err := filepath.EvalSymlinks(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("execenv: resolve runtime config: %w", err)
+	}
+	root, err := filepath.EvalSymlinks(w.Path)
+	if err != nil {
+		return fmt.Errorf("execenv: resolve worktree %q: %w", w.Path, err)
+	}
+	rel, err := filepath.Rel(root, path)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("execenv: runtime config %q is outside worktree %q", path, w.Path)
+		return nil // External targets do not belong to this worktree's index.
 	}
 	rel = filepath.ToSlash(rel)
 	tracked, err := runGit(w.Path, "ls-files", "-z", "--", ":(literal)"+rel)
