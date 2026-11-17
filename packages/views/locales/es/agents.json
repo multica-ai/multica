@@ -870,6 +870,15 @@
     "failed_indicator": "Fallida"
   },
   "transcript": {
+    "managed_mcp_sources": {
+      "title": "Fuentes de configuración MCP gestionada",
+      "unavailable": "El historial de fuentes no está disponible para esta ejecución",
+      "empty": "No había servidores MCP gestionados al tomar la tarea",
+      "pending": "Las fuentes se registrarán al tomar esta tarea",
+      "workspace": "Vinculación del espacio de trabajo",
+      "agent": "Configuración del agente",
+      "task": "Configuración de la tarea"
+    },
     "dialog_title": "Transcripción de ejecución del agente",
     "status_running": "En ejecución",
     "status_completed": "Completada",

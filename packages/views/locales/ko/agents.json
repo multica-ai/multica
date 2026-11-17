@@ -727,6 +727,15 @@
     "failed_indicator": "실패"
   },
   "transcript": {
+    "managed_mcp_sources": {
+      "title": "관리형 MCP 구성 출처",
+      "unavailable": "이 실행의 출처 기록을 사용할 수 없습니다",
+      "empty": "작업을 가져올 때 관리형 MCP 서버가 없었습니다",
+      "pending": "작업을 가져올 때 출처가 기록됩니다",
+      "workspace": "워크스페이스 연결",
+      "agent": "에이전트 구성",
+      "task": "작업 재정의 구성"
+    },
     "dialog_title": "에이전트 실행 트랜스크립트",
     "status_running": "실행 중",
     "status_completed": "완료됨",

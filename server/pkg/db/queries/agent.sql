@@ -780,6 +780,7 @@ WHERE atq.id = $1 AND a.workspace_id = $2;
 -- whose completion lookup would race over "most recent issue by this agent".
 UPDATE agent_task_queue
 SET status = 'dispatched',
+    managed_mcp_snapshot = NULL,
     dispatched_at = now(),
     prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
 WHERE id = (
@@ -855,6 +856,19 @@ WHERE id = @task_id
   )
 RETURNING delivered_comment_ids;
 
+-- name: SetTaskManagedMcpSnapshot :one
+-- The delivery transaction owns this exact claim generation. A stale claim
+-- must roll back its token and snapshot together instead of replacing history.
+UPDATE agent_task_queue
+SET managed_mcp_snapshot = sqlc.narg(managed_mcp_snapshot)::jsonb
+WHERE id = @task_id
+  AND runtime_id = @runtime_id
+  AND attempt = @attempt
+  AND status = 'dispatched'
+  AND started_at IS NULL
+  AND dispatched_at = @dispatched_at
+RETURNING id;
+
 -- name: SetTaskIssueSnapshot :exec
 -- Record the comparable issue state this claim's payload was built from, so the
 -- NEXT run this agent takes on the issue can be told whether the issue itself
@@ -879,6 +893,7 @@ WHERE id = @task_id
 -- rolling back a newer reclaim.
 UPDATE agent_task_queue
 SET status = 'queued',
+    managed_mcp_snapshot = NULL,
     dispatched_at = NULL,
     prepare_lease_expires_at = NULL,
     delivered_comment_ids = '{}'
@@ -896,7 +911,8 @@ RETURNING *;
 -- Refresh dispatched_at so the server-side dispatch timeout measures from the
 -- recovered delivery attempt.
 UPDATE agent_task_queue
-SET dispatched_at = now(),
+SET managed_mcp_snapshot = NULL,
+    dispatched_at = now(),
     prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
@@ -981,7 +997,8 @@ WITH candidates AS MATERIALIZED (
     FOR UPDATE SKIP LOCKED
 )
 UPDATE agent_task_queue
-SET dispatched_at = now(),
+SET managed_mcp_snapshot = NULL,
+    dispatched_at = now(),
     prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
 WHERE id IN (SELECT id FROM candidates)
 RETURNING *;
