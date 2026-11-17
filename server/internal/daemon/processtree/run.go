@@ -1,5 +1,8 @@
 // Package processtree runs bounded helper commands whose descendants must not
 // survive cancellation. It uses a Unix process group or a Windows Job Object.
+// On Unix, the system init must reap orphaned descendants. In Linux containers,
+// use an external init/reaper (for example Docker --init); this package does not
+// act as PID 1 or wait for children owned by other callers.
 package processtree
 
 import (

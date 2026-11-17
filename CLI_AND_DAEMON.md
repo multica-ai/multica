@@ -141,6 +141,34 @@ To run in the foreground (useful for debugging):
 multica daemon start --foreground
 ```
 
+#### Linux containers
+
+Run a containerized daemon in the foreground under an init process that reaps
+orphaned children. Running the daemon itself as Linux PID 1 without a reaper is
+unsupported. For Docker, add `--init` to your existing run command:
+
+```bash
+docker run --init <your-daemon-image> multica daemon start --foreground
+```
+
+The example assumes an image with the Multica CLI on `PATH` and no conflicting
+entrypoint; retain your existing authentication, mounts, network and agent CLI
+configuration. For Docker Compose, set `init: true` on the **daemon** service
+and use `command: ["multica", "daemon", "start", "--foreground"]`. For other
+container runtimes, use an equivalent PID 1 init/reaper such as Tini.
+
+The daemon waits for its direct children with `cmd.Wait()`. Its process-tree
+helper terminates remaining descendants, but relies on the system init to reap
+orphans. Without that reaper, terminated descendants can remain zombies and
+cause `stop process tree: process group <pgid> still active after 5s` even when
+the direct child succeeded. Longer timeouts or more kill signals cannot reap
+zombies. A shell wrapper alone does not provide this contract.
+
+The self-hosted server Compose files do not launch the agent daemon; configure
+init on the container where you actually run the daemon. See
+[`processtree` container regression coverage](server/internal/daemon/processtree/README.md)
+for an isolated probe and the `--init` control.
+
 #### Following a replaced binary
 
 A CLI-launched daemon periodically compares its own compile-time version against
