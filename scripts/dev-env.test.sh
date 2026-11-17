@@ -427,6 +427,90 @@ assert_start_web foreign 999 0 1 "Port 13000 is busy: pid 999" ""
 assert_start_web foreign-silent 999 never 1 "Port 13000 is busy: pid 999" ""
 
 # ---------------------------------------------------------------------------
+# Daemon: `daemon start` is a no-op while one is running, so `make up` has to
+# restart a daemon that is not running this checkout's current build itself.
+# ---------------------------------------------------------------------------
+head_commit="$(git -C "$root_dir" rev-parse HEAD)"
+old_commit=0123456789abcdef0123456789abcdef01234567
+daemon_fake="$tmp_dir/daemon-fake"
+mkdir -p "$daemon_fake/server/bin" "$daemon_fake/go-bin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$daemon_fake/go-bin/go"
+chmod +x "$daemon_fake/go-bin/go"
+cat > "$daemon_fake/server/bin/multica" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_DAEMON/calls"
+case "$1 $2" in
+  "daemon status") cat "$FAKE_DAEMON/status" ;;
+  "daemon stop") printf '{"status":"stopped"}' > "$FAKE_DAEMON/status" ;;
+  "daemon start")
+    printf '{"status":"running","pid":5002,"cli_commit":"%s","uptime":"1s"}' \
+      "$(cat "$FAKE_DAEMON/start_commit")" > "$FAKE_DAEMON/status" ;;
+esac
+EOF
+chmod +x "$daemon_fake/server/bin/multica"
+
+# Args: case, commit the running daemon reports, recorded "<pid> <hash>" (or
+# "-" for none), commit a fresh start reports, expected exit, expected output,
+# expected record afterwards.
+assert_start_daemon() (
+  local case_name=$1 running_commit=$2 recorded=$3 start_commit=$4
+  local expected_status=$5 expected=$6 expected_record=$7 status=0 bin_hash
+  export FAKE_DAEMON="$tmp_dir/daemon-$case_name"
+  mkdir -p "$FAKE_DAEMON"
+  printf '{"status":"running","pid":5001,"cli_commit":"%s","active_task_count":1}' \
+    "$running_commit" > "$FAKE_DAEMON/status"
+  printf '%s' "$start_commit" > "$FAKE_DAEMON/start_commit"
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  PATH="$daemon_fake/go-bin:$PATH"
+  DIR="$root_dir" PROFILE=dev-test STATE_DIR="$FAKE_DAEMON" PROFILE_DIR="$FAKE_DAEMON"
+  WORKSPACES_ROOT="$FAKE_DAEMON/ws" MULTICA_BIN="$daemon_fake/server/bin/multica"
+  bin_hash="$(file_sha256 "$MULTICA_BIN")"
+  [ -n "$bin_hash" ] || fail "file_sha256 printed nothing"
+  case "$recorded" in
+    -) ;;
+    current) printf '5001 %s\n' "$bin_hash" > "$(daemon_build_file)" ;;
+    *) printf '%s\n' "$recorded" > "$(daemon_build_file)" ;;
+  esac
+  (start_daemon) > "$out" 2>&1 || status=$?
+  [ "$status" = "$expected_status" ] || { sed 's/^/  /' "$out" >&2; fail "$case_name: start_daemon exited $status, want $expected_status"; }
+  require_contains "$out" "$expected"
+  case "$expected_record" in
+    restarted) [ "$(cat "$(daemon_build_file)")" = "5002 $bin_hash" ] \
+      || fail "$case_name: recorded build is '$(cat "$(daemon_build_file)" 2>/dev/null)', want the restarted daemon" ;;
+    kept) ! grep -q '^daemon stop' "$FAKE_DAEMON/calls" \
+      || fail "$case_name: stopped a daemon that already ran the current build" ;;
+  esac
+)
+assert_start_daemon current "$head_commit" current "$head_commit" 0 "daemon already running for profile dev-test (pid 5001" kept
+assert_start_daemon old-commit "$old_commit" current "$head_commit" 0 "runs commit 0123456789, checkout is at" restarted
+assert_start_daemon dirty-edit "$head_commit" "5001 not-this-binary" "$head_commit" 0 "uncommitted changes differ" restarted
+assert_start_daemon unrecorded "$head_commit" - "$head_commit" 0 "was not started from" restarted
+assert_start_daemon other-pid "$head_commit" "4000 x" "$head_commit" 0 "interrupts 1 active task(s)" restarted
+assert_start_daemon wrong-start "$old_commit" current "$old_commit" 1 "reports commit 0123456789 after start" -
+
+# `make status` shows the daemon's commit, and calls a daemon that `make up`
+# would restart stale instead of running.
+assert_daemon_state() (
+  local case_name=$1 running_commit=$2 recorded=$3 expected_state=$4 expected=$5 row
+  export FAKE_DAEMON="$tmp_dir/daemon-state-$case_name"
+  mkdir -p "$FAKE_DAEMON"
+  printf '{"status":"running","pid":5001,"cli_commit":"%s","uptime":"3m0s"}' \
+    "$running_commit" > "$FAKE_DAEMON/status"
+  # shellcheck disable=SC1090
+  source "$root_dir/scripts/dev-env.sh"
+  DIR="$root_dir" PROFILE=dev-test STATE_DIR="$FAKE_DAEMON" PROFILE_DIR="$FAKE_DAEMON"
+  WORKSPACES_ROOT="$FAKE_DAEMON/ws" MULTICA_BIN="$daemon_fake/server/bin/multica"
+  [ "$recorded" = - ] || printf '5001 %s\n' "$(file_sha256 "$MULTICA_BIN")" > "$(daemon_build_file)"
+  row="$(component_state daemon)"
+  [ "${row%%|*}" = "$expected_state" ] || fail "$case_name: daemon state row '$row', want $expected_state"
+  case "$row" in *"$expected"*) ;; *) fail "$case_name: daemon state row '$row', want '$expected'" ;; esac
+)
+assert_daemon_state current "$head_commit" current running "pid 5001 commit $(git -C "$root_dir" rev-parse --short HEAD) up 3m0s"
+assert_daemon_state old-commit "$old_commit" current stale "runs commit 0123456789, checkout is at"
+assert_daemon_state unrecorded "$head_commit" - stale "run make up C=daemon to restart"
+
+# ---------------------------------------------------------------------------
 # Desktop: CDP port, env file, process tree, and the daemon Desktop starts.
 # ---------------------------------------------------------------------------
 
