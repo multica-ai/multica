@@ -9,9 +9,13 @@ DROP FUNCTION IF EXISTS archive_issue_on_delete();
 DROP FUNCTION IF EXISTS prevent_issue_archive_mutation();
 
 ALTER TABLE activity_log
-    DROP CONSTRAINT IF EXISTS activity_log_issue_id_fkey,
+    DROP CONSTRAINT IF EXISTS activity_log_issue_id_fkey;
+ALTER TABLE activity_log
     ADD CONSTRAINT activity_log_issue_id_fkey
-    FOREIGN KEY (issue_id) REFERENCES issue(id) ON DELETE CASCADE;
+    FOREIGN KEY (issue_id) REFERENCES issue(id) ON DELETE CASCADE
+    NOT VALID;
+ALTER TABLE activity_log
+    VALIDATE CONSTRAINT activity_log_issue_id_fkey;
 
 ALTER TABLE activity_log
     DROP COLUMN IF EXISTS issue_number,

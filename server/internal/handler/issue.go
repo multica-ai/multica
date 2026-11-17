@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -4638,12 +4637,45 @@ func hashClientFingerprint(parts ...string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func requestSourceIP(r *http.Request) *netip.Addr {
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
-		if addr, parseErr := netip.ParseAddr(host); parseErr == nil {
-			return &addr
+// requestSourceIP resolves the audit source address. Like the handler's
+// rate-limit client IP, forwarded headers are trusted only when the direct
+// peer is inside an explicitly configured trusted-proxy CIDR. With no trusted
+// proxies, RemoteAddr is retained verbatim: an untrusted proxy address is
+// still useful connection attribution, while spoofable headers are not.
+func requestSourceIP(r *http.Request, trustedProxies []netip.Prefix) *netip.Addr {
+	remoteAddr := r.RemoteAddr
+	remoteIP := parseAuditAddr(remoteAddr)
+	if remoteIP == nil && len(trustedProxies) > 0 {
+		remoteIP = parseAuditAddr(remoteAddrHost(remoteAddr))
+	}
+	if len(trustedProxies) > 0 && remoteIP != nil && addrInPrefixes(*remoteIP, trustedProxies) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			first := xff
+			if i := strings.IndexByte(xff, ','); i >= 0 {
+				first = xff[:i]
+			}
+			if forwarded := parseAuditAddr(strings.TrimSpace(first)); forwarded != nil {
+				return forwarded
+			}
 		}
-	} else if addr, parseErr := netip.ParseAddr(r.RemoteAddr); parseErr == nil {
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			if forwarded := parseAuditAddr(strings.TrimSpace(xri)); forwarded != nil {
+				return forwarded
+			}
+		}
+	}
+	return remoteIP
+}
+
+func parseAuditAddr(value string) *netip.Addr {
+	if value == "" {
+		return nil
+	}
+	if addrPort, err := netip.ParseAddrPort(value); err == nil {
+		addr := addrPort.Addr()
+		return &addr
+	}
+	if addr, err := netip.ParseAddr(value); err == nil {
 		return &addr
 	}
 	return nil
@@ -4664,7 +4696,7 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
 	_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
-	sourceIP := requestSourceIP(r)
+	sourceIP := requestSourceIP(r, h.cfg.TrustedProxies)
 	fingerprint := hashClientFingerprint(r.Header.Get("User-Agent"), r.Header.Get("Accept-Language"), r.Header.Get("X-Forwarded-Host"))
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
 	deleteResult, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue, nil, actorType, actorID, fingerprint, sourceIP)
@@ -5413,7 +5445,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	sourceIP := requestSourceIP(r)
+	sourceIP := requestSourceIP(r, h.cfg.TrustedProxies)
 	fingerprint := hashClientFingerprint(r.Header.Get("User-Agent"), r.Header.Get("Accept-Language"), r.Header.Get("X-Forwarded-Host"))
 
 	if !h.requireIssueDeletion(w, r, wsUUID, issues) {
@@ -5427,6 +5459,11 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 	}
+	// Batch deletion is intentionally transaction-per-issue: each issue's
+	// archive/delete pair either commits or rolls back independently, so one
+	// bad member cannot turn already-deleted members into a misleading all-
+	// or-nothing response. This is not a synthetic batch header; the API
+	// reports each requested member explicitly.
 	deleteResult, err := h.deleteIssuesAndCollectAttachmentURLs(r.Context(), issues, excludedIDs, actorType, actorID, fingerprint, sourceIP)
 	if err != nil {
 		slog.Warn("batch delete issues failed", "error", err)

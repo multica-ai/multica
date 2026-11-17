@@ -1,9 +1,13 @@
 -- MOJ-2166 batch 2: remove destructive cascade from activity_log and persist
 -- immutable issue deletion archives for all delete paths.
 ALTER TABLE activity_log
-    DROP CONSTRAINT IF EXISTS activity_log_issue_id_fkey,
+    DROP CONSTRAINT IF EXISTS activity_log_issue_id_fkey;
+ALTER TABLE activity_log
     ADD CONSTRAINT activity_log_issue_id_fkey
-    FOREIGN KEY (issue_id) REFERENCES issue(id) ON DELETE SET NULL;
+    FOREIGN KEY (issue_id) REFERENCES issue(id) ON DELETE SET NULL
+    NOT VALID;
+ALTER TABLE activity_log
+    VALIDATE CONSTRAINT activity_log_issue_id_fkey;
 
 ALTER TABLE activity_log
     ADD COLUMN IF NOT EXISTS issue_number INTEGER,
