@@ -100,6 +100,8 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 </Tab>
 <Tab value="worktree（并行运行）" id="worktree">
 
+使用内置 Claude Code 2.1.281+ 或 Codex 0.169.0+ 时，Multica 把运行时说明、技能和任务元数据放在检出目录之外。你对 `CLAUDE.md` 和 `AGENTS.md` 的正常修改仍可照常提交。旧版或版本未知的 CLI 继续使用文件注入，并记录警告；其他 provider 和 `in_place` 保持现有行为。结束时，Multica 会检查本次运行的每个提交，发现运行时内容就给出警告，不改写历史。
+
 每次运行拿到你仓库的一个独立 [git worktree](https://git-scm.com/docs/git-worktree)，建在运行时自己的工作区目录里。同一目录上的运行并发执行，谁都不用排队，也都不会写你的工作副本。
 
 这个目录必须是至少有一次提交的 git 仓库；不满足时运行会明确报错，不会悄悄退回串行。
@@ -157,7 +159,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 </Accordion>
 <Accordion title="不会静默丢东西" id="nothing-is-silently-lost">
 
-在 worktree 运行期间，受跟踪的运行时指令文件（如 `CLAUDE.md` 或 `AGENTS.md`）会在任务独立的索引中标记为 `skip-worktree`，防止注入的简报进入智能体的提交，不影响你的 checkout。对该文件的正常修改会保持未提交状态，直到清理阶段恢复跟踪，再按下面的规则交付。未跟踪的运行时文件和技能目录仍需从智能体的提交中排除。
+对于仍使用文件注入的 provider 或 CLI 版本，受跟踪的运行时指令文件（如 `CLAUDE.md` 或 `AGENTS.md`）会在任务独立的索引中标记为 `skip-worktree`，防止注入的简报进入智能体的提交，不影响你的 checkout。对该文件的正常修改会保持未提交状态，直到清理阶段恢复跟踪，再按下面的规则交付。未跟踪的运行时文件和技能目录仍需从智能体的提交中排除。
 
 智能体留下的未提交改动不会随 worktree 一起删除，运行中途失败时同样如此。它们去哪里，取决于智能体这次运行有没有自己提交：
 

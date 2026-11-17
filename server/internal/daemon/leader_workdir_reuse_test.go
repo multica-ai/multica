@@ -112,6 +112,29 @@ func TestShouldReusePriorWorkdirNonLeaderRequiresProvenance(t *testing.T) {
 	}
 }
 
+func TestShouldReusePriorWorkdirWithParentTaskMarker(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws", "task", "workdir")
+	if err := os.MkdirAll(workDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeLeaderTaskMarker(t, filepath.Dir(workDir), "agent", "issue")
+	writeLeaderManagedEnvProvenance(t, workDir, "ws", "issue", "agent")
+	task := leaderReuseTestTask("task")
+	task.WorkspaceID = "ws"
+	task.AgentID = "agent"
+	task.IssueID = "issue"
+	task.PriorWorkDir = workDir
+	if _, ok := shouldReusePriorWorkdir(task, nil, root); !ok {
+		t.Fatal("parent task marker was not recognized")
+	}
+	writeLeaderTaskMarker(t, filepath.Dir(workDir), "other-agent", "issue")
+	if _, ok := shouldReusePriorWorkdir(task, nil, root); ok {
+		t.Fatal("foreign parent task marker accepted")
+	}
+}
+
 func TestShouldReusePriorWorkdirChatAcceptsMatchingConversation(t *testing.T) {
 	t.Parallel()
 

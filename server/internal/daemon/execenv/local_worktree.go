@@ -155,6 +155,8 @@ func localWorktreeConversation(params PrepareParams) (key, id string) {
 // LocalWorktree is a prepared worktree plus everything the daemon needs to
 // finalize it after the agent exits.
 type LocalWorktree struct {
+	// RuntimeSidecarHashes survives the helper boundary and sidecar cleanup.
+	RuntimeSidecarHashes map[string]string
 	// GitRoot is the user's repository root — the repo that owns the branch.
 	GitRoot string
 	// Path is the worktree root inside the env root.
@@ -293,6 +295,8 @@ func (w *LocalWorktree) UnmarshalJSON(data []byte) error {
 
 // LocalWorktreeOutcome is what a finished worktree task delivered.
 type LocalWorktreeOutcome struct {
+	RuntimeWarnings  []RuntimeContamination
+	RuntimeScanError string
 	// Branch is the branch holding the task's work, or "" when the task made
 	// no changes at all (a read-only run) — in that case the branch is deleted
 	// so it never shows up in the user's `git branch` as an empty artifact.
@@ -518,10 +522,10 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	// from the repo's COMMON git dir, so the only file that would take effect
 	// is the user's own .git/info/exclude — editing it would change what `git
 	// status` shows in the user's checkout, which is theirs, not ours. Instead
-	// the daemon runs the existing CleanupRuntimeConfig + CleanupSidecars pass
-	// over the worktree before Finalize, so the sidecars are simply gone by the
-	// time the daemon commits. ProtectRuntimeConfig separately hides tracked
-	// instruction files from commits the agent makes while the brief is present.
+	// validated Claude/Codex runtimes receive their configuration outside the
+	// checkout. Other runtimes retain CleanupRuntimeConfig + CleanupSidecars
+	// before Finalize; commits made by the agent before cleanup are checked for
+	// contamination without rewriting their history.
 
 	if logger != nil {
 		logger.Info("execenv: local worktree ready",
@@ -564,11 +568,11 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 // no way back, and a warning in the daemon log is not an acceptable substitute
 // for the user's changes. The surviving worktree stays registered in the
 // user's repo, so `git worktree list` points straight at it.
-func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, error) {
+func (w *LocalWorktree) Finalize(logger *slog.Logger) (outcome LocalWorktreeOutcome, finalErr error) {
 	if w == nil {
 		return LocalWorktreeOutcome{}, nil
 	}
-	outcome := LocalWorktreeOutcome{Branch: w.Branch}
+	outcome = LocalWorktreeOutcome{Branch: w.Branch}
 	if err := w.RestoreRuntimeConfigTracking(); err != nil {
 		outcome.Branch = ""
 		outcome.PreservedPath = w.Path
@@ -587,6 +591,22 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 			"the work is preserved in the worktree at %s", w.GitRoot, w.Branch, err, w.Path)
 	}
 	defer unlock()
+	defer func() {
+		if outcome.Branch == "" {
+			return
+		}
+		var scanErr error
+		outcome.RuntimeWarnings, scanErr = w.runtimeContamination(outcome.Branch)
+		if scanErr != nil {
+			outcome.RuntimeScanError = scanErr.Error()
+			if logger != nil {
+				logger.Warn("execenv: runtime contamination scan incomplete", "error", scanErr)
+			}
+		}
+		if len(outcome.RuntimeWarnings) > 0 && logger != nil {
+			logger.Warn("execenv: delivered branch contains runtime configuration", "branch", outcome.Branch, "affected_files", len(outcome.RuntimeWarnings))
+		}
+	}()
 
 	// Something before the commit went wrong in a way that would make the
 	// delivered branch misleading. Commit nothing and keep the worktree: the

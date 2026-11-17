@@ -2605,6 +2605,30 @@ func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestCodexNativeDeveloperInstructions(t *testing.T) {
+	t.Parallel()
+	for _, resume := range []bool{false, true} {
+		t.Run(fmt.Sprint(resume), func(t *testing.T) {
+			c, fs, _ := newTestCodexClient(t)
+			opts := ExecOptions{Cwd: "/work", DeveloperInstructions: codexRuntimeBriefCanary}
+			method := "thread/start"
+			if resume {
+				method = "thread/resume"
+				opts.ResumeSessionID = "prior"
+			}
+			wait := drainRPCScript(t, c, fs, []rpcResponse{{method: method, result: json.RawMessage(`{"thread":{"id":"thread"}}`), assertFn: func(t *testing.T, p map[string]any) {
+				if p["developerInstructions"] != codexRuntimeBriefCanary {
+					t.Errorf("native brief not sent: %v", p["developerInstructions"])
+				}
+			}}})
+			defer wait()
+			if _, _, err := c.startOrResumeThread(context.Background(), opts, slog.Default()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	t.Parallel()
 

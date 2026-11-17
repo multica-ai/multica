@@ -437,6 +437,16 @@ func TestBuildClaudeArgsIgnoresSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildClaudeArgsExternalRuntimeDirectory(t *testing.T) {
+	args := buildClaudeArgs(ExecOptions{ClaudeRuntimeDir: "/task/runtime with spaces", ExtraArgs: []string{"--add-dir", "/other"}}, slog.Default())
+	if !slices.Contains(args, "/task/runtime with spaces") {
+		t.Fatalf("missing runtime directory: %v", args)
+	}
+	if !slices.Contains(args, "/other") {
+		t.Fatalf("lost user's additional directory: %v", args)
+	}
+}
+
 func TestArgsRequestBypassPermissions(t *testing.T) {
 	t.Parallel()
 

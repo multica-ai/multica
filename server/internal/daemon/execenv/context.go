@@ -14,8 +14,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TaskContextMarkerRelPath is a non-secret marker the daemon writes under the
-// task workdir. The CLI uses it as a fallback daemon-task signal when a child
+// TaskContextMarkerRelPath is a non-secret marker under the task context root
+// (EnvRoot for native worktree delivery, otherwise WorkDir). The CLI uses it
+// as a fallback daemon-task signal when a child
 // sandbox strips all MULTICA_* env vars before invoking `multica`.
 const TaskContextMarkerRelPath = ".multica/daemon_task_context.json"
 
@@ -236,6 +237,7 @@ func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sid
 			}
 			if manifest != nil {
 				manifest.Files = append(manifest.Files, path)
+				manifest.recordHash(path, data)
 			}
 			return nil
 		}
@@ -983,6 +985,12 @@ func writeSkillFilesWithNames(skillsDir string, skills []SkillContextForEnv, man
 // non-nil, each successful write's absolute directory by skill ID, so
 // explicit invocation never has to repeat the allocator.
 func writeSkillFilesWithNamesTracked(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest, installed map[string]string) ([]string, error) {
+	return writeSkillFilesWithReservedNames(skillsDir, skills, manifest, installed)
+}
+
+// Additional discovery roots reserve names without writing into those roots.
+// Claude's --add-dir otherwise qualifies colliding skills with a directory name.
+func writeSkillFilesWithReservedNames(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest, installed map[string]string, reservedRoots ...string) ([]string, error) {
 	if err := recordMkdirAll(skillsDir, 0o755, manifest); err != nil {
 		return nil, fmt.Errorf("create skills dir: %w", err)
 	}
@@ -997,7 +1005,7 @@ func writeSkillFilesWithNamesTracked(skillsDir string, skills []SkillContextForE
 	preparedSkillNames := make([]string, len(skills))
 
 	for i, skill := range skills {
-		slug, dir, err := allocateCollisionFreeSkillDir(skillsDir, batchSlugs[i])
+		slug, dir, err := allocateCollisionFreeSkillDirAcrossRoots(skillsDir, batchSlugs[i], reservedRoots)
 		if err != nil {
 			return nil, fmt.Errorf("allocate skill dir for %q: %w", skill.Name, err)
 		}

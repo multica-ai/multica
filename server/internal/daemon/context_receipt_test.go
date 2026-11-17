@@ -169,6 +169,16 @@ func TestBuildContextReceiptLoadStates(t *testing.T) {
 			in:       contextReceiptInput{Provider: "no-such-runtime"},
 			delivery: ReceiptDeliveryNone, load: ReceiptLoadNotDelivered,
 		},
+		{
+			name:     "external Claude runtime directory",
+			in:       contextReceiptInput{Provider: "claude", RuntimeVersion: "2.1.281", RuntimeDir: filepath.Join(filepath.Dir(workDir), "runtime")},
+			delivery: ReceiptDeliveryFile, load: ReceiptLoadVerified, path: "../runtime/CLAUDE.md",
+		},
+		{
+			name:     "native Codex developer instructions",
+			in:       contextReceiptInput{Provider: "codex", InlineBrief: true},
+			delivery: ReceiptDeliveryInline, load: ReceiptLoadDelivered,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

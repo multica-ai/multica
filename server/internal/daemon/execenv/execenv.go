@@ -55,10 +55,11 @@ type PrepareParams struct {
 	// Profile is the daemon's profile name (empty = default). It namespaces the
 	// per-issue Codex session store so a second profile-daemon sharing the same
 	// ~/.codex cannot see or GC this daemon's stores (MUL-4424).
-	Profile      string
-	Provider     string // agent provider (determines runtime config and skill injection paths)
-	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	Profile        string
+	Provider       string // agent provider (determines runtime config and skill injection paths)
+	CodexVersion   string // detected Codex CLI version (only used when Provider == "codex")
+	RuntimeVersion string // version paired with the executable used for this task
+	OpenclawBin    string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Cursor, OpenClaw, and OMP consume it here;
@@ -166,6 +167,7 @@ type TaskContextForEnv struct {
 	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
 	ProjectArchived               bool                    // project is archived; rendered as a note in the Project Context section
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
+	ProjectResourcesPath          string                  // explicit task-local path when resources live outside WorkDir
 	ChatSessionID                 string                  // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
 	// "feishu", "wecom"); empty for a web/mobile chat. It names the surface in
@@ -276,6 +278,9 @@ type SkillFileContextForEnv struct {
 
 // Environment represents a prepared, isolated execution environment.
 type Environment struct {
+	// RuntimeDir selects native delivery outside a local resource's worktree.
+	// Exported so the preparation helper and daemon use the same layout.
+	RuntimeDir string
 	// SkillDirectories records successful writes by skill ID, including any
 	// filesystem collision suffix. It crosses the preparation-helper JSON
 	// boundary like PreparedSkillNames.
@@ -623,7 +628,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}()
 	}
 
-	preparedSkillNames, err := writeContextFilesTracked(workDir, params.Provider, params.Task, manifest, env.SkillDirectories)
+	if err := env.selectRuntimeDelivery(params.Provider, params.RuntimeVersion, logger); err != nil {
+		return nil, err
+	}
+	preparedSkillNames, err := env.prepareRuntimeContext(params.Provider, params.Task, manifest)
 	if err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
@@ -665,6 +673,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
 		}
 		env.CodexHome = codexHome
+		if env.RuntimeDir != "" {
+			// Preserve Codex's own override/fallback discovery order in the
+			// isolated home; runtime instructions use a separate channel.
+			for _, name := range []string{"AGENTS.md", "AGENTS.override.md"} {
+				if err := syncCopiedFile(filepath.Join(resolveSharedCodexHome(), name), filepath.Join(codexHome, name)); err != nil {
+					return nil, fmt.Errorf("copy global Codex instructions: %w", err)
+				}
+			}
+		}
 	}
 
 	if params.Provider == "claude" {
@@ -744,6 +761,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: write sidecar manifest: %w", err)
 		}
 		logger.Warn("execenv: write sidecar manifest failed (non-fatal)", "error", err)
+	}
+	if localWorktree != nil {
+		localWorktree.RuntimeSidecarHashes = manifest.Hashes
 	}
 
 	// For OpenClaw, synthesize a per-task config that pins workspace to

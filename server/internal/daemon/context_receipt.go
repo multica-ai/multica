@@ -8,11 +8,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // Context receipt (MUL-9013): a per-run record of which context sources this
@@ -135,6 +137,7 @@ type contextReceiptInput struct {
 	CustomRuntime  bool
 	Model          string
 	WorkDir        string
+	RuntimeDir     string
 	Prompt         string
 	RuntimeBrief   string
 	InlineBrief    bool
@@ -164,6 +167,16 @@ func buildContextReceipt(in contextReceiptInput) ContextReceipt {
 
 	configPath := execenv.RuntimeConfigRelPath(in.WorkDir, in.Provider)
 	fileLoad, fileVerifiedAt := contextFileLoadState(in.Provider, in.RuntimeVersion)
+	if in.RuntimeDir != "" && in.Provider == "claude" {
+		if rel, err := filepath.Rel(in.WorkDir, filepath.Join(in.RuntimeDir, "CLAUDE.md")); err == nil {
+			configPath = filepath.ToSlash(rel)
+		}
+		fileVerifiedAt = agent.ExternalRuntimeConfigMinVersions["claude"]
+		fileLoad = ReceiptLoadVerifiedOtherVersion
+		if receiptVersionPattern.FindString(in.RuntimeVersion) == fileVerifiedAt {
+			fileLoad = ReceiptLoadVerified
+		}
+	}
 	if in.CustomRuntime {
 		// A vendor CLI probe does not establish how an arbitrary command
 		// speaking the same protocol discovers its instruction files.

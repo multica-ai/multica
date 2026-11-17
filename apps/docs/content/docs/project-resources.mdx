@@ -99,6 +99,8 @@ A plain non-git directory can only use this mode: worktree mode covers git repos
 </Tab>
 <Tab value="worktree (Parallel)" id="worktree">
 
+With built-in Claude Code 2.1.281+ or Codex 0.169.0+, Multica keeps runtime instructions, skills, and task metadata outside the checkout. Your own edits to `CLAUDE.md` and `AGENTS.md` remain ordinary Git changes. Older or unknown CLI versions retain file injection and log a warning. Other providers and `in_place` keep their existing behavior. At finalization, Multica checks every commit made during the run for runtime content and warns if it finds any; it does not rewrite history.
+
 Each run gets its own [git worktree](https://git-scm.com/docs/git-worktree) of your repo, created inside the runtime's own workspace directory. Runs on the same directory run concurrently without waiting, and none of them write to your working copy.
 
 The directory must be a git repository with at least one commit; if it is not, runs fail with an explicit error rather than quietly falling back to serial execution.
@@ -156,7 +158,7 @@ A run that could not record its branch — it failed before finishing, the recor
 </Accordion>
 <Accordion title="Nothing is silently dropped" id="nothing-is-silently-lost">
 
-During a worktree run, a tracked runtime instruction file such as `CLAUDE.md` or `AGENTS.md` is marked `skip-worktree` in the task's private index. This keeps the injected brief out of the agent's commits without changing your checkout. Intentional edits to that file remain uncommitted until cleanup restores normal tracking: they follow the delivery rules below. Untracked runtime files and skill directories still need to be excluded from the agent's commits.
+For providers or CLI versions that still use file injection, a tracked runtime instruction file such as `CLAUDE.md` or `AGENTS.md` is marked `skip-worktree` in the task's private index. This keeps the injected brief out of the agent's commits without changing your checkout. Intentional edits to that file remain uncommitted until cleanup restores normal tracking: they follow the delivery rules below. Untracked runtime files and skill directories still need to be excluded from the agent's commits.
 
 Nothing the agent leaves uncommitted is deleted with the worktree, including when the run fails partway. Where it goes depends on whether the agent committed during the run:
 

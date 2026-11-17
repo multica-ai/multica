@@ -531,7 +531,11 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 		b.WriteString("\n\n")
 	}
 	if len(ctx.ProjectResources) > 0 {
-		b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
+		path := ctx.ProjectResourcesPath
+		if path == "" {
+			path = ".multica/project/resources.json"
+		}
+		fmt.Fprintf(b, "Project resources (also written to `%s`):\n\n", path)
 		for _, r := range ctx.ProjectResources {
 			fmt.Fprintf(b, "- %s\n", formatProjectResource(r))
 		}

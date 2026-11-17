@@ -7340,7 +7340,10 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 		return "", false
 	}
 
-	data, err := os.ReadFile(filepath.Join(workdir, execenv.TaskContextMarkerRelPath))
+	data, err := os.ReadFile(filepath.Join(filepath.Dir(workdir), execenv.TaskContextMarkerRelPath))
+	if errors.Is(err, os.ErrNotExist) {
+		data, err = os.ReadFile(filepath.Join(workdir, execenv.TaskContextMarkerRelPath))
+	}
 	if err != nil {
 		return "", false
 	}
@@ -8702,6 +8705,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// it implies; preparation must not try to take it again.
 			EnvRootPreclaimed:     true,
 			Provider:              provider,
+			RuntimeVersion:        resolvedVersion,
 			CodexVersion:          codexVersion,
 			OpenclawBin:           openclawBin,
 			McpConfig:             effectiveMcpConfig,
@@ -8716,6 +8720,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			ReasonixEnv:           reasonixEnv,
 			CodexCustomArgs:       codexSandboxArgs,
 			Task:                  taskCtx,
+		}
+		if usesCustomProfileCommand {
+			prepParams.RuntimeVersion = ""
 		}
 		if localAssignment.UsesWorktree() {
 			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
@@ -8819,6 +8826,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				taskResult.EnvRoot = env.RootDir
 			}
 			outcome, finalizeErr := env.LocalWorktree.Finalize(taskLog)
+			if len(outcome.RuntimeWarnings) > 0 {
+				var warning strings.Builder
+				warning.WriteString("\n\nWarning: the delivered branch contains Multica runtime configuration in its commit history:")
+				for _, hit := range outcome.RuntimeWarnings {
+					fmt.Fprintf(&warning, "\n- %s: %s", hit.Commit, hit.Path)
+				}
+				taskResult.Comment += warning.String()
+			}
+			if outcome.RuntimeScanError != "" {
+				taskResult.Comment += "\n\nWarning: runtime contamination detection could not complete: " + outcome.RuntimeScanError
+			}
 			if outcome.Branch != "" {
 				taskResult.BranchName = outcome.Branch
 			}
@@ -8894,7 +8912,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				return // Preserve files that an unconfirmed process may still use.
 			}
 			var cleanupErr error
-			if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {
+			if cerr := env.CleanupRuntimeConfig(provider); cerr != nil {
 				cleanupErr = cerr
 				d.logger.Warn("execenv: cleanup runtime config failed", "error", cerr)
 			}
@@ -9022,13 +9040,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// Build the runtime brief and inject it into the provider-specific
 	// instruction file when supported.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	runtimeBrief, err := env.InjectRuntimeConfig(provider, taskCtx)
 	runtimeBriefWritten := err == nil
 	if err != nil {
+		if env.RuntimeDir != "" {
+			return TaskResult{}, fmt.Errorf("prepare external runtime instructions: %w", err)
+		}
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
 	if env.LocalWorktree != nil {
-		if err := env.LocalWorktree.ProtectRuntimeConfig(provider); err != nil {
+		if err := env.ProtectRuntimeConfig(provider); err != nil {
 			return TaskResult{}, fmt.Errorf("protect worktree runtime config: %w", err)
 		}
 	}
@@ -9147,6 +9168,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	if provider == "claude" && env.RuntimeDir != "" {
+		agentEnv["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] = "1"
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
@@ -9226,7 +9250,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}()
 	retiredSessionID = gateOpenCodeResumeToSaneClock(ctx, &task, &taskCtx, provider, backendConfig, env.WorkDir, effectiveMcpConfig, taskLog)
 	if retiredSessionID != "" {
-		if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
+		if freshBrief, briefErr := env.InjectRuntimeConfig(provider, taskCtx); briefErr != nil {
 			return TaskResult{}, fmt.Errorf("prepare fresh OpenCode session after clock check: %w", briefErr)
 		} else {
 			runtimeBrief = freshBrief
@@ -9346,6 +9370,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
+	if env.RuntimeDir != "" {
+		if provider == "claude" {
+			execOpts.ClaudeRuntimeDir = env.RuntimeDir
+		}
+		if provider == "codex" {
+			execOpts.DeveloperInstructions = runtimeBrief
+		}
+	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
 	//   - openclaw is pinned to the task workdir via the per-task config we
@@ -9426,9 +9458,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomRuntime:        usesCustomProfileCommand,
 		Model:                model,
 		WorkDir:              env.WorkDir,
+		RuntimeDir:           env.RuntimeDir,
 		Prompt:               prompt,
 		RuntimeBrief:         runtimeBrief,
-		InlineBrief:          execOpts.SystemPrompt != "",
+		InlineBrief:          execOpts.SystemPrompt != "" || execOpts.DeveloperInstructions != "",
 		BriefWritten:         runtimeBriefWritten,
 		ResumedSession:       execOpts.ResumeSessionID != "",
 		MCPConfig:            mcpConfig,
@@ -9523,12 +9556,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		execOpts.ResumeContinuityNotice = ""
 		taskCtx.PriorSessionResumed = false
 		runtimeBriefWritten = false
-		freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+		freshBrief, briefErr := env.InjectRuntimeConfig(provider, taskCtx)
 		if briefErr != nil {
+			if env.RuntimeDir != "" {
+				return TaskResult{}, fmt.Errorf("refresh external runtime instructions: %w", briefErr)
+			}
 			taskLog.Warn("execenv: re-inject cold runtime config for fresh retry failed (non-fatal)", "error", briefErr)
 		} else {
 			runtimeBrief = freshBrief
 			runtimeBriefWritten = true
+			if env.RuntimeDir != "" && provider == "codex" {
+				execOpts.DeveloperInstructions = runtimeBrief
+			}
 			if providerNeedsInlineSystemPrompt(provider) {
 				execOpts.SystemPrompt = runtimeBrief
 			}
@@ -9538,10 +9577,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 		receiptInput.Prompt = freshPrompt
 		receiptInput.RuntimeBrief = freshBrief
-		receiptInput.InlineBrief = execOpts.SystemPrompt != ""
-		if receiptInput.InlineBrief {
+		receiptInput.InlineBrief = execOpts.SystemPrompt != "" || execOpts.DeveloperInstructions != ""
+		if execOpts.SystemPrompt != "" {
 			// A failed file rewrite leaves the prior inline payload in use.
 			receiptInput.RuntimeBrief = execOpts.SystemPrompt
+		}
+		if execOpts.DeveloperInstructions != "" {
+			receiptInput.RuntimeBrief = execOpts.DeveloperInstructions
 		}
 		receiptInput.BriefWritten = runtimeBriefWritten
 		receiptInput.ResumedSession = false

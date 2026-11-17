@@ -99,6 +99,8 @@ Un simple répertoire non git ne peut utiliser que ce mode : le mode worktree es
 </Tab>
 <Tab value="worktree (Parallèle)" id="worktree">
 
+Avec Claude Code intégré 2.1.281+ ou Codex 0.169.0+, Multica place les instructions du runtime, les skills et les métadonnées de la tâche hors du checkout. Vos modifications de `CLAUDE.md` et `AGENTS.md` restent des changements Git ordinaires. Les CLI plus anciens ou de version inconnue conservent l'injection dans les fichiers et consignent un avertissement. Les autres fournisseurs et `in_place` gardent leur comportement actuel. À la fin, Multica examine chaque commit créé pendant l'exécution et signale tout contenu du runtime, sans réécrire l'historique.
+
 Chaque exécution obtient son propre [worktree git](https://git-scm.com/docs/git-worktree) de votre dépôt, créé dans le répertoire de travail propre au runtime. Les exécutions sur un même répertoire ont lieu simultanément, aucune n'attend, et aucune n'écrit dans votre copie de travail.
 
 Le répertoire doit être un dépôt git contenant au moins un commit ; sinon, les exécutions échouent avec une erreur explicite au lieu de revenir silencieusement à une exécution en série.
@@ -156,7 +158,7 @@ Une exécution qui n'a pas pu enregistrer sa branche, par exemple parce qu'elle 
 </Accordion>
 <Accordion title="Rien n'est perdu en silence" id="nothing-is-silently-lost">
 
-Pendant une exécution en worktree, un fichier d'instructions du runtime suivi par Git, comme `CLAUDE.md` ou `AGENTS.md`, est marqué `skip-worktree` dans l'index privé de la tâche. Le brief injecté reste ainsi hors des commits de l'agent, sans modifier votre checkout. Les modifications intentionnelles de ce fichier restent non commitées jusqu'au rétablissement du suivi lors du nettoyage, puis suivent les règles de livraison ci-dessous. Les fichiers du runtime non suivis et les répertoires de compétences doivent toujours être exclus des commits de l'agent.
+Pour les fournisseurs ou versions de CLI qui utilisent encore l'injection dans les fichiers, un fichier d'instructions du runtime suivi par Git, comme `CLAUDE.md` ou `AGENTS.md`, est marqué `skip-worktree` dans l'index privé de la tâche. Le brief injecté reste ainsi hors des commits de l'agent, sans modifier votre checkout. Les modifications intentionnelles de ce fichier restent non commitées jusqu'au rétablissement du suivi lors du nettoyage, puis suivent les règles de livraison ci-dessous. Les fichiers du runtime non suivis et les répertoires de compétences doivent toujours être exclus des commits de l'agent.
 
 Rien de ce que l'agent laisse non commité n'est supprimé avec le worktree, y compris lorsque l'exécution échoue en cours de route. Sa destination dépend de ce que l'agent a fait pendant l'exécution :
 

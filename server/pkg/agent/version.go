@@ -39,6 +39,26 @@ var MinVersions = map[string]string{
 	"opencode": "1.1.54",
 }
 
+// ExternalRuntimeConfigMinVersions select the external-delivery CLI channels,
+// independently of registration requirements. Older/unknown CLIs keep file delivery.
+var ExternalRuntimeConfigMinVersions = map[string]string{
+	"claude": "2.1.281",
+	"codex":  "0.169.0",
+}
+
+func SupportsExternalRuntimeConfig(provider, version string) bool {
+	minimum, ok := ExternalRuntimeConfigMinVersions[provider]
+	if !ok {
+		return false
+	}
+	v, err := parseSemver(version)
+	if err != nil {
+		return false
+	}
+	floor, err := parseSemver(minimum)
+	return err == nil && !v.lessThan(floor)
+}
+
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against
 // the multica CLI version reported by the daemon at registration time. The
 // quick-create prompt that the agent runs depends on CLI behavior introduced

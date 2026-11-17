@@ -34,6 +34,11 @@ type ExecOptions struct {
 	// PiSkillPaths contains only the SKILL.md files written for this task by
 	// the daemon. Pi loads them explicitly without trusting other project files.
 	PiSkillPaths []string
+	// ClaudeRuntimeDir supplies task instructions and skills outside the checkout.
+	ClaudeRuntimeDir string
+	// DeveloperInstructions is the Codex app-server instruction channel. It is
+	// populated only when the daemon did not inject the brief into AGENTS.md.
+	DeveloperInstructions string
 	// SystemPrompt carries the Multica runtime brief for the few providers
 	// that cannot pick it up from disk. The daemon leaves it empty for every
 	// other provider (see daemon.providerNeedsInlineSystemPrompt), because the
