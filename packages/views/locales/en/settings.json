@@ -850,7 +850,7 @@
     },
     "others_issues": {
       "label": "Other people's issues",
-      "description": "Issues assigned to someone else or their agent, that you only follow because you created, commented on or were mentioned in them. Key updates are @mentions, replies in threads you joined, and statuses that need a person, like in review, blocked or done.",
+      "description": "Issues assigned to someone else or their agent, that you only follow because you created, commented on or were mentioned in them. Key updates are @mentions, replies in threads you joined, and, with Status changes on, statuses that need a person, like in review, blocked or done.",
       "key_updates": "Key updates only",
       "all": "All activity"
     },

@@ -558,7 +558,7 @@
     "subscribe": "Subscribe",
     "unsubscribe": "Unsubscribe",
     "delegated_subscription_badge": "Watching via agent",
-    "delegated_subscription_hint": "Your agent created this issue on your behalf, so you're subscribed to it. You'll get notified when it needs review, finishes, or gets stuck.",
+    "delegated_subscription_hint": "Your agent created this issue on your behalf, so you're subscribed to it. With Status changes on, you'll get notified when it needs review, finishes, or gets stuck.",
     "key_updates_subscription_badge": "Key updates only",
     "key_updates_subscription_hint": "This issue is someone else's, and you follow it because you created, commented on or were mentioned in it. You'll hear about @mentions, replies in your threads, and, with Status changes on, when it needs review, gets stuck or finishes.",
     "key_updates_follow_all": "Get all activity",
