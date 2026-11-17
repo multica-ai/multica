@@ -17,7 +17,7 @@ The client reads:
 
 - `schema_version`: only version 1 is accepted.
 - `policy_revision`: the effective-instruction generation, currently fixed at
-  `3` by Cloud and not deployment configuration. Cloud advances it when the
+  `4` by Cloud and not deployment configuration. Cloud advances it when the
   meaning or set of actionable instructions changes, including additive
   instructions; `schema_version` changes only for incompatible wire parsing.
 - `subscription_version`: the workspace's monotonic subscription revision. A
@@ -39,6 +39,12 @@ The client reads:
   workspace notice for the first rejected execution in the Cloud-defined quota
   period. A malformed notification policy is ignored without invalidating an
   otherwise valid enforcement gate.
+- `features`: paid-feature restrictions, one `{"action": ...}` per feature
+  (revision 4). See [Paid features](#paid-features). Each feature is parsed on
+  its own, after the rest of the policy: a missing, unknown, or malformed
+  feature (including `features` of the wrong JSON type) falls back to `off`
+  for that feature only, with reason `feature_missing` or `feature_invalid`,
+  and never invalidates the gates.
 
 No deployment order is required for the optional notification policy. The
 consumer treats a missing policy as notices-disabled while continuing to
@@ -47,6 +53,10 @@ enforce the quota.
 Deploy this consumer before Cloud policy revision 3, which is the first to send
 `observe`. A consumer released before revision 3 rejects `observe` as an
 unknown action and fails the whole policy open to `off`.
+
+Revision 4 (`features`) is safe in either order: an older consumer ignores
+`features`, and this consumer treats a policy without it as every feature
+`off`.
 
 Responses tolerate unknown JSON fields and gates for additive compatibility.
 Unknown schema/action, malformed fields, a missing `autopilot_runs` gate, HTTP
@@ -110,3 +120,50 @@ structured localization; in-app quota views localize from `details`.
 
 Future consumers should depend on the small `Provider` interface. Tests can use
 `server/internal/entitlement/entitlementtest.Stub` without Cloud.
+
+## Paid features
+
+A paid feature is restricted for a workspace whose plan does not include it.
+Cloud decides which workspaces that is and sends one action per feature; this
+consumer never sees plan names. `FeatureProvider` is the only interface
+callers use, so a self-hosted license provider can replace the Cloud client
+without changing them. A nil provider (no `MULTICA_CLOUD_URL`) leaves every
+feature usable.
+
+The rule is the same for every feature:
+
+| Write | `off` | `observe` | `enforce` |
+| --- | --- | --- | --- |
+| Add to the configuration (create, add a person, widen) | allowed | allowed, recorded | rejected `403 feature_locked`, recorded |
+| Reduce or remove it (remove a person, make public, delete) | allowed | allowed | allowed |
+| Edit without changing it (rename, same-value write-back) | allowed | allowed | allowed |
+
+Reads never consult a feature. Existing configuration keeps working exactly as
+configured, including the access control it defines: a private project stays
+visible only to its members after a downgrade. Each feature classifies its own
+writes; the handler entry point is `requireFeatureAddition`
+(`server/internal/handler/paid_feature.go`), called after the ordinary
+permission checks, so a caller refused by those gets the ordinary error.
+
+| Feature | Restricted additions | Always allowed |
+| --- | --- | --- |
+| `private_projects` | create a private project; make a project private; add someone who is not a member yet, directly or by making them the lead | remove members; make it workspace-visible; delete or archive; set the lead to an existing member, an agent or nobody; other fields; the owner's recovery join |
+
+A stale cached `enforce` is downgraded to `observe` with reason `stale`, then
+to `off`, exactly like gates, so a Cloud outage admits additions rather than
+blocking them. Cloud failure before any policy was cached is `off`.
+
+Attempts are aggregated per workspace, feature, and UTC day in
+`entitlement_feature_attempt` (`service.EntitlementFeatureAttempts`):
+`observed_count` (admitted under a configured observe), `degraded_count`
+(admitted only because a stale enforce was downgraded), and `enforced_count`
+(rejected), with the latest operation, action, reason, policy and subscription
+revisions, and first/last attempt times. Admitted attempts are recorded after
+the write commits, rejections after authorization; recording is best-effort
+and never changes the result. Attempts measure demand, not existing
+configuration: count existing private projects from the product tables.
+
+Clients read `GET /api/workspaces/{id}/features`, which returns only
+`available` (off or observe) or `locked` (enforce) per feature, and render
+read-only and upgrade states from it. The server enforces on every write
+regardless.
