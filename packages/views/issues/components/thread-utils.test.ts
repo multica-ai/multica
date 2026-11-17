@@ -156,18 +156,27 @@ describe("latestUnresolvedThreadId", () => {
       activity("activity", "2026-11-17T15:00:00Z"),
       comment("older", "2026-11-17T11:00:00Z", null),
     ];
-    expect(latestUnresolvedThreadId(entries)).toBe("newest");
+    expect(latestUnresolvedThreadId(entries, new Map())).toBe("newest");
   });
 
   it("keeps resolved-thread bars outside the starting-fold preference", () => {
     const resolved = { ...comment("resolved", "2026-11-17T13:00:00Z", null), resolved_at: "2026-11-17T14:00:00Z" };
-    expect(latestUnresolvedThreadId([comment("open", "2026-11-17T12:00:00Z", null), resolved])).toBe("open");
-    expect(latestUnresolvedThreadId([resolved])).toBeNull();
-    expect(latestUnresolvedThreadId([])).toBeNull();
+    expect(latestUnresolvedThreadId([comment("open", "2026-11-17T12:00:00Z", null), resolved], new Map())).toBe("open");
+    expect(latestUnresolvedThreadId([resolved], new Map())).toBeNull();
+    expect(latestUnresolvedThreadId([], new Map())).toBeNull();
+  });
+
+  it("excludes a root resolved through a nested reply from the newest exemption", () => {
+    const open = comment("open", "2026-11-17T12:00:00Z", null);
+    const resolved = comment("reply-resolved", "2026-11-17T13:00:00Z", null);
+    const reply = comment("reply", "2026-11-17T14:00:00Z", resolved.id);
+    const resolution = { ...comment("nested-resolution", "2026-11-17T15:00:00Z", reply.id), resolved_at: "2026-11-17T16:00:00Z" };
+    const replies = new Map([[resolved.id, [reply, resolution]]]);
+    expect(latestUnresolvedThreadId([open, resolved], replies)).toBe(open.id);
   });
 
   it("breaks equal creation times by root id", () => {
     const when = "2026-11-17T12:00:00Z";
-    expect(latestUnresolvedThreadId([comment("z", when, null), comment("a", when, null)])).toBe("z");
+    expect(latestUnresolvedThreadId([comment("z", when, null), comment("a", when, null)], new Map())).toBe("z");
   });
 });

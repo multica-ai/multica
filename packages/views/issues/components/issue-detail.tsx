@@ -1865,8 +1865,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // this, every WS event (including reactions, edits, AI streaming on an
   // unrelated thread) hands every card a brand-new prop reference and forces
   // every thread subtree to re-render in lockstep.
-  const commentThreadDefault = useAppearanceStore((state) => state.commentThreadDefault);
-  const newestCommentThreadId = useMemo(() => latestUnresolvedThreadId(displayTimeline), [displayTimeline]);
   const prevThreadRepliesRef = useRef<Map<string, TimelineEntry[]>>(new Map());
   const timelineView = useMemo(() => {
     // Group entries: top-level = activities + root comments; replies are
@@ -1975,6 +1973,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     () => flattenGroups(timelineView.groups, expandedResolved),
     [timelineView.groups, expandedResolved],
   );
+  const commentThreadDefault = useAppearanceStore((state) => state.commentThreadDefault);
+  const newestCommentThreadId = useMemo(() => latestUnresolvedThreadId(
+    items.flatMap((item) => item.kind === "comment" ? [item.entry] : []),
+    timelineView.threadReplies,
+  ), [items, timelineView.threadReplies]);
 
   // In-page find (Cmd/Ctrl+F). `items.length` is the content signal that
   // triggers a match recompute when comments are added/removed; text edits
@@ -3548,16 +3551,18 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     }
     if (item.kind === "comment") {
       const isResolved = !!item.entry.resolved_at;
+      const replies = timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES;
+      const hasResolution = deriveThreadResolution(item.entry, replies).kind !== "none";
       return (
         <div className="pb-3" id={`comment-${item.id}`}>
           <CommentCard
             issueId={id}
-            defaultCollapsed={!isResolved && !find.open && (commentThreadDefault === "collapsed" || (commentThreadDefault === "latest" && item.id !== newestCommentThreadId))}
+            defaultCollapsed={!hasResolution && !find.open && (commentThreadDefault === "collapsed" || (commentThreadDefault === "latest" && item.id !== newestCommentThreadId))}
             replyScrollParent={isFlatTimeline ? null : scrollContainerEl}
             runs={commentRuns.get(item.id) ?? EMPTY_COMMENT_RUNS}
             enteringRunIds={enteringRunIds}
             entry={item.entry}
-            replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
+            replies={replies}
             currentUserId={user?.id}
             canModerate={canModerateComments}
             onReply={submitReply}

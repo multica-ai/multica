@@ -92,9 +92,13 @@ export function rootCommentIds(entries: readonly TimelineEntry[]): string[] {
     .map((e) => e.id);
 }
 
-/** Resolved roots keep their independent bar/expansion behavior. */
-export function latestUnresolvedThreadId(entries: readonly TimelineEntry[]): string | null {
-  const roots = entries.filter((entry) => entry.type === "comment" && !entry.parent_id && !entry.resolved_at);
+/** Resolved threads keep their independent bar/expansion behavior. */
+export function latestUnresolvedThreadId(
+  entries: readonly TimelineEntry[],
+  repliesByRoot: ReadonlyMap<string, TimelineEntry[]>,
+): string | null {
+  const roots = entries.filter((entry) => entry.type === "comment" && !entry.parent_id &&
+    deriveThreadResolution(entry, repliesByRoot.get(entry.id) ?? []).kind === "none");
   return sortTimelineEntriesAsc(roots).at(-1)?.id ?? null;
 }
 

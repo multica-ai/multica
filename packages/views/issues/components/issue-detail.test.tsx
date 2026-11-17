@@ -3209,6 +3209,19 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
+  it("keeps a reply resolution visible under a collapsed starting default", async () => {
+    useAppearanceStore.setState({ commentThreadDefault: "collapsed" });
+    const root = mockTimeline[0]!;
+    const resolution = { ...root, id: "resolution", parent_id: root.id, content: "Resolution remains visible",
+      created_at: "2026-01-18T00:00:00Z", resolved_at: "2026-01-19T00:00:00Z" };
+    mockApiObj.listTimeline.mockResolvedValue([root, resolution]);
+    const { container } = renderIssueDetail();
+    await screen.findByRole("button", { name: "Started working on this (resolved)" });
+    expect(container.querySelector('[data-comment-content="resolution"]')).not.toBeNull();
+    useCommentCollapseStore.getState().setCollapsed("issue-1", root.id, true);
+    await waitFor(() => expect(container.querySelector('[data-comment-content="resolution"]')).toBeNull());
+  });
+
   it("marks a reply-resolved thread as resolved on the quick-jump rail", async () => {
     // A resolution on a REPLY leaves the thread expanded, so it flattens to a
     // plain `comment` item, not a `resolved-bar`. The rail must still read it
@@ -4431,7 +4444,8 @@ describe("IssueDetail (shared)", () => {
   // reply's own time. It used to render in the run's ENQUEUE slot while the
   // card showed the reply time, pushing it above every comment written while
   // the run worked. Ordering matrix lives in comment-runs.test.ts.
-  it("renders an assignment run's reply after the comments it followed", async () => {
+  it.each(["expanded", "latest"] as const)("renders an assignment run's reply after the comments it followed with %s defaults", async (commentThreadDefault) => {
+    useAppearanceStore.setState({ commentThreadDefault });
     mockApiObj.listTimeline.mockResolvedValue([
       {
         type: "comment", id: "midway", actor_type: "member", actor_id: "user-1",
@@ -4458,6 +4472,7 @@ describe("IssueDetail (shared)", () => {
 
     const rendered = Array.from(container.querySelectorAll("[id^='comment-']")).map((el) => el.id);
     expect(rendered.indexOf("comment-midway")).toBeLessThan(rendered.indexOf("comment-run-reply"));
+    expect(container.querySelector('[data-comment-content="midway"]')).not.toBeNull();
   });
 
   // MUL-7548 regression: a comment-triggered run that posts several comments

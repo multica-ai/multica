@@ -53,7 +53,14 @@ test.describe("Comment thread starting preference", () => {
     const body = (number: number) => page.locator(`[data-comment-content="${rootIds[number - 1]}"]`);
     await expect(page.getByRole("button", { name: "Expand thread", exact: true })).toHaveCount(3);
     await expect(body(1)).toBeHidden();
-    await page.getByRole("button", { name: "Expand thread", exact: true }).first().press("Enter");
+    const firstRoot = page.locator(`#comment-${rootIds[0]}`);
+    await page.locator("[data-tab-scroll-root]").hover();
+    await page.mouse.wheel(0, -1200);
+    await firstRoot.getByRole("button", { name: "Expand thread", exact: true }).click();
+    await expect(body(1)).toBeVisible();
+    await firstRoot.getByRole("button", { name: "Collapse thread", exact: true }).press("Enter");
+    await expect(body(1)).toBeHidden();
+    await firstRoot.getByRole("button", { name: "Expand thread", exact: true }).press("Enter");
     await expect(body(1)).toBeVisible();
     await page.reload();
     await expect(body(1)).toBeVisible();
