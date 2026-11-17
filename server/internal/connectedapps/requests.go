@@ -33,6 +33,7 @@ const (
 	NotifActionReminder   = "app_action_reminder"
 	NotifConnectRequested = "app_connect_requested"
 	NotifActionResult     = "app_action_result"
+	NotifTeamRequested    = "app_team_requested"
 )
 
 // Request kinds.
@@ -96,7 +97,16 @@ func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID p
 		s.withdraw(ctx, req)
 		return db.AppActionRequest{}, ErrNoLongerAllowed
 	}
+	addsApp := false
 	if req.Kind == KindConnect {
+		if _, has := s.agentApp(ctx, req.AgentID, req.ToolkitSlug); !has {
+			if req.AccountScope != ScopePersonal || !s.mayManage(ctx, req.WorkspaceID, req.AgentID, actorID) ||
+				!s.Catalog(ctx, workspaceID).Allows(req.ToolkitSlug) {
+				s.withdraw(ctx, req)
+				return db.AppActionRequest{}, ErrCannotAddApp
+			}
+			addsApp = true
+		}
 		if _, err := s.resolveAccount(ctx, workspaceID, actorID, req.ToolkitSlug, req.AccountScope); err != nil {
 			return db.AppActionRequest{}, ErrAccountMissing
 		}
@@ -122,10 +132,28 @@ func (s *Service) Approve(ctx context.Context, workspaceID, actorID, requestID p
 		return db.AppActionRequest{}, err
 	}
 	if decided.Kind == KindConnect {
+		note := fmt.Sprintf("The %s account you asked for (request %s) is now connected. Continue the task and use the app.",
+			appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID))
+		if addsApp {
+			if err := s.addPersonalApp(ctx, decided, actorID); err != nil {
+				slog.Warn("connectedapps: add app on approval failed", "request_id", util.UUIDToString(decided.ID), "error", err)
+				if row, serr := s.q.SetAppActionRequestOutcome(ctx, db.SetAppActionRequestOutcomeParams{
+					ID: decided.ID, WorkspaceID: decided.WorkspaceID, Status: "failed",
+					Error: pgtype.Text{String: "the app could not be added to the agent", Valid: true},
+				}); serr == nil {
+					decided = row
+				}
+				s.publishChange(decided)
+				s.resume(ctx, decided, actorID, fmt.Sprintf(
+					"The person approved adding %s to you (request %s), but adding it failed. Continue without it and explain in your reply.",
+					appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID)))
+				return decided, nil
+			}
+			note = fmt.Sprintf("The person added %s to your apps and connected their account (request %s). Continue the task and use the app.",
+				appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID))
+		}
 		s.publishChange(decided)
-		s.resume(ctx, decided, actorID, fmt.Sprintf(
-			"The %s account you asked for (request %s) is now connected. Continue the task and use the app.",
-			appLabel(decided.ToolkitSlug), util.UUIDToString(decided.ID)))
+		s.resume(ctx, decided, actorID, note)
 		return decided, nil
 	}
 
@@ -148,7 +176,7 @@ func (s *Service) ResolveConnectRequests(ctx context.Context, userID pgtype.UUID
 	}
 	for _, r := range rows {
 		if _, err := s.Approve(ctx, r.WorkspaceID, userID, r.ID, nil); err != nil &&
-			!errors.Is(err, ErrNotPending) && !errors.Is(err, ErrNoLongerAllowed) {
+			!errors.Is(err, ErrNotPending) && !errors.Is(err, ErrNoLongerAllowed) && !errors.Is(err, ErrCannotAddApp) {
 			slog.Warn("connectedapps: resolve connect request failed", "request_id", util.UUIDToString(r.ID), "error", err)
 		}
 	}
@@ -307,6 +335,53 @@ func (s *Service) agentApp(ctx context.Context, agentID pgtype.UUID, slug string
 	return db.AgentApp{}, false
 }
 
+// addPersonalApp attaches the requested app to the agent through the personal
+// account of whoever triggers it, keeping the legacy allowlist in step. An
+// app attached meanwhile keeps its account and level.
+func (s *Service) addPersonalApp(ctx context.Context, req db.AppActionRequest, actorID pgtype.UUID) error {
+	if s.tx == nil {
+		return errors.New("connectedapps: no transaction starter configured")
+	}
+	agent, err := s.q.GetAgent(ctx, req.AgentID)
+	if err != nil {
+		return err
+	}
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.q.WithTx(tx)
+	apps, err := qtx.ListAgentApps(ctx, agent.ID)
+	if err != nil {
+		return err
+	}
+	slug := NormalizeSlug(req.ToolkitSlug)
+	slugs := make([]string, 0, len(apps)+1)
+	has := false
+	for _, app := range apps {
+		slugs = append(slugs, app.ToolkitSlug)
+		has = has || NormalizeSlug(app.ToolkitSlug) == slug
+	}
+	if !has {
+		if _, err := qtx.UpsertAgentApp(ctx, db.UpsertAgentAppParams{
+			WorkspaceID: agent.WorkspaceID, AgentID: agent.ID, ToolkitSlug: slug,
+			AccountScope: ScopePersonal, Level: DefaultLevel(agent.PermissionMode), CreatedBy: actorID,
+		}); err != nil {
+			return err
+		}
+		slugs = append(slugs, slug)
+	}
+	if err := qtx.SetAgentComposioToolkitAllowlist(ctx, db.SetAgentComposioToolkitAllowlistParams{ID: agent.ID, Slugs: slugs}); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Service) mayManage(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool {
+	return s.resumer != nil && s.resumer.CanManageAgent(ctx, workspaceID, agentID, userID)
+}
+
 // mayAct reports whether the approver is still a member who may run the
 // agent. Membership and agent access can change while a request waits.
 func (s *Service) mayAct(ctx context.Context, req db.AppActionRequest) bool {
@@ -399,6 +474,9 @@ func (s *Service) publishChange(req db.AppActionRequest) {
 }
 
 func appLabel(slug string) string {
+	if app, ok := Curated(slug); ok {
+		return app.Name
+	}
 	if name := runtimeapps.DisplayNameForToolkitSlug(slug); name != "" {
 		return name
 	}
@@ -440,6 +518,9 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 		}
 	case NotifConnectRequested:
 		body = fmt.Sprintf("%s asks you to connect %s", agentName, appLabel(req.ToolkitSlug))
+		if _, has := s.agentApp(ctx, req.AgentID, req.ToolkitSlug); !has {
+			body = fmt.Sprintf("%s asks you to add %s and connect your account", agentName, appLabel(req.ToolkitSlug))
+		}
 	case NotifActionReminder:
 		body = fmt.Sprintf("%s is still waiting for your confirmation on %s · %s; it expires in 2 hours", agentName, appLabel(req.ToolkitSlug), req.ToolSlug)
 	default:
@@ -477,6 +558,53 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 	})
 	if err != nil {
 		slog.Warn("connectedapps: create inbox item failed", "request_id", util.UUIDToString(req.ID), "error", err)
+	}
+}
+
+// NotifyTeamRequest tells the workspace's owners and admins, except the
+// requester, that a member asks for a team account for slug.
+func (s *Service) NotifyTeamRequest(ctx context.Context, workspaceID, requesterID pgtype.UUID, slug string, agentID pgtype.UUID) {
+	admins, err := s.q.ListWorkspaceManagerUserIDs(ctx, workspaceID)
+	if err != nil {
+		slog.Warn("connectedapps: list admins for team request failed", "toolkit", slug, "error", err)
+		return
+	}
+	name := "A member"
+	if user, err := s.q.GetUser(ctx, requesterID); err == nil && user.Name != "" {
+		name = user.Name
+	}
+	body := fmt.Sprintf("%s asks for a team %s account", name, appLabel(slug))
+	if agentID.Valid {
+		if agent, err := s.q.GetAgent(ctx, agentID); err == nil {
+			body += " for " + agent.Name
+		}
+	}
+	details, _ := json.Marshal(map[string]any{
+		"toolkit_slug": slug,
+		"agent_id":     util.UUIDToPtr(agentID),
+		"requested_by": util.UUIDToString(requesterID),
+	})
+	for _, admin := range admins {
+		if admin == requesterID {
+			continue
+		}
+		if _, _, err := inbox.Deliver(ctx, s.q, s.bus, inbox.Notification{
+			Params: db.CreateInboxItemParams{
+				ID:            dbid.NewV7(),
+				WorkspaceID:   workspaceID,
+				RecipientType: "member",
+				RecipientID:   admin,
+				Type:          NotifTeamRequested,
+				Severity:      "info",
+				Title:         appLabel(slug),
+				Body:          pgtype.Text{String: body, Valid: true},
+				ActorType:     pgtype.Text{String: "member", Valid: true},
+				ActorID:       requesterID,
+				Details:       details,
+			},
+		}); err != nil {
+			slog.Warn("connectedapps: team request inbox item failed", "toolkit", slug, "error", err)
+		}
 	}
 }
 

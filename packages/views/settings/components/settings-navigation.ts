@@ -35,12 +35,24 @@ export interface SettingsLocation {
   integration: string | null;
 }
 
+function isComposioCallback(params: URLSearchParams) {
+  return params.has("connected") || params.get("error") === "composio_connect_failed";
+}
+
+// A plan refusal (`reason=feature_locked`) can only be for a team account.
+function isPersonalComposioCallback(params: URLSearchParams) {
+  return isComposioCallback(params) && params.get("scope") !== "team" && params.get("reason") !== "feature_locked";
+}
+
 /**
  * Resolve a settings URL, including links that predate the current layout.
  * Server redirects still point at some of them — the GitHub App install flow
  * returns to `?tab=github` / `?tab=repositories` and the Composio OAuth flow to
- * `?tab=integrations&connected=…` — so these mappings are part of the URL
- * contract, not bookmarks we can drop.
+ * `?tab=apps&connected=…[&scope=team]` (once `?tab=integrations&connected=…`)
+ * — so these mappings are part of the URL contract, not bookmarks we can drop.
+ *
+ * The workspace's apps left settings for their own page: `apps` here means
+ * "redirect to it". A personal connection returns to Connected accounts.
  */
 export function resolveSettingsLocation(
   params: URLSearchParams,
@@ -67,11 +79,16 @@ export function resolveSettingsLocation(
       return { tab: "code", section: section ?? "repositories", integration: null };
     case "channels":
       return { tab: "channels", section, integration: null };
+    case "apps":
+      if (isPersonalComposioCallback(params)) {
+        return { tab: "connected-accounts", section: null, integration: null };
+      }
+      return { tab: "apps", section: null, integration: null };
     case "integrations": {
-      const composioCallback =
-        params.has("connected") ||
-        params.get("error") === "composio_connect_failed";
-      if (composioCallback || integration === "composio") {
+      if (isPersonalComposioCallback(params)) {
+        return { tab: "connected-accounts", section: null, integration: null };
+      }
+      if (isComposioCallback(params) || integration === "composio") {
         return { tab: "apps", section: null, integration: null };
       }
       if (integration === "github") {
@@ -109,4 +126,15 @@ export function settingsHref(
   if (detail.section) params.set("section", detail.section);
   if (detail.integration) params.set("integration", detail.integration);
   return `${pathname}?${params.toString()}`;
+}
+
+/** The Apps page for a retired settings link, keeping the connect result. */
+export function movedAppsHref(appsPath: string, searchParams: URLSearchParams) {
+  const params = new URLSearchParams();
+  for (const key of ["connected", "error", "reason"]) {
+    const value = searchParams.get(key);
+    if (value) params.set(key, value);
+  }
+  const search = params.toString();
+  return search ? `${appsPath}?${search}` : appsPath;
 }

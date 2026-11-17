@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api, ApiError } from "@multica/core/api";
-import type { PaidFeatureAccess } from "@multica/core/billing";
+import { workspaceFeatureKeys, type PaidFeatureAccess } from "@multica/core/billing";
 import { toast } from "sonner";
 import enBilling from "../../locales/en/billing.json";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { AppAccountScope, AppsOverview } from "@multica/core/types";
+import type { AppAccountScope, AppCatalogEntry, AppsOverview } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 import { AddAppDialog } from "./add-app-dialog";
@@ -16,14 +17,20 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<object>()),
   useWorkspacePaths: () => ({ settings: () => "/acme/settings" }),
 }));
-vi.mock("../../navigation", async (importOriginal) => ({
-  ...(await importOriginal<object>()),
-  AppLink: ({ href, children, ...props }: React.ComponentProps<"a"> & { href: string }) => <a href={href} {...props}>{children}</a>,
-}));
-
 vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
-  api: { connectApp: vi.fn() },
+  api: { connectApp: vi.fn(), getAppsOverview: vi.fn() },
+}));
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Agent" }) }));
+vi.mock("../../navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../navigation")>()),
+  AppLink: ({ href, children, ...props }: React.ComponentProps<"a"> & { href: string }) => <a href={href} {...props}>{children}</a>,
+  useNavigation: () => ({
+    pathname: "/acme/settings",
+    searchParams: new URLSearchParams("tab=connected-accounts"),
+    hash: "",
+  }),
 }));
 
 const overview: AppsOverview = {
@@ -35,34 +42,46 @@ const catalog = [
   { slug: "notion", name: "Notion", curated: true, recommended_scope: "team" as const },
 ];
 
-beforeEach(() => { vi.mocked(api.connectApp).mockRejectedValue(new Error("offline")); });
+beforeEach(() => {
+  vi.mocked(api.connectApp).mockRejectedValue(new Error("offline"));
+  vi.mocked(api.getAppsOverview).mockResolvedValue(overview);
+});
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  delete (window as { desktopAPI?: unknown }).desktopAPI;
 });
 
 function renderDialog(
   scope: AppAccountScope,
   canManage = true,
-  extra: { overview?: AppsOverview; teamAccess?: Pick<PaidFeatureAccess, "canAdd" | "state">; onConnectError?: (e: unknown) => void } = {},
+  extra: { overview?: AppsOverview; catalog?: AppCatalogEntry[]; teamAccess?: Pick<PaidFeatureAccess, "canAdd" | "state"> } = {},
 ) {
-  render(<I18nProvider locale="en" resources={{ en: { common: enCommon, settings: enSettings, billing: enBilling } }}>
-    <AddAppDialog open onOpenChange={vi.fn()} scope={scope} canManage={canManage}
-      overview={extra.overview ?? overview} catalog={catalog} catalogLoading={false} catalogError={false}
-      teamAccess={extra.teamAccess} onConnectError={extra.onConnectError} />
-  </I18nProvider>);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  render(<QueryClientProvider client={client}>
+    <I18nProvider locale="en" resources={{ en: { common: enCommon, settings: enSettings, billing: enBilling } }}>
+      <AddAppDialog open onOpenChange={vi.fn()} scope={scope} canManage={canManage}
+        overview={extra.overview ?? overview} catalog={extra.catalog ?? catalog} catalogLoading={false} catalogError={false}
+        teamAccess={extra.teamAccess} />
+    </I18nProvider>
+  </QueryClientProvider>);
+  return { invalidate };
 }
 
 describe("AddAppDialog", () => {
-  it("shows only team connection actions in the team context", async () => {
+  it("says what agents can do before a team connection starts", async () => {
     const user = userEvent.setup();
     renderDialog("team");
     const dialog = screen.getByRole("dialog", { name: "Connect team account" });
     expect(within(dialog).getAllByRole("button", { name: "Connect" })).toHaveLength(1);
     expect(within(dialog).getByText("Connected")).toBeVisible();
     await user.click(within(dialog).getByRole("button", { name: "Connect" }));
-    await waitFor(() => expect(api.connectApp).toHaveBeenCalledWith("team", "notion"));
+    expect(api.connectApp).not.toHaveBeenCalled();
+    const disclosure = await screen.findByRole("dialog", { name: /Notion/ });
+    await user.click(within(disclosure).getByRole("button", { name: "Continue" }));
+    await waitFor(() =>
+      expect(api.connectApp).toHaveBeenCalledWith("team", "notion", "/acme/settings?tab=connected-accounts"),
+    );
   });
 
   it("does not mistake a team connection for the caller's personal connection", async () => {
@@ -73,7 +92,9 @@ describe("AddAppDialog", () => {
     expect(within(dialog).queryByText("Connected")).not.toBeInTheDocument();
     const row = within(dialog).getByText("Gmail").closest("li")!;
     await user.click(within(row).getByRole("button", { name: "Connect" }));
-    await waitFor(() => expect(api.connectApp).toHaveBeenCalledWith("personal", "gmail"));
+    const disclosure = await screen.findByRole("dialog", { name: /Gmail/ });
+    await user.click(within(disclosure).getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(api.connectApp).toHaveBeenCalledWith("personal", "gmail", expect.any(String)));
   });
 
   it("guards team connections even if a member is passed a team dialog", async () => {
@@ -82,34 +103,18 @@ describe("AddAppDialog", () => {
     const connect = screen.getByRole("button", { name: "Connect" });
     expect(connect).toBeDisabled();
     await user.click(connect);
-    expect(api.connectApp).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Continue" })).not.toBeInTheDocument();
   });
 
-  it("keeps the scoped dialog open after failure and permits retry", async () => {
+  it("returns to the app list when the disclosure is cancelled", async () => {
     const user = userEvent.setup();
     renderDialog("team");
-    const connect = screen.getByRole("button", { name: "Connect" });
-    await user.click(connect);
-    await waitFor(() => expect(connect).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    const disclosure = await screen.findByRole("dialog", { name: /Notion/ });
+    await user.click(within(disclosure).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Notion/ })).not.toBeInTheDocument());
     expect(screen.getByRole("dialog", { name: "Connect team account" })).toBeVisible();
-    await user.click(connect);
-    await waitFor(() => expect(api.connectApp).toHaveBeenCalledTimes(2));
-    expect(api.connectApp).toHaveBeenLastCalledWith("team", "notion");
-  });
-
-  it("hands the hosted flow to the system browser on Desktop and frees the row", async () => {
-    // Desktop blocks same-window navigation to another origin, so assigning
-    // the location left the row on "Connecting..." forever.
-    const openExternal = vi.fn();
-    (window as { desktopAPI?: unknown }).desktopAPI = { openExternal, pickDirectory: vi.fn() };
-    vi.mocked(api.connectApp).mockResolvedValue({ redirect_url: "https://connect.example.test/flow" });
-    const user = userEvent.setup();
-    renderDialog("team");
-    const connect = screen.getByRole("button", { name: "Connect" });
-    await user.click(connect);
-    await waitFor(() => expect(openExternal).toHaveBeenCalledWith("https://connect.example.test/flow"));
-    await waitFor(() => expect(connect).toBeEnabled());
-    expect(connect).toHaveTextContent("Connect");
+    expect(api.connectApp).not.toHaveBeenCalled();
   });
 });
 
@@ -125,7 +130,8 @@ describe("AddAppDialog on a plan without team app accounts (MUL-9491)", () => {
     renderDialog("team", true, { teamAccess: { canAdd: true, state: "available" } });
     expect(screen.queryByText("View plans")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Connect" }));
-    await waitFor(() => expect(api.connectApp).toHaveBeenCalledWith("team", "notion"));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(api.connectApp).toHaveBeenCalledWith("team", "notion", expect.any(String)));
   });
 
   it("replaces Connect with Upgrade to add for an app without a team account", async () => {
@@ -141,13 +147,12 @@ describe("AddAppDialog on a plan without team app accounts (MUL-9491)", () => {
 
   it("still reconnects an app's existing team account", async () => {
     const user = userEvent.setup();
-    render(<I18nProvider locale="en" resources={{ en: { common: enCommon, settings: enSettings, billing: enBilling } }}>
-      <AddAppDialog open onOpenChange={vi.fn()} scope="team" canManage overview={withExpiredSlack}
-        catalog={catalogWithSlack} catalogLoading={false} catalogError={false}
-        teamAccess={{ canAdd: false, state: "read_only" }} />
-    </I18nProvider>);
+    renderDialog("team", true, {
+      overview: withExpiredSlack, catalog: catalogWithSlack, teamAccess: { canAdd: false, state: "read_only" },
+    });
     await user.click(screen.getByRole("button", { name: "Reconnect" }));
-    await waitFor(() => expect(api.connectApp).toHaveBeenCalledWith("team", "slack"));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(api.connectApp).toHaveBeenCalledWith("team", "slack", expect.any(String)));
   });
 
   it("does not gate personal accounts", () => {
@@ -156,14 +161,14 @@ describe("AddAppDialog on a plan without team app accounts (MUL-9491)", () => {
     expect(screen.queryByText("View plans")).not.toBeInTheDocument();
   });
 
-  it("explains a feature_locked refusal and reports it to the caller", async () => {
+  it("explains a feature_locked refusal and refetches the plan", async () => {
     const locked = new ApiError("locked", 403, "Forbidden", { code: "feature_locked", feature: "team_app_accounts" });
     vi.mocked(api.connectApp).mockRejectedValue(locked);
-    const onConnectError = vi.fn();
     const user = userEvent.setup();
-    renderDialog("team", true, { teamAccess: { canAdd: true, state: "available" }, onConnectError });
+    const { invalidate } = renderDialog("team", true, { teamAccess: { canAdd: true, state: "available" } });
     await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(enBilling.paid_feature.locked_error));
-    expect(onConnectError).toHaveBeenCalledWith(locked);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceFeatureKeys.all("ws-1") });
   });
 });

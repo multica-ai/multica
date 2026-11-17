@@ -11,6 +11,7 @@
     "usage": "统计",
     "runtimes": "运行时",
     "skills": "Skills",
+    "apps": "应用",
     "settings": "设置",
     "views": "视图",
     "docs": "知识库"
@@ -23,6 +24,7 @@
     "member": "成员",
     "squad": "小队",
     "skill": "Skill",
+    "app": "应用",
     "machine": "机器",
     "runtime": "运行时",
     "attachment": "附件",

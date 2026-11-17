@@ -1140,6 +1140,15 @@ export function InboxPage() {
             {t(($) => $.detail.open_project)}
           </Button>
         )}
+        {detailItem.type === "app_team_requested" && detailItem.details?.toolkit_slug && (
+          <Button
+            size="sm"
+            render={<AppLink href={wsPaths.appDetail(detailItem.details.toolkit_slug)} />}
+            nativeButton={false}
+          >
+            {t(($) => $.detail.open_app)}
+          </Button>
+        )}
         {detailItem.type === "quick_create_failed" &&
           detailItem.details?.source_context_id &&
           detailItem.details?.task_id && (

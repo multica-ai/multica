@@ -37,6 +37,15 @@ export interface AgentApp {
   level: AppAccessLevel;
 }
 
+/** Members asking an admin to connect a team account for one app. */
+export interface AppTeamRequest {
+  toolkit_slug: string;
+  requested_by: string[];
+  /** Agents the members wanted the account for; may be empty. */
+  agent_ids: string[];
+  last_requested_at: string;
+}
+
 export interface AppsOverview {
   catalog_mode: AppCatalogMode;
   /** The apps of a custom catalog. */
@@ -46,6 +55,21 @@ export interface AppsOverview {
   team: AppConnection[];
   personal: AppConnection[];
   agent_apps: AgentApp[];
+  /** Open requests for team accounts the workspace has not connected. */
+  team_requests?: AppTeamRequest[];
+}
+
+/** What disconnecting a personal account stops, across every workspace the
+ * caller belongs to. */
+export interface PersonalAppImpact {
+  agents: {
+    id: string;
+    name: string;
+    workspace_id: string;
+    workspace_name: string;
+    /** A run the caller started is using the agent right now. */
+    running: boolean;
+  }[];
 }
 
 export interface AppCatalogEntry {
@@ -156,6 +180,9 @@ export interface AppRequest {
   error: string | null;
   reason: string | null;
   redacted: boolean;
+  /** A connect request for an app the agent does not have yet; answering it
+   * adds the app to the agent. */
+  adds_app?: boolean;
   expires_at: string;
   decided_by: string | null;
   decided_at: string | null;

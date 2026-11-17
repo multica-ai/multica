@@ -16,6 +16,8 @@ import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { FEATURE_LOCKED_CODE, workspaceFeatureKeys } from "@multica/core/billing";
 import {
+  appCatalogOptions,
+  appsOverviewOptions,
   chatAppRequestsOptions,
   connectedAppsKeys,
   issueAppRequestsOptions,
@@ -24,8 +26,9 @@ import {
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { AppRequest } from "@multica/core/types";
 import { useLocale, useT } from "../i18n";
-import { currentPath, useNavigation } from "../navigation";
-import { isDesktopShell, openExternal } from "../platform";
+import { useNavigation } from "../navigation";
+import { appAccountStatus } from "./app-status";
+import { ConnectAppDialog } from "./connect-app-dialog";
 
 const CONNECTED_PARAM = "app_connected";
 const CONNECT_ERROR_PARAM = "app_connect_error";
@@ -206,8 +209,9 @@ function AppRequestCard({
   highlightToken?: number;
 }) {
   const { t } = useT("settings");
+  const { t: ta } = useT("agents");
   const locale = useLocale();
-  const navigation = useNavigation();
+  const wsId = useWorkspaceId();
   const ref = useRef<HTMLDivElement>(null);
   const [highlighted, setHighlighted] = useState(false);
   useEffect(() => {
@@ -223,12 +227,18 @@ function AppRequestCard({
   const [draft, setDraft] = useState(() => prettyArgs(request.arguments));
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
-  const [connecting, setConnecting] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
 
   const agent = getActorName("agent", request.agent_id);
   const approver = getActorName("member", request.approver_user_id);
-  const app = request.toolkit_slug;
   const pending = request.status === "pending";
+  const isConnect = request.kind === "connect";
+  const addsApp = isConnect && request.adds_app === true;
+  const catalog = useQuery({ ...appCatalogOptions(wsId), enabled: isConnect });
+  const overview = useQuery({ ...appsOverviewOptions(wsId), enabled: addsApp && pending && isApprover });
+  const entry = catalog.data?.apps.find((a) => a.slug === request.toolkit_slug);
+  const app = entry?.name || request.toolkit_slug;
+  const hasAccount = appAccountStatus(overview.data, "personal", request.toolkit_slug) === "connected";
 
   const approve = () => {
     let args: Record<string, unknown> | undefined;
@@ -258,22 +268,6 @@ function AppRequestCard({
         onError: () => toast.error(t(($) => $.connected_apps.request.toast_failed)),
       },
     );
-  const connect = async () => {
-    setConnecting(true);
-    try {
-      // The callback appends its own query, so the fragment stays behind.
-      const returnTo = currentPath({ ...navigation, hash: "" });
-      const { redirect_url } = await api.connectApp("personal", app, returnTo);
-      openExternal(redirect_url, { webTarget: "same-tab" });
-      // Desktop opens the hosted flow in the system browser and stays here;
-      // the card resolves through the request's realtime update.
-      if (isDesktopShell()) setConnecting(false);
-    } catch {
-      toast.error(t(($) => $.connected_apps.toast_failed));
-      setConnecting(false);
-    }
-  };
-
   const statusLabel = (status: string) => {
     switch (status) {
       case "approved":
@@ -300,12 +294,16 @@ function AppRequestCard({
         <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand" />
         <div className="min-w-0 flex-1 space-y-1">
           <p className="text-body font-medium">
-            {request.kind === "connect"
-              ? t(($) => $.connected_apps.request.title_connect, { agent, app })
-              : t(($) => $.connected_apps.request.title_action, { agent, tool: request.tool_slug })}
+            {addsApp
+              ? ta(($) => $.app_requests.title_adds_app, { agent, app })
+              : isConnect
+                ? t(($) => $.connected_apps.request.title_connect, { agent, app })
+                : t(($) => $.connected_apps.request.title_action, { agent, tool: request.tool_slug })}
           </p>
           <p className="flex flex-wrap items-center gap-1.5 text-caption text-muted-foreground">
-            <Badge variant="outline">{t(($) => $.connected_apps.scopes[request.account_scope])}</Badge>
+            <Badge variant="outline">
+              {addsApp ? ta(($) => $.app_requests.new_app) : t(($) => $.connected_apps.scopes[request.account_scope])}
+            </Badge>
             {request.kind === "action" && <Badge variant="outline">{request.action_class}</Badge>}
             <span>
               {pending
@@ -346,6 +344,11 @@ function AppRequestCard({
             />
           )}
           <div className="flex flex-wrap items-center justify-end gap-2">
+            {addsApp && (
+              <p className="mr-auto text-caption text-muted-foreground">
+                {ta(($) => $.app_requests.adds_app_note, { app, agent })}
+              </p>
+            )}
             {request.kind === "action" && !editing && !rejecting && (
               <Button size="xs" variant="ghost" onClick={() => setEditing(true)}>
                 <Pencil />
@@ -354,16 +357,28 @@ function AppRequestCard({
             )}
             <Button
               size="xs"
-              variant="outline"
+              variant={addsApp ? "ghost" : "outline"}
               disabled={decide.isPending}
               onClick={() => (rejecting ? reject() : setRejecting(true))}
             >
               {t(($) => $.connected_apps.request.reject)}
             </Button>
-            {request.kind === "connect" ? (
+            {addsApp ? (
+              hasAccount ? (
+                <Button size="xs" disabled={decide.isPending} onClick={approve}>
+                  {decide.isPending && <Loader2 className="animate-spin" />}
+                  {ta(($) => $.app_requests.add_to_agent, { app, agent })}
+                </Button>
+              ) : (
+                <Button size="xs" onClick={() => setConnectOpen(true)}>
+                  <Plug />
+                  {t(($) => $.connected_apps.request.connect, { app })}
+                </Button>
+              )
+            ) : isConnect ? (
               <>
-                <Button size="xs" variant="outline" disabled={connecting} onClick={connect}>
-                  {connecting ? <Loader2 className="animate-spin" /> : <Plug />}
+                <Button size="xs" variant="outline" onClick={() => setConnectOpen(true)}>
+                  <Plug />
                   {t(($) => $.connected_apps.request.connect, { app })}
                 </Button>
                 <Button size="xs" disabled={decide.isPending} onClick={approve}>
@@ -380,6 +395,16 @@ function AppRequestCard({
             )}
           </div>
         </div>
+      )}
+      {isConnect && (
+        <ConnectAppDialog
+          open={connectOpen}
+          onOpenChange={setConnectOpen}
+          scope="personal"
+          slug={request.toolkit_slug}
+          name={app}
+          logo={entry?.logo}
+        />
       )}
     </div>
   );

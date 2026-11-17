@@ -1,10 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
-import { Check, Loader2 } from "@multica/ui/icons";
+import { Check } from "@multica/ui/icons";
 import { Badge } from "@multica/ui/components/ui/badge";
-import { Button, buttonVariants } from "@multica/ui/components/ui/button";
+import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -13,15 +12,12 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
-import { api } from "@multica/core/api";
 import type { PaidFeatureAccess } from "@multica/core/billing";
-import { useWorkspacePaths } from "@multica/core/paths";
 import type { AppAccountScope, AppCatalogEntry, AppsOverview } from "@multica/core/types";
 import { ComposioToolkitLogo } from "../../common/composio-toolkit-logo";
-import { PaidFeatureNotice, usePaidFeatureErrorMessage } from "../../billing";
+import { ConnectAppDialog } from "../../common/connect-app-dialog";
+import { PaidFeatureNotice, UpgradeToAddLink } from "../../billing";
 import { useT } from "../../i18n";
-import { AppLink } from "../../navigation";
-import { isDesktopShell, openExternal } from "../../platform";
 
 /**
  * The add-app dialog: every app the workspace allows, curated ones first.
@@ -37,7 +33,6 @@ export function AddAppDialog({
   catalogLoading,
   catalogError,
   teamAccess,
-  onConnectError,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -49,12 +44,10 @@ export function AddAppDialog({
   catalogError: boolean;
   /** The plan's `team_app_accounts` access. Omitted means available. */
   teamAccess?: Pick<PaidFeatureAccess, "canAdd" | "state">;
-  onConnectError?: (error: unknown) => void;
 }) {
   const { t } = useT("settings");
-  const paidFeatureError = usePaidFeatureErrorMessage();
   const [query, setQuery] = useState("");
-  const [connecting, setConnecting] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState<AppCatalogEntry | null>(null);
 
   const connected = useMemo(() => {
     const set = new Set<string>();
@@ -81,22 +74,6 @@ export function AddAppDialog({
     );
   }, [catalog, query]);
 
-  async function connect(app: AppCatalogEntry) {
-    if (connecting || (scope === "team" && (!canManage || (!canAddTeam && !existingTeam.has(app.slug))))) return;
-    setConnecting(app.slug);
-    try {
-      const { redirect_url } = await api.connectApp(scope, app.slug);
-      openExternal(redirect_url, { webTarget: "same-tab" });
-      // The web tab leaves for the hosted flow. Desktop opens it in the system
-      // browser and stays here, so the row must become clickable again.
-      if (isDesktopShell()) setConnecting(null);
-    } catch (e) {
-      onConnectError?.(e);
-      toast.error(paidFeatureError(e, e instanceof Error && e.message ? e.message : t(($) => $.connected_apps.toast_failed)));
-      setConnecting(null);
-    }
-  }
-
   const connectButton = (app: AppCatalogEntry) => {
     if (connected.has(app.slug)) {
       return (
@@ -114,15 +91,10 @@ export function AddAppDialog({
       <Button
         size="xs"
         variant="outline"
-        disabled={connecting !== null || (scope === "team" && !canManage)}
-        onClick={() => connect(app)}
+        disabled={scope === "team" && !canManage}
+        onClick={() => setConnecting(app)}
       >
-        {connecting === app.slug && <Loader2 className="animate-spin" />}
-        {connecting === app.slug
-          ? t(($) => $.connected_apps.add.connecting)
-          : reconnect
-            ? t(($) => $.connected_apps.reconnect)
-            : t(($) => $.connected_apps.add.connect)}
+        {reconnect ? t(($) => $.connected_apps.reconnect) : t(($) => $.connected_apps.add.connect)}
       </Button>
     );
   };
@@ -177,17 +149,16 @@ export function AddAppDialog({
           )}
         </div>
       </DialogContent>
+      {connecting && (
+        <ConnectAppDialog
+          open
+          onOpenChange={(next) => { if (!next) setConnecting(null); }}
+          scope={scope}
+          slug={connecting.slug}
+          name={connecting.name || connecting.slug}
+          logo={connecting.logo}
+        />
+      )}
     </Dialog>
-  );
-}
-
-/** Stands in for Connect where the plan cannot add a team account. */
-function UpgradeToAddLink() {
-  const { t } = useT("billing");
-  const paths = useWorkspacePaths();
-  return (
-    <AppLink href={`${paths.settings()}?tab=billing`} className={buttonVariants({ size: "xs", variant: "outline" })}>
-      {t(($) => $.paid_feature.upgrade_to_add)}
-    </AppLink>
   );
 }

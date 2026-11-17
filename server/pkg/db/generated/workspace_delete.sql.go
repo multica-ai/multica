@@ -556,6 +556,9 @@ deleted_app_action_requests AS (
 deleted_app_tool_calls AS (
     DELETE FROM app_tool_call WHERE workspace_id = $1
 ),
+deleted_app_team_requests AS (
+    DELETE FROM app_team_request WHERE workspace_id = $1
+),
 deleted_issue_environments AS (
     DELETE FROM issue_environment WHERE workspace_id = $1
 ),

@@ -62,6 +62,10 @@ var (
 	// ErrRateLimited: the account used its per-minute budget. The request
 	// stays pending, so approving again a minute later runs it.
 	ErrRateLimited = errors.New("connectedapps: the account is over its per-minute call budget")
+	// ErrCannotAddApp: approving a request for an app the agent does not
+	// have adds the app, and the approver may not edit the agent or the
+	// catalog no longer allows the app. The request is withdrawn.
+	ErrCannotAddApp = errors.New("connectedapps: the approver cannot add apps to this agent")
 )
 
 // Resumer continues the agent's work after a person decides on a request: a
@@ -72,12 +76,18 @@ type Resumer interface {
 	// workspace, by the same rule that admits a new run. An invalid userID
 	// checks a system principal with no human originator.
 	CanActFor(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool
+	// CanManageAgent reports whether userID may edit agentID, and so add
+	// apps to it, by the same rule as the agent settings.
+	CanManageAgent(ctx context.Context, workspaceID, agentID, userID pgtype.UUID) bool
 }
 
 // Config wires a Service.
 type Config struct {
-	Queries  *db.Queries
-	Composio *composiointeg.Service
+	Queries *db.Queries
+	// TxStarter writes an app an approval adds to an agent together with
+	// the agent's legacy allowlist. Without it, such approvals fail.
+	TxStarter TxStarter
+	Composio  *composiointeg.Service
 	// TokenSecret signs gateway tokens. Derive it with DeriveTokenSecret.
 	TokenSecret []byte
 	// PublicBaseURL is the API's public origin, e.g. "https://api.multica.ai".
@@ -100,6 +110,7 @@ type Config struct {
 // Service is the connected-apps runtime: overlay, gateway, and confirmations.
 type Service struct {
 	q          *db.Queries
+	tx         TxStarter
 	composio   *composiointeg.Service
 	secret     []byte
 	gatewayURL string
@@ -132,6 +143,7 @@ func New(cfg Config) (*Service, error) {
 	}
 	return &Service{
 		q:          cfg.Queries,
+		tx:         cfg.TxStarter,
 		composio:   cfg.Composio,
 		secret:     cfg.TokenSecret,
 		gatewayURL: base + GatewayPath,

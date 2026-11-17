@@ -211,7 +211,12 @@
     "status": "ステータス",
     "runs_7d": "実行 (7日)",
     "edit_access_aria": "アクセス: {{value}}。アクセスを変更",
-    "all_settings": "すべての設定"
+    "all_settings": "すべての設定",
+    "apps": "アプリ",
+    "apps_needs_account_other": "{{count}} 件が自分のアカウントを必要としています",
+    "apps_count_other": "{{count}} 個のアプリ",
+    "apps_none": "なし",
+    "apps_aria": "アプリ: {{value}}。アプリを表示"
   },
   "pickers": {
     "concurrency_range": "最大同時実行数（{{min}}–{{max}}）",
@@ -645,10 +650,6 @@
       "load_failed": "このエージェントのアプリを読み込めませんでした。",
       "empty": "接続済みのアプリはありません。",
       "level": "アカウント範囲",
-      "team_connected": "チームアカウント接続済み",
-      "team_missing": "チームアカウント未接続",
-      "personal_connected": "あなたのアカウントは接続済み",
-      "personal_missing": "このアプリはまだ接続していません",
       "team_admin_only": "エージェントにチームアカウントを付与できるのはワークスペース管理者のみです。",
       "team_shared_warning": "このエージェントを実行できる人は、このチームアカウントを通じて操作できます。",
       "manage_link": "設定 → 接続済みアプリ でアカウントを管理",
@@ -1071,5 +1072,41 @@
       "comment": "修正しました。375px 以下では料金カードを 1 列にしています。PR を作成し、テストも通っています。",
       "step_read": "{{file}} を読む"
     }
+  },
+  "apps_section": {
+    "title": "アプリ",
+    "empty": "このエージェントはまだアプリを使用していません。",
+    "scopes": {
+      "personal": "個人アカウント",
+      "team": "チームアカウント"
+    },
+    "connect_yours": "自分のアカウントを接続",
+    "reconnect": "再接続",
+    "connect_team": "チームアカウントを接続",
+    "ask_admin": "管理者に依頼",
+    "requested": "依頼済み",
+    "asked_toast": "{{app}} のチームアカウントの接続を管理者に依頼しました。",
+    "ask_failed_toast": "依頼を送信できませんでした。"
+  },
+  "add_app_dialog": {
+    "title": "{{agent}} にアプリを追加",
+    "description": "個人アカウントのアプリはエージェントを開始した人のアカウントを使うため、自分のアカウントがなくても追加できます。",
+    "search_other": "{{count}} 個のアプリを検索",
+    "search_label": "アプリを検索",
+    "curated": "厳選",
+    "recommended_team": "通常はチームアカウント",
+    "recommended_personal": "通常は個人アカウント",
+    "team_connected": "チームアカウント接続済み",
+    "add": "追加",
+    "add_aria": "{{app}} を追加",
+    "empty": "一致するアプリはありません。",
+    "load_failed": "アプリを読み込めませんでした。",
+    "added_toast": "{{app}} を {{agent}} に追加しました。"
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} が {{app}} を使おうとしています",
+    "new_app": "このエージェントの新しいアプリ",
+    "adds_app_note": "応答すると、今後の実行で {{agent}} が {{app}} を使えるようになります。",
+    "add_to_agent": "{{app}} を {{agent}} に追加"
   }
 }

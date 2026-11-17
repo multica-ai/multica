@@ -257,6 +257,11 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 	}); err != nil {
 		return empty, err
 	}
+	if err := qtx.DeleteAppTeamRequestsByMember(ctx, db.DeleteAppTeamRequestsByMemberParams{
+		WorkspaceID: workspaceID, RequestedBy: userID,
+	}); err != nil {
+		return empty, err
+	}
 
 	// Member row deletion lives inside the same tx so a successful revoke is
 	// never followed by a failed member-delete (which would leave the user
