@@ -24,6 +24,8 @@ An agent doesn't keep running in the background. It stores a reusable identity a
 
 Switching models or editing instructions does not create a new agent, and past issues, comments, and run history are not lost.
 
+In Multica, an agent handling a task or chat from a person is asked to propose a plan and wait when the work looks large (roughly over ten minutes or spanning several repositories or modules) and its scope is not yet agreed. Small tasks and approved plans proceed directly. To bypass this for one task, say “Just run with it; no plan approval needed.” For a lasting preference, put that instruction in the agent’s **Instructions**, which take priority. Waiting for a plan decision should leave the task status unchanged. This is guidance for the model, not a runtime limit; automated work does not wait for this approval.
+
 ## Agents, runtimes, and runs
 
 | Concept | Responsibility |

@@ -73,9 +73,39 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(execenv.BuildOnBehalfOfBlock(task.InitiatorName, task.InitiatorEmail))
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
 	b.WriteString(buildJoinedWakeupsBlock(task.WakeupJoined))
+	b.WriteString(buildScopeCheckBlock(task))
 	b.WriteString(buildProjectWorkflowBlock(task))
 	b.WriteString(buildParentIssueBlock(task))
 	return b.String()
+}
+
+// Admission is per turn; the rule stays in the cached runtime brief.
+func buildScopeCheckBlock(task Task) string {
+	if task.QuickCreatePrompt != "" || task.AutopilotRunID != "" || (task.IssueID == "" && task.ChatSessionID == "") {
+		return ""
+	}
+	if humanScopeCheckTurn(task) {
+		return "## Scope Check for This Turn\n\nApply Scope Check. If you need a plan decision, the plan is this turn's final reply; leave issue status unchanged while waiting.\n\n"
+	}
+	return "## Scope Check for This Turn\n\nSkip Scope Check this turn.\n\n"
+}
+
+func humanScopeCheckTurn(task Task) bool {
+	if task.WakeupID != "" || task.WakeupSystemRule != "" || (task.Attribution != nil && task.Attribution.RetryOfTaskID != "") {
+		return false
+	}
+	if task.TriggerAuthorType != "" {
+		return task.TriggerAuthorType == "member"
+	}
+	if task.TriggerCommentID != "" || task.Attribution == nil || task.Attribution.Source != "direct_human" || task.Attribution.Evidence == nil {
+		return false
+	}
+	switch task.Attribution.Evidence.Kind {
+	case "issue_assignment", "chat", "rerun":
+		return true
+	default:
+		return false
+	}
 }
 
 // buildParentIssueBlock points a sub-issue's run at its parent. The sub-issue's

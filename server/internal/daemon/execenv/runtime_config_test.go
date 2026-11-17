@@ -604,9 +604,7 @@ func TestProtocolHeadingInInstructionsGetsNoLeaderBrief(t *testing.T) {
 	}
 }
 
-// Instruction Precedence belongs to the issue workflow only; the issue-less
-// kinds must not inherit it. After MUL-5377 it applies to every issue run,
-// comment-triggered or not, because there is a single issue workflow.
+// Issue workflow precedence is issue-only; chat shares only Scope Check precedence.
 func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 	t.Parallel()
 	if out := buildMetaSkillContent("claude", TaskContextForEnv{
@@ -630,7 +628,6 @@ func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 			t.Parallel()
 			out := buildMetaSkillContent("claude", tc.ctx)
 			for _, banned := range []string{
-				"## Instruction Precedence",
 				"issue workflow below",
 				"The workflow never widens what your Agent Identity allows",
 			} {
@@ -2629,6 +2626,37 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 		}
 		if !strings.Contains(brief, wantWhy) {
 			t.Errorf("%s brief states %q without %q; a rule with no reason is the first one dropped under pressure", name, wantRule, wantWhy)
+		}
+	}
+}
+
+func TestScopeCheckBrief(t *testing.T) {
+	// The agreed rule stays small, provider-neutral and independent of turn provenance.
+	words := strings.Fields(strings.ReplaceAll(scopeCheckText, "—", ""))
+	if len(words) > 80 {
+		t.Fatalf("Scope Check grew to %d words, limit 80", len(words))
+	}
+	for _, provider := range []string{"claude", "codex", "pi", "cursor"} {
+		for _, ctx := range []TaskContextForEnv{
+			{IssueID: "issue-1", AgentInstructions: "Don't ask for a plan; execute directly."},
+			{ChatSessionID: "chat-1", AgentInstructions: "Don't ask for a plan; execute directly."},
+		} {
+			out := buildMetaSkillContent(provider, ctx)
+			for _, want := range []string{
+				"## Scope Check\n\n" + scopeCheckText,
+				"Agent Identity instructions have priority over Scope Check.",
+				ctx.AgentInstructions,
+				"the person told you to just run with it",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("%s missing %q", provider, want)
+				}
+			}
+			ctx.TriggerCommentID = "comment-1"
+			ctx.InitiatorType = "agent"
+			if next := buildMetaSkillContent(provider, ctx); next != out {
+				t.Errorf("%s brief changed across triggers", provider)
+			}
 		}
 	}
 }

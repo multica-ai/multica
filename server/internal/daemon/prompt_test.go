@@ -2280,3 +2280,49 @@ func TestPromptPointsSubIssueRunsAtTheirParent(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildPromptScopeCheckProvenance(t *testing.T) {
+	// Decode claim wire data too: InitiatorType is the represented human,
+	// not necessarily the actor who triggered the run.
+	cases := []struct{ name, wire, want string }{
+		{"human comment", `{"issue_id":"i","trigger_comment_id":"c","trigger_author_type":"member"}`, "Apply"},
+		{"agent comment on behalf of human", `{"issue_id":"i","trigger_comment_id":"c","trigger_author_type":"agent","initiator_type":"member"}`, "Skip"},
+		{"system comment", `{"issue_id":"i","trigger_author_type":"system"}`, "Skip"},
+		{"human assignment", `{"issue_id":"i","attribution":{"source":"direct_human","evidence":{"kind":"issue_assignment"}}}`, "Apply"},
+		{"human chat", `{"chat_session_id":"c","attribution":{"source":"direct_human","evidence":{"kind":"chat"}}}`, "Apply"},
+		{"human rerun", `{"issue_id":"i","attribution":{"source":"direct_human","evidence":{"kind":"rerun"}}}`, "Apply"},
+		{"delegated", `{"issue_id":"i","initiator_type":"member","attribution":{"source":"delegation","evidence":{"kind":"issue_assignment"}}}`, "Skip"},
+		{"wakeup", `{"issue_id":"i","wakeup_id":"w","trigger_author_type":"member"}`, "Skip"},
+		{"system rule", `{"issue_id":"i","wakeup_system_rule":"child_done","attribution":{"source":"direct_human","evidence":{"kind":"issue_assignment"}}}`, "Skip"},
+		{"automatic retry", `{"issue_id":"i","trigger_author_type":"member","attribution":{"source":"direct_human","retry_of_task_id":"r","evidence":{"kind":"issue_assignment"}}}`, "Skip"},
+		{"unknown legacy server", `{"issue_id":"i","initiator_type":"member"}`, "Skip"},
+		{"missing evidence", `{"issue_id":"i","attribution":{"source":"direct_human"}}`, "Skip"},
+		{"unknown evidence", `{"issue_id":"i","attribution":{"source":"direct_human","evidence":{"kind":"future"}}}`, "Skip"},
+		{"unknown comment author", `{"issue_id":"i","trigger_comment_id":"c","attribution":{"source":"direct_human","evidence":{"kind":"issue_assignment"}}}`, "Skip"},
+		{"unknown chat author", `{"chat_session_id":"c"}`, "Skip"},
+		{"autopilot", `{"autopilot_run_id":"r","trigger_author_type":"member"}`, ""},
+		{"autopilot with issue", `{"autopilot_run_id":"r","issue_id":"i","trigger_author_type":"member"}`, ""},
+		{"quick create", `{"quick_create_prompt":"create a task","trigger_author_type":"member"}`, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var task Task
+			if err := json.Unmarshal([]byte(tc.wire), &task); err != nil {
+				t.Fatal(err)
+			}
+			out := BuildPrompt(task, "")
+			if tc.want == "" {
+				if strings.Contains(out, "Scope Check") {
+					t.Fatal("non-interactive task received Scope Check")
+				}
+				return
+			}
+			if !strings.Contains(out, tc.want+" Scope Check") {
+				t.Fatalf("expected %s Scope Check in %s", tc.want, out)
+			}
+			if tc.want == "Apply" && (!strings.Contains(out, "leave issue status unchanged") || !strings.Contains(out, "the plan is this turn's final reply")) {
+				t.Fatal("plan wait must preserve issue status")
+			}
+		})
+	}
+}

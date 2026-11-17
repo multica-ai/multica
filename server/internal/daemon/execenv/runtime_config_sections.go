@@ -553,11 +553,22 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 // other. MUL-5442 merges them here so adding an action type is a one-place
 // edit. Step 4 keeps only what this section cannot express: the delegation-only
 // role's "stop once the delegation is delivered" rule.
-func writeInstructionPrecedence(b *strings.Builder) {
+func writeInstructionPrecedence(b *strings.Builder, issueWorkflow bool) {
 	b.WriteString("## Instruction Precedence\n\n")
+	b.WriteString("Agent Identity instructions have priority over Scope Check.\n\n")
+	if !issueWorkflow {
+		return
+	}
 	b.WriteString("Agent Identity instructions have priority over the issue workflow below. ")
 	b.WriteString("If a workflow step conflicts with Agent Identity, skip the conflicting action and continue with the remaining compatible steps. ")
 	b.WriteString("The workflow never widens what your Agent Identity allows: when it forbids changing issue status, investigating, implementing, creating issues, updating issues, delegating, or any other action, skip that action.\n\n")
+}
+
+// Keep this rule stable across triggers; BuildPrompt selects each turn.
+const scopeCheckText = "If a task from a person looks large — likely to run more than about 10 minutes, or to touch several repos or modules — and its scope isn't settled yet, first reply with how you understand it and what you plan to do, then stop and wait. Skip this when the plan is already agreed, the task is small, or the person told you to just run with it. Keep sub-agents few and don't nest them."
+
+func writeScopeCheck(b *strings.Builder) {
+	b.WriteString("## Scope Check\n\n" + scopeCheckText + "\n\n")
 }
 
 // SessionContinuityNotice variants describe missing provider working memory.
@@ -984,7 +995,8 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Comment Formatting    |    ✓    |   ✓    |     —     |      —       |  —
 //	Repositories          |    △    |   △    |     △     |      —       |  △
 //	Project Context       |    △    |   △    |     △     |      △       |  △
-//	Instruction Precedence|    —    |   ✓    |     —     |      —       |  —
+//	Instruction Precedence|    ✓    |   ✓    |     —     |      —       |  ✓
+//	Scope Check           |    ✓    |   ✓    |     —     |      —       |  ✓
 //	Sub-issue Creation    |    ✓    |   ✓    |     —     |      —       |  —
 //	Skills                |    ✓    |   ✓    |     ✓    |      ✓       |  ✓
 //	Mentions              |    ✓    |   ✓    |     —     |      —       |  —
@@ -1027,8 +1039,9 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 
 	writeProjectContext(&b, ctx)
 
-	if kind == kindIssue {
-		writeInstructionPrecedence(&b)
+	if kind == kindIssue || kind == kindChat {
+		writeInstructionPrecedence(&b, kind == kindIssue)
+		writeScopeCheck(&b)
 	}
 
 	writeWorkflowHeader(&b)

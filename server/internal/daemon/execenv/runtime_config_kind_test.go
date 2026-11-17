@@ -143,7 +143,8 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		{"## Repositories", map[taskKind]bool{
 			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
 		}},
-		{"## Instruction Precedence", issueKinds},
+		{"## Instruction Precedence", map[taskKind]bool{kindIssue: true, kindChat: true}},
+		{"## Scope Check", map[taskKind]bool{kindIssue: true, kindChat: true}},
 		{"## Sub-issue Creation", issueKinds},
 		// Quick-create included: it used to be skipped here and carry its own
 		// copy in issue_context.md, which nothing read. One index, one place.

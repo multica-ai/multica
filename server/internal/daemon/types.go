@@ -73,6 +73,18 @@ type ProjectWorkflowData struct {
 	Brief string `json:"brief"`
 }
 
+// TaskAttributionData reads the existing claim provenance, not the authorization
+// human in InitiatorType: delegated work can also act on a human's behalf.
+type TaskAttributionData struct {
+	Source        string            `json:"source"`
+	RetryOfTaskID string            `json:"retry_of_task_id,omitempty"`
+	Evidence      *TaskEvidenceData `json:"evidence,omitempty"`
+}
+
+type TaskEvidenceData struct {
+	Kind string `json:"kind"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -192,10 +204,11 @@ type Task struct {
 	// carried separately in trigger_author_*. Empty when no originator exists.
 	// The daemon renders ## On Behalf Of per turn; its effective credentials
 	// remain scoped to the runtime owner. See MUL-2645, GH-8674.
-	InitiatorType  string `json:"initiator_type,omitempty"`
-	InitiatorID    string `json:"initiator_id,omitempty"`
-	InitiatorName  string `json:"initiator_name,omitempty"`
-	InitiatorEmail string `json:"initiator_email,omitempty"`
+	InitiatorType  string               `json:"initiator_type,omitempty"`
+	InitiatorID    string               `json:"initiator_id,omitempty"`
+	InitiatorName  string               `json:"initiator_name,omitempty"`
+	InitiatorEmail string               `json:"initiator_email,omitempty"`
+	Attribution    *TaskAttributionData `json:"attribution,omitempty"`
 	// AuthToken is the task-scoped credential the server mints at claim time.
 	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the
 	// agent never sees the daemon's own (often workspace-owner) credential.
