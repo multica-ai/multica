@@ -611,6 +611,13 @@ ORDER BY t.id;
 -- When no version/publisher resolves on the non-manual path, the caller passes NULL
 -- accountable + originator_source='unattributed' so the row is still not a
 -- NULL-source bypass (MUL-4302 §2).
+WITH enqueue_agent AS MATERIALIZED (
+    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    FROM agent a
+    WHERE a.id = sqlc.arg(agent_id)
+      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+    FOR KEY SHARE OF a
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
     originator_user_id, accountable_user_id, rule_version_id,
@@ -618,7 +625,7 @@ INSERT INTO agent_task_queue (
     id
 )
 SELECT
-    $1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary),
+    sqlc.arg(agent_id), enqueue_agent.runtime_id, NULL, 'queued', sqlc.arg(priority), sqlc.narg(autopilot_run_id), sqlc.narg(trigger_summary),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(rule_version_id),
@@ -626,7 +633,7 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, NULL, $2)
+FROM enqueue_agent
 RETURNING *;
 
 -- name: GetAutopilotTaskByRun :one

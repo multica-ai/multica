@@ -1833,6 +1833,9 @@ func (s *TaskService) RetrySourceContextQuickCreate(ctx context.Context, workspa
 	if err != nil || locked.ID != contextID {
 		return nil, ErrSourceContextRetryUnavailable
 	}
+	if _, err := qtx.LockAgentForTaskEnqueue(ctx, parent.AgentID); err != nil {
+		return nil, fmt.Errorf("lock source context retry agent: %w", err)
+	}
 	child, err := qtx.CreateManualQuickCreateRetryTask(ctx, db.CreateManualQuickCreateRetryTaskParams{
 		ActorUserID:          requesterID,
 		RuntimeMcpOverlay:    overlay.Overlay,
@@ -5494,14 +5497,18 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			}
 		}
 		if createRetry {
-			child, cerr := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
-				NewTaskID:            dbid.NewV7(),
-				ID:                   taskID,
-				FireAt:               retryFireAt,
-				MaxAttempts:          retryMaxAttempts,
-				RuntimeMcpOverlay:    retryOverlay.Overlay,
-				RuntimeConnectedApps: retryOverlay.ConnectedApps,
-			})
+			var child db.AgentTaskQueue
+			_, cerr := qtx.LockAgentForTaskEnqueue(ctx, t.AgentID)
+			if cerr == nil {
+				child, cerr = qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
+					NewTaskID:            dbid.NewV7(),
+					ID:                   taskID,
+					FireAt:               retryFireAt,
+					MaxAttempts:          retryMaxAttempts,
+					RuntimeMcpOverlay:    retryOverlay.Overlay,
+					RuntimeConnectedApps: retryOverlay.ConnectedApps,
+				})
+			}
 			switch {
 			case cerr == nil:
 				transferErr := transferPendingSourceContextToRetry(ctx, qtx, t, child)
@@ -6000,14 +6007,18 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		}
 		return nil, err
 	}
-	child, err := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
-		NewTaskID:            dbid.NewV7(),
-		ID:                   parent.ID,
-		FireAt:               retryFireAt,
-		MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
-		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
-		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
-	})
+	var child db.AgentTaskQueue
+	_, err = qtx.LockAgentForTaskEnqueue(ctx, parent.AgentID)
+	if err == nil {
+		child, err = qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
+			NewTaskID:            dbid.NewV7(),
+			ID:                   parent.ID,
+			FireAt:               retryFireAt,
+			MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
+			RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
+			RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
+		})
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Workspace torn down, or the pending slot was taken between the check
 		// above and this insert. Same contract as FailTask's path: no retry, no

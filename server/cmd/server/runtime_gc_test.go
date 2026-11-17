@@ -499,7 +499,10 @@ func TestRuntimeGC_RuntimeLockRejectsConcurrentEnqueue(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	runtimeID := createRuntimeGCFixtureRuntime(t, ctx, "enqueue-race")
-	agentID := runtimeGCFixtureAgentID(t, ctx)
+	// A bound agent now routes to its current runtime instead of this stale
+	// hint. Use an unbound agent so the enqueue still targets the runtime
+	// being deleted and exercises the owner fence's lock and refusal.
+	agentID := testutil.New(testPool, testWorkspaceID, testUserID).Agent(t, "runtime-gc-enqueue-race", "")
 
 	locked := make(chan struct{})
 	proceed := make(chan struct{})

@@ -1147,6 +1147,13 @@ WHERE id = $1;
 -- The chat sender (initiator) is a direct_human originator and accountable;
 -- attribution provenance is stamped so this path is not a NULL-source enqueue
 -- bypass (MUL-4302 §2).
+WITH enqueue_agent AS MATERIALIZED (
+    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    FROM agent a
+    WHERE a.id = sqlc.arg(agent_id)
+      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+    FOR KEY SHARE OF a
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
@@ -1154,9 +1161,9 @@ INSERT INTO agent_task_queue (
     fire_at, channel_context_revision, id, context
 )
 SELECT
-    $1, $2, NULL,
+    sqlc.arg(agent_id), enqueue_agent.runtime_id, NULL,
     CASE WHEN sqlc.narg('fire_at')::timestamptz IS NULL THEN 'queued' ELSE 'deferred' END,
-    $3, $4, $5,
+    sqlc.arg(priority), sqlc.narg(chat_session_id), sqlc.narg(initiator_user_id),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
@@ -1169,7 +1176,7 @@ SELECT
     sqlc.narg('channel_context_revision')::bigint,
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
     sqlc.narg('context')::jsonb
-WHERE lock_task_owner_rows($1, NULL, $2)
+FROM enqueue_agent
 RETURNING *;
 
 -- name: PromoteChannelChatTasksIfMediaReady :many
