@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -9,7 +10,9 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // RuntimeContamination identifies an affected commit without rewriting it.
@@ -18,7 +21,7 @@ type RuntimeContamination struct {
 	Path   string
 }
 
-func (w *LocalWorktree) runtimeContamination(tip string) ([]RuntimeContamination, error) {
+func (w *LocalWorktree) runtimeContamination(tip string) (found []RuntimeContamination, err error) {
 	commits, err := runGitTrimmed(w.GitRoot, "rev-list", w.BaseCommit+".."+tip)
 	if err != nil {
 		return nil, err
@@ -30,7 +33,17 @@ func (w *LocalWorktree) runtimeContamination(tip string) ([]RuntimeContamination
 			hashes[filepath.ToSlash(rel)] = hash
 		}
 	}
-	var found []RuntimeContamination
+	// One cat-file process serves every blob: a task commit can touch
+	// thousands of files, and a process per blob would stall Finalize.
+	blobs, err := startRuntimeBlobReader(w.GitRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := blobs.close(err != nil); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 	for _, commit := range strings.Fields(commits) {
 		paths, err := runGitStdout(w.GitRoot, "diff-tree", "--root", "-r", "-m", "--no-commit-id", "--no-renames", "--raw", "--diff-filter=ACMT", "-z", commit)
 		if err != nil {
@@ -50,7 +63,7 @@ func (w *LocalWorktree) runtimeContamination(tip string) ([]RuntimeContamination
 			if metadata[1] == "160000" {
 				continue
 			} // Submodules contain commits, not blobs.
-			marker, hash, err := inspectRuntimeBlob(w.GitRoot, metadata[3])
+			marker, hash, err := blobs.inspect(metadata[3])
 			if err != nil {
 				return found, err
 			}
@@ -62,22 +75,80 @@ func (w *LocalWorktree) runtimeContamination(tip string) ([]RuntimeContamination
 	return found, nil
 }
 
-// Stream blobs: a task may commit large binaries, which must not be buffered
-// whole just to search for a short marker or hash an owned sidecar.
-func inspectRuntimeBlob(gitRoot, object string) (bool, string, error) {
+// runtimeBlobReader streams blobs from a long-lived `git cat-file --batch`.
+// Blobs are never buffered whole: a task may commit large binaries, which must
+// not be held in memory just to search for a short marker or hash a sidecar.
+type runtimeBlobReader struct {
+	cancel context.CancelFunc
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+}
+
+func startRuntimeBlobReader(gitRoot string) (*runtimeBlobReader, error) {
+	// The whole scan shares one deadline; it runs once, after the agent exits.
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-C", gitRoot, "cat-file", "blob", object)
+	cmd := exec.CommandContext(ctx, "git", "-C", gitRoot, "cat-file", "--batch")
+	cmd.WaitDelay = 5 * time.Second
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return nil, err
+	}
+	return &runtimeBlobReader{cancel: cancel, cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout)}, nil
+}
+
+func (r *runtimeBlobReader) inspect(object string) (bool, string, error) {
+	if _, err := io.WriteString(r.stdin, object+"\n"); err != nil {
+		return false, "", fmt.Errorf("git cat-file: %w", err)
+	}
+	header, err := r.stdout.ReadString('\n')
+	if err != nil {
+		return false, "", fmt.Errorf("git cat-file %s: %w", object, err)
+	}
+	fields := strings.Fields(header)
+	if len(fields) != 3 || fields[1] != "blob" {
+		return false, "", fmt.Errorf("git cat-file %s: unexpected header %q", object, strings.TrimSpace(header))
+	}
+	size, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil {
+		return false, "", fmt.Errorf("git cat-file %s: %w", object, err)
+	}
 	hash := sha256.New()
 	probe := &runtimeBlobProbe{tail: []byte("\n")}
-	cmd.Stdout = io.MultiWriter(hash, probe)
-	if err := cmd.Run(); err != nil {
-		return false, "", err
+	if _, err := io.CopyN(io.MultiWriter(hash, probe), r.stdout, size); err != nil {
+		return false, "", fmt.Errorf("git cat-file %s: %w", object, err)
+	}
+	if b, err := r.stdout.ReadByte(); err != nil || b != '\n' {
+		return false, "", fmt.Errorf("git cat-file %s: missing object terminator", object)
 	}
 	probe.Write([]byte("\n"))
 	var marker taskContextMarkerFile
 	isTaskMarker := !probe.large && json.Unmarshal(probe.jsonPrefix, &marker) == nil && marker.ManagedBy == TaskContextMarkerManagedBy
 	return probe.marked || isTaskMarker, fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+// close ends the batch. After a failed read git may still be blocked writing
+// the unread remainder of a blob, so an aborted scan kills it rather than
+// waiting out the deadline.
+func (r *runtimeBlobReader) close(aborted bool) error {
+	defer r.cancel()
+	_ = r.stdin.Close()
+	if aborted {
+		r.cancel()
+		_ = r.cmd.Wait()
+		return nil
+	}
+	return r.cmd.Wait()
 }
 
 type runtimeBlobProbe struct {
