@@ -5,9 +5,11 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 )
@@ -180,10 +182,11 @@ func TestGitlabSystemHookMergeRequest(t *testing.T) {
 	p, _ := For("gitlab")
 	h := http.Header{}
 	h.Set("X-Gitlab-Event", "System Hook")
-	body := []byte(`{"object_kind":"merge_request","event_type":"merge_request",
-		"project":{"path_with_namespace":"group/sub/widget"},
-		"object_attributes":{"iid":59,"title":"MUL-44: fix","state_id":3,
-			"source_branch":"fix/mul-44","url":"https://gitlab.test/group/sub/widget/-/merge_requests/59"}}`)
+	// GitLab 19.5.3-ee: https://github.com/multica-ai/multica/pull/10411#issuecomment-6943978266
+	body, err := os.ReadFile("testdata/gitlab-system-hook-merge.json")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := p.EventKind(h, body); got != EventPullRequest {
 		t.Fatalf("system MR kind = %v, want EventPullRequest", got)
 	}
@@ -191,11 +194,55 @@ func TestGitlabSystemHookMergeRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pr.State != "merged" || pr.RepoOwner != "group/sub" || pr.Number != 59 {
+	if pr.State != "merged" || pr.RepoOwner != "example-user" || pr.RepoName != "example-project" || pr.Number != 10 ||
+		pr.Body != "" || pr.HeadSHA != "2222222222222222222222222222222222222222" ||
+		pr.UpdatedAt != "2026-11-01T09:15:57.549Z" || pr.AuthorLogin != "project_200_bot_00000000000000000000000000000000" {
 		t.Fatalf("system MR = %+v", pr)
 	}
 	if got := p.EventKind(h, []byte(`{"object_kind":"project_create"}`)); got != EventOther {
 		t.Fatalf("unrelated system event kind = %v, want EventOther", got)
+	}
+}
+
+func TestGitlabSystemHookStateUsesExplicitState(t *testing.T) {
+	p, _ := For("gitlab")
+	for _, tc := range []struct {
+		state   string
+		stateID int
+		want    string
+	}{
+		{"merged", 2, "merged"},
+		{"closed", 3, "closed"},
+		{"opened", 3, "open"},
+		{"", 3, "open"},
+	} {
+		name := tc.state
+		if name == "" {
+			name = "missing_state"
+		}
+		t.Run(name, func(t *testing.T) {
+			body, err := os.ReadFile("testdata/gitlab-system-hook-merge.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatal(err)
+			}
+			attrs := payload["object_attributes"].(map[string]any)
+			attrs["state"], attrs["state_id"] = tc.state, tc.stateID
+			if tc.state == "" {
+				delete(attrs, "state")
+			}
+			body, err = json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pr, err := p.ParsePullRequest(body)
+			if err != nil || pr.State != tc.want {
+				t.Fatalf("state=%q state_id=%d: got %q err=%v, want %q", tc.state, tc.stateID, pr.State, err, tc.want)
+			}
+		})
 	}
 }
 

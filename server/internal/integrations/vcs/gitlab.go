@@ -67,7 +67,6 @@ type glMergeRequestPayload struct {
 		Title          string `json:"title"`
 		Description    string `json:"description"`
 		State          string `json:"state"` // opened|closed|merged|locked
-		StateID        int    `json:"state_id"`
 		Action         string `json:"action"`
 		SourceBranch   string `json:"source_branch"`
 		URL            string `json:"url"`
@@ -89,15 +88,6 @@ func (gitlabProvider) ParsePullRequest(body []byte) (PullRequestEvent, error) {
 	owner, name := splitNamespace(d.Project.PathWithNamespace)
 	draft := d.ObjectAttributes.Draft || d.ObjectAttributes.WorkInProgress ||
 		strings.HasPrefix(strings.ToLower(d.ObjectAttributes.Title), "draft:")
-	state := d.ObjectAttributes.State
-	if state == "" {
-		switch d.ObjectAttributes.StateID {
-		case 2:
-			state = "closed"
-		case 3:
-			state = "merged"
-		}
-	}
 	return PullRequestEvent{
 		Action:          d.ObjectAttributes.Action,
 		RepoOwner:       owner,
@@ -105,7 +95,7 @@ func (gitlabProvider) ParsePullRequest(body []byte) (PullRequestEvent, error) {
 		Number:          d.ObjectAttributes.IID,
 		Title:           d.ObjectAttributes.Title,
 		Body:            d.ObjectAttributes.Description,
-		State:           normalizeGitLabMRState(state, draft),
+		State:           normalizeGitLabMRState(d.ObjectAttributes.State, draft),
 		HTMLURL:         d.ObjectAttributes.URL,
 		Branch:          d.ObjectAttributes.SourceBranch,
 		HeadSHA:         d.ObjectAttributes.LastCommit.ID,
@@ -257,6 +247,9 @@ func (gitlabProvider) ValidateToken(ctx context.Context, instanceURL, token stri
 // /user validation only proves that the token is valid, not that it can read
 // every private project listed in a workspace.
 func (gitlabProvider) RepositoryReadable(ctx context.Context, instanceURL, owner, name, token string) (bool, error) {
+	// Finish authorization before GitLab's webhook delivery window expires.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	project := url.PathEscape(owner + "/" + name)
 	endpoint := NormalizeInstanceURL(instanceURL) + "/api/v4/projects/" + project
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)

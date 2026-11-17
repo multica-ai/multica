@@ -149,7 +149,8 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 				ws, err := h.Queries.GetWorkspace(r.Context(), conn.WorkspaceID)
 				if err != nil {
 					slog.Warn("vcs: load workspace for system hook failed", "err", err)
-					break
+					writeError(w, http.StatusServiceUnavailable, "workspace lookup failed")
+					return
 				}
 				if !gitLabSystemHookRepoAllowed(ws.Repos, conn.InstanceUrl, pr.RepoOwner, pr.RepoName) {
 					break
@@ -158,11 +159,16 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 					token, err := h.openVCSSecret(conn.AccessTokenEncrypted)
 					if err != nil || token == "" {
 						slog.Warn("vcs: open access token for system hook failed", "err", err)
-						break
+						writeError(w, http.StatusInternalServerError, "access token error")
+						return
 					}
 					readable, err := checker.RepositoryReadable(r.Context(), conn.InstanceUrl, pr.RepoOwner, pr.RepoName, token)
-					if err != nil || !readable {
-						slog.Warn("vcs: system-hook repository is not readable", "provider", conn.Provider, "owner", pr.RepoOwner, "name", pr.RepoName, "err", err)
+					if err != nil {
+						slog.Warn("vcs: system-hook repository access lookup failed", "provider", conn.Provider, "err", err)
+						writeError(w, http.StatusServiceUnavailable, "repository access lookup failed")
+						return
+					}
+					if !readable {
 						break
 					}
 				}
@@ -227,7 +233,7 @@ func gitLabRepoURLMatchesInstance(repo, instance *url.URL) bool {
 		return false
 	}
 	if repo.Scheme == "ssh" {
-		return strings.EqualFold(repo.Host, instance.Host) && repo.User != nil && repo.User.Username() == "git"
+		return strings.EqualFold(repo.Hostname(), instance.Hostname()) && repo.User != nil && repo.User.Username() == "git"
 	}
 	if repo.Scheme == "https" || repo.Scheme == "http" {
 		return repo.Scheme == instance.Scheme && strings.EqualFold(repo.Host, instance.Host) && repo.User == nil
