@@ -3690,6 +3690,70 @@ describe("IssueDetail (shared)", () => {
       ...overrides,
     });
 
+    const inlineChildren = () => within(document.querySelector<HTMLElement>('[class~="group/sub-issues"]')!);
+    const findInlineChild = (title: string) => waitFor(() => inlineChildren().getByText(title));
+
+    it("offers direct sidebar child links and an independent disclosure", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({ id: "child-open", identifier: "TES-11", title: "Open destination", status: "todo" }),
+          subIssue({ id: "child-done", identifier: "TES-12", title: "Custom completion", status: "verified", status_category: "done" }),
+          subIssue({ id: "child-cancelled", identifier: "TES-13", title: "Cancelled destination", status: "cancelled" }),
+        ],
+      });
+      const { container } = renderIssueDetail();
+      await waitFor(() => expect(container.querySelector('[data-issue-sidebar-section="sub_issues"]')).not.toBeNull());
+      const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      expect(sidebar.getAllByRole("link")).toHaveLength(3);
+      expect(sidebar.getByRole("link", { name: /TES-11 Open destination/ })).toHaveAttribute("href", "/test/issues/child-open");
+      expect(sidebar.getByRole("link", { name: /TES-13 Cancelled destination/ })).toBeInTheDocument();
+      expect(sidebar.getByRole("progressbar", { name: "Sub-issues" })).toHaveAttribute("aria-valuenow", "1");
+      expect(sidebar.getByRole("progressbar", { name: "Sub-issues" })).toHaveAttribute("aria-valuemax", "3");
+      const toggle = sidebar.getByRole("button", { name: "Sub-issues" });
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(sidebar.queryAllByRole("link")).toHaveLength(0);
+      expect(inlineChildren().getByText("Open destination")).toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(sidebar.getAllByRole("link")).toHaveLength(3);
+    });
+
+    it("leaves the sidebar slot empty while loading and when no children exist", async () => {
+      let resolveChildren!: (value: { issues: Issue[] }) => void;
+      mockApiObj.listChildIssues.mockImplementation(() => new Promise((resolve) => {
+        resolveChildren = resolve;
+      }));
+      const { container } = renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      const sidebar = () => container.querySelector('[data-issue-sidebar-section="sub_issues"]');
+      expect(sidebar()?.childElementCount).toBe(0);
+      await act(async () => resolveChildren({ issues: [] }));
+      expect(sidebar()?.childElementCount).toBe(0);
+    });
+
+    it("removes cached sidebar links after a child query loses access", async () => {
+      let rejectChildren!: (reason: unknown) => void;
+      mockApiObj.listChildIssues.mockImplementation(() => new Promise((_resolve, reject) => {
+        rejectChildren = reject;
+      }));
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(issueKeys.children("ws-1", "issue-1"), [
+        subIssue({ id: "child-private", identifier: "TES-11", title: "Previously authorized child" }),
+      ]);
+      const { container } = render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+      const sidebar = () => container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!;
+      await waitFor(() => expect(within(sidebar()).getByRole("link", { name: /Previously authorized child/ })).toBeInTheDocument());
+      await act(async () => rejectChildren(new ApiError("Access denied", 403, "Forbidden")));
+      await waitFor(() => expect(sidebar().childElementCount).toBe(0));
+    });
+
     it("jumps from the outline to the expanded sub-issues section without comments", async () => {
       // Preview/order behavior lives in thread-minimap.test.tsx; this tests the real section.
       mockApiObj.listTimeline.mockResolvedValue([]);
@@ -3697,10 +3761,10 @@ describe("IssueDetail (shared)", () => {
         issues: [subIssue({ id: "child-1", title: "Child destination" })],
       });
       const { container } = renderIssueDetail();
-      await screen.findByText("Child destination");
+      await findInlineChild("Child destination");
       const section = container.querySelector<HTMLDivElement>(".group\\/sub-issues")!;
       fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
-      expect(screen.queryByText("Child destination")).not.toBeInTheDocument();
+      expect(within(section).queryByText("Child destination")).not.toBeInTheDocument();
 
       const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
       scroller.scrollTop = 600;
@@ -3709,7 +3773,7 @@ describe("IssueDetail (shared)", () => {
       fireEvent.click(within(screen.getByRole("navigation", { name: "Quick navigation" }))
         .getByRole("button", { name: "Sub-issues" }));
 
-      expect(await screen.findByText("Child destination")).toBeInTheDocument();
+      expect(await findInlineChild("Child destination")).toBeInTheDocument();
       await waitFor(() => expect(scroller.scrollTop).toBe(284));
     });
 
@@ -3740,7 +3804,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Fix login flow");
+      await findInlineChild("Fix login flow");
       // Label chips ride inside the row link.
       expect(screen.getByText("backend")).toBeInTheDocument();
       expect(screen.getByText("auth")).toBeInTheDocument();
@@ -3750,7 +3814,7 @@ describe("IssueDetail (shared)", () => {
       const due = screen.getByText("Jan 1");
       expect(due.closest("span")?.className).toContain("text-destructive");
       // Bare row shows no due date / no progress chip of its own.
-      const bareRow = screen.getByText("Ship dashboards").closest("a");
+      const bareRow = inlineChildren().getByText("Ship dashboards").closest("a");
       expect(bareRow?.textContent).not.toContain("/");
     });
 
@@ -3777,7 +3841,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Fix login flow");
+      await findInlineChild("Fix login flow");
       expect(screen.queryByText("backend")).not.toBeInTheDocument();
       expect(screen.queryByText("Jan 1")).not.toBeInTheDocument();
     });
@@ -3819,7 +3883,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Fix login flow");
+      await findInlineChild("Fix login flow");
       // Chip renders only on the row that has a value for the property.
       expect(await screen.findByText("Sprint 3")).toBeInTheDocument();
       expect(screen.getAllByText("Sprint 3")).toHaveLength(1);
@@ -3872,7 +3936,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Wrapped up");
+      await findInlineChild("Wrapped up");
       const due = screen.getByText("Jan 1");
       expect(due.closest("span")?.className).not.toContain("text-destructive");
       expect(due.closest("span")?.className).toContain("text-muted-foreground");
