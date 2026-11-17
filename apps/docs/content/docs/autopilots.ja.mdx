@@ -91,6 +91,19 @@ Webhook リクエストには次の制約があります。
 
 たとえばイベント名に `workflow_run`、Actions に `completed, failed` を指定すると、この 2 種類の `workflow_run` の結果だけを受け取ります。Multica は一般的なリクエストヘッダーと payload からイベントと action を判定します。GitHub の `X-GitHub-Event` と body の `action` にも対応しています。
 
+GitLab の場合、イベント名は GitLab が送る `X-Gitlab-Event` リクエストヘッダーの値そのもので、`Merge Request Hook`、`Issue Hook`、`Note Hook` のように空白や大文字も含めて一致させます。payload の `object_kind`（`merge_request`）では一致しません。Actions の各値は `object_attributes.action` と `object_attributes.state` の両方と比較され、どちらかが一致すればルールに一致します。次のルールは新規作成・更新・再オープンされた merge request を受け取り、マージとクローズは無視します。
+
+```json
+{ "event": "Merge Request Hook", "actions": ["open", "update", "reopen"] }
+```
+
+Actions には状態を表す語（`opened`、`merged`、`closed`）ではなく、操作を表す語（`open`、`update`、`reopen`、`merge`、`close`）を指定してください。値は完全一致で比較され、一方の形から他方へ変換されることはありません。状態を表す語は、対象をその状態のままにするすべてのイベントに一致します。オープン中の merge request にコミットを push すると `"action": "update"` と `"state": "opened"` が、承認すると `"action": "approval"` と同じ状態が送られるため、`opened` を指定すると新規作成に加えてこれらのイベントでも実行が始まります。
+
+- `Issue Hook` に `close` を指定すると、クローズされた issue を受け取ります。
+- `Note Hook` に `create` を指定すると、新しいコメントを受け取ります。コメントの編集では `update` が送られます。
+- Actions が空の GitLab ルールは、そのイベント名のすべてのイベントを受け取ります。
+- Pipeline Hook と Job Hook の結果はそれぞれ `object_attributes.status` と `build_status` にあり、action としては読み取られません。Actions を空にして、そのフィールドに条件を追加してください（例: `object_attributes.status` が `failed` に等しい）。
+
 各ルールには payload のフィールドに対する `conditions` も設定できます。ルールの **条件を追加** をクリックするか、API から設定します。すべての条件を満たしたときだけそのルールに一致し、除外されたイベントは実行が始まる前に無視されます。`path` はドット区切りで payload をたどり、数値は配列の添字、`*` は任意の要素を表します（`pull_request.labels.*.name`）。`op` は `equals`、`not_equals`、`contains`、`in`、`exists` のいずれかで、`ignore_case` はテキストに適用されます。`*` を使う場合、`equals`、`contains`、`in`、`exists` はいずれかの要素が一致すれば成立し、`not_equals` はどの要素も一致しないときに成立します。フィールドが存在しない場合は一致せず、`exists` は `null` を無視します。たとえば次のルールは、準備ができていて `needs-review` ラベルが付き、`main` または `release` を対象とし、bot が作成したものではない pull request だけを受け取ります。
 
 ```json

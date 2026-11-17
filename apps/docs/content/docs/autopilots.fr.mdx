@@ -91,6 +91,19 @@ Lorsqu'une même source envoie plusieurs types d'événements, ajoutez des filtr
 
 Par exemple, avec `workflow_run` comme nom d'événement et `completed, failed` comme actions, seuls ces deux types de résultats `workflow_run` sont acceptés. Multica reconnaît l'événement et l'action à partir des en-têtes de requête et des champs de charge utile courants, notamment l'en-tête `X-GitHub-Event` de GitHub et le champ `action` du corps.
 
+Pour GitLab, le nom d'événement est la valeur de l'en-tête `X-Gitlab-Event` telle que GitLab l'envoie, par exemple `Merge Request Hook`, `Issue Hook` ou `Note Hook`, espaces et majuscules compris ; le champ `object_kind` de la charge utile (`merge_request`) ne correspond pas. Chaque action listée est comparée à la fois à `object_attributes.action` et à `object_attributes.state`, et la règle correspond si l'une des deux valeurs figure dans la liste. Cette règle accepte les merge requests créées, mises à jour ou rouvertes, et ignore les fusions et fermetures :
+
+```json
+{ "event": "Merge Request Hook", "actions": ["open", "update", "reopen"] }
+```
+
+Indiquez des verbes d'action (`open`, `update`, `reopen`, `merge`, `close`) plutôt que des états (`opened`, `merged`, `closed`). Les valeurs sont comparées à l'identique et jamais converties d'une forme à l'autre, et un état correspond à tout événement qui laisse l'objet dans cet état. Pousser un commit sur une merge request ouverte envoie `"action": "update"` avec `"state": "opened"`, et une approbation envoie `"action": "approval"` avec le même état : avec `opened`, chacun de ces événements lance donc une exécution, en plus des nouvelles merge requests.
+
+- `Issue Hook` avec `close` accepte les tickets fermés.
+- `Note Hook` avec `create` accepte les nouveaux commentaires ; un commentaire modifié envoie `update`.
+- Une règle GitLab sans actions accepte tous les événements portant ce nom.
+- Les hooks de pipeline et de job indiquent leur résultat dans `object_attributes.status` et `build_status`, qui ne sont pas lus comme des actions. Laissez les actions vides et ajoutez plutôt une condition sur ce champ, par exemple `object_attributes.status` égal à `failed`.
+
 Chaque règle peut aussi porter des `conditions` sur les champs de la charge utile : cliquez sur **Ajouter une condition** dans la règle, ou définissez-les via l'API. Toutes les conditions doivent être vraies pour que la règle corresponde ; un événement filtré est ignoré avant le démarrage de toute exécution. `path` parcourt la charge utile avec des points : un nombre indexe un tableau et `*` désigne n'importe quel élément (`pull_request.labels.*.name`). `op` vaut `equals`, `not_equals`, `contains`, `in` ou `exists`, et `ignore_case` s'applique au texte. Avec `*`, `equals`, `contains`, `in` et `exists` sont vraies si un élément correspond, et `not_equals` si aucun ne correspond. Un champ absent ne correspond jamais, et `exists` ignore `null`. Par exemple, cette règle n'accepte que les pull requests prêtes, étiquetées `needs-review`, qui ciblent `main` ou `release` et n'ont pas été ouvertes par un bot :
 
 ```json
