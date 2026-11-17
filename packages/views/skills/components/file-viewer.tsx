@@ -22,8 +22,8 @@ export function isMarkdownPath(path: string) {
  * Body of a single skill file.
  *
  * Frontmatter is stripped from the preview because `name` / `description` are
- * surfaced as first-class properties on the Overview tab — rendering them
- * again here was the third copy of the same two fields.
+ * surfaced as first-class properties of the skill — rendering them again here
+ * was the third copy of the same two fields.
  */
 export function FileViewer({
   path,

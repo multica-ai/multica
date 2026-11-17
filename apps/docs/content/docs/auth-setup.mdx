@@ -4,6 +4,7 @@ description: Configure email verification codes, Google sign-in, and who can sig
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
+import { Step, Steps } from "fumadocs-ui/components/steps";
 
 Multica signs users in with email verification codes by default; Google OAuth can be added on top. Existing users can always sign in again — signup restrictions only decide whether new accounts can be created.
 
@@ -15,15 +16,28 @@ Email can be delivered through Resend or SMTP. When both are configured, `SMTP_H
 
 ### Using Resend
 
-1. Verify a sending domain and create an API key at [Resend](https://resend.com/).
-2. Set:
+<Steps>
+<Step>
 
-   ```dotenv
-   RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
-   RESEND_FROM_EMAIL=noreply@example.com
-   ```
+Verify a sending domain and create an API key at [Resend](https://resend.com/).
 
-3. Restart the API service.
+</Step>
+<Step>
+
+Set:
+
+```dotenv
+RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+RESEND_FROM_EMAIL=noreply@example.com
+```
+
+</Step>
+<Step>
+
+Restart the API service.
+
+</Step>
+</Steps>
 
 `RESEND_FROM_EMAIL` must belong to a domain already verified in Resend.
 
@@ -57,7 +71,7 @@ SMTP_EHLO_NAME=mail.example.com
 
 ### Behavior without an email service
 
-The server still starts, but verification codes and invitation links are only written to the log; no email is sent. This suits local development, not production.
+The server still starts, but verification codes and invitation links are only written to the log; no email is sent. This mode is only suitable for local development.
 
 The startup log states whether the current mode is `Resend API`, `SMTP relay`, or `DEV mode`.
 
@@ -78,22 +92,38 @@ Do not enable a fixed code on a publicly reachable instance. The production comb
 
 ## Google sign-in
 
-1. Create an OAuth 2.0 client in the [Google Cloud Console](https://console.cloud.google.com/).
-2. Add the Multica frontend's callback URL to **Authorized redirect URIs**:
+<Steps>
+<Step>
 
-   ```text
-   https://multica.example.com/auth/callback
-   ```
+Create an OAuth 2.0 client in the [Google Cloud Console](https://console.cloud.google.com/).
 
-3. Set:
+</Step>
+<Step>
 
-   ```dotenv
-   GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
-   GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
-   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
-   ```
+Add the Multica frontend's callback URL to **Authorized redirect URIs**:
 
-4. Restart the API service.
+```text
+https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+Set:
+
+```dotenv
+GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+```
+
+</Step>
+<Step>
+
+Restart the API service.
+
+</Step>
+</Steps>
 
 The URLs in the Google Console and in `GOOGLE_REDIRECT_URI` must match exactly, including protocol, port, and trailing slash. Once configured, the sign-in page shows a Google sign-in button; the frontend image needs no rebuild.
 
@@ -144,7 +174,7 @@ Revoking an invitation does not delete an account already created using it or pr
 
 Sessions slide. The lifetime below is an **idle** bound, not a countdown from sign-in: once a session drops below half of it, the next request re-issues it with a full lifetime again, so an account in continuous use is never signed out on a schedule. There is no absolute cap.
 
-The bound is one-sided. A session is only re-issued once it is past the halfway point, so a session last used while it still had more than half its lifetime left is not extended — the idle gap that is always survivable is half the value below, not all of it.
+The bound is one-sided. A session is only re-issued once it is past the halfway point, so a session last used while it still had more than half its lifetime left is not extended. The idle gap a session is guaranteed to survive is only half the value below.
 
 Adjust with `AUTH_TOKEN_TTL`, which accepts a Go duration or a positive integer of seconds:
 
@@ -154,7 +184,7 @@ AUTH_TOKEN_TTL=720h
 
 The minimum is `60s`; anything shorter is clamped up to it and logs a warning at startup. Below that, the renewal cadence the server derives would fall under the floor clients apply to it, and clients would check for renewal less often than the session can survive.
 
-Restart the API service after changing it. The value applies to sessions issued or re-issued afterwards — because sessions slide, an existing session picks up the new lifetime the next time it is re-issued.
+Restart the API service after changing it. The value applies to sessions issued or re-issued afterwards. Because sessions slide, an existing session picks up the new lifetime the next time it is re-issued.
 
 ## Next steps
 

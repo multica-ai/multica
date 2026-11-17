@@ -10,6 +10,16 @@ const profile = {
   command_name: "wrapper",
 };
 describe("runtime profile response compatibility", () => {
+  it("reads machine bindings and tolerates older responses", () => {
+    expect(
+      RuntimeProfileSchema.parse({ ...profile, daemon_id: "machine-a" }).daemon_id,
+    ).toBe("machine-a");
+    for (const daemon_id of [undefined, null, 42]) {
+      expect(
+        RuntimeProfileSchema.parse({ ...profile, daemon_id }).daemon_id,
+      ).toBeNull();
+    }
+  });
   it("defaults old or malformed identities to the protocol", () => {
     for (const runtime_type of [undefined, null, 42, ""]) {
       expect(

@@ -70,13 +70,16 @@ func TestCodebuddyExecuteFallbackUsage(t *testing.T) {
 		otherModel: {InputTokens: 20, OutputTokens: 10, CacheReadTokens: 40, CacheWriteTokens: 2},
 	}
 
-	cases := []struct {
-		name    string
-		events  []json.RawMessage
-		result  json.RawMessage
-		success bool
-		want    map[string]TokenUsage
-	}{
+	type testCase struct {
+		name            string
+		events          []json.RawMessage
+		result          json.RawMessage
+		success         bool
+		resumeSessionID string
+		want            map[string]TokenUsage
+	}
+	cumulative := &codebuddyUsage{InputTokens: 999, OutputTokens: 99, CacheReadInputTokens: 9999, CacheCreationInputTokens: 999}
+	cases := []testCase{
 		{name: "split_response_without_result", events: split, want: baseWant},
 		{name: "split_response_zero_result_usage", events: split, result: terminal(true, &codebuddyUsage{}, map[string]codebuddyResultModelUsage{model: {}}), want: baseWant},
 		{name: "zero_usage_arrives_before_real_usage", events: []json.RawMessage{assistant("msg_a", model, "", &codebuddyUsage{OutputTokens: 1}), a, a2}, want: baseWant},
@@ -97,13 +100,39 @@ func TestCodebuddyExecuteFallbackUsage(t *testing.T) {
 		{name: "successful_model_totals_override_fallback", events: split, result: terminal(false, &codebuddyUsage{InputTokens: 999}, finalUsage), success: true, want: finalWant},
 		{name: "failed_model_totals_override_fallback", events: split, result: terminal(true, &codebuddyUsage{InputTokens: 999}, finalUsage), want: finalWant},
 		{name: "terminal_usage_without_model_totals", events: split, result: terminal(true, &codebuddyUsage{InputTokens: 150, OutputTokens: 50, CacheReadInputTokens: 300, CacheCreationInputTokens: 15}, nil), want: map[string]TokenUsage{model: finalWant[model]}},
+		{name: "resumed_successful_model_totals_override_fallback", events: split, result: terminal(false, &codebuddyUsage{InputTokens: 999}, finalUsage), success: true, resumeSessionID: "session-resumed", want: finalWant},
+		{name: "resumed_failed_model_totals_override_fallback", events: split, result: terminal(true, &codebuddyUsage{InputTokens: 999}, finalUsage), resumeSessionID: "session-resumed", want: finalWant},
+		{name: "resumed_without_result", events: split, resumeSessionID: "session-resumed", want: baseWant},
+		{name: "resumed_without_current_usage", result: terminal(true, cumulative, nil), resumeSessionID: "session-resumed", want: map[string]TokenUsage{}},
 	}
 
+	// The reporter captured per-run modelUsage alongside session-cumulative
+	// usage. Exercise the missing/unusable modelUsage paths separately; those
+	// result shapes are synthetic, not additional captured failure events.
+	for _, failed := range []bool{false, true} {
+		for _, totals := range []struct {
+			name  string
+			value any
+		}{
+			{name: "null"},
+			{name: "empty", value: map[string]codebuddyResultModelUsage{}},
+			{name: "zero", value: map[string]codebuddyResultModelUsage{model: {}}},
+			{name: "unnamed", value: map[string]codebuddyResultModelUsage{"": {InputTokens: 999}}},
+		} {
+			cases = append(cases, testCase{
+				name:   fmt.Sprintf("resumed_failed_%t_%s_model_totals", failed, totals.name),
+				events: split, result: terminal(failed, cumulative, totals.value),
+				success: !failed, resumeSessionID: "session-resumed", want: baseWant,
+			})
+		}
+	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			backend := codebuddyUsageFixtureBackend(t, tt.events, tt.result, !tt.success)
-			result := executeCodebuddyUsageFixture(t, backend, len(tt.events))
+			result := executeCodebuddyUsageFixtureWithOptions(t, backend, len(tt.events), ExecOptions{
+				Timeout: 5 * time.Second, ResumeSessionID: tt.resumeSessionID,
+			})
 			wantStatus := "failed"
 			if tt.success {
 				wantStatus = "completed"
@@ -115,6 +144,36 @@ func TestCodebuddyExecuteFallbackUsage(t *testing.T) {
 				t.Fatalf("usage = %#v, want %#v", result.Usage, tt.want)
 			}
 		})
+	}
+}
+
+func TestCodebuddyResultUsageAcrossResume(t *testing.T) {
+	t.Parallel()
+
+	// Sanitized events from #10643: modelUsage is per run, while usage and
+	// num_turns include the previous run on resume. No baseline subtraction
+	// should be applied to modelUsage.
+	events := []json.RawMessage{
+		json.RawMessage(`{"type":"result","subtype":"success","is_error":false,"num_turns":2,"usage":{"input_tokens":29821,"output_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"modelUsage":{"<MODEL>":{"inputTokens":29821,"outputTokens":2,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}`),
+		json.RawMessage(`{"type":"result","subtype":"success","is_error":false,"num_turns":4,"usage":{"input_tokens":59665,"output_tokens":4,"cache_creation_input_tokens":0,"cache_read_input_tokens":0},"modelUsage":{"<MODEL>":{"inputTokens":29844,"outputTokens":2,"cacheReadInputTokens":0,"cacheCreationInputTokens":0}}}`),
+	}
+	var total TokenUsage
+	for i, event := range events {
+		var msg codebuddySDKMessage
+		if err := json.Unmarshal(event, &msg); err != nil {
+			t.Fatal(err)
+		}
+		usage := codebuddyResultUsage(msg, "<MODEL>", i > 0)
+		wantInput := []int64{29821, 29844}[i]
+		want := map[string]TokenUsage{"<MODEL>": {InputTokens: wantInput, OutputTokens: 2}}
+		if !reflect.DeepEqual(usage, want) {
+			t.Fatalf("run %d: usage = %#v, want %#v", i, usage, want)
+		}
+		total.InputTokens += usage["<MODEL>"].InputTokens
+		total.OutputTokens += usage["<MODEL>"].OutputTokens
+	}
+	if want := (TokenUsage{InputTokens: 59665, OutputTokens: 4}); total != want {
+		t.Fatalf("issue total = %+v, want %+v", total, want)
 	}
 }
 
@@ -170,9 +229,14 @@ func codebuddyUsageFixtureBackend(t *testing.T, events []json.RawMessage, result
 
 func executeCodebuddyUsageFixture(t *testing.T, backend Backend, eventCount int) Result {
 	t.Helper()
+	return executeCodebuddyUsageFixtureWithOptions(t, backend, eventCount, ExecOptions{Timeout: 5 * time.Second})
+}
+
+func executeCodebuddyUsageFixtureWithOptions(t *testing.T, backend Backend, eventCount int, opts ExecOptions) Result {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "fixture", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "fixture", opts)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -2,6 +2,10 @@ package wecom
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/util"
@@ -159,5 +163,136 @@ func TestARelayedAttachmentOnlyAnswerStillClosesTheBubble(t *testing.T) {
 	}
 	if want := copyFor(DefaultLocale).StreamNoReplyWithFiles; sealed != want {
 		t.Errorf("sealed with %q, want %q — the copy is the round's, in the round's own locale", sealed, want)
+	}
+}
+
+// ---- and the frame has to get there ----
+
+// The tests above check each end on its own: the publisher routes a seal, and
+// a seal handed to deliverRelayed closes the round. What lies between them is
+// the relay, and it addressed every frame by installation: the stream reader
+// drops a frame with no scope id, and perform asks whether this replica owns
+// that installation's socket before anything else. A seal carries no
+// installation, so it reached nobody. These run both processes joined by the
+// relay itself.
+
+// sealPair is two processes joined by the relay: holder painted the bubble for
+// task-1, elsewhere holds no round and no socket, and the ending lands there.
+type sealPair struct {
+	holder, elsewhere *bubbleRig
+	dedupe            *sharedDedupe
+}
+
+func newSealPair(t *testing.T) sealPair {
+	t.Helper()
+	p := sealPair{holder: newBubbleRig(t), elsewhere: newBoundRoomRig(t), dedupe: newSharedDedupe()}
+	p.holder.ran(t, "REQ-1", "task-1")
+	p.elsewhere.senders.clear(p.elsewhere.instID, p.elsewhere.conn.sender)
+	p.elsewhere.askedInTheRoom(t, "task-1")
+
+	fan := &fanoutRelay{}
+	for _, rig := range []*bubbleRig{p.holder, p.elsewhere} {
+		router := NewRelayOutbound(fan, p.dedupe, RelayConfig{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		fan.register(router)
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(func() { cancel(); router.Wait() })
+		router.Start(ctx)
+		router.Attach(rig.out)
+		if rig == p.elsewhere {
+			rig.typing.WithRelay(router)
+			rig.out = NewOutbound(rig.q, rig.senders, rig.streams, nil, WithRelay(router))
+		}
+	}
+	return p
+}
+
+// sealedWith waits for the holder's bubble to close and returns its last words.
+func (p sealPair) sealedWith(t *testing.T) string {
+	t.Helper()
+	sealed := ""
+	waitFor(t, "the holder to close the bubble", func() bool {
+		for _, f := range p.holder.conn.streamFrames(t) {
+			if f["finish"] == true {
+				sealed, _ = f["content"].(string)
+			}
+		}
+		return sealed != ""
+	})
+	return sealed
+}
+
+// REVERSE VERIFICATION: publish the seal under its installation again, or put
+// it back behind the ownership gate, and the bubble is never closed. Put it
+// back behind the claim and no claim is the assertion that fails.
+func TestACancellationElsewhereClosesTheBubbleThroughTheRelay(t *testing.T) {
+	t.Parallel()
+	p := newSealPair(t)
+
+	p.elsewhere.cancelled(t, "task-1")
+
+	if got, want := p.sealedWith(t), copyFor(DefaultLocale).StreamCancelled; got != want {
+		t.Errorf("sealed with %q, want %q", got, want)
+	}
+	if n := p.dedupe.claimCount(); n != 0 {
+		t.Errorf("the seal took %d claim(s) — claimed once for the deployment, a replica without the "+
+			"round can win it and the holder never closes the bubble", n)
+	}
+	if got := pushedTexts(t, p.elsewhere.conn); len(got) != 0 {
+		t.Errorf("the replica without the round said %q", got)
+	}
+}
+
+// The other wordless ending that is routed: a completion with nothing to say.
+func TestACompletionWithNothingToSayElsewhereClosesTheBubbleThroughTheRelay(t *testing.T) {
+	t.Parallel()
+	p := newSealPair(t)
+	p.elsewhere.queueTask(t, taskUUID(t, "task-1"), "")
+
+	p.elsewhere.answer(t, "", "task-1")
+
+	if got, want := p.sealedWith(t), wordlessSealCopy(DefaultLocale, false); got != want {
+		t.Errorf("sealed with %q, want %q", got, want)
+	}
+	if n := p.dedupe.claimCount(); n != 0 {
+		t.Errorf("the seal took %d claim(s)", n)
+	}
+}
+
+// A seal carries no installation, so dispatching it by installation put every
+// seal in the deployment on one shard queue. A cancel-all burst bigger than
+// that one queue was shed, and those bubbles kept spinning.
+//
+// REVERSE VERIFICATION: dispatch seals by InstallationID again and the burst
+// lands on one queue, which overflows.
+func TestABurstOfSealsIsSpreadAcrossTheDispatchQueues(t *testing.T) {
+	t.Parallel()
+	const shards, depth = 8, 4
+	r := NewRelayOutbound(nil, nil, RelayConfig{Shards: shards, QueueDepth: depth},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	// Not started: frames stay in the queues where they can be counted.
+	const n = shards * depth / 2
+	for i := 0; i < n; i++ {
+		frame, err := json.Marshal(relayFrame{
+			Kind:       relayKindSeal,
+			SealReason: sealReasonCancelled,
+			TaskID:     fmt.Sprintf("00000000-0000-0000-0000-%012d", i),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r.DeliverWecomOutbound("", frame, fmt.Sprintf("seal-%d", i))
+	}
+	queued, used := 0, 0
+	for _, q := range r.queues {
+		queued += len(q)
+		if len(q) > 0 {
+			used++
+		}
+	}
+	if queued != n {
+		t.Errorf("%d of %d seals were queued, the rest shed", queued, n)
+	}
+	if used < 2 {
+		t.Errorf("all seals went to %d queue(s); they should spread by task id", used)
 	}
 }

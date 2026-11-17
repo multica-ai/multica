@@ -90,8 +90,12 @@ func (h *Handler) ListWorkspaceWakeups(w http.ResponseWriter, r *http.Request) {
 			isAdmin = roleAllowed(manager.Role, "owner", "admin")
 		}
 	}
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
 	result, err := h.Queries.ListWorkspaceWakeups(r.Context(), db.ListWorkspaceWakeupsParams{
-		WorkspaceID: parseUUID(workspaceID), AgentIds: ids, MemberID: managerID, IsAdmin: isAdmin,
+		WorkspaceID: parseUUID(workspaceID), AgentIds: ids, MemberID: managerID, IsAdmin: isAdmin, HiddenProjectIds: hidden.Param(),
 		Scope: scope, Kind: kind, Source: source, AgentID: agentID, Search: search, PageLimit: int32(limit), PageOffset: int32(page),
 	})
 	if err != nil {
@@ -172,7 +176,11 @@ func (h *Handler) ListWorkspaceWakeupSummaries(w http.ResponseWriter, r *http.Re
 	for id := range allowed {
 		ids = append(ids, parseUUID(id))
 	}
-	rows, err := h.Queries.ListWorkspaceWakeupSummaryRows(r.Context(), db.ListWorkspaceWakeupSummaryRowsParams{WorkspaceID: parseUUID(workspaceID), AgentIds: ids})
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListWorkspaceWakeupSummaryRows(r.Context(), db.ListWorkspaceWakeupSummaryRowsParams{WorkspaceID: parseUUID(workspaceID), AgentIds: ids, HiddenProjectIds: hidden.Param()})
 	if err != nil {
 		wakeupError(w, err)
 		return
@@ -472,7 +480,11 @@ func (h *Handler) ListPausedWakeups(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
 		return
 	}
-	rows, err := h.Queries.ListPausedWakeupIssues(r.Context(), parseUUID(workspaceID))
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListPausedWakeupIssues(r.Context(), db.ListPausedWakeupIssuesParams{WorkspaceID: parseUUID(workspaceID), HiddenProjectIds: hidden.Param()})
 	if err != nil {
 		wakeupError(w, err)
 		return

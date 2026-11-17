@@ -43,7 +43,7 @@ func writeOpencodeRuntimeConfig(t *testing.T, servers string) {
 	t.Helper()
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	redirectTestHome(t, home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	dir := filepath.Join(home, ".config", "opencode")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

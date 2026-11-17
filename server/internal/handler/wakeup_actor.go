@@ -10,6 +10,17 @@ import (
 
 type wakeupActorKey struct{}
 type wakeupActor struct{ kind, id, task string }
+type wakeupHandedToKey struct{}
+
+// withWakeupHandedTo names the agent a write hands the issue to. That agent
+// gets the change as its own run, so the write's issue events skip its event
+// wakeups (migration 558, MUL-7420).
+func withWakeupHandedTo(ctx context.Context, agentID string) context.Context {
+	if agentID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, wakeupHandedToKey{}, agentID)
+}
 
 // Carry only server-resolved request identity into transaction-local settings.
 // In particular, mutation of another agent's comment must not reuse its author
@@ -35,6 +46,12 @@ func (h *Handler) beginWakeupWrite(ctx context.Context) (pgx.Tx, error) {
 	if actor, ok := ctx.Value(wakeupActorKey{}).(wakeupActor); ok {
 		_, err = tx.Exec(ctx, `SELECT set_config('multica.actor_type',$1,true),set_config('multica.actor_id',$2,true),set_config('multica.source_task_id',$3,true)`, actor.kind, actor.id, actor.task)
 		if err != nil {
+			_ = tx.Rollback(ctx)
+			return nil, err
+		}
+	}
+	if agent, ok := ctx.Value(wakeupHandedToKey{}).(string); ok {
+		if _, err = tx.Exec(ctx, `SELECT set_config('multica.handed_to_agent',$1,true)`, agent); err != nil {
 			_ = tx.Rollback(ctx)
 			return nil, err
 		}

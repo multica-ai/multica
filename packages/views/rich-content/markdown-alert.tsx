@@ -25,13 +25,13 @@ import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import type { Element, ElementContent, Root } from "hast";
 import type { ExtraProps } from "react-markdown";
 import {
+  AlertCircle,
   Info,
   Lightbulb,
-  MessageSquareWarning,
-  OctagonAlert,
+  OctagonXIcon,
   TriangleAlert,
-  type LucideIcon,
-} from "lucide-react";
+  type IconComponent,
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
 
@@ -100,7 +100,7 @@ export function rehypeMarkdownAlerts() {
 // violet token, and --warning is too light for title text in light mode. Title
 // text sits one shade darker than the bar in light mode so it keeps AA
 // contrast, the same scheme as the pull-request state pills.
-const ALERT_STYLE: Record<MarkdownAlertType, { icon: LucideIcon; bar: string; title: string }> = {
+const ALERT_STYLE: Record<MarkdownAlertType, { icon: IconComponent; bar: string; title: string }> = {
   note: {
     icon: Info,
     bar: "border-blue-600 dark:border-blue-400",
@@ -112,7 +112,7 @@ const ALERT_STYLE: Record<MarkdownAlertType, { icon: LucideIcon; bar: string; ti
     title: "text-emerald-700 dark:text-emerald-400",
   },
   important: {
-    icon: MessageSquareWarning,
+    icon: AlertCircle,
     bar: "border-violet-600 dark:border-violet-400",
     title: "text-violet-700 dark:text-violet-400",
   },
@@ -122,7 +122,7 @@ const ALERT_STYLE: Record<MarkdownAlertType, { icon: LucideIcon; bar: string; ti
     title: "text-amber-700 dark:text-amber-400",
   },
   caution: {
-    icon: OctagonAlert,
+    icon: OctagonXIcon,
     bar: "border-rose-600 dark:border-rose-400",
     title: "text-rose-700 dark:text-rose-400",
   },

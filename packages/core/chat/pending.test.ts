@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   enqueuePendingChatTask,
@@ -45,6 +46,68 @@ describe("pending chat queue", () => {
       queued_tasks: [queued],
     });
   });
+
+  it.each(["FIFO", "reversed"])(
+    "preserves multiple follow-ups before the head loads (%s responses)",
+    (order) => {
+      const first = {
+        ...task("first", "2026-01-01T00:00:01Z"),
+        message_id: "message-first",
+      };
+      const second = {
+        ...task("second", "2026-01-01T00:00:02Z"),
+        message_id: "message-second",
+      };
+      const earlier = order === "FIFO" ? first : second;
+      const later = order === "FIFO" ? second : first;
+      const waitingForHead = {
+        ...enqueuePendingChatTask(undefined, earlier, true),
+        supports_queue: true,
+      };
+
+      const result = enqueuePendingChatTask(waitingForHead, later, true);
+
+      expect(result.task_id).toBeUndefined();
+      expect(result.supports_queue).toBe(true);
+      expect(result.queued_tasks).toEqual([first, second]);
+      expect(waitingForHead.queued_tasks).toEqual([earlier]);
+
+      const head = task("head", "2026-01-01T00:00:00Z");
+      expect(enqueuePendingChatTask(result, head, false)).toEqual({
+        ...head,
+        supports_queue: true,
+        queued_tasks: [first, second],
+      });
+    },
+  );
+
+  it.each(["rich-first", "sparse-first"])(
+    "deduplicates headless follow-ups without losing previews or siblings (%s)",
+    (order) => {
+      const rich = {
+        ...task("first", "2026-01-01T00:00:01Z"),
+        message_id: "message-first",
+      };
+      const sparse = {
+        task_id: rich.task_id,
+        status: rich.status,
+        created_at: rich.created_at,
+      };
+      const sibling = {
+        ...task("second", "2026-01-01T00:00:02Z"),
+        message_id: "message-second",
+      };
+      const initial = order === "rich-first" ? rich : sparse;
+      const duplicate = order === "rich-first" ? sparse : rich;
+      const waitingForHead = enqueuePendingChatTask(undefined, initial, true);
+      const withSibling = enqueuePendingChatTask(waitingForHead, sibling, true);
+
+      const result = enqueuePendingChatTask(withSibling, duplicate, true);
+
+      expect(result.task_id).toBeUndefined();
+      expect(result.queued_tasks).toEqual([rich, sibling]);
+    },
+  );
 
   it("preserves a follow-up when its response arrives before the head response", () => {
     const followUp = {

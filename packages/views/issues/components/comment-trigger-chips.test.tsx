@@ -15,6 +15,10 @@ vi.mock("@multica/core/agents", () => ({
   useAgentPresenceDetail: () => ({ availability: "online", workload: "idle" }),
 }));
 
+vi.mock("@multica/core/api", () => ({
+  api: { getBaseUrl: () => "https://api.example.test" },
+}));
+
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws-1" }),
 }));
@@ -61,6 +65,25 @@ describe("CommentTriggerChips", () => {
     renderWithI18n(<CommentTriggerChips recipients={[]} hasAllMembersMention onActionChange={vi.fn()} />);
     expect(screen.getByText("Member broadcast · @all does not start agents")).toBeInTheDocument();
     expect(screen.queryByText(/notif/i)).not.toBeInTheDocument();
+  });
+
+  it.each(["single", "stacked"])("resolves an uploaded avatar against the API origin in a %s preview", (variant) => {
+    // URL edge cases belong to core/workspace/avatar-url.test.ts; this guards
+    // the trigger preview's wiring to the real avatar and URL resolver.
+    const recipients = [entry({ ...walt, avatar_url: "/uploads/agent-custom-avatar.png" }, idle)];
+    if (variant === "stacked") recipients.push(entry(bob, idle));
+
+    renderWithI18n(
+      <CommentTriggerChips
+        recipients={recipients}
+        onActionChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "Walt" })).toHaveAttribute(
+      "src",
+      "https://api.example.test/uploads/agent-custom-avatar.png",
+    );
   });
 
   it("keeps explicit agent triggers visible alongside @all semantics", () => {

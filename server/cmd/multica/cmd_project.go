@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -21,7 +23,14 @@ var projectCmd = &cobra.Command{
 var projectListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List projects in the workspace",
-	RunE:  runProjectList,
+	Long: "List projects in the workspace.\n\n" +
+		"--status, --priority and --lead take several values, repeated or comma-separated;\n" +
+		"a project matches when it has any of them. --lead takes a member or agent name\n" +
+		"(fuzzy match), me, or none for projects without a lead.\n\n" +
+		"Without --limit every matching project is listed. --output json prints the\n" +
+		"projects as an array, as before; when --limit leaves more, a hint with the next\n" +
+		"--offset goes to stderr.",
+	RunE: runProjectList,
 }
 
 var projectGetCmd = &cobra.Command{
@@ -49,6 +58,24 @@ var projectDeleteCmd = &cobra.Command{
 	Short: "Delete a project",
 	Args:  exactArgs(1),
 	RunE:  runProjectDelete,
+}
+
+var projectArchiveCmd = &cobra.Command{
+	Use:   "archive <id>",
+	Short: "Archive a project: hide it from default lists and stop new issues from being filed into it",
+	Long: `Archive a project. It disappears from default project lists and pickers and
+accepts no new issues; its existing issues stay readable and editable, and its
+status is unchanged. Autopilots that file into it are paused. Undo with
+` + "`multica project restore <id>`" + `.`,
+	Args: exactArgs(1),
+	RunE: runProjectArchive,
+}
+
+var projectRestoreCmd = &cobra.Command{
+	Use:   "restore <id>",
+	Short: "Restore an archived project (paused autopilots stay paused)",
+	Args:  exactArgs(1),
+	RunE:  runProjectRestore,
 }
 
 var projectStatusCmd = &cobra.Command{
@@ -91,6 +118,43 @@ var projectResourceRemoveCmd = &cobra.Command{
 	RunE:  runProjectResourceRemove,
 }
 
+var projectMemberCmd = &cobra.Command{
+	Use:   "member",
+	Short: "Manage the members of a private project",
+}
+
+var projectMemberListCmd = &cobra.Command{
+	Use:   "list <project-id>",
+	Short: "List a project's members",
+	Args:  exactArgs(1),
+	RunE:  runProjectMemberList,
+}
+
+var projectMemberAddCmd = &cobra.Command{
+	Use:   "add <project-id> <member>...",
+	Short: "Add workspace members to a project (name, email or user id)",
+	Args:  cobra.MinimumNArgs(2),
+	RunE:  runProjectMemberAdd,
+}
+
+var projectMemberRemoveCmd = &cobra.Command{
+	Use:   "remove <project-id> <member>",
+	Short: "Remove a member from a project (name, email or user id)",
+	Args:  exactArgs(2),
+	RunE:  runProjectMemberRemove,
+}
+
+var validProjectVisibilities = []string{"workspace", "private"}
+
+func validateProjectVisibility(v string) error {
+	for _, allowed := range validProjectVisibilities {
+		if v == allowed {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid visibility %q; valid values: %s", v, strings.Join(validProjectVisibilities, ", "))
+}
+
 var validProjectStatuses = []string{
 	"planned", "in_progress", "paused", "completed", "cancelled",
 }
@@ -114,6 +178,8 @@ func init() {
 	projectCmd.AddCommand(projectUpdateCmd)
 	projectCmd.AddCommand(projectDeleteCmd)
 	projectCmd.AddCommand(projectStatusCmd)
+	projectCmd.AddCommand(projectArchiveCmd)
+	projectCmd.AddCommand(projectRestoreCmd)
 	projectCmd.AddCommand(projectResourceCmd)
 
 	projectResourceCmd.AddCommand(projectResourceListCmd)
@@ -121,10 +187,15 @@ func init() {
 	projectResourceCmd.AddCommand(projectResourceUpdateCmd)
 	projectResourceCmd.AddCommand(projectResourceRemoveCmd)
 
+	projectCmd.AddCommand(projectMemberCmd)
+	projectMemberCmd.AddCommand(projectMemberListCmd)
+	projectMemberCmd.AddCommand(projectMemberAddCmd)
+	projectMemberCmd.AddCommand(projectMemberRemoveCmd)
+	projectMemberListCmd.Flags().String("output", "table", "Output format: table or json")
+	projectMemberAddCmd.Flags().String("output", "table", "Output format: table or json")
+
 	// project list
-	projectListCmd.Flags().String("output", "table", "Output format: table or json")
-	projectListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
-	projectListCmd.Flags().String("status", "", "Filter by status")
+	registerProjectListFlags(projectListCmd)
 
 	// project get
 	projectGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -138,6 +209,8 @@ func init() {
 	projectCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	projectCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
+	projectCreateCmd.Flags().String("visibility", "", "Who can see the project: workspace (default) or private (its members only)")
+	projectCreateCmd.Flags().StringArray("member", nil, "Member of a private project (name, email or user id; may be repeated). You are always added")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project resource list
@@ -184,6 +257,8 @@ func init() {
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
 	projectUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	projectUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD; pass empty string to clear)")
+	projectUpdateCmd.Flags().String("visibility", "", "Switch visibility: workspace or private (its members only)")
+	projectUpdateCmd.Flags().StringArray("member", nil, "Members to add with --visibility private, whether the project is switching to private or already is (name, email or user id; may be repeated)")
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project delete
@@ -191,11 +266,29 @@ func init() {
 
 	// project status
 	projectStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// project archive / restore
+	projectArchiveCmd.Flags().String("output", "table", "Output format: table or json")
+	projectRestoreCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
-// ---------------------------------------------------------------------------
 // Project commands
-// ---------------------------------------------------------------------------
+
+const projectListMaxPageSize = 200
+
+func registerProjectListFlags(cmd *cobra.Command) {
+	cmd.Flags().String("output", "table", "Output format: table or json")
+	cmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+	cmd.Flags().StringSlice("status", nil, "Filter by status: planned, in_progress, paused, completed, cancelled (repeatable or comma-separated)")
+	cmd.Flags().StringSlice("priority", nil, "Filter by priority: urgent, high, medium, low, none (repeatable or comma-separated)")
+	cmd.Flags().StringSlice("lead", nil, "Filter by lead: member or agent name, me, or none (repeatable or comma-separated)")
+	cmd.Flags().Bool("archived", false, "List archived projects instead of active ones")
+	cmd.Flags().String("search", "", "Only projects whose title contains this text (case-insensitive)")
+	cmd.Flags().String("sort", "", "Sort by: name, priority, status, progress, start_date, due_date, created_at (default) or last_activity_at")
+	cmd.Flags().String("direction", "", "Sort direction, asc or desc (defaults to the natural one for --sort: newest, highest or earliest first)")
+	cmd.Flags().Int("limit", 0, fmt.Sprintf("Page size, 1 to %d (default: every matching project)", projectListMaxPageSize))
+	cmd.Flags().Int("offset", 0, "Number of matching projects to skip (with --limit)")
+}
 
 func runProjectList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
@@ -210,8 +303,44 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 	if client.WorkspaceID != "" {
 		params.Set("workspace_id", client.WorkspaceID)
 	}
-	if v, _ := cmd.Flags().GetString("status"); v != "" {
-		params.Set("status", v)
+	for _, flag := range []string{"status", "priority"} {
+		if values, _ := cmd.Flags().GetStringSlice(flag); len(values) > 0 {
+			params.Set(flag, strings.Join(values, ","))
+		}
+	}
+	if leads, _ := cmd.Flags().GetStringSlice("lead"); len(leads) > 0 {
+		refs, err := resolveProjectLeadFilters(ctx, client, leads)
+		if err != nil {
+			return err
+		}
+		params.Set("lead", strings.Join(refs, ","))
+	}
+	if v, _ := cmd.Flags().GetString("search"); v != "" {
+		params.Set("q", v)
+	}
+	for _, flag := range []string{"sort", "direction"} {
+		if v, _ := cmd.Flags().GetString(flag); v != "" {
+			params.Set(flag, v)
+		}
+	}
+	limit, _ := cmd.Flags().GetInt("limit")
+	offset, _ := cmd.Flags().GetInt("offset")
+	if cmd.Flags().Changed("limit") && (limit < 1 || limit > projectListMaxPageSize) {
+		return fmt.Errorf("--limit must be between 1 and %d", projectListMaxPageSize)
+	}
+	if offset < 0 {
+		return fmt.Errorf("--offset must be 0 or more")
+	}
+	if limit > 0 {
+		params.Set("limit", strconv.Itoa(limit))
+	}
+	if offset > 0 {
+		params.Set("offset", strconv.Itoa(offset))
+	}
+	archivedOnly, _ := cmd.Flags().GetBool("archived")
+	if archivedOnly {
+		params.Set("include_archived", "true")
+		params.Set("archived", "only")
 	}
 
 	path := "/api/projects"
@@ -225,6 +354,21 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 	}
 
 	projectsRaw, _ := result["projects"].([]any)
+	if archivedOnly {
+		// Servers without archived=only return active projects too.
+		archived := make([]any, 0, len(projectsRaw))
+		for _, raw := range projectsRaw {
+			if p, ok := raw.(map[string]any); ok && strVal(p, "archived_at") != "" {
+				archived = append(archived, raw)
+			}
+		}
+		projectsRaw = archived
+	}
+	if hasMore, _ := result["has_more"].(bool); hasMore {
+		total, _ := result["total"].(float64)
+		fmt.Fprintf(os.Stderr, "Showing %d–%d of %d projects; next page: --offset %d\n",
+			offset+1, offset+len(projectsRaw), int(total), offset+len(projectsRaw))
+	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
@@ -233,28 +377,71 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 
 	fullID, _ := cmd.Flags().GetBool("full-id")
 	actors := loadActorDisplayLookup(ctx, client)
-	headers := []string{"ID", "TITLE", "STATUS", "LEAD", "CREATED"}
+	headers := []string{"ID", "TITLE", "STATUS", "PRIORITY", "PROGRESS", "LEAD", "DUE", "LAST ACTIVITY", "CREATED"}
 	rows := make([][]string, 0, len(projectsRaw))
 	for _, raw := range projectsRaw {
 		p, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		lead := formatLead(p, actors)
-		created := strVal(p, "created_at")
-		if len(created) >= 10 {
-			created = created[:10]
-		}
 		rows = append(rows, []string{
 			displayID(strVal(p, "id"), fullID),
 			strVal(p, "title"),
 			strVal(p, "status"),
-			lead,
-			created,
+			strVal(p, "priority"),
+			formatProjectProgress(p),
+			formatLead(p, actors),
+			strVal(p, "due_date"),
+			dayOf(strVal(p, "last_activity_at")),
+			dayOf(strVal(p, "created_at")),
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+// dayOf keeps the calendar day of an RFC 3339 timestamp.
+func dayOf(ts string) string {
+	if len(ts) >= 10 {
+		return ts[:10]
+	}
+	return ts
+}
+
+func formatProjectProgress(p map[string]any) string {
+	total, _ := p["issue_count"].(float64)
+	if total == 0 {
+		return ""
+	}
+	done, _ := p["done_count"].(float64)
+	return fmt.Sprintf("%d/%d", int(done), int(total))
+}
+
+// resolveProjectLeadFilters turns --lead values into the API's lead refs:
+// member:<id>, agent:<id> or none.
+func resolveProjectLeadFilters(ctx context.Context, client *cli.APIClient, leads []string) ([]string, error) {
+	refs := make([]string, 0, len(leads))
+	for _, lead := range leads {
+		switch strings.ToLower(strings.TrimSpace(lead)) {
+		case "none":
+			refs = append(refs, "none")
+		case "me":
+			var me struct {
+				ID string `json:"id"`
+			}
+			if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
+				return nil, fmt.Errorf("resolve lead me: %w", err)
+			}
+			refs = append(refs, "member:"+me.ID)
+		default:
+			actorType, id, err := resolveAssignee(ctx, client, lead, memberOrAgentKinds)
+			if err != nil {
+				return nil, fmt.Errorf("resolve lead: %w", err)
+			}
+			refs = append(refs, actorType+":"+id)
+		}
+	}
+	return refs, nil
 }
 
 func runProjectGet(cmd *cobra.Command, args []string) error {
@@ -288,12 +475,13 @@ func runProjectGet(cmd *cobra.Command, args []string) error {
 	if output == "table" {
 		actors := loadActorDisplayLookup(ctx, client)
 		lead := formatLead(project, actors)
-		headers := []string{"ID", "TITLE", "STATUS", "LEAD", "DESCRIPTION"}
+		headers := []string{"ID", "TITLE", "STATUS", "LEAD", "ARCHIVED", "DESCRIPTION"}
 		rows := [][]string{{
 			strVal(project, "id"),
 			strVal(project, "title"),
 			strVal(project, "status"),
 			lead,
+			formatProjectArchived(project),
 			strVal(project, "description"),
 		}}
 		cli.PrintTable(os.Stdout, headers, rows)
@@ -343,6 +531,9 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
 		body["due_date"] = v
+	}
+	if err := applyProjectVisibilityFlags(ctx, cmd, client, body); err != nil {
+		return err
 	}
 
 	// Bundle resources into the create payload so the server attaches them in
@@ -439,9 +630,31 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("due-date")
 		body["due_date"] = v
 	}
+	if err := applyProjectVisibilityFlags(ctx, cmd, client, body); err != nil {
+		return err
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date, --visibility")
+	}
+
+	// Servers before MUL-9325 read member_ids only when the visibility
+	// changes, so members named for a project that is already private go
+	// through the member API.
+	if ids, ok := body["member_ids"].([]string); ok {
+		var project map[string]any
+		if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID, &project); err != nil {
+			return fmt.Errorf("get project: %w", err)
+		}
+		if strVal(project, "visibility") == "private" {
+			delete(body, "member_ids")
+			if len(ids) > 0 {
+				if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/members", map[string]any{"user_ids": ids}, nil); err != nil {
+					return fmt.Errorf("add project members: %w", err)
+				}
+				fmt.Fprintf(os.Stderr, "Added %d member(s) to project %s.\n", len(ids), projectRef.Display)
+			}
+		}
 	}
 
 	var result map[string]any
@@ -486,6 +699,84 @@ func runProjectDelete(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// formatProjectArchived renders the archive date for table output, or "-"
+// for an active project.
+func formatProjectArchived(project map[string]any) string {
+	archivedAt := strVal(project, "archived_at")
+	if archivedAt == "" {
+		return "-"
+	}
+	if len(archivedAt) >= 10 {
+		return archivedAt[:10]
+	}
+	return archivedAt
+}
+
+func runProjectArchive(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/archive", map[string]any{}, &result); err != nil {
+		return fmt.Errorf("archive project: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Project %s archived. Restore it with `multica project restore %s`.\n", strVal(result, "title"), strVal(result, "id"))
+	if paused, _ := result["paused_autopilot_ids"].([]any); len(paused) > 0 {
+		ids := make([]string, 0, len(paused))
+		for _, id := range paused {
+			if s, ok := id.(string); ok {
+				ids = append(ids, s)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Paused %d autopilot(s) that file into it: %s\n", len(ids), strings.Join(ids, ", "))
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	return nil
+}
+
+func runProjectRestore(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/restore", map[string]any{}, &result); err != nil {
+		return fmt.Errorf("restore project: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Project %s restored.\n", strVal(result, "title"))
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	return nil
+}
+
 func runProjectStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	status := args[1]
@@ -522,9 +813,7 @@ func runProjectStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Project resource commands
-// ---------------------------------------------------------------------------
 
 func runProjectResourceList(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
@@ -973,9 +1262,7 @@ func summarizeResourceRef(raw any) string {
 	return ""
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 func formatLead(project map[string]any, actors actorDisplayLookup) string {
 	lType := strVal(project, "lead_type")
@@ -984,4 +1271,136 @@ func formatLead(project map[string]any, actors actorDisplayLookup) string {
 		return ""
 	}
 	return actors.actor(lType, lID)
+}
+
+// applyProjectVisibilityFlags maps --visibility / --member onto a project
+// create or update body.
+func applyProjectVisibilityFlags(ctx context.Context, cmd *cobra.Command, client *cli.APIClient, body map[string]any) error {
+	visibility, _ := cmd.Flags().GetString("visibility")
+	members, _ := cmd.Flags().GetStringArray("member")
+	if visibility == "" {
+		if len(members) > 0 {
+			return fmt.Errorf("--member requires --visibility private")
+		}
+		return nil
+	}
+	if err := validateProjectVisibility(visibility); err != nil {
+		return err
+	}
+	body["visibility"] = visibility
+	if len(members) == 0 {
+		return nil
+	}
+	if visibility != "private" {
+		return fmt.Errorf("--member requires --visibility private")
+	}
+	ids, err := resolveProjectMemberUserIDs(ctx, client, members)
+	if err != nil {
+		return err
+	}
+	body["member_ids"] = ids
+	return nil
+}
+
+// resolveProjectMemberUserIDs turns member names, emails or user ids into
+// user ids. Only workspace members qualify.
+func resolveProjectMemberUserIDs(ctx context.Context, client *cli.APIClient, refs []string) ([]string, error) {
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		ref = strings.TrimSpace(ref)
+		if ref == "" {
+			continue
+		}
+		if _, err := uuid.Parse(ref); err == nil {
+			ids = append(ids, ref)
+			continue
+		}
+		_, id, err := resolveAssignee(ctx, client, ref, memberOnlyKinds)
+		if err != nil {
+			return nil, fmt.Errorf("resolve member %q: %w", ref, err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func printProjectMembers(cmd *cobra.Command, result map[string]any) error {
+	output, _ := cmd.Flags().GetString("output")
+	if output != "table" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	members, _ := result["members"].([]any)
+	headers := []string{"USER ID", "NAME", "EMAIL"}
+	rows := make([][]string, 0, len(members))
+	for _, raw := range members {
+		m, _ := raw.(map[string]any)
+		rows = append(rows, []string{strVal(m, "user_id"), strVal(m, "name"), strVal(m, "email")})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runProjectMemberList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/projects/"+projectRef.ID+"/members", &result); err != nil {
+		return fmt.Errorf("list project members: %w", err)
+	}
+	return printProjectMembers(cmd, result)
+}
+
+func runProjectMemberAdd(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+	ids, err := resolveProjectMemberUserIDs(ctx, client, args[1:])
+	if err != nil {
+		return err
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/members", map[string]any{"user_ids": ids}, &result); err != nil {
+		return fmt.Errorf("add project members: %w", err)
+	}
+	return printProjectMembers(cmd, result)
+}
+
+func runProjectMemberRemove(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	projectRef, err := resolveProjectID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve project: %w", err)
+	}
+	ids, err := resolveProjectMemberUserIDs(ctx, client, args[1:2])
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("member is required")
+	}
+	if err := client.DeleteJSON(ctx, "/api/projects/"+projectRef.ID+"/members/"+ids[0]); err != nil {
+		return fmt.Errorf("remove project member: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Removed %s from project %s.\n", args[1], projectRef.ID)
+	return nil
 }

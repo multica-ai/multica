@@ -19,7 +19,7 @@ import {
   Webhook,
   X as XIcon,
   Zap,
-} from "lucide-react";
+} from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import {
   Dialog,
@@ -69,13 +69,12 @@ import { parseCron, toCron } from "./schedule-editor/cron-mapping";
 import { useScheduleSubmitGate } from "./schedule-editor/validate";
 import { WebhookEventFilterSection } from "./webhook-event-filter-section";
 import { WebhookUrlField } from "./webhook-url-field";
+import { serializeEventFilters } from "./webhook-payload-condition";
 import { useT } from "../../i18n";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
 import type { WebhookEventFilter } from "@multica/core/types";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 export interface AutopilotInitial {
   title: string;
@@ -106,9 +105,7 @@ export type AutopilotDialogProps =
       canManageAccess: boolean;
     };
 
-// ---------------------------------------------------------------------------
 // Static schema-level data (not user-visible)
-// ---------------------------------------------------------------------------
 
 const OUTPUT_MODE_KEYS: AutopilotExecutionMode[] = ["create_issue", "run_only"];
 
@@ -117,23 +114,7 @@ const OUTPUT_MODE_ICONS: Record<AutopilotExecutionMode, typeof FilePlus2> = {
   run_only: Play,
 };
 
-// ---------------------------------------------------------------------------
-// Webhook event-filter dirty detection
-// ---------------------------------------------------------------------------
-
-// serializeEventFilters returns a stable JSON string so the edit-mode dirty
-// check can compare the current filters against the snapshot taken on open
-// without depending on reference equality. Normalizes empty Actions to []
-// so omitted-vs-explicit-empty doesn't show as a phantom change.
-function serializeEventFilters(filters: WebhookEventFilter[]): string {
-  return JSON.stringify(
-    filters.map((f) => ({ event: f.event, actions: f.actions ?? [] })),
-  );
-}
-
-// ---------------------------------------------------------------------------
 // AutopilotDialog
-// ---------------------------------------------------------------------------
 
 export function AutopilotDialog(props: AutopilotDialogProps) {
   const { t } = useT("autopilots");
@@ -207,8 +188,20 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   })();
   const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialKind);
 
-  const initialEventFilters: WebhookEventFilter[] =
-    !isCreate && props.triggers[0]?.event_filters ? props.triggers[0].event_filters : [];
+  // The webhook panel only renders when the first trigger is a webhook, so this
+  // is that row. Its filters are editable here only while it is the sole
+  // webhook: this panel holds one filter list, and with two webhooks it would
+  // show the first as if it were the whole story and save into that one alone.
+  // Every webhook row on the detail page carries its own editor regardless.
+  const existingWebhook = isCreate
+    ? null
+    : props.triggers.find((trig) => trig.kind === "webhook") ?? null;
+  const webhookTriggerCount = isCreate
+    ? 0
+    : props.triggers.filter((trig) => trig.kind === "webhook").length;
+  const webhookFiltersLocked = webhookTriggerCount >= 2;
+
+  const initialEventFilters: WebhookEventFilter[] = existingWebhook?.event_filters ?? [];
   const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>(initialEventFilters);
 
   const initialCronRef = useRef(toCron(initialCfg));
@@ -220,9 +213,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const eventFiltersDirty =
     serializeEventFilters(eventFilters) !== initialEventFiltersRef.current;
 
-  const firstTriggerIdRef = useRef(
-    !isCreate && props.triggers[0] ? props.triggers[0].id : null,
-  );
+  const webhookTriggerIdRef = useRef(existingWebhook?.id ?? null);
   // The row the schedule write targets, snapshotted at mount like the one
   // above. Null means there is none to patch, so the write creates one.
   const scheduleTriggerIdRef = useRef(existingSchedule?.id ?? null);
@@ -421,13 +412,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         // UpdateAutopilotTriggerRequest in autopilot.go).
         if (
           triggerKind === "webhook" &&
+          !webhookFiltersLocked &&
           eventFiltersDirty &&
-          firstTriggerIdRef.current
+          webhookTriggerIdRef.current
         ) {
           try {
             await updateTrigger.mutateAsync({
               autopilotId: props.autopilotId,
-              triggerId: firstTriggerIdRef.current,
+              triggerId: webhookTriggerIdRef.current,
               event_filters: eventFilters,
             });
           } catch (err) {
@@ -465,10 +457,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         className={cn(
           "p-0 gap-0 flex flex-col overflow-hidden",
           "!transition-all !duration-300 !ease-out !-translate-y-1/2",
-          "!w-[calc(100vw-2rem)]",
+          "!w-[calc(100%-2rem)]",
           isExpanded
-            ? "!max-w-6xl !h-[calc(100vh-4rem)]"
-            : "!max-w-5xl !h-[min(720px,calc(100vh-4rem))]",
+            ? "!max-w-6xl !h-[calc(100%-4rem)]"
+            : "!max-w-5xl !h-[min(720px,calc(100%-4rem))]",
         )}
       >
         <DialogTitle className="sr-only">
@@ -528,6 +520,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                     type="button"
                     onClick={() => setIsExpanded((v) => !v)}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                    aria-label={isExpanded ? t(($) => $.dialog.collapse) : t(($) => $.dialog.expand)}
                   >
                     {isExpanded ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
                   </button>
@@ -544,6 +537,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                     type="button"
                     onClick={() => onOpenChange(false)}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
+                    aria-label={t(($) => $.dialog.close)}
                   >
                     <XIcon className="size-4" />
                   </button>
@@ -683,6 +677,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             ) : (
               <WebhookSection
                 isCreate={isCreate}
+                filtersLocked={webhookFiltersLocked}
                 eventFilters={eventFilters}
                 onEventFiltersChange={setEventFilters}
               />
@@ -737,9 +732,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Right column sections
-// ---------------------------------------------------------------------------
 
 function SectionLabel({
   children,
@@ -1005,9 +998,7 @@ function ScheduleEmptyState({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Trigger kind segmented control + webhook help section
-// ---------------------------------------------------------------------------
 
 function TriggerKindSection({
   kind,
@@ -1047,10 +1038,12 @@ function TriggerKindSection({
 
 function WebhookSection({
   isCreate,
+  filtersLocked,
   eventFilters,
   onEventFiltersChange,
 }: {
   isCreate: boolean;
+  filtersLocked: boolean;
   eventFilters: WebhookEventFilter[];
   onEventFiltersChange: (filters: WebhookEventFilter[]) => void;
 }) {
@@ -1065,18 +1058,24 @@ function WebhookSection({
             : t(($) => $.dialog.webhook_help_edit)}
         </p>
       </div>
-      <WebhookEventFilterSection
-        filters={eventFilters}
-        onChange={onEventFiltersChange}
-      />
+      {filtersLocked ? (
+        <div className="rounded-md border border-dashed p-3">
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.dialog.webhook_multiple_notice)}
+          </p>
+        </div>
+      ) : (
+        <WebhookEventFilterSection
+          filters={eventFilters}
+          onChange={onEventFiltersChange}
+        />
+      )}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
 // Post-create state for webhook autopilots: shows the freshly minted URL
 // inline so the user can copy it without leaving the dialog.
-// ---------------------------------------------------------------------------
 
 function WebhookCreatedPanel({
   trigger,

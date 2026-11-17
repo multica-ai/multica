@@ -1,10 +1,12 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "@/data/api";
 
-export const agentListOptions = (wsId: string | null) =>
+export const agentListOptions = (wsId: string | null, opts?: { includeArchived?: boolean }) =>
   queryOptions({
-    queryKey: ["agents", wsId] as const,
-    queryFn: ({ signal }) => api.listAgents({ signal }),
+    queryKey: opts?.includeArchived
+      ? ["agents", wsId, { includeArchived: true }] as const
+      : ["agents", wsId] as const,
+    queryFn: ({ signal }) => api.listAgents({ signal, includeArchived: opts?.includeArchived }),
     enabled: !!wsId,
     // Mirrors Web/Desktop: projected unstable ages offline without an event,
     // while offline recovery is covered by lifecycle events and reconnect.

@@ -78,7 +78,7 @@ func (r *bubbleReplica) asked(t *testing.T, turn boundTurn, reqID string) {
 			Source: channel.Source{ChannelType: TypeWecom, ChatID: turn.chatID, ChatType: channel.ChatTypeP2P, SenderID: "USER_1"},
 			Raw:    raw,
 		},
-		sessionID)
+		sessionID, sessionID)
 	r.bus.Publish(events.Event{
 		Type:          protocol.EventTaskQueued,
 		ChatSessionID: turn.sessionID,

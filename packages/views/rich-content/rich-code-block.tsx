@@ -26,10 +26,11 @@
 
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toHtml } from "hast-util-to-html";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../i18n";
+import { DeferredTooltip } from "../common/deferred-tooltip";
 import {
   MermaidBlock,
   MERMAID_BLOCK_DEFAULT_RESERVED_PX,
@@ -144,19 +145,23 @@ export function CodeBlockShell({
             {language}
           </span>
         )}
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-          title={copyLabel}
-          aria-label={copyLabel}
-        >
-          {copied ? (
-            <Check className="h-3.5 w-3.5" />
-          ) : (
-            <Copy className="h-3.5 w-3.5" />
-          )}
-        </button>
+        <DeferredTooltip
+          content={copyLabel}
+          trigger={
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="flex h-6 w-6 items-center justify-center rounded-xs text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              aria-label={copyLabel}
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
+            </button>
+          }
+        />
       </div>
       {/* No extra right padding: `.rich-text-editor pre` outranks utility
           padding classes anyway, and the editable NodeView uses the same
