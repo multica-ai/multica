@@ -271,7 +271,7 @@
     },
     "own": {
       "title": "Tự tạo chủ đề",
-      "description": "Nhập chủ đề dưới dạng .zip hoặc thư mục, hoặc bắt đầu từ bản sao của chủ đề hiện tại."
+      "description": "Nhờ bất kỳ agent nào tạo theme trong trò chuyện hoặc công việc, nhập theme dạng .zip hoặc thư mục, hoặc bắt đầu từ bản sao của theme hiện tại."
     },
     "tools": {
       "duplicate": "Nhân bản “{{name}}” thành chủ đề mới",
@@ -349,7 +349,7 @@
     },
     "density": {
       "title": "Mật độ",
-      "description": "Chiều cao hàng trong danh sách công việc và tìm kiếm.",
+      "description": "Chiều cao hàng trong danh sách công việc, tìm kiếm và thanh bên, và khoảng cách trên bảng.",
       "compact": "Gọn",
       "default": "Mặc định",
       "comfortable": "Thoải mái"
@@ -387,6 +387,7 @@
     "reserved_error": "Bị trình duyệt hoặc cửa sổ desktop giữ riêng.",
     "send_error": "Gửi chỉ có thể dùng Enter hoặc Mod+Enter.",
     "unsafe_error": "Phím này sẽ gây trở ngại cho việc gõ chữ hoặc điều hướng bàn phím cơ bản.",
+    "unrecognized_error": "Không ghi được tổ hợp phím này. Hãy thử tổ hợp khác.",
     "send_enter_hint": "Shift+Enter chèn một đoạn mới, tiếp tục danh sách, hoặc thêm dòng mới trong khối code.",
     "categories": {
       "general": "Chung",
@@ -424,6 +425,14 @@
       "archiveInboxItem": {
         "label": "Lưu trữ thông báo",
         "description": "Lưu trữ thông báo hộp thư đến đang mở, hoặc khôi phục khi đang đọc mục lưu trữ."
+      },
+      "unsubscribeArchiveInboxItem": {
+        "label": "Hủy theo dõi & lưu trữ",
+        "description": "Hủy theo dõi công việc của thông báo đang mở và lưu trữ nó. Chỉ áp dụng cho công việc không phải của bạn hay của agent của bạn."
+      },
+      "snoozeInboxItem": {
+        "label": "Tạm ẩn thông báo",
+        "description": "Tạm ẩn công việc trong hộp thư đến đang mở, hoặc hiện lại ngay nếu đang bị tạm ẩn."
       },
       "send": {
         "label": "Gửi",
@@ -484,6 +493,10 @@
       "goSettings": {
         "label": "Đi tới Cài đặt",
         "description": "Mở cài đặt không gian làm việc."
+      },
+      "voiceInput": {
+        "label": "Nhập bằng giọng nói",
+        "description": "Đọc chính tả vào ô soạn thảo bạn dùng gần nhất. Giữ để nói."
       }
     },
     "fixed": {
@@ -580,7 +593,8 @@
       "code": "Code",
       "channels": "Nhắn tin",
       "apps": "Ứng dụng đã kết nối",
-      "workflows": "Quy trình"
+      "workflows": "Quy trình",
+      "voice_input": "Nhập bằng giọng nói"
     },
     "groups": {
       "personal": "Cá nhân",
@@ -707,6 +721,7 @@
     "save_failed": "Không thể lưu thuộc tính",
     "limit_hint": "{{count}}/{{max}} thuộc tính đang hoạt động",
     "archived_badge": "Đã lưu trữ",
+    "options_preview": "Hiện tất cả tùy chọn của {{name}}",
     "types": {
       "text": "Văn bản",
       "number": "Số",
@@ -816,8 +831,32 @@
     "toast_profile_failed": "Không thể cập nhật hồ sơ"
   },
   "notifications": {
-    "title": "Thông báo hộp thư đến",
-    "description": "Các sự kiện bị tắt tiếng vẫn hiển thị trên công việc.",
+    "title": "Hộp thư đến",
+    "description": "Chọn sự kiện nào được đưa vào Hộp thư đến trong thanh bên Công việc. Sự kiện đã tắt sẽ không tạo thông báo, và bật lại cũng không khôi phục những gì đã bỏ lỡ.",
+    "categories": {
+      "direct": "Về bạn",
+      "issues": "Công việc bạn theo dõi",
+      "projects": "Dự án bạn theo dõi",
+      "agents": "Agent"
+    },
+    "others_issues": {
+      "label": "Công việc của người khác",
+      "description": "Công việc được gán cho người khác hoặc agent của họ, mà bạn chỉ theo dõi vì đã tạo, bình luận hoặc được nhắc đến. Cập nhật quan trọng gồm @nhắc, trả lời trong chuỗi bạn đã tham gia, và trạng thái cần có người xử lý như đang xem xét, bị chặn hoặc đã xong.",
+      "key_updates": "Chỉ cập nhật quan trọng",
+      "all": "Mọi hoạt động"
+    },
+    "leaving": {
+      "title": "Rời khỏi Hộp thư đến",
+      "description": "Đọc thông báo không làm nó rời khỏi Hộp thư đến.",
+      "manual_label": "Lưu trữ thủ công",
+      "manual_description": "Từ hàng của nó trong thanh bên, hoặc từ đầu thông báo",
+      "manual_value": "Bất cứ lúc nào",
+      "done_label": "Lưu trữ công việc bạn hoàn thành",
+      "done_description": "Khi bạn chuyển một công việc sang Đã xong hoặc Đã hủy, thông báo của nó sẽ được lưu trữ. Công việc người khác hoàn thành vẫn ở trong Hộp thư đến của bạn.",
+      "archived_label": "Thông báo đã lưu trữ",
+      "archived_description": "Tìm lại và khôi phục chúng",
+      "archived_action": "Xem đã lưu trữ"
+    },
     "toast_failed": "Không thể cập nhật cài đặt thông báo",
     "groups": {
       "assignments": {
@@ -836,6 +875,10 @@
         "label": "Lượt nhắc",
         "description": "Khi ai đó @nhắc bạn, bao gồm @all và @squad"
       },
+      "reactions": {
+        "label": "Biểu cảm",
+        "description": "Khi ai đó bày tỏ cảm xúc với công việc bạn tạo hoặc bình luận bạn viết"
+      },
       "updates": {
         "label": "Mức ưu tiên & ngày đến hạn",
         "description": "Khi mức ưu tiên hoặc ngày đến hạn thay đổi trên công việc bạn theo dõi"
@@ -846,7 +889,7 @@
       },
       "agent_activity": {
         "label": "Hoạt động của agent",
-        "description": "Khi một lượt chạy của agent thất bại"
+        "description": "Khi một lượt chạy của agent thất bại, hoặc một thao tác ứng dụng mà agent yêu cầu chạy bị chặn hoặc hết hạn"
       },
       "chat_replies": {
         "label": "Bao gồm trả lời trò chuyện"
@@ -1652,6 +1695,40 @@
     "apps": "Tài khoản nhóm hoặc cá nhân kết nối qua Multica và được thêm vào từng agent.",
     "plugins": "Các gói đã cài đặt có thể thêm công cụ, hook theo lịch và bộ nhớ lưu trữ, mỗi thứ với quyền riêng."
   },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "Tin nhắn riêng với tài khoản quét mã QR kết nối.",
+    "loading": "Đang kết nối…",
+    "load_failed": "Không tải được kết nối WeChat.",
+    "not_enabled": "WeChat chưa được bật trên máy chủ này. Hãy nhờ quản trị viên bật lên.",
+    "empty": "Kết nối WeChat từ tab Tích hợp của agent.",
+    "admin_only": "Quản trị viên không gian làm việc mới kết nối được WeChat.",
+    "connected": "Đã kết nối",
+    "connect": "Kết nối WeChat",
+    "disconnect": "Ngắt kết nối",
+    "disconnect_title": "Ngắt kết nối WeChat?",
+    "disconnect_description": "Tin nhắn mới sẽ không tới agent này nữa. Lịch sử trò chuyện Multica của bạn vẫn còn.",
+    "cancel": "Hủy",
+    "close": "Đóng",
+    "action_failed": "Không hoàn thành được thao tác này. Hãy thử lại.",
+    "connect_title": "Kết nối WeChat với {{agent}}",
+    "privacy_hint": "Quét bằng tài khoản WeChat của chính bạn. Tin nhắn của nó sẽ chạy với tư cách bạn trong không gian làm việc này. Đừng chia sẻ mã QR này.",
+    "qr_label": "Mã QR kết nối WeChat",
+    "scan_hint": "Quét bằng WeChat và xác nhận trên điện thoại.",
+    "scanned": "Đã quét. Xác nhận kết nối trong WeChat.",
+    "verify_hint": "WeChat yêu cầu mã xác minh. Nhập mã hiện trên điện thoại của bạn.",
+    "verify_label": "Mã xác minh",
+    "verify": "Xác minh",
+    "success": "Đã kết nối. Gửi tin nhắn mới cho bot trong WeChat để bắt đầu.",
+    "expired": "Mã QR này đã hết hạn. Tạo mã mới.",
+    "blocked": "WeChat đã chặn các lần thử xác minh tiếp theo. Hãy thử lại sau.",
+    "already_bound": "Bot này đã được liên kết trong WeChat rồi. Ngắt kết nối client trước đó rồi thử lại.",
+    "refresh": "Mã QR mới",
+    "retry": "Thử lại",
+    "already_connected": "Tài khoản WeChat này đã kết nối với {{agent}}. Ngắt kết nối ở đó trước.",
+    "connected_elsewhere": "Tài khoản WeChat này đã kết nối ở nơi khác. Ngắt kết nối hiện có trước.",
+    "authorization_expired": "Ủy quyền WeChat đã hết hạn. Quét lại để kết nối lại."
+  },
   "connected_apps": {
     "description": "Các tài khoản agent của bạn dùng để truy cập ứng dụng bên ngoài. Các hành động được phép sẽ chạy ngay lập tức.",
     "loading": "Đang tải ứng dụng…",
@@ -1832,5 +1909,125 @@
       "admin_required": "Quản trị viên không gian làm việc có thể khôi phục quyền truy cập.",
       "account_link": "Tài khoản này có hạn chế thao tác đã lưu. Khôi phục quyền truy cập trong Ứng dụng đã kết nối."
     }
+  },
+  "voice_input": {
+    "description": "Đọc chính tả vào trò chuyện, bình luận và trả lời. Giọng nói được chuyển thành văn bản ngay trên máy này và không bao giờ rời khỏi máy.",
+    "model_title": "Mô hình giọng nói",
+    "model_hint": "Mô hình chạy trên máy này. Tải một mô hình, hoặc chuyển đổi giữa các mô hình bạn đã có.",
+    "engine_unavailable": "Chuyển giọng nói thành văn bản trên thiết bị không khả dụng trên máy này.",
+    "enabled": {
+      "title": "Nhập bằng giọng nói",
+      "hint": "Hiện micro trong trò chuyện, bình luận và trả lời, và bật phím tắt giọng nói."
+    },
+    "input_title": "Đầu vào",
+    "shortcut": {
+      "title": "Phím tắt",
+      "hint": "Hoạt động mỗi khi có ô soạn thảo trên màn hình, dù ô đó không được chọn.",
+      "change": "Đổi",
+      "unassigned": "Chưa đặt"
+    },
+    "activation": {
+      "title": "Kích hoạt",
+      "auto": "Chạm hoặc giữ",
+      "toggle": "Chạm",
+      "hold": "Giữ",
+      "hints": {
+        "auto": "Chạm để bắt đầu rồi chạm lại để chèn. Giữ để nói rồi thả ra để chèn.",
+        "toggle": "Chạm để bắt đầu, chạm lại để chèn.",
+        "hold": "Giữ để nói, thả ra để chèn."
+      }
+    },
+    "recognition_title": "Nhận dạng",
+    "language": {
+      "title": "Ngôn ngữ nói",
+      "hint": "Tự nhận dạng xử lý được hầu hết giọng nói. Chọn một ngôn ngữ nếu cụm từ ngắn bị nhận ra sai ngôn ngữ.",
+      "auto": "Tự nhận dạng"
+    },
+    "fillers": {
+      "title": "Bỏ từ đệm",
+      "hint": "Bỏ “um”, “uh” và các từ ngập ngừng tương tự."
+    },
+    "vocabulary": {
+      "title": "Từ vựng",
+      "hint": "Tên và thuật ngữ muốn viết theo cách của bạn, ví dụ tên sản phẩm hoặc đồng đội. Tối đa {{max}}.",
+      "placeholder": "Thêm một từ",
+      "remove": "Xóa {{word}}"
+    },
+    "microphone_title": "Micro",
+    "device": {
+      "title": "Thiết bị đầu vào",
+      "default": "Mặc định hệ thống",
+      "unnamed": "Micro {{index}}",
+      "permission_hint": "Kiểm tra micro một lần để xem tên thiết bị."
+    },
+    "test": {
+      "title": "Kiểm tra micro",
+      "hint": "Hãy nói để kiểm tra mức âm. Không ghi âm gì cả.",
+      "blocked": "Quyền truy cập micro đã bị chặn. Hãy cho phép trong cài đặt trình duyệt hoặc hệ thống.",
+      "start": "Kiểm tra",
+      "stop": "Dừng"
+    },
+    "history": {
+      "title": "Lịch sử",
+      "description": "Bản ghi âm và văn bản của chúng ở lại trên máy này và không bao giờ được tải lên. Bản ghi thất bại hoặc bị gián đoạn có thể được chuyển thành văn bản lại từ âm thanh của nó.",
+      "keep": {
+        "title": "Giữ lịch sử",
+        "hint": "Thời gian bản ghi âm ở lại trên máy này.",
+        "options": {
+          "off": "Không giữ",
+          "1d": "1 ngày",
+          "7d": "7 ngày",
+          "30d": "30 ngày",
+          "forever": "Mãi mãi"
+        }
+      },
+      "clear": "Xóa tất cả",
+      "clear_dialog": {
+        "title": "Xóa lịch sử giọng nói?",
+        "description": "Mọi bản ghi âm và bản ghi văn bản lưu trên máy này sẽ bị xóa.",
+        "cancel": "Hủy"
+      },
+      "empty": "Các lần đọc chính tả của bạn sẽ hiện ở đây.",
+      "off": "Lịch sử đang tắt. Bản ghi âm mới sẽ không được giữ.",
+      "today": "Hôm nay",
+      "yesterday": "Hôm qua",
+      "status": {
+        "transcribing": "Đang chuyển thành văn bản…",
+        "failed": "Chuyển thành văn bản thất bại",
+        "interrupted": "Bị gián đoạn trước khi chuyển thành văn bản"
+      },
+      "actions": {
+        "play": "Phát bản ghi âm",
+        "pause": "Tạm dừng",
+        "retranscribe": "Chuyển thành văn bản lại",
+        "copy": "Sao chép văn bản",
+        "delete": "Xóa"
+      },
+      "copied": "Đã sao chép",
+      "copy_failed": "Không sao chép được",
+      "retry_failed": "Không chuyển được bản ghi âm này thành văn bản",
+      "show_more": "Hiện thêm"
+    }
+  },
+  "private_projects": {
+    "title": "Dự án riêng tư",
+    "description": "Chỉ thành viên của dự án riêng tư mới mở được dự án đó. Với vai trò chủ sở hữu không gian làm việc, bạn có thể xem ai ở trong từng dự án, và tự thêm mình vào khi cần tham gia.",
+    "empty": "Không gian làm việc này không có dự án riêng tư nào.",
+    "load_failed": "Không tải được dự án riêng tư.",
+    "retry": "Thử lại",
+    "no_members": "Không có thành viên",
+    "lead_name": "{{name}} (trưởng dự án)",
+    "more_members": "+{{count}} nữa",
+    "archived": "Đã lưu trữ",
+    "member": "Bạn là thành viên",
+    "open": "Mở",
+    "join": "Tham gia",
+    "join_title": "Tham gia “{{title}}”?",
+    "join_description": "Bạn sẽ được thêm vào danh sách thành viên của dự án này và sẽ thấy công việc, bình luận và tệp đính kèm của nó. Các thành viên hiện tại sẽ được thông báo.",
+    "join_description_empty": "Dự án này chưa có thành viên. Bạn sẽ là thành viên duy nhất của nó, và sẽ thấy công việc, bình luận và tệp đính kèm của nó.",
+    "join_confirm": "Tham gia dự án",
+    "cancel": "Hủy",
+    "toast_joined": "Bạn đã tham gia {{title}}",
+    "toast_failed": "Không tham gia được dự án."
   }
 }

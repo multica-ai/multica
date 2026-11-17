@@ -52,10 +52,10 @@
   "queue": {
     "title_other": "{{count}} tin nhắn đang xếp hàng",
     "clear": "Xóa tất cả",
-    "steer": "Điều hướng",
-    "steer_unavailable": "Điều hướng khả dụng sau khi câu trả lời hiện tại bắt đầu",
+    "steer": "Gửi ngay (dừng câu trả lời hiện tại)",
+    "steer_unavailable": "Khả dụng sau khi câu trả lời hiện tại bắt đầu",
     "steer_no_permission": "Bạn không còn quyền chạy agent này",
-    "steer_unavailable_toast": "Điều hướng không khả dụng. Đang làm mới hàng đợi.",
+    "steer_unavailable_toast": "Gửi ngay không khả dụng. Đang làm mới hàng đợi.",
     "edit": "Chỉnh sửa tin nhắn đang xếp hàng",
     "remove": "Loại bỏ tin nhắn đang xếp hàng",
     "more": "Thêm thao tác hàng đợi",

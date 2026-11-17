@@ -376,7 +376,8 @@
     "pending_health_warning": "Đang chờ daemon đồng bộ",
     "pending_health_error": "Lỗi đăng ký",
     "pending_health_disabled": "Đã tắt",
-    "pending_cli_unknown": "đang chờ"
+    "pending_cli_unknown": "đang chờ",
+    "col_rate_limits": "Giới hạn"
   },
   "profiles": {
     "cta": "Thêm runtime",
@@ -674,5 +675,38 @@
       "run_there": "Chạy trên máy đó",
       "connected": "{{name}} đã kết nối tới Multica"
     }
+  },
+  "rate_limits": {
+    "title": "Giới hạn",
+    "caption": "CLI báo cáo trong lúc task đang chạy",
+    "updated": "Cập nhật {{ago}}",
+    "empty_title": "Chưa có dữ liệu giới hạn",
+    "empty_hint": "Sẽ ghi lại lần tới khi runtime này chạy task. Tài khoản dùng API key không có giới hạn gói.",
+    "window_session": "Phiên",
+    "window_session_hours": "Phiên {{hours}} giờ",
+    "window_weekly": "Theo tuần",
+    "window_weekly_opus": "Theo tuần · Opus",
+    "window_weekly_sonnet": "Theo tuần · Sonnet",
+    "window_generic": "Giới hạn khác",
+    "short_session": "Phiên",
+    "short_weekly": "Tuần",
+    "short_weekly_opus": "Opus",
+    "short_weekly_sonnet": "Sonnet",
+    "short_generic": "Khác",
+    "used": "Đã dùng {{pct}}%",
+    "limited": "Đã chạm giới hạn",
+    "resets_in": "Đặt lại sau {{duration}}",
+    "resets_at": "Đặt lại lúc {{time}}",
+    "reset_since": "Đã đặt lại từ lần báo cáo trước",
+    "verdict_ahead": "Nhanh hơn tốc độ {{pct}}% · hết sau khoảng {{duration}}",
+    "verdict_on_pace": "Đủ dùng tới lúc đặt lại",
+    "verdict_limited": "Tiếp tục sau khi đặt lại",
+    "credits": "Credit",
+    "credits_balance": "Còn {{balance}}",
+    "credits_unlimited": "Không giới hạn",
+    "credits_none": "Không có",
+    "duration_minutes": "{{minutes}}p",
+    "duration_hours": "{{hours}}g {{minutes}}p",
+    "duration_days": "{{days}}n {{hours}}g"
   }
 }

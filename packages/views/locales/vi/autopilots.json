@@ -21,7 +21,8 @@
     "active": "Đang hoạt động",
     "paused": "Đã tạm dừng",
     "paused_runtime_required": "Đã tạm dừng — người được giao cần một runtime",
-    "archived": "Đã lưu trữ"
+    "archived": "Đã lưu trữ",
+    "paused_project_archived": "Đã tạm dừng — dự án đã được lưu trữ"
   },
   "execution_mode": {
     "create_issue": "Tạo Công việc",
@@ -115,7 +116,8 @@
       "cancel": "Hủy",
       "confirm": "Xóa",
       "deleting": "Đang xóa..."
-    }
+    },
+    "paused_project_archived": "Đã tạm dừng vì dự án của nó đã được lưu trữ. Hãy khôi phục dự án, rồi kích hoạt lại autopilot này."
   },
   "access": {
     "title": "Quản lý quyền truy cập",
