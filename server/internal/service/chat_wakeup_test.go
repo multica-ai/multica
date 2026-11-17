@@ -249,7 +249,7 @@ func TestChatWakeupCheckInStaysSilent(t *testing.T) {
 	f.fx.Exec(t, "UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1", util.UUIDToString(firstTask.ID))
 	f.dueNow(t, w.ID)
 	second := f.process(t, w.ID)
-	if second.CheckCount != 2 || second.LastTaskID == firstTask.ID {
+	if second.CheckCount != 2 || second.LastTaskID == firstTask.ID || second.LastCheckNote.Valid {
 		t.Fatalf("after the second check = %+v", second)
 	}
 	secondTask, _ := f.turn(t, second)

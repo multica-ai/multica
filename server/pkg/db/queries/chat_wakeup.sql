@@ -99,6 +99,7 @@ SET last_task_id = @task_id,
     end_reason = CASE WHEN @end_status::text = '' THEN end_reason ELSE @end_reason::text END,
     ended_at = CASE WHEN @end_status::text = '' THEN ended_at ELSE now() END,
     next_eval_at = @next_eval_at,
+    last_check_note = NULL,
     last_error = NULL,
     updated_at = now()
 WHERE id = @id

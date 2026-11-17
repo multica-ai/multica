@@ -790,6 +790,7 @@ SET last_task_id = $1,
     end_reason = CASE WHEN $2::text = '' THEN end_reason ELSE $3::text END,
     ended_at = CASE WHEN $2::text = '' THEN ended_at ELSE now() END,
     next_eval_at = $4,
+    last_check_note = NULL,
     last_error = NULL,
     updated_at = now()
 WHERE id = $5
