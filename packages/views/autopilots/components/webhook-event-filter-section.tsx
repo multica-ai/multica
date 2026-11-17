@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef } from "react";
 import { X, Plus, Filter, ExternalLink } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
@@ -13,43 +13,52 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
-import type {
-  WebhookEventFilter,
-  WebhookPayloadCondition,
-} from "@multica/core/types";
+import type { WebhookEventFilter } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { useConfigStore } from "@multica/core/config";
 import {
   CONDITION_OPS,
-  EMPTY_CONDITION_DRAFT,
   MAX_CONDITIONS,
   MAX_CONDITION_PATH_LENGTH,
   MAX_CONDITION_VALUES,
-  buildCondition,
-  formatCondition,
-  formatConditionValue,
-  type ConditionDraft,
   type ConditionOp,
 } from "./webhook-payload-condition";
+import {
+  newConditionDraft,
+  newRuleDraft,
+  resolveEventFilterDrafts,
+  type ConditionFieldError,
+  type ConditionRowDraft,
+  type EventFilterDraft,
+} from "./webhook-event-filter-draft";
 import { isTraditionalChinese } from "../../common/docs-locale";
 
 interface WebhookEventFilterSectionProps {
-  filters: WebhookEventFilter[];
-  onChange: (filters: WebhookEventFilter[]) => void;
+  drafts: EventFilterDraft[];
+  onChange: (drafts: EventFilterDraft[]) => void;
+  // Set once a save was attempted: incomplete fields are marked from then on,
+  // and the first of them takes focus.
+  showErrors: boolean;
 }
 
+const INPUT =
+  "h-7 w-full min-w-0 rounded-md border bg-background px-2.5 text-caption outline-none focus:ring-1 focus:ring-ring aria-invalid:border-destructive aria-invalid:focus:ring-destructive";
+
+// Rules and conditions are edited where they are shown: "Add rule" appends an
+// empty rule card, "Add condition" an empty condition row, and every field is
+// an input, existing ones included. What the inputs hold is what Save sends,
+// so there is no per-row commit to forget, and an incomplete row stops the
+// save and says where instead of being dropped.
 export function WebhookEventFilterSection({
-  filters,
+  drafts,
   onChange,
+  showErrors,
 }: WebhookEventFilterSectionProps) {
   const { t, i18n } = useT("autopilots");
-  const conditionLimitsId = useId();
+  const idPrefix = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
   const payloadSupported = useConfigStore((state) => state.webhookPayloadConditionsSupported);
-  const [newEvent, setNewEvent] = useState("");
-  const [newActions, setNewActions] = useState("");
-  const [editingIdx, setEditingIdx] = useState<number | null>(null);
-  const [draft, setDraft] = useState<ConditionDraft>(EMPTY_CONDITION_DRAFT);
-  const draftCondition = buildCondition(draft);
+  const { errors } = resolveEventFilterDrafts(drafts);
   const docsHref = isTraditionalChinese(i18n.language)
     ? `https://multica.ai/docs/zh-Hant/autopilots#${encodeURIComponent("事件過濾")}`
     : i18n.language?.startsWith("zh")
@@ -58,50 +67,55 @@ export function WebhookEventFilterSection({
         ? `https://multica.ai/docs/fr/autopilots#${encodeURIComponent("filtres-dévénements")}`
         : "https://multica.ai/docs/autopilots#event-filters";
 
-  const addFilter = () => {
-    const event = newEvent.trim();
-    if (!event) return;
-    const actions = newActions
-      .split(",")
-      .map((a) => a.trim())
-      .filter((a) => a.length > 0);
-    const next: WebhookEventFilter = { event };
-    if (actions.length > 0) next.actions = actions;
-    onChange([...filters, next]);
-    setNewEvent("");
-    setNewActions("");
-  };
+  // A blocked save lands the user on the first field that blocked it.
+  useEffect(() => {
+    if (!showErrors) return;
+    rootRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [showErrors]);
 
-  const removeFilter = (idx: number) => {
-    onChange(filters.filter((_, i) => i !== idx));
-    setEditingIdx(null);
-  };
+  // A row added with a button is typed into next, so its first field takes
+  // focus once it renders.
+  const focusKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const key = focusKeyRef.current;
+    if (!key) return;
+    focusKeyRef.current = null;
+    rootRef.current?.querySelector<HTMLElement>(`[data-focus-key="${key}"]`)?.focus();
+  }, [drafts]);
 
-  const updateConditions = (idx: number, conditions: WebhookPayloadCondition[]) => {
+  const updateRule = (key: string, patch: Partial<EventFilterDraft>) =>
+    onChange(drafts.map((d) => (d.key === key ? { ...d, ...patch } : d)));
+
+  const updateCondition = (ruleKey: string, rowKey: string, patch: Partial<ConditionRowDraft>) =>
     onChange(
-      filters.map((f, i) => {
-        if (i !== idx) return f;
-        const { conditions: _previous, ...rest } = f;
-        return conditions.length > 0 ? { ...rest, conditions } : rest;
-      }),
+      drafts.map((d) =>
+        d.key === ruleKey
+          ? { ...d, conditions: d.conditions.map((c) => (c.key === rowKey ? { ...c, ...patch } : c)) }
+          : d,
+      ),
     );
-  };
 
-  const openEditor = (idx: number) => {
-    setEditingIdx(idx);
-    setDraft(EMPTY_CONDITION_DRAFT);
-  };
-
-  const addCondition = (idx: number) => {
-    if (!draftCondition) return;
-    updateConditions(idx, [...(filters[idx]?.conditions ?? []), draftCondition]);
-    setEditingIdx(null);
+  const conditionErrorText = (error: ConditionFieldError) => {
+    switch (error) {
+      case "path_required":
+        return t(($) => $.dialog.event_filter_error_path_required);
+      case "path_invalid":
+        return t(($) => $.dialog.event_filter_error_path_invalid, {
+          path: MAX_CONDITION_PATH_LENGTH,
+        });
+      case "value_required":
+        return t(($) => $.dialog.event_filter_error_value_required);
+      case "values_too_many":
+        return t(($) => $.dialog.event_filter_error_too_many_values, {
+          values: MAX_CONDITION_VALUES,
+        });
+    }
   };
 
   const opLabel = (op: ConditionOp) => t(($) => $.dialog.event_filter_condition_ops[op]);
 
   return (
-    <div className="space-y-2">
+    <div ref={rootRef} className="space-y-2">
       <div className="flex items-center gap-1.5 text-micro font-semibold tracking-[0.08em] text-muted-foreground uppercase">
         <Filter className="size-3" />
         {t(($) => $.dialog.event_filter_label)}
@@ -117,241 +131,211 @@ export function WebhookEventFilterSection({
         </a>
       </div>
 
-      {filters.length > 0 && (
-        <div className="space-y-1">
-          {filters.map((f, idx) => {
-            const conditions = f.conditions ?? [];
-            const editing = editingIdx === idx;
-            const canAddCondition = payloadSupported && !editing && conditions.length < MAX_CONDITIONS;
-            return (
-              <div key={idx} className="rounded-md border bg-background text-caption">
-                <div className="flex min-w-0 items-center gap-2 py-1 pr-1 pl-2.5">
-                  <span className="shrink-0 font-mono font-medium text-foreground">{f.event}</span>
-                  {f.actions && f.actions.length > 0 && (
-                    <span className="min-w-0 truncate text-muted-foreground">
-                      {f.actions.join(" · ")}
-                    </span>
-                  )}
-                  <div className="ml-auto flex shrink-0 items-center">
-                    <TooltipHint label={t(($) => $.dialog.event_filter_remove_label)}>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={() => removeFilter(idx)}
-                        aria-label={t(($) => $.dialog.event_filter_remove_label)}
-                      >
-                        <X />
-                      </Button>
-                    </TooltipHint>
-                  </div>
-                </div>
+      {drafts.map((rule) => {
+        const eventError = showErrors ? errors.events[rule.key] : undefined;
+        const eventErrorId = `${idPrefix}-${rule.key}-event-error`;
+        const canAddCondition = payloadSupported && rule.conditions.length < MAX_CONDITIONS;
+        return (
+          <div
+            key={rule.key}
+            role="group"
+            aria-label={rule.event.trim() || t(($) => $.dialog.event_filter_new_rule_label)}
+            className="space-y-2 rounded-md border bg-background p-2 text-caption"
+          >
+            <div className="flex items-start gap-1.5">
+              <div className="min-w-0 flex-[3]">
+                <input
+                  type="text"
+                  data-focus-key={rule.key}
+                  value={rule.event}
+                  onChange={(e) => updateRule(rule.key, { event: e.target.value })}
+                  aria-label={t(($) => $.dialog.event_filter_event_label)}
+                  aria-invalid={eventError ? true : undefined}
+                  aria-describedby={eventError ? eventErrorId : undefined}
+                  placeholder={t(($) => $.dialog.event_filter_event_placeholder)}
+                  className={cn(INPUT, "font-mono")}
+                />
+                {eventError && (
+                  <p id={eventErrorId} className="mt-1 text-micro text-destructive">
+                    {t(($) => $.dialog.event_filter_error_event_required)}
+                  </p>
+                )}
+              </div>
+              <input
+                type="text"
+                value={rule.actions}
+                onChange={(e) => updateRule(rule.key, { actions: e.target.value })}
+                aria-label={t(($) => $.dialog.event_filter_actions_label)}
+                placeholder={t(($) => $.dialog.event_filter_actions_placeholder)}
+                className={cn(INPUT, "flex-[2]")}
+              />
+              <TooltipHint label={t(($) => $.dialog.event_filter_remove_label)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="mt-1 shrink-0"
+                  onClick={() => onChange(drafts.filter((d) => d.key !== rule.key))}
+                  aria-label={t(($) => $.dialog.event_filter_remove_label)}
+                >
+                  <X />
+                </Button>
+              </TooltipHint>
+            </div>
 
-                {conditions.length > 0 && (
-                  <div className="border-t py-1">
-                    <p className="px-2.5 py-1 text-micro text-muted-foreground">
-                      {t(($) => $.dialog.event_filter_condition_all)}
-                    </p>
-                    <ul>
-                    {conditions.map((c, cIdx) => (
-                      <li
-                        key={cIdx}
-                        title={formatCondition(c)}
-                        className="flex min-w-0 items-center gap-1.5 py-0.5 pr-1 pl-2.5"
-                      >
-                        <span className="min-w-0 truncate font-mono text-foreground">{c.path}</span>
-                        <span className="shrink-0 text-muted-foreground">{opLabel(c.op)}</span>
-                        {c.op !== "exists" && (
-                          <span className="max-w-[45%] shrink-0 truncate font-mono text-foreground">
-                            {formatConditionValue(c)}
-                          </span>
-                        )}
-                        {c.ignore_case && (
-                          <span className="shrink-0 text-micro text-muted-foreground">
-                            {t(($) => $.dialog.event_filter_condition_ignore_case)}
-                          </span>
-                        )}
+            {rule.conditions.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-micro text-muted-foreground">
+                  {t(($) => $.dialog.event_filter_condition_all)}
+                </p>
+                {rule.conditions.map((row) => {
+                  const pathError = showErrors ? errors.paths[row.key] : undefined;
+                  const valueError = showErrors ? errors.values[row.key] : undefined;
+                  const pathErrorId = `${idPrefix}-${row.key}-path-error`;
+                  const valueErrorId = `${idPrefix}-${row.key}-value-error`;
+                  return (
+                    <div
+                      key={row.key}
+                      role="group"
+                      aria-label={t(($) => $.dialog.event_filter_condition_label)}
+                      className="space-y-1.5 border-l-2 pl-2"
+                    >
+                      <div className="flex items-start gap-1.5">
+                        <div className="min-w-0 flex-1">
+                          <input
+                            type="text"
+                            data-focus-key={row.key}
+                            value={row.path}
+                            onChange={(e) => updateCondition(rule.key, row.key, { path: e.target.value })}
+                            aria-label={t(($) => $.dialog.event_filter_condition_path_label)}
+                            aria-invalid={pathError ? true : undefined}
+                            aria-describedby={pathError ? pathErrorId : undefined}
+                            placeholder={t(($) => $.dialog.event_filter_condition_path_placeholder)}
+                            className={cn(INPUT, "font-mono")}
+                          />
+                          {pathError && (
+                            <p id={pathErrorId} className="mt-1 text-micro text-destructive">
+                              {conditionErrorText(pathError)}
+                            </p>
+                          )}
+                        </div>
                         <TooltipHint label={t(($) => $.dialog.event_filter_condition_remove_label)}>
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon-xs"
-                            className="ml-auto"
+                            className="mt-1 shrink-0"
                             onClick={() =>
-                              updateConditions(
-                                idx,
-                                conditions.filter((_, i) => i !== cIdx),
-                              )
+                              updateRule(rule.key, {
+                                conditions: rule.conditions.filter((c) => c.key !== row.key),
+                              })
                             }
                             aria-label={t(($) => $.dialog.event_filter_condition_remove_label)}
                           >
                             <X />
                           </Button>
                         </TooltipHint>
-                      </li>
-                    ))}
-                    </ul>
-                  </div>
-                )}
-
-                {canAddCondition && (
-                  <Button type="button" variant="ghost" size="xs" className="m-1 text-muted-foreground" onClick={() => openEditor(idx)}>
-                    <Plus />
-                    {t(($) => $.dialog.event_filter_condition_add_label)}
-                  </Button>
-                )}
-
-                {editing && (
-                  <div
-                    role="group"
-                    aria-label={t(($) => $.dialog.event_filter_condition_add_label)}
-                    className="space-y-1.5 border-t p-2"
-                  >
-                    <input
-                      type="text"
-                      autoFocus
-                      value={draft.path}
-                      onChange={(e) => setDraft({ ...draft, path: e.target.value })}
-                      aria-label={t(($) => $.dialog.event_filter_condition_path_label)}
-                      aria-describedby={conditionLimitsId}
-                      placeholder={t(($) => $.dialog.event_filter_condition_path_placeholder)}
-                      className="h-7 w-full rounded-md border bg-background px-2.5 text-caption font-mono outline-none focus:ring-1 focus:ring-ring"
-                    />
-                    <div className="flex gap-1.5">
-                      <Select
-                        items={CONDITION_OPS.map((op) => ({ value: op, label: opLabel(op) }))}
-                        value={draft.op}
-                        onValueChange={(v) => {
-                          if (v) setDraft({ ...draft, op: v as ConditionOp });
-                        }}
-                      >
-                        <SelectTrigger
-                          size="sm"
-                          aria-label={t(($) => $.dialog.event_filter_condition_op_label)}
-                          className={cn("text-caption", draft.op === "exists" ? "w-full" : "w-28 shrink-0")}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CONDITION_OPS.map((op) => (
-                            <SelectItem key={op} value={op}>
-                              {opLabel(op)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {draft.op !== "exists" && (
-                        <input
-                          type="text"
-                          value={draft.value}
-                          onChange={(e) => setDraft({ ...draft, value: e.target.value })}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              addCondition(idx);
-                            }
+                      </div>
+                      <div className="flex items-start gap-1.5">
+                        <Select
+                          items={CONDITION_OPS.map((op) => ({ value: op, label: opLabel(op) }))}
+                          value={row.op}
+                          onValueChange={(v) => {
+                            if (v) updateCondition(rule.key, row.key, { op: v as ConditionOp });
                           }}
-                          aria-label={t(($) => $.dialog.event_filter_condition_value_label)}
-                          aria-describedby={conditionLimitsId}
-                          placeholder={
-                            draft.op === "in"
-                              ? t(($) => $.dialog.event_filter_condition_values_placeholder)
-                              : t(($) => $.dialog.event_filter_condition_value_placeholder)
-                          }
-                          className="h-7 min-w-0 flex-1 rounded-md border bg-background px-2.5 text-caption font-mono outline-none focus:ring-1 focus:ring-ring"
-                        />
-                      )}
+                        >
+                          <SelectTrigger
+                            size="sm"
+                            aria-label={t(($) => $.dialog.event_filter_condition_op_label)}
+                            className={cn("text-caption", row.op === "exists" ? "w-full" : "w-28 shrink-0")}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {CONDITION_OPS.map((op) => (
+                              <SelectItem key={op} value={op}>
+                                {opLabel(op)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {row.op !== "exists" && (
+                          <>
+                            <div className="min-w-0 flex-1">
+                              <input
+                                type="text"
+                                value={row.value}
+                                onChange={(e) =>
+                                  updateCondition(rule.key, row.key, { value: e.target.value })
+                                }
+                                aria-label={t(($) => $.dialog.event_filter_condition_value_label)}
+                                aria-invalid={valueError ? true : undefined}
+                                aria-describedby={valueError ? valueErrorId : undefined}
+                                placeholder={
+                                  row.op === "in"
+                                    ? t(($) => $.dialog.event_filter_condition_values_placeholder)
+                                    : t(($) => $.dialog.event_filter_condition_value_placeholder)
+                                }
+                                className={cn(INPUT, "font-mono")}
+                              />
+                              {valueError && (
+                                <p id={valueErrorId} className="mt-1 text-micro text-destructive">
+                                  {conditionErrorText(valueError)}
+                                </p>
+                              )}
+                            </div>
+                            <label className="inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap text-muted-foreground">
+                              <Checkbox
+                                checked={row.ignoreCase}
+                                onCheckedChange={(checked) =>
+                                  updateCondition(rule.key, row.key, { ignoreCase: checked === true })
+                                }
+                              />
+                              {t(($) => $.dialog.event_filter_condition_ignore_case)}
+                            </label>
+                          </>
+                        )}
+                      </div>
                     </div>
-                    <p id={conditionLimitsId} className="text-micro text-muted-foreground">
-                      {t(($) => $.dialog.event_filter_condition_limits, {
-                        path: MAX_CONDITION_PATH_LENGTH,
-                        values: MAX_CONDITION_VALUES,
-                      })}
-                    </p>
-                    <div className="flex items-center gap-1.5">
-                      {draft.op !== "exists" && (
-                        <label className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
-                          <Checkbox
-                            checked={draft.ignoreCase}
-                            onCheckedChange={(checked) =>
-                              setDraft({ ...draft, ignoreCase: checked === true })
-                            }
-                          />
-                          {t(($) => $.dialog.event_filter_condition_ignore_case)}
-                        </label>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        className="ml-auto"
-                        onClick={() => setEditingIdx(null)}
-                      >
-                        {t(($) => $.dialog.event_filter_condition_cancel)}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="xs"
-                        onClick={() => addCondition(idx)}
-                        disabled={!draftCondition}
-                      >
-                        {t(($) => $.dialog.event_filter_add)}
-                      </Button>
-                    </div>
-                  </div>
-                )}
+                  );
+                })}
               </div>
-            );
-          })}
-        </div>
-      )}
+            )}
 
-      {/* Actions widen only where the row has room (the per-webhook dialog),
-          so their placeholder isn't clipped there; the autopilot dialog's side
-          panel keeps w-28, which leaves the event placeholder whole. */}
-      <div className="@container/ef-add flex gap-2">
-        <input
-          type="text"
-          value={newEvent}
-          onChange={(e) => setNewEvent(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              addFilter();
-            }
-          }}
-          placeholder={t(($) => $.dialog.event_filter_event_placeholder)}
-          className="flex-1 min-w-0 rounded-md border bg-background px-2.5 py-1.5 text-caption font-mono outline-none focus:ring-1 focus:ring-ring"
-        />
-        <input
-          type="text"
-          value={newActions}
-          onChange={(e) => setNewActions(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              addFilter();
-            }
-          }}
-          placeholder={t(($) => $.dialog.event_filter_actions_placeholder)}
-          className="w-28 rounded-md border bg-background px-2.5 py-1.5 text-caption outline-none focus:ring-1 focus:ring-ring @sm/ef-add:w-36"
-        />
-        <button
-          type="button"
-          onClick={addFilter}
-          disabled={!newEvent.trim()}
-          className={cn(
-            "inline-flex shrink-0 items-center justify-center gap-1 rounded-md border px-2.5 py-1.5 text-caption font-medium transition-colors",
-            newEvent.trim()
-              ? "border-primary bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
-              : "bg-muted text-muted-foreground cursor-not-allowed",
-          )}
-        >
-          <Plus className="size-3.5" />
-          {t(($) => $.dialog.event_filter_add)}
-        </button>
-      </div>
+            {canAddCondition && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="text-muted-foreground"
+                onClick={() => {
+                  const row = newConditionDraft();
+                  focusKeyRef.current = row.key;
+                  updateRule(rule.key, { conditions: [...rule.conditions, row] });
+                }}
+              >
+                <Plus />
+                {t(($) => $.dialog.event_filter_condition_add_label)}
+              </Button>
+            )}
+          </div>
+        );
+      })}
+
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        className="text-muted-foreground"
+        onClick={() => {
+          const rule = newRuleDraft();
+          focusKeyRef.current = rule.key;
+          onChange([...drafts, rule]);
+        }}
+      >
+        <Plus />
+        {t(($) => $.dialog.event_filter_add_rule)}
+      </Button>
       <p className="text-micro text-muted-foreground">
         {t(($) => $.dialog.event_filter_hint)}
       </p>

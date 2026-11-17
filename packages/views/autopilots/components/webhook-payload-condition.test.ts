@@ -1,11 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
-  EMPTY_CONDITION_DRAFT,
   buildCondition,
-  formatCondition,
   formatConditionValue,
   parseConditionValue,
+  splitConditionValues,
+  type ConditionDraft,
 } from "./webhook-payload-condition";
 
 describe("parseConditionValue", () => {
@@ -24,8 +24,11 @@ describe("parseConditionValue", () => {
 });
 
 describe("buildCondition", () => {
-  const draft = (patch: Partial<typeof EMPTY_CONDITION_DRAFT>) => ({
-    ...EMPTY_CONDITION_DRAFT,
+  const draft = (patch: Partial<ConditionDraft>): ConditionDraft => ({
+    path: "",
+    op: "equals",
+    value: "",
+    ignoreCase: false,
     ...patch,
   });
 
@@ -80,19 +83,24 @@ describe("buildCondition", () => {
   });
 });
 
-describe("formatCondition", () => {
-  it("renders each op as code", () => {
-    expect(formatCondition({ path: "a", op: "equals", value: false })).toBe("a equals false");
-    expect(formatCondition({ path: "a", op: "contains", value: "x", ignore_case: true })).toBe('a contains/i "x"');
-    expect(formatCondition({ path: "a", op: "in", values: ["x", 1] })).toBe('a in ["x", 1]');
-    expect(formatCondition({ path: "a", op: "exists" })).toBe("a exists");
-  });
-});
-
 describe("formatConditionValue", () => {
   it("quotes strings and leaves booleans and numbers bare", () => {
     expect(formatConditionValue({ path: "a", op: "equals", value: "x" })).toBe('"x"');
     expect(formatConditionValue({ path: "a", op: "equals", value: false })).toBe("false");
     expect(formatConditionValue({ path: "a", op: "in", values: ["x", 1] })).toBe('"x", 1');
+  });
+});
+
+describe("splitConditionValues", () => {
+  it.each([
+    ["main, release", ["main", "release"]],
+    ['"fix, docs", chore', ['"fix, docs"', "chore"]],
+    ['"a\\", b", c', ['"a\\", b"', "c"]],
+    ['a"b, c', ['a"b', "c"]],
+    ['"open, x', ['"open', "x"]],
+    ['"", main', ['""', "main"]],
+    [" , main ,", ["main"]],
+  ] as const)("splits %s outside quoted values", (raw, want) => {
+    expect(splitConditionValues(raw)).toEqual(want);
   });
 });

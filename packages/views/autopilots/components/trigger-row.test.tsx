@@ -155,7 +155,7 @@ describe("TriggerRow on a webhook", () => {
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("Edit webhook", { selector: "h2" })).toBeInTheDocument();
-    expect(within(dialog).getByText("pull_request")).toBeInTheDocument();
+    expect(within(dialog).getByRole("textbox", { name: "Event" })).toHaveValue("pull_request");
   });
 
   it("says a webhook without filters accepts every event", () => {

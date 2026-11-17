@@ -6,9 +6,14 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { toast } from "sonner";
-import type { AutopilotTrigger, WebhookEventFilter } from "@multica/core/types";
+import type { AutopilotTrigger } from "@multica/core/types";
 import { WebhookEventFilterSection } from "./webhook-event-filter-section";
 import { serializeEventFilters } from "./webhook-payload-condition";
+import {
+  draftsFromEventFilters,
+  resolveEventFilterDrafts,
+  type EventFilterDraft,
+} from "./webhook-event-filter-draft";
 import { useT } from "../../i18n";
 
 // The webhook counterpart of EditScheduleTriggerDialog: every webhook row opens
@@ -49,7 +54,10 @@ function EditWebhookTriggerDialogBody({
 }) {
   const { t } = useT("autopilots");
   const updateTrigger = useUpdateAutopilotTrigger();
-  const [filters, setFilters] = useState<WebhookEventFilter[]>(trigger.event_filters ?? []);
+  const [drafts, setDrafts] = useState<EventFilterDraft[]>(() =>
+    draftsFromEventFilters(trigger.event_filters ?? []),
+  );
+  const [showErrors, setShowErrors] = useState(false);
   const [label, setLabel] = useState(trigger.label ?? "");
   const [enabled, setEnabled] = useState(trigger.enabled);
   const [submitting, setSubmitting] = useState(false);
@@ -62,13 +70,21 @@ function EditWebhookTriggerDialogBody({
     label: (trigger.label ?? "").trim(),
     enabled: trigger.enabled,
   });
-  const filtersDirty = serializeEventFilters(filters) !== baseline.current.filters;
+  const resolved = resolveEventFilterDrafts(drafts);
+  // An incomplete row counts as a change: Save stays available so pressing it
+  // can point at the row, rather than going quiet over an edit it won't send.
+  const filtersDirty =
+    !resolved.valid || serializeEventFilters(resolved.filters) !== baseline.current.filters;
   const labelDirty = label.trim() !== baseline.current.label;
   const enabledDirty = enabled !== baseline.current.enabled;
   const canSubmit = !submitting && (filtersDirty || labelDirty || enabledDirty);
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
+    if (!resolved.valid) {
+      setShowErrors(true);
+      return;
+    }
     setSubmitting(true);
     try {
       // Only the fields that moved. A changed filter list or enabled flag is a
@@ -78,7 +94,7 @@ function EditWebhookTriggerDialogBody({
       await updateTrigger.mutateAsync({
         autopilotId,
         triggerId: trigger.id,
-        ...(filtersDirty ? { event_filters: filters } : {}),
+        ...(filtersDirty ? { event_filters: resolved.filters } : {}),
         ...(labelDirty ? { label: label.trim() } : {}),
         ...(enabledDirty ? { enabled } : {}),
       });
@@ -97,12 +113,12 @@ function EditWebhookTriggerDialogBody({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      {/* Wider than the schedule dialog: a rule row, its conditions and the
-          add-rule inputs share one line each and need the room. */}
-      <DialogContent className="sm:max-w-md">
+      {/* Wider than the schedule dialog: rules and conditions are edited in
+          place, and a condition's operator, value and ignore-case share a line. */}
+      <DialogContent className="sm:max-w-lg">
         <DialogTitle>{t(($) => $.edit_webhook_dialog.title)}</DialogTitle>
         <div className="min-w-0 space-y-4 pt-2">
-          <WebhookEventFilterSection filters={filters} onChange={setFilters} />
+          <WebhookEventFilterSection drafts={drafts} onChange={setDrafts} showErrors={showErrors} />
 
           <div>
             <label className="text-caption font-medium text-muted-foreground">

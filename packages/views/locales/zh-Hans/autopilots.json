@@ -349,14 +349,22 @@
     "webhook_created_done": "完成",
     "event_filter_label": "事件过滤",
     "event_filter_docs_link_label": "了解事件过滤的工作方式",
-    "event_filter_event_placeholder": "例如 workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "添加",
-    "event_filter_remove_label": "移除过滤条件",
+    "event_filter_event_placeholder": "事件，例如 pull_request",
+    "event_filter_actions_placeholder": "动作（可选）",
+    "event_filter_add_rule": "添加规则",
+    "event_filter_event_label": "事件",
+    "event_filter_actions_label": "动作",
+    "event_filter_new_rule_label": "新规则",
+    "event_filter_condition_label": "条件",
+    "event_filter_error_event_required": "请填写事件名。",
+    "event_filter_error_path_required": "请填写 Payload 字段。",
+    "event_filter_error_path_invalid": "字段名之间用点分隔，最多 {{path}} 个字符。",
+    "event_filter_error_value_required": "请填写值。",
+    "event_filter_error_too_many_values": "最多 {{values}} 个值。",
+    "event_filter_remove_label": "移除规则",
     "event_filter_hint": "只处理匹配规则且正文满足全部条件的事件。留空则接收所有事件。",
     "event_filter_condition_remove_label": "移除条件",
     "event_filter_condition_add_label": "添加条件",
-    "event_filter_condition_cancel": "取消",
     "event_filter_condition_ops": {
       "equals": "是",
       "not_equals": "不是",
@@ -365,7 +373,7 @@
       "exists": "存在"
     },
     "event_filter_condition_path_label": "Payload 字段",
-    "event_filter_condition_path_placeholder": "例如 pull_request.labels.*.name",
+    "event_filter_condition_path_placeholder": "Payload 字段，例如 pull_request.base.ref",
     "event_filter_condition_op_label": "运算符",
     "event_filter_condition_value_label": "值",
     "event_filter_condition_value_placeholder": "例如 main",
@@ -373,6 +381,8 @@
     "event_filter_condition_ignore_case": "忽略大小写",
     "schedule_multiple_notice": "该自动化有 {{count}} 条时间表。关闭此弹窗，在下方「触发器」中逐条编辑。",
     "webhook_multiple_notice": "该自动化有多个 Webhook。关闭此弹窗，在下方「触发器」中逐条编辑。",
+    "webhook_edit_filters": "编辑过滤",
+    "webhook_filters_saved_separately": "过滤单独保存，在这里点取消不会撤销。",
     "schedule_empty": "还没有时间表——这个自动化只在手动触发时运行。",
     "schedule_add": "添加时间表",
     "error_title_required": "请填写自动化名称。",
@@ -387,8 +397,7 @@
         "description": "静默运行，不创建任务"
       }
     },
-    "event_filter_condition_all": "且正文满足全部条件",
-    "event_filter_condition_limits": "字段路径最多 {{path}} 个字符，候选值列表最多 {{values}} 项。"
+    "event_filter_condition_all": "且正文满足全部条件"
   },
   "schedule_editor": {
     "time_label": "时间",

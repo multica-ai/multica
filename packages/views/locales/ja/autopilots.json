@@ -349,14 +349,22 @@
     "webhook_created_done": "完了",
     "event_filter_label": "イベントフィルター",
     "event_filter_docs_link_label": "イベントフィルターの仕組みを学ぶ",
-    "event_filter_event_placeholder": "例: workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "追加",
-    "event_filter_remove_label": "フィルターを削除",
+    "event_filter_event_placeholder": "イベント（例: pull_request）",
+    "event_filter_actions_placeholder": "アクション（任意）",
+    "event_filter_add_rule": "ルールを追加",
+    "event_filter_event_label": "イベント",
+    "event_filter_actions_label": "アクション",
+    "event_filter_new_rule_label": "新しいルール",
+    "event_filter_condition_label": "条件",
+    "event_filter_error_event_required": "イベント名を入力してください。",
+    "event_filter_error_path_required": "Payload のフィールドを入力してください。",
+    "event_filter_error_path_invalid": "フィールド名はドットで区切り、{{path}} 文字以内にしてください。",
+    "event_filter_error_value_required": "値を入力してください。",
+    "event_filter_error_too_many_values": "値は {{values}} 個までです。",
+    "event_filter_remove_label": "ルールを削除",
     "event_filter_hint": "ルールと本文のすべての条件に一致するイベントのみ処理します。空欄の場合はすべて受け付けます。",
     "event_filter_condition_remove_label": "条件を削除",
     "event_filter_condition_add_label": "条件を追加",
-    "event_filter_condition_cancel": "キャンセル",
     "event_filter_condition_ops": {
       "equals": "等しい",
       "not_equals": "等しくない",
@@ -365,7 +373,7 @@
       "exists": "存在する"
     },
     "event_filter_condition_path_label": "Payload のフィールド",
-    "event_filter_condition_path_placeholder": "例: pull_request.labels.*.name",
+    "event_filter_condition_path_placeholder": "Payload のフィールド（例: pull_request.base.ref）",
     "event_filter_condition_op_label": "演算子",
     "event_filter_condition_value_label": "値",
     "event_filter_condition_value_placeholder": "例: main",
@@ -373,6 +381,8 @@
     "event_filter_condition_ignore_case": "大文字と小文字を区別しない",
     "schedule_multiple_notice": "このオートパイロットにはスケジュールが {{count}} 件あります。このダイアログを閉じて、下の「トリガー」から個別に編集してください。",
     "webhook_multiple_notice": "このオートパイロットには Webhook が複数あります。このダイアログを閉じて、下の「トリガー」から個別に編集してください。",
+    "webhook_edit_filters": "フィルターを編集",
+    "webhook_filters_saved_separately": "フィルターは個別に保存され、ここでキャンセルしても元に戻りません。",
     "schedule_empty": "スケジュールはありません。このオートパイロットは手動で実行したときだけ動きます。",
     "schedule_add": "スケジュールを追加",
     "error_title_required": "オートパイロット名を入力してください。",
@@ -387,8 +397,7 @@
         "description": "タスクを作成せず、静かに実行します"
       }
     },
-    "event_filter_condition_all": "かつ本文がすべての条件を満たす",
-    "event_filter_condition_limits": "パスは {{path}} 文字まで、候補リストは {{values}} 個までです。"
+    "event_filter_condition_all": "かつ本文がすべての条件を満たす"
   },
   "schedule_editor": {
     "time_label": "時刻",

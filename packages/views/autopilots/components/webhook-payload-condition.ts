@@ -20,13 +20,6 @@ export function formatConditionValue(c: WebhookPayloadCondition): string {
   return JSON.stringify(c.value);
 }
 
-// formatCondition is the full API form, used as the row's tooltip.
-export function formatCondition(c: WebhookPayloadCondition): string {
-  if (c.op === "exists") return `${c.path} exists`;
-  const value = c.op === "in" ? `[${formatConditionValue(c)}]` : formatConditionValue(c);
-  return `${c.path} ${c.op}${c.ignore_case ? "/i" : ""} ${value}`;
-}
-
 // parseConditionValue reads JSON scalars (true, 42, "42") and falls back to
 // plain text, so `main` and `"main"` both mean the string main.
 export function parseConditionValue(raw: string): WebhookPayloadConditionValue {
@@ -46,14 +39,36 @@ export function parseConditionValue(raw: string): WebhookPayloadConditionValue {
   return trimmed;
 }
 
+// splitConditionValues splits an "is one of" list at its commas, except for
+// commas inside a value written as a quoted string ("fix, docs"), so a value
+// that holds a comma survives the trip through the text input. A value that
+// opens a quote without closing it is read as plain text up to its comma.
+export function splitConditionValues(raw: string): string[] {
+  const values: string[] = [];
+  let from = 0;
+  for (;;) {
+    let start = from;
+    while (start < raw.length && /\s/.test(raw[start]!)) start++;
+    let scanFrom = start;
+    if (raw[start] === '"') {
+      let i = start + 1;
+      while (i < raw.length && raw[i] !== '"') i += raw[i] === "\\" ? 2 : 1;
+      if (i < raw.length) scanFrom = i + 1;
+    }
+    const comma = raw.indexOf(",", scanFrom);
+    const value = raw.slice(start, comma === -1 ? raw.length : comma).trim();
+    if (value) values.push(value);
+    if (comma === -1) return values;
+    from = comma + 1;
+  }
+}
+
 export interface ConditionDraft {
   path: string;
   op: ConditionOp;
   value: string;
   ignoreCase: boolean;
 }
-
-export const EMPTY_CONDITION_DRAFT: ConditionDraft = { path: "", op: "equals", value: "", ignoreCase: false };
 
 // buildCondition returns null while the draft can't produce a row the
 // server accepts.
@@ -65,10 +80,7 @@ export function buildCondition(draft: ConditionDraft): WebhookPayloadCondition |
   if (!draft.value.trim()) return null;
   const condition: WebhookPayloadCondition = { path, op: draft.op };
   if (draft.op === "in") {
-    const values = draft.value
-      .split(",")
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0);
+    const values = splitConditionValues(draft.value);
     if (values.length === 0 || values.length > MAX_CONDITION_VALUES) return null;
     condition.values = values.map(parseConditionValue);
   } else if (draft.op === "contains") {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { AutopilotTrigger } from "@multica/core/types";
@@ -72,8 +72,9 @@ describe("EditWebhookTriggerDialog", () => {
     const user = userEvent.setup();
     const { onOpenChange } = renderDialog();
 
-    await user.type(screen.getByPlaceholderText("e.g. workflow_run"), "issues");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "Add rule" }));
+    // The new rule's event input takes focus, so typing goes straight into it.
+    await user.keyboard("issues");
     await user.click(saveButton());
 
     await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
@@ -89,13 +90,82 @@ describe("EditWebhookTriggerDialog", () => {
     const user = userEvent.setup();
     renderDialog();
 
-    await user.click(screen.getByRole("button", { name: "Remove filter" }));
+    await user.click(screen.getByRole("button", { name: "Remove rule" }));
     await user.click(saveButton());
 
     await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
     // An omitted field leaves the stored filters in place server-side; only
     // an explicit [] takes the webhook back to accepting every event.
     expect(mockUpdateTrigger.mock.calls[0]?.[0].event_filters).toEqual([]);
+  });
+
+  it("edits a saved rule in place", async () => {
+    const user = userEvent.setup();
+    renderDialog();
+
+    const actions = within(screen.getByRole("group", { name: "pull_request" })).getByRole("textbox", {
+      name: "Actions",
+    });
+    await user.clear(actions);
+    await user.type(actions, "opened, reopened");
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger.mock.calls[0]?.[0].event_filters).toEqual([
+      { event: "pull_request", actions: ["opened", "reopened"] },
+    ]);
+  });
+
+  // Regression cover for text left in a rule form being dropped on Save: an
+  // incomplete rule now stops the save and says where, and nothing is sent.
+  it("stops a save on an incomplete rule and points at it", async () => {
+    const user = userEvent.setup();
+    const { onOpenChange } = renderDialog();
+
+    await user.click(screen.getByRole("button", { name: "Add rule" }));
+    await user.click(saveButton());
+
+    const [, newEvent] = screen.getAllByRole("textbox", { name: "Event" });
+    expect(newEvent).toHaveAttribute("aria-invalid", "true");
+    expect(newEvent).toHaveFocus();
+    expect(screen.getByText("Enter an event name.")).toBeInTheDocument();
+    expect(mockUpdateTrigger).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    await user.type(newEvent!, "issues");
+    expect(screen.queryByText("Enter an event name.")).not.toBeInTheDocument();
+    await user.click(saveButton());
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+  });
+
+  // Regression cover: a list value holding a comma came back from the inputs
+  // split in two, so an unrelated save rewrote the rule without saying so.
+  it("leaves saved filters alone when only the switch moved", async () => {
+    const user = userEvent.setup();
+    renderDialog(
+      trigger({
+        event_filters: [
+          {
+            event: "pull_request",
+            conditions: [
+              { path: "pull_request.title", op: "in", values: ["fix, docs", "chore"] },
+              { path: "pull_request.body", op: "equals", value: "" },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(saveButton()).toBeDisabled();
+    await user.click(enabledSwitch());
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).toEqual({
+      autopilotId: AUTOPILOT_ID,
+      triggerId: "trg-hook",
+      enabled: false,
+    });
   });
 
   it("sends the label alone when only the label was touched", async () => {

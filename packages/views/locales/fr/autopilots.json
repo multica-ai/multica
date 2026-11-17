@@ -350,14 +350,22 @@
     "webhook_created_done": "Terminé",
     "event_filter_label": "Filtres d'événements",
     "event_filter_docs_link_label": "Comprendre le fonctionnement des filtres d'événements",
-    "event_filter_event_placeholder": "ex. workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "Ajouter",
-    "event_filter_remove_label": "Retirer le filtre",
+    "event_filter_event_placeholder": "Événement, ex. pull_request",
+    "event_filter_actions_placeholder": "Actions (facultatif)",
+    "event_filter_add_rule": "Ajouter une règle",
+    "event_filter_event_label": "Événement",
+    "event_filter_actions_label": "Actions",
+    "event_filter_new_rule_label": "Nouvelle règle",
+    "event_filter_condition_label": "Condition",
+    "event_filter_error_event_required": "Saisissez un nom d'événement.",
+    "event_filter_error_path_required": "Saisissez un champ de la charge utile.",
+    "event_filter_error_path_invalid": "Séparez les noms de champ par des points, {{path}} caractères maximum.",
+    "event_filter_error_value_required": "Saisissez une valeur.",
+    "event_filter_error_too_many_values": "{{values}} valeurs maximum.",
+    "event_filter_remove_label": "Supprimer la règle",
     "event_filter_hint": "Seuls les événements correspondant à une règle et à toutes ses conditions sont traités. Laissez vide pour tout accepter.",
     "event_filter_condition_remove_label": "Retirer la condition",
     "event_filter_condition_add_label": "Ajouter une condition",
-    "event_filter_condition_cancel": "Annuler",
     "event_filter_condition_ops": {
       "equals": "est",
       "not_equals": "n'est pas",
@@ -366,7 +374,7 @@
       "exists": "existe"
     },
     "event_filter_condition_path_label": "Champ de la charge utile",
-    "event_filter_condition_path_placeholder": "ex. pull_request.labels.*.name",
+    "event_filter_condition_path_placeholder": "Champ de la charge utile, ex. pull_request.base.ref",
     "event_filter_condition_op_label": "Opérateur",
     "event_filter_condition_value_label": "Valeur",
     "event_filter_condition_value_placeholder": "ex. main",
@@ -374,6 +382,8 @@
     "event_filter_condition_ignore_case": "Ignorer la casse",
     "schedule_multiple_notice": "Cette automatisation a {{count}} planifications. Fermez cette fenêtre et modifiez chacune dans la liste Déclencheurs ci-dessous.",
     "webhook_multiple_notice": "Cette automatisation a plusieurs webhooks. Fermez cette fenêtre et modifiez chacun dans la liste Déclencheurs ci-dessous.",
+    "webhook_edit_filters": "Modifier les filtres",
+    "webhook_filters_saved_separately": "Les filtres sont enregistrés à part : Annuler ici ne les rétablit pas.",
     "schedule_empty": "Aucune planification — cette automatisation ne s'exécute que sur déclenchement manuel.",
     "schedule_add": "Ajouter une planification",
     "error_title_required": "Saisissez un nom pour cette automatisation.",
@@ -388,8 +398,7 @@
         "description": "Exécution silencieuse, aucune tâche créée"
       }
     },
-    "event_filter_condition_all": "Et la charge utile remplit toutes les conditions",
-    "event_filter_condition_limits": "Chemins : {{path}} caractères maximum. Listes : {{values}} valeurs maximum."
+    "event_filter_condition_all": "Et la charge utile remplit toutes les conditions"
   },
   "schedule_editor": {
     "time_label": "Heure",
