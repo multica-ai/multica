@@ -280,8 +280,7 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 		wire.ValidUntil.IsZero() || wire.ValidForSeconds <= 0 || wire.ValidForSeconds > int64(maxPolicyTTL/time.Second) {
 		return fetchedPolicy{}, ErrInvalidPolicy
 	}
-	// Gates this consumer does not know are ignored, so Cloud can keep sending
-	// retired gates (such as issue_count) to older consumers during a rollout.
+	// Unknown gates are ignored for additive compatibility.
 	gates := make(map[GateName]Gate, 1)
 	for _, name := range []GateName{GateAutopilotRuns} {
 		wireGate, ok := wire.Gates[string(name)]

@@ -607,7 +607,6 @@ func newTestClient(t *testing.T, baseURL string, mutate func(*Config)) *Client {
 
 func samplePolicy(policyRevision, subscriptionVersion, validForSeconds int64, autopilotAction Action) wirePolicy {
 	autopilotLimit := testAutopilotLimit
-	retiredIssueLimit := 1000
 	periodStart := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	periodEnd := periodStart.AddDate(0, 1, 0)
 	autopilotGate := wireGate{Action: string(autopilotAction)}
@@ -627,9 +626,6 @@ func samplePolicy(policyRevision, subscriptionVersion, validForSeconds int64, au
 		ValidUntil:          time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC),
 		ValidForSeconds:     validForSeconds,
 		Gates: map[string]wireGate{
-			// Cloud may keep sending the retired issue_count gate to older
-			// consumers; this consumer must ignore it.
-			"issue_count":             {Action: string(ActionEnforce), Limit: &retiredIssueLimit},
 			string(GateAutopilotRuns): autopilotGate,
 		},
 	}
@@ -709,24 +705,4 @@ func (o *recordingObserver) snapshot() (cache, refresh, decisions []string, regr
 	defer o.mu.Unlock()
 	return append([]string(nil), o.cache...), append([]string(nil), o.refresh...),
 		append([]string(nil), o.decisions...), o.versionRegressions
-}
-
-func TestRetiredIssueCountGateDoesNotAffectPolicy(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		mutate func(*wirePolicy)
-	}{
-		{"absent", func(p *wirePolicy) { delete(p.Gates, "issue_count") }},
-		{"unreadable", func(p *wirePolicy) { p.Gates["issue_count"] = wireGate{Action: "future"} }},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			server := httptest.NewServer(policyHandler(tc.mutate))
-			defer server.Close()
-			client := newTestClient(t, server.URL, nil)
-			decision := client.Gate(context.Background(), uuid.New(), GateAutopilotRuns)
-			if decision.Gate.Action != ActionEnforce || decision.Reason != ReasonRefreshed {
-				t.Fatalf("decision = %+v", decision)
-			}
-		})
-	}
 }

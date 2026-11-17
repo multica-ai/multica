@@ -1562,8 +1562,6 @@ describe("workspace subscription contract", () => {
     status: "active",
     seats: 3,
     limits: {
-      // Retired limit Cloud may still send; the client ignores it.
-      issue_count: { mode: "unlimited" },
       autopilot_runs: { mode: "unlimited" },
     },
     current_period_end: "2026-09-01T00:00:00Z",
