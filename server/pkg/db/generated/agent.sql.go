@@ -2635,18 +2635,19 @@ INSERT INTO agent_task_queue (
     originator_source, rerun_of_task_id, id
 )
 SELECT
-    p.agent_id, p.runtime_id, 'queued', p.priority, p.context,
+    p.agent_id, COALESCE(a.runtime_id, p.runtime_id), 'queued', p.priority, p.context,
     TRUE, p.is_leader_task, p.squad_id,
     $1, $1,
     $2, $3,
     'direct_human', p.id, $4
 FROM agent_task_queue p
+LEFT JOIN agent a ON a.id = p.agent_id
 WHERE p.id = $5
   AND p.status = 'failed'
   AND p.issue_id IS NULL
   AND p.chat_session_id IS NULL
   AND p.autopilot_run_id IS NULL
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+  AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE(a.runtime_id, p.runtime_id))
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
@@ -2666,7 +2667,8 @@ type CreateManualQuickCreateRetryTaskParams struct {
 //
 // The caller locks and transfers the pending issue_source_context in the same
 // transaction. lock_task_owner_rows provides the usual workspace-teardown
-// fence; a deleted workspace therefore yields pgx.ErrNoRows and no task.
+// fence; a deleted workspace therefore yields pgx.ErrNoRows and no task. Like
+// CreateRetryTask, the run is stamped with the agent's current runtime (#10717).
 func (q *Queries) CreateManualQuickCreateRetryTask(ctx context.Context, arg CreateManualQuickCreateRetryTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createManualQuickCreateRetryTask,
 		arg.ActorUserID,
@@ -2881,7 +2883,7 @@ INSERT INTO agent_task_queue (
     channel_context_revision, handoff_note, workflow_step, id
 )
 SELECT
-    p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    p.agent_id, COALESCE(a.runtime_id, p.runtime_id), p.issue_id, p.chat_session_id, p.autopilot_run_id,
     CASE WHEN $2::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
@@ -2907,8 +2909,9 @@ SELECT
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE($6::uuid, gen_random_uuid())
 FROM agent_task_queue p
+LEFT JOIN agent a ON a.id = p.agent_id
 WHERE p.id = $1
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+  AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE(a.runtime_id, p.runtime_id))
 ON CONFLICT (issue_id, agent_id, (COALESCE(comment_thread_id, '00000000-0000-0000-0000-000000000000'::uuid))) WHERE status IN ('queued', 'dispatched')
        OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
 DO NOTHING
@@ -2928,6 +2931,13 @@ type CreateRetryTaskParams struct {
 // identity. The child earns its own delivered-comment receipt at claim time.
 // Preserve a NULL chat_input_task_id for legacy/channel parents rather than
 // promoting untagged history to the task-owned input path.
+//
+// The retry is stamped with the agent's current runtime, as an enqueue is.
+// Claims fence on agent.runtime_id = task.runtime_id, so a retry stamped with a
+// runtime the agent moved off while the parent ran would be claimable by neither
+// daemon (#10717); UpdateAgent re-stamps only rows queued at switch time. An
+// unbound agent keeps the parent's runtime. Resume needs no change here: claim
+// resumes a session only on the runtime that recorded it.
 //
 // Keep work_dir for every retry, but clear resume context for unsafe sessions.
 // Keep failure predicates aligned with resumeUnsafeFailureReason and resume lookups.
