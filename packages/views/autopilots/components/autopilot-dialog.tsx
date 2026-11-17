@@ -1046,6 +1046,11 @@ function WebhookSection({
             <Pencil />
             {t(($) => $.dialog.webhook_edit_filters)}
           </Button>
+          {/* The editor writes on its own Save, so this dialog's Cancel has
+              nothing of it to undo; say so before someone relies on it. */}
+          <p className="text-micro text-muted-foreground">
+            {t(($) => $.dialog.webhook_filters_saved_separately)}
+          </p>
           <EditWebhookTriggerDialog
             open={filtersOpen}
             onOpenChange={setFiltersOpen}

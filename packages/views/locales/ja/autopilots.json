@@ -382,6 +382,7 @@
     "schedule_multiple_notice": "このオートパイロットにはスケジュールが {{count}} 件あります。このダイアログを閉じて、下の「トリガー」から個別に編集してください。",
     "webhook_multiple_notice": "このオートパイロットには Webhook が複数あります。このダイアログを閉じて、下の「トリガー」から個別に編集してください。",
     "webhook_edit_filters": "フィルターを編集",
+    "webhook_filters_saved_separately": "フィルターは個別に保存され、ここでキャンセルしても元に戻りません。",
     "schedule_empty": "スケジュールはありません。このオートパイロットは手動で実行したときだけ動きます。",
     "schedule_add": "スケジュールを追加",
     "error_title_required": "オートパイロット名を入力してください。",

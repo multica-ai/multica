@@ -382,6 +382,7 @@
     "schedule_multiple_notice": "该自动化有 {{count}} 条时间表。关闭此弹窗，在下方「触发器」中逐条编辑。",
     "webhook_multiple_notice": "该自动化有多个 Webhook。关闭此弹窗，在下方「触发器」中逐条编辑。",
     "webhook_edit_filters": "编辑过滤",
+    "webhook_filters_saved_separately": "过滤单独保存，在这里点取消不会撤销。",
     "schedule_empty": "还没有时间表——这个自动化只在手动触发时运行。",
     "schedule_add": "添加时间表",
     "error_title_required": "请填写自动化名称。",

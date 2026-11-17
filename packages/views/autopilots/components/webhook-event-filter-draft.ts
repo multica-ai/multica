@@ -8,6 +8,7 @@ import {
   MAX_CONDITION_VALUES,
   buildCondition,
   parseConditionValue,
+  splitConditionValues,
   type ConditionOp,
 } from "./webhook-payload-condition";
 
@@ -56,11 +57,16 @@ export function newConditionDraft(): ConditionRowDraft {
 }
 
 // conditionValueToText writes a stored value back the way it would have to be
-// typed to come out the same: strings bare unless they would read as another
-// type ("false", "42"), which keep their quotes.
-export function conditionValueToText(value: WebhookPayloadConditionValue): string {
+// typed to come out the same. Strings stay bare unless bare text would read
+// differently: as another type ("false", "42"), trimmed ("  x  "), as nothing
+// (""), or, inside an "is one of" list, as two values ("fix, docs"). Those
+// keep their quotes. Anything else would come back changed, and a save that
+// only renamed the webhook would quietly rewrite its rule.
+export function conditionValueToText(value: WebhookPayloadConditionValue, inList = false): string {
   if (typeof value !== "string") return String(value);
-  return parseConditionValue(value) === value ? value : JSON.stringify(value);
+  const bareReadsBack =
+    value.trim() !== "" && parseConditionValue(value) === value && !(inList && value.includes(","));
+  return bareReadsBack ? value : JSON.stringify(value);
 }
 
 function conditionToDraft(c: WebhookPayloadCondition): ConditionRowDraft {
@@ -68,7 +74,7 @@ function conditionToDraft(c: WebhookPayloadCondition): ConditionRowDraft {
     c.op === "exists"
       ? ""
       : c.op === "in"
-        ? (c.values ?? []).map(conditionValueToText).join(", ")
+        ? (c.values ?? []).map((v) => conditionValueToText(v, true)).join(", ")
         : c.value === undefined
           ? ""
           : conditionValueToText(c.value);
@@ -103,10 +109,7 @@ function conditionErrors(
     errors.path = "path_invalid";
   }
   if (row.op !== "exists") {
-    const values = row.value
-      .split(",")
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0);
+    const values = splitConditionValues(row.value);
     if (row.op === "in" ? values.length === 0 : !row.value.trim()) errors.value = "value_required";
     else if (row.op === "in" && values.length > MAX_CONDITION_VALUES) errors.value = "values_too_many";
   }

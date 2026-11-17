@@ -367,6 +367,7 @@
     "schedule_multiple_notice": "Esta automatización tiene {{count}} programaciones. Cierra este diálogo y edita cada una en Disparadores, más abajo.",
     "webhook_multiple_notice": "Esta automatización tiene varios webhooks. Cierra este diálogo y edita cada uno en Disparadores, más abajo.",
     "webhook_edit_filters": "Editar filtros",
+    "webhook_filters_saved_separately": "Los filtros se guardan por separado: Cancelar aquí no los deshace.",
     "schedule_empty": "Sin programación: esta automatización solo se ejecuta cuando se dispara manualmente.",
     "schedule_add": "Añadir programación",
     "error_title_required": "Introduce un nombre para esta automatización.",

@@ -4,6 +4,7 @@ import {
   buildCondition,
   formatConditionValue,
   parseConditionValue,
+  splitConditionValues,
   type ConditionDraft,
 } from "./webhook-payload-condition";
 
@@ -87,5 +88,19 @@ describe("formatConditionValue", () => {
     expect(formatConditionValue({ path: "a", op: "equals", value: "x" })).toBe('"x"');
     expect(formatConditionValue({ path: "a", op: "equals", value: false })).toBe("false");
     expect(formatConditionValue({ path: "a", op: "in", values: ["x", 1] })).toBe('"x", 1');
+  });
+});
+
+describe("splitConditionValues", () => {
+  it.each([
+    ["main, release", ["main", "release"]],
+    ['"fix, docs", chore', ['"fix, docs"', "chore"]],
+    ['"a\\", b", c', ['"a\\", b"', "c"]],
+    ['a"b, c', ['a"b', "c"]],
+    ['"open, x', ['"open', "x"]],
+    ['"", main', ['""', "main"]],
+    [" , main ,", ["main"]],
+  ] as const)("splits %s outside quoted values", (raw, want) => {
+    expect(splitConditionValues(raw)).toEqual(want);
   });
 });

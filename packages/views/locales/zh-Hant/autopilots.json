@@ -366,6 +366,7 @@
     "schedule_multiple_notice": "該自動化有 {{count}} 條時間表。關閉此彈窗，在下方「觸發器」中逐條編輯。",
     "webhook_multiple_notice": "該自動化有多個 Webhook。關閉此彈窗，在下方「觸發器」中逐條編輯。",
     "webhook_edit_filters": "編輯過濾",
+    "webhook_filters_saved_separately": "過濾單獨儲存，在這裡點取消不會復原。",
     "schedule_empty": "還沒有時間表——這個自動化只在手動觸發時執行。",
     "schedule_add": "新增時間表",
     "error_title_required": "請填寫自動化名稱。",

@@ -15,6 +15,7 @@ describe("conditionValueToText", () => {
     [false, "false"],
     [42, "42"],
     ["false", '"false"'],
+    ["", '""'],
     ["42", '"42"'],
     ['"quoted"', '"\\"quoted\\""'],
   ] as const)("writes %j as %s", (value, text) => {
@@ -33,6 +34,11 @@ describe("draftsFromEventFilters → resolveEventFilterDrafts", () => {
           { path: "pull_request.number", op: "not_equals", value: 7 },
           { path: "pull_request.title", op: "contains", value: "false", ignore_case: true },
           { path: "pull_request.base.ref", op: "in", values: ["main", "release", 3] },
+          // Commas and empty strings inside a list, and an empty string on
+          // its own, are values the API accepts that bare text can't carry.
+          { path: "pull_request.title", op: "in", values: ["fix, docs", "chore", "", '"quoted"'] },
+          { path: "pull_request.body", op: "equals", value: "" },
+          { path: "pull_request.head.ref", op: "not_equals", value: "  padded  " },
           { path: "pull_request.labels.*.name", op: "exists" },
         ],
       },

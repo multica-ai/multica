@@ -39,6 +39,30 @@ export function parseConditionValue(raw: string): WebhookPayloadConditionValue {
   return trimmed;
 }
 
+// splitConditionValues splits an "is one of" list at its commas, except for
+// commas inside a value written as a quoted string ("fix, docs"), so a value
+// that holds a comma survives the trip through the text input. A value that
+// opens a quote without closing it is read as plain text up to its comma.
+export function splitConditionValues(raw: string): string[] {
+  const values: string[] = [];
+  let from = 0;
+  for (;;) {
+    let start = from;
+    while (start < raw.length && /\s/.test(raw[start]!)) start++;
+    let scanFrom = start;
+    if (raw[start] === '"') {
+      let i = start + 1;
+      while (i < raw.length && raw[i] !== '"') i += raw[i] === "\\" ? 2 : 1;
+      if (i < raw.length) scanFrom = i + 1;
+    }
+    const comma = raw.indexOf(",", scanFrom);
+    const value = raw.slice(start, comma === -1 ? raw.length : comma).trim();
+    if (value) values.push(value);
+    if (comma === -1) return values;
+    from = comma + 1;
+  }
+}
+
 export interface ConditionDraft {
   path: string;
   op: ConditionOp;
@@ -56,10 +80,7 @@ export function buildCondition(draft: ConditionDraft): WebhookPayloadCondition |
   if (!draft.value.trim()) return null;
   const condition: WebhookPayloadCondition = { path, op: draft.op };
   if (draft.op === "in") {
-    const values = draft.value
-      .split(",")
-      .map((v) => v.trim())
-      .filter((v) => v.length > 0);
+    const values = splitConditionValues(draft.value);
     if (values.length === 0 || values.length > MAX_CONDITION_VALUES) return null;
     condition.values = values.map(parseConditionValue);
   } else if (draft.op === "contains") {

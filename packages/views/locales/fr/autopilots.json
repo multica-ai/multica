@@ -383,6 +383,7 @@
     "schedule_multiple_notice": "Cette automatisation a {{count}} planifications. Fermez cette fenêtre et modifiez chacune dans la liste Déclencheurs ci-dessous.",
     "webhook_multiple_notice": "Cette automatisation a plusieurs webhooks. Fermez cette fenêtre et modifiez chacun dans la liste Déclencheurs ci-dessous.",
     "webhook_edit_filters": "Modifier les filtres",
+    "webhook_filters_saved_separately": "Les filtres sont enregistrés à part : Annuler ici ne les rétablit pas.",
     "schedule_empty": "Aucune planification — cette automatisation ne s'exécute que sur déclenchement manuel.",
     "schedule_add": "Ajouter une planification",
     "error_title_required": "Saisissez un nom pour cette automatisation.",

@@ -382,6 +382,7 @@
     "schedule_multiple_notice": "이 오토파일럿에는 일정이 {{count}}개 있습니다. 이 대화상자를 닫고 아래 '트리거'에서 각각 수정하세요.",
     "webhook_multiple_notice": "이 오토파일럿에는 Webhook이 여러 개 있습니다. 이 대화상자를 닫고 아래 '트리거'에서 각각 수정하세요.",
     "webhook_edit_filters": "필터 수정",
+    "webhook_filters_saved_separately": "필터는 따로 저장되며, 여기서 취소해도 되돌려지지 않습니다.",
     "schedule_empty": "일정이 없습니다. 이 오토파일럿은 수동으로 실행할 때만 동작합니다.",
     "schedule_add": "일정 추가",
     "error_title_required": "오토파일럿 이름을 입력하세요.",

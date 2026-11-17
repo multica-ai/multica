@@ -138,6 +138,36 @@ describe("EditWebhookTriggerDialog", () => {
     await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
   });
 
+  // Regression cover: a list value holding a comma came back from the inputs
+  // split in two, so an unrelated save rewrote the rule without saying so.
+  it("leaves saved filters alone when only the switch moved", async () => {
+    const user = userEvent.setup();
+    renderDialog(
+      trigger({
+        event_filters: [
+          {
+            event: "pull_request",
+            conditions: [
+              { path: "pull_request.title", op: "in", values: ["fix, docs", "chore"] },
+              { path: "pull_request.body", op: "equals", value: "" },
+            ],
+          },
+        ],
+      }),
+    );
+
+    expect(saveButton()).toBeDisabled();
+    await user.click(enabledSwitch());
+    await user.click(saveButton());
+
+    await waitFor(() => expect(mockUpdateTrigger).toHaveBeenCalledTimes(1));
+    expect(mockUpdateTrigger.mock.calls[0]?.[0]).toEqual({
+      autopilotId: AUTOPILOT_ID,
+      triggerId: "trg-hook",
+      enabled: false,
+    });
+  });
+
   it("sends the label alone when only the label was touched", async () => {
     const user = userEvent.setup();
     renderDialog(trigger({ label: "Old name" }));
