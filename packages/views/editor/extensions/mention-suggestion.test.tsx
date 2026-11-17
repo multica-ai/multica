@@ -425,6 +425,60 @@ describe("createMentionSuggestion", () => {
     expect(document.querySelectorAll("button")).toHaveLength(20);
   });
 
+  it("keeps the selected issue when a late project result takes a reserved slot", async () => {
+    let resolveProjects!: (value: unknown) => void;
+    searchProjectsMock.mockReturnValue(new Promise((resolve) => { resolveProjects = resolve; }));
+    searchIssuesMock.mockResolvedValue({ issues: [], total: 0 });
+    const items: MentionItem[] = Array.from({ length: 20 }, (_, n) => ({
+      id: `i-${n}`,
+      label: `MUL-${n}`,
+      type: "issue" as const,
+      description: `road ${n}`,
+      status: "todo" as const,
+    }));
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="road" command={command} />
+      </I18nWrapper>,
+    );
+    act(() => {
+      ref.current!.onKeyDown({ event: new KeyboardEvent("keydown", { key: "ArrowUp" }) });
+    });
+    await waitFor(() => expect(searchProjectsMock).toHaveBeenCalled());
+    await act(async () => {
+      resolveProjects({
+        projects: [{ id: "p-roadmap", title: "Roadmap", description: null, icon: null, status: "planned" }],
+        total: 1,
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Roadmap")).toBeInTheDocument();
+    });
+    act(() => {
+      ref.current!.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Enter" }) });
+    });
+
+    expect(command).toHaveBeenCalledWith(expect.objectContaining({ id: "i-19" }));
+  });
+
+  it("keeps server issue matches when the project search fails", async () => {
+    searchIssuesMock.mockResolvedValue({
+      issues: [{ id: "i-7", identifier: "MUL-7", title: "Road test", status: "todo" }],
+      total: 1,
+    });
+    searchProjectsMock.mockRejectedValue(new Error("503"));
+
+    render(<I18nWrapper><MentionList items={[]} query="road" command={vi.fn()} /></I18nWrapper>);
+
+    await waitFor(() => {
+      expect(screen.getByText("MUL-7")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("No results")).not.toBeInTheDocument();
+  });
+
   it("matches cached live projects synchronously and leaves archived ones to the server", () => {
     const qc = fakeQc({
       projects: [

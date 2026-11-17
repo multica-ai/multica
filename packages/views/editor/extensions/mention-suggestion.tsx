@@ -273,18 +273,26 @@ function demoteCancelledItems(items: MentionItem[], query: string): MentionItem[
  * matches (cached plus server) merge ahead of project matches and alone can
  * fill every slot, so the first few live projects keep a slot regardless of
  * position. Cancelled projects get no reservation: they never take a live
- * row's slot. Order is preserved.
+ * row's slot. The row the user has selected always stays, so a late project
+ * result cannot pull it out from under the highlight and make Enter insert a
+ * different row. Order is preserved.
  */
-function truncateMentionItems(items: MentionItem[], query: string): MentionItem[] {
+function truncateMentionItems(
+  items: MentionItem[],
+  query: string,
+  selectedKey: string | null,
+): MentionItem[] {
   if (items.length <= MAX_ITEMS) return items;
-  const reserved = new Set(
+  const kept = new Set(
     items
       .filter((item) => item.type === "project" && !isDemotedCancelled(item, query))
       .slice(0, RESERVED_PROJECT_SLOTS),
   );
-  let remaining = MAX_ITEMS - reserved.size;
+  const selected = items.find((item) => mentionItemKey(item) === selectedKey);
+  if (selected) kept.add(selected);
+  let remaining = MAX_ITEMS - kept.size;
   return items.filter((item) => {
-    if (reserved.has(item)) return true;
+    if (kept.has(item)) return true;
     if (remaining <= 0) return false;
     remaining--;
     return true;
@@ -333,7 +341,8 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       const timer = setTimeout(() => {
         void (async () => {
           try {
-            const [issues, projects] = await Promise.all([
+            // One search failing must not discard the other's results.
+            const [issues, projects] = await Promise.allSettled([
               searchIssues({
                 q,
                 limit: contextSearch ? SERVER_CONTEXT_SEARCH_LIMIT : SERVER_ISSUE_SEARCH_LIMIT,
@@ -350,8 +359,8 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
             ]);
             if (!cancelled && !controller.signal.aborted) {
               const results = [
-                ...issues.issues.map(issueToMention),
-                ...projects.projects.map(projectToMention),
+                ...(issues.status === "fulfilled" ? issues.value.issues.map(issueToMention) : []),
+                ...(projects.status === "fulfilled" ? projects.value.projects.map(projectToMention) : []),
               ];
               setServerItems(
                 contextSearch
@@ -360,7 +369,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
               );
             }
           } catch {
-            // Aborted or network error: keep the synchronous cache results.
+            // Malformed response: keep the synchronous cache results.
           } finally {
             if (!cancelled && !controller.signal.aborted) {
               setSearchedQuery(q);
@@ -385,8 +394,9 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
           normalizedQuery,
         ),
         normalizedQuery,
+        selectedKey,
       );
-    }, [items, normalizedQuery, searchedQuery, serverItems]);
+    }, [items, normalizedQuery, searchedQuery, selectedKey, serverItems]);
 
     // The single index space for selection. groupItems() re-buckets displayItems
     // (current → recent → search → users → issues); orderedItems is exactly what
