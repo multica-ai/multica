@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -61,9 +62,17 @@ func (env *Environment) prepareRuntimeContext(provider string, ctx TaskContextFo
 		}
 		// Claude Code 2.1.277+ loads the main checkout's project skills in a
 		// linked worktree whose root has no .claude/skills — which, with the
-		// runtime skills moved out, includes this one. Those may be untracked,
-		// so the worktree cannot show them; reserve their names too.
-		roots = append(roots, skillsDirPath(env.LocalWorktree.GitRoot, provider))
+		// runtime skills moved out, includes this one. Those may be gitignored,
+		// so the worktree cannot show them; reserve their names too. GitRoot is
+		// not necessarily that checkout: the resource may itself point at a
+		// linked worktree of the repository.
+		mainCheckout, err := mainCheckoutRoot(env.LocalWorktree.GitRoot)
+		if err != nil {
+			return nil, err
+		}
+		if mainCheckout != "" {
+			roots = append(roots, skillsDirPath(mainCheckout, provider))
+		}
 		return writeSkillFilesWithReservedNames(skillsDirPath(env.RuntimeDir, provider), ctx.AgentSkills, manifest, env.SkillDirectories, roots...)
 	}
 	return resolveSkillSlugs(ctx.AgentSkills), nil
@@ -84,4 +93,27 @@ func (env *Environment) selectRuntimeDelivery(provider, version string, logger *
 		return fmt.Errorf("create runtime directory: %w", err)
 	}
 	return nil
+}
+
+// mainCheckoutRoot returns the repository's main working tree — the first
+// entry of `git worktree list` — or "" for a bare repository, which has none.
+func mainCheckoutRoot(gitRoot string) (string, error) {
+	out, err := runGitStdout(gitRoot, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", fmt.Errorf("list worktrees of %s: %w", gitRoot, err)
+	}
+	block, _, _ := strings.Cut(out, "\n\n")
+	var root string
+	for _, line := range strings.Split(block, "\n") {
+		if path, ok := strings.CutPrefix(line, "worktree "); ok {
+			root = path
+		}
+		if line == "bare" {
+			return "", nil
+		}
+	}
+	if root == "" {
+		return "", fmt.Errorf("list worktrees of %s: no main worktree in %q", gitRoot, block)
+	}
+	return root, nil
 }

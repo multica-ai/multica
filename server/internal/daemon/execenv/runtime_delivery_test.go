@@ -223,6 +223,53 @@ func TestRuntimeWorktreeClaudeSkillAvoidsMainCheckoutSkills(t *testing.T) {
 	}
 }
 
+// The resource may point at a linked worktree (B) of a repository whose main
+// checkout is A. Claude falls back to A's project skills, not B's, so A's
+// gitignored skills must be avoided too.
+func TestRuntimeWorktreeClaudeSkillAvoidsMainCheckoutOfLinkedSource(t *testing.T) {
+	main := newTestRepo(t)
+	writeFile(t, filepath.Join(main, ".gitignore"), ".claude/skills/\n")
+	gitRun(t, main, "add", ".gitignore")
+	gitRun(t, main, "commit", "-m", "ignore personal skills")
+	writeFile(t, filepath.Join(main, ".claude", "skills", "runtime-probe", "SKILL.md"), "Ignored user skill")
+	linked := filepath.Join(t.TempDir(), "linked")
+	gitRun(t, main, "worktree", "add", "-b", "linked-source", linked)
+	ctx := TaskContextForEnv{AgentSkills: []SkillContextForEnv{{ID: "skill", Name: "runtime-probe", Content: "Multica skill"}}}
+	env, err := Prepare(PrepareParams{WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace", TaskID: "11112222-3333-4444-5555-666677778888", Provider: "claude", RuntimeVersion: "2.1.281", LocalWorktree: &LocalWorktreeParams{LocalPath: linked}, Task: ctx}, worktreeTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer env.LocalWorktree.Discard(worktreeTestLogger())
+	defer env.Cleanup(true)
+	if !slices.Equal(env.PreparedSkillNames, []string{"runtime-probe-multica"}) {
+		t.Fatalf("names=%v", env.PreparedSkillNames)
+	}
+}
+
+func TestMainCheckoutRoot(t *testing.T) {
+	main := newTestRepo(t)
+	linked := filepath.Join(t.TempDir(), "linked")
+	gitRun(t, main, "worktree", "add", "-b", "linked-root", linked)
+	want, err := filepath.EvalSymlinks(main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, from := range []string{main, linked} {
+		got, err := mainCheckoutRoot(from)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resolved, err := filepath.EvalSymlinks(got); err != nil || resolved != want {
+			t.Fatalf("mainCheckoutRoot(%s) = %s, want %s", from, got, want)
+		}
+	}
+	bare := filepath.Join(t.TempDir(), "bare.git")
+	gitRun(t, main, "clone", "--bare", main, bare)
+	if got, err := mainCheckoutRoot(bare); err != nil || got != "" {
+		t.Fatalf("bare repository: %q, %v", got, err)
+	}
+}
+
 func TestRuntimeDeliveryLegacyScope(t *testing.T) {
 	for _, tc := range []struct {
 		provider, version string
