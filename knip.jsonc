@@ -93,7 +93,6 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/ee": {
-      "entry": ["eslint.config.mjs"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/core": {
