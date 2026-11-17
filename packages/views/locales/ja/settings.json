@@ -985,7 +985,7 @@
     "confirm_cancel": "キャンセル",
     "confirm_action": "確認",
     "change_logo_aria": "ワークスペースのロゴを変更",
-    "click_logo_hint": "ロゴをクリックして新しい画像をアップロード",
+    "click_logo_hint": "ロゴをクリックして画像をアップロードするか、文字アイコンを作成します",
     "toast_logo_failed": "ワークスペースのロゴをアップロードできませんでした",
     "context_hint": "このワークスペースのエージェントに、実行のたびに渡されます。",
     "slug_hint": "ワークスペースの URL に使われます。作成後は変更できません。",

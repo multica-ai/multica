@@ -957,7 +957,7 @@
     "section_general": "워크스페이스 정보",
     "logo_label": "워크스페이스 아이콘",
     "change_logo_aria": "워크스페이스 로고 변경",
-    "click_logo_hint": "로고를 클릭하여 새 이미지를 업로드하세요",
+    "click_logo_hint": "로고를 클릭해 이미지를 업로드하거나 텍스트 아이콘을 만드세요",
     "toast_logo_failed": "워크스페이스 로고를 업로드하지 못했습니다",
     "name_label": "이름",
     "description_label": "설명",

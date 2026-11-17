@@ -966,7 +966,7 @@
     "section_general": "Detalles del espacio de trabajo",
     "logo_label": "Logo del espacio de trabajo",
     "change_logo_aria": "Cambiar logo del espacio de trabajo",
-    "click_logo_hint": "Haz clic en el logo para subir una imagen nueva",
+    "click_logo_hint": "Haz clic en el logotipo para subir una imagen o crear un icono de texto",
     "toast_logo_failed": "Error al subir el logo del espacio de trabajo",
     "name_label": "Nombre",
     "description_label": "Descripción",
