@@ -909,6 +909,7 @@ func (q *Queries) GetAutopilotRunByTriggerAndPlanned(ctx context.Context, arg Ge
 const getAutopilotRunByWebhookDelivery = `-- name: GetAutopilotRunByWebhookDelivery :one
 SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id, quota_reservation_id, reason_code FROM autopilot_run
 WHERE webhook_delivery_id = $1
+   OR id = (SELECT autopilot_run_id FROM webhook_delivery WHERE id = $1)
 LIMIT 1
 `
 
@@ -1907,6 +1908,60 @@ func (q *Queries) RecoverPartialAutopilotRun(ctx context.Context, id pgtype.UUID
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const resumeFailedWebhookIssueDelivery = `-- name: ResumeFailedWebhookIssueDelivery :one
+WITH candidate AS (
+    SELECT retry.id AS retry_id, prior.id AS prior_id,
+           linked.status = 'failed' AND linked.task_id IS NULL AND NOT EXISTS (
+               SELECT 1 FROM agent_task_queue task WHERE task.issue_id = linked.issue_id
+           ) AS reopen
+    FROM webhook_delivery retry
+    JOIN webhook_delivery prior ON prior.trigger_id = retry.trigger_id
+      AND prior.workspace_id = retry.workspace_id AND prior.dedupe_key = retry.dedupe_key
+    JOIN autopilot_run linked ON linked.webhook_delivery_id = prior.id
+    WHERE retry.id = $1 AND retry.status = 'queued' AND prior.status = 'failed'
+      AND linked.issue_id IS NOT NULL
+    ORDER BY prior.created_at DESC, prior.id DESC
+    LIMIT 1
+)
+UPDATE autopilot_run r
+SET webhook_delivery_id = candidate.retry_id,
+    status = CASE WHEN candidate.reopen THEN 'issue_created' ELSE r.status END,
+    completed_at = CASE WHEN candidate.reopen THEN NULL ELSE r.completed_at END,
+    failure_reason = CASE WHEN candidate.reopen THEN NULL ELSE r.failure_reason END,
+    reason_code = CASE WHEN candidate.reopen THEN NULL ELSE r.reason_code END
+FROM candidate
+WHERE r.webhook_delivery_id = candidate.prior_id
+RETURNING r.id, r.autopilot_id, r.trigger_id, r.source, r.status, r.issue_id, r.task_id, r.triggered_at, r.completed_at, r.failure_reason, r.trigger_payload, r.result, r.created_at, r.squad_id, r.planned_at, r.webhook_delivery_id, r.quota_reservation_id, r.reason_code
+`
+
+// Keep the original run, issue, and consumed quota. The old delivery retains
+// its audit link to the run when the new delivery takes over dispatch.
+func (q *Queries) ResumeFailedWebhookIssueDelivery(ctx context.Context, id pgtype.UUID) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, resumeFailedWebhookIssueDelivery, id)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PlannedAt,
+		&i.WebhookDeliveryID,
+		&i.QuotaReservationID,
+		&i.ReasonCode,
+	)
+	return i, err
 }
 
 const rotateAutopilotTriggerWebhookToken = `-- name: RotateAutopilotTriggerWebhookToken :one
