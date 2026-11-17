@@ -4,6 +4,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -23,8 +24,9 @@ func TestExplicitSkillRealSmoke(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("wire capture uses a bash wrapper")
 	}
-	for _, provider := range []string{"claude", "codex", "antigravity", "hermes"} {
-		t.Run(provider, func(t *testing.T) {
+	for _, scenario := range []string{"claude", "codex", "codex-fallback", "antigravity", "hermes"} {
+		t.Run(scenario, func(t *testing.T) {
+			provider := strings.TrimSuffix(scenario, "-fallback")
 			command := provider
 			if provider == "antigravity" {
 				command = "agy"
@@ -66,6 +68,11 @@ func TestExplicitSkillRealSmoke(t *testing.T) {
 				copySkillSmokeConfig(t, "CODEX_HOME", ".codex", home, []string{"config.toml", "auth.json"})
 				config.Env["CODEX_HOME"] = home
 				skillParent = filepath.Join(home, "skills")
+				if scenario == "codex-fallback" {
+					// A materialized skill outside Codex's discovery paths must
+					// reach the real runtime through the injection fallback.
+					skillParent = filepath.Join(root, "materialized-skills")
+				}
 			}
 			dir := filepath.Join(skillParent, "explicit-probe")
 			if err := os.MkdirAll(dir, 0755); err != nil {
@@ -111,6 +118,7 @@ exit "$result"
 			}
 			opts := ExecOptions{Cwd: cwd, Timeout: 120 * time.Second, SkillInvocation: invocation, Model: os.Getenv(strings.ToUpper(provider) + "_SKILL_SMOKE_MODEL")}
 			result := runSkillSmokeTurn(t, ctx, backend, invocation.FallbackPrompt(), opts)
+			t.Logf("Skill response: %q", result.Output)
 			if !strings.Contains(result.Output, "EXPLICIT_SKILL PLATFORM_OK USER_OK") {
 				t.Errorf("skill or message context lost: %q", result.Output)
 			}
@@ -122,6 +130,36 @@ exit "$result"
 					t.Fatal("no Claude command-name evidence; fallback is not native expansion")
 				}
 			case "codex":
+				if scenario == "codex-fallback" {
+					input, err := os.ReadFile(config.Env["SKILL_SMOKE_INPUT"])
+					if err != nil {
+						t.Fatal(err)
+					}
+					injected := false
+					for _, line := range strings.Split(strings.TrimSpace(string(input)), "\n") {
+						var request struct {
+							Method string `json:"method"`
+							Params struct {
+								Input []struct {
+									Text string `json:"text"`
+								} `json:"input"`
+							} `json:"params"`
+						}
+						if err := json.Unmarshal([]byte(line), &request); err != nil {
+							t.Fatal(err)
+						}
+						if request.Method == "turn/start" {
+							for _, block := range request.Params.Input {
+								injected = injected || (strings.Contains(block.Text, "<selected-skill>") && strings.Contains(block.Text, dir) && strings.Contains(block.Text, body))
+							}
+						}
+					}
+					t.Logf("Codex fallback body and directory evidence: %t", injected)
+					if !injected || skillSmokeEvidence(filepath.Join(root, "codex-home", "sessions"), "<name>explicit-probe</name>") {
+						t.Fatal("expected injected skill body and directory without native skill expansion")
+					}
+					break
+				}
 				if !skillSmokeEvidence(filepath.Join(root, "codex-home", "sessions"), "<skill>") || !skillSmokeEvidence(filepath.Join(root, "codex-home", "sessions"), "<name>explicit-probe</name>") {
 					t.Fatal("no Codex native skill injection in rollout")
 				}
@@ -132,7 +170,7 @@ exit "$result"
 				}
 			}
 			if !t.Failed() {
-				t.Logf("%s selected skill passed; session=%s", provider, result.SessionID)
+				t.Logf("%s selected skill passed; session=%s", scenario, result.SessionID)
 			}
 		})
 	}
