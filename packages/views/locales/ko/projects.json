@@ -82,6 +82,8 @@
     "copy_link": "링크 복사",
     "copy_title_as_link": "제목이 포함된 링크 복사",
     "delete_action": "프로젝트 삭제",
+    "tab_overview": "개요",
+    "tab_issues": "태스크",
     "section_properties": "속성",
     "section_progress": "진행률",
     "section_description": "설명",
@@ -119,7 +121,24 @@
       "forecast_none": "최근 완료된 태스크가 적어 완료일을 예측할 수 없습니다.",
       "by_assignee": "담당자별",
       "agent_tag": "에이전트",
-      "unassigned": "미배정"
+      "unassigned": "미배정",
+      "axis_assignee": "담당자",
+      "axis_label": "라벨",
+      "by_label": "라벨별",
+      "no_labels": "아직 이슈가 없습니다.",
+      "unlabeled": "라벨 없음"
+    },
+    "tab_activity": "활동",
+    "agent_context_badge": "에이전트 컨텍스트",
+    "section_breakdown": "분포",
+    "section_working": "작업 중인 에이전트",
+    "working_empty": "지금 이 프로젝트의 이슈에서 실행 중인 에이전트가 없습니다.",
+    "section_activity": "최근 활동",
+    "activity": {
+      "empty": "이 프로젝트의 이슈에 아직 활동이 없습니다.",
+      "load_more": "더 불러오기",
+      "view_all": "모두 보기",
+      "hint": "이 프로젝트 이슈의 상태, 담당자, 우선순위, 날짜 변경 내역입니다."
     }
   },
   "resources": {
@@ -182,7 +201,8 @@
     "toast_ref_update_failed": "브랜치를 업데이트하지 못했습니다",
     "ref_error_commit": "이것은 브랜치가 아니라 커밋입니다. 특정 리비전이 필요하면 multica repo checkout --ref를 사용하세요.",
     "ref_default_label": "기본 브랜치",
-    "ref_running_note": "이미 진행 중인 작업에는 영향이 없습니다."
+    "ref_running_note": "이미 진행 중인 작업에는 영향이 없습니다.",
+    "document_hint": "이 프로젝트에서 에이전트가 실행될 때 사용하는 저장소와 폴더입니다."
   },
   "delete_dialog": {
     "offline_error": "오프라인 상태입니다. 다시 연결한 후 삭제를 재시도하세요.",

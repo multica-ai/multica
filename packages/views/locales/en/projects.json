@@ -82,6 +82,8 @@
     "copy_link": "Copy link",
     "copy_title_as_link": "Copy link with title",
     "delete_action": "Delete project",
+    "tab_overview": "Overview",
+    "tab_issues": "Issues",
     "section_properties": "Properties",
     "section_progress": "Progress",
     "section_description": "Description",
@@ -123,7 +125,24 @@
       "forecast_none": "Too few recent completions to forecast a finish date.",
       "by_assignee": "By assignee",
       "agent_tag": "Agent",
-      "unassigned": "Unassigned"
+      "unassigned": "Unassigned",
+      "axis_assignee": "Assignee",
+      "axis_label": "Label",
+      "by_label": "By label",
+      "no_labels": "No issues yet.",
+      "unlabeled": "No label"
+    },
+    "tab_activity": "Activity",
+    "agent_context_badge": "Agent context",
+    "section_breakdown": "Breakdown",
+    "section_working": "Agents working",
+    "working_empty": "No agents are running on this project's issues right now.",
+    "section_activity": "Recent activity",
+    "activity": {
+      "empty": "No activity on this project's issues yet.",
+      "load_more": "Load more",
+      "view_all": "View all",
+      "hint": "Status, assignee, priority and date changes across this project's issues."
     }
   },
   "resources": {
@@ -186,7 +205,8 @@
     "toast_ref_update_failed": "Couldn't update the branch",
     "ref_error_commit": "That's a commit, not a branch. For a specific revision, use --ref with multica repo checkout.",
     "ref_default_label": "Default branch",
-    "ref_running_note": "Tasks already running aren't affected."
+    "ref_running_note": "Tasks already running aren't affected.",
+    "document_hint": "Repositories and folders agents work in when they run in this project."
   },
   "delete_dialog": {
     "offline_error": "You're offline. Reconnect and try deleting again.",

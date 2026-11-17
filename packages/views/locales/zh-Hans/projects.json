@@ -82,6 +82,8 @@
     "copy_link": "复制链接",
     "copy_title_as_link": "复制带标题的链接",
     "delete_action": "删除项目",
+    "tab_overview": "概览",
+    "tab_issues": "任务",
     "section_properties": "属性",
     "section_progress": "进度",
     "section_description": "描述",
@@ -119,7 +121,24 @@
       "forecast_none": "近期完成的任务太少，暂时无法预测完成日期。",
       "by_assignee": "按负责人",
       "agent_tag": "智能体",
-      "unassigned": "未分配"
+      "unassigned": "未分配",
+      "axis_assignee": "负责人",
+      "axis_label": "标签",
+      "by_label": "按标签",
+      "no_labels": "还没有任务。",
+      "unlabeled": "无标签"
+    },
+    "tab_activity": "活动",
+    "agent_context_badge": "智能体上下文",
+    "section_breakdown": "分布",
+    "section_working": "智能体在做",
+    "working_empty": "目前没有智能体在处理这个项目的任务。",
+    "section_activity": "动态",
+    "activity": {
+      "empty": "这个项目的任务还没有动态。",
+      "load_more": "加载更多",
+      "view_all": "查看全部",
+      "hint": "项目内所有任务的状态、负责人、优先级和日期变化。"
     }
   },
   "resources": {
@@ -182,7 +201,8 @@
     "toast_ref_update_failed": "分支更新失败",
     "ref_error_commit": "这是 commit，不是分支。需要指定某个版本时，请用 multica repo checkout --ref。",
     "ref_default_label": "默认分支",
-    "ref_running_note": "进行中的任务不受影响。"
+    "ref_running_note": "进行中的任务不受影响。",
+    "document_hint": "智能体在这个项目里运行时使用的仓库和文件夹。"
   },
   "delete_dialog": {
     "offline_error": "当前处于离线状态，请联网后重试删除。",

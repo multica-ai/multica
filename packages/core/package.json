@@ -112,6 +112,7 @@
     "./projects": "./projects/index.ts",
     "./projects/deletion-permissions": "./projects/deletion-permissions.ts",
     "./projects/queries": "./projects/queries.ts",
+    "./projects/tab-store": "./projects/tab-store.ts",
     "./projects/mutations": "./projects/mutations.ts",
     "./projects/access": "./projects/access.ts",
     "./projects/config": "./projects/config.ts",

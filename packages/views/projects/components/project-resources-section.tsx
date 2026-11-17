@@ -130,7 +130,13 @@ function looksLikeRepoUrl(value: string): boolean {
 const chipClassName =
   "inline-flex h-5 max-w-full shrink-0 items-center gap-1 rounded-sm bg-muted px-1.5 text-micro text-muted-foreground transition-colors hover:bg-surface-selected hover:text-foreground data-[popup-open]:bg-surface-selected data-[popup-open]:text-foreground";
 
-export function ProjectResourcesSection({ projectId }: { projectId: string }) {
+export function ProjectResourcesSection({
+  projectId,
+  variant = "sidebar",
+}: {
+  projectId: string;
+  variant?: "sidebar" | "document";
+}) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const [open, setOpen] = useState(true);
@@ -148,6 +154,33 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // only rewrites the resource, which works from anywhere.
   const desktopMode = isDesktopShell();
 
+  const groups = (
+    <>
+      <RepositoryGroup wsId={wsId} projectId={projectId} repos={repos} />
+      {(desktopMode || folders.length > 0) && (
+        <LocalFolderGroup
+          wsId={wsId}
+          projectId={projectId}
+          folders={folders}
+          desktopMode={desktopMode}
+        />
+      )}
+      {others.map((resource) => (
+        <UnknownResourceRow key={resource.id} resource={resource} />
+      ))}
+    </>
+  );
+
+  if (variant === "document") {
+    return (
+      <section>
+        <h2 className="text-label font-medium">{t(($) => $.resources.section_header)}</h2>
+        <p className="mb-3 mt-1 text-caption text-muted-foreground">{t(($) => $.resources.document_hint)}</p>
+        <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2">{groups}</div>
+      </section>
+    );
+  }
+
   return (
     <div>
       <button
@@ -161,20 +194,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
         />
       </button>
       {open && (
-        <div className="space-y-4 pl-2">
-          <RepositoryGroup wsId={wsId} projectId={projectId} repos={repos} />
-          {(desktopMode || folders.length > 0) && (
-            <LocalFolderGroup
-              wsId={wsId}
-              projectId={projectId}
-              folders={folders}
-              desktopMode={desktopMode}
-            />
-          )}
-          {others.map((resource) => (
-            <UnknownResourceRow key={resource.id} resource={resource} />
-          ))}
-        </div>
+        <div className="space-y-4 pl-2">{groups}</div>
       )}
     </div>
   );

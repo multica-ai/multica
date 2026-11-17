@@ -122,6 +122,7 @@ import type {
   Project,
   ArchiveProjectResponse,
   ProjectProgressDetail,
+  ProjectActivityPage,
   CreateProjectRequest,
   UpdateProjectRequest,
   ListProjectsResponse,
@@ -393,6 +394,8 @@ import {
   ArchiveProjectResponseSchema,
   ProjectProgressDetailSchema,
   EMPTY_PROJECT_PROGRESS_DETAIL,
+  ProjectActivityPageSchema,
+  EMPTY_PROJECT_ACTIVITY_PAGE,
   ListProjectMembersResponseSchema,
   ListPrivateProjectsResponseSchema,
   ProjectSubscriptionSchema,
@@ -3055,12 +3058,13 @@ export class ApiClient {
   // issue work, the authenticated member's My Issues relation.
   // `parentIssueId` narrows the projection to that issue's direct children,
   // which is how the sub-issue header on issue detail reads the same source
-  // as the Issues list header. The server rejects combining it with `scope`,
-  // so callers pass one or the other.
+  // as the Issues list header. `projectId` narrows it to one project's issues.
+  // The server rejects combining the narrowings, so callers pass at most one.
   async getWorkspaceWorkingAgents(
     type?: WorkspaceWorkingAgentType,
     mineRelation?: WorkspaceWorkingAgentMineRelation,
     parentIssueId?: string,
+    projectId?: string,
   ): Promise<WorkspaceWorkingAgent[]> {
     const search = new URLSearchParams();
     if (type) search.set("type", type);
@@ -3069,6 +3073,8 @@ export class ApiClient {
       search.set("relation", mineRelation);
     } else if (parentIssueId) {
       search.set("parent", parentIssueId);
+    } else if (projectId) {
+      search.set("project", projectId);
     }
     const query = search.toString();
     return this.fetch(`/api/working-agents${query ? `?${query}` : ""}`);
@@ -4532,6 +4538,20 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/projects/${id}/progress`);
     return parseWithFallback(raw, ProjectProgressDetailSchema, EMPTY_PROJECT_PROGRESS_DETAIL, {
       endpoint: "GET /api/projects/:id/progress",
+    });
+  }
+
+  async listProjectActivity(
+    id: string,
+    params: { before?: string; limit?: number } = {},
+  ): Promise<ProjectActivityPage> {
+    const search = new URLSearchParams();
+    if (params.before) search.set("before", params.before);
+    if (params.limit) search.set("limit", String(params.limit));
+    const query = search.toString();
+    const raw = await this.fetch<unknown>(`/api/projects/${id}/activity${query ? `?${query}` : ""}`);
+    return parseWithFallback(raw, ProjectActivityPageSchema, EMPTY_PROJECT_ACTIVITY_PAGE, {
+      endpoint: "GET /api/projects/:id/activity",
     });
   }
 

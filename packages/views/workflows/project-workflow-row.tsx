@@ -10,6 +10,7 @@ import { handoffStepCount, resolveProjectWorkflow, useIssueWorkflows, useSetProj
 import { projectListOptions } from "@multica/core/projects/queries";
 import type { IssueWorkflow, IssueWorkflowMappingPlan, Project } from "@multica/core/types";
 import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
+import { PillButton } from "../common/pill-button";
 import { useT } from "../i18n";
 import { WorkflowMappingDialog } from "./workflow-mapping-dialog";
 
@@ -146,7 +147,15 @@ export function WorkflowChoiceItems({
  * The project's Workflow property (MUL-7420). It opens the project's flow
  * panel for everyone; switching lives there (MUL-8941).
  */
-export function ProjectWorkflowControl({ project, onOpen }: { project: Project; onOpen: () => void }) {
+export function ProjectWorkflowControl({
+  project,
+  onOpen,
+  variant = "row",
+}: {
+  project: Project;
+  onOpen: () => void;
+  variant?: "row" | "pill";
+}) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const { workflows } = useIssueWorkflows(wsId);
@@ -155,6 +164,20 @@ export function ProjectWorkflowControl({ project, onOpen }: { project: Project; 
   const name = current?.name ?? t(($) => $.workflows.default_name);
   const handoffs = current ? handoffStepCount(current) : 0;
   const handoffLabel = handoffs > 0 ? t(($) => $.workflows.settings.handoffs, { count: handoffs }) : null;
+
+  if (variant === "pill") {
+    return (
+      <PillButton
+        disabled={!current}
+        onClick={onOpen}
+        aria-haspopup="dialog"
+        title={handoffLabel ? `${name} · ${handoffLabel}` : name}
+      >
+        <Workflow aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 truncate">{name}</span>
+      </PillButton>
+    );
+  }
 
   return (
     <button
