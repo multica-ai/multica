@@ -26,6 +26,7 @@ autoUpdater.autoInstallOnAppQuit = true;
 // `latest-arm64.yml` instead of the x64 metadata.
 if (process.platform === "win32" && process.arch === "arm64") {
   autoUpdater.channel = "latest-arm64";
+  autoUpdater.allowDowngrade = false;
 }
 
 interface ChannelConfigurableUpdater {
