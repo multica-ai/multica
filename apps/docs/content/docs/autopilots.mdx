@@ -45,7 +45,7 @@ Below is an autopilot whose execution mode is Create issue. Click **Run now**, o
 
 ## Run on a schedule
 
-The schedule editor lets you pick the run time, repeat days, time window, and timezone, and previews the upcoming run times. One autopilot can have multiple schedules; to enable or disable an individual trigger, use the CLI's `autopilot trigger-update` — see [Using the CLI](/cli) for the parameters.
+The schedule editor lets you pick the run time, repeat days, time window, and timezone, and previews the upcoming run times. One autopilot can have multiple schedules. To change, enable, or disable one trigger, click the edit button on its row under **Triggers**, or use the CLI's `autopilot trigger-update` — see [Using the CLI](/cli) for the parameters.
 
 For more complex rules, edit the standard 5-field cron directly:
 
@@ -87,7 +87,7 @@ Constraints on webhook requests:
 
 ### Filter events [#event-filters]
 
-When one source sends several event types, add event filters to the trigger. Each row holds one event name plus an optional list of actions; a run fires if any row matches, and leaving all rows empty accepts every event.
+When one source sends several event types, add event filters to the trigger. Each row holds one event name plus an optional list of actions; a run fires if any row matches, and leaving all rows empty accepts every event. To edit a webhook's filters, click **Edit webhook** on its row under **Triggers**.
 
 For example, with `workflow_run` as the event name and `completed, failed` as the actions, only those two kinds of `workflow_run` results are accepted. Multica recognizes the event and action from common request headers and payload fields, including GitHub's `X-GitHub-Event` and the `action` field in the body.
 
