@@ -817,8 +817,10 @@ func notifyDelegatedIssueCreated(
 
 // notifyMentionedMembers creates inbox items for each @mentioned member,
 // excluding the actor and any IDs in the skip set. When an @all mention is
-// present, all workspace members are notified (excluding agents). Returns the
-// members that received a row.
+// present, all workspace members are notified (excluding agents). An @squad
+// mention only triggers the squad leader (handled by the comment-trigger
+// path); it does not notify the squad's human members. Returns the members
+// that received a row.
 func notifyMentionedMembers(
 	bus *events.Bus,
 	queries *db.Queries,
@@ -834,20 +836,18 @@ func notifyMentionedMembers(
 ) map[string]bool {
 	notified := map[string]bool{}
 	// Collect the set of member IDs to notify, each with how the mention
-	// reached them. Naming someone outranks reaching them through a squad,
-	// which outranks @all.
+	// reached them. Naming someone outranks reaching them through @all.
 	recipientIDs := map[string]bool{}
 	via := map[string]string{}
 	reach := func(id, how string) {
 		recipientIDs[id] = true
-		if via[id] == inbox.MentionViaMember || (via[id] == inbox.MentionViaSquad && how == inbox.MentionViaAll) {
+		if via[id] == inbox.MentionViaMember {
 			return
 		}
 		via[id] = how
 	}
 
 	hasAll := false
-	var squadIDs []string
 	for _, m := range mentions {
 		if m.Type == "all" {
 			hasAll = true
@@ -858,29 +858,6 @@ func notifyMentionedMembers(
 				continue
 			}
 			reach(m.ID, inbox.MentionViaMember)
-		}
-		if m.Type == "squad" {
-			squadIDs = append(squadIDs, m.ID)
-		}
-	}
-
-	// Expand each @squad mention to its human members. Agent members of a
-	// squad are reached via comment-trigger / assignment paths, not the
-	// mention-inbox path, so we only seed member-typed recipients here.
-	for _, sid := range squadIDs {
-		squadUUID, err := util.ParseUUID(sid)
-		if err != nil {
-			continue
-		}
-		members, err := queries.ListSquadMembers(context.Background(), squadUUID)
-		if err != nil {
-			slog.Error("failed to list squad members for @squad mention", "squad_id", sid, "error", err)
-			continue
-		}
-		for _, sm := range members {
-			if sm.MemberType == "member" {
-				reach(util.UUIDToString(sm.MemberID), inbox.MentionViaSquad)
-			}
 		}
 	}
 
