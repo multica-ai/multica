@@ -82,6 +82,8 @@ export function CodeTab() {
   const [savingKey, setSavingKey] = useState<GitHubSettingsKey | null>(null);
   const githubConnection = useConnectGitHub(wsId);
   const { connecting, connect: handleConnect } = githubConnection;
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
+  // Retain the last target while the dialog animates out.
   const [disconnectTarget, setDisconnectTarget] = useState<(typeof installations)[number] | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
@@ -111,7 +113,7 @@ export function CodeTab() {
       await api.deleteGitHubInstallation(wsId, disconnectTarget.id);
       await qc.invalidateQueries({ queryKey: ["github", wsId] });
       toast.success(t(($) => $.github.toast_disconnected));
-      setDisconnectTarget(null);
+      setDisconnectOpen(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.github.toast_disconnect_failed));
     } finally {
@@ -242,7 +244,10 @@ export function CodeTab() {
                   variant="ghost"
                   size="sm"
                   aria-label={t(($) => $.github.disconnect_account, { login: installation.account_login })}
-                  onClick={() => setDisconnectTarget(installation)}
+                  onClick={() => {
+                    setDisconnectTarget(installation);
+                    setDisconnectOpen(true);
+                  }}
                 >
                   <Unplug />
                   {t(($) => $.github.disconnect)}
@@ -312,9 +317,9 @@ export function CodeTab() {
       </SettingsSection>
 
       <AlertDialog
-        open={!!disconnectTarget}
+        open={disconnectOpen}
         onOpenChange={(v) => {
-          if (!v && !disconnecting) setDisconnectTarget(null);
+          if (!v && !disconnecting) setDisconnectOpen(false);
         }}
       >
         <AlertDialogContent>

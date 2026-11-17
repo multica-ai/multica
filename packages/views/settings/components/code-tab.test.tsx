@@ -254,6 +254,31 @@ describe("CodeTab — GitHub", () => {
     );
   });
 
+  it.each(["cancel", "confirm"])("keeps the account name in the outgoing confirmation on %s", async (action) => {
+    connect();
+    installationsRef.current.installations.push({ id: "inst-2", account_login: "other-org" });
+    mockDeleteInstallation.mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    render(<CodeTab />, { wrapper: Wrapper });
+
+    await user.click(screen.getByRole("button", { name: "Disconnect acme" }));
+    const dialog = await screen.findByRole("alertdialog");
+    // Keep the outgoing node: jsdom does not run the dialog's exit animation.
+    const description = within(dialog).getByText(/^Disconnect acme from this workspace\?/);
+    await user.click(within(dialog).getByRole("button", { name: action === "cancel" ? "Cancel" : "Disconnect" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+
+    expect(description).toHaveTextContent("Disconnect acme from this workspace?");
+    if (action === "cancel") {
+      expect(mockDeleteInstallation).not.toHaveBeenCalled();
+    } else {
+      expect(mockDeleteInstallation).toHaveBeenCalledExactlyOnceWith("workspace-1", "inst-1");
+    }
+
+    await user.click(screen.getByRole("button", { name: "Disconnect other-org" }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Disconnect other-org from this workspace?");
+  });
+
   it("shows members the connection read-only and who can change it", () => {
     connect();
     roleRef.current = "member";
