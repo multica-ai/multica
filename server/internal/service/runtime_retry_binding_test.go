@@ -15,8 +15,10 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// A retry retains its parent's runtime even when the agent's binding changes.
-// Enqueue must preserve that recovery attempt; claim enforces the current binding.
+// A retry survives a change to the agent's runtime binding. A rebound agent's
+// retry goes to the new runtime, which is the only one its claim fence admits
+// (#10717); an unbound agent's retry keeps the parent's runtime until the agent
+// is bound again.
 func TestRetryPreservesChildAcrossRuntimeBindingChanges(t *testing.T) {
 	for _, tt := range []struct {
 		name          string
@@ -95,9 +97,13 @@ func TestRetryPreservesChildAcrossRuntimeBindingChanges(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load retry child: %v", err)
 			}
-			if child.RuntimeID != util.MustParseUUID(runtimeA) || child.Status != "queued" || child.Attempt != 2 {
-				t.Fatalf("retry child = runtime:%s status:%q attempt:%d, want original runtime %s, queued, attempt 2",
-					util.UUIDToString(child.RuntimeID), child.Status, child.Attempt, runtimeA)
+			wantRuntime := runtimeB
+			if tt.unbound {
+				wantRuntime = runtimeA
+			}
+			if child.RuntimeID != util.MustParseUUID(wantRuntime) || child.Status != "queued" || child.Attempt != 2 {
+				t.Fatalf("retry child = runtime:%s status:%q attempt:%d, want runtime %s, queued, attempt 2",
+					util.UUIDToString(child.RuntimeID), child.Status, child.Attempt, wantRuntime)
 			}
 			var parentStatus string
 			fx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, parentID).Scan(&parentStatus)
@@ -105,13 +111,15 @@ func TestRetryPreservesChildAcrossRuntimeBindingChanges(t *testing.T) {
 				t.Fatalf("parent status = %q, want failed", parentStatus)
 			}
 
-			claimParams := db.ClaimAgentTaskParams{
-				AgentID:          util.MustParseUUID(agentID),
-				RuntimeID:        util.MustParseUUID(runtimeA),
-				PrepareLeaseSecs: 60,
-				RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
+			claimOn := func(runtimeID string) db.ClaimAgentTaskParams {
+				return db.ClaimAgentTaskParams{
+					AgentID:          util.MustParseUUID(agentID),
+					RuntimeID:        util.MustParseUUID(runtimeID),
+					PrepareLeaseSecs: 60,
+					RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
+				}
 			}
-			if _, err := q.ClaimAgentTask(ctx, claimParams); !errors.Is(err, pgx.ErrNoRows) {
+			if _, err := q.ClaimAgentTask(ctx, claimOn(runtimeA)); !errors.Is(err, pgx.ErrNoRows) {
 				t.Fatalf("claim on old runtime with changed binding = %v, want no rows", err)
 			}
 			var childStatus string
@@ -120,10 +128,12 @@ func TestRetryPreservesChildAcrossRuntimeBindingChanges(t *testing.T) {
 				t.Fatalf("rejected claim changed retry status to %q, want queued", childStatus)
 			}
 
-			fx.Exec(t, `UPDATE agent SET runtime_id = $1 WHERE id = $2`, runtimeA, agentID)
-			claimed, err := q.ClaimAgentTask(ctx, claimParams)
+			if tt.unbound {
+				fx.Exec(t, `UPDATE agent SET runtime_id = $1 WHERE id = $2`, runtimeA, agentID)
+			}
+			claimed, err := q.ClaimAgentTask(ctx, claimOn(wantRuntime))
 			if err != nil {
-				t.Fatalf("claim retry after restoring original runtime: %v", err)
+				t.Fatalf("claim retry on runtime %s: %v", wantRuntime, err)
 			}
 			if claimed.ID != childID {
 				t.Fatalf("claimed task = %s, want existing retry %s", util.UUIDToString(claimed.ID), util.UUIDToString(childID))

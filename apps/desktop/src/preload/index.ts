@@ -4,6 +4,7 @@ import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
   ManualUpdateCheckResult,
+  UpdaterDownloadState,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import {
@@ -505,6 +506,12 @@ const daemonAPI = {
 };
 
 const updaterAPI = {
+  getDownloadState: (): Promise<UpdaterDownloadState> => ipcRenderer.invoke("updater:get-download-state"),
+  onDownloadState: (callback: (state: UpdaterDownloadState) => void) => {
+    const handler = (_: unknown, state: UpdaterDownloadState) => callback(state);
+    ipcRenderer.on("updater:download-state", handler);
+    return () => ipcRenderer.removeListener("updater:download-state", handler);
+  },
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => {
     const handler = (_: unknown, info: { version: string; releaseNotes?: string }) => callback(info);
     ipcRenderer.on("updater:update-available", handler);

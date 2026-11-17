@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -38,16 +37,7 @@ func TestDeliverToBystander(t *testing.T) {
 
 func setOthersIssuesPref(t *testing.T, userID, value string) {
 	t.Helper()
-	workspaceFixture(t).Exec(t, `
-		INSERT INTO notification_preference (workspace_id, user_id, preferences)
-		VALUES ($1, $2, jsonb_build_object('others_issues', $3::text))
-		ON CONFLICT (workspace_id, user_id) DO UPDATE SET preferences = EXCLUDED.preferences
-	`, testWorkspaceID, userID, value)
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(),
-			`DELETE FROM notification_preference WHERE workspace_id = $1 AND user_id = $2`,
-			testWorkspaceID, userID)
-	})
+	setNotificationPref(t, userID, "others_issues", value)
 }
 
 func inboxCount(t *testing.T, queries *db.Queries, recipientID string) int {
@@ -71,6 +61,7 @@ func TestBystanderTier_StatusChange(t *testing.T) {
 	optedIn := createNotificationMember(t, "bystander-all@multica.ai")
 	t.Cleanup(func() { cleanupTestUser(t, "bystander-all@multica.ai") })
 	setOthersIssuesPref(t, optedIn, "all")
+	enableStatusChanges(t, owner, watcher, follower, optedIn)
 
 	issueID := workspaceFixture(t).Issue(t, "bystander tier issue", testutil.Cols{
 		"assignee_type": "member",
@@ -114,6 +105,7 @@ func TestBystanderTier_OwnAgentIsOwnIssue(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, "bystander-agent-owner@multica.ai") })
 	other := createNotificationMember(t, "bystander-agent-other@multica.ai")
 	t.Cleanup(func() { cleanupTestUser(t, "bystander-agent-other@multica.ai") })
+	enableStatusChanges(t, owner, other)
 
 	f := workspaceFixture(t)
 	runtimeID := f.Runtime(t, "bystander-runtime", testutil.Cols{"owner_id": owner})
@@ -204,6 +196,7 @@ func TestBystanderTier_ProjectWatcherKeepsEveryEvent(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, "bystander-project-watcher@multica.ai") })
 	bystander := createNotificationMember(t, "bystander-project-plain@multica.ai")
 	t.Cleanup(func() { cleanupTestUser(t, "bystander-project-plain@multica.ai") })
+	enableStatusChanges(t, watcher, bystander)
 
 	projectID := createTestProject(t)
 	f := workspaceFixture(t)

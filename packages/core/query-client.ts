@@ -4,7 +4,7 @@ import { workspaceKeys } from "./workspace/queries";
 import type { Workspace } from "./types";
 
 export function createQueryClient(): QueryClient {
-  return new QueryClient({
+  const client = new QueryClient({
     defaultOptions: {
       queries: {
         staleTime: Infinity,
@@ -18,6 +18,14 @@ export function createQueryClient(): QueryClient {
       },
     },
   });
+  // Keep the policy on the app client so custom clients and explicit query
+  // overrides retain their retry settings. Status checks also work across
+  // mocked API modules and different client error classes.
+  client.setQueryDefaults(["inbox"], {
+    retry: (failureCount, error) =>
+      (error as { status?: number } | null)?.status !== 503 && failureCount < 1,
+  });
+  return client;
 }
 
 /**

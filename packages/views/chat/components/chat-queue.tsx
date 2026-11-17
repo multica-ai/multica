@@ -9,7 +9,7 @@ import {
   Pencil,
   Trash2,
 } from "@multica/ui/icons";
-import type { ChatQueuedTask } from "@multica/core/types";
+import type { ChatQueuedTask, ChatWakeup } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
@@ -25,6 +25,8 @@ import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 
 interface ChatQueueProps {
   tasks: ChatQueuedTask[];
+  /** Names the wakeup behind a queued wakeup turn. */
+  wakeups?: ChatWakeup[];
   headStatus: string | undefined;
   onSendNow: (taskId: string) => Promise<void> | void;
   /** Blocks "send now" independently of the head task's status — used when the
@@ -38,6 +40,7 @@ interface ChatQueueProps {
 
 export function ChatQueue({
   tasks,
+  wakeups,
   headStatus,
   onSendNow,
   sendNowDisabled = false,
@@ -64,6 +67,16 @@ export function ChatQueue({
   );
 
   if (tasks.length === 0) return null;
+
+  const queuedLabel = (task: ChatQueuedTask) => {
+    if (task.wakeup_id) {
+      const title = wakeups?.find((w) => w.id === task.wakeup_id)?.title;
+      return title
+        ? t(($) => $.wakeup.queue_label, { title })
+        : t(($) => $.wakeup.queue_fallback);
+    }
+    return task.content?.trim() || t(($) => $.queue.fallback);
+  };
 
   const run = async (key: string, action: () => Promise<void> | void) => {
     setBusyAction(key);
@@ -121,7 +134,7 @@ export function ChatQueue({
                     aria-hidden="true"
                   />
                   <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                    {task.content?.trim() || t(($) => $.queue.fallback)}
+                    {queuedLabel(task)}
                   </span>
                   <div className="flex shrink-0 items-center gap-0.5">
                     <span

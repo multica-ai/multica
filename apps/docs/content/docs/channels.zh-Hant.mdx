@@ -12,15 +12,15 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
 ## 選擇平臺
 
-| | 飛書 / Lark | Slack | 釘釘 | 企業微信 | Telegram |
-|---|---|---|---|---|---|
-| 安裝方式 | 在 Multica 中生成二維碼，用飛書掃碼授權 | 在 Slack 建立 app，再把兩個 token 填入 Multica | 建立企業內部應用和 Stream 模式機器人，再把 AppKey 與 AppSecret 填入 Multica | 在企業微信管理後臺建立智慧機器人並開啟長連線，再把 Bot ID 與 Secret 填入 Multica | 用 @BotFather 建立 Bot，再把 token 填入 Multica |
-| 私聊 AI 代理 | 支援 | 支援 | 支援 | 支援 | 支援 |
-| 群聊或頻道 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 或回覆 Bot 後觸發 |
-| 建立任務 | `/issue` 訊息命令，按輸入直接建立 | `/issue` slash 命令，AI 代理整理描述後建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 |
-| 新建 Chat | `/new [訊息]` | 私聊：`/new [訊息]`；頻道/thread：`@Multica /new [訊息]` | `/new [訊息]` | `/new [訊息]` | `/new [訊息]` |
-| 清空當前 Chat 上下文 | `/clear [訊息]` | 私聊：`/clear [訊息]`；頻道/thread：`@Multica /clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` |
-| 連線方式 | 平臺長連線 | Socket Mode | Stream 模式 | 平臺長連線 | `getUpdates` 長輪詢 |
+| | 飛書 / Lark | Slack | 釘釘 | 企業微信 | Telegram | 微信 |
+|---|---|---|---|---|---|---|
+| 安裝方式 | 在 Multica 中生成二維碼，用飛書掃碼授權 | 在 Slack 建立 app，再把兩個 token 填入 Multica | 建立企業內部應用和 Stream 模式機器人，再把 AppKey 與 AppSecret 填入 Multica | 在企業微信管理後臺建立智慧機器人並開啟長連線，再把 Bot ID 與 Secret 填入 Multica | 用 @BotFather 建立 Bot，再把 token 填入 Multica | 用自己的微信帳號掃描 QR 碼 |
+| 私聊 AI 代理 | 支援 | 支援 | 支援 | 支援 | 支援 | 僅限掃碼連線的帳號 |
+| 群聊或頻道 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 後觸發 | @ Bot 或回覆 Bot 後觸發 | 不支援 |
+| 建立任務 | `/issue` 訊息命令，按輸入直接建立 | `/issue` slash 命令，AI 代理整理描述後建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 | `/issue` 訊息命令，按輸入直接建立 |
+| 新建 Chat | `/new [訊息]` | 私聊：`/new [訊息]`；頻道/thread：`@Multica /new [訊息]` | `/new [訊息]` | `/new [訊息]` | `/new [訊息]` | `/new [訊息]` |
+| 清空當前 Chat 上下文 | `/clear [訊息]` | 私聊：`/clear [訊息]`；頻道/thread：`@Multica /clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` | `/clear [訊息]` |
+| 連線方式 | 平臺長連線 | Socket Mode | Stream 模式 | 平臺長連線 | `getUpdates` 長輪詢 | iLink 長輪詢 |
 
 新連線目前只開放中國大陸版飛書；已有的國際版 Lark 連線仍可繼續使用和管理。
 
@@ -38,8 +38,7 @@ Telegram 會把圖片、檔案、影片和音訊作為附件轉交給 AI 代理�
 - [Slack Bot 接入](/slack-bot-integration)
 - [釘釘 Bot 接入](/dingtalk-bot-integration)
 - [Telegram Bot 接入](/telegram-bot-integration)
-
-[微信 Bot](/weixin-bot-integration) 透過掃碼連線，將掃碼帳號繫結到發起連線的 Multica 使用者，不使用下方首次傳送訊息時的繫結連結流程。
+- [微信 Bot 接入](/weixin-bot-integration)
 
 ## 訊息的執行流程
 
@@ -70,12 +69,15 @@ Telegram 會把圖片、檔案、影片和音訊作為附件轉交給 AI 代理�
 - 釘釘按 conversation 區分會話；每個單聊或群聊分別延續自己的會話。
 - 企業微信按聊天區分會話；每個單聊或群聊分別延續自己的會話。
 - Telegram 按聊天區分會話；forum 的每個 topic 分別隔離。
+- 微信按已連線的 Bot 和掃碼帳號儲存會話。
 
 在頻道中繼續追問時仍需再次 @ Bot。除了上面提到的近期上下文，AI 代理不會自動讀取整個頻道的歷史。
 
 ## 帳號繫結
 
-成員第一次向 Bot 發訊息時，會收到一個帳號繫結連結。登入 Multica 後，平臺帳號與當前工作區成員關聯。
+微信在掃碼時將微信帳號繫結到發起連線的 Multica 使用者，訊息按該使用者的工作區權限執行。請用自己的帳號掃碼，不要分享 QR 碼；其他帳號和群聊訊息不會被接收。
+
+對於飛書/Lark、Slack、釘釘、企業微信和 Telegram，成員第一次向 Bot 發訊息時，會收到一個帳號繫結連結。登入 Multica 後，平臺帳號與當前工作區成員關聯。
 
 繫結完成後，Multica 才會執行 AI 代理。每條訊息都會重新檢查帳號繫結和工作區成員身份；離開工作區後，不能繼續透過 Bot 使用它。
 
@@ -85,7 +87,7 @@ Telegram 會把圖片、檔案、影片和音訊作為附件轉交給 AI 代理�
 
 ## 管理連線
 
-工作區 owner 和 admin 可以連線或斷開 Bot；飛書/Lark Bot 的連線和斷開還對 AI 代理所有者開放。普通成員可以檢視已經連線的整合並使用自己有權呼叫的 AI 代理。
+工作區 owner 和 admin 可以連線或斷開 Bot；飛書/Lark、釘釘和微信的連線和斷開還對 AI 代理所有者開放。普通成員可以檢視已經連線的整合並使用自己有權呼叫的 AI 代理。
 
 斷開後，Bot 不再接收新訊息。已有的 Multica 對話和執行記錄仍然保留。
 
@@ -117,4 +119,5 @@ MULTICA_WEIXIN_SECRET_KEY=<base64 編碼的 32 位元組金鑰>
 - [Slack Bot 接入](/slack-bot-integration)
 - [釘釘 Bot 接入](/dingtalk-bot-integration)
 - [Telegram Bot 接入](/telegram-bot-integration)
+- [微信 Bot 接入](/weixin-bot-integration)
 - [與 AI 代理對話](/chat)

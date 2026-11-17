@@ -96,11 +96,11 @@ If the agent hadn't produced anything yet, the message you just sent is taken ba
 
 ## Send messages while a reply is in progress
 
-You can keep typing while the agent is replying. **Send** adds a plain text message to the current reply without stopping it, when the runtime supports steering. The agent reads it at its next safe boundary and continues the original task. Upgrade your daemon to enable this.
+You can keep typing while the agent is replying. **Send** adds a plain text message without a skill link to the current reply without stopping it, when the runtime supports steering. The agent reads it at its next safe boundary and continues the original task. Upgrade your daemon to enable this.
 
-On web and desktop, **Add to current run** above your draft means your text will join the running reply. **Start after this run** means the message will be queued, for example when it has files or the current run doesn't support steering.
+On web and desktop, **Add to current run** above your draft means your text will join the running reply. **Start after this run** means the message will be queued, for example when it has files or a skill link, or the current run doesn't support steering.
 
-Messages with attachments, and messages sent before a reply starts or to a runtime without steering support, enter the queue. If guidance is not delivered before the reply ends, it automatically becomes a queued message; you do not need to resend it. If you stop while delivery is in progress, Chat waits for its result before queuing undelivered guidance. If the reply is retried automatically, guidance stays with the original request so both are processed together. When resuming the same session, guidance already delivered there is not sent again.
+Messages with attachments or skill links, and messages sent before a reply starts or to a runtime without steering support, enter the queue. If guidance is not delivered before the reply ends, it automatically becomes a queued message; you do not need to resend it. If you stop while delivery is in progress, Chat waits for its result before queuing undelivered guidance. If the reply is retried automatically, guidance stays with the original request so both are processed together. When resuming the same session, guidance already delivered there is not sent again.
 
 Queued messages appear above the input and run in order. You can remove them, use **⋯ → Edit queued message** to restore them to the input, or **⋯ → Clear all** to withdraw them. **Send now (stops current reply)** moves a queued message to the front and stops the current reply. It requires an active reply and permission to run the agent.
 
@@ -116,6 +116,8 @@ Conversations can be renamed, pinned, archived, and deleted:
 - **Delete** permanently removes the conversation and its messages.
 
 If a conversation is bound to an external channel (such as Slack), archiving breaks the binding; unarchiving does not restore it — bind again.
+
+The number of unread replies across your conversations shows as a badge on **Chat** in the app rail. In the desktop app, right-click **Chat** for **Mark all as read**.
 
 <Callout type="warning">
 Deleting a conversation cannot be undone and stops any runs in it that haven't finished. Archive instead when you just don't need it for now.

@@ -12,20 +12,20 @@ func TestStubIsWorkspaceScopedAndDefaultsOff(t *testing.T) {
 	stub := New()
 	workspaceA, workspaceB := uuid.New(), uuid.New()
 	limit := 7
-	stub.Set(workspaceA, entitlement.GateIssueCount, entitlement.Decision{
+	stub.Set(workspaceA, entitlement.GateAutopilotRuns, entitlement.Decision{
 		Gate: entitlement.Gate{Action: entitlement.ActionEnforce, Limit: &limit},
 	})
 
-	first := stub.Gate(context.Background(), workspaceA, entitlement.GateIssueCount)
+	first := stub.Gate(context.Background(), workspaceA, entitlement.GateAutopilotRuns)
 	if first.Gate.Action != entitlement.ActionEnforce || first.Gate.Limit == nil || *first.Gate.Limit != 7 || first.Reason != entitlement.ReasonStub {
 		t.Fatalf("configured = %+v", first)
 	}
 	*first.Gate.Limit = 99
-	second := stub.Gate(context.Background(), workspaceA, entitlement.GateIssueCount)
+	second := stub.Gate(context.Background(), workspaceA, entitlement.GateAutopilotRuns)
 	if second.Gate.Limit == nil || *second.Gate.Limit != 7 {
 		t.Fatalf("stub leaked mutable decision: %+v", second)
 	}
-	missing := stub.Gate(context.Background(), workspaceB, entitlement.GateIssueCount)
+	missing := stub.Gate(context.Background(), workspaceB, entitlement.GateAutopilotRuns)
 	if missing.Gate.Action != entitlement.ActionOff || missing.Reason != entitlement.ReasonStub {
 		t.Fatalf("missing = %+v", missing)
 	}

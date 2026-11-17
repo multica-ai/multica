@@ -81,7 +81,6 @@
     "run_blocked_attribution": "실행되지 않음 — 실행의 책임 구성원을 확인할 수 없습니다",
     "run_blocked_already_active": "실행되지 않음 — 최근 실행이 이미 이 건을 처리했습니다",
     "run_blocked_quota_exceeded": "실행되지 않음 — 이 기간의 실행 한도에 도달했습니다",
-    "run_blocked_issue_limit_reached": "실행되지 않음 — 워크스페이스가 태스크 수 한도에 도달했습니다",
     "run_blocked_generic": "실행되지 않음 — 실행이 차단되었습니다",
     "section_triggers": "트리거",
     "section_run_history": "실행 기록",
@@ -184,6 +183,9 @@
     "url_copied": "Webhook URL을 복사했습니다",
     "url_copy_failed": "URL을 복사하지 못했습니다",
     "edit_schedule": "일정 수정",
+    "edit_webhook": "Webhook 수정",
+    "event_filter_summary_all": "모든 이벤트 수락",
+    "event_filter_summary_conditions_other": "조건 {{count}}개",
     "rotate_url": "URL 재발급",
     "rotate_confirm_title": "Webhook URL 재발급",
     "rotate_confirm_description": "현재 URL은 즉시 동작을 멈춥니다. 이 URL을 호출하는 외부 시스템은 새 URL로 업데이트해야 합니다. 계속할까요?",
@@ -247,6 +249,18 @@
       "disabled_invalid_signature": "서명이 유효하지 않아 재실행할 수 없습니다",
       "disabled_rejected": "거부된 전달은 재실행할 수 없습니다",
       "disabled_queued": "아직 대기 중입니다. 처리된 후 재실행하세요"
+    },
+    "ignore": {
+      "title": "무시한 이유",
+      "payload_filtered": "본문 조건 불충족",
+      "event_filtered": "이벤트 또는 동작 불일치",
+      "trigger_disabled": "트리거 비활성화됨",
+      "autopilot_paused": "자동화 일시 중지됨",
+      "autopilot_archived": "자동화 보관됨",
+      "quota_exceeded": "실행 할당량 도달",
+      "actual_value": "실제 값",
+      "missing": "필드 없음",
+      "truncated": "미리보기가 잘렸습니다. 전체 값은 원본 본문에서 확인하세요."
     }
   },
   "add_trigger_dialog": {
@@ -272,6 +286,12 @@
     "submitting": "저장하는 중...",
     "toast_updated": "일정을 수정했습니다",
     "toast_update_failed": "일정 수정에 실패했습니다"
+  },
+  "edit_webhook_dialog": {
+    "title": "Webhook 수정",
+    "label_placeholder": "예: GitHub 풀 리퀘스트",
+    "toast_updated": "Webhook을 수정했습니다",
+    "toast_update_failed": "Webhook 수정에 실패했습니다"
   },
   "dialog": {
     "sr_create": "새 오토파일럿",
@@ -328,12 +348,40 @@
     "webhook_created_done": "완료",
     "event_filter_label": "이벤트 필터",
     "event_filter_docs_link_label": "이벤트 필터 작동 방식 알아보기",
-    "event_filter_event_placeholder": "예: workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "추가",
-    "event_filter_remove_label": "필터 제거",
-    "event_filter_hint": "이 이벤트와 일치하는 Webhook만 처리합니다. 비워 두면 모두 허용합니다.",
+    "event_filter_event_placeholder": "이벤트 (예: pull_request)",
+    "event_filter_actions_placeholder": "액션 (선택)",
+    "event_filter_add_rule": "규칙 추가",
+    "event_filter_event_label": "이벤트",
+    "event_filter_actions_label": "액션",
+    "event_filter_new_rule_label": "새 규칙",
+    "event_filter_condition_label": "조건",
+    "event_filter_error_event_required": "이벤트 이름을 입력하세요.",
+    "event_filter_error_path_required": "Payload 필드를 입력하세요.",
+    "event_filter_error_path_invalid": "필드 이름은 점으로 구분하고 {{path}}자 이내로 입력하세요.",
+    "event_filter_error_value_required": "값을 입력하세요.",
+    "event_filter_error_too_many_values": "값은 최대 {{values}}개입니다.",
+    "event_filter_remove_label": "규칙 삭제",
+    "event_filter_hint": "규칙과 모든 본문 조건에 일치하는 이벤트만 처리합니다. 비워 두면 모든 이벤트를 수락합니다.",
+    "event_filter_condition_remove_label": "조건 제거",
+    "event_filter_condition_add_label": "조건 추가",
+    "event_filter_condition_ops": {
+      "equals": "같음",
+      "not_equals": "같지 않음",
+      "contains": "포함",
+      "in": "다음 중 하나",
+      "exists": "존재"
+    },
+    "event_filter_condition_path_label": "Payload 필드",
+    "event_filter_condition_path_placeholder": "Payload 필드 (예: pull_request.base.ref)",
+    "event_filter_condition_op_label": "연산자",
+    "event_filter_condition_value_label": "값",
+    "event_filter_condition_value_placeholder": "예: main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "대소문자 무시",
     "schedule_multiple_notice": "이 오토파일럿에는 일정이 {{count}}개 있습니다. 이 대화상자를 닫고 아래 '트리거'에서 각각 수정하세요.",
+    "webhook_multiple_notice": "이 오토파일럿에는 Webhook이 여러 개 있습니다. 이 대화상자를 닫고 아래 '트리거'에서 각각 수정하세요.",
+    "webhook_edit_filters": "필터 수정",
+    "webhook_filters_saved_separately": "필터는 따로 저장되며, 여기서 취소해도 되돌려지지 않습니다.",
     "schedule_empty": "일정이 없습니다. 이 오토파일럿은 수동으로 실행할 때만 동작합니다.",
     "schedule_add": "일정 추가",
     "error_title_required": "오토파일럿 이름을 입력하세요.",
@@ -347,7 +395,8 @@
         "label": "실행만",
         "description": "태스크를 만들지 않고 조용히 실행합니다"
       }
-    }
+    },
+    "event_filter_condition_all": "본문이 모든 조건을 충족해야 함"
   },
   "schedule_editor": {
     "time_label": "시간",

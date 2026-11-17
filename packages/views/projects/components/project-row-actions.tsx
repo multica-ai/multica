@@ -3,8 +3,8 @@
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Archive, ArchiveRestore, ExternalLink, Link2, Pencil, Pin, PinOff, Trash2 } from "@multica/ui/icons";
-import { copyText } from "@multica/ui/lib/clipboard";
+import { Archive, ArchiveRestore, ExternalLink, Link2, Pencil, Pin, PinOff, Trash2, Type } from "@multica/ui/icons";
+import { copyText, copyTextAndHtml } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
@@ -31,6 +31,7 @@ import { agentListOptions, memberListOptions } from "@multica/core/workspace/que
 import { useT } from "../../i18n";
 import { useIntentNavigate, useNavigation } from "../../navigation";
 import { CollectionRowMenu } from "../../layout/collection-list";
+import { titleLinkPayload } from "../../common/title-link";
 import { useArchiveProjects, useRestoreProjects } from "./project-archive";
 
 export function DeleteProjectsDialog({
@@ -180,6 +181,17 @@ export function ProjectRowActions({
       toast.success(tLayout(($) => $.rail.link_copied));
     }
   };
+  const copyTitleAsLink = async () => {
+    const { text, html } = titleLinkPayload(
+      project.title,
+      getShareableUrl(wsPaths.projectDetail(project.id)),
+    );
+    if (await copyTextAndHtml(text, html)) {
+      toast.success(t(($) => $.detail.toast_title_link_copied));
+    } else {
+      toast.error(t(($) => $.detail.toast_title_link_copy_failed));
+    }
+  };
 
   return (
     <>
@@ -229,6 +241,10 @@ export function ProjectRowActions({
         <DropdownMenuItem onClick={() => void copyLink()}>
           <Link2 className="size-3.5" />
           {tLayout(($) => $.rail.copy_link)}
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void copyTitleAsLink()}>
+          <Type className="size-3.5" />
+          {t(($) => $.detail.copy_title_as_link)}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         {project.archived_at ? (

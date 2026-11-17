@@ -295,7 +295,7 @@ multica runtime profile create --display-name "內部 Claude 封裝" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` 為當前 profile 登記開機自啟，平臺差異見[開機自啟](/daemon-runtimes#autostart)。`runtime usage` 預設統計 90 天，`--days` 最多 365。`runtime update` 讓那臺電腦上的守護程序把 CLI 更新到指定版本，`--wait` 等待更新結束；更新失敗、更新逾時或等待本身逾時時，命令會以非零狀態退出。`runtime profile create` 用 `--runtime-type` 指定相容的工具（舊的 `--protocol-family` 仍可用）；固定引數目前只能在網頁端填寫。
+`daemon autostart` 為當前 profile 登記開機自啟，平臺差異見[開機自啟](/daemon-runtimes#autostart)。`runtime usage` 預設統計 90 天，`--days` 最多 365。`runtime update` 讓那臺電腦上的守護程序把 CLI 更新到指定版本，`--wait` 等待更新結束；更新失敗、更新逾時或等待本身逾時時，命令會以非零狀態退出。`runtime profile create` 用 `--runtime-type` 指定相容的工具（舊的 `--protocol-family` 仍可用）；固定引數目前只能在網頁端填寫。 `runtime profile create` 預設綁定目前機器；使用 `--daemon-id <id>` 可以選擇另一臺已登記的本機。 舊配置可以透過 `multica runtime profile update <profile-id> --daemon-id <id>` 綁定機器。
 
 刪除仍繫結活躍 AI 代理的執行時時，命令預設拒絕。`multica runtime delete <id> --cascade` 會解綁這些 AI 代理、保留其配置與歷史記錄，並取消它們的活動執行。
 
@@ -342,6 +342,20 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Asia/
   {"event": "push"}
 ]
 ```
+
+每行還可以包含 `conditions`，使用與介面相同的本文欄位規則。例如，下面的規則只接收目標分支為 `main` 的非草稿 PR：
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+每條規則最多 20 個條件，欄位路徑最多 256 個字元，`in` 候選值清單最多 100 項。建立或更新觸發器時，超出上限的條件會回傳 HTTP 400。
 
 這個範例接收 PR 評審提交和所有 push 事件。省略 `actions` 或使用空的 actions 陣列，表示接收該事件的所有 action。
 
@@ -485,7 +499,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `env get/set <agent-id>` | 讀寫自定義環境變數（AI 代理所有者或工作區 owner/admin；每次讀取都會記錄） | `set`：`--custom-env` / `--custom-env-file` / `--custom-env-stdin`，整體替換，值為 `****` 的鍵保留原值 |
 | | `skills list/set/add <agent-id>` | 管理繫結的 skill | `--skill-ids`（`set` 全量替換，`add` 增量新增） |
 | | `mcp list/add/enable/disable/remove <agent-id>` | 給該 agent 分配工作區 MCP 服務 | server id 從 `workspace mcp list` 獲取。庫裡的條目在這裡新增之前不會生效；`disable` 只停止下發，保留分配 |
-| `autopilot` | `list/get/create/update/delete` | 管理自動化 | `create`：`--title`、`--agent`、`--mode`（均必填）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（可重複） |
+| `autopilot` | `list/get/create/update/delete` | 管理自動化 | `create`：`--title`、`--mode`（均必填）、`--agent` / `--squad` / `--squad-id`（三選一，必填）、`--description`、`--issue-title-template`、`--project`、`--subscriber`（可重複） |
 | | `trigger <id>` | 手動觸發一次 | |
 | | `runs <id>` | 檢視執行歷史 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 管理定時和 webhook 觸發器 | `trigger-add`：`--kind`（`schedule` 或 `webhook`）、`--cron`、`--timezone`（預設 UTC）、`--label` |

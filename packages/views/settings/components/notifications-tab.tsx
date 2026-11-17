@@ -64,15 +64,7 @@ export function NotificationsTab() {
   };
 
   const handleToggle = (key: NotificationGroupKey, enabled: boolean) => {
-    const updated: NotificationPreferences = {
-      ...preferences,
-      [key]: enabled ? "all" : "muted",
-    };
-    // Remove keys set to "all" (default) to keep the object clean
-    if (enabled) {
-      delete updated[key];
-    }
-    save(updated);
+    save({ ...preferences, [key]: enabled ? "all" : "muted" });
   };
 
   const handleOthersIssues = (value: OthersIssuesValue) => {
@@ -142,7 +134,7 @@ export function NotificationsTab() {
                   description={t(($) => $.notifications.groups[key].description)}
                 >
                   <Switch
-                    checked={preferences[key] !== "muted"}
+                    checked={notificationPreferenceValue(preferences, key) !== "muted"}
                     aria-label={t(($) => $.notifications.groups[key].label)}
                     onCheckedChange={(checked) => handleToggle(key, checked)}
                   />

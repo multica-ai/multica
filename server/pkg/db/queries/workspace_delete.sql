@@ -353,6 +353,9 @@ deleted_draft_restores AS (
     DELETE FROM chat_draft_restore
     WHERE chat_session_id IN (SELECT id FROM ws_sessions)
 ),
+deleted_chat_wakeups AS (
+    DELETE FROM chat_wakeup WHERE workspace_id = $1
+),
 -- Same no-FK chore as chat_draft_restore above. Matched on workspace_id rather
 -- than the session set because that column exists precisely so this statement
 -- does not have to join through chat_session, which it deletes in this same CTE.
@@ -642,6 +645,10 @@ WHERE autopilot_quota_reservation.workspace_id = $1;
 -- name: DeleteWorkspaceAutopilotQuotaPeriods :exec
 DELETE FROM autopilot_quota_period
 WHERE autopilot_quota_period.workspace_id = $1;
+
+-- name: DeleteWorkspaceEntitlementLimitOverages :exec
+DELETE FROM entitlement_limit_overage
+WHERE entitlement_limit_overage.workspace_id = $1;
 
 -- name: DeleteWorkspaceAutopilotChildren :exec
 WITH

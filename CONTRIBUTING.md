@@ -342,6 +342,7 @@ make up C=api,web,daemon     # choose the components
 make status                  # what is running, and whether it is yours
 make list                    # every environment on this machine
 make down                    # stop the processes, keep the data
+make down C=daemon           # stop only the listed components
 make destroy                 # stop, then drop the database and free the slot
 make gc                      # collect expired environments or ones whose checkout is gone
 ```

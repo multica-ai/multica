@@ -14,7 +14,8 @@
     "upload_image": "Upload image",
     "emoji_label": "Emoji",
     "more_emojis": "More emojis…",
-    "emoji_loading": "Loading…"
+    "emoji_loading": "Loading…",
+    "text_icon": "Text icon"
   },
   "avatar_crop": {
     "title": "Edit avatar",
@@ -28,6 +29,14 @@
     "uploading": "Uploading…",
     "loading": "Loading…",
     "load_failed": "Couldn't load image"
+  },
+  "text_avatar": {
+    "title": "Text icon",
+    "preview": "Preview",
+    "text_label": "Text",
+    "text_hint": "1–2 characters: letters, digits or Chinese. Longer text is cut.",
+    "color_label": "Color",
+    "render_failed": "Couldn't create the icon. Please try again."
   },
   "color_picker": {
     "saturation": "Saturation and brightness",

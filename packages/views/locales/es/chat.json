@@ -261,7 +261,9 @@
     "archive": "Archivar",
     "unarchive": "Desarchivar",
     "archived_title": "Archivado",
-    "row_actions_aria": "Acciones del chat"
+    "row_actions_aria": "Acciones del chat",
+    "wakeup_preview": "Volvió a informar",
+    "wakeup_active": "Esperando para informar"
   },
   "header": {
     "rename": "Renombrar chat",
@@ -269,5 +271,52 @@
     "unarchive": "Desarchivar chat",
     "delete": "Eliminar chat",
     "agent_settings": "Ajustes del agente"
+  },
+  "wakeup": {
+    "panel_title": "Recordatorios",
+    "panel_empty": "No hay recordatorios en esta conversación",
+    "panel_ended": "Terminados recientemente",
+    "limits_hint": "Todo recordatorio termina: la espera dura 24 horas por defecto y 7 días como máximo. Si el plazo llega antes, el agente vuelve una vez para contarte cómo va todo.",
+    "strip_waiting": "Esperando: {{title}}",
+    "card": "Volverá a informar: {{title}}",
+    "ends": "termina {{relative}}",
+    "reminder_at": "aviso {{relative}}",
+    "next_check": "próxima revisión {{relative}}",
+    "last_check": "Última revisión: {{note}}",
+    "cancel": "Cancelar recordatorio",
+    "cancel_failed": "No se pudo cancelar el recordatorio",
+    "retry": "Reintentar",
+    "retry_failed": "No se pudo reintentar el aviso",
+    "status": {
+      "active": "Esperando",
+      "fired": "Informado",
+      "expired": "Plazo alcanzado",
+      "cancelled": "Cancelado",
+      "failed": "No se pudo ejecutar"
+    },
+    "report": {
+      "waiting": "Esperando para informar",
+      "running": "Informando…",
+      "failed": "No se pudo informar"
+    },
+    "failure": {
+      "permission_revoked": "Quien lo pidió ya no puede ejecutar este agente",
+      "access_lost": "Lo que vigilaba pasó a un proyecto privado",
+      "dispatch_failed": "El agente no pudo ejecutarse"
+    },
+    "kind": {
+      "condition": "Cuando ocurra",
+      "at": "Aviso",
+      "check": "Revisión periódica"
+    },
+    "divider": {
+      "condition": "De vuelta para informar · ocurrió",
+      "at": "De vuelta para informar · aviso",
+      "check": "De vuelta para informar · revisión",
+      "expired": "De vuelta para informar · plazo alcanzado",
+      "generic": "De vuelta para informar"
+    },
+    "queue_label": "Recordatorio: {{title}}",
+    "queue_fallback": "Recordatorio"
   }
 }

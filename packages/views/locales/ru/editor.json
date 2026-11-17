@@ -114,6 +114,7 @@
   "mention": {
     "group_users": "Пользователи",
     "group_issues": "Задачи",
+    "group_projects": "Проекты",
     "all_members": "Все участники",
     "agent_badge": "Агент",
     "squad_badge": "Команда",

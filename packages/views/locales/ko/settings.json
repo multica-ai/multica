@@ -841,7 +841,7 @@
     },
     "others_issues": {
       "label": "다른 사람의 태스크",
-      "description": "다른 사람이나 그 사람의 에이전트에게 배정된 태스크 중, 만들거나 댓글을 달거나 멘션되어 자동으로 구독한 것. 주요 업데이트는 나를 향한 @멘션, 참여한 스레드의 답글, 그리고 검토 필요·차단·완료처럼 사람이 봐야 하는 상태입니다.",
+      "description": "다른 사람이나 그 사람의 에이전트에게 배정된 태스크 중, 만들거나 댓글을 달거나 멘션되어 자동으로 구독한 것. 주요 업데이트는 나를 향한 @멘션, 참여한 스레드의 답글, 그리고 상태 변경을 켠 경우 검토 필요·차단·완료처럼 사람이 봐야 하는 상태입니다.",
       "key_updates": "주요 업데이트만",
       "all": "모든 활동"
     },
@@ -957,7 +957,7 @@
     "section_general": "워크스페이스 정보",
     "logo_label": "워크스페이스 아이콘",
     "change_logo_aria": "워크스페이스 로고 변경",
-    "click_logo_hint": "로고를 클릭하여 새 이미지를 업로드하세요",
+    "click_logo_hint": "로고를 클릭해 이미지를 업로드하거나 텍스트 아이콘을 만드세요",
     "toast_logo_failed": "워크스페이스 로고를 업로드하지 못했습니다",
     "name_label": "이름",
     "description_label": "설명",
@@ -1021,7 +1021,7 @@
     "disconnect": "연결 해제",
     "disconnecting": "연결 해제 중...",
     "disconnect_confirm_title": "GitHub App 연결 해제",
-    "disconnect_confirm_description": "Multica가 이 설치의 Webhook 수신을 중단합니다. 기존 PR 미러와 연결은 유지되며, 언제든 다시 연결해 업데이트를 재개할 수 있습니다.",
+    "disconnect_confirm_description": "이 워크스페이스에서 {{login}} 연결을 해제할까요? 이 계정의 업데이트가 중단됩니다. 기존 PR 기록과 링크는 유지되며 다른 연결에는 영향을 주지 않습니다.",
     "disconnect_confirm_cancel": "취소",
     "disconnect_confirm_action": "연결 해제",
     "not_configured": "이 배포에는 GitHub 연동이 설정되어 있지 않습니다. 운영자가 다음 값을 설정해야 합니다:",
@@ -1042,7 +1042,18 @@
     "feature_auto_link_description": "제목이나 브랜치 이름에 태스크 번호(예: {{example}})가 있거나 설명에 \"Closes {{example}}\"가 있는 PR을 해당 태스크에 연결합니다.",
     "status_paused": "일시 중지됨",
     "pause": "GitHub 기능 일시 중지",
-    "resume": "GitHub 기능 재개"
+    "resume": "GitHub 기능 재개",
+    "add_account": "계정 또는 조직 추가",
+    "disconnect_account": "{{login}} 연결 해제",
+    "errors": {
+      "missing_authorization": "GitHub에서 사용자 인증을 반환하지 않았습니다. 다시 연결하고 인증을 완료하세요. 기존 설치에서 반복되면 Multica 운영자에게 문의하세요.",
+      "installation_not_authorized": "개인 설치에는 소유자의 GitHub 계정을 사용하세요. 조직 설치에는 승인된 모든 저장소의 관리자 권한이 있는 계정을 사용하고 저장소를 하나 이상 선택하세요.",
+      "invalid_state": "GitHub 연결 요청이 만료되었거나 유효하지 않습니다. 설정 → 코드에서 다시 연결하세요.",
+      "incomplete_callback": "GitHub 연결 응답이 불완전합니다. 설정 → 코드에서 다시 연결하세요.",
+      "bad_workspace": "연결할 워크스페이스를 찾을 수 없습니다. 대상 워크스페이스를 열고 설정 → 코드에서 다시 시도하세요.",
+      "verification_failed": "GitHub 설치 관리 권한을 확인하지 못했습니다. 다시 연결하고 반복되면 Multica 운영자에게 GitHub App 설정 확인을 요청하세요.",
+      "persist_failed": "GitHub 연결을 저장하지 못했습니다. 설정 → 코드에서 다시 시도하고 반복되면 Multica 운영자에게 문의하세요."
+    }
   },
   "vcs": {
     "section_title": "셀프 호스팅 Git",
@@ -1203,7 +1214,13 @@
       "up_to_date": "최신 버전입니다.",
       "downloading": "v{{version}}을(를) 백그라운드에서 다운로드 중입니다. 설치 준비가 끝나면 알림을 드립니다.",
       "check_now": "지금 확인",
-      "checking": "확인 중..."
+      "checking": "확인 중...",
+      "check_unavailable": "지금 업데이트를 확인할 수 없습니다. 잠시 후 다시 시도하세요.",
+      "check_network": "업데이트 서비스에 연결할 수 없습니다. 네트워크 연결을 확인하고 다시 시도하세요.",
+      "check_failed": "업데이트 확인에 실패했습니다. 다시 시도하세요.",
+      "download_failed": "업데이트 다운로드에 실패했습니다. 현재 버전을 계속 사용하면서 다시 시도할 수 있습니다.",
+      "download_ready": "v{{version}} 설치 준비가 완료되었습니다.",
+      "retry": "다시 시도"
     },
     "daemon": {
       "title": "데몬",
@@ -1699,20 +1716,10 @@
     "section_title": "WeChat",
     "page_description": "연결 QR 코드를 스캔한 계정과의 개인 메시지입니다.",
     "loading": "연결 중…",
-    "load_failed": "WeChat 연결을 불러오지 못했습니다.",
-    "not_enabled": "이 서버에서 WeChat이 활성화되지 않았습니다. 관리자에게 문의하세요.",
     "empty": "에이전트의 연동 탭에서 WeChat을 연결하세요.",
-    "admin_only": "워크스페이스 관리자가 WeChat을 연결할 수 있습니다.",
-    "connected": "연결됨",
-    "connect": "WeChat 연결",
-    "disconnect": "연결 해제",
-    "disconnect_title": "WeChat 연결을 해제할까요?",
-    "disconnect_description": "새 메시지가 이 에이전트에 전달되지 않습니다. Multica 채팅 기록은 유지됩니다.",
-    "cancel": "취소",
     "close": "닫기",
     "action_failed": "작업을 완료하지 못했습니다. 다시 시도하세요.",
-    "connect_title": "{{agent}}에 WeChat 연결",
-    "privacy_hint": "본인의 WeChat 계정으로 스캔하세요. 메시지는 이 워크스페이스에서 본인의 권한으로 실행됩니다. QR 코드를 공유하지 마세요.",
+    "privacy_hint": "메시지는 이 워크스페이스에서 본인의 권한으로 실행됩니다. QR 코드를 공유하지 마세요.",
     "qr_label": "WeChat 연결 QR 코드",
     "scan_hint": "WeChat으로 스캔한 후 휴대폰에서 확인하세요.",
     "scanned": "스캔되었습니다. WeChat에서 연결을 확인하세요.",

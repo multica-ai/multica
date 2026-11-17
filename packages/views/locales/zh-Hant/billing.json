@@ -1,71 +1,4 @@
 {
-  "title": "帳單（測試頁）",
-  "subtitle": "直接透傳 multica-cloud 的 /api/v1/billing/*。不是正式 UI——只是把所有端點塞到一個頁面方便驗證 Stripe 流程。",
-  "endpoints": {
-    "balance": "GET /api/cloud-billing/balance",
-    "transactions": "GET /api/cloud-billing/transactions",
-    "batches": "GET /api/cloud-billing/batches",
-    "topups": "GET /api/cloud-billing/topups",
-    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
-  },
-  "balance": {
-    "title": "餘額",
-    "credits_suffix": "credits",
-    "meta": "raw micro: {{micro}} · owner: {{owner}}… · updated {{updated}}"
-  },
-  "buy": {
-    "title": "購買 credits / 管理帳單",
-    "no_tiers": "未配置任何價格檔位。Cloud 那邊應該沒有配 Stripe key——checkout 會返回 503。",
-    "tier_money_to_credits": "{{money}} → {{credits}} credits",
-    "tier_bonus": " + 贈送 {{credits}}",
-    "tier_bonus_with_expiry": " + 贈送 {{credits}}（{{expiry}}）",
-    "tier_id": "id: {{id}}",
-    "open_portal": "開啟 Stripe Billing Portal",
-    "portal_hint": "對於尚未付款的使用者預期返回 400（Stripe 還沒建 customer 記錄）。",
-    "toast_no_url": "Cloud 沒有返回 checkout URL",
-    "toast_checkout_failed": "Checkout 失敗",
-    "toast_no_portal_url": "沒拿到 portal URL",
-    "toast_portal_failed": "開啟 Portal 失敗"
-  },
-  "checkout": {
-    "session_label": "Checkout session {{prefix}}…",
-    "loading": "正在載入訂單狀態…",
-    "fetch_failed": "拉取訂單狀態失敗：{{error}}",
-    "fetch_failed_unknown": "未知錯誤",
-    "final_status": "最終狀態：{{status}}",
-    "polling_status": "正在輪詢訂單狀態…當前：{{status}}",
-    "status_unknown": "unknown",
-    "label_order": "訂單",
-    "label_tier": "檔位",
-    "label_charged": "已收款",
-    "charged_value": "{{money}} · {{credits}} credits",
-    "charged_with_bonus": "{{money}} · {{credits}} credits + {{bonus}} 贈送",
-    "clear_url": "從 URL 清除"
-  },
-  "transactions": {
-    "title": "流水",
-    "empty": "暫無流水。",
-    "credits_value": "{{value}} credits",
-    "row_meta": "{{date}} · balance after: {{balance}} credits · ref: {{ref}}",
-    "ref_empty": "—"
-  },
-  "batches": {
-    "title": "Credit 批次",
-    "empty": "暫無批次。",
-    "remaining_over_total": "{{remaining}} / {{total}} credits",
-    "id_suffix": "{{id}}…",
-    "consumed": "已消耗：{{value}} credits",
-    "expires_suffix": " · 過期時間 {{value}}",
-    "never_expires_suffix": " · 永不過期"
-  },
-  "topups": {
-    "title": "充值訂單",
-    "empty": "暫無充值訂單。",
-    "amount_to_credits": "{{money}} → {{credits}} credits",
-    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credits + {{bonus}} 贈送",
-    "row_meta": "{{date}} · stripe: {{checkout}}",
-    "stripe_empty": "—"
-  },
   "workspace": {
     "title": "帳單與套餐",
     "description": "管理這個工作區的套餐、限額、成員席位和 Stripe 帳單。",
@@ -169,7 +102,6 @@
     },
     "limits": {
       "title": "用量與限額",
-      "issues": "任務數量",
       "autopilots": "自動化執行",
       "unlimited": "不限",
       "per_month": "每月 {{count}} 次",
@@ -238,12 +170,6 @@
       "title": "前往 Stripe Checkout？",
       "description": "付款週期：{{interval}}。當前成員：{{count}}。Stripe 會重新統計席位，並在付款前顯示最終金額。"
     }
-  },
-  "shared": {
-    "request_failed": "請求失敗",
-    "refresh": "重新整理",
-    "paging": "第 {{page}} / {{totalPages}} 頁 · 共 {{total}} 條",
-    "date_dash": "—"
   },
   "return_page": {
     "redirecting": "正在返回工作區帳單頁…",

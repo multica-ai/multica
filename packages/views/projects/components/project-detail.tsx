@@ -3,10 +3,10 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Archive, ArchiveRestore, BellOff, BellRing, Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2 } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, BellOff, BellRing, Check, ChevronRight, FileQuestion, Link2, PanelRight, Pencil, Pin, PinOff, Trash2, Type } from "@multica/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
-import { copyText } from "@multica/ui/lib/clipboard";
+import { copyText, copyTextAndHtml } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
@@ -81,6 +81,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
+import { titleLinkPayload } from "../../common/title-link";
 import { useProjectStatusLabels, useProjectPriorityLabels, useFormatRelativeDate } from "./labels";
 import {
   ArchivedProjectNotice,
@@ -559,6 +560,22 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     }}>
                       <Link2 className="h-3.5 w-3.5" />
                       {t(($) => $.detail.copy_link)}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => {
+                      const { text, html } = titleLinkPayload(
+                        project.title,
+                        router.getShareableUrl(currentPath(router)),
+                      );
+                      void copyTextAndHtml(text, html).then((ok) => {
+                        if (ok) {
+                          toast.success(t(($) => $.detail.toast_title_link_copied));
+                        } else {
+                          toast.error(t(($) => $.detail.toast_title_link_copy_failed));
+                        }
+                      });
+                    }}>
+                      <Type className="h-3.5 w-3.5" />
+                      {t(($) => $.detail.copy_title_as_link)}
                     </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => {
                       if (isPinned) {

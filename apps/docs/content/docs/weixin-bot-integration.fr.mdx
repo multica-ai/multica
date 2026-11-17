@@ -1,0 +1,55 @@
+---
+title: Bot WeChat
+description: Scannez un QR code pour connecter votre compte WeChat à un agent Multica via iLink.
+---
+
+Multica se connecte au service iLink Bot de WeChat avec le protocole implémenté par le [plugin OpenClaw Weixin](https://github.com/Tencent/openclaw-weixin) de Tencent. Ce canal est distinct de WeCom. Vous n'avez pas besoin d'installer OpenClaw ni d'utiliser un outil d'automatisation de WeChat sur ordinateur.
+
+## Se connecter
+
+1. Ouvrez un agent dont vous êtes propriétaire. Les propriétaires et administrateurs de l’espace de travail peuvent connecter n’importe quel agent de cet espace. Choisissez **Ajouter un canal de messagerie** dans ses canaux de messagerie, puis **WeChat**. Le QR code s'affiche aussitôt.
+2. Scannez le QR code avec **votre propre compte WeChat** et confirmez sur votre téléphone. Si WeChat demande un code de vérification, saisissez les chiffres affichés sur le téléphone dans la boîte de dialogue. Une fois la connexion établie, la boîte de dialogue se ferme et WeChat apparaît dans les canaux de messagerie de l'agent.
+3. Envoyez un nouveau message privé au bot dans WeChat. L'agent a besoin d'un environnement d'exécution en ligne pour travailler.
+
+Le compte qui scanne le code est associé à l'utilisateur Multica qui a ouvert cette boîte de dialogue. Ses messages utilisent les permissions de cet utilisateur dans l'espace de travail. Ne partagez pas le QR code et ne demandez pas à quelqu'un d'autre de le scanner. Les autres comptes WeChat et les messages de groupe ne sont pas acceptés.
+
+La connexion doit être confirmée dans un délai maximal de cinq minutes ; WeChat peut faire expirer le code plus tôt. Générez un nouveau QR code après expiration. Fermer la boîte de dialogue annule la connexion en attente. Un bot déjà connecté à un autre agent ou espace de travail doit d'abord y être déconnecté. WeChat contrôle l'éligibilité des comptes et peut refuser une connexion ou demander une vérification supplémentaire.
+
+![Connexion WeChat par QR code dans les paramètres d'un agent](/images/docs/weixin/qr-login.png)
+
+Le QR code de cette illustration sert aux tests ; ce n'est pas un code d'autorisation actif.
+
+## Messages et commandes
+
+- Les messages texte poursuivent la même discussion Multica. Les réponses finales sont renvoyées à WeChat en texte brut ; les longues réponses sont découpées sans casser les caractères Unicode. Les messages ne sont pas modifiés en continu pendant la génération.
+- Pendant l'exécution, Multica renouvelle l'indicateur de saisie de WeChat lorsqu'il est disponible. Il s'arrête après la fin, l'échec ou l'annulation. Un renouvellement qui échoue est retenté au prochain intervalle de cinq secondes. Une permission manquante ou une erreur de l'indicateur n'interrompt ni les messages ni les réponses.
+- `/new [message]` démarre une nouvelle discussion Multica. `/clear [message]` réinitialise le contexte visible par l'agent dans la discussion actuelle. `/issue <titre>` crée une tâche assignée à l'agent connecté.
+- Lorsque le stockage objet est configuré, les images, fichiers, vidéos et notes vocales non transcrites reçus sont joints à la discussion Multica. Les transcriptions fournies par WeChat sont utilisées comme texte ; Multica n'ajoute pas de service de reconnaissance vocale et ne convertit pas l'audio SILK.
+- Les fichiers joints à la réponse finale de l'agent sont renvoyés à WeChat. Les images prises en charge et les vidéos MP4 utilisent les messages multimédias natifs ; les autres formats, y compris l'audio, sont envoyés comme fichiers. Cet adaptateur limite chaque transfert à **20 MiB**. Un échec d'envoi produit un avertissement ; le fichier reste dans Multica.
+- Les conversations de groupe, l'accès aux contacts, les notifications proactives, le développement des messages transférés et la récupération de l'historique des messages cités ne sont pas pris en charge.
+
+Les réponses nécessitent les informations d'authentification de contexte émises par WeChat pour cette conversation. Si une réponse est refusée parce que le contexte a expiré, envoyez un nouveau message. Multica ne suppose pas une durée de validité fixe. Une réponse API réussie confirme l'acceptation par le fournisseur, pas la livraison ni la lecture. Si la réponse à une demande d'envoi est perdue, Multica enregistre un résultat inconnu et ne renvoie pas automatiquement le message.
+
+En cas de forte charge, une notification de réponse WeChat peut être omise ; la réponse reste accessible dans la discussion Multica.
+
+## Se déconnecter
+
+Dans les canaux de messagerie de l'agent, choisissez **Gérer WeChat → Déconnecter**. Les nouveaux messages ne parviennent plus à l'agent et le contexte de réponse enregistré est supprimé. L'historique des discussions Multica est conservé. Une réponse iLink signalant explicitement l'expiration de l'autorisation désactive aussi la connexion et affiche un avis d'expiration ; reconnectez-vous en scannant un nouveau QR code. Renouveler l'autorisation d'une connexion existante au même agent conserve sa discussion et son curseur de réception. Si le bot est déjà connecté à un autre agent de cet espace de travail, la boîte de dialogue nomme cet agent si vous pouvez le gérer, pour vous permettre de le déconnecter d'abord. Les identités des agents d'autres espaces restent privées.
+
+![Compte WeChat connecté dans les paramètres de messagerie de l'espace de travail](/images/docs/weixin/connected.png)
+
+## Auto-hébergement
+
+Générez une clé de chiffrement à conserver :
+
+```sh
+openssl rand -base64 32
+```
+
+Définissez-la dans `MULTICA_WEIXIN_SECRET_KEY` sur le serveur API et redémarrez ce dernier. Utilisez la même clé sur chaque réplique. Conservez-la avec vos secrets de déploiement et vos sauvegardes ; la modifier empêche le déchiffrement des identifiants existants et nécessite de reconnecter les bots. Sans cette clé, les commandes de connexion sont désactivées. Docker Compose transmet cette variable.
+
+Le serveur API doit pouvoir accéder en HTTPS à `ilinkai.weixin.qq.com`, aux hôtes régionaux `*.weixin.qq.com` renvoyés par WeChat et à `novac2c.cdn.weixin.qq.com`. Aucun webhook public ni tunnel entrant n'est nécessaire. Les navigateurs reçoivent uniquement le contenu d'affichage du QR code et son état ; les identifiants du bot et le contexte de réponse sont chiffrés au repos sur le serveur.
+
+Appliquez les migrations habituelles de la base de données. Le superviseur commun des canaux maintient un seul long polling par installation entre les répliques, et le curseur de mise à jour est enregistré après acceptation du lot par le moteur commun de réception. Les réponses finales utilisent un bail de livraison en base de données pour éviter les doublons. Les événements en attente d'envoi sont en mémoire : un redémarrage du serveur peut interrompre une réponse, et un envoi au résultat incertain n'est volontairement pas rejoué. La réponse et ses pièces jointes restent dans Multica.
+
+Référence du protocole : Tencent `@tencent-weixin/openclaw-weixin` **2.4.10**, commit source [`874637a`](https://github.com/Tencent/openclaw-weixin/tree/874637a0dbc24050f72d1385add4fc6170a2d726), avec sa [documentation du protocole](https://github.com/Tencent/openclaw-weixin/blob/874637a0dbc24050f72d1385add4fc6170a2d726/docs/protocol_zh_CN.md). Cet adaptateur est une implémentation native en Go et ne dépend pas de ce paquet à l'exécution. Le comportement du fournisseur et l'éligibilité des comptes peuvent évoluer indépendamment des versions de Multica.
