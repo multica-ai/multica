@@ -57,6 +57,21 @@ multica daemon start
 
 如需把執行工作目錄放到其他磁碟，可用 `multica config set workspaces_root <path>` 為當前 profile 持久化根目錄，也可在 `daemon start` 或 `daemon restart` 中傳入 `--workspaces-root <path>`。flag 的優先順序高於 `MULTICA_WORKSPACES_ROOT`，環境變數又高於 profile 配置。修改根目錄不會遷移已有的執行目錄。
 
+### AI 代理的預設本機目錄 [#agent-default-directory]
+
+在 daemon 的啟動環境中設定 `MULTICA_AGENT_LOCAL_DIRECTORIES`，將完整的 AI 代理 UUID 對應至這台電腦上的絕對路徑：
+
+```bash
+export MULTICA_AGENT_LOCAL_DIRECTORIES='{"12ab5678-1234-4567-890a-123456789abc":"/path/to/workspace"}'
+multica daemon restart
+```
+
+此對應適用於沒有專案 `local_directory` 綁定的任務、聊天及自動化執行。專案綁定優先，包括綁定至其他 daemon 的目錄。小隊協調 AI 代理仍使用受管理的工作目錄；未設定的 AI 代理維持原有行為。
+
+執行沿用 `in_place` 流程：可讀取目錄中的指令、skill 及工具設定，也可修改檔案。任務與自動化的寫入執行共用既有路徑鎖，聊天執行仍免於該鎖。清理時，daemon 不會刪除使用者目錄。
+
+JSON 格式錯誤、AI 代理 UUID 無效、路徑空白或使用相對路徑時，daemon 會拒絕啟動。執行開始時，目錄必須存在且可寫入。修改啟動環境後需重新啟動 daemon；此對應不是伺服器端的 AI 代理設定。
+
 啟動時，守護程序檢測 `PATH` 中受支援的 AI 程式設計工具，為你有權連線的工作區註冊執行時。工具剛安裝或剛登入時，重啟守護程序就會重新檢測。
 
 守護程序至少需要檢測到一款內建支援的 AI 程式設計工具才能啟動。安裝方法和可執行檔名見[安裝 AI 程式設計工具](/install-agent-runtime)。
@@ -139,7 +154,7 @@ Cursor 依專案目錄保存 MCP 的 OAuth 登入，而每次執行都有自己�
 
 AI 代理有 MCP 設定時，每次執行都有自己的 Cursor 資料目錄，執行在那裡的 `mcp-auth.json` 就是這個連結。沒有 MCP 設定時，執行使用你自己的 Cursor 資料目錄（`~/.cursor`，或 daemon 的 `CURSOR_DATA_DIR`）和其中設定的 MCP 服務；daemon 只把 Cursor 在 `projects/` 下為執行目錄保存的 `mcp-auth.json` 連結到 AI 代理的登入檔。執行的目錄被清理時，這個連結會一併刪除。
 
-沒有 MCP 設定時，有兩種執行不做連結，因為它們對應的 Cursor 專案你自己也在用，連結會取代你在那裡的登入：在專案本機目錄裡原地工作的執行，以及目錄外層套著一個 git 儲存庫的執行，例如主目錄下的 dotfiles 儲存庫（Cursor 會把這個儲存庫當作專案）。這些執行使用 Cursor 在該目錄下已有的登入，執行紀錄裡也不會提供登入指令；需要時自己在該目錄裡執行 `cursor-agent mcp login <server>` 登入。
+沒有 MCP 設定時，有兩種執行不做連結，因為它們對應的 Cursor 專案你自己也在用，連結會取代你在那裡的登入：在本機目錄裡原地工作的執行，以及目錄外層套著一個 git 儲存庫的執行，例如主目錄下的 dotfiles 儲存庫（Cursor 會把這個儲存庫當作專案）。這些執行使用 Cursor 在該目錄下已有的登入，執行紀錄裡也不會提供登入指令；需要時自己在該目錄裡執行 `cursor-agent mcp login <server>` 登入。
 
 如果某個服務仍需登入，執行紀錄裡會寫明是哪個服務，並提供要在執行環境所在電腦上執行的指令。有 MCP 設定的 AI 代理，例如：
 

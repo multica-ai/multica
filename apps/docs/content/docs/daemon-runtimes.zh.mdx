@@ -57,6 +57,21 @@ multica daemon start
 
 如需把执行工作目录放到其他磁盘，可用 `multica config set workspaces_root <path>` 为当前 profile 持久化根目录，也可在 `daemon start` 或 `daemon restart` 中传入 `--workspaces-root <path>`。flag 的优先级高于 `MULTICA_WORKSPACES_ROOT`，环境变量又高于 profile 配置。修改根目录不会迁移已有的执行目录。
 
+### 智能体的默认本地目录 [#agent-default-directory]
+
+在守护进程的启动环境中设置 `MULTICA_AGENT_LOCAL_DIRECTORIES`，将完整的智能体 UUID 映射到这台电脑上的绝对路径：
+
+```bash
+export MULTICA_AGENT_LOCAL_DIRECTORIES='{"12ab5678-1234-4567-890a-123456789abc":"/path/to/workspace"}'
+multica daemon restart
+```
+
+该映射用于没有项目 `local_directory` 绑定的任务、聊天和自动化执行。项目绑定优先，包括绑定到其他守护进程的目录。小队协调智能体仍使用托管工作目录；未配置的智能体保持原有行为。
+
+执行沿用 `in_place` 流程：可以读取目录中的指令、skill 和工具设置，也可以修改文件。任务和自动化的写入执行共用现有路径锁，聊天执行继续免于该锁。清理时，守护进程不会删除用户目录。
+
+JSON 格式错误、智能体 UUID 无效、路径为空或使用相对路径时，守护进程会拒绝启动。执行开始时，目录必须存在且可写。修改启动环境后需重启守护进程；该映射不是服务端智能体设置。
+
 启动时，守护进程检测 `PATH` 中受支持的 AI 编程工具，为你有权连接的工作区注册运行时。工具刚安装或刚登录时，重启守护进程就会重新检测。
 
 守护进程至少需要检测到一款内置支持的 AI 编程工具才能启动。安装方法和可执行文件名见[安装 AI 编程工具](/install-agent-runtime)。
@@ -139,7 +154,7 @@ Cursor 按项目目录保存 MCP 的 OAuth 登录，而每次运行都有自己�
 
 智能体有 MCP 配置时，每次运行都有自己的 Cursor 数据目录，运行在那里的 `mcp-auth.json` 就是这个链接。没有 MCP 配置时，运行使用你自己的 Cursor 数据目录（`~/.cursor`，或 daemon 的 `CURSOR_DATA_DIR`）和其中配置的 MCP 服务；daemon 只把 Cursor 在 `projects/` 下为运行目录保存的 `mcp-auth.json` 链接到智能体的登录文件。运行的目录被清理时，这个链接会一并删除。
 
-没有 MCP 配置时，有两种运行不做链接，因为它们对应的 Cursor 项目你自己也在用，链接会替换掉你在那里的登录：在项目本地目录里原地工作的运行，以及目录外层套着一个 git 仓库的运行，例如主目录下的 dotfiles 仓库（Cursor 会把这个仓库当作项目）。这些运行使用 Cursor 在该目录下已有的登录，运行记录里也不会给出登录命令；需要时自己在该目录里执行 `cursor-agent mcp login <server>` 登录。
+没有 MCP 配置时，有两种运行不做链接，因为它们对应的 Cursor 项目你自己也在用，链接会替换掉你在那里的登录：在本地目录里原地工作的运行，以及目录外层套着一个 git 仓库的运行，例如主目录下的 dotfiles 仓库（Cursor 会把这个仓库当作项目）。这些运行使用 Cursor 在该目录下已有的登录，运行记录里也不会给出登录命令；需要时自己在该目录里执行 `cursor-agent mcp login <server>` 登录。
 
 如果某个服务仍需登录，运行记录里会写明是哪个服务，并给出要在运行时所在电脑上执行的命令。有 MCP 配置的智能体，例如：
 
@@ -174,9 +189,9 @@ cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~
 
 任务仍未关闭时，运行完成 12 小时后只删可以重新生成的内容：目录中的 `node_modules`、`.next`、`.turbo`，以及 `codex-home` 下的四个精确路径：`.sandbox-bin`、`.tmp/plugins`、`.tmp/marketplaces`、`cache/remote_plugin_catalog`。其他文件（包括 SQLite 数据库和 WAL 文件）保留。托管的任务运行目录默认还会在运行完成 14 天后整体删除，不论任务是否关闭。
 
-未归档的聊天如果使用 Multica 管理的工作目录，守护进程默认会在最后一次运行结束 12 小时后按同样的规则清理可重新生成的内容。清理成功后，守护进程会跳过该次运行的重复扫描。后续运行结束后，经过同样的等待时间便可再次清理。聊天直接在项目本地目录中运行时，只清理上述精确路径中的 Codex 缓存。
+未归档的聊天如果使用 Multica 管理的工作目录，守护进程默认会在最后一次运行结束 12 小时后按同样的规则清理可重新生成的内容。清理成功后，守护进程会跳过该次运行的重复扫描。后续运行结束后，经过同样的等待时间便可再次清理。聊天直接在本地目录中运行时，只清理上述精确路径中的 Codex 缓存。
 
-项目本地目录上的运行直接改你自己的目录，守护进程不会动它。运行记录目录保留 daemon 日志和 `output/`。运行完成超过 `MULTICA_GC_COMPLETED_TASK_TTL`（默认 14 天）后，如果会话记录保存在记录目录外，就删除整个 `codex-home`；仍保存任务本地会话记录的 home 会保留。将该变量设为 `0` 可关闭 home 到期清理。后续运行会重建 home 并重新连接会话存储；会话存储仍遵循下文独立的保留策略。
+本地目录上的运行直接改你自己的目录，守护进程不会动它。运行记录目录保留 daemon 日志和 `output/`。运行完成超过 `MULTICA_GC_COMPLETED_TASK_TTL`（默认 14 天）后，如果会话记录保存在记录目录外，就删除整个 `codex-home`；仍保存任务本地会话记录的 home 会保留。将该变量设为 `0` 可关闭 home 到期清理。后续运行会重建 home 并重新连接会话存储；会话存储仍遵循下文独立的保留策略。
 
 ### 共享的仓库缓存
 

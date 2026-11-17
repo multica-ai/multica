@@ -259,6 +259,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 檢查更新的間隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二進位制被帶外替換（`brew upgrade`、重新下載、本地構建）後重啟到新二進位制。與 `MULTICA_DAEMON_AUTO_UPDATE` 相互獨立 |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 執行工作目錄的根目錄 |
+| `MULTICA_AGENT_LOCAL_DIRECTORIES` | 未設定 | 將 AI 代理 UUID 對應至預設本機絕對路徑的 JSON 物件；參閱[AI 代理預設目錄](/daemon-runtimes#agent-default-directory)。 |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | 僅適用於 Linux/macOS。每次執行的私有臨時目錄的父目錄；必須是現有、可寫的絕對路徑，無效值會使執行啟動失敗，不會回退到 `/tmp`。請選擇較短的路徑——子工具可能會在其中繫結 AF_UNIX socket；Linux 的 `sun_path` 上限為 108 位元組，macOS 為 104 位元組 |
 
 守護程序注入 AI 代理 task 的內部上下文見 [Task 執行時環境](/daemon-runtimes#task-執行時環境)。`MULTICA_REPO_CHECKOUT_MODE` 也屬於這類變數：守護程序只在 Linux 和 Windows 的 Codex 執行中把它設為 `isolated`，不需要也無法手動配置。守護程序自身環境裡的 `MULTICA_*` 變數不會傳進執行。

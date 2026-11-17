@@ -155,7 +155,7 @@ func TestAcquireLocalDirectoryLockSkipsSquadLeaderTasks(t *testing.T) {
 		ID:               "worker-task",
 		ProjectResources: resources,
 	}
-	assignment, err := localDirectoryAssignmentForTask(worker, daemonID)
+	assignment, err := localDirectoryAssignmentForTask(worker, daemonID, nil)
 	if err != nil {
 		t.Fatalf("worker assignment: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestAcquireLocalDirectoryLockSkipsSquadLeaderTasks(t *testing.T) {
 		IsLeaderTask:     true,
 		ProjectResources: resources,
 	}
-	leaderAssignment, err := localDirectoryAssignmentForTask(leader, daemonID)
+	leaderAssignment, err := localDirectoryAssignmentForTask(leader, daemonID, nil)
 	if err != nil {
 		t.Fatalf("leader assignment: %v", err)
 	}
@@ -815,7 +815,7 @@ func TestAcquireLocalDirectoryLockSkipsWorktreeMode(t *testing.T) {
 		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
 	}
 
-	assignment, err := localDirectoryAssignmentForTask(Task{ID: "t1", ProjectResources: resources}, daemonID)
+	assignment, err := localDirectoryAssignmentForTask(Task{ID: "t1", ProjectResources: resources}, daemonID, nil)
 	if err != nil {
 		t.Fatalf("assignment: %v", err)
 	}
@@ -898,7 +898,7 @@ func TestAcquireLocalDirectoryLockRejectsUnknownExecutionMode(t *testing.T) {
 		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
 	}
 
-	assignment, err := localDirectoryAssignmentForTask(Task{ID: "t1", ProjectResources: resources}, daemonID)
+	assignment, err := localDirectoryAssignmentForTask(Task{ID: "t1", ProjectResources: resources}, daemonID, nil)
 	if err != nil {
 		t.Fatalf("assignment: %v", err)
 	}
@@ -1021,7 +1021,7 @@ func TestChatTaskSkipsPathMutexButKeepsAssignment(t *testing.T) {
 	chat := Task{ID: "chat-task", ChatSessionID: "sess-1", ProjectResources: resources}
 
 	// Property 1: the chat task still binds to the user's directory.
-	chatAssignment, err := localDirectoryAssignmentForTask(chat, daemonID)
+	chatAssignment, err := localDirectoryAssignmentForTask(chat, daemonID, nil)
 	if err != nil {
 		t.Fatalf("chat assignment: %v", err)
 	}
@@ -1119,7 +1119,7 @@ func TestChatTaskOnWorktreeResourceKeepsAssignment(t *testing.T) {
 		ProjectResources: []ProjectResourceData{{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw}},
 	}
 
-	assignment, err := localDirectoryAssignmentForTask(chat, daemonID)
+	assignment, err := localDirectoryAssignmentForTask(chat, daemonID, nil)
 	if err != nil {
 		t.Fatalf("chat assignment: %v", err)
 	}

@@ -328,7 +328,7 @@ does not clear those blocks or establish that earlier background processes exite
 
 The issue sidebar's **Environments** section lists the servers and desktop apps associated with an issue's runs, grouped by the machine they run on. A localhost URL opens only on that machine. The daemon reports environments in two ways:
 
-- **Detected.** On macOS and Linux, any process listening on a TCP port whose working directory is inside a run's directory shows up. It has to be seen on two scans in a row, about 30 seconds apart, so short-lived test servers stay out. The agent CLIs themselves are ignored, and so are servers in a project's own local directory, which the user started.
+- **Detected.** On macOS and Linux, any process listening on a TCP port whose working directory is inside a run's directory shows up. It has to be seen on two scans in a row, about 30 seconds apart, so short-lived test servers stay out. The agent CLIs themselves are ignored, and so are servers in a user's own local directory, which the user started.
 - **Declared.** A repository can describe its environments in `.multica/environments.toml`. An agent starts one with `multica env start <name>`. The daemon then supervises it: the environment keeps running after the run ends and stops at its TTL. If it is still running when the daemon restarts, the new daemon process picks it back up.
 
 ```toml
@@ -392,6 +392,7 @@ Daemon behavior is configured via flags or environment variables:
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
 | Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` |
+| Agent default local directories | — | `MULTICA_AGENT_LOCAL_DIRECTORIES` | Unset; JSON object mapping agent UUIDs to absolute paths |
 | GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |
 | GC scan interval | — | `MULTICA_GC_INTERVAL` | `2h` |
 | GC TTL (done/cancelled issues) | — | `MULTICA_GC_TTL` | `24h` |
@@ -404,6 +405,21 @@ Daemon behavior is configured via flags or environment variables:
 | GC Hermes memory TTL (per-agent `memories/`) | — | `MULTICA_GC_HERMES_MEMORY_TTL` | `2160h` (90d; set `0` to disable) |
 | GC Hermes session TTL (per-conversation `state.db`) | — | `MULTICA_GC_HERMES_SESSION_TTL` | `336h` (14d; set `0` to disable) |
 | GC task temp legacy TTL (pre-lock `multica-task-*`) | — | `MULTICA_GC_TASK_TEMP_LEGACY_TTL` | `0` (disabled; set a duration to opt in) |
+
+#### Agent default local directories
+
+Set `MULTICA_AGENT_LOCAL_DIRECTORIES` in the daemon's startup environment to map full agent UUIDs to absolute directories on this computer:
+
+```bash
+export MULTICA_AGENT_LOCAL_DIRECTORIES='{"12ab5678-1234-4567-890a-123456789abc":"/path/to/workspace"}'
+multica daemon restart
+```
+
+The mapping applies to issue, chat, and autopilot runs without a project `local_directory` binding. Project bindings take precedence, including bindings owned by another daemon. Squad coordinators keep their managed working directories. Unconfigured agents keep the existing behavior.
+
+Runs use the existing `in_place` flow: local instructions, skills, and tool settings are available, and the agent can change files in that directory. Issue and autopilot writers share the existing path lock; chat turns retain their lock exemption. The daemon does not delete the user directory during cleanup.
+
+Malformed JSON, invalid agent UUIDs, and empty or relative paths reject daemon startup. The directory must exist and be writable when a run starts. Restart the daemon after changing its startup environment; the mapping is not a server-side agent setting.
 
 #### Workspace garbage collection
 
