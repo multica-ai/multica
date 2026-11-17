@@ -841,7 +841,7 @@
     },
     "others_issues": {
       "label": "别人的任务",
-      "description": "任务分配给别人或别人的智能体，而你只是因为创建、评论或被 @ 自动订阅了它。关键更新指 @你、回复你参与的讨论，以及待评审、受阻、完成等需要人来看的状态。",
+      "description": "任务分配给别人或别人的智能体，而你只是因为创建、评论或被 @ 自动订阅了它。关键更新指 @你、回复你参与的讨论，以及（打开状态变更时）待评审、受阻、完成等需要人来看的状态。",
       "key_updates": "仅关键更新",
       "all": "全部动态"
     },
@@ -957,7 +957,7 @@
     "section_general": "工作区信息",
     "logo_label": "工作区图标",
     "change_logo_aria": "更换工作区图标",
-    "click_logo_hint": "点击图标上传新图片",
+    "click_logo_hint": "点击图标上传图片，或生成文字图标",
     "toast_logo_failed": "上传工作区图标失败",
     "name_label": "名称",
     "description_label": "描述",
@@ -1021,7 +1021,7 @@
     "disconnect": "断开",
     "disconnecting": "断开中...",
     "disconnect_confirm_title": "断开 GitHub App",
-    "disconnect_confirm_description": "Multica 将不再接收该安装的 webhook。已有的 PR 镜像与关联会保留，再次连接即可恢复同步。",
+    "disconnect_confirm_description": "要从此工作区断开 {{login}} 吗？此账号的更新将停止，已有 PR 记录与关联会保留，其他连接不受影响。",
     "disconnect_confirm_cancel": "取消",
     "disconnect_confirm_action": "断开",
     "not_configured": "当前部署没有配置 GitHub 集成。运维需要设置",
@@ -1042,7 +1042,18 @@
     "feature_auto_link_description": "PR 标题或分支名含任务编号（如 {{example}}），或正文里写了 \"Closes {{example}}\" 时，自动关联到对应任务。",
     "status_paused": "已暂停",
     "pause": "暂停 GitHub 功能",
-    "resume": "恢复 GitHub 功能"
+    "resume": "恢复 GitHub 功能",
+    "add_account": "添加账号或组织",
+    "disconnect_account": "断开 {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub 未返回用户授权。请重新连接并完成授权。如果已有安装反复出现此问题，请联系 Multica 运维人员。",
+      "installation_not_authorized": "个人安装请使用所属的 GitHub 账号；组织安装请使用对所有已授权仓库都有管理员权限的账号，并至少选择一个仓库。",
+      "invalid_state": "GitHub 连接请求已过期或无效。请从设置 → 代码重新连接。",
+      "incomplete_callback": "GitHub 返回的连接信息不完整。请从设置 → 代码重新连接。",
+      "bad_workspace": "找不到此次连接的工作区。请打开目标工作区，从设置 → 代码重试。",
+      "verification_failed": "无法验证你对 GitHub 安装的管理权限。请重新连接；若仍失败，请联系 Multica 运维人员检查 GitHub App 配置。",
+      "persist_failed": "无法保存 GitHub 连接。请从设置 → 代码重试；若仍失败，请联系 Multica 运维人员。"
+    }
   },
   "vcs": {
     "section_title": "自托管 Git",
@@ -1460,7 +1471,13 @@
       "up_to_date": "已是最新版本。",
       "downloading": "v{{version}} 正在后台下载——准备好安装时会通知你。",
       "check_now": "立即检查",
-      "checking": "检查中..."
+      "checking": "检查中...",
+      "check_unavailable": "暂时无法检查更新，请稍后重试。",
+      "check_network": "无法连接更新服务，请检查网络后重试。",
+      "check_failed": "检查更新失败，请重试。",
+      "download_failed": "更新下载失败，可以继续使用当前版本并重试。",
+      "download_ready": "v{{version}} 已可安装。",
+      "retry": "重试"
     },
     "daemon": {
       "title": "守护进程",
@@ -1694,6 +1711,30 @@
     "mcp": "由管理员添加、在工作区内共享，再按智能体分配。",
     "apps": "通过 Multica 连接团队或个人账号，再将应用添加到智能体。",
     "plugins": "安装后可提供工具、定时 hook 和存储，每个插件单独授权。"
+  },
+  "weixin": {
+    "section_title": "微信",
+    "page_description": "接收扫码账号的私聊消息。",
+    "loading": "正在连接…",
+    "empty": "在智能体的「集成」页签中连接微信。",
+    "close": "关闭",
+    "action_failed": "操作未完成，请重试。",
+    "privacy_hint": "消息将以你的身份在此工作区执行，请勿分享二维码。",
+    "qr_label": "微信连接二维码",
+    "scan_hint": "使用微信扫码，并在手机上确认。",
+    "scanned": "已扫码，请在微信中确认连接。",
+    "verify_hint": "微信要求输入验证码，请填写手机上显示的数字。",
+    "verify_label": "验证码",
+    "verify": "验证",
+    "success": "已连接。请在微信中向机器人发送新消息。",
+    "expired": "二维码已过期，请重新生成。",
+    "blocked": "微信已暂停验证码验证，请稍后重试。",
+    "already_bound": "此机器人已在微信中绑定，请先断开原客户端，再重试。",
+    "refresh": "重新生成二维码",
+    "retry": "重试",
+    "already_connected": "这个微信已经连接到智能体 {{agent}}，请先在那边断开。",
+    "connected_elsewhere": "这个微信已在其他位置连接，请先断开原连接。",
+    "authorization_expired": "微信授权已过期，请重新扫码连接。"
   },
   "connected_apps": {
     "description": "智能体通过这些账号操作外部应用，允许的操作会直接执行。",

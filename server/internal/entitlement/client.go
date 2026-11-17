@@ -280,8 +280,9 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 		wire.ValidUntil.IsZero() || wire.ValidForSeconds <= 0 || wire.ValidForSeconds > int64(maxPolicyTTL/time.Second) {
 		return fetchedPolicy{}, ErrInvalidPolicy
 	}
-	gates := make(map[GateName]Gate, 2)
-	for _, name := range []GateName{GateIssueCount, GateAutopilotRuns} {
+	// Unknown gates are ignored for additive compatibility.
+	gates := make(map[GateName]Gate, 1)
+	for _, name := range []GateName{GateAutopilotRuns} {
 		wireGate, ok := wire.Gates[string(name)]
 		if !ok {
 			return fetchedPolicy{}, ErrInvalidPolicy

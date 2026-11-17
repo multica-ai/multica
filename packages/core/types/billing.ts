@@ -209,7 +209,6 @@ export interface WorkspaceSubscriptionEntitlements {
   status: string;
   seats: number;
   limits: {
-    issueCount: WorkspaceEntitlementLimit;
     autopilotRuns: WorkspaceEntitlementLimit;
   };
   currentPeriodEnd: string | null;
@@ -239,11 +238,6 @@ export interface WorkspaceSubscriptionSummary {
     portal: boolean;
     purchaseSeats: boolean;
   };
-}
-
-export interface IssueLimitUsage {
-  used: number;
-  limit: number;
 }
 
 export interface WorkspaceSeatCapacity {

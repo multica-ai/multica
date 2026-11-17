@@ -57,6 +57,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ScheduleEditor } from "./schedule-editor/schedule-editor";
 import { WebhookUrlField } from "./webhook-url-field";
+import { WebhookEventFilterSummary } from "./webhook-event-filter-section";
 import { getDefaultScheduleConfig, type ScheduleConfig } from "./schedule-editor/model";
 import { browserTimezone } from "../../common/timezone-select";
 import { cronFields, parseCron, toCron } from "./schedule-editor/cron-mapping";
@@ -75,6 +76,7 @@ import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
 import { EditScheduleTriggerDialog } from "./edit-schedule-trigger-dialog";
+import { EditWebhookTriggerDialog } from "./edit-webhook-trigger-dialog";
 import { useRunAutopilotNow } from "./use-run-autopilot-now";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
@@ -437,18 +439,25 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
     </IconButton>
   ) : null;
 
-  // Schedule rows only: cron and timezone are the fields this dialog edits, and
-  // the API rejects them on any other kind. It rides alongside Delete so the
-  // row that states a schedule is also the row that can change it — without it
-  // an autopilot with two schedules has no editable schedule at all (MUL-7478).
+  // Each schedule and webhook row edits itself, riding alongside Delete so the
+  // row that states a trigger is also the row that can change it. The
+  // autopilot dialog speaks for one schedule and for a first-and-only webhook;
+  // without these, two schedules (MUL-7478), a webhook added beside a schedule
+  // or a second webhook had no editor at all. Api rows have nothing to edit.
+  const editLabel =
+    trigger.kind === "schedule"
+      ? t(($) => $.trigger_row.edit_schedule)
+      : isWebhook
+        ? t(($) => $.trigger_row.edit_webhook)
+        : null;
   const editButton =
-    canWrite && trigger.kind === "schedule" ? (
+    canWrite && editLabel ? (
       <IconButton
         size="icon-sm"
         variant="ghost"
         className="shrink-0 text-muted-foreground"
         onClick={() => setEditOpen(true)}
-        label={t(($) => $.trigger_row.edit_schedule)}
+        label={editLabel}
       >
         <Pencil className="size-3.5" />
       </IconButton>
@@ -493,7 +502,7 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
               })}
             </span>
           )}
-          {editButton}
+          {!showWebhookUrlRow && editButton}
           {!showWebhookUrlRow && deleteButton}
         </div>
       </div>
@@ -522,10 +531,16 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
                     <RotateCw className={cn("h-3.5 w-3.5 text-muted-foreground", rotateToken.isPending && "animate-spin")} />
                   </IconButton>
                 )}
+                {editButton}
                 {deleteButton}
               </>
             }
           />
+        </div>
+      )}
+      {isWebhook && (
+        <div className="mt-1.5 pl-6">
+          <WebhookEventFilterSummary filters={trigger.event_filters ?? []} />
         </div>
       )}
       <AlertDialog open={confirmOpen} onOpenChange={(v) => { if (!v && !deleting) setConfirmOpen(false); }}>
@@ -552,12 +567,21 @@ export function TriggerRow({ trigger, autopilotId, canWrite }: { trigger: Autopi
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <EditScheduleTriggerDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        autopilotId={autopilotId}
-        trigger={trigger}
-      />
+      {isWebhook ? (
+        <EditWebhookTriggerDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          autopilotId={autopilotId}
+          trigger={trigger}
+        />
+      ) : (
+        <EditScheduleTriggerDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          autopilotId={autopilotId}
+          trigger={trigger}
+        />
+      )}
       <AlertDialog open={rotateOpen} onOpenChange={(v) => { if (!v && !rotateToken.isPending) setRotateOpen(false); }}>
         <AlertDialogContent>
           <AlertDialogHeader>

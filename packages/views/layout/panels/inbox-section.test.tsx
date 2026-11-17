@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -20,6 +20,7 @@ const state = vi.hoisted(() => ({
   unread: 0,
   compact: false,
   archive: vi.fn(),
+  unarchive: vi.fn(() => Promise.resolve()),
   unsubscribeArchive: vi.fn(),
   markAllRead: vi.fn(),
   archiveAll: vi.fn(),
@@ -40,11 +41,18 @@ vi.mock("@multica/core/inbox/queries", async (importOriginal) => ({
   useInboxUnreadCount: () => state.unread,
 }));
 vi.mock("@multica/core/inbox/mutations", () => ({
-  useArchiveInbox: () => ({ mutate: state.archive }),
+  useArchiveInbox: () => ({
+    mutate: state.archive,
+    mutateAsync: (id: string) => {
+      state.archive(id);
+      return Promise.resolve();
+    },
+  }),
+  useUnarchiveInbox: () => ({ mutateAsync: state.unarchive }),
   useMarkAllInboxRead: () => ({ mutate: state.markAllRead }),
-  useArchiveAllInbox: () => ({ mutate: state.archiveAll }),
-  useArchiveAllReadInbox: () => ({ mutate: state.archiveAllRead }),
-  useArchiveCompletedInbox: () => ({ mutate: state.archiveCompleted }),
+  useArchiveAllInbox: () => ({ mutateAsync: async () => (await state.archiveAll()) ?? { count: 1 } }),
+  useArchiveAllReadInbox: () => ({ mutateAsync: async () => (await state.archiveAllRead()) ?? { count: 1 } }),
+  useArchiveCompletedInbox: () => ({ mutateAsync: async () => (await state.archiveCompleted()) ?? { count: 1 } }),
   useMarkInboxRead: () => ({ mutate: state.markRead }),
   useMarkInboxUnread: () => ({ mutate: state.markUnread }),
   useUnsubscribeArchiveInbox: () => ({ mutate: state.unsubscribeArchive }),
@@ -135,7 +143,7 @@ function renderSection(
       </NavigationProvider>
     </QueryClientProvider>,
   );
-  return { ...result, nav };
+  return { ...result, nav, client };
 }
 
 const rows = () => Array.from(document.querySelectorAll<HTMLElement>("[data-inbox-row]"));
@@ -156,7 +164,7 @@ beforeEach(() => {
   }
   useSidebarTreeStore.setState({ inboxCollapsed: false, inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS });
   useInboxFilterStore.getState().clearFilters("ws-1");
-  useInboxSelectionStore.setState({ landing: null });
+  useInboxSelectionStore.setState({ landing: null, heldRows: {}, leftRowKeyByWorkspace: {} });
 });
 
 describe("InboxSection", () => {
@@ -396,6 +404,43 @@ describe("InboxSection", () => {
     expect(state.archive).toHaveBeenCalledWith("n1");
   });
 
+  it("opens the next row once the open one is archived from its row, and stays put for any other", () => {
+    const { nav } = renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Open one" }),
+        item({ id: "n2", issue_id: "issue-b", title: "Next one", created_at: "2026-11-09T08:00:00Z" }),
+        item({ id: "n3", issue_id: "issue-c", title: "Last one", created_at: "2026-11-08T08:00:00Z" }),
+      ],
+      "issue-a",
+    );
+    fireEvent.click(within(rows()[2]!).getByRole("button", { name: "Archive" }));
+    expect(state.archive).toHaveBeenCalledWith("n3");
+    expect(nav.push).not.toHaveBeenCalled();
+
+    fireEvent.click(within(rows()[0]!).getByRole("button", { name: "Archive" }));
+    expect(state.archive).toHaveBeenCalledWith("n1");
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-b");
+    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace["ws-1"]).toBe("issue-a");
+  });
+
+  it("says when the open row comes back once another window snoozed it, rather than that it was archived", async () => {
+    const open = item({ id: "n1", issue_id: "issue-a", title: "Open one" });
+    const other = item({ id: "n2", issue_id: "issue-b", title: "Other one", created_at: "2026-11-09T08:00:00Z" });
+    const { client } = renderSection([open, other], "issue-a");
+    const until = new Date(Date.now() + 26 * 60 * 60 * 1000).toISOString();
+    act(() => {
+      client.setQueryData(snoozedInboxOptions("ws-1").queryKey, [
+        { issue_id: "issue-a", item_id: "n1", snoozed_until: until, snoozed_at: new Date().toISOString(), updates: 0 },
+      ]);
+      client.setQueryData(["inbox", "ws-1", "list"], [other]);
+    });
+
+    const row = screen.getByRole("link", { name: /^Open one/ });
+    await waitFor(() => expect(row).toHaveTextContent(/Back .* · Leaves the Inbox when you move on/));
+    expect(row).toHaveAttribute("aria-current", "page");
+    expect(row).not.toHaveTextContent("Archived");
+  });
+
   it("caps the list at the chosen number of rows, with the rest behind Show more", () => {
     useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, limit: 5 } });
     renderSection(
@@ -490,6 +535,44 @@ describe("InboxSection", () => {
     expect(state.archiveCompleted).toHaveBeenCalledTimes(1);
     fireEvent.click(within(await open()).getByRole("menuitem", { name: "Archive all" }));
     expect(state.archiveAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the next row a bulk archive leaves when it takes the open one", async () => {
+    const { nav } = renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Open one", read: true }),
+        item({ id: "n2", issue_id: "issue-b", title: "Read one", read: true, created_at: "2026-11-09T08:00:00Z" }),
+        item({ id: "n3", issue_id: "issue-c", title: "Unread one", created_at: "2026-11-08T08:00:00Z" }),
+      ],
+      "issue-a",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all read" }));
+    expect(state.archiveAllRead).toHaveBeenCalledTimes(1);
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-c");
+  });
+
+  it("keeps the issue open with nothing lit once a bulk archive takes every row", async () => {
+    const { nav } = renderSection([item({ id: "n1", issue_id: "issue-a", title: "Open one" })], "issue-a");
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all" }));
+    expect(state.archiveAll).toHaveBeenCalledTimes(1);
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace["ws-1"]).toBe("issue-a");
+  });
+
+  it("keeps a bulk archive that spares the open row from moving it", async () => {
+    const { nav } = renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Open one" }),
+        item({ id: "n2", issue_id: "issue-b", title: "Read one", read: true, created_at: "2026-11-09T08:00:00Z" }),
+      ],
+      "issue-a",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all read" }));
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace["ws-1"]).toBeUndefined();
   });
 
   it("says a row is back from a snooze, with what arrived meanwhile, until it is read", () => {

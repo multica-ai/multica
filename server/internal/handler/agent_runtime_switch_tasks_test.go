@@ -53,6 +53,14 @@ func TestUpdateAgent_RuntimeSwitch_MovesPendingTasks(t *testing.T) {
 		"runtime_id": oldRuntimeID, "issue_id": issueID, "status": "running",
 		"dispatched_at": testutil.Raw("now()"), "started_at": testutil.Raw("now()"),
 	})
+	dispatchedID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": oldRuntimeID, "issue_id": dbfx.Issue(t, "dispatched during runtime switch"),
+		"status": "dispatched", "dispatched_at": testutil.Raw("now()"),
+	})
+	waitingID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": oldRuntimeID, "issue_id": issueID, "status": "waiting_local_directory",
+		"dispatched_at": testutil.Raw("now()"),
+	})
 	finishedID := dbfx.Task(t, agentID, testutil.Cols{
 		"runtime_id": oldRuntimeID, "issue_id": issueID, "status": "completed",
 		"completed_at": testutil.Raw("now()"),
@@ -63,12 +71,14 @@ func TestUpdateAgent_RuntimeSwitch_MovesPendingTasks(t *testing.T) {
 		t.Fatalf("switch runtime: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	got := taskRuntimes(t, queuedID, deferredID, runningID, finishedID)
+	got := taskRuntimes(t, queuedID, deferredID, runningID, dispatchedID, waitingID, finishedID)
 	want := map[string]string{
-		queuedID:   newRuntimeID,
-		deferredID: newRuntimeID,
-		runningID:  oldRuntimeID,
-		finishedID: oldRuntimeID,
+		queuedID:     newRuntimeID,
+		deferredID:   newRuntimeID,
+		runningID:    oldRuntimeID,
+		dispatchedID: oldRuntimeID,
+		waitingID:    oldRuntimeID,
+		finishedID:   oldRuntimeID,
 	}
 	for id, runtimeID := range want {
 		if got[id] != runtimeID {

@@ -18,6 +18,15 @@ import (
 // after commit. That single idempotent finalizer owns transcript messages,
 // attachment detachment and persisted draft restores for disconnected clients.
 func PrepareRuntimeAccessCancellation(ctx context.Context, qtx *db.Queries, tasks []db.AgentTaskQueue) ([]pgtype.UUID, error) {
+	taskIDs := make([]pgtype.UUID, 0, len(tasks))
+	for _, task := range tasks {
+		taskIDs = append(taskIDs, task.ID)
+	}
+	// Access revocation must not leave guidance able to create another run,
+	// including when its delivery acknowledgement arrives after cancellation.
+	if err := qtx.WithdrawChatTaskSupplementsByTasks(ctx, taskIDs); err != nil {
+		return nil, err
+	}
 	if err := SettleTerminalTaskState(ctx, qtx, tasks...); err != nil {
 		return nil, err
 	}

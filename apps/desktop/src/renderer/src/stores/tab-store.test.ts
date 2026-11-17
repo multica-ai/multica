@@ -999,7 +999,7 @@ describe("commitScrollMemento", () => {
     });
   });
 
-  it("REPLACES the route's entries — scrolling back to 0 clears the stale offset", () => {
+  it("clears a container captured at zero on both axes", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");
     const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
@@ -1007,14 +1007,56 @@ describe("commitScrollMemento", () => {
     store.commitScrollMemento(tabId, "/acme/issues", {
       list: { top: 500, height: 8000 },
     });
-    // User scrolled back to top before leaving: the capture has no entry
-    // for this container. The old 500 must not survive.
-    store.commitScrollMemento(tabId, "/acme/issues", {});
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      list: { top: 0, height: 8000 },
+    });
 
     expect(useTabStore.getState().byWorkspace.acme.tabs[0].memento).toEqual({
       scroll: {},
       view: {},
     });
+  });
+
+  it.each([
+    { top: 180, left: 320 },
+    { top: 180, left: 0 },
+    { top: 0, left: 320 },
+    { top: 0, left: 0 },
+  ])("updates only the captured container at %o", ({ top, left }) => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = getActiveTab(useTabStore.getState())!.id;
+    const otherTabId = store.openTab("/acme/inbox", "Inbox");
+    store.commitScrollMemento(otherTabId, "/acme/issues", {
+      board: { top: 50, height: 900 },
+    });
+    store.commitScrollMemento(tabId, "/acme/projects", {
+      board: { top: 70, height: 900 },
+    });
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      board: { top: 200, left: 640, height: 1000 },
+      list: { top: 400, height: 2000 },
+    });
+
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      board: { top, ...(left > 0 ? { left } : {}), height: 1000 },
+    });
+
+    const tabs = useTabStore.getState().byWorkspace.acme.tabs;
+    const scroll = tabs.find(t => t.id === tabId)!.memento.scroll;
+    expect(scroll["/acme/issues::board"]).toEqual(
+      top > 0 || left > 0
+        ? { top, ...(left > 0 ? { left } : {}), height: 1000 }
+        : undefined,
+    );
+    expect(scroll["/acme/issues::list"]).toEqual({ top: 400, height: 2000 });
+    expect(scroll["/acme/projects::board"]).toEqual({ top: 70, height: 900 });
+    expect(tabs.find(t => t.id === otherTabId)!.memento.scroll).toEqual({
+      "/acme/issues::board": { top: 50, height: 900 },
+    });
+    const before = useTabStore.getState().byWorkspace.acme;
+    store.commitScrollMemento(tabId, "/acme/issues", {});
+    expect(useTabStore.getState().byWorkspace.acme).toBe(before);
   });
 
   it("keeps other routes' entries when one route commits", () => {
@@ -1051,7 +1093,26 @@ describe("commitScrollMemento", () => {
     expect(useTabStore.getState().byWorkspace.acme).toBe(before);
   });
 
-  it("preserves view-state entries across a scroll REPLACE", () => {
+  it("writes when only the horizontal offset changed", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      board: { top: 0, height: 800, left: 300 },
+    });
+
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      board: { top: 0, height: 800, left: 900 },
+    });
+
+    expect(
+      useTabStore.getState().byWorkspace.acme.tabs[0].memento.scroll[
+        "/acme/issues::board"
+      ],
+    ).toEqual({ top: 0, height: 800, left: 900 });
+  });
+
+  it("preserves view-state entries when clearing a scroll offset", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");
     const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
@@ -1060,9 +1121,9 @@ describe("commitScrollMemento", () => {
       list: { top: 500, height: 8000 },
     });
 
-    // Scrolled back to 0 before leaving: REPLACE clears the route's scroll
-    // entries — but never its view-state entries.
-    store.commitScrollMemento(tabId, "/acme/inbox", {});
+    store.commitScrollMemento(tabId, "/acme/inbox", {
+      list: { top: 0, height: 8000 },
+    });
 
     expect(useTabStore.getState().byWorkspace.acme.tabs[0].memento).toEqual({
       scroll: {},

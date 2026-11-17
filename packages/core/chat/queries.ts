@@ -50,6 +50,11 @@ export const chatKeys = {
   draftRestoresAll: () => ["chat", "draft-restores"] as const,
   /** Durable deferred-cancellation draft restores for a session (#5219). */
   draftRestores: (sessionId: string) => [...chatKeys.draftRestoresAll(), sessionId] as const,
+  wakeupsAll: () => ["chat", "wakeups"] as const,
+  /** A conversation's wakeups: active ones plus those that ended recently. */
+  wakeups: (sessionId: string) => [...chatKeys.wakeupsAll(), sessionId] as const,
+  /** The caller's wakeups across their conversations in this workspace. */
+  myWakeups: (wsId: string) => [...chatKeys.all(wsId), "my-wakeups"] as const,
   /** Aggregate of in-flight chat tasks for the current user — FAB reads this. */
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
   /** Per-user pinned agents for the quick-agent bar. */
@@ -190,6 +195,25 @@ export function chatDraftRestoresOptions(sessionId: string) {
     queryFn: () => api.listChatDraftRestores(sessionId),
     enabled: !!sessionId,
     staleTime: 0,
+  });
+}
+
+/** Kept fresh by chat:wakeup_changed; the countdowns tick client-side. */
+export function chatWakeupsOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: chatKeys.wakeups(sessionId),
+    queryFn: () => api.listChatSessionWakeups(sessionId),
+    enabled: !!sessionId,
+    staleTime: Infinity,
+  });
+}
+
+export function myChatWakeupsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: chatKeys.myWakeups(wsId),
+    queryFn: () => api.listMyChatWakeups(),
+    enabled: !!wsId,
+    staleTime: Infinity,
   });
 }
 

@@ -38,7 +38,7 @@ import { useCommentUploads } from "./use-comment-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { api, dispatchReasonCode, errorCode } from "@multica/core/api";
 import { ReplyInput, type ReplyInputHandle } from "./reply-input";
-import { VirtualThreadRow } from "./virtual-thread-row";
+import { VirtualThreadRow, shouldVirtualizeThreadRows } from "./virtual-thread-row";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { AppCallChips } from "./app-call-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
@@ -1065,8 +1065,7 @@ function ReplyToQuote({ entry, onJump }: { entry: TimelineEntry; onJump?: (comme
   );
 }
 
-/** A run without a persisted reply still belongs to the agent, never its trigger author. */
-export function AgentRunComment({ run, standalone = false, commentProps, entering = false, replyTo, highlightedId, managedAnchor = false }: {
+type AgentRunCommentProps = {
   run: CommentRun;
   managedAnchor?: boolean;
   standalone?: boolean;
@@ -1076,7 +1075,33 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
   replyTo?: ReactNode;
   /** The flashed jump target: the slot's comment id, or the run's task id until it has one. */
   highlightedId?: string | null;
-}) {
+};
+
+function shallowEqual<T extends object>(a: T | undefined, b: T | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = Object.keys(a) as (keyof T)[];
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every((key) => Object.is(a[key], b[key]));
+}
+
+/**
+ * The timeline rebuilds `commentProps` on every render, so a plain shallow
+ * compare would never match. Its fields are the same stable values
+ * `CommentCard` already memoizes on; compare them one level down. Without
+ * this every agent reply on screen re-rendered on each Virtuoso range or
+ * height update — every frame of a sidebar toggle (MUL-9426).
+ */
+function agentRunCommentPropsEqual(prev: AgentRunCommentProps, next: AgentRunCommentProps): boolean {
+  const { commentProps: prevComment, ...prevRest } = prev;
+  const { commentProps: nextComment, ...nextRest } = next;
+  return shallowEqual(prevRest, nextRest) && shallowEqual(prevComment, nextComment);
+}
+
+/** A run without a persisted reply still belongs to the agent, never its trigger author. */
+export const AgentRunComment = memo(AgentRunCommentImpl, agentRunCommentPropsEqual);
+
+function AgentRunCommentImpl({ run, standalone = false, commentProps, entering = false, replyTo, highlightedId, managedAnchor = false }: AgentRunCommentProps) {
   const viewState = useInlineCommentRunState();
   const replyEntry = commentProps?.entry;
   // A deleted reply renders nothing in a run slot either (see CommentRow), so
@@ -1327,15 +1352,24 @@ function CommentCardImpl({
       && (run.anchorCommentId === entry.id || run.anchorCommentId === replyResolutionId)))
     : orderThreadWithRuns(entry, allNestedReplies, runs);
 
+  // Long threads mount replies on demand: many rows, or few rows carrying a
+  // lot of Markdown (MUL-9409). Short threads render inline, but through the
+  // same wrapper, so crossing the threshold never remounts a row (an open
+  // reply editor survives a new long report arriving).
+  const virtualizeRows = !!replyScrollParent && shouldVirtualizeThreadRows(
+    threadRows.map((row) => ("run" in row ? row.reply?.content : row.content)?.length ?? 0),
+  );
   const renderRows = () => threadRows.map((row) => {
-    if (!replyScrollParent || threadRows.length < 30) return renderThreadRow(row);
+    if (!replyScrollParent) return renderThreadRow(row);
     if (!("run" in row) && isDeletedComment(row)) return null;
     const anchorId = "run" in row
       ? (row.reply && !isDeletedComment(row.reply) ? row.reply.id : row.run.task.id)
       : row.id;
-    return <VirtualThreadRow key={anchorId} id={`comment-${anchorId}`}
+    // Keyed like the inline rows: a run slot keeps its task key when its reply
+    // arrives, so the slot (and its open activity panel) stays mounted.
+    return <VirtualThreadRow key={"run" in row ? row.run.task.id : row.id} id={`comment-${anchorId}`} virtualize={virtualizeRows}
       taskId={"run" in row ? row.run.task.id : undefined} scrollParent={replyScrollParent}>
-      {() => renderThreadRow(row, true)}
+      {() => renderThreadRow(row, virtualizeRows)}
     </VirtualThreadRow>;
   });
 

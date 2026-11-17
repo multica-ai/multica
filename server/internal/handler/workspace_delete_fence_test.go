@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -71,6 +72,9 @@ func TestTaskWriteFence_BlocksOnWorkspaceLockAlone(t *testing.T) {
 	}
 	ctx := context.Background()
 	f := newWorkspaceDeletePathFixture(t, "fenceonly")
+	// A bound agent ignores a stale runtime hint. With no binding, the hint
+	// remains the write's target, so this still isolates the runtime's fence.
+	unboundAgent := testutil.New(testPool, f.neighbourID, testUserID).Agent(t, "fence-runtime-only", "")
 
 	holder, err := testPool.Begin(ctx)
 	if err != nil {
@@ -106,7 +110,7 @@ func TestTaskWriteFence_BlocksOnWorkspaceLockAlone(t *testing.T) {
 	}
 
 	blockedEnqueue("enqueue via the victim's agent", f.victimAgent, f.neighbourRuntime, f.neighbourIssue)
-	blockedEnqueue("enqueue via the victim's runtime", f.neighbourAgent, f.victimRuntime, f.neighbourIssue)
+	blockedEnqueue("enqueue via the victim's runtime", unboundAgent, f.victimRuntime, f.neighbourIssue)
 	blockedEnqueue("enqueue via the victim's issue", f.neighbourAgent, f.neighbourRuntime, f.victimIssue)
 
 	// Reassignment onto the victim's runtime is fenced too.

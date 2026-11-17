@@ -25,6 +25,7 @@ import {
   Plus,
   Square,
   Trash2,
+  Type,
   Unlink,
   UserMinus,
   Zap,
@@ -132,6 +133,7 @@ export function IssueActionsMenuItems({
     openInDesktop,
     togglePin,
     copyLink,
+    copyTitleAsLink,
     openCreateSubIssue,
     openRename,
     openSetParent,
@@ -434,6 +436,10 @@ export function IssueActionsMenuItems({
       <P.Item onClick={copyLink}>
         <Link2 className="h-3.5 w-3.5" />
         {t(($) => $.actions.copy_link)}
+      </P.Item>
+      <P.Item onClick={copyTitleAsLink}>
+        <Type className="h-3.5 w-3.5" />
+        {t(($) => $.actions.copy_title_as_link)}
       </P.Item>
       {sidebar ? (
         <P.Item onClick={copyIdentifier}>

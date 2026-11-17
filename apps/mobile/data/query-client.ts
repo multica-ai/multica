@@ -32,6 +32,13 @@ export const queryClient = new QueryClient({
   },
 });
 
+// Match web/desktop: keep the previous inbox result on overload and let the
+// next event or refresh fetch again, without changing other queries' retries.
+queryClient.setQueryDefaults(["inbox"], {
+  retry: (failureCount, error) =>
+    (error as { status?: number } | null)?.status !== 503 && failureCount < 1,
+});
+
 // ── focusManager ← AppState ──────────────────────────────────────────
 // Foregrounding the app counts as "focus" → triggers refetchOnWindowFocus
 // for any stale queries the user is currently looking at.

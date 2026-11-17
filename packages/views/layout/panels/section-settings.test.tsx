@@ -65,10 +65,11 @@ describe("InboxSectionSettings", () => {
     fireEvent.click(screen.getByRole("button", { name: "Inbox display" }));
   }
 
-  it("shows each notification kind as delivered unless muted", () => {
+  it("shows each notification kind as delivered unless muted, status changes off by default", () => {
     open();
     expect(toggle("Comments")).not.toBeChecked();
     expect(toggle("Mentions")).toBeChecked();
+    expect(toggle("Status changes")).not.toBeChecked();
   });
 
   it("mutes a kind at write time through the notification preferences", () => {
@@ -77,10 +78,19 @@ describe("InboxSectionSettings", () => {
     expect(preferences.mutate).toHaveBeenCalledWith({ comments: "muted", mentions: "muted" }, expect.anything());
   });
 
-  it("drops a kind from the stored preferences when it is turned back on", () => {
+  it("turns a kind back on", () => {
     open();
     fireEvent.click(toggle("Comments"));
-    expect(preferences.mutate).toHaveBeenCalledWith({}, expect.anything());
+    expect(preferences.mutate).toHaveBeenCalledWith({ comments: "all" }, expect.anything());
+  });
+
+  it("turns status changes on", () => {
+    open();
+    fireEvent.click(toggle("Status changes"));
+    expect(preferences.mutate).toHaveBeenCalledWith(
+      { comments: "muted", status_changes: "all" },
+      expect.anything(),
+    );
   });
 
   it("turns off the section count and the Work badge", () => {

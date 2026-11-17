@@ -298,7 +298,7 @@ multica runtime profile create --display-name "Wrapper Claude interne" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` enregistre le profil courant pour qu'il démarre à l'ouverture de session ; les différences entre plateformes sont décrites dans [Démarrage à l'ouverture de session](/daemon-runtimes#autostart). `runtime usage` couvre 90 jours par défaut, et `--days` va jusqu'à 365. `runtime update` demande au daemon de cette machine de mettre sa CLI à jour vers la version indiquée ; `--wait` attend la fin de la mise à jour et renvoie un code de sortie non nul si elle échoue ou expire, ou si l’attente elle-même expire. `runtime profile create` indique l'outil compatible avec `--runtime-type` (l'ancien `--protocol-family` fonctionne encore) ; les arguments fixes ne se définissent pour l'instant que dans l'application web.
+`daemon autostart` enregistre le profil courant pour qu'il démarre à l'ouverture de session ; les différences entre plateformes sont décrites dans [Démarrage à l'ouverture de session](/daemon-runtimes#autostart). `runtime usage` couvre 90 jours par défaut, et `--days` va jusqu'à 365. `runtime update` demande au daemon de cette machine de mettre sa CLI à jour vers la version indiquée ; `--wait` attend la fin de la mise à jour et renvoie un code de sortie non nul si elle échoue ou expire, ou si l’attente elle-même expire. `runtime profile create` indique l'outil compatible avec `--runtime-type` (l'ancien `--protocol-family` fonctionne encore) ; les arguments fixes ne se définissent pour l'instant que dans l'application web. `runtime profile create` lie le profil à cette machine par défaut ; utilisez `--daemon-id <id>` pour choisir une autre machine locale enregistrée. Pour lier un ancien profil, utilisez `multica runtime profile update <profile-id> --daemon-id <id>`.
 
 La suppression d'un runtime auquel des agents actifs sont encore liés est refusée par défaut. `multica runtime delete <id> --cascade` dissocie ces agents, préserve leur configuration et leur historique, et annule leurs exécutions actives.
 
@@ -335,12 +335,57 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 - Le `--context` d'un espace de travail est fourni à tous ses agents. `--slug` ne peut plus être modifié après la création. `--issue-prefix` est mis en majuscules ; le changer renumérote toutes les tâches existantes, et les anciens identifiants cités ailleurs ne mènent plus nulle part.
 - `--issue-title-template` ne remplace que `{{date}}` (UTC, `YYYY-MM-DD`) et refuse tout autre `{{...}}`. Le `--timezone` d'un déclencheur planifié vaut UTC par défaut.
 
+### Filtres d'événements webhook [#webhook-event-filters]
+
+Utilisez `--event-filters-file` avec `autopilot trigger-add` ou `trigger-update` pour configurer les filtres d'événements et d'actions d'un déclencheur webhook. Enregistrez un tableau JSON non vide dans `filters.json` :
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+Chaque ligne peut aussi contenir des `conditions`, avec les mêmes règles sur la charge utile que dans l’application. Par exemple, cette règle accepte les pull requests non brouillon ciblant `main` :
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+Chaque règle accepte au maximum 20 conditions. Un chemin est limité à 256 caractères et une liste `in` à 100 valeurs. La création ou la modification d’un déclencheur avec une condition trop longue renvoie HTTP 400.
+
+Cet exemple accepte les soumissions de revues de PR et tous les événements push. Omettre `actions` ou fournir un tableau d'actions vide accepte toutes les actions de cet événement.
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-list <autopilot-id> --full-id
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+Lors d'une mise à jour, le fichier remplace toute la liste des filtres. Omettre les deux options de filtrage conserve les filtres enregistrés, même lors d'un changement de libellé ou de l'activation/désactivation du déclencheur. `autopilot get` renvoie les filtres dans le tableau `triggers` au niveau racine.
+
+Pour supprimer tous les filtres et accepter tous les événements, utilisez l'option réservée à la mise à jour :
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` et `--event-filters-file` ne peuvent pas être combinés. Un fichier dont la valeur racine est `null` ou un tableau vide, ou qui contient des champs inconnus, un JSON invalide ou des noms d'événement/d'action vides ou composés uniquement d'espaces, est refusé. Ces options ne s'appliquent qu'aux déclencheurs webhook ; en créer un sans fichier de filtres accepte tous les événements. Voir [Automatisations](/autopilots#filtres-dévénements) pour la correspondance des événements entrants.
+
 ## Vue d'ensemble des commandes
 
 | Commande | Rôle |
 | --- | --- |
 | `issue` | Créer, mettre à jour, assigner et rechercher des tâches ; gérer les commentaires, les abonnés, les étiquettes, les propriétés, les réveils, la chronologie et les exécutions |
 | `project` | Gérer les projets et leurs ressources |
+| `inbox` | Lire vos notifications sans modifier leur état lu |
 | `label`, `property` | Gérer les étiquettes et les propriétés personnalisées de l'espace de travail |
 | `view` | Lire les vues enregistrées et lister les tâches qu'une vue affiche |
 | `agent`, `skill`, `squad` | Gérer les agents, les skills et les squads |
@@ -453,7 +498,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `env get/set <agent-id>` | Lire et écrire les variables d'environnement personnalisées (propriétaire de l'agent ou owner/admin de l'espace de travail ; chaque lecture est enregistrée) | `set` : `--custom-env` / `--custom-env-file` / `--custom-env-stdin` ; remplace l'ensemble, et les clés dont la valeur est `****` gardent leur valeur |
 | | `skills list/set/add <agent-id>` | Gérer les skills rattachés | `--skill-ids` (`set` remplace toute la liste, `add` ajoute à la suite) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | Assigner des serveurs MCP de l'espace de travail à cet agent | Récupérez l'ID du serveur avec `workspace mcp list`. Une entrée de la bibliothèque n'a aucun effet tant qu'elle n'est pas ajoutée ici ; `disable` cesse de l'envoyer sans supprimer l'assignation |
-| `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--agent`, `--mode` (tous obligatoires), `--description`, `--issue-title-template`, `--project`, `--subscriber` (répétable) |
+| `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--mode` (obligatoires), exactement une option parmi `--agent` / `--squad` / `--squad-id` (obligatoire), `--description`, `--issue-title-template`, `--project`, `--subscriber` (répétable) |
 | | `trigger <id>` | Déclencher une exécution manuellement | |
 | | `runs <id>` | Afficher l'historique des exécutions | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Gérer les déclencheurs de planification et webhook | `trigger-add` : `--kind` (`schedule` ou `webhook`), `--cron`, `--timezone` (UTC par défaut), `--label` |
@@ -470,6 +515,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `member list/add/set-role/remove` | Gérer les membres d'un squad | |
 | | `activity <issue-id> <outcome>` | Enregistrer une évaluation du chef | |
 | `chat` | `history`, `thread [id]` | Lire la session de messagerie externe qu'un agent traite actuellement | `--limit`, `--before` |
+| `inbox` | `list` | [Lire vos notifications actives](/inbox) sans les marquer comme lues | `--project`, `--type`, `--output` (`table` ou `json`) ; filtres locaux |
 
 ### Runtime
 

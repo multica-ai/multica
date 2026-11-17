@@ -575,6 +575,7 @@ func TestDelegatedTier_ChildCompletionDeliversExactlyOnce(t *testing.T) {
 	bus := events.New()
 
 	agentID, runtimeID := firstFixtureAgent(t)
+	enableStatusChanges(t, testUserID)
 	parentID := createTestIssue(t, testWorkspaceID, testUserID)
 	t.Cleanup(func() { cleanupTestIssue(t, parentID) })
 

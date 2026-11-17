@@ -613,6 +613,9 @@ func TestGetConfigDeclaresAgentConversationStartersSupport(t *testing.T) {
 	if !cfg.AgentConversationStartersSupported {
 		t.Fatal("this build persists conversation_starters but does not advertise the contract")
 	}
+	if !cfg.WebhookPayloadConditionsSupported {
+		t.Fatal("this build must declare webhook payload condition support")
+	}
 	var raw map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode raw config: %v", err)

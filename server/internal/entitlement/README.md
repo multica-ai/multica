@@ -7,8 +7,7 @@ switches.
 
 Production wiring has one boundary: setting `MULTICA_CLOUD_URL` connects this
 consumer as well as the other managed Cloud clients. An empty URL performs no
-HTTP request, issue creation does not count rows, and the autopilot consumer
-does not access its quota tables. Self-hosted deployments therefore retain the
+HTTP request and the autopilot consumer does not access its quota tables. Self-hosted deployments therefore retain the
 unlimited paths. Request timeout and stale grace use bounded code defaults
 instead of deployment configuration.
 
@@ -40,14 +39,13 @@ The client reads:
   period. A malformed notification policy is ignored without invalidating an
   otherwise valid enforcement gate.
 
-Deploy Cloud policy revision 2 before the Multica consumer. The consumer treats
-a missing notification policy as notices-disabled while continuing to enforce
-the quota. The reverse order is safe because older consumers ignore the
-additive notification fields.
+No deployment order is required for the optional notification policy. The
+consumer treats a missing policy as notices-disabled while continuing to
+enforce the quota.
 
-Responses tolerate unknown JSON fields for additive compatibility. Unknown
-schema/action, malformed fields, missing gates, HTTP failures, and timeouts fail
-open.
+Responses tolerate unknown JSON fields and gates for additive compatibility.
+Unknown schema/action, malformed fields, a missing `autopilot_runs` gate, HTTP
+failures, and timeouts fail open.
 
 ## Cache and degradation
 
@@ -62,27 +60,7 @@ cached `enforce` is downgraded to `observe`; after the grace, the result is
 also bounds Cloud request rate when an outage returns errors immediately; cold
 failures are cached only as `off` and never as policy.
 
-## Issue count limit
-
-The `issue_count` gate limits the total number of rows in a workspace's
-`issue` table. It does not use `workspace.issue_counter`: that counter only
-allocates monotonically increasing display numbers, while deleting an issue
-must release one unit of capacity.
-
-Issue creation resolves the Cloud instruction before opening a transaction.
-Inside the transaction, incrementing the workspace issue counter locks the
-workspace row, serializing concurrent admission; a bounded `CountIssuesUpTo`
-read then admits only when the current row count is below Cloud's limit. A
-blocked create rolls back the counter increment with the rest of the
-transaction. The usage read is also bounded and samples at most `limit + 1`
-rows, with overflow protection for the maximum integer limit.
-
-Entitlement lookup, refresh, expiry, and policy-validation failures are
-fail-open: the consumer skips the count and issue creation proceeds. The local
-`observe` degradation is likewise normalized to `off` by this consumer; the
-shared entitlement decision metric still records the stale observation. Once
-a valid `enforce` instruction enters the transaction, ordinary database errors
-still abort that transaction rather than creating a partially persisted issue.
+## Autopilot quota
 
 The client itself has no background goroutine and introduces no startup
 dependency; the autopilot consumer owns its policy-neutral accounting and

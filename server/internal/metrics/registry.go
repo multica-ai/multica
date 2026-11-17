@@ -21,6 +21,7 @@ type RegistryOptions struct {
 }
 
 type Registry struct {
+	InboxRead    *InboxReadMetrics
 	Gatherer     prometheus.Gatherer
 	HTTP         *HTTPMetrics
 	Business     *BusinessMetrics
@@ -41,6 +42,9 @@ func NewRegistry(opts RegistryOptions) *Registry {
 	}, []string{"version", "commit"})
 	buildInfo.WithLabelValues(defaultLabel(opts.Version, "dev"), defaultLabel(opts.Commit, "unknown")).Set(1)
 	reg.MustRegister(buildInfo)
+
+	inboxRead := NewInboxReadMetrics()
+	reg.MustRegister(inboxRead.Collectors()...)
 
 	httpMetrics := NewHTTPMetrics()
 	reg.MustRegister(httpMetrics.Collectors()...)
@@ -70,6 +74,7 @@ func NewRegistry(opts RegistryOptions) *Registry {
 	}
 
 	return &Registry{
+		InboxRead:    inboxRead,
 		Gatherer:     reg,
 		HTTP:         httpMetrics,
 		Business:     businessMetrics,

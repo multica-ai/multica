@@ -127,6 +127,9 @@ export function pendingRuntimesForProfiles({
       .filter((profileId): profileId is string => !!profileId),
   );
   const pendingRuntimes = pendingProfiles
+    .filter(
+      ({ profile }) => !!localDaemonId && profile.daemon_id === localDaemonId,
+    )
     .filter(({ profile }) => !registeredProfileIds.has(profile.id))
     .map(({ profile, createdAt }) =>
       pendingRuntimeFromProfile({

@@ -72,7 +72,10 @@ func TestNotification_CurrentMembership(t *testing.T) {
 				payload := map[string]any{"issue_id": issueID, "issue_title": issue.Title, "issue_status": issue.Status}
 				expectedType := "mentioned"
 				content := "[@Recipient](mention://member/" + recipient + ")"
-				if source == "description squad created" || source == "description squad updated" || source == "comment squad" {
+				// An @squad mention only triggers the squad leader; the squad's
+				// human members get no inbox row, current or removed.
+				squadSource := source == "description squad created" || source == "description squad updated" || source == "comment squad"
+				if squadSource {
 					agent := fx.Agent(t, "Leader", "")
 					squad := fx.Squad(t, "Squad", agent)
 					fx.SquadMember(t, squad, "member", recipient)
@@ -130,6 +133,7 @@ func TestNotification_CurrentMembership(t *testing.T) {
 						fx.Cleanup(t, `DELETE FROM issue_subscriber WHERE issue_id = $1`, subscriberIssue)
 					}
 					addTestSubscriber(t, subscriberIssue, "member", recipient, "manual")
+					enableStatusChanges(t, recipient)
 					e.Type = protocol.EventIssueUpdated
 					issue.Status = "done"
 					payload["issue"], payload["status_changed"], payload["prev_status"] = issue, true, "todo"
@@ -162,7 +166,7 @@ func TestNotification_CurrentMembership(t *testing.T) {
 				e.Payload = payload
 				bus.Publish(e)
 				want := 1
-				if removed {
+				if removed || squadSource {
 					want = 0
 				}
 				if n := fx.Count(t, `SELECT count(*) FROM inbox_item WHERE workspace_id = $1 AND recipient_id = $2`, testWorkspaceID, recipient); n != want {
@@ -173,6 +177,60 @@ func TestNotification_CurrentMembership(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// A comment that @-mentions both a squad and one of its human members
+// notifies that member exactly once, as a direct mention.
+func TestNotification_SquadAndMemberMention(t *testing.T) {
+	fx := workspaceFixture(t)
+	recipient := fx.User(t, "Recipient", "squad-and-member-recipient@example.test")
+	fx.Member(t, testWorkspaceID, recipient, "member")
+	issueID := fx.Issue(t, "Squad and member mention")
+	commentID := fx.Comment(t, issueID, "Original comment")
+	fx.Cleanup(t, `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
+	fx.Cleanup(t, `DELETE FROM issue_subscriber WHERE issue_id = $1`, issueID)
+	squad := fx.Squad(t, "Squad", fx.Agent(t, "Leader", ""))
+	fx.SquadMember(t, squad, "member", recipient)
+
+	bus := events.New()
+	registerNotificationListeners(bus, db.New(testPool))
+	content := "[@Squad](mention://squad/" + squad + ") [@Recipient](mention://member/" + recipient + ")"
+	bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue_id": issueID, "issue_title": "Squad and member mention", "issue_status": "todo",
+			"comment": handler.CommentResponse{ID: commentID, IssueID: issueID, AuthorType: "member", AuthorID: testUserID, Content: content},
+		},
+	})
+
+	rows, err := testPool.Query(context.Background(),
+		`SELECT type, details FROM inbox_item WHERE issue_id = $1 AND recipient_id = $2`, issueID, recipient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var typ string
+		var details []byte
+		if err := rows.Scan(&typ, &details); err != nil {
+			t.Fatal(err)
+		}
+		var d struct {
+			MentionVia string `json:"mention_via"`
+		}
+		_ = json.Unmarshal(details, &d)
+		got = append(got, typ+"/"+d.MentionVia)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "mentioned/member" {
+		t.Fatalf("inbox rows = %v, want [mentioned/member]", got)
 	}
 }
 
