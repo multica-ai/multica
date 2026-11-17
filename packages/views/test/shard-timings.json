@@ -521,7 +521,6 @@
     "settings/components/code-tab.test.tsx": 1694,
     "settings/components/code-vcs.test.tsx": 1734,
     "settings/components/composio-tab.test.tsx": 769,
-    "settings/components/connected-apps-tab.test.tsx": 1289,
     "settings/components/delete-workspace-dialog.test.tsx": 1228,
     "settings/components/dingtalk-tab.test.tsx": 1469,
     "settings/components/issue-statuses-tab.test.tsx": 3724,

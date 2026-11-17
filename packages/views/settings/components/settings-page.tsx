@@ -34,7 +34,7 @@ import {
 } from "@multica/core/feature-flags";
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
-import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
+import { movedAppsHref, resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { AppLink, useNavigation } from "../../navigation";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
@@ -44,7 +44,8 @@ import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
 import { ChannelsTab } from "./channels-tab";
-import { ConnectedAppsTab, useComposioAvailable } from "./connected-apps-tab";
+import { ConnectedAccountsTab } from "./connected-accounts-tab";
+import { useComposioAvailable } from "../../common/use-composio-available";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { WorkflowsTab } from "../../workflows/workflows-tab";
@@ -185,6 +186,16 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               ? [entry("voice-input", t(($) => $.page.tabs.voice_input), Mic, <VoiceInputTab />)]
               : []),
             entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
+            ...(appsAvailable
+              ? [
+                  entry(
+                    "connected-accounts",
+                    t(($) => $.page.tabs.connected_accounts),
+                    Plug,
+                    <ConnectedAccountsTab />,
+                  ),
+                ]
+              : []),
           ],
         },
       ],
@@ -254,9 +265,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               MessagesSquare,
               <ChannelsTab />,
             ),
-            ...(appsAvailable
-              ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)]
-              : []),
             entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
               adminOnly: true,
             }),
@@ -288,10 +296,14 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   // Wakeup defaults moved to the issue wakeups list; old links land there.
   const wakeupsMoved = location.tab === "wakeups";
   const wakeupsTarget = wakeupsHref(paths.autopilots());
+  // The workspace's apps moved to their own page.
+  const appsMoved = location.tab === "apps";
+  const appsTarget = movedAppsHref(paths.apps(), navigation.searchParams);
   const { replace } = navigation;
   useEffect(() => {
     if (wakeupsMoved) replace(wakeupsTarget);
-  }, [wakeupsMoved, wakeupsTarget, replace]);
+    else if (appsMoved) replace(appsTarget);
+  }, [wakeupsMoved, wakeupsTarget, appsMoved, appsTarget, replace]);
   const candidate =
     location.tab === "billing" && !billingEnabled ? "workspace" : location.tab;
   const active =

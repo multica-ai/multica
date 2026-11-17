@@ -38,7 +38,7 @@ export const OBJECT_PAGE_BODY =
   "mx-auto w-full max-w-[var(--object-page-max-width,760px)] px-[var(--space-lg,1.5rem)] py-[var(--space-xl,2rem)]";
 
 /** What an object page shows, as themes see it on `data-type`. */
-export type ObjectPageType = "project" | "agent" | "squad" | "runtime" | "member" | "autopilot" | "skill";
+export type ObjectPageType = "project" | "agent" | "squad" | "runtime" | "member" | "autopilot" | "skill" | "app";
 
 interface ObjectPageProps {
   type: ObjectPageType;

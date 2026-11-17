@@ -105,7 +105,8 @@
     "app_action_requested": "Necesita tu confirmación",
     "app_action_reminder": "La confirmación caduca pronto",
     "app_connect_requested": "Conectar una aplicación",
-    "app_action_result": "Resultado de la acción de la aplicación"
+    "app_action_result": "Resultado de la acción de la aplicación",
+    "app_team_requested": "Cuenta del equipo solicitada"
   },
   "labels": {
     "set_status_to": "Establecer estado en",

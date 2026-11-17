@@ -25,6 +25,7 @@ import {
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { runtimeDisplayName } from "@multica/core/runtimes";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { appCatalogOptions } from "@multica/core/connected-apps";
 import {
   inboxListOptions,
   archivedInboxPagesOptions,
@@ -70,6 +71,7 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
   "member",
   "squad",
   "skill",
+  "app",
   "machine",
   "runtime",
 ]);
@@ -148,6 +150,7 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
   const squads = useQuery({ ...squadListOptions(wsId), enabled: false }).data;
   const runtimes = useQuery({ ...runtimeListOptions(wsId), enabled: false }).data;
   const sessions = useQuery({ ...chatSessionsOptions(wsId), enabled: false }).data;
+  const appCatalog = useQuery({ ...appCatalogOptions(wsId), enabled: false }).data;
 
   const data: ResolvedTabEntityData = {};
   switch (subject.kind) {
@@ -171,6 +174,11 @@ function useTabEntityData(subject: TabSubject, wsId: string, fetch: boolean): Re
     case "skill":
       if (skill) data.skill = { name: skill.name };
       break;
+    case "app": {
+      const name = appCatalog?.apps.find((a) => a.slug === subject.slug)?.name;
+      if (name) data.app = { name };
+      break;
+    }
     case "actor": {
       const name =
         subject.actorType === "agent"

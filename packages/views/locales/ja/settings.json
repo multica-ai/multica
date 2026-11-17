@@ -579,6 +579,7 @@
       "issue": "タスク",
       "notifications": "通知",
       "tokens": "API トークン",
+      "connected_accounts": "接続済みアカウント",
       "general": "一般",
       "github": "GitHub",
       "labs": "ラボ",
@@ -592,7 +593,6 @@
       "billing": "請求とプラン",
       "code": "コード",
       "channels": "メッセージング",
-      "apps": "接続済みアプリ",
       "workflows": "ワークフロー",
       "voice_input": "音声入力"
     },
@@ -1637,6 +1637,7 @@
   "layout": {
     "scope": {
       "account": "アカウント · 全デバイスで同期",
+      "all_workspaces": "すべてのワークスペース",
       "device": "このデバイスのみ",
       "device_workspace": "このデバイスのみ · {{name}}",
       "workspace": "{{name}} ワークスペース",
@@ -1726,21 +1727,8 @@
     "authorization_expired": "WeChatの認証が失効しました。もう一度スキャンして接続してください。"
   },
   "connected_apps": {
-    "description": "エージェントが外部アプリを操作するアカウントです。許可された操作はすぐに実行されます。",
     "loading": "アプリを読み込み中…",
     "load_failed": "アプリを読み込めませんでした。",
-    "team_title": "チームアカウント",
-    "team_description": "サポート用メールや会社の GitHub など、ワークスペースが所有する共有アカウントです。管理者が接続し、チームアカウントを付与されたエージェントはその名義で操作します。",
-    "team_empty": "チームアカウントはまだありません。",
-    "team_empty_member": "チームアカウントはまだありません。ワークスペース管理者に接続を依頼してください。",
-    "personal_title": "自分のアカウント",
-    "personal_description": "あなた自身のアカウントです。あなたが起動した実行では、「起動した人のアカウント」に設定されたアプリがこれを使います。",
-    "personal_empty": "まだアカウントを接続していません。",
-    "connected_by": "{{name}} が接続",
-    "last_used": "最終使用 {{when}}",
-    "last_used_never": "未使用",
-    "used_by_other": "{{count}} 個のエージェントが使用",
-    "expired": "再接続が必要",
     "reconnect": "再接続",
     "rules": "ルール",
     "activity": "アクティビティ",
@@ -1763,7 +1751,6 @@
       "recommended_personal": "通常は個人アカウント",
       "connect_team": "チームアカウントを接続",
       "connect_personal": "自分のアカウントを接続",
-      "connecting": "接続中…",
       "connected": "接続済み",
       "connect": "接続",
       "team_description": "ワークスペース共有のアカウントを接続します。利用するエージェントは、各エージェントの「アプリ」で設定します。",
@@ -1782,9 +1769,14 @@
     },
     "disconnect_personal": {
       "title": "あなたの {{app}} アカウントの接続を解除しますか？",
-      "description": "あなたが起動した実行では使えなくなります。後で再接続できます。",
+      "description": "参加しているすべてのワークスペースから削除されます。",
+      "agents": "次のエージェントは再接続を求めます",
+      "no_agents": "使用しているエージェントはありません。",
+      "uses_it": "自分が開始した実行で使用",
+      "running": "実行中 — 停止されます",
+      "impact_failed": "使用しているエージェントを確認できませんでした。",
       "cancel": "キャンセル",
-      "confirm": "接続を解除"
+      "confirm": "すべての接続を解除"
     },
     "detail": {
       "team_title": "{{app}} · チームアカウント",
@@ -1834,6 +1826,25 @@
     "scopes": {
       "team": "チームアカウント",
       "personal": "起動した人のアカウント"
+    },
+    "status": {
+      "connected": "接続済み",
+      "expired": "ログインの有効期限切れ",
+      "needs_your_account": "自分のアカウントが必要",
+      "no_team_account": "チームアカウント未接続"
+    },
+    "disclosure": {
+      "title": "{{app}} を接続",
+      "personal_subtitle": "自分のアカウントです。次の画面でアプリにログインします。",
+      "team_subtitle": "ワークスペース全体で共有するチームアカウントです。次の画面でアプリにログインします。",
+      "without_asking": "エージェントが毎回確認せずに実行できること",
+      "logged": "エージェントの呼び出しはすべて、実行元のタスクまたはチャットに記録されます。",
+      "used_by": "{{agents}} が {{app}} を使用しており、このアカウントとして操作します。",
+      "used_by_none": "このアプリを使用しているエージェントはまだありません。エージェントのページから追加できます。",
+      "visibility_personal": "自分が開始した実行でのみ使われます。他のワークスペースでも使えます。",
+      "visibility_team": "チームアカウントを割り当てられたエージェントは、誰が実行を開始してもこのアカウントとして操作します。",
+      "cancel": "キャンセル",
+      "continue": "続ける"
     },
     "levels": {
       "read": "読み取りのみ",
@@ -1904,6 +1915,77 @@
       "cancel": "キャンセル",
       "admin_required": "ワークスペース管理者が制限を解除できます。",
       "account_link": "このアカウントには保存済みの操作制限があります。接続済みアプリで解除してください。"
+    },
+    "hub": {
+      "description": "{{workspace}} のエージェントが使えるすべてのアプリと、使用するアカウント。",
+      "tabs": {
+        "in_use": "使用中",
+        "attention": "要対応",
+        "all": "すべてのアプリ"
+      },
+      "search": "アプリを検索",
+      "popular": "{{workspace}} で人気",
+      "scope_team": "チームアカウント",
+      "scope_personal": "個人アカウント",
+      "scope_both": "チームと個人のアカウント",
+      "used_by": "{{agents}} が使用中",
+      "wanted_by": "{{agents}} が使用を希望",
+      "asked_by": "{{names}} が依頼",
+      "members_asked_other": "{{count}} 人のメンバーが依頼",
+      "set_up": "設定",
+      "connect": "接続",
+      "reconnect": "再接続",
+      "ask_admin": "管理者に依頼",
+      "requested": "依頼済み",
+      "toast_requested": "ワークスペース管理者に {{app}} の接続を依頼しました。",
+      "empty_in_use": "使用中のアプリはまだありません。アプリを設定すると、エージェントが使えるようになります。",
+      "empty_attention": "対応が必要なものはありません。",
+      "no_matches": "検索に一致するアプリはありません。",
+      "unavailable": "このサーバーではアプリを利用できません。",
+      "retry": "再試行"
+    },
+    "app_page": {
+      "agents_title": "エージェント",
+      "agents_empty": "このワークスペースにはまだエージェントがいません。",
+      "source_label": "{{agent}} が {{app}} で使うアカウント",
+      "source_team": "チームアカウント",
+      "source_personal": "実行を開始した人の個人アカウント",
+      "not_using": "{{app}} を使用しない",
+      "enable": "{{agent}} に {{app}} の使用を許可",
+      "team_admin_only": "チームアカウントのアクセスを変更できるのはワークスペース管理者のみです。",
+      "save_failed": "エージェントを更新できませんでした。",
+      "activity_title": "最近のアクティビティ",
+      "activity_empty": "まだ {{app}} を使用したエージェントはありません。",
+      "as_team": "チームアカウントとして",
+      "as_you": "あなたとして",
+      "in_chat": "チャット",
+      "accounts_title": "アカウント",
+      "your_account": "自分のアカウント",
+      "team_account": "チームアカウント",
+      "not_connected": "未接続",
+      "account_actions": "{{account}}の操作",
+      "dismiss": "却下",
+      "toast_dismissed": "依頼を却下しました",
+      "capabilities_title": "エージェントができること",
+      "capabilities_note": "毎回確認せずに実行できます。"
+    },
+    "accounts_page": {
+      "description": "他のアプリにある自分のアカウントです。参加しているすべてのワークスペースで使えます。エージェントは自分が開始した実行でのみ使用し、他の人は使えません。",
+      "waiting_title": "対応待ち",
+      "waiting_description": "自分のアカウントが必要で停止しているエージェント。",
+      "needs_on_issue": "{{agent}} が {{issue}} で {{app}} のアカウントを必要としています",
+      "needs_in_chat": "{{agent}} がチャットで {{app}} のアカウントを必要としています",
+      "open_issue": "タスクを開く",
+      "open_chat": "チャットを開く",
+      "connect_app": "{{app}} を接続",
+      "reconnect_app": "{{app}} を再接続",
+      "accounts_title": "アカウント",
+      "accounts_description": "エージェントに求められる前に接続することも、タスクで求められたときに接続することもできます。",
+      "connect_account": "アカウントを接続",
+      "empty": "接続しているアカウントはありません。",
+      "used_by": "{{agents}} が使用中",
+      "actions": "{{app}} の操作",
+      "footer": "アカウントの接続を解除すると、すべてのワークスペースから削除されます。エージェントは次に必要になったときに再度求めます。"
     }
   },
   "voice_input": {
