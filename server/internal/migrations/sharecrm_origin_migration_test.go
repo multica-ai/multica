@@ -200,3 +200,168 @@ func assertShareCRMOriginRejected(t *testing.T, ctx context.Context, conn *pgx.C
 		t.Fatalf("insert sharecrm_chat under pre-ShareCRM constraint: got %v, want check violation", err)
 	}
 }
+
+func TestStuckUpstream667RestoresExistingOrigins(t *testing.T) {
+	ctx, conn := openOriginFixture(t, "sharecrm_origin_stuck_667")
+
+	if _, err := conn.Exec(ctx, `
+		CREATE TABLE issue (id UUID PRIMARY KEY, origin_type TEXT NULL);
+		ALTER TABLE issue ADD CONSTRAINT issue_origin_type_check
+			CHECK (origin_type IN (
+				'autopilot', 'quick_create', 'lark_chat', 'slack_chat', 'agent_create',
+				'dingtalk_chat', 'wecom_chat', 'telegram_chat', 'sharecrm_chat',
+				'custom_origin', 'weird''origin'
+			));
+	`); err != nil {
+		t.Fatalf("create pre-upgrade issue table: %v", err)
+	}
+	for _, row := range []struct{ id, origin string }{
+		{"00000000-0000-4000-8000-000000000021", "sharecrm_chat"},
+		{"00000000-0000-4000-8000-000000000022", "custom_origin"},
+		{"00000000-0000-4000-8000-000000000023", "weird'origin"},
+	} {
+		if _, err := conn.Exec(ctx, `INSERT INTO issue (id, origin_type) VALUES ($1, $2)`, row.id, row.origin); err != nil {
+			t.Fatalf("insert %s: %v", row.origin, err)
+		}
+	}
+
+	// The 667 file an earlier checkout of this PR already committed: weixin
+	// only, NOT VALID, so existing rows remain and new ShareCRM writes fail.
+	if _, err := conn.Exec(ctx, `
+		ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_origin_type_check;
+		ALTER TABLE issue ADD CONSTRAINT issue_origin_type_check
+			CHECK (origin_type IN (
+				'autopilot', 'quick_create', 'lark_chat', 'slack_chat', 'agent_create',
+				'dingtalk_chat', 'wecom_chat', 'telegram_chat', 'weixin_chat'
+			))
+			NOT VALID;
+	`); err != nil {
+		t.Fatalf("apply already-committed upstream 667: %v", err)
+	}
+	assertShareCRMOriginRejected(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000024")
+
+	applyMigrationFile(t, ctx, conn.Conn(), "668_issue_origin_weixin_chat_validate.up.sql")
+	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), true, true, true)
+	for _, row := range []struct{ id, origin string }{
+		{"00000000-0000-4000-8000-000000000021", "sharecrm_chat"},
+		{"00000000-0000-4000-8000-000000000022", "custom_origin"},
+		{"00000000-0000-4000-8000-000000000023", "weird'origin"},
+	} {
+		assertIssueOrigin(t, ctx, conn.Conn(), row.id, row.origin)
+	}
+	for _, row := range []struct{ id, origin string }{
+		{"00000000-0000-4000-8000-000000000025", "sharecrm_chat"},
+		{"00000000-0000-4000-8000-000000000026", "weixin_chat"},
+		{"00000000-0000-4000-8000-000000000027", "custom_origin"},
+		{"00000000-0000-4000-8000-000000000028", "weird'origin"},
+	} {
+		if _, err := conn.Exec(ctx, `INSERT INTO issue (id, origin_type) VALUES ($1, $2)`, row.id, row.origin); err != nil {
+			t.Fatalf("insert %s after 668 repair: %v", row.origin, err)
+		}
+	}
+
+	applyMigrationFile(t, ctx, conn.Conn(), "673_issue_origin_sharecrm_chat.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "674_issue_origin_sharecrm_chat_validate.up.sql")
+	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), true, true, true)
+	if !originAllowed(t, ctx, conn.Conn(), "custom_origin") || !originAllowed(t, ctx, conn.Conn(), "weird'origin") {
+		t.Fatal("repair lost an origin that still had rows")
+	}
+}
+
+func TestOriginNarrowingRollsBackWhileRowsRemain(t *testing.T) {
+	ctx, conn := openOriginFixture(t, "sharecrm_origin_rollback")
+	if _, err := conn.Exec(ctx, `
+		CREATE TABLE issue (id UUID PRIMARY KEY, origin_type TEXT NULL);
+		ALTER TABLE issue ADD CONSTRAINT issue_origin_type_check
+			CHECK (origin_type IN (
+				'autopilot', 'quick_create', 'lark_chat', 'slack_chat', 'agent_create',
+				'dingtalk_chat', 'wecom_chat', 'telegram_chat', 'sharecrm_chat', 'custom_origin'
+			));
+	`); err != nil {
+		t.Fatalf("create issue table: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO issue (id, origin_type) VALUES ($1, 'sharecrm_chat')`, "00000000-0000-4000-8000-000000000031"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO issue (id, origin_type) VALUES ($1, 'custom_origin')`, "00000000-0000-4000-8000-000000000032"); err != nil {
+		t.Fatal(err)
+	}
+
+	applyMigrationFile(t, ctx, conn.Conn(), "667_issue_origin_weixin_chat.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "668_issue_origin_weixin_chat_validate.up.sql")
+	if _, err := conn.Exec(ctx, `INSERT INTO issue (id, origin_type) VALUES ($1, 'weixin_chat')`, "00000000-0000-4000-8000-000000000033"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, readMigrationFile(t, "667_issue_origin_weixin_chat.down.sql")); !isCheckViolation(err) {
+		t.Fatalf("667 down with a weixin row: got %v, want check violation", err)
+	}
+	assertIssueOrigin(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000033", "weixin_chat")
+	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), true, true, true)
+	if !originAllowed(t, ctx, conn.Conn(), "custom_origin") {
+		t.Fatal("failed 667 down dropped custom_origin")
+	}
+
+	if _, err := conn.Exec(ctx, `DELETE FROM issue WHERE origin_type = 'weixin_chat'`); err != nil {
+		t.Fatal(err)
+	}
+	applyMigrationFile(t, ctx, conn.Conn(), "667_issue_origin_weixin_chat.down.sql")
+	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), true, false, true)
+	assertIssueOrigin(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000031", "sharecrm_chat")
+	assertIssueOrigin(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000032", "custom_origin")
+
+	applyMigrationFile(t, ctx, conn.Conn(), "667_issue_origin_weixin_chat.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "668_issue_origin_weixin_chat_validate.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "673_issue_origin_sharecrm_chat.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "674_issue_origin_sharecrm_chat_validate.up.sql")
+	if _, err := conn.Exec(ctx, readMigrationFile(t, "673_issue_origin_sharecrm_chat.down.sql")); !isCheckViolation(err) {
+		t.Fatalf("673 down with a sharecrm row: got %v, want check violation", err)
+	}
+	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), true, true, true)
+	assertIssueOrigin(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000031", "sharecrm_chat")
+}
+
+func originAllowed(t *testing.T, ctx context.Context, conn *pgx.Conn, origin string) bool {
+	t.Helper()
+	var definition string
+	if err := conn.QueryRow(ctx, `
+		SELECT pg_get_constraintdef(oid)
+		FROM pg_constraint
+		WHERE conrelid = to_regclass('issue') AND conname = 'issue_origin_type_check'
+	`).Scan(&definition); err != nil {
+		t.Fatalf("read origin constraint: %v", err)
+	}
+	return strings.Contains(definition, "'"+strings.ReplaceAll(origin, "'", "''")+"'")
+}
+
+func openOriginFixture(t *testing.T, schema string) (context.Context, *pgxpool.Conn) {
+	t.Helper()
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("integration test requires Postgres at DATABASE_URL")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil {
+		t.Fatalf("connect to Postgres: %v", err)
+	}
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		pool.Close()
+		t.Fatalf("acquire Postgres connection: %v", err)
+	}
+	t.Cleanup(func() {
+		conn.Release()
+		_, _ = pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+schema+" CASCADE")
+		pool.Close()
+	})
+	if _, err := conn.Exec(ctx, "DROP SCHEMA IF EXISTS "+schema+" CASCADE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Exec(ctx, `SELECT set_config('search_path', $1, false)`, schema); err != nil {
+		t.Fatal(err)
+	}
+	return ctx, conn
+}
