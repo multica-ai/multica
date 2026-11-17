@@ -39,7 +39,11 @@ const (
 
 const maxNameLen = 64
 
-func init() { extension.RegisterWorkspaceRoutes(Mount) }
+func init() {
+	extension.RegisterWorkspaceRoutes(Mount)
+	// Filing names the project, which may be private.
+	extension.RegisterProjectEvent(EventFiled)
+}
 
 // Mount registers the folder routes on r.
 func Mount(r chi.Router, h *handler.Handler) {

@@ -18,6 +18,7 @@ type WorkspaceRoutes func(r chi.Router, h *handler.Handler)
 var (
 	mu              sync.Mutex
 	workspaceRoutes []WorkspaceRoutes
+	projectEvents   = map[string]bool{}
 )
 
 func RegisterWorkspaceRoutes(mount WorkspaceRoutes) {
@@ -33,4 +34,19 @@ func MountWorkspaceRoutes(r chi.Router, h *handler.Handler) {
 	for _, mount := range mounts {
 		mount(r, h)
 	}
+}
+
+// RegisterProjectEvent declares that events of eventType are about the project
+// named by their payload's top-level project_id, so an event about a private
+// project reaches only that project's members.
+func RegisterProjectEvent(eventType string) {
+	mu.Lock()
+	defer mu.Unlock()
+	projectEvents[eventType] = true
+}
+
+func IsProjectEvent(eventType string) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	return projectEvents[eventType]
 }

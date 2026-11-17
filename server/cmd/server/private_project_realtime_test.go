@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/extension"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -195,6 +196,35 @@ func TestRegisterListeners_PrivateProjectEventsReachOnlyItsAudience(t *testing.T
 		if len(fb.workspaceCalls) != 1 {
 			t.Errorf("%s %v: workspace broadcasts = %d, want 1", e.Type, e.Payload, len(fb.workspaceCalls))
 		}
+	}
+}
+
+func TestRegisterListeners_ExtensionProjectEventReachesOnlyItsAudience(t *testing.T) {
+	const filed = "test_extension:filed"
+	extension.RegisterProjectEvent(filed)
+
+	publish := func(eventType, projectID string) *fakeBroadcaster {
+		bus := events.New()
+		fb := &fakeBroadcaster{}
+		registerListeners(bus, fb, newPrivateProjectAudience(fakeAudienceQuerier{}))
+		bus.Publish(events.Event{Type: eventType, WorkspaceID: ppWorkspace, Payload: map[string]any{"project_id": projectID, "folder_id": "f"}})
+		return fb
+	}
+
+	fb := publish(filed, ppPrivate)
+	want := []string{
+		realtime.WorkspaceMemberScopeID(ppWorkspace, ppMember),
+		realtime.WorkspaceMemberScopeID(ppWorkspace, ppShared),
+	}
+	sort.Strings(want)
+	if got := privateAudienceScopes(fb); len(fb.workspaceCalls) != 0 || len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("private project: workspace=%d delivered=%v, want only %v", len(fb.workspaceCalls), got, want)
+	}
+	if fb := publish(filed, ppPublic); len(fb.workspaceCalls) != 1 {
+		t.Fatalf("public project: workspace broadcasts = %d, want 1", len(fb.workspaceCalls))
+	}
+	if fb := publish("test_extension:unregistered", ppPrivate); len(fb.workspaceCalls) != 1 {
+		t.Fatalf("unregistered event: workspace broadcasts = %d, want 1", len(fb.workspaceCalls))
 	}
 }
 

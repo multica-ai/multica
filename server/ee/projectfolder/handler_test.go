@@ -17,6 +17,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/extension"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -232,4 +233,10 @@ func TestDeleteMovesProjectsOut(t *testing.T) {
 		t.Fatalf("deleting the folder edited the project: updated_at %s -> %s", before, after)
 	}
 	e.delete(t, folder.ID).Want(http.StatusNotFound)
+}
+
+func TestFiledEventFollowsPrivateProjectAudience(t *testing.T) {
+	if !extension.IsProjectEvent(EventFiled) {
+		t.Fatalf("%s is not registered as a project event; filing a private project would reach the whole workspace", EventFiled)
+	}
 }
