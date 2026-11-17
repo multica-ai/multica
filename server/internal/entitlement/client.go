@@ -309,7 +309,9 @@ func normalizeGate(name GateName, wire wireGate) (Gate, error) {
 	switch action {
 	case ActionOff:
 		return Gate{Action: ActionOff}, nil
-	case ActionEnforce:
+	case ActionObserve, ActionEnforce:
+		// observe carries the same parameters as enforce so consumers can tell
+		// what would have been blocked without rejecting anything.
 	default:
 		return Gate{}, ErrInvalidPolicy
 	}
