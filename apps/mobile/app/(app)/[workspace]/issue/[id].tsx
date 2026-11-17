@@ -96,6 +96,7 @@ export default function IssueDetail() {
     await Promise.all([
       detail.refetch(),
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, id) }),
+      qc.invalidateQueries({ queryKey: issueKeys.children(wsId, id) }),
     ]);
   }, [detail, qc, wsId, id]);
 

@@ -64,6 +64,7 @@ import type {
 } from "@multica/core/types";
 import {
   AppConfigSchema,
+  ChildIssuesResponseSchema,
   EMPTY_APP_CONFIG,
   EMPTY_REFRESH_SESSION_RESPONSE,
   RefreshSessionResponseSchema,
@@ -655,6 +656,15 @@ class ApiClient {
       IssueSchema,
       EMPTY_ISSUE_FALLBACK,
       { ...opts, endpoint: "getIssue" },
+    );
+  }
+
+  async listChildIssues(id: string, opts?: { signal?: AbortSignal }): Promise<{ issues: Issue[] }> {
+    return this.fetchValidated(
+      `/api/issues/${id}/children`,
+      ChildIssuesResponseSchema,
+      { issues: [] },
+      { ...opts, endpoint: "GET /api/issues/:id/children" },
     );
   }
 

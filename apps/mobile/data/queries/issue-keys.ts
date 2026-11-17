@@ -27,6 +27,8 @@ export const issueKeys = {
   ) => [...issueKeys.myAll(wsId), scope, filter] as const,
   detail: (wsId: string | null, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
+  children: (wsId: string | null, id: string) =>
+    [...issueKeys.all(wsId), "children", id] as const,
   timeline: (wsId: string | null, id: string) =>
     [...issueKeys.all(wsId), "timeline", id] as const,
   // Currently-running tasks for an issue (queued/dispatched/running). Drives

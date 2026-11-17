@@ -1,17 +1,15 @@
 /** Project issues use concrete status sections, like the other issue lists. */
-import { useMemo } from "react";
 import { View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
-import type { IssueStatus } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
-import { StatusIcon } from "@/components/ui/status-icon";
+import { IssueSectionHeader } from "@/components/issue/issue-section-header";
 import { IssueRow } from "@/components/issue/issue-row";
 import { IssuesLoading } from "@/components/issue/issues-loading";
 import { projectIssuesOptions } from "@/data/queries/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
-import { groupIssuesByStatus } from "@/lib/group-issues-by-status";
+import { useIssueSections } from "@/lib/use-issue-sections";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { useT } from "@/lib/i18n";
 
@@ -28,7 +26,9 @@ export function ProjectRelatedIssues({ projectId }: Props) {
   );
 
   const catalog = useIssueStatuses();
-  const sections = useMemo(() => groupIssuesByStatus(data ?? [], catalog.statuses), [data, catalog.statuses]);
+  const { sections, toggleSection } = useIssueSections(
+    data ?? [], catalog.statuses, `${wsId}:${projectId}`,
+  );
 
   const navigateToIssue = (id: string) => {
     if (wsSlug) router.push(`/${wsSlug}/issue/${id}`);
@@ -61,11 +61,15 @@ export function ProjectRelatedIssues({ projectId }: Props) {
 
   return (
     <View>
-      {sections.map(({ status, data: issues }) => {
-        if (issues.length === 0) return null;
+      {sections.map(({ status, count, expanded, data: issues }) => {
         return (
           <View key={status}>
-            <SectionHeader status={status} count={issues.length} />
+            <IssueSectionHeader
+              status={status}
+              count={count}
+              expanded={expanded}
+              onPress={() => toggleSection(status)}
+            />
             {issues.map((issue) => (
               <IssueRow
                 key={issue.id}
@@ -76,25 +80,6 @@ export function ProjectRelatedIssues({ projectId }: Props) {
           </View>
         );
       })}
-    </View>
-  );
-}
-
-function SectionHeader({
-  status,
-  count,
-}: {
-  status: IssueStatus;
-  count: number;
-}) {
-  const catalog = useIssueStatuses();
-  return (
-    <View className="flex-row items-center gap-2 px-4 py-2 bg-background">
-      <StatusIcon status={status} category={catalog.categoryOf(status)} icon={catalog.iconOf(status)} color={catalog.colorOf(status)} size={14} />
-      <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-        {catalog.labelOf(status)}
-      </Text>
-      <Text className="text-xs text-muted-foreground/60">{count}</Text>
     </View>
   );
 }

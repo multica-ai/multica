@@ -45,14 +45,21 @@ interface Props {
   onPress: () => void;
   /** Render the status icon inline at the start of the row. Default: false. */
   showStatus?: boolean;
+  /** Include a readable status below the title on mixed-status child lists. */
+  showStatusLabel?: boolean;
 }
 
-export function IssueRow({ issue, onPress, showStatus = false }: Props) {
+export function IssueRow({ issue, onPress, showStatus = false, showStatusLabel = false }: Props) {
   // One catalog read for both the icon's colour and the chip — see the
   // divergence note in `custom-status-chip.tsx`.
   const catalog = useIssueStatuses();
   return (
-    <Pressable onPress={onPress} className="active:bg-secondary px-4 py-3">
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${issue.identifier}, ${issue.title}, ${catalog.labelOf(issue.status)}`}
+      className="active:bg-secondary px-4 py-3"
+    >
       <View className="flex-row items-center gap-3">
         {/* The glyph is per CATEGORY, so a custom status draws its category's
             icon rather than falling back to Todo's; the colour is what tells
@@ -69,11 +76,15 @@ export function IssueRow({ issue, onPress, showStatus = false }: Props) {
         <Text className="text-xs text-muted-foreground shrink-0 w-16">
           {issue.identifier}
         </Text>
-        <View className="flex-1 flex-row items-center gap-1.5 min-w-0">
+        <View className={showStatusLabel ? "flex-1 gap-1 min-w-0" : "flex-1 flex-row items-center gap-1.5 min-w-0"}>
           <Text className="text-sm text-foreground shrink" numberOfLines={1}>
             {issue.title}
           </Text>
-          <CustomStatusChip status={issue.status} catalog={catalog} />
+          {showStatusLabel ? (
+            <Text className="text-xs text-muted-foreground">
+              {catalog.labelOf(issue.status)}
+            </Text>
+          ) : <CustomStatusChip status={issue.status} catalog={catalog} />}
         </View>
         {issue.assignee_type && issue.assignee_id ? (
           <ActorAvatar

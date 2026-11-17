@@ -5,7 +5,7 @@ import { getServerConfig } from "@/data/server-config-store";
  *   Header card (icon + title + description, tap → edit)
  *   Properties section (Status / Priority / Lead — tap chip → picker)
  *   Resources section (read-only by default, "Add" button → resource form)
- *   Related issues (Open / Done bucketed list)
+ *   Related issues (collapsible workflow-ordered status groups)
  *
  * Per-record realtime: `useProjectRealtime(id, onDeleted=back)` subscribes
  * to `project:updated` (full replace) and `project:deleted` (pop back).

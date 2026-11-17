@@ -52,6 +52,7 @@
     "search_placeholder": "Search issues and projects"
   },
   "detail": {
+    "sub_issues": "Sub-issues",
     "properties": "Properties",
     "activity": "Activity",
     "comments": "Comments",
@@ -113,6 +114,7 @@
     "commented": "commented"
   },
   "errors": {
+    "children_load_failed": "Failed to load sub-issues.",
     "create_failed": "Failed to create issue",
     "load_failed": "Failed to load issues: {{message}}",
     "incomplete_list": "Could not load all issues. Please try again."

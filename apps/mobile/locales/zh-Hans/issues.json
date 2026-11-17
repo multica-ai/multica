@@ -52,6 +52,7 @@
     "search_placeholder": "搜索任务和项目"
   },
   "detail": {
+    "sub_issues": "子任务",
     "properties": "属性",
     "activity": "动态",
     "comments": "评论",
@@ -111,6 +112,7 @@
     "commented": "发表了评论"
   },
   "errors": {
+    "children_load_failed": "无法加载子任务。",
     "create_failed": "创建任务失败",
     "load_failed": "任务加载失败：{{message}}",
     "incomplete_list": "未能加载全部任务，请重试。"

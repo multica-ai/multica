@@ -9,6 +9,7 @@
  * automatically following appends. Item separators provide spacing between rows.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { IssueChildren } from "./issue-children";
 import {
   ActivityIndicator,
   Pressable,
@@ -308,6 +309,7 @@ export function TimelineList({
       <IssueHeaderCard issue={issue} />
       <IssueDescription issueId={issue.id} description={issue.description} />
       <IssueReactionRow issue={issue} />
+      <IssueChildren issueId={issue.id} />
       <View className="px-4 pt-4 pb-2 border-t border-border">
         <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
           Activity

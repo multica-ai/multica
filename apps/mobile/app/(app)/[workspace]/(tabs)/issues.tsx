@@ -20,7 +20,7 @@
  * are deferred — power-user features with non-trivial picker cost; ship
  * after the parity-critical scope tabs land.
  */
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Pressable, SectionList, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
@@ -33,7 +33,7 @@ import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { Header } from "@/components/ui/header";
 import { HeaderActions } from "@/components/ui/app-header-actions";
-import { StatusIcon } from "@/components/ui/status-icon";
+import { IssueSectionHeader } from "@/components/issue/issue-section-header";
 import { IssueRow } from "@/components/issue/issue-row";
 import { IssuesLoading } from "@/components/issue/issues-loading";
 import { issueListOptions } from "@/data/queries/issues";
@@ -46,7 +46,7 @@ import { useClearFiltersOnWorkspaceChange } from "@/lib/use-clear-filters-on-wor
 import { PRIORITY_LABEL } from "@/lib/issue-status";
 import { useT } from "@/lib/i18n";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
-import { groupIssuesByStatus } from "@/lib/group-issues-by-status";
+import { useIssueSections } from "@/lib/use-issue-sections";
 import { filterIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
@@ -57,7 +57,6 @@ import { THEME } from "@/lib/theme";
 // row past the safe width when filter icon shares the row. Per-status
 // counts still appear on the SectionList headers below.
 const SCOPES: IssuesScope[] = ["all", "members", "agents"];
-const NO_COLLAPSED_STATUSES: string[] = [];
 
 export default function IssuesPage() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
@@ -68,20 +67,6 @@ export default function IssuesPage() {
   const setScope = useIssuesViewStore((s) => s.setScope);
   const statusFilters = useIssuesViewStore((s) => s.statusFilters);
   const priorityFilters = useIssuesViewStore((s) => s.priorityFilters);
-  const [collapsedByWorkspace, setCollapsedByWorkspace] = useState<Record<string, string[]>>({});
-  const collapsedStatuses = collapsedByWorkspace[wsId ?? ""] ?? NO_COLLAPSED_STATUSES;
-  const toggleSection = (status: string) => {
-    if (!wsId) return;
-    setCollapsedByWorkspace((current) => {
-      const collapsed = current[wsId] ?? [];
-      return {
-        ...current,
-        [wsId]: collapsed.includes(status)
-          ? collapsed.filter((key) => key !== status)
-          : [...collapsed, status],
-      };
-    });
-  };
 
   const openFilter = () => {
     if (!wsSlug) return;
@@ -124,13 +109,8 @@ export default function IssuesPage() {
     [scopedIssues, statusFilters, priorityFilters],
   );
 
-  const sections = useMemo(
-    () => groupIssuesByStatus(filtered, catalog.statuses, "workflow").map((section) => ({
-      ...section,
-      count: section.data.length,
-      data: collapsedStatuses.includes(section.status) ? [] : section.data,
-    })),
-    [filtered, catalog.statuses, collapsedStatuses],
+  const { sections, toggleSection } = useIssueSections(
+    filtered, catalog.statuses, wsId ?? "",
   );
 
   const hasActiveFilters =
@@ -195,10 +175,10 @@ export default function IssuesPage() {
             <View className="h-px bg-border ml-4" />
           )}
           renderSectionHeader={({ section }) => (
-            <SectionHeader
+            <IssueSectionHeader
               status={section.status}
               count={section.count}
-              expanded={!collapsedStatuses.includes(section.status)}
+              expanded={section.expanded}
               onPress={() => toggleSection(section.status)}
             />
           )}
@@ -359,43 +339,6 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
         size={12}
         color={THEME[colorScheme].mutedForeground}
       />
-    </Pressable>
-  );
-}
-
-// The section header names its concrete built-in or custom status.
-function SectionHeader({
-  status,
-  count,
-  expanded,
-  onPress,
-}: {
-  status: IssueStatus;
-  count: number;
-  expanded: boolean;
-  onPress: () => void;
-}) {
-  const catalog = useIssueStatuses();
-  const { colorScheme } = useColorScheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${catalog.labelOf(status)} (${count})`}
-      accessibilityState={{ expanded }}
-      className="min-h-12 flex-row items-center gap-2 px-4 py-3 bg-background"
-    >
-      <Ionicons
-        name={expanded ? "chevron-down" : "chevron-forward"}
-        size={14}
-        color={THEME[colorScheme].mutedForeground}
-      />
-      {/* Category keys resolve to their canonical lifecycle glyph. */}
-      <StatusIcon status={status} category={catalog.categoryOf(status)} icon={catalog.iconOf(status)} color={catalog.colorOf(status)} size={14} />
-      <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-        {catalog.labelOf(status)}
-      </Text>
-      <Text className="text-xs text-muted-foreground/60">{count}</Text>
     </Pressable>
   );
 }

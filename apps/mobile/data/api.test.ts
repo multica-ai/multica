@@ -38,6 +38,26 @@ describe("api.listAgents", () => {
   });
 });
 
+describe("api.listChildIssues", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([{}, { issues: null }, { issues: [{ id: 123 }] }])("handles missing or malformed children in %j", async (body) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(body)));
+    await expect(api.listChildIssues("parent-1")).resolves.toEqual({ issues: [] });
+  });
+
+  it("uses the dedicated endpoint with cancellation and propagates load failures", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => Response.json({ error: "Unavailable" }, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(api.listChildIssues("parent-1", { signal: controller.signal })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/issues/parent-1/children",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+});
+
 describe("api.deleteComment", () => {
   const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
 

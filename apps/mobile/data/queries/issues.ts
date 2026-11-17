@@ -36,6 +36,15 @@ export const issueDetailOptions = (wsId: string | null, id: string) =>
     enabled: !!wsId && !!id,
   });
 
+/** The dedicated children endpoint returns every visible direct child. */
+export const childIssuesOptions = (wsId: string | null, id: string) =>
+  queryOptions({
+    queryKey: issueKeys.children(wsId, id),
+    queryFn: async ({ signal }) => (await api.listChildIssues(id, { signal })).issues,
+    enabled: !!wsId && !!id,
+    refetchOnMount: "always",
+  });
+
 /**
  * Single query over the full issue timeline (ASC, oldest first). Mirrors
  * web's `issueTimelineOptions` post-#2322 — server returns the whole list
