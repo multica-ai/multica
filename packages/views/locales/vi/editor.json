@@ -54,6 +54,10 @@
   },
   "attachment": {
     "download_failed": "Không lấy được liên kết tải xuống. Hãy thử lại sau ít phút.",
+    "copy_contents": "Sao chép nội dung",
+    "contents_copied": "Đã sao chép nội dung",
+    "copy_failed": "Không sao chép được nội dung",
+    "more_actions": "Thêm thao tác",
     "preview": "Xem trước",
     "preview_loading": "Đang tải bản xem trước…",
     "preview_failed": "Không tải được bản xem trước",
@@ -178,5 +182,49 @@
     "clear_filter": "Xóa bộ lọc",
     "no_matches": "Không có hàng phù hợp",
     "close": "Đóng"
+  },
+  "voice": {
+    "dictate": "Đọc chính tả",
+    "hold_to_talk": "Giữ để nói",
+    "tap_or_hold": "Đọc chính tả (chạm, hoặc giữ để nói)",
+    "cancel": "Hủy",
+    "insert": "Chèn",
+    "send": "Gửi",
+    "retry": "Thử lại",
+    "dismiss": "Bỏ qua",
+    "requesting": "Đang chờ micro…",
+    "transcribing": "Đang chuyển thành văn bản…",
+    "release_to_insert": "Thả ra để chèn",
+    "recording": "Đang ghi âm",
+    "errors": {
+      "permission_denied": "Quyền truy cập micro đã bị chặn. Hãy cho phép trong cài đặt trình duyệt hoặc hệ thống, rồi thử lại.",
+      "no_microphone": "Không tìm thấy micro. Hãy kết nối một micro, rồi thử lại.",
+      "microphone_failed": "Không khởi động được micro.",
+      "no_speech": "Không nghe thấy giọng nói. Hãy thử lại, nói gần micro hơn một chút.",
+      "unavailable": "Nhập giọng nói không chuyển thành văn bản được trên máy tính này.",
+      "transcription_failed": "Chuyển thành văn bản thất bại. Bản ghi âm của bạn vẫn được giữ, nên bạn có thể thử lại."
+    },
+    "models": {
+      "more_languages": "Thêm {{more}}",
+      "in_use": "Đang dùng",
+      "recommended": "Khuyên dùng",
+      "most_accurate": "Chính xác nhất",
+      "fastest": "Nhanh nhất",
+      "by": "Của {{author}}",
+      "license": "Giấy phép",
+      "downloading": "Đang tải xuống, {{percent}}%",
+      "failed": "Tải xuống thất bại. Thử lại để tiếp tục từ chỗ đã dừng.",
+      "download": "Tải xuống",
+      "retry": "Thử lại",
+      "cancel": "Hủy",
+      "use": "Dùng",
+      "delete": "Xóa {{name}}"
+    },
+    "setup": {
+      "title": "Thiết lập nhập giọng nói",
+      "description": "Giọng nói được chuyển thành văn bản ngay trên máy tính này, nên bản ghi âm không bao giờ rời khỏi máy. Tải một mô hình giọng nói một lần để bắt đầu.",
+      "later": "Để sau",
+      "start": "Bắt đầu đọc chính tả"
+    }
   }
 }

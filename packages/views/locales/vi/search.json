@@ -6,6 +6,7 @@
   "breadcrumb_aria": "Menu hiện tại",
   "groups": {
     "pages": "Trang",
+    "views": "Chế độ xem",
     "commands": "Lệnh",
     "members": "Thành viên",
     "agents": "Agents",
@@ -122,7 +123,6 @@
     "unsubscribed": "Đã bỏ theo dõi",
     "label_added": "Đã thêm nhãn {{name}}",
     "label_removed": "Đã gỡ nhãn {{name}}",
-    "label_failed": "Không thêm được nhãn {{name}} cho mọi công việc",
     "update_failed": "Cập nhật thất bại",
     "assigned": "Đã giao {{identifier}} cho {{name}}"
   },

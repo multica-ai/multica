@@ -9,13 +9,20 @@
     "view_comfortable": "Thoải mái",
     "no_search_results": "Không có kết quả nào khớp với tìm kiếm của bạn",
     "view_table": "Bảng",
-    "view_cards": "Thẻ",
+    "view_board": "Bảng",
     "row_menu": "Thao tác với dự án",
     "rename": "Đổi tên",
     "pin": "Ghim vào thanh bên",
     "unpin": "Bỏ ghim",
     "delete": "Xóa",
-    "no_matches": "Không có dự án nào khớp"
+    "no_matches": "Không có dự án nào khớp",
+    "scope_archived": "Dự án đã lưu trữ",
+    "archive": "Lưu trữ",
+    "restore": "Khôi phục",
+    "no_archived": "Không có dự án đã lưu trữ",
+    "search": "Tìm kiếm dự án",
+    "group_none": "Không nhóm",
+    "board_column_empty": "Không có dự án"
   },
   "table": {
     "name": "Tên",
@@ -23,8 +30,12 @@
     "status": "Trạng thái",
     "progress": "Tiến độ",
     "lead": "Phụ trách",
+    "start_date": "Ngày bắt đầu",
+    "due_date": "Ngày đến hạn",
+    "last_activity": "Hoạt động gần đây",
     "created": "Ngày tạo",
-    "issues": "Công việc"
+    "issues": "Công việc",
+    "archived": "Đã lưu trữ"
   },
   "status": {
     "planned": "Đã lên kế hoạch",
@@ -86,7 +97,9 @@
     "no_issues_yet": "Chưa có công việc nào",
     "toast_link_copied": "Đã sao chép liên kết",
     "toast_project_deleted": "Đã xóa dự án",
-    "toast_move_issue_failed": "Không di chuyển được công việc"
+    "toast_move_issue_failed": "Không di chuyển được công việc",
+    "archive_action": "Lưu trữ dự án",
+    "restore_action": "Khôi phục dự án"
   },
   "resources": {
     "section_header": "Tài nguyên",
@@ -155,7 +168,9 @@
     "title": "Xóa dự án",
     "description": "Thao tác này sẽ xóa dự án. Các công việc sẽ không bị xóa nhưng sẽ bị gỡ liên kết.",
     "confirm": "Xóa",
-    "cancel": "Hủy"
+    "cancel": "Hủy",
+    "archive_instead": "Lưu trữ thay vì xóa",
+    "archive_hint": "Lưu trữ sẽ ẩn dự án nhưng giữ lại các công việc, lịch sử và cài đặt của nó. Bạn có thể khôi phục bất cứ lúc nào."
   },
   "picker": {
     "no_project": "Không có dự án",
@@ -215,7 +230,8 @@
     "search": "Tìm theo tên hoặc email...",
     "no_members": "Không có thành viên nào khớp",
     "no_selected": "Chưa có thành viên dự án",
-    "admin_notice": "Chủ sở hữu và quản trị viên không gian làm việc luôn có quyền truy cập.",
+    "members_only_notice": "Chỉ những người được liệt kê ở đây mới có quyền truy cập. Chủ sở hữu và quản trị viên không gian làm việc cũng phải được thêm vào.",
+    "manager": "Quản lý quyền truy cập",
     "you": "Bạn",
     "remove": "Gỡ {{name}}",
     "failed": "Không lưu được thay đổi quyền truy cập.",
@@ -224,5 +240,24 @@
     "publish_description": "Mọi thành viên không gian làm việc sẽ xem được dự án này cùng các công việc, bình luận và tệp đính kèm của nó.",
     "done": "Xong",
     "retry": "Thử lại"
+  },
+  "archive": {
+    "badge": "Đã lưu trữ",
+    "dialog_title": "Lưu trữ “{{name}}”?",
+    "dialog_title_count_other": "Lưu trữ {{count}} dự án?",
+    "dialog_description": "Dự án đã lưu trữ sẽ bị ẩn khỏi danh sách và bộ chọn dự án, và không nhận công việc mới nữa. Không có gì bị xóa.",
+    "dialog_open_issues_other": "{{count}} công việc đang mở vẫn giữ nguyên, vẫn đọc và sửa được.",
+    "dialog_autopilots_other": "{{count}} autopilot đang hoạt động, tự tạo công việc vào dự án này, sẽ bị tạm dừng.",
+    "dialog_restore_hint": "Bạn có thể khôi phục bất cứ lúc nào từ mục Dự án đã lưu trữ.",
+    "cancel": "Hủy",
+    "confirm": "Lưu trữ",
+    "toast_archived": "Đã lưu trữ “{{name}}”",
+    "toast_archived_count_other": "Đã lưu trữ {{count}} dự án",
+    "toast_paused_other": "Đã tạm dừng {{count}} autopilot tự tạo công việc vào dự án này",
+    "undo": "Hoàn tác",
+    "toast_restored": "Đã khôi phục “{{name}}”",
+    "toast_completed": "“{{name}}” đã hoàn thành",
+    "notice": "Dự án này đã được lưu trữ. Nó bị ẩn khỏi danh sách và bộ chọn dự án, không nhận công việc mới; các công việc của nó vẫn đọc và sửa được.",
+    "prop_label": "Đã lưu trữ"
   }
 }

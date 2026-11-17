@@ -954,7 +954,7 @@
     "tool_kind_misc": "Khác",
     "trigger_wakeup": "Đánh thức",
     "context_receipt_title": "Đã nhận ngữ cảnh",
-    "context_receipt_summary_other": "{{count}} nguồn · {{size}}",
+    "context_receipt_summary_other": "{{count}} nguồn",
     "context_receipt_model": "Model",
     "context_receipt_session": "Phiên",
     "context_receipt_session_resumed": "Đã tiếp tục một phiên trước (lịch sử của phiên đó cũng nằm trong ngữ cảnh)",
@@ -968,7 +968,7 @@
     "context_receipt_col_delivery": "Gửi qua",
     "context_receipt_col_load": "Đã tải",
     "context_receipt_same_as_brief": "Giống bản tóm tắt runtime",
-    "context_receipt_footnote": "Được daemon ghi lại trước khi agent bắt đầu. Chỉ lưu kích thước và hash ngắn, không lưu nội dung. “Đã xác minh” nghĩa là phiên bản runtime này đã được kiểm tra là tải được file. Kích thước và hash của skill bao gồm toàn bộ gói đã ghi.",
+    "context_receipt_footnote": "Được daemon ghi lại trước khi agent bắt đầu. Chỉ lưu kích thước và hash ngắn, không lưu nội dung. “Đã xác minh” nghĩa là phiên bản runtime này đã được kiểm tra là tải được file. Kích thước và hash của skill bao gồm toàn bộ gói đã ghi; kích thước file không cho thấy model đã đọc gì.",
     "context_source_runtime_brief": "Bản tóm tắt runtime",
     "context_source_agent_instructions": "Hướng dẫn agent",
     "context_source_project_description": "Mô tả dự án",
@@ -984,7 +984,13 @@
     "context_load_verified": "Đã xác minh",
     "context_load_verified_other_version": "Chỉ xác minh trên {{version}}",
     "context_load_unverified": "Chưa xác minh",
-    "context_load_not_delivered": "Chưa gửi"
+    "context_load_not_delivered": "Chưa gửi",
+    "context_receipt_direct_bytes": "Nhập trực tiếp: {{size}}",
+    "context_receipt_file_bytes": "File trên đĩa: {{size}}",
+    "context_receipt_package": "Gói",
+    "context_receipt_instruction_file_bytes": "File hướng dẫn: {{size}}",
+    "context_receipt_skill_package_bytes": "Gói skill: {{size}}",
+    "context_receipt_other_file_bytes": "File khác: {{size}}"
   },
   "task_failure": {
     "cancelled_by_system": "Bị hệ thống hủy",
