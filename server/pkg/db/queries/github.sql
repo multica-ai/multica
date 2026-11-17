@@ -7,6 +7,15 @@ SELECT * FROM github_installation
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListGitHubInstallationsWithConnectedBy :many
+-- Only disclose the connector's display name while they belong to this workspace.
+SELECT sqlc.embed(gi), COALESCE(u.name, '')::text AS connected_by
+FROM github_installation gi
+LEFT JOIN member m ON m.user_id = gi.connected_by_id AND m.workspace_id = gi.workspace_id
+LEFT JOIN "user" u ON u.id = m.user_id
+WHERE gi.workspace_id = $1
+ORDER BY gi.created_at ASC;
+
 -- name: ListGitHubInstallationsByInstallationID :many
 -- One installation_id can be bound to several workspaces; webhook routing lists
 -- every binding and fans the event out to each bound workspace. Ordered oldest

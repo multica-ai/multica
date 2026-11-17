@@ -40,6 +40,7 @@ import type {
   ChatMessage,
   ChatPendingTask,
   ChatQuickAction,
+  ChatWakeup,
   TaskMessagePayload,
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
@@ -60,6 +61,7 @@ import {
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
 import { useT } from "../../i18n";
 import { isAnnotatableChatMessage, type ChatAnnotations } from "./use-chat-annotations";
+import { ChatWakeupCards, ChatWakeupDivider, useWakeupsBySourceTask } from "./chat-wakeups";
 
 // ─── Public component ────────────────────────────────────────────────────
 
@@ -106,6 +108,8 @@ interface ChatMessageListProps {
   quickActionsPendingMessageId?: string | null;
   /** Lets the reader annotate settled assistant replies into the next message. */
   annotations?: Pick<ChatAnnotations, "cardRef" | "captureProps" | "popup" | "revealSourceRef">;
+  /** The conversation's wakeups: dividers for wakeup turns, cards under the replies that made them. */
+  wakeups?: ChatWakeup[];
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -206,6 +210,7 @@ export function ChatMessageList({
   onRegenerateQuickActions,
   quickActionsPendingMessageId = null,
   annotations,
+  wakeups,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -234,6 +239,8 @@ export function ChatMessageList({
   const fadeStyle = useScrollFade(scrollRef, 16);
 
   const pendingTaskId = pendingTask?.task_id ?? null;
+  const wakeupsBySourceTask = useWakeupsBySourceTask(wakeups);
+  const wakeupById = useMemo(() => new Map((wakeups ?? []).map((w) => [w.id, w])), [wakeups]);
 
   // The session's newest assistant turn — the only one whose quick actions can
   // be refreshed (regeneration resumes the newest provider state). Computed off
@@ -440,6 +447,10 @@ export function ChatMessageList({
               quickActionsPendingMessageId={quickActionsPendingMessageId}
               starterCardsMessageId={starterCardsMessageId}
               annotatable={!!annotations}
+              wakeup={item.kind === "message" && item.message.wakeup_id
+                ? wakeupById.get(item.message.wakeup_id)
+                : undefined}
+              createdWakeups={item.taskId ? wakeupsBySourceTask.get(item.taskId) : undefined}
             />
           </div>
         )}
@@ -514,6 +525,8 @@ const MessageBubble = memo(function MessageBubble({
   quickActionsPendingMessageId,
   starterCardsMessageId,
   annotatable,
+  wakeup,
+  createdWakeups,
 }: {
   item: ChatRenderItem;
   isPending: boolean;
@@ -525,23 +538,36 @@ const MessageBubble = memo(function MessageBubble({
   quickActionsPendingMessageId: string | null;
   starterCardsMessageId: string | null;
   annotatable: boolean;
+  /** The wakeup behind a wakeup turn's input row. */
+  wakeup?: ChatWakeup;
+  /** Wakeups this row's turn created. */
+  createdWakeups?: ChatWakeup[];
 }) {
   // The live row and the persisted assistant row both land here under one key,
   // and both render <AssistantMessage> — same component type, same position —
-  // so React reconciles rather than remounts at task completion.
+  // so React reconciles rather than remounts at task completion. The wakeup
+  // cards follow it as a sibling in both forms for the same reason.
   if (item.kind === "live") {
     return (
-      <AssistantMessage
-        taskId={item.taskId}
-        isPending={isPending}
-        transformContent={transformContent}
-        onQuickAction={onQuickAction}
-        quickActionsDisabled={quickActionsDisabled}
-      />
+      <>
+        <AssistantMessage
+          taskId={item.taskId}
+          isPending={isPending}
+          transformContent={transformContent}
+          onQuickAction={onQuickAction}
+          quickActionsDisabled={quickActionsDisabled}
+        />
+        {createdWakeups && <ChatWakeupCards wakeups={createdWakeups} />}
+      </>
     );
   }
 
   const { message } = item;
+
+  // A wakeup turn's input is the runtime's, not something the person wrote.
+  if (message.message_kind === "wakeup") {
+    return <ChatWakeupDivider message={message} wakeup={wakeup} />;
+  }
 
   if (message.role === "user") {
     return (
@@ -572,19 +598,22 @@ const MessageBubble = memo(function MessageBubble({
   }
 
   return (
-    <AssistantMessage
-      taskId={message.task_id ?? null}
-      message={message}
-      isPending={isPending}
-      transformContent={transformContent}
-      onQuickAction={onQuickAction}
-      quickActionsDisabled={quickActionsDisabled}
-      onRegenerateQuickActions={onRegenerateQuickActions}
-      canRegenerateQuickActions={message.id === latestAssistantMessageId}
-      quickActionsPending={quickActionsPendingMessageId === message.id}
-      showStarterCards={message.id === starterCardsMessageId}
-      sourceId={annotatable && isAnnotatableChatMessage(message) ? message.id : undefined}
-    />
+    <>
+      <AssistantMessage
+        taskId={message.task_id ?? null}
+        message={message}
+        isPending={isPending}
+        transformContent={transformContent}
+        onQuickAction={onQuickAction}
+        quickActionsDisabled={quickActionsDisabled}
+        onRegenerateQuickActions={onRegenerateQuickActions}
+        canRegenerateQuickActions={message.id === latestAssistantMessageId}
+        quickActionsPending={quickActionsPendingMessageId === message.id}
+        showStarterCards={message.id === starterCardsMessageId}
+        sourceId={annotatable && isAnnotatableChatMessage(message) ? message.id : undefined}
+      />
+      {createdWakeups && <ChatWakeupCards wakeups={createdWakeups} />}
+    </>
   );
 });
 

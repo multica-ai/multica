@@ -6,7 +6,6 @@ description: "Conversation en tête-à-tête avec un agent, visible de vous seul
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 import { ChatDemo } from "@/components/demos/chat-demo";
-import { ChatQueueDemo } from "@/components/demos/chat-queue-demo";
 
 Discussion convient aux sujets qui n'ont pas encore pris la forme d'une tâche claire : clarifier des idées, faire le point sur l'espace de travail, discuter d'une approche, poser une question qui ne relève d'aucune tâche, ou confier d'abord un petit travail à un agent.
 
@@ -97,22 +96,15 @@ Si l'agent n'avait encore rien produit, le message que vous venez d'envoyer est 
 
 ## Envoyer des messages pendant une réponse
 
-Vous pouvez continuer à écrire pendant que l'agent répond. Dès que la zone de saisie contient du texte, le bouton d'envoi devient **Mettre le message en file d'attente**. Les messages en file n'interrompent pas la réponse en cours : ils attendent dans une file au-dessus de la zone de saisie et sont traités dans l'ordre une fois la réponse terminée.
+Vous pouvez écrire pendant que l’agent répond. Si le runtime le permet, **Envoyer** ajoute un message texte sans lien de skill à la réponse en cours sans arrêter l’exécution. L’agent le lit au prochain moment approprié et poursuit la tâche initiale. Mettez votre daemon à jour pour activer cette fonction.
 
-| Action | Résultat |
-|---|---|
-| **Réorienter** | Place ce message en tête de file et arrête la réponse en cours. Ce que l'agent a déjà écrit reste dans la conversation, puis il traite ce message. |
-| Retirer (icône corbeille) | Retire le message de la file ; il n'est jamais envoyé à l'agent. |
-| **⋯ → Modifier le message en file d'attente** | Remet le message et ses pièces jointes dans la zone de saisie pour le modifier et le renvoyer. |
-| **⋯ → Tout effacer** | Retire tous les messages en file. La réponse en cours continue. |
+Sur le web et sur ordinateur, **Ajouter à l'exécution en cours** au-dessus du brouillon indique que votre texte rejoindra la réponse en cours. **Démarrer après cette exécution** indique que le message sera mis en file, par exemple s'il contient des pièces jointes ou un lien de skill, ou si l'exécution ne prend pas en charge cette fonction.
 
-**Réorienter** n'est pas disponible tant que la réponse en cours n'a pas vraiment commencé (par exemple quand elle attend encore qu'un runtime la prenne en charge), ni si vous avez perdu la permission d'exécuter l'agent.
+Les messages avec pièces jointes ou liens de skill, envoyés avant le début de la réponse ou à un runtime incompatible sont automatiquement mis en file. Un message non transmis avant la fin de la réponse rejoint automatiquement la file ; inutile de le renvoyer. Si vous arrêtez pendant la transmission, Chat attend son résultat avant de mettre les messages non transmis en file. En cas de nouvelle tentative automatique, les instructions supplémentaires restent associées à la demande initiale pour être traitées ensemble. Lors de la reprise de la même session, les instructions déjà transmises ne sont pas renvoyées.
 
-<ChatQueueDemo />
+La file apparaît au-dessus du champ de saisie et suit l’ordre des messages. Vous pouvez supprimer un message, le modifier via **⋯**, ou vider la file. **Envoyer maintenant (arrête la réponse)** place le message en tête et arrête la réponse en cours. Cette action nécessite une réponse démarrée et le droit d’exécuter l’agent.
 
-<Callout>
-Ici, **Réorienter** arrête d'abord la réponse en cours. Dans les commentaires d'une tâche, [Ajouter à l'exécution en cours](/mentioning-agents#réorienter-un-agent-en-cours-dexécution) fonctionne autrement : l'exécution n'est pas interrompue, l'agent lit le message à la fin de l'étape en cours et poursuit la tâche d'origine.
-</Callout>
+Cette fonction concerne les conversations Chat directes sur les clients web, de bureau et mobile à jour. Sur mobile, les messages en file apparaissent à la fin de la conversation ; supprimez-les ou modifiez-les depuis le web ou le bureau. Les anciens clients et les conversations Slack et Lark conservent leur file habituelle.
 
 ## Organiser la liste des conversations
 

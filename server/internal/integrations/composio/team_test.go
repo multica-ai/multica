@@ -85,3 +85,30 @@ func TestExecuteTool_RequiresConnectionIdentity(t *testing.T) {
 		t.Fatalf("incomplete identity reached upstream %d times", calls.Load())
 	}
 }
+
+func TestExecuteTool_EmptyArgumentsOnWire(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var wire map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&wire); err != nil {
+			t.Error(err)
+		}
+		if got := string(wire["arguments"]); got != `{}` {
+			t.Errorf("arguments on wire = %q, want {}; body = %s", got, wire)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"successful":true,"data":{"accountSummaries":[]}}`))
+	}))
+	defer srv.Close()
+	client, err := sdk.NewClient(sdk.Options{APIKey: "test-key", BaseURL: srv.URL, Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := newTestService(t, client, newFakeStore())
+	resp, err := svc.ExecuteTool(context.Background(), "ca_selected", "ws_team", sdk.Tool{Slug: "GOOGLE_ANALYTICS_LIST_ACCOUNT_SUMMARIES"}, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Successful {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}

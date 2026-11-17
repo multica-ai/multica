@@ -102,6 +102,7 @@ const (
 	EventChatSessionRead     = "chat:session_read"
 	EventChatSessionDeleted  = "chat:session_deleted"
 	EventChatSessionUpdated  = "chat:session_updated"
+	EventChatWakeupChanged   = "chat:wakeup_changed"
 
 	// Project events
 	EventProjectCreated         = "project:created"
@@ -250,6 +251,8 @@ const (
 
 	// Telegram installation lifecycle. Same contract as the Slack pair:
 	// front-ends invalidate the Telegram installations query on either.
+	EventWeixinInstallationCreated   = "weixin_installation:created"
+	EventWeixinInstallationRevoked   = "weixin_installation:revoked"
 	EventTelegramInstallationCreated = "telegram_installation:created"
 	EventTelegramInstallationRevoked = "telegram_installation:revoked"
 )

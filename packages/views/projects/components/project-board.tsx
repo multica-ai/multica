@@ -25,6 +25,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { CardControl } from "../../common/card-control";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
+import { useRestoredScrollRef } from "../../platform/scroll-restoration";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectIcon } from "./project-icon";
 import { ProjectLeadPicker } from "./project-lead-picker";
@@ -75,6 +76,7 @@ export function ProjectBoard({
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
   const [active, setActive] = useState<Project | null>(null);
+  const restoreScrollRef = useRestoredScrollRef("project-board");
 
   const handleDragStart = (event: DragStartEvent) => {
     setActive((event.active.data.current as DragData | undefined)?.project ?? null);
@@ -96,7 +98,9 @@ export function ProjectBoard({
       onDragCancel={() => setActive(null)}
     >
       <div
+        ref={restoreScrollRef}
         data-board-scroller=""
+        data-tab-scroll-root="project-board"
         className={cn("flex min-h-0 flex-1 gap-3 overflow-x-auto pt-2 pb-4", PAGE_GUTTER)}
       >
         {columns.map((column) => (

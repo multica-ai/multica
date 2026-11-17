@@ -1,9 +1,11 @@
+import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
 import {
   ScrollRestorationProvider,
   useRestoredScrollEntry,
   useRestoredScrollOffset,
+  useRestoredScrollRef,
   useScrollRestorationAdapter,
   type ScrollRestorationAdapter,
 } from "./scroll-restoration";
@@ -32,6 +34,26 @@ describe("scroll-restoration public surface", () => {
       ),
     });
     expect(result.current).toBe(123);
+  });
+
+  it("useRestoredScrollRef restores both axes; a sideways-only entry has no vertical offset", () => {
+    const adapter = makeAdapter(() => ({ top: 0, height: 800, left: 640 }));
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ScrollRestorationProvider adapter={adapter}>
+        {children}
+      </ScrollRestorationProvider>
+    );
+    const ref = renderHook(() => useRestoredScrollRef("board"), { wrapper });
+    const offset = renderHook(() => useRestoredScrollOffset("board"), {
+      wrapper,
+    });
+
+    const el = document.createElement("div");
+    ref.result.current(el);
+
+    expect(el.scrollLeft).toBe(640);
+    expect(el.scrollTop).toBe(0);
+    expect(offset.result.current).toBeUndefined();
   });
 
   it("all hooks return undefined without a provider (web no-op path)", () => {

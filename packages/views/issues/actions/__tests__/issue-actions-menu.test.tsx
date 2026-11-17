@@ -134,7 +134,7 @@ vi.mock("sonner", () => ({
   toast: { success: toastSuccessMock, error: toastErrorMock, info: vi.fn() },
 }));
 
-const { apiMocks, copyTextMock } = vi.hoisted(() => ({
+const { apiMocks, copyTextMock, copyTextAndHtmlMock } = vi.hoisted(() => ({
   apiMocks: {
     listTasksByIssue: vi.fn(),
     listIssueWorkflows: vi.fn(),
@@ -147,6 +147,7 @@ const { apiMocks, copyTextMock } = vi.hoisted(() => ({
     runQuickAction: vi.fn(),
   },
   copyTextMock: vi.fn(),
+  copyTextAndHtmlMock: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -156,6 +157,7 @@ vi.mock("@multica/core/api", () => ({
 
 vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: copyTextMock,
+  copyTextAndHtml: copyTextAndHtmlMock,
 }));
 
 vi.mock("../../../common/actor-avatar", () => ({
@@ -222,6 +224,8 @@ beforeEach(() => {
   navState.hash = "";
   copyTextMock.mockReset();
   copyTextMock.mockResolvedValue(true);
+  copyTextAndHtmlMock.mockReset();
+  copyTextAndHtmlMock.mockResolvedValue(true);
   toastSuccessMock.mockReset();
   toastErrorMock.mockReset();
   apiMocks.listQuickActions.mockReset();
@@ -267,12 +271,32 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Rename issue")).toBeInTheDocument();
     expect(screen.getByText("Open in new tab")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
+    expect(screen.getByText("Copy link with title")).toBeInTheDocument();
     expect(screen.getByText("Create sub-issue")).toBeInTheDocument();
     expect(screen.getByText("Relations")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
     // Linking to existing issues stays inside the "Relations" submenu.
     expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
+  });
+
+  it("copies the identifier and title as a rich link", async () => {
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Copy link with title"));
+
+    expect(copyTextAndHtmlMock).toHaveBeenCalledWith(
+      "[TES-1 Example](https://app.example/test/issues/TES-1)",
+      '<a href="https://app.example/test/issues/TES-1">TES-1 Example</a>',
+    );
   });
 
   it("lists Create sub-issue directly below Rename issue", async () => {
@@ -805,6 +829,7 @@ describe("Sidebar variant (MUL-8425)", () => {
       "Pin to sidebar",
       "Mark as unread",
       "Copy link",
+      "Copy link with title",
       "Copy identifier",
     ]);
     expect(screen.getByTestId("row")).toHaveAttribute("data-popup-open");

@@ -53,8 +53,6 @@
     "zoom_actual": "Actual size"
   },
   "attachment": {
-    "install_theme": "Install theme",
-    "install_theme_failed": "Couldn't read the attachment. Try again in a moment.",
     "download_failed": "Couldn't fetch a download link. Try again in a moment.",
     "copy_contents": "Copy contents",
     "contents_copied": "Contents copied",
@@ -108,6 +106,7 @@
   "mention": {
     "group_users": "Users",
     "group_issues": "Issues",
+    "group_projects": "Projects",
     "all_members": "All members",
     "agent_badge": "Agent",
     "squad_badge": "Squad",

@@ -129,12 +129,24 @@
   "toasts": {
     "source_context_retry_started": "Повтор запущен с исходным контекстом",
     "archived": "Уведомление архивировано",
+    "archived_many_one": "{{count}} уведомление архивировано",
+    "archived_many_few": "{{count}} уведомления архивированы",
+    "archived_many_many": "{{count}} уведомлений архивировано",
+    "archived_many_other": "{{count}} уведомления архивированы",
     "unarchived": "Уведомление восстановлено",
     "deleted": "Уведомление удалено",
     "unsubscribed_archived": "Вы отписались, уведомление в архиве",
     "unsubscribed_archived_subtree": "Вы отписались от задачи и её подзадач",
     "unsubscribed_hint": "Обновления не попадут во входящие. @упоминания по-прежнему придут.",
     "undo": "Отменить"
+  },
+  "kept": {
+    "archived": "В архиве",
+    "leaves": "Уйдёт из входящих, когда вы перейдёте дальше",
+    "filtered": "Больше не подходит под фильтры",
+    "notification_archived": "Уведомление в архиве",
+    "next": "Следующее",
+    "next_tooltip": "Открыть следующее: {{title}}"
   },
   "errors": {
     "archived_lookup_failed": "Не удалось загрузить связанное уведомление",

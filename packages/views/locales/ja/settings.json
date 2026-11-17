@@ -841,7 +841,7 @@
     },
     "others_issues": {
       "label": "他の人のタスク",
-      "description": "他の人やその人のエージェントに割り当てられたタスクで、作成・コメント・メンションによって自動的に購読しているもの。重要な更新とは、あなたへの @メンション、参加したスレッドへの返信、レビュー待ち・ブロック・完了など人の確認が必要なステータスです。",
+      "description": "他の人やその人のエージェントに割り当てられたタスクで、作成・コメント・メンションによって自動的に購読しているもの。重要な更新とは、あなたへの @メンション、参加したスレッドへの返信、そしてステータス変更がオンならレビュー待ち・ブロック・完了など人の確認が必要なステータスです。",
       "key_updates": "重要な更新のみ",
       "all": "すべてのアクティビティ"
     },
@@ -985,7 +985,7 @@
     "confirm_cancel": "キャンセル",
     "confirm_action": "確認",
     "change_logo_aria": "ワークスペースのロゴを変更",
-    "click_logo_hint": "ロゴをクリックして新しい画像をアップロード",
+    "click_logo_hint": "ロゴをクリックして画像をアップロードするか、文字アイコンを作成します",
     "toast_logo_failed": "ワークスペースのロゴをアップロードできませんでした",
     "context_hint": "このワークスペースのエージェントに、実行のたびに渡されます。",
     "slug_hint": "ワークスペースの URL に使われます。作成後は変更できません。",
@@ -1021,7 +1021,7 @@
     "disconnect": "接続解除",
     "disconnecting": "接続解除中…",
     "disconnect_confirm_title": "GitHub App の接続を解除",
-    "disconnect_confirm_description": "Multica はこのインストールの Webhook 受信を停止します。既存の PR ミラーとリンクは保持され、いつでも再接続して更新を再開できます。",
+    "disconnect_confirm_description": "このワークスペースから {{login}} の接続を解除しますか？このアカウントの更新は停止します。既存の PR 記録とリンクは保持され、他の接続には影響しません。",
     "disconnect_confirm_cancel": "キャンセル",
     "disconnect_confirm_action": "接続解除",
     "not_configured": "このデプロイには GitHub 連携が設定されていません。運営者が次の値を設定する必要があります:",
@@ -1042,7 +1042,18 @@
     "feature_auto_link_description": "タイトルかブランチ名にタスク番号（例: {{example}}）を含む PR、または説明に「Closes {{example}}」と書いた PR を、そのタスクに関連付けます。",
     "status_paused": "一時停止中",
     "pause": "GitHub 機能を一時停止",
-    "resume": "GitHub 機能を再開"
+    "resume": "GitHub 機能を再開",
+    "add_account": "アカウントまたは組織を追加",
+    "disconnect_account": "{{login}} の接続を解除",
+    "errors": {
+      "missing_authorization": "GitHub からユーザー認証が返されませんでした。再接続して認証を完了してください。既存のインストールで繰り返す場合は、Multica の運用担当者に連絡してください。",
+      "installation_not_authorized": "個人のインストールには所有者の GitHub アカウントを使用してください。組織の場合は、承認された全リポジトリの管理権限を持つアカウントを使用し、少なくとも 1 つのリポジトリを選択してください。",
+      "invalid_state": "GitHub 接続リクエストの期限が切れているか、無効です。設定 → コードから再接続してください。",
+      "incomplete_callback": "GitHub の接続応答が不完全です。設定 → コードから再接続してください。",
+      "bad_workspace": "接続先のワークスペースが見つかりません。対象のワークスペースを開き、設定 → コードから再試行してください。",
+      "verification_failed": "GitHub インストールへの管理権限を確認できませんでした。再接続し、繰り返す場合は Multica の運用担当者に GitHub App の設定確認を依頼してください。",
+      "persist_failed": "GitHub 接続を保存できませんでした。設定 → コードから再試行し、繰り返す場合は Multica の運用担当者に連絡してください。"
+    }
   },
   "vcs": {
     "section_title": "セルフホスト Git",
@@ -1460,7 +1471,13 @@
       "up_to_date": "最新バージョンを使用しています。",
       "downloading": "v{{version}} をバックグラウンドでダウンロード中です。インストールの準備が整うとお知らせします。",
       "check_now": "今すぐ確認",
-      "checking": "確認中…"
+      "checking": "確認中…",
+      "check_unavailable": "現在アップデートを確認できません。しばらくしてから再試行してください。",
+      "check_network": "更新サービスに接続できません。ネットワーク接続を確認して再試行してください。",
+      "check_failed": "アップデートの確認に失敗しました。再試行してください。",
+      "download_failed": "更新のダウンロードに失敗しました。現在のバージョンを使い続け、再試行できます。",
+      "download_ready": "v{{version}} をインストールできます。",
+      "retry": "再試行"
     },
     "daemon": {
       "title": "デーモン",
@@ -1694,6 +1711,30 @@
     "mcp": "管理者が追加してワークスペースで共有し、エージェントごとに割り当てます。",
     "apps": "Multica で接続したチームまたは個人のアカウントを、各エージェントに追加します。",
     "plugins": "インストールするとツール、定期フック、ストレージを追加でき、プラグインごとに権限を付与します。"
+  },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "接続用 QR コードを読み取ったアカウントとの個別メッセージ。",
+    "loading": "接続中…",
+    "empty": "エージェントの「連携」タブから WeChat に接続してください。",
+    "close": "閉じる",
+    "action_failed": "操作を完了できませんでした。もう一度お試しください。",
+    "privacy_hint": "メッセージはこのワークスペースであなたの権限で実行されます。QR コードを共有しないでください。",
+    "qr_label": "WeChat 接続用 QR コード",
+    "scan_hint": "WeChat で読み取り、スマートフォンで確認してください。",
+    "scanned": "読み取り済み。WeChat で接続を確認してください。",
+    "verify_hint": "WeChat による認証が必要です。スマートフォンに表示されたコードを入力してください。",
+    "verify_label": "認証コード",
+    "verify": "認証",
+    "success": "接続しました。WeChat でボットに新しいメッセージを送信してください。",
+    "expired": "QR コードの有効期限が切れました。新しく生成してください。",
+    "blocked": "WeChat により認証が制限されています。しばらくしてからお試しください。",
+    "already_bound": "このボットはすでに WeChat に接続されています。以前のクライアントの接続を解除して再試行してください。",
+    "refresh": "新しい QR コード",
+    "retry": "再試行",
+    "already_connected": "このWeChatアカウントは{{agent}}に接続されています。先にそちらで接続を解除してください。",
+    "connected_elsewhere": "このWeChatアカウントは別の場所で接続されています。先に既存の接続を解除してください。",
+    "authorization_expired": "WeChatの認証が失効しました。もう一度スキャンして接続してください。"
   },
   "connected_apps": {
     "description": "エージェントが外部アプリを操作するアカウントです。許可された操作はすぐに実行されます。",

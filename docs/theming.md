@@ -13,8 +13,8 @@ Appearance → Theme options**. Themes never run JavaScript.
 **Settings → Appearance → Manage** lists the themes installed on the device
 and the community theme store; the built-in themes are in the theme picker. Install a theme from the
 store there, or with **Import theme**, from a `.zip` of the folder or from the
-folder itself; a theme `.zip` attached to a chat or comment installs with
-**Install theme** on the attachment. Themes are saved on the device, like every other Appearance
+folder itself, including a theme `.zip` downloaded from a chat or comment
+attachment. Themes are saved on the device, like every other Appearance
 setting; **Remove** on a theme's card deletes it, and goes back to Default
 when it was in use. **Check for updates** looks for new releases of the
 themes installed from the store.
@@ -463,9 +463,9 @@ to the skill's routing table instead of an entry to every agent's skill list.
   itself. Every later save to the theme in use applies within a second, so
   ask for changes and watch them land.
 - **On the web, or with an agent on another machine.** The agent attaches
-  the theme as a `.zip`. **Install theme** on the attachment reads it with
-  the same checks and confirmation as **Import theme**; a newer version of
-  the same id replaces the old one.
+  the theme as a `.zip`. Download it and install it with **Import theme**,
+  which runs the checks and asks before installing; a newer version of the
+  same id replaces the old one.
 
 The checker runs without installing the repository, from a sparse clone
 and Node 22.18 or newer:

@@ -54,6 +54,7 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { ProviderLogo } from "./provider-logo";
+import { RateLimitCell } from "./rate-limit-section";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
@@ -662,6 +663,20 @@ export function RuntimeList({
       header: t(($) => $.list.col_agents),
       width: 92,
       cell: (row) => <AgentStack agentIds={row.workload.agentIds} />,
+    },
+    {
+      key: "rate_limits",
+      header: t(($) => $.list.col_rate_limits),
+      width: 88,
+      cell: (row) =>
+        isPendingCustomRuntime(row.runtime) ? (
+          <CollectionEmptyValue />
+        ) : (
+          <RateLimitCell
+            runtime={row.runtime}
+            enabled={canReadRuntimeUsage(row.runtime, user?.id ?? null)}
+          />
+        ),
     },
     {
       key: "cost",

@@ -123,12 +123,21 @@
   "toasts": {
     "source_context_retry_started": "원본 컨텍스트로 재시도를 시작했습니다",
     "archived": "알림을 보관했습니다",
+    "archived_many_other": "알림 {{count}}개를 보관했습니다",
     "unarchived": "알림을 복원했습니다",
     "deleted": "알림이 삭제되었습니다",
     "unsubscribed_archived": "구독을 해제하고 보관했습니다",
     "unsubscribed_archived_subtree": "이 태스크와 하위 태스크의 구독을 해제했습니다",
     "unsubscribed_hint": "이후 업데이트는 인박스에 오지 않습니다. @멘션은 계속 알림을 받습니다.",
     "undo": "실행 취소"
+  },
+  "kept": {
+    "archived": "보관됨",
+    "leaves": "다른 곳으로 이동하면 인박스에서 빠집니다",
+    "filtered": "더 이상 필터와 일치하지 않음",
+    "notification_archived": "알림이 보관됨",
+    "next": "다음",
+    "next_tooltip": "다음 열기: {{title}}"
   },
   "errors": {
     "archived_lookup_failed": "링크된 알림을 불러오지 못했습니다",

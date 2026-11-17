@@ -1110,7 +1110,14 @@ multica autopilot create \
   --mode create_issue \
   --subscriber "Alice"
 
+multica autopilot create \
+  --title "Weekly dependency audit" \
+  --description "Audit dependencies for security updates." \
+  --squad "Backend Squad" \
+  --mode create_issue
+
 multica autopilot update <id> --status paused
+multica autopilot update <id> --squad-id <squad-uuid>
 multica autopilot update <id> --description "New prompt"
 multica autopilot update <id> --subscriber "Alice" --subscriber "Bob"
 multica autopilot update <id> --clear-subscribers
@@ -1118,6 +1125,7 @@ multica autopilot delete <id>
 ```
 
 `--mode` accepts `create_issue` (creates a new issue on each run and assigns it to the agent) or `run_only` (enqueues a direct agent task without creating an issue). `--agent` accepts either a name or UUID.
+To assign a squad instead, use `--squad` (name or ID) or `--squad-id` (canonical UUID); the run goes to the squad's leader, and in `create_issue` mode the created issue is assigned to the squad. `--agent`, `--squad`, and `--squad-id` are mutually exclusive, and `create` requires one of them. On `update` they switch the assignee (sending `assignee_type` with `assignee_id`); an update without any of them leaves the current assignee untouched. Table output labels the assignee by type, e.g. `squad:Backend Squad`.
 `--subscriber` accepts a workspace member name or user ID and may be repeated; on update it replaces the autopilot's subscriber template. Subscribers receive inbox notifications for issues created by a `create_issue` autopilot. Use `--clear-subscribers` to remove all autopilot subscribers.
 
 ### Manual Trigger
@@ -1165,6 +1173,41 @@ output — use `autopilot get <id> --output json --show-secrets` to reveal them.
 The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
 triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
 also defines an `api` kind, which is not surfaced here.
+
+### Webhook Event and Action Filters
+
+Use a JSON file to configure the same event/action filters as the web UI:
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+Save this array as `filters.json`, then create or update a webhook trigger:
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+An event without `actions` (or with an empty actions array) accepts every action
+for that event. Filters apply only to webhook triggers; schedule triggers reject
+them. The server validates the filters using the same rules as UI submissions.
+
+Omitting `--event-filters-file` on update preserves the saved filters. Replacing
+filters requires a nonempty array; `null`, an empty array, unknown fields, and
+malformed files are rejected. To explicitly remove filters and accept all events:
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` cannot be combined with `--event-filters-file`. Creation
+without a filter file accepts all events. These flags configure existing event
+and action matching; they do not add payload-field conditions.
 
 ## Other Commands
 

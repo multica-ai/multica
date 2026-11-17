@@ -1,6 +1,6 @@
 ---
 title: Intégrations de messagerie
-description: Connectez les agents Multica à Feishu, Lark, Slack, DingTalk, WeCom ou Telegram et utilisez-les depuis les outils de messagerie que votre équipe utilise déjà.
+description: Connectez les agents Multica à Feishu, Lark, Slack, DingTalk, WeCom, Telegram ou WeChat et utilisez-les depuis les outils de messagerie que votre équipe utilise déjà.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -8,19 +8,19 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
 Les intégrations de messagerie permettent à l'équipe de poser des questions à un agent en message direct, de le @mentionner dans une conversation de groupe ou de créer des tâches depuis la fenêtre de conversation, sans ouvrir Multica.
 
-Feishu/Lark, Slack, DingTalk, WeCom et Telegram sont pris en charge aujourd'hui. Ils partagent les mêmes mécanismes de session, d'identité et d'exécution, mais s'installent différemment.
+Feishu/Lark, Slack, DingTalk, WeCom, Telegram et WeChat sont pris en charge. WeChat accepte uniquement les messages privés du compte qui a scanné le QR code de connexion. Ils partagent les mêmes mécanismes de session, d'identité et d'exécution, mais s'installent différemment.
 
 ## Choisir une plateforme
 
-| | Feishu / Lark | Slack | DingTalk | WeCom | Telegram |
-|---|---|---|---|---|---|
-| Installation | Générez un QR code dans Multica et autorisez-le en le scannant avec Feishu | Créez une application dans Slack, puis collez deux jetons dans Multica | Créez une application interne et un robot en mode Stream, puis collez son AppKey et son AppSecret dans Multica | Créez un bot intelligent avec la connexion longue activée dans la console d'administration WeCom, puis collez son ID de bot et son secret dans Multica | Créez un bot avec @BotFather, puis collez son jeton dans Multica |
-| Messages directs à l'agent | Pris en charge | Pris en charge | Pris en charge | Pris en charge | Pris en charge |
-| Groupes ou canaux | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot ou en lui répondant |
-| Créer des tâches | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande slash `/issue` ; l'agent rédige la description avant de créer la tâche | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle |
-| Démarrer une nouvelle discussion | `/new [message]` | Message direct : `/new [message]` ; canal/fil : `@Multica /new [message]` | `/new [message]` | `/new [message]` | `/new [message]` |
-| Effacer le contexte de la discussion en cours | `/clear [message]` | Message direct : `/clear [message]` ; canal/fil : `@Multica /clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` |
-| Connexion | Connexion longue de la plateforme | Socket Mode | Mode Stream | Connexion longue de la plateforme | Long polling `getUpdates` |
+| | Feishu / Lark | Slack | DingTalk | WeCom | Telegram | WeChat |
+|---|---|---|---|---|---|---|
+| Installation | Générez un QR code dans Multica et autorisez-le en le scannant avec Feishu | Créez une application dans Slack, puis collez deux jetons dans Multica | Créez une application interne et un robot en mode Stream, puis collez son AppKey et son AppSecret dans Multica | Créez un bot intelligent avec la connexion longue activée dans la console d'administration WeCom, puis collez son ID de bot et son secret dans Multica | Créez un bot avec @BotFather, puis collez son jeton dans Multica | Scannez un QR code avec votre propre compte WeChat |
+| Messages directs à l'agent | Pris en charge | Pris en charge | Pris en charge | Pris en charge | Pris en charge | Uniquement le compte qui a scanné le QR code |
+| Groupes ou canaux | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot ou en lui répondant | Non pris en charge |
+| Créer des tâches | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande slash `/issue` ; l'agent rédige la description avant de créer la tâche | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle |
+| Démarrer une nouvelle discussion | `/new [message]` | Message direct : `/new [message]` ; canal/fil : `@Multica /new [message]` | `/new [message]` | `/new [message]` | `/new [message]` | `/new [message]` |
+| Effacer le contexte de la discussion en cours | `/clear [message]` | Message direct : `/clear [message]` ; canal/fil : `@Multica /clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` |
+| Connexion | Connexion longue de la plateforme | Socket Mode | Mode Stream | Connexion longue de la plateforme | Long polling `getUpdates` | Long polling iLink |
 
 Les nouvelles connexions ne sont actuellement ouvertes qu'à Feishu en Chine continentale ; les connexions Lark internationales existantes continuent de fonctionner et peuvent toujours être gérées.
 
@@ -38,6 +38,7 @@ Guides pas à pas :
 - [Intégration du bot Slack](/slack-bot-integration)
 - [Intégration du bot DingTalk](/dingtalk-bot-integration)
 - [Intégration du bot Telegram](/telegram-bot-integration)
+- [Intégration du bot WeChat](/weixin-bot-integration)
 
 ## Traitement d'un message
 
@@ -68,12 +69,15 @@ Sur Slack, `/new` et `/clear` sont des commandes slash natives dans un message d
 - DingTalk sépare les sessions par conversation ; chaque message direct ou groupe poursuit sa propre session.
 - WeCom sépare les sessions par conversation ; chaque message direct ou conversation de groupe poursuit sa propre session.
 - Telegram sépare les sessions par conversation ; les sujets de forum sont isolés par sujet.
+- WeChat conserve une session pour le bot connecté et le compte qui a scanné son QR code.
 
 Dans un canal, chaque relance nécessite toujours une nouvelle @mention. En dehors du contexte récent décrit plus haut, l'agent ne lit jamais automatiquement l'historique du canal.
 
 ## Association de compte
 
-La première fois qu'un membre écrit au bot, il reçoit un lien d'association de compte. Une fois qu'il s'est connecté à Multica, son compte sur la plateforme est associé à son appartenance à l'espace de travail actuel.
+Pour WeChat, le scan du QR code associe le compte WeChat à l'utilisateur Multica qui a lancé la connexion. Les messages utilisent les permissions de cet utilisateur dans l'espace de travail. Scannez avec votre propre compte et ne partagez pas le QR code ; les autres comptes et les messages de groupe ne sont pas acceptés.
+
+Pour Feishu/Lark, Slack, DingTalk, WeCom et Telegram, la première fois qu'un membre écrit au bot, il reçoit un lien d'association de compte. Une fois qu'il s'est connecté à Multica, son compte sur la plateforme est associé à son appartenance à l'espace de travail actuel.
 
 Multica n'exécute l'agent qu'une fois l'association terminée. Chaque message revérifie l'association du compte et l'appartenance à l'espace de travail ; après avoir quitté un espace de travail, on ne peut plus l'atteindre via le bot.
 
@@ -83,7 +87,7 @@ L'association de compte confirme uniquement l'identité de l'expéditeur. Les au
 
 ## Gérer les connexions
 
-Les propriétaires et administrateurs de l'espace de travail peuvent connecter ou déconnecter des bots ; pour les bots Feishu/Lark, la connexion et la déconnexion sont aussi ouvertes au propriétaire de l'agent. Les membres ordinaires peuvent consulter les intégrations connectées et utiliser les agents auxquels ils ont accès.
+Les propriétaires et administrateurs de l'espace de travail peuvent connecter ou déconnecter des bots ; pour Feishu/Lark, DingTalk et WeChat, la connexion et la déconnexion sont aussi ouvertes au propriétaire de l'agent. Les membres ordinaires peuvent consulter les intégrations connectées et utiliser les agents auxquels ils ont accès.
 
 Après la déconnexion, le bot ne reçoit plus de nouveaux messages. Les conversations Multica et les historiques d'exécution existants sont conservés.
 
@@ -97,6 +101,7 @@ MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_WEIXIN_SECRET_KEY=<base64-encoded 32-byte key>
 ```
 
 Ces clés chiffrent les identifiants de bot stockés. Consultez [Variables d'environnement](/environment-variables) pour savoir comment les générer, les stocker et les renouveler. Multica Cloud est déjà configuré.
@@ -114,4 +119,5 @@ Quel que soit le mode, une réponse produite alors qu'aucune réplique ne détie
 - [Intégration du bot Slack](/slack-bot-integration) — créer une application Slack et coller ses jetons dans Multica.
 - [Intégration du bot DingTalk](/dingtalk-bot-integration) — créer un robot en mode Stream et coller ses identifiants dans Multica.
 - [Intégration du bot Telegram](/telegram-bot-integration) — créer un bot avec @BotFather et coller son jeton dans Multica.
+- [Intégration du bot WeChat](/weixin-bot-integration)
 - [Discussion](/chat) — le modèle de conversation et d'exécution derrière chaque bot.

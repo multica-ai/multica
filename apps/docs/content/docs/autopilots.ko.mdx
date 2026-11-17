@@ -45,7 +45,7 @@ import { AutopilotDemo } from "@/components/demos/autopilot-demo";
 
 ## 일정에 따라 실행
 
-일정 편집기에서 실행 시간, 반복 요일, 시간 범위, 시간대를 선택하고 다음 실행 시간을 미리 볼 수 있습니다. 오토파일럿 하나에 여러 일정을 추가할 수 있습니다. 특정 트리거를 개별적으로 켜거나 끄려면 CLI의 `autopilot trigger-update`를 사용하세요. 인수는 [CLI 명령](/cli)을 참고하세요.
+일정 편집기에서 실행 시간, 반복 요일, 시간 범위, 시간대를 선택하고 다음 실행 시간을 미리 볼 수 있습니다. 오토파일럿 하나에 여러 일정을 추가할 수 있습니다. 특정 트리거를 수정하거나 개별적으로 켜거나 끄려면 '트리거'에서 해당 줄의 수정 버튼을 클릭하거나 CLI의 `autopilot trigger-update`를 사용하세요. 인수는 [CLI 명령](/cli)을 참고하세요.
 
 더 복잡한 규칙이 필요하면 표준 5필드 cron을 직접 수정할 수 있습니다.
 
@@ -87,9 +87,43 @@ Webhook 요청에는 다음 제약이 있습니다.
 
 ### 이벤트 필터링 [#event-filters]
 
-같은 소스에서 여러 종류의 이벤트를 보낸다면 트리거에 이벤트 필터를 추가할 수 있습니다. 각 줄에는 이벤트 이름과 선택적인 action 목록을 입력합니다. 어느 한 줄이라도 일치하면 실행되며 모두 비워 두면 모든 이벤트를 받습니다.
+같은 소스에서 여러 종류의 이벤트를 보낸다면 트리거에 이벤트 필터를 추가할 수 있습니다. **규칙 추가**를 클릭하고 이벤트 이름과 선택적인 action 목록을 입력합니다. 어느 한 규칙이라도 일치하면 실행되며 규칙이 없으면 모든 이벤트를 받습니다. Webhook의 필터를 수정하려면 '트리거'에서 해당 줄의 **Webhook 수정**을 클릭하세요.
 
 예를 들어 이벤트 이름에 `workflow_run`, Actions에 `completed, failed`를 입력하면 이 두 종류의 `workflow_run` 결과만 받습니다. Multica는 GitHub의 `X-GitHub-Event`와 body의 `action`을 포함해 일반적인 요청 header와 payload에서 이벤트와 action을 식별합니다.
+
+GitLab의 이벤트 이름은 GitLab이 보내는 `X-Gitlab-Event` 요청 header 값 그대로이며, `Merge Request Hook`, `Issue Hook`, `Note Hook`처럼 공백과 대소문자까지 일치해야 합니다. payload의 `object_kind`(`merge_request`)로는 일치하지 않습니다. Actions의 각 값은 `object_attributes.action`과 `object_attributes.state` 모두와 비교되며, 둘 중 하나라도 같으면 규칙이 일치합니다. 아래 규칙은 새로 만들어지거나 업데이트되거나 다시 열린 merge request를 받고, 병합과 닫기는 무시합니다.
+
+```json
+{ "event": "Merge Request Hook", "actions": ["open", "update", "reopen"] }
+```
+
+Actions에는 상태 단어(`opened`, `merged`, `closed`)가 아니라 동작 단어(`open`, `update`, `reopen`, `merge`, `close`)를 입력하세요. 값은 정확히 비교되며 한 형태가 다른 형태로 변환되지 않습니다. 상태 단어는 대상을 그 상태로 두는 모든 이벤트와 일치합니다. 열린 merge request에 커밋을 push하면 `"action": "update"`와 `"state": "opened"`가, 승인하면 `"action": "approval"`와 같은 상태가 전송되므로, `opened`를 입력하면 새 merge request뿐 아니라 이런 이벤트마다 실행이 시작됩니다.
+
+- `Issue Hook`에 `close`를 지정하면 닫힌 issue를 받습니다.
+- `Note Hook`에 `create`를 지정하면 새 댓글을 받습니다. 댓글을 수정하면 `update`가 전송됩니다.
+- Actions가 비어 있는 GitLab 규칙은 해당 이벤트 이름의 모든 이벤트를 받습니다.
+- 실패할 때만 실행하려면 **Actions**를 `failed`로 설정하고 이벤트 이름에 `Pipeline Hook`(`object_kind: "pipeline"`, 상태는 `object_attributes.status`) 또는 `Job Hook`(`object_kind: "build"`, 상태는 `build_status`)을 입력하세요. `success`, `running` 등 다른 상태는 필터링되며, Actions를 비우면 해당 이벤트의 모든 상태를 받습니다. 이 CI 상태 필드는 각각의 객체 유형에만 적용됩니다. [GitLab 이벤트 payload](https://docs.gitlab.com/user/project/integrations/webhook_events/#pipeline-events)를 참고하세요.
+
+각 규칙에는 payload 필드에 대한 `conditions`도 지정할 수 있습니다. 규칙의 **조건 추가**를 클릭하거나 API로 설정하세요. 모든 조건을 만족해야 해당 규칙이 일치하며, 걸러진 이벤트는 실행이 시작되기 전에 무시됩니다. `path`는 점으로 payload를 따라가며, 숫자는 배열 인덱스이고 `*`는 임의의 요소를 뜻합니다(`pull_request.labels.*.name`). `op`는 `equals`, `not_equals`, `contains`, `in`, `exists` 중 하나이며, `ignore_case`는 텍스트에 적용됩니다. `*`를 쓰면 `equals`, `contains`, `in`, `exists`는 요소 하나라도 일치하면 성립하고, `not_equals`는 어떤 요소도 일치하지 않을 때 성립합니다. 필드가 없으면 일치하지 않으며, `exists`는 `null`을 무시합니다. 예를 들어 아래 규칙은 준비된 상태이고 `needs-review` 라벨이 있으며 `main` 또는 `release`를 대상으로 하고 봇이 열지 않은 pull request만 받습니다.
+
+```json
+{
+  "event": "pull_request",
+  "actions": ["opened", "synchronize"],
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.labels.*.name", "op": "equals", "value": "needs-review" },
+    { "path": "pull_request.base.ref", "op": "in", "values": ["main", "release"] },
+    { "path": "sender.type", "op": "not_equals", "value": "Bot" }
+  ]
+}
+```
+
+규칙당 조건은 최대 20개, 필드 경로는 256자, `in` 후보 목록은 100개까지입니다. 한도를 초과하는 조건으로 트리거를 만들거나 수정하면 HTTP 400을 반환합니다.
+
+`*`가 빈 배열을 펼치면 `not_equals`는 충족됩니다. 경로가 없으면 일치하지 않습니다. 이벤트나 동작 불일치는 `event_filtered`, 본문 조건 불충족은 `payload_filtered`로 기록합니다. 모두 HTTP 200을 반환하며 실행이나 태스크를 만들지 않습니다. 목록에는 이유와 첫 번째 불일치 필드를 표시하고, 상세에는 수신 당시 저장한 조건과 실제 값을 표시합니다. 나중에 규칙을 바꿔도 이 기록은 유지됩니다. 미리보기는 값 10개, 각 256자로 제한됩니다. 전체 값은 원본 본문에서 확인하세요.
+
+CLI의 `--event-filters-file`로도 이 필터들을 모두 설정할 수 있습니다. 업데이트할 때 필터 옵션을 생략하면 기존 설정이 유지되고, `--clear-event-filters`를 지정하면 필터를 명시적으로 삭제하여 모든 이벤트를 받습니다. JSON 형식과 명령은 [CLI 예시](/cli#webhook-event-filters)를 참고하세요.
 
 ### Webhook URL 보호
 

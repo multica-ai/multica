@@ -1,17 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { AlarmClock, Archive, ChevronDown, CircleCheck } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
-import { useArchiveInbox, type InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
+import type { InboxUnsubscribeScope } from "@multica/core/inbox/mutations";
 import { findSnoozedInboxIssue, snoozedInboxOptions } from "@multica/core/inbox/queries";
-import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import { nextInboxRow } from "@multica/core/inbox/open-row";
 import {
   getShortcut,
   isEditableShortcutTarget,
@@ -20,7 +18,7 @@ import {
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
-import { inboxRowHref } from "../../inbox/components/inbox-display";
+import { InboxKeptActions, InboxNextButton, useKeptInboxRowText } from "../../inbox/components/inbox-kept-actions";
 import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { formatSnoozeTime } from "../../inbox/components/inbox-snooze-time";
 import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
@@ -28,7 +26,11 @@ import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-
 import { useSidebarInboxIssue } from "../../inbox/components/use-sidebar-inbox-issue";
 import { UnsubscribeArchiveButton } from "../../inbox/components/unsubscribe-archive-button";
 import { useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
-import { useNavigation } from "../../navigation";
+import {
+  useArchiveInboxWithUndo,
+  useLeaveInboxRow,
+  useRestoreInbox,
+} from "../../inbox/components/use-leave-inbox-row";
 import { useLocale, useT } from "../../i18n";
 
 /**
@@ -36,6 +38,10 @@ import { useLocale, useT } from "../../i18n";
  * Inbox section, while the section still lists it. Marking it done,
  * snoozing, archiving or unsubscribing opens the next notification the
  * section lists, so the Inbox can be worked through without leaving the page.
+ *
+ * Once its notification leaves the Inbox on its own (the issue reached Done,
+ * another window archived it), the section keeps the row in place and this
+ * says so instead, with an undo and the way on to the next notification.
  *
  * A snoozed issue shows when it comes back instead, wherever it is opened,
  * with the way to bring it back now or change the time.
@@ -53,75 +59,65 @@ export function IssueInboxActions({
   const { t } = useT("inbox");
   const { t: tIssues } = useT("issues");
   const wsId = useWorkspaceId();
-  const p = useWorkspacePaths();
-  const { push } = useNavigation();
   const { fromInbox } = useSidebarInboxIssue(wsId, issueId);
-  const rememberSidebarIssue = useInboxSelectionStore((s) => s.rememberSidebarIssue);
-  const { rows } = useFilteredInboxRows(wsId, issueId, fromInbox);
+  const { rows, kept } = useFilteredInboxRows(wsId, issueId, fromInbox);
   const index = fromInbox ? rows.findIndex((row) => row.issue_id === issueId) : -1;
-  const item = index >= 0 ? rows[index]! : null;
-  const { mutateAsync: archiveAsync } = useArchiveInbox();
+  const row = index >= 0 ? rows[index]! : null;
+  // A row kept after it left the Inbox on its own is no longer there to act on.
+  const settled = kept && kept.reason !== "filtered" ? kept : null;
+  const item = settled ? null : row;
+  const next = row ? nextInboxRow(rows, issueId) : null;
+  const leave = useLeaveInboxRow();
+  const archiveWithUndo = useArchiveInboxWithUndo();
+  const restore = useRestoreInbox();
   const unsubscribeArchive = useUnsubscribeArchive();
   const { snooze, unsnooze } = useInboxSnooze();
   const { data: snoozedList } = useQuery(snoozedInboxOptions(wsId));
   const snoozed = item ? undefined : findSnoozedInboxIssue(snoozedList, issueId);
+  const keptText = useKeptInboxRowText(wsId);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
 
-  const failed = (fallback: string) => (err: unknown) =>
-    toast.error(err instanceof Error && err.message ? err.message : fallback);
-
-  // Rows run newest first: move on to the older one, else the newer one.
-  const openNext = (next: (typeof rows)[number] | null) => {
-    if (!next) return;
-    rememberSidebarIssue(wsId, next.issue_id ?? null);
-    push(inboxRowHref(p, next));
-  };
-
-  // Toasts follow the request's promise: the next issue's page can replace
-  // this header first, and React Query drops per-call callbacks with it.
   const archiveItem = () => {
     if (!item) return;
-    const next = rows[index + 1] ?? rows[index - 1] ?? null;
-    archiveAsync(item.id).then(
-      () => toast.success(t(($) => $.toasts.archived)),
-      failed(t(($) => $.errors.archive_failed)),
-    );
-    openNext(next);
+    archiveWithUndo(item.id, issueId);
+    leave(issueId, next);
   };
 
   const unsubscribeItem = (scope: InboxUnsubscribeScope) => {
     if (!item?.issue_id) return;
-    const next = rows[index + 1] ?? rows[index - 1] ?? null;
     unsubscribeArchive({ id: item.id, issueId: item.issue_id }, scope);
-    openNext(next);
+    leave(issueId, next);
   };
 
   const snoozeItem = (until: Date) => {
     if (!item) return;
-    const next = rows[index + 1] ?? rows[index - 1] ?? null;
     snooze(item, until);
-    openNext(next);
+    leave(issueId, next);
   };
 
   // Done archives the issue's notifications on the server; archiving here as
-  // well takes the row out at once instead of when that event arrives.
+  // well confirms it with an undo, which restores the notification and leaves
+  // the issue done. Until the status is saved the row stays, so a write that
+  // fails or never happens leaves it as it was.
   const markDone = () => {
     if (!item || !onMarkDone) return;
-    const next = rows[index + 1] ?? rows[index - 1] ?? null;
     onMarkDone(() => {
-      archiveAsync(item.id).catch(failed(t(($) => $.errors.archive_failed)));
-      openNext(next);
+      void archiveWithUndo(item.id, issueId);
+      leave(issueId, next);
     });
   };
+
+  const moveOn = () => leave(issueId, next);
 
   const archiveRef = useRef<(() => void) | null>(null);
   const snoozeRef = useRef<(() => void) | null>(null);
   useEffect(() => {
-    archiveRef.current = item ? archiveItem : null;
+    // Archived already, E moves on as archiving would have.
+    archiveRef.current = item ? archiveItem : settled && next ? moveOn : null;
     snoozeRef.current = item
       ? () => setSnoozeOpen(true)
       : snoozed
-        ? () => unsnooze(snoozed.item_id)
+        ? () => unsnooze(snoozed.item_id, issueId)
         : null;
   });
   useEffect(() => {
@@ -144,14 +140,27 @@ export function IssueInboxActions({
   }, []);
 
   if (!item) {
-    if (!snoozed) return null;
+    if (snoozed) {
+      return (
+        <SnoozedChip
+          until={new Date(snoozed.snoozed_until)}
+          open={snoozeOpen}
+          onOpenChange={setSnoozeOpen}
+          onSnooze={(until) => snooze({ id: snoozed.item_id }, until)}
+          onUnsnooze={() => unsnooze(snoozed.item_id, issueId)}
+        >
+          {settled && next && <InboxNextButton next={next} onNext={moveOn} />}
+        </SnoozedChip>
+      );
+    }
+    if (!settled) return null;
     return (
-      <SnoozedChip
-        until={new Date(snoozed.snoozed_until)}
-        open={snoozeOpen}
-        onOpenChange={setSnoozeOpen}
-        onSnooze={(until) => snooze({ id: snoozed.item_id }, until)}
-        onUnsnooze={() => unsnooze(snoozed.item_id)}
+      <InboxKeptActions
+        label={keptText.notice(settled)}
+        onUndo={() => restore(settled.item.id, { quiet: true })}
+        next={next}
+        onNext={moveOn}
+        layout="header"
       />
     );
   }
@@ -205,12 +214,15 @@ function SnoozedChip({
   onOpenChange,
   onSnooze,
   onUnsnooze,
+  children,
 }: {
   until: Date;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSnooze: (until: Date) => void;
   onUnsnooze: () => void;
+  /** After the chip, before the separator. */
+  children?: ReactNode;
 }) {
   const { t } = useT("inbox");
   const locale = useLocale();
@@ -238,6 +250,7 @@ function SnoozedChip({
           </button>
         }
       />
+      {children}
       <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
     </>
   );
