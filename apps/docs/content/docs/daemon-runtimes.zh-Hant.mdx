@@ -190,6 +190,12 @@ Hermes 在任務和聊天中的執行會將會話持久目錄作為隔離的 `HE
 
 Multica 每次執行都會重新整理其中的 skill 和派生配置。模型服務認證會保留，託管執行的訊息平臺介面卡和 HTTP 入口會關閉。宿主的 Gateway 狀態、日誌、會話和定時任務各自隔離。執行結束時會停止本次執行的 Gateway，確保後續執行使用自己的執行環境。
 
+### Codex 專案指令大小限制 [#codex-instructions]
+
+開始或恢復 Codex 執行前，守護程序會檢查 Codex 是否選中了產生的 `AGENTS.md`，以及能否在 `project_doc_max_bytes` 限制內完整讀取它。預設限制為 32 KiB，由專案的所有指令檔案共用。如果檔案被其他檔案覆蓋、超出剩餘大小限制，或無法確認實際生效的設定，執行會在模型回合開始前停止。診斷會標明檔案和限制，不輸出指令內容。
+
+可以精簡 AI 代理或儲存庫指令，檢查是否有優先順序更高的 `AGENTS.override.md`，或在 Codex 設定或 AI 代理自訂參數中明確提高限制，例如 `-c project_doc_max_bytes=65536`。Multica 會保留你設定的限制和儲存庫檔案。詳見 [Codex 指令探索規則](https://learn.chatgpt.com/docs/agent-configuration/agents-md)。
+
 ### Codex 原生記憶與子 AI 代理 [#codex-memory]
 
 守護程序管理的 Codex 執行預設關閉 Codex 原生記憶，避免本機或前一次執行留下的記憶帶進別的工作區。設定只寫入這次執行專用的 `CODEX_HOME/config.toml`（`features.memories` 和 `memories.generate_memories`、`memories.use_memories` 均為 `false`），不改你的 `~/.codex/config.toml`。需要保留原生記憶時，在守護程序的環境中設定 `MULTICA_CODEX_MEMORY=1`。

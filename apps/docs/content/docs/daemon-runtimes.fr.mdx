@@ -189,6 +189,12 @@ Les exécutions Hermes liées à une tâche ou à un chat utilisent le répertoi
 
 Multica actualise les skills et la configuration dérivée à chaque exécution. L’authentification du fournisseur de modèles est conservée ; les adaptateurs de messagerie et les points d’entrée HTTP sont désactivés pour les exécutions gérées. L’état de la Gateway, les journaux, les sessions et les tâches cron de l’hôte sont isolés. Toute Gateway propre à une exécution est arrêtée à la fin de celle-ci afin que les exécutions suivantes utilisent leur propre environnement.
 
+### Limite des instructions de projet Codex [#codex-instructions]
+
+Avant de démarrer ou de reprendre une exécution Codex, le daemon vérifie que Codex sélectionne le fichier `AGENTS.md` généré et peut le lire entièrement dans la limite `project_doc_max_bytes` (32 Kio par défaut, partagés entre les fichiers d'instructions du projet). Si le fichier est masqué, dépasse le budget restant ou si la configuration effective ne peut pas être vérifiée, l'exécution s'arrête avant le démarrage d'un tour du modèle. Le diagnostic indique le fichier et la limite sans afficher le contenu des instructions.
+
+Réduisez les instructions de l'agent ou du dépôt, vérifiez si un fichier `AGENTS.override.md` les masque, ou augmentez explicitement la limite dans la configuration Codex ou les arguments personnalisés de l'agent, par exemple `-c project_doc_max_bytes=65536`. Multica conserve votre limite et les fichiers du dépôt. Voir [la découverte des instructions Codex](https://learn.chatgpt.com/docs/agent-configuration/agents-md).
+
 ### Mémoire native et sous-agents de Codex [#codex-memory]
 
 Dans les exécutions Codex gérées par le daemon, la mémoire native de Codex est désactivée par défaut, pour que les souvenirs de cette machine ou d'une exécution précédente ne passent pas dans un autre espace de travail. Le réglage est écrit uniquement dans le `CODEX_HOME/config.toml` propre à l'exécution (`features.memories`, `memories.generate_memories` et `memories.use_memories` à `false`) ; votre `~/.codex/config.toml` n'est pas modifié. Pour garder la mémoire native, définissez `MULTICA_CODEX_MEMORY=1` dans l'environnement du daemon.
