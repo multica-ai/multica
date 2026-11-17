@@ -37,6 +37,38 @@ func (q *Queries) AckChatTaskSupplement(ctx context.Context, arg AckChatTaskSupp
 	return i, err
 }
 
+const activateHermesChatSupplement = `-- name: ActivateHermesChatSupplement :one
+WITH candidate AS MATERIALIZED (
+    SELECT t.id, r.workspace_id
+    FROM agent_task_queue t
+    JOIN agent_runtime r ON r.id=t.runtime_id
+    JOIN chat_session cs ON cs.id=t.chat_session_id AND cs.workspace_id=r.workspace_id
+    WHERE t.id = $1 AND t.status='running' AND t.issue_id IS NULL
+      AND r.provider='hermes' AND t.regenerate_quick_actions_for IS NULL
+      AND NOT EXISTS (SELECT 1 FROM channel_chat_session_binding b WHERE b.chat_session_id=cs.id)
+    FOR UPDATE OF t
+)
+INSERT INTO task_supplement_capability (task_id, workspace_id, capability)
+SELECT id, workspace_id, 'task-supplement-v1' FROM candidate
+ON CONFLICT (task_id) DO UPDATE SET capability=EXCLUDED.capability
+RETURNING task_id, workspace_id, issue_id, capability, created_at
+`
+
+// Activation follows the live provider handshake. Locking the task serializes
+// it with completion; no executable-name/version opt-in can create this row.
+func (q *Queries) ActivateHermesChatSupplement(ctx context.Context, taskID pgtype.UUID) (TaskSupplementCapability, error) {
+	row := q.db.QueryRow(ctx, activateHermesChatSupplement, taskID)
+	var i TaskSupplementCapability
+	err := row.Scan(
+		&i.TaskID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.Capability,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const claimNextChatTaskSupplement = `-- name: ClaimNextChatTaskSupplement :one
 WITH next AS MATERIALIZED (
     SELECT s.message_id FROM chat_task_supplement s
