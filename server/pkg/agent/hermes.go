@@ -620,6 +620,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
+		defer guidance.close()
 		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
