@@ -3397,7 +3397,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                   variant="ghost"
                   size="sm"
                   className="w-full justify-start text-muted-foreground"
-                  onClick={jumpToSubIssues}
+                  onClick={() => {
+                    if (isMobile) setMobileSidebarOpen(false);
+                    jumpToSubIssues();
+                  }}
                 >
                   {t(($) => $.detail.sub_issues_view_all, { total: childIssues.length })}
                 </Button>

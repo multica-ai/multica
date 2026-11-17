@@ -3757,6 +3757,37 @@ describe("IssueDetail (shared)", () => {
       await waitFor(() => expect(scroller.scrollTop).toBe(284));
     });
 
+    it("closes the narrow-screen sidebar before expanding and jumping to all children", async () => {
+      mockViewport.isMobile = true;
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: Array.from({ length: 25 }, (_, i) => subIssue({
+          id: `child-${i + 1}`,
+          identifier: `TES-${i + 1}`,
+          title: `Child ${i + 1}`,
+        })),
+      });
+      const { container } = renderIssueDetail();
+      await findInlineChild("Child 25");
+      const section = container.querySelector<HTMLDivElement>('[class~="group/sub-issues"]')!;
+      fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
+      expect(inlineChildren().queryByText("Child 25")).not.toBeInTheDocument();
+
+      const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
+      scroller.scrollTop = 600;
+      vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+      vi.spyOn(section, "getBoundingClientRect").mockReturnValue({ top: -200 } as DOMRect);
+      fireEvent.click(screen.getByRole("button", { name: enIssues.detail.sidebar_tooltip }));
+      const sheet = await screen.findByRole("dialog");
+      const sidebar = within(sheet.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      expect(sidebar.getAllByRole("link")).toHaveLength(10);
+      fireEvent.click(sidebar.getByRole("button", { name: "View all (25)" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(await findInlineChild("Child 25")).toBeVisible();
+      expect(inlineChildren().getAllByText(/^Child \d+$/)).toHaveLength(25);
+      await waitFor(() => expect(scroller.scrollTop).toBe(284));
+    });
+
     it("shows all ten sidebar children without an overflow button at the limit", async () => {
       mockApiObj.listChildIssues.mockResolvedValue({
         issues: Array.from({ length: 10 }, (_, i) => subIssue({
