@@ -11,13 +11,25 @@ import {
 } from "@multica/ui/components/ui/hover-card";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { AgentTask, IssueWakeupSummaryRow, PausedWakeup } from "@multica/core/types";
-import { pausedWakeupsOptions, workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
+import type {
+  AgentTask,
+  IssueStatusCategory,
+  IssueWakeupSummaryRow,
+  PausedWakeup,
+} from "@multica/core/types";
+import {
+  pausedWakeupsOptions,
+  workspaceWakeupSummariesOptions,
+} from "@multica/core/issues/wakeups";
 import { cn } from "@multica/ui/lib/utils";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { AgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
-import { selectIssueTasks, type IssueTaskGroups } from "../surface/activity";
+import {
+  deriveIssueExecutionState,
+  selectIssueTasks,
+  type IssueTaskGroups,
+} from "../surface/activity";
 import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
 
@@ -51,6 +63,8 @@ interface IssueAgentActivityIndicatorProps {
   // Whether hovering opens the activity card. Opt OUT where the card's only
   // incremental information is not worth a popup (Inbox — see below).
   hoverCard?: boolean;
+  childProgress?: { done: number; total: number } | null;
+  statusCategory?: IssueStatusCategory | null;
 }
 
 /**
@@ -61,7 +75,9 @@ interface IssueAgentActivityIndicatorProps {
  *   - has ≥1 running task  → tiny avatar stack + shimmering "Working"
  *   - 0 running, ≥1 queued → half-opacity stack + muted "Queued"
  *   - future wakeups only   → next time/event + remaining count
- *   - no tasks or wakeups   → return null (no chrome, no placeholder)
+ *   - no task or wakeup + unfinished children on an in-progress issue
+ *                           → muted "Waiting on sub-issues" fallback
+ *   - otherwise             → return null (no chrome, no placeholder)
  *
  * The shimmer shares chat's ShimmerText component. Earlier iterations layered
  * a brand ring + opacity pulse around the avatars; both read as nervous on a
@@ -95,6 +111,8 @@ export const IssueAgentActivityIndicator = memo(
     issueId,
     size = "xs",
     hoverCard = true,
+    childProgress,
+    statusCategory,
   }: IssueAgentActivityIndicatorProps) {
     const { t } = useT("issues");
     const wsId = useWorkspaceId();
@@ -145,15 +163,32 @@ export const IssueAgentActivityIndicator = memo(
     const hasTasks = agentIds.length > 0;
     const hoverTasks = [...groups.running, ...groups.queued];
     const wakeupTriggered = hoverTasks.some((task) => !!task.wakeup_id);
-    if (!hasTasks && !wakeupCount && !paused) return null;
+    const executionState = deriveIssueExecutionState(
+      groups,
+      statusCategory,
+      childProgress,
+    );
+    const isImplicitChildWait =
+      executionState === "waiting" && !wakeupCount && !paused;
+    if (!hasTasks && !wakeupCount && !paused && !isImplicitChildWait) {
+      return null;
+    }
     const isRunning = opacity === "full";
     // One sentence of what the issue waits for; a paused rule speaks up only
     // when nothing else is waiting, because it needs someone to look.
-    const waitingLabel = wakeups[0]
+    const waitingLabel = isImplicitChildWait
+      ? t(($) => $.agent_activity.status_waiting)
+      : wakeups[0]
       ? text.waiting(wakeups[0])
       : paused
         ? t(($) => $.wakeups.wait.paused)
         : "";
+    const waitingDetail = isImplicitChildWait && childProgress
+      ? t(($) => $.agent_activity.waiting_detail, {
+          done: childProgress.done,
+          total: childProgress.total,
+        })
+      : "";
     const label = hasTasks
       ? isRunning
         ? t(($) => $.agent_activity.status_running)
@@ -194,14 +229,27 @@ export const IssueAgentActivityIndicator = memo(
       </>
     ) : (
       <>
-        {!wakeups[0] ? (
+        {isImplicitChildWait ? null : !wakeups[0] ? (
           <TriangleAlert className="size-3 text-destructive" aria-hidden="true" />
         ) : wakeups[0].kind === "event" ? (
           <Bell className="size-3 text-muted-foreground" aria-hidden="true" />
         ) : (
           <Clock3 className="size-3 text-muted-foreground" aria-hidden="true" />
         )}
-        <span className={cn("max-w-36 truncate text-micro", wakeups[0] ? "text-muted-foreground" : "text-destructive")}>
+        <span
+          className={cn(
+            "max-w-36 truncate text-micro",
+            wakeups[0] || isImplicitChildWait
+              ? "text-muted-foreground"
+              : "text-destructive",
+          )}
+          title={isImplicitChildWait ? waitingDetail : undefined}
+          aria-label={
+            isImplicitChildWait
+              ? `${waitingLabel} · ${waitingDetail}`
+              : undefined
+          }
+        >
           {waitingLabel}
         </span>
         {wakeupCount > 1 && (
@@ -226,7 +274,7 @@ export const IssueAgentActivityIndicator = memo(
           render={
             <span
               tabIndex={0}
-              aria-label={`${label}${wakeupTriggered ? ` · ${t(($) => $.wakeups.triggered_by_wakeup)}` : ""}${wakeupCount ? ` · ${t(($) => $.wakeups.upcoming, { count: wakeupCount })}` : ""}`}
+              aria-label={`${label}${waitingDetail ? ` · ${waitingDetail}` : ""}${wakeupTriggered ? ` · ${t(($) => $.wakeups.triggered_by_wakeup)}` : ""}${wakeupCount ? ` · ${t(($) => $.wakeups.upcoming, { count: wakeupCount })}` : ""}`}
               onFocus={() => setOpen(true)}
               onBlur={() => setOpen(false)}
               className="inline-flex shrink-0 items-center gap-1 rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
@@ -237,6 +285,14 @@ export const IssueAgentActivityIndicator = memo(
         </HoverCardTrigger>
         <HoverCardContent align="end" className="w-72">
           {hasTasks && <AgentActivityHoverContent tasks={hoverTasks} />}
+          {isImplicitChildWait && (
+            <div className="space-y-1">
+              <p className="text-body font-medium">{waitingLabel}</p>
+              <p className="text-caption text-muted-foreground">
+                {waitingDetail}
+              </p>
+            </div>
+          )}
           {paused && !wakeupCount && (
             <p className={cn("text-caption text-destructive", hasTasks && "mt-2 border-t border-border pt-2")}>
               {t(($) => $.wakeups.wait.paused)}
