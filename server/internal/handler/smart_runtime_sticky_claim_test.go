@@ -110,3 +110,69 @@ func TestSmartRuntimeStickyInheritanceClaimableByRunOwner(t *testing.T) {
 		t.Fatalf("the run owner's machine failed to claim the stamped follow-up (task=%v, err=%v)", claimed != nil, err)
 	}
 }
+
+// The auto-retry of a failed sticky follow-up keeps claiming on the run's
+// machine: CreateRetryTask rewrites the inherited marker to the retry's own
+// id (the fence would otherwise read the parent's id and refuse), keeps the
+// source run vouching for the machine, and the run owner's daemon claims the
+// second attempt.
+func TestSmartRuntimeAutoRetryReinheritsStickyMarker(t *testing.T) {
+	ctx := t.Context()
+	templateOwner := dbfx.User(t, "Retry Template Owner", "retry-inherit-template@example.test")
+	dbfx.Member(t, testWorkspaceID, templateOwner, "member")
+	runOwner := dbfx.User(t, "Retry Run Owner", "retry-inherit-run-owner@example.test")
+	dbfx.Member(t, testWorkspaceID, runOwner, "member")
+	joiner := dbfx.User(t, "Retry Joiner", "retry-inherit-joiner@example.test")
+	dbfx.Member(t, testWorkspaceID, joiner, "member")
+	machine := dbfx.Runtime(t, "Retry run machine", testutil.Cols{"provider": "codex", "owner_id": runOwner})
+	agentID := dbfx.Agent(t, "retry-inherit-agent", "", testutil.Cols{
+		"share_runtime": false, "recommended_cli": "codex", "owner_id": templateOwner,
+	})
+	issueID := dbfx.Issue(t, "Retry inheritance", testutil.Cols{"assignee_type": "agent", "assignee_id": agentID})
+
+	sourceID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": machine, "issue_id": issueID, "status": "completed",
+		"originator_user_id": runOwner, "accountable_user_id": runOwner,
+		"runtime_config_source": "recommended_match", "dispatched_at": testutil.Raw("now()"),
+	})
+	source := parseUUID(sourceID)
+	followUpID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": machine, "issue_id": issueID, "status": "queued",
+		"originator_user_id": joiner, "accountable_user_id": joiner,
+		"runtime_config_source": "recommended_match",
+	})
+	followUp := parseUUID(followUpID)
+	if _, err := testHandler.Queries.MarkTaskStickyRuntimeInheritance(ctx, db.MarkTaskStickyRuntimeInheritanceParams{
+		TaskID:       followUp,
+		SourceTaskID: source,
+	}); err != nil {
+		t.Fatalf("stamp sticky inheritance: %v", err)
+	}
+
+	// FailTask marks the parent failed in its own transaction before creating
+	// the retry; mirror that state here.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'failed', completed_at = now() WHERE id = $1`, followUp); err != nil {
+		t.Fatalf("fail the sticky follow-up: %v", err)
+	}
+	retry, err := testHandler.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: followUp})
+	if err != nil {
+		t.Fatalf("create auto retry: %v", err)
+	}
+	var stickyTaskID, stickyRuntime, stickySource string
+	if err := testPool.QueryRow(ctx, `SELECT
+			context->>'sticky_runtime_inherited_task_id',
+			context->>'sticky_runtime_inherited_runtime_id',
+			context->>'sticky_runtime_source_task_id'
+		FROM agent_task_queue WHERE id = $1`, retry.ID).Scan(&stickyTaskID, &stickyRuntime, &stickySource); err != nil {
+		t.Fatalf("read retry marker: %v", err)
+	}
+	if stickyTaskID != util.UUIDToString(retry.ID) || stickyRuntime != util.UUIDToString(retry.RuntimeID) || stickySource != util.UUIDToString(source) {
+		t.Fatalf("retry marker = (%s, %s, %s), want (self %s, machine %s, source %s)",
+			stickyTaskID, stickyRuntime, stickySource, util.UUIDToString(retry.ID), util.UUIDToString(retry.RuntimeID), util.UUIDToString(source))
+	}
+
+	claimed, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(machine))
+	if err != nil || claimed == nil || claimed.ID != retry.ID {
+		t.Fatalf("the run owner's machine failed to claim the retry (task=%v, err=%v)", claimed != nil, err)
+	}
+}

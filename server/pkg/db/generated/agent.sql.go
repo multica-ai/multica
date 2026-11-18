@@ -3014,11 +3014,31 @@ INSERT INTO agent_task_queue (
     effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint
 )
 SELECT
-    p.agent_id, selected.runtime_id, 'queued', p.priority, p.context,
+    p.agent_id, selected.runtime_id, 'queued', p.priority,
+    -- Same sticky rule as the automatic retry: a manual rerun keeping the
+    -- run's machine rewrites the inheritance marker to itself; a rerun that
+    -- resolves elsewhere (fixed rebinding) strips it.
+    NULLIF(
+        (p.context - ARRAY[
+            'fixed_runtime_batch_retained',
+            'fixed_runtime_batch_retained_runtime_id',
+            'fixed_runtime_batch_retained_task_id'
+        ])
+        || CASE
+            WHEN p.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                AND p.context->>'sticky_runtime_inherited_runtime_id' = selected.runtime_id::text
+            THEN jsonb_build_object(
+                'sticky_runtime_inherited', true,
+                'sticky_runtime_inherited_runtime_id', selected.runtime_id::text,
+                'sticky_runtime_inherited_task_id', to_jsonb($1::uuid),
+                'sticky_runtime_source_task_id', p.context->>'sticky_runtime_source_task_id')
+            ELSE '{}'::jsonb
+        END,
+    '{}'::jsonb),
     TRUE, p.is_leader_task, p.squad_id,
-    $1, $1,
-    $2, $3,
-    'direct_human', p.id, $4,
+    $2, $2,
+    $3, $4,
+    'direct_human', p.id, $1,
     CASE WHEN NOT a.share_runtime THEN p.effective_model END,
     CASE WHEN NOT a.share_runtime THEN p.effective_thinking_level END,
     CASE WHEN NOT a.share_runtime THEN p.effective_service_tier END,
@@ -3035,16 +3055,16 @@ WHERE p.id = $5
   AND p.issue_id IS NULL
   AND p.chat_session_id IS NULL
   AND p.autopilot_run_id IS NULL
-  AND (a.share_runtime OR r.owner_id = $1)
+  AND (a.share_runtime OR r.owner_id = $2)
   AND lock_task_owner_rows(p.agent_id, p.issue_id, selected.runtime_id)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, effective_model, effective_thinking_level, effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint, effective_service_tier
 `
 
 type CreateManualQuickCreateRetryTaskParams struct {
+	NewTaskID            pgtype.UUID `json:"new_task_id"`
 	ActorUserID          pgtype.UUID `json:"actor_user_id"`
 	RuntimeMcpOverlay    []byte      `json:"runtime_mcp_overlay"`
 	RuntimeConnectedApps []byte      `json:"runtime_connected_apps"`
-	NewTaskID            pgtype.UUID `json:"new_task_id"`
 	SourceTaskID         pgtype.UUID `json:"source_task_id"`
 }
 
@@ -3062,10 +3082,10 @@ type CreateManualQuickCreateRetryTaskParams struct {
 // original requester. Fixed agents follow their current binding.
 func (q *Queries) CreateManualQuickCreateRetryTask(ctx context.Context, arg CreateManualQuickCreateRetryTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createManualQuickCreateRetryTask,
+		arg.NewTaskID,
 		arg.ActorUserID,
 		arg.RuntimeMcpOverlay,
 		arg.RuntimeConnectedApps,
-		arg.NewTaskID,
 		arg.SourceTaskID,
 	)
 	var i AgentTaskQueue
@@ -3328,12 +3348,27 @@ SELECT
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary,
     -- A retry is a fresh routing decision: strip a fixed-runtime batch
     -- retention marker inherited from the parent so the clone is not treated
-    -- as retained on a runtime the retry no longer targets.
-    NULLIF(p.context - ARRAY[
+    -- as retained on a runtime the retry no longer targets. A sticky
+    -- runtime-inheritance marker is rewritten instead of stripped when the
+    -- retry keeps the run's machine — the retry still claims there under the
+    -- run's own authorization, and the fence re-checks the source anyway.
+    NULLIF(
+        (p.context - ARRAY[
         'fixed_runtime_batch_retained',
         'fixed_runtime_batch_retained_runtime_id',
         'fixed_runtime_batch_retained_task_id'
-    ], '{}'::jsonb),
+    ])
+        || CASE
+            WHEN p.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                AND p.context->>'sticky_runtime_inherited_runtime_id' = COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, $2::uuid, p.runtime_id)::text
+            THEN jsonb_build_object(
+                'sticky_runtime_inherited', true,
+                'sticky_runtime_inherited_runtime_id', COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, $2::uuid, p.runtime_id)::text,
+                'sticky_runtime_inherited_task_id', retry.retry_id::text,
+                'sticky_runtime_source_task_id', p.context->>'sticky_runtime_source_task_id')
+            ELSE '{}'::jsonb
+        END,
+    '{}'::jsonb),
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
               OR COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, $2::uuid, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
          ELSE p.session_id END,
@@ -3363,9 +3398,12 @@ SELECT
     -- A retry continues its parent's work, so it keeps the parent's step (MUL-7420).
     p.workflow_step,
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
-    COALESCE($7::uuid, gen_random_uuid())
+    retry.retry_id
 FROM agent_task_queue p
 JOIN agent a ON a.id = p.agent_id
+CROSS JOIN LATERAL (
+    SELECT COALESCE($7::uuid, gen_random_uuid()) AS retry_id
+) retry
 WHERE p.id = $1
   AND COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, $2::uuid, p.runtime_id) IS NOT NULL
   AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, $2::uuid, p.runtime_id))

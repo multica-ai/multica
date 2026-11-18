@@ -658,12 +658,27 @@ SELECT
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary,
     -- A retry is a fresh routing decision: strip a fixed-runtime batch
     -- retention marker inherited from the parent so the clone is not treated
-    -- as retained on a runtime the retry no longer targets.
-    NULLIF(p.context - ARRAY[
+    -- as retained on a runtime the retry no longer targets. A sticky
+    -- runtime-inheritance marker is rewritten instead of stripped when the
+    -- retry keeps the run's machine — the retry still claims there under the
+    -- run's own authorization, and the fence re-checks the source anyway.
+    NULLIF(
+        (p.context - ARRAY[
         'fixed_runtime_batch_retained',
         'fixed_runtime_batch_retained_runtime_id',
         'fixed_runtime_batch_retained_task_id'
-    ], '{}'::jsonb),
+    ])
+        || CASE
+            WHEN p.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                AND p.context->>'sticky_runtime_inherited_runtime_id' = COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id)::text
+            THEN jsonb_build_object(
+                'sticky_runtime_inherited', true,
+                'sticky_runtime_inherited_runtime_id', COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id)::text,
+                'sticky_runtime_inherited_task_id', retry.retry_id::text,
+                'sticky_runtime_source_task_id', p.context->>'sticky_runtime_source_task_id')
+            ELSE '{}'::jsonb
+        END,
+    '{}'::jsonb),
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
               OR COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
          ELSE p.session_id END,
@@ -693,9 +708,12 @@ SELECT
     -- A retry continues its parent's work, so it keeps the parent's step (MUL-7420).
     p.workflow_step,
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
-    COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
+    retry.retry_id
 FROM agent_task_queue p
 JOIN agent a ON a.id = p.agent_id
+CROSS JOIN LATERAL (
+    SELECT COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid()) AS retry_id
+) retry
 WHERE p.id = $1
   AND COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id) IS NOT NULL
   AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id))
@@ -732,7 +750,27 @@ INSERT INTO agent_task_queue (
     effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint
 )
 SELECT
-    p.agent_id, selected.runtime_id, 'queued', p.priority, p.context,
+    p.agent_id, selected.runtime_id, 'queued', p.priority,
+    -- Same sticky rule as the automatic retry: a manual rerun keeping the
+    -- run's machine rewrites the inheritance marker to itself; a rerun that
+    -- resolves elsewhere (fixed rebinding) strips it.
+    NULLIF(
+        (p.context - ARRAY[
+            'fixed_runtime_batch_retained',
+            'fixed_runtime_batch_retained_runtime_id',
+            'fixed_runtime_batch_retained_task_id'
+        ])
+        || CASE
+            WHEN p.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                AND p.context->>'sticky_runtime_inherited_runtime_id' = selected.runtime_id::text
+            THEN jsonb_build_object(
+                'sticky_runtime_inherited', true,
+                'sticky_runtime_inherited_runtime_id', selected.runtime_id::text,
+                'sticky_runtime_inherited_task_id', to_jsonb(sqlc.arg(new_task_id)::uuid),
+                'sticky_runtime_source_task_id', p.context->>'sticky_runtime_source_task_id')
+            ELSE '{}'::jsonb
+        END,
+    '{}'::jsonb),
     TRUE, p.is_leader_task, p.squad_id,
     sqlc.arg(actor_user_id), sqlc.arg(actor_user_id),
     sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
