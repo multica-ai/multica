@@ -180,3 +180,31 @@ func TestUpdateAgent_RuntimeSwitch_RetryLeavesSessionOnOldRuntime(t *testing.T) 
 			prior.SessionID.String, uuidToString(prior.RuntimeID), oldSession, oldRuntimeID, newRuntimeID)
 	}
 }
+
+func TestSmartRuntimeClaimUsesOriginatorMachine(t *testing.T) {
+	other := dbfx.User(t, "Other Member", "smart-runtime-other@example.test")
+	dbfx.Member(t, testWorkspaceID, other, "member")
+	foreign := dbfx.Runtime(t, "foreign-runtime", testutil.Cols{"owner_id": other, "provider": "codex"})
+	personal := dbfx.Runtime(t, "personal-runtime", testutil.Cols{"provider": "codex"})
+	agentID := dbfx.Agent(t, "smart-agent", "", testutil.Cols{"share_runtime": false, "recommended_cli": "codex", "owner_id": other, "model": "codex-test-model"})
+	issueID := dbfx.Issue(t, "Smart runtime claim", testutil.Cols{"assignee_type": "agent", "assignee_id": agentID})
+	issue, err := testHandler.Queries.GetIssue(t.Context(), parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := testHandler.TaskService.EnqueueTaskForIssueByActor(t.Context(), issue, parseUUID(testUserID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uuidToString(task.RuntimeID) != personal || task.RuntimeConfigSource.String != "recommended_match" || task.EffectiveModel.String != "codex-test-model" {
+		t.Fatalf("unexpected effective route: runtime=%s, source=%s, model=%s", uuidToString(task.RuntimeID), task.RuntimeConfigSource.String, task.EffectiveModel.String)
+	}
+	wrong, err := testHandler.TaskService.ClaimTaskForRuntime(t.Context(), parseUUID(foreign))
+	if err != nil || wrong != nil {
+		t.Fatalf("foreign runtime claim: task=%v, error=%v", wrong != nil, err)
+	}
+	claimed, err := testHandler.TaskService.ClaimTaskForRuntime(t.Context(), parseUUID(personal))
+	if err != nil || claimed == nil || claimed.ID != task.ID {
+		t.Fatalf("personal runtime failed to claim the task: %v", err)
+	}
+}
