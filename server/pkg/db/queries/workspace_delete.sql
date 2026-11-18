@@ -758,6 +758,9 @@ deleted_project_members AS (
 ),
 deleted_project_subscribers AS (
     DELETE FROM project_subscriber WHERE project_subscriber.workspace_id = $1
+),
+deleted_project_folders AS (
+    DELETE FROM project_folder WHERE project_folder.workspace_id = $1
 )
 DELETE FROM project WHERE project.workspace_id = $1;
 

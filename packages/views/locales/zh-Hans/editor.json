@@ -102,6 +102,7 @@
   "mention": {
     "group_users": "用户",
     "group_issues": "任务",
+    "group_projects": "项目",
     "all_members": "所有成员",
     "agent_badge": "智能体",
     "squad_badge": "小队",

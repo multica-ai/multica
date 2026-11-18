@@ -39,6 +39,9 @@ type cursorMcpLoginCheck struct {
 	Executable        string
 	Host              string
 	GOOS              string
+	// UserDataDir marks TaskCursorDataDir as the user's own Cursor data dir
+	// (no managed mcp_config) rather than a per-task one.
+	UserDataDir bool
 }
 
 func (n cursorMcpLoginNotice) String() string {
@@ -103,6 +106,15 @@ func cursorMcpLoginNoticeFor(check cursorMcpLoginCheck, taskLog *slog.Logger) cu
 		GOOS:          check.GOOS,
 	}
 	if check.AuthStore == "" {
+		return notice
+	}
+	if check.UserDataDir {
+		workDir, err := execenv.PrepareCursorMcpUserLoginWorkspace(check.TaskCursorDataDir, check.AuthSource, check.AuthStore)
+		if err != nil {
+			taskLog.Warn("cursor mcp login workspace unavailable; pointing the login at the task directory", "error", err)
+			return notice
+		}
+		notice.WorkDir = workDir
 		return notice
 	}
 	workDir, dataDir, err := execenv.PrepareCursorMcpLoginWorkspace(check.AuthSource, check.AuthStore, check.McpConfig, servers)

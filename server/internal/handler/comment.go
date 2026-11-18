@@ -2704,10 +2704,12 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	if hasAgentOrSquadMention(mentions) {
 		return h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
 	}
-	if util.HasMentionAll(mentions) {
-		return nil, nil
-	}
-	if hasMemberMention(mentions) {
+	// A member who @mentions people (a member or @all) and no agent/squad is
+	// talking to humans, so the implicit fallbacks stay quiet. An agent's
+	// member mention or @all only notifies humans: a worker result that pings
+	// a reviewer still has to reach its squad leader, or the
+	// leader→worker→leader loop stalls.
+	if actorType == "member" && (util.HasMentionAll(mentions) || hasMemberMention(mentions)) {
 		return nil, nil
 	}
 

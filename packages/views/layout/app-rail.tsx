@@ -16,6 +16,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { CheckCheck, ExternalLink, Link2, RotateCcw, Settings, Users, type IconComponent } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useChatStore } from "@multica/core/chat";
+import { useMarkAllChatSessionsRead } from "@multica/core/chat/mutations";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import {
@@ -262,8 +263,15 @@ function RailSpaceMenu({
   const copyLink = async () => {
     if (await copyText(getShareableUrl(href))) toast.success(t(($) => $.rail.link_copied));
   };
+  const wsId = useCurrentWorkspace()?.id;
   const markAllRead = useMarkAllInboxRead();
-  const inboxUnread = useInboxUnreadCount(useCurrentWorkspace()?.id);
+  const inboxUnread = useInboxUnreadCount(wsId);
+  const markAllChatsRead = useMarkAllChatSessionsRead();
+  const { data: chatSessions = [] } = useQuery({
+    ...chatSessionsOptions(wsId ?? ""),
+    enabled: space === "chat" && !!wsId,
+  });
+  const unreadChatIds = chatSessions.filter((s) => (s.unread_count ?? 0) > 0).map((s) => s.id);
   const customOrder = useRailOrderStore((s) => s.order !== null);
   const setOrder = useRailOrderStore((s) => s.setOrder);
   return (
@@ -283,6 +291,21 @@ function RailSpaceMenu({
             <DropdownMenuItem
               onClick={() =>
                 markAllRead.mutate(undefined, {
+                  onError: () => toast.error(t(($) => $.rail.mark_all_read_failed)),
+                })
+              }
+            >
+              <CheckCheck />
+              {t(($) => $.rail.mark_all_read)}
+            </DropdownMenuItem>
+          </>
+        )}
+        {space === "chat" && unreadChatIds.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() =>
+                markAllChatsRead.mutate(unreadChatIds, {
                   onError: () => toast.error(t(($) => $.rail.mark_all_read_failed)),
                 })
               }

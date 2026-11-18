@@ -218,6 +218,60 @@ export function useMarkChatSessionRead() {
   });
 }
 
+class MarkChatSessionsReadError extends Error {
+  constructor(readonly failedIds: string[], total: number) {
+    super(`failed to mark ${failedIds.length} of ${total} chats read`);
+  }
+}
+
+/**
+ * Clears unread on every chat session that has any, one read per session (the
+ * server has no bulk read, and each read broadcasts its own chat:session_read
+ * to other devices). All rows drop to 0 optimistically; if any read fails the
+ * mutation rejects and only the failed rows get their unread back, so the
+ * badge stays right even when the follow-up refetch fails too.
+ */
+export function useMarkAllChatSessionsRead() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: async (sessionIds: string[]) => {
+      logger.info("markAllChatSessionsRead.start", { count: sessionIds.length });
+      const results = await Promise.allSettled(sessionIds.map((id) => api.markChatSessionRead(id)));
+      const failedIds = sessionIds.filter((_, i) => results[i]!.status === "rejected");
+      if (failedIds.length > 0) throw new MarkChatSessionsReadError(failedIds, sessionIds.length);
+    },
+    onMutate: async (sessionIds) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+      const ids = new Set(sessionIds);
+      const prevUnread = new Map<string, Pick<ChatSession, "has_unread" | "unread_count">>();
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) =>
+        old?.map((s) => {
+          if (!ids.has(s.id)) return s;
+          prevUnread.set(s.id, { has_unread: s.has_unread, unread_count: s.unread_count });
+          return { ...s, has_unread: false, unread_count: 0 };
+        }),
+      );
+      return { prevUnread };
+    },
+    onError: (err, sessionIds, ctx) => {
+      logger.error("markAllChatSessionsRead.error.rollback", { err });
+      if (!ctx) return;
+      const failed = new Set(err instanceof MarkChatSessionsReadError ? err.failedIds : sessionIds);
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) =>
+        old?.map((s) => {
+          const prev = failed.has(s.id) ? ctx.prevUnread.get(s.id) : undefined;
+          return prev ? { ...s, ...prev } : s;
+        }),
+      );
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
 /**
  * Renames a chat session. Optimistically swaps the title in the cached
  * list so the dropdown reflects the new label immediately; rolls back on

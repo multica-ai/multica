@@ -45,6 +45,7 @@
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@fontsource-variable/source-serif-4": "^5.2.9",
     "@multica/core": "workspace:*",
+    "@multica/ee": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
     "@tanstack/react-query": "catalog:",

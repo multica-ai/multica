@@ -4578,10 +4578,15 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 }
 
 // isAgentRunningOnIssue reports whether the calling agent's current task
-// (identified by X-Task-ID) is running for the exact issue being promoted.
+// (identified by X-Task-ID) is running for the exact issue being promoted
+// and belongs to the target receiving agent (assignee or squad leader).
 // That is the only true self-loop on backlog→active: the agent flipping
 // the same issue its own task is executing for would immediately re-enqueue
 // itself, complete the run, flip again, and so on.
+//
+// A coordinator whose run is bound to the issue but which promotes it for a
+// different receiving agent is not a loop: the run goes to another agent, and
+// suppressing it would leave the issue in an active status with no run.
 //
 // Same-agent cross-issue handoff (Agent A finishing a task on issue I1 then
 // promoting issue I2 — even when I2 is also assigned to A) is NOT a loop
@@ -4592,7 +4597,7 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 // "agent": resolveActor demotes the actor to "member" otherwise (handler.go
 // resolveActor). We still recheck defensively — a future caller could pass
 // agent identity through a different path.
-func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue db.Issue) bool {
+func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue db.Issue, targetAgentID pgtype.UUID) bool {
 	if actorType != "agent" {
 		return false
 	}
@@ -4611,7 +4616,11 @@ func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue
 	if !task.IssueID.Valid {
 		return false
 	}
-	return uuidToString(task.IssueID) == uuidToString(issue.ID)
+	if !targetAgentID.Valid {
+		return false
+	}
+	return uuidToString(task.IssueID) == uuidToString(issue.ID) &&
+		uuidToString(task.AgentID) == uuidToString(targetAgentID)
 }
 
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
