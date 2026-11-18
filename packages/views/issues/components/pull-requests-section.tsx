@@ -265,10 +265,10 @@ function AutoCompleteItems({ issueId, autoComplete }: { issueId: string; autoCom
         <>
           <DropdownMenuItem
             disabled={setAutoComplete.isPending}
+            // The menu closes, and unmounts this item, before the request
+            // settles; per-call mutate callbacks would never fire.
             onClick={() =>
-              setAutoComplete.mutate(!disabled, {
-                onError: () => toast.error(t(($) => $.pr_automation.update_failed)),
-              })
+              setAutoComplete.mutateAsync(!disabled).catch(() => toast.error(t(($) => $.pr_automation.update_failed)))
             }
           >
             {disabled ? <RotateCcw /> : <CircleSlash />}

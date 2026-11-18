@@ -3,10 +3,10 @@
 import {
   createContext,
   Fragment,
+  useCallback,
   useContext,
   useEffect,
   useState,
-  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { Plus } from "@multica/ui/icons";
@@ -27,41 +27,29 @@ export interface IssueSidebarAddEntry {
 }
 
 type Entries = ReadonlyMap<string, IssueSidebarAddEntry>;
+type SetEntry = (key: string, entry: IssueSidebarAddEntry | null) => void;
 
-interface AddMenuStore {
-  subscribe: (listener: () => void) => () => void;
-  get: () => Entries;
-  set: (key: string, entry: IssueSidebarAddEntry | null) => void;
-}
-
-function createAddMenuStore(): AddMenuStore {
-  let entries: Entries = new Map();
-  const listeners = new Set<() => void>();
-  return {
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    get: () => entries,
-    set: (key, entry) => {
-      if ((entries.get(key) ?? null) === entry) return;
-      const next = new Map(entries);
-      if (entry) next.set(key, entry);
-      else next.delete(key);
-      entries = next;
-      for (const listener of listeners) listener();
-    },
-  };
-}
-
-const AddMenuContext = createContext<AddMenuStore | null>(null);
-const NO_ENTRIES: Entries = new Map();
-const noSubscription = () => () => {};
-const noEntries = () => NO_ENTRIES;
+// Two contexts: sections only set entries, so a change to the entries
+// re-renders the menu without re-rendering the sections that offer them.
+const SetEntryContext = createContext<SetEntry | null>(null);
+const EntriesContext = createContext<Entries>(new Map());
 
 export function IssueSidebarAddMenuProvider({ children }: { children: ReactNode }) {
-  const [store] = useState(createAddMenuStore);
-  return <AddMenuContext.Provider value={store}>{children}</AddMenuContext.Provider>;
+  const [entries, setEntries] = useState<Entries>(() => new Map());
+  const setEntry = useCallback<SetEntry>((key, entry) => {
+    setEntries((current) => {
+      if ((current.get(key) ?? null) === entry) return current;
+      const next = new Map(current);
+      if (entry) next.set(key, entry);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+  return (
+    <SetEntryContext.Provider value={setEntry}>
+      <EntriesContext.Provider value={entries}>{children}</EntriesContext.Provider>
+    </SetEntryContext.Provider>
+  );
 }
 
 /**
@@ -71,20 +59,19 @@ export function IssueSidebarAddMenuProvider({ children }: { children: ReactNode 
  * but keep the section's state and handlers, since the section stays mounted.
  */
 export function useIssueSidebarAddEntry(key: string, entry: IssueSidebarAddEntry | null) {
-  const store = useContext(AddMenuContext);
+  const setEntry = useContext(SetEntryContext);
   // Every render: the items close over the section's latest state. Only the
-  // menu re-renders, so this cannot feed back into the section.
+  // menu reads the entries, so this cannot feed back into the section.
   useEffect(() => {
-    store?.set(key, entry);
+    setEntry?.(key, entry);
   });
-  useEffect(() => () => store?.set(key, null), [store, key]);
+  useEffect(() => () => setEntry?.(key, null), [setEntry, key]);
 }
 
 /** The sidebar's "+": what empty sections offer to add. Absent when none do. */
 export function IssueSidebarAddMenu() {
   const { t } = useT("issues");
-  const store = useContext(AddMenuContext);
-  const entries = useSyncExternalStore(store?.subscribe ?? noSubscription, store?.get ?? noEntries, store?.get ?? noEntries);
+  const entries = useContext(EntriesContext);
   if (entries.size === 0) return null;
   const sorted = [...entries.entries()].sort(([, a], [, b]) => a.order - b.order);
 

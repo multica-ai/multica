@@ -36,6 +36,11 @@ vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
   api: apiMock,
 }));
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock("sonner", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("sonner")>();
+  return { ...actual, toast: Object.assign(vi.fn(), actual.toast, { error: toastError }) };
+});
 const navigatePush = vi.hoisted(() => vi.fn());
 vi.mock("../../navigation", () => ({
   useNavigation: () => ({ push: navigatePush }),
@@ -104,6 +109,7 @@ describe("PullRequestsSection (MUL-7429)", () => {
     apiMock.linkIssuePullRequest.mockReset();
     apiMock.setIssuePRAutoComplete.mockReset();
     navigatePush.mockReset();
+    toastError.mockReset();
   });
 
   it("renders nothing while no PR is linked and offers the section's actions from the + menu", async () => {
@@ -210,6 +216,28 @@ describe("PullRequestsSection (MUL-7429)", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Pull request automation" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Keep status when PRs merge" }));
     await waitFor(() => expect(apiMock.setIssuePRAutoComplete).toHaveBeenCalledWith("issue-1", true));
+  });
+
+  // The menu closes, unmounting the item, before the request fails; the
+  // failure must still be reported, or a merged PR linked next would move the
+  // issue the reader meant to keep.
+  it("reports a failed save of keep-status chosen from the + menu after the menu closed", async () => {
+    apiMock.setIssuePRAutoComplete.mockRejectedValue(new Error("Offline"));
+    renderSection();
+    await openAddMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Keep status when PRs merge" }));
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(enIssues.pr_automation.update_failed));
+  });
+
+  it("reports a failed save of keep-status chosen from the section menu after the menu closed", async () => {
+    mockPullRequests = [linkedPR];
+    apiMock.setIssuePRAutoComplete.mockRejectedValue(new Error("Offline"));
+    renderSection();
+    fireEvent.click(await screen.findByRole("button", { name: "Pull request automation" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Keep status when PRs merge" }));
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(enIssues.pr_automation.update_failed));
   });
 
   it("opens the GitHub setting from the + menu", async () => {
