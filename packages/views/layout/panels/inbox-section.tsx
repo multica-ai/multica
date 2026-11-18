@@ -559,6 +559,7 @@ function InboxRow({
           <AppLink
             href={href}
             newTabTitle={title}
+            data-issue-id={item.issue_id ?? undefined}
             draggable={false}
             aria-current={active ? "page" : undefined}
             onNavigateInPlace={land}
@@ -807,7 +808,12 @@ function InboxRowCard({
         </div>
       )}
       <div className="-mx-1 mt-1 flex items-center gap-1 border-t border-border pt-2">
-        <AppLink href={href} onNavigateInPlace={onOpen} className={buttonVariants({ size: "sm", variant: "secondary" })}>
+        <AppLink
+          href={href}
+          data-issue-id={item.issue_id ?? undefined}
+          onNavigateInPlace={onOpen}
+          className={buttonVariants({ size: "sm", variant: "secondary" })}
+        >
           {t(($) => $.panels.work.inbox_open)}
         </AppLink>
         {unread && (
