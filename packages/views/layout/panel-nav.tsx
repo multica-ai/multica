@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef } from "react";
+import { createContext, useContext, useId, useRef, type RefObject } from "react";
 import { ChevronDown } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
@@ -62,6 +62,13 @@ export function PanelHeader({
   );
 }
 
+const PanelScrollContext = createContext<RefObject<HTMLDivElement | null> | null>(null);
+
+/** The scroll container of the enclosing `PanelBody`, for lists that virtualize inside it. */
+export function usePanelScrollRef() {
+  return useContext(PanelScrollContext);
+}
+
 export function PanelBody({
   children,
   onClickCapture,
@@ -81,7 +88,7 @@ export function PanelBody({
       onAuxClickCapture={onAuxClickCapture}
       className="scrollbar-slim min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-4 [&>section:first-child]:mt-0"
     >
-      {children}
+      <PanelScrollContext.Provider value={ref}>{children}</PanelScrollContext.Provider>
     </div>
   );
 }
