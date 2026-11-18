@@ -1,6 +1,6 @@
 ---
 title: Chat integrations
-description: Connect Multica agents to Feishu, Lark, Slack, DingTalk, WeCom, Telegram, or WeChat and use them from the chat tools your team already uses.
+description: Connect Multica agents to Feishu, Lark, Slack, DingTalk, WeCom, Telegram, WeChat, or InfoFlow and use them from the chat tools your team already uses.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -8,7 +8,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
 Chat integrations let the team ask an agent questions in a DM, @-mention it in a group chat, or create issues from the chat window, without opening Multica.
 
-Feishu/Lark, Slack, DingTalk, WeCom, Telegram, and WeChat are available. WeChat accepts private messages only from the account that scans the connection QR code. They share the same session, identity, and execution mechanics but install differently.
+Feishu/Lark, Slack, DingTalk, WeCom, Telegram, WeChat, and InfoFlow are available. WeChat accepts private messages only from the account that scans the connection QR code. They share the same session, identity, and execution mechanics but install differently.
 
 ## Choose a platform
 
@@ -21,6 +21,16 @@ Feishu/Lark, Slack, DingTalk, WeCom, Telegram, and WeChat are available. WeChat 
 | Start a new Chat | `/new [message]` | DM: `/new [message]`; channel/thread: `@Multica /new [message]` | `/new [message]` | `/new [message]` | `/new [message]` | `/new [message]` |
 | Clear the current Chat context | `/clear [message]` | DM: `/clear [message]`; channel/thread: `@Multica /clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` |
 | Connection | Platform long connection | Socket Mode | Stream mode | Platform long connection | `getUpdates` long polling | iLink long polling |
+
+### InfoFlow
+
+InfoFlow installs from an AppKey and an AppSecret copied out of the InfoFlow admin console, and Multica holds one WebSocket per installation. Direct messages and @-mentions in a group both reach the agent, and `/issue`, `/new` and `/clear` behave as they do on the other channels.
+
+When the server has object storage configured, images, voice and files are passed to the agent as attachments, and the files the agent produces go back into the same chat. Markdown answers arrive as a dynamic card; when the robot has not been approved for cards, the same answer goes out as a Markdown message instead.
+
+- Sessions are separated by conversation: one per direct chat, one per group.
+- Account binding uses the same first-message link as the other channels, and workspace membership is re-checked on every message.
+- Self-hosting also needs `MULTICA_INFOFLOW_SECRET_KEY`; without it the channel stays disabled and its handlers return `403 infoflow_not_configured`.
 
 New connections are currently open only for mainland-China Feishu; existing international Lark connections keep working and can still be managed.
 
@@ -69,6 +79,7 @@ On Slack, `/new` and `/clear` are native slash commands in a DM. A native slash-
 - DingTalk separates sessions by conversation; each DM or group continues its own session.
 - WeCom separates sessions by chat; each DM or group chat continues its own session.
 - Telegram separates sessions by chat; forum topics are isolated by topic.
+- InfoFlow separates sessions by conversation; each DM or group continues its own session.
 - WeChat keeps a session for the connected Bot and the account that scanned its QR code.
 
 Follow-ups in a channel still need a fresh @-mention. Apart from the recent context described above, the agent never reads the channel history automatically.
@@ -77,7 +88,7 @@ Follow-ups in a channel still need a fresh @-mention. Apart from the recent cont
 
 For WeChat, scanning the QR code binds that WeChat account to the Multica user who started the connection. Messages use that user's workspace permissions. Scan with your own account and do not share the QR code; other accounts and group messages are not accepted.
 
-For Feishu/Lark, Slack, DingTalk, WeCom, and Telegram, the first time a member messages the Bot, they receive an account binding link. After signing in to Multica, the platform account is linked to their membership in the current workspace.
+For Feishu/Lark, Slack, DingTalk, WeCom, Telegram, and InfoFlow, the first time a member messages the Bot, they receive an account binding link. After signing in to Multica, the platform account is linked to their membership in the current workspace.
 
 Multica only runs the agent after binding completes. Every message re-checks account binding and workspace membership; after leaving a workspace, the Bot can no longer be used to reach it.
 
@@ -102,6 +113,7 @@ MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_WEIXIN_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_INFOFLOW_SECRET_KEY=<base64-encoded 32-byte key>
 ```
 
 These keys encrypt stored Bot credentials. See [Environment variables](/environment-variables) for how to generate, store, and rotate them. Multica Cloud already has this configured.

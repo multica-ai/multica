@@ -41,8 +41,12 @@ func TestRegisterInfoFlow_BuildsChannel(t *testing.T) {
 	if ch.Type() != TypeInfoFlow {
 		t.Errorf("Type() = %q, want %q", ch.Type(), TypeInfoFlow)
 	}
-	if got := ch.Capabilities(); got != channel.CapText|channel.CapAttachment {
-		t.Errorf("Capabilities() = %v, want text|attachment", got)
+	// text|attachment|rich_card: an image goes out as an image, anything else as a
+	// Markdown link, and a Markdown answer goes out as an audited dynamic card
+	// (card.go) that degrades to a Markdown message when the robot has not been
+	// approved for it. Inbound media is covered by attachment too.
+	if got, want := ch.Capabilities(), channel.CapText|channel.CapAttachment|channel.CapRichCard; got != want {
+		t.Errorf("Capabilities() = %v, want %v", got, want)
 	}
 }
 

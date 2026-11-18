@@ -147,11 +147,14 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	}
 	target := targetFromChatID(delivery.ChannelChatID)
 	if content != "" {
-		client, err := newSDKClient(creds)
+		// A markdown answer goes out as a rich card, with the Markdown message
+		// as the fallback the card path degrades to. sendReply is the only place
+		// that decides, so the reply and the OutboundReplier render alike.
+		replies, err := newReplySender(creds, slog.Default())
 		if err != nil {
 			return err
 		}
-		if _, err := sendText(ctx, client, target, content); err != nil {
+		if _, err := replies.send(ctx, target, content); err != nil {
 			return fmt.Errorf("post infoflow reply: %w", err)
 		}
 	}

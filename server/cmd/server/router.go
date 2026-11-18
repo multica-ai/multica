@@ -1361,7 +1361,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				AppURL:  appURLFromEnv(),
 				Logger:  slog.Default(),
 			})
-			channelRouter.Register(infoflow.TypeInfoFlow, infoflow.NewInfoFlowResolverSet(queries, pool, infoflowReplier))
+			// Inbound media needs the same two things file delivery does: an
+			// installation whose robot can read its own chat files, and object
+			// storage to put the bytes in. Without storage the resolver is not built
+			// at all, and an image stays the placeholder text the adapter wrote.
+			var infoflowMedia engine.MediaResolver
+			if store != nil {
+				infoflowMedia = infoflow.NewMediaResolver(
+					box.Open,
+					nil,
+					store,
+					engine.NewDBMediaIntentLedger(queries),
+					slog.Default(),
+				)
+			}
+			channelRouter.Register(infoflow.TypeInfoFlow, infoflow.NewInfoFlowResolverSet(queries, pool, infoflowReplier, infoflowMedia))
 			// File delivery needs two things at once: an adapter that goes back for
 			// the bound attachment, and object storage to go back to. Both are decided
 			// here, in one branch, so a deployment cannot promise a hop it cannot

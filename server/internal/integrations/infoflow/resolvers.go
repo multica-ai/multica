@@ -37,8 +37,10 @@ func decodeRawEvent(msg channel.InboundMessage) (rawEvent, error) {
 // NewInfoFlowResolverSet builds the platform bundle the engine.Router runs the
 // inbound pipeline through. replier delivers verdict-driven replies (binding
 // prompt, status notices) and may be nil when the deployment has no app URL /
-// binding service configured.
-func NewInfoFlowResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier) engine.ResolverSet {
+// binding service configured. media may be nil when the deployment has no
+// object storage: without it an image stays a placeholder line rather than
+// becoming an attachment, which is the degrade path the engine already handles.
+func NewInfoFlowResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, media engine.MediaResolver) engine.ResolverSet {
 	session := engine.NewChatSession(q, tx, TypeInfoFlow, engine.SessionTitles{
 		Group:    "InfoFlow group chat",
 		Direct:   "InfoFlow chat",
@@ -49,6 +51,7 @@ func NewInfoFlowResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.O
 		Identity:     &identityResolver{q: q},
 		Dedup:        &deduper{q: q},
 		Session:      &sessionBinder{session: session},
+		Media:        media,
 		Audit:        &auditor{q: q},
 		Replier:      replier,
 		OriginType:   "infoflow_chat",

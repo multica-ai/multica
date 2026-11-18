@@ -1,6 +1,6 @@
 ---
 title: Intégrations de messagerie
-description: Connectez les agents Multica à Feishu, Lark, Slack, DingTalk, WeCom, Telegram ou WeChat et utilisez-les depuis les outils de messagerie que votre équipe utilise déjà.
+description: Connectez les agents Multica à Feishu, Lark, Slack, DingTalk, WeCom, Telegram, WeChat ou InfoFlow et utilisez-les depuis les outils de messagerie que votre équipe utilise déjà.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -8,7 +8,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
 Les intégrations de messagerie permettent à l'équipe de poser des questions à un agent en message direct, de le @mentionner dans une conversation de groupe ou de créer des tâches depuis la fenêtre de conversation, sans ouvrir Multica.
 
-Feishu/Lark, Slack, DingTalk, WeCom, Telegram et WeChat sont pris en charge. WeChat accepte uniquement les messages privés du compte qui a scanné le QR code de connexion. Ils partagent les mêmes mécanismes de session, d'identité et d'exécution, mais s'installent différemment.
+Feishu/Lark, Slack, DingTalk, WeCom, Telegram, WeChat et InfoFlow sont pris en charge. WeChat accepte uniquement les messages privés du compte qui a scanné le QR code de connexion. Ils partagent les mêmes mécanismes de session, d'identité et d'exécution, mais s'installent différemment.
 
 ## Choisir une plateforme
 
@@ -21,6 +21,16 @@ Feishu/Lark, Slack, DingTalk, WeCom, Telegram et WeChat sont pris en charge. WeC
 | Démarrer une nouvelle discussion | `/new [message]` | Message direct : `/new [message]` ; canal/fil : `@Multica /new [message]` | `/new [message]` | `/new [message]` | `/new [message]` | `/new [message]` |
 | Effacer le contexte de la discussion en cours | `/clear [message]` | Message direct : `/clear [message]` ; canal/fil : `@Multica /clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` |
 | Connexion | Connexion longue de la plateforme | Socket Mode | Mode Stream | Connexion longue de la plateforme | Long polling `getUpdates` | Long polling iLink |
+
+### InfoFlow
+
+InfoFlow s'installe avec un AppKey et un AppSecret copiés depuis la console d'administration InfoFlow, et Multica maintient une connexion WebSocket par installation. Les messages directs et les @mentions dans un groupe atteignent tous l'agent, et `/issue`, `/new` et `/clear` se comportent comme sur les autres canaux.
+
+Lorsque le serveur dispose d'un stockage objet, les images, la voix et les fichiers sont transmis à l'agent en pièces jointes, et les fichiers produits par l'agent repartent dans la même conversation. Les réponses Markdown arrivent sous forme de carte dynamique ; lorsque le robot n'est pas autorisé à envoyer des cartes, la même réponse part en message Markdown.
+
+- Les sessions sont séparées par conversation : une par message direct, une par groupe.
+- L'association de compte utilise le même lien de premier message que les autres canaux, et l'appartenance à l'espace de travail est revérifiée à chaque message.
+- L'auto-hébergement exige aussi `MULTICA_INFOFLOW_SECRET_KEY` ; sans elle, le canal reste désactivé et ses points d'entrée renvoient `403 infoflow_not_configured`.
 
 Les nouvelles connexions ne sont actuellement ouvertes qu'à Feishu en Chine continentale ; les connexions Lark internationales existantes continuent de fonctionner et peuvent toujours être gérées.
 
@@ -69,6 +79,7 @@ Sur Slack, `/new` et `/clear` sont des commandes slash natives dans un message d
 - DingTalk sépare les sessions par conversation ; chaque message direct ou groupe poursuit sa propre session.
 - WeCom sépare les sessions par conversation ; chaque message direct ou conversation de groupe poursuit sa propre session.
 - Telegram sépare les sessions par conversation ; les sujets de forum sont isolés par sujet.
+- InfoFlow sépare les sessions par conversation ; chaque message direct ou groupe poursuit sa propre session.
 - WeChat conserve une session pour le bot connecté et le compte qui a scanné son QR code.
 
 Dans un canal, chaque relance nécessite toujours une nouvelle @mention. En dehors du contexte récent décrit plus haut, l'agent ne lit jamais automatiquement l'historique du canal.
@@ -77,7 +88,7 @@ Dans un canal, chaque relance nécessite toujours une nouvelle @mention. En deho
 
 Pour WeChat, le scan du QR code associe le compte WeChat à l'utilisateur Multica qui a lancé la connexion. Les messages utilisent les permissions de cet utilisateur dans l'espace de travail. Scannez avec votre propre compte et ne partagez pas le QR code ; les autres comptes et les messages de groupe ne sont pas acceptés.
 
-Pour Feishu/Lark, Slack, DingTalk, WeCom et Telegram, la première fois qu'un membre écrit au bot, il reçoit un lien d'association de compte. Une fois qu'il s'est connecté à Multica, son compte sur la plateforme est associé à son appartenance à l'espace de travail actuel.
+Pour Feishu/Lark, Slack, DingTalk, WeCom, Telegram et InfoFlow, la première fois qu'un membre écrit au bot, il reçoit un lien d'association de compte. Une fois qu'il s'est connecté à Multica, son compte sur la plateforme est associé à son appartenance à l'espace de travail actuel.
 
 Multica n'exécute l'agent qu'une fois l'association terminée. Chaque message revérifie l'association du compte et l'appartenance à l'espace de travail ; après avoir quitté un espace de travail, on ne peut plus l'atteindre via le bot.
 
@@ -102,6 +113,7 @@ MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_WEIXIN_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_INFOFLOW_SECRET_KEY=<base64-encoded 32-byte key>
 ```
 
 Ces clés chiffrent les identifiants de bot stockés. Consultez [Variables d'environnement](/environment-variables) pour savoir comment les générer, les stocker et les renouveler. Multica Cloud est déjà configuré.

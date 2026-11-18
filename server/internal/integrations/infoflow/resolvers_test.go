@@ -20,10 +20,13 @@ func TestInfoflowSessionRouting(t *testing.T) {
 func TestNewInfoFlowResolverSet_RequiredFields(t *testing.T) {
 	// A nil *db.Queries is fine here: we only assert the bundle is wired, not
 	// that its resolvers can reach the database.
-	set := NewInfoFlowResolverSet(nil, nil, nil)
+	set := NewInfoFlowResolverSet(nil, nil, nil, nil)
 	if set.Installation == nil || set.Identity == nil || set.Dedup == nil ||
 		set.Session == nil || set.Audit == nil {
 		t.Fatalf("required resolvers missing: %+v", set)
+	}
+	if set.Media != nil {
+		t.Errorf("Media = %v, want nil (no media resolver without object storage)", set.Media)
 	}
 	if set.OriginType != "infoflow_chat" {
 		t.Errorf("OriginType = %q, want infoflow_chat", set.OriginType)

@@ -1,6 +1,6 @@
 ---
 title: 채팅 연동
-description: Multica 에이전트를 Feishu, Lark, Slack, DingTalk, WeCom, Telegram 또는 WeChat에 연결해 팀이 이미 사용하는 채팅 도구에서 활용합니다.
+description: Multica 에이전트를 Feishu, Lark, Slack, DingTalk, WeCom, Telegram, WeChat 또는 InfoFlow에 연결해 팀이 이미 사용하는 채팅 도구에서 활용합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -8,7 +8,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 
 채팅 연동을 사용하면 팀이 Multica를 열지 않고도 DM으로 에이전트에게 질문하고, 그룹 채팅에서 @멘션하거나, 채팅 창에서 바로 태스크를 만들 수 있습니다.
 
-현재 Feishu/Lark, Slack, DingTalk, WeCom, Telegram, WeChat을 지원합니다. WeChat은 연결 QR 코드를 스캔한 계정의 DM만 받습니다. 같은 대화, 신원, 실행 메커니즘을 사용하지만 설치 방법은 다릅니다.
+현재 Feishu/Lark, Slack, DingTalk, WeCom, Telegram, WeChat, InfoFlow를 지원합니다. WeChat은 연결 QR 코드를 스캔한 계정의 DM만 받습니다. 같은 대화, 신원, 실행 메커니즘을 사용하지만 설치 방법은 다릅니다.
 
 ## 플랫폼 선택
 
@@ -21,6 +21,16 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 | 새 Chat 시작 | `/new [메시지]` | DM: `/new [메시지]`, 채널/thread: `@Multica /new [메시지]` | `/new [메시지]` | `/new [메시지]` | `/new [메시지]` | `/new [메시지]` |
 | 현재 Chat 컨텍스트 지우기 | `/clear [메시지]` | DM: `/clear [메시지]`, 채널/thread: `@Multica /clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` |
 | 연결 방식 | 플랫폼 장기 연결 | Socket Mode | Stream 모드 | 플랫폼 장기 연결 | `getUpdates` long polling | iLink 롱 폴링 |
+
+### InfoFlow
+
+InfoFlow는 InfoFlow 관리 콘솔에서 복사한 AppKey와 AppSecret으로 설치하며, Multica는 설치마다 WebSocket 연결 하나를 유지합니다. DM과 그룹에서의 @멘션 모두 에이전트에 도달하고, `/issue`, `/new`, `/clear`는 다른 채널과 동일하게 동작합니다.
+
+서버에 객체 스토리지가 설정되어 있으면 이미지, 음성, 파일이 첨부 파일로 에이전트에 전달되고 에이전트가 만든 파일은 같은 채팅으로 다시 전송됩니다. Markdown 답변은 다이내믹 카드로 도착하며, 로봇이 카드 전송 권한을 받지 않은 경우 같은 내용을 Markdown 메시지로 보냅니다.
+
+- 세션은 대화별로 구분됩니다. DM마다 하나, 그룹마다 하나입니다.
+- 계정 연결은 다른 채널과 같은 첫 메시지 링크로 이뤄지며, 메시지마다 워크스페이스 멤버 자격을 다시 확인합니다.
+- 자체 호스팅에는 `MULTICA_INFOFLOW_SECRET_KEY`도 필요합니다. 설정하지 않으면 채널이 비활성 상태로 남고 핸들러는 `403 infoflow_not_configured`를 반환합니다。
 
 새 연결은 현재 중국 본토 버전 Feishu에서만 만들 수 있습니다. 기존 국제 버전 Lark 연결은 계속 사용하고 관리할 수 있습니다.
 
@@ -70,6 +80,7 @@ Slack DM에서는 `/new`과 `/clear`가 네이티브 slash 명령입니다. 네�
 - WeCom은 채팅별로 대화를 구분하며 각 DM 또는 그룹 채팅이 자체 대화를 이어갑니다.
 - Telegram은 채팅별로 대화를 구분하며 forum topic은 topic별로 분리합니다.
 - WeChat은 연결된 Bot과 QR 코드를 스캔한 계정별로 대화를 유지합니다.
+- InfoFlow는 대화별로 세션을 구분합니다. DM마다 하나, 그룹마다 하나입니다.
 
 채널에서 후속 질문을 할 때도 Bot을 다시 @멘션해야 합니다. 위에서 설명한 최근 컨텍스트 외에는 에이전트가 채널 기록을 자동으로 읽지 않습니다.
 
@@ -77,7 +88,7 @@ Slack DM에서는 `/new`과 `/clear`가 네이티브 slash 명령입니다. 네�
 
 WeChat은 QR 코드를 스캔할 때 해당 WeChat 계정을 연결을 시작한 Multica 사용자에게 연결합니다. 메시지는 그 사용자의 워크스페이스 권한으로 실행됩니다. 본인 계정으로 스캔하고 QR 코드를 공유하지 마세요. 다른 계정이나 그룹의 메시지는 받지 않습니다.
 
-Feishu/Lark, Slack, DingTalk, WeCom, Telegram에서는 멤버가 Bot에 처음 메시지를 보내면 계정 연결 링크를 받습니다. Multica에 로그인하면 플랫폼 계정이 현재 워크스페이스 멤버와 연결됩니다.
+Feishu/Lark, Slack, DingTalk, WeCom, Telegram, InfoFlow에서는 멤버가 Bot에 처음 메시지를 보내면 계정 연결 링크를 받습니다. Multica에 로그인하면 플랫폼 계정이 현재 워크스페이스 멤버와 연결됩니다.
 
 연결을 마친 뒤에만 Multica가 에이전트를 실행합니다. 메시지마다 계정 연결과 워크스페이스 멤버 자격을 다시 확인하므로 워크스페이스를 떠난 뒤에는 Bot으로 해당 에이전트를 계속 사용할 수 없습니다.
 
@@ -102,6 +113,7 @@ MULTICA_DINGTALK_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_WECOM_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_TELEGRAM_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_WEIXIN_SECRET_KEY=<base64로 인코딩한 32바이트 키>
+MULTICA_INFOFLOW_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 ```
 
 이 키는 Bot 자격 증명을 암호화해 저장하는 데 사용됩니다. 생성, 보관, 교체 방법은 [환경 변수](/environment-variables)를 참고하세요. Multica Cloud에는 이미 설정되어 있습니다.
