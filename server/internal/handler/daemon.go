@@ -6602,6 +6602,7 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 			resp[i].IssueTitle = label.title
 		}
 	}
+	h.hydrateTaskRuntimeIdentity(r.Context(), issue.WorkspaceID, tasks, resp)
 	h.hydrateTaskSupplementMetadata(r.Context(), r, issue.WorkspaceID, tasks, resp)
 	// Execution-log rows render the "on behalf of <member>" badge, so this
 	// issue-facing surface must resolve initiator/originator names (departed-safe,
