@@ -318,6 +318,17 @@ _published_frontend_port() {
 
 case "${1:-}" in
   info) exit 0 ;;
+  ps)
+    # scripts/selfhost-project.sh asks which directories own a Compose
+    # project. MULTICA_TEST_OWNERS holds "project=working_dir".
+    project=""
+    for arg in "$@"; do
+      case "$arg" in label=com.docker.compose.project=*) project="${arg#label=com.docker.compose.project=}" ;; esac
+    done
+    printf '%s\n' "${MULTICA_TEST_OWNERS:-}" | sed -n "s#^${project}=##p"
+    exit 0
+    ;;
+  volume) exit 0 ;;
   compose)
     shift
     subcommand=""
@@ -327,7 +338,12 @@ case "${1:-}" in
       esac
     done
     case "$subcommand" in
-      up) : >.stub-stack-up ;;
+      up)
+        : >.stub-stack-up
+        if [ -n "${MULTICA_TEST_COMPOSE_LOG:-}" ]; then
+          printf '%s project=%s\n' "$subcommand" "$(_resolve COMPOSE_PROJECT_NAME || echo multica)" >>"$MULTICA_TEST_COMPOSE_LOG"
+        fi
+        ;;
       config)
         # Opt-in, so the port matrix above never probes real host ports.
         [ -n "${MULTICA_TEST_COMPOSE_CONFIG:-}" ] || exit 1
@@ -379,6 +395,11 @@ JSON
         esac
         ;;
       version) echo "2.30.0" ;;
+      down)
+        if [ -n "${MULTICA_TEST_COMPOSE_LOG:-}" ]; then
+          printf '%s project=%s\n' "$subcommand" "$(_resolve COMPOSE_PROJECT_NAME || echo multica)" >>"$MULTICA_TEST_COMPOSE_LOG"
+        fi
+        ;;
     esac
     exit 0
     ;;
@@ -763,6 +784,60 @@ test_with_server_port_preflight_allows_free_and_own_ports() {
   _require_server_ports "$tmp" "own running stack" "$held" "3000" || return 1
 }
 
+# Regression for #7967: the installer must not share the default "multica"
+# Compose project with another checkout's stack.
+test_with_server_keeps_compose_projects_apart() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  _setup_server_sandbox "$tmp"
+  mkdir -p "$tmp/server/scripts"
+  cp "$ROOT_DIR/scripts/selfhost-project.sh" "$tmp/server/scripts/"
+
+  # Fresh install while another checkout runs "multica": pick our own name.
+  _run_with_server "$tmp" MULTICA_TEST_OWNERS="multica=/elsewhere/checkout-a" \
+    MULTICA_TEST_COMPOSE_LOG="$tmp/compose.log" || return 1
+  local written
+  written="$(sed -n 's/^COMPOSE_PROJECT_NAME=//p' "$tmp/server/.env")"
+  case "$written" in
+    multica-server-*) ;;
+    *)
+      echo "fresh install next to another checkout must write its own COMPOSE_PROJECT_NAME, got '${written:-<none>}'" >&2
+      return 1
+      ;;
+  esac
+  if ! grep -qx "up project=$written" "$tmp/compose.log"; then
+    echo "installer must start its own project $written" >&2
+    cat "$tmp/compose.log" >&2
+    return 1
+  fi
+
+  # Existing .env on the default project, but another checkout owns it: refuse
+  # before Compose touches that stack.
+  cp "$tmp/server/.env.example" "$tmp/server/.env"
+  : >"$tmp/compose.log"
+  if _run_with_server "$tmp" MULTICA_TEST_OWNERS="multica=/elsewhere/checkout-a" \
+    MULTICA_TEST_COMPOSE_LOG="$tmp/compose.log" 2>/dev/null; then
+    echo "installer must refuse a Compose project owned by another checkout" >&2
+    return 1
+  fi
+  if [ -s "$tmp/compose.log" ] || ! grep -Fq "/elsewhere/checkout-a" "$tmp/install.err"; then
+    echo "installer must stop before Compose and name the owning checkout" >&2
+    cat "$tmp/compose.log" "$tmp/install.err" >&2
+    return 1
+  fi
+
+  # The same .env, with nothing else running, keeps "multica" as before.
+  : >"$tmp/compose.log"
+  _run_with_server "$tmp" MULTICA_TEST_COMPOSE_LOG="$tmp/compose.log" || return 1
+  if ! grep -qx "up project=multica" "$tmp/compose.log"; then
+    echo "an existing install must keep the multica project" >&2
+    cat "$tmp/compose.log" >&2
+    return 1
+  fi
+}
+
 test_brew_install_failure_falls_back_to_release_binary
 test_brew_tap_failure_falls_back_to_release_binary
 test_remote_ssh_install_prints_token_login_hint
@@ -773,4 +848,5 @@ test_with_server_refuses_ports_already_in_use
 test_with_server_port_preflight_allows_free_and_own_ports
 test_with_server_fails_when_checkout_does_not_land
 test_cli_lookup_failure_does_not_claim_up_to_date
+test_with_server_keeps_compose_projects_apart
 echo "install.sh tests passed"
