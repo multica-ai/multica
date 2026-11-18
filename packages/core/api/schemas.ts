@@ -1125,6 +1125,7 @@ const ReactionSchema = z.object({
 const AttachmentImageFields = {
   width: z.number().int().positive().optional().catch(undefined),
   height: z.number().int().positive().optional().catch(undefined),
+  thumbnail_url: z.string().min(1).optional().catch(undefined),
 };
 
 const AttachmentSchema = z.object({

@@ -31,6 +31,7 @@ vi.mock("../../../editor", () => ({
 
 vi.mock("../../../editor/hooks/use-inline-media-url", () => ({
   useResignedInlineMedia: (_id: string | undefined, url: string) => ({ url, pending: false }),
+  useAttachmentThumbnailURL: (_id: string, path: string) => ({ url: path, pending: false, failed: false }),
 }));
 
 vi.mock("@multica/core/workspace/avatar-url", () => ({
@@ -179,6 +180,24 @@ describe("DeliverablesSection", () => {
   it("shows no copy button without a link to copy", () => {
     renderSection(FILES);
     expect(screen.queryByRole("button", { name: "Copy link to latest version" })).toBeNull();
+  });
+
+  it("tiles a large image with its thumbnail and falls back to the original if it fails", () => {
+    const render = attachment({
+      id: "render",
+      filename: "render.jpg",
+      content_type: "image/jpeg",
+      size_bytes: 6 * 1024 * 1024,
+      thumbnail_url: "/api/attachments/render/thumbnail",
+    });
+    const { container } = renderSection(collectDeliverableFiles([comment("c-9", [render, SHOT])]));
+    const sources = () =>
+      Array.from(container.querySelectorAll("img"), (img) => img.getAttribute("src")).sort();
+    // A small image without a thumbnail keeps loading its original.
+    expect(sources()).toEqual(["/api/attachments/render/thumbnail", SHOT.download_url].sort());
+
+    fireEvent.error(container.querySelector('img[src="/api/attachments/render/thumbnail"]')!);
+    expect(sources()).toEqual([render.download_url, SHOT.download_url].sort());
   });
 
   it("opens the overview from view all", () => {

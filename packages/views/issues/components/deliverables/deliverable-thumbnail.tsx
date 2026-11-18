@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Attachment } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { cn } from "@multica/ui/lib/utils";
-import { useResignedInlineMedia } from "../../../editor/hooks/use-inline-media-url";
+import {
+  useAttachmentThumbnailURL,
+  useResignedInlineMedia,
+} from "../../../editor/hooks/use-inline-media-url";
 import { fileTypeLabel, getPreviewKind } from "../../../editor/utils/preview";
 import { fileIcon } from "../../../editor/utils/file-icon";
 
@@ -60,9 +63,69 @@ function FileFace({
   );
 }
 
-// Loads the original — there is no thumbnail endpoint yet — so callers keep
-// these few (the sidebar shows three) or lazy (the overview's grid).
+// A large image shows the server's downscaled copy: decoding dozens of
+// multi-megapixel originals into small tiles is what made the overview stutter.
+// Small images, other formats, older servers and a failed thumbnail load the
+// original.
 function ImageThumbnail({
+  attachment,
+  className,
+}: {
+  attachment: Attachment;
+  className?: string;
+}) {
+  const [failedThumbnail, setFailedThumbnail] = useState<string | null>(null);
+  const thumbnailPath = attachment.thumbnail_url;
+  if (thumbnailPath && failedThumbnail !== thumbnailPath) {
+    return (
+      <ResizedImageThumbnail
+        attachment={attachment}
+        thumbnailPath={thumbnailPath}
+        onFail={() => setFailedThumbnail(thumbnailPath)}
+        className={className}
+      />
+    );
+  }
+  return <OriginalImageThumbnail attachment={attachment} className={className} />;
+}
+
+function ResizedImageThumbnail({
+  attachment,
+  thumbnailPath,
+  onFail,
+  className,
+}: {
+  attachment: Attachment;
+  thumbnailPath: string;
+  onFail: () => void;
+  className?: string;
+}) {
+  const { url, pending, failed } = useAttachmentThumbnailURL(attachment.id, thumbnailPath);
+  useEffect(() => {
+    if (failed) onFail();
+  }, [failed, onFail]);
+
+  if (pending || failed || !url) {
+    return (
+      <FileFace attachment={attachment} showTypeLabel={false} className={className} />
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      draggable={false}
+      onError={onFail}
+      className={cn("bg-muted object-cover", className)}
+    />
+  );
+}
+
+// Loads the original, so callers keep these few (the sidebar shows three) or
+// lazy (the overview's grid).
+function OriginalImageThumbnail({
   attachment,
   className,
 }: {
