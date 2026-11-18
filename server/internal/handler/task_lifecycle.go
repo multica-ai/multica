@@ -299,7 +299,17 @@ func (h *Handler) RetrySourceContextQuickCreate(w http.ResponseWriter, r *http.R
 	canInvoke := func(agent db.Agent) bool {
 		return h.canInvokeAgent(r.Context(), agent, "member", userID, userID, uuidToString(workspaceID))
 	}
-	task, err := h.TaskService.RetrySourceContextQuickCreate(r.Context(), workspaceID, requesterID, taskID, canInvoke)
+	var task *db.AgentTaskQueue
+	hidden, err := h.taskInHiddenProject(r, workspaceID, taskID)
+	if err == nil {
+		if hidden {
+			// The requester may have lost access to the project the context
+			// was captured from since (MUL-8472); the run is gone for them.
+			err = service.ErrSourceContextRetryUnavailable
+		} else {
+			task, err = h.TaskService.RetrySourceContextQuickCreate(r.Context(), workspaceID, requesterID, taskID, canInvoke)
+		}
+	}
 	if errors.Is(err, service.ErrRerunInvokeNotAllowed) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return

@@ -169,6 +169,27 @@ func (h *Handler) commentInHiddenProject(r *http.Request, workspaceID string, co
 	return !hidden.CanSeeProject(projectID), nil
 }
 
+// taskInHiddenProject is commentInHiddenProject for a run, whose projects come
+// from projectaccess.TaskProjects as in requireTaskVisible.
+func (h *Handler) taskInHiddenProject(r *http.Request, workspaceID, taskID pgtype.UUID) (bool, error) {
+	hidden, err := h.hiddenProjects(r, uuidToString(workspaceID))
+	if err != nil || hidden.Empty() {
+		return false, err
+	}
+	task, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{ID: taskID, WorkspaceID: workspaceID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	projects, err := projectaccess.TaskProjects(r.Context(), h.Queries, task)
+	if err != nil {
+		return false, err
+	}
+	return !hidden.CanSeeProjects(projects), nil
+}
+
 // sourceContextProjectVisible answers a hidden target project of a comment
 // sub-issue exactly like a missing one.
 func (h *Handler) sourceContextProjectVisible(r *http.Request, workspaceID, projectID pgtype.UUID) error {
