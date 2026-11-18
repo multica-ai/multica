@@ -202,6 +202,7 @@ interface ContentEditorBaseProps {
   mentionMode?: "default" | "context";
   mentionContextItems?: MentionItem[];
   enableRuntimeAgentMentions?: boolean;
+  onMentionSelect?: (item: MentionItem) => void;
   /** Enable the `/` command picker. Defaults false. */
   enableSlashCommands?: boolean;
   /**
@@ -413,6 +414,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionMode = "default",
       mentionContextItems,
       enableRuntimeAgentMentions = false,
+      onMentionSelect,
       enableSlashCommands = false,
       slashCommandMode = "skill",
       showBlockHandles = false,
@@ -619,6 +621,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
 
+    const onMentionSelectRef = useRef(onMentionSelect);
+    onMentionSelectRef.current = onMentionSelect;
+
     const editor = useEditor({
       immediatelyRender: false,
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
@@ -669,6 +674,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         runtimeMentionIssueId: enableRuntimeAgentMentions ? currentIssueId : undefined,
+        onMentionSelect: (item) => onMentionSelectRef.current?.(item),
         enableSlashCommands,
         slashCommandMode,
         quickActionMenu: {

@@ -2143,6 +2143,7 @@ export class ApiClient {
     attachmentIds?: string[],
     suppressAgentIds?: string[],
     steerTaskIds?: string[],
+    requesterRuntimeAgentIds?: string[],
   ): Promise<Comment> {
     return this.fetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
@@ -2153,6 +2154,7 @@ export class ApiClient {
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
         ...(steerTaskIds?.length ? { steer_task_ids: steerTaskIds } : {}),
+        ...(requesterRuntimeAgentIds?.length ? { runtime_originator_mode: "requester", runtime_originator_agent_ids: requesterRuntimeAgentIds } : {}),
       }),
     });
   }
@@ -2202,7 +2204,7 @@ export class ApiClient {
     });
   }
 
-  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number): Promise<Comment> {
+  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number, requesterRuntimeAgentIds?: string[]): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}`, {
       method: "PUT",
       body: JSON.stringify({
@@ -2211,6 +2213,7 @@ export class ApiClient {
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
         ...(contentBase !== undefined ? { content_base: contentBase } : {}),
         ...(expectedRevision !== undefined ? { expected_revision: expectedRevision } : {}),
+        ...(requesterRuntimeAgentIds?.length ? { runtime_originator_mode: "requester", runtime_originator_agent_ids: requesterRuntimeAgentIds } : {}),
       }),
     });
   }
