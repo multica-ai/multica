@@ -178,8 +178,9 @@ Playwright round trips never land in a number.
   load, and toggles the navigation sidebar six times (each toggle includes the
   sidebar's 200 ms animation).
 - **Inbox switching** clicks rows in the Work panel's Inbox section and records
-  time until the issue is on screen and, for comment notifications on the walk
-  down, until that comment is in view, plus stalls up to one second after.
+  time until the issue is on screen and, for rows that link to a comment (the
+  oldest unread one), until that comment is in view on the walk down, plus
+  stalls up to one second after.
   `collapsed` walks the default five rows down and back; `expanded` first
   clicks "Show N more" (its own cost is reported) and walks ten rows down and
   back. The walk back opens cached issues, which restore where the user left

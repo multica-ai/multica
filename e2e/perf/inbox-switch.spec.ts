@@ -7,8 +7,8 @@
  *   expanded  — after "Show N more": walk ten rows down and back up.
  *
  * For each click: time until the selected issue is on screen, time until the
- * comment its notification points at is in view (comment notifications, on the
- * walk down), and the stalls from the click until the user would click again. The walk
+ * comment the row links to is in view (rows that link to one, on the walk
+ * down), and the stalls from the click until the user would click again. The walk
  * down opens issues for the first time; the walk back opens cached ones.
  * Real API and database seeded by scripts/perf-seed.mjs; opt in with
  * PERF_SCENARIO=inbox-switch and PERF_MANIFEST=<manifest>.
@@ -139,10 +139,14 @@ function values(of: SwitchSample[], key: "issue_visible_ms" | "comment_visible_m
 async function switchTo(page: Page, list: ReturnType<Page["locator"]>, row: ManifestInboxRow, landsOnComment: boolean) {
   const item = list.filter({ hasText: row.title }).first();
   await item.scrollIntoViewIfNeeded();
+  // The row links to the comment the app will land on — the oldest unread one
+  // on the issue, which is not necessarily the notification's own comment.
+  const href = (await item.locator("a[href]").first().getAttribute("href")) ?? "";
+  const target = landsOnComment ? (/#comment-([0-9a-f-]{36})/.exec(href)?.[1] ?? null) : null;
   const before = await inputCount(page);
   const issue = waitFor(page, "issueReady", { title: row.title, expectComments: row.comments > 0 }, SWITCH_TIMEOUT_MS).catch(() => null);
-  const comment = landsOnComment && row.target_comment_id
-    ? waitFor(page, "commentInView", { title: row.title, commentId: row.target_comment_id }, SWITCH_TIMEOUT_MS).catch(() => null)
+  const comment = target
+    ? waitFor(page, "commentInView", { title: row.title, commentId: target }, SWITCH_TIMEOUT_MS).catch(() => null)
     : Promise.resolve(null);
   await item.click();
   const [issueAt, commentAt] = await Promise.all([issue, comment]);
@@ -152,7 +156,7 @@ async function switchTo(page: Page, list: ReturnType<Page["locator"]>, row: Mani
   return {
     issue_visible_ms: issueAt === null ? null : round(issueAt - input),
     comment_visible_ms: commentAt === null ? null : round(commentAt - input),
-    jumps_to_comment: landsOnComment && !!row.target_comment_id,
+    jumps_to_comment: !!target,
     stalls: await stallsBetween(page, input, end),
   };
 }
