@@ -183,14 +183,41 @@ func TestInboxListArchivedSendsFiltersToServer(t *testing.T) {
 		"GET /api/issues": reply(`{"issues":[{"id":"` + inboxIssue1 + `","identifier":"MUL-1","title":"X"}]}`),
 	})
 	out, err := runInboxCommand(t, registerInboxListFlags, func(cmd *cobra.Command, _ []string) error { return runInboxList(cmd, nil) }, nil,
-		map[string]string{"archived": "true", "issue": inboxIssue1, "project": inboxProject, "unread": "true", "since": "1d", "output": "json"})
+		map[string]string{"archived": "true", "issue": inboxIssue1, "project": inboxProject, "unread": "true", "since": "1d", "type": "new_comment", "output": "json"})
 	if err != nil || !strings.Contains(out, inboxItemA) {
 		t.Fatalf("archived: %s %v", out, err)
 	}
 	since, err := time.Parse(time.RFC3339Nano, query.Get("received_after"))
-	if query.Get("group_id") != inboxIssue1 || query.Get("projects") != inboxProject || query.Get("unread_only") != "true" ||
+	if query.Get("group_id") != inboxIssue1 || query.Get("projects") != inboxProject || query.Get("unread_only") != "true" || query.Get("notification_types") != "new_comment" ||
 		err != nil || time.Since(since) < 23*time.Hour || time.Since(since) > 25*time.Hour {
 		t.Fatalf("archive page query = %v", query)
+	}
+}
+
+// The archive lists each issue under one notification, so a mention under a
+// later status change is only found when the type reaches the server.
+func TestInboxListArchivedTypeFindsOlderNotification(t *testing.T) {
+	fakeInboxServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /api/inbox/archived/page": func(w http.ResponseWriter, r *http.Request) {
+			id, kind := inboxItemB, "status_changed"
+			if r.URL.Query().Get("notification_types") == "mentioned" {
+				id, kind = inboxItemA, "mentioned"
+			}
+			fmt.Fprintf(w, `{"items":[{"id":"%s","type":"%s","title":"T","issue_id":"%s","read":true,"created_at":"2026-11-01T00:00:00Z"}],"next_cursor":null,"has_more":false}`, id, kind, inboxIssue1)
+		},
+		"GET /api/issues": reply(`{"issues":[{"id":"` + inboxIssue1 + `","identifier":"MUL-1","title":"X"}]}`),
+	})
+	out, err := runInboxCommand(t, registerInboxListFlags, func(cmd *cobra.Command, _ []string) error { return runInboxList(cmd, nil) }, nil,
+		map[string]string{"archived": "true", "type": "mentioned", "issue": inboxIssue1, "output": "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0]["id"] != inboxItemA || rows[0]["type"] != "mentioned" {
+		t.Fatalf("archived --type mentioned = %v, want the older mention", rows)
 	}
 }
 

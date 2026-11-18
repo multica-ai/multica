@@ -232,9 +232,15 @@ func runInboxList(cmd *cobra.Command, _ []string) error {
 	}
 
 	unreadOnly, _ := cmd.Flags().GetBool("unread")
+	notifType, _ := cmd.Flags().GetString("type")
 	var response []inboxListRow
 	if archived {
+		// The archive lists one notification per issue, so the type has to
+		// be matched before that one is picked, not after.
 		filters := url.Values{}
+		if notifType != "" {
+			filters.Set("notification_types", notifType)
+		}
 		if issueID != "" {
 			filters.Set("group_id", issueID)
 		}
@@ -254,7 +260,6 @@ func runInboxList(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("list inbox: %w", err)
 	}
-	notifType, _ := cmd.Flags().GetString("type")
 	items := make([]inboxListItem, 0, len(response))
 	for _, row := range response {
 		if projectID != "" && (row.IssueProjectID == nil || !strings.EqualFold(*row.IssueProjectID, projectID)) {
