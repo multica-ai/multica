@@ -219,6 +219,7 @@ export function createBlockInsertSuggestion(
     >({
       pluginKey,
       component: BlockInsertList,
+      placement: "bottom-start",
       getProps: (props) => ({
         items: props.items,
         query: props.query,
