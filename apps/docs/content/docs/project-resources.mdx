@@ -92,7 +92,7 @@ A local directory has two execution modes, set per resource with `execution_mode
 
 The agent works directly in your directory, and runs execute one at a time. When two runs use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
 
-Waiting does not modify the directory. A waiting run can be cancelled; otherwise it waits until the directory becomes available.
+Waiting does not modify the directory or consume a daemon execution slot. A waiting run can be cancelled; otherwise it resumes startup once both the directory and execution capacity are available.
 
 A plain non-git directory can only use this mode: worktree mode covers git repositories.
 
@@ -155,6 +155,8 @@ A run that could not record its branch — it failed before finishing, the recor
 
 </Accordion>
 <Accordion title="Nothing is silently dropped" id="nothing-is-silently-lost">
+
+During a worktree run, a tracked runtime instruction file such as `CLAUDE.md` or `AGENTS.md` is marked `skip-worktree` in the task's private index. This keeps the injected brief out of the agent's commits without changing your checkout. Intentional edits to that file remain uncommitted until cleanup restores normal tracking: they follow the delivery rules below. Untracked runtime files and skill directories still need to be excluded from the agent's commits.
 
 Nothing the agent leaves uncommitted is deleted with the worktree, including when the run fails partway. Where it goes depends on whether the agent committed during the run:
 

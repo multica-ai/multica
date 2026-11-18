@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { taskContextReceiptOptions } from "@multica/core/agents";
@@ -39,6 +40,50 @@ export function loadTone(load: string): LoadTone {
 /** Top-level rows: sources that stand on their own, not sections of another. */
 export function topLevelSources(receipt: ContextReceipt): ContextReceiptSource[] {
   return receipt.sources.filter((s) => !s.parent);
+}
+
+/** Delivery describes preparation, independently of later file-load evidence. */
+export function receiptDeliveryBytes(receipt: ContextReceipt) {
+  const totals = { direct: 0, files: 0, instructionFiles: 0, skillPackages: 0, otherFiles: 0 };
+  for (const source of topLevelSources(receipt)) {
+    if (source.delivery === "inline" || source.delivery === "prompt") totals.direct += source.bytes;
+    else if (source.delivery === "file") {
+      totals.files += source.bytes;
+      switch (source.kind) {
+        case "runtime_brief":
+        case "existing_instructions":
+        case "agent_instructions":
+        case "project_description":
+          totals.instructionFiles += source.bytes;
+          break;
+        case "skill":
+          totals.skillPackages += source.bytes;
+          break;
+        default:
+          totals.otherFiles += source.bytes;
+      }
+    }
+  }
+  return totals;
+}
+
+function sourcePath(source: ContextReceiptSource): string | undefined {
+  if (source.kind === "skill" && source.delivery === "file" && source.path) {
+    // URI identifiers are not filesystem paths, even when their suffix matches.
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source.path)) return source.path;
+    // Existing receipts name the entry file but measure the complete package.
+    return source.path.replace(/(^|[/\\])SKILL\.md$/, "$1") || ".";
+  }
+  return source.path;
+}
+
+function DeliveryPath({ path }: { path: string }) {
+  // Explicit breaks preserve separators and copied text, including URI schemes.
+  return path.split(/([/\\]+)/).map((part, index) => (
+    <Fragment key={index}>
+      {part}{/[/\\]$/.test(part) && <wbr />}
+    </Fragment>
+  ));
 }
 
 /** Rows the reader should look at first: delivery we cannot vouch for. */
@@ -86,7 +131,7 @@ export function ContextReceiptButton({ taskId, open }: { taskId: string; open: b
 export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
   const { t } = useT("agents");
   const topLevel = topLevelSources(receipt);
-  const totalBytes = topLevel.reduce((sum, s) => sum + s.bytes, 0);
+  const bytes = receiptDeliveryBytes(receipt);
   const warnings = receiptWarnings(receipt);
 
   const runtimeLabel = [providerDisplayName(receipt.runtime), receipt.runtime_version]
@@ -100,8 +145,20 @@ export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
         <div className="text-muted-foreground">
           {t(($) => $.transcript.context_receipt_summary, {
             count: topLevel.length,
-            size: formatBytes(totalBytes),
           })}
+        </div>
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground">
+          <span>{t(($) => $.transcript.context_receipt_direct_bytes, { size: formatBytes(bytes.direct) })}</span>
+          <div className="min-w-0">
+            <div>{t(($) => $.transcript.context_receipt_file_bytes, { size: formatBytes(bytes.files) })}</div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 text-micro">
+              <span>{t(($) => $.transcript.context_receipt_instruction_file_bytes, { size: formatBytes(bytes.instructionFiles) })}</span>
+              <span>{t(($) => $.transcript.context_receipt_skill_package_bytes, { size: formatBytes(bytes.skillPackages) })}</span>
+              {bytes.otherFiles > 0 && (
+                <span>{t(($) => $.transcript.context_receipt_other_file_bytes, { size: formatBytes(bytes.otherFiles) })}</span>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -150,8 +207,8 @@ export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
         <thead>
           <tr className="border-b text-left text-muted-foreground">
             <th className="w-[34%] py-1 pr-2 font-normal">{t(($) => $.transcript.context_receipt_col_source)}</th>
-            <th className="w-[12%] py-1 pr-2 text-right font-normal">{t(($) => $.transcript.context_receipt_col_size)}</th>
-            <th className="w-[30%] py-1 pr-2 font-normal">{t(($) => $.transcript.context_receipt_col_delivery)}</th>
+            <th className="w-[20%] py-1 pr-2 text-right font-normal">{t(($) => $.transcript.context_receipt_col_size)}</th>
+            <th className="w-[22%] py-1 pr-2 font-normal">{t(($) => $.transcript.context_receipt_col_delivery)}</th>
             <th className="py-1 font-normal">{t(($) => $.transcript.context_receipt_col_load)}</th>
           </tr>
         </thead>
@@ -165,13 +222,18 @@ export function ContextReceiptView({ receipt }: { receipt: ContextReceipt }) {
                 </div>
                 {s.sha256 && <div className="font-mono text-micro text-faint-foreground">{s.sha256}</div>}
               </td>
-              <td className="py-1 pr-2 text-right tabular-nums text-foreground">{formatBytes(s.bytes)}</td>
+              <td className="py-1 pr-2 text-right tabular-nums text-foreground">
+                <div>{formatBytes(s.bytes)}</div>
+                {s.kind === "skill" && s.delivery === "file" && (
+                  <div className="whitespace-nowrap text-micro text-muted-foreground">{t(($) => $.transcript.context_receipt_package)}</div>
+                )}
+              </td>
               <td className="py-1 pr-2">
                 <div
-                  className={cn("truncate", s.delivery === "file" ? "font-mono text-foreground" : "text-muted-foreground")}
-                  title={s.path}
+                  className={s.delivery === "file" ? "font-mono text-foreground [overflow-wrap:anywhere]" : "truncate text-muted-foreground"}
+                  title={sourcePath(s)}
                 >
-                  {deliveryLabel(s, t)}
+                  {s.delivery === "file" ? <DeliveryPath path={deliveryLabel(s, t)} /> : deliveryLabel(s, t)}
                 </div>
               </td>
               <td className="py-1">
@@ -226,7 +288,7 @@ function sourceLabel(source: ContextReceiptSource, t: T): string {
 function deliveryLabel(source: ContextReceiptSource, t: T): string {
   switch (source.delivery) {
     case "file":
-      return source.path ?? t(($) => $.transcript.context_delivery_file);
+      return sourcePath(source) ?? t(($) => $.transcript.context_delivery_file);
     case "inline":
       return t(($) => $.transcript.context_delivery_inline);
     case "prompt":

@@ -309,9 +309,13 @@ func (q *Queries) CountUndrainedTasksByRuntimeOrAgent(ctx context.Context, arg C
 }
 
 const deleteAgentRuntime = `-- name: DeleteAgentRuntime :exec
+WITH deleted_rate_limit AS (
+    DELETE FROM runtime_rate_limit WHERE runtime_id = $1
+)
 DELETE FROM agent_runtime WHERE id = $1
 `
 
+// runtime_rate_limit has no FK; its row goes with the runtime.
 func (q *Queries) DeleteAgentRuntime(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteAgentRuntime, id)
 	return err
@@ -749,6 +753,12 @@ SELECT EXISTS (
   WHERE agent_runtime.id = $1
     AND status = 'offline'
     AND last_seen_at < now() - make_interval(secs => $2::double precision)
+    AND NOT EXISTS (
+      SELECT 1 FROM runtime_profile p
+      WHERE p.id = agent_runtime.profile_id AND p.workspace_id = agent_runtime.workspace_id
+        AND p.daemon_id IS NULL
+        AND p.created_by = agent_runtime.owner_id
+    )
     AND NOT EXISTS (
       SELECT 1
       FROM agent
@@ -1234,6 +1244,12 @@ SELECT id FROM agent_runtime
 WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => $1::double precision)
   AND NOT EXISTS (
+    SELECT 1 FROM runtime_profile p
+    WHERE p.id = agent_runtime.profile_id AND p.workspace_id = agent_runtime.workspace_id
+      AND p.daemon_id IS NULL
+      AND p.created_by = agent_runtime.owner_id
+  )
+  AND NOT EXISTS (
     SELECT 1
     FROM agent
     WHERE agent.runtime_id = agent_runtime.id
@@ -1390,6 +1406,46 @@ SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device
 // holding session/agent locks must not wait here while revocation locks them.
 func (q *Queries) LockAgentRuntimeForAccessChange(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
 	row := q.db.QueryRow(ctx, lockAgentRuntimeForAccessChange, id)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+		&i.SharedWith,
+		&i.MaxConcurrentTasks,
+	)
+	return i, err
+}
+
+const lockAgentRuntimeForClaimDelivery = `-- name: LockAgentRuntimeForClaimDelivery :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with, max_concurrent_tasks FROM agent_runtime
+WHERE id = $1
+FOR NO KEY UPDATE
+`
+
+// The claim delivery gate's lock on the runtime it re-reads owner_id and
+// visibility from. FOR NO KEY UPDATE still blocks every UPDATE and DELETE of
+// the row, so a re-registration or visibility flip waits for the gate to
+// commit. Unlike FOR UPDATE it does not block FOR KEY SHARE, which every task
+// insert takes on its runtime (lock_task_owner_rows and the foreign key) while
+// already holding the agent row. The gate takes the agent row after this one,
+// so FOR UPDATE here deadlocked a chat send racing a delivery (MUL-9501).
+func (q *Queries) LockAgentRuntimeForClaimDelivery(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, lockAgentRuntimeForClaimDelivery, id)
 	var i AgentRuntime
 	err := row.Scan(
 		&i.ID,

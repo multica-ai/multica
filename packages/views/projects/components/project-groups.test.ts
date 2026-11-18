@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "@multica/core/types";
-import { NO_LEAD_KEY, groupProjects, projectGroupKey, projectGroupUpdate } from "./project-groups";
+import { NO_FOLDER_KEY, NO_LEAD_KEY, groupProjects, projectGroupKey, projectGroupUpdate } from "./project-groups";
 
 const base: Project = {
   id: "p1",
@@ -35,6 +35,24 @@ describe("project groups", () => {
     expect(projectGroupUpdate("priority", "urgent")).toEqual({ priority: "urgent" });
     expect(projectGroupUpdate("lead", "member:u1")).toEqual({ lead_type: "member", lead_id: "u1" });
     expect(projectGroupUpdate("lead", NO_LEAD_KEY)).toEqual({ lead_type: null, lead_id: null });
+  });
+
+  it("puts a project whose folder is gone with the projects outside every folder", () => {
+    const projects = [
+      { ...base, id: "a" },
+      { ...base, id: "b" },
+      { ...base, id: "c" },
+    ];
+    const folderOf = new Map([
+      ["a", "f1"],
+      ["c", "deleted"],
+    ]);
+    expect(projectGroupKey(projects[1]!, "folder", folderOf)).toBe(NO_FOLDER_KEY);
+    const buckets = groupProjects(projects, "folder", ["f1", NO_FOLDER_KEY], folderOf);
+    expect(buckets.map((b) => [b.key, b.projects.map((p) => p.id)])).toEqual([
+      ["f1", ["a"]],
+      [NO_FOLDER_KEY, ["b", "c"]],
+    ]);
   });
 
   it("buckets in key order, keeps row order and empty buckets, drops unlisted keys", () => {

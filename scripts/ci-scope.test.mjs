@@ -17,6 +17,9 @@ function filterFiles(files) {
 
 for (const [name, files, selected] of [
   ["readme only", ["README.md"], []],
+  ["stable release promotion", [".github/workflows/promote-release.yml"], ["scripts"]],
+  ["release orchestration", [".github/workflows/release.yml"], ["scripts"]],
+  ["release creation", [".goreleaser.yml"], ["scripts"]],
   ["docs only", ["apps/docs/content/docs/guide.mdx"], ["quality", "docs"]],
   ["docs test", ["apps/docs/lib/unrendered-bold.test.ts"], ["quality", "docs"]],
   ["web changelog", ["apps/web/features/landing/i18n/en.ts"], ["frontend", "quality"]],

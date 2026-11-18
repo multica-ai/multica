@@ -6,6 +6,7 @@ import { createLogger } from "../logger";
 import type {
   ChatSession,
   ChatPinnedAgent,
+  ChatWakeup,
   ChatDraftRestoresResponse,
   ChatQuickActionsPendingState,
 } from "../types";
@@ -45,6 +46,61 @@ export function useConsumeChatDraftRestore() {
       // Exhausted the retries. The draft is safe (it is in the composer) and the
       // ledger keeps the row from being re-offered; the next mount reconciles it.
       logger.warn("consumeChatDraftRestore.error", { sessionId, restoreId, err });
+    },
+  });
+}
+
+/**
+ * Cancel a wakeup an agent created in this conversation. Optimistically drops
+ * it from the active set; chat:wakeup_changed then brings back the ended row.
+ */
+export function useCancelChatWakeup() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ sessionId, wakeupId }: { sessionId: string; wakeupId: string }) =>
+      api.cancelChatWakeup(sessionId, wakeupId),
+    onMutate: async ({ sessionId, wakeupId }) => {
+      await qc.cancelQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      const prev = qc.getQueryData<ChatWakeup[]>(chatKeys.wakeups(sessionId));
+      qc.setQueryData<ChatWakeup[]>(chatKeys.wakeups(sessionId), (old) =>
+        old?.map((w) =>
+          w.id === wakeupId
+            ? { ...w, status: "cancelled", end_reason: "cancelled_by_user", ended_at: new Date().toISOString() }
+            : w,
+        ),
+      );
+      return { prev };
+    },
+    onError: (err, { sessionId }, ctx) => {
+      logger.warn("cancelChatWakeup.error", { sessionId, err });
+      if (ctx?.prev) qc.setQueryData(chatKeys.wakeups(sessionId), ctx.prev);
+    },
+    onSettled: (_data, _err, { sessionId }) => {
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.myWakeups(wsId) });
+    },
+  });
+}
+
+/**
+ * Re-run a wakeup whose report turn failed. The new turn arrives through
+ * chat:wakeup_changed like any other wakeup turn.
+ */
+export function useRetryChatWakeup() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: ({ sessionId, wakeupId }: { sessionId: string; wakeupId: string }) =>
+      api.retryChatWakeup(sessionId, wakeupId),
+    onError: (err, { sessionId }) => {
+      logger.warn("retryChatWakeup.error", { sessionId, err });
+    },
+    onSettled: (_data, _err, { sessionId }) => {
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      qc.invalidateQueries({ queryKey: chatKeys.myWakeups(wsId) });
     },
   });
 }
@@ -155,6 +211,60 @@ export function useMarkChatSessionRead() {
     onError: (err, sessionId, ctx) => {
       logger.error("markChatSessionRead.error.rollback", { sessionId, err });
       if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+class MarkChatSessionsReadError extends Error {
+  constructor(readonly failedIds: string[], total: number) {
+    super(`failed to mark ${failedIds.length} of ${total} chats read`);
+  }
+}
+
+/**
+ * Clears unread on every chat session that has any, one read per session (the
+ * server has no bulk read, and each read broadcasts its own chat:session_read
+ * to other devices). All rows drop to 0 optimistically; if any read fails the
+ * mutation rejects and only the failed rows get their unread back, so the
+ * badge stays right even when the follow-up refetch fails too.
+ */
+export function useMarkAllChatSessionsRead() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: async (sessionIds: string[]) => {
+      logger.info("markAllChatSessionsRead.start", { count: sessionIds.length });
+      const results = await Promise.allSettled(sessionIds.map((id) => api.markChatSessionRead(id)));
+      const failedIds = sessionIds.filter((_, i) => results[i]!.status === "rejected");
+      if (failedIds.length > 0) throw new MarkChatSessionsReadError(failedIds, sessionIds.length);
+    },
+    onMutate: async (sessionIds) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+      const ids = new Set(sessionIds);
+      const prevUnread = new Map<string, Pick<ChatSession, "has_unread" | "unread_count">>();
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) =>
+        old?.map((s) => {
+          if (!ids.has(s.id)) return s;
+          prevUnread.set(s.id, { has_unread: s.has_unread, unread_count: s.unread_count });
+          return { ...s, has_unread: false, unread_count: 0 };
+        }),
+      );
+      return { prevUnread };
+    },
+    onError: (err, sessionIds, ctx) => {
+      logger.error("markAllChatSessionsRead.error.rollback", { err });
+      if (!ctx) return;
+      const failed = new Set(err instanceof MarkChatSessionsReadError ? err.failedIds : sessionIds);
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) =>
+        old?.map((s) => {
+          const prev = failed.has(s.id) ? ctx.prevUnread.get(s.id) : undefined;
+          return prev ? { ...s, ...prev } : s;
+        }),
+      );
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });

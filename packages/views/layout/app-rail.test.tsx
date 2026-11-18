@@ -22,6 +22,9 @@ const state = vi.hoisted(() => ({
   chatSessions: [] as { id: string; unread_count?: number }[],
   chat: { activeSessionId: null as string | null, isOpen: false },
   stuck: [] as unknown[],
+  desktop: false,
+  markAllInboxRead: vi.fn(),
+  markAllChatsRead: vi.fn(),
 }));
 
 vi.mock("../navigation", () => ({
@@ -39,7 +42,16 @@ vi.mock("../navigation", () => ({
     pathname: state.pathname,
     searchParams: new URLSearchParams(state.search),
     push: vi.fn(),
+    openInNewTab: state.desktop ? vi.fn() : undefined,
+    getShareableUrl: (href: string) => href,
   }),
+  useIntentNavigate: () => vi.fn(),
+}));
+vi.mock("@multica/core/inbox/mutations", () => ({
+  useMarkAllInboxRead: () => ({ mutate: state.markAllInboxRead }),
+}));
+vi.mock("@multica/core/chat/mutations", () => ({
+  useMarkAllChatSessionsRead: () => ({ mutate: state.markAllChatsRead }),
 }));
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
@@ -132,6 +144,9 @@ beforeEach(() => {
   state.chatSessions = [];
   state.chat = { activeSessionId: null, isOpen: false };
   state.stuck = [];
+  state.desktop = false;
+  state.markAllInboxRead.mockReset();
+  state.markAllChatsRead.mockReset();
   useRailOrderStore.setState({ order: null });
   useSidebarTreeStore.setState({ inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS });
 });
@@ -377,6 +392,45 @@ describe("AppRail chat badge", () => {
     state.appForeground = false;
     renderRail();
     expect(chatBadge()).toHaveAttribute("aria-label", "5");
+  });
+});
+
+describe("AppRail space menu", () => {
+  const openMenu = async (href: string) => {
+    fireEvent.contextMenu(link(href)!, { clientX: 30, clientY: 300 });
+    return screen.findByRole("menu");
+  };
+  const markAllRead = (menu: HTMLElement) => within(menu).queryByRole("menuitem", { name: "Mark all as read" });
+
+  beforeEach(() => {
+    state.desktop = true;
+  });
+
+  it("marks every unread chat read from Chat", async () => {
+    state.chatSessions = [
+      { id: "a", unread_count: 3 },
+      { id: "b", unread_count: 0 },
+      { id: "c", unread_count: 22 },
+    ];
+    renderRail();
+    fireEvent.click(markAllRead(await openMenu("/acme/chat"))!);
+    expect(state.markAllChatsRead).toHaveBeenCalledWith(["a", "c"], expect.anything());
+    expect(state.markAllInboxRead).not.toHaveBeenCalled();
+  });
+
+  it("offers no Mark all as read on Chat when every chat is read", async () => {
+    state.chatSessions = [{ id: "a", unread_count: 0 }];
+    renderRail();
+    expect(markAllRead(await openMenu("/acme/chat"))).toBeNull();
+  });
+
+  it("marks the inbox read from Work", async () => {
+    state.inboxUnread = 4;
+    state.chatSessions = [{ id: "a", unread_count: 3 }];
+    renderRail();
+    fireEvent.click(markAllRead(await openMenu("/acme/issues"))!);
+    expect(state.markAllInboxRead).toHaveBeenCalledTimes(1);
+    expect(state.markAllChatsRead).not.toHaveBeenCalled();
   });
 });
 

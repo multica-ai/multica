@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/extension"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/gitca"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -39,6 +40,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/integrations/weixin"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -222,6 +224,7 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 }
 
 type RouterOptions struct {
+	InboxReadMetrics    *obsmetrics.InboxReadMetrics
 	HTTPMetrics         *obsmetrics.HTTPMetrics
 	BusinessMetrics     *obsmetrics.BusinessMetrics
 	ChannelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
@@ -462,6 +465,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	invitationRateLimits.Recipient.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_RECIPIENT_24H", invitationRateLimits.Recipient.Limit)
 	h.InvitationRateLimiters = handler.NewMemoryInvitationRateLimiters(invitationRateLimits)
 	h.Metrics = opts.BusinessMetrics
+	h.InboxReads.Metrics = opts.InboxReadMetrics
 	h.FeatureFlags = opts.FeatureFlags
 	h.ThemeStore = themeStoreFromEnv()
 	h.TaskService.FeatureFlags = opts.FeatureFlags
@@ -476,8 +480,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		opts.BusinessMetrics.RecordEntitlementConfigError()
 	} else if entitlementClient.Enabled() {
 		h.Entitlements = entitlementClient
-		h.TaskService.Entitlements = entitlementClient
-		h.IssueService.Entitlements = entitlementClient
+		h.Features = entitlementClient
 		h.AutopilotService.Entitlements = entitlementClient
 		h.AutopilotService.QuotaMetrics = opts.BusinessMetrics
 	}
@@ -1245,6 +1248,31 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
 	}
 
+	// WeChat iLink needs only an at-rest key; users authorize their bot by QR.
+	if key, err := secretbox.LoadKey("MULTICA_WEIXIN_SECRET_KEY"); err == nil {
+		box, boxErr := secretbox.New(key)
+		if boxErr != nil {
+			slog.Error("weixin: encryption setup failed", "error", boxErr)
+		} else if install, installErr := weixin.NewInstallService(queries, pool, box); installErr != nil {
+			slog.Error("weixin: install service setup failed", "error", installErr)
+		} else {
+			outbound := weixin.NewOutbound(queries, box, slog.Default())
+			media := weixin.NewMediaResolver(nil, nil)
+			if store != nil {
+				media = weixin.NewMediaResolver(store, engine.NewDBMediaIntentLedger(queries))
+				outbound.EnableFileDelivery(store)
+				h.DeclareChannelFileDelivery(string(weixin.TypeWeixin))
+			}
+			channelRouter.Register(weixin.TypeWeixin, weixin.NewWeixinResolverSet(queries, pool, outbound, outbound.Typing, media))
+			weixin.RegisterWeixin(channelRegistry, weixin.ChannelDeps{Queries: queries, Box: box, Logger: slog.Default(), Typing: outbound.Typing, Bus: bus})
+			outbound.Register(bus)
+			h.WeixinInstall, h.WeixinOutbound = install, outbound
+			slog.Info("weixin integration enabled (QR login and long polling)")
+		}
+	} else {
+		slog.Info("weixin integration disabled (MULTICA_WEIXIN_SECRET_KEY not set)")
+	}
+
 	// Telegram integration. Same shape as Slack: BYO bot token pasted at
 	// install, one getUpdates long-polling loop per active installation
 	// supervised by the shared engine.Supervisor, resolvers on the generic
@@ -1693,6 +1721,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/environments", h.ReportTaskEnvironments)
 		r.Post("/tasks/{taskId}/environment-configs", h.ReportTaskEnvironmentConfigs)
 		r.Post("/tasks/{taskId}/context-receipt", h.ReportTaskContextReceipt)
+		r.Post("/tasks/{taskId}/rate-limits", h.ReportTaskRateLimits)
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 		r.Post("/tasks/{taskId}/cancel-ack", h.AckTaskCancelled)
@@ -1806,6 +1835,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetWorkspace)
 					r.Put("/pin", h.SetWorkspacePinned)
 					r.Get("/members", h.ListMembersWithUser)
+					// Paid-feature states for read-only and upgrade UI; the
+					// server enforces on every write regardless.
+					r.Get("/features", h.GetWorkspaceFeatures)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 					// Listing GitHub installations is member-visible so the
@@ -1976,6 +2008,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/dingtalk/install/byo", h.RegisterDingTalkBYO)
 				})
 
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/weixin/installations", h.ListWeixinInstallations)
+					r.Post("/weixin/logins", h.BeginWeixinLogin)
+					r.Post("/weixin/logins/{loginId}/poll", h.PollWeixinLogin)
+					r.Delete("/weixin/logins/{loginId}", h.CancelWeixinLogin)
+					r.Delete("/weixin/installations/{installationId}", h.RevokeWeixinInstallation)
+				})
+
 				// Telegram integration. Same admin/member split as Slack:
 				// listing is member-visible; install + revoke are admin-only.
 				r.Group(func(r chi.Router) {
@@ -2126,7 +2167,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
-				r.Get("/limit-usage", h.GetIssueLimitUsage)
 				r.Post("/table/groups", h.ListIssueTableGroups)
 				r.Post("/table/rows", h.ListIssueTableRows)
 				r.Post("/table/facets", h.ListIssueTableFacets)
@@ -2280,18 +2320,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Commercial (server/ee) workspace routes; none in an open-source build.
+			extension.MountWorkspaceRoutes(r, h)
+
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
 				// Workspace owner only: every private project, joined or not.
-				r.Get("/private", h.ListPrivateProjectsForOwner)
+				// Human-only: a machine credential carries its owner's user
+				// id and must not use the owner's way into private projects.
+				r.With(handler.RequireHumanActor).Get("/private", h.ListPrivateProjectsForOwner)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
-					r.Post("/join", h.JoinPrivateProject)
+					r.With(handler.RequireHumanActor).Post("/join", h.JoinPrivateProject)
 					r.Post("/archive", h.ArchiveProject)
 					r.Post("/restore", h.RestoreProject)
 					r.Post("/workflow", h.SetProjectWorkflow)
@@ -2509,6 +2554,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/usage", h.GetRuntimeUsage)
 					r.Get("/usage/by-agent", h.GetRuntimeUsageByAgent)
 					r.Get("/usage/by-hour", h.GetRuntimeUsageByHour)
+					r.Get("/rate-limits", h.GetRuntimeRateLimits)
 					r.Get("/activity", h.GetRuntimeTaskActivity)
 					r.Post("/update", h.InitiateUpdate)
 					r.Get("/update/{updateId}", h.GetUpdate)
@@ -2604,10 +2650,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// creator-only fetch + idempotent consume.
 					r.Get("/draft-restores", h.ListChatDraftRestores)
 					r.Delete("/draft-restores/{restoreId}", h.ConsumeChatDraftRestore)
+					r.Get("/wakeups", h.ListChatSessionWakeups)
+					r.Post("/wakeups/{wakeupId}/cancel", h.CancelChatSessionWakeup)
+					r.Post("/wakeups/{wakeupId}/retry", h.RetryChatSessionWakeup)
 				})
 			})
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 			r.Get("/api/chat/pending-tasks/has-any", h.HasPendingChatTasks)
+			r.Get("/api/chat/my-wakeups", h.ListMyChatWakeups)
 
 			// Quick-agent bar: per-user pinned agents for one-tap new chats.
 			r.Get("/api/chat/pinned-agents", h.ListChatPinnedAgents)
@@ -2621,6 +2671,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// thread (?id for a specific one, else the thread the session is in).
 			r.Get("/api/chat/history", h.GetChatChannelHistory)
 			r.Get("/api/chat/thread", h.GetChatThread)
+			// Agent-facing chat wakeups: like history, scoped to the calling
+			// turn's own conversation through its task token.
+			r.Route("/api/chat/wakeups", func(r chi.Router) {
+				r.Get("/", h.ListChatTurnWakeups)
+				r.Post("/", h.CreateChatTurnWakeup)
+				r.Put("/{wakeupId}", h.UpdateChatTurnWakeup)
+				r.Post("/{wakeupId}/cancel", h.CancelChatTurnWakeup)
+				r.Post("/{wakeupId}/finish", h.FinishChatTurnWakeup)
+				r.Post("/{wakeupId}/checkin", h.CheckInChatTurnWakeup)
+			})
 
 			// Connected Apps (MUL-8516)
 			// Connected Apps management and decisions are for people; runs

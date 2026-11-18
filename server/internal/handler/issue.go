@@ -109,6 +109,9 @@ type IssueResponse struct {
 	// SourceContext is detail-only. List, board, search, and children responses
 	// deliberately omit the potentially large immutable snapshot.
 	SourceContext *sourceContextDetailResponse `json:"source_context,omitempty"`
+	// RunOutcome is set only on the response to the caller's own update
+	// (#10845); see IssueRunOutcome.
+	RunOutcome *IssueRunOutcome `json:"run_outcome,omitempty"`
 	// duplicateOfIssueID is the raw mark, kept off the wire; see DuplicateOf.
 	duplicateOfIssueID pgtype.UUID
 }
@@ -3069,9 +3072,6 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
 	if err != nil {
-		if writeIssueLimitReached(w, err) {
-			return
-		}
 		if errors.Is(err, service.ErrProjectAccessDenied) {
 			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonProjectAccessBlocked)
 			return
@@ -3733,9 +3733,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if writeIssueCreatePropertyError(w, err) {
 		return
 	}
-	if writeIssueLimitReached(w, err) {
-		return
-	}
 	if writeIssueNumberCollision(w, err) {
 		return
 	}
@@ -4369,6 +4366,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		},
 		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 	)
+	logDeclinedIssueRun(r.Context(), issue, trigger)
+	runDecided := willRun
 	willRun = willRun && !req.SuppressRun
 
 	updatedPayload := map[string]any{
@@ -4436,9 +4435,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if handoff != nil && req.StopPreviousAssigneeRuns {
 		h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 	}
-	if willRun {
-		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
-	}
+	resp.RunOutcome = h.resolveIssueRun(r, issue, trigger, runDecided, req.SuppressRun, actorType, actorID, workspaceID, handoffNote)
 
 	// Sub-issue rules on the parent (the child_done system rule and sub-issue
 	// conditions): the write recorded the change; process it now. A failure
@@ -4584,10 +4581,15 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 }
 
 // isAgentRunningOnIssue reports whether the calling agent's current task
-// (identified by X-Task-ID) is running for the exact issue being promoted.
+// (identified by X-Task-ID) is running for the exact issue being promoted
+// and belongs to the target receiving agent (assignee or squad leader).
 // That is the only true self-loop on backlog→active: the agent flipping
 // the same issue its own task is executing for would immediately re-enqueue
 // itself, complete the run, flip again, and so on.
+//
+// A coordinator whose run is bound to the issue but which promotes it for a
+// different receiving agent is not a loop: the run goes to another agent, and
+// suppressing it would leave the issue in an active status with no run.
 //
 // Same-agent cross-issue handoff (Agent A finishing a task on issue I1 then
 // promoting issue I2 — even when I2 is also assigned to A) is NOT a loop
@@ -4598,7 +4600,7 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 // "agent": resolveActor demotes the actor to "member" otherwise (handler.go
 // resolveActor). We still recheck defensively — a future caller could pass
 // agent identity through a different path.
-func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue db.Issue) bool {
+func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue db.Issue, targetAgentID pgtype.UUID) bool {
 	if actorType != "agent" {
 		return false
 	}
@@ -4617,7 +4619,11 @@ func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue
 	if !task.IssueID.Valid {
 		return false
 	}
-	return uuidToString(task.IssueID) == uuidToString(issue.ID)
+	if !targetAgentID.Valid {
+		return false
+	}
+	return uuidToString(task.IssueID) == uuidToString(issue.ID) &&
+		uuidToString(task.AgentID) == uuidToString(targetAgentID)
 }
 
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
@@ -5203,6 +5209,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		var runOutcome *IssueRunOutcome
 		if hasFieldUpdate {
 			resp := issueToResponse(issue, prefix)
 			h.advanceRunStep(r.Context(), callerRun, prevIssue, issue)
@@ -5225,6 +5232,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				},
 				h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 			)
+			logDeclinedIssueRun(r.Context(), issue, trigger)
+			runDecided := willRun
 			willRun = willRun && !req.Updates.SuppressRun
 			batchPayload := map[string]any{
 				"issue":                      resp,
@@ -5254,9 +5263,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if handoff != nil && req.Updates.StopPreviousAssigneeRuns {
 				h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 			}
-			if willRun {
-				h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, batchHandoffNote)
-			}
+			runOutcome = h.resolveIssueRun(r, issue, trigger, runDecided, req.Updates.SuppressRun, actorType, actorID, workspaceID, batchHandoffNote)
 
 			// No status change — not even → cancelled — cancels active tasks here,
 			// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.
@@ -5286,7 +5293,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if issue.Revision == prevIssue.Revision {
 			outcome = batchOutcomeUnchanged
 		}
-		results = append(results, batchIssueResult{IssueID: issueID, Identifier: identifier, Outcome: outcome})
+		results = append(results, batchIssueResult{IssueID: issueID, Identifier: identifier, Outcome: outcome, RunOutcome: runOutcome})
 		updated++
 	}
 

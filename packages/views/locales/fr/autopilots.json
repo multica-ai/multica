@@ -81,7 +81,6 @@
     "run_blocked_attribution": "Non déclenchée — l'exécution n'a pas pu être attribuée à un membre responsable",
     "run_blocked_already_active": "Non déclenchée — une exécution récente couvre déjà ce cas",
     "run_blocked_quota_exceeded": "Non déclenché — la limite d'exécutions de la période est atteinte",
-    "run_blocked_issue_limit_reached": "Non déclenchée : l'espace de travail a atteint sa limite de tâches",
     "run_blocked_generic": "Non déclenchée — l'exécution a été bloquée",
     "section_triggers": "Déclencheurs",
     "section_run_history": "Historique des exécutions",
@@ -184,6 +183,10 @@
     "url_copied": "URL du webhook copiée",
     "url_copy_failed": "Échec de la copie",
     "edit_schedule": "Modifier la planification",
+    "edit_webhook": "Modifier le webhook",
+    "event_filter_summary_all": "Accepte tous les événements",
+    "event_filter_summary_conditions_one": "{{count}} condition",
+    "event_filter_summary_conditions_other": "{{count}} conditions",
     "rotate_url": "Renouveler l'URL",
     "rotate_confirm_title": "Renouveler l'URL du webhook",
     "rotate_confirm_description": "L'URL actuelle cessera de fonctionner immédiatement. Tous les systèmes externes qui l'appellent devront être mis à jour avec la nouvelle. Continuer ?",
@@ -247,6 +250,18 @@
       "disabled_invalid_signature": "Rejeu impossible — la signature était invalide",
       "disabled_rejected": "Impossible de rejouer une livraison rejetée",
       "disabled_queued": "Encore en file d'attente — rejouez une fois qu'elle sera traitée"
+    },
+    "ignore": {
+      "title": "Motif du filtrage",
+      "payload_filtered": "Conditions de la charge utile non remplies",
+      "event_filtered": "Événement ou action non correspondant",
+      "trigger_disabled": "Déclencheur désactivé",
+      "autopilot_paused": "Automatisation en pause",
+      "autopilot_archived": "Automatisation archivée",
+      "quota_exceeded": "Quota d’exécutions atteint",
+      "actual_value": "Valeur réelle",
+      "missing": "Champ absent",
+      "truncated": "Aperçu tronqué. Consultez le contenu brut pour la valeur complète."
     }
   },
   "add_trigger_dialog": {
@@ -272,6 +287,12 @@
     "submitting": "Enregistrement...",
     "toast_updated": "Planification mise à jour",
     "toast_update_failed": "Échec de la mise à jour de la planification"
+  },
+  "edit_webhook_dialog": {
+    "title": "Modifier le webhook",
+    "label_placeholder": "ex. Pull requests GitHub",
+    "toast_updated": "Webhook mis à jour",
+    "toast_update_failed": "Échec de la mise à jour du webhook"
   },
   "dialog": {
     "sr_create": "Nouvelle automatisation",
@@ -328,12 +349,40 @@
     "webhook_created_done": "Terminé",
     "event_filter_label": "Filtres d'événements",
     "event_filter_docs_link_label": "Comprendre le fonctionnement des filtres d'événements",
-    "event_filter_event_placeholder": "ex. workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "Ajouter",
-    "event_filter_remove_label": "Retirer le filtre",
-    "event_filter_hint": "Ne traiter que les webhooks correspondant à ces événements. Laissez vide pour tous les accepter.",
+    "event_filter_event_placeholder": "Événement, ex. pull_request",
+    "event_filter_actions_placeholder": "Actions (facultatif)",
+    "event_filter_add_rule": "Ajouter une règle",
+    "event_filter_event_label": "Événement",
+    "event_filter_actions_label": "Actions",
+    "event_filter_new_rule_label": "Nouvelle règle",
+    "event_filter_condition_label": "Condition",
+    "event_filter_error_event_required": "Saisissez un nom d'événement.",
+    "event_filter_error_path_required": "Saisissez un champ de la charge utile.",
+    "event_filter_error_path_invalid": "Séparez les noms de champ par des points, {{path}} caractères maximum.",
+    "event_filter_error_value_required": "Saisissez une valeur.",
+    "event_filter_error_too_many_values": "{{values}} valeurs maximum.",
+    "event_filter_remove_label": "Supprimer la règle",
+    "event_filter_hint": "Seuls les événements correspondant à une règle et à toutes ses conditions sont traités. Laissez vide pour tout accepter.",
+    "event_filter_condition_remove_label": "Retirer la condition",
+    "event_filter_condition_add_label": "Ajouter une condition",
+    "event_filter_condition_ops": {
+      "equals": "est",
+      "not_equals": "n'est pas",
+      "contains": "contient",
+      "in": "est parmi",
+      "exists": "existe"
+    },
+    "event_filter_condition_path_label": "Champ de la charge utile",
+    "event_filter_condition_path_placeholder": "Champ de la charge utile, ex. pull_request.base.ref",
+    "event_filter_condition_op_label": "Opérateur",
+    "event_filter_condition_value_label": "Valeur",
+    "event_filter_condition_value_placeholder": "ex. main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "Ignorer la casse",
     "schedule_multiple_notice": "Cette automatisation a {{count}} planifications. Fermez cette fenêtre et modifiez chacune dans la liste Déclencheurs ci-dessous.",
+    "webhook_multiple_notice": "Cette automatisation a plusieurs webhooks. Fermez cette fenêtre et modifiez chacun dans la liste Déclencheurs ci-dessous.",
+    "webhook_edit_filters": "Modifier les filtres",
+    "webhook_filters_saved_separately": "Les filtres sont enregistrés à part : Annuler ici ne les rétablit pas.",
     "schedule_empty": "Aucune planification — cette automatisation ne s'exécute que sur déclenchement manuel.",
     "schedule_add": "Ajouter une planification",
     "error_title_required": "Saisissez un nom pour cette automatisation.",
@@ -347,7 +396,8 @@
         "label": "Exécution seule",
         "description": "Exécution silencieuse, aucune tâche créée"
       }
-    }
+    },
+    "event_filter_condition_all": "Et la charge utile remplit toutes les conditions"
   },
   "schedule_editor": {
     "time_label": "Heure",

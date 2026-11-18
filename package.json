@@ -72,6 +72,7 @@
     "pg": "^8.20.0",
     "postcss": "catalog:",
     "turbo": "^2.5.4",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "yaml": "catalog:"
   }
 }

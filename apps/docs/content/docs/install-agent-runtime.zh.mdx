@@ -131,7 +131,9 @@ Multica 使用 `amp --execute --stream-json --executor local`，通过标准输�
 
 **DSH Desktop。** 装的是 DeepSeek Harness Desktop 而不是 npm 包时，守护进程也会去找这个应用生成的 CLI shim，位置在它自己的用户级数据目录下：macOS 是 `~/Library/Application Support/DSH Desktop`，Windows 是 `%APPDATA%\DSH Desktop`。Windows 上这是漫游应用数据目录，不是安装目录：应用本身装在 Program Files 或 `%LOCALAPPDATA%\Programs`，它驱动的 CLI 则和其他用户级状态放在一起。这些路径里的版本层是生成的 id，守护进程会逐个枚举，优先取最新的一份。PATH 上不需要别的东西，生成的 shim 会用绝对路径调用应用自带的运行时。DSH Desktop 装在非默认位置时，用 `MULTICA_DSH_PATH` 指向那个 shim。
 
-守护进程只有在 `dsh --profile multica --probe` 成功后才注册 DeepSeek Harness；失败时会在 `/health` 报告缺少 profile。
+**升级 DSH 后。** 如果探测提示 profile 中的核心包不兼容，先备份守护进程诊断中指出的配置文件。检查 `@deepseek-ai/dsh-agent`、`@deepseek-ai/dsh-session`、`@deepseek-ai/dsh-tools` 和 `@deepseek-ai/dsh-llm` 的本地覆盖：尽量使用应用自带的核心包，或让覆盖版本与已安装的 DSH 版本匹配。保留需要的独立插件和钩子，不要删除所有依赖。修复后重新运行 `dsh --profile multica --probe`。Multica 会将这种已确认的兼容性拒绝报告为需要手动修复 profile，不会覆盖现有配置。
+
+守护进程只有在 `dsh --profile multica --probe` 成功后才注册 DeepSeek Harness。`/health` 诊断会区分 profile 缺失、已确认需要手动修复、协议不兼容和探测暂时不可用。启动失败时，诊断会包含检测到的 CLI 版本、配置文件位置，以及可用的脱敏输出。
 
 </Accordion>
 <Accordion title="MiniMax Code" id="minimax-code">

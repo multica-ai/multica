@@ -54,7 +54,10 @@ type Client struct {
 	refreshes  singleflight.Group
 }
 
-var _ Provider = (*Client)(nil)
+var (
+	_ Provider        = (*Client)(nil)
+	_ FeatureProvider = (*Client)(nil)
+)
 
 func New(cfg Config) (*Client, error) {
 	if strings.TrimSpace(cfg.BaseURL) == "" {
@@ -104,19 +107,48 @@ func (c *Client) Gate(ctx context.Context, workspaceID uuid.UUID, name GateName)
 	if !name.valid() {
 		return c.recordDecision(name, offDecision(ReasonUnknownGate))
 	}
+	entry, reason, stale, ok := c.policy(ctx, workspaceID)
+	if !ok {
+		return c.recordDecision(name, offDecision(reason))
+	}
+	return c.recordDecision(name, decisionFromEntry(entry, name, reason, stale))
+}
 
+// Feature resolves one paid feature from the same cached policy as Gate, so
+// reading both costs at most one Cloud request per workspace.
+func (c *Client) Feature(ctx context.Context, workspaceID uuid.UUID, name FeatureName) FeatureDecision {
+	if !c.Enabled() {
+		return c.recordFeatureDecision(name, FeatureDecision{Action: ActionOff, Reason: ReasonDisabled})
+	}
+	if workspaceID == uuid.Nil {
+		return c.recordFeatureDecision(name, FeatureDecision{Action: ActionOff, Reason: ReasonInvalidWorkspace})
+	}
+	if !name.Valid() {
+		return c.recordFeatureDecision(name, FeatureDecision{Action: ActionOff, Reason: ReasonUnknownGate})
+	}
+	entry, reason, stale, ok := c.policy(ctx, workspaceID)
+	if !ok {
+		return c.recordFeatureDecision(name, FeatureDecision{Action: ActionOff, Reason: reason})
+	}
+	return c.recordFeatureDecision(name, featureDecisionFromEntry(entry, name, reason, stale))
+}
+
+// policy returns the workspace's usable cached or refreshed policy. ok=false
+// means there is none and reason says why every gate and feature is off.
+// stale=true means the policy may no longer enforce.
+func (c *Client) policy(ctx context.Context, workspaceID uuid.UUID) (entry cacheEntry, reason Reason, stale, ok bool) {
 	now := c.now()
 	cached, cachedOK := c.cache.get(workspaceID)
 	if cachedOK && cached.hasPolicy && now.Before(cached.freshUntil) {
 		c.recordCache("hit")
-		return c.recordDecision(name, decisionFromEntry(cached, name, ReasonCacheFresh, false))
+		return cached, ReasonCacheFresh, false, true
 	}
 	if cachedOK && now.Before(cached.retryAfter) {
 		c.recordCache("retry_suppressed")
 		if cached.hasPolicy && now.Before(cached.staleUntil) {
-			return c.recordDecision(name, decisionFromEntry(cached, name, ReasonStale, true))
+			return cached, ReasonStale, true, true
 		}
-		return c.recordDecision(name, offDecision(ReasonUnavailable))
+		return cacheEntry{}, ReasonUnavailable, false, false
 	}
 	if cachedOK && cached.hasPolicy {
 		c.recordCache("expired")
@@ -124,13 +156,12 @@ func (c *Client) Gate(ctx context.Context, workspaceID uuid.UUID, name GateName)
 		c.recordCache("miss")
 	}
 
-	entry, refreshed, err := c.refresh(ctx, workspaceID)
+	refreshedEntry, refreshed, err := c.refresh(ctx, workspaceID)
 	if err == nil {
-		reason := ReasonRefreshed
 		if !refreshed {
-			reason = ReasonCacheFresh
+			return refreshedEntry, ReasonCacheFresh, false, true
 		}
-		return c.recordDecision(name, decisionFromEntry(entry, name, reason, false))
+		return refreshedEntry, ReasonRefreshed, false, true
 	}
 
 	// A stale policy is safe only after enforcement is downgraded to observe.
@@ -138,16 +169,16 @@ func (c *Client) Gate(ctx context.Context, workspaceID uuid.UUID, name GateName)
 	// call was waiting in singleflight.
 	now = c.now()
 	if cached, ok := c.cache.get(workspaceID); ok && cached.hasPolicy && now.Before(cached.staleUntil) {
-		return c.recordDecision(name, decisionFromEntry(cached, name, ReasonStale, true))
+		return cached, ReasonStale, true, true
 	}
-	reason := ReasonUnavailable
+	reason = ReasonUnavailable
 	if errors.Is(err, ErrInvalidPolicy) {
 		reason = ReasonInvalidPolicy
 	}
 	if errors.Is(err, errVersionRegression) {
 		reason = ReasonVersionRegression
 	}
-	return c.recordDecision(name, offDecision(reason))
+	return cacheEntry{}, reason, false, false
 }
 
 type refreshResult struct {
@@ -216,6 +247,10 @@ type wirePolicy struct {
 	ValidUntil          time.Time           `json:"valid_until"`
 	ValidForSeconds     int64               `json:"valid_for_seconds"`
 	Gates               map[string]wireGate `json:"gates"`
+	// Features stays raw so one malformed feature, or a features value of the
+	// wrong JSON type, cannot fail the decode of the whole policy and with it
+	// the metered gates. normalizeFeatures parses it entry by entry.
+	Features json.RawMessage `json:"features"`
 }
 
 type wireGate struct {
@@ -280,8 +315,9 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 		wire.ValidUntil.IsZero() || wire.ValidForSeconds <= 0 || wire.ValidForSeconds > int64(maxPolicyTTL/time.Second) {
 		return fetchedPolicy{}, ErrInvalidPolicy
 	}
-	gates := make(map[GateName]Gate, 2)
-	for _, name := range []GateName{GateIssueCount, GateAutopilotRuns} {
+	// Unknown gates are ignored for additive compatibility.
+	gates := make(map[GateName]Gate, 1)
+	for _, name := range []GateName{GateAutopilotRuns} {
 		wireGate, ok := wire.Gates[string(name)]
 		if !ok {
 			return fetchedPolicy{}, ErrInvalidPolicy
@@ -298,6 +334,7 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 			subscriptionVersion: wire.SubscriptionVersion,
 			cloudValidUntil:     wire.ValidUntil,
 			gates:               gates,
+			features:            normalizeFeatures(wire.Features),
 		},
 		validForSeconds: wire.ValidForSeconds,
 	}, nil
@@ -308,7 +345,9 @@ func normalizeGate(name GateName, wire wireGate) (Gate, error) {
 	switch action {
 	case ActionOff:
 		return Gate{Action: ActionOff}, nil
-	case ActionEnforce:
+	case ActionObserve, ActionEnforce:
+		// observe carries the same parameters as enforce so consumers can tell
+		// what would have been blocked without rejecting anything.
 	default:
 		return Gate{}, ErrInvalidPolicy
 	}
@@ -340,6 +379,49 @@ func normalizeGate(name GateName, wire wireGate) (Gate, error) {
 	return gate, nil
 }
 
+// normalizeFeatures reads every known paid feature independently. A missing,
+// unknown or malformed feature falls back to off for that feature alone; it
+// never invalidates the policy, so the metered gates keep their instructions.
+// Features this consumer does not know are ignored.
+func normalizeFeatures(raw json.RawMessage) map[FeatureName]featureEntry {
+	out := make(map[FeatureName]featureEntry, len(Features()))
+	var entries map[string]json.RawMessage
+	objectOK := len(raw) > 0 && json.Unmarshal(raw, &entries) == nil && entries != nil
+	for _, name := range Features() {
+		if !objectOK {
+			reason := ReasonFeatureMissing
+			if len(raw) > 0 && string(raw) != "null" {
+				reason = ReasonFeatureInvalid
+			}
+			out[name] = featureEntry{action: ActionOff, reason: reason}
+			continue
+		}
+		entry, ok := entries[string(name)]
+		if !ok {
+			out[name] = featureEntry{action: ActionOff, reason: ReasonFeatureMissing}
+			continue
+		}
+		out[name] = normalizeFeature(entry)
+	}
+	return out
+}
+
+func normalizeFeature(raw json.RawMessage) featureEntry {
+	var wire struct {
+		Action json.RawMessage `json:"action"`
+	}
+	var action string
+	if json.Unmarshal(raw, &wire) != nil || json.Unmarshal(wire.Action, &action) != nil {
+		return featureEntry{action: ActionOff, reason: ReasonFeatureInvalid}
+	}
+	switch Action(action) {
+	case ActionOff, ActionObserve, ActionEnforce:
+		return featureEntry{action: Action(action)}
+	default:
+		return featureEntry{action: ActionOff, reason: ReasonFeatureInvalid}
+	}
+}
+
 // Notification instructions are additive presentation policy. A malformed
 // notification object must never invalidate the enforcement gate and fail open
 // the underlying quota, so it is dropped independently.
@@ -360,6 +442,29 @@ func decisionFromEntry(entry cacheEntry, name GateName, reason Reason, stale boo
 	return Decision{
 		Gate:                gate,
 		Reason:              reason,
+		PolicyRevision:      entry.policy.policyRevision,
+		SubscriptionVersion: entry.policy.subscriptionVersion,
+		CloudValidUntil:     entry.policy.cloudValidUntil,
+	}
+}
+
+func featureDecisionFromEntry(entry cacheEntry, name FeatureName, reason Reason, stale bool) FeatureDecision {
+	feature, ok := entry.policy.features[name]
+	if !ok {
+		feature = featureEntry{action: ActionOff, reason: ReasonFeatureMissing}
+	}
+	if feature.reason != "" {
+		reason = feature.reason
+	}
+	action := feature.action
+	downgraded := stale && action == ActionEnforce
+	if downgraded {
+		action = ActionObserve
+	}
+	return FeatureDecision{
+		Action:              action,
+		Reason:              reason,
+		Downgraded:          downgraded,
 		PolicyRevision:      entry.policy.policyRevision,
 		SubscriptionVersion: entry.policy.subscriptionVersion,
 		CloudValidUntil:     entry.policy.cloudValidUntil,
@@ -408,6 +513,19 @@ func (c *Client) recordRefresh(outcome string, duration time.Duration) {
 	if c != nil && c.observer != nil {
 		c.observer.RecordEntitlementRefresh(outcome, duration.Seconds())
 	}
+}
+
+// Feature decisions share the decision metric under a "feature:" prefix; the
+// label set stays bounded by the known feature list.
+func (c *Client) recordFeatureDecision(name FeatureName, decision FeatureDecision) FeatureDecision {
+	if c != nil && c.observer != nil {
+		label := "feature:unknown"
+		if name.Valid() {
+			label = "feature:" + string(name)
+		}
+		c.observer.RecordEntitlementDecision(label, string(decision.Action), string(decision.Reason))
+	}
+	return decision
 }
 
 func (c *Client) recordDecision(name GateName, decision Decision) Decision {

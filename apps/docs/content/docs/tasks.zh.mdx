@@ -42,7 +42,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | `deferred` | 已安排稍后触发，到达指定时间后进入队列 |
 | `queued` | 正在等待运行时领取 |
 | `dispatched` | 运行时已经领取，正在启动 AI 编程工具 |
-| `waiting_local_directory` | 目标本地目录正被另一条执行占用，等待目录锁释放 |
+| `waiting_local_directory` | 启动前等待目标本地目录或守护进程执行槽位 |
 | `running` | AI 编程工具正在执行 |
 | `completed` | 这次执行已正常结束 |
 | `failed` | 执行出错或中断 |
@@ -167,7 +167,7 @@ multica issue rerun-task <run-id>
 | `deferred` | 已安排稍后触发 | 到达预定时间后进入 `queued`，再按下面的规则计时 |
 | `queued` | 等待运行时领取 | 只要运行时还在心跳就一直等待，并且无论如何都会在入队后至少保留一个重连宽限期；两个窗口都过去才会失败，且不会自动重试 |
 | `dispatched` | 运行时已领取，正在启动工具 | 停留超过 **5 分钟**按失败处理 |
-| `waiting_local_directory` | 等待本地目录锁释放 | 没有独立超时；目录释放后回到启动流程 |
+| `waiting_local_directory` | 等待本地目录和执行容量 | 没有独立超时；目录和守护进程执行槽位可用后继续启动 |
 | `running` | AI 编程工具正在执行 | 不设固定时长上限；以运行时心跳判定存活，心跳每 15 秒一次，失去心跳的运行时最迟约 3 分钟被判为离线。其上的运行要等心跳缺席超过重连宽限期（`MULTICA_RUNTIME_RECONNECT_GRACE`，默认 3 小时）才失败；守护进程重启时，会直接回收这些运行 |
 
 自动重试只覆盖以下临时故障，且仅适用于挂在任务或对话上的运行（自动化**仅运行**模式除外）：

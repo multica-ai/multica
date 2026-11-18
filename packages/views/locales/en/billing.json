@@ -1,71 +1,4 @@
 {
-  "title": "Billing (test page)",
-  "subtitle": "Direct passthrough to multica-cloud's /api/v1/billing/*. Not a finished UI — just every endpoint stuffed onto one page so we can verify the proxy + Stripe flow.",
-  "endpoints": {
-    "balance": "GET /api/cloud-billing/balance",
-    "transactions": "GET /api/cloud-billing/transactions",
-    "batches": "GET /api/cloud-billing/batches",
-    "topups": "GET /api/cloud-billing/topups",
-    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
-  },
-  "balance": {
-    "title": "Balance",
-    "credits_suffix": "credits",
-    "meta": "raw micro: {{micro}} · owner: {{owner}}… · updated {{updated}}"
-  },
-  "buy": {
-    "title": "Buy credits / Manage billing",
-    "no_tiers": "No price tiers configured. Cloud probably has no Stripe key set — checkout will return 503.",
-    "tier_money_to_credits": "{{money}} → {{credits}} credits",
-    "tier_bonus": " + {{credits}} bonus",
-    "tier_bonus_with_expiry": " + {{credits}} bonus ({{expiry}})",
-    "tier_id": "id: {{id}}",
-    "open_portal": "Open Stripe Billing Portal",
-    "portal_hint": "400 is expected for users who haven't paid yet (no Stripe customer record exists).",
-    "toast_no_url": "Cloud returned no checkout URL",
-    "toast_checkout_failed": "Checkout failed",
-    "toast_no_portal_url": "No portal URL returned",
-    "toast_portal_failed": "Portal failed"
-  },
-  "checkout": {
-    "session_label": "Checkout session {{prefix}}…",
-    "loading": "Loading order status…",
-    "fetch_failed": "Failed to fetch status: {{error}}",
-    "fetch_failed_unknown": "unknown error",
-    "final_status": "Final status: {{status}}",
-    "polling_status": "Polling status… current: {{status}}",
-    "status_unknown": "unknown",
-    "label_order": "Order",
-    "label_tier": "Tier",
-    "label_charged": "Charged",
-    "charged_value": "{{money}} · {{credits}} credits",
-    "charged_with_bonus": "{{money}} · {{credits}} credits + {{bonus}} bonus",
-    "clear_url": "Clear from URL"
-  },
-  "transactions": {
-    "title": "Transactions",
-    "empty": "No transactions yet.",
-    "credits_value": "{{value}} credits",
-    "row_meta": "{{date}} · balance after: {{balance}} credits · ref: {{ref}}",
-    "ref_empty": "—"
-  },
-  "batches": {
-    "title": "Credit batches",
-    "empty": "No batches yet.",
-    "remaining_over_total": "{{remaining}} / {{total}} credits",
-    "id_suffix": "{{id}}…",
-    "consumed": "Consumed: {{value}} credits",
-    "expires_suffix": " · expires {{value}}",
-    "never_expires_suffix": " · never expires"
-  },
-  "topups": {
-    "title": "Topup orders",
-    "empty": "No topup orders yet.",
-    "amount_to_credits": "{{money}} → {{credits}} credits",
-    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credits + {{bonus}} bonus",
-    "row_meta": "{{date}} · stripe: {{checkout}}",
-    "stripe_empty": "—"
-  },
   "workspace": {
     "title": "Billing",
     "description": "Manage this workspace's plan, limits, human seats, and Stripe billing.",
@@ -171,7 +104,6 @@
     },
     "limits": {
       "title": "Usage and limits",
-      "issues": "Issues",
       "autopilots": "Automation runs",
       "unlimited": "Unlimited",
       "per_month": "{{count}} / month",
@@ -246,12 +178,6 @@
       "description": "Billing interval: {{interval}}. Current human members: {{count}}. Stripe will re-count seats and show the final amount before payment."
     }
   },
-  "shared": {
-    "request_failed": "Request failed",
-    "refresh": "Refresh",
-    "paging": "page {{page}} / {{totalPages}} · {{total}} total",
-    "date_dash": "—"
-  },
   "return_page": {
     "redirecting": "Returning you to workspace billing…",
     "load_failed_title": "Could not open workspace billing",
@@ -260,5 +186,11 @@
     "workspace_missing_description": "You came back from Stripe, but this workspace is no longer available to you — it may have been removed, or your access changed. Open Billing in the workspace you expected to check the current state.",
     "retry": "Try again",
     "go_to_app": "Go to Multica"
+  },
+  "paid_feature": {
+    "read_only": "Read-only. Upgrade to edit.",
+    "unavailable": "Not included in this workspace's plan.",
+    "view_plans": "View plans",
+    "locked_error": "This isn't included in the workspace's plan. Existing settings keep working; upgrade to add more."
   }
 }

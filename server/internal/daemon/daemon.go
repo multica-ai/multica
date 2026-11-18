@@ -2516,7 +2516,8 @@ type runtimeVerdict struct {
 // a file the OS refuses to execute is present, so the self-heal that would have
 // re-resolved a vanished path never runs, and the probe failed on this exact
 // file.
-func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string, installing bool) runtimeVerdict {
+func newRuntimeVerdict(probe builtinProbeResult, execPath string, installing bool) runtimeVerdict {
+	verdict, reason := probe.verdict, probe.reason
 	switch verdict {
 	case builtinProbeNotExecutable:
 		offline := &RuntimeOfflineReason{Code: RuntimeOfflineCodeNotExecutable, Detail: reason}
@@ -2532,9 +2533,13 @@ func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string, ins
 		// running right now, which is stated explicitly instead of being
 		// implied by an absent reason — and withdrawn by
 		// withdrawDshInstallWait if that install gives up.
+		detail := reason
+		if probe.offlineDetail != "" {
+			detail = probe.offlineDetail
+		}
 		offline := &RuntimeOfflineReason{
 			Code:       RuntimeOfflineCodeDshProfile,
-			Detail:     reason,
+			Detail:     detail,
 			Installing: installing && verdict != builtinProbeProfileMigration,
 		}
 		repair := dshProfileRepair()
@@ -2542,6 +2547,15 @@ func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string, ins
 		return runtimeVerdict{reason: reason, offline: offline}
 	}
 	return runtimeVerdict{reason: reason}
+}
+
+// builtinProbeResult keeps local diagnostics separate from durable repair data.
+// offlineDetail contains only a constructed repair summary, never provider output.
+type builtinProbeResult struct {
+	version       string
+	reason        string
+	verdict       builtinProbeVerdict
+	offlineDetail string
 }
 
 // probeBuiltinRuntime resolves and version-detects one built-in provider,
@@ -2553,16 +2567,17 @@ func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string, ins
 // the same way, for a CLI that runs but whose backend has no runtime profile
 // installed. See builtinProbeVerdict.
 //
-// The second return value is a short human-readable reason when the verdict is
-// not OK. It is surfaced on /health as skipped_agents so a user can tell "CLI
+// The result carries a short human-readable reason when the verdict is not OK.
+// It is surfaced on /health as skipped_agents so a user can tell "CLI
 // not installed" apart from "CLI installed but dropped at registration", which
 // was previously only visible in the daemon log (MUL-5439).
-func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) (string, string, builtinProbeVerdict) {
+func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) builtinProbeResult {
 	// museapp has no local binary: version detection runs against the remote
 	// receptionist instead. This must come before any path resolution — an
 	// empty entry.Path is expected here, not a missing CLI.
 	if name == "museapp" {
-		return d.probeMuseAppReceptionist(ctx)
+		version, reason, verdict := d.probeMuseAppReceptionist(ctx)
+		return builtinProbeResult{version: version, reason: reason, verdict: verdict}
 	}
 	var (
 		lastErr  error
@@ -2630,7 +2645,7 @@ probeLoop:
 			}
 			d.logger.Warn("skip registering runtime: re-resolved version too old",
 				"name", name, "version", heal.rejected.Detected, "error", heal.rejected.Error())
-			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
+			return builtinProbeResult{version: heal.rejected.Detected, reason: heal.rejected.Error(), verdict: builtinProbeBelowMinimum}
 		}
 		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path}.ForVersionProbe(name))
 		if err != nil {
@@ -2651,7 +2666,7 @@ probeLoop:
 				d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
 				// The version is returned even though the provider is dropped: the
 				// caller needs it to report what it demoted.
-				return version, err.Error(), builtinProbeBelowMinimum
+				return builtinProbeResult{version: version, reason: err.Error(), verdict: builtinProbeBelowMinimum}
 			}
 			// The CLI ran but printed something (or nothing) the gate could not
 			// parse. That is "we didn't learn a version", not "we verified it is
@@ -2698,12 +2713,19 @@ probeLoop:
 			// daemon may be the stale side of the skew. A probe that merely
 			// failed is transient, on the same rule every other provider's
 			// version probe gets.
-			switch probeDshMulticaProfile(ctx, resolved.Path) {
+			profileProbe := probeDshMulticaProfile(ctx, resolved.Path)
+			switch profileProbe.verdict {
 			case dshProbeOK:
 			case dshProbeNeedsMigration:
+				reason := dshProfileMigrationReason
+				offlineDetail := reason
+				if profileProbe.detail != "" {
+					reason = fmt.Sprintf("DSH %s: %s", dshDiagnosticOutput([]byte(version)), profileProbe.detail)
+					offlineDetail = fmt.Sprintf("DSH %s: %s", dshDiagnosticOutput([]byte(version)), profileProbe.repairSummary)
+				}
 				d.logger.Warn("skip registering runtime: DSH Multica runtime profile needs manual migration",
-					"name", name, "path", resolved.Path)
-				return "", dshProfileMigrationReason, builtinProbeProfileMigration
+					"name", name, "path", resolved.Path, "error", reason)
+				return builtinProbeResult{version: "", reason: reason, verdict: builtinProbeProfileMigration, offlineDetail: offlineDetail}
 			case dshProbeMissingProfile:
 				d.logger.Warn("skip registering runtime: DSH Multica runtime profile is not installed",
 					"name", name, "path", resolved.Path)
@@ -2711,19 +2733,22 @@ probeLoop:
 				if d.startDshProfileProvision(resolved.Path) {
 					reason = dshProfileInstallStartedReason
 				}
-				return "", reason, builtinProbeMissingProfile
+				return builtinProbeResult{version: "", reason: reason, verdict: builtinProbeMissingProfile}
 			case dshProbeIncompatible:
 				d.logger.Warn("skip registering runtime: DSH Multica runtime profile speaks another protocol",
 					"name", name, "path", resolved.Path)
-				return "", dshIncompatibleProfileReason, builtinProbeIncompatibleProfile
+				return builtinProbeResult{version: "", reason: dshIncompatibleProfileReason, verdict: builtinProbeIncompatibleProfile}
 			default:
 				// Transient. Retry inside this round's budget, then leave the
 				// loop for the tail, which reports it as the transient drop it
 				// is. The labelled break matters: a bare one would leave only
 				// the switch and fall through to registering a runtime whose
 				// profile answered nothing.
-				lastErr = errors.New(dshProbeFailedReason)
-				transientReason = dshProbeFailedReason
+				transientReason = fmt.Sprintf("%s (DSH %s; profile %q)", dshProbeFailedReason, dshDiagnosticOutput([]byte(version)), dshMulticaProfileManifestPath())
+				if profileProbe.detail != "" {
+					transientReason += ": " + profileProbe.detail
+				}
+				lastErr = errors.New(transientReason)
 				if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
 					break probeLoop
 				}
@@ -2746,7 +2771,7 @@ probeLoop:
 			version = d.agentVersion(name)
 		}
 		d.logger.Debug("agent version detected", "name", name, "version", version, "path", resolved.Path)
-		return version, "", builtinProbeOK
+		return builtinProbeResult{version: version, reason: "", verdict: builtinProbeOK}
 	}
 	// The OS refusing to execute the file is not a failed probe, it is a
 	// finding: the CLI is installed, resolvable, and unrunnable. Report it as
@@ -2757,7 +2782,7 @@ probeLoop:
 	if agent.IsExecFormatError(lastErr) {
 		d.logger.Warn("skip registering runtime: agent CLI is not executable on this machine",
 			"name", name, "attempts", attempts, "error", lastErr)
-		return "", fmt.Sprintf("agent CLI is not executable: %v", lastErr), builtinProbeNotExecutable
+		return builtinProbeResult{version: "", reason: fmt.Sprintf("agent CLI is not executable: %v", lastErr), verdict: builtinProbeNotExecutable}
 	}
 
 	d.logger.Warn("skip registering runtime", "name", name, "attempts", attempts, "error", lastErr)
@@ -2768,7 +2793,7 @@ probeLoop:
 	if transientReason != "" {
 		reason = transientReason
 	}
-	return "", reason, builtinProbeUnavailable
+	return builtinProbeResult{version: "", reason: reason, verdict: builtinProbeUnavailable}
 }
 
 // probeMuseAppReceptionist is the museapp equivalent of CLI version detection.
@@ -2831,7 +2856,8 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 	for name, entry := range d.agents() {
 		name, entry := name, entry
 		g.Go(func() error {
-			version, reason, verdict := d.probeBuiltinRuntime(ctx, name, entry)
+			probe := d.probeBuiltinRuntime(ctx, name, entry)
+			version, reason, verdict := probe.version, probe.reason, probe.verdict
 			if verdict != builtinProbeOK {
 				demote := demotableBuiltinProbeVerdict(verdict) &&
 					(!builtinProbeNeedsConfirmation(verdict) ||
@@ -2839,7 +2865,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 				mu.Lock()
 				skipped[name] = reason
 				if demote {
-					demotable[name] = newRuntimeVerdict(verdict, reason, entry.Path, d.dshInstallInFlight.Load())
+					demotable[name] = newRuntimeVerdict(probe, entry.Path, d.dshInstallInFlight.Load())
 				} else {
 					unavailable[name] = reason
 				}
@@ -3111,7 +3137,7 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 // a transient 5xx would silently flip the daemon into thinking the workspace
 // has zero profiles).
 func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string, failedProfiles *[]map[string]string) string {
-	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
+	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID, d.cfg.DaemonID)
 	if err != nil {
 		// Best-effort: never fail registration because profiles couldn't be
 		// fetched. An older server with no profiles route returns 404.
@@ -3896,7 +3922,7 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	resp, err := d.client.GetRuntimeProfiles(refreshCtx, workspaceID)
+	resp, err := d.client.GetRuntimeProfiles(refreshCtx, workspaceID, d.cfg.DaemonID)
 	if err != nil {
 		// Older server (no profiles route) returns 404; let the on-demand caller
 		// log the failure at debug level.
@@ -5525,8 +5551,8 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 
 // runBatchPoller is the single machine-level claim+dispatch loop. Each cycle it
 // acquires whatever execution slots are free (slot-before-claim, so a claimed
-// task never sits server-side `dispatched` without local capacity to run it and
-// race the dispatch-timeout sweeper), asks the server for up to that many tasks
+// newly claimed task has startup capacity rather than waiting server-side as
+// `dispatched` and racing the timeout sweeper), asks for up to that many tasks
 // across all of the daemon's runtimes in one call, and dispatches each returned
 // task — routed to its runtime by handleTask — into a slot.
 //
@@ -5641,16 +5667,9 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			go func(t Task, slot int) {
 				defer taskWG.Done()
 				defer d.activeTasks.Add(-1)
-				defer func() {
-					// Release local capacity before waking the poller. The task's
-					// terminal callback and local cleanup have both finished at this
-					// point, so a successor that was previously blocked by agent
-					// capacity or per-(issue, agent) serialization can be claimed
-					// immediately instead of waiting for PollInterval.
-					sem <- slot
-					signalPollerWakeup(wakeup)
-				}()
-				d.handleTask(parentCtx, t, slot)
+				executionSlot := newTaskSlotLease(sem, slot, wakeup)
+				defer executionSlot.release()
+				d.handleTask(parentCtx, t, executionSlot)
 			}(t, slot)
 			dispatched++
 		}
@@ -5991,7 +6010,7 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 	return cancelled
 }
 
-func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
+func (d *Daemon) handleTask(ctx context.Context, task Task, slot *taskSlotLease) {
 	d.mu.Lock()
 	rt, tracked := d.runtimeIndex[task.RuntimeID]
 	d.mu.Unlock()
@@ -6060,7 +6079,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// fires only after execenv.Prepare/Reuse has put env.WorkDir on disk,
 	// so consumers that read status==running can resolve the workdir path
 	// without racing the daemon's os.MkdirAll.
-	localRelease, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, taskLog)
+	localRelease, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, taskLog, slot)
 	if abort {
 		return
 	}
@@ -6113,7 +6132,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}()
 
-	result, err := d.runner.run(runCtx, task, provider, slot, taskLog)
+	result, err := d.runner.run(runCtx, task, provider, slot.index, taskLog)
 	if errors.Is(err, errStartClaimRejected) {
 		// The row belongs to another claim (or is terminal). A task-id-only
 		// failure callback from this stale delivery could kill its new owner.
@@ -6413,10 +6432,11 @@ func withoutWorktreePreserved(err error) error {
 //     blacklist) — fail the task fast with a user-facing reason.
 //  3. The mutex is held by another task — call MarkTaskWaitingLocalDirectory
 //     so the row flips to waiting_local_directory while we block on the
-//     lock, then return the release callback once we win.
+//     lock, returning execution capacity during the wait. Reacquire capacity
+//     before returning the path release callback.
 //  4. The blocking wait is cancelled (daemon shutdown, server-side cancel)
 //     — fail the task with the ctx error.
-func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger) (release func(), abort bool) {
+func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger, slot *taskSlotLease) (release func(), abort bool) {
 	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
 		return nil, false
 	}
@@ -6520,11 +6540,15 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	}()
 
 	onWait := func(holder string) {
-		// LocalPathLocker invokes onWait synchronously and at most once for an
-		// Acquire call. Count the actual mutex wait even if the best-effort
-		// server status update below fails.
+		// Retrying the path after capacity becomes available can contend again.
+		// Keep one wait lifecycle while returning the slot on every conflict.
+		if waitCounted {
+			slot.release()
+			return
+		}
 		d.resourceWaitTasks.Add(1)
 		waitCounted = true
+		slot.release()
 		// Rendered to the user, so it names the directory rather than its path
 		// (see localDirectoryAssignment.DisplayName). The absolute path stays in
 		// the daemon's own logs, which is where an operator debugging a wedged
@@ -6564,7 +6588,30 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			}()
 		})
 	}
-	release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
+	for {
+		release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
+		if err != nil {
+			break
+		}
+		acquired, acquireErr := slot.tryAcquire(waitCtx)
+		if acquireErr != nil {
+			release()
+			release = nil
+			err = acquireErr
+			break
+		}
+		if acquired {
+			break
+		}
+		// Worktree snapshot preparation takes the same path mutex while owning
+		// its execution slot. Never hold the path while blocking on capacity.
+		release()
+		release = nil
+		taskLog.Debug("local_directory: waiting for execution capacity")
+		if err = slot.acquire(waitCtx); err != nil {
+			break
+		}
+	}
 	if err != nil {
 		// If the wait was cut short because the server finalized the task
 		// (terminal state) or deleted the row, the row is already in a
@@ -6888,6 +6935,14 @@ func providerDisplayName(name string) string {
 // hermes 0.18.2 over ACP (AGENTS.md). MCode 0.1.2 also loads AGENTS.md by its
 // native runtime contract. kiro was confirmed earlier by a kiro-cli
 // 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
+//
+// Pi 1.5.2 evidence (GitHub #10713): the author reports an in-band run following
+// AGENTS.md-only instructions, notably the MULTICA_CLI_PATH contract; no run
+// transcript is attached. Separately, upstream v1.5.2 documents context-file
+// discovery from the working directory without project trust:
+// https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/docs/configuration.md
+// That is the loader contract, not a canary result. No fresh MUL-5392 canary
+// was run for 1.5.2.
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
 	case "openclaw", "kimi", "traecli", "qwenpaw":
@@ -8077,19 +8132,24 @@ func resolveTaskModelSelection(
 }
 
 func (d *Daemon) reportThinkingLevelWarning(ctx context.Context, taskID, warning string, msgSeq *atomic.Int32, taskLog *slog.Logger) {
-	if warning == "" {
+	d.reportTaskNotice(ctx, taskID, warning, msgSeq, taskLog)
+}
+
+// reportTaskNotice writes a daemon-authored text row into the run transcript.
+func (d *Daemon) reportTaskNotice(ctx context.Context, taskID, notice string, msgSeq *atomic.Int32, taskLog *slog.Logger) {
+	if notice == "" {
 		return
 	}
 	message := TaskMessageData{
 		Seq:       int(msgSeq.Add(1)),
 		Type:      "text",
-		Content:   redact.Text(warning) + "\n\n",
+		Content:   redact.Text(notice) + "\n\n",
 		CreatedAt: time.Now(),
 	}
 	reportCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := d.client.ReportTaskMessages(reportCtx, taskID, []TaskMessageData{message}); err != nil {
-		taskLog.Warn("failed to report thinking-level warning", "error", err)
+		taskLog.Warn("failed to report task notice", "error", err)
 	}
 }
 
@@ -8401,6 +8461,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentMcpConfig json.RawMessage
 	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
+	var cursorMcpAuthStore string
+	var cursorUserDataDir string
 	remoteMCPConfig, remoteMCPDiagnostics, remoteMCPBrokers, remoteMCPErr := startTaskRemoteMCPBrokers(
 		prepareCtx, ctx, task.ID, provider, task.RemoteMCPConnections,
 		func(resolveCtx context.Context, contributionID string) (http.Header, error) {
@@ -8464,6 +8526,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		if provider == "cursor" {
 			cursorMcpAuthSource = strings.TrimSpace(task.Agent.CustomEnv[execenv.CursorMcpAuthSourceEnv])
+			cursorMcpAuthStore = execenv.CursorMcpAuthStorePath(d.cfg.Profile, task.AgentID)
+			cursorUserDataDir = execenv.CursorUserDataDir()
 		}
 	}
 	// Decode openclaw-specific runtime_config knobs once so reuse / prepare /
@@ -8614,6 +8678,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			OpenclawBin:           openclawBin,
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
+			CursorMcpAuthStore:    cursorMcpAuthStore,
+			CursorUserDataDir:     cursorUserDataDir,
 			OpenclawGateway:       openclawGateway,
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
@@ -8664,6 +8730,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			OpenclawBin:           openclawBin,
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
+			CursorMcpAuthStore:    cursorMcpAuthStore,
+			CursorUserDataDir:     cursorUserDataDir,
 			OpenclawGateway:       openclawGateway,
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
@@ -8842,6 +8910,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// in place, leave them behind in the user's tree.
 	if env.LocalDirectory || env.LocalWorktree != nil {
 		defer func() {
+			if err := env.LocalWorktree.RestoreRuntimeConfigTracking(); err != nil {
+				env.LocalWorktree.AbortWithReason(err)
+				d.logger.Warn("execenv: restore runtime config tracking failed", "error", err)
+				return
+			}
 			if taskResult.FailureReason == taskfailure.ReasonProcessCleanupUnconfirmed.String() {
 				return // Preserve files that an unconfirmed process may still use.
 			}
@@ -8919,7 +8992,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1)
 	}
 	var cursorHookCommand []string
-	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && task.IssueID != ""
+	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && (task.IssueID != "" || task.ChatSessionID != "")
 	if supplementSupported && provider == "cursor" {
 		cursorHookCommand, supplementSupported = cursorSupplementHookCommand(env)
 	}
@@ -8979,6 +9052,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
+	if env.LocalWorktree != nil {
+		if err := env.LocalWorktree.ProtectRuntimeConfig(provider); err != nil {
+			return TaskResult{}, fmt.Errorf("protect worktree runtime config: %w", err)
+		}
+	}
 	// An exempt turn runs in the user's directory without having queued for it,
 	// so a sibling coding task may be writing to the same tree right now. That
 	// is the one thing it cannot work out from its own context — tell it.
@@ -9006,7 +9084,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			promptOptions = append(promptOptions, WithWorktreeCommitsAllLeftovers())
 		}
 	}
-	prompt := BuildPrompt(task, provider, promptOptions...)
+	prompt, skillInvocation := buildRuntimePrompt(task, provider, env.SkillDirectories, promptOptions...)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -9179,7 +9257,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			runtimeBrief = freshBrief
 			runtimeBriefWritten = true
 		}
-		prompt = BuildPrompt(task, provider, promptOptions...)
+		prompt, skillInvocation = buildRuntimePrompt(task, provider, env.SkillDirectories, promptOptions...)
 	}
 	backend, err := agent.ResolveBackend(provider, backendConfig)
 	if err != nil {
@@ -9252,6 +9330,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
 	execOpts := agent.ExecOptions{
+		SkillInvocation:            skillInvocation,
 		EnableTaskSupplement:       taskSupplementNegotiated,
 		CursorHookCommand:          cursorHookCommand,
 		Cwd:                        env.WorkDir,
@@ -9388,6 +9467,28 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
 	d.reportThinkingLevelWarning(ctx, task.ID, selection.ThinkingLevelWarning, &msgSeq, taskLog)
+	var pendingCursorLoginCheck *cursorMcpLoginCheck
+	if provider == "cursor" && (env.CursorDataDir != "" || env.CursorUserDataDir != "") {
+		check := cursorMcpLoginCheck{
+			TaskWorkDir:       env.WorkDir,
+			TaskCursorDataDir: env.CursorDataDir,
+			AuthSource:        cursorMcpAuthSource,
+			AuthStore:         cursorMcpAuthStore,
+			McpConfig:         effectiveMcpConfig,
+			Host:              d.cfg.DeviceName,
+			GOOS:              runtime.GOOS,
+		}
+		if env.CursorDataDir == "" {
+			check.TaskCursorDataDir = env.CursorUserDataDir
+			check.UserDataDir = true
+		}
+		if !usesCustomProfileCommand {
+			check.Executable = entry.Path
+		}
+		if !d.reportCursorMcpLoginNotice(ctx, task.ID, check, &msgSeq, taskLog) {
+			pendingCursorLoginCheck = &check
+		}
+	}
 	outputObserver := &taskOutputObserver{}
 	ctx = withTaskOutputObserver(ctx, outputObserver)
 	// STOE-30: mirror the agent's cumulative token counters into task_usage
@@ -9403,6 +9504,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	stopUsageFlush := d.startUsageFlush(ctx, task.ID, &liveUsage, taskLog)
 	defer stopUsageFlush()
+	// MUL-9427: forward the account's rate-limit state the CLI reports, so the
+	// runtime pages show how much of the plan's windows is left.
+	observeRateLimits, stopRateLimitFlush := d.startRateLimitFlush(ctx, task.ID, taskLog)
+	execOpts.OnRateLimits = observeRateLimits
+	defer stopRateLimitFlush()
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
@@ -9456,7 +9562,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}
-		freshPrompt := BuildPrompt(task, provider, promptOptions...)
+		freshPrompt, freshSkills := buildRuntimePrompt(task, provider, env.SkillDirectories, promptOptions...)
+		execOpts.SkillInvocation = freshSkills
 
 		receiptInput.Prompt = freshPrompt
 		receiptInput.RuntimeBrief = freshBrief
@@ -9502,6 +9609,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	phaseRecorder.Mark(taskPhaseTurnCompleted)
+
+	// Cursor records a server's OAuth challenge only after connecting to it, so
+	// an agent's first run can only learn about a missing login here.
+	if pendingCursorLoginCheck != nil {
+		d.reportCursorMcpLoginNotice(ctx, task.ID, *pendingCursorLoginCheck, &msgSeq, taskLog)
+	}
 
 	// MUL-8188: a resumed run that was cancelled after minutes of total
 	// silence resumed a session the runtime cannot drive. Retire it so the
@@ -11101,6 +11214,7 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 	result := make([]execenv.SkillContextForEnv, len(skills))
 	for i, s := range skills {
 		result[i] = execenv.SkillContextForEnv{
+			ID:          s.ID,
 			Name:        s.Name,
 			Description: s.Description,
 			Content:     s.Content,

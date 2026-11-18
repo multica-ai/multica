@@ -943,6 +943,7 @@ func (h *Handler) runtimeLiveProfile(ctx context.Context, rt db.AgentRuntime) (d
 func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile, blockers profileInstanceBlockers) map[string]any {
 	known := blockers.known
 	ttlDays := service.OfflineRuntimeTTLDays()
+	keepsLegacyAnchor := !profile.DaemonID.Valid && profile.CreatedBy.Valid && profile.CreatedBy == rt.OwnerID
 	name := rt.Name
 	if rt.CustomName.Valid && strings.TrimSpace(rt.CustomName.String) != "" {
 		name = rt.CustomName.String
@@ -956,6 +957,8 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 
 	parts := []string{lead}
 	switch {
+	case keepsLegacyAnchor:
+		parts = append(parts, "Edit this custom runtime and choose the machine that should keep it. Unused copies on other machines are removed when the binding is saved; move or archive their agents and finish pending tasks first. Until then, this legacy instance is kept so the machine can reconnect.")
 	case rt.Status == "online":
 		parts = append(parts, fmt.Sprintf(
 			"It is still online, so its daemon would register it again. Stop that daemon first; Multica then removes the runtime automatically after %d days offline, once no agent is bound to it and nothing is still running on it.",
@@ -1008,6 +1011,10 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 		"runtime_status":          rt.Status,
 		"last_seen_at":            timestampToPtr(rt.LastSeenAt),
 		"auto_cleanup_after_days": ttlDays,
+	}
+	if keepsLegacyAnchor {
+		resp["auto_cleanup_after_days"] = 0
+		resp["requires_machine_binding"] = true
 	}
 	if known {
 		resp["active_agent_count"] = len(blockers.agents)

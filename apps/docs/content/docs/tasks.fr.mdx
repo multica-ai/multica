@@ -42,7 +42,7 @@ Une exécution passe généralement par ces états :
 | `deferred` | Programmée pour plus tard ; entre dans la file d'attente à l'heure prévue |
 | `queued` | En attente de prise en charge par un runtime |
 | `dispatched` | Un runtime l'a prise en charge et démarre l'outil de codage IA |
-| `waiting_local_directory` | Le répertoire local cible est occupé par une autre exécution ; attente de la libération du verrou du répertoire |
+| `waiting_local_directory` | En attente du répertoire local cible ou d'un slot d'exécution du daemon avant le démarrage |
 | `running` | L'outil de codage IA est en cours d'exécution |
 | `completed` | L'exécution s'est terminée normalement |
 | `failed` | L'exécution a rencontré une erreur ou a été interrompue |
@@ -167,7 +167,7 @@ Les valeurs ci-dessous sont celles de la configuration par défaut du serveur.
 | `deferred` | Programmée pour plus tard | Passe à `queued` à l'heure prévue, puis les règles ci-dessous s'appliquent |
 | `queued` | En attente de prise en charge par un runtime | Attend tant que son runtime continue d'envoyer des signaux de vie, et dans tous les cas au moins un délai de grâce de reconnexion après la mise en file d'attente ; n'échoue que lorsque les deux fenêtres sont écoulées, et n'est pas relancée automatiquement |
 | `dispatched` | Prise en charge ; l'outil démarre | Considérée comme en échec après plus de **5 minutes** dans cet état |
-| `waiting_local_directory` | En attente de la libération du verrou du répertoire local | Pas de délai propre ; reprend le processus de démarrage une fois le répertoire libéré |
+| `waiting_local_directory` | En attente du répertoire local et de la capacité d'exécution | Pas de délai propre ; reprend le démarrage lorsque le répertoire et un slot d'exécution du daemon sont disponibles |
 | `running` | L'outil de codage IA est en cours d'exécution | Pas de durée maximale fixe ; la vivacité suit le signal de vie du runtime — un toutes les 15 secondes ; un runtime qui perd son signal de vie est marqué hors ligne au plus tard en 3 minutes environ. Ses exécutions n'échouent qu'une fois le signal de vie absent au-delà du délai de grâce de reconnexion (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 heures par défaut) ; un redémarrage du daemon les récupère directement |
 
 La relance automatique ne couvre que les défaillances transitoires ci-dessous, et ne s'applique qu'aux exécutions rattachées à une tâche ou à une discussion (hors mode **Exécution seule** des automatisations) :

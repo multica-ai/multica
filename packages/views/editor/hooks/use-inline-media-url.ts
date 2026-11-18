@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { ApiError } from "@multica/core/api/client";
+import type { Attachment } from "@multica/core/types";
 import {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
@@ -23,6 +24,9 @@ import {
 // server/internal/handler/file.go) so a re-render never serves an expired
 // signature from the query cache.
 const RESIGN_STALE_MS = 20 * 60 * 1000;
+// Neighbour prefetch and the viewer must use the same signature to reuse
+// browser-cached bytes, while refreshing well before the default 30-min TTL.
+const PREVIEW_RESIGN_STALE_MS = 5 * 60 * 1000;
 
 // How long fetched image bytes stay in the query cache after the last <img>
 // using them unmounts. The bytes themselves never go stale (an attachment id
@@ -79,11 +83,22 @@ export function __resetInlineMediaBlobCacheForTests(): void {
 // picked URL, which this client may be unable to load. A caller that treats a
 // load failure as meaningful (the viewer skips broken images) waits it out
 // instead of rendering it.
+// Viewers and neighbour prefetch reauthenticate stale metadata on mount;
+// inline thumbnails stay lazy.
 export function useResignedInlineMedia(
   attachmentId: string | undefined,
   rawPickedUrl: string,
   blobFallback: boolean,
-): { url: string; pending: boolean } {
+  {
+    refreshOnMount = false,
+    metadataSource = "workspace",
+    currentMetadata,
+  }: {
+    refreshOnMount?: boolean;
+    metadataSource?: "workspace" | "markdown-link";
+    currentMetadata?: Attachment;
+  } = {},
+): { url: string; pending: boolean; failed: boolean } {
   const pickedUrl = resolveLegacyLocalMediaURL(rawPickedUrl);
   const idFromPickedUrl = attachmentIdFromDownloadURL(pickedUrl);
   const resignAttachmentId = attachmentId ?? idFromPickedUrl;
@@ -101,17 +116,35 @@ export function useResignedInlineMedia(
   const needsResign =
     !!resignAttachmentId &&
     !!pickedUrl &&
-    idFromPickedUrl !== undefined &&
-    ((api.getBaseUrl?.() ?? "") !== "" || isCrossOriginWebURL);
+    (refreshOnMount ||
+      (idFromPickedUrl !== undefined &&
+        ((api.getBaseUrl?.() ?? "") !== "" || isCrossOriginWebURL)));
 
-  const { data: fresh, isError: freshFailed } = useQuery({
-    queryKey: ["attachment-inline-resign", resignAttachmentId],
-    queryFn: () => api.getAttachment(resignAttachmentId as string),
-    enabled: needsResign,
-    staleTime: RESIGN_STALE_MS,
+  const metadataQuery = useQuery({
+    queryKey: metadataSource === "markdown-link"
+      ? ["attachment-inline-resign", resignAttachmentId, "markdown-link"]
+      : ["attachment-inline-resign", resignAttachmentId],
+    queryFn: () => metadataSource === "markdown-link"
+      ? api.getAttachmentForDownload(resignAttachmentId as string)
+      : api.getAttachment(resignAttachmentId as string),
+    enabled: needsResign && !currentMetadata,
+    staleTime: refreshOnMount ? PREVIEW_RESIGN_STALE_MS : RESIGN_STALE_MS,
     gcTime: RESIGN_STALE_MS,
+    ...(refreshOnMount
+      ? {
+          retry: retryAttachmentPreview,
+          refetchOnMount: true,
+          refetchOnWindowFocus: recoverFailedPreview,
+          refetchOnReconnect: recoverFailedPreview,
+        }
+      : {}),
   });
 
+  const fresh = currentMetadata ?? metadataQuery.data;
+  const freshFailed = !currentMetadata && metadataQuery.isError;
+  // Offline refreshes are paused, not fetching, and still need authorization.
+  const metadataPending = !currentMetadata && metadataQuery.fetchStatus !== "idle";
+  const invalidMetadata = refreshOnMount && !!fresh && fresh.id !== resignAttachmentId;
   const dl = fresh?.download_url ?? "";
   // Accept the fresh URL only when it is an actual upgrade — absolute and no
   // longer the auth-gated API shape (i.e. a signed storage URL the renderer
@@ -124,18 +157,30 @@ export function useResignedInlineMedia(
   // Only after `fresh` has landed do we know this deployment has nothing
   // signed to give — firing the byte fetch earlier would double-download on
   // every CloudFront / presign client.
+  const isAuthenticated =
+    !!fresh && !(refreshOnMount && (metadataPending || freshFailed || invalidMetadata));
   const { data: blob, isError: blobFailed } = useQuery({
     queryKey: ["attachment-inline-blob", resignAttachmentId],
     queryFn: () => api.getAttachmentBlob(resignAttachmentId as string),
-    enabled: needsResign && blobFallback && !!fresh && signedUrl === "",
+    enabled: needsResign && blobFallback && isAuthenticated && signedUrl === "",
     staleTime: Infinity,
     gcTime: INLINE_BLOB_GC_MS,
+    ...(refreshOnMount
+      ? {
+          retry: retryAttachmentPreview,
+          refetchOnWindowFocus: recoverFailedPreview,
+          refetchOnReconnect: recoverFailedPreview,
+        }
+      : {}),
   });
-  const isAuthenticated = !!fresh;
   const blobUrl = useObjectURL(resignAttachmentId, blob, isAuthenticated);
 
-  if (!needsResign) return { url: pickedUrl, pending: false };
-  if (signedUrl) return { url: signedUrl, pending: false };
+  if (!needsResign) return { url: pickedUrl, pending: false, failed: false };
+  if (refreshOnMount && metadataPending)
+    return { url: "", pending: true, failed: false };
+  if (refreshOnMount && (freshFailed || invalidMetadata || (signedUrl === "" && blobFailed)))
+    return { url: "", pending: false, failed: true };
+  if (signedUrl) return { url: signedUrl, pending: false, failed: false };
   // Only return the cached blob URL when it belongs to the current id and
   // the current QueryClient has authenticated metadata for it. This keeps
   // the 5-min re-entry cache for the same session but prevents a logged-out
@@ -147,16 +192,20 @@ export function useResignedInlineMedia(
     isAuthenticated &&
     blobUrlCache.get(resignAttachmentId) === blobUrl
   ) {
-    return { url: blobUrl, pending: false };
+    return { url: blobUrl, pending: false, failed: false };
   }
   if (blobUrl && !resignAttachmentId && isAuthenticated) {
-    return { url: blobUrl, pending: false };
+    return { url: blobUrl, pending: false, failed: false };
   }
   // Still upgrading while the metadata is in flight, and — for a caller that
   // renders the bytes — while they are. A failure at either step ends the
   // wait on the picked URL.
   const pending = !freshFailed && (!fresh || (blobFallback && !blobFailed));
-  return { url: pickedUrl, pending };
+  return {
+    url: refreshOnMount ? "" : pickedUrl,
+    pending,
+    failed: freshFailed || blobFailed,
+  };
 }
 
 // useFreshStreamedMediaURL resolves the URL the viewer streams a video, audio

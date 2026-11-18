@@ -93,7 +93,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 智能体直接在你的目录里工作，同一时间只进行一次运行。两次运行使用同一个真实目录时，后到的运行进入 `waiting_local_directory`，等前一次释放目录后继续。两个路径经不同符号链接指向同一目录时，同样串行。
 
-等待不会修改目录。等待中的运行可以取消，否则会一直等到目录可用。
+等待不会修改目录，也不占用守护进程执行槽位。等待中的运行可以取消，否则会在目录和执行容量都可用后继续启动。
 
 普通的非 git 目录只能用这种模式：worktree 模式只面向 git 仓库。
 
@@ -156,6 +156,8 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 </Accordion>
 <Accordion title="不会静默丢东西" id="nothing-is-silently-lost">
+
+在 worktree 运行期间，受跟踪的运行时指令文件（如 `CLAUDE.md` 或 `AGENTS.md`）会在任务独立的索引中标记为 `skip-worktree`，防止注入的简报进入智能体的提交，不影响你的 checkout。对该文件的正常修改会保持未提交状态，直到清理阶段恢复跟踪，再按下面的规则交付。未跟踪的运行时文件和技能目录仍需从智能体的提交中排除。
 
 智能体留下的未提交改动不会随 worktree 一起删除，运行中途失败时同样如此。它们去哪里，取决于智能体这次运行有没有自己提交：
 

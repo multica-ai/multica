@@ -760,6 +760,15 @@ func (c *Client) ReportTaskContextReceipt(ctx context.Context, taskID string, re
 	}, nil)
 }
 
+// ReportTaskRateLimits posts the subscription rate-limit snapshot the agent
+// CLI reported while running the task; the server keeps the newest one as the
+// state of the task's runtime.
+func (c *Client) ReportTaskRateLimits(ctx context.Context, taskID string, snapshot agent.RateLimitSnapshot) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/rate-limits", taskID), map[string]any{
+		"rate_limits": snapshot,
+	}, nil)
+}
+
 // EnvironmentCommand is a stop, restart, start or log read a member asked
 // for from the issue sidebar.
 type EnvironmentCommand struct {
@@ -1190,10 +1199,9 @@ const RuntimeOfflineCodeNotExecutable = "not_executable"
 // queued forever. The exception is an install the daemon is running right now,
 // which Installing states explicitly.
 //
-// Only an ABSENT profile reaches this code. A profile that is present but
-// answers with a protocol this daemon does not drive never takes a live runtime
-// offline at all: the daemon can be the stale side of that skew, so it reports
-// the incompatibility and leaves the runtime alone.
+// Missing profiles and confirmed manual-repair configurations reach this code.
+// A profile that answers with a protocol this daemon does not drive remains
+// non-demotable: the daemon can be the stale side of that separate skew.
 const RuntimeOfflineCodeDshProfile = "dsh_profile"
 
 // RuntimeOfflineReason is why a runtime went offline, in the form clients can
@@ -1266,6 +1274,7 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 type RuntimeProfile struct {
 	ID             string   `json:"id"`
 	WorkspaceID    string   `json:"workspace_id"`
+	DaemonID       *string  `json:"daemon_id"`
 	DisplayName    string   `json:"display_name"`
 	ProtocolFamily string   `json:"protocol_family"`
 	RuntimeType    string   `json:"runtime_type"`
@@ -1288,9 +1297,9 @@ type RuntimeProfilesResponse struct {
 // Mirrors GetWorkspaceRepos. Callers must treat this as best-effort: an older
 // server with no profiles route returns 404, which the daemon swallows and
 // continues with built-in runtimes only.
-func (c *Client) GetRuntimeProfiles(ctx context.Context, workspaceID string) (*RuntimeProfilesResponse, error) {
+func (c *Client) GetRuntimeProfiles(ctx context.Context, workspaceID, daemonID string) (*RuntimeProfilesResponse, error) {
 	var resp RuntimeProfilesResponse
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/runtime-profiles", workspaceID), &resp); err != nil {
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/runtime-profiles?daemon_id=%s", workspaceID, url.QueryEscape(daemonID)), &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

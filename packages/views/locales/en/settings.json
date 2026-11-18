@@ -850,7 +850,7 @@
     },
     "others_issues": {
       "label": "Other people's issues",
-      "description": "Issues assigned to someone else or their agent, that you only follow because you created, commented on or were mentioned in them. Key updates are @mentions, replies in threads you joined, and statuses that need a person, like in review, blocked or done.",
+      "description": "Issues assigned to someone else or their agent, that you only follow because you created, commented on or were mentioned in them. Key updates are @mentions, replies in threads you joined, and, with Status changes on, statuses that need a person, like in review, blocked or done.",
       "key_updates": "Key updates only",
       "all": "All activity"
     },
@@ -966,7 +966,7 @@
     "section_general": "Workspace details",
     "logo_label": "Workspace logo",
     "change_logo_aria": "Change workspace logo",
-    "click_logo_hint": "Click the logo to upload a new image",
+    "click_logo_hint": "Click the logo to upload an image or create a text icon",
     "toast_logo_failed": "Failed to upload workspace logo",
     "name_label": "Name",
     "description_label": "Description",
@@ -1030,7 +1030,7 @@
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting…",
     "disconnect_confirm_title": "Disconnect GitHub App",
-    "disconnect_confirm_description": "Multica will stop receiving webhooks for this installation. Existing PR mirrors and links are kept; reconnect any time to resume updates.",
+    "disconnect_confirm_description": "Disconnect {{login}} from this workspace? Updates for this account will stop. Existing PR records and links are kept; other connections are unaffected.",
     "disconnect_confirm_cancel": "Cancel",
     "disconnect_confirm_action": "Disconnect",
     "not_configured": "GitHub integration is not configured for this deployment. Operators must set",
@@ -1051,7 +1051,18 @@
     "feature_auto_link_description": "Links a PR to the issue whose ID, e.g. {{example}}, is in its title or branch name, or follows “Closes” in its description.",
     "status_paused": "Paused",
     "pause": "Pause GitHub features",
-    "resume": "Resume GitHub features"
+    "resume": "Resume GitHub features",
+    "add_account": "Add account or organization",
+    "disconnect_account": "Disconnect {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub did not return user authorization. Retry connecting and complete authorization. If it repeats for an existing installation, ask your Multica operator for help.",
+      "installation_not_authorized": "Use the owning GitHub account for a personal installation, or an account with admin access to every authorized repository for an organization. Select at least one repository.",
+      "invalid_state": "This GitHub connection request expired or is invalid. Start the connection again from Settings → Code.",
+      "incomplete_callback": "GitHub returned an incomplete connection response. Start the connection again from Settings → Code.",
+      "bad_workspace": "Could not find the workspace for this connection. Open the intended workspace and retry from Settings → Code.",
+      "verification_failed": "Could not verify your GitHub installation access. Retry connecting; if it repeats, ask your Multica operator to check the GitHub App configuration.",
+      "persist_failed": "Could not save the GitHub connection. Retry from Settings → Code; if it repeats, contact your Multica operator."
+    }
   },
   "vcs": {
     "section_title": "Self-hosted Git",
@@ -1471,7 +1482,13 @@
       "up_to_date": "You're on the latest version.",
       "downloading": "v{{version}} is downloading in the background — you'll be notified when it's ready to install.",
       "check_now": "Check now",
-      "checking": "Checking…"
+      "checking": "Checking…",
+      "check_unavailable": "Unable to check for updates right now. Please try again later.",
+      "check_network": "Cannot reach the update service. Check your connection and try again.",
+      "check_failed": "Unable to check for updates. Please try again.",
+      "download_failed": "Update download failed. You can keep using the current version and retry.",
+      "download_ready": "v{{version}} is ready to install.",
+      "retry": "Retry"
     },
     "daemon": {
       "title": "Daemon",
@@ -1710,6 +1727,30 @@
     "mcp": "Added by admins and shared across the workspace, then assigned per agent.",
     "apps": "Team or personal accounts connected through Multica and added to each agent.",
     "plugins": "Installed packages that can add tools, scheduled hooks, and storage, each with its own permissions."
+  },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "Private messages with the account that scans the connection QR code.",
+    "loading": "Connecting…",
+    "empty": "Connect WeChat from an agent’s Integrations tab.",
+    "close": "Close",
+    "action_failed": "Could not complete this action. Try again.",
+    "privacy_hint": "Messages will run as you in this workspace. Do not share this QR code.",
+    "qr_label": "WeChat connection QR code",
+    "scan_hint": "Scan with WeChat and confirm on your phone.",
+    "scanned": "Scanned. Confirm the connection in WeChat.",
+    "verify_hint": "WeChat requires a verification code. Enter the code shown on your phone.",
+    "verify_label": "Verification code",
+    "verify": "Verify",
+    "success": "Connected. Send a new message to the bot in WeChat to start.",
+    "expired": "This QR code has expired. Generate a new one.",
+    "blocked": "WeChat has blocked further verification attempts. Try again later.",
+    "already_bound": "This bot is already bound in WeChat. Disconnect the previous client and try again.",
+    "refresh": "New QR code",
+    "retry": "Retry",
+    "already_connected": "This WeChat account is connected to {{agent}}. Disconnect it there first.",
+    "connected_elsewhere": "This WeChat account is connected elsewhere. Disconnect the existing connection first.",
+    "authorization_expired": "WeChat authorization expired. Scan again to reconnect."
   },
   "connected_apps": {
     "description": "Accounts your agents use to access external apps. Allowed actions run immediately.",

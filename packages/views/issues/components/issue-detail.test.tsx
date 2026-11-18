@@ -18,6 +18,7 @@ import enAgents from "../../locales/en/agents.json";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores/issue-sidebar-sections-store";
+import { useSubIssuesCollapseStore } from "@multica/core/issues/stores/sub-issues-collapse-store";
 
 vi.mock("./issue-wakeup-header-chip", () => ({
   IssueWakeupHeaderChip: ({ onOpen }: { onOpen: () => void }) => (
@@ -500,7 +501,7 @@ const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 const scrollToIndexSpy = vi.hoisted(() => vi.fn());
 const scrollIntoViewIndexSpy = vi.hoisted(() => vi.fn());
 const mockVirtualWindow = vi.hoisted(() => ({
-  enabled: false, delayedViewport: false, lateScrollReset: false, offscreenViewport: false, pendingSizeCorrection: false, holdAtIndex: false,
+  enabled: false, delayedViewport: false, lateScrollReset: false, offscreenViewport: false, contentSettlesAbove: false, pendingSizeCorrection: false, holdAtIndex: false,
   targetId: "", targetHeight: 100, scrollParent: null as HTMLElement | null,
 }));
 
@@ -531,8 +532,14 @@ vi.mock("react-virtuoso", () => ({
       if (mockVirtualWindow.offscreenViewport && customScrollParent) {
         const list = document.querySelector('[data-testid="virtuoso-mock"]')?.parentElement;
         if (list) list.getBoundingClientRect = () => new DOMRect(0, 1000 - customScrollParent.scrollTop, 400, 100);
+        // Content above the list can still grow once after the first reveal
+        // and push the list back out of view before it measures.
+        let settled = !mockVirtualWindow.contentSettlesAbove;
         const timer = window.setInterval(() => {
-          if (customScrollParent.scrollTop > 0) { window.clearInterval(timer); measured(); }
+          if (customScrollParent.scrollTop <= 0) return;
+          if (!settled) { settled = true; customScrollParent.scrollTop = 0; return; }
+          window.clearInterval(timer);
+          measured();
         }, 10);
         return () => window.clearInterval(timer);
       }
@@ -592,6 +599,7 @@ beforeEach(() => {
   mockVirtualWindow.holdAtIndex = false;
   mockVirtualWindow.delayedViewport = false;
   mockVirtualWindow.offscreenViewport = false;
+  mockVirtualWindow.contentSettlesAbove = false;
   mockVirtualWindow.lateScrollReset = false;
   mockVirtualWindow.targetId = "";
   mockVirtualWindow.targetHeight = 100;
@@ -710,6 +718,7 @@ const mockTimeline: TimelineEntry[] = [
 // ---------------------------------------------------------------------------
 
 import { IssueDetail, groupSubIssuesByStage } from "./issue-detail";
+import { ScrollRestorationProvider, type ScrollRestorationAdapter } from "../../platform";
 import { READING_COLUMN } from "../../layout/reading-column";
 import {
   IssueSurfaceSelectionProvider,
@@ -807,6 +816,12 @@ function hasHighlightedCommentBackground(root: ParentNode | null): boolean {
 // Tests
 // ---------------------------------------------------------------------------
 
+
+// Timeline thread rows render inside a stable wrapper (MUL-9409), so row order
+// and adjacency are compared at the wrapper level.
+function threadRow(el: Element): Element {
+  return el.closest("[data-thread-row]") ?? el;
+}
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1027,6 +1042,37 @@ describe("IssueDetail (shared)", () => {
     fireEvent.click(screen.getByRole("button", { name: "View all 1 deliverable" }));
     fireEvent.click(screen.getByRole("button", { name: "Show in comments" }));
     await waitFor(() => expect(scrollIntoViewIndexSpy.mock.calls.length).toBeGreaterThan(jumps));
+  });
+
+  it("finds text in comments the timeline has not mounted, without mounting the history (MUL-9538)", async () => {
+    mockVirtualWindow.enabled = true;
+    const history = Array.from({ length: 40 }, (_, index) => ({
+      ...mockTimeline[0]!, id: `history-${index}`, parent_id: null, source_task_id: undefined,
+      content: index === 30 ? "The **needle** is in this one" : `Historical comment ${index}`,
+      created_at: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+    }));
+    mockApiObj.listTimeline.mockResolvedValue(history);
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    // Find only answers in a visible page; jsdom lays nothing out.
+    const rects = vi.spyOn(HTMLElement.prototype, "getClientRects")
+      .mockReturnValue([new DOMRect(0, 0, 1, 1)] as unknown as DOMRectList);
+    try {
+      renderIssueDetail();
+      await screen.findByText("Historical comment 0");
+
+      fireEvent.keyDown(document, { key: "f", code: "KeyF", ctrlKey: true });
+      fireEvent.change(await screen.findByRole("textbox", { name: "Find in issue..." }), { target: { value: "needle" } });
+
+      // Counted from the comment's Markdown while it is not mounted.
+      await waitFor(() => expect(screen.getByRole("search")).toHaveTextContent("1/1"));
+      // Landing on it mounts that comment, not the history before it.
+      await waitFor(() => expect(scrollIntoViewIndexSpy).toHaveBeenCalledWith(expect.objectContaining({ index: 30 })));
+      await waitFor(() => expect(document.getElementById("comment-history-30")).not.toBeNull());
+      expect(document.querySelectorAll('[id^="comment-history-"]').length).toBeLessThanOrEqual(8);
+      expect(screen.getByTestId("virtuoso-mock")).toBeInTheDocument();
+    } finally {
+      rects.mockRestore();
+    }
   });
 
   it("opens source-context creation from both a root comment and a reply", async () => {
@@ -1718,7 +1764,7 @@ describe("IssueDetail (shared)", () => {
     const agentBlock = container.querySelector(`[data-run-comment-id="${taskId}"]`)!;
     expect(agentBlock).not.toBeNull();
     expect(userBlock.contains(agentBlock)).toBe(false);
-    expect(agentBlock.parentElement).toBe(userBlock.parentElement);
+    expect(threadRow(agentBlock).parentElement).toBe(userBlock.parentElement);
     expect(agentBlock.querySelector(`[data-run-id="${taskId}"]`)).not.toBeNull();
     const running: AgentTask = { ...task, status: "running", started_at: task.created_at, delivered_comment_ids: [root.id] };
     act(() => client.setQueryData(issueKeys.tasks("issue-1"), [running]));
@@ -1786,8 +1832,8 @@ describe("IssueDetail (shared)", () => {
     const firstComment = container.querySelector(`#comment-${first.id}`);
     expect(latestComment).not.toBeNull();
     expect(firstComment).not.toBeNull();
-    expect(latestComment!.nextElementSibling).toBe(run);
-    expect(firstComment!.nextElementSibling).not.toBe(run);
+    expect(threadRow(latestComment!).nextElementSibling).toBe(threadRow(run));
+    expect(threadRow(firstComment!).nextElementSibling).not.toBe(threadRow(run));
   });
 
   it("keeps the running block after its delivered comment and one queued block after later replies", async () => {
@@ -1829,7 +1875,7 @@ describe("IssueDetail (shared)", () => {
     expect(rootContent!.compareDocumentPosition(runningBlock!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(runningBlock!.compareDocumentPosition(firstComment!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(firstComment!.compareDocumentPosition(latestComment!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(latestComment!.nextElementSibling).toBe(queuedBlock);
+    expect(threadRow(latestComment!).nextElementSibling).toBe(threadRow(queuedBlock!));
     expect(container.querySelectorAll(`[data-run-comment-id="${queued.id}"]`)).toHaveLength(1);
   });
 
@@ -1913,9 +1959,9 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => expect(container.querySelectorAll('[data-run-slot-id]')).toHaveLength(3));
     const slots = tasks.map((task) => container.querySelector(`[data-run-slot-id="${task.id}"]`)!);
     const [secondRow, thirdRow] = [second, third].map((request) => container.querySelector(`#comment-${request.id}`)!);
-    expect(secondRow!.previousElementSibling).toBe(slots[0]);
-    expect(secondRow!.nextElementSibling).toBe(slots[1]);
-    expect(thirdRow!.nextElementSibling).toBe(slots[2]);
+    expect(threadRow(secondRow!).previousElementSibling).toBe(threadRow(slots[0]!));
+    expect(threadRow(secondRow!).nextElementSibling).toBe(threadRow(slots[1]!));
+    expect(threadRow(thirdRow!).nextElementSibling).toBe(threadRow(slots[2]!));
     fireEvent.click(within(slots[0] as HTMLElement).getByRole("button", { name: /View activity/ }));
     await within(slots[0] as HTMLElement).findByText("No activity recorded yet.");
     for (const index of [0, 1]) {
@@ -1939,9 +1985,9 @@ describe("IssueDetail (shared)", () => {
     expect(within(slots[0] as HTMLElement).queryByRole("button", { name: /View activity/ })).not.toBeInTheDocument();
     // Answers land at their own time, after the requests; the queued run
     // stays with its request.
-    expect(thirdRow!.nextElementSibling).toBe(slots[2]);
-    expect(slots[2]!.nextElementSibling).toBe(slots[0]);
-    expect(slots[0]!.nextElementSibling).toBe(slots[1]);
+    expect(threadRow(thirdRow!).nextElementSibling).toBe(threadRow(slots[2]!));
+    expect(threadRow(slots[2]!).nextElementSibling).toBe(threadRow(slots[0]!));
+    expect(threadRow(slots[0]!).nextElementSibling).toBe(threadRow(slots[1]!));
     expect(container.querySelector(`[data-run-slot-id="${tasks[2]!.id}"]`)).toBe(slots[2]);
     expect(within(slots[2] as HTMLElement).getByText("Waiting for an available agent.")).toBeInTheDocument();
   });
@@ -2015,7 +2061,7 @@ describe("IssueDetail (shared)", () => {
     const userReply = container.querySelector("#comment-user-reply")!;
     const agentBlock = container.querySelector(`[data-run-comment-id="${task.id}"]`)!;
     expect(userReply.contains(agentBlock)).toBe(false);
-    expect(userReply.nextElementSibling).toBe(agentBlock);
+    expect(threadRow(userReply).nextElementSibling).toBe(threadRow(agentBlock));
     expect(within(agentBlock as HTMLElement).getByRole("button", { name: "Retry run" })).toBeInTheDocument();
     expect(container.querySelectorAll(`[data-run-id="${task.id}"]`)).toHaveLength(1);
   });
@@ -2857,14 +2903,16 @@ describe("IssueDetail (shared)", () => {
       { kind: "root", delayedViewport: true, lateScrollReset: false },
       { kind: "reply", delayedViewport: false, lateScrollReset: true },
       { kind: "reply", delayedViewport: false, lateScrollReset: false, offscreenViewport: true },
+      { kind: "reply", delayedViewport: false, lateScrollReset: false, offscreenViewport: true, contentSettlesAbove: true },
       { kind: "reply", delayedViewport: false, lateScrollReset: false, pendingSizeCorrection: true },
       { kind: "reply", delayedViewport: false, lateScrollReset: false, holdAtIndex: true },
-    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport, late scroll: $lateScrollReset, below fold: $offscreenViewport)", async ({ kind, delayedViewport, lateScrollReset, offscreenViewport, pendingSizeCorrection, holdAtIndex }) => {
+    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport, late scroll: $lateScrollReset, below fold: $offscreenViewport, settling above: $contentSettlesAbove)", async ({ kind, delayedViewport, lateScrollReset, offscreenViewport, contentSettlesAbove, pendingSizeCorrection, holdAtIndex }) => {
       mockVirtualWindow.holdAtIndex = !!holdAtIndex;
       mockVirtualWindow.pendingSizeCorrection = !!pendingSizeCorrection;
       mockVirtualWindow.enabled = true;
       mockVirtualWindow.delayedViewport = delayedViewport;
       mockVirtualWindow.offscreenViewport = !!offscreenViewport;
+      mockVirtualWindow.contentSettlesAbove = !!contentSettlesAbove;
       mockVirtualWindow.lateScrollReset = lateScrollReset;
       const history = Array.from({ length: 120 }, (_, index) => ({
         ...mockTimeline[0]!,
@@ -2909,6 +2957,46 @@ describe("IssueDetail (shared)", () => {
       await act(async () => { finishTasks([]); });
       await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
       expect(landedBeforeGrouping).toBe(false);
+    });
+
+    describe("on a route that already recorded the landing", () => {
+      function renderOverLandedRoute(props: Partial<React.ComponentProps<typeof IssueDetail>> = {}) {
+        mockApiObj.listTasksByIssue.mockResolvedValue([]);
+        const viewState = new Map([["highlight:issue-1", "comment-2"]]);
+        const adapter: ScrollRestorationAdapter = {
+          get: () => undefined,
+          getViewState: (key) => viewState.get(key),
+          setViewState: (key, value) => {
+            if (value === undefined) viewState.delete(key);
+            else viewState.set(key, value);
+          },
+        };
+        render(
+          <I18nProvider locale="en" resources={TEST_RESOURCES}>
+            <QueryClientProvider client={createTestQueryClient()}>
+              <ScrollRestorationProvider adapter={adapter}>
+                <IssueDetail issueId="issue-1" highlightCommentId="comment-2" {...props} />
+              </ScrollRestorationProvider>
+            </QueryClientProvider>
+          </I18nProvider>,
+        );
+      }
+
+      it("does not replay it when the view merely remounts", async () => {
+        renderOverLandedRoute();
+        await waitFor(() => expect(document.getElementById("comment-comment-2")).not.toBeNull());
+        await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 100)); });
+        expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(false);
+      });
+
+      // MUL-9492: a Work panel click on another page cannot clear the issue
+      // route's record before it navigates there.
+      it("lands a pending request anyway and reports it", async () => {
+        const onHighlightLanded = vi.fn();
+        renderOverLandedRoute({ highlightRequestToken: 3, highlightRequestPending: true, onHighlightLanded });
+        await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
+        expect(onHighlightLanded).toHaveBeenCalledTimes(1);
+      });
     });
 
     it("restarts a comment landing that a timeline update cancels while it is still aligning", async () => {
@@ -3658,6 +3746,7 @@ describe("IssueDetail (shared)", () => {
 
   describe("sub-issues list", () => {
     beforeEach(() => {
+      useSubIssuesCollapseStore.setState({ collapsedIssueIds: new Set() });
       useSubIssueDisplayStore.setState({
         rowProperties: { ...DEFAULT_SUB_ISSUE_ROW_PROPERTIES },
         rowPropertyIds: [],
@@ -3684,6 +3773,160 @@ describe("IssueDetail (shared)", () => {
       ...overrides,
     });
 
+    const inlineChildren = () => within(document.querySelector<HTMLElement>('[class~="group/sub-issues"]')!);
+    const findInlineChild = (title: string) => waitFor(() => inlineChildren().getByText(title));
+
+    it("offers direct sidebar child links and an independent disclosure", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({ id: "child-open", identifier: "TES-11", title: "Open destination", status: "todo" }),
+          subIssue({ id: "child-done", identifier: "TES-12", title: "Custom completion", status: "verified", status_category: "done" }),
+          subIssue({ id: "child-cancelled", identifier: "TES-13", title: "Cancelled destination", status: "cancelled" }),
+        ],
+      });
+      const { container } = renderIssueDetail();
+      await waitFor(() => expect(container.querySelector('[data-issue-sidebar-section="sub_issues"]')).not.toBeNull());
+      const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      expect(sidebar.getAllByRole("link")).toHaveLength(3);
+      expect(sidebar.getByRole("link", { name: /TES-11 Open destination/ })).toHaveAttribute("href", "/test/issues/child-open");
+      expect(sidebar.getByRole("link", { name: /TES-13 Cancelled destination/ })).toBeInTheDocument();
+      expect(sidebar.getByRole("progressbar", { name: "Sub-issues" })).toHaveAttribute("aria-valuenow", "1");
+      expect(sidebar.getByRole("progressbar", { name: "Sub-issues" })).toHaveAttribute("aria-valuemax", "3");
+      const toggle = sidebar.getByRole("button", { name: "Sub-issues" });
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(sidebar.queryAllByRole("link")).toHaveLength(0);
+      expect(inlineChildren().getByText("Open destination")).toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(sidebar.getAllByRole("link")).toHaveLength(3);
+    });
+
+    const stagedSidebarChildren = () => Array.from({ length: 25 }, (_, i) => subIssue({
+      id: `child-${i + 1}`,
+      number: i + 1,
+      identifier: `TES-${i + 1}`,
+      title: `Child ${i + 1}`,
+      stage: i % 3 === 0 ? 2 : i % 3 === 1 ? 1 : null,
+      status: i === 1 || i >= 20 ? "verified" : i === 2 ? "declined" : i === 5 ? "cancelled" : "todo",
+      status_category: i === 1 || i >= 20 ? "done" : i === 2 ? "closed" : undefined,
+    }));
+
+    it.each([false, true])("expands unfinished-first sidebar children in place (mobile: %s)", async (isMobile) => {
+      mockViewport.isMobile = isMobile;
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: stagedSidebarChildren() });
+      const { container } = renderIssueDetail();
+      await findInlineChild("Child 25");
+      const section = container.querySelector<HTMLDivElement>('[class~="group/sub-issues"]')!;
+      const inlineOrder = inlineChildren().getAllByText(/^Child \d+$/).map((row) => row.textContent);
+      fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
+      const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
+      scroller.scrollTop = 600;
+      vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+      vi.spyOn(section, "getBoundingClientRect").mockReturnValue({ top: -200 } as DOMRect);
+      let sheet: HTMLElement | undefined;
+      if (isMobile) {
+        fireEvent.click(screen.getByRole("button", { name: enIssues.detail.sidebar_tooltip }));
+        sheet = await screen.findByRole("dialog");
+      }
+      const sidebar = within(document.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      const childLinks = () => sidebar.getAllByRole("link").map((link) => link.getAttribute("href"));
+      const urls = (numbers: number[]) => numbers.map((n) => `/test/issues/child-${n}`);
+      const firstTen = [5, 8, 11, 14, 17, 20, 1, 4, 7, 10];
+      expect(childLinks()).toEqual(urls(firstTen));
+      expect(sidebar.getByText("6/25")).toBeInTheDocument();
+      expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuemax", "25");
+      expect(sidebar.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "6");
+      const showMore = sidebar.getByRole("button", { name: "Show 15 more" });
+      expect(showMore).toHaveAttribute("aria-expanded", "false");
+      fireEvent.click(showMore);
+      expect(childLinks()).toEqual(urls([
+        5, 8, 11, 14, 17, 20, 1, 4, 7, 10, 13, 16, 19, 9, 12, 15, 18,
+        2, 23, 22, 25, 3, 6, 21, 24,
+      ]));
+      expect(inlineChildren().queryByText("Child 25")).not.toBeInTheDocument();
+      expect(scroller.scrollTop).toBe(600);
+      if (isMobile) {
+        expect(screen.getByRole("dialog")).toBe(sheet);
+        expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeNull();
+      }
+      const collapse = sidebar.getByRole("button", { name: "Collapse" });
+      expect(collapse).toHaveAttribute("aria-expanded", "true");
+      fireEvent.click(collapse);
+      expect(childLinks()).toEqual(urls(firstTen));
+      expect(sidebar.getByRole("button", { name: "Show 15 more" })).toHaveAttribute("aria-expanded", "false");
+      expect(sidebar.getByText("6/25")).toBeInTheDocument();
+      expect(scroller.scrollTop).toBe(600);
+      expect(inlineChildren().queryByText("Child 25")).not.toBeInTheDocument();
+      if (isMobile) {
+        expect(screen.getByRole("dialog")).toBe(sheet);
+        expect(document.querySelector('[data-slot="sheet-overlay"]')).not.toBeNull();
+        fireEvent.keyDown(sheet!, { key: "Escape" });
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      }
+      fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
+      expect(inlineChildren().getAllByText(/^Child \d+$/).map((row) => row.textContent)).toEqual(inlineOrder);
+    });
+
+    it("keeps inline stage order including completed children at the ten-child limit", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: stagedSidebarChildren().slice(0, 10) });
+      const { container } = renderIssueDetail();
+      await findInlineChild("Child 10");
+      const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      expect(sidebar.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual(
+        [2, 5, 8, 1, 4, 7, 10, 3, 6, 9].map((n) => `/test/issues/child-${n}`),
+      );
+      expect(sidebar.queryByRole("button", { name: /Show .* more|Collapse|View all/ })).not.toBeInTheDocument();
+      expect(sidebar.getByText("1/10")).toBeInTheDocument();
+    });
+
+    it("shows the remaining count when only one child is hidden", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: stagedSidebarChildren().slice(0, 11) });
+      const { container } = renderIssueDetail();
+      await findInlineChild("Child 11");
+      const sidebar = within(container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!);
+      expect(sidebar.getAllByRole("link")).toHaveLength(10);
+      fireEvent.click(sidebar.getByRole("button", { name: "Show 1 more" }));
+      expect(sidebar.getAllByRole("link")).toHaveLength(11);
+      fireEvent.click(sidebar.getByRole("button", { name: "Collapse" }));
+      expect(sidebar.getAllByRole("link")).toHaveLength(10);
+    });
+
+    it("leaves the sidebar slot empty while loading and when no children exist", async () => {
+      let resolveChildren!: (value: { issues: Issue[] }) => void;
+      mockApiObj.listChildIssues.mockImplementation(() => new Promise((resolve) => {
+        resolveChildren = resolve;
+      }));
+      const { container } = renderIssueDetail();
+      await screen.findByText("Implement authentication");
+      const sidebar = () => container.querySelector('[data-issue-sidebar-section="sub_issues"]');
+      expect(sidebar()?.childElementCount).toBe(0);
+      await act(async () => resolveChildren({ issues: [] }));
+      expect(sidebar()?.childElementCount).toBe(0);
+    });
+
+    it("removes cached sidebar links after a child query loses access", async () => {
+      let rejectChildren!: (reason: unknown) => void;
+      mockApiObj.listChildIssues.mockImplementation(() => new Promise((_resolve, reject) => {
+        rejectChildren = reject;
+      }));
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(issueKeys.children("ws-1", "issue-1"), [
+        subIssue({ id: "child-private", identifier: "TES-11", title: "Previously authorized child" }),
+      ]);
+      const { container } = render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+      const sidebar = () => container.querySelector<HTMLElement>('[data-issue-sidebar-section="sub_issues"]')!;
+      await waitFor(() => expect(within(sidebar()).getByRole("link", { name: /Previously authorized child/ })).toBeInTheDocument());
+      await act(async () => rejectChildren(new ApiError("Access denied", 403, "Forbidden")));
+      await waitFor(() => expect(sidebar().childElementCount).toBe(0));
+    });
+
     it("jumps from the outline to the expanded sub-issues section without comments", async () => {
       // Preview/order behavior lives in thread-minimap.test.tsx; this tests the real section.
       mockApiObj.listTimeline.mockResolvedValue([]);
@@ -3691,10 +3934,10 @@ describe("IssueDetail (shared)", () => {
         issues: [subIssue({ id: "child-1", title: "Child destination" })],
       });
       const { container } = renderIssueDetail();
-      await screen.findByText("Child destination");
+      await findInlineChild("Child destination");
       const section = container.querySelector<HTMLDivElement>(".group\\/sub-issues")!;
       fireEvent.click(within(section).getByRole("button", { name: "Sub-issues" }));
-      expect(screen.queryByText("Child destination")).not.toBeInTheDocument();
+      expect(within(section).queryByText("Child destination")).not.toBeInTheDocument();
 
       const scroller = container.querySelector<HTMLDivElement>("[data-tab-scroll-root]")!;
       scroller.scrollTop = 600;
@@ -3703,7 +3946,7 @@ describe("IssueDetail (shared)", () => {
       fireEvent.click(within(screen.getByRole("navigation", { name: "Quick navigation" }))
         .getByRole("button", { name: "Sub-issues" }));
 
-      expect(await screen.findByText("Child destination")).toBeInTheDocument();
+      expect(await findInlineChild("Child destination")).toBeInTheDocument();
       await waitFor(() => expect(scroller.scrollTop).toBe(284));
     });
 
@@ -3734,7 +3977,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Fix login flow");
+      await findInlineChild("Fix login flow");
       // Label chips ride inside the row link.
       expect(screen.getByText("backend")).toBeInTheDocument();
       expect(screen.getByText("auth")).toBeInTheDocument();
@@ -3744,7 +3987,7 @@ describe("IssueDetail (shared)", () => {
       const due = screen.getByText("Jan 1");
       expect(due.closest("span")?.className).toContain("text-destructive");
       // Bare row shows no due date / no progress chip of its own.
-      const bareRow = screen.getByText("Ship dashboards").closest("a");
+      const bareRow = inlineChildren().getByText("Ship dashboards").closest("a");
       expect(bareRow?.textContent).not.toContain("/");
     });
 
@@ -3771,7 +4014,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Fix login flow");
+      await findInlineChild("Fix login flow");
       expect(screen.queryByText("backend")).not.toBeInTheDocument();
       expect(screen.queryByText("Jan 1")).not.toBeInTheDocument();
     });
@@ -3813,7 +4056,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Fix login flow");
+      await findInlineChild("Fix login flow");
       // Chip renders only on the row that has a value for the property.
       expect(await screen.findByText("Sprint 3")).toBeInTheDocument();
       expect(screen.getAllByText("Sprint 3")).toHaveLength(1);
@@ -3866,7 +4109,7 @@ describe("IssueDetail (shared)", () => {
 
       renderIssueDetail();
 
-      await screen.findByText("Wrapped up");
+      await findInlineChild("Wrapped up");
       const due = screen.getByText("Jan 1");
       expect(due.closest("span")?.className).not.toContain("text-destructive");
       expect(due.closest("span")?.className).toContain("text-muted-foreground");

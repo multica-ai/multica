@@ -185,11 +185,14 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 |---|---|---|
 | GitHub | `GITHUB_APP_SLUG` | GitHub App の slug |
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC と接続 state の署名シークレット |
-| GitHub | `GITHUB_APP_ID` | PR カードの CI ステータス・マージ可否と「GitHub から選択」リポジトリに必要です |
-| GitHub | `GITHUB_APP_PRIVATE_KEY` | App ID と対になる完全な PEM 秘密鍵。用途は同上 |
+| GitHub | `GITHUB_APP_CLIENT_ID` | App の Client ID。接続するユーザーが installation にアクセスできるか確認するために必須 |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | Client ID と対になる client secret。新規接続に必須 |
+| GitHub | `GITHUB_APP_ID` | 新規接続で installation の管理権限確認に必須。PR カードとリポジトリ一覧にも使用 |
+| GitHub | `GITHUB_APP_PRIVATE_KEY` | 新規接続で installation の管理権限確認に必須。PR カードとリポジトリ一覧にも使用 |
 | Lark | `MULTICA_LARK_SECRET_KEY` | base64 エンコードされた 32 バイトの資格情報暗号化キー |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 エンコードされた 32 バイトの token 暗号化キー |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 エンコードされた 32 バイトの Bot token 暗号化キー |
+| WeChat | `MULTICA_WEIXIN_SECRET_KEY` | WeChat の認証情報と QR 状態を暗号化する Base64 エンコードの 32 バイトキー |
 | Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | ストリーミング返信に表示するツールのステップ。`auto`（既定。DM では詳細、グループでは作業の種類のみ）、`off`、`summary`、`detail` |
 | Composio | `COMPOSIO_API_KEY` | Composio ツール接続を有効化 |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | コールバック API アドレス。`MULTICA_PUBLIC_URL` にフォールバック可能 |

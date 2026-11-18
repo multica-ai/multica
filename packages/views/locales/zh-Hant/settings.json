@@ -841,7 +841,7 @@
     },
     "others_issues": {
       "label": "別人的任務",
-      "description": "任務指派給別人或別人的 AI 代理，而你只是因為建立、留言或被 @ 自動訂閱了它。關鍵更新指 @你、回覆你參與的討論，以及待評審、受阻、完成等需要人來看的狀態。",
+      "description": "任務指派給別人或別人的 AI 代理，而你只是因為建立、留言或被 @ 自動訂閱了它。關鍵更新指 @你、回覆你參與的討論，以及（開啟狀態變更時）待評審、受阻、完成等需要人來看的狀態。",
       "key_updates": "僅關鍵更新",
       "all": "全部動態"
     },
@@ -957,7 +957,7 @@
     "section_general": "工作區資訊",
     "logo_label": "工作區圖示",
     "change_logo_aria": "更換工作區圖示",
-    "click_logo_hint": "點選圖示上傳新圖片",
+    "click_logo_hint": "點擊圖示上傳圖片，或產生文字圖示",
     "toast_logo_failed": "上傳工作區圖示失敗",
     "name_label": "名稱",
     "description_label": "描述",
@@ -1021,7 +1021,7 @@
     "disconnect": "斷開",
     "disconnecting": "斷開中...",
     "disconnect_confirm_title": "斷開 GitHub App",
-    "disconnect_confirm_description": "Multica 將不再接收該安裝的 webhook。已有的 PR 映象與關聯會保留，再次連線即可恢復同步。",
+    "disconnect_confirm_description": "要從此工作區斷開 {{login}} 嗎？此帳號的更新將停止，已有 PR 記錄與關聯會保留，其他連線不受影響。",
     "disconnect_confirm_cancel": "取消",
     "disconnect_confirm_action": "斷開",
     "not_configured": "當前部署沒有配置 GitHub 整合。運維需要設定",
@@ -1042,7 +1042,18 @@
     "feature_auto_link_description": "PR 標題或分支名含任務編號（如 {{example}}），或正文裡寫了 \"Closes {{example}}\" 時，自動關聯到對應任務。",
     "status_paused": "已暫停",
     "pause": "暫停 GitHub 功能",
-    "resume": "恢復 GitHub 功能"
+    "resume": "恢復 GitHub 功能",
+    "add_account": "新增帳號或組織",
+    "disconnect_account": "斷開 {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub 未傳回使用者授權。請重新連線並完成授權。如果已有安裝反覆出現此問題，請聯絡 Multica 維運人員。",
+      "installation_not_authorized": "個人安裝請使用所屬的 GitHub 帳號；組織安裝請使用對所有已授權倉庫都有管理員權限的帳號，並至少選取一個倉庫。",
+      "invalid_state": "GitHub 連線請求已過期或無效。請從設定 → 程式碼重新連線。",
+      "incomplete_callback": "GitHub 傳回的連線資訊不完整。請從設定 → 程式碼重新連線。",
+      "bad_workspace": "找不到此次連線的工作區。請開啟目標工作區，從設定 → 程式碼重試。",
+      "verification_failed": "無法驗證你對 GitHub 安裝的管理權限。請重新連線；若仍失敗，請聯絡 Multica 維運人員檢查 GitHub App 設定。",
+      "persist_failed": "無法儲存 GitHub 連線。請從設定 → 程式碼重試；若仍失敗，請聯絡 Multica 維運人員。"
+    }
   },
   "vcs": {
     "section_title": "自託管 Git",
@@ -1460,7 +1471,13 @@
       "up_to_date": "已是最新版本。",
       "downloading": "v{{version}} 正在後臺下載——準備好安裝時會通知你。",
       "check_now": "立即檢查",
-      "checking": "檢查中..."
+      "checking": "檢查中...",
+      "check_unavailable": "暫時無法檢查更新，請稍後重試。",
+      "check_network": "無法連線至更新服務，請檢查網路後重試。",
+      "check_failed": "檢查更新失敗，請重試。",
+      "download_failed": "更新下載失敗，可以繼續使用目前版本並重試。",
+      "download_ready": "v{{version}} 已可安裝。",
+      "retry": "重試"
     },
     "daemon": {
       "title": "守護程序",
@@ -1694,6 +1711,30 @@
     "mcp": "由管理員新增、在工作區內共享，再按 AI 代理分配。",
     "apps": "透過 Multica 連線團隊或個人帳號，再將應用新增至 AI 代理。",
     "plugins": "安裝後可提供工具、定時 hook 和儲存，每個外掛單獨授權。"
+  },
+  "weixin": {
+    "section_title": "微信",
+    "page_description": "接收掃碼帳號的私訊。",
+    "loading": "正在連線…",
+    "empty": "在 AI 代理的「整合」分頁中連接微信。",
+    "close": "關閉",
+    "action_failed": "操作未完成，請重試。",
+    "privacy_hint": "訊息將以你的身分在此工作區執行，請勿分享 QR 碼。",
+    "qr_label": "微信連線 QR 碼",
+    "scan_hint": "使用微信掃碼，並在手機上確認。",
+    "scanned": "已掃碼，請在微信中確認連線。",
+    "verify_hint": "微信要求輸入驗證碼，請填寫手機上顯示的數字。",
+    "verify_label": "驗證碼",
+    "verify": "驗證",
+    "success": "已連接。請在微信中向機器人傳送新訊息。",
+    "expired": "QR 碼已過期，請重新產生。",
+    "blocked": "微信已暫停驗證碼驗證，請稍後重試。",
+    "already_bound": "此機器人已在微信中綁定，請先中斷原用戶端，再重試。",
+    "refresh": "重新產生 QR 碼",
+    "retry": "重試",
+    "already_connected": "此微信已連接至 AI 代理 {{agent}}，請先在該處中斷連線。",
+    "connected_elsewhere": "此微信已在其他位置連接，請先中斷原連線。",
+    "authorization_expired": "微信授權已過期，請重新掃碼連接。"
   },
   "connected_apps": {
     "description": "AI 代理透過這些帳號操作外部應用，允許的操作會直接執行。",

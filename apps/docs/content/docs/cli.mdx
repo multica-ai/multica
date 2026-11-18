@@ -234,6 +234,25 @@ multica issue wakeup runs MUL-123 <wakeup-id>
 
 Creating one from a terminal as a member requires `--agent-id`; an agent creating one inside its own run wakes itself by default.
 
+## Chat wakeups [#chat-wakeups]
+
+Only an agent inside a chat run can use `chat wakeup`; the current conversation is implicit. These commands do not accept a session ID and cannot be used from an ordinary member terminal or an issue run. See [Follow up later](/chat#follow-up-later) for the user controls.
+
+```bash
+multica chat wakeup create --title "Review ready" \
+  --until-issue MUL-123 --state in_review --expires-in 48h \
+  --instruction "Summarize the result in this conversation"
+multica chat wakeup create --title "Check back in two hours" \
+  --after 2h --instruction "Remind the user to review the result"
+multica chat wakeup list
+```
+
+Use exactly one `--until-*` condition, `--at` / `--after`, or `--every`. Creation and update require `--title` and `--instruction` (or `--instruction-file`). `update` replaces the configuration and restarts relative deadlines; it cannot switch a wakeup between a condition, a reminder, and a check. Conditions and checks default to 24 hours and allow at most 7 days via `--expires-in` or `--expires-at`; reminders allow at most 30 days and do not accept expiry flags. Checks run at least 10 minutes apart, and the deadline may allow at most 100 checks: `--every 10m` with the default 24 hours would be 144 checks and is rejected, so use a longer interval or an earlier deadline such as `--expires-in 16h`.
+
+Conditions support `--until-issue` with `--state` or `--status`, `--until-children-done` with optional `--stage`, `--until-pr`, `--until-run`, and `--until-reply` with optional `--from <user-id>`. A PR condition uses a GitHub PR mirrored in this workspace: `owner/repo#N[:merged|closed|checks]`. `checks` waits for checks to finish on the current head, whether they pass or fail. A `checks` condition can be created only when the server reads CI status from GitHub; a self-hosted server needs `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` (see [GitHub integration](/github-integration)). An already-finished check result at creation is recorded as a baseline and does not immediately wake the agent.
+
+Use `list`, `get <id>`, or `cancel <id>` to inspect or cancel a wakeup. During a periodic check, `checkin <id> --note "..."` records a quiet update without sending a reply; `finish <id>` ends the check when its goal is met. The final deadline turn must report back and cannot check in quietly.
+
 ## Agents and skills
 
 ```bash
@@ -313,7 +332,7 @@ multica runtime profile create --display-name "Internal Claude wrapper" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version; `--wait` waits for completion and exits non-zero if the update fails or times out, or if the wait itself times out. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app.
+`daemon autostart` registers the current profile to start at login; see [Start at login](/daemon-runtimes#autostart) for platform details. `runtime usage` covers 90 days by default, and `--days` goes up to 365. `runtime update` asks the daemon on that computer to update its CLI to the given version; `--wait` waits for completion and exits non-zero if the update fails or times out, or if the wait itself times out. `runtime profile create` takes the compatible tool through `--runtime-type` (the older `--protocol-family` still works); fixed arguments can currently be set only in the web app. `runtime profile create` binds the profile to this machine by default; use `--daemon-id <id>` to select another registered local machine. Bind an older, unscoped profile with `multica runtime profile update <profile-id> --daemon-id <id>`.
 
 Deleting a runtime that still has active agents bound to it is refused by default. `multica runtime delete <id> --cascade` unbinds those agents, preserves their configuration and history, and cancels their active runs.
 
@@ -350,12 +369,57 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 - A workspace's `--context` is provided to every agent in the workspace. `--slug` cannot be changed after creation. `--issue-prefix` is uppercased; changing it renumbers every existing issue, and old identifiers in external references stop resolving.
 - `--issue-title-template` interpolates only `{{date}}` (UTC, `YYYY-MM-DD`) and rejects any other `{{...}}` token. A schedule trigger's `--timezone` defaults to UTC.
 
+### Webhook event filters [#webhook-event-filters]
+
+Use `--event-filters-file` on `autopilot trigger-add` or `trigger-update` to configure a webhook trigger's event and action filters. Save a nonempty JSON array as `filters.json`:
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+Each row may also include `conditions`, using the same payload-field rules as the app. For example, this row accepts only non-draft pull requests targeting `main`:
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+Each rule supports up to 20 conditions. A field path can contain at most 256 characters, and an `in` list can contain at most 100 values. Creating or updating a trigger with an oversized condition returns HTTP 400.
+
+This accepts PR review submissions and all push events. Omitting `actions` or using an empty actions array accepts every action for that event.
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-list <autopilot-id> --full-id
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+The file replaces the entire filter list on update. Omitting both filter options preserves the saved filters, including when updating a label or enabling/disabling the trigger. `autopilot get` returns the filters in the top-level `triggers` array.
+
+To remove all filters and accept every event, use the update-only flag:
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` and `--event-filters-file` cannot be combined. Top-level `null` or an empty array, unknown fields, malformed JSON, and blank event/action names are rejected. These options apply only to webhook triggers; creating one without a filter file accepts all events. See [Autopilots](/autopilots#event-filters) for how incoming events are matched.
+
 ## Command overview
 
 | Command | Purpose |
 | --- | --- |
 | `issue` | Create, update, assign, and search issues; manage comments, subscribers, labels, properties, wakeups, the timeline, and runs |
 | `project` | Manage projects, their resources, and the workflow they use |
+| `inbox` | Read your notifications without changing read status |
 | `workflow` | Manage issue workflows: statuses and who handles each one |
 | `issue-status` | Manage the workspace status catalog: statuses, their color, and their icon |
 | `label`, `property` | Manage workspace labels and custom properties |
@@ -480,7 +544,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `env get/set <agent-id>` | Read and write custom environment variables (agent owner or workspace owner/admin; every read is recorded) | `set`: `--custom-env` / `--custom-env-file` / `--custom-env-stdin`; replaces the whole set, and keys whose value is `****` keep their existing value |
 | | `skills list/set/add <agent-id>` | Manage attached skills | `--skill-ids` (`set` replaces the full list, `add` appends) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | Assign workspace MCP servers to this agent | Take the server id from `workspace mcp list`. A library entry does nothing until it is added here; `disable` stops sending it without dropping the assignment |
-| `autopilot` | `list/get/create/update/delete` | Manage automations | `create`: `--title`, `--agent`, `--mode` (all required), `--description`, `--issue-title-template`, `--project`, `--subscriber` (repeatable) |
+| `autopilot` | `list/get/create/update/delete` | Manage automations | `create`: `--title`, `--mode` (both required), exactly one of `--agent` / `--squad` / `--squad-id` (required), `--description`, `--issue-title-template`, `--project`, `--subscriber` (repeatable) |
 | | `trigger <id>` | Trigger a run manually | |
 | | `runs <id>` | View run history | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | `trigger-add`: `--kind` (`schedule` or `webhook`), `--cron`, `--timezone` (default UTC), `--label` |
@@ -497,6 +561,8 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `member list/add/set-role/remove` | Manage squad members | |
 | | `activity <issue-id> <outcome>` | Record a leader evaluation | |
 | `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
+| | `wakeup create/list/get/update/cancel/finish/checkin` | Manage follow-ups in the current chat run; see [Chat wakeups](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
+| `inbox` | `list` | [Read your active notifications](/inbox) without marking them read | `--project`, `--type`, `--output` (`table` or `json`); filters apply locally |
 
 ### Runtime
 

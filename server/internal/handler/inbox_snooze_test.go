@@ -184,7 +184,7 @@ func TestInboxRowsWrittenIntoASnoozeJoinItUnlessTheyWakeIt(t *testing.T) {
 			IssueID:       parseUUID(f.issueID),
 			Title:         "Snoozed issue",
 			Details:       []byte(details),
-		}})
+		}, IgnorePreferences: true}) // About snoozes, not preferences: status changes start muted.
 		if err != nil || !inserted {
 			t.Fatalf("create %s: inserted=%v err=%v", notifType, inserted, err)
 		}

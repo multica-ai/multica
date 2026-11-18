@@ -53,8 +53,15 @@ type PrivateProjectOverview struct {
 }
 
 // requireWorkspaceOwnerRecovery admits a human workspace owner and nobody
-// else: not admins, and not an agent running on an owner's behalf.
+// else: not admins, not an agent running on an owner's behalf, and not a
+// machine credential (task token or cloud node PAT) that auth stamps with its
+// owner's user id. The router also wraps both routes in RequireHumanActor;
+// this check is the handler's own backstop.
 func (h *Handler) requireWorkspaceOwnerRecovery(w http.ResponseWriter, r *http.Request, workspaceID string) (db.Member, bool) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "machine credentials cannot use workspace owner access to private projects")
+		return db.Member{}, false
+	}
 	if actorType, _ := h.resolveActor(r, requestUserID(r), workspaceID); actorType == "agent" {
 		writeError(w, http.StatusForbidden, "agents cannot use workspace owner access to private projects")
 		return db.Member{}, false
