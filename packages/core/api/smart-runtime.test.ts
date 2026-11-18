@@ -21,6 +21,20 @@ describe("smart runtime response compatibility", () => {
     expect(await request()).toEqual({ agentIds: [] });
   });
 
+  it("validates agent responses and treats a missing strategy as fixed", async () => {
+    respond([{ id: "old", runtime_id: "fixed" }, { id: "smart", share_runtime: false, runtime_config_summary: { recommended: { cli: "codex" }, current: { runtime_id: "personal" } } }]);
+    expect(await api.listAgents()).toMatchObject([
+      { id: "old", runtime_id: "fixed" },
+      { id: "smart", share_runtime: false, runtime_config_summary: { current: { runtime_id: "personal" } } },
+    ]);
+    respond({ id: false });
+    await expect(api.getAgent("agent")).rejects.toThrow("Invalid agent response");
+    respond({ id: false });
+    await expect(api.createAgent({ name: "Agent", runtime_id: "", share_runtime: false, cli: "codex" })).rejects.toThrow("Invalid agent response");
+    respond({ id: false });
+    await expect(api.updateAgent("agent", { share_runtime: false })).rejects.toThrow("Invalid agent response");
+  });
+
   it("deduplicates and caps recent IDs in server order", async () => {
     const ids = Array.from({ length: 12 }, (_, index) => String(index));
     const fetch = respond({ agent_ids: [ids[0], ...ids] });

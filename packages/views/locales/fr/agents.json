@@ -201,7 +201,7 @@
     "edit_description_title": "Modifier la description",
     "description_placeholder": "Que fait cet agent ?",
     "cancel": "Annuler",
-    "prop_recommended_runtime": "Recommended runtime",
+    "prop_recommended_runtime": "CLI recommandée",
     "section_execution_hint": "Choisissez le runtime, le modèle, le niveau de raisonnement, la vitesse et la limite d’exécutions parallèles."
   },
   "overview": {
@@ -498,12 +498,12 @@
       "select_image_toast": "Veuillez sélectionner un fichier image.",
       "upload_failed_toast": "Échec de l'envoi de l'avatar"
     },
-    "recommended_runtime_label": "Recommended runtime",
+    "recommended_runtime_label": "CLI recommandée",
     "share_runtime": {
       "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
       "fixed_title": "Fixed runtime",
       "label": "Runtime policy",
-      "smart_desc": "Each caller uses their own runtime, defaults to the recommended model, and falls back to the default model when unavailable.",
+      "smart_desc": "Chaque personne utilise son propre environnement d’exécution. Le modèle configuré doit y être disponible.",
       "smart_title": "Smart runtime"
     }
   },

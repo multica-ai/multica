@@ -28,7 +28,8 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
         ],
   }),
 }));
-vi.mock("@multica/core/agents", () => ({ isAgentRuntimeBound: () => true }));
+vi.mock("@multica/core/auth", () => ({ useAuthStore: () => undefined }));
+vi.mock("@multica/core/agents", () => ({ isAgentRuntimeBound: () => true, useRecentAgents: () => ({ recentAgents: [], recentIds: new Set(), recordRecentAgent: vi.fn() }) }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 vi.mock("../../common/use-viewing-timezone", () => ({ useViewingTimezone: () => "Asia/Shanghai" }));
 

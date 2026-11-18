@@ -1855,7 +1855,9 @@ function buildRuntimeAgentMentions({
     const ownerMember =
       task.runtime_owner_id ? memberById.get(task.runtime_owner_id) : null;
     const originatorMember =
-      task.originator_user_id ? memberById.get(task.originator_user_id) : null;
+      (task.originator_user_id ?? task.attribution?.originator?.id)
+        ? memberById.get((task.originator_user_id ?? task.attribution?.originator?.id)!)
+        : null;
     const hint = task.runtime_config_hint;
     const provider = task.runtime_provider?.trim() || null;
     return {

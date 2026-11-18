@@ -201,7 +201,7 @@
     "description_placeholder": "¿Qué hace este agente?",
     "cancel": "Cancelar",
     "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents.",
-    "prop_recommended_runtime": "Recommended runtime",
+    "prop_recommended_runtime": "CLI recomendada",
     "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel run limit."
   },
   "overview": {
@@ -480,12 +480,12 @@
       "select_image_toast": "Selecciona un archivo de imagen.",
       "upload_failed_toast": "Error al subir el avatar"
     },
-    "recommended_runtime_label": "Recommended runtime",
+    "recommended_runtime_label": "CLI recomendada",
     "share_runtime": {
       "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
       "fixed_title": "Fixed runtime",
       "label": "Runtime policy",
-      "smart_desc": "Each caller uses their own runtime, defaults to the recommended model, and falls back to the default model when unavailable.",
+      "smart_desc": "Cada persona usa su propio entorno de ejecución. El modelo configurado debe estar disponible en ese entorno.",
       "smart_title": "Smart runtime"
     }
   },

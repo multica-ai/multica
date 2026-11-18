@@ -192,7 +192,7 @@
     "edit_description_title": "编辑描述",
     "description_placeholder": "这个智能体做什么？",
     "cancel": "取消",
-    "prop_recommended_runtime": "推荐运行时",
+    "prop_recommended_runtime": "推荐 CLI",
     "section_execution_hint": "选择运行时、模型、思考强度、速度和并行运行上限。"
   },
   "overview": {
@@ -481,12 +481,12 @@
       "select_image_toast": "请选择图片文件。",
       "upload_failed_toast": "头像上传失败"
     },
-    "recommended_runtime_label": "推荐运行时",
+    "recommended_runtime_label": "推荐 CLI",
     "share_runtime": {
       "fixed_desc": "所有人调用该智能体时使用它绑定的运行时配置。",
       "fixed_title": "固定运行时",
       "label": "运行时策略",
-      "smart_desc": "调用者使用自己的运行时，默认使用推荐模型，不存在则回退默认模型",
+      "smart_desc": "调用者使用自己的运行时。配置的模型必须在该运行时中可用。",
       "smart_title": "智能运行时"
     }
   },

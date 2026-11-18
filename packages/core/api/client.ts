@@ -637,6 +637,8 @@ import {
   WorkspacePinnedSchema,
   RecentAgentSelectionResponseSchema,
   EMPTY_RECENT_AGENT_SELECTION_RESPONSE,
+  AgentSchema,
+  AgentListSchema,
   AgentRuntimeConfigSummarySchema,
   RuntimeConfigHintSchema,
   MALFORMED_AGENT_RUNTIME_CONFIG_SUMMARY,
@@ -2333,19 +2335,22 @@ export class ApiClient {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.include_archived) search.set("include_archived", "true");
-    return this.fetch(`/api/agents?${search}`);
+    const raw = await this.fetch<unknown>(`/api/agents?${search}`);
+    return parseWithFallback(raw, AgentListSchema, [], { endpoint: "GET /api/agents" });
   }
 
   async getAgent(id: string): Promise<Agent> {
-    return this.fetch(`/api/agents/${id}`);
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`);
+    return this.parseAgentResponse(raw, "GET /api/agents/{id}");
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
     assertAgentConversationStartersWriteSupported(data);
-    return this.fetch("/api/agents", {
+    const raw = await this.fetch<unknown>("/api/agents", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return this.parseAgentResponse(raw, "POST /api/agents");
   }
 
   /**
@@ -2458,10 +2463,17 @@ export class ApiClient {
 
   async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
     assertAgentConversationStartersWriteSupported(data);
-    return this.fetch(`/api/agents/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    return this.parseAgentResponse(raw, "PUT /api/agents/{id}");
+  }
+
+  private parseAgentResponse(raw: unknown, endpoint: string): Agent {
+    const agent = parseWithFallback(raw, AgentSchema, null, { endpoint });
+    if (!agent) throw new Error("Invalid agent response");
+    return agent;
   }
 
   /** The current user's recently used agents in one workspace. */

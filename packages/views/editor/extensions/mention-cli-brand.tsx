@@ -192,7 +192,6 @@ const PROVIDER_TAG_LABELS: Record<string, string> = {
   qwen: "Qwen Code",
   qwenpaw: "QwenPaw",
   mcode: "MiniMax Code",
-  dsh: "DeepSeek Harness",
   dim: "Dim",
   zeroclaw: "ZeroClaw",
   omp: "Oh-My-Pi",

@@ -121,6 +121,7 @@ import type {
   User,
   WebhookDelivery,
   WorkspaceMcpServer,
+  Agent,
   AgentRuntimeConfigSummary,
   MigrateAgentsToRuntimeResponse,
   RecentAgentSelectionResponse,
@@ -5222,7 +5223,7 @@ export const AgentRuntimeConfigSummarySchema = z
         service_tier: z.string().default(""),
         max_concurrent_tasks: z.number().default(0),
         runtime_config: z.record(z.string(), z.unknown()).default({}),
-        strategy: z.enum(["recommended", "custom"]).default("recommended"),
+        strategy: z.enum(["recommended", "custom"]).catch("recommended").default("recommended"),
         source: z
           .enum([
             "shared",
@@ -5231,6 +5232,7 @@ export const AgentRuntimeConfigSummarySchema = z
             "default_user_runtime",
             "missing_user_runtime",
           ])
+          .catch("missing_user_runtime")
           .default("missing_user_runtime"),
         persisted: z.boolean().default(false),
         editable: z.boolean().default(false),
@@ -5243,6 +5245,7 @@ export const AgentRuntimeConfigSummarySchema = z
             "runtime_offline",
             "model_unavailable",
           ])
+          .catch("runtime_unavailable")
           .default("runtime_unavailable"),
         resolution_message: z.string().optional(),
       })
@@ -5277,6 +5280,46 @@ export const MALFORMED_AGENT_RUNTIME_CONFIG_SUMMARY: AgentRuntimeConfigSummary =
     resolution_message: "invalid runtime config response",
   },
 };
+
+export const AgentSchema = z.object({
+  id: z.string().min(1),
+  workspace_id: z.string().default(""),
+  runtime_id: z.string().default(""),
+  runtime_bound: z.boolean().optional().catch(undefined),
+  runtime_availability: z.enum(["online", "unstable", "offline"]).optional().catch(undefined),
+  share_runtime: z.boolean().optional().catch(undefined),
+  cli: z.string().optional().catch(undefined),
+  runtime_config_summary: AgentRuntimeConfigSummarySchema.optional().catch(undefined),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  instructions: z.string().default(""),
+  avatar_url: z.string().nullable().default(null),
+  runtime_mode: z.enum(["local", "cloud"]).catch("local"),
+  runtime_config: z.record(z.string(), z.unknown()).default({}),
+  custom_args: z.array(z.string()).default([]),
+  visibility: z.enum(["private", "workspace"]).catch("private"),
+  permission_mode: z.enum(["private", "public_to"]).catch("private"),
+  invocation_targets: z.array(z.object({
+    target_type: z.enum(["workspace", "member", "team"]),
+    target_id: z.string().nullable(),
+  })).catch([]),
+  status: z.enum(["idle", "working", "blocked", "error", "offline"]).catch("offline"),
+  max_concurrent_tasks: z.number().default(0),
+  model: z.string().default(""),
+  owner_id: z.string().nullable().default(null),
+  skills: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().default(""),
+    enabled: z.boolean().optional(),
+  }).loose()).default([]),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  archived_at: z.string().nullable().default(null),
+  archived_by: z.string().nullable().default(null),
+}).loose() satisfies z.ZodType<Agent>;
+
+export const AgentListSchema = z.array(AgentSchema);
 
 // Uniform batch runtime configuration for personal and agent-level scopes.
 // Open strings keep installed desktop clients forward-compatible with newer

@@ -192,7 +192,7 @@
     "edit_description_title": "説明を編集",
     "description_placeholder": "このエージェントは何をしますか？",
     "cancel": "キャンセル",
-    "prop_recommended_runtime": "Recommended runtime",
+    "prop_recommended_runtime": "推奨 CLI",
     "section_execution_hint": "ランタイム、モデル、思考レベル、速度、同時実行数を設定します。"
   },
   "overview": {
@@ -340,12 +340,12 @@
       "select_image_toast": "画像ファイルを選択してください。",
       "upload_failed_toast": "アバターのアップロードに失敗しました"
     },
-    "recommended_runtime_label": "Recommended runtime",
+    "recommended_runtime_label": "推奨 CLI",
     "share_runtime": {
       "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
       "fixed_title": "Fixed runtime",
       "label": "Runtime policy",
-      "smart_desc": "Each caller uses their own runtime, defaults to the recommended model, and falls back to the default model when unavailable.",
+      "smart_desc": "呼び出したユーザーは自分のランタイムを使います。設定したモデルがそのランタイムで利用できる必要があります。",
       "smart_title": "Smart runtime"
     }
   },

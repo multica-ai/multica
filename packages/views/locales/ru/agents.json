@@ -219,7 +219,7 @@
     "edit_description_title": "Изменить описание",
     "description_placeholder": "Чем занимается этот агент?",
     "cancel": "Отмена",
-    "prop_recommended_runtime": "Recommended runtime",
+    "prop_recommended_runtime": "Рекомендуемый CLI",
     "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel run limit."
   },
   "overview": {
@@ -532,12 +532,12 @@
       "select_image_toast": "Пожалуйста, выберите файл изображения.",
       "upload_failed_toast": "Не удалось загрузить аватар"
     },
-    "recommended_runtime_label": "Recommended runtime",
+    "recommended_runtime_label": "Рекомендуемый CLI",
     "share_runtime": {
       "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
       "fixed_title": "Fixed runtime",
       "label": "Runtime policy",
-      "smart_desc": "Each caller uses their own runtime, defaults to the recommended model, and falls back to the default model when unavailable.",
+      "smart_desc": "Каждый пользователь запускает агента в своей среде выполнения. Выбранная модель должна быть доступна в этой среде.",
       "smart_title": "Smart runtime"
     }
   },

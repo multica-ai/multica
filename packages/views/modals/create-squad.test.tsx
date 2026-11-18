@@ -30,6 +30,11 @@ const mocks = vi.hoisted(() => ({
   invalidate: vi.fn(),
 }));
 
+vi.mock("@multica/core/agents", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/agents")>()),
+  useRecentAgents: () => ({ recentAgents: [], recentIds: new Set(), recordRecentAgent: vi.fn() }),
+}));
+
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (opts: { queryKey?: unknown[] }) => {
     const key = opts.queryKey ?? [];

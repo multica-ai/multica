@@ -7,6 +7,11 @@ import { PillButton } from "../../../common/pill-button";
 import { AssigneePicker } from "./assignee-picker";
 import { PriorityPicker } from "./priority-picker";
 
+vi.mock("@multica/core/agents", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/agents")>()),
+  useRecentAgents: () => ({ recentAgents: [], recentIds: new Set(), recordRecentAgent: vi.fn() }),
+}));
+
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
   useQuery: () => ({ data: [] }),
