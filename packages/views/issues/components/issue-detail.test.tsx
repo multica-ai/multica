@@ -3008,26 +3008,39 @@ describe("IssueDetail (shared)", () => {
         driftStart ||= performance.now();
         return Math.min(performance.now() - driftStart, 300);
       };
+      // The update lands between two frames of the alignment loop, after its
+      // second measurement of the mounted anchor. Timing it from the test
+      // instead raced the loop on slow CI runners.
+      let interrupt: (() => void) | null = null;
+      let alignedReads = 0;
+      let interrupted = false;
       const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
         const container = this.closest<HTMLElement>("[data-tab-scroll-root]");
         if (this === container) return new DOMRect(0, 0, 400, 200);
         if (this.id === "comment-comment-2" && container) {
+          if (this.dataset.virtualThreadMounted !== "false" && ++alignedReads === 2 && interrupt) {
+            const update = interrupt;
+            setTimeout(() => {
+              update();
+              interrupted = true;
+            }, 0);
+          }
           return new DOMRect(0, 250 + drift() - container.scrollTop, 400, 100);
         }
         return new DOMRect(0, 0, 0, 0);
       });
       try {
         const { queryClient } = renderIssueDetailWithHighlight("comment-2");
+        interrupt = () =>
+          act(() => {
+            queryClient.setQueryData<TimelineEntry[]>(["issues", "timeline", "issue-1"], (old) => [
+              ...(old ?? []),
+              { ...mockTimeline[0]!, id: "comment-late", content: "Arrived mid-landing", created_at: "2026-01-18T00:00:00Z" },
+            ]);
+          });
         await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
+        await waitFor(() => expect(interrupted).toBe(true));
         const container = document.querySelector<HTMLElement>("[data-tab-scroll-root]")!;
-        act(() => {
-          queryClient.setQueryData<TimelineEntry[]>(["issues", "timeline", "issue-1"], (old) => [
-            ...(old ?? []),
-            { ...mockTimeline[0]!, id: "comment-late", content: "Arrived mid-landing", created_at: "2026-01-18T00:00:00Z" },
-          ]);
-        });
-        expect(driftStart).toBeGreaterThan(0);
-        expect(performance.now() - driftStart).toBeLessThan(300);
         // 250 + 300 drift - 16 top gap: where the comment sits once settled.
         await waitFor(() => expect(container.scrollTop).toBe(534), { timeout: 2000 });
       } finally {

@@ -162,6 +162,58 @@ These are observed local measurements, not latency thresholds. Stop other
 run-owned builds/tests before measuring; the report also records system load.
 Destroy the API environment after the comparison with `make destroy ARGS="--yes"`.
 
+## Core paths: big issues and Inbox switching
+
+`core-paths.spec.ts` is the benchmark the performance work (MUL-9539) is
+judged by. It measures the two paths people report as slow, on the production
+UI against a real local API, with a seeded "large workspace":
+
+- **issue**: open a big issue by URL, scroll its history to the end at a
+  steady pace while the images load, then, from the middle of the history,
+  toggle the left nav (⌘B) and the right sidebar ten times each. It runs on
+  two issues: `large` (300 comments, 80 images, 70 runs, 40 sub-issues) and
+  `p99` (54 / 54 / 36 / 38, the non-zero p99 of a production sample).
+- **inbox**: click through twenty rows of the Work panel's Inbox, then go back
+  and forth between the first five. `PERF_INBOX_ROWS=20` (default) uses the
+  largest section limit; `PERF_INBOX_ROWS=all` first presses "Show N more".
+  A switch ends when the notified comment is in view; `PERF_INBOX_UNTIL=title`
+  ends it at the issue title instead, for refs older than #10872 that do not
+  bring the comment into view.
+
+Each step reports **time until the content is on screen** and **stalls**:
+frames longer than 50 ms (Long Animation Frames), the longest one, and the
+scripts behind the worst. Interactions start at the click event's own
+timestamp and end in the frame where the target is laid out in the viewport,
+so Playwright's IPC is not in the number. A step whose content never appears
+fails rather than reporting a fast time.
+
+The dataset (`lib/core-dataset.ts`) takes its sizes from production
+aggregates: ~1,000 issues, ~1,800 notifications of which ~950 unread, and the
+issues above. Text, structure and image bytes are deterministic; the report
+carries a digest, and `scripts/perf-core-report.mjs` refuses to compare
+reports from different datasets. The first run seeds a `perf-core` workspace
+(about a minute) and later runs reuse it.
+
+```bash
+make up C=api ARGS="--ephemeral"
+NEXT_PUBLIC_API_URL='' NEXT_PUBLIC_WS_URL='' pnpm --filter @multica/web build
+(cd apps/web && REMOTE_API_URL=http://localhost:<api-port> pnpm exec next start --port 3000) &
+PERF_SCENARIO=core-paths PERF_REPORT_PATH=$PWD/perf/main.json \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts core-paths.spec.ts"
+node scripts/perf-core-report.mjs main=perf/main.json [other=perf/other.json ...]
+```
+
+`PERF_SCENARIO=core-issue` or `core-inbox` runs one scenario;
+`PERF_ISSUES=large` narrows the issue scenario; `PERF_REPEATS` (default 5)
+and `PERF_WARMUP` (default 1) set the rounds, each in a fresh browser context.
+`PERF_CPU_THROTTLE=4` slows the CPU for the whole sample: an M-series Mac
+absorbs work that a mid-range laptop shows as stalls, and a fix that only
+helps there (#10767's left-nav toggle) is invisible unthrottled. Sidebar
+toggles also report main-thread work per toggle, the most stable of the
+numbers.
+To compare refs, build each ref in its own worktree and run the spec from one
+checkout against each server in turn, never two at once.
+
 ## Inbox jump
 
 `inbox-jump.spec.ts` opens a notification about a reply deep in a long issue
