@@ -121,6 +121,21 @@ describe("PullRequestsSection (MUL-7429)", () => {
     expect(screen.queryByText(enIssues.detail.pull_requests_empty_title)).not.toBeInTheDocument();
   });
 
+  it("opens the + menu on a click the moment it appears", async () => {
+    renderSection();
+    await new Promise<void>((resolve) => {
+      const observer = new MutationObserver(() => {
+        const add = document.querySelector<HTMLElement>('button[aria-label="Add"]');
+        if (!add) return;
+        observer.disconnect();
+        fireEvent.click(add);
+        resolve();
+      });
+      observer.observe(document.body, { subtree: true, childList: true });
+    });
+    expect(await screen.findByRole("menuitem", { name: "Keep status when PRs merge" })).toBeInTheDocument();
+  });
+
   it("shows the section header with its actions once a PR is linked, and leaves the + menu", async () => {
     mockPullRequests = [linkedPR];
     renderSection();

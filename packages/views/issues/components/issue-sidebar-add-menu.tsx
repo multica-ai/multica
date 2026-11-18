@@ -5,7 +5,7 @@ import {
   Fragment,
   useCallback,
   useContext,
-  useEffect,
+  useLayoutEffect,
   useState,
   type ReactNode,
 } from "react";
@@ -61,11 +61,13 @@ export function IssueSidebarAddMenuProvider({ children }: { children: ReactNode 
 export function useIssueSidebarAddEntry(key: string, entry: IssueSidebarAddEntry | null) {
   const setEntry = useContext(SetEntryContext);
   // Every render: the items close over the section's latest state. Only the
-  // menu reads the entries, so this cannot feed back into the section.
-  useEffect(() => {
+  // menu reads the entries, so this cannot feed back into the section. A
+  // layout effect commits the "+" with the section that went empty, ready to
+  // open, instead of a frame later with its menu still being set up.
+  useLayoutEffect(() => {
     setEntry?.(key, entry);
   });
-  useEffect(() => () => setEntry?.(key, null), [setEntry, key]);
+  useLayoutEffect(() => () => setEntry?.(key, null), [setEntry, key]);
 }
 
 /** The sidebar's "+": what empty sections offer to add. Absent when none do. */
