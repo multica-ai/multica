@@ -3323,6 +3323,9 @@ export const InboxItemListSchema = z.array(
       type: z.string(),
       severity: z.string(),
       issue_id: z.string().nullish(),
+      // Only picks the link; a bad value falls back to the issue_id link
+      // instead of failing the whole list.
+      issue_identifier: z.string().min(1).nullish().catch(null),
       title: z.string(),
       body: z.string().nullish(),
       issue_status: z.string().nullish(),
