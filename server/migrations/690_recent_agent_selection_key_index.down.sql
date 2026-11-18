@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_recent_agent_selection_workspace_user;
