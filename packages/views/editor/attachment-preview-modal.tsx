@@ -798,15 +798,20 @@ function PreviewPanel({
     htmlLocation,
   };
 
-  // Gallery navigation hands this panel an attachment the reader never
-  // clicked, so — unlike the click-through path, where <Attachment> had
-  // already upgraded the URL — the viewer has to run the re-sign itself. A
-  // no-op for URLs that are already loadable (signed CDN, public storage).
+  // Cached attachment records can outlive their signed URLs. Revalidate on
+  // opening the viewer; external images without an identity keep their URL.
+  const cdnDomain = useConfigStore((s) => s.cdnDomain);
   const resigned = useResignedInlineMedia(
-    state.attachmentId ?? undefined,
+    kind === "image"
+      ? state.attachmentId ?? attachmentIdFromStorageURL(state.mediaUrl, cdnDomain)
+      : undefined,
     state.mediaUrl,
     kind === "image",
+    { refreshOnMount: kind === "image" },
   );
+  useEffect(() => {
+    if (kind === "image" && resigned.failed) onImageError?.();
+  }, [kind, resigned.failed, onImageError]);
   // Until that upgrade lands the picked URL may be one this client cannot
   // load natively (desktop, split-origin web); handed to <img> it would fail
   // and, in a sequence, read as a broken image to skip. Hold the previous
@@ -824,7 +829,6 @@ function PreviewPanel({
 
   // Video, audio and PDF stream straight from a URL the reader has never
   // loaded, so they get a freshly signed one rather than the record's.
-  const cdnDomain = useConfigStore((s) => s.cdnDomain);
   const streamed = useFreshStreamedMediaURL(
     state.attachmentId ??
       attachmentIdFromLocalUploadURL(state.mediaUrl) ??
@@ -1277,7 +1281,7 @@ function PreviewPanel({
               },
             }}
           >
-            {kind === "image" && imageFailed ? (
+            {kind === "image" && (imageFailed || resigned.failed) ? (
               <UnsupportedFallback
                 message={t(($) => $.attachment.preview_failed)}
                 onDownload={handleDownload}

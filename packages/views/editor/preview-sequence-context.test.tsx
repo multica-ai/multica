@@ -320,7 +320,7 @@ describe("PreviewSequenceProvider", () => {
     expectCounter("3 / 3");
   });
 
-  it("skips a broken image and says so", () => {
+  it("skips a broken image and says so", async () => {
     render(
       <PreviewSequenceProvider items={sequenceOf(THREE)}>
         <Opener openKey={THREE[0]!.id} />
@@ -334,8 +334,13 @@ describe("PreviewSequenceProvider", () => {
     });
     expectCounter("2 / 3");
 
+    const image = await waitFor(() => {
+      const image = screen.getByRole("dialog").querySelector("img");
+      expect(image).not.toBeNull();
+      return image!;
+    });
     act(() => {
-      fireEvent.error(screen.getByRole("dialog").querySelector("img")!);
+      fireEvent.error(image);
     });
 
     // Kept moving the way the reader was going, and the dead frame is now out
@@ -348,7 +353,7 @@ describe("PreviewSequenceProvider", () => {
     expectCounter("1 / 3");
   });
 
-  it("stays on a file opened by name when it fails, and says so on the stage", () => {
+  it("stays on a file opened by name when it fails, and says so on the stage", async () => {
     function PinnedOpener() {
       const sequence = usePreviewSequence();
       return (
@@ -366,6 +371,12 @@ describe("PreviewSequenceProvider", () => {
       fireEvent.click(screen.getByText("open"));
     });
     expectCounter("2 / 3");
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("dialog").querySelector("img")?.getAttribute("src"),
+      ).toBe(THREE[1]!.download_url),
+    );
 
     act(() => {
       fireEvent.error(screen.getByRole("dialog").querySelector("img")!);
@@ -386,6 +397,11 @@ describe("PreviewSequenceProvider", () => {
       fireEvent.click(nextButton());
     });
     expectCounter("3 / 3");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("dialog").querySelector("img")?.getAttribute("src"),
+      ).toBe(THREE[2]!.download_url),
+    );
     act(() => {
       fireEvent.error(screen.getByRole("dialog").querySelector("img")!);
     });
@@ -418,7 +434,9 @@ describe("PreviewSequenceProvider", () => {
       fireEvent.click(nextButton());
     });
     expectCounter("3 / 3");
-    expect(screen.getByRole("dialog").querySelector("img")).not.toBeNull();
+    await waitFor(() =>
+      expect(screen.getByRole("dialog").querySelector("img")).not.toBeNull(),
+    );
   });
 
   it("leaves the arrow keys to a focused video", async () => {
@@ -454,7 +472,7 @@ describe("PreviewSequenceProvider", () => {
 
   // Review of #8763: the panel is reused across kinds, so the frame it held
   // for a PDF must never reach the image canvas while the next image decodes.
-  it("shows the image itself, not the previous file, while it decodes", () => {
+  it("shows the image itself, not the previous file, while it decodes", async () => {
     const restoreDecode = stubDecode(() => new Promise<void>(() => {}));
     try {
       const mixed = [
@@ -474,8 +492,10 @@ describe("PreviewSequenceProvider", () => {
         fireEvent.click(nextButton());
       });
 
-      const image = screen.getByRole("dialog").querySelector("img")!;
-      expect(image.getAttribute("src")).toBe(mixed[1]!.download_url);
+      await waitFor(() =>
+        expect(
+          screen.getByRole("dialog").querySelector("img")?.getAttribute("src")).toBe(mixed[1]!.download_url),
+      );
       expectCounter("2 / 3");
       expect(nextButton()).not.toBeDisabled();
       expect(toastErrorMock).not.toHaveBeenCalled();
@@ -500,7 +520,11 @@ describe("PreviewSequenceProvider", () => {
       act(() => {
         fireEvent.click(screen.getByText("open"));
       });
-      await act(async () => {});
+      await waitFor(() =>
+        expect(
+          screen.getByRole("dialog").querySelector("img")?.getAttribute("src"),
+        ).toBe(first.download_url),
+      );
       act(() => {
         fireEvent.click(nextButton());
       });
