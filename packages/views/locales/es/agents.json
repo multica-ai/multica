@@ -200,7 +200,9 @@
     "edit_description_title": "Editar descripción",
     "description_placeholder": "¿Qué hace este agente?",
     "cancel": "Cancelar",
-    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents."
+    "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents.",
+    "prop_recommended_runtime": "Recommended runtime",
+    "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel run limit."
   },
   "overview": {
     "attention_title": "Ejecuciones que requieren atención",
@@ -242,7 +244,11 @@
     "service_tier_standard_description": "Velocidad estándar y uso estándar",
     "service_tier_tooltip": "Velocidad · {{value}}",
     "service_tier_clear": "Predeterminado del runtime",
-    "service_tier_clear_title": "Quitar la sobreescritura de velocidad y dejar que la configuración local de Codex decida"
+    "service_tier_clear_title": "Quitar la sobreescritura de velocidad y dejar que la configuración local de Codex decida",
+    "cli_empty": "No CLIs",
+    "cli_none": "No CLI",
+    "cli_tooltip": "CLI · {{name}}",
+    "cli_tooltip_none": "CLI · none selected"
   },
   "model_dropdown": {
     "label": "Modelo",
@@ -252,7 +258,8 @@
     "managed_by_runtime_title": "La selección de modelo la gestiona este runtime.",
     "managed_by_runtime_hint": "Configura el modelo en el host del runtime (p. ej., Hermes lo lee de su propio archivo de configuración).",
     "discovery_failed": "falló el descubrimiento",
-    "clear_full": "Limpiar selección (usar el predeterminado del proveedor)"
+    "clear_full": "Limpiar selección (usar el predeterminado del proveedor)",
+    "recommended_label": "Recommended model"
   },
   "tabs": {
     "work": "Trabajo",
@@ -472,6 +479,14 @@
       "remove_aria": "Quitar avatar",
       "select_image_toast": "Selecciona un archivo de imagen.",
       "upload_failed_toast": "Error al subir el avatar"
+    },
+    "recommended_runtime_label": "Recommended runtime",
+    "share_runtime": {
+      "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
+      "fixed_title": "Fixed runtime",
+      "label": "Runtime policy",
+      "smart_desc": "Each caller uses their own runtime, defaults to the recommended model, and falls back to the default model when unavailable.",
+      "smart_title": "Smart runtime"
     }
   },
   "conversation_starters": {
@@ -1100,5 +1115,34 @@
       "comment": "Corregido: las tarjetas de precios se apilan en una columna por debajo de 375 px. El PR está abierto y los tests pasan.",
       "step_read": "Leer {{file}}"
     }
+  },
+  "runtime_config": {
+    "confirm_notice": "Got it",
+    "confirming_notice": "Saving…",
+    "current_concurrency": "Concurrency",
+    "current_model": "Model",
+    "current_runtime": "Runtime",
+    "current_section": "My Current Configuration",
+    "current_speed": "Speed",
+    "current_strategy": "Configuration strategy",
+    "current_thinking": "Thinking",
+    "load_failed": "Failed to load current configuration.",
+    "loading": "Loading current configuration…",
+    "not_editable": "Please add a runtime first.",
+    "notice_required": "This agent used your runtime with recommended or default settings. Review and save your own configuration here if needed.",
+    "notice_seen_failed_toast": "Failed to confirm runtime notice",
+    "resolution": {
+      "model_unavailable": "Runtime model unavailable",
+      "no_user_runtime": "Please add a runtime first",
+      "runtime_offline": "Runtime offline",
+      "runtime_unavailable": "Runtime unavailable"
+    },
+    "save_failed_toast": "Failed to save current configuration",
+    "saved_toast": "Current configuration saved",
+    "strategy_custom": "Custom",
+    "strategy_recommended": "Recommended"
+  },
+  "runtime_policy": {
+    "smart": "Smart"
   }
 }

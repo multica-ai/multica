@@ -225,13 +225,14 @@ export function buildDuplicateDraft(
 export function buildCreateAgentRequest(options: {
   draft: AgentDraft;
   runtimeId: string;
+  runtimeCli?: string;
   /** Provider of `runtimeId`; drafts outlive runtime switches, so fields the target runtime cannot run are dropped here. */
   runtimeProvider?: string;
   /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
   duplicateSource?: Agent | null;
 }): CreateAgentRequest {
-  const { runtimeId, runtimeProvider, template, duplicateSource } = options;
+  const { runtimeId, runtimeCli, runtimeProvider, template, duplicateSource } = options;
   const qoder = runtimeProvider === QODER_PROVIDER;
   // The Qoder bridge refuses skills and execution overrides, and the form
   // hides them once Qoder is chosen.
@@ -259,7 +260,8 @@ export function buildCreateAgentRequest(options: {
         }
       : {}),
     avatar_url: draft.avatarUrl ?? undefined,
-    runtime_id: runtimeId,
+    runtime_id: runtimeCli ? "" : runtimeId,
+    ...(runtimeCli ? { cli: runtimeCli.trim().toLowerCase() } : {}),
     ...(draft.qoderAgentId ? { runtime_config: { qoder_agent_id: draft.qoderAgentId } } : {}),
     model: draft.model.trim() || undefined,
     thinking_level: draft.thinkingLevel.trim() || undefined,

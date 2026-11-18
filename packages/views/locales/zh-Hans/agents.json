@@ -191,7 +191,9 @@
     "rename_required": "名称必填",
     "edit_description_title": "编辑描述",
     "description_placeholder": "这个智能体做什么？",
-    "cancel": "取消"
+    "cancel": "取消",
+    "prop_recommended_runtime": "推荐运行时",
+    "section_execution_hint": "选择运行时、模型、思考强度、速度和并行运行上限。"
   },
   "overview": {
     "attention_title": "需要处理的运行",
@@ -248,7 +250,11 @@
     "service_tier_standard_description": "明确使用标准速度和标准用量",
     "service_tier_tooltip": "速度 · {{value}}",
     "service_tier_clear": "运行时默认",
-    "service_tier_clear_title": "清除速度覆盖，交由本地 Codex 配置决定"
+    "service_tier_clear_title": "清除速度覆盖，交由本地 Codex 配置决定",
+    "cli_empty": "暂无 CLI",
+    "cli_none": "未选择 CLI",
+    "cli_tooltip": "CLI · {{name}}",
+    "cli_tooltip_none": "CLI · 未选择"
   },
   "model_dropdown": {
     "label": "模型",
@@ -258,7 +264,8 @@
     "managed_by_runtime_title": "模型选择由该运行时管理。",
     "managed_by_runtime_hint": "请在运行时主机上配置模型（例如 Hermes 会从自身配置文件读取）。",
     "discovery_failed": "发现失败",
-    "clear_full": "清除选择（使用提供方默认）"
+    "clear_full": "清除选择（使用提供方默认）",
+    "recommended_label": "推荐模型"
   },
   "tabs": {
     "work": "工作",
@@ -473,6 +480,14 @@
       "remove_aria": "移除头像",
       "select_image_toast": "请选择图片文件。",
       "upload_failed_toast": "头像上传失败"
+    },
+    "recommended_runtime_label": "推荐运行时",
+    "share_runtime": {
+      "fixed_desc": "所有人调用该智能体时使用它绑定的运行时配置。",
+      "fixed_title": "固定运行时",
+      "label": "运行时策略",
+      "smart_desc": "调用者使用自己的运行时，默认使用推荐模型，不存在则回退默认模型",
+      "smart_title": "智能运行时"
     }
   },
   "conversation_starters": {
@@ -1071,5 +1086,34 @@
       "comment": "修好了：价格卡片在 375px 下改为单列。已开 PR，测试通过。",
       "step_read": "读取 {{file}}"
     }
+  },
+  "runtime_config": {
+    "confirm_notice": "知道了",
+    "confirming_notice": "保存中…",
+    "current_concurrency": "并发",
+    "current_model": "模型",
+    "current_runtime": "运行时",
+    "current_section": "我的当前配置",
+    "current_speed": "速度",
+    "current_strategy": "配置策略",
+    "current_thinking": "思考",
+    "load_failed": "当前配置加载失败。",
+    "loading": "正在加载当前配置…",
+    "not_editable": "请先添加运行时。",
+    "notice_required": "该智能体已使用你的运行时和推荐或默认配置运行。你可以在这里检查并保存自己的配置。",
+    "notice_seen_failed_toast": "确认运行时提示失败",
+    "resolution": {
+      "model_unavailable": "运行时模型不可用",
+      "no_user_runtime": "请先添加运行时",
+      "runtime_offline": "运行时离线",
+      "runtime_unavailable": "运行时不可用"
+    },
+    "save_failed_toast": "保存当前配置失败",
+    "saved_toast": "已保存我的当前配置",
+    "strategy_custom": "自定义",
+    "strategy_recommended": "推荐"
+  },
+  "runtime_policy": {
+    "smart": "智能"
   }
 }

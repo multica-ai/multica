@@ -191,7 +191,9 @@
     "rename_required": "이름은 필수입니다",
     "edit_description_title": "설명 수정",
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
-    "cancel": "취소"
+    "cancel": "취소",
+    "prop_recommended_runtime": "Recommended runtime",
+    "section_execution_hint": "런타임, 모델, 추론 수준, 속도와 병렬 실행 한도를 설정합니다."
   },
   "overview": {
     "attention_title": "확인이 필요한 실행",
@@ -248,7 +250,11 @@
     "service_tier_standard_description": "기본 속도 및 표준 사용량",
     "service_tier_tooltip": "속도 · {{value}}",
     "service_tier_clear": "런타임 기본값",
-    "service_tier_clear_title": "속도 재정의를 지우고 로컬 Codex 설정에 맡깁니다"
+    "service_tier_clear_title": "속도 재정의를 지우고 로컬 Codex 설정에 맡깁니다",
+    "cli_empty": "CLI 없음",
+    "cli_none": "CLI 없음",
+    "cli_tooltip": "CLI · {{name}}",
+    "cli_tooltip_none": "CLI · 선택 안 됨"
   },
   "model_dropdown": {
     "label": "모델",
@@ -258,7 +264,8 @@
     "managed_by_runtime_title": "이 런타임에서 모델 선택을 관리합니다.",
     "managed_by_runtime_hint": "런타임 호스트에서 모델을 설정하세요. 예: Hermes는 자체 설정 파일에서 읽습니다.",
     "discovery_failed": "검색 실패",
-    "clear_full": "선택 지우기(제공자 기본값 사용)"
+    "clear_full": "선택 지우기(제공자 기본값 사용)",
+    "recommended_label": "Recommended model"
   },
   "tabs": {
     "work": "작업",
@@ -332,6 +339,14 @@
       "remove_aria": "아바타 제거",
       "select_image_toast": "이미지 파일을 선택하세요.",
       "upload_failed_toast": "아바타 업로드 실패"
+    },
+    "recommended_runtime_label": "Recommended runtime",
+    "share_runtime": {
+      "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
+      "fixed_title": "Fixed runtime",
+      "label": "Runtime policy",
+      "smart_desc": "Each caller uses their own runtime, defaults to the recommended model, and falls back to the default model when unavailable.",
+      "smart_title": "Smart runtime"
     }
   },
   "conversation_starters": {
@@ -1071,5 +1086,34 @@
       "comment": "수정했습니다. 375px 이하에서 요금 카드가 한 열로 바뀝니다. PR을 열었고 테스트도 통과했습니다.",
       "step_read": "{{file}} 읽기"
     }
+  },
+  "runtime_config": {
+    "confirm_notice": "Got it",
+    "confirming_notice": "Saving…",
+    "current_concurrency": "Concurrency",
+    "current_model": "Model",
+    "current_runtime": "Runtime",
+    "current_section": "My Current Configuration",
+    "current_speed": "Speed",
+    "current_strategy": "Configuration strategy",
+    "current_thinking": "Thinking",
+    "load_failed": "Failed to load current configuration.",
+    "loading": "Loading current configuration…",
+    "not_editable": "Please add a runtime first.",
+    "notice_required": "This agent used your runtime with recommended or default settings. Review and save your own configuration here if needed.",
+    "notice_seen_failed_toast": "Failed to confirm runtime notice",
+    "resolution": {
+      "model_unavailable": "Runtime model unavailable",
+      "no_user_runtime": "Please add a runtime first",
+      "runtime_offline": "Runtime offline",
+      "runtime_unavailable": "Runtime unavailable"
+    },
+    "save_failed_toast": "Failed to save current configuration",
+    "saved_toast": "Current configuration saved",
+    "strategy_custom": "Custom",
+    "strategy_recommended": "Recommended"
+  },
+  "runtime_policy": {
+    "smart": "Smart"
   }
 }

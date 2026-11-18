@@ -23,6 +23,7 @@ import { splitRuntimeName } from "../../runtimes/components/runtime-machines";
 import { AgentConfigurationPanel } from "./agent-configuration-panel";
 import { CreateAgentFooter } from "./create-agent-footer";
 import { AgentCreateChip, AgentCreateShell } from "./create-shell";
+import { useRuntimeStrategy } from "./use-runtime-strategy";
 import { createPathWithParams } from "./squad-param";
 import { useCreateAgentForm } from "./use-create-agent-form";
 import { useCreateAgentSubmit } from "./use-create-agent-submit";
@@ -115,12 +116,16 @@ export function ManualCreateAgentPage() {
     runtimeId: runtimeParam,
   });
 
+  const runtimeStrategy = useRuntimeStrategy(duplicateAgent);
+
   const submit = useCreateAgentSubmit({
     draft: form.draft,
     runtimeId: form.selectedRuntime?.id ?? null,
+    runtimeCli: form.selectedRuntime?.provider,
     runtimeProvider: form.selectedRuntime?.provider,
     squadId,
     duplicateSource: duplicateAgent,
+    shareRuntime: runtimeStrategy.shareRuntime,
     // The work is committed; leaving it stored would hand the finished agent's
     // fields to whoever opens this form next. Only this flow's slot — another
     // half-finished copy is still someone's unfinished work.
@@ -261,13 +266,29 @@ export function ManualCreateAgentPage() {
               submit.clearNameError();
               form.setDraft((current) => ({ ...current, name }));
             }}
+            shareRuntime={runtimeStrategy.shareRuntime}
+            onShareRuntimeChange={
+              runtimeStrategy.setShareRuntime
+            }
             runtimeSummary={
               duplicateId ? undefined : (
-                <RuntimeSummaryCard
-                  runtime={runtime}
-                  loading={form.runtimesLoading}
-                  onChange={changeRuntime}
-                />
+                // Under the smart runtime policy the panel
+                // must render the Recommended runtime CLI picker, so the
+                // machine summary card is withheld there entirely. Under the
+                // fixed policy it only appears once a machine is explicitly
+                // chosen (two-step flow handoff or the policy switch); with
+                // nothing chosen yet the inline picker stays available.
+                !runtimeStrategy.shareRuntime
+                  ? undefined
+                  : form.draft.runtimeId
+                    ? (
+                      <RuntimeSummaryCard
+                        runtime={runtime}
+                        loading={form.runtimesLoading}
+                        onChange={changeRuntime}
+                      />
+                    )
+                    : undefined
               )
             }
           />

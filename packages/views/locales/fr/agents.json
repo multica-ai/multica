@@ -200,7 +200,9 @@
     "rename_required": "Le nom est obligatoire",
     "edit_description_title": "Modifier la description",
     "description_placeholder": "Que fait cet agent ?",
-    "cancel": "Annuler"
+    "cancel": "Annuler",
+    "prop_recommended_runtime": "Recommended runtime",
+    "section_execution_hint": "Choisissez le runtime, le modèle, le niveau de raisonnement, la vitesse et la limite d’exécutions parallèles."
   },
   "overview": {
     "attention_title": "Des exécutions demandent votre attention",
@@ -260,7 +262,11 @@
     "service_tier_standard_description": "Vitesse et consommation standard",
     "service_tier_tooltip": "Vitesse · {{value}}",
     "service_tier_clear": "Valeur par défaut du runtime",
-    "service_tier_clear_title": "Effacer la surcharge de vitesse et laisser la configuration locale de Codex décider"
+    "service_tier_clear_title": "Effacer la surcharge de vitesse et laisser la configuration locale de Codex décider",
+    "cli_empty": "No CLIs",
+    "cli_none": "No CLI",
+    "cli_tooltip": "CLI · {{name}}",
+    "cli_tooltip_none": "CLI · none selected"
   },
   "model_dropdown": {
     "label": "Modèle",
@@ -270,7 +276,8 @@
     "managed_by_runtime_title": "Le choix du modèle est géré par ce runtime.",
     "managed_by_runtime_hint": "Configurez le modèle sur l'hôte du runtime (Hermes, par exemple, le lit dans son propre fichier de configuration).",
     "discovery_failed": "échec de la détection",
-    "clear_full": "Effacer la sélection (utiliser la valeur par défaut du fournisseur)"
+    "clear_full": "Effacer la sélection (utiliser la valeur par défaut du fournisseur)",
+    "recommended_label": "Recommended model"
   },
   "tabs": {
     "work": "Travail",
@@ -490,6 +497,14 @@
       "remove_aria": "Supprimer l'avatar",
       "select_image_toast": "Veuillez sélectionner un fichier image.",
       "upload_failed_toast": "Échec de l'envoi de l'avatar"
+    },
+    "recommended_runtime_label": "Recommended runtime",
+    "share_runtime": {
+      "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
+      "fixed_title": "Fixed runtime",
+      "label": "Runtime policy",
+      "smart_desc": "Each caller uses their own runtime, defaults to the recommended model, and falls back to the default model when unavailable.",
+      "smart_title": "Smart runtime"
     }
   },
   "conversation_starters": {
@@ -1100,5 +1115,34 @@
       "comment": "Corrigé : sous 375px, les cartes tarifs passent sur une colonne. PR ouverte, tests au vert.",
       "step_read": "Lecture de {{file}}"
     }
+  },
+  "runtime_config": {
+    "confirm_notice": "Got it",
+    "confirming_notice": "Saving…",
+    "current_concurrency": "Concurrency",
+    "current_model": "Model",
+    "current_runtime": "Runtime",
+    "current_section": "My Current Configuration",
+    "current_speed": "Speed",
+    "current_strategy": "Configuration strategy",
+    "current_thinking": "Thinking",
+    "load_failed": "Failed to load current configuration.",
+    "loading": "Loading current configuration…",
+    "not_editable": "Please add a runtime first.",
+    "notice_required": "This agent used your runtime with recommended or default settings. Review and save your own configuration here if needed.",
+    "notice_seen_failed_toast": "Failed to confirm runtime notice",
+    "resolution": {
+      "model_unavailable": "Runtime model unavailable",
+      "no_user_runtime": "Please add a runtime first",
+      "runtime_offline": "Runtime offline",
+      "runtime_unavailable": "Runtime unavailable"
+    },
+    "save_failed_toast": "Failed to save current configuration",
+    "saved_toast": "Current configuration saved",
+    "strategy_custom": "Custom",
+    "strategy_recommended": "Recommended"
+  },
+  "runtime_policy": {
+    "smart": "Smart"
   }
 }

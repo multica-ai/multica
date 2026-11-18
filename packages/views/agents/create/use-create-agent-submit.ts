@@ -46,12 +46,15 @@ export function classifyAgentCreateError(
 export function useCreateAgentSubmit(options: {
   draft: AgentDraft;
   runtimeId: string | null;
+  /** Smart-runtime recommended CLI. Sent only when creating with smart runtime. */
+  runtimeCli?: string;
   /** Provider of `runtimeId`, so settings it cannot run are not submitted. */
   runtimeProvider?: string;
   squadId: string | null;
   /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
   duplicateSource?: Agent | null;
+  shareRuntime?: boolean;
   /** Runs after the agent is committed, before navigation. */
   onCreated?: (agent: Agent) => Promise<void> | void;
 }) {
@@ -69,10 +72,12 @@ export function useCreateAgentSubmit(options: {
   const {
     draft,
     runtimeId,
+    runtimeCli,
     runtimeProvider,
     squadId,
     template,
     duplicateSource,
+    shareRuntime,
     onCreated,
   } = options;
 
@@ -82,15 +87,18 @@ export function useCreateAgentSubmit(options: {
     setNameError(null);
     setFormError(null);
     try {
-      const agent = await api.createAgent(
-        buildCreateAgentRequest({
-          draft,
-          runtimeId,
-          runtimeProvider,
-          template,
-          duplicateSource,
-        }),
-      );
+      const request = buildCreateAgentRequest({
+        draft,
+        runtimeId,
+        runtimeCli: shareRuntime === false ? runtimeCli : undefined,
+        runtimeProvider,
+        template,
+        duplicateSource,
+      });
+        if (shareRuntime !== undefined) {
+        request.share_runtime = shareRuntime;
+      }
+      const agent = await api.createAgent(request);
       if (!agent.id) throw new Error(t(($) => $.creation_studio.create_failed));
 
       if (squadId) {

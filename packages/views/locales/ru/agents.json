@@ -218,7 +218,9 @@
     "rename_required": "Имя обязательно",
     "edit_description_title": "Изменить описание",
     "description_placeholder": "Чем занимается этот агент?",
-    "cancel": "Отмена"
+    "cancel": "Отмена",
+    "prop_recommended_runtime": "Recommended runtime",
+    "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel run limit."
   },
   "overview": {
     "attention_title": "Запуски требуют внимания",
@@ -284,7 +286,11 @@
     "service_tier_standard_description": "Стандартная скорость и стандартное использование",
     "service_tier_tooltip": "Скорость · {{value}}",
     "service_tier_clear": "По умолчанию для среды выполнения",
-    "service_tier_clear_title": "Сбросить переопределение скорости и позволить локальной конфигурации Codex решить это"
+    "service_tier_clear_title": "Сбросить переопределение скорости и позволить локальной конфигурации Codex решить это",
+    "cli_empty": "No CLIs",
+    "cli_none": "No CLI",
+    "cli_tooltip": "CLI · {{name}}",
+    "cli_tooltip_none": "CLI · none selected"
   },
   "model_dropdown": {
     "label": "Модель",
@@ -294,7 +300,8 @@
     "managed_by_runtime_title": "Выбор модели управляется этой средой выполнения.",
     "managed_by_runtime_hint": "Настройте модель на хосте среды выполнения (например, Hermes считывает её из собственного файла конфигурации).",
     "discovery_failed": "не удалось получить список",
-    "clear_full": "Очистить выбор (использовать значение провайдера по умолчанию)"
+    "clear_full": "Очистить выбор (использовать значение провайдера по умолчанию)",
+    "recommended_label": "Recommended model"
   },
   "tabs": {
     "work": "Работа",
@@ -524,6 +531,14 @@
       "remove_aria": "Удалить аватар",
       "select_image_toast": "Пожалуйста, выберите файл изображения.",
       "upload_failed_toast": "Не удалось загрузить аватар"
+    },
+    "recommended_runtime_label": "Recommended runtime",
+    "share_runtime": {
+      "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
+      "fixed_title": "Fixed runtime",
+      "label": "Runtime policy",
+      "smart_desc": "Each caller uses their own runtime, defaults to the recommended model, and falls back to the default model when unavailable.",
+      "smart_title": "Smart runtime"
     }
   },
   "conversation_starters": {
@@ -1158,5 +1173,34 @@
       }
     },
     "title": "Создайте первого ИИ-коллегу"
+  },
+  "runtime_config": {
+    "confirm_notice": "Got it",
+    "confirming_notice": "Saving…",
+    "current_concurrency": "Concurrency",
+    "current_model": "Model",
+    "current_runtime": "Runtime",
+    "current_section": "My Current Configuration",
+    "current_speed": "Speed",
+    "current_strategy": "Configuration strategy",
+    "current_thinking": "Thinking",
+    "load_failed": "Failed to load current configuration.",
+    "loading": "Loading current configuration…",
+    "not_editable": "Please add a runtime first.",
+    "notice_required": "This agent used your runtime with recommended or default settings. Review and save your own configuration here if needed.",
+    "notice_seen_failed_toast": "Failed to confirm runtime notice",
+    "resolution": {
+      "model_unavailable": "Runtime model unavailable",
+      "no_user_runtime": "Please add a runtime first",
+      "runtime_offline": "Runtime offline",
+      "runtime_unavailable": "Runtime unavailable"
+    },
+    "save_failed_toast": "Failed to save current configuration",
+    "saved_toast": "Current configuration saved",
+    "strategy_custom": "Custom",
+    "strategy_recommended": "Recommended"
+  },
+  "runtime_policy": {
+    "smart": "Smart"
   }
 }

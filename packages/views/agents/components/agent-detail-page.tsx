@@ -24,6 +24,8 @@ import type { Agent, UpdateAgentRequest } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
   isAgentRuntimeBound,
+  agentEffectiveRuntimeId,
+  agentRuntimeConfigKeys,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
@@ -242,8 +244,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
       // resolves last (e.g. flipping visibility then runtime simultaneously
       // and only the visibility PATCH fails).
       const optimisticData =
-        typeof data.runtime_id === "string"
-          ? { ...data, runtime_bound: data.runtime_id.trim().length > 0 }
+        typeof data.runtime_id === "string" && data.runtime_id.trim().length > 0
+          ? { ...data, runtime_bound: true }
           : data;
       const queryKey = workspaceKeys.agents(wsId);
       const detailQueryKey = workspaceKeys.agent(wsId, id);
@@ -277,6 +279,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         );
         cacheAgentResponse(qc, wsId, updatedAgent, { insertIntoList: false });
         void qc.invalidateQueries({ queryKey });
+        void qc.invalidateQueries({ queryKey: agentRuntimeConfigKeys.current(id) });
         toast.success(t(($) => $.detail.agent_updated_toast));
       } catch (e) {
         if (prevListAgent) {
@@ -437,7 +440,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const isArchived = !!agent.archived_at;
   const runtimeBound = isAgentRuntimeBound(agent);
   const runtime = runtimeBound
-    ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
+    ? runtimes.find((r) => r.id === agentEffectiveRuntimeId(agent)) ?? null
     : null;
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
