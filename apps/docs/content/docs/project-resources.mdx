@@ -38,7 +38,7 @@ When creating a project, you can also pick repositories directly under **Repos**
 
 A resource's `ref` sets the branch, tag, or commit that later checkouts use by default. `default_branch_hint` only gives the agent a default-branch hint and does not force a branch switch.
 
-For a managed repository, the agent starts in the task working directory. `multica repo checkout` normally creates a subdirectory for the repository and prints its path. Run commands that need the repository root from that path. If the agent process itself must start at the root and you control the runtime computer, attach an existing checkout as a local directory in `in_place` mode.
+For a managed repository, the agent starts in the task working directory. `multica repo checkout` normally creates a subdirectory for the repository and prints its path. Run commands that need the repository root from that path. If the agent process itself must start at the root and you control the runtime computer, attach an existing checkout as a local directory. Both `in_place` and `worktree` start the agent at a repository root; prefer `worktree` for git repositories to keep runs isolated and parallel. See [How runs share the directory](#how-runs-share-the-directory).
 
 ## Add a local directory
 
