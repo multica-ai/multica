@@ -242,11 +242,32 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		{"provider_network with retry disabled (max_attempts=1) never retries", provNet, 1, 1, false},
 		{"timeout keeps single immediate retry", "timeout", 1, 2, true},
 		{"timeout exhausts at attempt 2", "timeout", 2, 2, false},
+		{"structured Codex overload retries within shared budget", string(taskfailure.ReasonCodexServerOverloaded), 1, 2, true},
+		{"structured Codex overload respects disabled retries", string(taskfailure.ReasonCodexServerOverloaded), 1, 1, false},
+		{"generic capacity remains terminal", string(taskfailure.ReasonAgentProviderCapacityOrRateLimit), 1, 2, false},
 		{"non-retryable reason never retries", "agent_error.unknown", 1, 2, false},
 	}
 	for _, tc := range eligCases {
 		if got := retryEligible(tc.reason, mkTask(tc.attempt, tc.max)); got != tc.want {
 			t.Errorf("%s: retryEligible(%q, attempt=%d/max=%d) = %v, want %v", tc.name, tc.reason, tc.attempt, tc.max, got, tc.want)
+		}
+	}
+}
+
+func TestCodexOverloadTaskRetrySchedule(t *testing.T) {
+	reason := string(taskfailure.ReasonCodexServerOverloaded)
+	for attempt := int32(1); attempt <= 8; attempt++ {
+		for i := 0; i < 30; i++ {
+			delay := retryDelayForAttempt(reason, attempt)
+			var floor, ceiling time.Duration
+			if attempt == 1 {
+				floor, ceiling = 50*time.Second, 70*time.Second
+			} else {
+				floor, ceiling = 110*time.Second, 5*time.Minute+10*time.Second
+			}
+			if delay < floor || delay > ceiling {
+				t.Fatalf("attempt %d delay = %s outside [%s, %s]", attempt, delay, floor, ceiling)
+			}
 		}
 	}
 }
@@ -266,6 +287,7 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// Capacity/rate-limit failures keep their existing user-retry posture.
 		// Correcting a misleading auth label must not enable an automatic resend.
 		{reason: "agent_error.provider_capacity_or_rate_limit", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
+		{reason: string(taskfailure.ReasonCodexServerOverloaded), wantType: "agent_error", wantResumeOK: true, wantRetry: true},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},

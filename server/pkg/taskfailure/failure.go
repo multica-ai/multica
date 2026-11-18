@@ -221,6 +221,9 @@ const (
 	// overloaded, no capacity available. Transient — backoff +
 	// retry is appropriate.
 	ReasonAgentProviderCapacityOrRateLimit Reason = "agent_error.provider_capacity_or_rate_limit"
+	// Only a Codex adapter with structured serverOverloaded evidence and
+	// confirmed process cleanup may report this reason. Never infer it from text.
+	ReasonCodexServerOverloaded Reason = "agent_error.codex_server_overloaded"
 
 	// ReasonAgentProviderServerError: provider 5xx, internal error,
 	// service unavailable, bad gateway. Transient — short backoff.
@@ -277,7 +280,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 27 reasons. Order is
+// allReasons is the canonical ordered list of reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -309,6 +312,7 @@ var allReasons = []Reason{
 	ReasonAgentProviderAuthOrAccess,
 	ReasonAgentProviderQuotaLimit,
 	ReasonAgentProviderCapacityOrRateLimit,
+	ReasonCodexServerOverloaded,
 	ReasonAgentProviderServerError,
 	ReasonAgentProviderNetwork,
 
