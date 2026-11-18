@@ -23,6 +23,7 @@ import (
 type emailCall struct {
 	label string
 	ctx   context.Context
+	err   error
 }
 
 // stubEmailSender parks every send until the test releases it. A handler that
@@ -60,7 +61,7 @@ func (s *stubEmailSender) send(ctx context.Context, label string) error {
 	case <-ctx.Done():
 		err = ctx.Err()
 	}
-	s.finished <- emailCall{label: label, ctx: ctx}
+	s.finished <- emailCall{label: label, ctx: ctx, err: err}
 	return err
 }
 
@@ -191,8 +192,8 @@ func TestEmailQueueSendOutlivesItsWorkerContext(t *testing.T) {
 	if entered.label != "verification_code/a@example.com/123456" {
 		t.Fatalf("send payload = %q", entered.label)
 	}
-	if done.ctx.Err() != nil {
-		t.Fatalf("send context died with its worker: %v", done.ctx.Err())
+	if done.err != nil {
+		t.Fatalf("send returned error after worker cancel: %v", done.err)
 	}
 	if _, ok := done.ctx.Deadline(); !ok {
 		t.Fatal("send context has no deadline, so a wedged relay holds a worker forever")
