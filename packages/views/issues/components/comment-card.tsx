@@ -142,7 +142,7 @@ interface CommentCardProps {
   canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], requesterRuntimeAgentIds?: string[]) => Promise<string | boolean>;
   onReplyAccepted?: (commentId: string) => void;
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string, requesterRuntimeAgentIds?: string[]) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string, requesterRuntimeAgentIds?: string[], runtimeSourceTaskIds?: Record<string, string>) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string, prompt?: string) => void;
@@ -369,7 +369,7 @@ const NEVER_STEER = () => false;
 function useEditAttachmentState(
   issueId: string,
   entry: TimelineEntry,
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string, requesterRuntimeAgentIds?: string[]) => Promise<void>,
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string, requesterRuntimeAgentIds?: string[], runtimeSourceTaskIds?: Record<string, string>) => Promise<void>,
 ) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
@@ -506,7 +506,9 @@ function useEditAttachmentState(
       const attachmentsChanged = !sameIdSet(activeIds, (entry.attachments ?? []).map((a) => a.id));
       // Nothing changed — close the editor without a write. Accepted, so
       // onAccepted resets the edit state.
-      if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged && runtimeOriginator.requestArgs(trimmed).length === 0) {
+      const [requesterIds, sourceTaskIds] = runtimeOriginator.requestArgs(trimmed);
+      const hasRuntimeRouting = requesterIds.length > 0 || Object.keys(sourceTaskIds).length > 0;
+      if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged && !hasRuntimeRouting) {
         return true;
       }
       const { suppressAgentIds } = routing;
@@ -517,7 +519,8 @@ function useEditAttachmentState(
           activeIds,
           suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
           initialContentBase,
-          ...runtimeOriginator.requestArgs(trimmed),
+          requesterIds.length > 0 ? requesterIds : undefined,
+          Object.keys(sourceTaskIds).length > 0 ? sourceTaskIds : undefined,
         );
         setRevisionConflict(false);
         return true;
@@ -784,7 +787,7 @@ function CommentRow({
   hasReplies?: boolean;
   /** True when this row is the deep-link target currently being highlighted. */
   isHighlighted?: boolean;
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string, requesterRuntimeAgentIds?: string[]) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string, requesterRuntimeAgentIds?: string[], runtimeSourceTaskIds?: Record<string, string>) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string, prompt?: string) => void;

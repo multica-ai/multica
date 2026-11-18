@@ -440,7 +440,9 @@ func TestSmartRuntimeContinuationHonorsExplicitSource(t *testing.T) {
 	agentID := dbfx.Agent(t, "explicit-review-agent", "", testutil.Cols{
 		"share_runtime": false, "recommended_cli": "codex", "owner_id": templateOwner,
 	})
-	issueID := dbfx.Issue(t, "Explicit continuation", testutil.Cols{"assignee_type": "agent", "assignee_id": agentID})
+	// The issue is deliberately UNASSIGNED: the explicit pick follows the
+	// mentioned agent, never the issue's assignee (QA round 11, case 2).
+	issueID := dbfx.Issue(t, "Explicit continuation")
 
 	// The picked run: Codex / gpt-5.4, dispatched (the popover's vouch).
 	pickedID := dbfx.Task(t, agentID, testutil.Cols{
