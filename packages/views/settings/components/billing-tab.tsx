@@ -431,7 +431,9 @@ function BillingTabContent() {
             ? t(($) => $.workspace.plan_change.rate_limited)
             : code === "seat_purchase_in_progress"
               ? t(($) => $.workspace.plan_change.in_progress)
-              : t(($) => $.workspace.plan_change.preview_failed),
+              : code === "plan_change_in_progress"
+                ? t(($) => $.workspace.plan_change.change_in_progress)
+                : t(($) => $.workspace.plan_change.preview_failed),
         );
       });
   }, [
@@ -570,7 +572,9 @@ function BillingTabContent() {
           setSeatPurchaseError(
             previewErrorCode === "seat_purchase_in_progress"
               ? t(($) => $.workspace.seat_purchase.in_progress)
-              : t(($) => $.workspace.seat_purchase.preview_failed),
+              : previewErrorCode === "plan_change_in_progress"
+                ? t(($) => $.workspace.seat_purchase.plan_change_in_progress)
+                : t(($) => $.workspace.seat_purchase.preview_failed),
           );
         });
     }, SEAT_PURCHASE_PREVIEW_DEBOUNCE_MS);
@@ -779,6 +783,14 @@ function BillingTabContent() {
           setPlanChangeError(t(($) => $.workspace.plan_change.in_progress));
           return;
         }
+        if (code === "plan_change_in_progress") {
+          setPlanChangePreview(null);
+          setPlanChangeError(
+            t(($) => $.workspace.plan_change.change_in_progress),
+          );
+          await summaryQuery.refetch();
+          return;
+        }
         setPlanChangeQuoteChanged(true);
         await summaryQuery.refetch();
         setPlanChangePreviewRevision((revision) => revision + 1);
@@ -892,6 +904,13 @@ function BillingTabContent() {
         if (purchaseErrorCode === "seat_purchase_in_progress") {
           setSeatPurchaseError(
             t(($) => $.workspace.seat_purchase.in_progress),
+          );
+          await summaryQuery.refetch();
+          return;
+        }
+        if (purchaseErrorCode === "plan_change_in_progress") {
+          setSeatPurchaseError(
+            t(($) => $.workspace.seat_purchase.plan_change_in_progress),
           );
           await summaryQuery.refetch();
           return;

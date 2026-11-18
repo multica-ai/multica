@@ -1076,6 +1076,10 @@ describe("BillingTab", () => {
       "seat_purchase_in_progress",
       "Another seat purchase is being processed. Wait for it to finish; contact support if it remains here.",
     ],
+    [
+      "plan_change_in_progress",
+      "A plan change is being processed. Try again after it finishes.",
+    ],
   ])("maps purchase conflict %s to actionable copy", async (code, copy) => {
     const user = userEvent.setup();
     Object.assign(mocks.entitlements, {
@@ -1729,6 +1733,57 @@ describe("BillingTab", () => {
         expect(mocks.previewPlanChange).toHaveBeenCalledTimes(2),
       );
       expect(mocks.refetchSummary).toHaveBeenCalled();
+    });
+
+    it("explains that another plan change holds the subscription", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.changePlan.mockRejectedValueOnce(
+        new ApiError("request failed", 409, "Conflict", {
+          code: "plan_change_in_progress",
+        }),
+      );
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      await within(dialog).findByText("$30.00");
+      await user.click(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      );
+
+      expect(
+        await within(dialog).findByText(
+          "Another plan change is being processed. Try again after it finishes.",
+        ),
+      ).toBeInTheDocument();
+      expect(mocks.refetchSummary).toHaveBeenCalled();
+      // Not treated as a changed quote: no new preview is requested.
+      expect(mocks.previewPlanChange).toHaveBeenCalledTimes(1);
+    });
+
+    it("explains a quote refused while another plan change is in flight", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.previewPlanChange.mockRejectedValueOnce(
+        new ApiError("request failed", 409, "Conflict", {
+          code: "plan_change_in_progress",
+        }),
+      );
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      const dialog = await screen.findByRole("dialog");
+
+      expect(
+        await within(dialog).findByText(
+          "Another plan change is being processed. Try again after it finishes.",
+        ),
+      ).toBeInTheDocument();
     });
 
     it("keeps the subscription unchanged and explains a declined upgrade payment", async () => {
