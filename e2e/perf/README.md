@@ -162,6 +162,65 @@ These are observed local measurements, not latency thresholds. Stop other
 run-owned builds/tests before measuring; the report also records system load.
 Destroy the API environment after the comparison with `make destroy ARGS="--yes"`.
 
+## Large workspace: big issues and Inbox switching
+
+`big-issue.spec.ts` and `inbox-switch.spec.ts` (MUL-9539) measure two things
+only: **time until the requested content is on screen**, and **stalls** — Long
+Animation Frames, reported as frames over 200 ms, the longest frame, and the
+total time in frames over 50 ms. Both are read inside the page, from the
+input's own event timestamp to the first frame that shows the content, so
+Playwright round trips never land in a number.
+
+- **Big issue** opens an issue by URL in a fresh context (app boot included)
+  and records time until the title and first comments are rendered, then time
+  until the main thread has been quiet for a second. It then scrolls the
+  thread with the mouse wheel (about 3,000 px/s for up to 15 s) while images
+  load, and toggles the navigation sidebar six times (each toggle includes the
+  sidebar's 200 ms animation).
+- **Inbox switching** clicks rows in the Work panel's Inbox section and records
+  time until the issue is on screen and, for comment notifications on the walk
+  down, until that comment is in view, plus stalls up to one second after.
+  `collapsed` walks the default five rows down and back; `expanded` first
+  clicks "Show N more" (its own cost is reported) and walks ten rows down and
+  back. The walk back opens cached issues, which restore where the user left
+  them instead of landing on the comment again. Content that is not on screen
+  within 15 s is counted as missed, not as a time.
+
+Both run against a production build, a real API and a database seeded by
+`scripts/perf-seed.mjs`. Sizes come from production distributions (counts
+only): tier `m` is the nonzero p99 (1,000 issues, 5,000 notifications); tier
+`l` is the largest observed (60,000 issues, 130,000 notifications, plus one
+issue with 2,000 comments and 300 images). Every tier has three issues with
+300 comments, 80 images (~1 MB, 2880×1800), 70 runs and 40 sub-issues, five
+p99 issues (54 comments, 54 images, 36 runs, 38 sub-issues) and 50 Inbox rows
+mixing them with smaller issues. Images go through the real upload endpoint.
+
+The scenarios sign in through the app's verification-code flow, so the web
+app runs in its production cookie mode; a `multica_token` in localStorage
+would switch it to desktop-style token mode, where every image first takes a
+401 and a retry.
+
+```bash
+make up C=api ARGS="--ephemeral"
+make env-exec ARGS="-- node scripts/perf-seed.mjs --tier m --out perf-report/manifest-m.json"
+NEXT_PUBLIC_API_URL='' NEXT_PUBLIC_WS_URL='' pnpm --filter @multica/web build
+(cd apps/web && REMOTE_API_URL=http://localhost:<api-port> pnpm exec next start --port 13901)
+
+for scenario in big-issue inbox-switch; do
+  PERF_SCENARIO=$scenario PERF_MANIFEST=$PWD/perf-report/manifest-m.json \
+    PLAYWRIGHT_BASE_URL=http://localhost:13901 \
+    make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts $scenario.spec.ts"
+done
+```
+
+Reports land in `perf-report/<scenario>-<tier>.json` (or `PERF_REPORT_PATH`)
+with every sample, a median summary, the dataset digest and the machine.
+`PERF_REPEATS` (default 5, plus one warmup), `PERF_CPU_THROTTLE`,
+`PERF_ISSUE_KINDS=p99,big,xl` and `PERF_INBOX_MODES=collapsed,expanded`
+narrow a run. To compare frontends, build each ref, start its server against
+the same API and dataset, and run the specs from one checkout against each;
+compare only reports whose `content_sha256` matches.
+
 ## When to run the typing scenarios
 
 Nothing runs this automatically. The routine guard is the component test from
