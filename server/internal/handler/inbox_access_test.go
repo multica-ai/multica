@@ -2,11 +2,9 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -45,8 +43,8 @@ var inboxOwnerReads = []inboxOwnerRead{
 	{"archived facets", "/api/inbox/archived/facets", "ArchivedInboxFacets", (*Handler).GetArchivedInboxFacets},
 }
 
-func (e inboxOwnerRead) serve(h *Handler, cloud *auth.CloudPATVerifier) http.HandlerFunc {
-	return middleware.Auth(testHandler.Queries, nil, cloud, nil)(
+func (e inboxOwnerRead) serve(h *Handler) http.HandlerFunc {
+	return middleware.Auth(testHandler.Queries, nil, nil, nil)(
 		middleware.RequireWorkspaceMember(testHandler.Queries)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			e.handler(h, w, r)
 		})),
@@ -108,7 +106,7 @@ func TestListInboxAccessLookupErrors(t *testing.T) {
 					faults := &inboxAccessFailureDB{DBTX: testPool, query: query, err: tc.err}
 					h := *testHandler
 					h.Queries = db.New(faults)
-					response := testutil.Call(t, e.serve(&h, nil), e.request(token, testWorkspaceID)).Want(tc.status)
+					response := testutil.Call(t, e.serve(&h), e.request(token, testWorkspaceID)).Want(tc.status)
 					if tc.status == http.StatusServiceUnavailable && response.Header().Get("Retry-After") != "1" {
 						t.Fatal("temporary access-lookup failure must supply Retry-After")
 					}
@@ -129,8 +127,8 @@ func TestListInboxAccessLookupErrors(t *testing.T) {
 	}
 }
 
-func inboxAccessHandler(cloud *auth.CloudPATVerifier) http.HandlerFunc {
-	return inboxOwnerReads[0].serve(testHandler, cloud)
+func inboxAccessHandler() http.HandlerFunc {
+	return inboxOwnerReads[0].serve(testHandler)
 }
 
 func inboxCredentialRequest(token, workspaceID string) *http.Request {
@@ -184,7 +182,7 @@ func TestListInboxTaskCredentialAccess(t *testing.T) {
 			token := inboxTaskCredential(t, taskID, agentID, testWorkspaceID, testUserID)
 			for _, e := range inboxOwnerReads {
 				t.Run(e.name, func(t *testing.T) {
-					testutil.Call(t, e.serve(testHandler, nil), e.request(token, testWorkspaceID)).Want(tc.want)
+					testutil.Call(t, e.serve(testHandler), e.request(token, testWorkspaceID)).Want(tc.want)
 				})
 			}
 		})
@@ -206,27 +204,9 @@ func TestListInboxRejectsForgedTaskIdentityAndWorkspace(t *testing.T) {
 			req := testutil.WithHeaders(e.request(token, testWorkspaceID), "X-Task-ID", allowedTask, "X-Agent-ID", agentID,
 				"X-Actor-Source", "member", "X-User-ID", other, "X-Originator-User-ID", testUserID)
 			req.URL.RawQuery = "originator_user_id=" + testUserID + "&recipient_id=" + other
-			testutil.Call(t, e.serve(testHandler, nil), req).Want(http.StatusForbidden)
+			testutil.Call(t, e.serve(testHandler), req).Want(http.StatusForbidden)
 
-			testutil.Call(t, e.serve(testHandler, nil), e.request(allowedToken, foreignWorkspace)).Want(http.StatusForbidden)
-		})
-	}
-}
-
-func TestListInboxCloudPATCannotBorrowTaskIdentity(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"valid": true, "owner_id": testUserID})
-	}))
-	defer srv.Close()
-	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
-	runtimeID := dbfx.Runtime(t, "Cloud inbox runtime")
-	agentID := dbfx.Agent(t, "Cloud inbox agent", runtimeID)
-	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "status": "running", "originator_user_id": testUserID, "accountable_user_id": testUserID})
-	for _, e := range inboxOwnerReads {
-		t.Run(e.name, func(t *testing.T) {
-			req := testutil.WithHeaders(e.request("mcn_inbox-test", testWorkspaceID),
-				"X-Actor-Source", "task_token", "X-Task-ID", taskID, "X-Agent-ID", agentID)
-			testutil.Call(t, e.serve(testHandler, verifier), req).Want(http.StatusForbidden)
+			testutil.Call(t, e.serve(testHandler), e.request(allowedToken, foreignWorkspace)).Want(http.StatusForbidden)
 		})
 	}
 }
@@ -267,7 +247,7 @@ func TestListInboxHumanCredentialsAndReadOnlyIsolation(t *testing.T) {
 			req.Header.Set("X-User-ID", other)
 			req.URL.RawQuery = "recipient_id=" + other
 			var items []InboxItemResponse
-			testutil.Call(t, inboxAccessHandler(nil), req).Want(http.StatusOK).JSON(&items)
+			testutil.Call(t, inboxAccessHandler(), req).Want(http.StatusOK).JSON(&items)
 			found := false
 			for _, item := range items {
 				if item.ID == otherItem || item.ID == foreign {
@@ -311,7 +291,7 @@ func TestListInboxDelegatedOriginatorAndProjectVisibility(t *testing.T) {
 	secret := insertSecretInboxItem(t, f, testUserID)
 	list := func() map[string]bool {
 		var items []InboxItemResponse
-		testutil.Call(t, inboxAccessHandler(nil), inboxCredentialRequest(token, testWorkspaceID)).Want(http.StatusOK).JSON(&items)
+		testutil.Call(t, inboxAccessHandler(), inboxCredentialRequest(token, testWorkspaceID)).Want(http.StatusOK).JSON(&items)
 		ids := map[string]bool{}
 		for _, item := range items {
 			ids[item.ID] = true
@@ -330,7 +310,7 @@ func TestListInboxDelegatedOriginatorAndProjectVisibility(t *testing.T) {
 	}
 	// Loss of an upstream human must never borrow the accountable owner.
 	dbfx.Exec(t, `UPDATE agent_task_queue SET originator_user_id=NULL,accountable_user_id=$2 WHERE id=$1`, taskID, testUserID)
-	testutil.Call(t, inboxAccessHandler(nil), inboxCredentialRequest(token, testWorkspaceID)).Want(http.StatusForbidden)
+	testutil.Call(t, inboxAccessHandler(), inboxCredentialRequest(token, testWorkspaceID)).Want(http.StatusForbidden)
 
 	var counterAfter int64
 	dbfx.QueryRow(t, `SELECT issue_counter FROM workspace WHERE id=$1`, testWorkspaceID).Scan(&counterAfter)
@@ -361,12 +341,12 @@ func TestArchivedInboxOwnerReadIsolation(t *testing.T) {
 	reads := map[string]func(*testing.T, *http.Request) []InboxItemResponse{
 		"archived": func(t *testing.T, req *http.Request) []InboxItemResponse {
 			var items []InboxItemResponse
-			testutil.Call(t, inboxOwnerReads[1].serve(testHandler, nil), req).Want(http.StatusOK).JSON(&items)
+			testutil.Call(t, inboxOwnerReads[1].serve(testHandler), req).Want(http.StatusOK).JSON(&items)
 			return items
 		},
 		"archived page": func(t *testing.T, req *http.Request) []InboxItemResponse {
 			var page archivedInboxPageResponse
-			testutil.Call(t, inboxOwnerReads[2].serve(testHandler, nil), req).Want(http.StatusOK).JSON(&page)
+			testutil.Call(t, inboxOwnerReads[2].serve(testHandler), req).Want(http.StatusOK).JSON(&page)
 			return page.Items
 		},
 	}
