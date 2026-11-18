@@ -231,5 +231,31 @@
       "later": "Ahora no",
       "start": "Empezar a dictar"
     }
+  },
+  "block_menu": {
+    "label": "Insertar bloque",
+    "blocks": {
+      "paragraph": "Texto",
+      "heading1": "Encabezado 1",
+      "heading2": "Encabezado 2",
+      "heading3": "Encabezado 3",
+      "bulletList": "Lista con viñetas",
+      "orderedList": "Lista numerada",
+      "taskList": "Lista de tareas",
+      "blockquote": "Cita",
+      "codeBlock": "Bloque de código",
+      "mermaid": "Diagrama Mermaid",
+      "table": "Tabla",
+      "divider": "Separador",
+      "image": "Imagen",
+      "file": "Archivo"
+    }
+  },
+  "block_handle": {
+    "add": "Añadir debajo",
+    "options": "Arrastra para mover, haz clic para ver opciones",
+    "turn_into": "Convertir en",
+    "duplicate": "Duplicar",
+    "delete": "Eliminar"
   }
 }
