@@ -439,6 +439,58 @@ func (s *TaskService) resolveOriginatorFromTriggerComment(ctx context.Context, w
 	return s.attributionFromTriggerComment(ctx, workspaceID, commentID, attribution.SourceCommentSource).UserID
 }
 
+// resolveAgentTriggerCommentOriginator recovers the human whose runtime an
+// agent-authored reply belongs to: the reply's source task decides, and a
+// personal (smart) task keeps pointing at that task's machine owner even after
+// another member joins the thread. Used as the sticky chain's first hop, so
+// the owner stays sticky to the issue/task-chain owner unless the caller
+// explicitly overrides it.
+func (s *TaskService) resolveAgentTriggerCommentOriginator(ctx context.Context, workspaceID, commentID pgtype.UUID) pgtype.UUID {
+	if s == nil || s.Queries == nil || !commentID.Valid {
+		return pgtype.UUID{}
+	}
+	comment, err := s.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
+		ID:          commentID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil || comment.AuthorType != "agent" || !comment.SourceTaskID.Valid {
+		return pgtype.UUID{}
+	}
+	parent, err := s.Queries.GetAgentTask(ctx, comment.SourceTaskID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return s.runtimeOriginatorForTask(ctx, parent)
+}
+
+// resolveIssueCreationOriginator returns the human an issue's execution
+// descends from: the member creator, or for agent-created issues the origin
+// task's originator / the autopilot trigger principal.
+func (s *TaskService) resolveIssueCreationOriginator(ctx context.Context, issue db.Issue) pgtype.UUID {
+	if issue.CreatorType == "member" && issue.CreatorID.Valid {
+		return issue.CreatorID
+	}
+	if s == nil || s.Queries == nil || !issue.OriginType.Valid || !issue.OriginID.Valid {
+		return pgtype.UUID{}
+	}
+	switch issue.OriginType.String {
+	case "quick_create", "agent_create":
+		task, err := s.Queries.GetAgentTask(ctx, issue.OriginID)
+		if err != nil {
+			return pgtype.UUID{}
+		}
+		return task.OriginatorUserID
+	case "autopilot":
+		run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID)
+		if err != nil {
+			return pgtype.UUID{}
+		}
+		return ResolveAutopilotTriggerPrincipal(ctx, s.Queries, run.TriggerID, issue.OriginID, issue.WorkspaceID)
+	default:
+		return pgtype.UUID{}
+	}
+}
+
 // attributionFromTriggerComment resolves the full attribution (accountable
 // human + provenance label + delegation lineage + evidence) for a
 // comment-triggered run. It performs the DB reads and hands the gathered facts
@@ -491,16 +543,72 @@ func (s *TaskService) attributionFromComment(ctx context.Context, comment db.Com
 	return attribution.ClassifyComment(facts, agentAuthoredSource)
 }
 
-// resolveOriginatorForIssueTask returns the top-of-chain human for issue-backed
-// dispatches. Comment-triggered runs keep the existing comment-chain semantics;
-// direct issue assignment/creation falls back to the issue's member creator.
-// Agent-created issues that carry an explicit task-origin link — quick_create
-// (daemon quick-create flow) or agent_create (an agent's ordinary `issue
-// create`, MUL-4305) — inherit that origin task's originator, since origin_id
-// points at the agent_task_queue row that created the issue. Other
-// agent/system origins, including autopilot, deliberately remain unattributed.
+// resolveOriginatorForIssueTask returns the current sticky human originator
+// for issue-backed dispatches. A normal member comment must not become the
+// runtime owner just because it is the latest comment; instead, comment-
+// triggered runs first inherit an agent reply's parent task, then the latest
+// task already seen on this issue, then the issue's creation origin.
+// Comment-less runs (assign, promote, Autopilot rerun) recover the same
+// latest-task owner before falling back to creation origin, so a smart-
+// runtime Autopilot issue does not lose its initiator and silently dispatch
+// to the agent's recommended machine. If no chain exists yet, a member
+// comment can initialize the originator as a final fallback.
+//
+// Explicit takeover is represented by the enqueue caller passing an override;
+// that task selects the requester's personal runtime, so later non-shared
+// tasks recover the new owner from the selected runtime.
 func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
-	return s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource, pgtype.UUID{}).UserID
+	if triggerCommentID.Valid {
+		if originator := s.resolveAgentTriggerCommentOriginator(ctx, issue.WorkspaceID, triggerCommentID); originator.Valid {
+			return originator
+		}
+		if originator := s.latestIssueTaskRuntimeOriginator(ctx, issue.ID); originator.Valid {
+			return originator
+		}
+		if originator := s.resolveIssueCreationOriginator(ctx, issue); originator.Valid {
+			return originator
+		}
+		return s.resolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, triggerCommentID)
+	}
+	if originator := s.latestIssueTaskRuntimeOriginator(ctx, issue.ID); originator.Valid {
+		return originator
+	}
+	return s.resolveIssueCreationOriginator(ctx, issue)
+}
+
+func (s *TaskService) resolveOriginatorForIssueTaskWithOverride(ctx context.Context, issue db.Issue, triggerCommentID, originatorOverride pgtype.UUID) pgtype.UUID {
+	if originatorOverride.Valid {
+		return originatorOverride
+	}
+	return s.resolveOriginatorForIssueTask(ctx, issue, triggerCommentID)
+}
+
+func (s *TaskService) runtimeOriginatorForTask(ctx context.Context, task db.AgentTaskQueue) pgtype.UUID {
+	// runtime_config_source is the immutable task-time mode snapshot. A NULL
+	// source predates the snapshot column and keeps the legacy behavior of
+	// inheriting the task originator.
+	if !task.RuntimeConfigSource.Valid || task.RuntimeConfigSource.String == string(RuntimeConfigSourceShared) {
+		return task.OriginatorUserID
+	}
+	runtime, err := s.runtimeLookup().Get(ctx, task.RuntimeID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return runtime.OwnerID
+}
+
+func (s *TaskService) latestIssueTaskRuntimeOriginator(ctx context.Context, issueID pgtype.UUID) pgtype.UUID {
+	if s == nil || s.Queries == nil || !issueID.Valid {
+		return pgtype.UUID{}
+	}
+	originator, err := s.Queries.GetLatestIssueTaskRuntimeOriginator(ctx, issueID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("resolve latest issue task runtime originator failed", "issue_id", util.UUIDToString(issueID), "error", err)
+		}
+		return pgtype.UUID{}
+	}
+	return originator
 }
 
 type runtimeAvailabilityPolicy uint8
@@ -1347,10 +1455,10 @@ func (s *TaskService) ResolveIssueReviewSHAParam(ctx context.Context, issueID pg
 }
 
 func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, origin, false)
+	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, pgtype.UUID{}, fireAt, origin, false)
 }
 
-func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, freshRerun bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, originatorOverride pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, freshRerun bool) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1385,12 +1493,16 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	if err := s.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
-	originatorUserID := attr.UserID
-	effective, err := s.resolveTaskRuntimeConfig(ctx, agent, originatorUserID, allowRuntimeOffline)
+	// Runtime ownership follows the sticky chain (or an explicit override), so
+	// accountability and "whose machine executes" stay independent: a member
+	// joining a running conversation inherits that run's machine instead of
+	// switching it to their own.
+	runtimeOriginatorUserID := s.resolveOriginatorForIssueTaskWithOverride(ctx, issue, triggerCommentID, originatorOverride)
+	effective, err := s.resolveTaskRuntimeConfig(ctx, agent, runtimeOriginatorUserID, allowRuntimeOffline)
 	if err != nil {
 		return db.AgentTaskQueue{}, err
 	}
-	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
+	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, runtimeOriginatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	createParams := db.CreateAgentTaskParams{
 		ID:                          dbid.NewV7(),
@@ -1410,7 +1522,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		TriggerSummary:              s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
 		ForceFreshSession:           pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:                 pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
-		OriginatorUserID:            originatorUserID,
+		OriginatorUserID:            attr.UserID,
 		AccountableUserID:           attr.AccountableUserID,
 		RuleVersionID:               attr.RuleVersionID,
 		RerunOfTaskID:               rerunOfTaskID,
@@ -1543,10 +1655,10 @@ func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, 
 }
 
 func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, origin, false, false)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, pgtype.UUID{}, origin, false, false)
 }
 
-func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, freshRerun, workflowHandoff bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, originatorOverride pgtype.UUID, origin RunOrigin, freshRerun, workflowHandoff bool) (db.AgentTaskQueue, error) {
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -1575,12 +1687,14 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	if err := s.guardRunProjectAccess(ctx, issue, agent, attr.UserID, attr.AccountableUserID); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
-	originatorUserID := attr.UserID
-	effective, err := s.resolveTaskRuntimeConfig(ctx, agent, originatorUserID, allowRuntimeOffline)
+	// Same split as the issue-assignee path: the sticky chain (or an explicit
+	// override) picks the executing machine, accountability stays with attr.
+	runtimeOriginatorUserID := s.resolveOriginatorForIssueTaskWithOverride(ctx, issue, triggerCommentID, originatorOverride)
+	effective, err := s.resolveTaskRuntimeConfig(ctx, agent, runtimeOriginatorUserID, allowRuntimeOffline)
 	if err != nil {
 		return db.AgentTaskQueue{}, err
 	}
-	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
+	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, runtimeOriginatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	params := db.CreateAgentTaskParams{
 		ID:                          dbid.NewV7(),
@@ -1602,7 +1716,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		ForceFreshSession:           pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
 		HandoffNote:                 pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
 		SquadID:                     squadID,
-		OriginatorUserID:            originatorUserID,
+		OriginatorUserID:            attr.UserID,
 		AccountableUserID:           attr.AccountableUserID,
 		RuleVersionID:               attr.RuleVersionID,
 		RerunOfTaskID:               rerunOfTaskID,
@@ -6561,9 +6675,11 @@ func (s *TaskService) promoteNewestSurvivingComment(ctx context.Context, ids []p
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin, fresh bool) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, pgtype.Timestamptz{}, origin, fresh)
+		// A manual rerun resolves a new placement: the clicking member's own
+		// machine, not the failed attempt's.
+		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, actorUserID, pgtype.Timestamptz{}, origin, fresh)
 	}
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, origin, fresh, false)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, actorUserID, origin, fresh, false)
 }
 
 // The bulk terminal writes below are the sweeper, archive and daemon-recovery
@@ -8827,8 +8943,10 @@ func (s *TaskService) resolveRetryRuntimeFallback(ctx context.Context, q *db.Que
 // EnqueueCommentTaskForRequester runs a member's explicit requester selection
 // on that member's runtime. The normal issue/project authorization still runs.
 func (s *TaskService) EnqueueCommentTaskForRequester(ctx context.Context, issue db.Issue, agentID, squadID, commentID, requesterID pgtype.UUID, assignee bool, origin RunOrigin) (db.AgentTaskQueue, error) {
+	// The member explicitly picked their own runtime, so the override pins it:
+	// without it the sticky chain would recover the previous owner instead.
 	if assignee && !squadID.Valid {
-		return s.enqueueIssueTask(ctx, issue, commentID, false, "", requesterID, pgtype.UUID{}, pgtype.Timestamptz{}, origin)
+		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, commentID, nil, false, "", requesterID, pgtype.UUID{}, requesterID, pgtype.Timestamptz{}, origin, false)
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, commentID, squadID.Valid, squadID, false, "", requesterID, pgtype.UUID{}, origin)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, commentID, nil, squadID.Valid, squadID, false, "", requesterID, pgtype.UUID{}, requesterID, origin, false, false)
 }

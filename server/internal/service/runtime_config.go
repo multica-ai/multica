@@ -394,7 +394,8 @@ func resolveEffectiveRuntimeConfig(ctx context.Context, queries *db.Queries, age
 	recommendedProvider := RecommendedCLI(agent)
 
 	if recommendedProvider != "" {
-		if matched, ok := matchRecommendedCLI(userRuntimes, recommendedProvider); ok {
+		matched, ok := matchRecommendedCLI(userRuntimes, recommendedProvider)
+		if ok {
 			effective := EffectiveRuntimeConfig{
 				RuntimeID:          matched.ID,
 				RuntimeName:        matched.Name,
@@ -406,17 +407,35 @@ func resolveEffectiveRuntimeConfig(ctx context.Context, queries *db.Queries, age
 				Source:             RuntimeConfigSourceRecommendedMatch,
 				NoticeSeen:         noticeSeen,
 			}
-			if status := validateEffectiveRuntime(ctx, catalog, agent, originatorUserID, matched, effective.Model, true); status != RuntimeConfigResolutionReady {
+			status := validateEffectiveRuntime(ctx, catalog, agent, originatorUserID, matched, effective.Model, true)
+			if status == RuntimeConfigResolutionReady {
+				effective = withRuntimeConfigResolution(effective, RuntimeConfigResolutionReady)
+				effective.Hint = runtimeConfigHint(agent, effective, noticeSeen)
+				return effective, nil
+			}
+			// An offline CLI match must not mask another online machine the
+			// originator owns: the resolution order puts a usable personal
+			// runtime above a waiting offline one. Only model-catalog problems
+			// stay on the matched machine, because they are about the saved
+			// model, not the machine's availability. With no online runtime
+			// left, fall through with the offline status so admission can wait.
+			if status != RuntimeConfigResolutionRuntimeOffline || !hasOnlineRuntime(userRuntimes, matched.ID) {
 				effective = withRuntimeConfigResolution(effective, status)
 				return effective, newRuntimeConfigResolutionError(status, nil)
 			}
-			effective = withRuntimeConfigResolution(effective, RuntimeConfigResolutionReady)
-			effective.Hint = runtimeConfigHint(agent, effective, noticeSeen)
-			return effective, nil
 		}
 	}
 
 	return defaultUserRuntimeConfig(ctx, catalog, agent, originatorUserID, pickOriginatorRuntime(userRuntimes), noticeSeen)
+}
+
+func hasOnlineRuntime(runtimes []db.AgentRuntime, excludeID pgtype.UUID) bool {
+	for _, rt := range runtimes {
+		if rt.Status == "online" && rt.ID != excludeID {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultUserRuntimeConfig(ctx context.Context, catalog LiveRuntimeModels, agent db.Agent, originatorUserID pgtype.UUID, defaultRuntime db.AgentRuntime, noticeSeen bool) (EffectiveRuntimeConfig, error) {
