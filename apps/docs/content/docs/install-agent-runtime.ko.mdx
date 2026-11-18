@@ -107,6 +107,8 @@ Node.js 20+를 설치하고 `npm install -g @deepseek-ai/dsh`를 실행한 뒤 M
 
 **DSH 업그레이드 후.** 프로브가 프로필 내부 코어 패키지의 비호환성을 보고하면 데몬 진단에 표시된 매니페스트를 백업하세요. `@deepseek-ai/dsh-agent`, `@deepseek-ai/dsh-session`, `@deepseek-ai/dsh-tools`, `@deepseek-ai/dsh-llm`의 재정의를 확인하고, 가능하면 앱에 포함된 코어 패키지를 사용하거나 설치된 DSH와 호환되는 버전으로 맞추세요. 필요한 독립 플러그인과 훅은 유지하고 모든 의존성을 삭제하지 마세요. 수정 후 `dsh --profile multica --probe`를 다시 실행하세요. Multica는 확인된 호환성 거부를 수동 프로필 복구가 필요한 상태로 보고하며 기존 프로필을 덮어쓰지 않습니다.
 
+프로브에 설치된 DSH가 요구 사항을 충족하지 않아 `@multica-ai/dsh-runtime`을 건너뛰었다고 표시되면 매니페스트를 백업하고 Multica 브리지를 호환되는 빌드로 업데이트하세요. 업데이트 후 `dsh --profile multica --probe`를 다시 실행하세요.
+
 데몬은 `dsh --profile multica --probe`가 성공한 경우에만 DeepSeek Harness를 등록합니다. `/health` 진단은 프로필 누락, 확인된 수동 복구 필요, 프로토콜 비호환, 프로브의 일시적 사용 불가를 구분합니다. 시작 실패 시 감지된 CLI 버전, 매니페스트 위치, 가능한 경우 민감 정보를 가린 진단 출력을 포함합니다.
 
 </Accordion>
