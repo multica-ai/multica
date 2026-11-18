@@ -24,12 +24,16 @@ multica agent skills list <agent-id> --output json   # current skill bindings
 multica agent env get <agent-id> --output json  # plaintext env (agent owner or ws owner/admin; agents denied)
 ```
 
-An agent can also be **unbound**: `runtime_id` is `NULL` (served as `""` with
-`runtime_bound: false`) after its runtime was deleted, which unbinds instead of
-deleting its agents. An unbound agent keeps everything it owns and stays
-editable, but no trigger path will run it — they all refuse with
-`agent_runtime_required` — until `agent update <id> --runtime-id <runtime-id>`
-binds it again. Unbound is orthogonal to archived.
+A fixed agent (`share_runtime: true`) becomes **unbound** when its runtime is
+removed. Check `runtime_bound: false` before triggering a run. Bind it again
+with `agent update <id> --runtime-id <runtime-id>` to clear
+`agent_runtime_required`.
+
+A smart agent (`share_runtime: false`) has an empty template `runtime_id` by
+design. Its runs use the originator's saved personal settings or an eligible
+runtime owned by the originator, preferring the recommended CLI. Personal
+settings affect only that member's runs. If no eligible runtime exists, finish
+setting up an owned runtime before retrying.
 
 `agent get` returns the persisted agent including `runtime_id`, `model`,
 `thinking_level`, `service_tier`, `custom_args`, `has_custom_env`,
@@ -54,13 +58,19 @@ Two distinct text fields, often confused:
 
 ## CLI / API entry points
 
-Minimum create call (`--name` and `--runtime-id` are both required):
+For a fixed agent, provide `--name` and `--runtime-id`:
 
 ```bash
 multica agent create --name <name> --runtime-id <runtime-id> \
   --description "<short catalog summary>" \
   --instructions "<runtime behavior contract>" \
   --output json
+```
+
+For a smart agent, choose the recommended CLI instead of binding a machine:
+
+```bash
+multica agent create --name "Review helper" --runtime-strategy smart --cli codex --output json
 ```
 
 The CLI builds a JSON body and posts it to `/api/agents`. It only adds a key
@@ -73,9 +83,10 @@ request is sent. `--conversation-starters` is a JSON array of `{label, prompt}`
 objects (at most 3); pass `'[]'` on update to clear.
 
 The HTTP body accepts: `name`, `description`, `instructions`,
-`conversation_starters`, `avatar_url`, `runtime_id`, `runtime_config`,
-`custom_env`, `custom_args`, `model`, `thinking_level`, `service_tier`,
-`visibility`, `max_concurrent_tasks`, `mcp_config`, `skill_ids`.
+`conversation_starters`, `avatar_url`, `runtime_id`, `share_runtime`,
+`recommended_cli`, `runtime_config`, `custom_env`, `custom_args`, `model`,
+`thinking_level`, `service_tier`, `visibility`, `max_concurrent_tasks`,
+`mcp_config`, `skill_ids`.
 
 ## Copying an agent
 

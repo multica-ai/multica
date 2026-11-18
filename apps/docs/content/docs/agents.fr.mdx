@@ -34,6 +34,8 @@ Changer de modèle ou modifier les instructions ne crée pas de nouvel agent, et
 
 Un runtime peut héberger plusieurs agents, et un agent peut mener à bien de nombreuses exécutions au fil du temps. Lorsque le runtime est hors ligne, l'identité et l'historique de l'agent sont conservés, mais les nouvelles exécutions attendent le retour du runtime.
 
+Un agent en mode fixe utilise le runtime auquel il est lié. En mode intelligent, il utilise un runtime appartenant au membre qui a déclenché l’exécution. Les membres partagent la définition et gardent leurs paramètres d’exécution personnels.
+
 ## Comment un agent participe
 
 - **Prendre en charge une tâche** — définissez l'agent comme assigné ; il démarre dès que l'exécution est mise en file d'attente.
