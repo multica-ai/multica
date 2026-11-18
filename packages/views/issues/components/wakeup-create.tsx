@@ -22,7 +22,9 @@ import { childIssuesOptions, issueDetailOptions, useCreateIssueWakeup } from "@m
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { propertyListOptions } from "@multica/core/properties/queries";
-import { isAgentRuntimeBound } from "@multica/core/agents";
+import { isAgentRuntimeBound, useRecentAgents } from "@multica/core/agents";
+import { useAuthStore } from "@multica/core/auth";
+import { SmartRuntimeAgentBadge } from "../../agents/components/agent-runtime-hover";
 import { ApiError } from "@multica/core/api";
 import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { shortcutMatchesEvent, useShortcut } from "@multica/core/shortcuts";
@@ -643,11 +645,31 @@ function AgentChoice({
   const { setFilter, matches } = useMatches();
   const { data = [] } = useQuery(agentListOptions(workspaceId));
   const agents = useMemo(() => data.filter((a) => !a.archived_at), [data]);
+  const { t: tCommon } = useT("common");
+  const userId = useAuthStore((state) => state.user?.id);
+  const { recentAgents, recentIds, recordRecentAgent } = useRecentAgents({
+    agents, userId, wsId: workspaceId, enabled: open,
+  });
+  const visibleRecent = recentAgents.filter((agent) => matches(agent.name));
+  const visibleAgents = agents.filter((agent) => !recentIds.has(agent.id) && matches(agent.name));
   const selected = agents.find((a) => a.id === value);
   const pick = (id: string) => {
+    if (id) recordRecentAgent(id);
     onChange(id);
     setOpen(false);
   };
+  const renderAgent = (agent: (typeof agents)[number]) => (
+    <PickerItem
+      key={agent.id}
+      selected={agent.id === value}
+      disabled={!allowAny && !isAgentRuntimeBound(agent)}
+      onClick={() => pick(agent.id)}
+    >
+      <ActorAvatar actorType="agent" actorId={agent.id} size="sm" showStatusDot />
+      <span className="truncate">{agent.name}</span>
+      <SmartRuntimeAgentBadge shareRuntime={agent.share_runtime} />
+    </PickerItem>
+  );
   return (
     <PropertyPicker
       open={open}
@@ -675,23 +697,13 @@ function AgentChoice({
           <span className="truncate">{placeholder}</span>
         </PickerItem>
       )}
-      {agents.filter((a) => matches(a.name)).length === 0 && !allowAny ? (
-        <PickerEmpty />
-      ) : (
-        agents
-          .filter((a) => matches(a.name))
-          .map((a) => (
-            <PickerItem
-              key={a.id}
-              selected={a.id === value}
-              disabled={!allowAny && !isAgentRuntimeBound(a)}
-              onClick={() => pick(a.id)}
-            >
-              <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
-              <span className="truncate">{a.name}</span>
-            </PickerItem>
-          ))
+      {visibleRecent.length > 0 && (
+        <PickerSection label={tCommon(($) => $.recently_used)}>
+          {visibleRecent.map(renderAgent)}
+        </PickerSection>
       )}
+      {visibleAgents.map(renderAgent)}
+      {!allowAny && visibleAgents.length === 0 && visibleRecent.length === 0 && <PickerEmpty />}
     </PropertyPicker>
   );
 }

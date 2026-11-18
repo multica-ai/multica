@@ -2,15 +2,14 @@
 
 import { useMemo, useState } from "react";
 import { Lock, UserMinus } from "@multica/ui/icons";
-import type { Agent, IssueAssigneeType, MemberWithUser, Squad, UpdateIssueRequest } from "@multica/core/types";
+import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useRecentAgents } from "@multica/core/agents";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
-import { useAssigneePicksStore, selectAssigneePicks, rankAssigneePicks } from "@multica/core/issues/stores/assignee-picks-store";
+import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { DeferredPopup } from "../../../common/deferred-popup";
 import {
@@ -64,15 +63,10 @@ interface AssigneePickerProps {
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
-  /**
-   * Whether a pick feeds the local ranking right away. The create-issue
-   * dialog turns this off and records only the assignee it submits.
-   */
-  recordPicks?: boolean;
 }
 
 /**
- * Mounting the real picker subscribes to members/agents/squads
+ * Mounting the real picker subscribes to members/agents/squads/frequency
  * queries — multiplied per board card / list row that cost froze tab
  * switches. Uncontrolled callers that bring their own trigger content get a
  * deferred lookalike trigger instead; the picker mounts on first interaction.
@@ -114,7 +108,6 @@ function AssigneePickerImpl({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
-  recordPicks = true,
 }: AssigneePickerProps) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(false);
@@ -160,7 +153,6 @@ function AssigneePickerImpl({
         assigneeType={assigneeType}
         assigneeId={assigneeId}
         mixed={mixed}
-        recordPicks={recordPicks}
         onPick={(updates) => {
           onUpdate(updates);
           setOpen(false);
@@ -211,29 +203,12 @@ export function AssigneePickerPanel({
   );
 }
 
-/**
- * Records a manual pick in this device's per-user, per-workspace queue that
- * ranks the picker. Exported for the create-issue dialog, which records only
- * the assignee it finally submits.
- */
-export function useRecordAssigneePick() {
-  const user = useAuthStore((s) => s.user);
-  const wsId = useWorkspaceId();
-  const recordPick = useAssigneePicksStore((s) => s.recordPick);
-  return (type: IssueAssigneeType, id: string) => {
-    if (user?.id && wsId) recordPick(user.id, wsId, { type, id });
-  };
-}
-
-function useAssigneeChoices(filter: string, options?: { open?: boolean }) {
 function useAssigneeChoices(filter: string, options?: { open?: boolean }) {
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
-  const picks = useAssigneePicksStore(selectAssigneePicks(user?.id, wsId));
-  const ranked = useMemo(() => rankAssigneePicks(picks), [picks]);
   const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
   const onRecentAgentRecordError = useRecentAgentRecordError();
 
@@ -263,38 +238,23 @@ function useAssigneeChoices(filter: string, options?: { open?: boolean }) {
     onRecordError: onRecentAgentRecordError,
   });
 
+  // Build a lookup map from frequency data for sorting.
   const freqMap = useMemo(() => {
     const map = new Map<string, number>();
-    for (const entry of ranked) map.set(`${entry.type}:${entry.id}`, entry.count);
+    for (const entry of frequency) {
+      map.set(`${entry.assignee_type}:${entry.assignee_id}`, entry.frequency);
+    }
     return map;
-  }, [ranked]);
+  }, [frequency]);
 
   const getFreq = (type: string, id: string) => freqMap.get(`${type}:${id}`) ?? 0;
-
-  // Only actors this user can pick are listed: agents they may invoke that
-  // have a runtime, and squads whose leader is such an agent (the server
-  // checks the leader's invoke permission). Anything else would be a row
-  // that can't be clicked, or a pick the server rejects.
-  const role =
-    memberRole === "owner" || memberRole === "admin" || memberRole === "member"
-      ? memberRole
-      : null;
-  const assignableAgents = agents.filter(
-    (a) =>
-      !a.archived_at &&
-      isAgentRuntimeBound(a) &&
-      canAssignAgentToIssue(a, { userId: user?.id ?? null, role }).allowed,
-  );
-  const assignableAgentIds = new Set(assignableAgents.map((a) => a.id));
-  const assignableSquads = squads.filter(
-    (s) => !s.archived_at && assignableAgentIds.has(s.leader_id),
-  );
 
   const query = filter.trim().toLowerCase();
   const filteredMembers = members
     .filter((m) => m.name.toLowerCase().includes(query) || matchesPinyin(m.name, query))
     .sort((a, b) => getFreq("member", b.user_id) - getFreq("member", a.user_id));
-  const matchingAgents = assignableAgents
+  const matchingAgents = agents
+    .filter((a) => !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
   const filteredRecentAgents = recentAgents.filter(
     (agent) =>
@@ -304,44 +264,25 @@ function useAssigneeChoices(filter: string, options?: { open?: boolean }) {
   const filteredSquads = squads
     .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)))
     .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
-  // Recent: the top 3 actors this user picked most often on this device in
-  // this workspace. Entries whose actor is gone or no longer pickable —
-  // member removed, agent/squad archived or hidden above — are skipped so the
-  // next one moves up. Hidden while searching so Enter still picks the first
-  // match.
-  const recent: RecentAssignee[] = [];
-  if (!query) {
-    for (const entry of ranked) {
-      if (recent.length >= 3) break;
-      if (entry.type === "member") {
-        const member = members.find((m) => m.user_id === entry.id);
-        if (member) recent.push({ type: "member", member });
-      } else if (entry.type === "agent") {
-        const agent = assignableAgents.find((a) => a.id === entry.id);
-        if (agent) recent.push({ type: "agent", agent });
-      } else if (entry.type === "squad") {
-        const squad = assignableSquads.find((s) => s.id === entry.id);
-        if (squad) recent.push({ type: "squad", squad });
-      }
-    }
-  }
+  const runnableAgentIds = new Set(
+    agents
+      .filter((agent) => !agent.archived_at && isAgentRuntimeBound(agent))
+      .map((agent) => agent.id),
+  );
 
   return {
-    recent,
+    userId: user?.id ?? null,
+    memberRole,
     filteredMembers,
     filteredRecentAgents,
     filteredAgents,
     filteredSquads,
+    runnableAgentIds,
     recordRecentAgent,
     isRecentAgentsError,
     refetchRecentAgents,
   };
 }
-
-type RecentAssignee =
-  | { type: "member"; member: MemberWithUser }
-  | { type: "agent"; agent: Agent }
-  | { type: "squad"; squad: Squad };
 
 function AssigneeOptions({
   choices,
@@ -349,7 +290,6 @@ function AssigneeOptions({
   assigneeType,
   assigneeId,
   mixed = false,
-  recordPicks = true,
   onPick,
 }: {
   choices: ReturnType<typeof useAssigneeChoices>;
@@ -357,7 +297,6 @@ function AssigneeOptions({
   assigneeType: IssueAssigneeType | null;
   assigneeId: string | null;
   mixed?: boolean;
-  recordPicks?: boolean;
   onPick: (updates: Partial<UpdateIssueRequest>) => void;
 }) {
   const { t } = useT("issues");
@@ -377,51 +316,6 @@ function AssigneeOptions({
 
   const isSelected = (type: string, id: string) =>
     assigneeType === type && assigneeId === id;
-
-  // One click is one pick, single issue or batch. Re-picking the current
-  // assignee changes nothing, so it does not count.
-  const pickActor = (type: IssueAssigneeType, id: string) => {
-    if (recordPicks && !isSelected(type, id)) recordPick(type, id);
-    onPick({ assignee_type: type, assignee_id: id });
-  };
-
-  // Shared by Recent and the per-type groups so selection and the private
-  // lock render identically wherever an actor shows up.
-  const renderMember = (m: MemberWithUser) => (
-    <PickerItem
-      key={m.user_id}
-      selected={isSelected("member", m.user_id)}
-      onClick={() => pickActor("member", m.user_id)}
-    >
-      <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
-      <span className="truncate">{m.name}</span>
-    </PickerItem>
-  );
-
-  const renderAgent = (a: Agent) => (
-    <PickerItem
-      key={a.id}
-      selected={isSelected("agent", a.id)}
-      onClick={() => pickActor("agent", a.id)}
-    >
-      <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
-      <span className="truncate">{a.name}</span>
-      {a.visibility === "private" && (
-        <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
-      )}
-    </PickerItem>
-  );
-
-  const renderSquad = (s: Squad) => (
-    <PickerItem
-      key={s.id}
-      selected={isSelected("squad", s.id)}
-      onClick={() => pickActor("squad", s.id)}
-    >
-      <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
-      <span className="truncate">{s.name}</span>
-    </PickerItem>
-  );
 
   const renderAgent = (agent: Agent) => {
     const decision = canAssignAgentToIssue(agent, {
@@ -492,10 +386,25 @@ function AssigneeOptions({
       {/* Members */}
       {filteredMembers.length > 0 && (
         <PickerSection label={t(($) => $.pickers.assignee.members_group)}>
-          {filteredMembers.map(renderMember)}
+          {filteredMembers.map((m) => (
+            <PickerItem
+              key={m.user_id}
+              selected={isSelected("member", m.user_id)}
+              onClick={() =>
+                onPick({
+                  assignee_type: "member",
+                  assignee_id: m.user_id,
+                })
+              }
+            >
+              <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
+              <span className="truncate">{m.name}</span>
+            </PickerItem>
+          ))}
         </PickerSection>
       )}
 
+      {/* Agents */}
       {filteredAgents.length > 0 && (
         <PickerSection label={t(($) => $.pickers.assignee.agents_group)}>
           {filteredAgents.map(renderAgent)}
@@ -506,7 +415,31 @@ function AssigneeOptions({
           its leader agent on the backend. */}
       {filteredSquads.length > 0 && (
         <PickerSection label={t(($) => $.pickers.assignee.squads_group)}>
-          {filteredSquads.map(renderSquad)}
+          {filteredSquads.map((s) => {
+            const runtimeBound = runnableAgentIds.has(s.leader_id);
+            return (
+              <PickerItem
+                key={s.id}
+                selected={isSelected("squad", s.id)}
+                disabled={!runtimeBound}
+                tooltip={
+                  runtimeBound
+                    ? undefined
+                    : t(($) => $.pickers.assignee.squad_runtime_required)
+                }
+                onClick={() => {
+                  if (!runtimeBound) return;
+                  onPick({
+                    assignee_type: "squad",
+                    assignee_id: s.id,
+                  });
+                }}
+              >
+                <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
+                <span className="truncate">{s.name}</span>
+              </PickerItem>
+            );
+          })}
         </PickerSection>
       )}
 
