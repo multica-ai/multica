@@ -234,6 +234,7 @@ export function useRootModel(
       autopilots: scope === "all" ? objects.autopilots : [],
       chats: scope === "all" ? objects.chats : [],
       skills: scope === "all" ? objects.skills : [],
+      docs: scope === "all" ? objects.docs : [],
       workspaces: scope === "all" ? objects.workspaces : [],
     };
 
@@ -265,6 +266,7 @@ export function useRootModel(
       visibleObjects.autopilots.length +
       visibleObjects.chats.length +
       visibleObjects.skills.length +
+      visibleObjects.docs.length +
       visibleObjects.workspaces.length;
     const hasResults =
       objectCount > 0 ||
