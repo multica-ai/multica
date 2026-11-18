@@ -53,5 +53,6 @@
     "restore": "還原此版本",
     "loading": "載入中..."
   },
-  "updated": "{{name}} 更新於 {{time}}"
+  "edited": "{{time}}編輯",
+  "outline": "大綱"
 }

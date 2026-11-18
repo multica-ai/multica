@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   History,
@@ -8,6 +8,11 @@ import {
   Trash2,
 } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,11 +28,13 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { Doc } from "@multica/core/types";
-import { ContentEditor } from "../../editor";
+import { ContentEditor, useEditorUpload } from "../../editor";
+import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { AppLink } from "../../navigation";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 import { useDocDraft } from "./use-doc-draft";
+import { DocOutline, MIN_OUTLINE_HEADINGS, useDocOutline } from "./doc-outline";
 import { MoveDialog } from "./move-dialog";
 import { DeleteDocDialog } from "./doc-tree";
 export function DocPage({ docId }: { docId: string }) {
@@ -54,11 +61,18 @@ function DocEditor({ doc }: { doc: Doc }) {
   const wsId = useWorkspaceId();
   const { data: tree } = useQuery(docTreeOptions(wsId));
   const { getActorName } = useActorName();
+  const timeAgo = useTimeAgo();
   const { draft, status, dirty, change, retry, reload } = useDocDraft(doc);
   const [moving, setMoving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const ancestors = folderAncestry(tree?.folders ?? [], doc.folderId);
   const author = getActorName(doc.updatedByType, doc.updatedById);
+  const { uploadWithToast } = useEditorUpload();
+  const uploadFile = useCallback((file: File) => uploadWithToast(file), [uploadWithToast]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const outline = useDocOutline(bodyRef, scrollRef);
+  const showOutline = outline.headings.length >= MIN_OUTLINE_HEADINGS;
   return (
     <div className="flex h-full min-h-0 flex-col">
       <BreadcrumbHeader
@@ -74,6 +88,17 @@ function DocEditor({ doc }: { doc: Doc }) {
         }
         actions={
           <>
+            <span role="status" className="px-1 text-caption text-muted-foreground">
+              {status === "error" ? (
+                <Button size="xs" variant="ghost" onClick={() => void retry()}>
+                  {t(($) => $.editor.save_failed)}
+                </Button>
+              ) : status === "saving" || (dirty && status === "saved") ? (
+                t(($) => $.editor.saving)
+              ) : status !== "conflict" ? (
+                t(($) => $.editor.saved)
+              ) : null}
+            </span>
             <AppLink
               href={p.docHistory(doc.id)}
               className="flex items-center gap-1 rounded-md px-2 py-1 text-caption hover:bg-surface-hover"
@@ -123,56 +148,75 @@ function DocEditor({ doc }: { doc: Doc }) {
           </Button>
         </div>
       )}
-      <div className="min-h-0 flex-1 overflow-auto">
-        <div className="mx-auto max-w-3xl px-6 py-8">
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-2 text-caption text-muted-foreground">
-            <span>
-              {t(($) => $.updated, {
-                name: author,
-                time: new Date(doc.updatedAt).toLocaleString(),
-              })}
-            </span>
-            <span role="status">
-              {status === "error" ? (
-                <Button size="xs" variant="ghost" onClick={() => void retry()}>
-                  {t(($) => $.editor.save_failed)}
-                </Button>
-              ) : status === "saving" || (dirty && status === "saved") ? (
-                t(($) => $.editor.saving)
-              ) : status !== "conflict" ? (
-                t(($) => $.editor.saved)
-              ) : null}
-            </span>
-          </div>
-          {draft.backup && (
-            <details className="mb-5 rounded-md border p-3 text-body">
-              <summary className="cursor-pointer">
-                {t(($) => $.editor.draft)}
-              </summary>
-              <textarea
-                aria-label={t(($) => $.editor.draft)}
-                readOnly
-                value={`${draft.backup.title}\n\n${draft.backup.content}`}
-                className="mt-2 min-h-40 w-full resize-y rounded-md bg-muted p-2 font-mono text-caption"
+      <div ref={scrollRef} className="@container min-h-0 flex-1 overflow-auto">
+        <div className="flex min-h-full">
+          <div className="min-w-0 flex-1">
+            <div className="mx-auto max-w-4xl px-6 py-8 @3xl:px-16">
+              {draft.backup && (
+                <details className="mb-5 rounded-md border p-3 text-body">
+                  <summary className="cursor-pointer">
+                    {t(($) => $.editor.draft)}
+                  </summary>
+                  <textarea
+                    aria-label={t(($) => $.editor.draft)}
+                    readOnly
+                    value={`${draft.backup.title}\n\n${draft.backup.content}`}
+                    className="mt-2 min-h-40 w-full resize-y rounded-md bg-muted p-2 font-mono text-caption"
+                  />
+                </details>
+              )}
+              <input
+                aria-label={t(($) => $.editor.title_label)}
+                value={draft.title}
+                maxLength={300}
+                placeholder={t(($) => $.untitled)}
+                onChange={(e) => change({ title: e.target.value })}
+                className="w-full bg-transparent text-display-sm font-semibold outline-none"
               />
-            </details>
+              <div className="mt-3 mb-8 flex items-center gap-2 text-caption text-muted-foreground">
+                <ActorAvatar
+                  actorType={doc.updatedByType}
+                  actorId={doc.updatedById}
+                  size="xs"
+                />
+                <span className="truncate">{author}</span>
+                <span aria-hidden>·</span>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={<time dateTime={doc.updatedAt} className="shrink-0" />}
+                  >
+                    {t(($) => $.edited, { time: timeAgo(doc.updatedAt) })}
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {new Date(doc.updatedAt).toLocaleString()}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div ref={bodyRef}>
+                <ContentEditor
+                  value={draft.content}
+                  onUpdate={(content) => change({ content })}
+                  debounceMs={0}
+                  flushPendingOnUnmount
+                  placeholder={t(($) => $.editor.placeholder)}
+                  enableSlashCommands
+                  slashCommandMode="blocks"
+                  showBlockHandles
+                  onUploadFile={uploadFile}
+                  className="min-h-80"
+                />
+              </div>
+            </div>
+          </div>
+          {showOutline && (
+            <aside className="hidden w-56 shrink-0 py-8 pr-6 @5xl:block">
+              <DocOutline
+                headings={outline.headings}
+                activeIndex={outline.activeIndex}
+                onSelect={outline.scrollTo}
+              />
+            </aside>
           )}
-          <input
-            aria-label={t(($) => $.editor.title_label)}
-            value={draft.title}
-            maxLength={300}
-            placeholder={t(($) => $.untitled)}
-            onChange={(e) => change({ title: e.target.value })}
-            className="mb-6 w-full bg-transparent text-display-sm font-semibold outline-none"
-          />
-          <ContentEditor
-            value={draft.content}
-            onUpdate={(content) => change({ content })}
-            debounceMs={0}
-            flushPendingOnUnmount
-            placeholder={t(($) => $.editor.placeholder)}
-            className="min-h-80"
-          />
         </div>
       </div>
       <MoveDialog

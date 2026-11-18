@@ -53,5 +53,6 @@
     "restore": "Restaurar esta versión",
     "loading": "Cargando..."
   },
-  "updated": "Actualizado por {{name}} · {{time}}"
+  "edited": "Editado {{time}}",
+  "outline": "Esquema"
 }

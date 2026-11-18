@@ -53,5 +53,6 @@
     "restore": "Restore this version",
     "loading": "Loading..."
   },
-  "updated": "Updated by {{name}} · {{time}}"
+  "edited": "Edited {{time}}",
+  "outline": "Outline"
 }

@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type FileChooser } from "@playwright/test";
 import { TestApiClient } from "./fixtures";
 
 let api: TestApiClient;
@@ -160,4 +160,89 @@ test("create a nested doc, edit Markdown, and delete it with confirmation", asyn
   await page.getByRole("menuitem", {name: "Delete", exact: true}).click();
   await page.getByRole("alertdialog").getByRole("button", {name: "Delete", exact: true}).click();
   await expect(page.getByRole("button", {name: "More actions for Product", exact: true})).toHaveCount(0);
+});
+
+test("block menu, block handle and outline shape a document", async ({ page }, info) => {
+  const doc = await api.createDoc(
+    "Launch plan",
+    "# Goals\n\nShip Docs.\n\n## Scope\n\n- Editor\n- Outline\n\n## Risks\n\nNone yet.",
+  );
+  // Registered up front: the file-chooser hook must be armed before the key
+  // press that opens the picker, or the dialog slips past it.
+  const choosers: FileChooser[] = [];
+  page.on("filechooser", (chooser) => choosers.push(chooser));
+  await page.goto(`/${slug}/docs/${doc.id}`);
+  const content = async () => (await api.getDoc(doc.id)).content;
+  await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+  await expect(page.locator("time")).toHaveText(/^Edited /);
+
+  const outline = page.getByRole("navigation", { name: "Outline" });
+  await expect(outline.getByRole("button")).toHaveText(["Goals", "Scope", "Risks"]);
+
+  // `/` opens the block menu; Enter inserts the highlighted block.
+  // The chat composer is the second editor on the page.
+  const editor = page.locator('.ProseMirror[contenteditable="true"]').first();
+  // An instant synthetic click can land before ProseMirror reads the DOM
+  // selection; retry until the editor's own selection is in the paragraph.
+  await expect(async () => {
+    await page.getByText("None yet.", { exact: true }).click();
+    expect(
+      await editor.evaluate(
+        (dom) =>
+          (dom as unknown as { editor: { state: { selection: { $from: { parent: { textContent: string } } } } } })
+            .editor.state.selection.$from.parent.textContent,
+      ),
+    ).toBe("None yet.");
+  }).toPass();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("/h2");
+  await expect(page.getByRole("listbox", { name: "Insert block" })).toBeVisible();
+  // Pausing past the autosave must keep the caret and the open menu.
+  await expect.poll(content).toContain("/h2");
+  await expect(page.getByRole("listbox", { name: "Insert block" })).toBeVisible();
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("Timeline");
+  await expect.poll(content).toContain("## Timeline");
+  await expect(outline.getByRole("button")).toHaveText(["Goals", "Scope", "Risks", "Timeline"]);
+
+  // The handle's grip opens turn-into.
+  await page.getByText("Ship Docs.", { exact: true }).hover();
+  await page.getByRole("button", { name: "Drag to move, click for options" }).click();
+  await expect(page.getByRole("group", { name: "Turn into" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Quote", exact: true }).click();
+  await expect.poll(content).toContain("> Ship Docs.");
+
+  // Dragging the grip moves the block.
+  await page.getByText("None yet.", { exact: true }).hover();
+  await page
+    .getByRole("button", { name: "Drag to move, click for options" })
+    .dragTo(editor.getByRole("heading", { name: "Goals" }), {
+      targetPosition: { x: 4, y: 2 },
+    });
+  await expect.poll(content).toMatch(/^None yet\.\n\n# Goals/);
+
+  // "+" opens the menu on a new line; Image uploads through the file picker.
+  await page.getByRole("heading", { name: "Timeline" }).hover();
+  await page.getByRole("button", { name: "Add below" }).click();
+  await expect(page.getByRole("listbox", { name: "Insert block" })).toBeVisible();
+  await page.keyboard.type("image");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => choosers.length).toBe(1);
+  await choosers[0]!.setFiles({
+    name: "diagram.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  });
+  await expect.poll(content).toMatch(/!\[diagram\.png\]\([^)]*\/api\/attachments\/[0-9a-f-]{36}\/download\)/);
+
+  await page.mouse.move(0, 0);
+  await page.screenshot({
+    path: info.outputPath("docs-blocks.png"),
+    animations: "disabled",
+    style: "nextjs-portal { display: none; }",
+  });
 });

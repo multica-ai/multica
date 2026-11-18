@@ -53,5 +53,6 @@
     "restore": "이 버전 복원",
     "loading": "불러오는 중..."
   },
-  "updated": "{{name}} 업데이트 · {{time}}"
+  "edited": "{{time}} 편집",
+  "outline": "개요"
 }

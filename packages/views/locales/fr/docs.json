@@ -53,5 +53,6 @@
     "restore": "Restaurer cette version",
     "loading": "Chargement..."
   },
-  "updated": "Mis à jour par {{name}} · {{time}}"
+  "edited": "Modifié {{time}}",
+  "outline": "Plan"
 }
