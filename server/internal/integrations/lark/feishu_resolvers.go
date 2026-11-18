@@ -11,6 +11,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 // This file is the Feishu ResolverSet: the platform-specific implementations
@@ -46,12 +47,13 @@ func larkMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
 // engine.ChatSession — there is no Feishu-specific session implementation.
 func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager, media engine.MediaResolver) engine.ResolverSet {
 	set := engine.ResolverSet{
-		Installation: &feishuInstallationResolver{store: store},
-		Identity:     &feishuIdentityResolver{store: store},
-		Dedup:        &feishuDeduper{store: store},
-		Session:      &feishuSessionBinder{session: session},
-		Audit:        &feishuAuditor{audit: audit},
-		OriginType:   originFeishuChat,
+		Installation:  &feishuInstallationResolver{store: store},
+		Identity:      &feishuIdentityResolver{store: store},
+		Dedup:         &feishuDeduper{store: store},
+		Session:       &feishuSessionBinder{session: session},
+		Audit:         &feishuAuditor{audit: audit},
+		IssueDelivery: snapshotFeishuIssueDelivery,
+		OriginType:    originFeishuChat,
 	}
 	if replier != nil {
 		set.Replier = &feishuOutboundReplier{replier: replier}
@@ -63,6 +65,25 @@ func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audi
 		set.Media = media
 	}
 	return set
+}
+
+func snapshotFeishuIssueDelivery(inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID, bindingID pgtype.UUID, routeRevision int64) *service.ChannelIssueDelivery {
+	bindingKey, config := larkSessionRouting(msg)
+	if len(config) == 0 {
+		config = []byte(`{}`)
+	}
+	return &service.ChannelIssueDelivery{
+		ChannelType:      string(msg.Source.ChannelType),
+		InstallationID:   inst.ID,
+		BindingID:        bindingID,
+		ChannelChatID:    bindingKey,
+		ChatType:         string(msg.Source.ChatType),
+		ChannelMessageID: textOrNull(msg.MessageID),
+		ChannelThreadID:  textOrNull(msg.Source.ThreadID),
+		ChannelSenderID:  textOrNull(msg.Source.SenderID),
+		RouteRevision:    routeRevision,
+		Config:           config,
+	}
 }
 
 // ---- installation routing ----
