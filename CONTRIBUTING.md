@@ -738,7 +738,7 @@ fixtures:
 
 ```bash
 make up C=api,web ARGS="--ephemeral"
-make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue, --json
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task, --json
 make destroy ARGS="--yes"
 ```
 
@@ -748,6 +748,30 @@ with a wide description and a comment with a diff. The script registers a
 fixture runtime with the profile token and completes each task with canned
 Markdown through the daemon API, so it also works inside a daemon-managed task.
 It prints the URL of everything it created and exits.
+
+`task` is for UI and CLI work that needs an agent mid-run: agent status,
+the issue's execution log, Working / Idle filters, task panels. It assigns a new
+issue to the `Fixture Worker` agent, claims and starts the task, writes a few
+execution log entries and moves the issue to In Progress, then leaves the task
+running. `--queued` adds a second task queued behind it on the same issue.
+With `--json` it also prints `task_id`, `agent_id` and the task's `mat_`
+`auth_token`, which is what the CLI needs to run as that agent inside a task
+checkout:
+
+```bash
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --queued --json"
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --hold"   # Ctrl-C to stop
+```
+
+Nothing heartbeats for the fixture runtime by default, so it shows offline
+about 150 seconds after the run. The held tasks are unaffected: the server
+fails them only once the runtime has been silent for its reconnect grace
+(`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 hours by default), and an API restart does
+not touch them. When a screenshot needs the runtime or agent shown online, add
+`--hold`: the script then keeps heartbeating until Ctrl-C instead of exiting. A
+new environment, or `make destroy`, drops every held task with its database;
+run `task` again there. The fixture runtime reports the checkout's
+`git describe` version as its CLI version.
 
 ### Desktop
 
