@@ -2,10 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,12 +17,14 @@ import (
 )
 
 const (
-	inboxItemA  = "aaaaaaaa-0000-0000-0000-00000000000a"
-	inboxItemB  = "bbbbbbbb-0000-0000-0000-00000000000b"
-	inboxIssue1 = "11111111-0000-0000-0000-000000000001"
-	inboxIssue2 = "22222222-0000-0000-0000-000000000002"
-	inboxMember = "33333333-0000-0000-0000-000000000003"
-	inboxAgent  = "44444444-0000-0000-0000-000000000004"
+	inboxItemA   = "aaaaaaaa-0000-0000-0000-00000000000a"
+	inboxItemB   = "bbbbbbbb-0000-0000-0000-00000000000b"
+	inboxItemC   = "cccccccc-0000-0000-0000-00000000000c"
+	inboxIssue1  = "11111111-0000-0000-0000-000000000001"
+	inboxIssue2  = "22222222-0000-0000-0000-000000000002"
+	inboxMember  = "33333333-0000-0000-0000-000000000003"
+	inboxAgent   = "44444444-0000-0000-0000-000000000004"
+	inboxProject = "55555555-0000-0000-0000-000000000005"
 )
 
 type inboxRequest struct {
@@ -124,19 +129,79 @@ func TestInboxListFiltersAndEnrichesRows(t *testing.T) {
 	}
 }
 
-func TestInboxListArchivedAndSnoozed(t *testing.T) {
-	requests := fakeInboxServer(t, map[string]func(http.ResponseWriter, *http.Request){
-		"GET /api/inbox/archived": reply(`[{"id":"` + inboxItemA + `","type":"system","title":"Old notice","read":true,"created_at":"2026-11-01T00:00:00Z"}]`),
-		"GET /api/inbox/snoozed":  reply(`[{"issue_id":"` + inboxIssue1 + `","item_id":"` + inboxItemB + `","snoozed_until":"2026-12-01T09:00:00Z","snoozed_at":"2026-11-18T00:00:00Z","updates":2}]`),
-		"GET /api/issues":         reply(`{"issues":[{"id":"` + inboxIssue1 + `","identifier":"MUL-1","title":"X"}]}`),
+// The archive used to come from a list capped at 200 issue groups, so an older
+// archived issue could not be found to restore it.
+func TestInboxListArchivedReadsEveryPage(t *testing.T) {
+	const groups = 250
+	var pages []url.Values
+	fakeInboxServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /api/inbox/archived/page": func(w http.ResponseWriter, r *http.Request) {
+			q := r.URL.Query()
+			pages = append(pages, q)
+			start := 0
+			if cursor := q.Get("cursor"); cursor != "" {
+				start, _ = strconv.Atoi(cursor)
+			}
+			limit, _ := strconv.Atoi(q.Get("limit"))
+			end := min(start+limit, groups)
+			items := make([]string, 0, end-start)
+			for i := start; i < end; i++ {
+				items = append(items, fmt.Sprintf(`{"id":"%08d-0000-0000-0000-000000000000","type":"system","title":"Notice %d","read":true,"created_at":"2026-11-01T00:00:00Z"}`, i, i))
+			}
+			next := "null"
+			if end < groups {
+				next = fmt.Sprintf(`"%d"`, end)
+			}
+			fmt.Fprintf(w, `{"items":[%s],"next_cursor":%s,"has_more":%t}`, strings.Join(items, ","), next, end < groups)
+		},
 	})
-	list := func(cmd *cobra.Command, _ []string) error { return runInboxList(cmd, nil) }
+	out, err := runInboxCommand(t, registerInboxListFlags, func(cmd *cobra.Command, _ []string) error { return runInboxList(cmd, nil) }, nil,
+		map[string]string{"archived": "true", "output": "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != groups || rows[groups-1]["title"] != fmt.Sprintf("Notice %d", groups-1) {
+		t.Fatalf("listed %d archived groups, want all %d", len(rows), groups)
+	}
+	if len(pages) != 3 || pages[0].Get("cursor") != "" || pages[1].Get("cursor") != "100" || pages[2].Get("cursor") != "200" {
+		t.Fatalf("pages = %v", pages)
+	}
+}
 
-	out, err := runInboxCommand(t, registerInboxListFlags, list, nil, map[string]string{"archived": "true", "output": "json"})
+func TestInboxListArchivedSendsFiltersToServer(t *testing.T) {
+	var query url.Values
+	fakeInboxServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /api/projects/" + inboxProject: reply(`{"id":"` + inboxProject + `"}`),
+		"GET /api/inbox/archived/page": func(w http.ResponseWriter, r *http.Request) {
+			query = r.URL.Query()
+			_, _ = w.Write([]byte(`{"items":[{"id":"` + inboxItemA + `","type":"new_comment","title":"Old","issue_id":"` + inboxIssue1 + `","issue_project_id":"` + inboxProject + `","read":false,"created_at":"` + time.Now().UTC().Format(time.RFC3339) + `"}],"next_cursor":null,"has_more":false}`))
+		},
+		"GET /api/issues": reply(`{"issues":[{"id":"` + inboxIssue1 + `","identifier":"MUL-1","title":"X"}]}`),
+	})
+	out, err := runInboxCommand(t, registerInboxListFlags, func(cmd *cobra.Command, _ []string) error { return runInboxList(cmd, nil) }, nil,
+		map[string]string{"archived": "true", "issue": inboxIssue1, "project": inboxProject, "unread": "true", "since": "1d", "output": "json"})
 	if err != nil || !strings.Contains(out, inboxItemA) {
 		t.Fatalf("archived: %s %v", out, err)
 	}
-	out, err = runInboxCommand(t, registerInboxListFlags, list, nil, map[string]string{"snoozed": "true", "output": "json"})
+	since, err := time.Parse(time.RFC3339Nano, query.Get("received_after"))
+	if query.Get("group_id") != inboxIssue1 || query.Get("projects") != inboxProject || query.Get("unread_only") != "true" ||
+		err != nil || time.Since(since) < 23*time.Hour || time.Since(since) > 25*time.Hour {
+		t.Fatalf("archive page query = %v", query)
+	}
+}
+
+func TestInboxListSnoozed(t *testing.T) {
+	requests := fakeInboxServer(t, map[string]func(http.ResponseWriter, *http.Request){
+		"GET /api/inbox/snoozed": reply(`[{"issue_id":"` + inboxIssue1 + `","item_id":"` + inboxItemB + `","snoozed_until":"2026-12-01T09:00:00Z","snoozed_at":"2026-11-18T00:00:00Z","updates":2}]`),
+		"GET /api/issues":        reply(`{"issues":[{"id":"` + inboxIssue1 + `","identifier":"MUL-1","title":"X"}]}`),
+	})
+	list := func(cmd *cobra.Command, _ []string) error { return runInboxList(cmd, nil) }
+
+	out, err := runInboxCommand(t, registerInboxListFlags, list, nil, map[string]string{"snoozed": "true", "output": "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,26 +230,41 @@ func TestInboxListArchivedAndSnoozed(t *testing.T) {
 
 func TestInboxItemWritesReportCountAndFailures(t *testing.T) {
 	requests := fakeInboxServer(t, map[string]func(http.ResponseWriter, *http.Request){
-		"POST /api/inbox/" + inboxItemA + "/read": reply(`{"id":"` + inboxItemA + `","issue_id":"` + inboxIssue1 + `"}`),
+		// A reads its whole issue; C, on the same issue, has nothing left to read.
+		"POST /api/inbox/" + inboxItemA + "/read": reply(`{"id":"` + inboxItemA + `","issue_id":"` + inboxIssue1 + `","count":3}`),
+		"POST /api/inbox/" + inboxItemC + "/read": reply(`{"id":"` + inboxItemC + `","issue_id":"` + inboxIssue1 + `","count":0}`),
 		"POST /api/inbox/" + inboxItemB + "/read": func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":"inbox access requires the runtime owner's verified human trigger"}`))
 		},
 	})
-	out, err := runInboxCommand(t, registerInboxReadFlags, runInboxRead, []string{inboxItemA, strings.ToUpper(inboxItemA), inboxItemB}, map[string]string{"output": "json"})
-	if err == nil || !strings.Contains(err.Error(), "1 of 2") {
+	out, err := runInboxCommand(t, registerInboxReadFlags, runInboxRead, []string{inboxItemA, strings.ToUpper(inboxItemA), inboxItemB, inboxItemC}, map[string]string{"output": "json"})
+	if err == nil || !strings.Contains(err.Error(), "1 of 3") {
 		t.Fatalf("partial failure error = %v", err)
 	}
 	var result inboxWriteResult
 	if err := json.Unmarshal([]byte(out), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Action != "read" || result.Count != 1 || len(result.Items) != 1 || *result.Items[0].IssueID != inboxIssue1 ||
+	if result.Action != "read" || result.Count != 3 || len(result.Items) != 2 ||
+		result.Items[0].ID != inboxItemA || result.Items[0].Count != 3 || *result.Items[0].IssueID != inboxIssue1 ||
+		result.Items[1].ID != inboxItemC || result.Items[1].Count != 0 ||
 		len(result.Failed) != 1 || result.Failed[0].ID != inboxItemB || !strings.Contains(result.Failed[0].Error, "verified human trigger") {
 		t.Fatalf("result = %+v", result)
 	}
-	if len(*requests) != 2 {
+	if len(*requests) != 3 {
 		t.Fatalf("duplicate id not collapsed or failure stopped the batch: %v", *requests)
+	}
+
+	*requests = nil
+	out, err = runInboxCommand(t, registerInboxReadFlags, runInboxRead, []string{inboxItemA, inboxItemC}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{inboxItemA + ": 3 notifications", inboxItemC + ": no change", "Marked read 3 notifications"} {
+		if !strings.Contains(out, line) {
+			t.Errorf("table output missing %q: %s", line, out)
+		}
 	}
 
 	*requests = nil
@@ -209,19 +289,22 @@ func TestInboxArchiveUnarchiveUnreadUnsnoozeHitTheirEndpoints(t *testing.T) {
 		{"unsnooze", registerInboxOutputFlag, runInboxUnsnooze, "unsnooze"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			requests := fakeInboxServer(t, map[string]func(http.ResponseWriter, *http.Request){
-				"POST /api/inbox/" + inboxItemA + "/" + tc.action: reply(`{"issue_id":"` + inboxIssue1 + `"}`),
-			})
-			out, err := runInboxCommand(t, tc.register, tc.run, []string{inboxItemA}, map[string]string{"output": "json"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			var result inboxWriteResult
-			if err := json.Unmarshal([]byte(out), &result); err != nil || result.Action != tc.action || result.Count != 1 {
-				t.Fatalf("result = %s (%v)", out, err)
-			}
-			if len(*requests) != 1 {
-				t.Fatalf("requests = %v", *requests)
+			// An older server answers without a count; the notification itself still counts.
+			for body, want := range map[string]int64{`{"issue_id":"` + inboxIssue1 + `","count":4}`: 4, `{"issue_id":"` + inboxIssue1 + `"}`: 1} {
+				requests := fakeInboxServer(t, map[string]func(http.ResponseWriter, *http.Request){
+					"POST /api/inbox/" + inboxItemA + "/" + tc.action: reply(body),
+				})
+				out, err := runInboxCommand(t, tc.register, tc.run, []string{inboxItemA}, map[string]string{"output": "json"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var result inboxWriteResult
+				if err := json.Unmarshal([]byte(out), &result); err != nil || result.Action != tc.action || result.Count != want {
+					t.Fatalf("answer %s: result = %s (%v), want count %d", body, out, err, want)
+				}
+				if len(*requests) != 1 {
+					t.Fatalf("requests = %v", *requests)
+				}
 			}
 		})
 	}
@@ -230,17 +313,24 @@ func TestInboxArchiveUnarchiveUnreadUnsnoozeHitTheirEndpoints(t *testing.T) {
 func TestInboxSnoozeSendsUntil(t *testing.T) {
 	requests := fakeInboxServer(t, map[string]func(http.ResponseWriter, *http.Request){
 		"POST /api/inbox/" + inboxItemA + "/snooze": reply(`{"issue_id":"` + inboxIssue1 + `","count":3}`),
+		"POST /api/inbox/" + inboxItemC + "/snooze": reply(`{"issue_id":"` + inboxIssue1 + `","count":3}`),
+		"POST /api/inbox/" + inboxItemB + "/snooze": reply(`{"issue_id":"` + inboxIssue2 + `","count":2}`),
 	})
 	until := time.Now().Add(48 * time.Hour).UTC().Truncate(time.Second).Format(time.RFC3339)
-	out, err := runInboxCommand(t, registerInboxSnoozeFlags, runInboxSnooze, []string{inboxItemA}, map[string]string{"until": until, "output": "json"})
+	out, err := runInboxCommand(t, registerInboxSnoozeFlags, runInboxSnooze, []string{inboxItemA, inboxItemC, inboxItemB}, map[string]string{"until": until, "output": "json"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(*requests) != 1 || (*requests)[0].body != `{"until":"`+until+`"}` {
+	if len(*requests) != 3 || (*requests)[0].body != `{"until":"`+until+`"}` {
 		t.Fatalf("requests = %v", *requests)
 	}
-	if !strings.Contains(out, `"snoozed_until": "`+until+`"`) {
-		t.Fatalf("output lost the snooze time: %s", out)
+	var result inboxWriteResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatal(err)
+	}
+	// C re-snoozes A's issue to the same time, which changes nothing.
+	if result.SnoozedUntil != until || result.Count != 5 || len(result.Items) != 3 || result.Items[1].Count != 0 {
+		t.Fatalf("result = %+v", result)
 	}
 
 	*requests = nil

@@ -363,13 +363,15 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	item, err := h.Queries.MarkInboxRead(r.Context(), prev.ID)
+	row, err := h.Queries.MarkInboxRead(r.Context(), prev.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to mark read")
 		return
 	}
+	item := row.InboxItem
+	count := row.SiblingsRead + changedCount(!prev.Read)
 
-	logAgentInboxWrite(r, "read", "item_id", uuidToString(item.ID))
+	logAgentInboxWrite(r, "read", "item_id", uuidToString(item.ID), "count", count)
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
 	h.publish(protocol.EventInboxRead, workspaceID, "member", userID, map[string]any{
@@ -378,7 +380,21 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 	})
 
 	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, inboxWriteResponse{resp, count})
+}
+
+// inboxWriteResponse is the changed item plus how many notifications the change
+// actually modified, its issue group included; repeating a change counts 0.
+type inboxWriteResponse struct {
+	InboxItemResponse
+	Count int64 `json:"count"`
+}
+
+func changedCount(changed bool) int64 {
+	if changed {
+		return 1
+	}
+	return 0
 }
 
 // MarkInboxUnread flips a notification back to unread, the inverse of
@@ -400,7 +416,8 @@ func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	logAgentInboxWrite(r, "unread", "item_id", uuidToString(item.ID))
+	count := changedCount(prev.Read)
+	logAgentInboxWrite(r, "unread", "item_id", uuidToString(item.ID), "count", count)
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
 	h.publish(protocol.EventInboxUnread, workspaceID, "member", userID, map[string]any{
@@ -409,7 +426,7 @@ func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 	})
 
 	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, inboxWriteResponse{resp, count})
 }
 
 // DeleteInboxItem is human-only: deletion cannot be undone, unlike every other
@@ -455,17 +472,19 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	count := changedCount(!prev.Archived)
 	// Archive all sibling inbox items for the same issue (issue-level archive)
 	if item.IssueID.Valid {
-		h.Queries.ArchiveInboxByIssue(r.Context(), db.ArchiveInboxByIssueParams{
+		siblings, _ := h.Queries.ArchiveInboxByIssue(r.Context(), db.ArchiveInboxByIssueParams{
 			WorkspaceID:   item.WorkspaceID,
 			RecipientType: item.RecipientType,
 			RecipientID:   item.RecipientID,
 			IssueID:       item.IssueID,
 		})
+		count += siblings
 	}
 
-	logAgentInboxWrite(r, "archive", "item_id", uuidToString(item.ID), "issue_id", uuidToPtr(item.IssueID))
+	logAgentInboxWrite(r, "archive", "item_id", uuidToString(item.ID), "issue_id", uuidToPtr(item.IssueID), "count", count)
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
 	h.publish(protocol.EventInboxArchived, workspaceID, "member", userID, map[string]any{
@@ -475,7 +494,7 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	})
 
 	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, inboxWriteResponse{resp, count})
 }
 
 // UnarchiveInboxItem restores an archived notification to the main inbox. It is
@@ -498,17 +517,19 @@ func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	count := changedCount(prev.Archived)
 	// Restore all sibling inbox items for the same issue (issue-level restore).
 	if item.IssueID.Valid {
-		h.Queries.UnarchiveInboxByIssue(r.Context(), db.UnarchiveInboxByIssueParams{
+		siblings, _ := h.Queries.UnarchiveInboxByIssue(r.Context(), db.UnarchiveInboxByIssueParams{
 			WorkspaceID:   item.WorkspaceID,
 			RecipientType: item.RecipientType,
 			RecipientID:   item.RecipientID,
 			IssueID:       item.IssueID,
 		})
+		count += siblings
 	}
 
-	logAgentInboxWrite(r, "unarchive", "item_id", uuidToString(item.ID), "issue_id", uuidToPtr(item.IssueID))
+	logAgentInboxWrite(r, "unarchive", "item_id", uuidToString(item.ID), "issue_id", uuidToPtr(item.IssueID), "count", count)
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
 	h.publish(protocol.EventInboxUnarchived, workspaceID, "member", userID, map[string]any{
@@ -518,7 +539,7 @@ func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 	})
 
 	resp := h.enrichInboxResponse(r.Context(), inboxToResponse(item), item.IssueID)
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, inboxWriteResponse{resp, count})
 }
 
 func (h *Handler) CountUnreadInbox(w http.ResponseWriter, r *http.Request) {

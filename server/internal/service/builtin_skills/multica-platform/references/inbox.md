@@ -36,8 +36,10 @@ when it points at a comment, `read` and `created_at`. Listing never changes
 read state. `issue_identifier` and `actor` stay empty when their lookup fails;
 the row is still valid.
 
-The list has one row per notification, while the app shows one row per issue.
-Several rows can share an issue.
+The active list has one row per notification, while the app shows one row per
+issue, so several rows can share an issue. The archived list has one row per
+issue and is read page by page to the end, so an issue archived long ago is
+still found by `--issue`.
 
 ## Change
 
@@ -53,11 +55,13 @@ multica inbox unsnooze <id>...
 
 Ids must be full UUIDs from `list --output json`. Every id is checked before
 the first request; after that, a failure on one id does not stop the others.
-The JSON result lists `items` that succeeded and `failed` with each server
-error, and the command exits non-zero when any failed. `count` is the number
-of ids that succeeded; reading or archiving one notification also reads or
-archives every other notification on its issue, as opening or archiving it in
-the app does.
+The JSON result lists `items` that succeeded, each with its own `count`, and
+`failed` with each server error; the command exits non-zero when any failed.
+Reading or archiving one notification also reads or archives every other
+notification on its issue, as opening or archiving it in the app does. So
+`count` is the number of notifications actually changed, whole issues
+included: a second id on an issue already handled, or a change already in
+place, counts 0.
 
 Snoozing takes the whole issue out of the inbox until the time. It comes back
 early when someone mentions the owner by name, assigns it to them, a run
@@ -75,7 +79,9 @@ multica inbox archive --all --yes       # everything
 
 Without `--yes` they ask for confirmation, and a run, which cannot answer,
 fails without changing anything. `count` is the number of notifications the
-server changed. Bulk changes leave snoozed issues alone.
+server changed. `read --all`, `archive --all` and `archive --read` leave
+snoozed issues alone; `archive --completed` also archives a done or closed
+issue while it is snoozed and ends that snooze, as in the app.
 
 Only run a bulk change when the person asked for that sweep. To clear what
 you judged handled, pass those ids; `--all` also takes notifications that

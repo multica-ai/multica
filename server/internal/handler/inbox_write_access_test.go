@@ -161,6 +161,48 @@ func TestInboxEndpointsRejectCloudPAT(t *testing.T) {
 	}
 }
 
+// Per-item writes report how many notifications they actually changed, the
+// issue group included, so repeating one reports 0.
+func TestInboxItemWritesReportChangedCount(t *testing.T) {
+	f := newInboxWriteFixture(t)
+	token := f.taskToken(t, testUserID)
+	endpoint := func(name string) inboxOwnerEndpoint {
+		for _, e := range inboxOwnerEndpoints {
+			if e.name == name {
+				return e
+			}
+		}
+		t.Fatalf("no endpoint %q", name)
+		return inboxOwnerEndpoint{}
+	}
+	items := []string{f.item(t), f.item(t), f.item(t)}
+	dbfx.Exec(t, `UPDATE inbox_item SET read = true WHERE id = $1`, items[2])
+	for _, step := range []struct {
+		action string
+		item   string
+		want   int64
+	}{
+		{"read", items[0], 2},
+		{"read", items[1], 0},
+		{"unread", items[0], 1},
+		{"unread", items[0], 0},
+		{"archive", items[1], 3},
+		{"archive", items[0], 0},
+		{"unarchive", items[2], 3},
+		{"unarchive", items[2], 0},
+	} {
+		e := endpoint(step.action)
+		var resp struct {
+			ID    string `json:"id"`
+			Count *int64 `json:"count"`
+		}
+		testutil.Call(t, serveInboxEndpoint(e.handler, nil), e.request(f, step.item, token)).Want(http.StatusOK).JSON(&resp)
+		if resp.ID != step.item || resp.Count == nil || *resp.Count != step.want {
+			t.Fatalf("%s %s: id=%s count=%v, want %d", step.action, step.item, resp.ID, resp.Count, step.want)
+		}
+	}
+}
+
 func TestDeleteInboxItemIsHumanOnly(t *testing.T) {
 	f := newInboxWriteFixture(t)
 	endpoint := inboxOwnerEndpoint{method: http.MethodDelete, path: func(item, _ string) string { return "/api/inbox/" + item }, param: "id"}

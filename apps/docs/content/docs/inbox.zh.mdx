@@ -71,7 +71,7 @@ multica inbox list --issue MUL-123
 multica inbox list --archived     # 或 --snoozed
 ```
 
-每行显示通知 ID、任务编号、类型、来自谁、标题，以及评论或变更的简短摘要。`--unread`、`--issue`（任务编号或 UUID）、`--since`（RFC 3339 时间，或 `2h`、`1d`、`1w` 这样的时长）、`--project` 和 `--type` 都在拉取列表后于本地应用。`--project` 接受完整 UUID 或唯一 ID 前缀，包括 `multica project list` 显示的短 ID；无匹配或前缀有歧义时会报错。默认输出为表格；`--output json` 还会带上项目和评论 ID。
+每行显示通知 ID、任务编号、类型、来自谁、标题，以及评论或变更的简短摘要。`--unread`、`--issue`（任务编号或 UUID）、`--since`（RFC 3339 时间，或 `2h`、`1d`、`1w` 这样的时长）、`--project` 和 `--type` 用于筛选列表。`--archived` 会逐页读取整个归档，早已归档的任务也能找到并恢复。`--project` 接受完整 UUID 或唯一 ID 前缀，包括 `multica project list` 显示的短 ID；无匹配或前缀有歧义时会报错。表格还保留任务、评论和项目 ID，摘要会截短；`--output json` 带完整摘要。
 
 用列表里的 ID 处理通知：
 
@@ -84,7 +84,7 @@ multica inbox snooze <id>... --until tomorrow   # RFC 3339、30m、3h、1d、1w�
 
 与应用里一样，标为已读、归档或稍后提醒一条任务通知，会作用于整个任务；标为未读只改变这一条。某个 ID 失败不会中断其余 ID，命令会列出失败的条目并以非零状态退出。
 
-批量操作与收件箱菜单一致：`multica inbox read --all`，以及带 `--all`、`--read`（最新通知已读的任务）或 `--completed`（处于 `done` 或 `closed` 类状态的任务）的 `multica inbox archive`。它们需要 `--yes`，手动运行时也可以输入确认；稍后提醒中的任务不受影响。每次修改都会输出一个计数，`--output json` 以 JSON 返回：`--issue` 和批量操作是服务端实际改动的通知条数，按 ID 操作时是成功的 ID 数。CLI 不能删除通知。
+批量操作与收件箱菜单一致：`multica inbox read --all`，以及带 `--all`、`--read`（最新通知已读的任务）或 `--completed`（处于 `done` 或 `closed` 类状态的任务）的 `multica inbox archive`。它们需要 `--yes`，手动运行时也可以输入确认；除 `--completed` 外，稍后提醒中的任务不受影响：与应用一致，`--completed` 也会归档稍后提醒中已完成或已关闭的任务，并结束稍后提醒。每次修改都会输出实际改动的通知条数，包括整个任务上的通知；本来就是该状态的记为 0。`--output json` 返回同一计数，以及每个 ID 的结果。CLI 不能删除通知。
 
 获授权的智能体运行在这些操作中都使用任务凭证，不会回退到人的登录凭证。
 

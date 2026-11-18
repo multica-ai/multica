@@ -32,7 +32,7 @@ var inboxListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List your notifications without changing read status",
 	Long: "List your active notifications without changing read status. --archived lists archived notifications and --snoozed the issues you snoozed instead.\n\n" +
-		"Filters apply locally. Each row carries its issue key (e.g. MUL-123), who it is from, and a short summary of the comment or change; issue keys and names are looked up in one extra request each and stay empty when that lookup fails.\n\n" +
+		"With --archived every page of the archive is read, so --issue finds old issues too. Each row carries its issue key (e.g. MUL-123), who it is from, and a short summary of the comment or change; the table cuts the summary short, JSON has all of it. Issue keys and names are looked up in extra requests and stay empty when that lookup fails.\n\n" +
 		inboxAccessNote,
 	Args: exactArgs(0),
 	RunE: runInboxList,
@@ -66,7 +66,7 @@ var inboxUnreadCmd = &cobra.Command{
 var inboxArchiveCmd = &cobra.Command{
 	Use:   "archive [<id>...]",
 	Short: "Archive notifications",
-	Long: "Archive notifications: the given notification ids, or in bulk with --all, --read (issues whose newest notification is read) or --completed (issues in a done or closed status). Bulk archiving needs --yes and leaves snoozed issues alone.\n\n" +
+	Long: "Archive notifications: the given notification ids, or in bulk with --all, --read (issues whose newest notification is read) or --completed (issues in a done or closed status). Bulk archiving needs --yes. --all and --read leave snoozed issues alone; --completed also archives snoozed issues that are done or closed, ending the snooze, as in the app.\n\n" +
 		"Archiving a notification on an issue archives every notification on that issue. Archiving does not change the issue itself; `multica inbox unarchive` brings notifications back.\n\n" +
 		inboxAccessNote,
 	RunE: runInboxArchive,
@@ -228,23 +228,33 @@ func runInboxList(cmd *cobra.Command, _ []string) error {
 	}
 
 	if snoozed {
-		return listSnoozedInbox(ctx, client, issueID, output)
+		return listSnoozedInbox(ctx, cmd.Context(), client, issueID, output)
 	}
 
-	path := "/api/inbox"
+	unreadOnly, _ := cmd.Flags().GetBool("unread")
+	var response []inboxListRow
 	if archived {
-		path = "/api/inbox/archived"
+		filters := url.Values{}
+		if issueID != "" {
+			filters.Set("group_id", issueID)
+		}
+		if projectID != "" {
+			filters.Set("projects", projectID)
+		}
+		if unreadOnly {
+			filters.Set("unread_only", "true")
+		}
+		if !since.IsZero() {
+			filters.Set("received_after", since.UTC().Format(time.RFC3339Nano))
+		}
+		response, err = listArchivedInbox(cmd.Context(), client, filters)
+	} else {
+		err = client.GetJSON(ctx, "/api/inbox", &response)
 	}
-	var response []struct {
-		inboxListItem
-		Body    *string         `json:"body"`
-		Details json.RawMessage `json:"details"`
-	}
-	if err := client.GetJSON(ctx, path, &response); err != nil {
+	if err != nil {
 		return fmt.Errorf("list inbox: %w", err)
 	}
 	notifType, _ := cmd.Flags().GetString("type")
-	unreadOnly, _ := cmd.Flags().GetBool("unread")
 	items := make([]inboxListItem, 0, len(response))
 	for _, row := range response {
 		if projectID != "" && (row.IssueProjectID == nil || !strings.EqualFold(*row.IssueProjectID, projectID)) {
@@ -283,8 +293,10 @@ func runInboxList(cmd *cobra.Command, _ []string) error {
 			issueIDs = append(issueIDs, *item.IssueID)
 		}
 	}
-	issues := lookupInboxIssues(ctx, client, issueIDs)
-	actors := loadActorDisplayLookup(ctx, client)
+	issues := lookupInboxIssues(cmd.Context(), client, issueIDs)
+	actorCtx, actorCancel := cli.APIContext(cmd.Context())
+	defer actorCancel()
+	actors := loadActorDisplayLookup(actorCtx, client)
 	for i := range items {
 		if items[i].IssueID != nil {
 			items[i].IssueIdentifier = issues[strings.ToLower(*items[i].IssueID)].Identifier
@@ -298,18 +310,60 @@ func runInboxList(cmd *cobra.Command, _ []string) error {
 		return cli.PrintJSON(os.Stdout, items)
 	}
 	rows := make([][]string, 0, len(items))
-	for _, item := range items {
-		issue := item.IssueIdentifier
-		if issue == "" && item.IssueID != nil {
-			issue = *item.IssueID
+	value := func(s *string) string {
+		if s == nil {
+			return ""
 		}
-		rows = append(rows, []string{item.ID, issue, item.Type, item.Actor, oneLine(item.Title, 60), oneLine(item.Summary, 60), strconv.FormatBool(item.Read), item.CreatedAt})
+		return *s
 	}
-	cli.PrintTable(os.Stdout, []string{"ID", "ISSUE", "TYPE", "FROM", "TITLE", "SUMMARY", "READ", "CREATED"}, rows)
+	for _, item := range items {
+		rows = append(rows, []string{item.ID, item.Type, oneLine(item.Title, 0), value(item.IssueID), value(item.CommentID), value(item.IssueProjectID), strconv.FormatBool(item.Read), item.CreatedAt,
+			item.IssueIdentifier, item.Actor, oneLine(item.Summary, 80)})
+	}
+	// New columns go after the original ones so their positions stay put.
+	cli.PrintTable(os.Stdout, []string{"ID", "TYPE", "TITLE", "ISSUE", "COMMENT", "PROJECT", "READ", "CREATED", "KEY", "FROM", "SUMMARY"}, rows)
 	return nil
 }
 
-func listSnoozedInbox(ctx context.Context, client *cli.APIClient, issueID, output string) error {
+type inboxListRow struct {
+	inboxListItem
+	Body    *string         `json:"body"`
+	Details json.RawMessage `json:"details"`
+}
+
+// listArchivedInbox reads every page of the archive with the given filters,
+// each page under its own deadline.
+func listArchivedInbox(parent context.Context, client *cli.APIClient, filters url.Values) ([]inboxListRow, error) {
+	rows := []inboxListRow{}
+	cursor := ""
+	for {
+		params := url.Values{"limit": {"100"}}
+		for key, values := range filters {
+			params[key] = values
+		}
+		if cursor != "" {
+			params.Set("cursor", cursor)
+		}
+		var page struct {
+			Items      []inboxListRow `json:"items"`
+			NextCursor *string        `json:"next_cursor"`
+			HasMore    bool           `json:"has_more"`
+		}
+		ctx, cancel := cli.APIContext(parent)
+		err := client.GetJSON(ctx, "/api/inbox/archived/page?"+params.Encode(), &page)
+		cancel()
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, page.Items...)
+		if !page.HasMore || page.NextCursor == nil || *page.NextCursor == "" {
+			return rows, nil
+		}
+		cursor = *page.NextCursor
+	}
+}
+
+func listSnoozedInbox(ctx, parent context.Context, client *cli.APIClient, issueID, output string) error {
 	var response []struct {
 		inboxSnoozedItem
 		// The server calls the notification id item_id here; the CLI calls it
@@ -329,7 +383,7 @@ func listSnoozedInbox(ctx context.Context, client *cli.APIClient, issueID, outpu
 		items = append(items, row.inboxSnoozedItem)
 		ids = append(ids, row.IssueID)
 	}
-	issues := lookupInboxIssues(ctx, client, ids)
+	issues := lookupInboxIssues(parent, client, ids)
 	for i := range items {
 		issue := issues[strings.ToLower(items[i].IssueID)]
 		items[i].IssueIdentifier, items[i].Title = issue.Identifier, issue.Title
@@ -343,7 +397,7 @@ func listSnoozedInbox(ctx context.Context, client *cli.APIClient, issueID, outpu
 		if issue == "" {
 			issue = item.IssueID
 		}
-		rows = append(rows, []string{item.ID, issue, oneLine(item.Title, 60), item.SnoozedUntil, strconv.FormatInt(item.Updates, 10)})
+		rows = append(rows, []string{item.ID, issue, oneLine(item.Title, 0), item.SnoozedUntil, strconv.FormatInt(item.Updates, 10)})
 	}
 	cli.PrintTable(os.Stdout, []string{"ID", "ISSUE", "TITLE", "UNTIL", "UPDATES"}, rows)
 	return nil
@@ -355,9 +409,9 @@ type inboxIssue struct {
 }
 
 // lookupInboxIssues fetches the key and title of each issue in one request per
-// hundred ids. It is best effort: notifications still list without their
-// issue key when the lookup fails.
-func lookupInboxIssues(ctx context.Context, client *cli.APIClient, ids []string) map[string]inboxIssue {
+// hundred ids, each under its own deadline. It is best effort: notifications
+// still list without their issue key when the lookup fails.
+func lookupInboxIssues(parent context.Context, client *cli.APIClient, ids []string) map[string]inboxIssue {
 	const chunk = 100
 	issues := map[string]inboxIssue{}
 	unique := make([]string, 0, len(ids))
@@ -379,7 +433,10 @@ func lookupInboxIssues(ctx context.Context, client *cli.APIClient, ids []string)
 				Title      string `json:"title"`
 			} `json:"issues"`
 		}
-		if err := client.GetJSON(ctx, "/api/issues?"+params.Encode(), &resp); err != nil {
+		ctx, cancel := cli.APIContext(parent)
+		err := client.GetJSON(ctx, "/api/issues?"+params.Encode(), &resp)
+		cancel()
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not look up issue keys: %v\n", err)
 			return issues
 		}
@@ -390,9 +447,10 @@ func lookupInboxIssues(ctx context.Context, client *cli.APIClient, ids []string)
 	return issues
 }
 
+// oneLine collapses whitespace and, when limit is positive, cuts to limit runes.
 func oneLine(s string, limit int) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if utf8.RuneCountInString(s) <= limit {
+	if limit <= 0 || utf8.RuneCountInString(s) <= limit {
 		return s
 	}
 	runes := []rune(s)
@@ -450,8 +508,8 @@ func runInboxCount(cmd *cobra.Command, _ []string) error {
 }
 
 // inboxWriteResult is what every write prints. Count is the number of
-// notifications the command changed: the server's count for --issue and the
-// bulk modes, and the ids that succeeded when ids are given.
+// notifications the server actually changed, issue groups included; an id
+// whose change was already in place counts 0.
 type inboxWriteResult struct {
 	Action       string              `json:"action"`
 	Count        int64               `json:"count"`
@@ -464,6 +522,7 @@ type inboxWriteResult struct {
 type inboxWriteItem struct {
 	ID      string  `json:"id"`
 	IssueID *string `json:"issue_id"`
+	Count   int64   `json:"count"`
 }
 
 type inboxWriteFailure struct {
@@ -471,8 +530,8 @@ type inboxWriteFailure struct {
 	Error string `json:"error"`
 }
 
-// inboxItemCall changes one notification and returns the issue it is on.
-type inboxItemCall func(ctx context.Context, client *cli.APIClient, id string) (*string, error)
+// inboxItemCall changes one notification and reports what changed.
+type inboxItemCall func(ctx context.Context, client *cli.APIClient, id string) (inboxWriteItem, error)
 
 func inboxItemIDs(args []string) ([]string, error) {
 	ids := make([]string, 0, len(args))
@@ -508,7 +567,7 @@ func runInboxItemWrites(cmd *cobra.Command, args []string, result inboxWriteResu
 	}
 	for _, id := range ids {
 		ctx, cancel := cli.APIContext(cmd.Context())
-		issueID, err := call(ctx, client, id)
+		item, err := call(ctx, client, id)
 		cancel()
 		if err != nil {
 			msg := cli.ServerMessage(err)
@@ -518,19 +577,23 @@ func runInboxItemWrites(cmd *cobra.Command, args []string, result inboxWriteResu
 			result.Failed = append(result.Failed, inboxWriteFailure{ID: id, Error: msg})
 			continue
 		}
-		result.Items = append(result.Items, inboxWriteItem{ID: id, IssueID: issueID})
+		item.ID = id
+		result.Items = append(result.Items, item)
+		result.Count += item.Count
 	}
-	result.Count = int64(len(result.Items))
 	if output == "json" {
 		if err := cli.PrintJSON(os.Stdout, result); err != nil {
 			return err
 		}
 	} else {
 		for _, item := range result.Items {
-			fmt.Fprintf(os.Stdout, "%s %s\n", capitalize(past), item.ID)
+			fmt.Fprintf(os.Stdout, "%s: %s\n", item.ID, inboxCountText(item.Count))
 		}
 		for _, failure := range result.Failed {
 			fmt.Fprintf(os.Stderr, "Failed %s: %s\n", failure.ID, failure.Error)
+		}
+		if err := printInboxCount(output, result, past); err != nil {
+			return err
 		}
 	}
 	if len(result.Failed) > 0 {
@@ -547,17 +610,34 @@ func capitalize(s string) string {
 }
 
 // postInboxItem posts to one notification's action endpoint and returns the
-// issue the response names.
+// issue and change count the response names.
 func postInboxItem(action string, body any) inboxItemCall {
-	return func(ctx context.Context, client *cli.APIClient, id string) (*string, error) {
+	return func(ctx context.Context, client *cli.APIClient, id string) (inboxWriteItem, error) {
 		var resp struct {
 			IssueID *string `json:"issue_id"`
+			Count   *int64  `json:"count"`
 		}
 		if err := client.PostJSON(ctx, "/api/inbox/"+url.PathEscape(id)+"/"+action, body, &resp); err != nil {
-			return nil, err
+			return inboxWriteItem{}, err
 		}
-		return resp.IssueID, nil
+		// Older servers leave count out of read, unread, archive and unarchive;
+		// the notification itself is the one change their answer confirms.
+		count := int64(1)
+		if resp.Count != nil {
+			count = *resp.Count
+		}
+		return inboxWriteItem{IssueID: resp.IssueID, Count: count}, nil
 	}
+}
+
+func inboxCountText(count int64) string {
+	switch count {
+	case 0:
+		return "no change"
+	case 1:
+		return "1 notification"
+	}
+	return fmt.Sprintf("%d notifications", count)
 }
 
 // runInboxBatch runs one server-side bulk change after confirmation and
@@ -713,8 +793,22 @@ func runInboxSnooze(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--until must be in the future")
 	}
 	formatted := until.UTC().Format(time.RFC3339)
-	return runInboxItemWrites(cmd, args, inboxWriteResult{Action: "snooze", SnoozedUntil: formatted}, "snoozed",
-		postInboxItem("snooze", map[string]string{"until": formatted}))
+	snooze := postInboxItem("snooze", map[string]string{"until": formatted})
+	snoozedIssues := map[string]bool{}
+	// Every id on an issue snoozes the whole issue to the same time, so only
+	// the first one on each issue changes anything.
+	call := func(ctx context.Context, client *cli.APIClient, id string) (inboxWriteItem, error) {
+		item, err := snooze(ctx, client, id)
+		if err == nil && item.IssueID != nil {
+			key := strings.ToLower(*item.IssueID)
+			if snoozedIssues[key] {
+				item.Count = 0
+			}
+			snoozedIssues[key] = true
+		}
+		return item, err
+	}
+	return runInboxItemWrites(cmd, args, inboxWriteResult{Action: "snooze", SnoozedUntil: formatted}, "snoozed", call)
 }
 
 func runInboxUnsnooze(cmd *cobra.Command, args []string) error {
