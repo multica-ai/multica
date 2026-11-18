@@ -163,7 +163,7 @@ func init() {
 	agentCreateCmd.Flags().String("conversation-starters", "", "Conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Shown above the Chat composer; selecting one fills the composer and does not start a run. Omit to default to none.")
 	agentCreateCmd.Flags().String("runtime-strategy", "", "Runtime strategy: smart or fixed")
 	agentCreateCmd.Flags().String("cli", "", "Recommended CLI for smart strategy")
-	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
+	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required for fixed strategy)")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
 	agentCreateCmd.Flags().String("thinking-level", "", "Reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Empty = runtime default.")
@@ -658,7 +658,7 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		"name":       name,
 		"runtime_id": runtimeID,
 	}
-	if err := applyRuntimeStrategyFlags(cmd, body); err != nil {
+	if err := applyRuntimeStrategyFlags(cmd, body, true); err != nil {
 		return err
 	}
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
@@ -749,7 +749,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{}
-	if err := applyRuntimeStrategyFlags(cmd, body); err != nil {
+	if err := applyRuntimeStrategyFlags(cmd, body, false); err != nil {
 		return err
 	}
 	if cmd.Flags().Changed("name") {
@@ -1515,12 +1515,19 @@ func strVal(m map[string]any, key string) string {
 	return fmt.Sprintf("%v", v)
 }
 
-func applyRuntimeStrategyFlags(cmd *cobra.Command, body map[string]any) error {
+func applyRuntimeStrategyFlags(cmd *cobra.Command, body map[string]any, creating bool) error {
 	strategy, _ := cmd.Flags().GetString("runtime-strategy")
 	cli, _ := cmd.Flags().GetString("cli")
 	switch strategy {
 	case "":
 	case "smart":
+		runtimeID, _ := cmd.Flags().GetString("runtime-id")
+		if runtimeID != "" {
+			return fmt.Errorf("--runtime-id cannot be used with smart strategy")
+		}
+		if creating && strings.TrimSpace(cli) == "" {
+			return fmt.Errorf("--cli is required with smart strategy")
+		}
 		body["share_runtime"] = false
 	case "fixed":
 		body["share_runtime"] = true
