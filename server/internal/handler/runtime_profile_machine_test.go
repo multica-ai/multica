@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -150,7 +151,12 @@ func TestCreateRuntimeProfile_OlderClientRequiresUnambiguousMachine(t *testing.T
 		t.Fatalf("wrong owned machine: %+v", second)
 	}
 	dbfx.Runtime(t, "Second owned machine", testutil.Cols{"workspace_id": ws, "daemon_id": "second-" + uuid.NewString(), "runtime_mode": "local"})
-	testutil.Call(t, testHandler.CreateRuntimeProfile, create()).Want(http.StatusBadRequest)
+	// Older clients show this text verbatim and cannot send daemon_id, so it
+	// has to point them at an update instead of at the field.
+	msg, _ := testutil.Call(t, testHandler.CreateRuntimeProfile, create()).Want(http.StatusBadRequest).Map()["error"].(string)
+	if !strings.Contains(msg, "Update Multica Desktop or the CLI") || strings.Contains(msg, "daemon_id") {
+		t.Fatalf("ambiguous older-client error = %q", msg)
+	}
 }
 
 func TestRuntimeProfile_LegacyDoesNotSpread(t *testing.T) {

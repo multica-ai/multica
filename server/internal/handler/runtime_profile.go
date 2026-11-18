@@ -214,8 +214,15 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.DaemonID == "" && len(machines) > 1 {
+		// Current Web, Desktop and CLI always send daemon_id, so this is an
+		// older installed client. It shows this text verbatim and cannot pass
+		// a machine itself, so the advice is to update or use the web app.
+		writeError(w, http.StatusBadRequest, "More than one machine could run this custom runtime and this client did not choose one. Update Multica Desktop or the CLI, or create it from the machine's page in the web app.")
+		return
+	}
 	if len(machines) != 1 {
-		writeError(w, http.StatusBadRequest, "daemon_id must select a registered local machine; upgrade your client or pass daemon_id explicitly")
+		writeError(w, http.StatusBadRequest, "daemon_id must select a registered local machine")
 		return
 	}
 
