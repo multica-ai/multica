@@ -891,7 +891,7 @@ type MarkInboxReadRow struct {
 // opened outside the inbox. The item itself is read whether or not it is
 // archived; its siblings only while active, as in MarkInboxReadByIssue, which
 // keeps the probe on the partial index idx_inbox_active_by_issue. Items without
-// an issue are their own group.
+// an issue are their own group. siblings_read is how many other rows it read.
 func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (MarkInboxReadRow, error) {
 	row := q.db.QueryRow(ctx, markInboxRead, id)
 	var i MarkInboxReadRow
