@@ -4144,8 +4144,9 @@ export const InfoFlowInstallationSchema = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   agent_id: z.string().default(""),
+  // The robot identifier. Defaulted (not required) so a backend that predates
+  // it on the wire leaves the row usable instead of dropping the installation.
   app_key: z.string().default(""),
-  bot_name: z.string().optional(),
   installer_user_id: z.string().default(""),
   status: z.string().default("revoked"),
 }).loose();

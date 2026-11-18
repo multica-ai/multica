@@ -103,6 +103,22 @@
     "error_not_member": "你登入的 Multica 帳號不是當前工作區成員。",
     "error_unknown": "出現未知錯誤。請稍後再試，如反覆失敗請聯絡工作區管理員。"
   },
+  "infoflow_bind": {
+    "page_title": "繫結你的如流帳號",
+    "redeeming": "正在繫結帳號…",
+    "needs_auth_description": "請先登入 Multica 完成繫結。連結中的 token 會把你的如流帳號繫結到目前 Multica 使用者，因此必須先登入。",
+    "sign_in": "登入",
+    "done_title": "繫結成功。",
+    "done_description": "之後你在如流裡傳送給機器人的訊息會直接交給對應的代理人。你可以關閉此頁面。",
+    "error_title": "繫結未完成",
+    "error_admin_hint": "如果反覆失敗，請在如流裡重新傳送訊息給機器人以取得新的連結。",
+    "error_missing_token": "連結中缺少 token。請在如流裡重新向機器人傳送訊息以取得新的連結。",
+    "error_expired": "此連結無效或已過期（連結有效期為 15 分鐘）。請重新向機器人取得新連結。",
+    "error_already_bound": "此如流帳號已繫結到其他 Multica 使用者。如需移轉帳號，必須先由原使用者解除繫結。",
+    "error_not_member": "目前登入的 Multica 帳號不是該工作區的成員。",
+    "error_not_configured": "此 Multica 部署未啟用如流整合，沒有可繫結的物件。請聯絡工作區管理員在伺服器端設定 MULTICA_INFOFLOW_SECRET_KEY。",
+    "error_unknown": "出了點問題，請重試；若持續失敗，請聯絡工作區管理員。"
+  },
   "telegram_bind": {
     "page_title": "繫結你的 Telegram 帳號",
     "redeeming": "正在繫結…",

@@ -103,6 +103,22 @@
     "error_not_member": "サインインしている Multica アカウントはこのワークスペースのメンバーではありません。",
     "error_unknown": "問題が発生しました。もう一度試し、それでも解決しない場合はワークスペース管理者にお問い合わせください。"
   },
+  "infoflow_bind": {
+    "page_title": "InfoFlow アカウントを連携",
+    "redeeming": "アカウントを連携しています…",
+    "needs_auth_description": "連携を完了するには Multica にサインインしてください。リンク内のトークンは InfoFlow アカウントをこの Multica ユーザーに結び付けるため、先にログインが必要です。",
+    "sign_in": "サインイン",
+    "done_title": "連携しました。",
+    "done_description": "次に InfoFlow でボットに送ったメッセージはエージェントに直接届きます。このタブは閉じて構いません。",
+    "error_title": "連携を完了できませんでした",
+    "error_admin_hint": "繰り返し失敗する場合は、InfoFlow でボットに再度メッセージを送って新しいリンクを取得してください。",
+    "error_missing_token": "リンクにトークンが含まれていません。InfoFlow でボットに再度メッセージを送って新しいリンクを取得してください。",
+    "error_expired": "このリンクは無効か、有効期限（15分）が切れています。ボットに再度メッセージを送って新しいリンクを取得してください。",
+    "error_already_bound": "この InfoFlow アカウントは別の Multica ユーザーに連携されています。アカウントの移行には明示的な解除が必要です。",
+    "error_not_member": "サインインしている Multica アカウントはこのワークスペースのメンバーではありません。",
+    "error_not_configured": "この Multica デプロイでは InfoFlow 連携が有効になっていないため、連携先がありません。ワークスペース管理者にサーバー上の MULTICA_INFOFLOW_SECRET_KEY の設定を依頼してください。",
+    "error_unknown": "問題が発生しました。再試行し、解決しない場合はワークスペース管理者に連絡してください。"
+  },
   "telegram_bind": {
     "page_title": "Telegram アカウントをリンク",
     "redeeming": "アカウントをリンクしています…",

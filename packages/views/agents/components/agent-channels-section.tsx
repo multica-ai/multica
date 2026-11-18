@@ -36,6 +36,17 @@ import {
 
 const DINGTALK_CHAT_MANAGE_PERMISSION = "qyapi_chat_manage";
 
+// infoflowContactName labels an InfoFlow installation. InfoFlow robots have no
+// rename API Multica can persist, so there is no `bot_name` to read — the AppKey
+// the user pasted from the InfoFlow console is the only identifier that tells two
+// robots apart, and it is what they recognise. Returns undefined for a row that
+// predates the backend exposing it, so the caller simply renders nothing rather
+// than an empty chip.
+function infoflowContactName(connection: ChannelConnection): string | undefined {
+  if (connection.channel !== "infoflow") return undefined;
+  return connection.installation.app_key || undefined;
+}
+
 export function AgentChannelLinks({ agent }: { agent: Agent }) {
   const { connections } = useMessagingChannels();
   const links = connections.filter(
@@ -69,7 +80,7 @@ function AgentChannelContact({
     connection.channel === "wecom"
       ? connection.installation.bot_name
       : connection.channel === "infoflow"
-        ? connection.installation.bot_name
+        ? infoflowContactName(connection)
         : (data?.bot_identities?.[installation.id]?.bot_name ??
           getDingTalkBotIdentity(data?.groups ?? [], installation.id)?.bot_name);
   const href = channelChatLink(connection);
@@ -219,7 +230,7 @@ function AgentChannelRow({
       : connection.channel === "wecom"
         ? connection.installation.bot_name
         : connection.channel === "infoflow"
-          ? connection.installation.bot_name
+          ? infoflowContactName(connection)
           : connection.channel === "telegram" &&
             connection.installation.bot_username
           ? `@${connection.installation.bot_username}`

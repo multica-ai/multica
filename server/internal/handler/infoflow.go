@@ -19,10 +19,17 @@ import (
 // row. The encrypted AppSecret in config is INTENTIONALLY absent — it is
 // server-internal (only the outbound sender decrypts it). WS lease columns are
 // runtime state, not API surface, so they are omitted too.
+//
+// AppKey is the robot identifier the user pasted from the InfoFlow console. It
+// is not a secret (only the sealed AppSecret has to stay server-side), and it is
+// the only name the UI can show for an installation: InfoFlow exposes no rename
+// API to persist a display name. `bot_name` is therefore deliberately absent —
+// an empty field would only make the frontend render a name that never arrives.
 type InfoFlowInstallationResponse struct {
 	ID                   string   `json:"id"`
 	WorkspaceID          string   `json:"workspace_id"`
 	AgentID              string   `json:"agent_id"`
+	AppKey               string   `json:"app_key"`
 	InstallerUserID      string   `json:"installer_user_id"`
 	Status               string   `json:"status"`
 	InstalledAt          string   `json:"installed_at"`
@@ -37,6 +44,7 @@ func infoflowInstallationToResponse(row db.ChannelInstallation) InfoFlowInstalla
 		ID:              uuidToString(row.ID),
 		WorkspaceID:     uuidToString(row.WorkspaceID),
 		AgentID:         uuidToString(row.AgentID),
+		AppKey:          infoflow.AppKeyFromConfig(row.Config),
 		InstallerUserID: uuidToString(row.InstallerUserID),
 		Status:          row.Status,
 		InstalledAt:     row.InstalledAt.Time.UTC().Format(time.RFC3339),

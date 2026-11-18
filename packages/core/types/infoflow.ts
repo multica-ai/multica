@@ -9,10 +9,14 @@ export interface InfoFlowInstallation {
   id: string;
   workspace_id: string;
   agent_id: string;
-  /** The robot's AppKey, pasted from the InfoFlow admin console. */
+  /** The robot's AppKey, pasted from the InfoFlow admin console. Not a secret:
+   * it is the robot identifier the UI shows as this installation's name, and
+   * it is the routing key the engine matches inbound events on. */
   app_key: string;
-  /** Chat display name; absent on older backends and until the first send. */
-  bot_name?: string;
+  /** The robot's own display name. Deliberately absent: InfoFlow exposes no
+   * rename API an installation could persist, so the backend never sends one —
+   * a field declared here would only invite the UI to read a name that never
+   * arrives. */
   installer_user_id: string;
   status: "active" | "revoked" | string;
 }

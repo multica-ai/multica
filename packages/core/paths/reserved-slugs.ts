@@ -322,14 +322,15 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "dingtalk",
 
   // Chat channel account-bind routes
-  // `/lark/bind`, `/slack/bind`, `/telegram/bind`, and `/wecom/bind` are global
-  // pre-workspace routes where a member links their chat identity, the same as
-  // `/dingtalk/bind`. Reserve the prefixes so a workspace slug cannot shadow
-  // them.
+  // `/lark/bind`, `/slack/bind`, `/telegram/bind`, `/wecom/bind`, and
+  // `/infoflow/bind` are global pre-workspace routes where a member links their
+  // chat identity, the same as `/dingtalk/bind`. Reserve the prefixes so a
+  // workspace slug cannot shadow them.
   "lark",
   "slack",
   "telegram",
   "wecom",
+  "infoflow",
 
   // Backend ops / observability
   // `/health`, `/readyz`, `/healthz`, and `/ws` exist on the backend host;

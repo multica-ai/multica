@@ -59,6 +59,23 @@ type credentials struct {
 	AppSecret string
 }
 
+// AppKeyFromConfig reads the plaintext AppKey (config.app_id) out of a stored
+// channel_installation.config blob. The AppKey is a public identifier, not a
+// secret, so — unlike decodeCredentials — this needs no decryptor and never
+// fails on a sealed AppSecret: the management API can show which robot an
+// installation belongs to even when the at-rest key it was sealed with has
+// since rotated.
+func AppKeyFromConfig(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var cfg installConfig
+	if json.Unmarshal(raw, &cfg) != nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.AppID)
+}
+
 // Decrypter opens a secretbox-sealed credential blob. *secretbox.Box.Open has
 // this shape, so the factory and outbound subscriber take it directly.
 type Decrypter func([]byte) ([]byte, error)

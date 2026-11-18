@@ -61,3 +61,42 @@ func mustJSON(t *testing.T, v any) json.RawMessage {
 	}
 	return b
 }
+
+func TestAppKeyFromConfig(t *testing.T) {
+	sealed, err := testBox(t).Seal([]byte("s"))
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	tests := []struct {
+		name string
+		raw  []byte
+		want string
+	}{
+		{name: "nil config", raw: nil, want: ""},
+		{name: "malformed config", raw: []byte("{not json"), want: ""},
+		{name: "unknown shape", raw: []byte(`{"other":"x"}`), want: ""},
+		{
+			name: "reads app id without opening the secret",
+			raw: mustJSON(t, installConfig{
+				AppID:              " appkey-1 ",
+				AppSecretEncrypted: base64.StdEncoding.EncodeToString(sealed),
+			}),
+			want: "appkey-1",
+		},
+		{
+			// A rotated at-rest key leaves the sealed AppSecret unreadable; the
+			// AppKey is still a plain identifier the UI can show.
+			name: "empty sealed secret",
+			raw:  mustJSON(t, installConfig{AppID: "appkey-2"}),
+			want: "appkey-2",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := AppKeyFromConfig(tc.raw); got != tc.want {
+				t.Errorf("AppKeyFromConfig() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

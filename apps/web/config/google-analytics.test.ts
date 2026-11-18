@@ -29,6 +29,9 @@ it("reports route labels as page_title, never workspace content", () => {
   expect(t("/contact-sales")).toBe("Contact sales");
   expect(t("/invite/inv_1")).toBe("Invite");
   expect(t("/lark/bind")).toBe("Lark");
+  // Reserved like the other IM bind routes: reported as its own page, never as
+  // a workspace slug (which would read "Workspace · Page").
+  expect(t("/infoflow/bind")).toBe("Infoflow");
   expect(t("/acme")).toBe("Workspace");
   expect(t("/acme/issues")).toBe("Workspace · Issues");
   expect(t("/acme/issues/MUL-123")).toBe("Workspace · Issues · Detail");
