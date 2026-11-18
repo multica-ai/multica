@@ -646,6 +646,14 @@ WHERE autopilot_quota_reservation.workspace_id = $1;
 DELETE FROM autopilot_quota_period
 WHERE autopilot_quota_period.workspace_id = $1;
 
+-- name: DeleteWorkspaceEntitlementLimitOverages :exec
+DELETE FROM entitlement_limit_overage
+WHERE entitlement_limit_overage.workspace_id = $1;
+
+-- name: DeleteWorkspaceEntitlementFeatureAttempts :exec
+DELETE FROM entitlement_feature_attempt
+WHERE entitlement_feature_attempt.workspace_id = $1;
+
 -- name: DeleteWorkspaceAutopilotChildren :exec
 WITH
 deleted_triggers AS (
@@ -754,6 +762,9 @@ deleted_project_members AS (
 ),
 deleted_project_subscribers AS (
     DELETE FROM project_subscriber WHERE project_subscriber.workspace_id = $1
+),
+deleted_project_folders AS (
+    DELETE FROM project_folder WHERE project_folder.workspace_id = $1
 )
 DELETE FROM project WHERE project.workspace_id = $1;
 

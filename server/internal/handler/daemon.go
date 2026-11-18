@@ -2502,8 +2502,8 @@ func claimPollHintDelay(now, fireAt time.Time) time.Duration {
 
 // finalizeClaimDelivery is the shared final delivery gate for the singular and
 // batch claim paths. It re-verifies the current agent/runtime authorization
-// INSIDE the FinalizeTaskClaim transaction, under a FOR UPDATE row lock on the
-// runtime row, so the decision and the task-token mint commit atomically:
+// INSIDE the FinalizeTaskClaim transaction, under a FOR NO KEY UPDATE row lock
+// on the runtime row, so the decision and the task-token mint commit atomically:
 //
 //   - runtime.owner_id is re-read authoritatively (no stale claim-time
 //     snapshot), and a concurrent re-registration that would change owner_id
@@ -2533,11 +2533,11 @@ func (h *Handler) finalizeClaimDelivery(
 ) (receipt []pgtype.UUID, deliveryFailure *claimBuildFailure, err error) {
 	var agentOwnerID pgtype.UUID
 	authorize := func(qtx *db.Queries, tokenParams *db.CreateTaskTokenParams) error {
-		// FOR UPDATE on the runtime row: any concurrent
-		// UpsertAgentRuntime/visibility flip that would change owner_id or
-		// visibility blocks until this transaction commits, so the values read
-		// here are the ones delivery is authorized against.
-		locked, lerr := qtx.LockAgentRuntime(ctx, runtime.ID)
+		// Any concurrent UpsertAgentRuntime/visibility flip that would change
+		// owner_id or visibility blocks until this transaction commits, so the
+		// values read here are the ones delivery is authorized against. The
+		// lock must not be FOR UPDATE: see LockAgentRuntimeForClaimDelivery.
+		locked, lerr := qtx.LockAgentRuntimeForClaimDelivery(ctx, runtime.ID)
 		if lerr != nil {
 			return fmt.Errorf("lock runtime for delivery authorization: %w", lerr)
 		}

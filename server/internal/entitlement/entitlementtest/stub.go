@@ -18,13 +18,43 @@ type Call struct {
 type Stub struct {
 	mu        sync.RWMutex
 	decisions map[uuid.UUID]map[entitlement.GateName]entitlement.Decision
+	features  map[uuid.UUID]map[entitlement.FeatureName]entitlement.FeatureDecision
 	calls     []Call
 }
 
-var _ entitlement.Provider = (*Stub)(nil)
+var (
+	_ entitlement.Provider        = (*Stub)(nil)
+	_ entitlement.FeatureProvider = (*Stub)(nil)
+)
 
 func New() *Stub {
-	return &Stub{decisions: make(map[uuid.UUID]map[entitlement.GateName]entitlement.Decision)}
+	return &Stub{
+		decisions: make(map[uuid.UUID]map[entitlement.GateName]entitlement.Decision),
+		features:  make(map[uuid.UUID]map[entitlement.FeatureName]entitlement.FeatureDecision),
+	}
+}
+
+// SetFeature fixes one workspace's paid-feature decision. The Reason given is
+// kept, so tests can tell a configured observe from a stale downgrade.
+func (s *Stub) SetFeature(workspaceID uuid.UUID, name entitlement.FeatureName, decision entitlement.FeatureDecision) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.features[workspaceID] == nil {
+		s.features[workspaceID] = make(map[entitlement.FeatureName]entitlement.FeatureDecision)
+	}
+	if decision.Reason == "" {
+		decision.Reason = entitlement.ReasonStub
+	}
+	s.features[workspaceID][name] = decision
+}
+
+func (s *Stub) Feature(_ context.Context, workspaceID uuid.UUID, name entitlement.FeatureName) entitlement.FeatureDecision {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if decision, ok := s.features[workspaceID][name]; ok {
+		return decision
+	}
+	return entitlement.FeatureDecision{Action: entitlement.ActionOff, Reason: entitlement.ReasonStub}
 }
 
 func (s *Stub) Set(workspaceID uuid.UUID, name entitlement.GateName, decision entitlement.Decision) {

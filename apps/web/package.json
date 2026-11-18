@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@multica/core": "workspace:*",
+    "@multica/ee": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
     "@tanstack/react-query": "catalog:",

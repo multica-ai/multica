@@ -103,6 +103,8 @@ Detailed states and retry rules are in [Runs](/tasks).
 
 One daemon executes at most 20 runs at a time by default; each agent at most 6. Effective concurrency is the smaller of the two.
 
+Runs waiting for a Direct local directory do not use a daemon execution slot. They reacquire a slot before starting and still count as owned work for shutdown and update safety.
+
 Once a limit is reached, new runs keep queueing. Adjust a single agent's concurrency in the agent settings, and the machine-wide cap with `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Parallel runs compete for machine capacity, tool account quota, and the same working directory all at once.
 
 Token usage, cost, and failures across runs are summarized per workspace on the [Analytics](/analytics) page; `multica runtime usage <runtime-id>` shows token usage for a single runtime.
@@ -134,15 +136,25 @@ The merge happens on the runtime's computer; the commands, URLs, headers, and en
 
 ### Cursor MCP logins [#cursor-mcp-login]
 
-Cursor stores MCP OAuth logins per project directory, and every run has its own directory. When a Cursor agent has an MCP configuration, the daemon therefore keeps one login file per agent on the runtime's computer, `cursor-mcp-auth/<agent-id>/mcp-auth.json` in the Multica config directory, and links each run to it. Log in to a server such as Mobbin once and the agent's later runs on that computer use the login. It is separate from your own Cursor's login, so a run never signs you out there. Every run of the agent on that computer uses it, including runs other members trigger.
+Cursor stores MCP OAuth logins per project directory, and every run has its own directory. The daemon therefore keeps one login file per Cursor agent on the runtime's computer, `cursor-mcp-auth/<agent-id>/mcp-auth.json` in the Multica config directory, and links each run to it. Log in to a server such as Mobbin once and the agent's later runs on that computer use the login. It is separate from the logins of your own Cursor projects, so a run never signs you out there. Every run of the agent on that computer uses it, including runs other members trigger.
 
-If a server still needs a login, the run's transcript says which one and gives the command to run on the runtime's computer, for example:
+When the agent has an MCP configuration, each run gets its own Cursor data directory, and the run's `mcp-auth.json` there is the link. When it has none, the run uses your own Cursor data directory (`~/.cursor`, or the daemon's `CURSOR_DATA_DIR`) and the MCP servers configured there; the daemon only links the `mcp-auth.json` that Cursor keeps for the run's directory under `projects/` to the agent's file. The link is removed when the run's directory is cleaned up.
+
+Without an MCP configuration, two kinds of run are not linked, because their Cursor project is one you work in too and linking it would replace your own login there: runs that work in place in a project's local directory, and runs whose directory is enclosed by a git repository, such as a dotfiles repository in your home folder, since Cursor then treats that repository as the project. These runs use whatever login Cursor already holds for that directory, and their transcript gives no login command; log in by running `cursor-agent mcp login <server>` in that directory yourself.
+
+If a server still needs a login, the run's transcript says which one and gives the command to run on the runtime's computer. For an agent with an MCP configuration, for example:
 
 ```bash
 cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
 ```
 
-The command runs in a login folder kept next to the agent's login file, so it still works after the run's own directory has been cleaned up.
+For an agent without one, the command uses your own Cursor data directory:
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~/.cursor cursor-agent mcp login mobbin
+```
+
+Both commands run in a login folder kept next to the agent's login file, so they still work after the run's own directory has been cleaned up.
 
 The login applies from the agent's next run; the current run does not pick it up. To use a login file of your own instead, set `CURSOR_MCP_AUTH_SOURCE` in the agent's environment variables to an absolute path to an `mcp-auth.json` or the Cursor project directory containing it; it takes priority over the per-agent file. Two runs of one agent that refresh the same token at the same moment can still sign each other out; log in again if that happens.
 

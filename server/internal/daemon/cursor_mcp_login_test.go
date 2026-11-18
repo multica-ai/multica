@@ -128,6 +128,45 @@ func TestReportCursorMcpLoginNoticePostsOnlyWhenLoginMissing(t *testing.T) {
 	}
 }
 
+func TestCursorMcpLoginNoticeOnUserDataDirPointsAtUserLoginWorkspace(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	userData := filepath.Join(root, "home", ".cursor")
+	workDir := filepath.Join(root, "task", "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	authPath := execenv.CursorMcpAuthPath(userData, workDir)
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(authPath, []byte(`{"mobbin":{"clientInfo":{"client_id":"c"}}}`), 0o600); err != nil {
+		t.Fatalf("write challenge: %v", err)
+	}
+	store := filepath.Join(root, "profile", "cursor-mcp-auth", "agent-1", "mcp-auth.json")
+
+	notice := cursorMcpLoginNoticeFor(cursorMcpLoginCheck{
+		TaskWorkDir:       workDir,
+		TaskCursorDataDir: userData,
+		AuthStore:         store,
+		UserDataDir:       true,
+		GOOS:              "darwin",
+	}, quietTaskLog())
+	loginWork := filepath.Join(filepath.Dir(store), "user-login", "workdir")
+	if notice.WorkDir != loginWork || notice.CursorDataDir != userData || len(notice.Servers) != 1 {
+		t.Fatalf("notice = %+v, want the user login workspace on the user data dir", notice)
+	}
+
+	loginAuth := execenv.CursorMcpAuthPath(userData, loginWork)
+	if err := os.WriteFile(loginAuth, []byte(`{"mobbin":{"tokens":{"access_token":"a","refresh_token":"r"}}}`), 0o600); err != nil {
+		t.Fatalf("log in through workspace: %v", err)
+	}
+	if got := readTestFile(t, store); !strings.Contains(got, `"access_token":"a"`) {
+		t.Fatalf("login did not land in the agent store: %s", got)
+	}
+}
+
 func TestCursorMcpLoginNoticeFallsBackToTaskWithoutStore(t *testing.T) {
 	t.Parallel()
 

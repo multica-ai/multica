@@ -1431,6 +1431,46 @@ func (q *Queries) LockAgentRuntimeForAccessChange(ctx context.Context, id pgtype
 	return i, err
 }
 
+const lockAgentRuntimeForClaimDelivery = `-- name: LockAgentRuntimeForClaimDelivery :one
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name, shared_with, max_concurrent_tasks FROM agent_runtime
+WHERE id = $1
+FOR NO KEY UPDATE
+`
+
+// The claim delivery gate's lock on the runtime it re-reads owner_id and
+// visibility from. FOR NO KEY UPDATE still blocks every UPDATE and DELETE of
+// the row, so a re-registration or visibility flip waits for the gate to
+// commit. Unlike FOR UPDATE it does not block FOR KEY SHARE, which every task
+// insert takes on its runtime (lock_task_owner_rows and the foreign key) while
+// already holding the agent row. The gate takes the agent row after this one,
+// so FOR UPDATE here deadlocked a chat send racing a delivery (MUL-9501).
+func (q *Queries) LockAgentRuntimeForClaimDelivery(ctx context.Context, id pgtype.UUID) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, lockAgentRuntimeForClaimDelivery, id)
+	var i AgentRuntime
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DaemonID,
+		&i.Name,
+		&i.RuntimeMode,
+		&i.Provider,
+		&i.Status,
+		&i.DeviceInfo,
+		&i.Metadata,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OwnerID,
+		&i.LegacyDaemonID,
+		&i.Visibility,
+		&i.ProfileID,
+		&i.CustomName,
+		&i.SharedWith,
+		&i.MaxConcurrentTasks,
+	)
+	return i, err
+}
+
 const lockRuntimeClaimCapacity = `-- name: LockRuntimeClaimCapacity :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::uuid::text || ':runtime_claim_capacity', 0))
 `

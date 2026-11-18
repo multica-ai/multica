@@ -234,6 +234,25 @@ multica issue wakeup runs MUL-123 <wakeup-id>
 
 Créer un réveil depuis un terminal en tant que membre demande `--agent-id` ; un agent qui en crée un pendant sa propre exécution se réveille lui-même par défaut.
 
+## Réveils de chat [#chat-wakeups]
+
+`chat wakeup` est réservé à un agent pendant une exécution de chat et vise la conversation en cours. Ces commandes ne prennent pas d’ID de session et ne fonctionnent ni depuis le terminal habituel d’un membre, ni pendant l’exécution d’une tâche. Les commandes côté utilisateur sont décrites dans [Recevoir un suivi plus tard](/chat#follow-up-later).
+
+```bash
+multica chat wakeup create --title "Review ready" \
+  --until-issue MUL-123 --state in_review --expires-in 48h \
+  --instruction "Summarize the result in this conversation"
+multica chat wakeup create --title "Check back in two hours" \
+  --after 2h --instruction "Remind the user to review the result"
+multica chat wakeup list
+```
+
+Choisissez une seule condition `--until-*`, une heure avec `--at` / `--after`, ou `--every`. La création et la mise à jour exigent `--title` et `--instruction` (ou `--instruction-file`). `update` remplace la configuration et recalcule les échéances relatives à partir de maintenant, mais ne peut pas changer une condition, un rappel ou une vérification en un autre type. Les conditions et vérifications durent 24 heures par défaut, au maximum 7 jours avec `--expires-in` ou `--expires-at`. Les rappels vont jusqu’à 30 jours et n’acceptent pas ces options d’expiration. Les vérifications sont espacées d’au moins 10 minutes, et l’échéance ne peut pas en permettre plus de 100 : `--every 10m` avec les 24 heures par défaut donnerait 144 vérifications et est refusé ; allongez l’intervalle ou avancez l’échéance, par exemple avec `--expires-in 16h`.
+
+Les conditions acceptent `--until-issue` avec `--state` ou `--status`, `--until-children-done` avec `--stage` facultatif, `--until-pr`, `--until-run`, et `--until-reply` avec `--from <user-id>` facultatif. Une condition de PR utilise une PR GitHub reflétée dans cet espace de travail : `owner/repo#N[:merged|closed|checks]`. `checks` attend la fin des vérifications du commit de tête actuel, qu’elles réussissent ou échouent. Une condition `checks` ne peut être créée que si le serveur lit l’état de la CI depuis GitHub ; un serveur auto-hébergé nécessite `GITHUB_APP_ID` et `GITHUB_APP_PRIVATE_KEY` (voir [Intégration GitHub](/github-integration)). Un résultat de vérification déjà terminé lors de la création sert de référence et ne réveille pas immédiatement l’agent.
+
+Utilisez `list`, `get <id>` ou `cancel <id>` pour consulter ou annuler un réveil. Pendant une vérification périodique, `checkin <id> --note "..."` enregistre un point silencieux sans envoyer de réponse ; `finish <id>` termine la vérification lorsque son but est atteint. La dernière exécution, à l’échéance, doit faire un compte rendu et ne peut pas rester silencieuse.
+
 ## Agents et skills
 
 ```bash
@@ -515,6 +534,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `member list/add/set-role/remove` | Gérer les membres d'un squad | |
 | | `activity <issue-id> <outcome>` | Enregistrer une évaluation du chef | |
 | `chat` | `history`, `thread [id]` | Lire la session de messagerie externe qu'un agent traite actuellement | `--limit`, `--before` |
+| | `wakeup create/list/get/update/cancel/finish/checkin` | Gérer le suivi dans l’exécution de chat en cours ; voir [Réveils de chat](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | [Lire vos notifications actives](/inbox) sans les marquer comme lues | `--project`, `--type`, `--output` (`table` ou `json`) ; filtres locaux |
 
 ### Runtime

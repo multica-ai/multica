@@ -4093,11 +4093,12 @@ func (e *ClaimDeliveryAuthzError) Error() string {
 // no snapshot leaves the following comment-triggered run with no baseline.
 //
 // The optional authorize closure runs INSIDE the same transaction, after the
-// gate has re-read the current runtime row under a FOR UPDATE row lock. That
-// makes the authorization decision and the task-token/daemon-token writes one
-// atomic unit: a concurrent runtime re-registration that would change owner_id
-// blocks until the gate commits, so the owner the gate authorized against is
-// the owner the tokens were minted for — no stale-snapshot delivery window.
+// gate has re-read the current runtime row under a FOR NO KEY UPDATE row
+// lock. That makes the authorization decision and the task-token/daemon-token
+// writes one atomic unit: a concurrent runtime re-registration that would
+// change owner_id blocks until the gate commits, so the owner the gate
+// authorized against is the owner the tokens were minted for — no
+// stale-snapshot delivery window.
 // The closure receives the in-transaction token params so it can normalize
 // identity fields from the locked rows before the token is inserted. It
 // returns a *ClaimDeliveryAuthzError to reject delivery (every other error

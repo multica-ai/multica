@@ -32,7 +32,28 @@ const (
 	// cursorMcpAuthStoreRoot is the directory under the daemon's Multica
 	// profile dir that holds each agent's persistent Cursor MCP OAuth state.
 	cursorMcpAuthStoreRoot = "cursor-mcp-auth"
+
+	// cursorMcpAuthLinkRecordFile, in a task's env root, records the link the
+	// task placed in the user's Cursor data dir so the GC can remove it.
+	cursorMcpAuthLinkRecordFile = "cursor-mcp-auth-link.json"
 )
+
+// CursorUserDataDir returns the Cursor data directory a cursor-agent launched
+// without a per-task CURSOR_DATA_DIR uses: the daemon's own CURSOR_DATA_DIR,
+// else ~/.cursor. Empty when neither resolves to an absolute path.
+func CursorUserDataDir() string {
+	if dir := strings.TrimSpace(os.Getenv("CURSOR_DATA_DIR")); dir != "" {
+		if !filepath.IsAbs(dir) {
+			return ""
+		}
+		return filepath.Clean(dir)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".cursor")
+}
 
 // CursorMcpAuthStorePath returns the agent's persistent Cursor mcp-auth.json on
 // this machine, or "" when there is no agent to key on or the Multica profile
@@ -51,11 +72,19 @@ func CursorMcpAuthStorePath(daemonProfile, agentID string) string {
 	if agent == "" {
 		return ""
 	}
+	root := cursorMcpAuthStoreRootDir(daemonProfile)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, agent, cursorMcpAuthFile)
+}
+
+func cursorMcpAuthStoreRootDir(daemonProfile string) string {
 	profileDir, err := cli.ProfileDir(daemonProfile)
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(profileDir, cursorMcpAuthStoreRoot, agent, cursorMcpAuthFile)
+	return filepath.Join(profileDir, cursorMcpAuthStoreRoot)
 }
 
 type cursorMcpConfigFile struct {
@@ -173,7 +202,20 @@ func CursorMcpServersNeedingLogin(cursorDataDir, workDir string) []string {
 	if cursorDataDir == "" {
 		return nil
 	}
-	data, err := os.ReadFile(CursorMcpAuthPath(cursorDataDir, workDir))
+	var names []string
+	for name, loggedIn := range cursorMcpAuthLogins(CursorMcpAuthPath(cursorDataDir, workDir)) {
+		if !loggedIn {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// cursorMcpAuthLogins reports, per server recorded in a Cursor mcp-auth.json,
+// whether it holds a login. A missing or unreadable file reports nil.
+func cursorMcpAuthLogins(path string) map[string]bool {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -186,14 +228,20 @@ func CursorMcpServersNeedingLogin(cursorDataDir, workDir string) []string {
 	if err := json.Unmarshal(data, &entries); err != nil {
 		return nil
 	}
-	var names []string
+	logins := make(map[string]bool, len(entries))
 	for name, entry := range entries {
-		if entry.Tokens == nil || (entry.Tokens.AccessToken == "" && entry.Tokens.RefreshToken == "") {
-			names = append(names, name)
+		logins[name] = entry.Tokens != nil && (entry.Tokens.AccessToken != "" || entry.Tokens.RefreshToken != "")
+	}
+	return logins
+}
+
+func cursorMcpAuthHasLogin(path string) bool {
+	for _, loggedIn := range cursorMcpAuthLogins(path) {
+		if loggedIn {
+			return true
 		}
 	}
-	sort.Strings(names)
-	return names
+	return false
 }
 
 // PrepareCursorMcpLoginWorkspace builds the agent's standing Cursor project for
@@ -210,20 +258,8 @@ func PrepareCursorMcpLoginWorkspace(mcpAuthSource, mcpAuthStore string, mcpConfi
 	}
 	envRoot := filepath.Join(filepath.Dir(mcpAuthStore), "login")
 	workDir := filepath.Join(envRoot, "workdir")
-	if err := os.MkdirAll(envRoot, 0o700); err != nil {
-		return "", "", fmt.Errorf("create cursor mcp login workspace: %w", err)
-	}
-	if err := os.MkdirAll(workDir, 0o700); err != nil {
-		return "", "", fmt.Errorf("create cursor mcp login workspace: %w", err)
-	}
-	// Cursor treats the nearest enclosing git repository as the project, so a
-	// repository above the profile dir would send the login somewhere else.
-	resolved, err := filepath.EvalSymlinks(workDir)
-	if err != nil {
-		return "", "", fmt.Errorf("resolve cursor mcp login workspace: %w", err)
-	}
-	if root := cursorProjectRoot(workDir); root != resolved {
-		return "", "", fmt.Errorf("cursor mcp login workspace resolves to enclosing project %s", root)
+	if _, err := prepareCursorMcpLoginWorkDir(envRoot, workDir); err != nil {
+		return "", "", err
 	}
 
 	managed, err := parseCursorManagedMcpServers(mcpConfig)
@@ -248,6 +284,231 @@ func PrepareCursorMcpLoginWorkspace(mcpAuthSource, mcpAuthStore string, mcpConfi
 		return "", "", fmt.Errorf("link cursor mcp login workspace to the agent's login: %w", err)
 	}
 	return workDir, cursorDataDir, nil
+}
+
+// PrepareCursorMcpUserLoginWorkspace is PrepareCursorMcpLoginWorkspace for
+// agents without managed MCP, whose tasks run on the user's Cursor data dir. It
+// returns a standing workdir whose project in userDataDir resolves to the same
+// login the agent's tasks use. The servers come from the user's own Cursor
+// configuration, so nothing is written into the workdir.
+func PrepareCursorMcpUserLoginWorkspace(userDataDir, mcpAuthSource, mcpAuthStore string) (string, error) {
+	if userDataDir == "" || mcpAuthStore == "" {
+		return "", fmt.Errorf("cursor user data dir and mcp auth store are required")
+	}
+	envRoot := filepath.Join(filepath.Dir(mcpAuthStore), "user-login")
+	workDir := filepath.Join(envRoot, "workdir")
+	projectRoot, err := prepareCursorMcpLoginWorkDir(envRoot, workDir)
+	if err != nil {
+		return "", err
+	}
+	projectDataDir := filepath.Join(userDataDir, "projects", cursorSlugifyPath(projectRoot))
+	if _, err := linkCursorProjectMcpAuth(projectDataDir, mcpAuthSource, mcpAuthStore); err != nil {
+		return "", fmt.Errorf("link cursor mcp login workspace to the agent's login: %w", err)
+	}
+	return workDir, nil
+}
+
+// prepareCursorMcpLoginWorkDir creates a standing login workdir and returns it
+// resolved, which is also its Cursor project root.
+func prepareCursorMcpLoginWorkDir(envRoot, workDir string) (string, error) {
+	if err := os.MkdirAll(envRoot, 0o700); err != nil {
+		return "", fmt.Errorf("create cursor mcp login workspace: %w", err)
+	}
+	if err := os.MkdirAll(workDir, 0o700); err != nil {
+		return "", fmt.Errorf("create cursor mcp login workspace: %w", err)
+	}
+	// Cursor treats the nearest enclosing git repository as the project, so a
+	// repository above the profile dir would send the login somewhere else.
+	resolved, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve cursor mcp login workspace: %w", err)
+	}
+	if root := cursorProjectRoot(workDir); root != resolved {
+		return "", fmt.Errorf("cursor mcp login workspace resolves to enclosing project %s", root)
+	}
+	return resolved, nil
+}
+
+// linkCursorUserMcpAuth links the mcp-auth.json Cursor keeps for a task's
+// project in the user's Cursor data dir to the agent's login, for tasks without
+// managed MCP. It returns userDataDir once the link is in place, else "".
+//
+// Only a project inside the task's env root is touched. Any other project (an
+// in-place local directory, or a git repository enclosing the workdir) is one
+// the user works in too, and its mcp-auth.json is the user's own login.
+func linkCursorUserMcpAuth(userDataDir, envRoot, workDir, mcpAuthSource, mcpAuthStore string, logger *slog.Logger) string {
+	if userDataDir == "" || envRoot == "" || workDir == "" || (strings.TrimSpace(mcpAuthSource) == "" && mcpAuthStore == "") {
+		return ""
+	}
+	projectRoot := cursorProjectRoot(workDir)
+	if !cursorPathWithin(envRoot, projectRoot) {
+		return ""
+	}
+	projectDataDir := filepath.Join(userDataDir, "projects", cursorSlugifyPath(projectRoot))
+	target, err := linkCursorProjectMcpAuth(projectDataDir, mcpAuthSource, mcpAuthStore)
+	if err == nil {
+		err = writeCursorMcpAuthLinkRecord(envRoot, filepath.Join(projectDataDir, cursorMcpAuthFile), target)
+		if err != nil {
+			_ = removeCursorMcpAuthFile(projectDataDir)
+		}
+	}
+	if err != nil {
+		if logger != nil {
+			logger.Warn("execenv: link cursor mcp auth into user data dir failed; MCP logins stay task-local", "project", projectDataDir, "error", err)
+		}
+		return ""
+	}
+	return userDataDir
+}
+
+// linkCursorProjectMcpAuth points a Cursor project's mcp-auth.json at the
+// explicit mcpAuthSource, else at the agent's mcpAuthStore, and returns what it
+// points at.
+func linkCursorProjectMcpAuth(projectDataDir, mcpAuthSource, mcpAuthStore string) (string, error) {
+	if err := os.MkdirAll(projectDataDir, 0o700); err != nil {
+		return "", fmt.Errorf("create cursor project data dir: %w", err)
+	}
+	if strings.TrimSpace(mcpAuthSource) != "" {
+		source, err := resolveCursorMcpAuthSource(mcpAuthSource)
+		if err != nil {
+			return "", err
+		}
+		if err := removeCursorMcpAuthFile(projectDataDir); err != nil {
+			return "", err
+		}
+		if err := seedCursorMcpAuthFile(projectDataDir, source); err != nil {
+			return "", err
+		}
+		return source, nil
+	}
+	if err := ensureCursorMcpAuthStore(mcpAuthStore); err != nil {
+		return "", err
+	}
+	if err := adoptCursorMcpAuthLogin(filepath.Join(projectDataDir, cursorMcpAuthFile), mcpAuthStore); err != nil {
+		return "", err
+	}
+	if err := removeCursorMcpAuthFile(projectDataDir); err != nil {
+		return "", err
+	}
+	if err := linkCursorMcpAuthStore(projectDataDir, mcpAuthStore); err != nil {
+		return "", err
+	}
+	return mcpAuthStore, nil
+}
+
+// adoptCursorMcpAuthLogin carries a login Cursor already saved in a project's
+// own mcp-auth.json into the agent's store while the store holds none, so
+// linking the project does not sign the agent out.
+func adoptCursorMcpAuthLogin(projectAuth, store string) error {
+	projectInfo, err := os.Stat(projectAuth)
+	if err != nil {
+		return nil
+	}
+	if storeInfo, err := os.Stat(store); err == nil && os.SameFile(projectInfo, storeInfo) {
+		return nil
+	}
+	if cursorMcpAuthHasLogin(store) || !cursorMcpAuthHasLogin(projectAuth) {
+		return nil
+	}
+	data, err := os.ReadFile(projectAuth)
+	if err != nil {
+		return nil
+	}
+	// In place: other tasks may hold hard links to the store.
+	if err := os.WriteFile(store, data, 0o600); err != nil {
+		return fmt.Errorf("adopt cursor mcp login into store: %w", err)
+	}
+	return nil
+}
+
+type cursorMcpAuthLinkRecord struct {
+	Link   string `json:"link"`
+	Target string `json:"target"`
+}
+
+func writeCursorMcpAuthLinkRecord(envRoot, link, target string) error {
+	data, err := json.Marshal(cursorMcpAuthLinkRecord{Link: link, Target: target})
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(envRoot, cursorMcpAuthLinkRecordFile), data, 0o600); err != nil {
+		return fmt.Errorf("record cursor mcp auth link: %w", err)
+	}
+	return nil
+}
+
+// RemoveCursorMcpAuthLink removes the link a task without managed MCP placed in
+// the user's Cursor data dir, before the GC removes the task's env root. A
+// leftover symlink would dangle, and a hard link (the Windows fallback) would
+// keep a copy of the agent's tokens.
+func RemoveCursorMcpAuthLink(envRoot, daemonProfile string) error {
+	return removeCursorMcpAuthLink(envRoot, CursorUserDataDir(), cursorMcpAuthStoreRootDir(daemonProfile))
+}
+
+// removeCursorMcpAuthLink trusts the env root's record only as far as it
+// matches what linkCursorUserMcpAuth creates: an mcp-auth.json directly under
+// a project of userDataDir that is a symlink to the recorded target, or a hard
+// link to a file in the agent stores. A file Cursor wrote itself is left alone.
+func removeCursorMcpAuthLink(envRoot, userDataDir, storeRoot string) error {
+	data, err := os.ReadFile(filepath.Join(envRoot, cursorMcpAuthLinkRecordFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var record cursorMcpAuthLinkRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return fmt.Errorf("parse cursor mcp auth link record: %w", err)
+	}
+	link := filepath.Clean(record.Link)
+	if userDataDir == "" || filepath.Base(link) != cursorMcpAuthFile ||
+		filepath.Dir(filepath.Dir(link)) != filepath.Join(userDataDir, "projects") {
+		return nil
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		return nil
+	}
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		if dest, err := os.Readlink(link); err != nil || dest != record.Target {
+			return nil
+		}
+	case info.Mode().IsRegular():
+		if storeRoot == "" || !cursorPathWithin(storeRoot, record.Target) {
+			return nil
+		}
+		targetInfo, err := os.Stat(record.Target)
+		if err != nil || !os.SameFile(info, targetInfo) {
+			return nil
+		}
+	default:
+		return nil
+	}
+	if err := os.Remove(link); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove cursor mcp auth link: %w", err)
+	}
+	return nil
+}
+
+// cursorPathWithin reports whether path is root or inside it, comparing
+// symlink-resolved paths where they resolve.
+func cursorPathWithin(root, path string) bool {
+	resolve := func(p string) string {
+		if resolved, err := filepath.EvalSymlinks(p); err == nil {
+			p = resolved
+		}
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		return filepath.Clean(p)
+	}
+	rel, err := filepath.Rel(resolve(root), resolve(path))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 // linkCursorMcpAuthStore points the task's mcp-auth.json at the agent's

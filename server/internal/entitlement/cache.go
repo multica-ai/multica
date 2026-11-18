@@ -16,6 +16,14 @@ type policySnapshot struct {
 	subscriptionVersion int64
 	cloudValidUntil     time.Time
 	gates               map[GateName]Gate
+	features            map[FeatureName]featureEntry
+}
+
+// featureEntry is one normalized paid feature. A feature Cloud did not send,
+// or sent malformed, is stored as off with the reason it fell back.
+type featureEntry struct {
+	action Action
+	reason Reason
 }
 
 type cacheEntry struct {

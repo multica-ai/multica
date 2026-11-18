@@ -16,6 +16,7 @@
 @source "../../../packages/ui/**/*.{ts,tsx}";
 @source "../../../packages/core/**/*.{ts,tsx}";
 @source "../../../packages/views/**/*.{ts,tsx}";
+@source "../../../packages/ee/**/*.{ts,tsx}";
 
 /* Font stack. `--font-inter` is the next/font Inter family (+ its synthetic
    size-adjusted fallback), set on <html> by inter.variable in app/layout.tsx.

@@ -264,6 +264,7 @@ import type {
   CreateBillingPortalSessionResponse,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrices,
+  WorkspaceFeatures,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspaceSubscriptionSeatReconcileResult,
@@ -421,6 +422,7 @@ import {
   BatchUpdateIssuesResponseSchema,
   UNCONFIRMED_BATCH_UPDATE,
   WorkspaceSubscriptionPricesSchema,
+  WorkspaceFeaturesSchema,
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
   WorkspaceSeatPurchasePreviewSchema,
@@ -1131,6 +1133,15 @@ export class ApiClient {
       return undefined as T;
     }
     return res.json() as Promise<T>;
+  }
+
+  /**
+   * A JSON request to an endpoint this client has no method for, with the
+   * same auth, workspace scoping and errors. For packages that own their
+   * endpoints (packages/ee); parse the result before using it.
+   */
+  request(path: string, init?: RequestInit): Promise<unknown> {
+    return this.fetch<unknown>(path, init);
   }
 
   // Auth
@@ -2457,6 +2468,19 @@ export class ApiClient {
       WorkspaceSubscriptionSummarySchema,
       null,
       { endpoint: "GET /api/cloud-subscriptions/summary" },
+    );
+  }
+
+  // Paid-feature states for read-only and upgrade UI (MUL-9482). A response
+  // that cannot be read falls back to every feature available: the server
+  // still enforces on write.
+  async getWorkspaceFeatures(workspaceId: string): Promise<WorkspaceFeatures> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/features`);
+    return parseWithFallback<WorkspaceFeatures>(
+      raw,
+      WorkspaceFeaturesSchema,
+      { features: {} },
+      { endpoint: "GET /api/workspaces/:id/features" },
     );
   }
 

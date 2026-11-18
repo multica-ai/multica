@@ -404,12 +404,16 @@ func TestStartDshProfileProvision_RunsAtMostOnce(t *testing.T) {
 
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		if strings.Contains(readRecord(t, record), "plugin --profile multica add") {
+		if !d.dshInstallInFlight.Load() {
+			got := readRecord(t, record)
+			if count := strings.Count(got, "args=plugin --profile multica add "); count != 1 {
+				t.Fatalf("install invocation count = %d, want 1; recorded %q", count, got)
+			}
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("the install never ran; recorded %q", readRecord(t, record))
+	t.Fatalf("the install did not finish; recorded %q", readRecord(t, record))
 }
 
 func TestStartDshProfileProvision_UnconfiguredNeverStarts(t *testing.T) {

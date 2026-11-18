@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/extension"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -359,8 +360,9 @@ func extractEventRefs(eventType string, payload any) eventRefs {
 			}
 		}
 	}
-	// A deleted issue states its project, since its row is gone by now.
-	if id, ok := str(top, "project_id"); ok && id != "" && (isProjectEvent || eventType == protocol.EventProjectMembersChanged || eventType == protocol.EventIssueDeleted) {
+	// A deleted issue states its project, since its row is gone by now, and
+	// commercial packages declare their own project events.
+	if id, ok := str(top, "project_id"); ok && id != "" && (isProjectEvent || eventType == protocol.EventProjectMembersChanged || eventType == protocol.EventIssueDeleted || extension.IsProjectEvent(eventType)) {
 		return eventRefs{projectKnown: true, projectID: id}
 	}
 	// An autopilot bound to a private project carries its prompt and runs.

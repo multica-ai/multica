@@ -286,10 +286,15 @@ func TestColdFailuresFailOpen(t *testing.T) {
 			gate.Action = "future"
 			p.Gates[string(GateAutopilotRuns)] = gate
 		}), ReasonInvalidPolicy},
-		{"cloud observe action", policyHandler(func(p *wirePolicy) {
+		{"observe without limit", policyHandler(func(p *wirePolicy) {
 			gate := p.Gates[string(GateAutopilotRuns)]
 			gate.Action = string(ActionObserve)
+			gate.Limit = nil
 			p.Gates[string(GateAutopilotRuns)] = gate
+		}), ReasonInvalidPolicy},
+		{"observe without autopilot period", policyHandler(func(p *wirePolicy) {
+			limit := testAutopilotLimit
+			p.Gates[string(GateAutopilotRuns)] = wireGate{Action: string(ActionObserve), Limit: &limit}
 		}), ReasonInvalidPolicy},
 		{"missing gate", policyHandler(func(p *wirePolicy) { delete(p.Gates, string(GateAutopilotRuns)) }), ReasonInvalidPolicy},
 		{"excessive TTL", policyHandler(func(p *wirePolicy) { p.ValidForSeconds = 301 }), ReasonInvalidPolicy},
@@ -314,6 +319,63 @@ func TestColdFailuresFailOpen(t *testing.T) {
 				t.Fatalf("decision = %+v", decision)
 			}
 		})
+	}
+}
+
+// Cloud chooses off, observe, or enforce per gate. Each must reach consumers
+// unchanged; observe keeps the enforce parameters so consumers can measure
+// what would have been blocked.
+func TestCloudGateActionsAreDeliveredUnchanged(t *testing.T) {
+	for _, action := range []Action{ActionOff, ActionObserve, ActionEnforce} {
+		t.Run(string(action), func(t *testing.T) {
+			server := httptest.NewServer(policyHandler(func(p *wirePolicy) {
+				*p = samplePolicy(3, 1, 60, action)
+			}))
+			defer server.Close()
+			client := newTestClient(t, server.URL, nil)
+
+			decision := client.Gate(context.Background(), uuid.New(), GateAutopilotRuns)
+			if decision.Gate.Action != action || decision.Reason != ReasonRefreshed || decision.PolicyRevision != 3 {
+				t.Fatalf("decision = %+v", decision)
+			}
+			if action == ActionOff {
+				if decision.Gate.Limit != nil || decision.Gate.PeriodStart != nil {
+					t.Fatalf("off gate carries parameters: %+v", decision.Gate)
+				}
+				return
+			}
+			gate := decision.Gate
+			if gate.Limit == nil || *gate.Limit != testAutopilotLimit || gate.PeriodStart == nil ||
+				gate.PeriodEnd == nil || gate.ResetAt == nil {
+				t.Fatalf("%s gate lost its parameters: %+v", action, gate)
+			}
+		})
+	}
+}
+
+func TestStaleCloudObserveStaysObserve(t *testing.T) {
+	clock := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
+	var fail atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if fail.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		writePolicy(t, w, samplePolicy(3, 0, 5, ActionObserve))
+	}))
+	defer server.Close()
+	client := newTestClient(t, server.URL, nil)
+	client.now = func() time.Time { return clock }
+	workspaceID := uuid.New()
+
+	if fresh := client.Gate(context.Background(), workspaceID, GateAutopilotRuns); fresh.Gate.Action != ActionObserve {
+		t.Fatalf("fresh = %+v", fresh)
+	}
+	fail.Store(true)
+	clock = clock.Add(6 * time.Second)
+	stale := client.Gate(context.Background(), workspaceID, GateAutopilotRuns)
+	if stale.Gate.Action != ActionObserve || stale.Reason != ReasonStale {
+		t.Fatalf("stale = %+v", stale)
 	}
 }
 

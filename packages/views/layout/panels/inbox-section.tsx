@@ -38,8 +38,6 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { AppLink, useNavigation } from "../../navigation";
-import { useViewStateWriter } from "../../platform";
-import { issueHighlightMementoKey } from "../../issues/components/issue-detail";
 import { useT } from "../../i18n";
 import { INBOX_TYPE_ICONS } from "../../inbox/components/inbox-filter-options";
 import { getInboxDisplayTitle, inboxRowHref, isAutopilotQuotaNotice } from "../../inbox/components/inbox-display";
@@ -457,14 +455,11 @@ function InboxRow({
   const statusLabelOf = useStatusLabel(item.workspace_id);
   const status = item.issue_status;
   const title = inboxRowTitle(item, typeLabels);
-  const writeViewState = useViewStateWriter();
   const requestLanding = useInboxSelectionStore((s) => s.requestLanding);
   // Every click is a fresh intent to land on what the notification is about,
   // even on the issue already open, or one whose landing ran before.
   const land = () => {
-    if (!item.issue_id) return;
-    writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
-    requestLanding(item.issue_id);
+    if (item.issue_id) requestLanding(item.issue_id);
   };
   // The card previews a notification you have not opened. A press opens it,
   // so the card goes at once, with no exit animation to compete with the

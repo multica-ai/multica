@@ -71,6 +71,16 @@ function useRateLimitText() {
     });
     return (date: Date) => `${weekday.format(date)} ${time.format(date)}`;
   }, [locale, tz]);
+  const creditFormat = useMemo(
+    () => new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }),
+    [locale],
+  );
+
+  // Codex reports the balance as a fixed-point string ("62500.0000000000").
+  const creditBalance = (balance: string) => {
+    const n = Number(balance);
+    return balance.trim() !== "" && Number.isFinite(n) ? creditFormat.format(n) : balance;
+  };
 
   const duration = (minutes: number) => {
     if (minutes < 60) {
@@ -155,7 +165,7 @@ function useRateLimitText() {
     return null;
   };
 
-  return { t, windowLabel, shortLabel, reset, usage, verdict };
+  return { t, windowLabel, shortLabel, reset, usage, verdict, creditBalance };
 }
 
 function useWindowViews(rateLimits: RuntimeRateLimits | null | undefined, now: number) {
@@ -283,7 +293,9 @@ export function RateLimitSection({ runtime }: { runtime: AgentRuntime }) {
             {credits.unlimited
               ? text.t(($) => $.rate_limits.credits_unlimited)
               : credits.has_credits && credits.balance
-                ? text.t(($) => $.rate_limits.credits_balance, { balance: credits.balance })
+                ? text.t(($) => $.rate_limits.credits_balance, {
+                    balance: text.creditBalance(credits.balance),
+                  })
                 : text.t(($) => $.rate_limits.credits_none)}
           </span>
         </div>
