@@ -843,7 +843,7 @@ func (q *Queries) SettleTerminalTaskSupplements(ctx context.Context, taskIds []p
 
 const startAgentTaskWithSupplement = `-- name: StartAgentTaskWithSupplement :one
 WITH candidate AS MATERIALIZED (
-    SELECT t.id, t.issue_id, r.workspace_id, r.provider
+    SELECT t.id, t.issue_id, t.chat_session_id, r.workspace_id, r.provider
     FROM agent_task_queue t
     JOIN agent_runtime r ON r.id = t.runtime_id
     WHERE t.id = $2
@@ -855,7 +855,7 @@ WITH candidate AS MATERIALIZED (
     FROM candidate
     WHERE $3::boolean
       AND provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi')
-      AND issue_id IS NOT NULL
+      AND (issue_id IS NOT NULL OR chat_session_id IS NOT NULL)
     ON CONFLICT DO NOTHING
     RETURNING task_id
 )

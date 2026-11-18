@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -46,7 +47,9 @@ var (
 	archivedInboxNegatable  = []string{"type", "actor", "status", "priority", "project", "assignee", "label", "dueDate"}
 )
 
-func parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.ArchivedInboxFacetsParams, bool) {
+// parseArchivedInboxFilters also gates the archive on owner access, so every
+// archive read that goes through it shares the active list's protection.
+func (h *Handler) parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.ArchivedInboxFacetsParams, bool) {
 	var p db.ArchivedInboxFacetsParams
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -54,6 +57,9 @@ func parseArchivedInboxFilters(w http.ResponseWriter, r *http.Request) (db.Archi
 	}
 	p.WorkspaceID, ok = parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
 	if !ok {
+		return p, false
+	}
+	if !h.requireInboxOwnerAccess(w, r, userID, p.WorkspaceID) {
 		return p, false
 	}
 	p.RecipientID = parseUUID(userID)
@@ -135,7 +141,9 @@ func archivedInboxScope(p db.ArchivedInboxFacetsParams, groupID pgtype.UUID) str
 }
 
 func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) {
-	filters, ok := parseArchivedInboxFilters(w, r)
+	r, cancel := h.inboxReadRequest(r)
+	defer cancel()
+	filters, ok := h.parseArchivedInboxFilters(w, r)
 	if !ok {
 		return
 	}
@@ -188,14 +196,16 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 	// Filtered inside the query, before grouping and paging, so a hidden
 	// notification neither shows up nor shortens a page. Not part of the
 	// cursor scope: access can change between pages.
-	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(filters.WorkspaceID))
+	hidden, ok := h.requestInboxHiddenProjects(w, r, uuidToString(filters.WorkspaceID))
 	if !ok {
 		return
 	}
 	p.HiddenProjectIds = hidden.Param()
-	rows, err := h.Queries.ListArchivedInboxPage(r.Context(), p)
+	rows, err := runInboxRead(r.Context(), h, "archived_page", func(ctx context.Context, q *db.Queries) ([]db.ListArchivedInboxPageRow, error) {
+		return q.ListArchivedInboxPage(ctx, p)
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load archived inbox page")
+		writeInboxReadError(w, err, "failed to load archived inbox page")
 		return
 	}
 	resp := archivedInboxPageResponse{Items: make([]InboxItemResponse, 0, limit), HasMore: len(rows) > limit}
@@ -232,18 +242,22 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) GetArchivedInboxFacets(w http.ResponseWriter, r *http.Request) {
-	p, ok := parseArchivedInboxFilters(w, r)
+	r, cancel := h.inboxReadRequest(r)
+	defer cancel()
+	p, ok := h.parseArchivedInboxFilters(w, r)
 	if !ok {
 		return
 	}
-	hidden, ok := h.requestHiddenProjects(w, r, uuidToString(p.WorkspaceID))
+	hidden, ok := h.requestInboxHiddenProjects(w, r, uuidToString(p.WorkspaceID))
 	if !ok {
 		return
 	}
 	p.HiddenProjectIds = hidden.Param()
-	rows, err := h.Queries.ArchivedInboxFacets(r.Context(), p)
+	rows, err := runInboxRead(r.Context(), h, "archived_facets", func(ctx context.Context, q *db.Queries) ([]db.ArchivedInboxFacetsRow, error) {
+		return q.ArchivedInboxFacets(ctx, p)
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load archived inbox filters")
+		writeInboxReadError(w, err, "failed to load archived inbox filters")
 		return
 	}
 	resp := archivedInboxFacetsResponse{

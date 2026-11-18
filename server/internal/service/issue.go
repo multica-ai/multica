@@ -5,16 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/multica-ai/multica/server/internal/attribution"
 	"log/slog"
 	"sort"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/attribution"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
@@ -43,9 +43,6 @@ type IssueService struct {
 	// Metrics as "PostHog only", so leaving it unset is safe.
 	Metrics     *obsmetrics.BusinessMetrics
 	TaskService *TaskService
-	// Entitlements supplies Cloud's effective issue-count instruction. Nil is
-	// the self-hosted unlimited path.
-	Entitlements entitlement.Provider
 }
 
 func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.Client, ts *TaskService) *IssueService {
@@ -161,6 +158,11 @@ var ErrParentIssueNotFound = errors.New("parent issue not found in this workspac
 // having to remember it. Callers translate this into 400.
 var ErrProjectNotFound = errors.New("project not found in this workspace")
 
+// ErrProjectArchived signals that the caller explicitly filed a new issue
+// into an archived project. Callers translate this into 409
+// project_archived; restoring the project lifts it.
+var ErrProjectArchived = errors.New("project is archived; restore it before adding issues")
+
 // ErrIssueLabelNotFound signals that one of the supplied LabelIDs does not
 // exist in the issue's workspace or is not an issue-scoped label. The whole
 // create is rejected so a new issue is never born with a partial or wrong
@@ -218,7 +220,7 @@ type IssueCreateResult struct {
 //
 // A healthy create is byte-identical to before this existed — the allocation
 // query is untouched and nothing extra is read on the way through. The collision
-// is the signal: AllocateIssueNumber bumps the counter inside the same
+// is the signal: IncrementIssueCounter bumps the counter inside the same
 // transaction as the INSERT, so the unique violation rolls the increment back
 // too and every later create in that workspace retries the same taken number
 // forever. Moving the counter first is what makes the second attempt land on a
@@ -276,7 +278,6 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 // Caller-owned validation is limited to transport-shaped checks: title
 // required, RFC3339 date format, assignee pair sanity.
 func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
-	issueCountPolicy := ResolveIssueCountPolicy(ctx, s.Entitlements, p.WorkspaceID)
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("begin tx: %w", err)
@@ -355,6 +356,7 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 	// WorkspaceID — there is no path from this service to a row in a
 	// foreign workspace.
 	projectID := p.ProjectID
+	var parentProjectID pgtype.UUID
 	if p.ParentIssueID.Valid {
 		parent, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
 			ID:          p.ParentIssueID,
@@ -366,16 +368,23 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 		// Back-fill project from parent when the caller did not pin
 		// one explicitly. Matches the long-standing HTTP behavior: a
 		// sub-issue inherits its parent's project unless overridden.
+		parentProjectID = parent.ProjectID
 		if !projectID.Valid {
 			projectID = parent.ProjectID
 		}
 	}
 	if projectID.Valid {
-		if _, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+		project, err := qtx.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
 			ID:          projectID,
 			WorkspaceID: p.WorkspaceID,
-		}); err != nil {
+		})
+		if err != nil {
 			return IssueCreateResult{}, ErrProjectNotFound
+		}
+		// A sub-issue staying in its parent's archived project continues work
+		// already there; only filing new work into it is refused.
+		if project.ArchivedAt.Valid && projectID != parentProjectID {
+			return IssueCreateResult{}, ErrProjectArchived
 		}
 	}
 
@@ -397,7 +406,7 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 		return IssueCreateResult{DuplicateIssue: &dup}, ErrActiveDuplicate
 	}
 
-	issueNumber, err := AllocateIssueNumber(ctx, qtx, p.WorkspaceID, issueCountPolicy)
+	issueNumber, err := qtx.IncrementIssueCounter(ctx, p.WorkspaceID)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("allocate issue number: %w", err)
 	}

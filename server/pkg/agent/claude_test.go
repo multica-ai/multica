@@ -1392,3 +1392,59 @@ func TestBuildClaudeArgsManagedSkillSettingsWins(t *testing.T) {
 		t.Fatalf("unrelated custom arg was dropped: %v", args)
 	}
 }
+
+func TestClaudeExecuteReportsRateLimits(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		"printf '%s\\n' '{\"type\":\"system\",\"session_id\":\"sess-rate-limits\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"allowed\",\"unifiedWindows\":{\"five_hour\":{\"utilization\":0.25,\"resetsAt\":1795327200},\"seven_day\":{\"utilization\":0.5,\"resetsAt\":1795568400}}},\"session_id\":\"sess-rate-limits\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-rate-limits\",\"result\":\"done\"}'\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	snapshots := make(chan RateLimitSnapshot, 4)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:      5 * time.Second,
+		OnRateLimits: func(s RateLimitSnapshot) { snapshots <- s },
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case <-session.Result:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	select {
+	case snap := <-snapshots:
+		if snap.Status != RateLimitStatusAllowed || len(snap.Windows) != 2 {
+			t.Fatalf("snapshot = %+v", snap)
+		}
+		if snap.Windows[0].Kind != RateLimitWindowSession || *snap.Windows[0].UsedPercent != 25 {
+			t.Fatalf("session window = %+v", snap.Windows[0])
+		}
+	default:
+		t.Fatal("rate_limit_event did not reach OnRateLimits")
+	}
+}

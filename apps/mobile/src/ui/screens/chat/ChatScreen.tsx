@@ -52,7 +52,8 @@ export function ChatDetail({ sessionId }: { sessionId: string }) {
 
   const items = useMemo<ChatItem[]>(
     () =>
-      (messages.data ?? []).map((message) =>
+      // A wakeup turn's input is the runtime's, withheld from the client; it would render as an empty bubble.
+      (messages.data ?? []).filter((message) => message.message_kind !== "wakeup").map((message) =>
         message.role === "user"
           ? { kind: "user", id: message.id, text: message.content }
           : { kind: "assistant", id: message.id, text: message.content, taskId: message.task_id, failed: Boolean(message.failure_reason) },

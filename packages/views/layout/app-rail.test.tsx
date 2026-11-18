@@ -3,6 +3,10 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useRailOrderStore } from "@multica/core/navigation";
+import {
+  DEFAULT_SIDEBAR_INBOX_SETTINGS,
+  useSidebarTreeStore,
+} from "@multica/core/issues/stores/sidebar-tree-store";
 import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { renderWithI18n } from "../test/i18n";
 import { AppRail } from "./app-rail";
@@ -18,6 +22,9 @@ const state = vi.hoisted(() => ({
   chatSessions: [] as { id: string; unread_count?: number }[],
   chat: { activeSessionId: null as string | null, isOpen: false },
   stuck: [] as unknown[],
+  desktop: false,
+  markAllInboxRead: vi.fn(),
+  markAllChatsRead: vi.fn(),
 }));
 
 vi.mock("../navigation", () => ({
@@ -35,7 +42,16 @@ vi.mock("../navigation", () => ({
     pathname: state.pathname,
     searchParams: new URLSearchParams(state.search),
     push: vi.fn(),
+    openInNewTab: state.desktop ? vi.fn() : undefined,
+    getShareableUrl: (href: string) => href,
   }),
+  useIntentNavigate: () => vi.fn(),
+}));
+vi.mock("@multica/core/inbox/mutations", () => ({
+  useMarkAllInboxRead: () => ({ mutate: state.markAllInboxRead }),
+}));
+vi.mock("@multica/core/chat/mutations", () => ({
+  useMarkAllChatSessionsRead: () => ({ mutate: state.markAllChatsRead }),
 }));
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
@@ -53,6 +69,7 @@ vi.mock("@multica/core/inbox/queries", async (importOriginal) => {
     useInboxUnreadCount: () => state.inboxUnread,
   };
 });
+vi.mock("@multica/core/inbox/use-snooze-wake", () => ({ useInboxSnoozeWake: () => {} }));
 vi.mock("@multica/core/chat/queries", () => ({
   chatSessionsOptions: (wsId: string) => ({
     queryKey: ["chat", wsId, "sessions"],
@@ -127,34 +144,32 @@ beforeEach(() => {
   state.chatSessions = [];
   state.chat = { activeSessionId: null, isOpen: false };
   state.stuck = [];
+  state.desktop = false;
+  state.markAllInboxRead.mockReset();
+  state.markAllChatsRead.mockReset();
   useRailOrderStore.setState({ order: null });
+  useSidebarTreeStore.setState({ inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS });
 });
 
 const railOrder = () =>
   Array.from(document.querySelectorAll<HTMLElement>("[data-rail-item]"), (item) => item.dataset.railItem);
 
 describe("AppRail global actions", () => {
-  it("carries New issue and search by default", () => {
+  it("carries New issue and search", () => {
     renderRail();
     expect(screen.getByRole("button", { name: /^new issue$/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Search..." })).toBeTruthy();
-  });
-
-  it("leaves them to the desktop title bar when turned off", () => {
-    renderRail(undefined, <AppRail globalActions={false} />);
-    expect(screen.queryByRole("button", { name: /^new issue$/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Search..." })).toBeNull();
   });
 });
 
 describe("AppRail order", () => {
   it("lists the spaces in the default order", () => {
     renderRail();
-    expect(railOrder()).toEqual(["inbox", "work", "team", "chat", "autopilots"]);
+    expect(railOrder()).toEqual(["work", "team", "chat", "autopilots"]);
   });
 
   it("follows the saved order", () => {
-    const order = ["chat", "inbox", "work", "team", "autopilots"] as const;
+    const order = ["chat", "work", "team", "autopilots"] as const;
     useRailOrderStore.getState().setOrder(order);
     renderRail();
     expect(railOrder()).toEqual(order);
@@ -182,12 +197,19 @@ describe("AppRail spaces", () => {
     state.pathname = "/acme/projects/p-1";
     renderRail();
 
-    for (const href of ["/acme/inbox", "/acme/issues", "/acme/agents", "/acme/chat", "/acme/autopilots"]) {
+    for (const href of ["/acme/issues", "/acme/agents", "/acme/chat", "/acme/autopilots"]) {
       expect(link(href)).not.toBeNull();
     }
     // Projects belong to the work space, which links to Issues.
     expect(link("/acme/issues")).toHaveAttribute("aria-current", "page");
     expect(link("/acme/agents")).not.toHaveAttribute("aria-current");
+  });
+
+  it("has no Inbox space: the full Inbox lights Work", () => {
+    state.pathname = "/acme/inbox";
+    renderRail();
+    expect(document.querySelector('a[data-space="inbox"]')).toBeNull();
+    expect(document.querySelector('a[data-space="work"]')).toHaveAttribute("aria-current", "page");
   });
 
   it("marks Settings in the footer while on a settings route", () => {
@@ -217,15 +239,15 @@ describe("AppRail label disclosure", () => {
 
   it("names a space whose label is cut off even when it is already the full name", async () => {
     renderRail();
-    const inbox = link("/acme/inbox")!;
-    clipLabel(within(inbox).getByText("Inbox"));
-    await act(async () => inbox.focus());
-    expect(tooltip()).toHaveTextContent("Inbox");
+    const chat = link("/acme/chat")!;
+    clipLabel(within(chat).getByText("Chat"));
+    await act(async () => chat.focus());
+    expect(tooltip()).toHaveTextContent("Chat");
   });
 
   it("stays quiet when the full-name label fits", async () => {
     renderRail();
-    await act(async () => link("/acme/inbox")!.focus());
+    await act(async () => link("/acme/chat")!.focus());
     expect(tooltip()).toBeNull();
   });
 });
@@ -241,54 +263,69 @@ function inboxItem(issueId: string, archived = false): InboxItem {
 }
 
 // Read by space: an href query string trips the attribute-selector lookup.
-const inboxHref = () => document.querySelector('a[data-space="inbox"]')?.getAttribute("href");
+const workHref = () => document.querySelector('a[data-space="work"]')?.getAttribute("href");
 
 describe("AppRail inbox return", () => {
-  it("returns to the notification last opened while it is still in the inbox", () => {
+  it("returns Work to the notification last opened while it is still in the inbox", () => {
     state.inboxItems = [inboxItem("issue-x")];
     const { visit } = renderRail();
     visit("/acme/inbox", "issue=issue-x");
-    visit("/acme/issues/issue-x");
-    expect(inboxHref()).toBe("/acme/inbox?issue=issue-x");
+    visit("/acme/agents");
+    expect(workHref()).toBe("/acme/inbox?issue=issue-x");
   });
 
   // Regression: the inbox page replaces an unknown ?issue= with the issue
   // itself, so a remembered selection that was archived since turned the
-  // Inbox item into a flash back to the issue on every click.
+  // rail item into a flash back to the issue on every click.
   it("drops a remembered notification that has left the inbox", async () => {
     state.inboxItems = [inboxItem("issue-x")];
     const { client, visit } = renderRail();
     visit("/acme/inbox", "issue=issue-x");
-    visit("/acme/issues/issue-x");
+    visit("/acme/agents");
     act(() => {
       client.setQueryData(["inbox", "ws-1", "list"], [inboxItem("issue-x", true), inboxItem("issue-y")]);
     });
-    await waitFor(() => expect(inboxHref()).toBe("/acme/inbox"));
+    await waitFor(() => expect(workHref()).toBe("/acme/inbox"));
   });
 
   it("leaves the selection to the inbox page when its list is not cached", () => {
     const { visit } = renderRail();
     visit("/acme/inbox", "issue=issue-x");
-    visit("/acme/issues/issue-x");
-    expect(inboxHref()).toBe("/acme/inbox?issue=issue-x");
+    visit("/acme/agents");
+    expect(workHref()).toBe("/acme/inbox?issue=issue-x");
   });
 
   it("keeps an archived-view selection, which resolves against its own list", () => {
     state.inboxItems = [];
     const { visit } = renderRail();
     visit("/acme/inbox", "view=archived&issue=issue-x");
-    visit("/acme/issues/issue-x");
-    expect(inboxHref()).toBe("/acme/inbox?view=archived&issue=issue-x");
+    visit("/acme/agents");
+    expect(workHref()).toBe("/acme/inbox?view=archived&issue=issue-x");
+  });
+
+  it("leaves other Work pages alone", () => {
+    state.inboxItems = [];
+    const { visit } = renderRail();
+    visit("/acme/issues", "issue=issue-x");
+    visit("/acme/agents");
+    expect(workHref()).toBe("/acme/issues?issue=issue-x");
   });
 });
 
 describe("AppRail badges", () => {
-  it("counts inbox unread with a static counter", () => {
+  it("counts inbox unread on Work with a static counter", () => {
     state.inboxUnread = 4;
     renderRail();
-    const badge = countBadge("/acme/inbox") as (HTMLElement & { animated?: boolean }) | null;
+    const badge = countBadge("/acme/issues") as (HTMLElement & { animated?: boolean }) | null;
     expect(badge).toHaveAttribute("aria-label", "4");
     expect(badge?.animated).toBe(false);
+  });
+
+  it("leaves Work unbadged when the Inbox settings turn the badge off", () => {
+    state.inboxUnread = 4;
+    useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, railBadge: false } });
+    renderRail();
+    expect(countBadge("/acme/issues")).toBeNull();
   });
 
   it("shows no attention dot when nothing needs a look", () => {
@@ -358,6 +395,45 @@ describe("AppRail chat badge", () => {
   });
 });
 
+describe("AppRail space menu", () => {
+  const openMenu = async (href: string) => {
+    fireEvent.contextMenu(link(href)!, { clientX: 30, clientY: 300 });
+    return screen.findByRole("menu");
+  };
+  const markAllRead = (menu: HTMLElement) => within(menu).queryByRole("menuitem", { name: "Mark all as read" });
+
+  beforeEach(() => {
+    state.desktop = true;
+  });
+
+  it("marks every unread chat read from Chat", async () => {
+    state.chatSessions = [
+      { id: "a", unread_count: 3 },
+      { id: "b", unread_count: 0 },
+      { id: "c", unread_count: 22 },
+    ];
+    renderRail();
+    fireEvent.click(markAllRead(await openMenu("/acme/chat"))!);
+    expect(state.markAllChatsRead).toHaveBeenCalledWith(["a", "c"], expect.anything());
+    expect(state.markAllInboxRead).not.toHaveBeenCalled();
+  });
+
+  it("offers no Mark all as read on Chat when every chat is read", async () => {
+    state.chatSessions = [{ id: "a", unread_count: 0 }];
+    renderRail();
+    expect(markAllRead(await openMenu("/acme/chat"))).toBeNull();
+  });
+
+  it("marks the inbox read from Work", async () => {
+    state.inboxUnread = 4;
+    state.chatSessions = [{ id: "a", unread_count: 3 }];
+    renderRail();
+    fireEvent.click(markAllRead(await openMenu("/acme/issues"))!);
+    expect(state.markAllInboxRead).toHaveBeenCalledTimes(1);
+    expect(state.markAllChatsRead).not.toHaveBeenCalled();
+  });
+});
+
 describe("AppRail panel peek", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -385,9 +461,9 @@ describe("AppRail panel peek", () => {
     });
     expect(peek).toBe("team");
 
-    // Inbox and Chat keep their lists in their pages but still preview.
-    hover("/acme/inbox");
-    expect(peek).toBe("inbox");
+    // Chat keeps its list in its page but still previews.
+    hover("/acme/chat");
+    expect(peek).toBe("chat");
   });
 });
 

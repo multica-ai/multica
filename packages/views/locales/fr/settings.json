@@ -277,7 +277,7 @@
     },
     "own": {
       "title": "Créer le vôtre",
-      "description": "Importez un thème au format .zip ou depuis un dossier, ou partez d’une copie du thème actuel."
+      "description": "Demandez à n’importe quel agent d’en créer un dans un chat ou une tâche, importez un thème au format .zip ou depuis un dossier, ou partez d’une copie du thème actuel."
     },
     "tools": {
       "duplicate": "Dupliquer « {{name}} » en nouveau thème",
@@ -341,8 +341,8 @@
     },
     "content_size": {
       "title": "Taille du texte",
-      "description": "Seulement le texte du contenu ; l’interface garde sa taille.",
-      "follow": "Comme l’interface ({{size}} px)"
+      "description": "Seulement le texte du contenu. Par défaut, comme l’interface.",
+      "follow": "Suivre la taille de l’interface"
     },
     "content_leading": {
       "title": "Interligne",
@@ -355,7 +355,7 @@
     },
     "density": {
       "title": "Densité",
-      "description": "Hauteur des lignes dans les listes de tickets et la recherche.",
+      "description": "Hauteur des lignes dans les listes de tickets, la recherche et la barre latérale, et espacement du tableau.",
       "compact": "Compacte",
       "default": "Par défaut",
       "comfortable": "Aérée"
@@ -393,6 +393,7 @@
     "reserved_error": "Réservé par le navigateur ou la fenêtre de bureau.",
     "send_error": "Envoyer ne peut utiliser que Entrée ou Mod+Entrée.",
     "unsafe_error": "Cette touche gênerait la saisie ou la navigation clavier de base.",
+    "unrecognized_error": "Impossible d'enregistrer cette combinaison. Essayez-en une autre.",
     "send_enter_hint": "Maj+Entrée insère un paragraphe, poursuit une liste, ou ajoute un saut de ligne dans un bloc de code.",
     "categories": {
       "general": "Général",
@@ -430,6 +431,14 @@
       "archiveInboxItem": {
         "label": "Archiver la notification",
         "description": "Archiver la notification ouverte, ou la restaurer lors de la consultation des archives."
+      },
+      "unsubscribeArchiveInboxItem": {
+        "label": "Se désabonner et archiver",
+        "description": "Se désabonner de la tâche de la notification ouverte et l'archiver. Disponible sur les tâches qui ne sont ni à vous ni à vos agents."
+      },
+      "snoozeInboxItem": {
+        "label": "Reporter la notification",
+        "description": "Reporte la tâche ouverte depuis la boîte de réception, ou la fait revenir si elle est reportée."
       },
       "send": {
         "label": "Envoyer",
@@ -490,6 +499,10 @@
       "goSettings": {
         "label": "Aller aux paramètres",
         "description": "Ouvrir les paramètres de l'espace de travail."
+      },
+      "voiceInput": {
+        "label": "Saisie vocale",
+        "description": "Dictez dans le dernier éditeur utilisé. Maintenez pour parler."
       }
     },
     "fixed": {
@@ -586,7 +599,8 @@
       "code": "Code",
       "channels": "Messagerie",
       "apps": "Applications connectées",
-      "workflows": "Workflows"
+      "workflows": "Workflows",
+      "voice_input": "Saisie vocale"
     },
     "groups": {
       "personal": "Personnel",
@@ -716,6 +730,7 @@
     "save_failed": "Impossible d'enregistrer la propriété",
     "limit_hint": "{{count}}/{{max}} propriétés actives",
     "archived_badge": "Archivée",
+    "options_preview": "Voir toutes les options de {{name}}",
     "types": {
       "text": "Texte",
       "number": "Nombre",
@@ -825,8 +840,32 @@
     "toast_profile_failed": "Échec de la mise à jour du profil"
   },
   "notifications": {
-    "title": "Notifications de la boîte de réception",
-    "description": "Les événements désactivés restent visibles dans la tâche.",
+    "title": "Boîte de réception",
+    "description": "Choisissez les événements qui arrivent dans la boîte de réception de la barre latérale Travail. Un événement désactivé ne crée aucune notification, et le réactiver ne récupère pas celles manquées.",
+    "categories": {
+      "direct": "Vous concernant",
+      "issues": "Tâches que vous suivez",
+      "projects": "Projets que vous suivez",
+      "agents": "Agents"
+    },
+    "others_issues": {
+      "label": "Tâches des autres",
+      "description": "Tâches assignées à quelqu'un d'autre ou à son agent, que vous suivez seulement parce que vous les avez créées, commentées ou y avez été mentionné. Les mises à jour clés sont les @mentions, les réponses dans les fils auxquels vous avez participé et, avec Changements de statut activé, les statuts qui demandent une personne, comme en relecture, bloquée ou terminée.",
+      "key_updates": "Mises à jour clés",
+      "all": "Toute l'activité"
+    },
+    "leaving": {
+      "title": "Sortir de la boîte de réception",
+      "description": "Lire une notification ne la retire pas de la boîte de réception.",
+      "manual_label": "Archiver à la main",
+      "manual_description": "Depuis sa ligne dans la barre latérale ou le haut de la notification",
+      "manual_value": "À tout moment",
+      "done_label": "Archiver les tâches que vous terminez",
+      "done_description": "Quand vous passez une tâche à un statut Terminé ou Annulé, ses notifications sont archivées. Celles terminées par d'autres restent dans la boîte de réception.",
+      "archived_label": "Notifications archivées",
+      "archived_description": "Retrouvez-les et désarchivez-les",
+      "archived_action": "Voir les archivées"
+    },
     "toast_failed": "Échec de la mise à jour des réglages de notification",
     "groups": {
       "assignments": {
@@ -845,6 +884,10 @@
         "label": "Mentions",
         "description": "Quand quelqu'un vous @mentionne, y compris via @all et @squad"
       },
+      "reactions": {
+        "label": "Réactions",
+        "description": "Quand quelqu'un réagit à une tâche que vous avez créée ou à un commentaire que vous avez écrit"
+      },
       "updates": {
         "label": "Priorité et date d'échéance",
         "description": "Quand la priorité ou la date d'échéance change sur les tâches que vous suivez"
@@ -855,7 +898,7 @@
       },
       "agent_activity": {
         "label": "Activité des agents",
-        "description": "Lorsqu'une exécution d'agent échoue"
+        "description": "Lorsqu'une exécution d'agent échoue, ou qu'une action d'app demandée par un agent est bloquée ou expire"
       },
       "chat_replies": {
         "label": "Inclure les réponses du chat"
@@ -923,7 +966,7 @@
     "section_general": "Détails de l'espace de travail",
     "logo_label": "Logo de l'espace de travail",
     "change_logo_aria": "Changer le logo de l'espace de travail",
-    "click_logo_hint": "Cliquez sur le logo pour envoyer une nouvelle image",
+    "click_logo_hint": "Cliquez sur le logo pour importer une image ou créer une icône texte",
     "toast_logo_failed": "Échec de l'envoi du logo de l'espace de travail",
     "name_label": "Nom",
     "description_label": "Description",
@@ -987,7 +1030,7 @@
     "disconnect": "Déconnecter",
     "disconnecting": "Déconnexion…",
     "disconnect_confirm_title": "Déconnecter la GitHub App",
-    "disconnect_confirm_description": "Multica cessera de recevoir les webhooks de cette installation. Les copies de PR et les liens existants sont conservés ; reconnectez à tout moment pour reprendre les mises à jour.",
+    "disconnect_confirm_description": "Déconnecter {{login}} de cet espace de travail ? Les mises à jour de ce compte s’arrêteront. Les PR et liens existants seront conservés ; les autres connexions ne seront pas affectées.",
     "disconnect_confirm_cancel": "Annuler",
     "disconnect_confirm_action": "Déconnecter",
     "not_configured": "L'intégration GitHub n'est pas configurée pour ce déploiement. Les opérateurs doivent définir",
@@ -1008,7 +1051,18 @@
     "feature_auto_link_description": "Lie une PR à la tâche dont l’identifiant, par ex. {{example}}, figure dans son titre ou sa branche, ou suit « Closes » dans sa description.",
     "status_paused": "En pause",
     "pause": "Mettre en pause les fonctionnalités GitHub",
-    "resume": "Reprendre les fonctionnalités GitHub"
+    "resume": "Reprendre les fonctionnalités GitHub",
+    "add_account": "Ajouter un compte ou une organisation",
+    "disconnect_account": "Déconnecter {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub n’a pas renvoyé d’autorisation utilisateur. Reconnectez-vous et terminez l’autorisation. Si cela se répète pour une installation existante, contactez votre opérateur Multica.",
+      "installation_not_authorized": "Pour une installation personnelle, utilisez le compte GitHub propriétaire. Pour une organisation, utilisez un compte administrateur de tous les dépôts autorisés et sélectionnez au moins un dépôt.",
+      "invalid_state": "Cette demande de connexion GitHub a expiré ou est invalide. Recommencez depuis Paramètres → Code.",
+      "incomplete_callback": "GitHub a renvoyé une réponse de connexion incomplète. Recommencez depuis Paramètres → Code.",
+      "bad_workspace": "L’espace de travail de cette connexion est introuvable. Ouvrez l’espace souhaité et réessayez depuis Paramètres → Code.",
+      "verification_failed": "Impossible de vérifier votre accès à l’installation GitHub. Réessayez ; si cela se répète, demandez à votre opérateur Multica de vérifier la configuration de la GitHub App.",
+      "persist_failed": "Impossible d’enregistrer la connexion GitHub. Réessayez depuis Paramètres → Code ; si cela se répète, contactez votre opérateur Multica."
+    }
   },
   "vcs": {
     "section_title": "Git auto-hébergé",
@@ -1428,7 +1482,13 @@
       "up_to_date": "Vous avez la dernière version.",
       "downloading": "La v{{version}} se télécharge en arrière-plan — vous serez averti quand elle sera prête à installer.",
       "check_now": "Vérifier maintenant",
-      "checking": "Vérification…"
+      "checking": "Vérification…",
+      "check_unavailable": "Impossible de rechercher les mises à jour pour le moment. Réessayez plus tard.",
+      "check_network": "Impossible de joindre le service de mise à jour. Vérifiez votre connexion et réessayez.",
+      "check_failed": "La recherche de mises à jour a échoué. Réessayez.",
+      "download_failed": "Le téléchargement a échoué. Vous pouvez continuer à utiliser la version actuelle et réessayer.",
+      "download_ready": "La version {{version}} est prête à être installée.",
+      "retry": "Réessayer"
     },
     "daemon": {
       "title": "Démon",
@@ -1668,6 +1728,30 @@
     "apps": "Des comptes d'équipe ou personnels connectés via Multica et ajoutés à chaque agent.",
     "plugins": "Paquets installés pouvant ajouter des outils, des hooks planifiés et du stockage, chacun avec ses propres autorisations."
   },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "Messages privés avec le compte qui scanne le QR code de connexion.",
+    "loading": "Connexion…",
+    "empty": "Connectez WeChat depuis l’onglet Intégrations d’un agent.",
+    "close": "Fermer",
+    "action_failed": "Cette action n’a pas pu aboutir. Réessayez.",
+    "privacy_hint": "Les messages seront exécutés avec vos droits dans cet espace de travail. Ne partagez pas ce QR code.",
+    "qr_label": "QR code de connexion WeChat",
+    "scan_hint": "Scannez avec WeChat et confirmez sur votre téléphone.",
+    "scanned": "Code scanné. Confirmez la connexion dans WeChat.",
+    "verify_hint": "WeChat demande une vérification. Saisissez le code affiché sur votre téléphone.",
+    "verify_label": "Code de vérification",
+    "verify": "Vérifier",
+    "success": "Connexion établie. Envoyez un nouveau message au bot dans WeChat.",
+    "expired": "Ce QR code a expiré. Générez-en un nouveau.",
+    "blocked": "WeChat a bloqué les tentatives de vérification. Réessayez plus tard.",
+    "already_bound": "Ce bot est déjà lié dans WeChat. Déconnectez l’ancien client, puis réessayez.",
+    "refresh": "Nouveau QR code",
+    "retry": "Réessayer",
+    "already_connected": "Ce compte WeChat est connecté à {{agent}}. Déconnectez-le de cet agent avant de continuer.",
+    "connected_elsewhere": "Ce compte WeChat est connecté ailleurs. Déconnectez la connexion existante avant de continuer.",
+    "authorization_expired": "L’autorisation WeChat a expiré. Scannez à nouveau pour vous reconnecter."
+  },
   "connected_apps": {
     "description": "Les comptes que vos agents utilisent pour accéder aux apps externes. Les actions autorisées sont exécutées immédiatement.",
     "loading": "Chargement des apps…",
@@ -1853,5 +1937,125 @@
       "admin_required": "Un administrateur peut rétablir l’accès.",
       "account_link": "Ce compte conserve des restrictions. Rétablissez l’accès dans les apps connectées."
     }
+  },
+  "voice_input": {
+    "description": "Dictez dans le chat, les commentaires et les réponses. La voix est transcrite sur cet ordinateur et ne le quitte jamais.",
+    "model_title": "Modèle vocal",
+    "model_hint": "Les modèles s’exécutent sur cet ordinateur. Téléchargez-en un, ou passez de l’un à l’autre.",
+    "engine_unavailable": "La transcription sur l’appareil n’est pas disponible sur cet ordinateur.",
+    "enabled": {
+      "title": "Saisie vocale",
+      "hint": "Affiche le micro dans le chat, les commentaires et les réponses, et active le raccourci vocal."
+    },
+    "input_title": "Saisie",
+    "shortcut": {
+      "title": "Raccourci",
+      "hint": "Fonctionne dès qu’un éditeur est à l’écran, même sans le focus.",
+      "change": "Modifier",
+      "unassigned": "Non défini"
+    },
+    "activation": {
+      "title": "Activation",
+      "auto": "Appui ou maintien",
+      "toggle": "Appui",
+      "hold": "Maintien",
+      "hints": {
+        "auto": "Appuyez pour commencer, appuyez à nouveau pour insérer. Maintenez pour parler, relâchez pour insérer.",
+        "toggle": "Appuyez pour commencer, appuyez à nouveau pour insérer.",
+        "hold": "Maintenez pour parler, relâchez pour insérer."
+      }
+    },
+    "recognition_title": "Reconnaissance",
+    "language": {
+      "title": "Langue parlée",
+      "hint": "La détection automatique convient dans la plupart des cas. Choisissez une langue si de courtes phrases sortent dans une autre.",
+      "auto": "Détection automatique"
+    },
+    "fillers": {
+      "title": "Supprimer les hésitations",
+      "hint": "Retire « euh », « hum » et les hésitations similaires."
+    },
+    "vocabulary": {
+      "title": "Vocabulaire",
+      "hint": "Noms et termes à écrire à votre façon, comme des produits ou des collègues. Jusqu’à {{max}}.",
+      "placeholder": "Ajouter un mot",
+      "remove": "Retirer {{word}}"
+    },
+    "microphone_title": "Micro",
+    "device": {
+      "title": "Périphérique d’entrée",
+      "default": "Par défaut du système",
+      "unnamed": "Micro {{index}}",
+      "permission_hint": "Testez le micro une fois pour voir le nom des périphériques."
+    },
+    "test": {
+      "title": "Tester le micro",
+      "hint": "Parlez pour vérifier le niveau. Rien n’est enregistré.",
+      "blocked": "L’accès au micro est bloqué. Autorisez-le dans le navigateur ou les réglages système.",
+      "start": "Tester",
+      "stop": "Arrêter"
+    },
+    "history": {
+      "title": "Historique",
+      "description": "Les enregistrements et leur texte restent sur cet ordinateur et ne sont jamais envoyés. Un enregistrement qui a échoué ou a été interrompu peut être retranscrit à partir de son audio.",
+      "keep": {
+        "title": "Conserver l'historique",
+        "hint": "Durée de conservation des enregistrements sur cet ordinateur.",
+        "options": {
+          "off": "Ne pas conserver",
+          "1d": "1 jour",
+          "7d": "7 jours",
+          "30d": "30 jours",
+          "forever": "Toujours"
+        }
+      },
+      "clear": "Tout effacer",
+      "clear_dialog": {
+        "title": "Effacer l'historique vocal ?",
+        "description": "Tous les enregistrements et transcriptions conservés sur cet ordinateur seront supprimés.",
+        "cancel": "Annuler"
+      },
+      "empty": "Vos dictées apparaîtront ici.",
+      "off": "L'historique est désactivé. Les nouveaux enregistrements ne sont pas conservés.",
+      "today": "Aujourd'hui",
+      "yesterday": "Hier",
+      "status": {
+        "transcribing": "Transcription…",
+        "failed": "Échec de la transcription",
+        "interrupted": "Interrompu avant la transcription"
+      },
+      "actions": {
+        "play": "Lire l'enregistrement",
+        "pause": "Pause",
+        "retranscribe": "Retranscrire",
+        "copy": "Copier le texte",
+        "delete": "Supprimer"
+      },
+      "copied": "Copié",
+      "copy_failed": "Impossible de copier",
+      "retry_failed": "Impossible de transcrire cet enregistrement",
+      "show_more": "Afficher plus"
+    }
+  },
+  "private_projects": {
+    "title": "Projets privés",
+    "description": "Seuls les membres d’un projet privé peuvent l’ouvrir. En tant que propriétaire de l’espace de travail, vous voyez qui fait partie de chacun et pouvez vous y ajouter quand vous devez intervenir.",
+    "empty": "Cet espace de travail n’a aucun projet privé.",
+    "load_failed": "Impossible de charger les projets privés.",
+    "retry": "Réessayer",
+    "no_members": "Aucun membre",
+    "lead_name": "{{name}} (responsable)",
+    "more_members": "+{{count}} autres",
+    "archived": "Archivé",
+    "member": "Vous êtes membre",
+    "open": "Ouvrir",
+    "join": "Rejoindre",
+    "join_title": "Rejoindre « {{title}} » ?",
+    "join_description": "Vous serez ajouté à la liste des membres de ce projet et verrez ses tâches, commentaires et pièces jointes. Ses membres actuels seront prévenus.",
+    "join_description_empty": "Ce projet n’a aucun membre. Vous en serez le seul membre et verrez ses tâches, commentaires et pièces jointes.",
+    "join_confirm": "Rejoindre le projet",
+    "cancel": "Annuler",
+    "toast_joined": "Vous avez rejoint {{title}}",
+    "toast_failed": "Impossible de rejoindre le projet."
   }
 }

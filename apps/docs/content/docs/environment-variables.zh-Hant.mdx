@@ -181,11 +181,14 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 |---|---|---|
 | GitHub | `GITHUB_APP_SLUG` | GitHub App slug |
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC 與連線 state 簽名金鑰 |
-| GitHub | `GITHUB_APP_ID` | PR 卡片的 CI 狀態、可合併性和"從 GitHub 選擇"倉庫都需要它 |
-| GitHub | `GITHUB_APP_PRIVATE_KEY` | 與 App ID 配套的完整 PEM 私鑰，用途同上 |
+| GitHub | `GITHUB_APP_CLIENT_ID` | App 的 Client ID。新連線必需，用於驗證操作者能否存取該 installation |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | 與 Client ID 配對的 client secret，新連線必需 |
+| GitHub | `GITHUB_APP_ID` | 新連線必需，用於驗證安裝管理權限；也用於 PR 卡片和倉庫瀏覽 |
+| GitHub | `GITHUB_APP_PRIVATE_KEY` | 新連線必需，用於驗證安裝管理權限；也用於 PR 卡片和倉庫瀏覽 |
 | 飛書 | `MULTICA_LARK_SECRET_KEY` | base64 編碼的 32 位元組憑據加密金鑰 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 編碼的 32 位元組 token 加密金鑰 |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 編碼的 32 位元組 Bot token 加密金鑰 |
+| 微信 | `MULTICA_WEIXIN_SECRET_KEY` | base64 編碼的 32 位元組金鑰，用於加密 iLink 憑據、登入狀態與回覆上下文；未設定時不開放微信連線 |
 | Telegram | `MULTICA_TELEGRAM_TOOL_PROGRESS` | 流式回覆中展示的工具步驟：`auto`（預設，私聊顯示細節，群聊只顯示工作型別）、`off`、`summary` 或 `detail` |
 | Composio | `COMPOSIO_API_KEY` | 啟用 Composio 工具連線 |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | 回撥 API 地址；可回退到 `MULTICA_PUBLIC_URL` |

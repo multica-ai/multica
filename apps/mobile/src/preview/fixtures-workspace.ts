@@ -111,14 +111,14 @@ export const projectIssueGroups: IssueGroupModel[] = [
 ];
 
 export const starredViews: ViewRowModel[] = [
-  { id: "builtin:my_issues", label: "我的任务", detail: "内置", starred: true },
-  { id: "builtin:my_agents", label: "我的智能体在做", detail: "内置", starred: true },
   { id: "builtin:all_issues", label: "全部任务", detail: "内置", starred: true },
+  { id: "builtin:my_work", label: "我的工作", detail: "内置", starred: true },
+  { id: "builtin:working", label: "执行中", detail: "内置", starred: true },
   { id: "view:ios", label: savedViewName, detail: "我的视图 · 3 个状态 · 另有 1 个条件", starred: true },
 ];
 
 export const otherViews: ViewRowModel[] = [
-  { id: "builtin:unread", label: "未读", detail: "内置", starred: false },
+  { id: "builtin:snoozed", label: "已延后", detail: "内置", starred: false },
   { id: "view:review", label: "待审核 PR", detail: "工作区视图 · 1 个状态", starred: false },
   { id: "view:due", label: "本周到期", detail: "工作区视图 · 另有 1 个条件", starred: false },
   { id: "view:blocked", label: "受阻任务", detail: "我的视图 · 1 个状态", starred: false },

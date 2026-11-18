@@ -106,7 +106,7 @@ function AutopilotEditor({ autopilot }: { autopilot: Autopilot | null }) {
       page={page}
       onPage={setPage}
       assignees={assignees}
-      projects={(projects.data ?? []).map((project) => ({ id: project.id, title: project.title, icon: project.icon }))}
+      projects={(projects.data ?? []).filter((project) => !project.archived_at || project.id === autopilot?.project_id).map((project) => ({ id: project.id, title: project.title, icon: project.icon }))}
       nextRuns={nextRuns}
       onAddSchedule={() => setDraft((current) => ({ ...current, schedule: newSchedule() }))}
       busy={busy}

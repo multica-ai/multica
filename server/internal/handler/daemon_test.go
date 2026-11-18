@@ -797,6 +797,7 @@ func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 	}
 	ctx := context.Background()
 	profileID := insertRuntimeProfileFixture(t, ctx, "Missing Custom Codex", "codex", "missing-codex")
+	dbfx.Exec(t, `UPDATE runtime_profile SET daemon_id = $1 WHERE id = $2`, "test-daemon-profile-failure", profileID)
 
 	req := newOwnerDaemonRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id": testWorkspaceID,
@@ -3413,6 +3414,43 @@ func TestClaimTask_ChatAutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
 	}
 }
 
+// TestClaimTask_AutoRetryAfterRuntimeMoveStartsNewSession: the agent moved to
+// another runtime while the parent ran there, so the retry is created on the
+// agent's new runtime (#10717). Its claim there must not resume the session the
+// old runtime recorded; the workdir is still offered best-effort, as for any
+// cross-runtime prior (TestClaimTask_IssuePriorSessionRuntimeGuard).
+func TestClaimTask_AutoRetryAfterRuntimeMoveStartsNewSession(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	oldRuntimeID := createRuntimeGuardRuntime(t, ctx, "opencode")
+	issueID := dbfx.Issue(t, "auto-retry after runtime move fixture", testutil.Cols{"status": "in_progress"})
+	parentID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":     oldRuntimeID,
+		"issue_id":       issueID,
+		"status":         "failed",
+		"failure_reason": "timeout",
+		"started_at":     testutil.Raw("now() - interval '20 minutes'"),
+		"completed_at":   testutil.Raw("now() - interval '1 minute'"),
+		"session_id":     "old-runtime-session",
+		"work_dir":       "/tmp/old-runtime-workdir",
+		"attempt":        1,
+		"max_attempts":   2,
+	})
+	createAutoRetryForTest(t, ctx, parentID)
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("PriorSessionID = %q, want empty (the old runtime's session cannot resume here)", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/old-runtime-workdir" {
+		t.Fatalf("PriorWorkDir = %q, want the parent's /tmp/old-runtime-workdir offered best-effort", task.PriorWorkDir)
+	}
+}
+
 func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -4959,7 +4997,7 @@ func TestDaemonRegister_ProfileUsesStoredRuntimeIdentity(t *testing.T) {
 	}
 	ctx := context.Background()
 	profileID := insertRuntimeProfileFixture(t, ctx, "Custom OMP", "pi", "wrapper")
-	if _, err := testPool.Exec(ctx, `UPDATE runtime_profile SET runtime_type = 'omp' WHERE id = $1`, profileID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE runtime_profile SET runtime_type = 'omp', daemon_id = 'test-omp-profile' WHERE id = $1`, profileID); err != nil {
 		t.Fatal(err)
 	}
 	req := newOwnerDaemonRequest("POST", "/api/daemon/register", map[string]any{

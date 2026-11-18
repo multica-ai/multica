@@ -9,7 +9,7 @@ import { useSidebarViews } from "@multica/core/issue-views/sidebar-views";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { selectWorkspace } from "../../platform/workspace";
 import { useActiveTasks } from "../model/tasks";
-import { viewItemLabel, viewItemOpensTab } from "../model/views";
+import { viewItemLabel } from "../model/views";
 import { useWorkspace } from "../model/workspace-context";
 import type { RootStackParamList, TabParamList } from "../navigation/types";
 import { useStrings } from "../strings";
@@ -46,7 +46,7 @@ export function WorkspaceMenuScreen() {
   const views = useSidebarViews(workspace.id, userId);
   const active = useOpenedOver();
 
-  const openProjects = projects.data?.filter((project) => project.status === "planned" || project.status === "in_progress").length ?? 0;
+  const openProjects = projects.data?.filter((project) => !project.archived_at && (project.status === "planned" || project.status === "in_progress")).length ?? 0;
   const paused = autopilots.data?.filter((autopilot) => autopilot.status === "paused").length ?? 0;
 
   const toTab = (screen: keyof TabParamList) => navigation.popTo("Tabs", { screen });
@@ -59,8 +59,6 @@ export function WorkspaceMenuScreen() {
       navigation.navigate(page);
       return;
     }
-    const item = views.items.find((view) => view.id === key);
-    if (item && viewItemOpensTab(item)) return toTab("myIssues");
     navigation.popToTop();
     navigation.navigate("SavedView", { itemId: key });
   };

@@ -52,7 +52,29 @@ Desktop saves tabs per workspace. For example, if you open three issues in works
 
 A given resource opens only once in the current workspace. Tabs can be reordered, pinned, and closed, and each keeps its own forward/back history and scroll position. Pinned tabs sit at the left end and have no close button; unpin a tab to close it. Opening another page from a pinned tab opens a new tab, and the pinned tab stays where it is. Clicking or pasting an app link for this deployment opens it directly in a tab instead of jumping to the browser.
 
+Switching between Board, List, and Swimlane in a tab also keeps each view's latest scroll position, including the board's horizontal position and scrolling within its columns.
+
 Logging out clears every tab saved on the machine, so the next person to sign in never sees pages left behind by the previous account.
+
+## Voice input
+
+Desktop can transcribe speech into chat, comments, replies, and descriptions when creating issues on your computer. Voice input is **off by default** and isn't available in the web app.
+
+1. Open **Settings → Voice input** and turn on **Voice input**.
+2. Download a speech model for the languages you use. Downloads need an internet connection; transcription runs locally once the model is installed. If the page reports that on-device transcription is unavailable, this build has no usable speech engine on your computer.
+3. Allow microphone access when prompted. You can choose and test the microphone on the same settings page.
+
+The default **Tap or hold** mode offers two ways to dictate: click the mic to start, then click the checkmark to insert the text; or hold the mic while speaking and release it to insert. Inserting leaves the text in the editor for you to review. In chat and comments, the send button in the recording bar, or `Enter` while that bar is recording, transcribes and sends. `Esc` cancels.
+
+The voice shortcut is **unassigned by default**. Set it under **Settings → Shortcuts**; it works while a supported editor is visible, even without focus. You can also choose tap-only or hold-only activation under **Voice input**.
+
+### Recordings and history
+
+Audio is transcribed on this computer without being uploaded for transcription. Text you send is submitted as an ordinary chat message or comment.
+
+Recordings and transcripts are kept locally for **30 days by default**. Under **Settings → Voice input → History**, you can play recordings, copy text, retry transcription, delete entries, or clear everything. **Keep history** offers no retention, 1 day, 7 days, 30 days, or forever.
+
+Turning off **Voice input** hides the mic and disables its shortcut. It does not delete recordings already saved; history remains accessible on the same page.
 
 ## Built-in daemon
 
@@ -69,6 +91,8 @@ You can check runtime status and logs in Desktop's settings. If a tool isn't det
 ## Updating Desktop
 
 Auto-update is on by default. The app checks for and downloads new versions in the background; once a download finishes you can restart to install immediately or let it install on the next quit. Under **Settings → Updates** you can turn off automatic checks or check for new versions manually.
+
+If a manual check or download fails, Settings shows a short message and a **Retry** button. You can keep using the current version while retrying.
 
 Updates are distributed per OS and CPU architecture:
 

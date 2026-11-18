@@ -297,6 +297,7 @@ Consultez `auth.json` pour l'exemple de référence (la section `web` contient `
 - Guillemets : guillemets doubles droits `"..."`, comme dans la source anglaise. N'utilisez ni `「」` ni les guillemets typographiques.
 - Points de suspension : trois points `...` et non le caractère unique `…`. Suivez la source anglaise.
 - Mélange chinois-anglais : un seul espace de chaque côté du mot anglais (voir les règles de combinaison des mots).
+- Gras et ponctuation : un `**` fermant placé juste après une ponctuation et directement suivi de texte ne ferme pas le gras, et les astérisques s'affichent sur la page. En chinois, japonais et coréen, le gras est souvent suivi du mot suivant sans espace. Sortez la ponctuation du gras (`**问题（Problem）**和` → `**问题**（Problem）和`), ou ajoutez un espace quand la ponctuation fait partie d'un libellé (`点击 **+**添加` → `点击 **+** 添加`). `apps/docs/lib/unrendered-bold.test.ts` échoue si un `**` reste non rendu dans la documentation.
 
 ### Principes de style
 

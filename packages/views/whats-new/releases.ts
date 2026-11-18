@@ -1,7 +1,8 @@
-import { CircleDot, Command, Gauge, Globe, History, Layers, ListPlus, Lock, Palette, PanelLeft, Pin, Quote, Server, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
+import { AlarmClock, BellOff, CircleDot, Command, FolderKanban, Gauge, Globe, History, Layers, ListChecks, ListPlus, Lock, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
+import { ANNOTATIONS_HERO, ENVIRONMENTS_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -21,20 +22,222 @@ export interface WhatsNewHighlight {
   /** English is required; a missing locale falls back to it. */
   copy: { en: HighlightCopy } & Partial<Record<SupportedLocale, HighlightCopy>>;
   action?: HighlightAction;
+  /** Puts the highlight in the What's new deck; highlights without one stay in the panel. */
+  hero?: WhatsNewHero;
 }
 
 export interface WhatsNewRelease extends ReleaseStamp {
   highlights: WhatsNewHighlight[];
 }
 
+/** The first release dealt as a corner deck; see WHATS_NEW_RELEASES. */
+export const WHATS_NEW_DECK_SINCE = "0.9.0";
+
 /**
  * In-app highlights per release, newest first. Not the changelog: only
- * user-visible changes worth discovering, 0–3 per release, with copy that
+ * user-visible changes worth discovering, with copy that
  * says how to use the feature. Fix-only releases get no entry, so they are
  * never marked as new in the panel. Versions and dates must
  * match the changelog entry the highlights come from.
+ *
+ * From WHATS_NEW_DECK_SINCE on, every entry needs at least one highlight with
+ * hero art: only those reach the corner deck, and an entry without one would
+ * reach users only through the Help menu.
  */
 export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
+  {
+    version: "0.10.0",
+    date: "2026-11-16",
+    highlights: [
+      {
+        id: "inbox-snooze",
+        icon: AlarmClock,
+        hero: SNOOZE_HERO,
+        action: { kind: "route", to: (p) => p.inbox() },
+        copy: {
+          en: {
+            title: "Snooze a notification until later",
+            body: "Your Inbox now sits at the top of the Work panel. Hover a notification and click the clock, or press H on an open issue, to pick when it comes back; until then it waits in the Snoozed view.",
+          },
+          "zh-Hans": {
+            title: "把通知延后处理",
+            body: "收件箱现在位于「工作」面板顶部。悬停一条通知并点闹钟按钮，或在打开的任务上按 H，选好它回来的时间；在那之前，它会待在「已延后」视图里。",
+          },
+          "zh-Hant": {
+            title: "把通知延後處理",
+            body: "收件箱現在位於「工作」面板頂部。將游標移到一則通知上並點鬧鐘按鈕，或在開啟的任務上按 H，選好它回來的時間；在那之前，它會待在「已延後」檢視裡。",
+          },
+          ja: {
+            title: "通知をあとで処理する",
+            body: "インボックスは「作業」パネルの一番上に移りました。通知にカーソルを合わせて時計ボタンを押すか、開いているタスクで H を押して、戻ってくる時間を選びます。それまでは「スヌーズ中」ビューで待機します。",
+          },
+          ko: {
+            title: "알림을 나중으로 미루기",
+            body: "인박스가 이제 '작업' 패널 맨 위에 있습니다. 알림에 마우스를 올려 시계 버튼을 누르거나 열린 태스크에서 H를 눌러 다시 알릴 시간을 고르세요. 그때까지는 '미뤄둔 항목' 보기에 있습니다.",
+          },
+          fr: {
+            title: "Reportez une notification à plus tard",
+            body: "La boîte de réception est désormais en haut du panneau Travail. Survolez une notification et cliquez sur l'horloge, ou appuyez sur H dans une tâche ouverte, pour choisir quand elle revient ; d'ici là, elle attend dans la vue Reportés.",
+          },
+        },
+      },
+      {
+        id: "desktop-voice-input",
+        icon: Mic,
+        hero: VOICE_HERO,
+        copy: {
+          en: {
+            title: "Dictate instead of typing on desktop",
+            body: "In the desktop app, turn on Settings → Voice input, then tap the mic in chat, a comment, or a reply to dictate, or hold it while you talk. The first time, pick a speech model to download; audio is transcribed on your computer.",
+          },
+          "zh-Hans": {
+            title: "在桌面端用语音代替打字",
+            body: "在桌面端打开「设置 → 语音输入」，然后在聊天、评论或回复的输入框里点麦克风开始听写，也可以按住麦克风说话。第一次使用时选一个语音模型下载，录音只在你的电脑上转写。",
+          },
+          "zh-Hant": {
+            title: "在桌面端用語音代替打字",
+            body: "在桌面端打開「設定 → 語音輸入」，然後在聊天、留言或回覆的輸入框裡點麥克風開始聽寫，也可以按住麥克風說話。第一次使用時選一個語音模型下載，錄音只在你的電腦上轉寫。",
+          },
+          ja: {
+            title: "デスクトップでは入力の代わりに話す",
+            body: "デスクトップアプリで「設定 → 音声入力」をオンにし、チャット、コメント、返信の入力欄でマイクを押すと音声入力が始まります。押し続けながら話すこともできます。初回は音声モデルを選んでダウンロードし、音声はこのコンピューター上で文字に変換されます。",
+          },
+          ko: {
+            title: "데스크톱에서 타이핑 대신 말하기",
+            body: "데스크톱 앱에서 '설정 → 음성 입력'을 켠 뒤 채팅, 댓글, 답글 입력창의 마이크를 눌러 받아쓰거나 누른 채로 말하세요. 처음에는 음성 모델을 골라 내려받으며, 음성은 이 컴퓨터에서 텍스트로 바뀝니다.",
+          },
+          fr: {
+            title: "Dictez au lieu de taper dans l'app de bureau",
+            body: "Dans l'app de bureau, activez Paramètres → Saisie vocale, puis cliquez sur le micro d'une discussion, d'un commentaire ou d'une réponse pour dicter, ou maintenez-le pendant que vous parlez. La première fois, choisissez un modèle vocal à télécharger ; l'audio est transcrit sur votre ordinateur.",
+          },
+        },
+      },
+      {
+        id: "project-board-archive",
+        icon: FolderKanban,
+        action: { kind: "route", to: (p) => p.projects() },
+        copy: {
+          en: {
+            title: "Plan projects on a board, and archive finished ones",
+            body: "On Projects, open Display settings to switch to Board or group by status, priority, or lead, and search from the header. Archive a project from its menu to hide it, and restore it any time from Archived projects.",
+          },
+          "zh-Hans": {
+            title: "用看板管理项目，并归档已完成的项目",
+            body: "在「项目」页打开「显示设置」，可以切换到看板，或按状态、优先级、负责人分组，也可以在页头搜索。在项目菜单里选「归档」即可把它隐藏，之后随时可以在「已归档的项目」里恢复。",
+          },
+          "zh-Hant": {
+            title: "用看板管理專案，並歸檔已完成的專案",
+            body: "在「專案」頁打開「顯示設定」，可以切換到看板，或按狀態、優先順序、負責人分組，也可以在頁首搜尋。在專案選單裡選「歸檔」即可把它隱藏，之後隨時可以在「已歸檔的專案」裡還原。",
+          },
+          ja: {
+            title: "プロジェクトをボードで管理し、終わったものはアーカイブ",
+            body: "「プロジェクト」ページで「表示設定」を開くと、ボードに切り替えたり、ステータス、優先度、リードでグループ化したりでき、ヘッダーから検索もできます。プロジェクトのメニューから「アーカイブ」を選ぶと非表示になり、「アーカイブ済みのプロジェクト」からいつでも復元できます。",
+          },
+          ko: {
+            title: "보드로 프로젝트를 관리하고 끝난 프로젝트는 보관하기",
+            body: "'프로젝트' 페이지에서 '표시 설정'을 열어 보드로 바꾸거나 상태, 우선순위, 리드별로 그룹화하고, 헤더에서 검색할 수 있습니다. 프로젝트 메뉴에서 '보관'을 고르면 숨겨지고, '보관된 프로젝트'에서 언제든 복원할 수 있습니다.",
+          },
+          fr: {
+            title: "Organisez vos projets en tableau et archivez ceux qui sont terminés",
+            body: "Dans Projets, ouvrez Affichage pour passer en Tableau ou regrouper par statut, priorité ou responsable, et cherchez depuis l'en-tête. Archivez un projet depuis son menu pour le masquer, et restaurez-le à tout moment depuis Projets archivés.",
+          },
+        },
+      },
+      {
+        id: "quieter-others-issues",
+        icon: BellOff,
+        action: { kind: "route", to: (p) => `${p.settings()}?tab=notifications` },
+        copy: {
+          en: {
+            title: "Hear less from other people's issues",
+            body: "At the top of someone else's issue, click Unsubscribe & archive or press Shift+E to stop its updates in one step. Their issues now send only key updates; to get everything, set Other people's issues to All activity in Settings → Notifications.",
+          },
+          "zh-Hans": {
+            title: "少收一些别人任务的通知",
+            body: "在别人的任务顶部点「取消订阅并归档」，或按 Shift+E，一步停掉它的更新。别人的任务现在默认只通知关键更新；想收到全部，可在「设置 → 通知」把「别人的任务」改为「全部动态」。",
+          },
+          "zh-Hant": {
+            title: "少收一些別人任務的通知",
+            body: "在別人的任務頂部點「取消訂閱並歸檔」，或按 Shift+E，一步停掉它的更新。別人的任務現在預設只通知關鍵更新；想收到全部，可在「設定 → 通知」把「別人的任務」改為「全部動態」。",
+          },
+          ja: {
+            title: "他の人のタスクの通知を減らす",
+            body: "他の人のタスクの上部で「購読解除してアーカイブ」を押すか Shift+E を押すと、更新をまとめて止められます。他の人のタスクは重要な更新だけが届くようになりました。すべて受け取るには「設定 → 通知」で「他の人のタスク」を「すべてのアクティビティ」にします。",
+          },
+          ko: {
+            title: "다른 사람의 태스크 알림 줄이기",
+            body: "다른 사람의 태스크 상단에서 '구독 해제 후 보관'을 누르거나 Shift+E를 누르면 업데이트를 한 번에 끌 수 있습니다. 다른 사람의 태스크는 이제 주요 업데이트만 알립니다. 모두 받으려면 '설정 → 알림'에서 '다른 사람의 태스크'를 '모든 활동'으로 바꾸세요.",
+          },
+          fr: {
+            title: "Moins de bruit venant des tâches des autres",
+            body: "En haut de la tâche d'une autre personne, cliquez sur Se désabonner et archiver ou appuyez sur Maj+E pour couper ses mises à jour en une fois. Les tâches des autres n'envoient plus que les mises à jour clés ; pour tout recevoir, réglez Tâches des autres sur Toute l'activité dans Paramètres → Notifications.",
+          },
+        },
+      },
+      {
+        id: "batch-edit",
+        icon: ListChecks,
+        action: { kind: "route", to: (p) => p.issues() },
+        copy: {
+          en: {
+            title: "Edit many issues at once",
+            body: "Select issues in a list, then use the bar at the bottom to change labels, project, or due date; More actions covers start date, parent, and custom properties. If some are skipped, click Select only these to fix and retry them.",
+          },
+          "zh-Hans": {
+            title: "一次修改多个任务",
+            body: "在列表里选中多个任务，用底部的操作栏修改标签、项目或截止日期；开始日期、父任务和自定义属性在「更多操作」里。有任务被跳过时，点「只选中这些」单独处理它们。",
+          },
+          "zh-Hant": {
+            title: "一次修改多個任務",
+            body: "在列表裡選取多個任務，用底部的操作列修改標籤、專案或截止日期；開始日期、父任務和自訂屬性在「更多操作」裡。有任務被略過時，點「只選取這些」單獨處理它們。",
+          },
+          ja: {
+            title: "複数のタスクをまとめて編集",
+            body: "リストでタスクを複数選び、下部のバーでラベル、プロジェクト、期限を変更します。開始日、親タスク、カスタムプロパティは「その他の操作」にあります。スキップされたタスクがあれば「この件だけを選択」で選び直して対応できます。",
+          },
+          ko: {
+            title: "여러 태스크를 한 번에 편집하기",
+            body: "목록에서 태스크를 여러 개 선택한 뒤 하단 바에서 라벨, 프로젝트, 마감일을 바꾸세요. 시작일, 상위 태스크, 사용자 지정 속성은 '더 보기'에 있습니다. 건너뛴 태스크가 있으면 '이 항목만 선택'으로 골라 따로 처리할 수 있습니다.",
+          },
+          fr: {
+            title: "Modifiez plusieurs tâches à la fois",
+            body: "Sélectionnez des tâches dans une liste, puis utilisez la barre du bas pour changer les étiquettes, le projet ou la date d'échéance ; Plus d'actions couvre la date de début, le parent et les propriétés personnalisées. Si certaines sont ignorées, cliquez sur Sélectionner seulement ces tâches pour les reprendre.",
+          },
+        },
+      },
+      {
+        id: "agent-made-themes",
+        icon: Sparkles,
+        action: { kind: "route", to: (p) => `${p.settings()}?tab=appearance` },
+        copy: {
+          en: {
+            title: "Have an agent make your theme",
+            body: "In a chat or an issue, ask any agent for a theme and describe the colors, background, or glass look you want. It builds and checks the theme and hands it to you; then switch to it in Settings → Appearance.",
+          },
+          "zh-Hans": {
+            title: "让智能体帮你做主题",
+            body: "在聊天或任务里请任意智能体做一个主题，说清想要的颜色、背景或玻璃效果。它会制作并检查好主题交给你，之后在「设置 → 外观」里切换即可。",
+          },
+          "zh-Hant": {
+            title: "讓 AI 代理幫你做主題",
+            body: "在聊天或任務裡請任一 AI 代理做一個主題，說清想要的顏色、背景或玻璃效果。它會製作並檢查好主題交給你，之後在「設定 → 外觀」裡切換即可。",
+          },
+          ja: {
+            title: "エージェントにテーマを作ってもらう",
+            body: "チャットやタスクで、好きなエージェントにテーマを頼み、色や背景、ガラス風の見た目など希望を伝えます。エージェントがテーマを作って確認し、渡してくれるので、「設定 → 外観」で切り替えます。",
+          },
+          ko: {
+            title: "에이전트에게 테마 만들기 맡기기",
+            body: "채팅이나 태스크에서 아무 에이전트에게 테마를 요청하고 원하는 색, 배경, 유리 효과를 설명하세요. 에이전트가 테마를 만들고 확인한 뒤 전달하면 '설정 → 모양'에서 바꿔 쓰면 됩니다.",
+          },
+          fr: {
+            title: "Faites créer votre thème par un agent",
+            body: "Dans une discussion ou une tâche, demandez un thème à n'importe quel agent en décrivant les couleurs, le fond ou l'effet verre souhaités. Il crée et vérifie le thème, puis vous le remet ; activez-le ensuite dans Paramètres → Apparence.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.9.0",
     date: "2026-11-13",
@@ -42,6 +245,7 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
       {
         id: "community-themes",
         icon: Palette,
+        hero: THEMES_HERO,
         action: { kind: "route", to: (p) => `${p.settings()}?tab=appearance` },
         copy: {
           en: {
@@ -73,6 +277,7 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
       {
         id: "environment-controls",
         icon: Server,
+        hero: ENVIRONMENTS_HERO,
         copy: {
           en: {
             title: "Run an issue's services from its sidebar",
@@ -103,6 +308,7 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
       {
         id: "chat-annotations",
         icon: Quote,
+        hero: ANNOTATIONS_HERO,
         action: { kind: "route", to: (p) => p.chat() },
         copy: {
           en: {

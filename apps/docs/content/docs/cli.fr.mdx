@@ -145,6 +145,39 @@ Si une tâche ouverte portant le même titre (sans tenir compte de la casse ni d
 
 Pour livrer plusieurs PR successives, utilisez `issue create --title "..." --pr-auto-complete off` ou `issue update <id> --pr-auto-complete off` pour conserver le statut de cette tâche après fusion. `--pr-auto-complete on` rétablit la règle de l'espace de travail au prochain événement PR. `issue pull-requests <id>` affiche le réglage de la tâche, celui de l'espace de travail, le statut cible et la décision, même sans PR liée. Les serveurs compatibles enregistrent le réglage dans la transaction de création ; les anciens reçoivent un PUT supplémentaire. En cas d'échec, le CLI indique l'ID créé et la commande update à réessayer : ne répétez pas create.
 
+### Mises à jour groupées
+
+Appliquez la même modification à plusieurs tâches, ou fournissez une clé de tâche ou un UUID par ligne avec `--ids-stdin` :
+
+```bash
+multica issue batch update MUL-123 MUL-124 --priority high --add-label QA --dry-run
+multica issue batch update MUL-123 MUL-124 --priority high --add-label QA
+multica issue batch update MUL-123 MUL-124 --property "Severity=High" --unset-property Reviewer
+```
+
+`--add-label` et `--remove-label` préservent les autres étiquettes ; `--clear-labels` les efface avant les ajouts. `--property` définit une valeur et `--unset-property` l'efface ; les propriétés à plusieurs valeurs sont remplacées en entier. Le statut, l'assigné, le projet, les dates, la tâche parente et l'étape sont aussi pris en charge. Ajoutez `--no-start` pour appliquer la modification sans lancer d'exécution d'agent.
+
+Chaque tâche reçoit un résultat : `updated`, `unchanged` ou `skipped` avec une raison. Si une tâche est ignorée, la commande affiche les résultats puis termine avec un code non nul ; les modifications réussies restent appliquées. Corrigez et relancez uniquement les tâches ignorées. `--dry-run` vérifie et affiche les changements prévus sans écrire de données.
+
+### Supprimer des tâches
+
+Supprimez une tâche, ou passez plusieurs identifiants de tâche ou UUID complets pour les supprimer en un seul lot :
+
+```bash
+multica issue delete MUL-123
+multica issue delete MUL-123 MUL-124 --yes --output json
+```
+
+La suppression est définitive : elle supprime les commentaires et pièces jointes, annule les exécutions en cours, marque les exécutions d’automatisation liées comme échouées et efface les marques de doublon pointant vers les tâches supprimées. Les sous-tâches sont détachées, sans être supprimées. Chaque identifiant est résolu avant la confirmation ; une tâche inexistante ou inaccessible interrompt la commande avant toute suppression.
+
+La commande demande confirmation. `--yes` permet de l’ignorer ; sans cette option, une exécution non interactive qui ne peut pas répondre échoue sans rien supprimer.
+
+`--dry-run` vérifie les suppressions prévues, y compris les droits de suppression, sans écrire de données ni demander de confirmation :
+
+```bash
+multica issue delete MUL-123 MUL-124 --dry-run --output json
+```
+
 ### Chronologie
 
 `issue get` montre la tâche telle qu'elle est maintenant. `issue timeline` liste dans l'ordre les changements de statut, de priorité, d'assigné, de titre et de dates ainsi que les résultats des exécutions, entremêlés avec les commentaires. C'est la commande pour savoir « quand est-elle passée en in_review » ou « depuis combien de temps est-elle bloquée dans ce statut » :
@@ -200,6 +233,25 @@ multica issue wakeup runs MUL-123 <wakeup-id>
 ```
 
 Créer un réveil depuis un terminal en tant que membre demande `--agent-id` ; un agent qui en crée un pendant sa propre exécution se réveille lui-même par défaut.
+
+## Réveils de chat [#chat-wakeups]
+
+`chat wakeup` est réservé à un agent pendant une exécution de chat et vise la conversation en cours. Ces commandes ne prennent pas d’ID de session et ne fonctionnent ni depuis le terminal habituel d’un membre, ni pendant l’exécution d’une tâche. Les commandes côté utilisateur sont décrites dans [Recevoir un suivi plus tard](/chat#follow-up-later).
+
+```bash
+multica chat wakeup create --title "Review ready" \
+  --until-issue MUL-123 --state in_review --expires-in 48h \
+  --instruction "Summarize the result in this conversation"
+multica chat wakeup create --title "Check back in two hours" \
+  --after 2h --instruction "Remind the user to review the result"
+multica chat wakeup list
+```
+
+Choisissez une seule condition `--until-*`, une heure avec `--at` / `--after`, ou `--every`. La création et la mise à jour exigent `--title` et `--instruction` (ou `--instruction-file`). `update` remplace la configuration et recalcule les échéances relatives à partir de maintenant, mais ne peut pas changer une condition, un rappel ou une vérification en un autre type. Les conditions et vérifications durent 24 heures par défaut, au maximum 7 jours avec `--expires-in` ou `--expires-at`. Les rappels vont jusqu’à 30 jours et n’acceptent pas ces options d’expiration. Les vérifications sont espacées d’au moins 10 minutes, et l’échéance ne peut pas en permettre plus de 100 : `--every 10m` avec les 24 heures par défaut donnerait 144 vérifications et est refusé ; allongez l’intervalle ou avancez l’échéance, par exemple avec `--expires-in 16h`.
+
+Les conditions acceptent `--until-issue` avec `--state` ou `--status`, `--until-children-done` avec `--stage` facultatif, `--until-pr`, `--until-run`, et `--until-reply` avec `--from <user-id>` facultatif. Une condition de PR utilise une PR GitHub reflétée dans cet espace de travail : `owner/repo#N[:merged|closed|checks]`. `checks` attend la fin des vérifications du commit de tête actuel, qu’elles réussissent ou échouent. Une condition `checks` ne peut être créée que si le serveur lit l’état de la CI depuis GitHub ; un serveur auto-hébergé nécessite `GITHUB_APP_ID` et `GITHUB_APP_PRIVATE_KEY` (voir [Intégration GitHub](/github-integration)). Un résultat de vérification déjà terminé lors de la création sert de référence et ne réveille pas immédiatement l’agent.
+
+Utilisez `list`, `get <id>` ou `cancel <id>` pour consulter ou annuler un réveil. Pendant une vérification périodique, `checkin <id> --note "..."` enregistre un point silencieux sans envoyer de réponse ; `finish <id>` termine la vérification lorsque son but est atteint. La dernière exécution, à l’échéance, doit faire un compte rendu et ne peut pas rester silencieuse.
 
 ## Agents et skills
 
@@ -265,7 +317,7 @@ multica runtime profile create --display-name "Wrapper Claude interne" \
   --command-name ccms --runtime-type claude
 ```
 
-`daemon autostart` enregistre le profil courant pour qu'il démarre à l'ouverture de session ; les différences entre plateformes sont décrites dans [Démarrage à l'ouverture de session](/daemon-runtimes#autostart). `runtime usage` couvre 90 jours par défaut, et `--days` va jusqu'à 365. `runtime update` demande au daemon de cette machine de mettre sa CLI à jour vers la version indiquée ; `--wait` attend la fin de la mise à jour. `runtime profile create` indique l'outil compatible avec `--runtime-type` (l'ancien `--protocol-family` fonctionne encore) ; les arguments fixes ne se définissent pour l'instant que dans l'application web.
+`daemon autostart` enregistre le profil courant pour qu'il démarre à l'ouverture de session ; les différences entre plateformes sont décrites dans [Démarrage à l'ouverture de session](/daemon-runtimes#autostart). `runtime usage` couvre 90 jours par défaut, et `--days` va jusqu'à 365. `runtime update` demande au daemon de cette machine de mettre sa CLI à jour vers la version indiquée ; `--wait` attend la fin de la mise à jour et renvoie un code de sortie non nul si elle échoue ou expire, ou si l’attente elle-même expire. `runtime profile create` indique l'outil compatible avec `--runtime-type` (l'ancien `--protocol-family` fonctionne encore) ; les arguments fixes ne se définissent pour l'instant que dans l'application web. `runtime profile create` lie le profil à cette machine par défaut ; utilisez `--daemon-id <id>` pour choisir une autre machine locale enregistrée. Pour lier un ancien profil, utilisez `multica runtime profile update <profile-id> --daemon-id <id>`.
 
 La suppression d'un runtime auquel des agents actifs sont encore liés est refusée par défaut. `multica runtime delete <id> --cascade` dissocie ces agents, préserve leur configuration et leur historique, et annule leurs exécutions actives.
 
@@ -302,12 +354,57 @@ multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1" --timezone Europ
 - Le `--context` d'un espace de travail est fourni à tous ses agents. `--slug` ne peut plus être modifié après la création. `--issue-prefix` est mis en majuscules ; le changer renumérote toutes les tâches existantes, et les anciens identifiants cités ailleurs ne mènent plus nulle part.
 - `--issue-title-template` ne remplace que `{{date}}` (UTC, `YYYY-MM-DD`) et refuse tout autre `{{...}}`. Le `--timezone` d'un déclencheur planifié vaut UTC par défaut.
 
+### Filtres d'événements webhook [#webhook-event-filters]
+
+Utilisez `--event-filters-file` avec `autopilot trigger-add` ou `trigger-update` pour configurer les filtres d'événements et d'actions d'un déclencheur webhook. Enregistrez un tableau JSON non vide dans `filters.json` :
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+Chaque ligne peut aussi contenir des `conditions`, avec les mêmes règles sur la charge utile que dans l’application. Par exemple, cette règle accepte les pull requests non brouillon ciblant `main` :
+
+```json
+{
+  "event": "pull_request",
+  "conditions": [
+    { "path": "pull_request.draft", "op": "equals", "value": false },
+    { "path": "pull_request.base.ref", "op": "equals", "value": "main" }
+  ]
+}
+```
+
+Chaque règle accepte au maximum 20 conditions. Un chemin est limité à 256 caractères et une liste `in` à 100 valeurs. La création ou la modification d’un déclencheur avec une condition trop longue renvoie HTTP 400.
+
+Cet exemple accepte les soumissions de revues de PR et tous les événements push. Omettre `actions` ou fournir un tableau d'actions vide accepte toutes les actions de cet événement.
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-list <autopilot-id> --full-id
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+Lors d'une mise à jour, le fichier remplace toute la liste des filtres. Omettre les deux options de filtrage conserve les filtres enregistrés, même lors d'un changement de libellé ou de l'activation/désactivation du déclencheur. `autopilot get` renvoie les filtres dans le tableau `triggers` au niveau racine.
+
+Pour supprimer tous les filtres et accepter tous les événements, utilisez l'option réservée à la mise à jour :
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` et `--event-filters-file` ne peuvent pas être combinés. Un fichier dont la valeur racine est `null` ou un tableau vide, ou qui contient des champs inconnus, un JSON invalide ou des noms d'événement/d'action vides ou composés uniquement d'espaces, est refusé. Ces options ne s'appliquent qu'aux déclencheurs webhook ; en créer un sans fichier de filtres accepte tous les événements. Voir [Automatisations](/autopilots#filtres-dévénements) pour la correspondance des événements entrants.
+
 ## Vue d'ensemble des commandes
 
 | Commande | Rôle |
 | --- | --- |
 | `issue` | Créer, mettre à jour, assigner et rechercher des tâches ; gérer les commentaires, les abonnés, les étiquettes, les propriétés, les réveils, la chronologie et les exécutions |
 | `project` | Gérer les projets et leurs ressources |
+| `inbox` | Lire vos notifications sans modifier leur état lu |
 | `label`, `property` | Gérer les étiquettes et les propriétés personnalisées de l'espace de travail |
 | `view` | Lire les vues enregistrées et lister les tâches qu'une vue affiche |
 | `agent`, `skill`, `squad` | Gérer les agents, les skills et les squads |
@@ -382,12 +479,16 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `get <id>` | Afficher une tâche | `--resolve-properties` (JSON uniquement ; lignes avec les noms de propriété, d'option et de membre à côté des ID enregistrés) |
 | | `create` | Créer une tâche | `--title` (obligatoire), `--description` / `--description-stdin` / `--description-file`, `--pr-auto-complete on/off`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (répétable), `--property` (répétable), `--allow-duplicate` (crée même si une tâche ouverte porte le même titre) |
 | | `update <id>` | Mettre à jour les champs d'une tâche | Mêmes champs que `create`, plus `--position`, `--no-start`, `--duplicate-of` |
+| | `batch update <id>...` | Appliquer une même modification à plusieurs tâches | `--ids-stdin`, `--status`, `--priority`, `--assignee` / `--assignee-id` / `--unassign`, `--project`, `--start-date`, `--due-date`, `--parent`, `--stage`, `--add-label`, `--remove-label`, `--clear-labels`, `--property`, `--unset-property`, `--no-start`, `--dry-run` |
+| | `delete <id>...` | Supprimer définitivement une ou plusieurs tâches | `--yes` ignore la confirmation ; accepte les identifiants de tâche ou UUID complets; `--dry-run` |
 | | `assign <id>` | Assigner ou désassigner | `--to` (correspondance approximative sur le nom parmi les membres, les agents et les squads), `--to-id`, `--unassign`, `--no-start` |
 | | `status <id> <status>` | Changer le statut | `--no-start`, `--duplicate-of` |
 | | `reorder <id>` | Déplacer au sein d'une colonne | |
 | | `search <query>` | Rechercher des tâches | `--limit`, `--include-closed`, `--project` |
 | | `children <id>` | Lister les sous-tâches regroupées par étape | |
 | | `pull-requests <id>` | Lister les PR associées | |
+| | `pull-requests link <id> <pr-url>` | Associer une PR synchronisée dont le titre et la branche ne contiennent pas la clé de la tâche | Rétablit aussi une PR retirée avec `unlink` |
+| | `pull-requests unlink <id> <pr>` | Retirer une PR associée sans qu'elle soit réassociée automatiquement | `<pr>` : URL, numéro ou id de la PR |
 | | `comment list/add/update/delete/resolve/unresolve` | Gérer les commentaires | `add` : `--content` / `--content-stdin` / `--content-file`, `--parent`, `--attachment` ; `update` : `--expected-revision` (obligatoire), `--content` / `--content-stdin` / `--content-file` ; `list` : `--since`, `--thread`, `--tail`, `--recent`, `--roots-only`, `--summary`, `--compact`, `--full` |
 | | `timeline <id>` | Lister l'activité et les commentaires dans l'ordre chronologique | `--action` (répétable), `--activity-only`, `--since`, `--tail` |
 | | `wakeup events/list/get/create/update/disable/trigger/delete/checkin/runs` | Gérer les réveils de tâche ; voir [Réveils de tâche](/issue-wakeups) | `create` / `update` : `--agent-id`, `--kind` (`event`, `at`, `every`, `cron`), `--event`, `--at` / `--after`, `--every`, `--cron`, `--timezone`, conditions `--until-*`, `--expires-in` / `--expires-at`, `--instruction` / `--instruction-file` ; `checkin` : `--note` |
@@ -400,12 +501,15 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `usage <issue-id>` | Afficher la consommation de tokens agrégée | |
 | | `rerun-task <run-id>` | Relancer une exécution précise avec son agent et son contexte de déclenchement d’origine | `--issue`, `--fresh` |
 | | `cancel-task <task-id>` | Annuler une exécution en cours ou en file d'attente | `--issue` |
-| `project` | `list/get/create/update/delete` | Gérer les projets | `create` : `--title` (obligatoire), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (répétable) |
+| `project` | `get/create/update/delete` | Gérer les projets | `create` : `--title` (obligatoire), `--lead`, `--status`, `--icon`, `--start-date`, `--due-date`, `--repo` (répétable), `--visibility` (`workspace` ou `private`), `--member` (répétable, avec `--visibility private`) ; `update` : `--visibility`, `--member` (ajoute les membres, que le projet devienne privé ou le soit déjà) |
+| | `list` | Lister et filtrer les projets | `--status`, `--priority`, `--lead`, `--search`, `--archived`, `--sort` (`name`, `priority`, `status`, `progress`, `start_date`, `due_date`, `created_at`, `last_activity_at`), `--direction` (`asc` / `desc`), `--limit` (1–200), `--offset` |
 | | `status <id> <status>` | Changer le statut d'un projet | |
+| | `archive/restore <id>` | Archiver ou restaurer un projet. Un projet archivé est masqué de `list`, n'accepte plus de nouvelles tâches et met en pause les automatisations qui y créent des tâches | `list --archived` liste uniquement les projets archivés |
 | | `resource list/add/update/remove` | Gérer les ressources d'un projet | `--type`, `--url`, `--default-branch-hint`, `--ref`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` pour un répertoire local) |
+| | `member list/add/remove` | Lister, ajouter ou retirer les membres d'un projet privé. Seuls les `owner`/`admin` présents sur la liste et le gestionnaire de l'accès du projet peuvent ajouter ou retirer ; les agents ne peuvent pas modifier l'accès | `add <project-id> <member>...`, `remove <project-id> <member>` ; un membre est un nom, un e-mail ou un ID utilisateur |
 | `label` | `list/get/create/update/delete` | Gérer les étiquettes de l'espace de travail | `list` : `--resource-type` (`issue` ou `skill`), `--full-id` ; `create` : `--name`, `--color`, `--resource-type` (`issue` ou `skill`), `--description` |
 | `property` | `list/get/create/update/archive/unarchive` | Gérer les propriétés personnalisées de l'espace de travail | `create` : `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option` (répétable, types select uniquement) ; `list` : `--include-archived` ; le type ne peut plus être modifié après la création |
-| `view` | `list/get/issues` | Lire les vues que vous pouvez ouvrir (les vôtres et celles partagées avec l'espace de travail) ; `issues` liste les tâches qu'une vue affiche, dans son ordre enregistré, avec tous ses filtres appliqués par le serveur. Pendant l'exécution d'un agent, les vues et les conditions « moi » sont celles du propriétaire du runtime | `<view>` accepte un ID, un préfixe d'ID ou le nom exact ; `list` : `--scope` (`workspace`, `my`, `project`), `--project`, `--full-id` ; `issues` : `--limit` (100 au maximum), `--cursor` (le `next_cursor` de la page précédente), `--today` (le jour de référence des filtres d'échéance relatifs ; aujourd'hui par défaut), `--fields` (JSON uniquement), `--full-id` |
+| `view` | `list/get/issues/create/update/duplicate/delete` | Lire les vues que vous pouvez ouvrir (les vôtres et celles partagées avec l'espace de travail) ; `issues` liste les tâches qu'une vue affiche, dans son ordre enregistré, avec tous ses filtres appliqués par le serveur. `create`, `update`, `duplicate` et `delete` enregistrent les vues au même format que l'application : elles apparaissent dans la barre latérale et restent modifiables dans l'application ; `update` ne change que ce que ses options nomment et refuse d'écraser une vue modifiée depuis sa lecture. Seul le propriétaire (et, pour une vue partagée, les propriétaires et administrateurs de l'espace de travail) peut modifier ou supprimer une vue. Pendant l'exécution d'un agent, les vues et les conditions « moi » sont celles du propriétaire du runtime | `<view>` accepte un ID, un préfixe d'ID ou le nom exact ; `list` : `--scope` (`workspace`, `my`, `project`), `--project`, `--full-id` ; `issues` : `--limit` (100 au maximum), `--cursor` (le `next_cursor` de la page précédente), `--today` (le jour de référence des filtres d'échéance relatifs ; aujourd'hui par défaut), `--fields` (JSON uniquement), `--full-id` ; `create` : `--name`, `--scope`, `--project`, `--scope-variant`, `--visibility` ; filtres de `create/update/duplicate` : `--status`, `--priority`, `--assignee`, `--creator`, `--label`, `--project-filter`, `--property "Name=Value"`, `--negate <filter>`, etc. ; affichage : `--view-mode`, `--grouping`, `--sort`, `--direction`, `--show-sub-issues`, etc. ; `--definition-file`, `--clear-filters`, `--dry-run` |
 | `agent` | `list/get/create/update/archive/restore` | Gérer les agents | `--name`, `--runtime-id` (obligatoire pour `create`), `--instructions`, `--conversation-starters`, `--model`, `--thinking-level`, `--custom-env` / `--custom-env-file` / `--custom-env-stdin` (`create` uniquement), `--custom-args`, `--mcp-config` / `--mcp-config-file` / `--mcp-config-stdin`, `--permission-mode`, `--visibility` (ancienne forme), `--max-concurrent-tasks` |
 | | `copy <agent-id>` | Copier dans un nouvel agent ; l'original reste intact | `--name` (par défaut, le nom d'origine suivi de ` (copy)`), `--runtime-id` (copier vers un autre runtime exige aussi `--model`), `--no-skills` ; la configuration secrète comme `custom_env`, `mcp_config` et `runtime_config` n'est pas copiée — fournissez-la à nouveau avec les mêmes options que pour `create` |
 | | `tasks <id>` | Afficher les exécutions d'un agent | |
@@ -413,7 +517,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `env get/set <agent-id>` | Lire et écrire les variables d'environnement personnalisées (propriétaire de l'agent ou owner/admin de l'espace de travail ; chaque lecture est enregistrée) | `set` : `--custom-env` / `--custom-env-file` / `--custom-env-stdin` ; remplace l'ensemble, et les clés dont la valeur est `****` gardent leur valeur |
 | | `skills list/set/add <agent-id>` | Gérer les skills rattachés | `--skill-ids` (`set` remplace toute la liste, `add` ajoute à la suite) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | Assigner des serveurs MCP de l'espace de travail à cet agent | Récupérez l'ID du serveur avec `workspace mcp list`. Une entrée de la bibliothèque n'a aucun effet tant qu'elle n'est pas ajoutée ici ; `disable` cesse de l'envoyer sans supprimer l'assignation |
-| `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--agent`, `--mode` (tous obligatoires), `--description`, `--issue-title-template`, `--project`, `--subscriber` (répétable) |
+| `autopilot` | `list/get/create/update/delete` | Gérer les automatisations | `create` : `--title`, `--mode` (obligatoires), exactement une option parmi `--agent` / `--squad` / `--squad-id` (obligatoire), `--description`, `--issue-title-template`, `--project`, `--subscriber` (répétable) |
 | | `trigger <id>` | Déclencher une exécution manuellement | |
 | | `runs <id>` | Afficher l'historique des exécutions | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Gérer les déclencheurs de planification et webhook | `trigger-add` : `--kind` (`schedule` ou `webhook`), `--cron`, `--timezone` (UTC par défaut), `--label` |
@@ -430,6 +534,8 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `member list/add/set-role/remove` | Gérer les membres d'un squad | |
 | | `activity <issue-id> <outcome>` | Enregistrer une évaluation du chef | |
 | `chat` | `history`, `thread [id]` | Lire la session de messagerie externe qu'un agent traite actuellement | `--limit`, `--before` |
+| | `wakeup create/list/get/update/cancel/finish/checkin` | Gérer le suivi dans l’exécution de chat en cours ; voir [Réveils de chat](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
+| `inbox` | `list` | [Lire vos notifications actives](/inbox) sans les marquer comme lues | `--project`, `--type`, `--output` (`table` ou `json`) ; filtres locaux |
 
 ### Runtime
 

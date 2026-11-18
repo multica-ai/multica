@@ -6,7 +6,6 @@ import { configStore } from "@multica/core/config";
 import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
 import type {
   AutopilotQuotaUsage,
-  IssueLimitUsage,
   WorkspaceSubscriptionEntitlements,
   WorkspaceSubscriptionSummary,
 } from "@multica/core/types";
@@ -21,7 +20,6 @@ const mocks = vi.hoisted(() => ({
   refetch: vi.fn(),
   refetchSummary: vi.fn(),
   refetchUsage: vi.fn(),
-  refetchIssueLimitUsage: vi.fn(),
   refetchPrices: vi.fn(),
   openExternal: vi.fn(),
   workspaceId: "workspace-1",
@@ -58,7 +56,6 @@ const mocks = vi.hoisted(() => ({
     status: "inactive",
     seats: 3,
     limits: {
-      issueCount: { mode: "limited", limit: 17 },
       autopilotRuns: { mode: "limited", limit: 7 },
     },
     currentPeriodEnd: null as string | null,
@@ -92,10 +89,6 @@ const mocks = vi.hoisted(() => ({
       purchaseSeats: false,
     },
   } as WorkspaceSubscriptionSummary,
-  issueLimitUsage: {
-    used: 11,
-    limit: 17,
-  } as IssueLimitUsage,
   usage: {
     action: "enforce" as "off" | "observe" | "enforce",
     used: 3 as number | null,
@@ -120,9 +113,6 @@ vi.mock("@multica/core/billing", () => ({
   }),
   workspaceSubscriptionSummaryOptions: (wsId: string) => ({
     queryKey: ["workspace-subscriptions", wsId, "summary"],
-  }),
-  issueLimitUsageOptions: (wsId: string) => ({
-    queryKey: ["workspace-subscriptions", wsId, "issue-limit-usage"],
   }),
   useCreateWorkspaceSubscriptionCheckout: () => ({
     mutateAsync: mocks.checkout,
@@ -264,7 +254,6 @@ describe("BillingTab", () => {
       status: "inactive",
       seats: 3,
       limits: {
-        issueCount: { mode: "limited", limit: 17 },
         autopilotRuns: { mode: "limited", limit: 7 },
       },
       currentPeriodEnd: null,
@@ -284,10 +273,6 @@ describe("BillingTab", () => {
         portal: false,
         purchaseSeats: false,
       },
-    });
-    Object.assign(mocks.issueLimitUsage, {
-      used: 11,
-      limit: 17,
     });
     Object.assign(mocks.usage, {
       action: "enforce",
@@ -325,15 +310,6 @@ describe("BillingTab", () => {
           dataUpdatedAt: mocks.summaryDataUpdatedAt,
           isFetchedAfterMount: mocks.summaryFetchedAfterMount,
           refetch: mocks.refetchSummary,
-        };
-      }
-      if (queryKey?.[queryKey.length - 1] === "issue-limit-usage") {
-        return {
-          data: mocks.issueLimitUsage,
-          isPending: false,
-          isFetching: false,
-          isError: false,
-          refetch: mocks.refetchIssueLimitUsage,
         };
       }
       if (queryKey?.[queryKey.length - 1] === "usage") {
@@ -400,7 +376,6 @@ describe("BillingTab", () => {
     renderWithI18n(<BillingTab />);
 
     expect(screen.getByRole("heading", { name: "Billing" })).toBeInTheDocument();
-    expect(screen.getByText("11 / 17")).toBeInTheDocument();
     expect(screen.getByText("5 / 7")).toBeInTheDocument();
     expect(screen.getByText("3 completed · 2 in progress")).toBeInTheDocument();
     expect(screen.getByText("$10.00 per human seat")).toBeInTheDocument();
@@ -703,7 +678,6 @@ describe("BillingTab", () => {
       ).toBeInTheDocument();
       expect(screen.queryByText("Pro is active")).not.toBeInTheDocument();
       expect(screen.queryByText("Unlimited")).not.toBeInTheDocument();
-      expect(screen.getByText("11 / 17")).toBeInTheDocument();
       expect(screen.getByText("5 / 7")).toBeInTheDocument();
       const summaryOptions = mocks.useQuery.mock.calls
         .map(([options]) => options)
@@ -727,7 +701,6 @@ describe("BillingTab", () => {
       plan: "pro",
       status: "active",
       limits: {
-        issueCount: { mode: "unlimited", limit: null },
         autopilotRuns: { mode: "unlimited", limit: null },
       },
     });
@@ -738,7 +711,7 @@ describe("BillingTab", () => {
       renderWithI18n(<BillingTab />);
 
       expect(screen.getByText("Pro is active")).toBeInTheDocument();
-      expect(screen.getAllByText("Unlimited")).toHaveLength(2);
+      expect(screen.getByText("Unlimited")).toBeInTheDocument();
       expect(screen.queryByText("5 / 7")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -1342,7 +1315,6 @@ describe("BillingTab", () => {
     renderWithI18n(<BillingTab />);
 
     expect(screen.queryByText("Unlimited")).not.toBeInTheDocument();
-    expect(screen.getByText("11 / 17")).toBeInTheDocument();
     expect(screen.getByText("5 / 7")).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -1389,7 +1361,6 @@ describe("BillingTab", () => {
       plan: "pro",
       status: "active",
       limits: {
-        issueCount: { mode: "unlimited", limit: null },
         autopilotRuns: { mode: "unlimited", limit: null },
       },
       currentPeriodEnd: "2026-09-13T00:00:00Z",
@@ -1403,7 +1374,7 @@ describe("BillingTab", () => {
     expect(
       screen.getByRole("button", { name: "Manage billing" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("Unlimited")).toHaveLength(2);
+    expect(screen.getByText("Unlimited")).toBeInTheDocument();
     expect(screen.queryByText("5 / 7")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Upgrade to Pro" }),

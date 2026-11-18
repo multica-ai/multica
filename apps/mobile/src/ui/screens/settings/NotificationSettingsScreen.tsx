@@ -3,11 +3,12 @@ import { Alert } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
 import { useUpdateNotificationPreferences } from "@multica/core/notification-preferences/mutations";
+import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
 import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
-import type { NotificationGroupKey, NotificationPreferences } from "@multica/core/types";
+import type { NotificationPreferences } from "@multica/core/types";
 import { useWorkspace } from "../../model/workspace-context";
 import { useStrings } from "../../strings";
-import { NotificationSettingsView } from "./NotificationSettingsView";
+import { NOTIFICATION_GROUPS as GROUPS, NotificationSettingsView } from "./NotificationSettingsView";
 
 export function NotificationSettingsScreen() {
   const navigation = useNavigation();
@@ -17,7 +18,7 @@ export function NotificationSettingsScreen() {
   const update = useUpdateNotificationPreferences();
   const preferences = query.data?.preferences;
   const muted = useMemo(
-    () => new Set(Object.entries(preferences ?? {}).flatMap(([group, value]) => (value === "muted" ? [group as NotificationGroupKey] : []))),
+    () => new Set(GROUPS.filter((group) => notificationPreferenceValue(preferences ?? {}, group) === "muted")),
     [preferences],
   );
 
@@ -28,10 +29,7 @@ export function NotificationSettingsScreen() {
       onBack={() => navigation.goBack()}
       onRetry={() => void query.refetch()}
       onToggle={(group, enabled) => {
-        // "all" is the default, so an enabled group is left out of the stored preferences.
-        const next: NotificationPreferences = { ...preferences };
-        if (enabled) delete next[group];
-        else next[group] = "muted";
+        const next: NotificationPreferences = { ...preferences, [group]: enabled ? "all" : "muted" };
         update.mutate(next, { onError: () => Alert.alert(strings.notifications.failed) });
       }}
     />

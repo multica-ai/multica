@@ -6,6 +6,8 @@ import { baselineFromQuery } from "@multica/core/issue-views/baseline";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { useSidebarViews, type SidebarViewItem } from "@multica/core/issue-views/sidebar-views";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
+import { snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { todayDateOnly } from "@multica/core/issues/date";
 import { sidebarIssuesOptions } from "@multica/core/issues/queries";
 import type { SidebarIssuesRequest } from "@multica/core/issues/sidebar-list";
@@ -15,7 +17,7 @@ import type { Project } from "@multica/core/types";
 import { groupIssuesByStatus } from "../../model/issue-groups";
 import { useActorResolver } from "../../model/people";
 import { useStatusPresentation, type StatusPresentation } from "../../model/status";
-import { findViewItem, viewDetail, viewItemLabel, viewItemNeedsUnread, viewItemRequest } from "../../model/views";
+import { findViewItem, snoozedIssueIds, viewDetail, viewItemIdSource, viewItemLabel, viewItemNeedsUnread, viewItemRequest, workingIssueIds } from "../../model/views";
 import { useWorkspace } from "../../model/workspace-context";
 import type { RootStackParamList } from "../../navigation/types";
 import { useStrings, type Strings } from "../../strings";
@@ -52,8 +54,12 @@ export function SavedViewScreen() {
   const item = findViewItem(itemId, views.data ?? []);
   const needsUnread = item ? viewItemNeedsUnread(item) : false;
   const unread = useIssueUnreadIds(workspace.id, needsUnread);
-  const ready = item !== null && !catalog.isPending && (!needsUnread || unread.data !== undefined);
-  const request = ready ? viewItemRequest(item, catalog.statuses, todayDateOnly(), unread.data ?? NO_IDS) : null;
+  const idSource = item ? viewItemIdSource(item) : null;
+  const working = useQuery({ ...workspaceWorkingAgentsOptions(workspace.id, "issue"), enabled: idSource === "working", select: workingIssueIds });
+  const snoozed = useQuery({ ...snoozedInboxOptions(workspace.id), enabled: idSource === "snoozed", select: snoozedIssueIds });
+  const ids = idSource === "working" ? working : idSource === "snoozed" ? snoozed : null;
+  const ready = item !== null && !catalog.isPending && (!needsUnread || unread.data !== undefined) && (!ids || ids.data !== undefined);
+  const request = ready ? viewItemRequest(item, catalog.statuses, todayDateOnly(), unread.data ?? NO_IDS, ids?.data ?? NO_IDS) : null;
   const list = useQuery({
     ...sidebarIssuesOptions(workspace.id, itemId, request ?? IDLE_REQUEST, LIMIT),
     enabled: request !== null,
@@ -67,7 +73,7 @@ export function SavedViewScreen() {
 
   return (
     <SavedViewView
-      state={missing ? "missing" : list.data ? "ready" : list.isError || views.isError || unread.isError ? "error" : "loading"}
+      state={missing ? "missing" : list.data ? "ready" : list.isError || views.isError || unread.isError || ids?.isError ? "error" : "loading"}
       title={item ? viewItemLabel(item, strings) : ""}
       subtitle={item ? `${viewDetail(item, userId, strings)} · ${strings.views.count(total)}` : ""}
       filters={filterChips(item, status, projects.data ?? [], strings)}
@@ -81,6 +87,7 @@ export function SavedViewScreen() {
         void views.refetch();
         void list.refetch();
         unread.refetch();
+        void ids?.refetch();
       }}
       onOpen={(issue) => navigation.navigate("Issue", { issueId: issue.id })}
     />

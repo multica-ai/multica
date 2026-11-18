@@ -96,9 +96,10 @@ Tapez `@` et choisissez une cible dans la liste :
 |---|---|
 | **Membre** | Reçoit une notification de mention dans la boîte de réception ; une @mention dans un commentaire ne crée pas d'abonnement. |
 | **Agent** | Crée une exécution pour cet agent ; les agents n'ont pas de boîte de réception. |
-| **Squad** | Notifie les membres du squad et déclenche le chef du squad. |
+| **Squad** | Déclenche le chef du squad ; les membres du squad ne sont pas notifiés. |
 | **Tâche** | Insère un lien vers une autre tâche — aucune notification, aucun déclenchement d'agent. |
-| **@all** | Notifie tous les membres de l'espace de travail et ne déclenche aucun agent. |
+| **Projet** | Insère un lien vers un projet — aucune notification, aucun déclenchement d'agent. |
+| **@all** | Notifie tous les membres de l'espace de travail ; la mention elle-même ne lance aucun agent. Le commentaire d'un agent worker revient toujours au chef du squad assigné, ou au chef du squad invité dans son fil de délégation, sauf si un agent ou un squad est explicitement mentionné. |
 
 Taper `@name` en texte brut ne crée pas de mention ; choisissez dans la liste de suggestions de l'éditeur. Taper un identifiant de tâche valide le convertit automatiquement en lien vers la tâche.
 

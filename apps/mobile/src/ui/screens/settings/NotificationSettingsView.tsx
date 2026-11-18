@@ -7,8 +7,9 @@ import { Screen } from "../../components/Screen";
 import { Failure, Loading } from "../../components/States";
 import { useStrings } from "../../strings";
 
-const INBOX_GROUPS: readonly NotificationGroupKey[] = ["assignments", "mentions", "comments", "status_changes", "updates", "new_issues", "agent_activity"];
+const INBOX_GROUPS: readonly NotificationGroupKey[] = ["assignments", "mentions", "reactions", "comments", "status_changes", "updates", "new_issues", "agent_activity"];
 const SYSTEM_GROUPS: readonly NotificationGroupKey[] = ["system_notifications"];
+export const NOTIFICATION_GROUPS: readonly NotificationGroupKey[] = [...INBOX_GROUPS, ...SYSTEM_GROUPS];
 
 interface NotificationSettingsViewProps {
   state: "loading" | "error" | "ready";

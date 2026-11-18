@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { collectTextMatches, useInPageFind } from "./use-in-page-find";
 
 function makeRoot(html: string): HTMLElement {
@@ -71,21 +71,12 @@ describe("useInPageFind without the CSS Custom Highlight API", () => {
   let container: HTMLElement;
 
   beforeEach(() => {
-    // jsdom lays nothing out and doesn't implement Range.getClientRects, which
-    // the scroll-to-match path now calls in every browser. Return a single
-    // zero-size rect so scrollRangeIntoView no-ops instead of throwing.
-    (Range.prototype as { getClientRects: () => DOMRectList }).getClientRects =
-      () =>
-        [
-          { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 },
-        ] as unknown as DOMRectList;
     container = document.createElement("div");
     container.innerHTML = "<h1>Find me</h1><p>find me twice: find</p>";
     document.body.appendChild(container);
   });
 
   afterEach(() => {
-    delete (Range.prototype as { getClientRects?: unknown }).getClientRects;
     container.remove();
   });
 
@@ -127,5 +118,81 @@ describe("useInPageFind without the CSS Custom Highlight API", () => {
     await flushFrames();
     expect(result.current.matchCount).toBe(0);
     expect(result.current.activeIndex).toBe(-1);
+  });
+});
+
+// The virtualized timeline: units are counted from their text, and only the
+// ones in the DOM are painted. Stepping to an unmounted one asks the host to
+// mount it.
+describe("useInPageFind with virtual content", () => {
+  let container: HTMLElement;
+  let virtualRoot: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    container.innerHTML = [
+      "<h1>Find before</h1>",
+      '<div id="timeline"><span>find in an activity line</span><p data-find-unit="mounted">find twice: find</p></div>',
+      "<footer>find after</footer>",
+    ].join("");
+    document.body.appendChild(container);
+    virtualRoot = container.querySelector<HTMLElement>("#timeline")!;
+  });
+
+  afterEach(() => {
+    container.remove();
+  });
+
+  async function flushFrames(count = 3): Promise<void> {
+    for (let i = 0; i < count; i++) {
+      await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    }
+  }
+
+  it("counts units from data in reading order and mounts the one stepped to", async () => {
+    const units = [
+      { key: "unmounted", text: "find me once" },
+      { key: "mounted", text: "find twice: find" },
+    ];
+    const getUnits = () => units;
+    const reveal = vi.fn((unit: { key: string }, done: () => void) => {
+      const el = document.createElement("p");
+      el.setAttribute("data-find-unit", unit.key);
+      el.textContent = "find me once";
+      virtualRoot.prepend(el);
+      done();
+      return () => {};
+    });
+    const { result } = renderHook(() =>
+      useInPageFind({
+        container,
+        contentKey: 0,
+        virtual: { root: () => virtualRoot, units: getUnits, reveal },
+      }),
+    );
+
+    act(() => {
+      result.current.openFind();
+      result.current.setQuery("find");
+    });
+    await flushFrames();
+
+    // Heading, both units' occurrences, footer. The activity line inside the
+    // timeline is not a unit, so it is not counted.
+    expect(result.current.matchCount).toBe(5);
+    expect(result.current.activeIndex).toBe(0);
+    expect(reveal).not.toHaveBeenCalled();
+
+    act(() => result.current.goNext());
+    expect(reveal).toHaveBeenCalledTimes(1);
+    expect(reveal.mock.calls[0]![0]).toMatchObject({ key: "unmounted" });
+    await flushFrames();
+    expect(result.current.matchCount).toBe(5);
+    expect(result.current.activeIndex).toBe(1);
+
+    // Already mounted: no reveal.
+    act(() => result.current.goNext());
+    expect(result.current.activeIndex).toBe(2);
+    expect(reveal).toHaveBeenCalledTimes(1);
   });
 });

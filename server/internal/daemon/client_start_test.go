@@ -126,7 +126,7 @@ func TestHandleTaskRejectedStartDoesNotFailNewOwner(t *testing.T) {
 		ran = true
 		return TaskResult{}, errStartClaimRejected
 	})
-	d.handleTask(context.Background(), Task{ID: "stale-task", WorkspaceID: "workspace", RuntimeID: "rt-1", Agent: &AgentData{Name: "test-agent"}}, 0)
+	d.handleTask(context.Background(), Task{ID: "stale-task", WorkspaceID: "workspace", RuntimeID: "rt-1", Agent: &AgentData{Name: "test-agent"}}, newTestTaskSlot(0))
 	if !ran || callbacks.Load() != 0 {
 		t.Fatalf("ran=%t terminal callbacks=%d", ran, callbacks.Load())
 	}

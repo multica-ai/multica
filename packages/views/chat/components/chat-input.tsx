@@ -33,6 +33,14 @@ import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
+import {
+  useComposerVoice,
+  VoiceErrorRow,
+  VoiceHud,
+  VoiceMicButton,
+  VoiceSetupDialog,
+  VoiceStrip,
+} from "../../voice";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { composeAnnotatedReply, EMPTY_REPLY_ANNOTATIONS, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
 import { ReplyAnnotations } from "../../issues/components/reply-annotations";
@@ -107,6 +115,8 @@ interface ChatInputProps {
   isRunning?: boolean;
   /** Enabled only after the server explicitly advertises follow-up queues. */
   allowSubmitWhileRunning?: boolean;
+  /** Server-confirmed permission and capability for this exact running turn. */
+  canSteerWhileRunning?: boolean;
   disabled?: boolean;
   /** True when the user has no agent available — disables the editor and
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
@@ -155,6 +165,8 @@ interface ChatInputProps {
    */
   draftKeyOverride?: string;
   editorKeyOverride?: string;
+  /** Mounted but not shown (the closed floating window): voice input is off. */
+  hidden?: boolean;
   /** Saved quotes from this session's replies, sent ahead of the typed text. */
   annotations?: Pick<ChatAnnotations, "draftKey" | "composer" | "editAnnotation">;
 }
@@ -174,6 +186,7 @@ export function ChatInput({
   onStop,
   isRunning,
   allowSubmitWhileRunning,
+  canSteerWhileRunning,
   disabled,
   noAgent,
   agentArchived,
@@ -191,15 +204,18 @@ export function ChatInput({
   focusRequest,
   draftKeyOverride,
   editorKeyOverride,
+  hidden = false,
   annotations: annotationSlot,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const { t: tEditor } = useT("editor");
+  const { t: tIssues } = useT("issues");
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
   const editorAreaRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   // Two keys with deliberately different concerns:
   //
   // `draftKey` — zustand storage key. Scopes the in-progress draft per session
@@ -604,12 +620,13 @@ export function ChatInput({
       const sent = attachedPage
         ? `[${escapeMarkdownLabel(attachedPage.label)}](mention://${attachedPage.type}/${attachedPage.id})\n\n${content}`
         : content;
-      const accepted = await onSend(
+      const sendArgs = [
         sent,
         uniqueActiveIds.length > 0 ? uniqueActiveIds : undefined,
         commitInput,
         draftAttachments.filter((attachment) => uniqueActiveIds.includes(attachment.id)),
-      );
+      ] as const;
+      const accepted = await onSend(...sendArgs);
       // Owner rejected the send (or threw, which useComposerSubmit also treats
       // as a rejection): the draft was never committed, so it stays put for
       // retry. Only a commit — here or by the owner — clears it.
@@ -695,6 +712,19 @@ export function ChatInput({
     !isProjectUpdating;
   const selectedProject = projects.find((project) => project.id === projectId);
   const canSubmitNow = !disabled && !noAgent && (!isRunning || !!allowSubmitWhileRunning);
+  const showRunHint = isRunning && allowSubmitWhileRunning && canSteerWhileRunning !== undefined
+    && !hasNothingToSend && !disabled && !noAgent;
+  const willSteer = canSteerWhileRunning && draftUploads.length === 0
+    && !inputDraft.includes("](slash://skill/");
+  const voice = useComposerVoice({
+    insert: (text) => editorRef.current?.insertText(text) ?? false,
+    submit: canSubmitNow ? () => void submit() : undefined,
+    // The editor is shared across sessions and agents; a switch must not
+    // carry a transcript (or its send) over to the new conversation.
+    scope: draftKeyOverride ?? `${draftKey}:${selectedAgentId ?? ""}`,
+    hidden,
+    disabled: !!disabled || !!noAgent,
+  });
 
   return (
     <>
@@ -747,6 +777,8 @@ export function ChatInput({
           noAgent && "pointer-events-none opacity-60",
         )}
         aria-disabled={noAgent || undefined}
+        ref={voice.rootRef}
+        onFocusCapture={voice.onFocusCapture}
         onKeyDown={(event) => {
           // Tab is the editor's when it wants it (list indent, the @ and /
           // pickers): those handle the key first and prevent its default.
@@ -760,6 +792,13 @@ export function ChatInput({
           togglePageContext();
         }}
       >
+        {showRunHint && (
+          <p role="status" className={cn("px-3 pt-2 text-caption", willSteer ? "text-brand" : "text-muted-foreground")}>
+            {willSteer
+              ? tIssues(($) => $.comment.recipient_steer)
+              : tIssues(($) => $.comment.recipient_after_run)}
+          </p>
+        )}
         {annotationDraftKey && annotations.length > 0 && (
           <div className="px-3 pt-2">
             <ReplyAnnotations draftKey={annotationDraftKey} annotations={annotations} disabled={submitting}
@@ -853,7 +892,15 @@ export function ChatInput({
             showBubbleMenu
           />
         </div>
-        {(uploadEnabled || projectSelectionEnabled || leftAdornment) && (
+        <VoiceHud voice={voice} />
+        <VoiceSetupDialog voice={voice} />
+        <VoiceErrorRow voice={voice} className="mx-2 mb-1" />
+        {voice.showStrip && (
+          <div className="absolute inset-x-1.5 bottom-1 flex items-center">
+            <VoiceStrip voice={voice} />
+          </div>
+        )}
+        {!voice.showStrip && (uploadEnabled || projectSelectionEnabled || leftAdornment) && (
           <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1">
             {(uploadEnabled || projectSelectionEnabled) && (
               <ChatAddMenu
@@ -869,7 +916,8 @@ export function ChatInput({
             {leftAdornment}
           </div>
         )}
-        <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+        <div className={cn("absolute bottom-1 right-1.5 flex items-center gap-1", voice.showStrip && "hidden")}>
+          <VoiceMicButton voice={voice} />
           {pageContext && (
             <IconButton
               type="button"
@@ -888,7 +936,7 @@ export function ChatInput({
             loading={submitting}
             busy={gate.uploading}
             // Queue-capable runs reuse this one action slot: an empty composer
-            // offers Stop, while live content swaps it to Queue Send. Older
+            // offers Stop, while live content swaps it to Send. Older
             // servers cannot accept follow-ups, so they remain stop-only. An
             // upload blocks submit, so it also falls back to Stop rather than
             // removing chat's only cancellation path; the attachment node
@@ -905,7 +953,7 @@ export function ChatInput({
                 ? placeholder
                 : undefined}
             tooltip={isRunning
-              ? t(($) => $.input.queue_send_tooltip)
+              ? t(($) => $.input.send_tooltip)
               : sendShortcut
                 ? (
                   <>
@@ -916,8 +964,6 @@ export function ChatInput({
                 : t(($) => $.input.send_tooltip)}
             ariaLabel={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
-              : isRunning
-                ? t(($) => $.input.queue_send_tooltip)
               : t(($) => $.input.send_tooltip)}
             stopTooltip={t(($) => $.input.stop_tooltip)}
             stopAriaLabel={t(($) => $.input.stop_tooltip)}

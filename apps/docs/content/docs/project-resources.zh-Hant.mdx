@@ -93,7 +93,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 AI 代理直接在你的目錄裡工作，同一時間只進行一次執行。兩次執行使用同一個真實目錄時，後到的執行進入 `waiting_local_directory`，等前一次釋放目錄後繼續。兩個路徑經不同符號連結指向同一目錄時，同樣序列。
 
-等待不會修改目錄。等待中的執行可以取消，否則會一直等到目錄可用。
+等待不會修改目錄，也不佔用守護程序執行槽位。等待中的執行可以取消，否則會在目錄和執行容量都可用後繼續啟動。
 
 普通的非 git 目錄只能用這種模式：worktree 模式只面向 git 倉庫。
 
@@ -156,6 +156,8 @@ AI 代理看到什麼、你拿回什麼：
 
 </Accordion>
 <Accordion title="不會靜默丟東西" id="nothing-is-silently-lost">
+
+在 worktree 執行期間，受追蹤的執行時指令檔（如 `CLAUDE.md` 或 `AGENTS.md`）會在任務獨立的索引中標記為 `skip-worktree`，避免注入的簡報進入代理的提交，不影響你的 checkout。對該檔案的正常修改會保持未提交狀態，直到清理階段恢復追蹤，再依下列規則交付。未追蹤的執行時檔案和技能目錄仍需從代理的提交中排除。
 
 AI 代理留下的未提交改動不會隨 worktree 一起刪除，執行中途失敗時同樣如此。它們去哪裡，取決於 AI 代理這次執行有沒有自己提交：
 

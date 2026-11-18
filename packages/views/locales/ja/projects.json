@@ -9,13 +9,20 @@
     "view_comfortable": "ゆったり",
     "no_search_results": "検索条件に一致する結果はありません",
     "view_table": "テーブル",
-    "view_cards": "カード",
+    "view_board": "ボード",
     "row_menu": "プロジェクトの操作",
     "rename": "名前を変更",
     "pin": "サイドバーにピン留め",
     "unpin": "ピン留め解除",
     "delete": "削除",
-    "no_matches": "該当するプロジェクトはありません"
+    "no_matches": "該当するプロジェクトはありません",
+    "scope_archived": "アーカイブ済みのプロジェクト",
+    "archive": "アーカイブ",
+    "restore": "復元",
+    "no_archived": "アーカイブ済みのプロジェクトはありません",
+    "search": "プロジェクトを検索",
+    "group_none": "グループ化なし",
+    "board_column_empty": "プロジェクトなし"
   },
   "table": {
     "name": "名前",
@@ -23,8 +30,12 @@
     "status": "ステータス",
     "progress": "進捗",
     "lead": "リード",
+    "start_date": "開始日",
+    "due_date": "期限",
+    "last_activity": "最近のアクティビティ",
     "created": "作成日",
-    "issues": "タスク数"
+    "issues": "タスク数",
+    "archived": "アーカイブ日"
   },
   "status": {
     "planned": "計画中",
@@ -69,6 +80,7 @@
     "sidebar_tooltip": "右サイドバーの開閉",
     "rename_action": "プロジェクト名を変更",
     "copy_link": "リンクをコピー",
+    "copy_title_as_link": "タイトル付きリンクをコピー",
     "delete_action": "プロジェクトを削除",
     "section_properties": "プロパティ",
     "section_progress": "進捗",
@@ -85,8 +97,12 @@
     "empty_issues_add_existing": "既存のタスクを追加",
     "no_issues_yet": "タスクはまだありません",
     "toast_link_copied": "リンクをコピーしました",
+    "toast_title_link_copied": "タイトル付きリンクをコピーしました",
+    "toast_title_link_copy_failed": "リンクをコピーできませんでした",
     "toast_project_deleted": "プロジェクトを削除しました",
-    "toast_move_issue_failed": "タスクを移動できませんでした"
+    "toast_move_issue_failed": "タスクを移動できませんでした",
+    "archive_action": "プロジェクトをアーカイブ",
+    "restore_action": "プロジェクトを復元"
   },
   "resources": {
     "section_header": "リソース",
@@ -155,7 +171,9 @@
     "title": "プロジェクトを削除",
     "description": "プロジェクトが削除されます。タスクは削除されませんが、リンクが解除されます。",
     "confirm": "削除",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "archive_instead": "代わりにアーカイブ",
+    "archive_hint": "アーカイブするとプロジェクトは非表示になりますが、タスク・履歴・設定は残り、いつでも復元できます。"
   },
   "picker": {
     "no_project": "プロジェクトなし",
@@ -215,7 +233,8 @@
     "search": "名前またはメールで検索...",
     "no_members": "該当するメンバーはいません",
     "no_selected": "メンバーはいません",
-    "admin_notice": "ワークスペースの owner と admin は常にアクセスできます。",
+    "members_only_notice": "アクセスできるのはこのリストのメンバーだけです。ワークスペースの owner と admin も追加が必要です。",
+    "manager": "アクセスを管理",
     "you": "あなた",
     "remove": "{{name}}を削除",
     "failed": "アクセス権を保存できませんでした。",
@@ -224,5 +243,24 @@
     "publish_description": "すべてのワークスペースメンバーがこのプロジェクトとタスク、コメント、添付ファイルを閲覧できるようになります。",
     "done": "完了",
     "retry": "再試行"
+  },
+  "archive": {
+    "badge": "アーカイブ済み",
+    "dialog_title": "「{{name}}」をアーカイブしますか？",
+    "dialog_title_count_other": "{{count}} 件のプロジェクトをアーカイブしますか？",
+    "dialog_description": "アーカイブしたプロジェクトはプロジェクト一覧や選択肢に表示されず、新しいタスクも作成できなくなります。何も削除されません。",
+    "dialog_open_issues_other": "未完了のタスク {{count}} 件はそのまま残り、引き続き閲覧・編集できます。",
+    "dialog_autopilots_other": "このプロジェクトにタスクを作成する有効な自動化 {{count}} 件が一時停止されます。",
+    "dialog_restore_hint": "「アーカイブ済みのプロジェクト」からいつでも復元できます。",
+    "cancel": "キャンセル",
+    "confirm": "アーカイブ",
+    "toast_archived": "「{{name}}」をアーカイブしました",
+    "toast_archived_count_other": "{{count}} 件のプロジェクトをアーカイブしました",
+    "toast_paused_other": "このプロジェクトにタスクを作成する自動化 {{count}} 件を一時停止しました",
+    "undo": "元に戻す",
+    "toast_restored": "「{{name}}」を復元しました",
+    "toast_completed": "「{{name}}」を完了にしました",
+    "notice": "このプロジェクトはアーカイブ済みです。一覧や選択肢に表示されず、新しいタスクは作成できません。既存のタスクは閲覧・編集できます。",
+    "prop_label": "アーカイブ"
   }
 }

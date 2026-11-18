@@ -11,6 +11,7 @@ out
 build
 bin
 dist-electron
+storybook-static
 *.tsbuildinfo
 # ...except electron-builder's source resources dir, which holds tracked
 # config files (entitlements, icons) — not build output.

@@ -126,7 +126,7 @@ describe("StatusPicker trigger color", () => {
     const trigger = iconOf(container);
     const row = iconOf(optionRow("QA"));
 
-    expect(trigger?.style.color).toBe("rgb(236, 122, 45)");
+    expect(trigger?.style.color).toBe("var(--palette-orange, #ec7a2d)");
     expect(row?.style.color).toBe(trigger?.style.color);
     expect(trigger?.querySelector("line")).not.toBeNull();
     expect(row?.innerHTML).toBe(trigger?.innerHTML);

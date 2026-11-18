@@ -92,7 +92,7 @@ Un répertoire local dispose de deux modes d'exécution, définis par ressource 
 
 L'agent travaille directement dans votre répertoire, et les exécutions ont lieu une à la fois. Lorsque deux exécutions utilisent le même répertoire réel, la seconde passe en `waiting_local_directory` et reprend une fois que la première a libéré le répertoire. Deux chemins qui mènent au même répertoire via des liens symboliques différents sont sérialisés de la même manière.
 
-L'attente ne modifie pas le répertoire. Une exécution en attente peut être annulée ; sinon, elle attend que le répertoire devienne disponible.
+L'attente ne modifie pas le répertoire et n'occupe pas de slot d'exécution du daemon. Une exécution en attente peut être annulée ; sinon, elle reprend le démarrage lorsque le répertoire et la capacité d'exécution sont disponibles.
 
 Un simple répertoire non git ne peut utiliser que ce mode : le mode worktree est réservé aux dépôts git.
 
@@ -155,6 +155,8 @@ Une exécution qui n'a pas pu enregistrer sa branche, par exemple parce qu'elle 
 
 </Accordion>
 <Accordion title="Rien n'est perdu en silence" id="nothing-is-silently-lost">
+
+Pendant une exécution en worktree, un fichier d'instructions du runtime suivi par Git, comme `CLAUDE.md` ou `AGENTS.md`, est marqué `skip-worktree` dans l'index privé de la tâche. Le brief injecté reste ainsi hors des commits de l'agent, sans modifier votre checkout. Les modifications intentionnelles de ce fichier restent non commitées jusqu'au rétablissement du suivi lors du nettoyage, puis suivent les règles de livraison ci-dessous. Les fichiers du runtime non suivis et les répertoires de compétences doivent toujours être exclus des commits de l'agent.
 
 Rien de ce que l'agent laisse non commité n'est supprimé avec le worktree, y compris lorsque l'exécution échoue en cours de route. Sa destination dépend de ce que l'agent a fait pendant l'exécution :
 

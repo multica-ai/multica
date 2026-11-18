@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { useSidebarViews } from "@multica/core/issue-views/sidebar-views";
-import { findViewItem, viewItemOpensTab, viewRows } from "../../model/views";
+import { viewRows } from "../../model/views";
 import { useWorkspace } from "../../model/workspace-context";
 import type { RootStackParamList } from "../../navigation/types";
 import { useStrings } from "../../strings";
@@ -27,11 +27,7 @@ export function ViewsScreen() {
       others={rows.others}
       onBack={() => navigation.goBack()}
       onRetry={() => void views.refetch()}
-      onOpen={(id) => {
-        const item = findViewItem(id, views.data ?? []);
-        if (item && viewItemOpensTab(item)) navigation.popTo("Tabs", { screen: "myIssues" });
-        else navigation.navigate("SavedView", { itemId: id });
-      }}
+      onOpen={(id) => navigation.navigate("SavedView", { itemId: id })}
       onToggleStar={(view) => (view.starred ? sidebar.unstar(view.id) : sidebar.star(view.id))}
     />
   );

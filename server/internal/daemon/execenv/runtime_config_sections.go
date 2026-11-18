@@ -522,6 +522,9 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 	if ctx.ProjectTitle != "" {
 		fmt.Fprintf(b, "The active project for this task is **%s**.\n\n", ctx.ProjectTitle)
 	}
+	if ctx.ProjectArchived {
+		b.WriteString("This project is **archived**: existing issues stay readable and editable, but it accepts no new issues — the API returns 409 `project_archived` for `--project` writes into it. Finish the work at hand; do not restore the project unless the user asks.\n\n")
+	}
 	if desc := strings.TrimSpace(ctx.ProjectDescription); desc != "" {
 		b.WriteString("Project description — durable context the project owner set for work in this project:\n\n")
 		b.WriteString(desc)
@@ -607,6 +610,7 @@ func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
 	b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 	b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
+	b.WriteString("- When you act toward someone else for the user (ask a person or agent something, hand off work, request a review, send an email or message), decide from the user's request whether they want the outcome back. If they asked for a decision, an answer, a review or work to be done, create a chat wakeup before you reply (`multica chat wakeup create --help`) so they never have to ask you to report back, and say what you are waiting for and until when. If they only wanted someone told, don't; when unsure, ask in your reply. Also create one whenever you promise to report back later (at a time they named, or while you watch something). For recurring work (every morning, every Friday), suggest an Autopilot instead\n")
 	b.WriteString("- Keep responses concise and direct\n\n")
 }
 
@@ -743,6 +747,12 @@ func writeSubIssueCreation(b *strings.Builder, ctx TaskContextForEnv) {
 // import; the brief's rendered-output tests pin the two together.
 const platformSkillName = "multica-platform"
 
+// platformSkillDomains is the domain list from the platform skill's
+// description, repeated in the brief's recall hint for agents that never read
+// the skill listing. TestPlatformSkillDomainsMatchDescription keeps it equal to
+// the description, so a new reference cannot ship without reaching the brief.
+const platformSkillDomains = "issue and PR contracts, sub-issues, batch changes, saved views, charts and files in comments, mentions, agents, squads, autopilots, projects, runtimes, local environments, skill import, themes"
+
 // subIssueContractsSkill returns how the brief should refer to the skill
 // carrying the sub-issue contracts, and whether any such skill is installed.
 //
@@ -796,7 +806,7 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	// what keeps that consolidation from costing recall, and it must therefore
 	// name the skill that actually holds those contracts.
 	if platformSlug != "" {
-		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, local environments, skill import — load the `" + platformSlug + "` skill and open the reference(s) its routing table names for the domains your task touches.\n\n")
+		b.WriteString("For a Multica platform action this brief does not fully cover — " + platformSkillDomains + " — load the `" + platformSlug + "` skill and open the reference(s) its routing table names for the domains your task touches.\n\n")
 	}
 }
 
@@ -822,7 +832,7 @@ func writeTraecliSkills(b *strings.Builder, skills []SkillContextForEnv) {
 	}
 	b.WriteString("\n")
 	if platformSlug != "" {
-		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, local environments, skill import — read `" + skillPath(platformSlug) + "` and open the reference(s) its routing table names for the domains your task touches.\n\n")
+		b.WriteString("For a Multica platform action this brief does not fully cover — " + platformSkillDomains + " — read `" + skillPath(platformSlug) + "` and open the reference(s) its routing table names for the domains your task touches.\n\n")
 	}
 }
 

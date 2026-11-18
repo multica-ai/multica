@@ -50,12 +50,12 @@ export interface ProjectSection {
   projects: ProjectRowModel[];
 }
 
-/** Projects under their status, in the order work moves; newest first within one. */
+/** Unarchived projects under their status, in the order work moves; newest first within one. */
 export function projectSections(projects: readonly Project[], resolveActor: ActorResolver, strings: Strings): ProjectSection[] {
   return PROJECT_STATUSES.map((status) => ({
     status,
     projects: projects
-      .filter((project) => project.status === status)
+      .filter((project) => !project.archived_at && project.status === status)
       .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
       .map((project) => projectRowModel(project, resolveActor, strings)),
   })).filter((section) => section.projects.length > 0);

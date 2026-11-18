@@ -954,7 +954,7 @@
     "tool_kind_misc": "其他",
     "trigger_wakeup": "喚醒觸發",
     "context_receipt_title": "上下文回執",
-    "context_receipt_summary_other": "{{count}} 個來源 · {{size}}",
+    "context_receipt_summary_other": "{{count}} 個來源",
     "context_receipt_model": "模型",
     "context_receipt_session": "工作階段",
     "context_receipt_session_resumed": "沿用了先前的工作階段（其歷史也在上下文中）",
@@ -968,7 +968,7 @@
     "context_receipt_col_delivery": "交付方式",
     "context_receipt_col_load": "載入狀態",
     "context_receipt_same_as_brief": "同執行說明",
-    "context_receipt_footnote": "由 daemon 在代理程式啟動前記錄。只保存大小和短雜湊，不保存內容。「已驗證」表示該執行環境的這個版本經過測試，確認會載入該檔案。 技能的大小和雜湊涵蓋實際寫入的整個技能包。",
+    "context_receipt_footnote": "由 daemon 在 AI 代理啟動前記錄。僅儲存大小與短雜湊，不儲存內容。\"已驗證\" 表示已測試此執行階段版本會載入該檔案。skill 的大小與雜湊涵蓋整個已寫入的套件；檔案位元組數不代表模型實際讀取的內容。",
     "context_source_runtime_brief": "執行說明",
     "context_source_agent_instructions": "代理程式指令",
     "context_source_project_description": "專案描述",
@@ -984,7 +984,13 @@
     "context_load_verified": "已驗證",
     "context_load_verified_other_version": "僅在 {{version}} 驗證過",
     "context_load_unverified": "未驗證",
-    "context_load_not_delivered": "未送達"
+    "context_load_not_delivered": "未送達",
+    "context_receipt_direct_bytes": "直接輸入：{{size}}",
+    "context_receipt_file_bytes": "磁碟檔案：{{size}}",
+    "context_receipt_package": "套件總量",
+    "context_receipt_instruction_file_bytes": "執行說明檔案：{{size}}",
+    "context_receipt_skill_package_bytes": "skill 套件：{{size}}",
+    "context_receipt_other_file_bytes": "其他檔案：{{size}}"
   },
   "task_failure": {
     "cancelled_by_system": "已由系統取消",

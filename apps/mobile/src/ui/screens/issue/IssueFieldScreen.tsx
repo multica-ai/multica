@@ -126,9 +126,11 @@ function ProjectField({ issue, title, cancel, onSave }: SingleFieldProps) {
   const choices = useMemo<FieldChoice[]>(
     () => [
       { value: NONE, label: strings.issue.noProject },
-      ...(projects.data ?? []).map((project) => ({ value: project.id, label: project.icon ? `${project.icon} ${project.title}` : project.title })),
+      ...(projects.data ?? [])
+        .filter((project) => !project.archived_at || project.id === issue.project_id)
+        .map((project) => ({ value: project.id, label: project.icon ? `${project.icon} ${project.title}` : project.title })),
     ],
-    [projects.data, strings],
+    [projects.data, issue.project_id, strings],
   );
   const selected = issue.project_id ?? NONE;
   return (

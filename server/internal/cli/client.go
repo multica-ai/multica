@@ -110,11 +110,11 @@ func newHTTPError(method, path string, resp *http.Response) *HTTPError {
 		Path:       path,
 		StatusCode: resp.StatusCode,
 		Body:       strings.TrimSpace(string(data)),
-		TaskScoped: requestUsedTaskToken(resp),
+		TaskScoped: RequestUsedTaskToken(resp),
 	}
 }
 
-// requestUsedTaskToken reports whether the request that produced resp actually
+// RequestUsedTaskToken reports whether the request that produced resp actually
 // sent a task token.
 //
 // Reading the client's own Token field would be wrong twice over. DownloadFile
@@ -124,7 +124,7 @@ func newHTTPError(method, path string, resp *http.Response) *HTTPError {
 // across a cross-host redirect, so the request that was sent is not always the
 // one the caller built. resp.Request is the request that actually went out,
 // after redirects, which is the only thing this claim can honestly rest on.
-func requestUsedTaskToken(resp *http.Response) bool {
+func RequestUsedTaskToken(resp *http.Response) bool {
 	if resp == nil || resp.Request == nil {
 		return false
 	}
@@ -323,6 +323,17 @@ func (c *APIClient) DeleteJSON(ctx context.Context, path string) error {
 
 // DeleteJSONResponse performs a DELETE request and optionally decodes the JSON response.
 func (c *APIClient) DeleteJSONResponse(ctx context.Context, path string, out any) error {
+	return c.deleteJSON(ctx, path, out, nil)
+}
+
+// DeleteJSONWithConflict lets callers consume a structured 409 in full before
+// deciding whether a follow-up request is safe. Other HTTP errors use the
+// usual bounded diagnostic body.
+func (c *APIClient) DeleteJSONWithConflict(ctx context.Context, path string, onConflict func(io.Reader) error) error {
+	return c.deleteJSON(ctx, path, nil, onConflict)
+}
+
+func (c *APIClient) deleteJSON(ctx context.Context, path string, out any, onConflict func(io.Reader) error) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.BaseURL+path, nil)
 	if err != nil {
 		return err
@@ -336,6 +347,9 @@ func (c *APIClient) DeleteJSONResponse(ctx context.Context, path string, out any
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusConflict && onConflict != nil {
+		return onConflict(resp.Body)
+	}
 	if resp.StatusCode >= 400 {
 		return newHTTPError(http.MethodDelete, path, resp)
 	}

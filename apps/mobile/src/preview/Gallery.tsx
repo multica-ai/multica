@@ -208,7 +208,7 @@ function MenuPreview({ mode }: { mode: "nav" | "workspaces" }) {
           ]}
           views={{
             items: [
-              { key: "builtin:my_agents", icon: "Layers", label: strings.nav.builtin.my_agents },
+              { key: "builtin:my_work", icon: "Layers", label: strings.nav.builtin.my_work },
               { key: "builtin:all_issues", icon: "Layers", label: strings.nav.builtin.all_issues },
               { key: "view:ios", icon: "Layers", label: fx.savedViewName },
             ],
