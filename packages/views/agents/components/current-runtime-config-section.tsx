@@ -56,9 +56,9 @@ export function CurrentRuntimeConfigSection({
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const queryClient = useQueryClient();
-  const runtimeConfigQuery = useQuery(
-    agentRuntimeCurrentConfigOptions(agent.id, true),
-  );
+  const userId = currentUserId ?? "";
+  const configKey = agentRuntimeConfigKeys.current(wsId, agent.id, userId);
+  const runtimeConfigQuery = useQuery(agentRuntimeCurrentConfigOptions(wsId, agent.id, userId));
   const runtimeConfigSummary =
     runtimeConfigQuery.data ?? agent.runtime_config_summary ?? null;
   const currentConfig = runtimeConfigSummary?.current ?? null;
@@ -82,7 +82,7 @@ export function CurrentRuntimeConfigSection({
 
   const cacheRuntimeConfigSummary = (summary: AgentRuntimeConfigSummary) => {
     queryClient.setQueryData(
-      agentRuntimeConfigKeys.current(agent.id),
+      configKey,
       summary,
     );
     queryClient.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (old) =>
@@ -195,9 +195,9 @@ export function CurrentRuntimeConfigSection({
       queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     }
     queryClient.invalidateQueries({
-      queryKey: agentRuntimeConfigKeys.current(agent.id),
+      queryKey: agentRuntimeConfigKeys.current(wsId, agent.id, userId),
     });
-  }, [summarySaysShared, wsId, agent.id, queryClient]);
+  }, [summarySaysShared, wsId, userId, agent.id, queryClient]);
 
   if (summarySaysShared) {
     return null;

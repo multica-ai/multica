@@ -280,7 +280,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         );
         cacheAgentResponse(qc, wsId, updatedAgent, { insertIntoList: false });
         void qc.invalidateQueries({ queryKey });
-        void qc.invalidateQueries({ queryKey: agentRuntimeConfigKeys.current(id) });
+        void qc.invalidateQueries({ queryKey: agentRuntimeConfigKeys.agent(wsId, id) });
         toast.success(t(($) => $.detail.agent_updated_toast));
       } catch (e) {
         if (prevListAgent) {

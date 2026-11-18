@@ -56,19 +56,21 @@ export const agentRunCountsKeys = {
 };
 
 export const agentRuntimeConfigKeys = {
-  all: (agentId: string) => ["agents", agentId, "runtime-config"] as const,
-  current: (agentId: string) =>
-    [...agentRuntimeConfigKeys.all(agentId), "current"] as const,
+  agent: (wsId: string, agentId: string) =>
+    ["workspaces", wsId, "agent-runtime-config", agentId] as const,
+  current: (wsId: string, agentId: string, userId: string) =>
+    [...agentRuntimeConfigKeys.agent(wsId, agentId), "current", userId] as const,
 };
 
 export function agentRuntimeCurrentConfigOptions(
+  wsId: string,
   agentId: string,
-  enabled = true,
+  userId: string,
 ) {
   return queryOptions({
-    queryKey: agentRuntimeConfigKeys.current(agentId),
+    queryKey: agentRuntimeConfigKeys.current(wsId, agentId, userId),
     queryFn: () => api.getAgentRuntimeCurrentConfig(agentId),
-    enabled: enabled && !!agentId,
+    enabled: !!wsId && !!agentId && !!userId,
   });
 }
 

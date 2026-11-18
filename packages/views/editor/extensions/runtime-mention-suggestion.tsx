@@ -1925,7 +1925,9 @@ function buildRuntimeAgentMentions({
       standardAgentIdsToHide.add(agentId);
     }
     const issueAgents = agents
-      .filter((agent) => latestTasks.has(agent.id))
+      .filter((agent) => latestTasks.has(agent.id) && (
+        agent.archived_at != null || canAssignAgentToIssue(agent, { userId, role: myRole }).allowed
+      ))
       .filter((agent) => {
         const task = latestTasks.get(agent.id);
         const runtime = taskRuntime(task);
