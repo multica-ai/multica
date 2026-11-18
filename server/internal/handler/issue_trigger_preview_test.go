@@ -1,14 +1,17 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/daemon"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -221,6 +224,52 @@ func TestUpdateIssueSuppressRunSkipsEnqueue(t *testing.T) {
 	if got := taskCountFor(t, control.ID, agentID); got == 0 {
 		t.Fatalf("control (no suppress_run) should enqueue, got 0 tasks")
 	}
+}
+
+// TestIssueWritesLogWhyARunDidNotStart: assigning an issue that waits in
+// Triage succeeds without a run, and both write paths log why (#10845).
+func TestIssueWritesLogWhyARunDidNotStart(t *testing.T) {
+	agentID := seededReadyAgentID(t)
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	inTriage := func(title string) IssueResponse {
+		issue := createIssueForTest(t, map[string]any{"title": title, "status": "todo"})
+		dbfx.Exec(t, `UPDATE issue SET triage_state = 'pending' WHERE id = $1`, issue.ID)
+		return issue
+	}
+	assign := map[string]any{"assignee_type": "agent", "assignee_id": agentID}
+
+	single := inTriage("triage single write")
+	testutil.Call(t, testHandler.UpdateIssue,
+		withURLParam(newRequest("PUT", "/api/issues/"+single.ID, assign), "id", single.ID)).Want(http.StatusOK)
+	batch := inTriage("triage batch write")
+	testutil.Call(t, testHandler.BatchUpdateIssues, newRequest("PATCH", "/api/issues/batch?workspace_id="+testWorkspaceID,
+		map[string]any{"issue_ids": []string{batch.ID}, "updates": assign})).Want(http.StatusOK)
+
+	for _, issue := range []IssueResponse{single, batch} {
+		if got := taskCountFor(t, issue.ID, agentID); got != 0 {
+			t.Fatalf("issue %s in triage got %d tasks, want none", issue.ID, got)
+		}
+		if !hasLogLine(logs.String(), `msg="issue write did not start a run"`, "issue_id="+issue.ID, "reason=issue_in_triage") {
+			t.Fatalf("no decline log for issue %s; logs:\n%s", issue.ID, logs.String())
+		}
+	}
+}
+
+func hasLogLine(logs string, parts ...string) bool {
+	for _, line := range strings.Split(logs, "\n") {
+		found := true
+		for _, part := range parts {
+			found = found && strings.Contains(line, part)
+		}
+		if found {
+			return true
+		}
+	}
+	return false
 }
 
 // TestLegacyV0438HandoffPayloadReachesTaskPrompt is the cross-version guard

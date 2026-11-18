@@ -4363,6 +4363,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		},
 		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 	)
+	logDeclinedIssueRun(r.Context(), issue, trigger)
 	willRun = willRun && !req.SuppressRun
 
 	updatedPayload := map[string]any{
@@ -5228,6 +5229,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				},
 				h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 			)
+			logDeclinedIssueRun(r.Context(), issue, trigger)
 			willRun = willRun && !req.Updates.SuppressRun
 			batchPayload := map[string]any{
 				"issue":                      resp,
