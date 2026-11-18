@@ -2159,7 +2159,16 @@ WHERE context->>'wakeup_id' IS NULL AND issue_id = @issue_id
 -- case — a dispatched sibling would trip the unique index — it defers to
 -- completion reconciliation unless no active task exists at all.
 UPDATE agent_task_queue
-SET coalesced_comment_ids = (
+SET runtime_id = COALESCE(sqlc.narg('new_runtime_id')::uuid, runtime_id),
+    effective_model = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('effective_model') ELSE effective_model END,
+    effective_thinking_level = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('effective_thinking_level') ELSE effective_thinking_level END,
+    effective_service_tier = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('effective_service_tier') ELSE effective_service_tier END,
+    effective_runtime_config = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('effective_runtime_config') ELSE effective_runtime_config END,
+    effective_max_concurrent_tasks = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('effective_max_concurrent_tasks') ELSE effective_max_concurrent_tasks END,
+    runtime_config_source = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('runtime_config_source') ELSE runtime_config_source END,
+    runtime_config_hint = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL THEN sqlc.narg('runtime_config_hint') ELSE runtime_config_hint END,
+    session_id = CASE WHEN sqlc.narg('new_runtime_id')::uuid IS NOT NULL AND runtime_id IS DISTINCT FROM sqlc.narg('new_runtime_id')::uuid THEN NULL ELSE session_id END,
+    coalesced_comment_ids = (
         SELECT COALESCE(array_agg(DISTINCT e), '{}')
         FROM unnest(array_append(coalesced_comment_ids, trigger_comment_id)) AS e
         WHERE e IS NOT NULL AND e <> @new_trigger_comment_id::uuid
@@ -2189,6 +2198,7 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
       AND t.agent_id = @agent_id
+      AND (sqlc.narg('new_runtime_id')::uuid IS NULL OR lock_task_owner_rows(t.agent_id, t.issue_id, sqlc.narg('new_runtime_id')::uuid))
       -- An unclaimed generic turn can become a leader turn. Never overwrite
       -- a worker obligation or a different squad's leader context.
       AND (

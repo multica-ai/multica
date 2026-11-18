@@ -2478,7 +2478,7 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	if trigger.Squad != nil {
 		leaderSquadID = trigger.Squad.ID
 	}
-	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+	params := db.MergeCommentIntoPendingTaskParams{
 		NewLeaderSquadID:        leaderSquadID,
 		IssueID:                 issue.ID,
 		AgentID:                 trigger.Agent.ID,
@@ -2494,7 +2494,46 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		NewRuntimeMcpOverlay:    overlay,
 		NewRuntimeConnectedApps: connectedApps,
 		HeadSha:                 headSha,
-	})
+	}
+	queries := h.Queries
+	if !trigger.Agent.ShareRuntime {
+		tx, beginErr := h.TxStarter.Begin(ctx)
+		if beginErr != nil {
+			return commentMergeError
+		}
+		defer tx.Rollback(ctx)
+		queries = h.Queries.WithTx(tx)
+		current, readErr := queries.GetAgentForClaimUpdate(ctx, trigger.Agent.ID)
+		if readErr != nil || current.ArchivedAt.Valid || current.WorkspaceID != issue.WorkspaceID || current.ShareRuntime {
+			return commentMergeError
+		}
+		effective, resolveErr := service.ResolveEffectiveRuntimeConfig(ctx, queries, current, attr.UserID, h.liveRuntimeModels())
+		if resolveErr != nil {
+			if status, _, ok := service.RuntimeConfigResolutionFromError(resolveErr); !ok || status != service.RuntimeConfigResolutionRuntimeOffline || !effective.RuntimeID.Valid {
+				return commentMergeError
+			}
+		}
+		params.NewRuntimeID = effective.RuntimeID
+		params.EffectiveModel = service.TaskEffectiveModel(effective)
+		params.EffectiveThinkingLevel = service.TaskEffectiveThinkingLevel(effective)
+		params.EffectiveServiceTier = service.TaskEffectiveServiceTier(effective)
+		params.EffectiveRuntimeConfig = effective.RuntimeConfig
+		params.EffectiveMaxConcurrentTasks = service.TaskEffectiveMaxConcurrentTasks(effective)
+		params.RuntimeConfigSource = service.TaskRuntimeConfigSource(effective)
+		params.RuntimeConfigHint = service.RuntimeConfigHintJSON(effective.Hint)
+		row, mergeErr := queries.MergeCommentIntoPendingTask(ctx, params)
+		if errors.Is(mergeErr, pgx.ErrNoRows) {
+			return commentMergeNoPendingTask
+		}
+		if mergeErr != nil || tx.Commit(ctx) != nil {
+			return commentMergeError
+		}
+		h.TaskService.RecordHumanDelegation(ctx, attr)
+		h.TaskService.BroadcastTaskCoalesced(ctx, row)
+		h.TaskService.NotifyRuntimeMayHaveWork(effective.RuntimeID)
+		return commentMergeSucceeded
+	}
+	row, err := queries.MergeCommentIntoPendingTask(ctx, params)
 	if err != nil {
 		if isNotFound(err) {
 			// No pre-claim (queued/deferred) task to merge into. The caller

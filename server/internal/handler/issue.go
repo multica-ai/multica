@@ -2858,7 +2858,8 @@ type QuickCreateIssueRequest struct {
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
 // correlate the eventual inbox item, even though completion is fully async.
 type QuickCreateIssueResponse struct {
-	TaskID string `json:"task_id"`
+	TaskID            string                     `json:"task_id"`
+	RuntimeConfigHint *service.RuntimeConfigHint `json:"runtime_config_hint,omitempty"`
 }
 
 func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
@@ -3081,7 +3082,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusAccepted, QuickCreateIssueResponse{TaskID: uuidToString(task.ID)})
+	writeJSON(w, http.StatusAccepted, QuickCreateIssueResponse{TaskID: uuidToString(task.ID), RuntimeConfigHint: runtimeConfigHintFromTask(task)})
 }
 
 // writeAgentUnavailable returns 422 with a stable error code so the modal
