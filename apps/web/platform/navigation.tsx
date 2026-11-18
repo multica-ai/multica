@@ -7,6 +7,7 @@ import {
   type NavigationAdapter,
 } from "@multica/views/navigation";
 import { canGoBackInApp } from "./in-app-history";
+import { useLaunchQueueNavigation } from "./pwa-launch";
 
 /**
  * Web half of the `multica:navigate` bridge — the event shared content
@@ -74,6 +75,7 @@ function NavigationProviderInner({
     () => "",
   );
   useInternalLinkHandler(router);
+  useLaunchQueueNavigation(router.push);
 
   const adapter: NavigationAdapter = {
     push: router.push,

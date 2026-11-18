@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { proxy } from "../proxy";
-import manifest, { PWA_START_URL } from "./manifest";
+import { PWA_START_URL, resolveLaunchPath } from "../platform/pwa-launch";
+import manifest from "./manifest";
 
 function launch(cookies: Record<string, string>, host = "www.multica.ai") {
   const cookieHeader = Object.entries(cookies)
@@ -66,6 +67,25 @@ describe("web app manifest", () => {
       // Same three states as start_url — a shortcut is a launcher entry too.
       expect(resolve("multica_logged_in=1")).toContain("/login");
       expect(resolve("")).toContain("/login");
+    }
+  });
+
+  it("reuses the open window instead of opening another", () => {
+    // navigate-existing would reload that window at the launch URL, dropping
+    // in-flight uploads and sending a plain relaunch back to the inbox.
+    expect(manifest().launch_handler).toEqual({
+      client_mode: "focus-existing",
+    });
+  });
+
+  it("moves an open window for every shortcut but not for a plain launch", () => {
+    // With focus-existing the launch URL is all the window learns, so a
+    // shortcut that matched start_url would only focus it.
+    const elsewhere = new URL("https://www.multica.ai/acme/issues/abc");
+
+    expect(resolveLaunchPath(PWA_START_URL, elsewhere)).toBeNull();
+    for (const shortcut of manifest().shortcuts ?? []) {
+      expect(resolveLaunchPath(shortcut.url, elsewhere)).not.toBeNull();
     }
   });
 });
