@@ -235,30 +235,10 @@ type LarkMessageMention struct {
 	Name string // display name (may be empty)
 }
 
-// BotInfo is the slice of /open-apis/bot/v3/info (+ a follow-up
-// /open-apis/contact/v3/users lookup for the union_id) we care about:
-// the Bot's per-installation `open_id` and its stable `union_id`.
-//
-// Both identifiers are persisted on lark_installation:
-//
-//   - `open_id` is the per-app Lark identifier; it is what /bot/v3/info
-//     returns and what the OUTBOUND send paths use to address a user.
-//
-//   - `union_id` is the cross-app stable identifier scoped to the Lark
-//     tenant. It is the only field that is consistent across the two
-//     WS perspectives in a multi-bot group chat — see MUL-2671 group-
-//     @-mention triage. The decoder matches inbound `mentions[].id`
-//     against `union_id` so the right bot's supervisor handles the
-//     event when several bots are bound to the same group.
-//
-// Everything else /bot/v3/info returns (display name, avatar,
-// activate_status, ip_white_list) is intentionally dropped — those
-// can be re-fetched downstream from the bot_open_id if a UI needs
-// them, and freezing them in our schema would create a drift surface
-// every time the operator edits the Bot on Lark's side.
+// BotInfo contains the bot's basic identity from /open-apis/bot/v3/info.
 type BotInfo struct {
 	OpenID  OpenID
-	UnionID string
+	UnionID string // Retained for existing callers; bot/v3/info does not populate it.
 }
 
 // SendCardParams is the input shape for posting a fresh card.

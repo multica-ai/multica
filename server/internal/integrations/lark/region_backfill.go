@@ -28,8 +28,8 @@ import (
 // deployments (no override, or override pointing at open.feishu.cn / a
 // mock) never run the UPDATE.
 //
-// Callers should fire this from a goroutine at boot, like
-// BackfillBotUnionIDs, so a slow DB write cannot block listener startup.
+// Callers should fire this from a goroutine at boot so a slow DB write
+// cannot block listener startup.
 func BackfillRegionFromLegacyOverride(ctx context.Context, queries *ChannelStore, httpOverride, callbackOverride string, log *slog.Logger) {
 	if log == nil {
 		log = slog.Default()

@@ -1311,19 +1311,15 @@ func TestHTTPClient_BindingPromptValidation(t *testing.T) {
 	}
 }
 
-// TestHTTPClient_GetBotInfo_HappyPath drives the device-flow follow-up
-// step: once RegistrationService has fresh client_id / client_secret
-// from /oauth/v1/app/registration, it mints a tenant_access_token and
-// asks /open-apis/bot/v3/info for the Bot's per-installation open_id,
-// then resolves the bot's union_id via /open-apis/contact/v3/users/
-// {open_id}?user_id_type=open_id. Both identifiers are persisted on
-// the installation row; the union_id is what the WS decoder uses to
-// route inbound @-mentions in multi-bot group chats (MUL-2671). The
-// other fields on the bot/v3/info response (display name, avatar,
-// IP whitelist) are deliberately dropped on the floor.
+// TestHTTPClient_GetBotInfo_HappyPath reads the basic bot identity without
+// querying Contact User or inferring a union_id.
 func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 	fake := newLarkFake(t)
 	fake.stubToken("tok_bi", 7200)
+	fake.mux.HandleFunc("/open-apis/contact/", func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("bot identity must not query Contact User: %s", r.URL.Path)
+		writeJSON(w, map[string]any{"code": 41050, "msg": "no user authority error"})
+	})
 	fake.mux.HandleFunc("/open-apis/bot/v3/info", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			t.Errorf("bot info: want GET, got %s", r.Method)
@@ -1341,26 +1337,6 @@ func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 			},
 		})
 	})
-	fake.mux.HandleFunc("/open-apis/contact/v3/users/ou_bot_42", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("contact users: want GET, got %s", r.Method)
-		}
-		if got := r.URL.Query().Get("user_id_type"); got != "open_id" {
-			t.Errorf("contact users: user_id_type=%q want open_id", got)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer tok_bi" {
-			t.Errorf("contact users: Authorization=%q want Bearer tok_bi", got)
-		}
-		writeJSON(w, map[string]any{
-			"code": 0,
-			"msg":  "ok",
-			"data": map[string]any{
-				"user": map[string]any{
-					"union_id": "on_bot_42_stable",
-				},
-			},
-		})
-	})
 
 	c := NewHTTPAPIClient(HTTPClientConfig{BaseURL: fake.URL()})
 	info, err := c.GetBotInfo(context.Background(), testCreds())
@@ -1370,40 +1346,8 @@ func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 	if string(info.OpenID) != "ou_bot_42" {
 		t.Errorf("OpenID: got %q want ou_bot_42", info.OpenID)
 	}
-	if info.UnionID != "on_bot_42_stable" {
-		t.Errorf("UnionID: got %q want on_bot_42_stable", info.UnionID)
-	}
-}
-
-// TestHTTPClient_GetBotInfo_UnionIDLookupSoftFails covers the case
-// where /contact/v3/users returns a non-zero code (e.g. the app's
-// contact scope was never approved). The install must still succeed
-// with an empty UnionID so the operator can backfill later instead
-// of the QR flow failing outright. The decoder transitional fallback
-// keeps single-bot installs working in the gap.
-func TestHTTPClient_GetBotInfo_UnionIDLookupSoftFails(t *testing.T) {
-	fake := newLarkFake(t)
-	fake.stubToken("tok_bi_softfail", 7200)
-	fake.mux.HandleFunc("/open-apis/bot/v3/info", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{
-			"code": 0,
-			"msg":  "ok",
-			"bot":  map[string]any{"open_id": "ou_bot_softfail"},
-		})
-	})
-	fake.mux.HandleFunc("/open-apis/contact/v3/users/ou_bot_softfail", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, map[string]any{"code": 99991002, "msg": "no permission"})
-	})
-	c := NewHTTPAPIClient(HTTPClientConfig{BaseURL: fake.URL()})
-	info, err := c.GetBotInfo(context.Background(), testCreds())
-	if err != nil {
-		t.Fatalf("GetBotInfo unexpectedly errored on soft-fail: %v", err)
-	}
-	if string(info.OpenID) != "ou_bot_softfail" {
-		t.Errorf("OpenID: got %q want ou_bot_softfail", info.OpenID)
-	}
 	if info.UnionID != "" {
-		t.Errorf("UnionID: got %q want empty (soft-fail leaves backfill to operator)", info.UnionID)
+		t.Errorf("UnionID: got %q want empty", info.UnionID)
 	}
 }
 

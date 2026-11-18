@@ -3,6 +3,7 @@ package lark
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -23,8 +24,8 @@ func TestHTTPClient_GetMessageSingle(t *testing.T) {
 		if id := strings.TrimPrefix(r.URL.Path, messageGetPrefix); id != "om_parent" {
 			t.Errorf("path id = %q", id)
 		}
-		if r.URL.Query().Get("user_id_type") != "open_id" {
-			t.Errorf("missing user_id_type=open_id: %q", r.URL.RawQuery)
+		if r.URL.Query().Has("user_id_type") {
+			t.Errorf("user_id_type must be omitted: %q", r.URL.RawQuery)
 		}
 		writeJSON(w, map[string]any{
 			"code": 0, "msg": "ok",
@@ -36,7 +37,10 @@ func TestHTTPClient_GetMessageSingle(t *testing.T) {
 						"create_time": "1000",
 						"sender":      map[string]any{"id": "ou_a", "id_type": "open_id", "sender_type": "user"},
 						"body":        map[string]any{"content": `{"text":"hi"}`},
-						"mentions":    []any{map[string]any{"key": "@_user_1", "id": "ou_b", "name": "Bob"}},
+						"mentions": []any{
+							map[string]any{"key": "@_user_1", "id": "ou_b", "id_type": "open_id", "name": "Same name"},
+							map[string]any{"key": "@_user_2", "id": "ou_bot", "id_type": "open_id", "name": "Same name"},
+						},
 					},
 				},
 			},
@@ -58,7 +62,11 @@ func TestHTTPClient_GetMessageSingle(t *testing.T) {
 	if m.SenderID != "ou_a" || m.SenderType != "user" {
 		t.Errorf("sender = id:%q type:%q", m.SenderID, m.SenderType)
 	}
-	if len(m.Mentions) != 1 || m.Mentions[0].Key != "@_user_1" || m.Mentions[0].ID != "ou_b" || m.Mentions[0].Name != "Bob" {
+	wantMentions := []LarkMessageMention{
+		{Key: "@_user_1", ID: "ou_b", Name: "Same name"},
+		{Key: "@_user_2", ID: "ou_bot", Name: "Same name"},
+	}
+	if !reflect.DeepEqual(m.Mentions, wantMentions) {
 		t.Errorf("mentions = %+v", m.Mentions)
 	}
 	if a := fake.lastAuth(); a != "Bearer tok" {
@@ -120,5 +128,69 @@ func TestHTTPClient_GetMessageEmptyID(t *testing.T) {
 	c := newTestClient(fake, time.Now)
 	if _, err := c.GetMessage(context.Background(), testCreds(), ""); err == nil {
 		t.Fatal("expected error for empty message id")
+	}
+}
+
+func TestHTTPClient_DefaultMentionIDsInSelectedContext(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		msg  InboundMessage
+		want string
+	}{
+		{"quoted message", InboundMessage{MessageType: "text", MessageID: "om_trigger", ParentID: "om_parent", Body: "/issue help", CommandBody: "/issue help"}, `<quoted_message message_id="om_parent"`},
+		{"forwarded messages", InboundMessage{MessageType: "merge_forward", MessageID: "om_forward", CommandBody: "forwarded message"}, `<forwarded_messages count="2">`},
+		{"quoted forward", InboundMessage{MessageType: "text", MessageID: "om_trigger", ParentID: "om_forward", Body: "/issue help", CommandBody: "/issue help"}, `<quoted_message message_id="om_forward"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newLarkFake(t)
+			fake.stubToken("tok", 7200)
+			fake.mux.HandleFunc(messageGetPrefix, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Has("user_id_type") {
+					t.Errorf("context request must use default mention IDs: %q", r.URL.RawQuery)
+				}
+				parent := map[string]any{
+					"message_id": "om_parent", "msg_type": "text", "create_time": "1000",
+					"sender": map[string]any{"id": "ou_author", "id_type": "open_id", "sender_type": "user"},
+					"body":   map[string]any{"content": `{"text":"@_user_1 @_user_2 @_user_3 /issue quoted"}`},
+					"mentions": []any{
+						map[string]any{"key": "@_user_1", "id": "ou_author", "id_type": "open_id", "name": "Alice"},
+						map[string]any{"key": "@_user_2", "id": "ou_bot_a", "id_type": "open_id", "name": "Bot A"},
+						map[string]any{"key": "@_user_3", "id": "ou_bot_b", "id_type": "open_id", "name": "Bot B"},
+					},
+				}
+				items := []any{parent}
+				if strings.HasSuffix(r.URL.Path, "/om_forward") {
+					items = []any{
+						map[string]any{"message_id": "om_forward", "msg_type": "merge_forward", "sender": map[string]any{"id": "ou_author", "sender_type": "user"}},
+						parent,
+						map[string]any{"message_id": "om_bot_reply", "msg_type": "text", "create_time": "2000", "sender": map[string]any{"id": "cli_bot", "id_type": "app_id", "sender_type": "app"}, "body": map[string]any{"content": `{"text":"forwarded bot reply"}`}},
+					}
+				}
+				writeJSON(w, map[string]any{"code": 0, "data": map[string]any{"items": items}})
+			})
+			fake.mux.HandleFunc("/open-apis/contact/v3/users/batch", func(w http.ResponseWriter, r *http.Request) {
+				if got := r.URL.Query()["user_ids"]; !reflect.DeepEqual(got, []string{"ou_author"}) {
+					t.Errorf("speaker lookup = %v, want only the human author", got)
+				}
+				if got := r.URL.Query().Get("user_id_type"); got != "open_id" {
+					t.Errorf("Contact User still requires user_id_type=open_id, got %q", got)
+				}
+				writeJSON(w, map[string]any{"code": 0, "data": map[string]any{"items": []any{}}})
+			})
+			client := newTestClient(fake, time.Now)
+			got := NewInboundEnricher(client, InboundEnricherConfig{}).Enrich(context.Background(), tc.msg, testCreds())
+			if !strings.Contains(got.Body, tc.want) || !strings.Contains(got.Body, "@Alice @Bot A @Bot B /issue quoted") {
+				t.Fatalf("selected context = %q", got.Body)
+			}
+			if got.CommandBody != tc.msg.CommandBody {
+				t.Errorf("trigger command = %q, want %q", got.CommandBody, tc.msg.CommandBody)
+			}
+			if strings.Contains(tc.name, "forward") && !strings.Contains(got.Body, "forwarded bot reply") {
+				t.Errorf("forwarded bot content missing: %q", got.Body)
+			}
+			if strings.Contains(got.Body, "@_user_") {
+				t.Errorf("unresolved mentions: %q", got.Body)
+			}
+		})
 	}
 }

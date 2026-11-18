@@ -703,14 +703,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				))
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
 
-				// One-shot union_id backfill for installations created
-				// before migration 112 added bot_union_id. Runs off the
-				// hot startup path so a slow Lark round-trip cannot block
-				// HTTP listener boot. New installs already write
-				// bot_union_id during the device-flow finalize, so this
-				// is bridge code — it will simply find no rows to update
-				// on a fresh deployment and exit. MUL-2671.
-				go lark.BackfillBotUnionIDs(context.Background(), cs, larkClient, installSvc, slog.Default())
 				go lark.BackfillLegacyInboundReceipts(context.Background(), cs, slog.Default())
 
 				// Upgrade repair for deployments that ran the whole
@@ -719,8 +711,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// existed: migration 116 backfilled their rows to 'feishu',
 				// so relabel them to 'lark' (their true cloud) before the
 				// operator clears the override. No-op on mainland / fresh
-				// deployments. Off the hot startup path like the union_id
-				// backfill. MUL-3083.
+				// deployments. Off the hot startup path. MUL-3083.
 				go lark.BackfillRegionFromLegacyOverride(context.Background(), cs,
 					strings.TrimSpace(os.Getenv("MULTICA_LARK_HTTP_BASE_URL")),
 					strings.TrimSpace(os.Getenv("MULTICA_LARK_CALLBACK_BASE_URL")),

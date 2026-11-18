@@ -553,35 +553,8 @@ func (c *httpAPIClient) SendBindingPromptCard(ctx context.Context, p BindingProm
 	return nil
 }
 
-// GetBotInfo calls /open-apis/bot/v3/info to learn the Bot's
-// per-installation `open_id` and then /open-apis/contact/v3/users/
-// {open_id}?user_id_type=open_id to resolve its stable `union_id`.
-// RegistrationService is the only caller — right after the device-
-// flow registration returns fresh `client_id` / `client_secret`, the
-// service mints a tenant_access_token with those creds and calls
-// this method so the installation row can be frozen with both Bot
-// identifiers in the same transaction as the installer-bind.
-//
-// Why two API calls instead of one: /bot/v3/info does not return
-// union_id in the public schema. The WS inbound decoder needs
-// union_id to disambiguate which bot was @-mentioned in a multi-bot
-// group chat (the per-app open_id field on mentions is structurally
-// inverse across WS perspectives — see MUL-2671 triage), so we
-// invest one extra HTTP round-trip at install time to capture it
-// and avoid running the wrong supervisor for every event going
-// forward.
-//
-// A missing union_id (contact lookup denied by app scope, or Lark
-// returns an empty field) is NOT a hard failure here — the
-// installation is still usable for p2p chats and the decoder can
-// fall back to the (broken) open_id match path until the operator
-// fixes scopes. We log a warning so the gap is visible.
-//
-// Other fields the upstream APIs return (display name, avatar, IP
-// whitelist) are deliberately dropped; downstream reads can fetch
-// them on demand from the bot_open_id, and freezing them into our
-// schema would create a drift surface every time the operator edits
-// the Bot on Lark's side.
+// GetBotInfo reads the bot identity documented by /open-apis/bot/v3/info.
+// Contact User is not a documented source of bot union IDs.
 func (c *httpAPIClient) GetBotInfo(ctx context.Context, creds InstallationCredentials) (BotInfo, error) {
 	if creds.AppID == "" || creds.AppSecret == "" {
 		return BotInfo{}, errors.New("lark http client: missing app credentials for GetBotInfo")
@@ -606,27 +579,15 @@ func (c *httpAPIClient) GetBotInfo(ctx context.Context, creds InstallationCreden
 		return BotInfo{}, errors.New("lark http client: bot info: response missing open_id")
 	}
 
-	// Resolve union_id via the contact endpoint. Soft-fail: log and
-	// return the BotInfo with empty UnionID. Callers (Registration-
-	// Service.finishSuccess) accept the gap and persist what they
-	// have.
-	unionID, lookupErr := c.fetchBotUnionID(ctx, creds, botResp.Bot.OpenID)
-	if lookupErr != nil {
-		c.cfg.Logger.Warn("lark http client: bot union_id lookup failed; continuing without it",
-			"app_id", creds.AppID,
-			"bot_open_id", botResp.Bot.OpenID,
-			"err", lookupErr)
-	}
-	return BotInfo{OpenID: OpenID(botResp.Bot.OpenID), UnionID: unionID}, nil
+	return BotInfo{OpenID: OpenID(botResp.Bot.OpenID)}, nil
 }
 
 // GetMessage retrieves a message by id via
 // GET /open-apis/im/v1/messages/{message_id}. The endpoint always wraps
 // the result in data.items[] — one element for a normal message, and a
 // forward sentinel followed by the bundled child messages for a
-// `merge_forward`. We pass user_id_type=open_id so sender.id and
-// mentions[].id come back as open_ids, matching the identifiers the
-// rest of the package keys on.
+// `merge_forward`. Omit user_id_type so mentions of both people and bots
+// use open_id; explicitly selecting open_id returns app_id for bot mentions.
 //
 // body.content is forwarded verbatim (the raw, JSON-encoded, msg_type-
 // specific string Lark double-encodes); the enricher's flattener owns
@@ -638,9 +599,7 @@ func (c *httpAPIClient) GetMessage(ctx context.Context, creds InstallationCreden
 	if messageID == "" {
 		return nil, errors.New("lark http client: missing message_id")
 	}
-	q := url.Values{}
-	q.Set("user_id_type", "open_id")
-	path := "/open-apis/im/v1/messages/" + url.PathEscape(messageID) + "?" + q.Encode()
+	path := "/open-apis/im/v1/messages/" + url.PathEscape(messageID)
 
 	var resp struct {
 		Code int    `json:"code"`
@@ -680,9 +639,9 @@ const larkListMessagesMaxPageSize = 50
 // share the chat_id (#5835). We pass sort_type=ByCreateTimeDesc so the
 // newest messages come first and a small page_size captures "the last N"
 // without paginating, keeping the inbound ACK path's fan-out to a single
-// round-trip. user_id_type=open_id matches the identifiers the rest of the
-// package keys on; body.content is forwarded verbatim for the enricher's
-// flattener to interpret.
+// round-trip. The endpoint returns open_ids for mentions without a
+// user_id_type override; body.content is forwarded verbatim for the
+// enricher's flattener to interpret.
 func (c *httpAPIClient) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
 	if p.ChatID == "" {
 		return nil, errors.New("lark http client: missing chat_id")
@@ -711,7 +670,6 @@ func (c *httpAPIClient) ListChatMessages(ctx context.Context, creds Installation
 	}
 	q.Set("sort_type", "ByCreateTimeDesc")
 	q.Set("page_size", strconv.Itoa(size))
-	q.Set("user_id_type", "open_id")
 	path := "/open-apis/im/v1/messages?" + q.Encode()
 
 	var resp struct {
@@ -1091,8 +1049,7 @@ func (c *httpAPIClient) ListMessageReactions(ctx context.Context, p ListMessageR
 
 // BatchGetUsers resolves user open_ids to display names via
 // GET /open-apis/contact/v3/users/batch?user_ids=…&user_id_type=open_id.
-// It mirrors fetchBotUnionID's single-user contact lookup, batched. Only
-// id->name pairs the API actually returns are included; a restricted
+// Only id->name pairs the API actually returns are included; a restricted
 // contact scope or an unknown id simply yields a smaller map (code==0
 // with fewer items), never an error, so the enricher degrades to
 // positional speaker labels. Ids past Lark's 50-per-call cap are dropped.
@@ -1187,48 +1144,6 @@ func (it larkRESTMessageItem) normalize() LarkMessage {
 		m.Mentions = append(m.Mentions, LarkMessageMention{Key: mn.Key, ID: mn.ID, Name: mn.Name})
 	}
 	return m
-}
-
-// fetchBotUnionID resolves a Bot's `union_id` from its `open_id` via
-// /open-apis/contact/v3/users/{open_id}?user_id_type=open_id. Split
-// out from GetBotInfo so the failure mode is explicit and the call
-// sites that only need open_id don't pay for the second round-trip.
-//
-// Empty string + nil error is a valid outcome: Lark's user endpoint
-// can return code=0 with no union_id field when the app's contact
-// scope is restricted. Caller logs and continues; the decoder still
-// works in single-bot deployments where open_id-based matching is
-// unambiguous.
-func (c *httpAPIClient) fetchBotUnionID(ctx context.Context, creds InstallationCredentials, openID string) (string, error) {
-	if openID == "" {
-		return "", errors.New("empty open_id")
-	}
-	q := url.Values{}
-	q.Set("user_id_type", "open_id")
-	path := "/open-apis/contact/v3/users/" + url.PathEscape(openID) + "?" + q.Encode()
-	var resp struct {
-		Code int    `json:"code"`
-		Msg  string `json:"msg"`
-		Data struct {
-			User struct {
-				UnionID string `json:"union_id"`
-			} `json:"user"`
-		} `json:"data"`
-	}
-	if err := c.doAuthedJSON(ctx, creds, http.MethodGet, path, nil, &resp); err != nil {
-		return "", fmt.Errorf("contact users: %w", err)
-	}
-	if resp.Code != 0 {
-		// invalidateToken is keyed by app_id (the cache key on
-		// httpAPIClient.tokens), NOT by the bearer string. Passing
-		// the bearer would do nothing and a stale token would keep
-		// being reused on every retry until natural TTL expiry.
-		if isTokenError(resp.Code) {
-			c.invalidateToken(creds.AppID)
-		}
-		return "", fmt.Errorf("contact users: code=%d msg=%q", resp.Code, resp.Msg)
-	}
-	return resp.Data.User.UnionID, nil
 }
 
 // doJSON encapsulates the verb + URL + auth-header + JSON

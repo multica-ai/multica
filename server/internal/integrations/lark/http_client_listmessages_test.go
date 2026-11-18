@@ -9,7 +9,7 @@ import (
 
 // TestHTTPClient_ListChatMessages exercises the group-context list path:
 // the request carries container_id_type=chat, the chat id, a descending
-// sort, the requested page_size, and user_id_type=open_id; items[] come
+// sort and requested page_size, without user_id_type; items[] come
 // back normalized verbatim (ordering is the enricher's job, not the
 // transport's).
 func TestHTTPClient_ListChatMessages(t *testing.T) {
@@ -32,8 +32,8 @@ func TestHTTPClient_ListChatMessages(t *testing.T) {
 		if q.Get("page_size") != "20" {
 			t.Errorf("page_size = %q", q.Get("page_size"))
 		}
-		if q.Get("user_id_type") != "open_id" {
-			t.Errorf("user_id_type = %q", q.Get("user_id_type"))
+		if q.Has("user_id_type") {
+			t.Errorf("user_id_type must be omitted: %q", r.URL.RawQuery)
 		}
 		if q.Get("end_time") != "1700000000" {
 			t.Errorf("end_time = %q", q.Get("end_time"))
