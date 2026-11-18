@@ -1,17 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api/client";
 import type { ReactNode } from "react";
-import { useFreshStreamedMediaURL,
+import {
+  useFreshStreamedMediaURL,
   useResignedInlineMedia,
   __resetInlineMediaBlobCacheForTests,
 } from "./use-inline-media-url";
 
-const { getAttachment, getAttachmentBlob, getBaseUrl } = vi.hoisted(() => ({
-  getAttachment: vi.fn(), getAttachmentBlob: vi.fn(), getBaseUrl: vi.fn(() => "https://api.example.test"),
+const { getAttachment, getAttachmentForDownload, getAttachmentBlob, getBaseUrl } = vi.hoisted(() => ({
+  getAttachment: vi.fn(), getAttachmentForDownload: vi.fn(), getAttachmentBlob: vi.fn(), getBaseUrl: vi.fn(() => "https://api.example.test"),
 }));
-vi.mock("@multica/core/api", () => ({ api: { getAttachment, getAttachmentBlob, getBaseUrl } }));
+vi.mock("@multica/core/api", () => ({ api: { getAttachment, getAttachmentForDownload, getAttachmentBlob, getBaseUrl } }));
 const id = "11111111-2222-3333-4444-555555555555";
 const stable = `/api/attachments/${id}/download`;
 const capability = (exp: number, sig = "fresh") => `/api/attachments/${id}/signed-download?exp=${exp}&sig=${sig}`;
@@ -23,8 +24,10 @@ function setup() {
 }
 afterEach(() => {
   cleanup();
-  __resetInlineMediaBlobCacheForTests(); vi.useRealTimers(); vi.clearAllMocks(); vi.unstubAllGlobals();
+  __resetInlineMediaBlobCacheForTests();
+  vi.useRealTimers(); vi.clearAllMocks(); vi.unstubAllGlobals();
   focusManager.setFocused(undefined);
+  onlineManager.setOnline(true);
   getBaseUrl.mockReturnValue("https://api.example.test");
 });
 
@@ -142,6 +145,7 @@ describe("registered image viewer access", () => {
     useResignedInlineMedia(id, cached, true, { refreshOnMount: true });
   it("renews a cached signed image before handing it to the viewer", async () => {
     getAttachment.mockResolvedValue({
+      id,
       download_url: "https://cdn.example.test/design.png?Signature=fresh",
     });
     const { wrapper } = setup();
@@ -156,6 +160,7 @@ describe("registered image viewer access", () => {
   });
   it("waits for current authentication instead of reusing metadata cached on an earlier open", async () => {
     getAttachment.mockResolvedValueOnce({
+      id,
       download_url: "https://cdn.example.test/first.png?Signature=first",
     });
     const { client, wrapper } = setup();
@@ -164,7 +169,7 @@ describe("registered image viewer access", () => {
       expect(first.result.current.url).toContain("Signature=first"),
     );
     first.unmount();
-    let finish!: (value: { download_url: string }) => void;
+    let finish!: (value: { id: string; download_url: string }) => void;
     getAttachment.mockImplementationOnce(
       () =>
         new Promise((resolve) => {
@@ -176,6 +181,7 @@ describe("registered image viewer access", () => {
     expect(second.result.current.url).toBe("");
     await act(async () => {
       finish({
+        id,
         download_url: "https://cdn.example.test/second.png?Signature=second",
       });
     });
@@ -190,6 +196,7 @@ describe("registered image viewer access", () => {
     async (status) => {
       const { client, wrapper } = setup();
       client.setQueryData(["attachment-inline-resign", id], {
+        id,
         download_url: "https://cdn.example.test/previous.png?Signature=private",
       });
       getAttachment.mockRejectedValue(
@@ -231,7 +238,7 @@ describe("fresh image access on proxy storage", () => {
   const useOpenedImage = () =>
     useResignedInlineMedia(id, cached, true, { refreshOnMount: true });
   it("keeps the authenticated byte fallback when metadata has no native signed URL", async () => {
-    getAttachment.mockResolvedValue({ download_url: stable });
+    getAttachment.mockResolvedValue({ id, download_url: stable });
     getAttachmentBlob.mockResolvedValue(
       new Blob(["png"], { type: "image/png" }),
     );
@@ -252,7 +259,7 @@ describe("fresh image access on proxy storage", () => {
     expect(getAttachmentBlob).toHaveBeenCalledWith(id);
   });
   it("does not show a blob from an earlier QueryClient before current authentication succeeds", async () => {
-    getAttachment.mockResolvedValueOnce({ download_url: stable });
+    getAttachment.mockResolvedValueOnce({ id, download_url: stable });
     getAttachmentBlob.mockResolvedValue(
       new Blob(["private png"], { type: "image/png" }),
     );
@@ -278,7 +285,7 @@ describe("fresh image access on proxy storage", () => {
     expect(getAttachmentBlob).toHaveBeenCalledTimes(1);
   });
   it("fails instead of rendering the old URL when authenticated image bytes are denied", async () => {
-    getAttachment.mockResolvedValue({ download_url: stable });
+    getAttachment.mockResolvedValue({ id, download_url: stable });
     getAttachmentBlob.mockRejectedValue(
       new ApiError("denied", 403, "Forbidden"),
     );
@@ -291,12 +298,14 @@ describe("fresh image access on proxy storage", () => {
     const other = "aaaaaaaa-2222-3333-4444-555555555555";
     const { client, wrapper } = setup();
     client.setQueryData(["attachment-inline-resign", other], {
+      id: other,
       download_url: "https://cdn.example.test/other.png?Signature=old",
     });
-    let finish!: (value: { download_url: string }) => void;
+    let finish!: (value: { id: string; download_url: string }) => void;
     getAttachment.mockImplementation((selected: string) =>
       selected === id
         ? Promise.resolve({
+            id,
             download_url: "https://cdn.example.test/first.png?Signature=fresh",
           })
         : new Promise((resolve) => {
@@ -316,6 +325,7 @@ describe("fresh image access on proxy storage", () => {
     expect(h.result.current.url).toBe("");
     await act(async () => {
       finish({
+        id: other,
         download_url: "https://cdn.example.test/other.png?Signature=fresh",
       });
     });
@@ -324,4 +334,96 @@ describe("fresh image access on proxy storage", () => {
     );
     expect(getAttachment).toHaveBeenCalledWith(other);
   });
+});
+
+describe("image viewer current authorization regressions", () => {
+  it("waits when an offline reopen pauses the metadata refresh", () => {
+    onlineManager.setOnline(false);
+    const { client, wrapper } = setup();
+    client.setQueryData(["attachment-inline-resign", id], {
+      id,
+      download_url: "https://cdn.example.test/private.png?Signature=old",
+    });
+    const hook = renderHook(
+      () => useResignedInlineMedia(id, stable, true, { refreshOnMount: true }),
+      { wrapper },
+    );
+    expect(hook.result.current.url).toBe("");
+    expect(hook.result.current.pending).toBe(true);
+    expect(getAttachment).not.toHaveBeenCalled();
+  });
+
+  it("uses the owning-workspace metadata endpoint for a pasted download link", async () => {
+    getAttachment.mockRejectedValue(
+      new ApiError("wrong workspace", 404, "Not Found"),
+    );
+    getAttachmentForDownload.mockResolvedValue({
+      id,
+      download_url: "https://cdn.example.test/pasted.png?Signature=new",
+    });
+    const hook = renderHook(
+      () =>
+        useResignedInlineMedia(id, stable, true, {
+          refreshOnMount: true,
+          metadataSource: "markdown-link",
+        }),
+      { wrapper: setup().wrapper },
+    );
+    await waitFor(() =>
+      expect(hook.result.current.url).toContain("pasted.png"),
+    );
+    expect(getAttachmentForDownload).toHaveBeenCalledWith(id);
+    expect(getAttachment).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed metadata instead of unlocking a previous private blob", async () => {
+    getAttachment.mockResolvedValueOnce({ id, download_url: stable });
+    getAttachmentBlob.mockResolvedValue(new Blob(["private"]));
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL = vi.fn(() => "blob:private");
+        static revokeObjectURL = vi.fn();
+      },
+    );
+    const first = renderHook(
+      () => useResignedInlineMedia(id, stable, true, { refreshOnMount: true }),
+      { wrapper: setup().wrapper },
+    );
+    await waitFor(() => expect(first.result.current.url).toBe("blob:private"));
+    first.unmount();
+    getAttachment.mockResolvedValueOnce({ id: "", download_url: "" });
+    const second = renderHook(
+      () => useResignedInlineMedia(id, stable, true, { refreshOnMount: true }),
+      { wrapper: setup().wrapper },
+    );
+    await waitFor(() => expect(second.result.current.failed).toBe(true));
+    expect(second.result.current.url).toBe("");
+    expect(getAttachmentBlob).toHaveBeenCalledTimes(1);
+  });
+});
+
+it("uses a new signed URL despite an earlier failure of the inactive byte path", async () => {
+  const { client, wrapper } = setup();
+  await client
+    .fetchQuery({
+      queryKey: ["attachment-inline-blob", id],
+      queryFn: () =>
+        Promise.reject(new ApiError("old failure", 403, "Forbidden")),
+      retry: false,
+    })
+    .catch(() => {});
+  getAttachment.mockResolvedValueOnce({
+    id,
+    download_url: "https://cdn.example.test/recovered.png?Signature=new",
+  });
+  const hook = renderHook(
+    () => useResignedInlineMedia(id, stable, true, { refreshOnMount: true }),
+    { wrapper },
+  );
+  await waitFor(() =>
+    expect(hook.result.current.url).toContain("recovered.png"),
+  );
+  expect(hook.result.current.failed).toBe(false);
+  expect(getAttachmentBlob).not.toHaveBeenCalled();
 });

@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { ApiError } from "@multica/core/api/client";
+import type { Attachment } from "@multica/core/types";
 import {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
@@ -84,7 +85,15 @@ export function useResignedInlineMedia(
   attachmentId: string | undefined,
   rawPickedUrl: string,
   blobFallback: boolean,
-  { refreshOnMount = false }: { refreshOnMount?: boolean } = {},
+  {
+    refreshOnMount = false,
+    metadataSource = "workspace",
+    currentMetadata,
+  }: {
+    refreshOnMount?: boolean;
+    metadataSource?: "workspace" | "markdown-link";
+    currentMetadata?: Attachment;
+  } = {},
 ): { url: string; pending: boolean; failed: boolean } {
   const pickedUrl = resolveLegacyLocalMediaURL(rawPickedUrl);
   const idFromPickedUrl = attachmentIdFromDownloadURL(pickedUrl);
@@ -107,14 +116,14 @@ export function useResignedInlineMedia(
       (idFromPickedUrl !== undefined &&
         ((api.getBaseUrl?.() ?? "") !== "" || isCrossOriginWebURL)));
 
-  const {
-    data: fresh,
-    isError: freshFailed,
-    isFetching: metadataFetching,
-  } = useQuery({
-    queryKey: ["attachment-inline-resign", resignAttachmentId],
-    queryFn: () => api.getAttachment(resignAttachmentId as string),
-    enabled: needsResign,
+  const metadataQuery = useQuery({
+    queryKey: metadataSource === "markdown-link"
+      ? ["attachment-inline-resign", resignAttachmentId, "markdown-link"]
+      : ["attachment-inline-resign", resignAttachmentId],
+    queryFn: () => metadataSource === "markdown-link"
+      ? api.getAttachmentForDownload(resignAttachmentId as string)
+      : api.getAttachment(resignAttachmentId as string),
+    enabled: needsResign && !currentMetadata,
     staleTime: refreshOnMount ? 0 : RESIGN_STALE_MS,
     gcTime: RESIGN_STALE_MS,
     ...(refreshOnMount
@@ -127,6 +136,11 @@ export function useResignedInlineMedia(
       : {}),
   });
 
+  const fresh = currentMetadata ?? metadataQuery.data;
+  const freshFailed = !currentMetadata && metadataQuery.isError;
+  // Offline refreshes are paused, not fetching, and still need authorization.
+  const metadataPending = !currentMetadata && metadataQuery.fetchStatus !== "idle";
+  const invalidMetadata = refreshOnMount && !!fresh && fresh.id !== resignAttachmentId;
   const dl = fresh?.download_url ?? "";
   // Accept the fresh URL only when it is an actual upgrade — absolute and no
   // longer the auth-gated API shape (i.e. a signed storage URL the renderer
@@ -140,7 +154,7 @@ export function useResignedInlineMedia(
   // signed to give — firing the byte fetch earlier would double-download on
   // every CloudFront / presign client.
   const isAuthenticated =
-    !!fresh && !(refreshOnMount && (metadataFetching || freshFailed));
+    !!fresh && !(refreshOnMount && (metadataPending || freshFailed || invalidMetadata));
   const { data: blob, isError: blobFailed } = useQuery({
     queryKey: ["attachment-inline-blob", resignAttachmentId],
     queryFn: () => api.getAttachmentBlob(resignAttachmentId as string),
@@ -158,9 +172,9 @@ export function useResignedInlineMedia(
   const blobUrl = useObjectURL(resignAttachmentId, blob, isAuthenticated);
 
   if (!needsResign) return { url: pickedUrl, pending: false, failed: false };
-  if (refreshOnMount && metadataFetching)
+  if (refreshOnMount && metadataPending)
     return { url: "", pending: true, failed: false };
-  if (refreshOnMount && (freshFailed || blobFailed))
+  if (refreshOnMount && (freshFailed || invalidMetadata || (signedUrl === "" && blobFailed)))
     return { url: "", pending: false, failed: true };
   if (signedUrl) return { url: signedUrl, pending: false, failed: false };
   // Only return the cached blob URL when it belongs to the current id and

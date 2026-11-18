@@ -37,6 +37,7 @@ vi.mock("sonner", () => ({ toast: toastMock }));
 const {
   getAttachmentTextContentMock,
   getAttachmentMock,
+  getAttachmentForDownloadMock,
   getAttachmentBlobMock,
   downloadMock,
   getBaseUrlMock,
@@ -59,8 +60,9 @@ const {
     getAttachmentTextContentMock: vi.fn(),
     // Re-sign metadata. Rejects by default: a deployment with nothing to
     // upgrade to, so the picked URL stands.
-    getAttachmentMock: vi.fn((): Promise<Attachment> => Promise.reject(new Error("no re-sign"))),
+    getAttachmentMock: vi.fn<(id: string) => Promise<Attachment>>(() => Promise.reject(new Error("no re-sign"))),
     getAttachmentBlobMock: vi.fn(),
+    getAttachmentForDownloadMock: vi.fn(),
     downloadMock: vi.fn(),
     // Default to the web shape (empty base, same-origin). Tests covering
     // the desktop-renderer / standalone-shell case override per-test.
@@ -74,6 +76,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     getAttachmentTextContent: getAttachmentTextContentMock,
     getAttachment: getAttachmentMock,
+    getAttachmentForDownload: getAttachmentForDownloadMock,
     getAttachmentBlob: getAttachmentBlobMock,
     getBaseUrl: getBaseUrlMock,
   },
@@ -236,6 +239,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   getAttachmentMock.mockReset().mockRejectedValue(new ApiError("no re-sign", 404, "Not Found"));
   getAttachmentBlobMock.mockReset();
+  getAttachmentForDownloadMock.mockReset();
   downloadMock.mockReset();
   // Drops any body a test queued but never consumed (a media kind skips the
   // text fetch), so it cannot answer the next test's request.
@@ -455,7 +459,7 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
   // is loaded from `app://` / file: / dev-server origin and needs the
   // absolute URL — otherwise `<img src>`, `<iframe src>`, `<video src>`
   // hit the shell origin and fail.
-  it.each(["https://api.example.tes t", "", "https://api.example.test/"])(
+  it.each(["https://api.example.test", "", "https://api.example.test/"])(
     "loads authenticated image bytes with API base '%s'",
     async (base) => {
     getBaseUrlMock.mockReturnValue(base);
@@ -1881,4 +1885,108 @@ describe("AttachmentPreviewModal — current image access failures", () => {
       expect(getAttachmentBlobMock).not.toHaveBeenCalled();
     },
   );
+});
+
+it.each(["pending", "denied"])(
+  "does not expose the current attachment's held frame when access is %s",
+  async (phase) => {
+    isDesktopShellMock.mockReturnValue(true);
+    const a = makeAttachment({
+      id: "att-a",
+      filename: "a.png",
+      content_type: "image/png",
+      download_url: "https://cdn.example.test/a.png?Signature=old",
+    });
+    const b = makeAttachment({
+      id: "att-b",
+      filename: "b.png",
+      content_type: "image/png",
+      download_url: "https://cdn.example.test/b.png?Signature=new",
+    });
+    let aCalls = 0;
+    let deny!: (error: Error) => void;
+    getAttachmentMock.mockImplementation((id: string) =>
+      id === a.id
+        ? ++aCalls === 1
+          ? Promise.resolve(a)
+          : new Promise<Attachment>((_resolve, reject) => {
+              deny = reject;
+            })
+        : Promise.resolve(b),
+    );
+    Object.defineProperty(HTMLImageElement.prototype, "decode", {
+      configurable: true,
+      value: function (this: HTMLImageElement) {
+        return this.src === a.download_url
+          ? Promise.resolve()
+          : new Promise<void>(() => {});
+      },
+    });
+    function Harness() {
+      const [selected, setSelected] = useState(a);
+      return (
+        <>
+          <button onClick={() => setSelected(a)}>Select A</button>
+          <button onClick={() => setSelected(b)}>Select B</button>
+          <AttachmentPreviewModal
+            source={{ kind: "full", attachment: selected }}
+            open
+            onClose={() => {}}
+          />
+        </>
+      );
+    }
+    try {
+      render(<Harness />);
+      await screen.findByRole("img", { name: a.filename });
+      fireEvent.click(screen.getByText("Select B"));
+      await waitFor(() => expect(getAttachmentMock).toHaveBeenCalledWith(b.id));
+      fireEvent.click(screen.getByText("Select A"));
+      await waitFor(() => expect(aCalls).toBe(2));
+      if (phase === "pending") {
+        expect(screen.queryByRole("img", { name: a.filename })).toBeNull();
+      } else {
+        await act(async () => {
+          deny(new ApiError("revoked", 403, "Forbidden"));
+        });
+        await screen.findByText("Couldn't load preview");
+        expect(
+          screen.getByRole("button", { name: "Copy image" }),
+        ).toBeDisabled();
+        fireEvent.click(screen.getByRole("button", { name: "Copy image" }));
+        expect(copyImageMock).not.toHaveBeenCalled();
+      }
+    } finally {
+      delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
+    }
+  },
+);
+
+it("refreshes a pasted protected image against its owning workspace", async () => {
+  const id = "11111111-2222-3333-4444-555555555555";
+  const fresh = makeAttachment({
+    id,
+    workspace_id: "other-workspace",
+    filename: "pasted.png",
+    content_type: "image/png",
+  });
+  getAttachmentForDownloadMock.mockResolvedValueOnce(fresh);
+  render(
+    <AttachmentPreviewModal
+      source={{
+        kind: "url",
+        url: `/api/attachments/${id}/download`,
+        filename: fresh.filename,
+      }}
+      open
+      onClose={() => {}}
+    />,
+  );
+  expect(
+    (await screen.findByRole("img", { name: fresh.filename })).getAttribute(
+      "src",
+    ),
+  ).toBe(fresh.download_url);
+  expect(getAttachmentForDownloadMock).toHaveBeenCalledWith(id);
+  expect(getAttachmentMock).not.toHaveBeenCalled();
 });
