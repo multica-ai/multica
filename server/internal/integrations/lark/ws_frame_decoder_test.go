@@ -101,13 +101,9 @@ func TestLarkJSONFrameDecoderGroupMentionDiscrimination(t *testing.T) {
 	})
 }
 
-// TestLarkJSONFrameDecoderGroupMentionUnionID exercises the MUL-2671
-// fix: in a multi-bot group chat the per-app `mentions[].id.open_id`
-// is structurally inverted across WS perspectives, so we route on
-// `union_id` (the stable, cross-app identifier captured at install
-// time) when the installation row knows it. The open_id path remains
-// as a transitional fallback for installations that haven't been
-// backfilled yet.
+// TestLarkJSONFrameDecoderGroupMentionUnionID checks the existing identity
+// precedence with synthetic inputs: a stored union_id takes precedence;
+// without one, the decoder compares open_ids.
 func TestLarkJSONFrameDecoderGroupMentionUnionID(t *testing.T) {
 	t.Parallel()
 
@@ -129,12 +125,8 @@ func TestLarkJSONFrameDecoderGroupMentionUnionID(t *testing.T) {
 	pgText := func(s string) pgtype.Text { return pgtype.Text{String: s, Valid: true} }
 
 	t.Run("union_id match wins even when open_id mismatches", func(t *testing.T) {
-		// Two-bot group chat, this bot's WS perspective:
-		// payload.mentions[0].open_id is the WIRE-form open_id Lark
-		// hands us (not equal to our installation's bot_open_id,
-		// which is what /bot/v3/info returned), but the union_id is
-		// the stable identifier we captured at install. The match
-		// must succeed.
+		// A matching union_id takes precedence over this fixture's
+		// deliberately different open_id.
 		inst := Installation{
 			BotOpenID:  "ou_bot_a_canonical",
 			BotUnionID: pgText("on_bot_a_union"),
@@ -149,11 +141,8 @@ func TestLarkJSONFrameDecoderGroupMentionUnionID(t *testing.T) {
 	})
 
 	t.Run("union_id mismatch wins even when open_id matches", func(t *testing.T) {
-		// The other bot in the group was @-mentioned; Lark hands
-		// THIS bot's WS a payload whose mentions[].id.open_id
-		// happens to equal our bot_open_id (the inverse-mapping
-		// quirk Bohan's live triage surfaced). The match must NOT
-		// fire — union_id is the source of truth.
+		// A mismatching union_id prevents a match despite this fixture's
+		// deliberately matching open_id.
 		inst := Installation{
 			BotOpenID:  "ou_bot_a_canonical",
 			BotUnionID: pgText("on_bot_a_union"),
@@ -168,9 +157,8 @@ func TestLarkJSONFrameDecoderGroupMentionUnionID(t *testing.T) {
 	})
 
 	t.Run("falls back to open_id when union_id is unknown", func(t *testing.T) {
-		// Pre-backfill installation row: no union_id yet. Decoder
-		// must keep working in the single-bot case via the legacy
-		// open_id comparison.
+		// Without a stored union_id, compare the mention's open_id
+		// with this installation's bot_open_id.
 		inst := Installation{BotOpenID: "ou_bot_a_canonical"}
 		msg, ok, err := d.Decode(mkRaw("ou_bot_a_canonical", "on_anything"), inst)
 		if err != nil || !ok {
@@ -351,10 +339,8 @@ func TestLarkJSONFrameDecoderMentionPlaceholderRewrite(t *testing.T) {
 	})
 
 	t.Run("open_id match does NOT strip when union_id known but differs", func(t *testing.T) {
-		// Mirror of containsMention's union_id-first rule: when we
-		// know our union_id, an open_id-only match means the mention
-		// is for the OTHER bot (the inverse-mapping quirk), so we
-		// must render it as @<name>, not strip it.
+		// The stored union_id takes precedence here as in containsMention:
+		// this fixture's mismatching union_id leaves the mention visible.
 		inst := Installation{
 			BotOpenID:  "ou_self_canonical",
 			BotUnionID: pgText("on_self_union"),

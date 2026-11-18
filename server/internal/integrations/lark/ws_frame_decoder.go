@@ -280,13 +280,8 @@ func resolveMentions(text string, mentions []larkMention, botOpenID, botUnionID 
 	return string(out)
 }
 
-// isBotMention identifies whether a payload mention refers to THIS
-// bot. Stays in lockstep with containsMention: when union_id is
-// known we trust it exclusively (open_id is structurally inverted
-// in multi-bot groups — matching on it would re-introduce the
-// MUL-2671 routing bug). Only when union_id is missing do we fall
-// back to open_id, which is correct in single-bot installs and the
-// best we can do in pre-backfill rows.
+// isBotMention uses the same identity precedence as containsMention so
+// routing and self-mention removal agree.
 func isBotMention(m larkMention, botOpenID, botUnionID string) bool {
 	if botUnionID != "" {
 		return m.ID.UnionID == botUnionID
@@ -323,32 +318,10 @@ func normalizeChatType(t string) ChatType {
 
 // containsMention answers "was THIS bot @-mentioned in this group event".
 //
-// The bot's stable identifier across WS perspectives is `union_id` —
-// see MUL-2671 group-@-mention triage. In a Lark group with several
-// Multica bots, each bot's WS receives the event, and Lark fills
-// `mentions[].id.open_id` with the per-app form for whichever bot it
-// is talking to: bot X's WS sees X's payload-form open_id when bot Y
-// was @-ed, and a different payload-form open_id when X itself was
-// the target. Only `union_id` is consistent across both WS streams.
-//
-// Match order:
-//
-//  1. When we know the bot's `union_id` (captured by GetBotInfo at
-//     install time, persisted in lark_installation.bot_union_id),
-//     compare against `mentions[].id.union_id`. This is the correct
-//     path and is unambiguous in multi-bot deployments.
-//
-//  2. When `union_id` is unknown — single-bot installs created
-//     before migration 112, or contact-scope-restricted operators
-//     where /contact/v3/users denied the lookup — fall back to the
-//     per-app `open_id` comparison. This is structurally inverted
-//     in multi-bot group chats but is fine for the p2p/single-bot
-//     case the WS sees most of the time, and avoids hard-failing
-//     pre-backfill installations.
-//
-// Empty inputs short-circuit to false rather than matching every
-// mention; that defends against an installation row that somehow
-// has both identifiers blank.
+// A stored bot_union_id takes precedence when present. Otherwise, compare
+// mention open_ids with this installation's bot_open_id. Open IDs are
+// app-scoped, so compare them within the current installation's context.
+// If both stored identifiers are empty, no mention matches.
 func containsMention(mentions []larkMention, botOpenID, botUnionID string) bool {
 	if botUnionID != "" {
 		for _, m := range mentions {
