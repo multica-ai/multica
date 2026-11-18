@@ -5402,8 +5402,6 @@ const MigrateAgentsToRuntimeResponseWireSchema = z
     skipped: z.array(SkippedRuntimeAgentSchema).default([]),
     tasks_migrated: z.number().default(0),
     tasks_staying_active: z.number().default(0),
-    confirmation_token: z.string().optional(),
-    confirmation_expires_at: z.string().optional(),
   })
   .loose();
 
@@ -5417,8 +5415,6 @@ export const MigrateAgentsToRuntimeResponseSchema =
       skipped: wire.skipped,
       tasksMigrated: wire.tasks_migrated,
       tasksStayingActive: wire.tasks_staying_active,
-      confirmationToken: wire.confirmation_token,
-      confirmationExpiresAt: wire.confirmation_expires_at,
     }),
   );
 

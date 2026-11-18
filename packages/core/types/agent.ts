@@ -327,10 +327,6 @@ export interface MigrateAgentsToRuntimeRequest {
   maxConcurrentTasks: number;
   /** Omit to preserve each selected agent's existing runtime config. */
   runtimeConfig?: Record<string, unknown>;
-  /** When true, smart-runtime agents keep their recommended configuration. */
-  useRecommendedConfigForSmartAgents?: boolean;
-  /** Opaque signed preview proof required when a preview is applied later. */
-  confirmationToken?: string;
 }
 
 export interface MigratedRuntimeCurrentConfig {
@@ -375,8 +371,6 @@ export interface MigrateAgentsToRuntimeResponse {
   skipped: SkippedRuntimeAgent[];
   tasksMigrated: number;
   tasksStayingActive: number;
-  confirmationToken?: string;
-  confirmationExpiresAt?: string;
 }
 
 /** The current user's recently used agents in one workspace (max 10, newest

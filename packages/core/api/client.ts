@@ -2579,15 +2579,6 @@ export class ApiClient {
           ...(data.runtimeConfig === undefined
             ? {}
             : { runtime_config: data.runtimeConfig }),
-          ...(data.useRecommendedConfigForSmartAgents === undefined
-            ? {}
-            : {
-                use_recommended_config_for_smart_agents:
-                  data.useRecommendedConfigForSmartAgents,
-            }),
-          ...(data.confirmationToken === undefined
-            ? {}
-            : { confirmation_token: data.confirmationToken }),
         }),
       },
     );
