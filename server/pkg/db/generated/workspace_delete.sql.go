@@ -235,6 +235,16 @@ func (q *Queries) DeleteWorkspaceConnections(ctx context.Context, workspaceID pg
 	return err
 }
 
+const deleteWorkspaceEntitlementFeatureAttempts = `-- name: DeleteWorkspaceEntitlementFeatureAttempts :exec
+DELETE FROM entitlement_feature_attempt
+WHERE entitlement_feature_attempt.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceEntitlementFeatureAttempts(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceEntitlementFeatureAttempts, workspaceID)
+	return err
+}
+
 const deleteWorkspaceEntitlementLimitOverages = `-- name: DeleteWorkspaceEntitlementLimitOverages :exec
 DELETE FROM entitlement_limit_overage
 WHERE entitlement_limit_overage.workspace_id = $1

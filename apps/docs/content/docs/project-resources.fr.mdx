@@ -30,6 +30,8 @@ Un répertoire local ne s'applique qu'au daemon auquel il est lié. Lorsque le d
 
 Ouvrez le projet et cliquez sur **Ajouter un dépôt** dans **Ressources → Dépôts**. Recherchez un dépôt rattaché à l'espace de travail ou collez une URL Git. Les dépôts de l'espace de travail se gèrent dans **Paramètres → Code** ; une fois GitHub connecté, la même page propose **Choisir depuis GitHub** pour importer les dépôts auxquels la GitHub App a accès.
 
+Coller une URL de branche GitHub (`https://github.com/owner/repo/tree/branch`) renseigne séparément l’URL du dépôt et la branche de départ. Les noms de branche encodés dans l’URL sont décodés ; les paramètres de requête et les ancres de page sont exclus. Vérifiez la branche de départ avant d’ajouter le dépôt.
+
 Les dépôts ne se limitent pas à GitHub : toute URL Git accessible par le runtime fonctionne comme ressource de dépôt. Une instance Multica auto-hébergée peut aussi connecter des instances Forgejo, Gitea ou GitLab auto-hébergées dans **Paramètres → Code** ; voir [Fournisseurs Git auto-hébergés](/vcs-integration).
 
 Lors de la création d'un projet, vous pouvez aussi choisir des dépôts directement sous **Dépôts**. Un même projet peut rattacher plusieurs dépôts GitHub.
@@ -92,7 +94,7 @@ Un répertoire local dispose de deux modes d'exécution, définis par ressource 
 
 L'agent travaille directement dans votre répertoire, et les exécutions ont lieu une à la fois. Lorsque deux exécutions utilisent le même répertoire réel, la seconde passe en `waiting_local_directory` et reprend une fois que la première a libéré le répertoire. Deux chemins qui mènent au même répertoire via des liens symboliques différents sont sérialisés de la même manière.
 
-L'attente ne modifie pas le répertoire. Une exécution en attente peut être annulée ; sinon, elle attend que le répertoire devienne disponible.
+L'attente ne modifie pas le répertoire et n'occupe pas de slot d'exécution du daemon. Une exécution en attente peut être annulée ; sinon, elle reprend le démarrage lorsque le répertoire et la capacité d'exécution sont disponibles.
 
 Un simple répertoire non git ne peut utiliser que ce mode : le mode worktree est réservé aux dépôts git.
 

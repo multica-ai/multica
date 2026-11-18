@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText, copyTextAndHtml } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
+import { isFeatureLockedError } from "@multica/core/billing";
 import type { Project, ProjectStatus, ProjectPriority } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { canDeleteProject } from "@multica/core/projects/deletion-permissions";
@@ -32,6 +33,7 @@ import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
+import { usePaidFeatureErrorMessage } from "../../billing";
 import { ProjectAccessControl } from "./project-access";
 import { ProjectLeadPicker } from "./project-lead-picker";
 import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
@@ -166,6 +168,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
+  const paidFeatureError = usePaidFeatureErrorMessage();
   const deleting = deleteProject.isPending;
   const { data: pinnedItems = [] } = useQuery({
     ...pinListOptions(wsId, userId ?? ""),
@@ -259,9 +262,13 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const handleUpdateField = useCallback(
     (data: Parameters<typeof updateProject.mutate>[0] extends { id: string } & infer R ? R : never) => {
       if (!project) return;
-      updateProject.mutate({ id: project.id, ...data });
+      // Field edits roll back silently; a plan refusal (a lead who would join
+      // a private project) needs saying why.
+      updateProject.mutateAsync({ id: project.id, ...data }).catch((err: unknown) => {
+        if (isFeatureLockedError(err)) toast.error(paidFeatureError(err, ""));
+      });
     },
-    [project, updateProject],
+    [project, updateProject, paidFeatureError],
   );
 
   const handleStatusChange = useCallback(

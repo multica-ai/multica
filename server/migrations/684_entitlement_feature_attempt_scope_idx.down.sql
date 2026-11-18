@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS uq_entitlement_feature_attempt_scope;

@@ -1,9 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
+import { paths } from "@multica/core/paths";
 import type { InboxItem } from "@multica/core/types";
 import {
   getInboxDisplayTitle,
   getQuickCreateOutcomeDetail,
+  inboxRowHref,
   isAutopilotQuotaNotice,
   isQuickCreateOutcome,
   resolveDetailItem,
@@ -150,5 +152,18 @@ describe("resolveDetailItem", () => {
   // redirects to the issue page, and the pane must not invent a row meanwhile.
   it("resolves nothing when neither key is in the list", () => {
     expect(resolveDetailItem(list, "issue-gone", "issue-also-gone")).toBeNull();
+  });
+});
+
+describe("inboxRowHref", () => {
+  const p = paths.workspace("acme");
+
+  it("links to the issue identifier, keeping the comment anchor", () => {
+    expect(inboxRowHref(p, item({ issue_identifier: "MUL-7", details: { comment_id: "c-1" } })))
+      .toBe("/acme/issues/MUL-7#comment-c-1");
+  });
+
+  it("falls back to the issue id when the server sent no identifier", () => {
+    expect(inboxRowHref(p, item({ details: { comment_id: "c-1" } }))).toBe("/acme/issues/issue-1#comment-c-1");
   });
 });

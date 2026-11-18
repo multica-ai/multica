@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -66,12 +67,22 @@ type IssueTriggerInput struct {
 // IssueRunTrigger is the resolved decision shared by preview and the write
 // paths. AgentID is the agent that will actually run — the assignee for an
 // agent issue, the squad leader for a squad issue.
+//
+// DeclineReason is set only when the write could have started a run (a create,
+// an assignment, or a promotion out of backlog) and does not. The write paths
+// log it so a run that silently did not start can be explained (#10845).
+// Writes that never start a run leave it empty.
 type IssueRunTrigger struct {
 	IssueID         pgtype.UUID
 	AgentID         pgtype.UUID
 	AssigneeType    string
 	Source          RunEnqueueSource
 	WorkflowHandoff bool
+	DeclineReason   dispatch.ReasonCode
+}
+
+func declineRun(reason dispatch.ReasonCode) (IssueRunTrigger, bool) {
+	return IssueRunTrigger{DeclineReason: reason}, false
 }
 
 func allowAllAgents(db.Agent) bool { return true }
@@ -106,6 +117,9 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return IssueRunTrigger{}, false
 	}
+	if issue.AssigneeType.String != "agent" && issue.AssigneeType.String != "squad" {
+		return IssueRunTrigger{}, false
+	}
 	canAccess := probe.CanAccessAgent
 	if canAccess == nil {
 		canAccess = allowAllAgents
@@ -118,25 +132,9 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	currentStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
 	prevStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, in.PrevStatus)
 
-	// Triage is stricter than the backlog parking lot: backlog defers a run,
-	// Triage refuses one outright (MUL-7189 §2.3). Deciding it here is what
-	// keeps the trigger PREVIEW honest — the queue door would refuse the insert
-	// either way, but silently, and the preview would have promised a run.
-	//
-	// Leaving Triage needs no case of its own. Triage is not a status, so accept
-	// clears this field and then takes the ordinary create / assign path; there
-	// is no "was in triage" transition for this predicate to recognise.
-	if issue.TriageState.Valid {
-		return IssueRunTrigger{}, false
-	}
-
 	var source RunEnqueueSource
 	switch {
 	case in.IsCreate || in.AssigneeChanged:
-		// Backlog is the parking lot: assigning into backlog never starts a run.
-		if currentStatus == "backlog" {
-			return IssueRunTrigger{}, false
-		}
 		source = RunSourceAssign
 	case in.StatusChanged && prevStatus == "backlog" &&
 		currentStatus != "backlog" &&
@@ -146,26 +144,45 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		return IssueRunTrigger{}, false
 	}
 
+	// Triage is stricter than the backlog parking lot: backlog defers a run,
+	// Triage refuses one outright (MUL-7189 §2.3). Deciding it here is what
+	// keeps the trigger PREVIEW honest — the queue door would refuse the insert
+	// either way, but silently, and the preview would have promised a run.
+	//
+	// Leaving Triage needs no case of its own. Triage is not a status, so accept
+	// clears this field and then takes the ordinary create / assign path; there
+	// is no "was in triage" transition for this predicate to recognise.
+	if issue.TriageState.Valid {
+		return declineRun(dispatch.ReasonIssueInTriage)
+	}
+	// Backlog is the parking lot: assigning into backlog never starts a run.
+	if source == RunSourceAssign && currentStatus == "backlog" {
+		return declineRun(dispatch.ReasonDeferred)
+	}
+
 	switch issue.AssigneeType.String {
 	case "agent":
 		agent, err := s.Queries.GetAgent(ctx, issue.AssigneeID)
-		if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-			return IssueRunTrigger{}, false
+		if err != nil || agent.ArchivedAt.Valid {
+			return declineRun(dispatch.ReasonTargetUnavailable)
+		}
+		if !agent.RuntimeID.Valid {
+			return declineRun(dispatch.ReasonAgentRuntimeRequired)
 		}
 		if !canAccess(agent) {
-			return IssueRunTrigger{}, false
+			return declineRun(dispatch.ReasonInvocationNotAllowed)
 		}
 		if source == RunSourceStatus && probe.IsSelfLoop != nil && probe.IsSelfLoop(issue.AssigneeID) {
-			return IssueRunTrigger{}, false
+			return declineRun(dispatch.ReasonAlreadyActive)
 		}
 		if source == RunSourceAssign && !in.IsCreate && !in.EnteredHandoffStep && probe.SuppressActiveSelfAssignment != nil &&
 			probe.SuppressActiveSelfAssignment(issue.AssigneeID) {
-			return IssueRunTrigger{}, false
+			return declineRun(dispatch.ReasonAlreadyActive)
 		}
 		// A step entered under the agent's own run queues behind it; one
 		// already queued covers the new step too.
 		if (source == RunSourceStatus || in.EnteredHandoffStep) && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
-			return IssueRunTrigger{}, false
+			return declineRun(dispatch.ReasonCoalesced)
 		}
 		return IssueRunTrigger{
 			IssueID:      issue.ID,
@@ -186,24 +203,27 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 			WorkspaceID: issue.WorkspaceID,
 		})
 		if err != nil {
-			return IssueRunTrigger{}, false
+			return declineRun(dispatch.ReasonTargetUnavailable)
 		}
 		leader, err := s.Queries.GetAgent(ctx, squad.LeaderID)
 		if err != nil {
-			return IssueRunTrigger{}, false
+			return declineRun(dispatch.ReasonTargetUnavailable)
 		}
 		verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), leader)
-		if err != nil || !verdict.Ready() {
-			return IssueRunTrigger{}, false
+		if err != nil {
+			return declineRun(dispatch.ReasonInternalError)
+		}
+		if !verdict.Ready() {
+			return declineRun(verdict.Reason)
 		}
 		if !canAccess(leader) {
-			return IssueRunTrigger{}, false
+			return declineRun(dispatch.ReasonInvocationNotAllowed)
 		}
 		if source == RunSourceStatus && probe.IsSelfLoop != nil && probe.IsSelfLoop(squad.LeaderID) {
-			return IssueRunTrigger{}, false
+			return declineRun(dispatch.ReasonAlreadyActive)
 		}
 		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, squad.LeaderID) {
-			return IssueRunTrigger{}, false
+			return declineRun(dispatch.ReasonCoalesced)
 		}
 		return IssueRunTrigger{
 			IssueID:         issue.ID,

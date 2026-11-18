@@ -30,6 +30,8 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 開啟專案，在 **資源 → 倉庫** 中點選 **新增倉庫**。搜尋已關聯到工作區的倉庫，或貼上 Git URL。工作區倉庫在 **設定 → 程式碼** 中維護；連線 GitHub 後，可在同一頁面透過 **從 GitHub 選擇** 匯入 App 已授權的倉庫。
 
+貼上 GitHub 分支頁面的 URL（`https://github.com/owner/repo/tree/branch`）時，倉庫位址和起始分支會分別填入。經過 URL 編碼的分支名稱會還原，查詢參數和頁面錨點不會算入分支名稱。新增倉庫前請檢查起始分支。
+
 倉庫不限於 GitHub：任何執行時能訪問的 Git URL 都可以作為倉庫資源。自部署的 Multica 還可以在 **設定 → 程式碼** 連線自託管的 Forgejo、Gitea 或 GitLab，見[自託管 Git 程式碼託管](/vcs-integration)。
 
 建立專案時，也可以直接在 **Repos** 中選擇倉庫。一個專案可以關聯多個 GitHub 倉庫。
@@ -93,7 +95,7 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 AI 代理直接在你的目錄裡工作，同一時間只進行一次執行。兩次執行使用同一個真實目錄時，後到的執行進入 `waiting_local_directory`，等前一次釋放目錄後繼續。兩個路徑經不同符號連結指向同一目錄時，同樣序列。
 
-等待不會修改目錄。等待中的執行可以取消，否則會一直等到目錄可用。
+等待不會修改目錄，也不佔用守護程序執行槽位。等待中的執行可以取消，否則會在目錄和執行容量都可用後繼續啟動。
 
 普通的非 git 目錄只能用這種模式：worktree 模式只面向 git 倉庫。
 

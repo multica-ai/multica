@@ -3,8 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
-import type { Attachment } from "@multica/core/types";
+import type { AgentSkillSummary, Attachment } from "@multica/core/types";
+import type { Editor } from "@tiptap/core";
 import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { issueKeys } from "@multica/core/issues/queries";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
@@ -14,7 +17,12 @@ import { ReplyInput } from "./reply-input";
 type QuickActionMenuProp = {
   getQuickActions?: () => { id: string; name: string; description?: string }[];
   getQuickActionContent?: (quickActionId: string) => string;
+  getSkills?: (editor: Editor) => AgentSkillSummary[];
 };
+
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: { getState: () => ({ user: { id: "user-1" } }) },
+}));
 
 // Uploads now flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181). Tests drive uploads by
@@ -23,6 +31,10 @@ const apiUploadFile = vi.hoisted(() => vi.fn());
 const apiListWorkspaces = vi.hoisted(() => vi.fn());
 const apiListQuickActions = vi.hoisted(() => vi.fn());
 const apiRenderQuickAction = vi.hoisted(() => vi.fn());
+const apiGetIssue = vi.hoisted(() => vi.fn());
+const apiListAgents = vi.hoisted(() => vi.fn());
+const apiListSquads = vi.hoisted(() => vi.fn());
+const apiListMembers = vi.hoisted(() => vi.fn());
 const apiPreviewCommentTriggers = vi.hoisted(() => vi.fn());
 const apiListTasksByIssue = vi.hoisted(() => vi.fn());
 const apiCancelTask = vi.hoisted(() => vi.fn());
@@ -62,6 +74,10 @@ vi.mock("@multica/core/api", () => ({
     listWorkspaces: apiListWorkspaces,
     listQuickActions: apiListQuickActions,
     renderQuickAction: apiRenderQuickAction,
+    getIssue: apiGetIssue,
+    listAgents: apiListAgents,
+    listSquads: apiListSquads,
+    listMembers: apiListMembers,
     previewCommentTriggers: apiPreviewCommentTriggers,
     listTasksByIssue: apiListTasksByIssue,
     cancelTask: apiCancelTask,
@@ -300,6 +316,10 @@ beforeEach(() => {
   apiListWorkspaces.mockReset();
   apiListQuickActions.mockReset();
   apiRenderQuickAction.mockReset();
+  apiGetIssue.mockReset().mockResolvedValue({ id: "issue-1", assignee_type: null, assignee_id: null });
+  apiListAgents.mockReset().mockResolvedValue([]);
+  apiListSquads.mockReset().mockResolvedValue([]);
+  apiListMembers.mockReset().mockResolvedValue([{ user_id: "user-1", role: "member", name: "User" }]);
   apiPreviewCommentTriggers.mockReset();
   apiListTasksByIssue.mockReset();
   apiCancelTask.mockReset();
@@ -337,13 +357,14 @@ describe("quick action `/` menu", () => {
       ],
     });
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return renderWithI18n(
+    const view = renderWithI18n(
       <QueryClientProvider client={queryClient}>
         {/* useQuickActionMenu resolves the workspace from the slug context; without
             it the catalog query stays disabled and every menu reads as empty. */}
         <WorkspaceSlugProvider slug="acme">{ui}</WorkspaceSlugProvider>
       </QueryClientProvider>,
     );
+    return { ...view, queryClient };
   }
 
   // Both composers post to the same issue, so `/` must offer the same catalog in
@@ -371,6 +392,63 @@ describe("quick action `/` menu", () => {
     },
   ];
 
+  async function replySkillIds({
+    timeline,
+    parentId = "comment-1",
+    targetMissing = false,
+    squads = [],
+  }: {
+    timeline: unknown[];
+    parentId?: string;
+    targetMissing?: boolean;
+    squads?: unknown[];
+  }) {
+    const agentIds = [
+      "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "parent-agent",
+      "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "root-leader",
+    ];
+    apiGetIssue.mockResolvedValue({
+      id: "issue-1",
+      assignee_type: "agent",
+      assignee_id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
+    });
+    apiListAgents.mockResolvedValue(agentIds.map((id) => ({
+      id,
+      runtime_id: "runtime-1",
+      archived_at: null,
+      owner_id: null,
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "workspace", target_id: null }],
+      skills: [{ id: `${id}-skill`, name: id, description: "" }],
+    })));
+    apiListSquads.mockResolvedValue(squads);
+    const view = renderInWorkspace(
+      <ReplyInput
+        issueId="issue-1"
+        parentId={parentId}
+        avatarType="member"
+        avatarId="user-1"
+        targetMissing={targetMissing}
+        onSubmit={vi.fn().mockResolvedValue(true)}
+      />,
+    );
+    view.queryClient.setQueryData(issueKeys.timeline("issue-1"), timeline);
+    activateComposer("reply-composer-shell");
+    await waitFor(() => {
+      expect(view.queryClient.getQueryData(issueKeys.detail("ws-1", "issue-1"))).toBeDefined();
+      expect(view.queryClient.getQueryData(workspaceKeys.agents("ws-1"))).toHaveLength(agentIds.length);
+      if (squads.length) {
+        expect(view.queryClient.getQueryData(workspaceKeys.squads("ws-1"))).toHaveLength(squads.length);
+      }
+    });
+    const editor = { state: { doc: { descendants: () => {} } } } as unknown as Editor;
+    const ids = editorQuickActionMenu.last?.getSkills?.(editor).map((skill) => skill.id) ?? [];
+    expect(apiListTasksByIssue).not.toHaveBeenCalled();
+    return ids;
+  }
+
   for (const composer of composers) {
     it(`offers the workspace's active quick actions in the ${composer.name}`, async () => {
       renderInWorkspace(composer.element);
@@ -392,7 +470,128 @@ describe("quick action `/` menu", () => {
       });
       expect(apiRenderQuickAction).not.toHaveBeenCalled();
     });
+
+    it(`resolves Issue assignee skills in the ${composer.name}`, async () => {
+      apiPreviewCommentTriggers.mockResolvedValue({ agents: [], blocked: [] });
+      apiGetIssue.mockResolvedValue({
+        id: "issue-1",
+        assignee_type: "agent",
+        assignee_id: "agent-1",
+      });
+      apiListAgents.mockResolvedValue([{
+        id: "agent-1",
+        runtime_id: "runtime-1",
+        archived_at: null,
+        owner_id: null,
+        permission_mode: "public_to",
+        invocation_targets: [{ target_type: "workspace", target_id: null }],
+        skills: [{ id: "skill-1", name: "deploy", description: "Ship changes" }],
+      }]);
+      renderInWorkspace(composer.element);
+      activateComposer(composer.shell);
+      const editor = {
+        state: { doc: { descendants: () => {} } },
+      } as unknown as Editor;
+
+      await waitFor(() => {
+        expect(editorQuickActionMenu.last?.getSkills?.(editor).map((skill) => skill.id))
+          .toEqual(["skill-1"]);
+      });
+
+      fireEvent.change(screen.getByTestId("editor"), { target: { value: "draft" } });
+      await waitFor(() => expect(apiPreviewCommentTriggers).toHaveBeenCalled());
+      await waitFor(() => expect(editorQuickActionMenu.last?.getSkills?.(editor)).toEqual([]));
+    });
   }
+
+  it("uses the parent comment agent's skills in ReplyInput", async () => {
+    const parent = {
+      type: "comment",
+      id: "comment-1",
+      actor_type: "agent",
+      actor_id: "parent-agent",
+      content: "Agent answer",
+      parent_id: null,
+    };
+
+    expect(await replySkillIds({ timeline: [parent] })).toEqual(["parent-agent-skill"]);
+  });
+
+  it("uses the conversation owner when ReplyInput targets a member root", async () => {
+    const root = {
+      type: "comment",
+      id: "root",
+      actor_type: "member",
+      actor_id: "user-2",
+      content: "Please investigate",
+      parent_id: null,
+    };
+    const agentReply = {
+      ...root,
+      id: "agent-reply",
+      actor_type: "agent",
+      actor_id: "parent-agent",
+      content: "Agent answer",
+      parent_id: root.id,
+    };
+
+    expect(await replySkillIds({ timeline: [root, agentReply], parentId: root.id }))
+      .toEqual(["parent-agent-skill"]);
+  });
+
+  it.each([
+    {
+      name: "agent",
+      content: "[@Root](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa) [@Assignee](mention://agent/cccccccc-cccc-cccc-cccc-cccccccccccc)",
+      squads: [],
+      expected: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa-skill",
+    },
+    {
+      name: "squad",
+      content: "[@Team](mention://squad/dddddddd-dddd-dddd-dddd-dddddddddddd) [@Assignee](mention://agent/cccccccc-cccc-cccc-cccc-cccccccccccc)",
+      squads: [{ id: "dddddddd-dddd-dddd-dddd-dddddddddddd", leader_id: "root-leader", archived_at: null }],
+      expected: "root-leader-skill",
+    },
+  ])("uses the first root $name mention in ReplyInput", async ({ content, squads, expected }) => {
+    const root = {
+      type: "comment",
+      id: "root",
+      actor_type: "member",
+      actor_id: "user-2",
+      content,
+      parent_id: null,
+    };
+    const reply = { ...root, id: "comment-1", content: "Reply", parent_id: root.id };
+
+    expect(await replySkillIds({ timeline: [root, reply], squads })).toEqual([expected]);
+  });
+
+  it("keeps member-to-member ReplyInput threads silent", async () => {
+    const root = {
+      type: "comment",
+      id: "root",
+      actor_type: "member",
+      actor_id: "user-2",
+      content: "Question",
+      parent_id: null,
+    };
+    const reply = { ...root, id: "comment-1", content: "Reply", parent_id: root.id };
+
+    expect(await replySkillIds({ timeline: [root, reply] })).toEqual([]);
+  });
+
+  it("returns no ReplyInput skills when the target is missing", async () => {
+    const parent = {
+      type: "comment",
+      id: "comment-1",
+      actor_type: "agent",
+      actor_id: "parent-agent",
+      content: "Agent answer",
+      parent_id: null,
+    };
+
+    expect(await replySkillIds({ timeline: [parent], targetMissing: true })).toEqual([]);
+  });
 });
 
 /**

@@ -332,3 +332,18 @@ export interface WorkspaceSubscriptionSeatReconcileResult {
 export interface CreateWorkspaceSubscriptionPortalResponse {
   url: string;
 }
+
+/**
+ * Paid features (MUL-9482). The server evaluates each feature for the
+ * workspace: `available` means it can be used and extended, `locked` means
+ * the plan does not include it, so existing configuration keeps working and
+ * can be reduced, but nothing can be added. The server enforces on every
+ * write; this is only for rendering.
+ */
+export type PaidFeature = "private_projects";
+
+export type WorkspaceFeatureState = "available" | "locked";
+
+export interface WorkspaceFeatures {
+  features: Partial<Record<PaidFeature, WorkspaceFeatureState>>;
+}

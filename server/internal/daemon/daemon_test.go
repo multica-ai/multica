@@ -5806,7 +5806,7 @@ func TestHandleTask_BareErrorReportsFailureWithCancelledParent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, 0)
+	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, newTestTaskSlot(0))
 
 	if got := failCalls.Load(); got != 1 {
 		t.Fatalf("fail callback calls = %d, want 1", got)
@@ -5848,7 +5848,7 @@ func TestHandleTask_UntrackedRuntimeFailsBackForRetry(t *testing.T) {
 		return TaskResult{}, nil
 	})
 
-	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, 0)
+	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, newTestTaskSlot(0))
 
 	body, _ := failBody.Load().(map[string]any)
 	if body == nil {
@@ -5921,7 +5921,7 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -6024,7 +6024,7 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -6682,7 +6682,7 @@ func TestHandleTask_AcksCancelAfterPollCancelled(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -6751,7 +6751,7 @@ func TestHandleTask_AcksCancelOnPostRunStatusCheck(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, 0)
+	d.handleTask(context.Background(), task, newTestTaskSlot(0))
 
 	if got := ackCalls.Load(); got != 1 {
 		t.Fatalf("cancel-ack calls = %d, want 1", got)

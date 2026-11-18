@@ -65,6 +65,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"dingtalk_group_presence":            workspaceDelete,
 	"dingtalk_bot_identity":              workspaceDelete,
 	"dingtalk_group_route":               workspaceDelete,
+	"entitlement_feature_attempt":        workspaceDelete,
 	"entitlement_limit_overage":          workspaceDelete,
 	"feedback":                           workspaceDeleteDetach,
 	"github_installation":                workspaceDelete,

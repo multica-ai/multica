@@ -87,7 +87,7 @@ const { cancelRunMock, updateIssueMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("@multica/core/issues/mutations", () => ({
-  useUpdateIssue: () => ({ mutate: updateIssueMock }),
+  useUpdateIssue: () => ({ mutate: updateIssueMock, mutateAsync: updateIssueMock }),
   useCancelIssueRun: () => ({ mutateAsync: cancelRunMock }),
 }));
 
@@ -247,7 +247,7 @@ beforeEach(() => {
   apiMocks.markIssueUnread.mockResolvedValue({ unread: true });
   cancelRunMock.mockReset();
   cancelRunMock.mockResolvedValue(undefined);
-  updateIssueMock.mockReset();
+  updateIssueMock.mockReset().mockResolvedValue(mockIssue);
 });
 
 describe("IssueActionsDropdown", () => {
