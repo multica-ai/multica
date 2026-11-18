@@ -226,8 +226,8 @@ func TestUpdateIssueSuppressRunSkipsEnqueue(t *testing.T) {
 	}
 }
 
-// TestIssueWritesLogWhyARunDidNotStart: assigning an issue that waits in
-// Triage succeeds without a run, and both write paths log why (#10845).
+// Both write paths explain declined agent runs in Triage (#10845), while
+// member assignments never imply that a run could have started.
 func TestIssueWritesLogWhyARunDidNotStart(t *testing.T) {
 	agentID := seededReadyAgentID(t)
 	var logs bytes.Buffer
@@ -240,22 +240,35 @@ func TestIssueWritesLogWhyARunDidNotStart(t *testing.T) {
 		dbfx.Exec(t, `UPDATE issue SET triage_state = 'pending' WHERE id = $1`, issue.ID)
 		return issue
 	}
-	assign := map[string]any{"assignee_type": "agent", "assignee_id": agentID}
+	for _, tc := range []struct {
+		assigneeType string
+		assigneeID   string
+		wantLog      bool
+	}{
+		{assigneeType: "agent", assigneeID: agentID, wantLog: true},
+		{assigneeType: "member", assigneeID: testUserID},
+	} {
+		t.Run(tc.assigneeType, func(t *testing.T) {
+			assign := map[string]any{"assignee_type": tc.assigneeType, "assignee_id": tc.assigneeID}
+			single := inTriage("triage single write " + tc.assigneeType)
+			testutil.Call(t, testHandler.UpdateIssue,
+				withURLParam(newRequest("PUT", "/api/issues/"+single.ID, assign), "id", single.ID)).Want(http.StatusOK)
+			batch := inTriage("triage batch write " + tc.assigneeType)
+			testutil.Call(t, testHandler.BatchUpdateIssues, newRequest("PATCH", "/api/issues/batch?workspace_id="+testWorkspaceID,
+				map[string]any{"issue_ids": []string{batch.ID}, "updates": assign})).Want(http.StatusOK)
 
-	single := inTriage("triage single write")
-	testutil.Call(t, testHandler.UpdateIssue,
-		withURLParam(newRequest("PUT", "/api/issues/"+single.ID, assign), "id", single.ID)).Want(http.StatusOK)
-	batch := inTriage("triage batch write")
-	testutil.Call(t, testHandler.BatchUpdateIssues, newRequest("PATCH", "/api/issues/batch?workspace_id="+testWorkspaceID,
-		map[string]any{"issue_ids": []string{batch.ID}, "updates": assign})).Want(http.StatusOK)
-
-	for _, issue := range []IssueResponse{single, batch} {
-		if got := taskCountFor(t, issue.ID, agentID); got != 0 {
-			t.Fatalf("issue %s in triage got %d tasks, want none", issue.ID, got)
-		}
-		if !hasLogLine(logs.String(), `msg="issue write did not start a run"`, "issue_id="+issue.ID, "reason=issue_in_triage") {
-			t.Fatalf("no decline log for issue %s; logs:\n%s", issue.ID, logs.String())
-		}
+			for _, issue := range []IssueResponse{single, batch} {
+				if got := taskCountFor(t, issue.ID, agentID); got != 0 {
+					t.Fatalf("issue %s in triage got %d tasks, want none", issue.ID, got)
+				}
+				if got := hasLogLine(logs.String(), `msg="issue write did not start a run"`, "issue_id="+issue.ID); got != tc.wantLog {
+					t.Fatalf("decline log for issue %s = %v, want %v; logs:\n%s", issue.ID, got, tc.wantLog, logs.String())
+				}
+				if tc.wantLog && !hasLogLine(logs.String(), `msg="issue write did not start a run"`, "issue_id="+issue.ID, "reason=issue_in_triage") {
+					t.Fatalf("no triage decline reason for issue %s; logs:\n%s", issue.ID, logs.String())
+				}
+			}
+		})
 	}
 }
 

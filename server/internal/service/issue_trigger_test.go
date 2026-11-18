@@ -43,6 +43,9 @@ func TestWillEnqueueRunNamesWhyAWriteStartsNoRun(t *testing.T) {
 	assign := func(issue db.Issue) IssueTriggerInput {
 		return IssueTriggerInput{Issue: issue, PrevStatus: issue.Status, AssigneeChanged: true}
 	}
+	create := func(issue db.Issue) IssueTriggerInput {
+		return IssueTriggerInput{Issue: issue, IsCreate: true}
+	}
 	promote := func(issue db.Issue) IssueTriggerInput {
 		return IssueTriggerInput{Issue: issue, PrevStatus: "backlog", StatusChanged: true}
 	}
@@ -67,6 +70,14 @@ func TestWillEnqueueRunNamesWhyAWriteStartsNoRun(t *testing.T) {
 		{name: "edit while in triage", issue: inTriage(assigned("agent", agentID, "todo")), input: edit},
 		{name: "assignment while in triage", issue: inTriage(assigned("agent", agentID, "todo")), input: assign, want: dispatch.ReasonIssueInTriage},
 		{name: "assignment into backlog", issue: assigned("agent", agentID, "backlog"), input: assign, want: dispatch.ReasonDeferred},
+		{name: "member assignment while in triage", issue: inTriage(assigned("member", userID, "todo")), input: assign},
+		{name: "member assignment into backlog", issue: assigned("member", userID, "backlog"), input: assign},
+		{name: "member creation while in triage", issue: inTriage(assigned("member", userID, "todo")), input: create},
+		{name: "member creation in backlog", issue: assigned("member", userID, "backlog"), input: create},
+		{name: "member promotion while in triage", issue: inTriage(assigned("member", userID, "todo")), input: promote},
+		{name: "member promotion out of backlog", issue: assigned("member", userID, "todo"), input: promote},
+		{name: "squad assignment while in triage", issue: inTriage(assigned("squad", squadID, "todo")), input: assign, want: dispatch.ReasonIssueInTriage},
+		{name: "squad assignment into backlog", issue: assigned("squad", squadID, "backlog"), input: assign, want: dispatch.ReasonDeferred},
 		{name: "agent without a runtime", issue: assigned("agent", unboundAgentID, "todo"), input: assign, want: dispatch.ReasonAgentRuntimeRequired},
 		{name: "archived agent", issue: assigned("agent", archivedAgentID, "todo"), input: assign, want: dispatch.ReasonTargetUnavailable},
 		{name: "agent the caller cannot invoke", issue: assigned("agent", agentID, "todo"), input: assign,

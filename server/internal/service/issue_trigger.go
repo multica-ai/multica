@@ -117,6 +117,9 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return IssueRunTrigger{}, false
 	}
+	if issue.AssigneeType.String != "agent" && issue.AssigneeType.String != "squad" {
+		return IssueRunTrigger{}, false
+	}
 	canAccess := probe.CanAccessAgent
 	if canAccess == nil {
 		canAccess = allowAllAgents
