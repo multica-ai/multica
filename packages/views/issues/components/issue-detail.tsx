@@ -214,6 +214,7 @@ import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useIssueTimelineAnchor } from "../hooks/use-issue-timeline-anchor";
 import { scrollToTimelineComment } from "../utils/scroll-to-timeline-comment";
+import { buildTimelineFindUnits, type TimelineFindUnit } from "../utils/timeline-find-units";
 import { useJumpToLatest } from "../hooks/use-jump-to-latest";
 import { useNewCommentsWhileAway } from "../hooks/use-new-comments-while-away";
 import { useInPageFind } from "../hooks/use-in-page-find";
@@ -658,6 +659,8 @@ function JumpToLatestButton({
     </Button>
   );
 }
+
+const EMPTY_COLLAPSED_IDS: string[] = [];
 
 // Flat per-item shape consumed by <Virtuoso>. Virtuoso needs a flat array
 // where each entry is one rendered row; we keep the grouping logic from
@@ -1972,14 +1975,33 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     [timelineView.groups, expandedResolved],
   );
 
-  // In-page find (Cmd/Ctrl+F). `items.length` is the content signal that
-  // triggers a match recompute when comments are added/removed; text edits
-  // are caught by the hook's own MutationObserver. Opening find forces the
-  // timeline to render flat below so every comment is in the DOM to match.
+  // In-page find (Cmd/Ctrl+F). The timeline stays virtualized while the bar is
+  // open: comments are counted from their Markdown, and stepping to one that
+  // is not mounted lands on it the way a deep link does (MUL-9538). Rendering
+  // the whole history to search its DOM blocked the page for seconds.
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const virtualTimelineRef = useRef<HTMLDivElement>(null);
+  const collapsedThreadIds = useCommentCollapseStore((s) => s.collapsedByIssue[id] ?? EMPTY_COLLAPSED_IDS);
+  const findUnits = useMemo(() => {
+    let built: TimelineFindUnit[] | null = null;
+    const folds = { expandedResolved, collapsed: new Set(collapsedThreadIds) };
+    return () => (built ??= buildTimelineFindUnits(items, timelineView.threadReplies, commentRuns, folds));
+  }, [items, timelineView.threadReplies, commentRuns, expandedResolved, collapsedThreadIds]);
+  const [findReveal, setFindReveal] = useState<{ unit: TimelineFindUnit; done: () => void } | null>(null);
+  const revealFindUnit = useCallback((unit: TimelineFindUnit, done: () => void) => {
+    const request = { unit, done };
+    setFindReveal(request);
+    return () => setFindReveal((current) => (current === request ? null : current));
+  }, []);
   const find = useInPageFind({
     container: scrollContainerEl,
     contentKey: items.length,
     enabled: !!issue,
+    virtual: {
+      root: () => virtualTimelineRef.current,
+      units: findUnits,
+      reveal: revealFindUnit,
+    },
   });
   // Close the bar (and drop highlights) when navigating to another issue —
   // the web route reuses this component instead of remounting.
@@ -2082,11 +2104,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     [items, timelineView.threadReplies],
   );
 
-  // When in-page find renders the timeline flat, there is no
-  // Virtuoso instance — minimap jumps drive the scroll container directly.
-  const isFlatTimeline = find.open;
-  const virtuosoRef = useRef<VirtuosoHandle>(null);
-  const virtualTimelineRef = useRef<HTMLDivElement>(null);
   const [measuredTimelineId, setMeasuredTimelineId] = useState<string | null>(null);
   const handleTimelineHeightChange = useCallback((height: number) => {
     if (height > 0) setMeasuredTimelineId(id);
@@ -2107,7 +2124,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // a screen away.
   const jumpToLatest = useJumpToLatest(scrollContainerEl, {
     nearTopOnly: isMobile,
-    tailPending: !isFlatTimeline && timelineTail.issueId === id && timelineTail.pending,
+    tailPending: timelineTail.issueId === id && timelineTail.pending,
   });
   // Keyed to `away`, not `visible`: mobile hides the button past the top of
   // the page, but the reader has not reached the new comments there.
@@ -2139,31 +2156,27 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     }
     const index = items.findIndex((item) => item.id === rootId);
     if (index < 0) { completeAnchorRestore(); return; }
-    if (!isFlatTimeline && measuredTimelineId !== id) {
+    if (measuredTimelineId !== id) {
       const list = virtualTimelineRef.current;
       if (list) container.scrollTop += list.getBoundingClientRect().top - container.getBoundingClientRect().top;
       return;
     }
     return scrollToTimelineComment({
-      container, virtualizer: isFlatTimeline ? null : virtuosoRef.current, index,
+      container, virtualizer: virtuosoRef.current, index,
       commentId: commentLandingTarget(readingAnchor.commentId, rootId, timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES),
       offset: readingAnchor.offset, onComplete: completeAnchorRestore,
     });
-  }, [readingAnchor, scrollContainerEl, issueLoading, timelineLoading, commentTasksLoading, replyToRoot, commentRuns, items, isFlatTimeline, measuredTimelineId, id, timelineView.threadReplies, completeAnchorRestore]);
+  }, [readingAnchor, scrollContainerEl, issueLoading, timelineLoading, commentTasksLoading, replyToRoot, commentRuns, items, measuredTimelineId, id, timelineView.threadReplies, completeAnchorRestore]);
   // Scroll a freshly posted comment into view, aligned so its bottom sits just
   // above the sticky composer (never behind it). A reply lives inside its root
-  // CommentCard, so the containing top-level row is the scroll target. Flat and
-  // virtualized timelines need separate scroll drivers, so they split into two
-  // effects below — kept apart because only the flat one depends on
-  // `scrollContainerEl`, and adding that dep to the virtualized effect would
-  // let a container re-measure cancel its in-flight scroll mid-flight.
-
-  // Virtualized mode: Virtuoso owns the scroll. The first jump materializes the
-  // row at its estimated height; once measured, the repeat aligns using the
-  // real height. The extra `offset` lifts the row's bottom clear of the sticky
-  // composer.
+  // CommentCard, so the containing top-level row is the scroll target.
+  // Virtuoso owns the scroll. The first jump materializes the row at its
+  // estimated height; once measured, the repeat aligns using the real height.
+  // The extra `offset` lifts the row's bottom clear of the sticky composer.
+  // `scrollContainerEl` stays out of the deps: a container re-measure would
+  // cancel the scroll mid-flight.
   useEffect(() => {
-    if (!pendingPostedCommentId || isFlatTimeline) return;
+    if (!pendingPostedCommentId) return;
     const rootId = replyToRoot.get(pendingPostedCommentId) ?? pendingPostedCommentId;
     const index = items.findIndex((item) => item.id === rootId);
     if (index < 0) return;
@@ -2183,40 +2196,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
       cancelAnimationFrame(frame);
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [pendingPostedCommentId, items, replyToRoot, isFlatTimeline]);
-
-  // Flat mode (find bar) has no Virtuoso, so drive scrollTop by
-  // hand: align the row's bottom to the composer's top edge. The comment's
-  // async layout (markdown, code highlight, images) keeps shifting its height,
-  // so re-align each frame until it settles (within 1px) or ~0.5s elapses — the
-  // same rAF stabilization the deep-link landing uses.
-  useEffect(() => {
-    if (!pendingPostedCommentId || !isFlatTimeline) return;
-    const rootId = replyToRoot.get(pendingPostedCommentId) ?? pendingPostedCommentId;
-    if (items.findIndex((item) => item.id === rootId) < 0) return;
-    let rafId = 0;
-    let frames = 0;
-    let last = -1;
-    const alignBottom = () => {
-      const el = document.getElementById(`comment-${rootId}`);
-      const container = scrollContainerEl;
-      if (el && container) {
-        const c = container.getBoundingClientRect();
-        const e = el.getBoundingClientRect();
-        const composerHeight = composerRef.current?.getBoundingClientRect().height ?? 0;
-        const target = Math.max(0, container.scrollTop + (e.bottom - c.bottom) + composerHeight);
-        container.scrollTop = target;
-        if (Math.abs(target - last) > 1 && ++frames < 30) {
-          last = target;
-          rafId = requestAnimationFrame(alignBottom);
-          return;
-        }
-      }
-      setPendingPostedCommentId(null);
-    };
-    rafId = requestAnimationFrame(alignBottom);
-    return () => cancelAnimationFrame(rafId);
-  }, [pendingPostedCommentId, items, replyToRoot, isFlatTimeline, scrollContainerEl]);
+  }, [pendingPostedCommentId, items, replyToRoot]);
   const jumpFlashTimerRef = useRef<number | null>(null);
   useEffect(
     () => () => {
@@ -2232,8 +2212,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     if (jumpFlashTimerRef.current !== null) window.clearTimeout(jumpFlashTimerRef.current);
     jumpFlashTimerRef.current = window.setTimeout(() => setHighlightedId(null), duration);
   }, []);
-  // Jump to a mounted comment: any row in flat mode, or a reply inside a
-  // rendered thread. Drive the container's scrollTop directly — never native
+  // Jump to a mounted comment, such as a reply inside a rendered thread. Drive the container's scrollTop directly — never native
   // scrollIntoView, which also scrolls the desktop shell (#3929).
   const jumpToComment = useCallback(
     (commentId: string) => {
@@ -2249,16 +2228,14 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   );
   const jumpToThread = useCallback(
     (threadId: string) => {
-      // Flat mode mounts every row, so the anchor is always in the DOM.
-      if (isFlatTimeline) return jumpToComment(threadId);
-      // Virtualized mode: the target row may not be mounted, so scroll by
-      // index and let Virtuoso mount it. Offset leaves a small top gap.
+      // The target row may not be mounted, so scroll by index and let
+      // Virtuoso mount it. Offset leaves a small top gap.
       const index = items.findIndex((it) => it.id === threadId);
       if (index < 0) return;
       virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
       flashJumpTarget(threadId);
     },
-    [isFlatTimeline, items, jumpToComment, flashJumpTarget],
+    [items, flashJumpTarget],
   );
   // Minimap jump to a reply. A reply's anchor exists only while its thread is
   // open, so first undo whatever hides it — the reader's own collapse, a root
@@ -2281,10 +2258,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
           toggleResolvedExpand(rootId, true);
         }
       }
-      if (!isFlatTimeline) virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
+      virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
       setPendingReplyJump({ replyId, rootId });
     },
-    [id, items, replyToRoot, expandedResolved, timelineView.threadReplies, toggleResolvedExpand, isFlatTimeline],
+    [id, items, replyToRoot, expandedResolved, timelineView.threadReplies, toggleResolvedExpand],
   );
   // Land the pending reply once its row is in the DOM. The expansion commits
   // on the next render and Virtuoso mounts the thread a frame or two later, so
@@ -2380,10 +2357,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
       ) {
         toggleResolvedExpand(root.id, true);
       }
-      if (!isFlatTimeline) virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
+      virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
       setPendingRunJump({ taskId, rootId: rootItem.id, flashId: run.hasReply && run.commentId ? run.commentId : taskId });
     },
-    [id, items, commentRuns, expandedResolved, timelineView.threadReplies, toggleResolvedExpand, isFlatTimeline],
+    [id, items, commentRuns, expandedResolved, timelineView.threadReplies, toggleResolvedExpand],
   );
   // Same frame-by-frame landing as a reply jump. A run that has replied may
   // only show as a log button in its comment's header, so align that comment.
@@ -2641,21 +2618,19 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     );
     const container = scrollContainerEl;
     if (!container) return;
-    if (!isFlatTimeline) {
-      if (targetIdx < 0) return;
-      if (measuredTimelineId !== id) {
-        // A long description can put the whole list below the scroll viewport.
-        // Bring its probe row into view so Virtuoso can measure before jumping.
-        const list = virtualTimelineRef.current;
-        if (list) container.scrollTop += list.getBoundingClientRect().top - container.getBoundingClientRect().top;
-        return;
-      }
+    if (targetIdx < 0) return;
+    if (measuredTimelineId !== id) {
+      // A long description can put the whole list below the scroll viewport.
+      // Bring its probe row into view so Virtuoso can measure before jumping.
+      const list = virtualTimelineRef.current;
+      if (list) container.scrollTop += list.getBoundingClientRect().top - container.getBoundingClientRect().top;
+      return;
     }
 
     interruptedLandingRef.current = null;
     let completed = false;
     const cancel = scrollToTimelineComment({
-      container, virtualizer: isFlatTimeline ? null : virtuosoRef.current,
+      container, virtualizer: virtuosoRef.current,
       index: targetIdx, commentId: landingId,
       onMounted: () => {
         didHighlightRef.current = highlightCommentId;
@@ -2678,7 +2653,26 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
         interruptedLandingRef.current = highlightCommentId;
       }
     };
-  }, [highlightCommentId, highlightTargetId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, isFlatTimeline, measuredTimelineId, timelineLoading, commentTasksLoading, flashJumpTarget]);
+  }, [highlightCommentId, highlightTargetId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, measuredTimelineId, timelineLoading, commentTasksLoading, flashJumpTarget]);
+
+  // Land on the comment in-page find stepped to, the way a deep link lands.
+  useEffect(() => {
+    const container = scrollContainerEl;
+    if (!findReveal || !container) return;
+    const index = items.findIndex((it) => it.id === findReveal.unit.itemId);
+    const finish = () => {
+      setFindReveal((current) => (current === findReveal ? null : current));
+      findReveal.done();
+    };
+    if (index < 0) {
+      finish();
+      return;
+    }
+    return scrollToTimelineComment({
+      container, virtualizer: virtuosoRef.current, index, commentId: findReveal.unit.anchorId,
+      onComplete: finish,
+    });
+  }, [findReveal, items, scrollContainerEl]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
@@ -3504,7 +3498,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     />
   );
 
-  // Shared row renderer for both timeline render modes (flat / virtualized).
+  // Row renderer for the virtualized timeline.
   // The wrapper `id="comment-..."` is the deep-link target — equivalent to
   // a native `<a href="#comment-...">` anchor. A run that left no comment is
   // addressed by its task id, which the sidebar's unread link lands on.
@@ -3517,7 +3511,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
           onExpand={() => toggleResolvedExpand(reply.id, true)} /> : <AgentRunComment run={item.run} entering={enteringRunIds.has(item.run.task.id)} standalone
           highlightedId={highlightedId}
           commentProps={reply ? {
-            issueId: id, replyScrollParent: isFlatTimeline ? null : scrollContainerEl, entry: reply, replies: timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES,
+            issueId: id, replyScrollParent: scrollContainerEl, entry: reply, replies: timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES,
             currentUserId: user?.id, canModerate: canModerateComments, onReply: submitReply,
             onReplyAccepted: scrollToTimelineBottom, onEdit: editComment, onDelete: deleteComment,
             onToggleReaction: handleToggleReaction, onCreateSubIssue: openCommentSubIssue,
@@ -3547,7 +3541,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
         <div className="pb-3" id={`comment-${item.id}`}>
           <CommentCard
             issueId={id}
-            replyScrollParent={isFlatTimeline ? null : scrollContainerEl}
+            replyScrollParent={scrollContainerEl}
             runs={commentRuns.get(item.id) ?? EMPTY_COMMENT_RUNS}
             enteringRunIds={enteringRunIds}
             entry={item.entry}
@@ -4325,44 +4319,32 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             {timelineLoading && timelineView.groups.length === 0 ? (
               <TimelineSkeleton />
             ) : (
-              // Only in-page find needs every row mounted for DOM text search.
-              // Browsing and comment deep links keep viewport-sized rendering.
-              !isFlatTimeline ? (
-                !scrollContainerEl ? (
-                  // Skeleton while the callback ref populates so the gap
-                  // between IssueDetail mount and Virtuoso mount doesn't
-                  // flash empty.
-                  <TimelineSkeleton />
-                ) : (
-                  <div ref={virtualTimelineRef} className="mt-4">
-                    <Virtuoso
-                      key={`${wsId}:${id}`}
-                      ref={virtuosoRef}
-                      customScrollParent={scrollContainerEl}
-                      data={items}
-                      initialScrollTop={readingAnchor ? undefined : restoredScrollTop}
-                      increaseViewportBy={{ top: 800, bottom: 800 }}
-                      totalListHeightChanged={handleTimelineHeightChange}
-                      rangeChanged={handleTimelineRangeChanged}
-                      computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
-                      // Also load-bearing for long threads: keepThreadRowAnchored
-                      // corrects after Virtuoso's resize handling in the same frame.
-                      skipAnimationFrameInResizeObserver
-                      // followOutput intentionally NOT set. Virtuoso treats
-                      // it as a sticky "is at bottom" flag and resets
-                      // scrollTop to maxScrollTop on every height-change
-                      // tick — issue-detail is document-shaped, not chat.
-                      itemContent={renderItem}
-                    />
-                  </div>
-                )
+              !scrollContainerEl ? (
+                // Skeleton while the callback ref populates so the gap
+                // between IssueDetail mount and Virtuoso mount doesn't
+                // flash empty.
+                <TimelineSkeleton />
               ) : (
-                <div className="mt-4">
-                  {items.map((item, i) => (
-                    <Fragment key={`${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}>
-                      {renderItem(i, item)}
-                    </Fragment>
-                  ))}
+                <div ref={virtualTimelineRef} className="mt-4">
+                  <Virtuoso
+                    key={`${wsId}:${id}`}
+                    ref={virtuosoRef}
+                    customScrollParent={scrollContainerEl}
+                    data={items}
+                    initialScrollTop={readingAnchor ? undefined : restoredScrollTop}
+                    increaseViewportBy={{ top: 800, bottom: 800 }}
+                    totalListHeightChanged={handleTimelineHeightChange}
+                    rangeChanged={handleTimelineRangeChanged}
+                    computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
+                    // Also load-bearing for long threads: keepThreadRowAnchored
+                    // corrects after Virtuoso's resize handling in the same frame.
+                    skipAnimationFrameInResizeObserver
+                    // followOutput intentionally NOT set. Virtuoso treats
+                    // it as a sticky "is at bottom" flag and resets
+                    // scrollTop to maxScrollTop on every height-change
+                    // tick — issue-detail is document-shaped, not chat.
+                    itemContent={renderItem}
+                  />
                 </div>
               )
             )}

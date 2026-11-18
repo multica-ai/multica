@@ -1036,6 +1036,37 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => expect(scrollIntoViewIndexSpy.mock.calls.length).toBeGreaterThan(jumps));
   });
 
+  it("finds text in comments the timeline has not mounted, without mounting the history (MUL-9538)", async () => {
+    mockVirtualWindow.enabled = true;
+    const history = Array.from({ length: 40 }, (_, index) => ({
+      ...mockTimeline[0]!, id: `history-${index}`, parent_id: null, source_task_id: undefined,
+      content: index === 30 ? "The **needle** is in this one" : `Historical comment ${index}`,
+      created_at: new Date(Date.UTC(2026, 0, 1, 0, index)).toISOString(),
+    }));
+    mockApiObj.listTimeline.mockResolvedValue(history);
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    // Find only answers in a visible page; jsdom lays nothing out.
+    const rects = vi.spyOn(HTMLElement.prototype, "getClientRects")
+      .mockReturnValue([new DOMRect(0, 0, 1, 1)] as unknown as DOMRectList);
+    try {
+      renderIssueDetail();
+      await screen.findByText("Historical comment 0");
+
+      fireEvent.keyDown(document, { key: "f", code: "KeyF", ctrlKey: true });
+      fireEvent.change(await screen.findByRole("textbox", { name: "Find in issue..." }), { target: { value: "needle" } });
+
+      // Counted from the comment's Markdown while it is not mounted.
+      await waitFor(() => expect(screen.getByRole("search")).toHaveTextContent("1/1"));
+      // Landing on it mounts that comment, not the history before it.
+      await waitFor(() => expect(scrollIntoViewIndexSpy).toHaveBeenCalledWith(expect.objectContaining({ index: 30 })));
+      await waitFor(() => expect(document.getElementById("comment-history-30")).not.toBeNull());
+      expect(document.querySelectorAll('[id^="comment-history-"]').length).toBeLessThanOrEqual(8);
+      expect(screen.getByTestId("virtuoso-mock")).toBeInTheDocument();
+    } finally {
+      rects.mockRestore();
+    }
+  });
+
   it("opens source-context creation from both a root comment and a reply", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       { ...mockTimeline[0], id: "source-root", parent_id: null },
