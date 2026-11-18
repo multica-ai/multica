@@ -3244,12 +3244,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // that opens a Popover listing optional fields not yet displayed. Hidden
   // once every optional field is on screen.
   const addPropertyRow = canAddProperty && (
-    <div className="col-span-2 mt-1">
+    <div className="col-span-2">
       <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
         <PopoverTrigger
-          className="-mx-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+          className="-mx-2 flex h-8 items-center gap-2 rounded-md px-2 text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
         >
-          <Plus className="h-3 w-3 shrink-0" />
+          <span aria-hidden="true" className="flex size-3.5 shrink-0 items-center justify-center"><Plus className="size-3" /></span>
           <span>{t(($) => $.detail.add_property_action)}</span>
         </PopoverTrigger>
         {/* Each option leads with the icon the resulting picker uses, so the
@@ -3534,7 +3534,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                   href={paths.issueDetail(child.id)}
                   title={`${child.identifier} ${child.title}`}
                   aria-label={`${child.identifier} ${child.title}, ${resolveStatusLabel(child.status)}`}
-                  className="group flex min-w-0 items-center gap-1.5 rounded-md px-2 py-2 text-label transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="group flex min-w-0 items-center gap-2 rounded-md px-2 py-2 text-label transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span role="img" aria-label={resolveStatusLabel(child.status)} className="shrink-0">
                     <StatusIcon

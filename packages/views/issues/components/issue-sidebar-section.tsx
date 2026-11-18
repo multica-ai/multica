@@ -25,7 +25,7 @@ export function IssueSidebarSectionHeader({
   id?: string;
 }) {
   return (
-    <div data-slot="issue-sidebar-section-header" className="mb-1 flex min-w-0 items-center gap-1 px-2">
+    <div data-slot="issue-sidebar-section-header" className="mb-1 flex h-8 min-w-0 items-center gap-1 px-2">
       {collapsible ? <Button
         id={id}
         type="button"
@@ -33,7 +33,7 @@ export function IssueSidebarSectionHeader({
         size="sm"
         aria-expanded={open}
         onClick={() => onOpenChange(!open)}
-        className={cn("min-w-0 flex-1 shrink justify-start px-[7px] font-medium aria-expanded:bg-transparent active:not-aria-[haspopup]:translate-y-0", !open && "text-muted-foreground")}
+        className={cn("h-8 min-w-0 flex-1 shrink justify-start px-[7px] font-medium aria-expanded:bg-transparent active:not-aria-[haspopup]:translate-y-0", !open && "text-muted-foreground")}
       >
         <span className="truncate">{title}</span>
         <ChevronRight aria-hidden="true" className={cn("!size-3 shrink-0 text-faint-foreground transition-transform motion-reduce:transition-none", open && "rotate-90")} />
@@ -44,7 +44,7 @@ export function IssueSidebarSectionHeader({
           </>
         )}
       </Button> : (
-        <div id={id} className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "min-w-0 flex-1 shrink justify-start px-[7px] font-medium hover:bg-transparent dark:hover:bg-transparent")}>
+        <div id={id} className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-8 min-w-0 flex-1 shrink justify-start px-[7px] font-medium hover:bg-transparent dark:hover:bg-transparent")}>
           <span className="truncate">{title}</span>
         </div>
       )}
@@ -63,13 +63,14 @@ export function IssueSidebarAddRow({ label, className, ...props }: ComponentProp
   return (
     <button
       type="button"
+      data-issue-sidebar-add-row=""
       {...props}
       className={cn(
-        "mx-2 flex h-7 items-center gap-1.5 rounded-md px-2 text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground aria-expanded:bg-accent/50 aria-expanded:text-foreground",
+        "mx-2 flex h-8 items-center gap-2 rounded-md px-2 text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground aria-expanded:bg-accent/50 aria-expanded:text-foreground",
         className,
       )}
     >
-      <Plus aria-hidden="true" className="size-3 shrink-0" />
+      <span aria-hidden="true" className="flex size-3.5 shrink-0 items-center justify-center"><Plus className="size-3" /></span>
       <span className="truncate">{label}</span>
     </button>
   );
@@ -77,14 +78,15 @@ export function IssueSidebarAddRow({ label, className, ...props }: ComponentProp
 
 /**
  * A card on the page canvas holding one or more sections. Sections keep their
- * own inset, so headers and rows land 16px inside the card's edge.
+ * own inset, so headers and rows land 16px inside the card's edge. Add rows
+ * standing in for empty sections stack like rows of one list.
  */
 export function IssueSidebarCard({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
       data-slot="issue-sidebar-card"
       className={cn(
-        "flex flex-col gap-3 rounded-xl bg-surface py-1.5 shadow-[var(--surface-card-shadow)] [overflow-anchor:none] [&>*]:flow-root",
+        "flex flex-col gap-3 rounded-xl bg-surface py-1.5 shadow-[var(--surface-card-shadow)] [overflow-anchor:none] [&>*]:flow-root [&>:has(>[data-issue-sidebar-add-row])~:has(>[data-issue-sidebar-add-row])]:-mt-2",
         className,
       )}
     >
@@ -93,7 +95,11 @@ export function IssueSidebarCard({ children, className }: { children: ReactNode;
   );
 }
 
-/** Fits labels to their content while reserving space for values and the hover gutter. */
+/**
+ * Fits labels to their content while reserving space for values and the hover
+ * gutter. The label column never drops below 4.5rem, so grids in different
+ * cards start their values on the same line.
+ */
 export function IssueSidebarPropertyGrid({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-[fit-content(min(44%,11rem))_minmax(0,1fr)] gap-x-2 gap-y-1 px-4">{children}</div>;
+  return <div className="grid grid-cols-[fit-content(min(44%,11rem))_minmax(0,1fr)] gap-x-2 gap-y-1 px-4 [&_[data-slot=prop-row-label]]:min-w-18">{children}</div>;
 }
