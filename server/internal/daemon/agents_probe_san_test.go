@@ -18,7 +18,7 @@ func TestRegisterRuntimesSan(t *testing.T) {
 	pathSan := filepath.Join(fakeDir, "san")
 	pinnedSan := filepath.Join(fakeDir, "custom-san")
 	for _, path := range []string{pathSan, pinnedSan} {
-		writeDaemonTestExecutable(t, path, []byte("#!/bin/sh\n[ \"$1\" = version ] || exit 7\necho 'san version 1.25.3'\n"))
+		writeDaemonTestExecutable(t, path, []byte("#!/bin/sh\n[ \"$1\" = version ] || exit 7\necho 'san version 1.25.4'\n"))
 	}
 	orig := resolveAgentsViaLoginShell
 	t.Cleanup(func() { resolveAgentsViaLoginShell = orig })
