@@ -795,6 +795,7 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		// DSH loads AGENTS.md from the agent session cwd.
 		{provider: "dsh", want: false},
 		{provider: "traecli", want: true},
+		{provider: "antigravity", want: true},
 		// Qwen Code loads the per-task QWEN.md file natively.
 		{provider: "qwen", want: false},
 		{provider: "codex", want: false},

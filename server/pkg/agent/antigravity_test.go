@@ -294,6 +294,224 @@ func TestAntigravityExecuteDeliverableWithTools(t *testing.T) {
 	}
 }
 
+func fakeAntigravityMultiTurnACPScript() string {
+	return `#!/bin/sh
+if [ -n "$ANTIGRAVITY_LAUNCH_COUNT_FILE" ]; then
+  printf 'launch\n' >> "$ANTIGRAVITY_LAUNCH_COUNT_FILE"
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true,"sse":true}}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_multiturn_123","models":{"availableModels":[{"modelId":"gemini-3.8-flash-high","name":"Gemini 3.8 Flash (High)"}],"currentModelId":"gemini-3.8-flash-high"}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_multiturn_123"}}\n' "$id"
+      ;;
+    *'"method":"session/set_mode"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      if [ -n "$ANTIGRAVITY_RECORD_SET_MODEL" ]; then
+        printf '%s\n' "$line" >> "$ANTIGRAVITY_RECORD_SET_MODEL"
+      fi
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      if [ -n "$ANTIGRAVITY_PROMPT_COUNT_FILE" ]; then
+        printf 'prompt\n' >> "$ANTIGRAVITY_PROMPT_COUNT_FILE"
+      fi
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_multiturn_123","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Multi-turn response"}}}}\n'
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      ;;
+  esac
+done
+`
+}
+
+func TestAntigravityExecuteMultiTurnSessionReuse(t *testing.T) {
+	clearAntigravitySessionPool()
+	t.Cleanup(clearAntigravitySessionPool)
+
+	tmpDir := t.TempDir()
+	launchCountFile := filepath.Join(tmpDir, "launch_count.txt")
+	promptCountFile := filepath.Join(tmpDir, "prompt_count.txt")
+	setModelRecordFile := filepath.Join(tmpDir, "set_model.txt")
+
+	t.Setenv("ANTIGRAVITY_LAUNCH_COUNT_FILE", launchCountFile)
+	t.Setenv("ANTIGRAVITY_PROMPT_COUNT_FILE", promptCountFile)
+	t.Setenv("ANTIGRAVITY_RECORD_SET_MODEL", setModelRecordFile)
+
+	binPath := makeFakeAntigravityExecutable(t, fakeAntigravityMultiTurnACPScript())
+	backend := &antigravityBackend{
+		cfg: Config{
+			ExecutablePath: binPath,
+			Logger:         quietAntigravityLogger(),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Turn 1: Cold start, creates session
+	session1, err := backend.Execute(ctx, "Turn 1 prompt", ExecOptions{Model: "gemini-3.8-flash-high"})
+	if err != nil {
+		t.Fatalf("turn 1 execute: %v", err)
+	}
+	for range session1.Messages {
+	}
+	res1 := <-session1.Result
+	if res1.Status != "completed" {
+		t.Fatalf("turn 1 status = %q, want completed", res1.Status)
+	}
+	if res1.SessionID != "ses_multiturn_123" {
+		t.Fatalf("turn 1 session ID = %q, want ses_multiturn_123", res1.SessionID)
+	}
+
+	// Turn 2: Warm resume with same session ID, switching model to test session/set_model
+	session2, err := backend.Execute(ctx, "Turn 2 prompt", ExecOptions{
+		ResumeSessionID: res1.SessionID,
+		Model:           "gemini-3.5-pro",
+	})
+	if err != nil {
+		t.Fatalf("turn 2 execute: %v", err)
+	}
+	for range session2.Messages {
+	}
+	res2 := <-session2.Result
+	if res2.Status != "completed" {
+		t.Fatalf("turn 2 status = %q, want completed", res2.Status)
+	}
+	if res2.SessionID != "ses_multiturn_123" {
+		t.Fatalf("turn 2 session ID = %q, want ses_multiturn_123", res2.SessionID)
+	}
+
+	// Verify only 1 process launch occurred (warm process reused)!
+	launchBytes, err := os.ReadFile(launchCountFile)
+	if err != nil {
+		t.Fatalf("read launch count: %v", err)
+	}
+	launches := strings.Count(string(launchBytes), "launch")
+	if launches != 1 {
+		t.Errorf("launch count = %d, want 1 (warm process should be reused)", launches)
+	}
+
+	// Verify 2 prompts executed!
+	promptBytes, err := os.ReadFile(promptCountFile)
+	if err != nil {
+		t.Fatalf("read prompt count: %v", err)
+	}
+	prompts := strings.Count(string(promptBytes), "prompt")
+	if prompts != 2 {
+		t.Errorf("prompt count = %d, want 2", prompts)
+	}
+
+	// Verify model switch called session/set_model on the warm connection
+	setModelBytes, err := os.ReadFile(setModelRecordFile)
+	if err != nil {
+		t.Fatalf("read set_model record: %v", err)
+	}
+	if !strings.Contains(string(setModelBytes), "gemini-3.5-pro") {
+		t.Errorf("expected session/set_model with gemini-3.5-pro, got %s", string(setModelBytes))
+	}
+}
+
+func TestAntigravityExecuteMultiTurnSessionReuseDisabled(t *testing.T) {
+	clearAntigravitySessionPool()
+	t.Cleanup(clearAntigravitySessionPool)
+
+	tmpDir := t.TempDir()
+	launchCountFile := filepath.Join(tmpDir, "launch_count.txt")
+	promptCountFile := filepath.Join(tmpDir, "prompt_count.txt")
+
+	t.Setenv("ANTIGRAVITY_LAUNCH_COUNT_FILE", launchCountFile)
+	t.Setenv("ANTIGRAVITY_PROMPT_COUNT_FILE", promptCountFile)
+	t.Setenv("MULTICA_ANTIGRAVITY_DISABLE_SESSION_REUSE", "1")
+
+	binPath := makeFakeAntigravityExecutable(t, fakeAntigravityMultiTurnACPScript())
+	backend := &antigravityBackend{
+		cfg: Config{
+			ExecutablePath: binPath,
+			Logger:         quietAntigravityLogger(),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	session1, err := backend.Execute(ctx, "Turn 1", ExecOptions{})
+	if err != nil {
+		t.Fatalf("turn 1 execute: %v", err)
+	}
+	for range session1.Messages {
+	}
+	res1 := <-session1.Result
+	if res1.Status != "completed" {
+		t.Fatalf("turn 1 status = %q", res1.Status)
+	}
+
+	session2, err := backend.Execute(ctx, "Turn 2", ExecOptions{ResumeSessionID: res1.SessionID})
+	if err != nil {
+		t.Fatalf("turn 2 execute: %v", err)
+	}
+	for range session2.Messages {
+	}
+	res2 := <-session2.Result
+	if res2.Status != "completed" {
+		t.Fatalf("turn 2 status = %q", res2.Status)
+	}
+
+	launchBytes, _ := os.ReadFile(launchCountFile)
+	launches := strings.Count(string(launchBytes), "launch")
+	if launches != 2 {
+		t.Errorf("launch count = %d, want 2 when session reuse is disabled", launches)
+	}
+}
+
+func TestAntigravityExecuteWarmFallbackOnDeadProcess(t *testing.T) {
+	clearAntigravitySessionPool()
+	t.Cleanup(clearAntigravitySessionPool)
+
+	binPath := makeFakeAntigravityExecutable(t, fakeAntigravityACPScript())
+	backend := &antigravityBackend{
+		cfg: Config{
+			ExecutablePath: binPath,
+			Logger:         quietAntigravityLogger(),
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	session1, err := backend.Execute(ctx, "Turn 1", ExecOptions{})
+	if err != nil {
+		t.Fatalf("turn 1 execute: %v", err)
+	}
+	for range session1.Messages {
+	}
+	res1 := <-session1.Result
+	if res1.Status != "completed" {
+		t.Fatalf("turn 1 status = %q", res1.Status)
+	}
+
+	// Turn 2 with ResumeSessionID: fakeAntigravityACPScript exited after Turn 1.
+	// alive() will report false, so executeACP falls back cleanly to a new process and resumes.
+	session2, err := backend.Execute(ctx, "Turn 2", ExecOptions{ResumeSessionID: res1.SessionID})
+	if err != nil {
+		t.Fatalf("turn 2 execute: %v", err)
+	}
+	for range session2.Messages {
+	}
+	res2 := <-session2.Result
+	if res2.Status != "completed" {
+		t.Fatalf("turn 2 status = %q", res2.Status)
+	}
+}
+
+
 func fakeAgyStreamJSONScript() string {
 	return `#!/bin/sh
 log=""

@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -134,7 +135,327 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	return b.executeCLI(ctx, prompt, opts, execPath)
 }
 
+// antigravityTurnState holds the ephemeral channel and state for an in-flight turn
+// executing on a persistent or single-turn ACP connection.
+type antigravityTurnState struct {
+	msgCh       chan Message
+	promptDone  chan hermesPromptResult
+	activity    chan struct{}
+	streaming   atomic.Bool
+	deliverable acpDeliverableTracker
+}
+
+// antigravitySessionConn represents a live, persistent ACP connection to an
+// agy_acp_server process.
+type antigravitySessionConn struct {
+	cmd         *exec.Cmd
+	stdin       io.WriteCloser
+	client      *hermesClient
+	execPath    string
+	cwd         string
+	sessionID   string
+	model       string
+	modeSet     bool
+	providerErr *acpProviderErrorSniffer
+	cancelProc  context.CancelFunc
+	readerDone  chan struct{}
+	stderrDone  chan struct{}
+
+	mu         sync.Mutex
+	turnState  atomic.Pointer[antigravityTurnState]
+	lastActive time.Time
+	closed     atomic.Bool
+	closeOnce  sync.Once
+}
+
+func (c *antigravitySessionConn) alive() bool {
+	if c.closed.Load() || c.cmd == nil || c.cmd.Process == nil || c.cmd.ProcessState != nil {
+		return false
+	}
+	select {
+	case <-c.readerDone:
+		return false
+	default:
+		return true
+	}
+}
+
+func (c *antigravitySessionConn) close() {
+	c.closeOnce.Do(func() {
+		c.closed.Store(true)
+		if c.stdin != nil {
+			_ = c.stdin.Close()
+		}
+		if c.cancelProc != nil {
+			c.cancelProc()
+		}
+		if c.cmd != nil && c.cmd.Process != nil {
+			_ = c.cmd.Wait()
+			releaseProcessGroup(c.cmd)
+		}
+	})
+}
+
+// antigravitySessionPool manages warm ACP connections keyed by session ID so that
+// follow-up turns on the same session avoid the multi-second startup latency of
+// agy_acp_server.par (Python zipapp unpacking, C++ runtime, gRPC connect, OAuth refresh).
+type antigravitySessionPool struct {
+	mu       sync.Mutex
+	sessions map[string]*antigravitySessionConn
+}
+
+var globalAntigravityPool = &antigravitySessionPool{
+	sessions: make(map[string]*antigravitySessionConn),
+}
+
+const antigravitySessionIdleTimeout = 5 * time.Minute
+
+func (p *antigravitySessionPool) get(sessionID, cwd, execPath string) *antigravitySessionConn {
+	if sessionID == "" {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	conn, ok := p.sessions[sessionID]
+	if !ok {
+		return nil
+	}
+	if !conn.alive() || conn.cwd != cwd || conn.execPath != execPath {
+		delete(p.sessions, sessionID)
+		go conn.close()
+		return nil
+	}
+	return conn
+}
+
+func (p *antigravitySessionPool) put(sessionID string, conn *antigravitySessionConn) {
+	if sessionID == "" || conn == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	conn.lastActive = time.Now()
+	p.sessions[sessionID] = conn
+	p.reapLocked(time.Now())
+}
+
+func (p *antigravitySessionPool) remove(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	p.mu.Lock()
+	conn, ok := p.sessions[sessionID]
+	if ok {
+		delete(p.sessions, sessionID)
+	}
+	p.mu.Unlock()
+	if conn != nil {
+		go conn.close()
+	}
+}
+
+func (p *antigravitySessionPool) reapLocked(now time.Time) {
+	for id, conn := range p.sessions {
+		if !conn.alive() || now.Sub(conn.lastActive) > antigravitySessionIdleTimeout {
+			delete(p.sessions, id)
+			go conn.close()
+		}
+	}
+}
+
+func clearAntigravitySessionPool() {
+	globalAntigravityPool.mu.Lock()
+	all := globalAntigravityPool.sessions
+	globalAntigravityPool.sessions = make(map[string]*antigravitySessionConn)
+	globalAntigravityPool.mu.Unlock()
+	for _, conn := range all {
+		conn.close()
+	}
+}
+
+func antigravitySessionReuseEnabled() bool {
+	return os.Getenv("MULTICA_ANTIGRAVITY_DISABLE_SESSION_REUSE") != "1"
+}
+
 func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts ExecOptions, execPath string) (*Session, error) {
+	cwd := opts.Cwd
+	if cwd == "" {
+		cwd = "."
+	}
+
+	if opts.ResumeSessionID != "" && antigravitySessionReuseEnabled() {
+		if conn := globalAntigravityPool.get(opts.ResumeSessionID, cwd, execPath); conn != nil {
+			sess, ok := b.tryExecuteACPOnWarmConn(ctx, prompt, opts, conn)
+			if ok {
+				return sess, nil
+			}
+		}
+	}
+
+	return b.executeACPNewConn(ctx, prompt, opts, execPath)
+}
+
+func (b *antigravityBackend) tryExecuteACPOnWarmConn(ctx context.Context, prompt string, opts ExecOptions, conn *antigravitySessionConn) (*Session, bool) {
+	conn.mu.Lock()
+	if !conn.alive() {
+		conn.mu.Unlock()
+		globalAntigravityPool.remove(opts.ResumeSessionID)
+		return nil, false
+	}
+
+	msgCh := make(chan Message, 256)
+	resCh := make(chan Result, 1)
+
+	ts := &antigravityTurnState{
+		msgCh:      msgCh,
+		promptDone: make(chan hermesPromptResult, 1),
+		activity:   make(chan struct{}, 1),
+	}
+	conn.turnState.Store(ts)
+
+	conn.client.readOnly = opts.ReadOnly
+	if opts.OnUsage != nil {
+		conn.client.onUsage = opts.OnUsage
+	}
+
+	timeout := opts.Timeout
+	runCtx, cancel := runContext(ctx, timeout)
+
+	go func() {
+		defer cancel()
+		defer close(msgCh)
+		defer close(resCh)
+		defer conn.mu.Unlock()
+		defer conn.turnState.Store(nil)
+
+		startTime := time.Now()
+		finalStatus := "completed"
+		var finalError string
+		var resumeRejected bool
+		sessionID := conn.sessionID
+		effectiveModel := conn.model
+
+		// 1. Ensure mode is yolo if not read-only
+		if !opts.ReadOnly && !conn.modeSet {
+			if _, err := conn.client.request(runCtx, "session/set_mode", map[string]any{
+				"sessionId": sessionID,
+				"modeId":    "yolo",
+			}); err == nil {
+				conn.modeSet = true
+			}
+		}
+
+		// 2. Set model if requested and different from current
+		if opts.Model != "" && opts.Model != conn.model {
+			if _, err := conn.client.request(runCtx, "session/set_model", map[string]any{
+				"sessionId": sessionID,
+				"modelId":   opts.Model,
+			}); err != nil {
+				b.cfg.Logger.Warn("antigravity set_session_model on warm session failed", "error", err, "requested_model", opts.Model)
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("antigravity could not switch to model %q: %v", opts.Model, err)
+				if isACPSessionNotFound(err) {
+					sessionID = ""
+					resumeRejected = true
+				}
+				conn.close()
+				globalAntigravityPool.remove(conn.sessionID)
+				resCh <- Result{
+					Status:         finalStatus,
+					Error:          finalError,
+					DurationMs:     time.Since(startTime).Milliseconds(),
+					SessionID:      sessionID,
+					ResumeRejected: resumeRejected,
+				}
+				return
+			}
+			effectiveModel = opts.Model
+			conn.model = opts.Model
+		}
+
+		// 3. Send prompt
+		userText := prompt
+		if opts.SystemPrompt != "" {
+			userText = opts.SystemPrompt + "\n\n---\n\n" + prompt
+		}
+		promptBlocks := []map[string]any{
+			{"type": "text", "text": userText},
+		}
+
+		ts.streaming.Store(true)
+		_, err := conn.client.request(runCtx, "session/prompt", map[string]any{
+			"sessionId": sessionID,
+			"prompt":    promptBlocks,
+		})
+
+		var promptSucceeded bool
+		if err != nil {
+			if runCtx.Err() == context.DeadlineExceeded {
+				finalStatus = "timeout"
+				finalError = fmt.Sprintf("antigravity timed out after %s", timeout)
+			} else if runCtx.Err() == context.Canceled {
+				finalStatus = "aborted"
+				finalError = "execution cancelled"
+			} else {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("antigravity session/prompt failed: %v", err)
+				if isACPSessionNotFound(err) {
+					sessionID = ""
+					resumeRejected = true
+				}
+			}
+		} else {
+			select {
+			case pr := <-ts.promptDone:
+				if pr.stopReason == "cancelled" {
+					finalStatus = "aborted"
+					finalError = "antigravity cancelled the prompt"
+				}
+				conn.client.mergeUsage(pr.usage)
+			default:
+			}
+			waitForACPNotificationQuiescence(runCtx, ts.activity, conn.readerDone, acpNotificationQuietTime, antigravityReaderDrainGrace)
+			promptSucceeded = (finalStatus == "completed")
+		}
+
+		duration := time.Since(startTime)
+		b.cfg.Logger.Info("antigravity warm session turn finished", "pid", conn.cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
+
+		finalOutput, providerErrorOutput := ts.deliverable.result()
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, conn.providerErr)
+
+		u := conn.client.accumulatedUsage()
+		var usageMap map[string]TokenUsage
+		if acpUsagePresent(u) {
+			model := effectiveModel
+			if model == "" {
+				model = "unknown"
+			}
+			usageMap = map[string]TokenUsage{model: u}
+		}
+
+		if promptSucceeded && conn.alive() && antigravitySessionReuseEnabled() {
+			conn.lastActive = time.Now()
+		} else {
+			conn.close()
+			globalAntigravityPool.remove(conn.sessionID)
+		}
+
+		resCh <- Result{
+			Status:         finalStatus,
+			Output:         finalOutput,
+			Error:          finalError,
+			DurationMs:     duration.Milliseconds(),
+			SessionID:      sessionID,
+			Usage:          usageMap,
+			ResumeRejected: resumeRejected,
+		}
+	}()
+
+	return &Session{Messages: msgCh, Result: resCh}, true
+}
+
+func (b *antigravityBackend) executeACPNewConn(ctx context.Context, prompt string, opts ExecOptions, execPath string) (*Session, error) {
 	// Translate the agent's mcp_config (Claude-style object of objects)
 	// into the array shape ACP session/new and session/resume expect.
 	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
@@ -146,7 +467,9 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 	runCtx, cancel := runContext(ctx, timeout)
 
 	antigravityArgs := append(antigravityACPLaunchArgs(), filterCustomArgs(opts.CustomArgs, antigravityBlockedArgs, b.cfg.Logger)...)
-	cmd := b.cfg.commandAt(execPath).exec(runCtx, antigravityArgs...)
+
+	procCtx, cancelProc := context.WithCancel(context.Background())
+	cmd := b.cfg.commandAt(execPath).exec(procCtx, antigravityArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(antigravityArgs))
 	if opts.Cwd != "" {
@@ -158,11 +481,13 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
+		cancelProc()
 		return nil, fmt.Errorf("antigravity stdout pipe: %w", err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
+		cancelProc()
 		return nil, fmt.Errorf("antigravity stdin pipe: %w", err)
 	}
 
@@ -170,11 +495,13 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		cancel()
+		cancelProc()
 		return nil, fmt.Errorf("antigravity stderr pipe: %w", err)
 	}
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
+		cancelProc()
 		return nil, fmt.Errorf("start antigravity: %w", err)
 	}
 
@@ -187,13 +514,31 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 
 	b.cfg.Logger.Info("antigravity acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
+	cwd := opts.Cwd
+	if cwd == "" {
+		cwd = "."
+	}
+
+	conn := &antigravitySessionConn{
+		cmd:         cmd,
+		stdin:       stdin,
+		execPath:    execPath,
+		cwd:         cwd,
+		providerErr: providerErr,
+		cancelProc:  cancelProc,
+		readerDone:  make(chan struct{}),
+		stderrDone:  stderrDone,
+	}
+
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	var deliverable acpDeliverableTracker
-	var streamingCurrentTurn atomic.Bool
-	promptDone := make(chan hermesPromptResult, 1)
-	activity := make(chan struct{}, 1)
+	ts := &antigravityTurnState{
+		msgCh:      msgCh,
+		promptDone: make(chan hermesPromptResult, 1),
+		activity:   make(chan struct{}, 1),
+	}
+	conn.turnState.Store(ts)
 
 	c := &hermesClient{
 		cfg:                        b.cfg,
@@ -202,39 +547,46 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 		pending:                    make(map[int]*pendingRPC),
 		pendingTools:               make(map[string]*pendingToolCall),
 		toolStartCarriesFinalInput: true,
+		onUsage:                    opts.OnUsage,
 		acceptNotification: func(string) bool {
-			return streamingCurrentTurn.Load()
+			curr := conn.turnState.Load()
+			return curr != nil && curr.streaming.Load()
 		},
 		onActivity: func() {
-			select {
-			case activity <- struct{}{}:
-			default:
+			curr := conn.turnState.Load()
+			if curr != nil && curr.streaming.Load() {
+				select {
+				case curr.activity <- struct{}{}:
+				default:
+				}
 			}
 		},
 		onMessage: func(msg Message) {
-			if !streamingCurrentTurn.Load() {
+			curr := conn.turnState.Load()
+			if curr == nil || !curr.streaming.Load() {
 				return
 			}
 			if msg.Type == MessageToolUse {
 				msg.Tool = antigravityToolNameFromTitle(msg.Tool, "")
 			}
-			deliverable.observe(msg)
-			trySend(msgCh, msg)
+			curr.deliverable.observe(msg)
+			trySend(curr.msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
-			if !streamingCurrentTurn.Load() {
+			curr := conn.turnState.Load()
+			if curr == nil || !curr.streaming.Load() {
 				return
 			}
 			select {
-			case promptDone <- result:
+			case curr.promptDone <- result:
 			default:
 			}
 		},
 	}
+	conn.client = c
 
-	readerDone := make(chan struct{})
 	go func() {
-		defer close(readerDone)
+		defer close(conn.readerDone)
 		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -246,15 +598,14 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 		c.closeAllPending(fmt.Errorf("antigravity process exited"))
 	}()
 
+	conn.mu.Lock()
+
 	go func() {
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
-		defer func() {
-			stdin.Close()
-			_ = cmd.Wait()
-			releaseProcessGroup(cmd)
-		}()
+		defer conn.mu.Unlock()
+		defer conn.turnState.Store(nil)
 
 		startTime := time.Now()
 		finalStatus := "completed"
@@ -273,18 +624,12 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 			"clientCapabilities": map[string]any{},
 		})
 		if err != nil {
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("antigravity initialize failed: %v", err)
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			conn.close()
+			resCh <- Result{Status: "failed", Error: fmt.Sprintf("antigravity initialize failed: %v", err), DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
 
 		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "antigravity", b.cfg)
-
-		cwd := opts.Cwd
-		if cwd == "" {
-			cwd = "."
-		}
 
 		// 2. Create or resume session
 		if opts.ResumeSessionID != "" {
@@ -294,6 +639,7 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 				"mcpServers": mcpServers,
 			})
 			if err != nil {
+				conn.close()
 				finalStatus, finalError, resumeRejected = classifyACPResumeFailure(
 					runCtx, "antigravity", "session/resume", err, timeout, b.cfg.Logger)
 				resCh <- Result{
@@ -322,16 +668,14 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 				"mcpServers": mcpServers,
 			})
 			if err != nil {
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("antigravity session/new failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				conn.close()
+				resCh <- Result{Status: "failed", Error: fmt.Sprintf("antigravity session/new failed: %v", err), DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
 			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
-				finalStatus = "failed"
-				finalError = "antigravity session/new returned no session ID"
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				conn.close()
+				resCh <- Result{Status: "failed", Error: "antigravity session/new returned no session ID", DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
 			if effectiveModel == "" {
@@ -340,6 +684,8 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 		}
 
 		c.sessionID = sessionID
+		conn.sessionID = sessionID
+		conn.model = effectiveModel
 		b.cfg.Logger.Info("antigravity session created", "session_id", sessionID)
 
 		// 3. Set mode to "yolo" to auto-approve tool permission requests (unless read-only)
@@ -347,7 +693,9 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 			if _, err := c.request(runCtx, "session/set_mode", map[string]any{
 				"sessionId": sessionID,
 				"modeId":    "yolo",
-			}); err != nil {
+			}); err == nil {
+				conn.modeSet = true
+			} else {
 				b.cfg.Logger.Debug("antigravity set_mode yolo failed or not supported", "error", err)
 			}
 		}
@@ -364,13 +712,10 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 				if setupFailureWithholdsSessionID(opts) {
 					sessionID = ""
 				} else if isACPSessionNotFound(err) {
-					b.cfg.Logger.Warn("resumed session not found at set_model time; clearing session id so the daemon retries fresh",
-						"backend", "antigravity",
-						"session_id", sessionID,
-					)
 					sessionID = ""
 					resumeRejected = true
 				}
+				conn.close()
 				resCh <- Result{
 					Status:         finalStatus,
 					Error:          finalError,
@@ -381,6 +726,7 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 				return
 			}
 			effectiveModel = opts.Model
+			conn.model = opts.Model
 			b.cfg.Logger.Info("antigravity session model set", "model", opts.Model)
 		}
 
@@ -393,11 +739,12 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 			{"type": "text", "text": userText},
 		}
 
-		streamingCurrentTurn.Store(true)
+		ts.streaming.Store(true)
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt":    promptBlocks,
 		})
+		var promptSucceeded bool
 		if err != nil {
 			if runCtx.Err() == context.DeadlineExceeded {
 				finalStatus = "timeout"
@@ -419,7 +766,7 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 			}
 		} else {
 			select {
-			case pr := <-promptDone:
+			case pr := <-ts.promptDone:
 				if pr.stopReason == "cancelled" {
 					finalStatus = "aborted"
 					finalError = "antigravity cancelled the prompt"
@@ -427,19 +774,14 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 				c.mergeUsage(pr.usage)
 			default:
 			}
-			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, antigravityReaderDrainGrace)
+			waitForACPNotificationQuiescence(runCtx, ts.activity, conn.readerDone, acpNotificationQuietTime, antigravityReaderDrainGrace)
+			promptSucceeded = (finalStatus == "completed")
 		}
 
 		duration := time.Since(startTime)
 		b.cfg.Logger.Info("antigravity finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		stdin.Close()
-		cancel()
-
-		<-readerDone
-		<-stderrDone
-
-		finalOutput, providerErrorOutput := deliverable.result()
+		finalOutput, providerErrorOutput := ts.deliverable.result()
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
 		u := c.accumulatedUsage()
@@ -450,6 +792,14 @@ func (b *antigravityBackend) executeACP(ctx context.Context, prompt string, opts
 				model = "unknown"
 			}
 			usageMap = map[string]TokenUsage{model: u}
+		}
+
+		if promptSucceeded && conn.alive() && antigravitySessionReuseEnabled() && sessionID != "" {
+			conn.lastActive = time.Now()
+			globalAntigravityPool.put(sessionID, conn)
+		} else {
+			conn.close()
+			globalAntigravityPool.remove(sessionID)
 		}
 
 		resCh <- Result{
