@@ -83,14 +83,19 @@ function ProjectMenuItems({ project }: { project: Project }) {
   const t = useFoldersT();
   const wsId = useWorkspaceId();
   const { folders, folderOf } = useProjectFoldersState(wsId);
-  const { mutate: file } = useFileProject(wsId);
+  const { mutateAsync: file } = useFileProject(wsId);
   const current = folderOf.get(project.id) ?? null;
 
   const move = (folder: ProjectFolder | null) => {
     if ((folder?.id ?? null) === current) return;
-    file(
-      { projectId: project.id, folderId: folder?.id ?? null },
-      { onSuccess: () => folder && toast.success(t("toast_moved", { name: folder.name })) },
+    const name = folder?.name;
+    // The menu unmounts as it closes. The promise outlives that, so the
+    // confirmation still shows. useFileProject reports a failure itself.
+    void file({ projectId: project.id, folderId: folder?.id ?? null }).then(
+      () => {
+        if (name) toast.success(t("toast_moved", { name }));
+      },
+      () => undefined,
     );
   };
 
@@ -330,9 +335,11 @@ const REFRESH_EVENTS = [
   "project_folder:updated",
   "project_folder:deleted",
   "project_folder:filed",
-  // Visibility changes decide which filed projects the caller may see.
+  // Visibility and membership changes decide which filed projects the caller
+  // may see. Gaining access emits project:members_changed, not project:updated.
   "project:updated",
   "project:deleted",
+  "project:members_changed",
 ] as WSEventType[];
 
 function RefreshOn({ event, refresh }: { event: WSEventType; refresh: () => void }) {
