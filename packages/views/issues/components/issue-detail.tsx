@@ -233,7 +233,8 @@ import {
  * issue already landed on the current route (value: the consumed comment
  * id). Lets a remount that merely restores the view (tab switch back) skip
  * the jump-and-highlight, while a fresh selection — which clears the entry
- * (see InboxPage.handleSelect) — runs it again.
+ * (see InboxPage.handleSelect) — or a pending landing request (a Work panel
+ * notification click) runs it again.
  */
 export function issueHighlightMementoKey(issueId: string): string {
   return `highlight:${issueId}`;
@@ -1246,6 +1247,13 @@ interface IssueDetailProps {
    * forces the render that re-reads the cleared memento entry.
    */
   highlightRequestToken?: number;
+  /**
+   * The host asked for this landing and has not seen it land (a notification
+   * clicked on another page). It runs even where this route records the
+   * comment as already landed; `onHighlightLanded` reports when it did.
+   */
+  highlightRequestPending?: boolean;
+  onHighlightLanded?: () => void;
   /** The app confirmation an Inbox notification points at; its card scrolls
    * into view and flashes, replayed by `highlightRequestToken`. */
   highlightAppRequestId?: string;
@@ -1486,7 +1494,7 @@ export function IssueDetailSkeleton({
 
 // IssueDetail
 
-export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightAppRequestId, leadingAction, variant = "page", trailingActions, notice, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, defaultSidebarOpen = true, layoutId = ISSUE_DETAIL_LAYOUT_ID, highlightCommentId: linkedCommentId, highlightRequestToken: linkedRequestToken, highlightRequestPending = false, onHighlightLanded, highlightAppRequestId, leadingAction, variant = "page", trailingActions, notice, readsInbox = true, skipInitialRefetch = false, openDeliverable, onDeliverableLinkDone }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { t: tCommon } = useT("common");
@@ -1627,9 +1635,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // landing already re-runs the effect through another dependency (mount,
   // items arriving, token bump), and the render that precedes it refreshes
   // this ref.
+  //
+  // A pending request ignores the entry: the host has not seen it land.
   const consumedHighlightId = useRestoredViewState(issueHighlightMementoKey(id));
-  const consumedHighlightRef = useRef(consumedHighlightId);
-  consumedHighlightRef.current = consumedHighlightId;
+  const highlightConsumed =
+    !!highlightCommentId && !highlightRequestPending && consumedHighlightId === highlightCommentId;
+  const highlightConsumedRef = useRef(highlightConsumed);
+  highlightConsumedRef.current = highlightConsumed;
+  const onHighlightLandedRef = useRef(onHighlightLanded);
+  onHighlightLandedRef.current = onHighlightLanded;
   const writeViewState = useViewStateWriter();
   const rightSidebarShortcutTargetRef = useRef<HTMLDivElement | null>(null);
   const attachScrollContainer = useCallback(
@@ -2139,8 +2153,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // to land on, so the issue opens where the reader left off instead of at
   // the top. If it arrives later, the landing still runs.
   const highlightMissing = timelineReady && targetIdx < 0;
-  const pendingHighlight =
-    !!highlightCommentId && consumedHighlightId !== highlightCommentId && !highlightMissing;
+  const pendingHighlight = !!highlightCommentId && !highlightConsumed && !highlightMissing;
   const { pending: readingAnchor, complete: completeAnchorRestore } = useIssueTimelineAnchor({
     containerKey: scrollContainerKey,
     container: scrollContainerEl,
@@ -2575,7 +2588,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     // switch back or an in-tab return). The restored scroll offset is the
     // state the user left, and the jump must not fight it. A fresh selection
     // clears the entry, so this only ever suppresses a *repeat* landing.
-    if (!resuming && !activeDeliverableJump && consumedHighlightRef.current === highlightCommentId) {
+    if (!resuming && !activeDeliverableJump && highlightConsumedRef.current) {
       didHighlightRef.current = highlightCommentId;
       return;
     }
@@ -2632,6 +2645,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
       onMounted: () => {
         didHighlightRef.current = highlightCommentId;
         writeViewState(issueHighlightMementoKey(id), highlightCommentId);
+        onHighlightLandedRef.current?.();
         // Timer owned outside this effect, so a re-run cannot leave the
         // highlight on.
         flashJumpTarget(landingId, 2500);

@@ -718,6 +718,7 @@ const mockTimeline: TimelineEntry[] = [
 // ---------------------------------------------------------------------------
 
 import { IssueDetail, groupSubIssuesByStage } from "./issue-detail";
+import { ScrollRestorationProvider, type ScrollRestorationAdapter } from "../../platform";
 import { READING_COLUMN } from "../../layout/reading-column";
 import {
   IssueSurfaceSelectionProvider,
@@ -2956,6 +2957,46 @@ describe("IssueDetail (shared)", () => {
       await act(async () => { finishTasks([]); });
       await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
       expect(landedBeforeGrouping).toBe(false);
+    });
+
+    describe("on a route that already recorded the landing", () => {
+      function renderOverLandedRoute(props: Partial<React.ComponentProps<typeof IssueDetail>> = {}) {
+        mockApiObj.listTasksByIssue.mockResolvedValue([]);
+        const viewState = new Map([["highlight:issue-1", "comment-2"]]);
+        const adapter: ScrollRestorationAdapter = {
+          get: () => undefined,
+          getViewState: (key) => viewState.get(key),
+          setViewState: (key, value) => {
+            if (value === undefined) viewState.delete(key);
+            else viewState.set(key, value);
+          },
+        };
+        render(
+          <I18nProvider locale="en" resources={TEST_RESOURCES}>
+            <QueryClientProvider client={createTestQueryClient()}>
+              <ScrollRestorationProvider adapter={adapter}>
+                <IssueDetail issueId="issue-1" highlightCommentId="comment-2" {...props} />
+              </ScrollRestorationProvider>
+            </QueryClientProvider>
+          </I18nProvider>,
+        );
+      }
+
+      it("does not replay it when the view merely remounts", async () => {
+        renderOverLandedRoute();
+        await waitFor(() => expect(document.getElementById("comment-comment-2")).not.toBeNull());
+        await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 100)); });
+        expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(false);
+      });
+
+      // MUL-9492: a Work panel click on another page cannot clear the issue
+      // route's record before it navigates there.
+      it("lands a pending request anyway and reports it", async () => {
+        const onHighlightLanded = vi.fn();
+        renderOverLandedRoute({ highlightRequestToken: 3, highlightRequestPending: true, onHighlightLanded });
+        await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
+        expect(onHighlightLanded).toHaveBeenCalledTimes(1);
+      });
     });
 
     it("restarts a comment landing that a timeline update cancels while it is still aligning", async () => {
