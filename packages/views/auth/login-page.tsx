@@ -494,7 +494,7 @@ export function LoginPage({
                   setServerError("");
                 }}
               >
-                <option value="cloud">Multica Cloud</option>
+                <option value="cloud">{t(($) => $.desktop.server.cloud)}</option>
                 <option value="custom">{t(($) => $.desktop.server.custom)}</option>
               </select>
               {serverChoice === "custom" && (
