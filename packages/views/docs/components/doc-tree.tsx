@@ -213,11 +213,20 @@ export function DocTree() {
       setDropTarget(undefined);
     },
   });
+  // Every row is the drop target its position means: a folder row is that
+  // folder, a doc row is the doc's folder, the blank tree is the top level.
+  // The innermost target always answers and stops the event, even to refuse:
+  // a refusal that bubbled would reach the top-level zone and move the item
+  // to the root.
   const dropProps = (destination: string | null) => ({
     onDragOver: (event: DragEvent) => {
-      if (!dragged || !canDropInto(dragged, destination, folders)) return;
-      event.preventDefault();
+      if (!dragged) return;
       event.stopPropagation();
+      if (!canDropInto(dragged, destination, folders)) {
+        setDropTarget(undefined);
+        return;
+      }
+      event.preventDefault();
       event.dataTransfer.dropEffect = "move";
       setDropTarget(destination);
     },
@@ -226,9 +235,14 @@ export function DocTree() {
       setDropTarget((current) => (current === destination ? undefined : current));
     },
     onDrop: (event: DragEvent) => {
-      if (!dragged || !canDropInto(dragged, destination, folders)) return;
+      if (!dragged) return;
       event.preventDefault();
       event.stopPropagation();
+      if (!canDropInto(dragged, destination, folders)) {
+        setDragged(null);
+        setDropTarget(undefined);
+        return;
+      }
       const item = dragged;
       setDragged(null);
       setDropTarget(undefined);
@@ -366,7 +380,7 @@ export function DocTree() {
                 </Button>
                 {menu({ kind: "folder", item: folder })}
               </summary>
-              <div className="ml-3 border-l pl-2">
+              <div className="ml-3 border-l pl-2" {...dropProps(folder.id)}>
                 {branch(folder.id, new Set([...ancestors, folder.id]))}
               </div>
             </details>
@@ -378,6 +392,7 @@ export function DocTree() {
           <li
             key={doc.id}
             {...dragProps({ kind: "doc", item: doc })}
+            {...dropProps(doc.folderId)}
             className={`flex items-center gap-1 rounded-md px-1 py-1 text-body ${pathname === p.docDetail(doc.id) ? "bg-surface-selected text-surface-selected-foreground" : "hover:bg-surface-hover"}`}
           >
             <FileText className="size-4 shrink-0 text-muted-foreground" />
