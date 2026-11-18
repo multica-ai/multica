@@ -2222,7 +2222,7 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 				// CLAIM-RECEIPT task (dispatched/running/waiting; queued is excluded
 				// — it must fold through the atomic merge above), turning the drop
 				// into a bounded follow-up (#5914, Elon round 2).
-				registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, getHeadSha())
+				registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, trigger.RuntimeRequester, getHeadSha())
 				if err != nil {
 					slog.Warn("register planned comment failed",
 						"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
@@ -2590,12 +2590,13 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 // the task just terminated), so the caller falls back to the active-task
 // decision. Delivered ids are untouched, so completion reconcile replays the
 // comment as a single bounded follow-up (#5914). See the query doc.
-func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue db.Issue, agentID, commentID pgtype.UUID, headSha pgtype.Text) (bool, error) {
+func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue db.Issue, agentID, commentID, runtimeOriginatorOverride pgtype.UUID, headSha pgtype.Text) (bool, error) {
 	row, err := h.Queries.RegisterPlannedCommentForActiveTask(ctx, db.RegisterPlannedCommentForActiveTaskParams{
-		CommentID: commentID,
-		IssueID:   issue.ID,
-		AgentID:   agentID,
-		HeadSha:   headSha,
+		CommentID:               commentID,
+		IssueID:                 issue.ID,
+		AgentID:                 agentID,
+		RuntimeOriginatorUserID: runtimeOriginatorOverride,
+		HeadSha:                 headSha,
 	})
 	if err != nil {
 		if isNotFound(err) {
@@ -2647,10 +2648,10 @@ func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue
 // different-head QUEUED blocker); the caller logs that loudly — it is the one
 // shape today's schema has no safe place to park, and closing it needs a durable
 // obligation record rather than an in-request hand-off.
-func (h *Handler) propagateUncoveredCommentObligation(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID, headSha pgtype.Text) bool {
+func (h *Handler) propagateUncoveredCommentObligation(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID, runtimeOriginatorOverride pgtype.UUID, headSha pgtype.Text) bool {
 	const maxAttempts = 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, commentID, pgtype.Text{})
+		registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, commentID, runtimeOriginatorOverride, pgtype.Text{})
 		if err != nil {
 			slog.Warn("propagate comment obligation: register on active task failed",
 				"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID),

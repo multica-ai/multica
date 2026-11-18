@@ -2588,7 +2588,11 @@ func (h *Handler) finalizeClaimDelivery(
 				Detail: "agent runtime changed before delivery",
 			}
 		}
-		if !service.PrivateRuntimePermitsAgent(agent, *task, locked) {
+		permits, permitErr := service.PrivateRuntimePermitsAgent(ctx, qtx, agent, *task, locked)
+		if permitErr != nil {
+			return permitErr
+		}
+		if !permits {
 			agentOwnerID = agent.OwnerID
 			return &service.ClaimDeliveryAuthzError{
 				Reason: "error_runtime_access_denied",
@@ -3064,7 +3068,22 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"error_agent_runtime_changed", http.StatusConflict, "agent runtime changed before task delivery",
 		)
 	}
-	if !service.PrivateRuntimePermitsAgent(agent, *task, runtime) {
+	permits, permitErr := service.PrivateRuntimePermitsAgent(r.Context(), h.Queries, agent, *task, runtime)
+	if permitErr != nil {
+		slog.Warn("daemon claim: private runtime permit check failed",
+			"task_id", uuidToString(task.ID),
+			"agent_id", uuidToString(task.AgentID),
+			"runtime_id", runtimeID,
+			"error", permitErr,
+		)
+		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+			r.Context(), task,
+			"Could not verify this private runtime's access to the assigned agent. Retry the task.",
+			taskfailure.ReasonRuntimeAccessDenied,
+			"error_runtime_access_denied", http.StatusForbidden, "private runtime permit check failed",
+		)
+	}
+	if !permits {
 		userMessage := "This private runtime cannot run the assigned agent because the agent and runtime have different owners."
 		if !agent.OwnerID.Valid {
 			userMessage = "This private runtime cannot run the assigned agent because the agent has no owner."
@@ -5204,6 +5223,32 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 	))
 }
 
+// plannedCommentRuntimeOriginator reads the per-comment requester override a
+// deferral persisted on the completed task's context. A missing entry keeps the
+// zero value: the replay then follows the sticky chain. A malformed entry is an
+// error so the caller refuses the replay rather than silently recovering a
+// different owner's machine.
+func plannedCommentRuntimeOriginator(taskContext []byte, commentID pgtype.UUID) (pgtype.UUID, error) {
+	if len(taskContext) == 0 || !commentID.Valid {
+		return pgtype.UUID{}, nil
+	}
+	var payload struct {
+		PlannedRuntimeOriginators map[string]string `json:"planned_runtime_originators"`
+	}
+	if err := json.Unmarshal(taskContext, &payload); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("decode planned runtime originators: %w", err)
+	}
+	raw, ok := payload.PlannedRuntimeOriginators[uuidToString(commentID)]
+	if !ok {
+		return pgtype.UUID{}, nil
+	}
+	originator, err := util.ParseUUID(raw)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("parse planned runtime originator: %w", err)
+	}
+	return originator, nil
+}
+
 // reconcileCommentsOnCompletion replays qualifying comments absent from this
 // run's delivered_comment_ids receipt. Planned/coalesced IDs do not prove the
 // provider received them, particularly with older daemons or deleted comments.
@@ -5351,11 +5396,32 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		// task and is not in its planned ids), so dropping the failure here is
 		// exactly how a promised follow-up is lost. Hand the obligation to that
 		// blocker instead, keeping it alive until some run provably covers it.
+		// An explicit "my runtime" selection made while this run was active is
+		// persisted per planned comment; the replay must honor it instead of
+		// letting the sticky chain recover the previous owner.
+		runtimeOriginatorOverride, err := plannedCommentRuntimeOriginator(task.Context, c.ID)
+		if err != nil {
+			slog.Error("reconcile comments on completion: invalid planned runtime originator; refusing sticky fallback",
+				"issue_id", uuidToString(task.IssueID),
+				"agent_id", agentID,
+				"comment_id", uuidToString(c.ID),
+				"error", err)
+			continue
+		}
+		if runtimeOriginatorOverride.Valid {
+			// Same application rule as the creation path: only smart agents take
+			// a requester runtime, and the override is scoped to this agent.
+			for i := range scoped {
+				if !scoped[i].Agent.ShareRuntime {
+					scoped[i].RuntimeRequester = runtimeOriginatorOverride
+				}
+			}
+		}
 		res := h.enqueueCommentAgentTriggers(ctx, issue, c.ID, scoped)[agentID]
 		handled := res.status != DispatchBlocked
 		if res.status == DispatchBlocked {
 			headSha := h.TaskService.ResolveIssueReviewSHAParam(ctx, task.IssueID)
-			if h.propagateUncoveredCommentObligation(ctx, issue, scoped[0], c.ID, headSha) {
+			if h.propagateUncoveredCommentObligation(ctx, issue, scoped[0], c.ID, runtimeOriginatorOverride, headSha) {
 				handled = true
 				slog.Info("reconcile comments on completion: replay blocked, obligation handed to the active task",
 					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID))
