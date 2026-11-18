@@ -19,14 +19,6 @@ export function isAgentRuntimeBound(
   agent: EffectiveRuntimeAgent & Pick<Agent, "runtime_bound">,
 ): boolean {
   const runtimeId = agentEffectiveRuntimeId(agent);
-  if (
-    agent.share_runtime === false &&
-    agent.runtime_config_summary?.current
-  ) {
-    return runtimeId !== null;
-  }
-  return (
-    agent.runtime_bound !== false &&
-    (runtimeId ?? "").trim().length > 0
-  );
+  if (agent.share_runtime === false) return runtimeId !== null;
+  return agent.runtime_bound !== false && runtimeId !== null;
 }

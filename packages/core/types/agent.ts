@@ -379,6 +379,12 @@ export interface MigrateAgentsToRuntimeResponse {
   confirmationExpiresAt?: string;
 }
 
+/** The current user's recently used agents in one workspace (max 10, newest
+ *  first). Drives the "recently used" grouping in every agent picker. */
+export interface RecentAgentSelectionResponse {
+  agentIds: string[];
+}
+
 // One daily bucket for the Agents-list ACTIVITY sparkline. The back-end
 // only returns days that had at least one completion; the front-end fills
 // in missing days with zero when rendering the 7-bucket series. The series

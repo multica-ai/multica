@@ -121,7 +121,11 @@ import type {
   User,
   WebhookDelivery,
   WorkspaceMcpServer,
+  AgentRuntimeConfigSummary,
+  MigrateAgentsToRuntimeResponse,
+  RecentAgentSelectionResponse,
 } from "../types";
+import { MAX_RECENT_AGENTS } from "../agents/recent-agent-selection";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
 
@@ -5131,3 +5135,221 @@ export const WorkspaceListItemSchema = z.object({
 export const WorkspacePinnedSchema = z.object({
   pinned_at: z.iso.datetime({ offset: true }).nullable().catch(null),
 });
+
+// ---------------------------------------------------------------------------
+// Smart runtime — per-user runtime config and recent agent selections
+// ---------------------------------------------------------------------------
+
+export const RecentAgentSelectionResponseSchema = z
+  .object({
+    agent_ids: z.array(z.string()).default([]),
+  })
+  .loose()
+  .transform((response) => ({
+    agentIds: [...new Set(response.agent_ids)].slice(0, MAX_RECENT_AGENTS),
+  }));
+
+export const EMPTY_RECENT_AGENT_SELECTION_RESPONSE: RecentAgentSelectionResponse = {
+  agentIds: [],
+};
+
+const AgentRuntimeConfigRecommendedWireSchema = z
+  .object({
+    cli: z.string().default(""),
+    runtime_id: z.string().default(""),
+    model: z.string().default(""),
+    thinking_level: z.string().default(""),
+    service_tier: z.string().default(""),
+    max_concurrent_tasks: z.number().default(0),
+    runtime_config: z.record(z.string(), z.unknown()).default({}),
+    editable: z.boolean().default(false),
+  })
+  .loose();
+
+const AgentRuntimeConfigRecommendedSchema =
+  AgentRuntimeConfigRecommendedWireSchema.transform(
+    ({ service_tier, runtime_config, ...recommended }) => ({
+      ...recommended,
+      serviceTier: service_tier,
+      runtimeConfig: runtime_config,
+    }),
+  );
+
+export const AgentRuntimeConfigSummarySchema = z
+  .object({
+    recommended: AgentRuntimeConfigRecommendedSchema,
+    current: z
+      .object({
+        runtime_id: z.string().nullable().default(null),
+        model: z.string().default(""),
+        thinking_level: z.string().default(""),
+        service_tier: z.string().default(""),
+        max_concurrent_tasks: z.number().default(0),
+        runtime_config: z.record(z.string(), z.unknown()).default({}),
+        strategy: z.enum(["recommended", "custom"]).default("recommended"),
+        source: z
+          .enum([
+            "shared",
+            "user_override",
+            "recommended_match",
+            "default_user_runtime",
+            "missing_user_runtime",
+          ])
+          .default("missing_user_runtime"),
+        persisted: z.boolean().default(false),
+        editable: z.boolean().default(false),
+        notice_required: z.boolean().default(false),
+        resolution_status: z
+          .enum([
+            "ready",
+            "no_user_runtime",
+            "runtime_unavailable",
+            "runtime_offline",
+            "model_unavailable",
+          ])
+          .default("runtime_unavailable"),
+        resolution_message: z.string().optional(),
+      })
+      .loose(),
+  })
+  .loose();
+
+export const MALFORMED_AGENT_RUNTIME_CONFIG_SUMMARY: AgentRuntimeConfigSummary = {
+  recommended: {
+    cli: "",
+    runtime_id: "",
+    model: "",
+    thinking_level: "",
+    serviceTier: "",
+    max_concurrent_tasks: 0,
+    runtimeConfig: {},
+    editable: false,
+  },
+  current: {
+    runtime_id: null,
+    model: "",
+    thinking_level: "",
+    service_tier: "",
+    max_concurrent_tasks: 0,
+    runtime_config: {},
+    strategy: "recommended",
+    source: "missing_user_runtime",
+    persisted: false,
+    editable: false,
+    notice_required: false,
+    resolution_status: "runtime_unavailable",
+    resolution_message: "invalid runtime config response",
+  },
+};
+
+// Uniform batch runtime configuration for personal and agent-level scopes.
+// Open strings keep installed desktop clients forward-compatible with newer
+// servers.
+const MigratedRuntimeCurrentConfigWireSchema = z
+  .object({
+    runtime_id: z.string().default(""),
+    model: z.string().default(""),
+    thinking_level: z.string().default(""),
+    service_tier: z.string().default(""),
+    max_concurrent_tasks: z.number().default(0),
+    runtime_config: z.record(z.string(), z.unknown()).default({}),
+    strategy: z.enum(["recommended", "custom"]).default("custom"),
+    source: z.string().default("user_override"),
+    resolution_status: z.string().default("ready"),
+    resolution_message: z.string().optional(),
+  })
+  .loose();
+
+const MigratedRuntimeCurrentConfigSchema =
+  MigratedRuntimeCurrentConfigWireSchema.transform((wire) => ({
+    runtimeId: wire.runtime_id,
+    model: wire.model,
+    thinkingLevel: wire.thinking_level,
+    serviceTier: wire.service_tier,
+    maxConcurrentTasks: wire.max_concurrent_tasks,
+    runtimeConfig: wire.runtime_config,
+    strategy: wire.strategy,
+    source: wire.source,
+    resolutionStatus: wire.resolution_status,
+    resolutionMessage: wire.resolution_message,
+  }));
+
+const MigratedRuntimeAgentWireSchema = z
+  .object({
+    agent_id: z.string(),
+    name: z.string().default(""),
+    previous_runtime_id: z.string().nullable().default(null),
+    current_config: MigratedRuntimeCurrentConfigSchema,
+    config_scope: z.string().default("personal"),
+  })
+  .loose();
+
+const MigratedRuntimeAgentSchema = MigratedRuntimeAgentWireSchema.transform(
+  (wire) => ({
+    agentId: wire.agent_id,
+    name: wire.name,
+    previousRuntimeId: wire.previous_runtime_id,
+    currentConfig: wire.current_config,
+    configScope: wire.config_scope,
+  }),
+);
+
+const SkippedRuntimeAgentWireSchema = z
+  .object({
+    agent_id: z.string(),
+    name: z.string().optional(),
+    reason: z.string().default("unknown"),
+    resolution_status: z.string().optional(),
+    resolution_message: z.string().optional(),
+  })
+  .loose();
+
+const SkippedRuntimeAgentSchema = SkippedRuntimeAgentWireSchema.transform(
+  (wire) => ({
+    agentId: wire.agent_id,
+    name: wire.name,
+    reason: wire.reason,
+    resolutionStatus: wire.resolution_status,
+    resolutionMessage: wire.resolution_message,
+  }),
+);
+
+const MigrateAgentsToRuntimeResponseWireSchema = z
+  .object({
+    target_runtime_id: z.string().default(""),
+    target_runtime_status: z.string().default(""),
+    dry_run: z.boolean().default(false),
+    migrated: z.array(MigratedRuntimeAgentSchema).default([]),
+    skipped: z.array(SkippedRuntimeAgentSchema).default([]),
+    tasks_migrated: z.number().default(0),
+    tasks_staying_active: z.number().default(0),
+    confirmation_token: z.string().optional(),
+    confirmation_expires_at: z.string().optional(),
+  })
+  .loose();
+
+export const MigrateAgentsToRuntimeResponseSchema =
+  MigrateAgentsToRuntimeResponseWireSchema.transform(
+    (wire): MigrateAgentsToRuntimeResponse => ({
+      targetRuntimeId: wire.target_runtime_id,
+      targetRuntimeStatus: wire.target_runtime_status,
+      dryRun: wire.dry_run,
+      migrated: wire.migrated,
+      skipped: wire.skipped,
+      tasksMigrated: wire.tasks_migrated,
+      tasksStayingActive: wire.tasks_staying_active,
+      confirmationToken: wire.confirmation_token,
+      confirmationExpiresAt: wire.confirmation_expires_at,
+    }),
+  );
+
+export const MALFORMED_MIGRATE_AGENTS_TO_RUNTIME_RESPONSE: MigrateAgentsToRuntimeResponse =
+  {
+    targetRuntimeId: "",
+    targetRuntimeStatus: "",
+    dryRun: false,
+    migrated: [],
+    skipped: [],
+    tasksMigrated: 0,
+    tasksStayingActive: 0,
+  };

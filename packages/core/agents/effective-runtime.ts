@@ -27,8 +27,7 @@ export function agentEffectiveRuntimeId(
   agent: EffectiveRuntimeAgent,
 ): string | null {
   if (agent.share_runtime === false) {
-    const current = agent.runtime_config_summary?.current;
-    if (current) return normalizeRuntimeId(current.runtime_id);
+    return normalizeRuntimeId(agent.runtime_config_summary?.current.runtime_id);
   }
   return normalizeRuntimeId(agent.runtime_id);
 }
