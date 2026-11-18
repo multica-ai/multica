@@ -1,0 +1,24 @@
+---
+title: Documents de l'espace de travail
+description: Regroupez les notes, décisions et références de l'équipe et retrouvez les versions précédentes.
+---
+
+Dans l'application web ou de bureau, ouvrez **Documents** dans la barre latérale de l'espace de travail. Gardez-y les informations que votre équipe consultera de nouveau, comme une liste d'intégration ou les décisions d'un projet.
+
+## Créer et partager un document
+
+1. Dans la barre latérale de Documents, choisissez **Nouveau**, puis **Nouveau document** ou **Nouveau dossier**. Utilisez le bouton plus à côté d'un dossier pour y créer un document.
+2. Donnez un titre au document et commencez à écrire. Tapez `/` pour insérer un titre, une liste de tâches, un tableau ou un autre bloc. Collez ou déposez une image pour l'ajouter aux pièces jointes de l'espace de travail.
+3. Attendez que l'état **Enregistré** s'affiche avant de partager. Copiez le lien depuis la barre supérieure, ou tapez `@` suivi du titre dans une tâche, un commentaire ou un chat.
+
+Pour réorganiser vos documents, faites glisser un document ou un dossier vers sa destination, ou choisissez **Déplacer vers...** dans son menu. Vous pouvez supprimer un dossier vide. La suppression d'un document efface aussi son historique.
+
+## Récupérer les brouillons et les versions
+
+Si quelqu'un enregistre une version plus récente pendant votre modification, Multica conserve votre brouillon et vous invite à **Recharger la dernière version**. Votre brouillon reste accessible à côté du contenu actuel. Copiez les passages que vous souhaitez conserver.
+
+Ouvrez **Historique** pour consulter une version précédente. Choisissez **Restaurer cette version** pour rétablir ce contenu. La restauration crée une version et conserve l'historique. Plusieurs enregistrements automatiques d'une même session de rédaction peuvent être regroupés dans l'historique.
+
+## Travailler sur les documents avec un agent
+
+Demandez à un agent de lire ou de mettre à jour un document lié et précisez ce qu'il doit conserver. Dans le [CLI](/cli), utilisez `multica doc list` pour trouver un document et `multica doc get` pour lire son contenu Markdown et sa révision. Transmettez cette révision à `multica doc update` avec `--base-revision`. Si quelqu'un a enregistré une modification entre-temps, récupérez la version actuelle et fusionnez vos modifications avant de réessayer.
