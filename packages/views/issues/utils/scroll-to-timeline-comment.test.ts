@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { scrollToTimelineComment } from "./scroll-to-timeline-comment";
+import { revealTimelineList, scrollToTimelineComment } from "./scroll-to-timeline-comment";
 
 const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
 
@@ -36,5 +36,41 @@ describe("scrollToTimelineComment", () => {
     expect(onComplete).toHaveBeenCalled();
     // 5000 - (600 - 100) / 2: the replacement row, centred.
     expect(container.scrollTop).toBe(4750);
+  });
+});
+
+describe("revealTimelineList", () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("keeps one frame budget per list across the effect re-runs that restart it", () => {
+    const pending = new Map<number, FrameRequestCallback>();
+    let nextId = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { pending.set(++nextId, cb); return nextId; });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => { pending.delete(id); });
+    const runFrames = (count: number) => {
+      for (let i = 0; i < count && pending.size; i++) {
+        const [id, cb] = pending.entries().next().value!;
+        pending.delete(id);
+        cb(0);
+      }
+    };
+    let writes = 0;
+    const container = { getBoundingClientRect: () => new DOMRect(0, 0, 400, 600) } as HTMLElement;
+    Object.defineProperty(container, "scrollTop", { get: () => 0, set: () => { writes++; } });
+    // Content above keeps the list below the viewport, so the reveal never ends on its own.
+    const list = { getBoundingClientRect: () => new DOMRect(0, 2000, 400, 100) } as HTMLElement;
+
+    let cancel = revealTimelineList(container, list);
+    runFrames(50);
+    for (let restart = 0; restart < 20; restart++) {
+      cancel();
+      cancel = revealTimelineList(container, list);
+      runFrames(10);
+    }
+    runFrames(500);
+    cancel();
+
+    expect(writes).toBe(120);
+    expect(pending.size).toBe(0);
   });
 });

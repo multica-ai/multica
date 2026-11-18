@@ -4,6 +4,13 @@ import type { VirtuosoHandle } from "react-virtuoso";
 const REVEAL_LIST_MAX_FRAMES = 120;
 
 /**
+ * Frames each list has left. The budget belongs to the list, not to one call:
+ * every commit that re-runs the caller's effect (a realtime comment, a
+ * timeline refresh) restarts the reveal, and must not restart its limit.
+ */
+const revealFramesLeft = new WeakMap<HTMLElement, number>();
+
+/**
  * Hold the virtualized timeline's top at the top of the viewport until the
  * caller sees the list report a measured height and cancels.
  *
@@ -16,10 +23,12 @@ const REVEAL_LIST_MAX_FRAMES = 120;
  */
 export function revealTimelineList(container: HTMLElement, list: HTMLElement) {
   let rafId = 0;
-  let frames = 0;
   const reveal = () => {
+    const left = revealFramesLeft.get(list) ?? REVEAL_LIST_MAX_FRAMES;
+    if (left <= 0) return;
+    revealFramesLeft.set(list, left - 1);
     container.scrollTop += list.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    if (++frames < REVEAL_LIST_MAX_FRAMES) rafId = requestAnimationFrame(reveal);
+    rafId = requestAnimationFrame(reveal);
   };
   reveal();
   return () => cancelAnimationFrame(rafId);
