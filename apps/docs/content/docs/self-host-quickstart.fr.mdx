@@ -378,7 +378,7 @@ docker compose -f docker-compose.selfhost.yml exec -T postgres \
   pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
 ```
 
-Utilisez vos propres `POSTGRES_USER` / `POSTGRES_DB` de `.env` si vous avez modifié les valeurs par défaut `multica`. Les données résident dans le volume nommé `multica_pgdata`, qui survit à `docker compose down`, mais pas à `down -v`.
+Utilisez vos propres `POSTGRES_USER` / `POSTGRES_DB` de `.env` si vous avez modifié les valeurs par défaut `multica`. Les données résident dans le volume nommé `multica_pgdata` (`<name>_pgdata` si `.env` définit `COMPOSE_PROJECT_NAME=<name>`, ce que fait `make selfhost` quand une autre copie du dépôt sur la machine utilise déjà `multica`), qui survit à `docker compose down`, mais pas à `down -v`.
 
 <Callout type="warning">
 **Ne redirigez pas `pg_dump` directement vers `gzip` par un pipe.** Un shell renvoie le code de sortie de la *dernière* commande d'un pipeline : `pg_dump … | gzip > backup.sql.gz` se termine donc avec `0` même si le dump a échoué, ce qui laisse une archive de 20 octets parfaitement valide, mais vide. Rediriger d'abord vers un fichier fait compter le code de sortie de `pg_dump` lui-même, et `&&` ne compresse qu'un dump qui a réellement réussi.
