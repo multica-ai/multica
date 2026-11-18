@@ -1583,7 +1583,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, permErr.Error())
 		return
 	}
-	runtime := db.AgentRuntime{Provider: cli, RuntimeMode: "daemon"}
+	runtime := db.AgentRuntime{Provider: cli, RuntimeMode: "local"}
 	if share {
 		runtime, err = h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 			ID:          runtimeUUID,
