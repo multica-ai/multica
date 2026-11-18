@@ -72,7 +72,7 @@ func TestHandleTask_ShutdownDisposition(t *testing.T) {
 					Usage: []TaskUsageEntry{{Provider: "openai", Model: "test", InputTokens: 100, OutputTokens: 50}},
 				}, nil
 			})
-			d.handleTask(ctx, Task{ID: "task", RuntimeID: "rt"}, 0)
+			d.handleTask(ctx, Task{ID: "task", RuntimeID: "rt"}, newTestTaskSlot(0))
 			mu.Lock()
 			defer mu.Unlock()
 			if !strings.HasSuffix(endpoint, tc.wantEndpoint) {

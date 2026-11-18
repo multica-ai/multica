@@ -203,14 +203,14 @@ interface ContentEditorBaseProps {
   enableSlashCommands?: boolean;
   /**
    * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
-   * lists the active agent's skills (chat); "command" shows the fixed built-in
-   * command menu (issue comments), e.g. /note.
+   * lists the active agent's skills (chat); "command" merges Issue quick
+   * actions, skills matching a nonempty query, and built-ins such as /note.
    */
   slashCommandMode?: "skill" | "command";
   /**
-   * Quick actions to offer in the "command" `/` menu, plus the resolver that
-   * turns a pick into the text it would post (MUL-5465). Read through
-   * functions so a newly created action appears without remounting the editor.
+   * Quick actions and Issue target-agent skills for the "command" `/` menu,
+   * plus the resolver that turns a quick-action pick into draft text. Read
+   * through functions so cached updates appear without remounting the editor.
    */
   quickActionMenu?: BuiltinCommandSuggestionOptions;
   /**
@@ -639,6 +639,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         slashCommandMode,
         quickActionMenu: {
           getQuickActions: () => quickActionMenuRef.current?.getQuickActions?.() ?? [],
+          getSkills: (editor) => quickActionMenuRef.current?.getSkills?.(editor) ?? [],
           subscribeQuickActions: (refresh) => {
             quickActionMenuListeners.current.add(refresh);
             return () => { quickActionMenuListeners.current.delete(refresh); };

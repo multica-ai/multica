@@ -186,5 +186,11 @@
     "workspace_missing_description": "You came back from Stripe, but this workspace is no longer available to you — it may have been removed, or your access changed. Open Billing in the workspace you expected to check the current state.",
     "retry": "Try again",
     "go_to_app": "Go to Multica"
+  },
+  "paid_feature": {
+    "read_only": "Read-only. Upgrade to edit.",
+    "unavailable": "Not included in this workspace's plan.",
+    "view_plans": "View plans",
+    "locked_error": "This isn't included in the workspace's plan. Existing settings keep working; upgrade to add more."
   }
 }

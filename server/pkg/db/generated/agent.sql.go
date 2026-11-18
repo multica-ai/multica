@@ -2910,7 +2910,9 @@ SELECT
     CASE WHEN $2::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
+    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
+              OR COALESCE(a.runtime_id, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
+         ELSE p.session_id END,
     p.work_dir,
     p.attempt + 1, COALESCE($3::int, p.max_attempts), p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
@@ -2959,8 +2961,10 @@ type CreateRetryTaskParams struct {
 // Claims fence on agent.runtime_id = task.runtime_id, so a retry stamped with a
 // runtime the agent moved off while the parent ran would be claimable by neither
 // daemon (#10717); UpdateAgent re-stamps only rows queued at switch time. An
-// unbound agent keeps the parent's runtime. Resume needs no change here: claim
-// resumes a session only on the runtime that recorded it.
+// unbound agent keeps the parent's runtime. A retry that moves leaves the
+// parent's session behind: it belongs to the runtime that recorded it, and an
+// attempt that ends before reporting its own would file it under the new one,
+// where the next claim would be told to resume it.
 //
 // Keep work_dir for every retry, but clear resume context for unsafe sessions.
 // Keep failure predicates aligned with resumeUnsafeFailureReason and resume lookups.
@@ -7259,8 +7263,11 @@ SET coalesced_comment_ids = (
         FROM unnest(array_append(coalesced_comment_ids, trigger_comment_id)) AS e
         WHERE e IS NOT NULL AND e <> $1::uuid
     ),
+    is_leader_task = CASE WHEN $2::uuid IS NOT NULL
+        THEN TRUE ELSE is_leader_task END,
+    squad_id = COALESCE($2::uuid, squad_id),
     trigger_comment_id = $1::uuid,
-    trigger_summary = COALESCE($2, trigger_summary),
+    trigger_summary = COALESCE($3, trigger_summary),
     -- Re-attribution is ATOMIC (MUL-4302): folding a newly-arrived comment moves the
     -- WHOLE attribution snapshot to that comment's human — person columns, source
     -- label, delegation lineage, rule version, and evidence — computed by the caller
@@ -7268,19 +7275,26 @@ SET coalesced_comment_ids = (
     -- run showing B accountable while still pointing at A's stale source / evidence /
     -- level. accountable comes from the resolved Result (finalizeAttribution already
     -- guaranteed originator ⟹ accountable == originator; the cross-column CHECK backs it).
-    originator_user_id = $3::uuid,
-    accountable_user_id = $4::uuid,
-    originator_source = $5,
-    delegated_from_task_id = $6::uuid,
-    rule_version_id = $7::uuid,
-    trigger_evidence_kind = $8,
-    trigger_evidence_ref_id = $9::uuid,
-    runtime_mcp_overlay = $10,
-    runtime_connected_apps = $11
+    originator_user_id = $4::uuid,
+    accountable_user_id = $5::uuid,
+    originator_source = $6,
+    delegated_from_task_id = $7::uuid,
+    rule_version_id = $8::uuid,
+    trigger_evidence_kind = $9,
+    trigger_evidence_ref_id = $10::uuid,
+    runtime_mcp_overlay = $11,
+    runtime_connected_apps = $12
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
-    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $12
-      AND t.agent_id = $13
+    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $13
+      AND t.agent_id = $14
+      -- An unclaimed generic turn can become a leader turn. Never overwrite
+      -- a worker obligation or a different squad's leader context.
+      AND (
+          $2::uuid IS NULL
+          OR (t.is_leader_task AND t.squad_id = $2::uuid)
+          OR (NOT t.is_leader_task AND t.squad_id IS NULL)
+      )
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid)
       AND (
           t.status = 'queued'
@@ -7292,17 +7306,19 @@ WHERE id = (
       -- into it would give a new-HEAD comment old-HEAD review coverage. Empty/
       -- absent head_sha (no linked PR) matches any task, preserving coalescing.
       AND (
-          COALESCE($14::text, '') = ''
-          OR t.context->>'head_sha' = $14::text
+          COALESCE($15::text, '') = ''
+          OR t.context->>'head_sha' = $15::text
       )
     ORDER BY t.created_at DESC
     LIMIT 1
+    FOR UPDATE OF t
 )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
 type MergeCommentIntoPendingTaskParams struct {
 	NewTriggerCommentID     pgtype.UUID `json:"new_trigger_comment_id"`
+	NewLeaderSquadID        pgtype.UUID `json:"new_leader_squad_id"`
 	NewTriggerSummary       pgtype.Text `json:"new_trigger_summary"`
 	NewOriginatorUserID     pgtype.UUID `json:"new_originator_user_id"`
 	NewAccountableUserID    pgtype.UUID `json:"new_accountable_user_id"`
@@ -7363,6 +7379,7 @@ type MergeCommentIntoPendingTaskParams struct {
 func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeCommentIntoPendingTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, mergeCommentIntoPendingTask,
 		arg.NewTriggerCommentID,
+		arg.NewLeaderSquadID,
 		arg.NewTriggerSummary,
 		arg.NewOriginatorUserID,
 		arg.NewAccountableUserID,

@@ -30,6 +30,8 @@ A local directory only applies to the daemon it is bound to. When the daemon exe
 
 Open the project and click **Add repository** in **Resources → Repositories**. Search for a repository already linked to the workspace, or paste a Git URL. Workspace repositories are managed in **Settings → Code**; once GitHub is connected, the same page offers **Pick from GitHub** to import repositories the App is authorized for.
 
+Pasting a GitHub branch URL (`https://github.com/owner/repo/tree/branch`) fills in the repository URL and starting branch separately. URL-encoded branch names are decoded; query parameters and page anchors are excluded. Check the starting branch before adding the repository.
+
 Repositories are not limited to GitHub: any Git URL the runtime can reach works as a repository resource. Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab under **Settings → Code**; see [Self-hosted Git hosting](/vcs-integration).
 
 When creating a project, you can also pick repositories directly under **Repos**. One project can link multiple GitHub repositories.
@@ -92,7 +94,7 @@ A local directory has two execution modes, set per resource with `execution_mode
 
 The agent works directly in your directory, and runs execute one at a time. When two runs use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
 
-Waiting does not modify the directory. A waiting run can be cancelled; otherwise it waits until the directory becomes available.
+Waiting does not modify the directory or consume a daemon execution slot. A waiting run can be cancelled; otherwise it resumes startup once both the directory and execution capacity are available.
 
 A plain non-git directory can only use this mode: worktree mode covers git repositories.
 

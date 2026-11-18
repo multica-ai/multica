@@ -62,6 +62,7 @@ import {
 import { ProjectStartDatePicker } from "../projects/components/project-start-date-picker";
 import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
 import { ProjectAccessDraftPicker } from "../projects/components/project-access";
+import { usePaidFeatureErrorMessage } from "../billing";
 import { PillButton } from "../common/pill-button";
 import { WorkflowPill } from "../workflows/workflow-pill";
 import { githubShortLabel } from "../common/github-url";
@@ -357,6 +358,7 @@ export function CreateProjectModal({
   const hasSource = sourceMode === "local" ? !!selectedLocalPath : selectedRepos.length > 0;
 
   const createProject = useCreateProject();
+  const paidFeatureError = usePaidFeatureErrorMessage();
 
   // Every selected repo's branch, not just the one in the add field. A branch
   // edited on an already-selected row goes through setRepoRef and used to
@@ -428,9 +430,12 @@ export function CreateProjectModal({
       router.push(wsPaths.projectDetail(project.id));
     } catch (err) {
       toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.create_project.toast_failed),
+        paidFeatureError(
+          err,
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.create_project.toast_failed),
+        ),
       );
     } finally {
       setSubmitting(false);

@@ -238,6 +238,9 @@ type Handler struct {
 	// Entitlements supplies workspace-scoped commercial gates. A nil provider
 	// preserves self-hosted behavior without extra reads.
 	Entitlements entitlement.Provider
+	// Features restricts paid features (paid_feature.go). Nil leaves every
+	// feature usable, which is the self-hosted behavior.
+	Features entitlement.FeatureProvider
 	// SeatCapacity executes Cloud's pre-purchased human-seat protocol. Nil or
 	// disabled preserves self-hosted behavior.
 	SeatCapacity          seatcapacity.Executor

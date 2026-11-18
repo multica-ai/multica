@@ -46,8 +46,9 @@ vi.mock("@multica/core/pins", () => ({
 }));
 
 const mockUpdateMutate = vi.fn();
+const mockUpdateMutateAsync = vi.fn();
 vi.mock("@multica/core/issues/mutations", () => ({
-  useUpdateIssue: () => ({ mutate: mockUpdateMutate }),
+  useUpdateIssue: () => ({ mutate: mockUpdateMutate, mutateAsync: mockUpdateMutateAsync }),
 }));
 
 // The status catalog is server state; this suite only needs it to answer which
@@ -152,6 +153,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 beforeEach(() => {
   mockOpenModal.mockReset();
   mockUpdateMutate.mockReset();
+  mockUpdateMutateAsync.mockReset().mockResolvedValue(mockIssue);
   mockCreatePinMutate.mockReset();
   mockDeletePinMutate.mockReset();
   vi.mocked(toast.success).mockReset();
@@ -169,14 +171,14 @@ afterEach(() => {
 });
 
 describe("useIssueActions", () => {
-  it("updateField dispatches useUpdateIssue.mutate with the correct payload", () => {
+  it("updateField dispatches useUpdateIssue.mutateAsync with the correct payload", () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
 
     act(() => {
       result.current.updateField({ status: "done" });
     });
 
-    expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", status: "done" },
       expect.any(Object),
     );
@@ -198,7 +200,7 @@ describe("useIssueActions", () => {
       assigneeType: "agent",
       assigneeId: "agent-1",
     });
-    expect(mockUpdateMutate).not.toHaveBeenCalled();
+    expect(mockUpdateMutateAsync).not.toHaveBeenCalled();
   });
 
   it("assigning an agent to a backlog issue applies directly — backlog never starts a run", () => {
@@ -212,7 +214,7 @@ describe("useIssueActions", () => {
       });
     });
 
-    expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "agent", assignee_id: "agent-1" },
       expect.any(Object),
     );
@@ -242,7 +244,7 @@ describe("useIssueActions", () => {
       assigneeType: "agent",
       assigneeId: "agent-1",
     });
-    expect(mockUpdateMutate).not.toHaveBeenCalled();
+    expect(mockUpdateMutateAsync).not.toHaveBeenCalled();
   });
 
   it("a status change that starts no run applies directly", () => {
@@ -252,7 +254,7 @@ describe("useIssueActions", () => {
       result.current.updateField({ status: "in_progress" });
     });
 
-    expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", status: "in_progress" },
       expect.any(Object),
     );
@@ -269,7 +271,7 @@ describe("useIssueActions", () => {
       });
     });
 
-    expect(mockUpdateMutate).toHaveBeenCalledWith(
+    expect(mockUpdateMutateAsync).toHaveBeenCalledWith(
       { id: "issue-1", assignee_type: "member", assignee_id: "user-1" },
       expect.any(Object),
     );

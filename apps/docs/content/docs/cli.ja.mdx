@@ -234,6 +234,25 @@ multica issue wakeup runs MUL-123 <wakeup-id>
 
 ターミナルからメンバーとして作成するときは `--agent-id` が必要です。エージェントが自分の実行の中で作成した場合は、既定でそのエージェント自身を起こします。
 
+## チャットのウェイクアップ [#chat-wakeups]
+
+`chat wakeup` はチャット実行中のエージェント専用で、対象は現在の会話です。セッション ID は指定できず、通常のメンバーの端末やタスクの実行からは使えません。ユーザー向けの操作は[後で報告してもらう](/chat#follow-up-later)を参照してください。
+
+```bash
+multica chat wakeup create --title "Review ready" \
+  --until-issue MUL-123 --state in_review --expires-in 48h \
+  --instruction "Summarize the result in this conversation"
+multica chat wakeup create --title "Check back in two hours" \
+  --after 2h --instruction "Remind the user to review the result"
+multica chat wakeup list
+```
+
+単一の `--until-*` 条件、`--at` / `--after`、`--every` のいずれかを選びます。作成と更新には `--title` と `--instruction`（または `--instruction-file`）が必要です。`update` は設定を置き換え、相対的な期限を更新時から計算し直します。ただし、条件・リマインダー・定期確認の種類は切り替えられません。条件待ちと確認は既定で 24 時間、`--expires-in` または `--expires-at` で最長 7 日まで指定できます。リマインダーは 30 日先までで、期限フラグは指定できません。確認間隔は最低 10 分で、期限までの確認回数は最大 100 回です。`--every 10m` に既定の 24 時間を組み合わせると 144 回になり拒否されるため、間隔を延ばすか、`--expires-in 16h` などで期限を早めてください。
+
+条件には `--until-issue` と `--state` または `--status`、`--until-children-done` と任意の `--stage`、`--until-pr`、`--until-run`、`--until-reply` と任意の `--from <user-id>` を使えます。PR 条件は、このワークスペースにミラーされた GitHub PR を `owner/repo#N[:merged|closed|checks]` 形式で指定します。`checks` は現在の head のチェック終了を待ち、成功も失敗も対象です。`checks` 条件は、サーバーが GitHub から CI 状態を読み取れる場合にのみ作成できます。セルフホストのサーバーでは `GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` が必要です（[GitHub 連携](/github-integration)を参照）。作成時にすでに終了しているチェック結果は基準として記録され、その結果だけでは直ちにエージェントを起動しません。
+
+`list`、`get <id>` で確認し、`cancel <id>` でキャンセルします。定期確認の実行中は、`checkin <id> --note "..."` で返信を送らずに状況を記録できます。目的を達成したら `finish <id>` で確認を終えます。期限到来による最後の実行では必ず報告し、無言のチェックインはできません。
+
 ## エージェントとスキル
 
 ```bash
@@ -507,6 +526,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `member list/add/set-role/remove` | スクワッドのメンバーを管理 | |
 | | `activity <issue-id> <outcome>` | リーダーの評価を記録 | |
 | `chat` | `history`、`thread [id]` | エージェントが現在処理している外部チャットセッションを読み取り | `--limit`、`--before` |
+| | `wakeup create/list/get/update/cancel/finish/checkin` | 現在のチャット実行の予定を管理。[チャットのウェイクアップ](#chat-wakeups)を参照 | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | 既読にせずに[現在の通知を読み取る](/inbox) | `--project`、`--type`、`--output`（`table` または `json`）；フィルターはローカルで適用 |
 
 ### Runtime

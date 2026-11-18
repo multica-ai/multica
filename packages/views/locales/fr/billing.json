@@ -186,5 +186,11 @@
     "workspace_missing_description": "Vous revenez de Stripe, mais cet espace de travail ne vous est plus accessible — il a peut-être été supprimé, ou vos droits ont changé. Ouvrez Facturation dans l'espace de travail attendu pour vérifier l'état actuel.",
     "retry": "Réessayer",
     "go_to_app": "Aller sur Multica"
+  },
+  "paid_feature": {
+    "read_only": "Lecture seule. Passez à un forfait supérieur pour modifier.",
+    "unavailable": "Non inclus dans le forfait de cet espace de travail.",
+    "view_plans": "Voir les forfaits",
+    "locked_error": "Non inclus dans le forfait de l'espace de travail. Les réglages existants restent actifs ; changez de forfait pour en ajouter."
   }
 }
