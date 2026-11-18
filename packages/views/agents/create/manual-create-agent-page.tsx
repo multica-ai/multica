@@ -52,11 +52,14 @@ export function ManualCreateAgentPage() {
   const duplicateId = navigation.searchParams.get("duplicate");
   const squadId = navigation.searchParams.get("squad");
   const runtimeParam = duplicateId ? null : navigation.searchParams.get("runtime");
+  // Step 1's "continue without a machine" entry: a smart runtime agent picks a
+  // recommended CLI in step 2, so it arrives without a runtime to seed.
+  const smartEntry = navigation.searchParams.get("strategy") === "smart";
   // On desktop the location is the tab's URL, and it moves to the done page
   // while this route is still mounted. Its missing `?runtime=` is not a
   // skipped step 1; redirecting on it threw the user back there.
   const onThisRoute = navigation.pathname === paths.newAgentManual();
-  const needsRuntime = onThisRoute && !duplicateId && !runtimeParam;
+  const needsRuntime = onThisRoute && !duplicateId && !runtimeParam && !smartEntry;
 
   useEffect(() => {
     if (needsRuntime) {

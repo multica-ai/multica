@@ -444,7 +444,8 @@
       "member_fix": "Demandez à un admin de corriger",
       "footer_selected": "Sélection :",
       "cancel": "Annuler",
-      "next": "Suivant"
+      "next": "Suivant",
+      "continue_smart": "Pas de machine ? Utiliser le runtime intelligent"
     }
   },
   "create_dialog": {

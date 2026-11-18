@@ -428,7 +428,8 @@
       "member_fix": "需要管理员处理",
       "footer_selected": "已选：",
       "cancel": "取消",
-      "next": "下一步"
+      "next": "下一步",
+      "continue_smart": "没有机器？使用智能运行时"
     }
   },
   "create_dialog": {

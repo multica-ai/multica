@@ -444,7 +444,8 @@
       "member_fix": "Ask an admin to fix it",
       "footer_selected": "Selected:",
       "cancel": "Cancel",
-      "next": "Next"
+      "next": "Next",
+      "continue_smart": "No machine? Use Smart runtime"
     }
   },
   "create_dialog": {

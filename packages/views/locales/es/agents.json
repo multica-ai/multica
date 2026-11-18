@@ -426,7 +426,8 @@
       "member_fix": "Pide a un administrador que lo arregle",
       "footer_selected": "Seleccionado:",
       "cancel": "Cancelar",
-      "next": "Siguiente"
+      "next": "Siguiente",
+      "continue_smart": "¿Sin máquina? Usa el runtime inteligente"
     }
   },
   "create_dialog": {

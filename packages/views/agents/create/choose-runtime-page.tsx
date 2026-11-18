@@ -171,6 +171,16 @@ export function ChooseRuntimePage({
       : selected && selected.option.runtime.status === "online"
         ? selected.option.runtime.id
         : null;
+  // A member with no usable machine cannot pick step 1's answer, but a smart
+  // runtime agent needs no machine: step 2 asks for a recommended CLI instead.
+  const anyOnlineOption = useMemo(
+    () => [...options.values()].some(({ option }) => option.runtime.status === "online"),
+    [options],
+  );
+  const goSmart = () =>
+    navigation.push(
+      createPathWithParams(paths.newAgentManual(), { squad: squadId, strategy: "smart" }),
+    );
 
   const goNext = (runtimeId: string) =>
     navigation.push(
@@ -287,6 +297,11 @@ export function ChooseRuntimePage({
         <Button variant="ghost" onClick={() => backOrReplace(paths.agents())}>
           {t(($) => $.creation_studio.runtime_step.cancel)}
         </Button>
+        {!anyOnlineOption ? (
+          <Button variant="outline" onClick={goSmart}>
+            {t(($) => $.creation_studio.runtime_step.continue_smart)}
+          </Button>
+        ) : null}
         <Button disabled={!nextRuntimeId} onClick={() => nextRuntimeId && goNext(nextRuntimeId)}>
           {t(($) => $.creation_studio.runtime_step.next)}
           <ChevronRight aria-hidden="true" className="size-3.5" />

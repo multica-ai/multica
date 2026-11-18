@@ -1060,7 +1060,8 @@
       "member_fix": "관리자에게 해결을 요청하세요",
       "footer_selected": "선택됨:",
       "cancel": "취소",
-      "next": "다음"
+      "next": "다음",
+      "continue_smart": "머신이 없나요? 스마트 런타임 사용"
     }
   },
   "intro": {

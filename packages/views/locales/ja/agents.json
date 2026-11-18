@@ -1060,7 +1060,8 @@
       "member_fix": "管理者に対応を依頼してください",
       "footer_selected": "選択中：",
       "cancel": "キャンセル",
-      "next": "次へ"
+      "next": "次へ",
+      "continue_smart": "マシンがない場合はスマートランタイムを使用"
     }
   },
   "intro": {
