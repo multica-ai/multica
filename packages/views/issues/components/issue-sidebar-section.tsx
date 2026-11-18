@@ -84,7 +84,7 @@ export function IssueSidebarCard({ children, className }: { children: ReactNode;
     <div
       data-slot="issue-sidebar-card"
       className={cn(
-        "flex flex-col gap-3 rounded-lg border bg-surface py-1.5 shadow-[var(--surface-shadow)] [overflow-anchor:none] [&>*]:flow-root",
+        "flex flex-col gap-3 rounded-xl bg-surface py-1.5 shadow-[var(--surface-card-shadow)] [overflow-anchor:none] [&>*]:flow-root",
         className,
       )}
     >

@@ -174,6 +174,7 @@ const STATUS: Entry[] = [
 const SHAPE: Entry[] = [
   ["radius", "Base corner radius. Every `rounded-*` step and component radius below derives from it."],
   ["surface-shadow", "Resting shadow of cards and the page."],
+  ["surface-card-shadow", "Outline and shadow of borderless cards on the page canvas, like the issue sidebar's."],
   ["floating-shadow", "Dialogs and sheets."],
   ["menu-shadow", "Menus, selects and popovers."],
   ["tooltip", "Tooltip fill (dark in both modes)."],
