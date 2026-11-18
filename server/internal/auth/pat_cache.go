@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -40,20 +41,50 @@ func NewPATCache(rdb redis.UniversalClient) *PATCache {
 
 func patCacheKey(hash string) string { return patCachePrefix + hash }
 
-// Get returns the cached user_id for a token hash. ok=false on cache miss
-// or any Redis error — a dead Redis must not take down auth.
-func (c *PATCache) Get(ctx context.Context, hash string) (userID string, ok bool) {
+// patCacheServiceSuffix is appended to the cached user_id when the PAT's
+// owner is a service account (user.kind='service'). Human-owned entries stay
+// in the legacy bare-user_id format so entries written before this field
+// existed still parse (as non-service) across a rolling deploy.
+const patCacheServiceSuffix = "service"
+
+// PATAuth is the cached decision for a PAT hash: the user the token belongs
+// to and whether that user is a service (machine) account. Service accounts
+// use ordinary mul_ PATs, but their requests are classified differently by
+// the actor guards, so the kind must survive a cache hit — not just a cache
+// miss.
+type PATAuth struct {
+	UserID    string
+	IsService bool
+}
+
+func parsePATCacheValue(v string) PATAuth {
+	if i := strings.IndexByte(v, '|'); i >= 0 {
+		return PATAuth{UserID: v[:i], IsService: v[i+1:] == patCacheServiceSuffix}
+	}
+	return PATAuth{UserID: v}
+}
+
+func formatPATCacheValue(p PATAuth) string {
+	if p.IsService {
+		return p.UserID + "|" + patCacheServiceSuffix
+	}
+	return p.UserID
+}
+
+// Get returns the cached auth decision for a token hash. ok=false on cache
+// miss or any Redis error — a dead Redis must not take down auth.
+func (c *PATCache) Get(ctx context.Context, hash string) (PATAuth, bool) {
 	if c == nil {
-		return "", false
+		return PATAuth{}, false
 	}
 	v, err := c.rdb.Get(ctx, patCacheKey(hash)).Result()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
 			slog.Warn("pat_cache: get failed; falling back to DB", "error", err)
 		}
-		return "", false
+		return PATAuth{}, false
 	}
-	return v, true
+	return parsePATCacheValue(v), true
 }
 
 // Set populates the cache with the given TTL. Callers MUST pass a TTL no
@@ -63,11 +94,11 @@ func (c *PATCache) Get(ctx context.Context, hash string) (userID string, ok bool
 //
 // Errors are logged and swallowed — a cache write failure is not a
 // request failure.
-func (c *PATCache) Set(ctx context.Context, hash, userID string, ttl time.Duration) {
+func (c *PATCache) Set(ctx context.Context, hash string, auth PATAuth, ttl time.Duration) {
 	if c == nil || ttl <= 0 {
 		return
 	}
-	if err := c.rdb.Set(ctx, patCacheKey(hash), userID, ttl).Err(); err != nil {
+	if err := c.rdb.Set(ctx, patCacheKey(hash), formatPATCacheValue(auth), ttl).Err(); err != nil {
 		slog.Warn("pat_cache: set failed", "error", err)
 	}
 }

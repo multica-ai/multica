@@ -44,11 +44,11 @@ func TestPATCache_NilSafe(t *testing.T) {
 	var c *PATCache // nil
 	ctx := context.Background()
 
-	if v, ok := c.Get(ctx, "any-hash"); ok || v != "" {
-		t.Fatalf("nil cache must miss; got (%q, %v)", v, ok)
+	if v, ok := c.Get(ctx, "any-hash"); ok || v.UserID != "" {
+		t.Fatalf("nil cache must miss; got (%q, %v)", v.UserID, ok)
 	}
-	c.Set(ctx, "any-hash", "user-1", AuthCacheTTL) // no panic
-	c.Invalidate(ctx, "any-hash")                  // no panic
+	c.Set(ctx, "any-hash", PATAuth{UserID: "user-1"}, AuthCacheTTL) // no panic
+	c.Invalidate(ctx, "any-hash")                                   // no panic
 }
 
 func TestNewPATCache_NilRedisReturnsNil(t *testing.T) {
@@ -69,14 +69,45 @@ func TestPATCache_SetGetInvalidate(t *testing.T) {
 		t.Fatal("expected miss before set")
 	}
 
-	c.Set(ctx, "hash-A", "user-A", AuthCacheTTL)
-	if v, ok := c.Get(ctx, "hash-A"); !ok || v != "user-A" {
-		t.Fatalf("expected hit user-A, got (%q, %v)", v, ok)
+	c.Set(ctx, "hash-A", PATAuth{UserID: "user-A"}, AuthCacheTTL)
+	if v, ok := c.Get(ctx, "hash-A"); !ok || v.UserID != "user-A" || v.IsService {
+		t.Fatalf("expected hit user-A (human), got (%+v, %v)", v, ok)
+	}
+
+	// Service accounts carry their kind through the cache: the flag is part
+	// of the cached value, not re-derived per request.
+	c.Set(ctx, "hash-S", PATAuth{UserID: "user-S", IsService: true}, AuthCacheTTL)
+	if v, ok := c.Get(ctx, "hash-S"); !ok || v.UserID != "user-S" || !v.IsService {
+		t.Fatalf("expected hit user-S (service), got (%+v, %v)", v, ok)
 	}
 
 	c.Invalidate(ctx, "hash-A")
 	if v, ok := c.Get(ctx, "hash-A"); ok {
-		t.Fatalf("expected miss after invalidate, got (%q, %v)", v, ok)
+		t.Fatalf("expected miss after invalidate, got (%q, %v)", v.UserID, ok)
+	}
+}
+
+// TestPATCacheValueFormat pins the Redis value format: human-owned entries
+// stay in the legacy bare-user_id shape (so entries written by the previous
+// binary still parse as non-service across a rolling deploy), and service
+// entries use the explicit suffix.
+func TestPATCacheValueFormat(t *testing.T) {
+	if got := formatPATCacheValue(PATAuth{UserID: "abc"}); got != "abc" {
+		t.Fatalf("human value = %q, want bare user id", got)
+	}
+	if got := formatPATCacheValue(PATAuth{UserID: "abc", IsService: true}); got != "abc|service" {
+		t.Fatalf("service value = %q, want \"abc|service\"", got)
+	}
+	if v := parsePATCacheValue("abc"); v.UserID != "abc" || v.IsService {
+		t.Fatalf("legacy parse = %+v, want human", v)
+	}
+	if v := parsePATCacheValue("abc|service"); v.UserID != "abc" || !v.IsService {
+		t.Fatalf("service parse = %+v, want service", v)
+	}
+	// A UUID can never contain '|', so a legacy user_id never parses as
+	// service even if the DB value were adversarial.
+	if v := parsePATCacheValue("0197aa55-1c2f-7d31-a8f5-6bbf2fcd0e12"); v.IsService {
+		t.Fatalf("legacy uuid must parse as human: %+v", v)
 	}
 }
 
@@ -94,7 +125,7 @@ func TestPATCache_TTL(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	c.Set(ctx, "hash-T", "user-T", AuthCacheTTL)
+	c.Set(ctx, "hash-T", PATAuth{UserID: "user-T"}, AuthCacheTTL)
 	ttl, err := rdb.TTL(ctx, patCacheKey("hash-T")).Result()
 	if err != nil {
 		t.Fatalf("TTL: %v", err)
@@ -148,7 +179,7 @@ func TestPATCache_Set_RespectsClampedTTL(t *testing.T) {
 
 	// Cache with a 5s TTL — what TTLForExpiry would return for a token
 	// expiring 5s from now.
-	c.Set(ctx, "hash-short", "user-short", 5*time.Second)
+	c.Set(ctx, "hash-short", PATAuth{UserID: "user-short"}, 5*time.Second)
 	ttl, err := rdb.TTL(ctx, patCacheKey("hash-short")).Result()
 	if err != nil {
 		t.Fatalf("TTL: %v", err)
@@ -159,11 +190,11 @@ func TestPATCache_Set_RespectsClampedTTL(t *testing.T) {
 
 	// Zero / negative TTL must skip caching entirely (already-expired
 	// token's TOCTOU-safe path).
-	c.Set(ctx, "hash-zero", "user-zero", 0)
+	c.Set(ctx, "hash-zero", PATAuth{UserID: "user-zero"}, 0)
 	if _, ok := c.Get(ctx, "hash-zero"); ok {
 		t.Fatal("zero-TTL Set must not cache")
 	}
-	c.Set(ctx, "hash-neg", "user-neg", -time.Second)
+	c.Set(ctx, "hash-neg", PATAuth{UserID: "user-neg"}, -time.Second)
 	if _, ok := c.Get(ctx, "hash-neg"); ok {
 		t.Fatal("negative-TTL Set must not cache")
 	}

@@ -64,7 +64,7 @@ func TestDaemonAuth_PATCacheHit(t *testing.T) {
 
 	const rawToken = "mul_daemon_pat_cache_hit_test"
 	hash := auth.HashToken(rawToken)
-	cache.Set(context.Background(), hash, "cached-user-id", auth.AuthCacheTTL)
+	cache.Set(context.Background(), hash, auth.PATAuth{UserID: "cached-user-id"}, auth.AuthCacheTTL)
 
 	var gotUserID, gotPath string
 	mw := DaemonAuth(nil, cache, nil, nil)

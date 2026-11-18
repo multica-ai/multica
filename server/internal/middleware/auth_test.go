@@ -355,7 +355,7 @@ func TestAuth_PATCacheHit(t *testing.T) {
 
 	const rawToken = "mul_cache_hit_test_token"
 	hash := auth.HashToken(rawToken)
-	cache.Set(context.Background(), hash, "cached-user-id", auth.AuthCacheTTL)
+	cache.Set(context.Background(), hash, auth.PATAuth{UserID: "cached-user-id"}, auth.AuthCacheTTL)
 
 	var gotUserID string
 	mw := Auth(nil, cache, nil, nil) // nil queries — only safe on cache hit
@@ -374,6 +374,43 @@ func TestAuth_PATCacheHit(t *testing.T) {
 	}
 	if gotUserID != "cached-user-id" {
 		t.Fatalf("expected cached X-User-ID, got %q", gotUserID)
+	}
+}
+
+// TestAuth_PATCacheHitServiceAccount pins the service-account classification:
+// a cached PAT whose owner is a kind='service' user MUST stamp
+// X-Actor-Source=service_account so the account-level guards (RequireHumanActor,
+// RequireUserAccount) can classify it — identically whether this request was a
+// cache hit or the one that populated the cache.
+func TestAuth_PATCacheHitServiceAccount(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	cache := auth.NewPATCache(rdb)
+
+	const rawToken = "mul_service_cache_hit_test_token"
+	hash := auth.HashToken(rawToken)
+	cache.Set(context.Background(), hash, auth.PATAuth{UserID: "service-user-id", IsService: true}, auth.AuthCacheTTL)
+
+	var gotUserID, gotActorSource string
+	mw := Auth(nil, cache, nil, nil) // nil queries — only safe on cache hit
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUserID = r.Header.Get("X-User-ID")
+		gotActorSource = r.Header.Get("X-Actor-Source")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+rawToken)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on cache hit, got %d", w.Code)
+	}
+	if gotUserID != "service-user-id" {
+		t.Fatalf("expected cached X-User-ID, got %q", gotUserID)
+	}
+	if gotActorSource != ActorSourceServiceAccount {
+		t.Fatalf("expected X-Actor-Source=%q, got %q", ActorSourceServiceAccount, gotActorSource)
 	}
 }
 

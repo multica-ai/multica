@@ -17,6 +17,14 @@ import (
 
 func uuidToString(u pgtype.UUID) string { return util.UUIDToString(u) }
 
+// ActorSourceServiceAccount is stamped by the Auth and DaemonAuth middlewares
+// when a request's mul_ PAT belongs to a kind='service' user. The value is
+// authoritative — both middlewares strip any client-supplied X-Actor-Source
+// before stamping — and handler.RequireHumanActor /
+// handler.RequireUserAccount use it to keep service identities off routes
+// meant for people.
+const ActorSourceServiceAccount = "service_account"
+
 func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userID, email, authPath string) bool {
 	if !auth.IsTemporarilyDisabledUser(userID, email) {
 		return false
@@ -214,11 +222,14 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// last time we looked, and nothing has invalidated the
 				// entry since. Skip the DB SELECT and the last_used_at
 				// UPDATE — last_used_at is bumped once per TTL window.
-				if userID, ok := patCache.Get(r.Context(), hash); ok {
-					if rejectTemporarilyDisabledUser(w, r, userID, "", "pat_cache") {
+				if patAuth, ok := patCache.Get(r.Context(), hash); ok {
+					if rejectTemporarilyDisabledUser(w, r, patAuth.UserID, "", "pat_cache") {
 						return
 					}
-					r.Header.Set("X-User-ID", userID)
+					r.Header.Set("X-User-ID", patAuth.UserID)
+					if patAuth.IsService {
+						r.Header.Set("X-Actor-Source", ActorSourceServiceAccount)
+					}
 					next.ServeHTTP(w, r)
 					return
 				}
@@ -227,7 +238,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
-				pat, err := queries.GetPersonalAccessTokenByHash(r.Context(), hash)
+				pat, err := queries.GetPersonalAccessTokenByHashWithKind(r.Context(), hash)
 				if err != nil {
 					slog.Warn("auth: invalid PAT", "path", r.URL.Path, "error", err)
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
@@ -235,10 +246,17 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				}
 
 				userID := uuidToString(pat.UserID)
+				patAuth := auth.PATAuth{
+					UserID:    userID,
+					IsService: pat.UserKind == auth.ServiceUserKind,
+				}
 				if rejectTemporarilyDisabledUser(w, r, userID, "", "pat") {
 					return
 				}
 				r.Header.Set("X-User-ID", userID)
+				if patAuth.IsService {
+					r.Header.Set("X-Actor-Source", ActorSourceServiceAccount)
+				}
 
 				// Clamp cache TTL to the token's remaining lifetime so a
 				// PAT expiring in <AuthCacheTTL can't continue passing
@@ -247,7 +265,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				if pat.ExpiresAt.Valid {
 					expiresAt = pat.ExpiresAt.Time
 				}
-				patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+				patCache.Set(r.Context(), hash, patAuth, auth.TTLForExpiry(time.Now(), expiresAt))
 
 				// Cache miss = TTL expired (or first use after revoke /
 				// process restart). Refresh last_used_at; subsequent hits

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 // TestRequireHumanActor_AllowsHumanRequest pins the happy path: a
@@ -59,6 +61,13 @@ func TestRequireHumanActor_BlocksMachineCredentials(t *testing.T) {
 		// of machine credential as mat_ for billing-authorization
 		// purposes.
 		{name: "cloud_pat", actorSource: "cloud_pat"},
+		// mul_ PAT belonging to a kind='service' user — set in BOTH
+		// middleware/auth.go and middleware/daemon_auth.go's mul_
+		// branches when the PAT cache reports IsService. A service
+		// account is a machine identity by construction; billing is
+		// account-level and human-only until a maintainer decides a
+		// service account may pay.
+		{name: "service_account", actorSource: "service_account"},
 	}
 
 	for _, tc := range cases {
@@ -92,19 +101,24 @@ func TestRequireHumanActor_BlocksMachineCredentials(t *testing.T) {
 //
 // Why the denylist shape:
 //
-//   - The Auth middleware today sets X-Actor-Source for exactly one
-//     case: mat_ task tokens. Every other authenticated path (JWT,
-//     mul_ PAT) leaves the header empty. So "non-empty AND not
-//     task_token" is unreachable in current production.
+//   - The Auth middleware sets X-Actor-Source only for machine
+//     credentials: mat_ task tokens, mcn_ cloud-node PATs, and mul_
+//     PATs owned by service accounts. Every other authenticated path
+//     (human JWT, human mul_ PAT) leaves the header empty. So
+//     "non-empty AND not in the denylist" is unreachable in current
+//     production.
 //
-//   - If a future actor kind is added (say a hypothetical
-//     `service_account` token), this gate's silence on the new value
-//     is a CONSCIOUS DECISION POINT, not an accident. The added auth
-//     branch is the right place to decide whether the new kind should
-//     be allowed at billing endpoints — and that decision belongs in
-//     a security review at the time, not in a default-deny rule here
-//     that pre-emptively shuts out hypothetical use cases we cannot
-//     reason about today.
+//   - If a future actor kind is added (say a new X-Actor-Source
+//     value), this gate's silence on the new value is a CONSCIOUS
+//     DECISION POINT, not an accident. The added auth branch is the
+//     right place to decide whether the new kind should be allowed at
+//     billing endpoints — and that decision belongs in a security
+//     review at the time, not in a default-deny rule here that
+//     pre-emptively shuts out hypothetical use cases we cannot reason
+//     about today. (When `service_account` arrived, this is exactly
+//     the decision it made: service accounts are machine identities,
+//     so they joined the machine list rather than relying on the
+//     unknown-value fallback.)
 //
 // If you are reading this comment because a new actor kind needs to
 // reach billing or needs to be blocked from it, update
@@ -126,10 +140,64 @@ func TestRequireHumanActor_IgnoresUnknownActorSource(t *testing.T) {
 	mw.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 — gate should only block exact 'task_token'", w.Code)
+		t.Fatalf("status = %d, want 200 — gate should only block denylisted sources", w.Code)
 	}
 	if !called {
 		t.Fatal("inner handler must run for unknown actor sources")
+	}
+}
+
+// TestRequireUserAccount_BlocksServiceAccounts pins the account-level gate:
+// requests classified as service accounts are rejected with 403, and every
+// other actor — including task tokens and cloud PATs, whose eligibility is
+// RequireHumanActor's business, not this gate's — passes through.
+func TestRequireUserAccount_BlocksServiceAccounts(t *testing.T) {
+	t.Run("service_account_rejected", func(t *testing.T) {
+		next := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+			t.Fatal("inner handler must NOT run for service accounts")
+		})
+		mw := RequireUserAccount(next)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces", nil)
+		req.Header.Set("X-Actor-Source", middleware.ActorSourceServiceAccount)
+		w := httptest.NewRecorder()
+		mw.ServeHTTP(w, req)
+
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", w.Code)
+		}
+	})
+
+	for _, tc := range []struct {
+		name        string
+		actorSource string
+	}{
+		{name: "empty (human JWT/PAT)", actorSource: ""},
+		{name: "task_token", actorSource: "task_token"},
+		{name: "cloud_pat", actorSource: "cloud_pat"},
+		{name: "unknown future", actorSource: "future_kind"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			mw := RequireUserAccount(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusOK)
+			}))
+
+			req := httptest.NewRequest(http.MethodPost, "/api/workspaces", nil)
+			if tc.actorSource != "" {
+				req.Header.Set("X-Actor-Source", tc.actorSource)
+			}
+			w := httptest.NewRecorder()
+			mw.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", w.Code)
+			}
+			if !called {
+				t.Fatal("inner handler must run for non-service actors")
+			}
+		})
 	}
 }
 
