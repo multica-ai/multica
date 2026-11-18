@@ -54,9 +54,22 @@ export function IssueSidebarSectionHeader({
   );
 }
 
-/** Shared spacing separates rendered sections without adding divider lines. */
-export function IssueSidebarStack({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("flex flex-col gap-6 [overflow-anchor:none] [&>*]:flow-root", className)}>{children}</div>;
+/**
+ * A card on the page canvas holding one or more sections. Sections keep their
+ * own inset, so headers and rows land 16px inside the card's edge.
+ */
+export function IssueSidebarCard({ children, className }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      data-slot="issue-sidebar-card"
+      className={cn(
+        "flex flex-col gap-3 rounded-lg border bg-surface py-1.5 shadow-[var(--surface-shadow)] [overflow-anchor:none] [&>*]:flow-root",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
 }
 
 /** Fits labels to their content while reserving space for values and the hover gutter. */

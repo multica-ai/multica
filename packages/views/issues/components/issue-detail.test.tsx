@@ -1761,7 +1761,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByText("Details")).toBeInTheDocument();
+      expect(screen.getByRole("region", { name: "Details" })).toBeInTheDocument();
     });
 
     expect(screen.queryByRole("button", { name: /^Metadata\b/ })).not.toBeInTheDocument();
@@ -2236,8 +2236,8 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
-  // Details is creator + immutable timestamps, so it ranks below the
-  // execution log, which is what people actually open the sidebar for.
+  // Details is creator + immutable timestamps, so it is small print under
+  // the cards, below the execution log people actually open the sidebar for.
   it("orders the Details section after the execution log", async () => {
     mockApiObj.listTasksByIssue.mockResolvedValue([
       {
@@ -2260,7 +2260,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     const executionLog = await screen.findByText("Execution log");
-    const details = screen.getByText("Details");
+    const details = screen.getByRole("region", { name: "Details" });
 
     // DOCUMENT_POSITION_FOLLOWING: Details comes after the execution log.
     expect(
@@ -2329,14 +2329,14 @@ describe("IssueDetail (shared)", () => {
   it("does not re-render comment cards when unrelated page state changes", async () => {
     renderIssueDetail();
     await screen.findByText("I can help with this");
-    await screen.findByText("Details");
+    await screen.findByRole("button", { name: "Properties" });
 
     const commentBodies = new Set(mockTimeline.map((entry) => entry.content));
     const cardRenders = () =>
       readonlyContentRenders.filter((content) => commentBodies.has(content)).length;
     const before = cardRenders();
 
-    fireEvent.click(screen.getByText("Details"));
+    fireEvent.click(screen.getByRole("button", { name: "Properties" }));
 
     expect(cardRenders()).toBe(before);
   });
@@ -2481,10 +2481,10 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetail();
 
       expect(await screen.findByText("created this issue on behalf of Test User")).toBeInTheDocument();
-      fireEvent.click(screen.getByText("Details"));
-      const creatorRow = screen.getByText("Created by").parentElement!;
-      expect(creatorRow).toHaveTextContent("Claude Agent");
-      expect(within(creatorRow).getByRole("link", { name: "On behalf of Test User" }))
+      const details = screen.getByRole("region", { name: "Details" });
+      expect(details).toHaveTextContent("Created by");
+      expect(details).toHaveTextContent("Claude Agent");
+      expect(within(details).getByRole("link", { name: "On behalf of Test User" }))
         .toHaveAttribute("href", "/test/members/user-1");
       expect(screen.queryByText("Requested by")).not.toBeInTheDocument();
     });
@@ -2505,7 +2505,6 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetail();
 
       expect(await screen.findByText("created this issue")).toBeInTheDocument();
-      fireEvent.click(screen.getByText("Details"));
       expect(screen.queryByText(/On behalf of/)).not.toBeInTheDocument();
       expect(screen.queryByText("Requested by")).not.toBeInTheDocument();
     });
@@ -2522,8 +2521,7 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetail();
 
       expect(await screen.findByText("created this issue on behalf of Unknown")).toBeInTheDocument();
-      fireEvent.click(screen.getByText("Details"));
-      expect(screen.getByText("Created by").parentElement).toHaveTextContent("On behalf of Unknown");
+      expect(screen.getByRole("region", { name: "Details" })).toHaveTextContent("On behalf of Unknown");
     });
   });
 
