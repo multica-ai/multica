@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -169,6 +171,7 @@ type privateRouteShared struct {
 	insiderID                          string
 	agentID, runtimeID                 string
 	labelID, propertyID, quickActionID string
+	uploadDir                          string
 }
 
 // privateRouteFixture is one route's private project: the insider is its
@@ -223,12 +226,24 @@ func (f *privateRouteFixture) supplement() string {
 	})
 }
 
+// attachment is a file on the private issue, stored in the test's own upload
+// directory: the member's download reads it and the member's delete removes
+// only it.
 func (f *privateRouteFixture) attachment() string {
 	return f.once("attachment", func() string {
+		const body = "probe"
+		key := "workspaces/" + f.fx.WorkspaceID + "/" + uuid.NewString() + ".txt"
+		path := filepath.Join(f.shared.uploadDir, filepath.FromSlash(key))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			f.t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			f.t.Fatal(err)
+		}
 		return f.fx.Insert(f.t, "attachment", dbfx.Cols{
 			"workspace_id": f.fx.WorkspaceID, "issue_id": f.issue(), "uploader_type": "member",
-			"uploader_id": f.shared.insiderID, "filename": "probe.txt", "url": "https://example.test/probe.txt",
-			"content_type": "text/plain", "size_bytes": 5,
+			"uploader_id": f.shared.insiderID, "filename": "probe.txt", "url": "/uploads/" + key,
+			"content_type": "text/plain", "size_bytes": len(body),
 		})
 	})
 }
@@ -465,6 +480,12 @@ func TestEveryRouteByProjectObjectIDHidesPrivateProjects(t *testing.T) {
 		"prompt": "Probe", "created_by_type": "member", "created_by_id": insiderID,
 	})
 
+	// The insider's control calls read and delete stored files: keep them in
+	// a directory of this test's own, never the runner's configured storage.
+	t.Setenv("S3_BUCKET", "")
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
+	shared.uploadDir = t.TempDir()
+	t.Setenv("LOCAL_UPLOAD_DIR", shared.uploadDir)
 	router, _ := NewRouterWithOptions(testPool, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, RouterOptions{})
 	call := func(token, method, path, body string) routeAnswer {
 		var req *http.Request
