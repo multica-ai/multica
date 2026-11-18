@@ -13,6 +13,7 @@ import type { InboxView } from "./inbox-view";
 import { InboxDetailLabel, useTypeLabels } from "./inbox-detail-label";
 import {
   getInboxDisplayTitle,
+  inboxIssueRef,
   isAutopilotQuotaNotice,
 } from "./inbox-display";
 import { useInboxContextMenu } from "./inbox-context-menu";
@@ -70,7 +71,7 @@ export function InboxListItem({
   const slug = useWorkspaceSlug();
   const issueHref =
     slug && item.issue_id
-      ? paths.workspace(slug).issueDetail(item.issue_id)
+      ? paths.workspace(slug).issueDetail(inboxIssueRef(item, item.issue_id))
       : null;
   const intentNavigate = useIntentNavigate();
   const displayTitle = isAutopilotQuotaNotice(item.type)
@@ -102,6 +103,7 @@ export function InboxListItem({
     <div
       data-mc="inbox-item"
       data-read={item.read === true ? "true" : "false"}
+      data-selected={isSelected ? "true" : "false"}
       role="button"
       tabIndex={0}
       onClick={(e) => {
@@ -144,7 +146,7 @@ export function InboxListItem({
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">
             {showUnread && (
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
+              <span data-mc="unread-dot" className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
             )}
             <span
               className={`truncate text-body ${showUnread ? "font-medium" : "text-muted-foreground"}`}

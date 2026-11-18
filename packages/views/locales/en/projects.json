@@ -9,13 +9,20 @@
     "view_comfortable": "Comfortable",
     "no_search_results": "No results match your search",
     "view_table": "Table",
-    "view_cards": "Cards",
+    "view_board": "Board",
     "row_menu": "Project actions",
     "rename": "Rename",
     "pin": "Pin to sidebar",
     "unpin": "Unpin",
     "delete": "Delete",
-    "no_matches": "No projects match"
+    "no_matches": "No projects match",
+    "scope_archived": "Archived projects",
+    "archive": "Archive",
+    "restore": "Restore",
+    "no_archived": "No archived projects",
+    "search": "Search projects",
+    "group_none": "No grouping",
+    "board_column_empty": "No projects"
   },
   "table": {
     "name": "Name",
@@ -23,8 +30,12 @@
     "status": "Status",
     "progress": "Progress",
     "lead": "Lead",
+    "start_date": "Start date",
+    "due_date": "Due date",
+    "last_activity": "Recent activity",
     "created": "Created",
-    "issues": "Issues"
+    "issues": "Issues",
+    "archived": "Archived"
   },
   "status": {
     "planned": "Planned",
@@ -69,6 +80,7 @@
     "sidebar_tooltip": "Toggle right sidebar",
     "rename_action": "Rename project",
     "copy_link": "Copy link",
+    "copy_title_as_link": "Copy link with title",
     "delete_action": "Delete project",
     "section_properties": "Properties",
     "section_progress": "Progress",
@@ -85,8 +97,12 @@
     "empty_issues_add_existing": "Add existing issue",
     "no_issues_yet": "No issues yet",
     "toast_link_copied": "Link copied",
+    "toast_title_link_copied": "Link copied with title",
+    "toast_title_link_copy_failed": "Failed to copy link",
     "toast_project_deleted": "Project deleted",
-    "toast_move_issue_failed": "Failed to move issue"
+    "toast_move_issue_failed": "Failed to move issue",
+    "archive_action": "Archive project",
+    "restore_action": "Restore project"
   },
   "resources": {
     "section_header": "Resources",
@@ -155,7 +171,9 @@
     "title": "Delete project",
     "description": "This will delete the project. Issues will not be deleted but will be unlinked.",
     "confirm": "Delete",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "archive_instead": "Archive instead",
+    "archive_hint": "Archiving hides the project but keeps its issues, history and settings. You can restore it any time."
   },
   "picker": {
     "no_project": "No project",
@@ -204,6 +222,7 @@
     }
   },
   "access": {
+    "agent_notice": "Agents follow their owner's access.",
     "label": "Access",
     "title": "Access to {{title}}",
     "description": "Controls who can see this project and its issues, comments, and attachments.",
@@ -214,7 +233,8 @@
     "search": "Search name or email...",
     "no_members": "No matching members",
     "no_selected": "No project members",
-    "admin_notice": "Workspace owners and admins always have access.",
+    "members_only_notice": "Only the people listed here have access. Workspace owners and admins have to be added too.",
+    "manager": "Manages access",
     "you": "You",
     "remove": "Remove {{name}}",
     "failed": "Could not save access changes.",
@@ -223,5 +243,29 @@
     "publish_description": "All workspace members will be able to see this project and its issues, comments, and attachments.",
     "done": "Done",
     "retry": "Retry"
+  },
+  "archive": {
+    "badge": "Archived",
+    "dialog_title": "Archive “{{name}}”?",
+    "dialog_title_count_one": "Archive {{count}} project?",
+    "dialog_title_count_other": "Archive {{count}} projects?",
+    "dialog_description": "Archived projects are hidden from project lists and pickers and stop accepting new issues. Nothing is deleted.",
+    "dialog_open_issues_one": "{{count}} open issue stays as it is, still readable and editable.",
+    "dialog_open_issues_other": "{{count}} open issues stay as they are, still readable and editable.",
+    "dialog_autopilots_one": "{{count}} active autopilot that files issues into it will be paused.",
+    "dialog_autopilots_other": "{{count}} active autopilots that file issues into it will be paused.",
+    "dialog_restore_hint": "You can restore it any time from Archived projects.",
+    "cancel": "Cancel",
+    "confirm": "Archive",
+    "toast_archived": "Archived “{{name}}”",
+    "toast_archived_count_one": "Archived {{count}} project",
+    "toast_archived_count_other": "Archived {{count}} projects",
+    "toast_paused_one": "Paused {{count}} autopilot that files issues into it",
+    "toast_paused_other": "Paused {{count}} autopilots that file issues into it",
+    "undo": "Undo",
+    "toast_restored": "Restored “{{name}}”",
+    "toast_completed": "“{{name}}” is completed",
+    "notice": "This project is archived. It's hidden from project lists and pickers and accepts no new issues; its issues stay readable and editable.",
+    "prop_label": "Archived"
   }
 }

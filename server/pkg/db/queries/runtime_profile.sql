@@ -1,5 +1,5 @@
--- Custom Runtime profiles (MUL-3284). Workspace-level definitions of a custom
--- runtime; see migration 120 for the table. Relational integrity (workspace,
+-- Custom Runtime profiles, bound to one daemon in a workspace.
+-- See migrations 120 and 674. Relational integrity (workspace,
 -- created_by) is enforced in the application layer — there are no DB FKs.
 
 -- name: CreateRuntimeProfile :one
@@ -13,8 +13,9 @@ INSERT INTO runtime_profile (
     visibility,
     created_by,
     enabled,
-    runtime_type
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    runtime_type,
+    daemon_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
 -- name: GetRuntimeProfile :one
@@ -53,6 +54,45 @@ SELECT * FROM runtime_profile
 WHERE workspace_id = $1 AND enabled = true
 ORDER BY created_at ASC;
 
+-- name: ListEnabledRuntimeProfilesForDaemon :many
+-- Legacy profiles may refresh existing instances, but cannot spread further.
+SELECT p.* FROM runtime_profile p
+WHERE p.workspace_id = @workspace_id AND p.enabled = true
+  AND (p.daemon_id = @daemon_id OR (p.daemon_id IS NULL AND EXISTS (
+    SELECT 1 FROM agent_runtime ar
+    WHERE ar.workspace_id = p.workspace_id AND ar.profile_id = p.id
+      AND ar.daemon_id = @daemon_id
+  )))
+ORDER BY p.created_at ASC;
+
+-- name: ListEnabledRuntimeProfilesForOwner :many
+-- Older PAT daemons do not send their machine ID. Registration still enforces
+-- the profile's machine binding, so returning this owner's set cannot copy it.
+SELECT p.* FROM runtime_profile p
+WHERE p.workspace_id = @workspace_id AND p.enabled = true
+  AND (p.created_by = @owner_id OR EXISTS (
+    SELECT 1 FROM agent_runtime ar
+    WHERE ar.workspace_id = p.workspace_id AND ar.owner_id = @owner_id
+      AND ((p.daemon_id IS NOT NULL AND ar.daemon_id = p.daemon_id)
+        OR (p.daemon_id IS NULL AND ar.profile_id = p.id))
+  ))
+ORDER BY p.created_at ASC;
+
+-- name: RuntimeProfileHasDaemonInstance :one
+SELECT EXISTS (
+  SELECT 1 FROM agent_runtime
+  WHERE workspace_id = @workspace_id AND profile_id = @profile_id AND daemon_id = @daemon_id
+) AS present;
+
+-- name: ListRuntimeProfileMachines :many
+-- A bounded result lets older clients infer an unambiguous machine.
+SELECT DISTINCT daemon_id FROM agent_runtime
+WHERE workspace_id = @workspace_id AND runtime_mode = 'local'
+  AND daemon_id IS NOT NULL AND daemon_id <> ''
+  AND (sqlc.narg('owner_id')::uuid IS NULL OR owner_id = sqlc.narg('owner_id')::uuid)
+  AND (sqlc.narg('daemon_id')::text IS NULL OR daemon_id = sqlc.narg('daemon_id')::text)
+LIMIT 2;
+
 -- name: UpdateRuntimeProfile :one
 -- Partial update via COALESCE: NULL args leave the column unchanged. The
 -- protocol_family is intentionally NOT updatable — changing the underlying
@@ -65,6 +105,7 @@ SET display_name = COALESCE(sqlc.narg('display_name'), display_name),
     fixed_args   = COALESCE(sqlc.narg('fixed_args'), fixed_args),
     visibility   = COALESCE(sqlc.narg('visibility'), visibility),
     enabled      = COALESCE(sqlc.narg('enabled'), enabled),
+    daemon_id    = COALESCE(sqlc.narg('daemon_id'), daemon_id),
     updated_at   = now()
 WHERE id = @id AND workspace_id = @workspace_id
 RETURNING *;
@@ -78,8 +119,15 @@ WHERE id = $1 AND workspace_id = $2;
 -- the profile-delete path must remove the profile's registered runtime
 -- instances itself. Returns the deleted rows so the caller can broadcast /
 -- audit. Runs inside the same transaction as DeleteRuntimeProfile.
+WITH deleted_rate_limits AS (
+    DELETE FROM runtime_rate_limit
+    WHERE runtime_rate_limit.runtime_id IN (
+        SELECT profile_runtime.id FROM agent_runtime AS profile_runtime
+        WHERE profile_runtime.profile_id = $1 AND profile_runtime.workspace_id = $2
+    )
+)
 DELETE FROM agent_runtime
-WHERE profile_id = $1 AND workspace_id = $2
+WHERE agent_runtime.profile_id = $1 AND agent_runtime.workspace_id = $2
 RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
 -- name: ListActiveAgentsByProfile :many

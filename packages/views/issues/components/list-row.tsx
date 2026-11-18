@@ -26,6 +26,7 @@ import { CustomStatusChip } from "./custom-status-chip";
 import { IssueBlockedMarker } from "./issue-blockers";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import {
   PEEKED_ROW_CLASS,
@@ -44,8 +45,16 @@ function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
 
+/** A row's position within its status group, for themes that stripe rows. */
+export type RowParity = "even" | "odd";
+
+export function rowParity(index: number): RowParity {
+  return index % 2 === 0 ? "even" : "odd";
+}
+
 function ListRowContent({
   issue,
+  parity,
   childProgress,
   project,
   isDragging,
@@ -55,6 +64,7 @@ function ListRowContent({
   checkboxProps,
 }: {
   issue: Issue;
+  parity: RowParity;
   childProgress?: ChildProgress;
   project?: Project;
   isDragging?: boolean;
@@ -85,6 +95,8 @@ function ListRowContent({
   const showStartDate = storeProperties.startDate && issue.start_date;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showLabels = storeProperties.labels && labels.length > 0;
+  const pullRequests = useIssuePullRequestSummaries(issue.id, storeProperties.pullRequests);
+  const showPullRequests = storeProperties.pullRequests && pullRequests.length > 0;
 
   return (
     <IssueActionsContextMenu issue={issue}>
@@ -95,6 +107,8 @@ function ListRowContent({
         data-status={issue.status}
         data-priority={issue.priority}
         data-assignee-type={issue.assignee_type ?? "none"}
+        data-parity={parity}
+        data-selected={selected ? "true" : "false"}
         {...{ [PEEK_TARGET_ATTR]: issue.id }}
         data-peeked={peeked ? "" : undefined}
         style={containerStyle}
@@ -148,6 +162,15 @@ function ListRowContent({
                   {childProgress!.done}/{childProgress!.total}
                 </span>
               </span>
+            )}
+            {showPullRequests && (
+              // Capped so a long PR set never squeezes the title away.
+              <IssuePullRequestChips
+                pullRequests={pullRequests}
+                max={2}
+                insideLink
+                className="max-w-[40%]"
+              />
             )}
             {showLabels && (
               <span className="ml-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
@@ -207,16 +230,19 @@ function ListRowContent({
 
 export const ListRow = memo(function ListRow({
   issue,
+  parity,
   childProgress,
   project,
 }: {
   issue: Issue;
+  parity: RowParity;
   childProgress?: ChildProgress;
   project?: Project;
 }) {
   return (
     <ListRowContent
       issue={issue}
+      parity={parity}
       childProgress={childProgress}
       project={project}
     />
@@ -235,11 +261,13 @@ const stopDrag = (e: React.SyntheticEvent) => {
 
 export const DraggableListRow = memo(function DraggableListRow({
   issue,
+  parity,
   childProgress,
   project,
   disableSorting,
 }: {
   issue: Issue;
+  parity: RowParity;
   childProgress?: ChildProgress;
   project?: Project;
   disableSorting?: boolean;
@@ -266,6 +294,7 @@ export const DraggableListRow = memo(function DraggableListRow({
   return (
     <ListRowContent
       issue={issue}
+      parity={parity}
       childProgress={childProgress}
       project={project}
       isDragging={isDragging}

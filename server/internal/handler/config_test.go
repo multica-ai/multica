@@ -613,6 +613,9 @@ func TestGetConfigDeclaresAgentConversationStartersSupport(t *testing.T) {
 	if !cfg.AgentConversationStartersSupported {
 		t.Fatal("this build persists conversation_starters but does not advertise the contract")
 	}
+	if !cfg.WebhookPayloadConditionsSupported {
+		t.Fatal("this build must declare webhook payload condition support")
+	}
 	var raw map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode raw config: %v", err)
@@ -642,6 +645,18 @@ func TestGetConfigDeclaresIssueCreatePropertiesSupport(t *testing.T) {
 	}
 	if _, ok := raw["issue_create_properties_supported"]; !ok {
 		t.Fatal("issue_create_properties_supported missing from the JSON body")
+	}
+}
+
+func TestGetConfigDeclaresIssueBatchOpsSupport(t *testing.T) {
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if raw["issue_batch_ops_supported"] != true {
+		t.Fatalf("issue_batch_ops_supported = %v; clients gate dry runs on it", raw["issue_batch_ops_supported"])
 	}
 }
 

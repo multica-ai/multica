@@ -9,13 +9,20 @@
     "view_comfortable": "舒适视图",
     "no_search_results": "未找到匹配的项目",
     "view_table": "表格",
-    "view_cards": "卡片",
+    "view_board": "看板",
     "row_menu": "项目操作",
     "rename": "重命名",
     "pin": "固定到侧边栏",
     "unpin": "取消钉选",
     "delete": "删除",
-    "no_matches": "没有匹配的项目"
+    "no_matches": "没有匹配的项目",
+    "scope_archived": "已归档的项目",
+    "archive": "归档",
+    "restore": "恢复",
+    "no_archived": "没有已归档的项目",
+    "search": "搜索项目",
+    "group_none": "不分组",
+    "board_column_empty": "暂无项目"
   },
   "table": {
     "name": "名称",
@@ -23,8 +30,12 @@
     "status": "状态",
     "progress": "进度",
     "lead": "负责人",
+    "start_date": "开始日期",
+    "due_date": "截止日期",
+    "last_activity": "最近活动",
     "created": "创建时间",
-    "issues": "任务数"
+    "issues": "任务数",
+    "archived": "归档于"
   },
   "status": {
     "planned": "计划中",
@@ -69,6 +80,7 @@
     "sidebar_tooltip": "切换右侧边栏",
     "rename_action": "重命名项目",
     "copy_link": "复制链接",
+    "copy_title_as_link": "复制带标题的链接",
     "delete_action": "删除项目",
     "section_properties": "属性",
     "section_progress": "进度",
@@ -85,8 +97,12 @@
     "empty_issues_add_existing": "添加已有任务",
     "no_issues_yet": "目前还没有任务",
     "toast_link_copied": "已复制链接",
+    "toast_title_link_copied": "已复制带标题的链接",
+    "toast_title_link_copy_failed": "复制链接失败",
     "toast_project_deleted": "已删除项目",
-    "toast_move_issue_failed": "移动任务失败"
+    "toast_move_issue_failed": "移动任务失败",
+    "archive_action": "归档项目",
+    "restore_action": "恢复项目"
   },
   "resources": {
     "section_header": "资源",
@@ -155,7 +171,9 @@
     "title": "删除项目",
     "description": "将删除这个项目。任务不会被删除，只会从项目中解除关联。",
     "confirm": "删除",
-    "cancel": "取消"
+    "cancel": "取消",
+    "archive_instead": "改为归档",
+    "archive_hint": "归档会隐藏项目，但保留它的任务、历史和设置，随时可以恢复。"
   },
   "picker": {
     "no_project": "无项目",
@@ -204,6 +222,7 @@
     }
   },
   "access": {
+    "agent_notice": "智能体的权限跟随其所有者。",
     "label": "访问权限",
     "title": "{{title}}的访问权限",
     "description": "控制谁能查看项目及其中的任务、评论和附件。",
@@ -214,7 +233,8 @@
     "search": "搜索姓名或邮箱...",
     "no_members": "没有匹配的成员",
     "no_selected": "暂无项目成员",
-    "admin_notice": "工作区 owner 和 admin 始终可以访问。",
+    "members_only_notice": "只有名单里的成员可以访问，工作区 owner 和 admin 也需要加入名单。",
+    "manager": "管理访问权限",
     "you": "你",
     "remove": "移除{{name}}",
     "failed": "无法保存访问权限。",
@@ -223,5 +243,24 @@
     "publish_description": "工作区所有成员都将能查看这个项目及其中的任务、评论和附件。",
     "done": "完成",
     "retry": "重试"
+  },
+  "archive": {
+    "badge": "已归档",
+    "dialog_title": "归档「{{name}}」？",
+    "dialog_title_count_other": "归档 {{count}} 个项目？",
+    "dialog_description": "归档后，项目会从项目列表和选择器中隐藏，也不能再新建任务。不会删除任何内容。",
+    "dialog_open_issues_other": "{{count}} 个未完成的任务保持原样，仍可查看和编辑。",
+    "dialog_autopilots_other": "{{count}} 个向它创建任务的自动化会被暂停。",
+    "dialog_restore_hint": "之后可以在「已归档的项目」里随时恢复。",
+    "cancel": "取消",
+    "confirm": "归档",
+    "toast_archived": "已归档「{{name}}」",
+    "toast_archived_count_other": "已归档 {{count}} 个项目",
+    "toast_paused_other": "已暂停 {{count}} 个向它创建任务的自动化",
+    "undo": "撤销",
+    "toast_restored": "已恢复「{{name}}」",
+    "toast_completed": "「{{name}}」已完成",
+    "notice": "该项目已归档：不会出现在项目列表和选择器中，也不能新建任务；已有任务仍可查看和编辑。",
+    "prop_label": "归档"
   }
 }

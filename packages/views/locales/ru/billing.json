@@ -1,71 +1,4 @@
 {
-  "title": "Биллинг (тестовая страница)",
-  "subtitle": "Прямая передача в /api/v1/billing/* multica-cloud. Не готовый интерфейс — просто все эндпоинты собраны на одной странице, чтобы проверить прокси и Stripe-флоу.",
-  "endpoints": {
-    "balance": "GET /api/cloud-billing/balance",
-    "transactions": "GET /api/cloud-billing/transactions",
-    "batches": "GET /api/cloud-billing/batches",
-    "topups": "GET /api/cloud-billing/topups",
-    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
-  },
-  "balance": {
-    "title": "Баланс",
-    "credits_suffix": "кредитов",
-    "meta": "raw micro: {{micro}} · владелец: {{owner}}… · обновлено {{updated}}"
-  },
-  "buy": {
-    "title": "Купить кредиты / Управление биллингом",
-    "no_tiers": "Тарифные планы не настроены. Скорее всего, в Cloud не задан ключ Stripe — checkout вернёт 503.",
-    "tier_money_to_credits": "{{money}} → {{credits}} кредитов",
-    "tier_bonus": " + {{credits}} бонус",
-    "tier_bonus_with_expiry": " + {{credits}} бонус ({{expiry}})",
-    "tier_id": "id: {{id}}",
-    "open_portal": "Открыть Stripe Billing Portal",
-    "portal_hint": "Код 400 ожидаем для пользователей, которые ещё не платили (записи клиента в Stripe не существует).",
-    "toast_no_url": "Cloud не вернул ссылку на checkout",
-    "toast_checkout_failed": "Не удалось создать checkout",
-    "toast_no_portal_url": "Ссылка на портал не получена",
-    "toast_portal_failed": "Не удалось открыть портал"
-  },
-  "checkout": {
-    "session_label": "Сессия оформления заказа {{prefix}}…",
-    "loading": "Загрузка статуса заказа…",
-    "fetch_failed": "Не удалось получить статус: {{error}}",
-    "fetch_failed_unknown": "неизвестная ошибка",
-    "final_status": "Итоговый статус: {{status}}",
-    "polling_status": "Опрос статуса… текущий: {{status}}",
-    "status_unknown": "неизвестно",
-    "label_order": "Заказ",
-    "label_tier": "Тариф",
-    "label_charged": "Списано",
-    "charged_value": "{{money}} · {{credits}} кредитов",
-    "charged_with_bonus": "{{money}} · {{credits}} кредитов + {{bonus}} бонус",
-    "clear_url": "Очистить URL"
-  },
-  "transactions": {
-    "title": "Транзакции",
-    "empty": "Пока нет транзакций.",
-    "credits_value": "{{value}} кредитов",
-    "row_meta": "{{date}} · баланс после: {{balance}} кредитов · ref: {{ref}}",
-    "ref_empty": "—"
-  },
-  "batches": {
-    "title": "Пакеты кредитов",
-    "empty": "Пока нет пакетов.",
-    "remaining_over_total": "{{remaining}} / {{total}} кредитов",
-    "id_suffix": "{{id}}…",
-    "consumed": "Израсходовано: {{value}} кредитов",
-    "expires_suffix": " · истекает {{value}}",
-    "never_expires_suffix": " · бессрочно"
-  },
-  "topups": {
-    "title": "Заказы пополнения",
-    "empty": "Пока нет заказов пополнения.",
-    "amount_to_credits": "{{money}} → {{credits}} кредитов",
-    "amount_to_credits_with_bonus": "{{money}} → {{credits}} кредитов + {{bonus}} бонус",
-    "row_meta": "{{date}} · stripe: {{checkout}}",
-    "stripe_empty": "—"
-  },
   "workspace": {
     "title": "Биллинг",
     "description": "Управляйте тарифом, лимитами, местами для участников и биллингом Stripe этого рабочего пространства.",
@@ -175,7 +108,6 @@
     },
     "limits": {
       "title": "Использование и лимиты",
-      "issues": "Задачи",
       "autopilots": "Запуски автоматизации",
       "unlimited": "Без ограничений",
       "per_month": "{{count}} / месяц",
@@ -260,12 +192,6 @@
       "description": "Интервал оплаты: {{interval}}. Текущее число участников-людей: {{count}}. Stripe пересчитает места и покажет итоговую сумму перед оплатой."
     }
   },
-  "shared": {
-    "request_failed": "Запрос не выполнен",
-    "refresh": "Обновить",
-    "paging": "страница {{page}} / {{totalPages}} · всего {{total}}",
-    "date_dash": "—"
-  },
   "return_page": {
     "redirecting": "Возвращаем вас к биллингу рабочего пространства…",
     "load_failed_title": "Не удалось открыть биллинг рабочего пространства",
@@ -274,5 +200,11 @@
     "workspace_missing_description": "Вы вернулись из Stripe, но это рабочее пространство больше вам недоступно — возможно, оно было удалено или изменился ваш доступ. Откройте Биллинг в ожидаемом рабочем пространстве, чтобы проверить текущее состояние.",
     "retry": "Повторить",
     "go_to_app": "Перейти в Multica"
+  },
+  "paid_feature": {
+    "read_only": "Только чтение. Чтобы редактировать, повысьте тариф.",
+    "unavailable": "Не входит в тариф этого рабочего пространства.",
+    "view_plans": "Посмотреть тарифы",
+    "locked_error": "Не входит в тариф рабочего пространства. Существующие настройки продолжают работать; чтобы добавить новые, повысьте тариф."
   }
 }

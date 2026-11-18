@@ -22,6 +22,9 @@ import {
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
+import { useInboxSelectionStore } from "@multica/core/inbox/selection-store";
+import { inboxRowKey, nextInboxRow } from "@multica/core/inbox/open-row";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import {
   inboxListOptions,
   archivedInboxPagesOptions,
@@ -33,13 +36,13 @@ import {
 import {
   useMarkInboxRead,
   useMarkInboxUnread,
-  useArchiveInbox,
   useUnarchiveInbox,
   useMarkAllInboxRead,
   useArchiveAllInbox,
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
   useRetrySourceContextQuickCreate,
+  type InboxUnsubscribeScope,
 } from "@multica/core/inbox/mutations";
 import {
   effectiveInboxFilters,
@@ -60,7 +63,7 @@ import { IssuePeekHost } from "../../issues/components/issue-peek";
 import { useIssueSurfaceActivity } from "../../issues/surface/activity";
 import { useViewStateWriter } from "../../platform";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
-import { useNavigation, useReportNavigating } from "../../navigation";
+import { AppLink, useNavigation, useReportNavigating } from "../../navigation";
 import { toast } from "sonner";
 import {
   MoreHorizontal,
@@ -72,6 +75,7 @@ import {
   ChevronDown,
   ListChecks,
   ArrowLeft,
+  AlarmClock,
 } from "@multica/ui/icons";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -98,11 +102,13 @@ import { CollapsedNavTrigger, PAGE_GUTTER, PageHeader } from "../../layout/page-
 import { PanelHeader } from "../../layout/panel-nav";
 import { useListColumnCollapsed } from "../../layout/app-shell-context";
 import { ListColumn } from "../../layout/list-column";
+import { InboxDeleteDialog } from "./inbox-delete-dialog";
 import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
 import { InboxFilterMenu } from "./inbox-filter-menu";
 import { InboxFilterChipsBar } from "./inbox-filter-options";
 import { InboxContextMenuProvider } from "./inbox-context-menu";
+import { useInboxUnsubscribable, useUnsubscribeArchive } from "./use-unsubscribe-archive";
 import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
 import {
@@ -112,17 +118,24 @@ import {
   resolveDetailItem,
 } from "./inbox-display";
 import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
+import { InboxKeptActions, useKeptInboxRowText } from "./inbox-kept-actions";
+import { useFilteredInboxRows } from "./use-filtered-inbox-rows";
+import { useKeptOpenInboxRow } from "./use-kept-open-inbox-row";
+import { useArchiveInboxBatchWithUndo, useArchiveInboxWithUndo, useRestoreInbox } from "./use-leave-inbox-row";
+import { useInboxSnooze } from "./use-inbox-snooze";
 import { InboxAppRequest } from "../../common/app-requests";
 import { useT } from "../../i18n";
-import { useIssueLimitUpgradePrompt } from "../../modals/use-issue-limit-upgrade-prompt";
+import { useLimitRecoveryPrompt } from "../../modals/use-limit-recovery-prompt";
 
+
+/** The phone's Inbox list, apart from the Work panel section's. */
+const INBOX_PAGE_LIST = "page";
 
 export function InboxPage() {
   const queryClient = useQueryClient();
   const { t } = useT("inbox");
   const { t: tCommon } = useT("common");
-  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
-  const showAutopilotQuotaRecoveryPrompt = useIssueLimitUpgradePrompt(
+  const showAutopilotQuotaRecoveryPrompt = useLimitRecoveryPrompt(
     "autopilot_quota",
   );
   const { searchParams, replace } = useNavigation();
@@ -156,9 +169,10 @@ export function InboxPage() {
   const isArchivedView = view === "archived";
   const filters = useInboxFilters(wsId);
   const clearFilters = useInboxFilterStore((state) => state.clearFilters);
-  const { data: rawItems = [], isLoading: loading } = useQuery({
+  const inboxQuery = useQuery({
     ...inboxListOptions(wsId), enabled: !isArchivedView,
   });
+  const { data: rawItems = [], isLoading: loading } = inboxQuery;
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
   // The filters read every notification of an issue, not just its newest.
   const activeRows = useMemo(() => rawItems.filter((item) => !item.archived), [rawItems]);
@@ -247,14 +261,41 @@ export function InboxPage() {
   });
   const lookupItems = useMemo(() => deduplicateArchivedInboxItems(lookup.data?.items ?? []), [lookup.data]);
   const presenceItems = lookupMissed ? presence.data?.items ?? [] : [];
+  const isCompact = useIsCompact();
+  // On desktop the live list is the Work panel's Inbox section, which applies
+  // the filters itself. The page only opens the notification the URL names,
+  // as the issue page does for an issue notification, so a filter can never
+  // refuse to open a row the section offered.
+  const opensAnyLiveRow = !isCompact && !isArchivedView;
+  // The open notification stays in place when something other than an Inbox
+  // action takes it out of the live list (`keepOpenInboxRow`). On desktop
+  // that list is the Work panel section's; a phone keeps it in the page's own.
+  const sectionList = useFilteredInboxRows(wsId, selectedKey || null, opensAnyLiveRow);
+  const pageList = useKeptOpenInboxRow(
+    wsId,
+    INBOX_PAGE_LIST,
+    filteredItems,
+    activeRows,
+    selectedKey || null,
+    effectiveFilters,
+    isCompact && !isArchivedView,
+  );
+  // Leaving the page leaves its open row.
+  useEffect(() => () => useInboxSelectionStore.getState().dropRow(wsId, INBOX_PAGE_LIST), [wsId]);
+  const keptRow = isArchivedView ? null : opensAnyLiveRow ? sectionList.kept : pageList.kept;
+  // Left the Inbox rather than only the filters, so there is nothing left to act on.
+  const settledRow = keptRow && keptRow.reason !== "filtered" ? keptRow : null;
   const selectionItems = useMemo(() => {
-    if (!isArchivedView || selectedOnPage) return filteredItems;
+    if (opensAnyLiveRow) return settledRow ? [...items, settledRow.item] : items;
+    if (!isArchivedView) return pageList.rows;
+    if (selectedOnPage) return filteredItems;
     return deduplicateArchivedInboxItems([
       ...filteredItems,
       ...filterInboxItems(lookupItems, effectiveFilters, filterContext),
     ]);
-  }, [isArchivedView, selectedOnPage, filteredItems, lookupItems, effectiveFilters, filterContext]);
-  const visibleItems = isArchivedView && pinnedKey ? selectionItems : filteredItems;
+  }, [opensAnyLiveRow, settledRow, items, isArchivedView, pageList.rows, selectedOnPage, filteredItems, lookupItems, effectiveFilters, filterContext]);
+  const visibleItems =
+    isArchivedView && pinnedKey ? selectionItems : isArchivedView || opensAnyLiveRow ? filteredItems : pageList.rows;
 
   // Inbox zero: the bleeding m rises once, at the moment the last notification
   // leaves; opening an already-empty inbox shows it at rest. Archived and
@@ -290,14 +331,12 @@ export function InboxPage() {
   // the shell's progress bar covers the swap on both platforms.
   useReportNavigating(detailSwapping);
 
-  // Track the last key we actually resolved against the inbox list. Lets the
-  // fallback effect distinguish "shared-link to a notification not in our
-  // inbox" (never resolved → redirect to the issue page) from "item was in
-  // our inbox and just got removed" (was resolved → stay on /inbox).
-  const lastResolvedKeyRef = useRef<string>("");
+  // Keep recognition across page mounts and query-cache eviction. A remembered
+  // selection that disappears stays in Inbox; an unknown shared link still
+  // falls back to the issue page.
   useEffect(() => {
-    if (selected) lastResolvedKeyRef.current = selectedKey;
-  }, [selected, selectedKey]);
+    if (selected) useInboxSelectionStore.getState().rememberResolvedKey(wsId, selectedKey);
+  }, [wsId, selected, selectedKey]);
 
   // Both the view and the selection live in the URL, so every write has to
   // carry the other one — a bare `?issue=` would silently drop the user out of
@@ -338,6 +377,7 @@ export function InboxPage() {
   // A targeted lookup must not hide pages that have already loaded. Its
   // pending/error states only block resolution of the off-page selection.
   const viewLoading = isArchivedView ? archivedLoading : loading;
+  const viewError = isArchivedView ? archivedError : inboxQuery.isError && !inboxQuery.data;
   const needsLookup = isArchivedView && !!selectedKey && !selectedOnPage;
   const lookupLoading = needsLookup && (lookup.isLoading || presence.isLoading);
   const lookupError = needsLookup && (lookup.isError || presence.isError) && !selected;
@@ -349,19 +389,18 @@ export function InboxPage() {
   // and `onInboxIssueDeleted` pruned the cache), the issue detail would 404
   // too — clear the selection and stay on /inbox instead.
   useEffect(() => {
-    if (viewLoading || lookupLoading || lookupError || (isArchivedView && archivedError)) return;
+    if (viewLoading || viewError || lookupLoading || lookupError) return;
     if (!selectedKey) return;
     if (selected) return;
     if (selectionFilteredOut) return;
-    if (lastResolvedKeyRef.current === selectedKey) {
+    if (useInboxSelectionStore.getState().lastResolvedKeyByWorkspace[wsId] === selectedKey) {
       setSelectedKey("");
       return;
     }
     replace(wsPaths.issueDetail(selectedKey));
   }, [
     viewLoading,
-    isArchivedView,
-    archivedError,
+    viewError,
     lookupLoading,
     lookupError,
     selectedKey,
@@ -369,16 +408,25 @@ export function InboxPage() {
     selectionFilteredOut,
     replace,
     wsPaths,
+    wsId,
     setSelectedKey,
   ]);
 
-  const isCompact = useIsCompact();
   const listCollapsed = useListColumnCollapsed();
+  // Desktop shows the live Inbox in the Work panel; only the archive needs
+  // a list of its own on the page.
+  const archiveSplit = !isCompact && isArchivedView;
   const unreadCount = useInboxUnreadCount(wsId);
 
   const markReadMutation = useMarkInboxRead();
+  const [deleteTarget, setDeleteTarget] = useState<InboxItem | null>(null);
   const markUnreadMutation = useMarkInboxUnread();
-  const archiveMutation = useArchiveInbox();
+  const archiveWithUndo = useArchiveInboxWithUndo();
+  const archiveBatchWithUndo = useArchiveInboxBatchWithUndo();
+  const restoreInbox = useRestoreInbox();
+  const { unsnooze } = useInboxSnooze();
+  const keptText = useKeptInboxRowText(wsId);
+  const { categoryOf } = useIssueStatuses(wsId);
   const unarchiveMutation = useUnarchiveInbox();
   const markAllReadMutation = useMarkAllInboxRead();
   const archiveAllMutation = useArchiveAllInbox();
@@ -482,12 +530,26 @@ export function InboxPage() {
     // keeps the entry and does NOT re-jump.
     if (item.issue_id) {
       writeViewState(issueHighlightMementoKey(item.issue_id), undefined);
-      if (nextKey === selectedKey) {
-        setHighlightRequestToken((t) => t + 1);
-      }
+      if (nextKey === selectedKey) setHighlightRequestToken((t) => t + 1);
     }
     setSelectedKey(nextKey);
   };
+
+  // The comment a notification opens at is chosen once per opening or
+  // re-click. Opening reads the issue, which moves the row's anchor from the
+  // oldest unread comment to the newest; following it would land a second
+  // time, past the comments the reader came for. Taken from the selected row,
+  // not the deferred detail, which renders only after the read has landed.
+  const [landing, setLanding] = useState<{ key: string; token: number; commentId: string | undefined } | null>(null);
+  if (selected && (landing?.key !== selectedKey || landing.token !== highlightRequestToken)) {
+    setLanding({ key: selectedKey, token: highlightRequestToken, commentId: selected.details?.comment_id ?? undefined });
+  } else if (landing && !selectedKey && !detailKey) {
+    // Back on the list: opening the row again chooses afresh.
+    setLanding(null);
+  }
+  const detailItemKey = detailItem ? (detailItem.issue_id ?? detailItem.id) : null;
+  const landingCommentId =
+    landing?.key === detailItemKey ? landing.commentId : (detailItem?.details?.comment_id ?? undefined);
 
   const handleMarkRead = (id: string) => {
     // Reading it back explicitly cancels an earlier park on the same row.
@@ -521,34 +583,47 @@ export function InboxPage() {
   // from, so both have to move the selection off it first. `list` is whichever
   // list the row came from — the main one for archive, the archived one for
   // unarchive.
+  // The rows in the order the user sees them: on desktop the Work panel
+  // section's, which applies the same filters.
+  const listedItems = opensAnyLiveRow ? sectionList.rows : selectionItems;
+  const leaveRow = useInboxSelectionStore((s) => s.leaveRow);
+  // Moving the selection off a row (an Inbox action on it) lets it go rather
+  // than keep it in place.
   const advanceSelectionPast = (id: string, list: InboxItem[]) => {
-    const idx = list.findIndex((i) => i.id === id);
-    const target = idx >= 0 ? list[idx] : null;
-    const wasSelected = !!target && (target.issue_id ?? target.id) === selectedKey;
+    const target = list.find((i) => i.id === id);
+    const wasSelected = !!target && inboxRowKey(target) === selectedKey;
     if (!wasSelected) return;
-    // List is sorted newest-first; prefer the next (older) item, fall back
-    // to the previous (newer) one when actioning at the bottom, and only
-    // clear the selection when nothing else is left.
-    const next = list[idx + 1] ?? list[idx - 1] ?? null;
-    setSelectedKey(next ? (next.issue_id ?? next.id) : "");
+    leaveRow(wsId, selectedKey);
+    // Only clear the selection when nothing else is left.
+    const next = nextInboxRow(list, selectedKey);
+    setSelectedKey(next ? inboxRowKey(next) : "");
+  };
+  // A batch archive that takes the open row moves on to the next one it leaves.
+  const archiveBatch = (
+    archive: () => Promise<{ count: number }>,
+    archives: (item: InboxItem) => boolean,
+    failed: string,
+  ) => {
+    const open = listedItems.find((i) => inboxRowKey(i) === selectedKey);
+    const takesOpen = !!open && archives(open);
+    void archiveBatchWithUndo(archive, archives, failed, takesOpen ? selectedKey : null);
+    if (!takesOpen) return;
+    leaveRow(wsId, selectedKey);
+    const next = nextInboxRow(listedItems, selectedKey, archives);
+    setSelectedKey(next ? inboxRowKey(next) : "");
   };
 
   // Toasts live in these shared handlers so every archive surface confirms alike.
   const handleArchive = (id: string) => {
-    advanceSelectionPast(id, selectionItems);
-    archiveMutation.mutate(id, {
-      onSuccess: () => toast.success(t(($) => $.toasts.archived)),
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_failed),
-        ),
-    });
+    advanceSelectionPast(id, listedItems);
+    // Archived already: moving on is all that is left.
+    if (settledRow?.item.id === id) return;
+    const target = listedItems.find((i) => i.id === id);
+    archiveWithUndo(id, target ? inboxRowKey(target) : id);
   };
 
   const handleUnarchive = (id: string) => {
-    advanceSelectionPast(id, selectionItems);
+    advanceSelectionPast(id, listedItems);
     unarchiveMutation.mutate(id, {
       onSuccess: () => toast.success(t(($) => $.toasts.unarchived)),
       onError: (err) =>
@@ -558,6 +633,15 @@ export function InboxPage() {
             : t(($) => $.errors.unarchive_failed),
         ),
     });
+  };
+
+  const unsubscribable = useInboxUnsubscribable(wsId);
+  const unsubscribeArchive = useUnsubscribeArchive();
+  const handleUnsubscribeArchive = (id: string, scope: InboxUnsubscribeScope = "issue") => {
+    const item = listedItems.find((i) => i.id === id);
+    if (!item?.issue_id) return;
+    advanceSelectionPast(id, listedItems);
+    unsubscribeArchive({ id, issueId: item.issue_id }, scope);
   };
 
   // Keep the listener stable while using the latest selected-item action.
@@ -596,30 +680,15 @@ export function InboxPage() {
     });
   };
 
-  const handleArchiveAll = () => {
-    setSelectedKey("");
-    archiveAllMutation.mutate(undefined, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_all_failed),
-        ),
-    });
-  };
+  const handleArchiveAll = () =>
+    archiveBatch(() => archiveAllMutation.mutateAsync(), () => true, t(($) => $.errors.archive_all_failed));
 
-  const handleArchiveAllRead = () => {
-    const readKeys = items.filter((i) => i.read).map((i) => i.issue_id ?? i.id);
-    if (readKeys.includes(selectedKey)) setSelectedKey("");
-    archiveAllReadMutation.mutate(undefined, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_all_read_failed),
-        ),
-    });
-  };
+  const handleArchiveAllRead = () =>
+    archiveBatch(
+      () => archiveAllReadMutation.mutateAsync(),
+      (item) => item.read === true,
+      t(($) => $.errors.archive_all_read_failed),
+    );
 
   // The command bar calls the page's own handlers, so archiving from it moves
   // the selection and toasts exactly like the row actions do.
@@ -652,17 +721,15 @@ export function InboxPage() {
     ),
   );
 
-  const handleArchiveCompleted = () => {
-    setSelectedKey("");
-    archiveCompletedMutation.mutate(undefined, {
-      onError: (err) =>
-        toast.error(
-          err instanceof Error && err.message
-            ? err.message
-            : t(($) => $.errors.archive_completed_failed),
-        ),
-    });
-  };
+  const handleArchiveCompleted = () =>
+    archiveBatch(
+      () => archiveCompletedMutation.mutateAsync(),
+      (item) => {
+        const category = item.issue_status ? categoryOf(item.issue_status) : null;
+        return category === "done" || category === "closed";
+      },
+      t(($) => $.errors.archive_completed_failed),
+    );
 
   // -- Shared sub-components --------------------------------------------------
 
@@ -779,6 +846,9 @@ export function InboxPage() {
         onMarkRead: handleMarkRead,
         onMarkUnread: handleMarkUnread,
         onAction: isArchivedView ? handleUnarchive : handleArchive,
+        onDelete: (id) => setDeleteTarget(selectionItems.find((item) => item.id === id) ?? null),
+        onUnsubscribeArchive: handleUnsubscribeArchive,
+        canUnsubscribe: unsubscribable,
       }}
     >
       <InboxList
@@ -807,6 +877,18 @@ export function InboxPage() {
           ) : undefined
         }
       />
+      {deleteTarget && (
+        <InboxDeleteDialog
+          key={deleteTarget.id}
+          item={deleteTarget}
+          view={view}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={(id) => {
+            advanceSelectionPast(id, listedItems);
+            toast.success(t(($) => $.toasts.deleted));
+          }}
+        />
+      )}
     </InboxContextMenuProvider>
   );
 
@@ -860,6 +942,24 @@ export function InboxPage() {
     </div>
   ) : null;
 
+  // The open notification left the Inbox on its own: say so above it, with
+  // the way back and the way on.
+  const keptNotice =
+    settledRow && detailItem && inboxRowKey(detailItem) === settledRow.key ? (
+      <InboxKeptActions
+        layout="strip"
+        label={keptText.notice(settledRow)}
+        icon={settledRow.reason === "snoozed" ? <AlarmClock /> : undefined}
+        onUndo={() =>
+          settledRow.reason === "snoozed"
+            ? unsnooze(settledRow.item.id, settledRow.key)
+            : void restoreInbox(settledRow.item.id, { quiet: true })
+        }
+        next={nextInboxRow(listedItems, settledRow.key)}
+        onNext={() => advanceSelectionPast(settledRow.item.id, listedItems)}
+      />
+    ) : null;
+
   const detailContent = detailItem?.issue_id ? (
     // Key by issue_id (not inbox-item id): a new comment/reaction generates a
     // new inbox notification for the same issue, and the dedup helper picks the
@@ -886,7 +986,7 @@ export function InboxPage() {
           issueId={detailItem.issue_id}
           defaultSidebarOpen={false}
           layoutId="multica_inbox_issue_detail_layout"
-          highlightCommentId={detailItem.details?.comment_id ?? undefined}
+          highlightCommentId={landingCommentId}
           highlightRequestToken={highlightRequestToken}
           highlightAppRequestId={
             detailItem.type.startsWith("app_") ? (detailItem.details?.request_id ?? undefined) : undefined
@@ -894,10 +994,11 @@ export function InboxPage() {
           // The inbox reads the row it selected itself (see the auto-read
           // effect above), and must keep a row marked unread while it is open.
           readsInbox={false}
-          // The split layout already has a nav trigger in the list header.
-          // Explicit false suppresses the detail header's fallback trigger,
-          // which is the way back once the list column is collapsed.
-          leadingAction={compactBackAction ?? (listCollapsed ? undefined : false)}
+          // The archive's list header already has a nav trigger. Explicit
+          // false suppresses the detail header's fallback trigger, which is
+          // the way back once the list column is collapsed.
+          leadingAction={compactBackAction ?? (archiveSplit && !listCollapsed ? false : undefined)}
+          notice={keptNotice}
           onDelete={() => {
             // Issue deletion CASCADE-deletes the inbox item server-side, and the
             // issue:deleted WS event prunes it from the inbox cache. Just clear
@@ -908,10 +1009,15 @@ export function InboxPage() {
           onDone={() => {
             handleArchive(detailItem.id);
           }}
+          onUnsubscribeArchive={
+            isArchivedView ? undefined : (scope) => handleUnsubscribeArchive(detailItem.id, scope)
+          }
         />
       </IssuePeekHost>
     </ErrorBoundary>
   ) : detailItem ? (
+    <>
+    {keptNotice}
     <div className="p-6">
       <h2 className="text-title font-semibold">
         {isAutopilotQuotaNotice(detailItem.type)
@@ -926,6 +1032,10 @@ export function InboxPage() {
           item={detailItem}
           onOpenRecovery={showAutopilotQuotaRecoveryPrompt}
         />
+      ) : detailItem.type === "project_owner_joined" && detailItem.details?.joined_by ? (
+        <div className="mt-4 text-body leading-relaxed text-foreground">
+          {t(($) => $.detail.project_owner_joined_body, { name: detailItem.details.joined_by })}
+        </div>
       ) : detailItem.body ? (
         <div className="mt-4 whitespace-pre-wrap text-body leading-relaxed text-foreground">
           {detailItem.body}
@@ -946,6 +1056,16 @@ export function InboxPage() {
         </div>
       )}
       <div className="mt-4 flex gap-2">
+        {detailItem.type === "project_owner_joined" && detailItem.details?.project_id && (
+          <Button
+            size="sm"
+            variant="outline"
+            render={<AppLink href={wsPaths.projectDetail(detailItem.details.project_id)} />}
+            nativeButton={false}
+          >
+            {t(($) => $.detail.open_project)}
+          </Button>
+        )}
         {detailItem.type === "quick_create_failed" &&
           detailItem.details?.source_context_id &&
           detailItem.details?.task_id && (
@@ -958,13 +1078,6 @@ export function InboxPage() {
                   await retrySourceContextMutation.mutateAsync(detailItem.details!.task_id!);
                   toast.success(t(($) => $.toasts.source_context_retry_started));
                 } catch (error) {
-                  if (
-                    error instanceof ApiError &&
-                    errorCode(error) === "issue_limit_reached"
-                  ) {
-                    showIssueLimitUpgradePrompt();
-                    return;
-                  }
                   toast.error(
                     error instanceof ApiError &&
                       errorCode(error) === "source_context_retry_unavailable"
@@ -1032,6 +1145,7 @@ export function InboxPage() {
         </Tooltip>
       </div>
     </div>
+    </>
   ) : null;
 
   // -- Compact layout: list / detail toggle -----------------------------------
@@ -1089,67 +1203,84 @@ export function InboxPage() {
     return <div className="flex flex-1 flex-col min-h-0">{listPanel}</div>;
   }
 
-  // -- Desktop layout: list column + detail ----------------------------------
+  // -- Desktop layout ----------------------------------------------------------
+  // The live list is the Inbox section of the Work panel beside this page, so
+  // the page shows only the detail. The archive keeps its own list column.
 
-  if (viewLoading) {
+  const emptyDetail = (
+    <>
+      {(!archiveSplit || listCollapsed) && (
+        <PageHeader>
+          <h1 className="text-body font-semibold">
+            {isArchivedView ? t(($) => $.list.archived_title) : t(($) => $.page.title)}
+          </h1>
+        </PageHeader>
+      )}
+      <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
+        {inboxZeroCount === 0 ? (
+          <MulticaBleedMark
+            key={inboxZeroRises ? "rise" : "rest"}
+            enterDelay={inboxZeroRises ? 0.2 : undefined}
+            className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
+          />
+        ) : (
+          <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
+        )}
+        <p className="relative text-body">
+          {visibleItems.length > 0
+            ? t(($) => $.detail.select_prompt)
+            : isArchivedView
+              ? t(($) => $.list.archived_empty)
+              : t(($) => $.detail.empty)}
+        </p>
+      </div>
+    </>
+  );
+
+  if (archiveSplit) {
     return (
       <div className="flex min-h-0 flex-1">
         <ListColumn collapsed={listCollapsed} width="list">
-          <div className="flex h-12 shrink-0 items-center pl-5 pr-2.5">
-            <Skeleton className="h-5 w-16" />
-          </div>
-          <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
-            {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-2 py-2.5">
-                <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-3 w-1/2" />
-                </div>
+          {viewLoading ? (
+            <>
+              <div className="flex h-12 shrink-0 items-center pl-5 pr-2.5">
+                <Skeleton className="h-5 w-16" />
               </div>
-            ))}
-          </div>
+              <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-3 px-2 py-2.5">
+                    <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-4 w-3/4" />
+                      <Skeleton className="h-3 w-1/2" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            listPanel
+          )}
         </ListColumn>
-        <div className="min-w-0 flex-1 p-6">
-          <Skeleton className="h-6 w-48" />
-          <Skeleton className="mt-4 h-4 w-32" />
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          {viewLoading ? null : (detailContent ?? emptyDetail)}
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="flex min-h-0 flex-1">
-      <ListColumn collapsed={listCollapsed} width="list">{listPanel}</ListColumn>
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        {detailContent ?? (
-          <>
-          {listCollapsed && (
-            <PageHeader>
-              <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
-            </PageHeader>
-          )}
-          <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
-            {inboxZeroCount === 0 ? (
-              <MulticaBleedMark
-                key={inboxZeroRises ? "rise" : "rest"}
-                enterDelay={inboxZeroRises ? 0.2 : undefined}
-                className="pointer-events-none absolute -right-[14%] -bottom-[26%] w-[min(560px,58%)] text-muted"
-              />
-            ) : (
-              <Inbox className="mb-3 h-10 w-10 text-faint-foreground" />
-            )}
-            <p className="relative text-body">
-              {visibleItems.length > 0
-                ? t(($) => $.detail.select_prompt)
-                : isArchivedView
-                  ? t(($) => $.list.archived_empty)
-                  : t(($) => $.detail.empty)}
-            </p>
-          </div>
-          </>
-        )}
+  if (viewLoading) {
+    return (
+      <div className="min-w-0 flex-1 p-6">
+        <Skeleton className="h-6 w-48" />
+        <Skeleton className="mt-4 h-4 w-32" />
       </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+      {detailContent ?? emptyDetail}
     </div>
   );
 }

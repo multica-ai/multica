@@ -67,6 +67,7 @@
     "autopilot_paused": "Autopilot paused",
     "children_done": "Sub-issues finished",
     "blockers_done": "Waiting tasks ended",
+    "project_owner_joined": "Owner joined project",
     "autopilot_quota_exceeded": "Autopilot run limit reached",
     "set_status": "Set status to",
     "set_priority": "Set priority to",
@@ -85,6 +86,7 @@
   },
   "body": {
     "autopilot_title_limit": "Autopilot \"{{title}}\" was not started because this workspace has reached its limit of {{limit}} runs for the current period. The allowance resets {{resetAt}}.",
-    "autopilot_limit": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. This execution was not started. The allowance resets {{resetAt}}."
+    "autopilot_limit": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. This execution was not started. The allowance resets {{resetAt}}.",
+    "project_owner_joined": "{{name}} is a workspace owner and added themselves to this private project. They can now see its issues, comments, and attachments."
   }
 }

@@ -1,6 +1,7 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
+import type { ContextMenuCommand, ContextMenuRequest } from "../shared/context-menu";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
@@ -9,6 +10,7 @@ import type {
 } from "../shared/issue-window";
 import type {
   ManualUpdateCheckResult,
+  UpdaterDownloadState,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import type {
@@ -26,6 +28,16 @@ import type {
   WorkspacePathOptions,
   WorkspacePathRequest,
 } from "../shared/workspace-window";
+import type {
+  VoiceHistoryAudio,
+  VoiceHistoryEntry,
+  VoiceHistorySaveRequest,
+  VoiceHistoryUpdate,
+  VoiceModelRequest,
+  VoiceModelsSnapshot,
+  VoiceTranscribeRequest,
+  VoiceTranscribeResult,
+} from "../shared/voice";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -63,26 +75,34 @@ interface DesktopAPI {
   downloadURL: (url: string) => Promise<void>;
   /** Hide macOS traffic lights for full-screen modals; restore when false. */
   setImmersiveMode: (immersive: boolean) => Promise<void>;
-  /** Show a native OS notification for a new inbox item. */
+  /** Show a native OS notification for an inbox item or chat reply. */
   showNotification: (payload: {
     slug: string;
     itemId: string;
-    issueKey: string;
+    issueKey?: string;
+    chatSessionId?: string;
     title: string;
     body: string;
   }) => void;
+  getWindowForeground: () => Promise<boolean>;
+  onWindowForegroundChanged: (callback: (foreground: boolean) => void) => () => void;
   /** Update the OS dock / taskbar unread badge. Pass 0 to clear. */
   setUnreadBadge: (count: number) => void;
-  /** Listen for "open inbox row" requests from notification clicks. Returns an unsubscribe function. */
+  /** Listen for inbox/chat navigation from notification clicks. Returns an unsubscribe function. */
   onInboxOpen: (
     callback: (payload: {
       slug: string;
       itemId: string;
-      issueKey: string;
+      issueKey?: string;
+      chatSessionId?: string;
     }) => void,
   ) => () => void;
   /** Listen for native macOS back/forward swipe gestures. Returns an unsubscribe function. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => () => void;
+  /** Listen for right-clicks the page left unhandled, to draw their menu. */
+  onContextMenu: (callback: (request: ContextMenuRequest) => void) => () => void;
+  /** Run the item picked in that menu. */
+  runContextMenuCommand: (command: ContextMenuCommand) => void;
   /** Report the renderer's memory-router path for recovery diagnostics. */
   setRendererRouteContext: (context: RendererRouteContextInput) => void;
   /** Open the OS folder picker and return the chosen absolute path.
@@ -122,6 +142,35 @@ interface DesktopAPI {
   openThemeFolder: (name?: string) => Promise<{ ok: boolean; error?: string }>;
   /** Create a theme folder from files; never replaces an existing one. */
   writeThemeFolder: (name: string, files: ThemeFolderFile[]) => Promise<ThemeFolderWriteResult>;
+  /** On-device voice input: speech models and transcription in main. */
+  voice: {
+    listModels: () => Promise<VoiceModelsSnapshot>;
+    /** Called on every model status or download-progress change. Returns an unsubscribe function. */
+    onModelsChanged: (callback: (snapshot: VoiceModelsSnapshot) => void) => () => void;
+    /** Start a download; progress arrives through onModelsChanged. */
+    downloadModel: (id: string) => Promise<void>;
+    cancelDownload: (id: string) => Promise<void>;
+    deleteModel: (id: string) => Promise<void>;
+    /** Load the model while the user is still speaking. */
+    prepare: (request: VoiceModelRequest) => void;
+    transcribe: (request: VoiceTranscribeRequest) => Promise<VoiceTranscribeResult>;
+    /** Recordings and their transcripts, kept on this device. */
+    history: {
+      /** Newest first. */
+      list: () => Promise<VoiceHistoryEntry[]>;
+      /** Called after any change. Returns an unsubscribe function. */
+      onChanged: (callback: () => void) => () => void;
+      /** Null when the request is invalid. */
+      save: (request: VoiceHistorySaveRequest) => Promise<VoiceHistoryEntry | null>;
+      update: (id: string, patch: VoiceHistoryUpdate) => Promise<void>;
+      audio: (id: string) => Promise<VoiceHistoryAudio | null>;
+      remove: (id: string) => Promise<void>;
+      /** Remember how many days to keep (0 keeps none, null forever) and drop older entries now. */
+      setRetention: (keepDays: number | null) => Promise<void>;
+      /** Delete every entry, including one still being transcribed. */
+      clear: () => Promise<void>;
+    };
+  };
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;
@@ -158,6 +207,10 @@ interface DesktopAPI {
   /** Listen for Cmd/Ctrl+Shift+N new-window requests. Returns an
    *  unsubscribe function. */
   onNewWindowShortcut: (callback: () => void) => () => void;
+  /** Whether View → Show Dev Toolbar is checked; false unless VITE_DEV_TOOLBAR is set. */
+  getDevToolbarVisible: () => boolean;
+  /** Listen for View → Show Dev Toolbar being toggled. Returns an unsubscribe function. */
+  onDevToolbarVisibleChange: (callback: (visible: boolean) => void) => () => void;
 }
 
 type DaemonReauthResult =
@@ -198,6 +251,8 @@ interface DaemonAPI {
 }
 
 interface UpdaterAPI {
+  getDownloadState: () => Promise<UpdaterDownloadState>;
+  onDownloadState: (callback: (state: UpdaterDownloadState) => void) => () => void;
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
   onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
   onUpdateDownloaded: (

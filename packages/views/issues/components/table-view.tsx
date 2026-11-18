@@ -129,6 +129,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { LabelChip } from "../../labels/label-chip";
 import { resolveClickIntent, useIntentNavigate } from "../../navigation";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { useT } from "../../i18n";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
@@ -167,6 +168,8 @@ import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { IssueBlockedMarker } from "./issue-blockers";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
+import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
+import { issuePullRequestSummariesOptions } from "@multica/core/github";
 
 // Enough placeholder rows to cover a typical viewport; the virtualizer only
 // mounts what fits, so overshooting costs nothing.
@@ -300,6 +303,7 @@ type ColumnLabelKey =
   | "created_at"
   | "updated_at"
   | "child_progress"
+  | "pull_requests"
   | "creator";
 
 const SORTABLE_COLUMNS: Partial<Record<TableSystemColumnKey, SortField>> = {
@@ -1308,6 +1312,8 @@ function IssueTableBodyCell({
         <span className="text-muted-foreground">{t(($) => $.table.empty_value)}</span>
       );
     }
+    case "pull_requests":
+      return <PullRequestsCell issueId={issue.id} />;
     case "creator":
       return (
         <span className="flex min-w-0 items-center gap-1.5">
@@ -1324,6 +1330,19 @@ function IssueTableBodyCell({
   }
   return null;
 }
+
+function PullRequestsCell({ issueId }: { issueId: string }) {
+  const { t } = useT("issues");
+  const pullRequests = useIssuePullRequestSummaries(issueId, true);
+  return pullRequests.length > 0 ? (
+    <IssuePullRequestChips pullRequests={pullRequests} max={3} />
+  ) : (
+    <span className="text-muted-foreground">{t(($) => $.table.empty_value)}</span>
+  );
+}
+
+const TABLE_SCROLL_KEY = "table";
+const TABLE_SCROLL_ROOT = { "data-tab-scroll-root": TABLE_SCROLL_KEY };
 
 export function TableView({
   serverQuery,
@@ -1391,6 +1410,10 @@ export function TableView({
   // The one cell whose editor (picker popup / rename input) is open — see
   // TableViewMeta.editingCellKey.
   const [editingCellKey, setEditingCellKey] = useState<string | null>(null);
+  // Pull-based scroll restoration (MUL-4741): the table's two-axis scroller
+  // gets its saved offsets back when it attaches.
+  const restoredScrollTop = useRestoredScrollOffset(TABLE_SCROLL_KEY);
+  const restoreScrollRef = useRestoredScrollRef(TABLE_SCROLL_KEY);
 
   const groupingPropertyId = propertyIdFromViewKey(tableGrouping);
   const effectiveTableGrouping =
@@ -2273,6 +2296,9 @@ export function TableView({
           cell: IssueTableBodyCell,
         };
         if (config.width !== undefined) definition.size = config.width;
+        // Room for three "#123" chips before the overflow count; the 150px
+        // default clips the second repo-prefixed chip mid-number.
+        else if (config.key === "pull_requests") definition.size = 200;
         return definition;
       }),
       {
@@ -2365,7 +2391,7 @@ export function TableView({
         const property = propertyId ? exportPropertyById.get(propertyId) : undefined;
         return property ? isActorPropertyType(property.type) : false;
       });
-      const [rows, exportLookups, exportActorName] = await Promise.all([
+      const [rows, exportLookups, exportActorName, exportPullRequests] = await Promise.all([
         mode === "all" ? exportIssues() : Promise.resolve(selectedIssues),
         resolveExportLookups({
           projects: csvColumns.some((column) => column.key === "project"),
@@ -2382,6 +2408,9 @@ export function TableView({
               buildActorNameResolver({ members, agents, squads }),
             )
           : Promise.resolve(getActorName),
+        csvColumns.some((column) => column.key === "pull_requests")
+          ? queryClient.fetchQuery(issuePullRequestSummariesOptions(wsId))
+          : Promise.resolve(null),
       ]);
       const headers = csvColumns.map((column) => {
         const propertyId = propertyIdFromViewKey(column.key);
@@ -2430,6 +2459,10 @@ export function TableView({
               const progress = exportLookups.childProgressMap.get(issue.id);
               return progress ? `${progress.done}/${progress.total}` : "";
             }
+            case "pull_requests":
+              return (exportPullRequests?.[issue.id] ?? [])
+                .map((pr) => pr.html_url)
+                .join(", ");
             case "creator":
               return exportActorName(issue.creator_type, issue.creator_id);
           }
@@ -2529,6 +2562,9 @@ export function TableView({
           <DataTable
             table={table}
             virtualizeRows
+            scrollContainerRef={restoreScrollRef}
+            initialScrollTop={restoredScrollTop}
+            scrollContainerAttributes={TABLE_SCROLL_ROOT}
             emptyMessage={t(($) => $.table.empty)}
             onRowClick={(row, event) => {
               if (row.original.kind === "issue") {

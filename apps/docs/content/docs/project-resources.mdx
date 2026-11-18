@@ -16,7 +16,7 @@ Two resource types are supported today:
 | Resource | Best for | Where runs happen |
 |---|---|---|
 | **GitHub repository** | Code shared by the team, with checkouts managed by the runtime | A runtime-managed working directory |
-| **Local directory** | An existing checkout, a very large repository, or when you want to inspect local changes directly | The original directory on a specific computer |
+| **Local directory** | An existing checkout, a very large repository, or when you want to inspect local changes directly | The original folder or an isolated worktree on a specific computer |
 
 ## How resources enter a run
 
@@ -24,17 +24,21 @@ When an agent works an issue inside the project, Multica adds the project name, 
 
 The workspace's linked repository list is always included in the run context. Repositories linked to the project additionally specify the code and default ref this body of work uses.
 
-A local directory only applies to the daemon it is bound to. When the daemon executing a run has a matching local directory, the agent works directly in that directory; other computers keep using the project's GitHub repositories or the workspace repositories.
+A local directory only applies to the daemon it is bound to. When the daemon executing a run has a matching local directory, the agent uses it in `in_place` mode or an isolated worktree of it in `worktree` mode; other computers keep using the project's GitHub repositories or the workspace repositories.
 
 ## Add a GitHub repository
 
-Open the project and choose "Add resource" under **Resources**. Pick a repository already linked to the workspace, or paste a Git URL. Workspace repositories are managed in **Settings → Code**; once GitHub is connected, the same page offers **Pick from GitHub** to import repositories the App is authorized for.
+Open the project and click **Add repository** in **Resources → Repositories**. Search for a repository already linked to the workspace, or paste a Git URL. Workspace repositories are managed in **Settings → Code**; once GitHub is connected, the same page offers **Pick from GitHub** to import repositories the App is authorized for.
+
+Pasting a GitHub branch URL (`https://github.com/owner/repo/tree/branch`) fills in the repository URL and starting branch separately. URL-encoded branch names are decoded; query parameters and page anchors are excluded. Check the starting branch before adding the repository.
 
 Repositories are not limited to GitHub: any Git URL the runtime can reach works as a repository resource. Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab under **Settings → Code**; see [Self-hosted Git hosting](/vcs-integration).
 
 When creating a project, you can also pick repositories directly under **Repos**. One project can link multiple GitHub repositories.
 
 A resource's `ref` sets the branch, tag, or commit that later checkouts use by default. `default_branch_hint` only gives the agent a default-branch hint and does not force a branch switch.
+
+For a managed repository, the agent starts in the task working directory. `multica repo checkout` normally creates a subdirectory for the repository and prints its path. Run commands that need the repository root from that path. If the agent process itself must start at the root and you control the runtime computer, attach an existing checkout as a local directory. Both `in_place` and `worktree` start the agent at a repository root; prefer `worktree` for git repositories to keep runs isolated and parallel. See [How runs share the directory](#how-runs-share-the-directory).
 
 ## Add a local directory
 
@@ -54,17 +58,17 @@ Make sure Desktop's local daemon is online.
 </Step>
 <Step>
 
-Open the project's **Resources**, or the **Local directory** tab of the create-project dialog. The same choice is available there before the project exists.
+For an existing project, open **Resources → Local folders** and follow the steps below. When creating a project, use the **Local folder** tab instead; the folder and mode are saved when you create the project.
 
 </Step>
 <Step>
 
-Choose "Add local directory", then pick the folder to use.
+Under your computer, click **Choose folder...**, then pick the folder to use.
 
 </Step>
 <Step>
 
-Pick how runs should use it: **Direct** or **Parallel**, described under [How runs share the directory](#how-runs-share-the-directory). Desktop preselects **Parallel** when the folder is a git repository the runtime on that machine can isolate, and **Direct** otherwise. Change it right there, or later from **Resources** with the pencil next to the directory.
+Pick **Edit directly** or **Run in parallel**, described under [How runs share the directory](#how-runs-share-the-directory), then click **Add folder**. Desktop preselects **Run in parallel** when the folder is a git repository the runtime on that machine can isolate, and **Edit directly** otherwise. To change it later, click the folder's mode label in **Resources** and choose another mode; the selection saves immediately.
 
 </Step>
 </Steps>
@@ -83,7 +87,7 @@ In the default `in_place` mode a local directory is not an isolated environment:
 
 ## How runs share the directory
 
-A local directory has two execution modes, set per resource with `execution_mode`. Desktop labels them **Direct** and **Parallel**; the API, the CLI and the rest of this page use the identifiers.
+A local directory has two execution modes, set per resource with `execution_mode`. Desktop shows them as **Edit directly** and **Run in parallel** when you add a folder, and as **Direct** and **Parallel** on the folder's mode label; the API, the CLI and the rest of this page use the identifiers.
 
 <LocalDirModeDemo />
 
@@ -92,7 +96,7 @@ A local directory has two execution modes, set per resource with `execution_mode
 
 The agent works directly in your directory, and runs execute one at a time. When two runs use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
 
-Waiting does not modify the directory. A waiting run can be cancelled; otherwise it waits until the directory becomes available.
+Waiting does not modify the directory or consume a daemon execution slot. A waiting run can be cancelled; otherwise it resumes startup once both the directory and execution capacity are available.
 
 A plain non-git directory can only use this mode: worktree mode covers git repositories.
 
@@ -155,6 +159,8 @@ A run that could not record its branch — it failed before finishing, the recor
 
 </Accordion>
 <Accordion title="Nothing is silently dropped" id="nothing-is-silently-lost">
+
+During a worktree run, a tracked runtime instruction file such as `CLAUDE.md` or `AGENTS.md` is marked `skip-worktree` in the task's private index. This keeps the injected brief out of the agent's commits without changing your checkout. Intentional edits to that file remain uncommitted until cleanup restores normal tracking: they follow the delivery rules below. Untracked runtime files and skill directories still need to be excluded from the agent's commits.
 
 Nothing the agent leaves uncommitted is deleted with the worktree, including when the run fails partway. Where it goes depends on whether the agent committed during the run:
 

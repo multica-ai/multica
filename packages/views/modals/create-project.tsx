@@ -62,6 +62,7 @@ import {
 import { ProjectStartDatePicker } from "../projects/components/project-start-date-picker";
 import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
 import { ProjectAccessDraftPicker } from "../projects/components/project-access";
+import { usePaidFeatureErrorMessage } from "../billing";
 import { PillButton } from "../common/pill-button";
 import { WorkflowPill } from "../workflows/workflow-pill";
 import { githubShortLabel } from "../common/github-url";
@@ -82,6 +83,7 @@ import {
 import { useConfigStore } from "@multica/core/config";
 import type { LocalDirectoryExecutionMode } from "@multica/core/types";
 import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-options";
+import { getProjectFoldersExtension, useProjectFolders } from "../extensions";
 
 /**
  * Builds the resource_ref for a local directory attached during project
@@ -142,7 +144,13 @@ function RepoUrlText({
   );
 }
 
-export function CreateProjectModal({ onClose }: { onClose: () => void }) {
+export function CreateProjectModal({
+  onClose,
+  data,
+}: {
+  onClose: () => void;
+  data?: Record<string, unknown> | null;
+}) {
   const { t } = useT("modals");
   // The execution-mode copy lives in the projects namespace alongside the
   // resource panel's, so both entry points describe the choice identically.
@@ -316,6 +324,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   };
 
   const [workflowId, setWorkflowId] = useState<string | null>(null);
+  const folders = useProjectFolders(wsId);
+  const FolderField = getProjectFoldersExtension()?.CreateProjectField;
+  const [folderId, setFolderId] = useState<string | null>(
+    typeof data?.folderId === "string" ? data.folderId : null,
+  );
 
   // Sync field changes to draft store
   const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
@@ -345,6 +358,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const hasSource = sourceMode === "local" ? !!selectedLocalPath : selectedRepos.length > 0;
 
   const createProject = useCreateProject();
+  const paidFeatureError = usePaidFeatureErrorMessage();
 
   // Every selected repo's branch, not just the one in the add field. A branch
   // edited on an already-selected row goes through setRepoRef and used to
@@ -409,15 +423,19 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         resources,
         ...(visibility === "private" ? { visibility, member_ids: memberIds } : {}),
       });
+      if (folderId && folders.canFile) folders.moveProject(project.id, folderId);
       clearDraft();
       onClose();
       toast.success(t(($) => $.create_project.toast_created));
       router.push(wsPaths.projectDetail(project.id));
     } catch (err) {
       toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.create_project.toast_failed),
+        paidFeatureError(
+          err,
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.create_project.toast_failed),
+        ),
       );
     } finally {
       setSubmitting(false);
@@ -627,6 +645,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           </DropdownMenu>
 
           <WorkflowPill value={workflowId} onChange={setWorkflowId} />
+          {FolderField && <FolderField value={folderId} onChange={setFolderId} />}
           {<ProjectAccessDraftPicker visibility={visibility} memberIds={memberIds} members={members}
             leadId={leadType === "member" ? leadId : undefined}
             onChange={(value, ids) => { setVisibility(value); setMemberIds(ids); setDraft({ visibility: value, memberIds: ids }); }} />}

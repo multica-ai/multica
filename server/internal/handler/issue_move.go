@@ -70,20 +70,26 @@ func (h *Handler) MoveIssue(w http.ResponseWriter, r *http.Request) {
 		if !valid {
 			return
 		}
-		var exists bool
+		var exists, archived bool
 		err := h.DB.QueryRow(r.Context(), `
-			SELECT EXISTS (
-				SELECT 1
-				FROM project
-				WHERE workspace_id = $1 AND id = $2
-			)
-		`, current.WorkspaceID, *projectID).Scan(&exists)
+			SELECT
+				EXISTS (SELECT 1 FROM project WHERE workspace_id = $1 AND id = $2),
+				EXISTS (SELECT 1 FROM project WHERE workspace_id = $1 AND id = $2 AND archived_at IS NOT NULL)
+		`, current.WorkspaceID, *projectID).Scan(&exists, &archived)
 		if err != nil {
 			writeIssueTableQueryFailure(w, r, "failed to validate move project")
 			return
 		}
 		if !exists {
 			writeError(w, http.StatusBadRequest, "project not found in this workspace")
+			return
+		}
+		if !h.requireProjectVisible(w, r, uuidToString(current.WorkspaceID), *projectID, http.StatusBadRequest, "project not found in this workspace") {
+			return
+		}
+		// Reordering inside an archived project is fine; moving into one is not.
+		if archived && *projectID != current.ProjectID {
+			writeProjectArchived(w)
 			return
 		}
 	}
@@ -175,17 +181,21 @@ func (h *Handler) issueMoveAnchorPosition(
 		return nil, true
 	}
 	var position float64
+	var projectID pgtype.UUID
 	err := h.DB.QueryRow(r.Context(), `
-		SELECT position
+		SELECT position, project_id
 		FROM issue
 		WHERE workspace_id = $1 AND id = $2
-	`, workspaceID, *id).Scan(&position)
+	`, workspaceID, *id).Scan(&position, &projectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusBadRequest, "move anchor not found in this workspace")
 		} else {
 			writeIssueTableQueryFailure(w, r, "failed to resolve move anchor")
 		}
+		return nil, false
+	}
+	if !h.requireProjectVisible(w, r, uuidToString(workspaceID), projectID, http.StatusBadRequest, "move anchor not found in this workspace") {
 		return nil, false
 	}
 	return &position, true

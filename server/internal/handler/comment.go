@@ -1731,15 +1731,17 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// A running turn receives text only, so a comment that carries files is
-	// always a normal trigger.
-	steer := commentSteerRequest{TaskIDs: steerTaskIDs, All: req.Steer}
-	if len(attachmentIDs) > 0 {
-		steer = commentSteerRequest{}
-	}
-
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+
+	// A running turn receives text only, so a comment that carries files is
+	// always a normal trigger. A member's explicit skill selection is the
+	// same: the text-only channel cannot invoke a skill, so the comment
+	// needs a turn of its own.
+	steer := commentSteerRequest{TaskIDs: steerTaskIDs, All: req.Steer}
+	if len(attachmentIDs) > 0 || (authorType == "member" && strings.Contains(req.Content, "](slash://skill/")) {
+		steer = commentSteerRequest{}
+	}
 
 	// sourceTaskID captures the agent's currently-executing task when it posts
 	// via the CLI (X-Task-ID header). Stamping it on the comment row keeps the
@@ -2446,7 +2448,12 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		return commentMergeError
 	}
 	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, attr.UserID, trigger.Agent)
+	var leaderSquadID pgtype.UUID
+	if trigger.Squad != nil {
+		leaderSquadID = trigger.Squad.ID
+	}
 	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
+		NewLeaderSquadID:        leaderSquadID,
 		IssueID:                 issue.ID,
 		AgentID:                 trigger.Agent.ID,
 		NewTriggerCommentID:     newTriggerCommentID,
@@ -2636,7 +2643,13 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 			return err
 		}
 	case commentTriggerSourceMentionAgent:
-		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID, service.OriginNamed); err != nil {
+		var err error
+		if trigger.Squad != nil {
+			_, err = h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID, service.OriginNamed)
+		} else {
+			_, err = h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID, service.OriginNamed)
+		}
+		if err != nil {
 			logCommentEnqueueFailure("enqueue mention agent task failed", err,
 				"issue_id", uuidToString(issue.ID),
 				"agent_id", uuidToString(trigger.Agent.ID))
@@ -2702,10 +2715,12 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	if hasAgentOrSquadMention(mentions) {
 		return h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
 	}
-	if util.HasMentionAll(mentions) {
-		return nil, nil
-	}
-	if hasMemberMention(mentions) {
+	// A member who @mentions people (a member or @all) and no agent/squad is
+	// talking to humans, so the implicit fallbacks stay quiet. An agent's
+	// member mention or @all only notifies humans: a worker result that pings
+	// a reviewer still has to reach its squad leader, or the
+	// leader→worker→leader loop stalls.
+	if actorType == "member" && (util.HasMentionAll(mentions) || hasMemberMention(mentions)) {
 		return nil, nil
 	}
 
@@ -3040,6 +3055,25 @@ func (h *Handler) routeAssigneeFallback(ctx context.Context, issue db.Issue, aut
 	}
 }
 
+// assignedSquadLedBy returns the squad the issue is assigned to when agentID
+// leads it, else nil. An explicit @agent mention of that leader then runs in
+// the leader role, as the implicit squad-assignee wake does; a plain mention
+// task carries no is_leader_task / squad_id, so the leader could not record
+// `multica squad activity` for the turn (#8875).
+func (h *Handler) assignedSquadLedBy(ctx context.Context, issue db.Issue, agentID pgtype.UUID) *db.Squad {
+	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" {
+		return nil
+	}
+	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+		ID:          issue.AssigneeID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || squad.LeaderID != agentID {
+		return nil
+	}
+	return &squad
+}
+
 func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db.Issue, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
 	// Checked here as well as in routeAssigneeFallback: an agent-authored
 	// comment reaches this one directly, without passing through that caller.
@@ -3102,11 +3136,10 @@ func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, a
 // mentions from the current comment and returns the runnable agent recipients.
 // Skips agents with on_mention trigger disabled, and private agents mentioned
 // by non-owner members (only the agent owner or workspace admin/owner can
-// mention a private agent). Self-mentions are intentionally allowed so an
-// agent running in one issue can explicitly enqueue itself on another (e.g.
-// a child-issue run notifying the parent issue whose assignee is the same
-// agent); runaway loops are prevented by HasPendingTaskForIssueAndAgent
-// dedupe and the natural queued/dispatched coalescing of the task queue.
+// mention a private agent). A self-mention from a trusted authoring task on
+// this issue is suppressed, including during completion replay. Cross-issue
+// self-mentions remain explicit handoffs (e.g. a child-issue run notifying the
+// parent issue whose assignee is the same agent).
 // Note: no issue status gate here — @mention is an explicit action and should
 // work even on done/cancelled issues (the agent can reopen the issue if needed).
 // commentMentionTarget is one EXPLICIT @agent / @squad mention and how it
@@ -3318,12 +3351,48 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			blockUnusableTarget("agent", m.ID, agent, verdict)
 			continue
 		}
+		if authorType == "agent" && authorID == uuidToString(agent.ID) && opts.AuthoringTaskID.Valid {
+			sourceTask, err := h.Queries.GetAgentTask(ctx, opts.AuthoringTaskID)
+			if err != nil {
+				blockTarget("agent", m.ID, ReasonInternalError)
+				continue
+			}
+			// Compare the exact authoring task, never the assignee or latest
+			// run: the same agent may be notifying this issue from another.
+			// Terminal source tasks still match when completion replays a comment.
+			if sourceTask.AgentID == agent.ID && sourceTask.IssueID == issue.ID {
+				active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, agent.ID, opts.ThreadCommentID)
+				status, reason := decideSuppressedLeaderOutcome(active, activeErr)
+				addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, Status: status, ReasonCode: reason})
+				continue
+			}
+		}
 		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts)
 		if err != nil {
 			blockTarget("agent", m.ID, ReasonInternalError)
 			continue
 		}
-		add(commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent, AlreadyPending: hasPending})
+		squad := h.assignedSquadLedBy(ctx, issue, agentUUID)
+		if squad != nil && authorType == "agent" && authorID == uuidToString(agentUUID) {
+			suppress := h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, agentUUID, squad.ID)
+			if opts.AuthoringTaskID.Valid {
+				task, err := h.Queries.GetAgentTask(ctx, opts.AuthoringTaskID)
+				if err != nil || task.AgentID != agentUUID {
+					blockTarget("agent", m.ID, ReasonInternalError)
+					continue
+				}
+				// Trusted same-issue self-mentions are suppressed above.
+				// Cross-issue handoffs remain eligible for the leader role.
+				suppress = task.IssueID == issue.ID && (task.IsLeaderTask || task.SquadID != squad.ID)
+			}
+			if suppress {
+				active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts.ThreadCommentID)
+				status, reason := decideSuppressedLeaderOutcome(active, activeErr)
+				addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, Status: status, ReasonCode: reason})
+				continue
+			}
+		}
+		add(commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent, Squad: squad, AlreadyPending: hasPending})
 		addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, ExecAgentID: uuidToString(agentUUID)})
 	}
 	return triggers, targets

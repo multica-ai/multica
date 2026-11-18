@@ -17,6 +17,8 @@ GitHub 연동은 설치할 때 승인한 저장소만 읽으며 코드, 댓글, 
 
 워크스페이스 owner 또는 admin이 연결할 수 있습니다.
 
+새 연결에는 GitHub의 설치 관리 권한도 필요합니다. 개인 installation은 승인하는 사용자 본인의 것이어야 합니다. 조직 installation은 포함된 모든 저장소에 admin 권한이 있어야 하며, 읽기 권한이나 일부 저장소의 관리 권한만으로는 연결할 수 없습니다. 조직 installation에 먼저 하나 이상의 저장소를 선택하세요.
+
 <Steps>
 <Step>
 **설정 → 코드**를 엽니다.
@@ -31,6 +33,10 @@ GitHub에서 계정 또는 조직을 선택하고 모든 저장소나 지정한 
 설치가 끝나면 Multica로 돌아옵니다.
 </Step>
 </Steps>
+
+GitHub 행 또는 **저장소 추가** 메뉴에서 **계정 또는 조직 추가**를 선택하면 기존 연결을 해제하지 않고 다른 설치를 연결할 수 있습니다. 각 연결에는 계정과 연결한 사람이 표시되며 저장소 선택기에서 계정을 전환할 수 있습니다. **GitHub 기능 일시 중지**는 워크스페이스의 모든 연결에 적용됩니다.
+
+GitHub에서 사용자 인증을 반환하지 않으면 App이 이미 설치되어 있거나 다른 워크스페이스에 연결되어 있어도 새 연결을 확인할 수 없습니다. 다시 연결하고 인증을 완료하세요. 반복되면 Multica 운영자에게 App의 사용자 인증 설정 확인을 요청하세요. 저장소 범위 변경만으로는 새 연결이 완료되지 않을 수 있습니다.
 
 연결 상태는 같은 페이지에 표시됩니다. 일반 멤버는 상태를 볼 수 있지만 연결, 연결 해제, 스위치 변경은 할 수 없습니다.
 
@@ -74,7 +80,7 @@ Resolves MUL-123
 
 본문에 `Related to MUL-123`처럼 단순히 언급만 하면 해당 태스크와 전혀 연결되지 않습니다. Commit message와 PR 댓글도 연결을 트리거하지 않습니다.
 
-직접 연결할 수도 있습니다. 태스크의 **Pull requests** 영역에서 **+**를 누르고 PR URL을 붙여넣습니다. PR을 태스크에서 빼려면 해당 행의 **⋯** 메뉴에서 **태스크에서 제거**를 선택합니다. 이후 Multica는 제목이나 브랜치를 보고 다시 연결하지 않습니다.
+직접 연결할 수도 있습니다. 태스크의 **Pull requests** 영역에서 **+** 버튼을 누르고 PR URL을 붙여넣습니다. PR을 태스크에서 빼려면 해당 행의 **⋯** 메뉴에서 **태스크에서 제거**를 선택합니다. 이후 Multica는 제목이나 브랜치를 보고 다시 연결하지 않습니다.
 
 ## 태스크에서 PR 확인
 
@@ -107,7 +113,7 @@ PR을 어떻게 연결했는지는 결과에 영향을 주지 않습니다. 제�
 
 판단은 PR 이벤트가 태스크에 닿을 때만 이루어집니다. 연결된 PR의 merge, 연결 추가, 연결 제거입니다. 태스크를 다시 열어도 원래대로 돌아가지 않으며, 다음에 연결된 PR이 merge될 때 바뀝니다. 설정을 바꿔도 이전에 merge된 태스크에는 영향을 주지 않습니다.
 
-상태 변경은 관련 PR을 적은 시스템 작업으로 타임라인에 기록되고 해당 태스크 구독자에게 알림이 전달됩니다. 이 설정은 [자체 호스팅 Git 코드 호스팅](/vcs-integration)을 포함한 모든 코드 호스트에 공통으로 적용됩니다.
+상태 변경은 관련 PR을 적은 시스템 작업으로 타임라인에 기록되고 상태 변경 알림을 켠 해당 태스크 구독자에게 알림이 전달됩니다. 이 설정은 [자체 호스팅 Git 코드 호스팅](/vcs-integration)을 포함한 모든 코드 호스트에 공통으로 적용됩니다.
 
 ## 여러 워크스페이스
 
@@ -119,7 +125,7 @@ PR을 어떻게 연결했는지는 결과에 영향을 주지 않습니다. 제�
 
 ## 연결 해제
 
-**설정 → 코드**의 GitHub 행에서 **⋯** 메뉴의 **연결 해제**를 선택하면 현재 Multica 워크스페이스와 해당 installation의 관계만 제거됩니다. GitHub에서 App을 대신 제거하지는 않습니다. 기존 PR 기록은 유지되고 새 이벤트만 해당 워크스페이스에 들어오지 않습니다.
+**설정 → 코드**에서 제거할 계정 옆의 **연결 해제**를 선택하세요. 해당 설치와 현재 워크스페이스의 연결만 제거되며 다른 연결은 이벤트를 계속 수신합니다. App은 GitHub에 설치된 상태로 유지되고 기존 PR 기록과 링크도 보존됩니다.
 
 GitHub 측의 저장소 승인을 취소하려면 개인 또는 조직의 GitHub App installations 페이지에서 App을 제거하거나 저장소 범위를 조정해야 합니다. App을 제거하면 해당 installation에 연결된 모든 Multica 워크스페이스가 이벤트 수신을 중지합니다.
 
@@ -137,8 +143,8 @@ GitHub의 **Developer settings → GitHub Apps**에서 App을 만들고 다음 �
 | 필드 | 값 |
 |---|---|
 | Homepage URL | Multica 프런트엔드 주소. 예: `https://multica.example.com` |
-| Callback URL | 비워 둠 |
-| Setup URL | `https://<api-host>/api/github/setup`, **Redirect on update** 활성화 |
+| Callback URL | `https://<api-host>/api/github/setup` |
+| Request user authorization (OAuth) during installation | 활성화 |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | 장기 보관할 임의 문자열 |
 
@@ -173,19 +179,21 @@ App의 공개 주소에서 slug를 확인합니다. 예를 들어 `https://githu
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<App을 만들 때 입력한 webhook secret>
+GITHUB_APP_CLIENT_ID=<Client ID>
+GITHUB_APP_CLIENT_SECRET=<Client secret>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-`GITHUB_APP_SLUG`와 `GITHUB_WEBHOOK_SECRET` 중 하나라도 없으면 연결 버튼이 비활성화되고 webhook endpoint도 이벤트 처리를 거부합니다.
+새 연결에는 이 절의 GitHub 변수 여섯 개가 모두 필요하며 `GITHUB_APP_ID`와 `GITHUB_APP_PRIVATE_KEY`도 포함됩니다. 하나라도 없으면 연결 버튼이 비활성화됩니다. webhook 수신에는 `GITHUB_WEBHOOK_SECRET`만 필요하며 기존 연결은 계속 작동합니다. 배포 전에 첫 번째 Callback URL을 이 endpoint로 설정하고 설치 시 OAuth 승인을 활성화하세요. 이 옵션이 활성화되면 GitHub는 별도의 Setup URL을 사용하지 않습니다.
 
-PR 카드에 CI 상태와 merge 가능 여부를 표시하려면 다음 두 변수도 필요합니다. Multica는 이 값으로 App 신원을 인증하고 snapshot을 가져옵니다.
+새 연결과 PR 카드의 CI 상태 및 merge 가능 여부를 위해 다음 두 변수도 설정하세요. Multica는 metadata 읽기 전용 토큰으로 installation의 전체 저장소 목록을 가져와 연결 사용자가 관리하는 목록과 비교합니다.
 
 ```dotenv
 GITHUB_APP_ID=<GitHub App 숫자 ID>
 GITHUB_APP_PRIVATE_KEY=<BEGIN/END 줄과 줄바꿈을 유지한 전체 PEM private key>
 ```
 
-Private key는 GitHub App의 **Private keys → Generate a private key**에서 생성합니다. 이 두 변수가 없어도 PR은 계속 미러링되고 태스크 자동 연결과 merge 시 상태 변경도 작동합니다. PR 카드에 CI 또는 merge 상태가 표시되지 않을 뿐입니다.
+GitHub App의 **Private keys → Generate a private key**에서 키를 생성하세요. 두 변수가 없으면 연결 버튼이 비활성화됩니다. 기존 연결은 webhook으로 PR을 미러링하고 태스크를 업데이트하지만 PR 카드에 CI나 merge 상태가 표시되지 않습니다.
 
 </Step>
 <Step>
@@ -205,7 +213,7 @@ API 서비스를 다시 시작한 뒤 **설정 → 코드**에서 연결을 완�
 
 ## 자주 묻는 문제
 
-- **연결 버튼을 사용할 수 없음**: `GITHUB_APP_SLUG`와 `GITHUB_WEBHOOK_SECRET`이 API 프로세스에 전달되었는지 확인합니다.
+- **연결 버튼을 사용할 수 없음**: 위의 GitHub 변수 여섯 개, 첫 번째 Callback URL, **Request user authorization (OAuth) during installation**을 확인합니다.
 - **Webhook이 401을 반환함**: GitHub App과 API가 같은 Webhook secret을 사용하는지 확인하고 GitHub의 **Recent Deliveries**에서 다시 전달합니다.
 - **PR이 연결되지 않음**: 저장소가 App 승인 범위에 있는지, 자동 연결이 켜져 있는지, 번호가 현재 워크스페이스에 속하는지, 누군가 태스크에서 PR을 제거하지 않았는지 확인합니다.
 - **본문에 번호를 썼는데 연결되지 않음**: `Closes MUL-123`을 사용하거나, 번호를 브랜치 이름이나 PR 제목에 넣거나, 직접 연결합니다.

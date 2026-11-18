@@ -27,12 +27,8 @@ export interface ProjectChipProps {
 const BASE_CLASS =
   "project-chip inline-flex min-w-0 max-w-[min(18rem,100%)] items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-caption";
 
-export function ProjectChip({
-  projectId,
-  fallbackLabel,
-  className,
-}: ProjectChipProps) {
-  const { t } = useT("projects");
+/** The project a chip shows, from the project list cache or its own query. */
+export function useChipProject(projectId: string) {
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const listProject = projects.find((p) => p.id === projectId);
@@ -42,7 +38,16 @@ export function ProjectChip({
     enabled: !listProject,
   });
 
-  const project = listProject ?? detailProject;
+  return listProject ?? detailProject;
+}
+
+export function ProjectChip({
+  projectId,
+  fallbackLabel,
+  className,
+}: ProjectChipProps) {
+  const { t } = useT("projects");
+  const project = useChipProject(projectId);
   const cls = className ? `${BASE_CLASS} ${className}` : BASE_CLASS;
 
   if (!project) {

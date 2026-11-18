@@ -12,6 +12,7 @@ export const ISSUE_SIDEBAR_SECTIONS = [
   "plugins",
   "parent",
   "waiting",
+  "sub_issues",
   "duplicates",
   "pull_requests",
   "environments",

@@ -44,18 +44,27 @@ const (
 func TestMain(m *testing.M) {
 	ctx := context.Background()
 	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
+	dbConfigured := dbURL != ""
+	if !dbConfigured {
 		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
 	}
 
 	pool, err := pgxpool.New(ctx, dbURL)
 	if err != nil {
+		if dbConfigured {
+			fmt.Fprintln(os.Stderr, "Failed to configure handler test database from DATABASE_URL")
+			os.Exit(1)
+		}
 		fmt.Printf("Skipping tests: could not connect to database: %v\n", err)
 		os.Exit(0)
 	}
 	if err := pool.Ping(ctx); err != nil {
-		fmt.Printf("Skipping tests: database not reachable: %v\n", err)
 		pool.Close()
+		if dbConfigured {
+			fmt.Fprintln(os.Stderr, "Failed to connect to handler test database configured by DATABASE_URL")
+			os.Exit(1)
+		}
+		fmt.Printf("Skipping tests: database not reachable: %v\n", err)
 		os.Exit(0)
 	}
 
@@ -2877,6 +2886,52 @@ func TestBacklogToTodoByAgentSameAgentDifferentIssue(t *testing.T) {
 	).Scan(&step2Tasks)
 	if step2Tasks != 1 {
 		t.Fatalf("expected exactly 1 task enqueued on step2 for same-agent serial chain, got %d", step2Tasks)
+	}
+}
+
+// TestBacklogToTodoByAgentSameIssueOtherAssigneeEnqueues covers #10829: a
+// coordinator whose run is bound to issue I promotes I out of backlog while I
+// is assigned to a different agent. That is not a self-loop, so the assignee
+// must get a run.
+func TestBacklogToTodoByAgentSameIssueOtherAssigneeEnqueues(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	coordinator := createHandlerTestAgent(t, "Backlog Coordinator", nil)
+	worker := createHandlerTestAgent(t, "Backlog Worker", nil)
+
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Coordinator-promoted backlog",
+		"status":        "backlog",
+		"assignee_type": "agent",
+		"assignee_id":   worker,
+	})
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	// The coordinator's run is bound to the same issue it promotes.
+	coordinatorTask := createHandlerTestTaskForAgentOnIssue(t, coordinator, created.ID)
+
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{"status": "todo"})
+	req = withURLParam(req, "id", created.ID)
+	req.Header.Set("X-Agent-ID", coordinator)
+	req.Header.Set("X-Task-ID", coordinatorTask)
+	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
+
+	var workerTasks int
+	dbfx.QueryRow(t,
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+		created.ID, worker,
+	).Scan(&workerTasks)
+	if workerTasks != 1 {
+		t.Fatalf("expected 1 queued task for the assignee after a coordinator promoted the issue its run is bound to, got %d", workerTasks)
 	}
 }
 

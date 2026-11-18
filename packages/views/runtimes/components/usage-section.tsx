@@ -645,7 +645,7 @@ function CostByBlock({
           <CostByList
             rows={byModel}
             renderKey={(key) => (
-              <span className="truncate font-mono text-caption text-foreground">
+              <span className="block truncate font-mono text-caption text-foreground">
                 {key}
               </span>
             )}

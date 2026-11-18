@@ -1,71 +1,4 @@
 {
-  "title": "請求（テストページ）",
-  "subtitle": "multica-cloud の /api/v1/billing/* に直接パススルーします。完成した UI ではなく、proxy と Stripe フローを検証するためにすべての endpoint を 1 つのページにまとめたものです。",
-  "endpoints": {
-    "balance": "GET /api/cloud-billing/balance",
-    "transactions": "GET /api/cloud-billing/transactions",
-    "batches": "GET /api/cloud-billing/batches",
-    "topups": "GET /api/cloud-billing/topups",
-    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
-  },
-  "balance": {
-    "title": "残高",
-    "credits_suffix": "credits",
-    "meta": "raw micro: {{micro}} · owner: {{owner}}… · updated {{updated}}"
-  },
-  "buy": {
-    "title": "クレジット購入 / 請求の管理",
-    "no_tiers": "設定された価格 tier がありません。Cloud に Stripe key が設定されていない可能性があり、checkout は 503 を返します。",
-    "tier_money_to_credits": "{{money}} → {{credits}} credits",
-    "tier_bonus": " + ボーナス {{credits}}",
-    "tier_bonus_with_expiry": " + ボーナス {{credits}}（{{expiry}}）",
-    "tier_id": "id: {{id}}",
-    "open_portal": "Stripe Billing Portal を開く",
-    "portal_hint": "まだ支払いをしていないユーザーには 400 が想定されます（Stripe customer record がまだ存在しません）。",
-    "toast_no_url": "Cloud が checkout URL を返しませんでした",
-    "toast_checkout_failed": "Checkout に失敗しました",
-    "toast_no_portal_url": "Portal URL が返されませんでした",
-    "toast_portal_failed": "Portal を開けませんでした"
-  },
-  "checkout": {
-    "session_label": "Checkout session {{prefix}}…",
-    "loading": "注文ステータスを読み込み中…",
-    "fetch_failed": "ステータスの取得に失敗しました: {{error}}",
-    "fetch_failed_unknown": "不明なエラー",
-    "final_status": "最終ステータス: {{status}}",
-    "polling_status": "ステータスを確認中… 現在: {{status}}",
-    "status_unknown": "unknown",
-    "label_order": "注文",
-    "label_tier": "Tier",
-    "label_charged": "請求済み",
-    "charged_value": "{{money}} · {{credits}} credits",
-    "charged_with_bonus": "{{money}} · {{credits}} credits + ボーナス {{bonus}}",
-    "clear_url": "URL から消去"
-  },
-  "transactions": {
-    "title": "取引履歴",
-    "empty": "取引履歴はまだありません。",
-    "credits_value": "{{value}} credits",
-    "row_meta": "{{date}} · balance after: {{balance}} credits · ref: {{ref}}",
-    "ref_empty": "—"
-  },
-  "batches": {
-    "title": "クレジット batch",
-    "empty": "batch はまだありません。",
-    "remaining_over_total": "{{remaining}} / {{total}} credits",
-    "id_suffix": "{{id}}…",
-    "consumed": "使用済み: {{value}} credits",
-    "expires_suffix": " · 有効期限 {{value}}",
-    "never_expires_suffix": " · 有効期限なし"
-  },
-  "topups": {
-    "title": "Topup 注文",
-    "empty": "topup 注文はまだありません。",
-    "amount_to_credits": "{{money}} → {{credits}} credits",
-    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credits + ボーナス {{bonus}}",
-    "row_meta": "{{date}} · stripe: {{checkout}}",
-    "stripe_empty": "—"
-  },
   "workspace": {
     "title": "請求とプラン",
     "description": "このワークスペースのプラン、上限、ユーザー席、Stripe 請求を管理します。",
@@ -169,7 +102,6 @@
     },
     "limits": {
       "title": "使用量と上限",
-      "issues": "タスク数",
       "autopilots": "自動化の実行",
       "unlimited": "無制限",
       "per_month": "月 {{count}} 回",
@@ -239,12 +171,6 @@
       "description": "請求期間: {{interval}}。現在のユーザーメンバー: {{count}}。Stripe が席数を再集計し、お支払い前に最終金額を表示します。"
     }
   },
-  "shared": {
-    "request_failed": "リクエストに失敗しました",
-    "refresh": "更新",
-    "paging": "{{page}} / {{totalPages}} ページ · 合計 {{total}}件",
-    "date_dash": "—"
-  },
   "return_page": {
     "redirecting": "ワークスペースの請求ページに戻ります…",
     "load_failed_title": "ワークスペースの請求ページを開けませんでした",
@@ -253,5 +179,11 @@
     "workspace_missing_description": "Stripe から戻りましたが、このワークスペースは利用できません。削除されたか、アクセス権が変更された可能性があります。対象のワークスペースの請求ページで現在の状態を確認してください。",
     "retry": "再試行",
     "go_to_app": "Multica を開く"
+  },
+  "paid_feature": {
+    "read_only": "読み取り専用です。編集するにはアップグレードしてください。",
+    "unavailable": "このワークスペースのプランには含まれていません。",
+    "view_plans": "プランを見る",
+    "locked_error": "このワークスペースのプランには含まれていません。既存の設定はそのまま有効です。追加するにはアップグレードしてください。"
   }
 }

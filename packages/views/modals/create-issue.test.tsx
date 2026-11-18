@@ -34,6 +34,18 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 const mockParentIssue = vi.hoisted(() => ({ value: null as Issue | null }));
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
+type VoiceOptions = { insert: (text: string) => boolean; submit?: () => void };
+const voiceOptions = vi.hoisted(() => ({ last: null as VoiceOptions | null }));
+
+// Voice input has its own tests; here only its wiring to the editor matters.
+vi.mock("../voice", () => ({
+  useComposerVoice: (options: VoiceOptions) => {
+    voiceOptions.last = options;
+    return { rootRef: () => {}, onFocusCapture: () => {} };
+  },
+  VoiceDialogFooter: ({ children }: { children: ReactNode }) => children,
+  VoiceMicButton: () => null,
+}));
 const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
 const mockListProperties = vi.hoisted(() => vi.fn());
@@ -50,7 +62,6 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
-const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
 // mocking that call; it resolves a plain server Attachment row.
@@ -226,10 +237,6 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
 }));
 
-vi.mock("./use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: () => mockShowIssueLimitUpgradePrompt,
-}));
-
 vi.mock("@multica/core/issues/queries", () => ({
   issueDetailOptions: (wsId: string, id: string) => ({
     queryKey: ["issues", wsId, "detail", id],
@@ -388,6 +395,12 @@ vi.mock("../editor", async () => {
           inFlightRef.current -= 1;
           if (inFlightRef.current === 0) onUploadingChange?.(false);
         }
+      },
+      insertText: (text: string) => {
+        valueRef.current += text;
+        setValue(valueRef.current);
+        onUpdate?.(valueRef.current);
+        return true;
       },
       hasActiveUploads: () => inFlightRef.current > 0,
       // Placeholder rebuild contract: the real handle draws a card for an
@@ -803,10 +816,25 @@ describe("CreateIssueModal", () => {
     }));
   });
 
-  it("uses the same compact attachment control as agent mode", () => {
+  it("dictates into the description and leaves creating to the button", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.title = "Voice issue";
+    mockDraftStore.draft.manual.description = "Steps:";
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    expect(voiceOptions.last?.submit).toBeUndefined();
+    act(() => {
+      expect(voiceOptions.last?.insert(" open the inbox")).toBe(true);
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    expect(mockCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Voice issue", description: "Steps: open the inbox",
+    }));
+  });
+
+  it("uses the same attachment control as agent mode, sized to match the mic", () => {
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
-    expect(screen.getByRole("button", { name: "Upload file" })).toHaveAttribute("data-size", "sm");
+    expect(screen.getByRole("button", { name: "Upload file" })).not.toHaveAttribute("data-size");
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -1599,29 +1627,6 @@ describe("CreateIssueModal", () => {
     expect(mockToastCustom).not.toHaveBeenCalled();
   });
 
-  it("offers the Cloud-authorized upgrade recovery when manual create reaches the issue limit", async () => {
-    const user = userEvent.setup();
-    const onClose = vi.fn();
-    mockCreateIssue.mockRejectedValue(
-      new ApiError("workspace has reached its issue limit", 402, "Payment Required", {
-        code: "issue_limit_reached",
-        limit: 1000,
-        policy_revision: 1,
-      }),
-    );
-
-    renderModal(<CreateIssueModal onClose={onClose} />);
-    await user.type(screen.getByPlaceholderText("Issue title"), "One more issue");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
-
-    await waitFor(() => {
-      expect(mockShowIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
-    });
-    expect(mockToastError).not.toHaveBeenCalled();
-    expect(mockClearDraft).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
   // Non-409 errors with a real message: surface the backend reason rather
   // than the generic i18n fallback. This is the whole point of the issue.
   it("surfaces err.message verbatim for non-duplicate errors", async () => {
@@ -1676,6 +1681,17 @@ describe("CreateIssueModal", () => {
       expect.objectContaining({ projectId: "proj-1" }),
     );
     expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
+  });
+
+  it("opens without a project when asked for none, over an unfinished draft's project", async () => {
+    const user = userEvent.setup();
+    const firstOpen = renderModal(<CreateIssueModal onClose={vi.fn()} />);
+    await user.click(screen.getByTestId("project-picker"));
+    firstOpen.unmount();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ project_id: null }} />);
+
+    expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "none");
   });
 
   it("restores an unfinished project selection after manual create remounts", async () => {

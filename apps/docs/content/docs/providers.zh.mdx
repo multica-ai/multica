@@ -45,11 +45,17 @@ Multica 不替代你在用的 AI 编程工具：运行时调用电脑上已经�
 | Qoder CN CLI | `qoderclicn` | ✓ | ✓ | ✓ | `.qoder/skills/` |
 | Qwen Code | `qwen` | ✓ | ✓ | ✓ | `.qwen/skills/` |
 | QwenPaw | `qwenpaw` | ✓ | ✓ | — | 单次执行的工作区 `skills/` |
+| Amp | `amp` | ✓ | — | 模式 | `.agents/skills/` |
+| Factory Droid | `droid` | ✓ | — | ✓ | `.factory/skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | ✓ | `.traecli/skills/` |
 | Dim | `dim` | ✓ | ✓ | ✓ | — |
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
+
+Amp 的模型字段用于选择 Amp **模式**（如 `high`），而不是底层模型 ID。留空则使用 Amp 的默认模式。
+
+Amp 还需要在守护进程或智能体环境中设置 `AMP_API_KEY`，仅有交互式登录记录不够。
 
 "Multica 管理 MCP"指可以在智能体配置中填写 MCP server，由 Multica 在执行前传给对应工具。这一列只说明 Multica 能否代为配置，不说明工具自身有没有别的 MCP 配置方式。
 
@@ -71,6 +77,8 @@ Devin 优先读取 `WINDSURF_API_KEY`，否则使用 `devin auth login` 保存�
 
 QwenPaw、MiniMax Code 和 ZeroClaw 例外：它们不接受在 Multica 侧选择的模型，选择框不可用，显示为"由运行时管理"，模型要在工具自身的配置里选。它们的模型列表为空是正常的，不表示运行时离线。
 
+Antigravity 会把 `agy models` 中的推理变体显示为独立模型。在模型选择器中选用完整的变体名称，包括后缀。Multica 不为 Antigravity 提供单独的**思考**设置。如果在自定义参数中传入 `--effort`，Antigravity 会检查它能否与所选模型同时使用。
+
 DeepSeek Harness 的模型目录由运行时自身提供（`dsh --profile multica --list-models`）。它的模型 id 采用 `provider/model` 形式（例如 `deepseek-official/deepseek-chat`），请从列表中选择完整 id。
 
 <Callout type="info">
@@ -87,7 +95,7 @@ Multica 保存工具返回的会话标识。下次在同一任务中继续工作
 
 ## MCP 配置
 
-Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code 和 ZeroClaw 暂不读取智能体中的 MCP 配置，创建智能体时不显示这一项。
+Amp、Factory Droid、Antigravity、GitHub Copilot CLI、DevEco Code、Muse Code 和 ZeroClaw 暂不读取智能体中的 MCP 配置，创建智能体时不显示这一项。
 
 向 Pi 下发受管 MCP 配置需要 Pi 0.99.0 或更高版本。旧版 Pi 仍可运行未配置 MCP 的智能体。
 
@@ -121,4 +129,4 @@ Codex、Hermes 和 OpenClaw 的处理稍有不同：
 
 ZCode 使用原生 NDJSON `app-server` 协议，支持会话创建、续接、取消、模型发现、思考强度和 MCP。任务通过 yolo 模式执行，无需等待交互式工具审批。每个模型的思考档位来自运行时目录，创建智能体时会保留对应默认值。
 
-macOS 可自动发现 ZCode Desktop 内置的 Node 入口；需要本机已安装 Node.js。运行时读取桌面端已启用的 API-key/Coding Plan 连接，为当前进程生成独占临时配置，退出后删除，原配置不变。Start Plan 登录身份令牌不作为 API key 导入，目前不支持这条账号鉴权路径。若模型列表为空，请先在桌面端配置一个可用的 API 连接。
+macOS 可自动发现 ZCode Desktop 内置的 CLI；需要本机已安装 Node.js。Linux 也可自动发现 ZCode Desktop，在后台运行内置 CLI，不打开桌面窗口，无需额外安装 Node.js 或手动配置环境变量。运行时读取桌面端已启用的 API-key/Coding Plan 连接，为当前进程生成独占临时配置，退出后删除，原配置不变。Start Plan 登录身份令牌不作为 API key 导入，目前不支持这条账号鉴权路径。若模型列表为空，请先在桌面端配置一个可用的 API 连接。

@@ -99,6 +99,8 @@ Webhook secret は一度しか表示されません。ページを離れる前�
 </Tab>
 </Tabs>
 
+GitLab 管理者はインスタンス全体の [System Hook](https://docs.gitlab.com/administration/system_hooks/) も設定できます。同じ URL とシークレットを使い、**Merge request events** を有効にします。Multica が処理するのは、このワークスペースの**設定 → コード → リポジトリ**に登録され、接続先の GitLab インスタンスに属し、接続用トークンで読み取れるリポジトリの MR イベントだけです。それ以外のシステムイベントは無視されます。リポジトリには HTTPS または SSH のクローン URL を使えます。プロジェクトごとのフック登録は不要になりますが、GitLab 管理者による設定が必要です。System Hook は Pipeline イベントを送らないため、CI 状態が必要ならプロジェクトまたはグループの Pipeline Webhook を残してください。両方を併用できます。応答 `202` は受信の確認であり、タスクの関連付けや状態変更を保証しません。接続前にマージされた MR がさかのぼって処理されることもありません。
+
 Multica は保存済みの secret で各 delivery を検証するため、一致する secret がない Webhook は拒否されます。
 
 ## ミラーされる内容

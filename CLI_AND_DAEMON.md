@@ -279,6 +279,8 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot) | `copilot` | GitHub's coding agent (model routed by your GitHub entitlement) |
 | OpenCode | `opencode` | Open-source coding agent |
+| Muse Code | `muse` | Muse Session Protocol via `muse serve` |
+| ZeroClaw | `zeroclaw` | ACP via `zeroclaw acp`; model is managed by ZeroClaw |
 | [ZCode](https://zcode.z.ai/) | `zcode` / ZCode Desktop | Native NDJSON app-server, sessions, model discovery, thinking levels, MCP and yolo execution |
 | OpenClaw | `openclaw` | Open-source coding agent |
 | Hermes | `hermes` | Nous Research coding agent |
@@ -295,6 +297,8 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Trae](https://docs.trae.cn/cli) | `traecli` | ByteDance TRAE CLI (ACP via `traecli acp serve`) |
 | [Grok Build CLI](https://docs.x.ai/) | `grok` | xAI Grok Build CLI (ACP via `grok agent stdio`) |
 | [Qwen Code](https://github.com/QwenLM/qwen-code) | `qwen` | Alibaba Qwen Code (`qwen -p` with stream-json) |
+| [Amp](https://ampcode.com/docs/cli) | `amp` | Local `amp --execute --stream-json`; requires an access token in `AMP_API_KEY` for unattended execution. Model configuration selects an Amp mode. Managed MCP and live supplements are unsupported. |
+| [Factory Droid](https://docs.factory.com/droid-exec/overview) | `droid` | Native CLI 1.8.0+, `droid exec` with stream-json; sign in or set `FACTORY_API_KEY`. Uses `--auto high`; Multica-managed MCP and live supplements are unsupported. |
 | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) | `qwenpaw` | QwenPaw ACP coding agent (ACP via `qwenpaw acp`; model is fixed by its own configuration) |
 | [MiniMax Code](https://github.com/MiniMax-AI/minimax-code) | `mcode` | MiniMax Code ACP coding agent (ACP via `mcode acp`; model is managed by MCode) |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` | DeepSeek Harness (`dsh --profile multica --stdio`; requires the Multica runtime profile to be installed; reads AGENTS.md and .dsh/skills/) |
@@ -391,7 +395,7 @@ Daemon behavior is configured via flags or environment variables:
 | GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |
 | GC scan interval | — | `MULTICA_GC_INTERVAL` | `2h` |
 | GC TTL (done/cancelled issues) | — | `MULTICA_GC_TTL` | `24h` |
-| GC completed-task TTL (issue tasks) | — | `MULTICA_GC_COMPLETED_TASK_TTL` | `14d` on Multica Cloud, `0` (disabled) elsewhere |
+| GC completed-task TTL (issue tasks) | — | `MULTICA_GC_COMPLETED_TASK_TTL` | `14d` (set `0` to disable) |
 | GC orphan TTL (no `.gc_meta.json`) | — | `MULTICA_GC_ORPHAN_TTL` | `72h` |
 | GC artifact TTL (completed tasks) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
 | GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
@@ -407,7 +411,7 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` for cleanup. The active-
 
 - **Full task cleanup** — when an issue's status is `done` or `cancelled` and has been idle for `MULTICA_GC_TTL`, the entire task directory is removed.
 - **Completed-task retention bound** — `MULTICA_GC_COMPLETED_TASK_TTL` fully removes an inactive issue task once its `.gc_meta.json` `completed_at` age exceeds the configured duration, even while the parent issue remains open. Cleanup waits for a successful parent-issue status check, never removes an active environment, and never fully removes a `local_directory` environment. A later rerun provisions a fresh environment instead of resuming the removed checkout.
-  - The default depends on where the daemon points: `14d` against Multica Cloud, and `0` (disabled, retain indefinitely) for self-host and every other origin — including cloud staging and previews. Set the variable to opt in or out on either side; an explicit `0` disables the policy on Cloud too.
+  - The default is `14d` on every server, Multica Cloud and self-host alike. Set the variable to change it; an explicit `0` disables the policy and keeps every completed environment until its issue becomes `done` or `cancelled`.
   - Removing an environment discards work an agent left uncommitted or unpushed on its branch, along with that task's `output/` and `logs/`. The per-issue Codex session store lives outside `MULTICA_WORKSPACES_ROOT` under its own TTL, so a later rerun still resumes the agent's prior session — it just starts from a fresh checkout. Size the TTL against that trade, and keep it comfortably above `MULTICA_GC_INTERVAL`: the active-root guard protects a task that is currently running, not one whose follow-up run is queued but unclaimed.
 - **Orphan cleanup** — task directories with no `.gc_meta.json` (e.g. left over from a daemon crash) are removed once they exceed `MULTICA_GC_ORPHAN_TTL`.
 - **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed. The daemon also reclaims the exact managed path `codex-home/.sandbox-bin`; old task metadata without `completed_at` becomes eligible for this managed-only cleanup after its `.gc_meta.json` file has been idle for `MULTICA_GC_ORPHAN_TTL`. The rest of the task (source, `.git`, `output/`, `logs/`, `.gc_meta.json`, Codex auth/config/session state) is preserved so the agent can resume it. The same basename patterns apply to unarchived chats that use a daemon-managed work directory once the chat status check succeeds and the last run has been complete for `MULTICA_GC_ARTIFACT_TTL`. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay.
@@ -478,6 +482,12 @@ Agent-specific overrides:
 | `MULTICA_QWEN_PATH` | Custom path to the `qwen` binary |
 | `MULTICA_QWEN_MODEL` | Override the Qwen Code model used |
 | `MULTICA_QWEN_ARGS` | Daemon-wide extra Qwen arguments (POSIX shellword parsing; managed protocol flags are filtered) |
+| `MULTICA_AMP_PATH` | Custom path to the `amp` executable |
+| `MULTICA_AMP_MODEL` | Amp mode (such as `high`); empty uses Amp's default |
+| `MULTICA_AMP_ARGS` | Supported extra Amp options, e.g. `--features fast`; protocol, executor, prompt and mode overrides are filtered |
+| `MULTICA_DROID_PATH` | Custom path to the native `droid` executable |
+| `MULTICA_DROID_MODEL` | Droid model ID; defaults to Droid's own configuration |
+| `MULTICA_DROID_ARGS` | Daemon-wide Droid arguments, e.g. `--reasoning-effort high`; managed protocol, prompt, session, and working-directory flags are filtered |
 | `MULTICA_QWENPAW_PATH` | Custom path to the `qwenpaw` binary |
 | `MULTICA_QWENPAW_ARGS` | Daemon-wide extra QwenPaw arguments (POSIX shellword parsing; managed protocol flags are filtered) |
 | `MULTICA_MCODE_PATH` | Custom path to the `mcode` binary |
@@ -714,6 +724,22 @@ multica issue update <id> --attachment revised.png
 `--position` sets the raw ordering value within the board column (lower sorts first). For relative moves, `issue reorder` is easier because it works out the value for you.
 `--attachment` uploads a local file and appends its Markdown reference to the end of the issue description. Repeat the flag to attach multiple files. To replace an existing image, also use `--description-file` to remove the old reference from the description.
 
+### Delete Issue
+
+```bash
+multica issue delete <id>                 # prompts before deleting
+multica issue delete <id> --yes           # no prompt
+multica issue delete MUL-101 MUL-102 --yes --output json
+```
+
+Deletion is permanent and removes the issue's comments and attachments, cancels its in-flight runs, fails linked autopilot runs, clears duplicate marks that pointed at it, and detaches its child issues without deleting them.
+
+Ids may be issue keys or full UUIDs. Every id is resolved with a read before the prompt, full UUIDs included, so an unknown, stale or invisible issue aborts the whole command instead of leaving a partial batch; several ids go to one batch request whose permission check covers the whole selection.
+
+`--yes` skips the confirmation. Without it the command reads stdin; if stdin closes without an answer (a non-interactive run) the command fails without deleting, while answering `n` declines and deletes nothing.
+
+With `--output json`, one id prints `{"id": "<uuid>", "deleted": true}` and several print `{"ids": ["<uuid>", ...], "deleted": true}`, always with canonical UUIDs whatever spelling was passed. If the server deletes only part of a batch, the command prints `{"ids": ["<uuid>", ...], "deleted": false, "deleted_count": N}` and exits non-zero.
+
 ### Reorder Issue
 
 Move an issue within its current status column. The new ordering value is computed the same way the board's drag-and-drop computes it, so the CLI and UI agree on where the issue lands.
@@ -942,9 +968,10 @@ belongs to a workspace and can optionally have a lead (member or agent).
 multica project list
 multica project list --status in_progress
 multica project list --output json
+multica project list --archived
 ```
 
-Available filters: `--status`.
+Available filters: `--status`, `--archived` (only archived projects; they are hidden by default).
 
 ### Get Project
 
@@ -978,6 +1005,18 @@ multica project status <id> in_progress
 ```
 
 Valid statuses: `planned`, `in_progress`, `paused`, `completed`, `cancelled`.
+
+### Archive and Restore
+
+```bash
+multica project archive <id>
+multica project restore <id>
+```
+
+Archiving hides a project from lists and pickers and stops new issues from being
+filed into it (HTTP 409 `project_archived`); existing issues stay editable.
+Active autopilots that file into the project are paused, and restoring does not
+resume them. Archiving is independent of status.
 
 ### Delete Project
 
@@ -1071,7 +1110,14 @@ multica autopilot create \
   --mode create_issue \
   --subscriber "Alice"
 
+multica autopilot create \
+  --title "Weekly dependency audit" \
+  --description "Audit dependencies for security updates." \
+  --squad "Backend Squad" \
+  --mode create_issue
+
 multica autopilot update <id> --status paused
+multica autopilot update <id> --squad-id <squad-uuid>
 multica autopilot update <id> --description "New prompt"
 multica autopilot update <id> --subscriber "Alice" --subscriber "Bob"
 multica autopilot update <id> --clear-subscribers
@@ -1079,6 +1125,7 @@ multica autopilot delete <id>
 ```
 
 `--mode` accepts `create_issue` (creates a new issue on each run and assigns it to the agent) or `run_only` (enqueues a direct agent task without creating an issue). `--agent` accepts either a name or UUID.
+To assign a squad instead, use `--squad` (name or ID) or `--squad-id` (canonical UUID); the run goes to the squad's leader, and in `create_issue` mode the created issue is assigned to the squad. `--agent`, `--squad`, and `--squad-id` are mutually exclusive, and `create` requires one of them. On `update` they switch the assignee (sending `assignee_type` with `assignee_id`); an update without any of them leaves the current assignee untouched. Table output labels the assignee by type, e.g. `squad:Backend Squad`.
 `--subscriber` accepts a workspace member name or user ID and may be repeated; on update it replaces the autopilot's subscriber template. Subscribers receive inbox notifications for issues created by a `create_issue` autopilot. Use `--clear-subscribers` to remove all autopilot subscribers.
 
 ### Manual Trigger
@@ -1126,6 +1173,41 @@ output — use `autopilot get <id> --output json --show-secrets` to reveal them.
 The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
 triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
 also defines an `api` kind, which is not surfaced here.
+
+### Webhook Event and Action Filters
+
+Use a JSON file to configure the same event/action filters as the web UI:
+
+```json
+[
+  {"event": "pull_request_review", "actions": ["submitted"]},
+  {"event": "push"}
+]
+```
+
+Save this array as `filters.json`, then create or update a webhook trigger:
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook --event-filters-file filters.json
+multica autopilot trigger-update <autopilot-id> <trigger-id> --event-filters-file filters.json
+multica autopilot get <autopilot-id> --output json
+```
+
+An event without `actions` (or with an empty actions array) accepts every action
+for that event. Filters apply only to webhook triggers; schedule triggers reject
+them. The server validates the filters using the same rules as UI submissions.
+
+Omitting `--event-filters-file` on update preserves the saved filters. Replacing
+filters requires a nonempty array; `null`, an empty array, unknown fields, and
+malformed files are rejected. To explicitly remove filters and accept all events:
+
+```bash
+multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filters
+```
+
+`--clear-event-filters` cannot be combined with `--event-filters-file`. Creation
+without a filter file accepts all events. These flags configure existing event
+and action matching; they do not add payload-field conditions.
 
 ## Other Commands
 

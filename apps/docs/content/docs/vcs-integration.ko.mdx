@@ -99,6 +99,8 @@ Webhook secret은 한 번만 표시됩니다. 페이지를 떠나기 전에 복�
 </Tab>
 </Tabs>
 
+GitLab 관리자는 인스턴스 전체에 적용되는 [System Hook](https://docs.gitlab.com/administration/system_hooks/)을 설정할 수도 있습니다. 같은 URL과 시크릿을 사용하고 **Merge request events**를 활성화하세요. Multica는 이 워크스페이스의 **설정 → 코드 → 저장소**에 등록되어 있고, 연결된 GitLab 인스턴스에 속하며, 연결 토큰으로 읽을 수 있는 저장소의 MR 이벤트만 처리합니다. 관련 없거나 권한이 없는 시스템 이벤트는 무시됩니다. 저장소에는 HTTPS 또는 SSH 복제 URL을 사용할 수 있습니다. 프로젝트마다 훅을 등록할 필요는 없어지지만 GitLab 관리자가 설정해야 합니다. System Hook은 Pipeline 이벤트를 보내지 않으므로 CI 상태가 필요하면 프로젝트 또는 그룹의 Pipeline Webhook을 유지하세요. 두 방식은 함께 사용할 수 있습니다. `202` 응답은 요청 수신만 뜻하며 태스크 연결이나 상태 변경을 보장하지 않습니다. 연결 전에 병합된 MR은 소급 처리하지 않습니다.
+
 Multica는 저장된 secret으로 모든 delivery를 검증하므로 일치하는 secret이 없는 Webhook은 거부됩니다.
 
 ## 미러링되는 내용

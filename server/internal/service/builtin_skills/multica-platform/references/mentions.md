@@ -112,19 +112,27 @@ is a no-op; a malformed UUID is rejected at the request boundary.
 
     [@all](mention://all/all)
 
-It addresses everyone on the issue. It does NOT make any specific agent run.
-And it is special at trigger time: a comment that carries an `@all` mention is
-treated as a broadcast that SUPPRESSES the issue assignee's automatic
-on-comment trigger (and the other implicit routing fallbacks — thread parent /
-conversation owner). Use `@all` to announce, not to request work from the
-assignee.
+It notifies every human member of the workspace except the author, not just
+people on this issue; notification preferences and private-project access
+still apply. The mention itself does NOT make any specific agent run.
 
-`@all` only suppresses those IMPLICIT routes. An EXPLICIT `@agent` / `@squad`
+For MEMBER-authored comments, `@all` (or a member mention) SUPPRESSES the issue
+assignee's automatic on-comment trigger and the other implicit routing
+fallbacks — thread parent / conversation owner. Members can use `@all` to
+announce without requesting work from the assignee.
+
+For AGENT-authored comments, member mentions and `@all` do NOT suppress the
+squad leader fallback. A worker's result on a squad-assigned issue still
+returns to the assigned leader; in a guest squad's delegation thread, it still
+returns to the guest leader. People receive notifications as usual, and the
+existing leader self-trigger protection and pending-run dedup still apply.
+
+For any author, an EXPLICIT `@agent` / `@squad`
 mention in the same comment still fires normally: a comment reading
 `[@all](mention://all/all) heads up — [@Preflight](mention://agent/<uuid>)
 please take this` enqueues Preflight and nobody else. The explicit-mention
-branch is evaluated BEFORE the `@all` short-circuit, so explicit mentions win
-over the broadcast.
+branch is evaluated BEFORE the member-only suppression, so explicit mentions
+win and there is no additional squad leader fallback.
 
 ## What does NOT happen
 
@@ -292,8 +300,10 @@ Correct:
   2. `[@Alice](mention://member/7f3a…) please review`
      → a real `user_id` parses; the link renders and resolves to Alice.
 
-@all broadcast: `[@all](mention://all/all) heads up` — addresses everyone,
-runs no specific agent, and suppresses the assignee auto-trigger.
+@all broadcast: `[@all](mention://all/all) heads up` — notifies human workspace
+members and runs no specific agent by itself. It suppresses the assignee
+auto-trigger only for member authors; worker-agent comments still return to
+the assigned or guest squad leader as described above.
 
 Using the wrong `type` for a real UUID still parses — it just resolves to the
 wrong entity, or to nothing. That is why the type must match the id source.

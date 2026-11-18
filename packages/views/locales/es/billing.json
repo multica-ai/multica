@@ -1,71 +1,4 @@
 {
-  "title": "Facturación (página de prueba)",
-  "subtitle": "Pasarela directa a /api/v1/billing/* de multica-cloud. No es una UI terminada: solo todos los endpoints metidos en una página para poder verificar el proxy y el flujo de Stripe.",
-  "endpoints": {
-    "balance": "GET /api/cloud-billing/balance",
-    "transactions": "GET /api/cloud-billing/transactions",
-    "batches": "GET /api/cloud-billing/batches",
-    "topups": "GET /api/cloud-billing/topups",
-    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
-  },
-  "balance": {
-    "title": "Saldo",
-    "credits_suffix": "créditos",
-    "meta": "micros en bruto: {{micro}} · propietario: {{owner}}… · actualizado {{updated}}"
-  },
-  "buy": {
-    "title": "Comprar créditos / Gestionar facturación",
-    "no_tiers": "No hay niveles de precio configurados. Es probable que Cloud no tenga clave de Stripe: checkout devolverá 503.",
-    "tier_money_to_credits": "{{money}} → {{credits}} créditos",
-    "tier_bonus": " + {{credits}} de bonus",
-    "tier_bonus_with_expiry": " + {{credits}} de bonus ({{expiry}})",
-    "tier_id": "id: {{id}}",
-    "open_portal": "Abrir el portal de facturación de Stripe",
-    "portal_hint": "400 es lo esperado para usuarios que aún no han pagado (no existe registro de cliente en Stripe).",
-    "toast_no_url": "Cloud no devolvió URL de checkout",
-    "toast_checkout_failed": "El checkout falló",
-    "toast_no_portal_url": "No se devolvió URL del portal",
-    "toast_portal_failed": "El portal falló"
-  },
-  "checkout": {
-    "session_label": "Sesión de checkout {{prefix}}…",
-    "loading": "Cargando el estado del pedido…",
-    "fetch_failed": "No se ha podido obtener el estado: {{error}}",
-    "fetch_failed_unknown": "error desconocido",
-    "final_status": "Estado final: {{status}}",
-    "polling_status": "Consultando el estado… actual: {{status}}",
-    "status_unknown": "desconocido",
-    "label_order": "Pedido",
-    "label_tier": "Nivel",
-    "label_charged": "Cobrado",
-    "charged_value": "{{money}} · {{credits}} créditos",
-    "charged_with_bonus": "{{money}} · {{credits}} créditos + {{bonus}} de bonus",
-    "clear_url": "Quitar de la URL"
-  },
-  "transactions": {
-    "title": "Transacciones",
-    "empty": "Aún no hay transacciones.",
-    "credits_value": "{{value}} créditos",
-    "row_meta": "{{date}} · saldo después: {{balance}} créditos · ref: {{ref}}",
-    "ref_empty": "-"
-  },
-  "batches": {
-    "title": "Lotes de crédito",
-    "empty": "Aún no hay lotes.",
-    "remaining_over_total": "{{remaining}} / {{total}} créditos",
-    "id_suffix": "{{id}}…",
-    "consumed": "Consumidos: {{value}} créditos",
-    "expires_suffix": " · caduca {{value}}",
-    "never_expires_suffix": " · nunca caduca"
-  },
-  "topups": {
-    "title": "Pedidos de recarga",
-    "empty": "Aún no hay pedidos de recarga.",
-    "amount_to_credits": "{{money}} → {{credits}} créditos",
-    "amount_to_credits_with_bonus": "{{money}} → {{credits}} créditos + {{bonus}} de bonus",
-    "row_meta": "{{date}} · stripe: {{checkout}}",
-    "stripe_empty": "-"
-  },
   "workspace": {
     "title": "Facturación",
     "description": "Gestiona el plan, los límites, los puestos humanos y la facturación de Stripe de este espacio de trabajo.",
@@ -171,7 +104,6 @@
     },
     "limits": {
       "title": "Uso y límites",
-      "issues": "Tareas",
       "autopilots": "Ejecuciones de automatización",
       "unlimited": "Ilimitado",
       "per_month": "{{count}} / mes",
@@ -246,12 +178,6 @@
       "description": "Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago."
     }
   },
-  "shared": {
-    "request_failed": "La solicitud falló",
-    "refresh": "Actualizar",
-    "paging": "página {{page}} / {{totalPages}} · {{total}} en total",
-    "date_dash": "-"
-  },
   "return_page": {
     "redirecting": "Volviendo a la facturación del espacio de trabajo…",
     "load_failed_title": "No se ha podido abrir la facturación del espacio de trabajo",
@@ -260,5 +186,11 @@
     "workspace_missing_description": "Has vuelto de Stripe, pero este espacio de trabajo ya no está disponible para ti: puede que se haya eliminado o que tu acceso haya cambiado. Abre Facturación en el espacio de trabajo que esperabas para comprobar el estado actual.",
     "retry": "Reintentar",
     "go_to_app": "Ir a Multica"
+  },
+  "paid_feature": {
+    "read_only": "Solo lectura. Mejora el plan para editar.",
+    "unavailable": "No está incluido en el plan de este espacio de trabajo.",
+    "view_plans": "Ver planes",
+    "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más."
   }
 }

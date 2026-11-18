@@ -184,19 +184,6 @@
     "toast_failed": "Échec de la création de la tâche",
     "toast_duplicate_title": "Tâche en double",
     "toast_duplicate_view": "Voir la tâche existante",
-    "issue_limit": {
-      "title": "Cet espace de travail a atteint sa limite de tâches",
-      "checking_description": "Vérification des actions de facturation disponibles pour cet espace de travail…",
-      "upgrade_description": "Passez à Pro pour continuer à créer des tâches.",
-      "portal_description": "Ouvrez le portail de facturation pour gérer l'abonnement de cet espace de travail et rétablir la création de tâches.",
-      "contact_description": "Demandez à un propriétaire ou administrateur de l'espace de travail de passer à Pro.",
-      "billing_description": "Ouvrez Facturation pour voir les options de mise à niveau disponibles pour cet espace de travail.",
-      "billing_unavailable_description": "Impossible de charger les actions de facturation. Ouvrez Facturation pour réessayer.",
-      "billing_disabled_description": "Supprimez une tâche existante pour libérer de la place ou contactez l'administrateur de votre espace de travail.",
-      "upgrade_action": "Passer à Pro",
-      "portal_action": "Ouvrir le portail de facturation",
-      "billing_action": "Voir la facturation"
-    },
     "autopilot_quota_limit": {
       "title": "Cet espace de travail a atteint sa limite d'exécutions d'automatisation",
       "checking_description": "Vérification des actions de facturation disponibles pour cet espace de travail…",

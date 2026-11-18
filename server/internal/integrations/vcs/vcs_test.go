@@ -5,9 +5,11 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 )
@@ -96,11 +98,11 @@ func TestForgejoEventKindAndParse(t *testing.T) {
 	p, _ := For("gitea")
 	h := http.Header{}
 	h.Set("X-Gitea-Event", "pull_request")
-	if p.EventKind(h) != EventPullRequest {
+	if p.EventKind(h, nil) != EventPullRequest {
 		t.Error("pull_request not classified")
 	}
 	h.Set("X-Gitea-Event", "status")
-	if p.EventKind(h) != EventCIStatus {
+	if p.EventKind(h, nil) != EventCIStatus {
 		t.Error("status not classified")
 	}
 
@@ -139,7 +141,7 @@ func TestGitlabParse(t *testing.T) {
 	p, _ := For("gitlab")
 	h := http.Header{}
 	h.Set("X-Gitlab-Event", "Merge Request Hook")
-	if p.EventKind(h) != EventPullRequest {
+	if p.EventKind(h, nil) != EventPullRequest {
 		t.Error("MR hook not classified")
 	}
 
@@ -164,7 +166,7 @@ func TestGitlabParse(t *testing.T) {
 	}
 
 	h.Set("X-Gitlab-Event", "Pipeline Hook")
-	if p.EventKind(h) != EventCIStatus {
+	if p.EventKind(h, nil) != EventCIStatus {
 		t.Error("pipeline hook not classified")
 	}
 	st, err := p.ParseCIStatus([]byte(`{"object_kind":"pipeline","object_attributes":{"sha":"deadbeef","status":"failed"}}`))
@@ -173,6 +175,74 @@ func TestGitlabParse(t *testing.T) {
 	}
 	if st.SHA != "deadbeef" || st.State != "failed" || st.Context != "gitlab/pipeline" {
 		t.Errorf("bad status: %+v", st)
+	}
+}
+
+func TestGitlabSystemHookMergeRequest(t *testing.T) {
+	p, _ := For("gitlab")
+	h := http.Header{}
+	h.Set("X-Gitlab-Event", "System Hook")
+	// GitLab 19.5.3-ee: https://github.com/multica-ai/multica/pull/10411#issuecomment-6943978266
+	body, err := os.ReadFile("testdata/gitlab-system-hook-merge.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.EventKind(h, body); got != EventPullRequest {
+		t.Fatalf("system MR kind = %v, want EventPullRequest", got)
+	}
+	pr, err := p.ParsePullRequest(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.State != "merged" || pr.RepoOwner != "example-user" || pr.RepoName != "example-project" || pr.Number != 10 ||
+		pr.Body != "" || pr.HeadSHA != "2222222222222222222222222222222222222222" ||
+		pr.UpdatedAt != "2026-11-01T09:15:57.549Z" || pr.AuthorLogin != "project_200_bot_00000000000000000000000000000000" {
+		t.Fatalf("system MR = %+v", pr)
+	}
+	if got := p.EventKind(h, []byte(`{"object_kind":"project_create"}`)); got != EventOther {
+		t.Fatalf("unrelated system event kind = %v, want EventOther", got)
+	}
+}
+
+func TestGitlabSystemHookStateUsesExplicitState(t *testing.T) {
+	p, _ := For("gitlab")
+	for _, tc := range []struct {
+		state   string
+		stateID int
+		want    string
+	}{
+		{"merged", 2, "merged"},
+		{"closed", 3, "closed"},
+		{"opened", 3, "open"},
+		{"", 3, "open"},
+	} {
+		name := tc.state
+		if name == "" {
+			name = "missing_state"
+		}
+		t.Run(name, func(t *testing.T) {
+			body, err := os.ReadFile("testdata/gitlab-system-hook-merge.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Fatal(err)
+			}
+			attrs := payload["object_attributes"].(map[string]any)
+			attrs["state"], attrs["state_id"] = tc.state, tc.stateID
+			if tc.state == "" {
+				delete(attrs, "state")
+			}
+			body, err = json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pr, err := p.ParsePullRequest(body)
+			if err != nil || pr.State != tc.want {
+				t.Fatalf("state=%q state_id=%d: got %q err=%v, want %q", tc.state, tc.stateID, pr.State, err, tc.want)
+			}
+		})
 	}
 }
 
@@ -285,6 +355,37 @@ func TestForgejoStatusTimestamp(t *testing.T) {
 	}
 }
 
+func TestGitlabRepositoryReadable(t *testing.T) {
+	cases := []struct {
+		status int
+		want   bool
+	}{
+		{http.StatusOK, true},
+		{http.StatusForbidden, false},
+		{http.StatusNotFound, false},
+	}
+	for _, tc := range cases {
+		t.Run(http.StatusText(tc.status), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v4/projects/group%2Fsub%2Frepo" && r.URL.EscapedPath() != "/api/v4/projects/group%2Fsub%2Frepo" {
+					t.Errorf("path = %q", r.URL.Path)
+				}
+				if r.Header.Get("PRIVATE-TOKEN") != "tok" {
+					t.Errorf("PRIVATE-TOKEN missing")
+				}
+				w.WriteHeader(tc.status)
+				if tc.status == http.StatusOK {
+					_, _ = w.Write([]byte(`{"path_with_namespace":"group/sub/repo"}`))
+				}
+			}))
+			defer srv.Close()
+			got, err := (&gitlabProvider{}).RepositoryReadable(context.Background(), srv.URL, "group/sub", "repo", "tok")
+			if err != nil || got != tc.want {
+				t.Fatalf("got=%v err=%v want=%v", got, err, tc.want)
+			}
+		})
+	}
+}
 func TestValidateTokenUnauthorized(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)

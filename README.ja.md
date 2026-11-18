@@ -113,7 +113,7 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 - **[ワークスペース](https://multica.ai/docs/ja/workspaces) →** エージェント、タスク、設定をチームごとに分けられます。
 - **[ロール](https://multica.ai/docs/ja/members-roles)と[アクセススコープ](https://multica.ai/docs/ja/agents#権限と-access) →** `owner`、`admin`、`member`、そして各メンバーがどのエージェントを実行できるかを正確に設定できます。
 - **[セキュリティモデル](https://multica.ai/docs/ja/security-model) →** エージェントが何にアクセスでき、何にアクセスできないか。
-- **[Slack、Feishu/Lark、DingTalk、WeCom、Telegram](https://multica.ai/docs/ja/channels) →** チームが普段やり取りしている場所から、エージェントに作業を頼み、その進み具合を追えます。Feishu/Lark の新しい接続は、現在は中国本土の Feishu でのみ利用できます。DingTalk、WeCom、Telegram は[コミュニティによるメンテナンス](https://multica.ai/docs/ja/community-maintained)です。
+- **[Slack、Feishu/Lark、DingTalk、WeCom、Telegram、WeChat](https://multica.ai/docs/ja/channels) →** チームが普段やり取りしている場所から、エージェントに作業を頼み、その進み具合を追えます。WeChat は接続用 QR コードをスキャンしたアカウントからの DM のみ受け付けます。Feishu/Lark の新しい接続は、現在は中国本土の Feishu でのみ利用できます。DingTalk、WeCom、Telegram は[コミュニティによるメンテナンス](https://multica.ai/docs/ja/community-maintained)です。
 - **Web、[デスクトップ](https://multica.ai/docs/ja/desktop-app)、[モバイル](https://multica.ai/docs/ja/mobile-app) →** macOS、Windows、Linux、iPhone、iPad で同じワークスペースを使えます。iOS アプリは現在ソースからビルドする形で、まだ App Store では提供していません。
 - **[CLI と API](https://multica.ai/docs/ja/cli) →** すべての機能をスクリプトから操作できます。エージェントも、あなたと同じ CLI で Multica を操作します。
 
@@ -175,7 +175,7 @@ CLI を検出します。Web から接続する場合や別のマシンを追加
 ## ランタイム
 
 Multica はモデルを同梱していません。インストールと認証を済ませたエージェント CLI をそのまま動かします。
-現在 29 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
+現在のソースコードは 31 種類に対応しており、プロバイダーの切り替えは移行作業ではなく、ドロップダウンで選び直すだけです。
 
 | プロバイダー | CLI | プロバイダー | CLI |
 | --- | --- | --- | --- |
@@ -193,6 +193,7 @@ Multica はモデルを同梱していません。インストールと認証を
 | MiniMax Code | `mcode` | Dim | `dim` |
 | Huawei Cloud CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
 | Muse Code | `muse` | Devin CLI | `devin` |
+| Amp | `amp` | Factory Droid | `droid` |
 | ZCode | `zcode` / ZCode Desktop | | |
 
 インストールと認証の方法：[AI コーディングツールをインストールする](https://multica.ai/docs/ja/install-agent-runtime) ·

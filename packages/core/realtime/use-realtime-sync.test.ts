@@ -854,6 +854,33 @@ describe("handleInboxNew", () => {
     expect(showNotification).not.toHaveBeenCalled();
   });
 
+  it("skips the banner for a move to in_progress but still refreshes the inbox", async () => {
+    const qc = createQueryClient();
+    qc.setQueryData<Workspace[]>(workspaceKeys.list(), [workspace()]);
+    qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
+      preferences: { system_notifications: "all" },
+    });
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    const showNotification = stubDesktopAPI();
+
+    await handleInboxNew(
+      qc,
+      inboxItem({ type: "status_changed", details: { from: "todo", to: "in_progress" } }),
+    );
+    expect(showNotification).not.toHaveBeenCalled();
+    await vi.waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: inboxKeys.all("ws-a") }),
+      ),
+    );
+
+    await handleInboxNew(
+      qc,
+      inboxItem({ type: "status_changed", details: { from: "in_progress", to: "in_review" } }),
+    );
+    expect(showNotification).toHaveBeenCalledTimes(1);
+  });
+
   // The tests below exercise the COLD-cache mute path (source preference not
   // yet cached), where the request — not just the query key — must be scoped
   // to the source workspace (#3766 follow-up). They install a fake API so the
