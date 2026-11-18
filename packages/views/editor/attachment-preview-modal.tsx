@@ -57,7 +57,9 @@ import {
   X,
   type IconComponent,
 } from "@multica/ui/icons";
-import type { Attachment } from "@multica/core/types";
+import { useQueryClient } from "@tanstack/react-query";
+import type { Attachment, Workspace } from "@multica/core/types";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import {
   attachmentIdFromDownloadURL,
   attachmentIdFromLocalUploadURL,
@@ -170,6 +172,12 @@ interface PreviewState {
   contentType: string;
   mediaUrl: string;
   attachmentId: string | null;
+  /**
+   * Workspace that owns the attachment, when known. Id-keyed requests target
+   * it rather than the current route's workspace, so a file linked from
+   * another workspace the reader belongs to still previews and downloads.
+   */
+  workspaceId: string | null;
   /** 0 when unknown (URL-only source). */
   sizeBytes: number;
   /**
@@ -202,6 +210,7 @@ function normalize(source: PreviewSource): PreviewState {
       contentType: source.attachment.content_type,
       mediaUrl: resolvePreviewMediaUrl(source.attachment),
       attachmentId: source.attachment.id,
+      workspaceId: source.attachment.workspace_id || null,
       sizeBytes: source.attachment.size_bytes,
       kind: getPreviewKind(
         source.attachment.content_type,
@@ -216,6 +225,7 @@ function normalize(source: PreviewSource): PreviewState {
     attachmentId:
       attachmentIdFromDownloadURL(source.url) ??
       attachmentIdFromLocalUploadURL(source.url) ?? null,
+    workspaceId: null,
     sizeBytes: 0,
     kind: source.forceKind ?? getPreviewKind("", source.filename),
   };
@@ -420,6 +430,7 @@ export function PreviewImagePrefetch({ source }: { source: PreviewSource }) {
       metadataSource: source.kind === "url" && state.attachmentId
         ? "markdown-link"
         : "workspace",
+      workspaceId: state.workspaceId ?? undefined,
     },
   );
 
@@ -478,6 +489,7 @@ export function AttachmentPreviewModal({
   // useWorkspaceSlug (not useWorkspacePaths) — returns null outside a
   // workspace route instead of throwing, so the new-tab button just hides.
   const slug = useWorkspaceSlug();
+  const queryClient = useQueryClient();
   const navigation = useNavigation();
   // The html kind's current address, for "Open in new tab". Tagged with its
   // file so one document's address never follows the reader to the next.
@@ -554,7 +566,7 @@ export function AttachmentPreviewModal({
     const attachmentId =
       state.attachmentId ?? attachmentIdFromStorageURL(state.mediaUrl, cdnDomain);
     if (attachmentId) {
-      return download(attachmentId);
+      return download(attachmentId, state.workspaceId ?? undefined);
     }
     return openExternal(state.mediaUrl);
   };
@@ -562,9 +574,18 @@ export function AttachmentPreviewModal({
   // Open-in-new-tab: the full-page route (/attachments/{id}/preview) shows
   // every previewable kind, but loads the file by id — a URL-only source has
   // none, and a file the viewer cannot show gains nothing from a tab.
-  const canOpenInNewTab = kind !== null && !!slug && !!state.attachmentId;
+  // The route lives under the workspace that owns the file, which a file
+  // linked from another workspace does not share with the current page. A
+  // workspace missing from the reader's list has no route to open.
+  const ownerSlug = (() => {
+    if (!slug || !state.workspaceId) return slug;
+    const workspaces = queryClient.getQueryData<Workspace[]>(workspaceKeys.list());
+    if (!workspaces) return slug;
+    return workspaces.find((w) => w.id === state.workspaceId)?.slug ?? null;
+  })();
+  const canOpenInNewTab = kind !== null && !!ownerSlug && !!state.attachmentId;
   const handleOpenInNewTab = () => {
-    if (!slug || !state.attachmentId) return;
+    if (!ownerSlug || !state.attachmentId) return;
     const address =
       htmlAddressRef.current?.attachmentId === state.attachmentId
         ? htmlAddressRef.current.address
@@ -574,7 +595,7 @@ export function AttachmentPreviewModal({
       address ? `loc=${encodeURIComponent(address)}` : "",
     ].filter(Boolean);
     const query = params.length > 0 ? `?${params.join("&")}` : "";
-    const path = `${paths.workspace(slug).attachmentPreview(state.attachmentId)}${query}`;
+    const path = `${paths.workspace(ownerSlug).attachmentPreview(state.attachmentId)}${query}`;
     if (navigation.openInNewTab) {
       navigation.openInNewTab(path, state.filename, { activate: true });
     } else {
@@ -708,7 +729,7 @@ const renderViewerHtmlFrame: HtmlFrameRenderer = ({ html, title, location }) => 
 // no tree to switch to. Shares the stage's query, so nothing is fetched twice.
 function useStructuredParse(state: PreviewState, enabled: boolean) {
   const format = enabled ? structuredFormat(state.contentType, state.filename) : null;
-  const query = useAttachmentHtmlText(format ? state.attachmentId : null);
+  const query = useAttachmentHtmlText(format ? state.attachmentId : null, state.workspaceId);
   const text = query.data?.text;
   return useMemo(
     () => (format && text !== undefined ? parseStructured(text, format) : null),
@@ -823,6 +844,7 @@ function PreviewPanel({
       metadataSource: source.kind === "url" && state.attachmentId
         ? "markdown-link"
         : "workspace",
+      workspaceId: state.workspaceId ?? undefined,
       currentMetadata: kind === "image" ? currentImageMetadata : undefined,
     },
   );
@@ -856,6 +878,7 @@ function PreviewPanel({
     state.mediaUrl,
     kind === "video" || kind === "audio" || kind === "pdf",
     kind === "pdf",
+    state.workspaceId,
   );
   const streamUrl = streamed.pending ? "" : streamed.url;
 
@@ -866,7 +889,10 @@ function PreviewPanel({
   const canCopyImage = kind === "image" && isDesktopShell();
   const canCopyText =
     kind !== null && TEXT_BACKED_KINDS.has(kind) && (kind !== "html" || htmlSource);
-  const copyContent = useAttachmentHtmlText(canCopyText ? state.attachmentId : null);
+  const copyContent = useAttachmentHtmlText(
+    canCopyText ? state.attachmentId : null,
+    state.workspaceId,
+  );
   const handleCopyText = async () => {
     if (!copyContent.data || copyContent.isError) return;
     if (await copyText(copyContent.data.text)) {
@@ -1731,6 +1757,7 @@ function PreviewContent({
       return (
         <TextBackedPreview
           attachmentId={state.attachmentId!}
+          workspaceId={state.workspaceId}
           onDownload={onDownload}
           downloading={downloading}
           render={(text) => (
@@ -1748,6 +1775,7 @@ function PreviewContent({
       return (
         <TextBackedPreview
           attachmentId={state.attachmentId!}
+          workspaceId={state.workspaceId}
           onDownload={onDownload}
           downloading={downloading}
           render={(text) =>
@@ -1769,6 +1797,7 @@ function PreviewContent({
       return (
         <TextBackedPreview
           attachmentId={state.attachmentId!}
+          workspaceId={state.workspaceId}
           onDownload={onDownload}
           downloading={downloading}
           render={(text) => (
@@ -1785,6 +1814,7 @@ function PreviewContent({
       return (
         <TextBackedPreview
           attachmentId={state.attachmentId!}
+          workspaceId={state.workspaceId}
           onDownload={onDownload}
           downloading={downloading}
           render={(text) => {
@@ -1821,6 +1851,7 @@ function PreviewContent({
       return (
         <TextBackedPreview
           attachmentId={state.attachmentId!}
+          workspaceId={state.workspaceId}
           onDownload={onDownload}
           downloading={downloading}
           render={(text) => code(text, extensionToLanguage(state.filename))}
@@ -1864,17 +1895,19 @@ function DocumentSheet({
 // is much longer than any plausible preview session.
 function TextBackedPreview({
   attachmentId,
+  workspaceId,
   onDownload,
   downloading,
   render,
 }: {
   attachmentId: string;
+  workspaceId: string | null;
   onDownload: () => void;
   downloading: boolean;
   render: (text: string) => ReactNode;
 }) {
   const { t } = useT("editor");
-  const query = useAttachmentHtmlText(attachmentId);
+  const query = useAttachmentHtmlText(attachmentId, workspaceId);
 
   if (query.isLoading) return <PreviewLoading />;
   if (query.error) {
