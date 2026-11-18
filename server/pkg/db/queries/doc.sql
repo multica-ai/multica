@@ -98,6 +98,23 @@ WHERE doc_id = $1
 ORDER BY number DESC
 LIMIT $2;
 
+-- name: MergeDocEditIntoVersion :execrows
+-- Folds an edit into the latest snapshot while the same author keeps editing:
+-- an unlabeled edit from the same author and task within 10 minutes of the
+-- snapshot's start. Creates, restores and labeled edits always stand alone.
+UPDATE doc_version SET
+    title = @title,
+    content = @content,
+    updated_at = now()
+WHERE doc_id = @doc_id
+  AND number = @number
+  AND action = 'edit'
+  AND message = ''
+  AND author_type = @author_type
+  AND author_id = @author_id
+  AND task_id IS NOT DISTINCT FROM sqlc.narg('task_id')
+  AND created_at > now() - interval '10 minutes';
+
 -- name: InsertDocVersion :one
 INSERT INTO doc_version (
     doc_id, workspace_id, number, title, content, author_type, author_id,

@@ -480,18 +480,35 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, DocResponse{DocSummaryResponse: docToSummary(doc), Content: doc.Content})
 		return
 	}
-	number := doc.VersionCount + 1
-	var actionRef pgtype.Int4
-	if req.Action == "restore" {
-		actionRef = pgtype.Int4{Int32: *req.ActionRef, Valid: true}
+	// Autosave writes every pause; keep one snapshot per editing stretch
+	// instead of one per pause.
+	merged := false
+	if req.Action == "edit" && req.Message == "" {
+		rows, err := qtx.MergeDocEditIntoVersion(ctx, db.MergeDocEditIntoVersionParams{
+			Title: title, Content: content, DocID: doc.ID, Number: doc.VersionCount,
+			AuthorType: actorType, AuthorID: parseUUID(actorID), TaskID: taskID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save version")
+			return
+		}
+		merged = rows == 1
 	}
-	if _, err := qtx.InsertDocVersion(ctx, db.InsertDocVersionParams{
-		DocID: doc.ID, WorkspaceID: wsUUID, Number: number, Title: title, Content: content,
-		AuthorType: actorType, AuthorID: parseUUID(actorID), Message: req.Message,
-		Action: req.Action, ActionRef: actionRef, TaskID: taskID, IssueID: issueID,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save version")
-		return
+	number := doc.VersionCount
+	if !merged {
+		number++
+		var actionRef pgtype.Int4
+		if req.Action == "restore" {
+			actionRef = pgtype.Int4{Int32: *req.ActionRef, Valid: true}
+		}
+		if _, err := qtx.InsertDocVersion(ctx, db.InsertDocVersionParams{
+			DocID: doc.ID, WorkspaceID: wsUUID, Number: number, Title: title, Content: content,
+			AuthorType: actorType, AuthorID: parseUUID(actorID), Message: req.Message,
+			Action: req.Action, ActionRef: actionRef, TaskID: taskID, IssueID: issueID,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save version")
+			return
+		}
 	}
 	updated, err := qtx.UpdateDocContent(ctx, db.UpdateDocContentParams{
 		Title:         title,

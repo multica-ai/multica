@@ -87,7 +87,7 @@ export function DocHistoryPage({ docId }: { docId: string }) {
                   {getActorName(v.authorType, v.authorId)}
                 </span>
                 <span className="block text-caption text-muted-foreground">
-                  {new Date(v.createdAt).toLocaleString()}
+                  {new Date(v.updatedAt).toLocaleString()}
                 </span>
               </button>
             ))

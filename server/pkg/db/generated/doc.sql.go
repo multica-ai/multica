@@ -503,6 +503,50 @@ func (q *Queries) LockDocTree(ctx context.Context, workspaceID pgtype.UUID) erro
 	return err
 }
 
+const mergeDocEditIntoVersion = `-- name: MergeDocEditIntoVersion :execrows
+UPDATE doc_version SET
+    title = $1,
+    content = $2,
+    updated_at = now()
+WHERE doc_id = $3
+  AND number = $4
+  AND action = 'edit'
+  AND message = ''
+  AND author_type = $5
+  AND author_id = $6
+  AND task_id IS NOT DISTINCT FROM $7
+  AND created_at > now() - interval '10 minutes'
+`
+
+type MergeDocEditIntoVersionParams struct {
+	Title      string      `json:"title"`
+	Content    string      `json:"content"`
+	DocID      pgtype.UUID `json:"doc_id"`
+	Number     int32       `json:"number"`
+	AuthorType string      `json:"author_type"`
+	AuthorID   pgtype.UUID `json:"author_id"`
+	TaskID     pgtype.UUID `json:"task_id"`
+}
+
+// Folds an edit into the latest snapshot while the same author keeps editing:
+// an unlabeled edit from the same author and task within 10 minutes of the
+// snapshot's start. Creates, restores and labeled edits always stand alone.
+func (q *Queries) MergeDocEditIntoVersion(ctx context.Context, arg MergeDocEditIntoVersionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, mergeDocEditIntoVersion,
+		arg.Title,
+		arg.Content,
+		arg.DocID,
+		arg.Number,
+		arg.AuthorType,
+		arg.AuthorID,
+		arg.TaskID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const moveDoc = `-- name: MoveDoc :one
 UPDATE doc SET folder_id = $1
 WHERE id = $2 AND workspace_id = $3

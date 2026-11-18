@@ -96,3 +96,49 @@ func TestDocFolderCycleAndNonemptyDelete(t *testing.T) {
 	testutil.Call(t, testHandler.MoveDocFolder, withURLParam(newRequest("POST", "/move", map[string]any{"parent_id": nil}), "id", child.ID)).Want(http.StatusOK)
 	testutil.Call(t, testHandler.DeleteDocFolder, withURLParam(newRequest("DELETE", "/folder", nil), "id", root.ID)).Want(http.StatusNoContent)
 }
+
+func TestDocEditsMergeIntoOneVersionPerEditingStretch(t *testing.T) {
+	doc := createDocForTest(t)
+	var updated DocResponse
+	revision := int64(1)
+	save := func(body map[string]any) DocResponse {
+		t.Helper()
+		body["base_revision"] = revision
+		req := withURLParam(newRequest("PATCH", "/api/docs/"+doc.ID, body), "id", doc.ID)
+		testutil.Call(t, testHandler.UpdateDoc, req).Want(http.StatusOK).JSON(&updated)
+		revision = updated.Revision
+		return updated
+	}
+	// The create snapshot stands alone; the first edit opens a new one.
+	if got := save(map[string]any{"content": "a"}); got.VersionCount != 2 {
+		t.Fatalf("first edit must open a version: %+v", got)
+	}
+	// Further autosaves in the same stretch fold into it.
+	save(map[string]any{"content": "ab"})
+	if got := save(map[string]any{"title": "Renamed", "content": "abc"}); got.VersionCount != 2 || got.Revision != 4 {
+		t.Fatalf("autosaves must merge but still bump the revision: %+v", got)
+	}
+	var version DocVersionResponse
+	req := withURLParams(newRequest("GET", "/api/docs/versions/2", nil), "id", doc.ID, "number", "2")
+	testutil.Call(t, testHandler.GetDocVersion, req).Want(http.StatusOK).JSON(&version)
+	if version.Content == nil || *version.Content != "abc" || version.Title != "Renamed" {
+		t.Fatalf("merged snapshot must hold the latest save: %+v", version)
+	}
+	// A labeled save is its own version.
+	if got := save(map[string]any{"content": "abcd", "message": "Checkpoint"}); got.VersionCount != 3 {
+		t.Fatalf("labeled save must append: %+v", got)
+	}
+	// So is the next stretch, once the open snapshot is older than the window.
+	if got := save(map[string]any{"content": "abcde"}); got.VersionCount != 4 {
+		t.Fatalf("edit after a labeled save must append: %+v", got)
+	}
+	testPool.Exec(context.Background(), "UPDATE doc_version SET created_at = now() - interval '11 minutes' WHERE doc_id = $1 AND number = 4", doc.ID)
+	if got := save(map[string]any{"content": "abcdef"}); got.VersionCount != 5 {
+		t.Fatalf("edit after the window must append: %+v", got)
+	}
+	// A restore never absorbs later edits.
+	save(map[string]any{"action": "restore", "action_ref": 1})
+	if got := save(map[string]any{"content": "after restore"}); got.VersionCount != 7 {
+		t.Fatalf("edit after a restore must append: %+v", got)
+	}
+}
