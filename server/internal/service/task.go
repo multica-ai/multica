@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -1396,10 +1397,6 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Debug("task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agent.ID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
-		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
-		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
-	}
 
 	// The issue assignee reacting to an agent-authored comment is a
 	// comment_source attribution (a special case of delegation); a member
@@ -1418,30 +1415,41 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		return db.AgentTaskQueue{}, err
 	}
 	originatorUserID := attr.UserID
+	effective, err := s.resolveTaskRuntimeConfig(ctx, agent, originatorUserID, allowRuntimeOffline)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	createParams := db.CreateAgentTaskParams{
-		ID:                   dbid.NewV7(),
-		AgentID:              issue.AssigneeID,
-		RuntimeID:            agent.RuntimeID,
-		IssueID:              issue.ID,
-		Priority:             priorityToInt(issue.Priority),
-		TriggerCommentID:     triggerCommentID,
-		CoalescedCommentIds:  coalescedCommentIDs,
-		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
-		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
-		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
-		OriginatorUserID:     originatorUserID,
-		AccountableUserID:    attr.AccountableUserID,
-		RuleVersionID:        attr.RuleVersionID,
-		RerunOfTaskID:        rerunOfTaskID,
-		FreshRerun:           pgtype.Bool{Bool: freshRerun, Valid: true},
-		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
-		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
-		OriginatorSource:     attrSource,
-		DelegatedFromTaskID:  attrDelegatedFrom,
-		TriggerEvidenceKind:  attrEvidenceKind,
-		TriggerEvidenceRefID: attrEvidenceRef,
+		ID:                          dbid.NewV7(),
+		AgentID:                     issue.AssigneeID,
+		RuntimeID:                   effective.RuntimeID,
+		EffectiveModel:              TaskEffectiveModel(effective),
+		EffectiveThinkingLevel:      TaskEffectiveThinkingLevel(effective),
+		EffectiveServiceTier:        TaskEffectiveServiceTier(effective),
+		EffectiveRuntimeConfig:      effective.RuntimeConfig,
+		EffectiveMaxConcurrentTasks: TaskEffectiveMaxConcurrentTasks(effective),
+		RuntimeConfigSource:         TaskRuntimeConfigSource(effective),
+		RuntimeConfigHint:           RuntimeConfigHintJSON(effective.Hint),
+		IssueID:                     issue.ID,
+		Priority:                    priorityToInt(issue.Priority),
+		TriggerCommentID:            triggerCommentID,
+		CoalescedCommentIds:         coalescedCommentIDs,
+		TriggerSummary:              s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
+		ForceFreshSession:           pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		HandoffNote:                 pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
+		OriginatorUserID:            originatorUserID,
+		AccountableUserID:           attr.AccountableUserID,
+		RuleVersionID:               attr.RuleVersionID,
+		RerunOfTaskID:               rerunOfTaskID,
+		FreshRerun:                  pgtype.Bool{Bool: freshRerun, Valid: true},
+		RuntimeMcpOverlay:           runtimeMCPOverlay.Overlay,
+		RuntimeConnectedApps:        runtimeMCPOverlay.ConnectedApps,
+		OriginatorSource:            attrSource,
+		DelegatedFromTaskID:         attrDelegatedFrom,
+		TriggerEvidenceKind:         attrEvidenceKind,
+		TriggerEvidenceRefID:        attrEvidenceRef,
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
@@ -1449,30 +1457,37 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	var task db.AgentTaskQueue
 	if fireAt.Valid {
 		task, err = s.Queries.CreateDeferredChannelIssueTask(ctx, db.CreateDeferredChannelIssueTaskParams{
-			ID:                   dbid.NewV7(),
-			AgentID:              createParams.AgentID,
-			RuntimeID:            createParams.RuntimeID,
-			IssueID:              createParams.IssueID,
-			Priority:             createParams.Priority,
-			TriggerCommentID:     createParams.TriggerCommentID,
-			CoalescedCommentIds:  createParams.CoalescedCommentIds,
-			TriggerSummary:       createParams.TriggerSummary,
-			ForceFreshSession:    createParams.ForceFreshSession,
-			IsLeaderTask:         createParams.IsLeaderTask,
-			HandoffNote:          createParams.HandoffNote,
-			SquadID:              createParams.SquadID,
-			HeadSha:              createParams.HeadSha,
-			OriginatorUserID:     createParams.OriginatorUserID,
-			AccountableUserID:    createParams.AccountableUserID,
-			RuntimeMcpOverlay:    createParams.RuntimeMcpOverlay,
-			RuntimeConnectedApps: createParams.RuntimeConnectedApps,
-			OriginatorSource:     createParams.OriginatorSource,
-			DelegatedFromTaskID:  createParams.DelegatedFromTaskID,
-			RuleVersionID:        createParams.RuleVersionID,
-			RerunOfTaskID:        createParams.RerunOfTaskID,
-			TriggerEvidenceKind:  createParams.TriggerEvidenceKind,
-			TriggerEvidenceRefID: createParams.TriggerEvidenceRefID,
-			FireAt:               fireAt,
+			ID:                          dbid.NewV7(),
+			AgentID:                     createParams.AgentID,
+			RuntimeID:                   createParams.RuntimeID,
+			EffectiveModel:              createParams.EffectiveModel,
+			EffectiveThinkingLevel:      createParams.EffectiveThinkingLevel,
+			EffectiveServiceTier:        createParams.EffectiveServiceTier,
+			EffectiveRuntimeConfig:      createParams.EffectiveRuntimeConfig,
+			EffectiveMaxConcurrentTasks: createParams.EffectiveMaxConcurrentTasks,
+			RuntimeConfigSource:         createParams.RuntimeConfigSource,
+			RuntimeConfigHint:           createParams.RuntimeConfigHint,
+			IssueID:                     createParams.IssueID,
+			Priority:                    createParams.Priority,
+			TriggerCommentID:            createParams.TriggerCommentID,
+			CoalescedCommentIds:         createParams.CoalescedCommentIds,
+			TriggerSummary:              createParams.TriggerSummary,
+			ForceFreshSession:           createParams.ForceFreshSession,
+			IsLeaderTask:                createParams.IsLeaderTask,
+			HandoffNote:                 createParams.HandoffNote,
+			SquadID:                     createParams.SquadID,
+			HeadSha:                     createParams.HeadSha,
+			OriginatorUserID:            createParams.OriginatorUserID,
+			AccountableUserID:           createParams.AccountableUserID,
+			RuntimeMcpOverlay:           createParams.RuntimeMcpOverlay,
+			RuntimeConnectedApps:        createParams.RuntimeConnectedApps,
+			OriginatorSource:            createParams.OriginatorSource,
+			DelegatedFromTaskID:         createParams.DelegatedFromTaskID,
+			RuleVersionID:               createParams.RuleVersionID,
+			RerunOfTaskID:               createParams.RerunOfTaskID,
+			TriggerEvidenceKind:         createParams.TriggerEvidenceKind,
+			TriggerEvidenceRefID:        createParams.TriggerEvidenceRefID,
+			FireAt:                      fireAt,
 		})
 	} else {
 		task, err = s.Queries.CreateAgentTask(ctx, createParams)
@@ -1573,10 +1588,6 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		slog.Debug("mention task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
-		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
-		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
-	}
 
 	// An explicit mention / thread-parent / squad-leader hop from an
 	// agent-authored comment is a delegation (the parent task's human is
@@ -1594,32 +1605,43 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		return db.AgentTaskQueue{}, err
 	}
 	originatorUserID := attr.UserID
+	effective, err := s.resolveTaskRuntimeConfig(ctx, agent, originatorUserID, allowRuntimeOffline)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	params := db.CreateAgentTaskParams{
-		ID:                   dbid.NewV7(),
-		AgentID:              agentID,
-		RuntimeID:            agent.RuntimeID,
-		IssueID:              issue.ID,
-		Priority:             priorityToInt(issue.Priority),
-		TriggerCommentID:     triggerCommentID,
-		CoalescedCommentIds:  coalescedCommentIDs,
-		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
-		IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
-		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
-		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
-		SquadID:              squadID,
-		OriginatorUserID:     originatorUserID,
-		AccountableUserID:    attr.AccountableUserID,
-		RuleVersionID:        attr.RuleVersionID,
-		RerunOfTaskID:        rerunOfTaskID,
-		FreshRerun:           pgtype.Bool{Bool: freshRerun, Valid: true},
-		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
-		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
-		OriginatorSource:     attrSource,
-		DelegatedFromTaskID:  attrDelegatedFrom,
-		TriggerEvidenceKind:  attrEvidenceKind,
-		TriggerEvidenceRefID: attrEvidenceRef,
+		ID:                          dbid.NewV7(),
+		AgentID:                     agentID,
+		RuntimeID:                   effective.RuntimeID,
+		EffectiveModel:              TaskEffectiveModel(effective),
+		EffectiveThinkingLevel:      TaskEffectiveThinkingLevel(effective),
+		EffectiveServiceTier:        TaskEffectiveServiceTier(effective),
+		EffectiveRuntimeConfig:      effective.RuntimeConfig,
+		EffectiveMaxConcurrentTasks: TaskEffectiveMaxConcurrentTasks(effective),
+		RuntimeConfigSource:         TaskRuntimeConfigSource(effective),
+		RuntimeConfigHint:           RuntimeConfigHintJSON(effective.Hint),
+		IssueID:                     issue.ID,
+		Priority:                    priorityToInt(issue.Priority),
+		TriggerCommentID:            triggerCommentID,
+		CoalescedCommentIds:         coalescedCommentIDs,
+		TriggerSummary:              s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
+		IsLeaderTask:                pgtype.Bool{Bool: isLeader, Valid: isLeader},
+		ForceFreshSession:           pgtype.Bool{Bool: forceFreshSession, Valid: forceFreshSession},
+		HandoffNote:                 pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
+		SquadID:                     squadID,
+		OriginatorUserID:            originatorUserID,
+		AccountableUserID:           attr.AccountableUserID,
+		RuleVersionID:               attr.RuleVersionID,
+		RerunOfTaskID:               rerunOfTaskID,
+		FreshRerun:                  pgtype.Bool{Bool: freshRerun, Valid: true},
+		RuntimeMcpOverlay:           runtimeMCPOverlay.Overlay,
+		RuntimeConnectedApps:        runtimeMCPOverlay.ConnectedApps,
+		OriginatorSource:            attrSource,
+		DelegatedFromTaskID:         attrDelegatedFrom,
+		TriggerEvidenceKind:         attrEvidenceKind,
+		TriggerEvidenceRefID:        attrEvidenceRef,
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
@@ -1740,8 +1762,9 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if agent.ArchivedAt.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
 	}
-	if !agent.RuntimeID.Valid {
-		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	effective, err := ResolveEffectiveRuntimeConfig(ctx, s.Queries, agent, requesterID, s.LiveRuntimeModels)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
 	}
 
 	payload := QuickCreateContext{
@@ -1801,18 +1824,25 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, requesterID, agent)
 	taskID := dbid.NewV7()
 	createParams := db.CreateQuickCreateTaskParams{
-		ID:                   taskID,
-		AgentID:              agentID,
-		RuntimeID:            agent.RuntimeID,
-		Priority:             priorityToInt("high"),
-		Context:              contextJSON,
-		OriginatorUserID:     requesterID,
-		AccountableUserID:    attr.AccountableUserID,
-		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
-		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
-		OriginatorSource:     attrSource,
-		TriggerEvidenceKind:  attrEvidenceKind,
-		TriggerEvidenceRefID: attrEvidenceRef,
+		ID:                          taskID,
+		AgentID:                     agentID,
+		RuntimeID:                   effective.RuntimeID,
+		EffectiveModel:              TaskEffectiveModel(effective),
+		EffectiveThinkingLevel:      TaskEffectiveThinkingLevel(effective),
+		EffectiveServiceTier:        TaskEffectiveServiceTier(effective),
+		EffectiveRuntimeConfig:      effective.RuntimeConfig,
+		EffectiveMaxConcurrentTasks: TaskEffectiveMaxConcurrentTasks(effective),
+		RuntimeConfigSource:         TaskRuntimeConfigSource(effective),
+		RuntimeConfigHint:           RuntimeConfigHintJSON(effective.Hint),
+		Priority:                    priorityToInt("high"),
+		Context:                     contextJSON,
+		OriginatorUserID:            requesterID,
+		AccountableUserID:           attr.AccountableUserID,
+		RuntimeMcpOverlay:           runtimeMCPOverlay.Overlay,
+		RuntimeConnectedApps:        runtimeMCPOverlay.ConnectedApps,
+		OriginatorSource:            attrSource,
+		TriggerEvidenceKind:         attrEvidenceKind,
+		TriggerEvidenceRefID:        attrEvidenceRef,
 	}
 	var task db.AgentTaskQueue
 	if capture == nil {
@@ -2042,8 +2072,11 @@ func (s *TaskService) PrepareChatTaskEnqueue(
 	if agent.ArchivedAt.Valid {
 		return PreparedChatTaskEnqueue{}, ErrChatTaskAgentArchived
 	}
-	if !agent.RuntimeID.Valid {
-		return PreparedChatTaskEnqueue{}, ErrChatTaskAgentNoRuntime
+	if _, err := s.resolveTaskRuntimeConfig(ctx, agent, initiatorUserID, allowRuntimeOffline); err != nil {
+		if errors.Is(err, ErrEffectiveRuntimeMissing) {
+			return PreparedChatTaskEnqueue{}, ErrChatTaskAgentNoRuntime
+		}
+		return PreparedChatTaskEnqueue{}, err
 	}
 
 	attr := attribution.DirectHumanRun(
@@ -2183,8 +2216,12 @@ func (s *TaskService) enqueueChatTaskTx(
 	if agent.ArchivedAt.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentArchived
 	}
-	if !agent.RuntimeID.Valid {
-		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
+	effective, err := resolveTaskRuntimeConfigOn(ctx, qtx, agent, initiatorUserID, s.LiveRuntimeModels)
+	if err != nil {
+		if errors.Is(err, ErrEffectiveRuntimeMissing) {
+			return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
+		}
+		return db.AgentTaskQueue{}, err
 	}
 
 	binding, bindingErr := qtx.LockChannelChatSessionBindingForContext(ctx, chatSession.ID)
@@ -2241,21 +2278,28 @@ func (s *TaskService) enqueueChatTaskTx(
 	}
 
 	task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
-		ID:                   dbid.NewV7(),
-		AgentID:              chatSession.AgentID,
-		RuntimeID:            agent.RuntimeID,
-		Priority:             2,
-		ChatSessionID:        chatSession.ID,
-		InitiatorUserID:      initiatorUserID,
-		FireAt:               mediaPendingUntil,
-		OriginatorUserID:     initiatorUserID,
-		AccountableUserID:    prepared.accountableUser,
-		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: true},
-		RuntimeMcpOverlay:    prepared.runtimeOverlay.Overlay,
-		RuntimeConnectedApps: prepared.runtimeOverlay.ConnectedApps,
-		OriginatorSource:     prepared.attrSource,
-		TriggerEvidenceKind:  prepared.attrEvidenceKind,
-		TriggerEvidenceRefID: chatSession.ID,
+		ID:                          dbid.NewV7(),
+		AgentID:                     chatSession.AgentID,
+		RuntimeID:                   effective.RuntimeID,
+		EffectiveModel:              TaskEffectiveModel(effective),
+		EffectiveThinkingLevel:      TaskEffectiveThinkingLevel(effective),
+		EffectiveServiceTier:        TaskEffectiveServiceTier(effective),
+		EffectiveRuntimeConfig:      effective.RuntimeConfig,
+		EffectiveMaxConcurrentTasks: TaskEffectiveMaxConcurrentTasks(effective),
+		RuntimeConfigSource:         TaskRuntimeConfigSource(effective),
+		RuntimeConfigHint:           RuntimeConfigHintJSON(effective.Hint),
+		Priority:                    2,
+		ChatSessionID:               chatSession.ID,
+		InitiatorUserID:             initiatorUserID,
+		FireAt:                      mediaPendingUntil,
+		OriginatorUserID:            initiatorUserID,
+		AccountableUserID:           prepared.accountableUser,
+		ForceFreshSession:           pgtype.Bool{Bool: forceFreshSession, Valid: true},
+		RuntimeMcpOverlay:           prepared.runtimeOverlay.Overlay,
+		RuntimeConnectedApps:        prepared.runtimeOverlay.ConnectedApps,
+		OriginatorSource:            prepared.attrSource,
+		TriggerEvidenceKind:         prepared.attrEvidenceKind,
+		TriggerEvidenceRefID:        chatSession.ID,
 		ChannelContextRevision: pgtype.Int8{
 			Int64: contextRevision, Valid: contextRevision > 0,
 		},
@@ -2572,8 +2616,12 @@ func (s *TaskService) sendDirectChatMessage(
 		if carrier.ArchivedAt.Valid {
 			return ErrChatTaskAgentArchived
 		}
-		if !carrier.RuntimeID.Valid {
-			return ErrChatTaskAgentNoRuntime
+		effective, err := resolveTaskRuntimeConfigOn(ctx, qtx, carrier, initiatorUserID, s.LiveRuntimeModels)
+		if err != nil {
+			if errors.Is(err, ErrEffectiveRuntimeMissing) {
+				return ErrChatTaskAgentNoRuntime
+			}
+			return err
 		}
 
 		// The database status of every newly-created task is "queued" until a
@@ -2607,21 +2655,28 @@ func (s *TaskService) sendDirectChatMessage(
 			// A string-to-string map has no fallible JSON encoders.
 			chatContext, _ := json.Marshal(map[string]string{"chat_input_actor_type": uploaderType})
 			task, err = qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
-				Context:              chatContext,
-				ID:                   dbid.NewV7(),
-				AgentID:              session.AgentID,
-				RuntimeID:            carrier.RuntimeID,
-				Priority:             2, // medium priority for chat; matches EnqueueChatTask
-				ChatSessionID:        session.ID,
-				InitiatorUserID:      initiatorUserID,
-				OriginatorUserID:     attr.UserID,
-				AccountableUserID:    attr.AccountableUserID,
-				ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},
-				RuntimeMcpOverlay:    overlay.Overlay,
-				RuntimeConnectedApps: overlay.ConnectedApps,
-				OriginatorSource:     attrSource,
-				TriggerEvidenceKind:  attrEvidenceKind,
-				TriggerEvidenceRefID: attrEvidenceRef,
+				Context:                     chatContext,
+				ID:                          dbid.NewV7(),
+				AgentID:                     session.AgentID,
+				RuntimeID:                   effective.RuntimeID,
+				EffectiveModel:              TaskEffectiveModel(effective),
+				EffectiveThinkingLevel:      TaskEffectiveThinkingLevel(effective),
+				EffectiveServiceTier:        TaskEffectiveServiceTier(effective),
+				EffectiveRuntimeConfig:      effective.RuntimeConfig,
+				EffectiveMaxConcurrentTasks: TaskEffectiveMaxConcurrentTasks(effective),
+				RuntimeConfigSource:         TaskRuntimeConfigSource(effective),
+				RuntimeConfigHint:           RuntimeConfigHintJSON(effective.Hint),
+				Priority:                    2, // medium priority for chat; matches EnqueueChatTask
+				ChatSessionID:               session.ID,
+				InitiatorUserID:             initiatorUserID,
+				OriginatorUserID:            attr.UserID,
+				AccountableUserID:           attr.AccountableUserID,
+				ForceFreshSession:           pgtype.Bool{Bool: false, Valid: true},
+				RuntimeMcpOverlay:           overlay.Overlay,
+				RuntimeConnectedApps:        overlay.ConnectedApps,
+				OriginatorSource:            attrSource,
+				TriggerEvidenceKind:         attrEvidenceKind,
+				TriggerEvidenceRefID:        attrEvidenceRef,
 			})
 			if err != nil {
 				return fmt.Errorf("create direct chat task: %w", err)
@@ -3872,9 +3927,15 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		// loaded Agent before returning any payload. Runtime mutation paths settle
 		// the remaining queued rows: teardown and revocation cancel them, and
 		// UpdateAgent re-stamps them to the new runtime.
-		if runtimeID.Valid && agent.RuntimeID != runtimeID {
-			outcome = "runtime_mismatch"
-			return nil
+		if agent.ShareRuntime && runtimeID.Valid && agent.RuntimeID != runtimeID {
+			candidates, err := qtx.ListQueuedClaimCandidatesByRuntime(ctx, runtimeID)
+			if err != nil {
+				return err
+			}
+			if !slices.ContainsFunc(candidates, func(task db.AgentTaskQueue) bool { return task.AgentID == agentID }) {
+				outcome = "runtime_mismatch"
+				return nil
+			}
 		}
 
 		t0 = time.Now()
@@ -3884,7 +3945,7 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 			outcome = "error_count_running"
 			return fmt.Errorf("count running tasks: %w", err)
 		}
-		if running >= int64(agent.MaxConcurrentTasks) {
+		if agent.ShareRuntime && running >= int64(agent.MaxConcurrentTasks) {
 			decisionDetail = claimDecisionDetail{running: running, maxConcurrent: int64(agent.MaxConcurrentTasks)}
 			outcome = "no_capacity"
 			return nil
@@ -6954,7 +7015,7 @@ func loadDelegatedFailureRecoveryTarget(ctx context.Context, q *db.Queries, fail
 		}
 		return nil, fmt.Errorf("load source agent: %w", err)
 	}
-	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid || agent.WorkspaceID != issue.WorkspaceID {
+	if agent.ArchivedAt.Valid || !AgentHasRuntimeBinding(agent) || agent.WorkspaceID != issue.WorkspaceID {
 		return nil, nil
 	}
 	return &delegatedFailureRecoveryTarget{failed: failed, source: source, issue: issue, agent: agent}, nil
@@ -7291,27 +7352,38 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			}
 			return delegatedFailureRecoveryCovered, err
 		}
+		effective, err := s.resolveTaskRuntimeConfig(ctx, target.agent, originator, allowRuntimeOffline)
+		if err != nil {
+			return delegatedFailureRecoveryCovered, err
+		}
 		overlay := s.buildRuntimeMCPOverlay(ctx, originator, target.agent)
 		task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
-			ID:                   dbid.NewV7(),
-			AgentID:              target.agent.ID,
-			RuntimeID:            target.agent.RuntimeID,
-			IssueID:              target.issue.ID,
-			Priority:             priorityToInt(target.issue.Priority),
-			TriggerCommentID:     target.comment.ID,
-			TriggerSummary:       s.buildCommentTriggerSummary(ctx, target.issue.WorkspaceID, target.comment.ID),
-			IsLeaderTask:         pgtype.Bool{Bool: target.source.IsLeaderTask, Valid: target.source.IsLeaderTask},
-			SquadID:              target.source.SquadID,
-			OriginatorUserID:     originator,
-			AccountableUserID:    accountable,
-			RuntimeMcpOverlay:    overlay.Overlay,
-			RuntimeConnectedApps: overlay.ConnectedApps,
-			OriginatorSource:     pgtype.Text{String: string(source), Valid: true},
-			DelegatedFromTaskID:  target.failed.ID,
-			RuleVersionID:        ruleVersionID,
-			TriggerEvidenceKind:  pgtype.Text{String: string(attribution.EvidenceDelegatedFailure), Valid: true},
-			TriggerEvidenceRefID: target.failed.ID,
-			HeadSha:              headShaText(s.ResolveIssueReviewSHA(ctx, target.issue.ID)),
+			ID:                          dbid.NewV7(),
+			AgentID:                     target.agent.ID,
+			RuntimeID:                   effective.RuntimeID,
+			EffectiveModel:              TaskEffectiveModel(effective),
+			EffectiveThinkingLevel:      TaskEffectiveThinkingLevel(effective),
+			EffectiveServiceTier:        TaskEffectiveServiceTier(effective),
+			EffectiveRuntimeConfig:      effective.RuntimeConfig,
+			EffectiveMaxConcurrentTasks: TaskEffectiveMaxConcurrentTasks(effective),
+			RuntimeConfigSource:         TaskRuntimeConfigSource(effective),
+			RuntimeConfigHint:           RuntimeConfigHintJSON(effective.Hint),
+			IssueID:                     target.issue.ID,
+			Priority:                    priorityToInt(target.issue.Priority),
+			TriggerCommentID:            target.comment.ID,
+			TriggerSummary:              s.buildCommentTriggerSummary(ctx, target.issue.WorkspaceID, target.comment.ID),
+			IsLeaderTask:                pgtype.Bool{Bool: target.source.IsLeaderTask, Valid: target.source.IsLeaderTask},
+			SquadID:                     target.source.SquadID,
+			OriginatorUserID:            originator,
+			AccountableUserID:           accountable,
+			RuntimeMcpOverlay:           overlay.Overlay,
+			RuntimeConnectedApps:        overlay.ConnectedApps,
+			OriginatorSource:            pgtype.Text{String: string(source), Valid: true},
+			DelegatedFromTaskID:         target.failed.ID,
+			RuleVersionID:               ruleVersionID,
+			TriggerEvidenceKind:         pgtype.Text{String: string(attribution.EvidenceDelegatedFailure), Valid: true},
+			TriggerEvidenceRefID:        target.failed.ID,
+			HeadSha:                     headShaText(s.ResolveIssueReviewSHA(ctx, target.issue.ID)),
 		})
 		if err == nil {
 			slog.Info("delegated failure recovery task enqueued",

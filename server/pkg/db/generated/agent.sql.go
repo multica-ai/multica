@@ -1654,7 +1654,16 @@ WHERE id = (
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
             -- A task's persisted runtime is not authority after an agent rebind.
-            AND a.runtime_id = atq.runtime_id
+            AND r.workspace_id = a.workspace_id
+            AND (
+                (a.share_runtime AND (
+                    a.runtime_id = atq.runtime_id
+                    OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                        AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                        AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+                ))
+                OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+            )
             -- Queued private-runtime rows are claimable so the handler can
             -- settle an owner mismatch through the existing FailTask path
             -- before daemon delivery. Public runtimes remain shareable across
@@ -1663,6 +1672,12 @@ WHERE id = (
                 r.visibility = 'public'
                 OR r.visibility = 'private'
             )
+            AND (a.share_runtime OR (
+                SELECT count(*) FROM agent_task_queue active
+                WHERE active.agent_id = atq.agent_id
+                  AND active.originator_user_id = atq.originator_user_id
+                  AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+            ) < COALESCE(atq.effective_max_concurrent_tasks, a.max_concurrent_tasks))
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
                 now() - make_interval(secs => $4::double precision)
@@ -3253,7 +3268,7 @@ INSERT INTO agent_task_queue (
     channel_context_revision, handoff_note, workflow_step, id
 )
 SELECT
-    p.agent_id, COALESCE($2::uuid, p.runtime_id), p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    p.agent_id, COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, $2::uuid, p.runtime_id), p.issue_id, p.chat_session_id, p.autopilot_run_id,
     CASE WHEN $3::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary,
@@ -3265,7 +3280,8 @@ SELECT
         'fixed_runtime_batch_retained_runtime_id',
         'fixed_runtime_batch_retained_task_id'
     ], '{}'::jsonb),
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL
+    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
+              OR COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, $2::uuid, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
          ELSE p.session_id END,
     p.work_dir,
     p.attempt + 1, COALESCE($4::int, p.max_attempts), p.id,
@@ -3295,9 +3311,10 @@ SELECT
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE($7::uuid, gen_random_uuid())
 FROM agent_task_queue p
+JOIN agent a ON a.id = p.agent_id
 WHERE p.id = $1
-  AND COALESCE($2::uuid, p.runtime_id) IS NOT NULL
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE($2::uuid, p.runtime_id))
+  AND COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, $2::uuid, p.runtime_id) IS NOT NULL
+  AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, $2::uuid, p.runtime_id))
 ON CONFLICT (issue_id, agent_id, (COALESCE(comment_thread_id, '00000000-0000-0000-0000-000000000000'::uuid))) WHERE status IN ('queued', 'dispatched')
        OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
 DO NOTHING
@@ -6045,6 +6062,145 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 	return items, nil
 }
 
+const listAgentsByIDsForWorkspace = `-- name: ListAgentsByIDsForWorkspace :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, share_runtime, recommended_cli FROM agent
+WHERE id = ANY($1::uuid[])
+  AND workspace_id = $2
+  AND kind = 'user'
+  AND archived_at IS NULL
+ORDER BY id
+`
+
+type ListAgentsByIDsForWorkspaceParams struct {
+	AgentIds    []pgtype.UUID `json:"agent_ids"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+// Workspace-scoped lookup for personal runtime migration dry runs. Missing and
+// cross-workspace IDs deliberately collapse to the same result so the bulk API
+// cannot be used as an existence oracle.
+func (q *Queries) ListAgentsByIDsForWorkspace(ctx context.Context, arg ListAgentsByIDsForWorkspaceParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listAgentsByIDsForWorkspace, arg.AgentIds, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.ConversationStarters,
+			&i.ShareRuntime,
+			&i.RecommendedCli,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentsByIDsForWorkspaceForUpdate = `-- name: ListAgentsByIDsForWorkspaceForUpdate :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, share_runtime, recommended_cli FROM agent
+WHERE id = ANY($1::uuid[])
+  AND workspace_id = $2
+  AND kind = 'user'
+  AND archived_at IS NULL
+ORDER BY id
+FOR UPDATE
+`
+
+type ListAgentsByIDsForWorkspaceForUpdateParams struct {
+	AgentIds    []pgtype.UUID `json:"agent_ids"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+// Committing variant of ListAgentsByIDsForWorkspace. Stable ID order prevents
+// two overlapping bulk personal-config writes from taking agent locks in
+// opposite orders.
+func (q *Queries) ListAgentsByIDsForWorkspaceForUpdate(ctx context.Context, arg ListAgentsByIDsForWorkspaceForUpdateParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listAgentsByIDsForWorkspaceForUpdate, arg.AgentIds, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.ConversationStarters,
+			&i.ShareRuntime,
+			&i.RecommendedCli,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllAgents = `-- name: ListAllAgents :many
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, share_runtime, recommended_cli FROM agent
 WHERE workspace_id = $1 AND kind = 'user'
@@ -6649,7 +6805,16 @@ WHERE atq.runtime_id = $1
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        AND r.workspace_id = a.workspace_id
+        AND (
+            (a.share_runtime AND (
+                a.runtime_id = atq.runtime_id
+                OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                    AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+            ))
+            OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+        )
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'
@@ -6765,7 +6930,16 @@ WHERE atq.runtime_id = ANY($1::uuid[])
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        AND r.workspace_id = a.workspace_id
+        AND (
+            (a.share_runtime AND (
+                a.runtime_id = atq.runtime_id
+                OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                    AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+            ))
+            OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+        )
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'
@@ -8934,7 +9108,16 @@ WHERE id = (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            AND r.workspace_id = a.workspace_id
+            AND (
+                (a.share_runtime AND (
+                    a.runtime_id = atq.runtime_id
+                    OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                        AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                        AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+                ))
+                OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+            )
             AND (
                 r.visibility = 'public'
                 OR (
@@ -8944,6 +9127,7 @@ WHERE id = (
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
                         OR a.owner_id = ANY(r.shared_with)
+                        OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
                     )
                 )
             )
@@ -9065,7 +9249,16 @@ WITH candidates AS MATERIALIZED (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            AND r.workspace_id = a.workspace_id
+            AND (
+                (a.share_runtime AND (
+                    a.runtime_id = atq.runtime_id
+                    OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                        AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                        AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+                ))
+                OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+            )
             AND (
                 r.visibility = 'public'
                 OR (
@@ -9075,6 +9268,7 @@ WITH candidates AS MATERIALIZED (
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
                         OR a.owner_id = ANY(r.shared_with)
+                        OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
                     )
                 )
             )
@@ -10251,21 +10445,21 @@ UPDATE agent SET
     avatar_url = COALESCE($4, avatar_url),
     runtime_config = COALESCE($5, runtime_config),
     runtime_mode = COALESCE($6, runtime_mode),
-    runtime_id = COALESCE($7, runtime_id),
-    visibility = COALESCE($8, visibility),
-    permission_mode = COALESCE($9, permission_mode),
-    status = COALESCE($10, status),
-    max_concurrent_tasks = COALESCE($11, max_concurrent_tasks),
-    instructions = COALESCE($12, instructions),
-    custom_env = COALESCE($13, custom_env),
-    custom_args = COALESCE($14, custom_args),
-    mcp_config = COALESCE($15, mcp_config),
-    model = COALESCE($16, model),
-    thinking_level = COALESCE($17, thinking_level),
-    service_tier = COALESCE($18, service_tier),
-    conversation_starters = COALESCE($19, conversation_starters),
-    composio_toolkit_allowlist = COALESCE($20::text[], composio_toolkit_allowlist),
-    share_runtime = COALESCE($21::boolean, share_runtime),
+    runtime_id = CASE WHEN NOT COALESCE($7::boolean, share_runtime) THEN NULL ELSE COALESCE($8, runtime_id) END,
+    visibility = COALESCE($9, visibility),
+    permission_mode = COALESCE($10, permission_mode),
+    status = COALESCE($11, status),
+    max_concurrent_tasks = COALESCE($12, max_concurrent_tasks),
+    instructions = COALESCE($13, instructions),
+    custom_env = COALESCE($14, custom_env),
+    custom_args = COALESCE($15, custom_args),
+    mcp_config = COALESCE($16, mcp_config),
+    model = COALESCE($17, model),
+    thinking_level = COALESCE($18, thinking_level),
+    service_tier = COALESCE($19, service_tier),
+    conversation_starters = COALESCE($20, conversation_starters),
+    composio_toolkit_allowlist = COALESCE($21::text[], composio_toolkit_allowlist),
+    share_runtime = COALESCE($7::boolean, share_runtime),
     recommended_cli = COALESCE($22, recommended_cli),
     updated_at = now()
 WHERE id = $1
@@ -10279,6 +10473,7 @@ type UpdateAgentParams struct {
 	AvatarUrl                pgtype.Text `json:"avatar_url"`
 	RuntimeConfig            []byte      `json:"runtime_config"`
 	RuntimeMode              pgtype.Text `json:"runtime_mode"`
+	ShareRuntime             pgtype.Bool `json:"share_runtime"`
 	RuntimeID                pgtype.UUID `json:"runtime_id"`
 	Visibility               pgtype.Text `json:"visibility"`
 	PermissionMode           pgtype.Text `json:"permission_mode"`
@@ -10293,7 +10488,6 @@ type UpdateAgentParams struct {
 	ServiceTier              pgtype.Text `json:"service_tier"`
 	ConversationStarters     []byte      `json:"conversation_starters"`
 	ComposioToolkitAllowlist []string    `json:"composio_toolkit_allowlist"`
-	ShareRuntime             pgtype.Bool `json:"share_runtime"`
 	RecommendedCli           pgtype.Text `json:"recommended_cli"`
 }
 
@@ -10311,6 +10505,7 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.AvatarUrl,
 		arg.RuntimeConfig,
 		arg.RuntimeMode,
+		arg.ShareRuntime,
 		arg.RuntimeID,
 		arg.Visibility,
 		arg.PermissionMode,
@@ -10325,7 +10520,6 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.ServiceTier,
 		arg.ConversationStarters,
 		arg.ComposioToolkitAllowlist,
-		arg.ShareRuntime,
 		arg.RecommendedCli,
 	)
 	var i Agent

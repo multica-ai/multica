@@ -2578,13 +2578,17 @@ func (h *Handler) finalizeClaimDelivery(
 		if aerr != nil {
 			return fmt.Errorf("re-read agent for delivery authorization: %w", aerr)
 		}
-		if agent.RuntimeID != task.RuntimeID {
+		bound, bindErr := service.RuntimeBindingAllowsClaim(ctx, qtx, agent, *task)
+		if bindErr != nil {
+			return bindErr
+		}
+		if !bound {
 			return &service.ClaimDeliveryAuthzError{
 				Reason: "error_agent_runtime_changed",
 				Detail: "agent runtime changed before delivery",
 			}
 		}
-		if locked.Visibility == "private" && locked.OwnerID.Valid && !service.RuntimeAllowsUser(locked, agent.OwnerID) {
+		if !service.PrivateRuntimePermitsAgent(agent, *task, locked) {
 			agentOwnerID = agent.OwnerID
 			return &service.ClaimDeliveryAuthzError{
 				Reason: "error_runtime_access_denied",
@@ -3039,7 +3043,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// changing task state, but Agent mutations do not stay locked through HTTP
 	// response assembly. Recheck the freshly loaded Agent here so a rebind or
 	// owner change that committed after the claim cannot reach the daemon.
-	if agent.RuntimeID != task.RuntimeID {
+	bound, bindErr := service.RuntimeBindingAllowsClaim(r.Context(), h.Queries, agent, *task)
+	if bindErr != nil {
+		if _, err := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); err != nil {
+			slog.Warn("requeue after binding lookup failure", "error", err)
+		}
+		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{outcome: "error_runtime_binding", status: http.StatusInternalServerError, message: "failed to check runtime binding"}
+	}
+	if !bound {
 		slog.Warn("daemon claim: agent runtime changed before delivery; refusing dispatch",
 			"task_id", uuidToString(task.ID),
 			"agent_id", uuidToString(task.AgentID),
@@ -3053,7 +3064,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"error_agent_runtime_changed", http.StatusConflict, "agent runtime changed before task delivery",
 		)
 	}
-	if runtime.Visibility == "private" && runtime.OwnerID.Valid && !service.RuntimeAllowsUser(runtime, agent.OwnerID) {
+	if !service.PrivateRuntimePermitsAgent(agent, *task, runtime) {
 		userMessage := "This private runtime cannot run the assigned agent because the agent and runtime have different owners."
 		if !agent.OwnerID.Valid {
 			userMessage = "This private runtime cannot run the assigned agent because the agent has no owner."
@@ -3144,9 +3155,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// empty object `{}` for agents that haven't opted into any
 	// provider-specific tuning. Forward only non-empty payloads so the
 	// daemon's per-provider decoders treat absent-or-empty identically.
+	selection, selectionErr := service.ResolveClaimModelSelection(r.Context(), h.Queries, *task, agent, h.liveRuntimeModels())
+	if selectionErr != nil {
+		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(r.Context(), task, selectionErr.Error(), taskfailure.ReasonInvalidTaskIdentity, "error_runtime_config", http.StatusConflict, "runtime configuration is unavailable")
+	}
 	var runtimeConfig json.RawMessage
-	if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
-		runtimeConfig = json.RawMessage(agent.RuntimeConfig)
+	if rc := bytes.TrimSpace(selection.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
+		runtimeConfig = json.RawMessage(selection.RuntimeConfig)
 	}
 	resp.Agent = &TaskAgentData{
 		ID:                    uuidToString(agent.ID),
@@ -3155,9 +3170,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		CustomEnv:             customEnv,
 		CustomArgs:            customArgs,
 		McpConfig:             mcpConfig,
-		Model:                 agent.Model.String,
-		ThinkingLevel:         agent.ThinkingLevel.String,
-		ServiceTier:           agent.ServiceTier.String,
+		Model:                 selection.Model,
+		ThinkingLevel:         selection.ThinkingLevel,
+		ServiceTier:           selection.ServiceTier,
 		RuntimeConfig:         runtimeConfig,
 		DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 	}
@@ -3165,7 +3180,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// It applies to every claim until changed or cleared; later edits do not
 	// affect payloads already delivered to the daemon.
 	if runtime.Provider == "openclaw" {
-		resp.ModelOverride = openclawModelOverride(agent.RuntimeConfig)
+		resp.ModelOverride = openclawModelOverride(selection.RuntimeConfig)
 	}
 	// System agents carry a product-owned instruction layer that ships with
 	// this binary instead of being copied into their row at creation. That

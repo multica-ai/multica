@@ -145,7 +145,7 @@ UPDATE agent SET
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
     runtime_config = COALESCE(sqlc.narg('runtime_config'), runtime_config),
     runtime_mode = COALESCE(sqlc.narg('runtime_mode'), runtime_mode),
-    runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
+    runtime_id = CASE WHEN NOT COALESCE(sqlc.narg('share_runtime')::boolean, share_runtime) THEN NULL ELSE COALESCE(sqlc.narg('runtime_id'), runtime_id) END,
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
     permission_mode = COALESCE(sqlc.narg('permission_mode'), permission_mode),
     status = COALESCE(sqlc.narg('status'), status),
@@ -636,7 +636,7 @@ INSERT INTO agent_task_queue (
     channel_context_revision, handoff_note, workflow_step, id
 )
 SELECT
-    p.agent_id, COALESCE(sqlc.narg('runtime_id')::uuid, p.runtime_id), p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    p.agent_id, COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id), p.issue_id, p.chat_session_id, p.autopilot_run_id,
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary,
@@ -648,7 +648,8 @@ SELECT
         'fixed_runtime_batch_retained_runtime_id',
         'fixed_runtime_batch_retained_task_id'
     ], '{}'::jsonb),
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL
+    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
+              OR COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
          ELSE p.session_id END,
     p.work_dir,
     p.attempt + 1, COALESCE(sqlc.narg(max_attempts)::int, p.max_attempts), p.id,
@@ -678,9 +679,10 @@ SELECT
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
+JOIN agent a ON a.id = p.agent_id
 WHERE p.id = $1
-  AND COALESCE(sqlc.narg('runtime_id')::uuid, p.runtime_id) IS NOT NULL
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE(sqlc.narg('runtime_id')::uuid, p.runtime_id))
+  AND COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id) IS NOT NULL
+  AND lock_task_owner_rows(p.agent_id, p.issue_id, COALESCE(CASE WHEN a.share_runtime THEN a.runtime_id END, sqlc.narg('runtime_id')::uuid, p.runtime_id))
 ON CONFLICT (issue_id, agent_id, (COALESCE(comment_thread_id, '00000000-0000-0000-0000-000000000000'::uuid))) WHERE status IN ('queued', 'dispatched')
        OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
 DO NOTHING
@@ -725,6 +727,29 @@ WHERE p.id = sqlc.arg(source_task_id)
   AND p.autopilot_run_id IS NULL
   AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
 RETURNING *;
+
+-- name: ListAgentsByIDsForWorkspace :many
+-- Workspace-scoped lookup for personal runtime migration dry runs. Missing and
+-- cross-workspace IDs deliberately collapse to the same result so the bulk API
+-- cannot be used as an existence oracle.
+SELECT * FROM agent
+WHERE id = ANY(@agent_ids::uuid[])
+  AND workspace_id = @workspace_id
+  AND kind = 'user'
+  AND archived_at IS NULL
+ORDER BY id;
+
+-- name: ListAgentsByIDsForWorkspaceForUpdate :many
+-- Committing variant of ListAgentsByIDsForWorkspace. Stable ID order prevents
+-- two overlapping bulk personal-config writes from taking agent locks in
+-- opposite orders.
+SELECT * FROM agent
+WHERE id = ANY(@agent_ids::uuid[])
+  AND workspace_id = @workspace_id
+  AND kind = 'user'
+  AND archived_at IS NULL
+ORDER BY id
+FOR UPDATE;
 
 -- name: CountPersonalAgentTasksByMigrationGroup :one
 -- Only tasks whose runtime was resolved for this human's personal configuration
@@ -1061,7 +1086,16 @@ WHERE id = (
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
             -- A task's persisted runtime is not authority after an agent rebind.
-            AND a.runtime_id = atq.runtime_id
+            AND r.workspace_id = a.workspace_id
+            AND (
+                (a.share_runtime AND (
+                    a.runtime_id = atq.runtime_id
+                    OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                        AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                        AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+                ))
+                OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+            )
             -- Queued private-runtime rows are claimable so the handler can
             -- settle an owner mismatch through the existing FailTask path
             -- before daemon delivery. Public runtimes remain shareable across
@@ -1070,6 +1104,12 @@ WHERE id = (
                 r.visibility = 'public'
                 OR r.visibility = 'private'
             )
+            AND (a.share_runtime OR (
+                SELECT count(*) FROM agent_task_queue active
+                WHERE active.agent_id = atq.agent_id
+                  AND active.originator_user_id = atq.originator_user_id
+                  AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+            ) < COALESCE(atq.effective_max_concurrent_tasks, a.max_concurrent_tasks))
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
                 now() - make_interval(secs => @runtime_stale_secs::double precision)
@@ -1191,7 +1231,16 @@ WHERE id = (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            AND r.workspace_id = a.workspace_id
+            AND (
+                (a.share_runtime AND (
+                    a.runtime_id = atq.runtime_id
+                    OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                        AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                        AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+                ))
+                OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+            )
             AND (
                 r.visibility = 'public'
                 OR (
@@ -1201,6 +1250,7 @@ WHERE id = (
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
                         OR a.owner_id = ANY(r.shared_with)
+                        OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
                     )
                 )
             )
@@ -1238,7 +1288,16 @@ WITH candidates AS MATERIALIZED (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            AND r.workspace_id = a.workspace_id
+            AND (
+                (a.share_runtime AND (
+                    a.runtime_id = atq.runtime_id
+                    OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                        AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                        AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+                ))
+                OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+            )
             AND (
                 r.visibility = 'public'
                 OR (
@@ -1248,6 +1307,7 @@ WITH candidates AS MATERIALIZED (
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
                         OR a.owner_id = ANY(r.shared_with)
+                        OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
                     )
                 )
             )
@@ -2492,7 +2552,16 @@ WHERE atq.runtime_id = $1
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        AND r.workspace_id = a.workspace_id
+        AND (
+            (a.share_runtime AND (
+                a.runtime_id = atq.runtime_id
+                OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                    AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+            ))
+            OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+        )
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'
@@ -2613,7 +2682,16 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        AND r.workspace_id = a.workspace_id
+        AND (
+            (a.share_runtime AND (
+                a.runtime_id = atq.runtime_id
+                OR (atq.context->'fixed_runtime_batch_retained' = 'true'::jsonb
+                    AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
+            ))
+            OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+        )
         AND (
             r.visibility = 'public'
             OR r.visibility = 'private'

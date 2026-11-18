@@ -21,21 +21,11 @@ func RuntimeBindingAllowsClaim(ctx context.Context, q *db.Queries, agent db.Agen
 	if !runtimeID.Valid {
 		return false, nil
 	}
-	if agent.RuntimeID == runtimeID {
-		return true, nil
+	if task.AgentID != agent.ID {
+		return false, nil
 	}
 	if agent.ShareRuntime {
-		return task.AgentID == agent.ID && taskHasFixedRuntimeRetention(task), nil
-	}
-	bound, err := q.AgentHasUserRuntimeBinding(ctx, db.AgentHasUserRuntimeBindingParams{
-		AgentID:   agent.ID,
-		RuntimeID: runtimeID,
-	})
-	if err != nil {
-		return false, err
-	}
-	if bound {
-		return true, nil
+		return agent.RuntimeID == runtimeID || taskHasFixedRuntimeRetention(task), nil
 	}
 	runtime, err := q.GetAgentRuntime(ctx, runtimeID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -44,7 +34,7 @@ func RuntimeBindingAllowsClaim(ctx context.Context, q *db.Queries, agent db.Agen
 	if err != nil {
 		return false, err
 	}
-	return taskOriginatorOwnsRuntime(runtime, task), nil
+	return runtime.WorkspaceID == agent.WorkspaceID && taskOriginatorOwnsRuntime(runtime, task), nil
 }
 
 // PrivateRuntimePermitsAgent is the Go-side copy of ClaimAgentTask's private
@@ -52,37 +42,17 @@ func RuntimeBindingAllowsClaim(ctx context.Context, q *db.Queries, agent db.Agen
 // own machine, matching the SQL originator-owned clause; a retained fixed task
 // is authorized only by a grant bound to that task and runtime, never by
 // another task on the same agent/runtime.
-func PrivateRuntimePermitsAgent(ctx context.Context, q *db.Queries, agent db.Agent, task db.AgentTaskQueue, runtime db.AgentRuntime) (bool, error) {
+func PrivateRuntimePermitsAgent(agent db.Agent, task db.AgentTaskQueue, runtime db.AgentRuntime) bool {
+	if task.AgentID != agent.ID || runtime.ID != task.RuntimeID || runtime.WorkspaceID != agent.WorkspaceID {
+		return false
+	}
+	if !agent.ShareRuntime {
+		return taskOriginatorOwnsRuntime(runtime, task)
+	}
 	if runtime.Visibility != "private" || !runtime.OwnerID.Valid {
-		return true, nil
+		return true
 	}
-	if !agent.OwnerID.Valid {
-		return false, nil
-	}
-	if agent.OwnerID == runtime.OwnerID {
-		return true, nil
-	}
-	// Upstream runtime sharing (MUL-8185): an agent owned by a member the
-	// runtime owner explicitly shared the private runtime with delivers like
-	// the owner's own agent. The SQL claim gates use the same list.
-	if slices.Contains(runtime.SharedWith, agent.OwnerID) {
-		return true, nil
-	}
-	if agent.ShareRuntime {
-		return task.AgentID == agent.ID && task.RuntimeID == runtime.ID && taskHasFixedRuntimeRetention(task), nil
-	}
-	bound, err := q.AgentHasUserRuntimeBindingForUser(ctx, db.AgentHasUserRuntimeBindingForUserParams{
-		AgentID:   agent.ID,
-		RuntimeID: runtime.ID,
-		UserID:    runtime.OwnerID,
-	})
-	if err != nil {
-		return false, err
-	}
-	if bound {
-		return true, nil
-	}
-	return taskOriginatorOwnsRuntime(runtime, task), nil
+	return agent.OwnerID.Valid && (agent.OwnerID == runtime.OwnerID || slices.Contains(runtime.SharedWith, agent.OwnerID))
 }
 
 // taskOriginatorOwnsRuntime is the Go copy of ClaimAgentTask's originator-owned
