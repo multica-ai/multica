@@ -105,6 +105,28 @@ it("saves after the debounce while the editor stays mounted", async () => {
   });
 });
 
+it("saves after the last edit even when the editor rerenders", async () => {
+  const view = mount();
+  act(() => view.result.current.change({ content: "Edited" }));
+
+  for (let elapsed = 500; elapsed < 1500; elapsed += 500) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    view.rerender();
+    expect(api.updateDoc).not.toHaveBeenCalled();
+  }
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  expect(api.updateDoc).toHaveBeenCalledExactlyOnceWith(doc.id, {
+    title: doc.title,
+    content: "Edited",
+    baseRevision: 1,
+  });
+});
+
 it("saves the last edit when navigating away during the debounce", async () => {
   const view = mount();
   act(() => view.result.current.change({ content: "Edited" }));
