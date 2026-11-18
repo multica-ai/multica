@@ -4531,6 +4531,21 @@ export class ApiClient {
     return res.blob();
   }
 
+  // Thumbnail bytes for clients that cannot load the auth-gated thumbnail
+  // path as a native <img> src (see getAttachmentBlob). Always proxied by the
+  // API, so unlike /download there is no storage redirect to worry about.
+  async getAttachmentThumbnailBlob(id: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.fetchRaw(`/api/attachments/${id}/thumbnail`, { signal });
+    return res.blob();
+  }
+
+  // The original bytes of an image that has a thumbnail, for copying it from
+  // a tile. Proxied by the API in every storage mode, so script can read it.
+  async getAttachmentOriginalBlob(id: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.fetchRaw(`/api/attachments/${id}/original`, { signal });
+    return res.blob();
+  }
+
   // Projects
   async listProjects(params?: { status?: string; include_archived?: boolean }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();

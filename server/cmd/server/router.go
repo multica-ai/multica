@@ -1820,6 +1820,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// because they are JSON-API consumers that always have
 		// workspace context.
 		r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
+		// Same access shape as /download, for grid tiles' native <img> src.
+		r.Get("/api/attachments/{id}/thumbnail", h.GetAttachmentThumbnail)
+		// The original of a thumbnailed image, for copying it from a tile.
+		r.Get("/api/attachments/{id}/original", h.GetAttachmentOriginal)
 		// Markdown links may point to an attachment in a different workspace.
 		// Resolve that workspace from the row and check membership before minting
 		// a fresh URL; the workspace-scoped metadata route stays unchanged.
