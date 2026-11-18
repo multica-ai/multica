@@ -1362,7 +1362,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				Logger:  slog.Default(),
 			})
 			channelRouter.Register(infoflow.TypeInfoFlow, infoflow.NewInfoFlowResolverSet(queries, pool, infoflowReplier))
-			infoflow.NewOutbound(queries, box, slog.Default()).Register(bus)
+			// File delivery needs two things at once: an adapter that goes back for
+			// the bound attachment, and object storage to go back to. Both are decided
+			// here, in one branch, so a deployment cannot promise a hop it cannot
+			// perform — the same shape the WeCom and Telegram wirings use.
+			var infoflowOutboundOpts []infoflow.OutboundOption
+			if store != nil {
+				infoflowOutboundOpts = append(infoflowOutboundOpts, infoflow.WithAttachments(store))
+				h.DeclareChannelFileDelivery(string(infoflow.TypeInfoFlow))
+			}
+			infoflow.NewOutbound(queries, box, slog.Default(), infoflowOutboundOpts...).Register(bus)
 			infoflow.RegisterInfoFlow(channelRegistry, infoflow.ChannelDeps{Box: box, Logger: slog.Default()})
 			installSvc, ierr := infoflow.NewInstallService(queries, pool, box, slog.Default())
 			if ierr != nil {

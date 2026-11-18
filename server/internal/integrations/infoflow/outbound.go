@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,6 +26,7 @@ type outboundQueries interface {
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
+	ListAttachmentsByChatMessage(context.Context, db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 }
 
 // Outbound delivers an agent's chat reply back to InfoFlow — the outbound half
@@ -38,14 +40,33 @@ type Outbound struct {
 	q      outboundQueries
 	box    *secretbox.Box
 	logger *slog.Logger
+
+	// objects is nil unless WithAttachments was passed, and nil means this
+	// deployment cannot deliver files at all. router.go pairs it with
+	// Handler.DeclareChannelFileDelivery so the capability the agent is promised
+	// and the hop the process can perform are decided by one condition.
+	objects mediaObjectStore
+
+	// attachmentWG tracks in-flight attachment deliveries.
+	attachmentWG sync.WaitGroup
+
+	// senderFor builds a mediaSender from decrypted credentials. A field rather
+	// than a direct call so a test can watch the wire without a network.
+	senderFor func(credentials) (mediaSender, error)
 }
 
 // NewOutbound builds the InfoFlow outbound subscriber.
-func NewOutbound(q outboundQueries, box *secretbox.Box, logger *slog.Logger) *Outbound {
+func NewOutbound(q outboundQueries, box *secretbox.Box, logger *slog.Logger, opts ...OutboundOption) *Outbound {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Outbound{q: q, box: box, logger: logger}
+	o := &Outbound{q: q, box: box, logger: logger, senderFor: newSenderFor}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(o)
+		}
+	}
+	return o
 }
 
 // Register subscribes to every chat-task terminal event.
@@ -75,7 +96,16 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// Nothing to say. A task that failed with a retry still queued carries no
 	// user-visible text, and the engine publishes again when it settles.
 	content := eventContent(e)
-	if content == "" {
+	// The turn's files are addressed by the assistant message, so a completed
+	// turn is always worth checking even when the agent said nothing and only
+	// bound an attachment.
+	var messageID pgtype.UUID
+	if o.mayCarryAttachments(e) {
+		if raw := chatDoneMessageID(e.Payload); raw != "" {
+			_ = messageID.Scan(raw)
+		}
+	}
+	if content == "" && !messageID.Valid {
 		return nil
 	}
 	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
@@ -115,13 +145,22 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if err != nil {
 		return fmt.Errorf("decode infoflow credentials: %w", err)
 	}
-	client, err := newSDKClient(creds)
-	if err != nil {
-		return err
-	}
 	target := targetFromChatID(delivery.ChannelChatID)
-	if _, err := sendText(ctx, client, target, content); err != nil {
-		return fmt.Errorf("post infoflow reply: %w", err)
+	if content != "" {
+		client, err := newSDKClient(creds)
+		if err != nil {
+			return err
+		}
+		if _, err := sendText(ctx, client, target, content); err != nil {
+			return fmt.Errorf("post infoflow reply: %w", err)
+		}
+	}
+	// Files go after the words, off this goroutine: the reply is already on its
+	// way, and an upload must not be able to delay or lose it. This runs on the
+	// publish call site's goroutine otherwise, which is exactly the thing
+	// Bus.Publish must never block on.
+	if messageID.Valid {
+		o.spawnAttachmentDelivery(creds, target, inst.WorkspaceID, messageID, inst.ID)
 	}
 	return nil
 }

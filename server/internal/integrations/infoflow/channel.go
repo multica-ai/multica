@@ -69,7 +69,11 @@ func RegisterInfoFlow(reg *channel.Registry, deps ChannelDeps) {
 func (c *infoflowChannel) Type() channel.Type { return TypeInfoFlow }
 
 func (c *infoflowChannel) Capabilities() channel.Capability {
-	return channel.CapText
+	// Text plus attachments: InfoFlow delivers an image as a real image message,
+	// and anything else as a Markdown link to the uploaded object (see
+	// outbound_media.go for why a file card is not available). Inbound media is
+	// not declared — the adapter does not resolve it yet.
+	return channel.CapText | channel.CapAttachment
 }
 
 // Disconnect is a no-op: the SDK session returns from Connect on context

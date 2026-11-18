@@ -41,8 +41,8 @@ func TestRegisterInfoFlow_BuildsChannel(t *testing.T) {
 	if ch.Type() != TypeInfoFlow {
 		t.Errorf("Type() = %q, want %q", ch.Type(), TypeInfoFlow)
 	}
-	if got := ch.Capabilities(); got != channel.CapText {
-		t.Errorf("Capabilities() = %v, want text", got)
+	if got := ch.Capabilities(); got != channel.CapText|channel.CapAttachment {
+		t.Errorf("Capabilities() = %v, want text|attachment", got)
 	}
 }
 
