@@ -2974,21 +2974,34 @@ INSERT INTO agent_task_queue (
     force_fresh_session, is_leader_task, squad_id,
     originator_user_id, accountable_user_id,
     runtime_mcp_overlay, runtime_connected_apps,
-    originator_source, rerun_of_task_id, id
+    originator_source, rerun_of_task_id, id,
+    effective_model, effective_thinking_level, effective_service_tier,
+    effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint
 )
 SELECT
-    p.agent_id, p.runtime_id, 'queued', p.priority, p.context,
+    p.agent_id, selected.runtime_id, 'queued', p.priority, p.context,
     TRUE, p.is_leader_task, p.squad_id,
     $1, $1,
     $2, $3,
-    'direct_human', p.id, $4
+    'direct_human', p.id, $4,
+    CASE WHEN NOT a.share_runtime THEN p.effective_model END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_thinking_level END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_service_tier END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_runtime_config END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_max_concurrent_tasks END,
+    CASE WHEN NOT a.share_runtime THEN p.runtime_config_source END,
+    CASE WHEN NOT a.share_runtime THEN p.runtime_config_hint END
 FROM agent_task_queue p
+JOIN agent a ON a.id = p.agent_id
+CROSS JOIN LATERAL (SELECT CASE WHEN a.share_runtime THEN COALESCE(a.runtime_id, p.runtime_id) ELSE p.runtime_id END AS runtime_id) selected
+JOIN agent_runtime r ON r.id = selected.runtime_id AND r.workspace_id = a.workspace_id
 WHERE p.id = $5
   AND p.status = 'failed'
   AND p.issue_id IS NULL
   AND p.chat_session_id IS NULL
   AND p.autopilot_run_id IS NULL
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+  AND (a.share_runtime OR r.owner_id = $1)
+  AND lock_task_owner_rows(p.agent_id, p.issue_id, selected.runtime_id)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, effective_model, effective_thinking_level, effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint, effective_service_tier
 `
 
@@ -3010,8 +3023,8 @@ type CreateManualQuickCreateRetryTaskParams struct {
 // transaction. lock_task_owner_rows provides the usual workspace-teardown
 // fence; a deleted workspace therefore yields pgx.ErrNoRows and no task. The
 // rerun inherits the parent's runtime — for a smart agent that is the runtime
-// the failed parent actually resolved to, not a fresh resolution — so the new
-// run lands where the requester expects it.
+// the failed parent resolved to while that machine still belongs to the
+// original requester. Fixed agents follow their current binding.
 func (q *Queries) CreateManualQuickCreateRetryTask(ctx context.Context, arg CreateManualQuickCreateRetryTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createManualQuickCreateRetryTask,
 		arg.ActorUserID,
@@ -8160,26 +8173,27 @@ SET runtime_id = COALESCE($1::uuid, runtime_id),
     squad_id = COALESCE($10::uuid, squad_id),
     trigger_comment_id = $9::uuid,
     trigger_summary = COALESCE($11, trigger_summary),
-    -- Re-attribution is ATOMIC (MUL-4302): folding a newly-arrived comment moves the
+    -- A continuation keeps the existing execution authorization snapshot.
+    -- Otherwise, re-attribution is atomic: folding a newly-arrived comment moves the
     -- WHOLE attribution snapshot to that comment's human — person columns, source
     -- label, delegation lineage, rule version, and evidence — computed by the caller
     -- as one attribution.Result. Re-stamping only the person columns would leave a
     -- run showing B accountable while still pointing at A's stale source / evidence /
     -- level. accountable comes from the resolved Result (finalizeAttribution already
     -- guaranteed originator ⟹ accountable == originator; the cross-column CHECK backs it).
-    originator_user_id = $12::uuid,
-    accountable_user_id = $13::uuid,
-    originator_source = $14,
-    delegated_from_task_id = $15::uuid,
-    rule_version_id = $16::uuid,
-    trigger_evidence_kind = $17,
-    trigger_evidence_ref_id = $18::uuid,
-    runtime_mcp_overlay = $19,
-    runtime_connected_apps = $20
+    originator_user_id = CASE WHEN $12::boolean THEN originator_user_id ELSE $13::uuid END,
+    accountable_user_id = CASE WHEN $12::boolean THEN accountable_user_id ELSE $14::uuid END,
+    originator_source = CASE WHEN $12::boolean THEN originator_source ELSE $15 END,
+    delegated_from_task_id = CASE WHEN $12::boolean THEN delegated_from_task_id ELSE $16::uuid END,
+    rule_version_id = CASE WHEN $12::boolean THEN rule_version_id ELSE $17::uuid END,
+    trigger_evidence_kind = CASE WHEN $12::boolean THEN trigger_evidence_kind ELSE $18 END,
+    trigger_evidence_ref_id = CASE WHEN $12::boolean THEN trigger_evidence_ref_id ELSE $19::uuid END,
+    runtime_mcp_overlay = CASE WHEN $12::boolean THEN runtime_mcp_overlay ELSE $20 END,
+    runtime_connected_apps = CASE WHEN $12::boolean THEN runtime_connected_apps ELSE $21 END
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
-    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $21
-      AND t.agent_id = $22
+    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $22
+      AND t.agent_id = $23
       AND ($1::uuid IS NULL OR lock_task_owner_rows(t.agent_id, t.issue_id, $1::uuid))
       -- An unclaimed generic turn can become a leader turn. Never overwrite
       -- a worker obligation or a different squad's leader context.
@@ -8199,8 +8213,8 @@ WHERE id = (
       -- into it would give a new-HEAD comment old-HEAD review coverage. Empty/
       -- absent head_sha (no linked PR) matches any task, preserving coalescing.
       AND (
-          COALESCE($23::text, '') = ''
-          OR t.context->>'head_sha' = $23::text
+          COALESCE($24::text, '') = ''
+          OR t.context->>'head_sha' = $24::text
       )
     ORDER BY t.created_at DESC
     LIMIT 1
@@ -8221,6 +8235,7 @@ type MergeCommentIntoPendingTaskParams struct {
 	NewTriggerCommentID         pgtype.UUID `json:"new_trigger_comment_id"`
 	NewLeaderSquadID            pgtype.UUID `json:"new_leader_squad_id"`
 	NewTriggerSummary           pgtype.Text `json:"new_trigger_summary"`
+	KeepExecutionSnapshot       bool        `json:"keep_execution_snapshot"`
 	NewOriginatorUserID         pgtype.UUID `json:"new_originator_user_id"`
 	NewAccountableUserID        pgtype.UUID `json:"new_accountable_user_id"`
 	NewOriginatorSource         pgtype.Text `json:"new_originator_source"`
@@ -8290,6 +8305,7 @@ func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeComm
 		arg.NewTriggerCommentID,
 		arg.NewLeaderSquadID,
 		arg.NewTriggerSummary,
+		arg.KeepExecutionSnapshot,
 		arg.NewOriginatorUserID,
 		arg.NewAccountableUserID,
 		arg.NewOriginatorSource,

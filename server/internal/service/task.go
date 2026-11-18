@@ -1904,7 +1904,7 @@ func (s *TaskService) RetrySourceContextQuickCreate(ctx context.Context, workspa
 		return nil, ErrSourceContextRetryUnavailable
 	}
 	agent, err := s.Queries.GetAgent(ctx, parent.AgentID)
-	if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+	if err != nil || agent.ArchivedAt.Valid || (agent.ShareRuntime && !agent.RuntimeID.Valid) {
 		return nil, ErrSourceContextRetryUnavailable
 	}
 	if canInvoke != nil && !canInvoke(agent) {
@@ -1934,6 +1934,9 @@ func (s *TaskService) RetrySourceContextQuickCreate(ctx context.Context, workspa
 		NewTaskID:            dbid.NewV7(),
 		SourceTaskID:         sourceTaskID,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrSourceContextRetryUnavailable
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create source context manual retry: %w", err)
 	}

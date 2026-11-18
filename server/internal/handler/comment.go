@@ -2507,7 +2507,24 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		if readErr != nil || current.ArchivedAt.Valid || current.WorkspaceID != issue.WorkspaceID || current.ShareRuntime {
 			return commentMergeError
 		}
-		effective, resolveErr := service.ResolveEffectiveRuntimeConfig(ctx, queries, current, attr.UserID, h.liveRuntimeModels())
+		if !trigger.RuntimeRequester.Valid {
+			// Continuing an authorized task keeps its machine, catalog snapshot,
+			// and execution attribution. An explicit personal selection may move it.
+			params.KeepExecutionSnapshot = true
+			row, mergeErr := queries.MergeCommentIntoPendingTask(ctx, params)
+			if errors.Is(mergeErr, pgx.ErrNoRows) {
+				return commentMergeNoPendingTask
+			}
+			if mergeErr != nil || tx.Commit(ctx) != nil {
+				return commentMergeError
+			}
+			h.TaskService.BroadcastTaskCoalesced(ctx, row)
+			return commentMergeSucceeded
+		}
+		if attr.UserID != trigger.RuntimeRequester {
+			return commentMergeAttributionBlocked
+		}
+		effective, resolveErr := service.ResolveEffectiveRuntimeConfig(ctx, queries, current, trigger.RuntimeRequester, h.liveRuntimeModels())
 		if resolveErr != nil {
 			if status, _, ok := service.RuntimeConfigResolutionFromError(resolveErr); !ok || status != service.RuntimeConfigResolutionRuntimeOffline || !effective.RuntimeID.Valid {
 				return commentMergeError

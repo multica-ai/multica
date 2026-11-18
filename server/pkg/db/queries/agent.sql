@@ -704,28 +704,41 @@ UPDATE agent_task_queue SET workflow_step = @workflow_step WHERE id = @id;
 -- transaction. lock_task_owner_rows provides the usual workspace-teardown
 -- fence; a deleted workspace therefore yields pgx.ErrNoRows and no task. The
 -- rerun inherits the parent's runtime — for a smart agent that is the runtime
--- the failed parent actually resolved to, not a fresh resolution — so the new
--- run lands where the requester expects it.
+-- the failed parent resolved to while that machine still belongs to the
+-- original requester. Fixed agents follow their current binding.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, status, priority, context,
     force_fresh_session, is_leader_task, squad_id,
     originator_user_id, accountable_user_id,
     runtime_mcp_overlay, runtime_connected_apps,
-    originator_source, rerun_of_task_id, id
+    originator_source, rerun_of_task_id, id,
+    effective_model, effective_thinking_level, effective_service_tier,
+    effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint
 )
 SELECT
-    p.agent_id, p.runtime_id, 'queued', p.priority, p.context,
+    p.agent_id, selected.runtime_id, 'queued', p.priority, p.context,
     TRUE, p.is_leader_task, p.squad_id,
     sqlc.arg(actor_user_id), sqlc.arg(actor_user_id),
     sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
-    'direct_human', p.id, sqlc.arg(new_task_id)
+    'direct_human', p.id, sqlc.arg(new_task_id),
+    CASE WHEN NOT a.share_runtime THEN p.effective_model END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_thinking_level END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_service_tier END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_runtime_config END,
+    CASE WHEN NOT a.share_runtime THEN p.effective_max_concurrent_tasks END,
+    CASE WHEN NOT a.share_runtime THEN p.runtime_config_source END,
+    CASE WHEN NOT a.share_runtime THEN p.runtime_config_hint END
 FROM agent_task_queue p
+JOIN agent a ON a.id = p.agent_id
+CROSS JOIN LATERAL (SELECT CASE WHEN a.share_runtime THEN COALESCE(a.runtime_id, p.runtime_id) ELSE p.runtime_id END AS runtime_id) selected
+JOIN agent_runtime r ON r.id = selected.runtime_id AND r.workspace_id = a.workspace_id
 WHERE p.id = sqlc.arg(source_task_id)
   AND p.status = 'failed'
   AND p.issue_id IS NULL
   AND p.chat_session_id IS NULL
   AND p.autopilot_run_id IS NULL
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+  AND (a.share_runtime OR r.owner_id = sqlc.arg(actor_user_id))
+  AND lock_task_owner_rows(p.agent_id, p.issue_id, selected.runtime_id)
 RETURNING *;
 
 -- name: ListAgentsByIDsForWorkspace :many
@@ -2178,22 +2191,23 @@ SET runtime_id = COALESCE(sqlc.narg('new_runtime_id')::uuid, runtime_id),
     squad_id = COALESCE(sqlc.narg('new_leader_squad_id')::uuid, squad_id),
     trigger_comment_id = @new_trigger_comment_id::uuid,
     trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary),
-    -- Re-attribution is ATOMIC (MUL-4302): folding a newly-arrived comment moves the
+    -- A continuation keeps the existing execution authorization snapshot.
+    -- Otherwise, re-attribution is atomic: folding a newly-arrived comment moves the
     -- WHOLE attribution snapshot to that comment's human — person columns, source
     -- label, delegation lineage, rule version, and evidence — computed by the caller
     -- as one attribution.Result. Re-stamping only the person columns would leave a
     -- run showing B accountable while still pointing at A's stale source / evidence /
     -- level. accountable comes from the resolved Result (finalizeAttribution already
     -- guaranteed originator ⟹ accountable == originator; the cross-column CHECK backs it).
-    originator_user_id = sqlc.narg('new_originator_user_id')::uuid,
-    accountable_user_id = sqlc.narg('new_accountable_user_id')::uuid,
-    originator_source = sqlc.narg('new_originator_source'),
-    delegated_from_task_id = sqlc.narg('new_delegated_from_task_id')::uuid,
-    rule_version_id = sqlc.narg('new_rule_version_id')::uuid,
-    trigger_evidence_kind = sqlc.narg('new_trigger_evidence_kind'),
-    trigger_evidence_ref_id = sqlc.narg('new_trigger_evidence_ref_id')::uuid,
-    runtime_mcp_overlay = sqlc.narg('new_runtime_mcp_overlay'),
-    runtime_connected_apps = sqlc.narg('new_runtime_connected_apps')
+    originator_user_id = CASE WHEN @keep_execution_snapshot::boolean THEN originator_user_id ELSE sqlc.narg('new_originator_user_id')::uuid END,
+    accountable_user_id = CASE WHEN @keep_execution_snapshot::boolean THEN accountable_user_id ELSE sqlc.narg('new_accountable_user_id')::uuid END,
+    originator_source = CASE WHEN @keep_execution_snapshot::boolean THEN originator_source ELSE sqlc.narg('new_originator_source') END,
+    delegated_from_task_id = CASE WHEN @keep_execution_snapshot::boolean THEN delegated_from_task_id ELSE sqlc.narg('new_delegated_from_task_id')::uuid END,
+    rule_version_id = CASE WHEN @keep_execution_snapshot::boolean THEN rule_version_id ELSE sqlc.narg('new_rule_version_id')::uuid END,
+    trigger_evidence_kind = CASE WHEN @keep_execution_snapshot::boolean THEN trigger_evidence_kind ELSE sqlc.narg('new_trigger_evidence_kind') END,
+    trigger_evidence_ref_id = CASE WHEN @keep_execution_snapshot::boolean THEN trigger_evidence_ref_id ELSE sqlc.narg('new_trigger_evidence_ref_id')::uuid END,
+    runtime_mcp_overlay = CASE WHEN @keep_execution_snapshot::boolean THEN runtime_mcp_overlay ELSE sqlc.narg('new_runtime_mcp_overlay') END,
+    runtime_connected_apps = CASE WHEN @keep_execution_snapshot::boolean THEN runtime_connected_apps ELSE sqlc.narg('new_runtime_connected_apps') END
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
