@@ -49,6 +49,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
   useCurrentWorkspace: () => ({ id: "ws-1", slug: "acme", settings: mockWorkspaceSettings }),
 }));
 
+import { IssueSidebarAddMenu, IssueSidebarAddMenuProvider } from "./issue-sidebar-add-menu";
 import { PullRequestsSection } from "./pull-requests-section";
 
 function renderSection(cachedDecision?: PRAutoComplete) {
@@ -59,10 +60,27 @@ function renderSection(cachedDecision?: PRAutoComplete) {
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
-        <PullRequestsSection issueId="issue-1" identifier="MUL-1" open onOpenChange={() => {}} />
+        <IssueSidebarAddMenuProvider>
+          <IssueSidebarAddMenu />
+          <div data-testid="section">
+            <PullRequestsSection issueId="issue-1" identifier="MUL-1" open onOpenChange={() => {}} />
+          </div>
+        </IssueSidebarAddMenuProvider>
       </I18nProvider>
     </QueryClientProvider>,
   );
+}
+
+/** The sidebar's "+" menu, where an issue with no PR offers the section's actions. */
+async function openAddMenu() {
+  fireEvent.click(await screen.findByRole("button", { name: "Add" }));
+}
+
+/** With no PR linked, linking starts from the "+" menu and continues in a dialog. */
+async function openLinkForm() {
+  await openAddMenu();
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Link pull request" }));
+  return screen.findByRole("textbox", { name: "Link pull request" });
 }
 
 const linkedPR = {
@@ -88,21 +106,22 @@ describe("PullRequestsSection (MUL-7429)", () => {
     navigatePush.mockReset();
   });
 
-  it("leaves only the link entry while no PR is linked", async () => {
-    const { container } = renderSection();
-    expect(await screen.findByRole("button", { name: "Link pull request" })).toHaveTextContent("Link pull request");
-    expect(container.querySelector('[data-slot="issue-sidebar-section-header"]')).toBeNull();
-    expect(screen.queryByText("Pull requests")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Pull request automation" })).toBeNull();
+  it("renders nothing while no PR is linked and offers the section's actions from the + menu", async () => {
+    renderSection();
+    await openAddMenu();
+    expect(await screen.findByRole("menuitem", { name: "Link pull request" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Keep status when PRs merge" })).toBeInTheDocument();
+    expect(screen.getByTestId("section")).toBeEmptyDOMElement();
     expect(screen.queryByText(enIssues.detail.pull_requests_empty_title)).not.toBeInTheDocument();
   });
 
-  it("shows the section header with its actions once a PR is linked", async () => {
+  it("shows the section header with its actions once a PR is linked, and leaves the + menu", async () => {
     mockPullRequests = [linkedPR];
     renderSection();
     expect(await screen.findByRole("button", { name: /^Pull requests/ })).toBeVisible();
     expect(screen.getByRole("button", { name: "Link pull request" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Pull request automation" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
   });
 
   it("keeps a retry entry when loading fails with no cached PRs", async () => {
@@ -110,6 +129,7 @@ describe("PullRequestsSection (MUL-7429)", () => {
     renderSection();
     expect(await screen.findByRole("button", { name: "Could not load. Retry" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Link pull request" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
   });
 
   it("retains linking after a failed refresh when cached data confirms backend support", async () => {
@@ -122,8 +142,7 @@ describe("PullRequestsSection (MUL-7429)", () => {
   it("links a pasted PR URL", async () => {
     apiMock.linkIssuePullRequest.mockResolvedValue({ pull_requests: [], auto_complete: decision });
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Link pull request" }), {
+    fireEvent.change(await openLinkForm(), {
       target: { value: "https://github.com/acme/widget/pull/41" },
     });
     expect(screen.getByText("PRs with MUL-1 in the title or branch name link automatically.")).toBeInTheDocument();
@@ -135,14 +154,28 @@ describe("PullRequestsSection (MUL-7429)", () => {
     );
   });
 
-  it("accepts a link pasted without a scheme", async () => {
-    apiMock.linkIssuePullRequest.mockResolvedValue({ pull_requests: [], auto_complete: decision });
+  it("links from the section header once a PR is linked", async () => {
+    mockPullRequests = [linkedPR];
+    apiMock.linkIssuePullRequest.mockResolvedValue({ pull_requests: [linkedPR], auto_complete: decision });
     renderSection();
     fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
     fireEvent.change(await screen.findByRole("textbox", { name: "Link pull request" }), {
+      target: { value: "https://github.com/acme/widget/pull/42" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Link" }));
+    await waitFor(() =>
+      expect(apiMock.linkIssuePullRequest).toHaveBeenCalledWith("issue-1", { url: "https://github.com/acme/widget/pull/42" }),
+    );
+  });
+
+  it("accepts a link pasted without a scheme", async () => {
+    apiMock.linkIssuePullRequest.mockResolvedValue({ pull_requests: [], auto_complete: decision });
+    renderSection();
+    const input = await openLinkForm();
+    fireEvent.change(input, {
       target: { value: "github.com/acme/widget/pull/41/files" },
     });
-    fireEvent.submit(screen.getByRole("textbox", { name: "Link pull request" }).closest("form")!);
+    fireEvent.submit(input.closest("form")!);
     await waitFor(() =>
       expect(apiMock.linkIssuePullRequest).toHaveBeenCalledWith("issue-1", { url: "github.com/acme/widget/pull/41/files" }),
     );
@@ -151,14 +184,23 @@ describe("PullRequestsSection (MUL-7429)", () => {
   it("explains a PR Multica has not received", async () => {
     apiMock.linkIssuePullRequest.mockRejectedValue(new ApiError("not found", 404, "Not Found"));
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Link pull request" }), {
+    fireEvent.change(await openLinkForm(), {
       target: { value: "https://github.com/acme/widget/pull/999" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Link" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Multica hasn’t received this PR yet. Check that its repository is connected.",
     );
+  });
+
+  // A PR that is already merged when it is linked moves the issue inside the
+  // link request, so keeping the status must be settable before any PR.
+  it("keeps this issue's status on merge before the first PR is linked", async () => {
+    apiMock.setIssuePRAutoComplete.mockResolvedValue({ pull_requests: [], auto_complete: { ...decision, issue_disabled: true } });
+    renderSection();
+    await openAddMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Keep status when PRs merge" }));
+    await waitFor(() => expect(apiMock.setIssuePRAutoComplete).toHaveBeenCalledWith("issue-1", true));
   });
 
   it("keeps this issue's status on merge from the section menu", async () => {
@@ -170,19 +212,17 @@ describe("PullRequestsSection (MUL-7429)", () => {
     await waitFor(() => expect(apiMock.setIssuePRAutoComplete).toHaveBeenCalledWith("issue-1", true));
   });
 
-  it("opens the GitHub setting from the section menu", async () => {
-    mockPullRequests = [linkedPR];
+  it("opens the GitHub setting from the + menu", async () => {
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Pull request automation" }));
+    await openAddMenu();
     fireEvent.click(await screen.findByRole("menuitem", { name: "PR merge settings" }));
     expect(navigatePush).toHaveBeenCalledWith("/acme/settings?tab=code");
   });
 
   it("offers only the settings link while the workspace leaves status alone", async () => {
     mockAutoComplete = { ...decision, workspace_enabled: false };
-    mockPullRequests = [linkedPR];
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Pull request automation" }));
+    await openAddMenu();
     expect(await screen.findByRole("menuitem", { name: "PR merge settings" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Keep status when PRs merge" })).toBeNull();
   });
@@ -190,16 +230,16 @@ describe("PullRequestsSection (MUL-7429)", () => {
   it("drops the auto-link hint when the workspace does not auto-link PRs", async () => {
     mockWorkspaceSettings = { github_auto_link_prs_enabled: false };
     renderSection();
-    fireEvent.click(await screen.findByRole("button", { name: "Link pull request" }));
-    await screen.findByRole("textbox", { name: "Link pull request" });
+    await openLinkForm();
     expect(screen.queryByText("PRs with MUL-1 in the title or branch name link automatically.")).toBeNull();
   });
 
-  it("hides the actions on a backend without auto-complete", async () => {
+  it("offers nothing on a backend without auto-complete", async () => {
     mockAutoComplete = null;
     renderSection();
     await waitFor(() => expect(screen.queryByText("Pull requests")).not.toBeInTheDocument());
     expect(screen.queryByRole("button", { name: "Link pull request" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Pull request automation" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
   });
 });

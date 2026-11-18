@@ -1,7 +1,7 @@
 "use client";
 
-import type { ComponentProps, ReactNode } from "react";
-import { ChevronRight, Plus } from "@multica/ui/icons";
+import type { ReactNode } from "react";
+import { ChevronRight } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -55,38 +55,15 @@ export function IssueSidebarSectionHeader({
 }
 
 /**
- * What an empty section shows instead of its header: the one way to add its
- * first item, so an empty section leaves no title behind. Used as a menu or
- * popover trigger, so it passes every prop through.
- */
-export function IssueSidebarAddRow({ label, className, ...props }: ComponentProps<"button"> & { label: string }) {
-  return (
-    <button
-      type="button"
-      data-issue-sidebar-add-row=""
-      {...props}
-      className={cn(
-        "mx-2 flex h-8 items-center gap-2 rounded-md px-2 text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground aria-expanded:bg-accent/50 aria-expanded:text-foreground",
-        className,
-      )}
-    >
-      <span aria-hidden="true" className="flex size-3.5 shrink-0 items-center justify-center"><Plus className="size-3" /></span>
-      <span className="truncate">{label}</span>
-    </button>
-  );
-}
-
-/**
  * A card on the page canvas holding one or more sections. Sections keep their
- * own inset, so headers and rows land 16px inside the card's edge. Add rows
- * standing in for empty sections stack like rows of one list.
+ * own inset, so headers and rows land 16px inside the card's edge.
  */
 export function IssueSidebarCard({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
       data-slot="issue-sidebar-card"
       className={cn(
-        "flex flex-col gap-3 rounded-xl bg-surface py-1.5 shadow-[var(--surface-card-shadow)] [overflow-anchor:none] [&>*]:flow-root [&>:has(>[data-issue-sidebar-add-row])~:has(>[data-issue-sidebar-add-row])]:-mt-2",
+        "flex flex-col gap-3 rounded-xl bg-surface py-1.5 shadow-[var(--surface-card-shadow)] [overflow-anchor:none] [&>*]:flow-root",
         className,
       )}
     >

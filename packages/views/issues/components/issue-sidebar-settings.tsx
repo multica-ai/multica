@@ -14,6 +14,7 @@ import {
   type IssueSidebarSection,
 } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
+import { IssueSidebarAddMenu, IssueSidebarAddMenuProvider } from "./issue-sidebar-add-menu";
 import { IssueSidebarCard } from "./issue-sidebar-section";
 
 const CARD_GROUPS = ISSUE_SIDEBAR_GROUPS.slice(0, -1);
@@ -40,9 +41,9 @@ export function useIssueSidebarSectionLabels(): Record<IssueSidebarSection, stri
 }
 
 /**
- * The issue sidebar: a strip level with the page header, then the overview
- * card and one card per group of related sections, minus the sections the
- * reader hid. Each section sits in its own slot, which collapses while the
+ * The issue sidebar: a strip level with the page header holding the "+" menu
+ * and settings, then the overview card and one card per group of related
+ * sections, minus the sections the reader hid. Each section sits in its own slot, which collapses while the
  * section renders nothing; a card whose slots all collapse goes with them.
  */
 export function IssueSidebarSections({
@@ -86,57 +87,60 @@ export function IssueSidebarSections({
     ));
 
   return (
-    <div ref={containerRef} data-mc="issue-properties">
-      <div className="sticky top-0 z-10 flex h-12 items-center justify-end border-b bg-background px-3">
-        <IssueSidebarSettings
-          available={available}
-          getEmptySections={getEmptySections}
-          onShownChange={onShownChange}
-          trigger={
-            <IconButton
-              variant="ghost"
-              size="icon-xs"
-              label={t(($) => $.detail.sidebar_settings.open)}
-              className="text-muted-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
-            >
-              <SlidersHorizontal />
-            </IconButton>
-          }
-        />
-      </div>
-      <div className="flex flex-col gap-2 p-2">
-        {overview && <IssueSidebarCard>{overview}</IssueSidebarCard>}
-        {CARD_GROUPS.map((group) => {
-          const shown = slots(group);
-          return shown.length > 0 && (
-            <IssueSidebarCard key={group[0]} className="[&:not(:has(>:not(:empty)))]:hidden">
-              {shown}
-            </IssueSidebarCard>
-          );
-        })}
-        <div className="flex flex-col gap-2 pt-1 [&>*]:flow-root">{slots(FOOTER_GROUP)}</div>
-        {hiddenCount > 0 && (
+    <IssueSidebarAddMenuProvider>
+      <div ref={containerRef} data-mc="issue-properties">
+        <div className="sticky top-0 z-10 flex h-12 items-center justify-end gap-1 border-b bg-background px-3">
+          <IssueSidebarAddMenu />
           <IssueSidebarSettings
             available={available}
             getEmptySections={getEmptySections}
             onShownChange={onShownChange}
-            side="top"
-            align="start"
             trigger={
-              <button
-                type="button"
-                className="flex h-7 max-w-full items-center gap-1.5 self-start rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+              <IconButton
+                variant="ghost"
+                size="icon-xs"
+                label={t(($) => $.detail.sidebar_settings.open)}
+                className="text-muted-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
               >
-                <EyeOff className="size-3.5 shrink-0" />
-                <span className="truncate">{t(($) => $.detail.sidebar_settings.hidden_count, { count: hiddenCount })}</span>
-                <span aria-hidden="true" className="text-faint-foreground">·</span>
-                <span className="shrink-0 font-medium text-foreground">{t(($) => $.detail.sidebar_settings.customize)}</span>
-              </button>
+                <SlidersHorizontal />
+              </IconButton>
             }
           />
-        )}
+        </div>
+        <div className="flex flex-col gap-2 p-2">
+          {overview && <IssueSidebarCard>{overview}</IssueSidebarCard>}
+          {CARD_GROUPS.map((group) => {
+            const shown = slots(group);
+            return shown.length > 0 && (
+              <IssueSidebarCard key={group[0]} className="[&:not(:has(>:not(:empty)))]:hidden">
+                {shown}
+              </IssueSidebarCard>
+            );
+          })}
+          <div className="flex flex-col gap-2 pt-1 [&>*]:flow-root">{slots(FOOTER_GROUP)}</div>
+          {hiddenCount > 0 && (
+            <IssueSidebarSettings
+              available={available}
+              getEmptySections={getEmptySections}
+              onShownChange={onShownChange}
+              side="top"
+              align="start"
+              trigger={
+                <button
+                  type="button"
+                  className="flex h-7 max-w-full items-center gap-1.5 self-start rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+                >
+                  <EyeOff className="size-3.5 shrink-0" />
+                  <span className="truncate">{t(($) => $.detail.sidebar_settings.hidden_count, { count: hiddenCount })}</span>
+                  <span aria-hidden="true" className="text-faint-foreground">·</span>
+                  <span className="shrink-0 font-medium text-foreground">{t(($) => $.detail.sidebar_settings.customize)}</span>
+                </button>
+              }
+            />
+          )}
+        </div>
       </div>
-    </div>
+    </IssueSidebarAddMenuProvider>
   );
 }
 

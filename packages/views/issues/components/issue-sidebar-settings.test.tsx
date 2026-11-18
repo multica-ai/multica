@@ -8,6 +8,8 @@ import {
 } from "@multica/core/issues/stores";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
+import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
+import { useIssueSidebarAddEntry } from "./issue-sidebar-add-menu";
 import { IssueSidebarSections } from "./issue-sidebar-settings";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
@@ -59,6 +61,38 @@ describe("IssueSidebarSections", () => {
     expect(screen.queryByText("body:execution_log")).toBeNull();
     expect(container.querySelector('[data-issue-sidebar-section="execution_log"]')).toBeNull();
     expect(screen.getByRole("button", { name: /2 sections hidden/ })).toBeInTheDocument();
+  });
+
+  it("collapses the Output card while it has nothing to show, offering its actions from the strip's + menu", async () => {
+    function EmptyOutput({ id, label }: { id: string; label: string }) {
+      useIssueSidebarAddEntry(id, { order: 0, items: <DropdownMenuItem>{label}</DropdownMenuItem> });
+      return null;
+    }
+    render(
+      <I18nProvider resources={TEST_RESOURCES} locale="en">
+        <IssueSidebarSections
+          sections={{
+            ...sections,
+            pull_requests: <EmptyOutput id="pull_requests" label="Link pull request" />,
+            environments: <EmptyOutput id="environments" label="Start an environment" />,
+            deliverables: null,
+          }}
+          available={available}
+          overview={<p>overview</p>}
+        />
+      </I18nProvider>,
+    );
+    const outputCard = document.querySelector('[data-issue-sidebar-section="pull_requests"]')!.parentElement!;
+    // The card hides itself once every section slot in it is empty.
+    expect([...outputCard.children].every((slot) => slot.childNodes.length === 0)).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByRole("menuitem", { name: "Link pull request" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Start an environment" })).toBeInTheDocument();
+  });
+
+  it("leaves the + menu out while no section has an action to offer", () => {
+    renderSections();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
   });
 
   it("shows a hidden section the reader jumped to", () => {
