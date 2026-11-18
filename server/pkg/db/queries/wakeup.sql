@@ -186,6 +186,8 @@ INSERT INTO agent_task_queue (
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
+    effective_model, effective_thinking_level, effective_service_tier, effective_runtime_config,
+    effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint,
     workflow_step, id
 )
 SELECT
@@ -211,6 +213,13 @@ SELECT
     sqlc.narg(rerun_of_task_id),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(effective_model),
+    sqlc.narg(effective_thinking_level),
+    sqlc.narg(effective_service_tier),
+    sqlc.narg(effective_runtime_config),
+    sqlc.narg(effective_max_concurrent_tasks),
+    sqlc.narg(runtime_config_source),
+    sqlc.narg(runtime_config_hint),
     -- The workflow step this run works on (MUL-7420). A wakeup continues the
     -- run that registered it, so it keeps that run's step: a status change it
     -- makes after someone else moved the issue is refused like the run's own
