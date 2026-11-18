@@ -1439,11 +1439,13 @@ func keepRootConnected(byID map[string]db.Comment) []db.Comment {
 }
 
 type CreateCommentRequest struct {
-	Content          string   `json:"content"`
-	Type             string   `json:"type"`
-	ParentID         *string  `json:"parent_id"`
-	AttachmentIDs    []string `json:"attachment_ids"`
-	SuppressAgentIDs []string `json:"suppress_agent_ids"`
+	RuntimeOriginatorMode     string   `json:"runtime_originator_mode"`
+	RuntimeOriginatorAgentIDs []string `json:"runtime_originator_agent_ids"`
+	Content                   string   `json:"content"`
+	Type                      string   `json:"type"`
+	ParentID                  *string  `json:"parent_id"`
+	AttachmentIDs             []string `json:"attachment_ids"`
+	SuppressAgentIDs          []string `json:"suppress_agent_ids"`
 	// SteerTaskIDs are the running turns the author chose to add this comment
 	// to, instead of starting a follow-up run for their agents. A turn that
 	// has ended, or cannot take additional input, is never swapped for another
@@ -1488,10 +1490,11 @@ const (
 )
 
 type commentAgentTrigger struct {
-	Agent          db.Agent
-	Source         commentAgentTriggerSource
-	Squad          *db.Squad
-	AlreadyPending bool
+	RuntimeRequester pgtype.UUID
+	Agent            db.Agent
+	Source           commentAgentTriggerSource
+	Squad            *db.Squad
+	AlreadyPending   bool
 	// NonLeaderAgentReply marks an agent comment routed back to a squad leader
 	// from worker context. The worker need not be a squad member. Completion may
 	// replay it only if creation recorded it as a planned input.
@@ -1737,6 +1740,11 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	routing, ok := parseCommentRuntimeRouting(w, r, req.RuntimeOriginatorMode, req.RuntimeOriginatorAgentIDs, authorType, authorID)
+	if !ok {
+		return
+	}
+
 	// A running turn receives text only, so a comment that carries files is
 	// always a normal trigger. A member's explicit skill selection is the
 	// same: the text-only channel cannot invoke a skill, so the comment
@@ -1958,7 +1966,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// The comment is already saved; a blocked mention must not fail the whole
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).
-	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steer)
+	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steer, routing)
 	if !steer.empty() {
 		applyCommentSupplements(&resp, h.listCommentSupplements(r.Context(), issue.WorkspaceID, []pgtype.UUID{comment.ID})[uuidToString(comment.ID)])
 	}
@@ -2005,7 +2013,7 @@ func isNoteComment(content string) bool {
 //
 // steer names the running turns the author chose: a recipient whose chosen
 // turn is still running receives this comment there instead of a follow-up run.
-func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID, steer commentSteerRequest) []CommentTriggerOutcome {
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID, steer commentSteerRequest, routing ...commentRuntimeRouting) []CommentTriggerOutcome {
 	if isNoteComment(comment.Content) {
 		return nil
 	}
@@ -2015,6 +2023,14 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 		OriginatorUserID:        originatorUserID,
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
+	if len(routing) > 0 {
+		for i := range triggers {
+			id := triggers[i].Agent.ID
+			if !triggers[i].Agent.ShareRuntime && (len(routing[0].agents) == 0 || routing[0].agents[id]) {
+				triggers[i].RuntimeRequester = routing[0].user
+			}
+		}
+	}
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
 	triggers, steered := h.steerCommentAgentTriggers(ctx, issue, comment, actorType, actorID, originatorUserID, triggers, steer)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
@@ -2186,7 +2202,7 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 			}
 			// No same-head QUEUED row to fold into (merge missed). The two paths
 			// resolve differently.
-			if !lostRace && !trigger.NonLeaderAgentReply {
+			if !lostRace && !trigger.NonLeaderAgentReply && !trigger.RuntimeRequester.Valid {
 				// (b) AlreadyPending path: this comment arrived AFTER its task, so
 				// it is newer than the task and completion reconcile covers it by
 				// timestamp; MUL-4195 leaves the claimed task untouched. Defer to
@@ -2313,6 +2329,9 @@ func commentBlockedTargetOutcomes(targets []commentMentionTarget) []CommentTrigg
 // infrastructure error that stays an unclassified internal error rather than
 // leaking the raw message.
 func commentEnqueueFailureReason(err error) DispatchReasonCode {
+	if reason, ok := service.RuntimeConfigDispatchReason(err); ok {
+		return reason
+	}
 	if errors.Is(err, service.ErrAttributionFailClosed) {
 		return ReasonAttributionBlocked
 	}
@@ -2620,6 +2639,19 @@ func logCommentEnqueueFailure(msg string, err error, attrs ...any) {
 // enqueue error (nil on success) so the caller can surface a
 // trigger_outcome (MUL-4525 §2).
 func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, trigger commentAgentTrigger) error {
+	if trigger.RuntimeRequester.Valid {
+		origin := service.OriginNamed
+		if trigger.Source == commentTriggerSourceIssueAssignee {
+			origin = service.OriginDerived
+		}
+		var squadID pgtype.UUID
+		if trigger.Squad != nil {
+			squadID = trigger.Squad.ID
+		}
+		_, err := h.TaskService.EnqueueCommentTaskForRequester(ctx, issue, trigger.Agent.ID, squadID, triggerCommentID, trigger.RuntimeRequester, trigger.Source == commentTriggerSourceIssueAssignee, origin)
+		return err
+	}
+
 	switch trigger.Source {
 	case commentTriggerSourceIssueAssignee:
 		if trigger.Squad != nil {
@@ -3460,16 +3492,23 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Content          string    `json:"content"`
-		ContentBase      *string   `json:"content_base,omitempty"`
-		AttachmentIDs    *[]string `json:"attachment_ids"`
-		SuppressAgentIDs []string  `json:"suppress_agent_ids"`
-		ExpectedRevision *int64    `json:"expected_revision,omitempty"`
+		RuntimeOriginatorMode     string    `json:"runtime_originator_mode"`
+		RuntimeOriginatorAgentIDs []string  `json:"runtime_originator_agent_ids"`
+		Content                   string    `json:"content"`
+		ContentBase               *string   `json:"content_base,omitempty"`
+		AttachmentIDs             *[]string `json:"attachment_ids"`
+		SuppressAgentIDs          []string  `json:"suppress_agent_ids"`
+		ExpectedRevision          *int64    `json:"expected_revision,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	routing, ok := parseCommentRuntimeRouting(w, r, req.RuntimeOriginatorMode, req.RuntimeOriginatorAgentIDs, actorType, actorID)
+	if !ok {
+		return
+	}
+
 	// See CreateComment: strip NUL / invalid-UTF-8 bytes PostgreSQL's TEXT column
 	// rejects before the empty check, so an edit that introduces such a byte
 	// can't 500 (GH #5388).
@@ -3726,7 +3765,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, existing.ID)
-		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs, commentSteerRequest{})
+		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs, commentSteerRequest{}, routing)
 	}
 
 	// Fetch reactions and attachments for the updated comment.
@@ -4343,4 +4382,39 @@ func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
 		h.publish(protocol.EventCommentUnresolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// A requester override can only name the authenticated human. Agent IDs scope
+// which of the already authorized triggers use that override.
+type commentRuntimeRouting struct {
+	user   pgtype.UUID
+	agents map[pgtype.UUID]bool
+}
+
+func parseCommentRuntimeRouting(w http.ResponseWriter, r *http.Request, mode string, rawIDs []string, actorType, actorID string) (commentRuntimeRouting, bool) {
+	ids, ok := parseUUIDSliceOrBadRequest(w, rawIDs, "runtime_originator_agent_ids")
+	if !ok {
+		return commentRuntimeRouting{}, false
+	}
+	switch strings.TrimSpace(mode) {
+	case "", "sticky":
+		return commentRuntimeRouting{}, true
+	case "requester":
+		if actorType != "member" || isMachineCredentialActor(r) {
+			writeError(w, http.StatusForbidden, "requester runtime routing requires a human member")
+			return commentRuntimeRouting{}, false
+		}
+		user, ok := parseUUIDOrBadRequest(w, actorID, "requester")
+		if !ok {
+			return commentRuntimeRouting{}, false
+		}
+		routing := commentRuntimeRouting{user: user, agents: make(map[pgtype.UUID]bool, len(ids))}
+		for _, id := range ids {
+			routing.agents[id] = true
+		}
+		return routing, true
+	default:
+		writeError(w, http.StatusBadRequest, "runtime_originator_mode must be sticky or requester")
+		return commentRuntimeRouting{}, false
+	}
 }

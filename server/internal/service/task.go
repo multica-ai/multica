@@ -8849,3 +8849,12 @@ func (s *TaskService) resolveRetryRuntimeFallback(ctx context.Context, q *db.Que
 	}
 	return fallback, err
 }
+
+// EnqueueCommentTaskForRequester runs a member's explicit requester selection
+// on that member's runtime. The normal issue/project authorization still runs.
+func (s *TaskService) EnqueueCommentTaskForRequester(ctx context.Context, issue db.Issue, agentID, squadID, commentID, requesterID pgtype.UUID, assignee bool, origin RunOrigin) (db.AgentTaskQueue, error) {
+	if assignee && !squadID.Valid {
+		return s.enqueueIssueTask(ctx, issue, commentID, false, "", requesterID, pgtype.UUID{}, pgtype.Timestamptz{}, origin)
+	}
+	return s.enqueueMentionTask(ctx, issue, agentID, commentID, squadID.Valid, squadID, false, "", requesterID, pgtype.UUID{}, origin)
+}
