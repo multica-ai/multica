@@ -57,6 +57,10 @@ type TaskService struct {
 	// FeatureFlags is the server-side toggle router. Nil is valid and returns
 	// each call site's default.
 	FeatureFlags *featureflag.Service
+	// LiveRuntimeModels is the last daemon-reported model catalog per runtime.
+	// Nil (or a miss) fails the model-availability check open: the static
+	// Codex table must not gate save/resolve.
+	LiveRuntimeModels LiveRuntimeModels
 	// EmptyClaim caches "this runtime has no queued task" so the daemon
 	// poll path can skip a Postgres scan on the steady-state empty case.
 	// Optional — a nil cache disables the fast path and every claim
@@ -496,6 +500,102 @@ func (s *TaskService) attributionFromComment(ctx context.Context, comment db.Com
 // agent/system origins, including autopilot, deliberately remain unattributed.
 func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
 	return s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource, pgtype.UUID{}).UserID
+}
+
+// resolveOriginatorForIssueTaskWithOverride lets a caller pin the smart-runtime
+// originator to a member it already resolved (the rerun clicker, a wakeup's
+// run-as person, an Autopilot's actor), falling back to the shared
+// comment-chain resolver.
+func (s *TaskService) resolveOriginatorForIssueTaskWithOverride(ctx context.Context, issue db.Issue, triggerCommentID, originatorOverride pgtype.UUID) pgtype.UUID {
+	if originatorOverride.Valid {
+		return originatorOverride
+	}
+	return s.resolveOriginatorForIssueTask(ctx, issue, triggerCommentID)
+}
+
+// runtimeOriginatorForTask returns the member whose personal runtime
+// configuration a task was enqueued with. runtime_config_source is the
+// immutable task-time mode snapshot: a NULL source predates the snapshot
+// column and keeps the legacy behavior of inheriting the task originator;
+// a shared stamp means the agent's fixed runtime and the task originator
+// again; any personal source routes to the effective runtime's owner, whose
+// machine actually executes the task.
+func (s *TaskService) runtimeOriginatorForTask(ctx context.Context, task db.AgentTaskQueue) pgtype.UUID {
+	if !task.RuntimeConfigSource.Valid || task.RuntimeConfigSource.String == string(RuntimeConfigSourceShared) {
+		return task.OriginatorUserID
+	}
+	runtime, err := s.runtimeLookup().Get(ctx, task.RuntimeID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return runtime.OwnerID
+}
+
+type runtimeAvailabilityPolicy uint8
+
+const (
+	requireRuntimeOnline runtimeAvailabilityPolicy = iota
+	allowRuntimeOffline
+)
+
+func (s *TaskService) resolveTaskRuntimeConfig(ctx context.Context, agent db.Agent, originatorUserID pgtype.UUID, policy runtimeAvailabilityPolicy) (EffectiveRuntimeConfig, error) {
+	effectiveRuntime, err := s.ResolveEffectiveRuntimeConfig(ctx, agent, originatorUserID)
+	if err == nil {
+		return effectiveRuntime, nil
+	}
+	status, _, resolutionErr := RuntimeConfigResolutionFromError(err)
+	if policy == allowRuntimeOffline && resolutionErr && status == RuntimeConfigResolutionRuntimeOffline && effectiveRuntime.RuntimeID.Valid {
+		return effectiveRuntime, nil
+	}
+	return effectiveRuntime, err
+}
+
+// resolveTaskRuntimeConfigOn is wakeup dispatch's runtime resolution against
+// the caller's own connection — a transaction's view when queries is a qtx —
+// with the enqueue path's offline tolerance and live model catalog baked in.
+// The catalog must be the same daemon-reported one the enqueue admission
+// reads: an unknown catalog fails the model check open, so a
+// transaction-scoped resolution without it would queue a model the
+// pre-transaction admission had just refused. Admission, disabling and the
+// enqueue must read one authoritative result, so the wakeup paths resolve
+// under the ownership fence on the transaction's connection rather than
+// trusting a pre-transaction read.
+func resolveTaskRuntimeConfigOn(ctx context.Context, queries *db.Queries, agent db.Agent, originatorUserID pgtype.UUID, catalog LiveRuntimeModels) (EffectiveRuntimeConfig, error) {
+	effectiveRuntime, err := ResolveEffectiveRuntimeConfig(ctx, queries, agent, originatorUserID, catalog)
+	if err == nil {
+		return effectiveRuntime, nil
+	}
+	status, _, resolutionErr := RuntimeConfigResolutionFromError(err)
+	if resolutionErr && status == RuntimeConfigResolutionRuntimeOffline && effectiveRuntime.RuntimeID.Valid {
+		return effectiveRuntime, nil
+	}
+	return effectiveRuntime, err
+}
+
+// retryRuntimeFallbackForParent is the runtime override a caller passes to
+// CreateRetryTask's COALESCE, which keeps the plain inheritance whenever the
+// override is NULL. Callers pass the parent row as it reads INSIDE the retry
+// transaction — its current runtime, not a pre-transaction snapshot, decides:
+// a runtime teardown that NULLed a terminal parent after the snapshot must
+// resolve a fallback instead of letting the NULL reach the new active row. A
+// parent with a current runtime passes no override. The fallback resolves the
+// inherited originator's effective runtime on the caller's own connection,
+// with the live model catalog like the enqueue admission; a deterministic
+// failure reports resolvable=false so the caller gives up the retry (the
+// parent still lands failed), and a transient DB error comes back as err.
+func (s *TaskService) retryRuntimeFallbackForParent(ctx context.Context, qtx *db.Queries, agent db.Agent, parent db.AgentTaskQueue) (fallback pgtype.UUID, resolvable bool, err error) {
+	if parent.RuntimeID.Valid {
+		return pgtype.UUID{}, true, nil
+	}
+	effective, rerr := resolveTaskRuntimeConfigOn(ctx, qtx, agent, parent.OriginatorUserID, s.LiveRuntimeModels)
+	if rerr != nil {
+		var resolution *RuntimeConfigResolutionError
+		if errors.As(rerr, &resolution) {
+			return pgtype.UUID{}, false, nil
+		}
+		return pgtype.UUID{}, false, fmt.Errorf("resolve retry runtime: %w", rerr)
+	}
+	return effective.RuntimeID, true, nil
 }
 
 // attributionForIssueTask resolves the full attribution for an issue-backed
