@@ -548,6 +548,113 @@ func TestGetIssueByIdentifierEnforcesPrefix(t *testing.T) {
 // TestDeleteIssueRejectsInvalidUUID verifies that a path segment that is
 // neither a valid UUID nor a valid identifier returns 404 (not 204) — the
 // handler must never silently succeed on malformed input.
+func TestDeleteIssueArchivesImmutableEvidence(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Immutable deletion archive",
+		"status": "todo",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created issue: %v", err)
+	}
+
+	ctx := context.Background()
+	var commentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, type)
+		VALUES ($1, $2, 'member', $3, 'deletion evidence', 'comment')
+		RETURNING id
+	`, testWorkspaceID, created.ID, testUserID).Scan(&commentID); err != nil {
+		t.Fatalf("insert comment fixture: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO activity_log (workspace_id, issue_id, actor_type, actor_id, action)
+		VALUES ($1, $2, 'member', $3, 'created_issue')
+	`, testWorkspaceID, created.ID, testUserID); err != nil {
+		t.Fatalf("insert activity fixture: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/issues/"+created.ID, nil)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.DeleteIssue(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteIssue: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var actorType, actorID, archivedTitle, archivedNumber, fingerprint, sourceIP, sessionIdentity, effectiveUser string
+	err := testPool.QueryRow(ctx, `
+		SELECT actor_type,
+		       COALESCE(actor_id::text, ''),
+		       issue_row->>'title',
+		       issue_row->>'number',
+		       COALESCE(client_fingerprint, ''),
+		       COALESCE(source_ip::text, ''),
+		       session_identity,
+		       effective_user
+		  FROM issue_archive
+		 WHERE issue_id = $1
+		 ORDER BY archive_id DESC
+		 LIMIT 1
+	`, created.ID).Scan(
+		&actorType, &actorID, &archivedTitle, &archivedNumber,
+		&fingerprint, &sourceIP, &sessionIdentity, &effectiveUser,
+	)
+	if err != nil {
+		t.Fatalf("load issue archive: %v", err)
+	}
+	if actorType != "member" || actorID != testUserID {
+		t.Fatalf("archive actor = %s/%s; want member/%s", actorType, actorID, testUserID)
+	}
+	if archivedTitle != "Immutable deletion archive" || archivedNumber == "" {
+		t.Fatalf("archive snapshot incomplete: number=%q title=%q", archivedNumber, archivedTitle)
+	}
+	if fingerprint == "" || sourceIP == "" || sessionIdentity == "" || effectiveUser == "" {
+		t.Fatalf("archive context incomplete: fingerprint=%q ip=%q session=%q user=%q", fingerprint, sourceIP, sessionIdentity, effectiveUser)
+	}
+
+	var archivedComment string
+	if err := testPool.QueryRow(ctx, `
+		SELECT comment_row->>'content'
+		  FROM issue_archive_comment
+		 WHERE issue_id = $1
+		 ORDER BY archive_id DESC
+		 LIMIT 1
+	`, created.ID).Scan(&archivedComment); err != nil {
+		t.Fatalf("load archived comment: %v", err)
+	}
+	if archivedComment != "deletion evidence" {
+		t.Fatalf("archived comment = %q; want deletion evidence", archivedComment)
+	}
+
+	var activityIssueID *string
+	var activityNumber int
+	var activityTitle *string
+	if err := testPool.QueryRow(ctx, `
+		SELECT issue_id::text, issue_number, issue_title
+		  FROM activity_log
+		 WHERE issue_number = $1 AND issue_title = $2
+		 ORDER BY id DESC
+		 LIMIT 1
+	`, archivedNumber, archivedTitle).Scan(&activityIssueID, &activityNumber, &activityTitle); err != nil {
+		t.Fatalf("load activity snapshot: %v", err)
+	}
+	if activityIssueID != nil || activityTitle == nil || activityNumber == 0 {
+		t.Fatalf("activity FK/snapshot = issue_id:%v number:%d title:%v; want null FK and populated snapshot", activityIssueID, activityNumber, activityTitle)
+	}
+
+	// The archive is intentionally not deletable through normal SQL. An owner
+	// must explicitly remove the append-only trigger before rewriting evidence.
+	if _, err := testPool.Exec(ctx, `UPDATE issue_archive SET actor_type = 'rewritten' WHERE issue_id = $1`, created.ID); err == nil {
+		t.Fatal("update of issue_archive unexpectedly succeeded")
+	}
+}
+
 func TestDeleteIssueRejectsInvalidUUID(t *testing.T) {
 	req := newRequest("DELETE", "/api/issues/not-a-uuid-or-identifier", nil)
 	req = withURLParam(req, "id", "not-a-uuid-or-identifier")

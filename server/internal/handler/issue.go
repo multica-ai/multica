@@ -3,12 +3,15 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"sort"
@@ -4623,6 +4626,61 @@ func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue
 		uuidToString(task.AgentID) == uuidToString(targetAgentID)
 }
 
+// hashClientFingerprint produces a stable, non-reversible fingerprint from
+// low-cardinality client request attributes. It is audit context, not identity.
+func hashClientFingerprint(parts ...string) string {
+	joined := strings.Join(parts, "\x1f")
+	if strings.TrimSpace(joined) == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(joined))
+	return hex.EncodeToString(sum[:])
+}
+
+// requestSourceIP resolves the audit source address. Like the handler's
+// rate-limit client IP, forwarded headers are trusted only when the direct
+// peer is inside an explicitly configured trusted-proxy CIDR. With no trusted
+// proxies, RemoteAddr is retained verbatim: an untrusted proxy address is
+// still useful connection attribution, while spoofable headers are not.
+func requestSourceIP(r *http.Request, trustedProxies []netip.Prefix) *netip.Addr {
+	remoteAddr := r.RemoteAddr
+	remoteIP := parseAuditAddr(remoteAddr)
+	if remoteIP == nil && len(trustedProxies) > 0 {
+		remoteIP = parseAuditAddr(remoteAddrHost(remoteAddr))
+	}
+	if len(trustedProxies) > 0 && remoteIP != nil && addrInPrefixes(*remoteIP, trustedProxies) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			first := xff
+			if i := strings.IndexByte(xff, ','); i >= 0 {
+				first = xff[:i]
+			}
+			if forwarded := parseAuditAddr(strings.TrimSpace(first)); forwarded != nil {
+				return forwarded
+			}
+		}
+		if xri := r.Header.Get("X-Real-IP"); xri != "" {
+			if forwarded := parseAuditAddr(strings.TrimSpace(xri)); forwarded != nil {
+				return forwarded
+			}
+		}
+	}
+	return remoteIP
+}
+
+func parseAuditAddr(value string) *netip.Addr {
+	if value == "" {
+		return nil
+	}
+	if addrPort, err := netip.ParseAddrPort(value); err == nil {
+		addr := addrPort.Addr()
+		return &addr
+	}
+	if addr, err := netip.ParseAddr(value); err == nil {
+		return &addr
+	}
+	return nil
+}
+
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	r = h.withWakeupActor(r)
 	id := chi.URLParam(r, "id")
@@ -4638,15 +4696,15 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
 	_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
-	deleteResult, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue, nil)
+	sourceIP := requestSourceIP(r, h.cfg.TrustedProxies)
+	fingerprint := hashClientFingerprint(r.Header.Get("User-Agent"), r.Header.Get("Accept-Language"), r.Header.Get("X-Forwarded-Host"))
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+	deleteResult, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue, nil, actorType, actorID, fingerprint, sourceIP)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete issue")
 		return
 	}
-
 	h.deleteS3Objects(r.Context(), deleteResult.AttachmentURLs)
-	userID := requestUserID(r)
-	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 	// Always emit the resolved UUID — frontend caches key by UUID, so an
 	// identifier-style payload ("MUL-123") would leave stale entries on
 	// other clients after an identifier-path delete.
@@ -4680,11 +4738,11 @@ type clearedDuplicate struct {
 	Original db.Issue
 }
 
-func (h *Handler) deleteIssueAndCollectAttachmentURLs(ctx context.Context, issue db.Issue, excludedIssueIDs []pgtype.UUID) (issueDeleteResult, error) {
-	return h.deleteIssuesAndCollectAttachmentURLs(ctx, []db.Issue{issue}, excludedIssueIDs)
+func (h *Handler) deleteIssueAndCollectAttachmentURLs(ctx context.Context, issue db.Issue, excludedIssueIDs []pgtype.UUID, actorType, actorID, fingerprint string, sourceIP *netip.Addr) (issueDeleteResult, error) {
+	return h.deleteIssuesAndCollectAttachmentURLs(ctx, []db.Issue{issue}, excludedIssueIDs, actorType, actorID, fingerprint, sourceIP)
 }
 
-func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issues []db.Issue, excludedIssueIDs []pgtype.UUID) (issueDeleteResult, error) {
+func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issues []db.Issue, excludedIssueIDs []pgtype.UUID, actorType, actorID, fingerprint string, sourceIP *netip.Addr) (issueDeleteResult, error) {
 	sort.Slice(issues, func(i, j int) bool {
 		return uuidToString(issues[i].ID) < uuidToString(issues[j].ID)
 	})
@@ -4721,6 +4779,18 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 		attachmentURLs, err := qtx.ListAttachmentURLsByIssueOrComments(ctx, issue.ID)
 		if err != nil {
 			return issueDeleteResult{}, fmt.Errorf("list issue attachment URLs: %w", err)
+		}
+		actorUUID, parseErr := util.ParseUUID(actorID)
+		if parseErr != nil {
+			actorUUID = pgtype.UUID{}
+		}
+		if auditErr := qtx.SetIssueAuditContext(ctx, db.SetIssueAuditContextParams{
+			ActorID:           actorUUID,
+			ActorType:         actorType,
+			ClientFingerprint: pgtype.Text{String: fingerprint, Valid: fingerprint != ""},
+			SourceIp:          sourceIP,
+		}); auditErr != nil {
+			return issueDeleteResult{}, fmt.Errorf("set issue audit context: %w", auditErr)
 		}
 		result.AttachmentURLs = append(result.AttachmentURLs, attachmentURLs...)
 		if sourceContext, contextErr := qtx.GetIssueSourceContextByIssue(ctx, db.GetIssueSourceContextByIssueParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID}); contextErr == nil {
@@ -5374,6 +5444,10 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 			Outcome:    outcome,
 		})
 	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	sourceIP := requestSourceIP(r, h.cfg.TrustedProxies)
+	fingerprint := hashClientFingerprint(r.Header.Get("User-Agent"), r.Header.Get("Accept-Language"), r.Header.Get("X-Forwarded-Host"))
+
 	if !h.requireIssueDeletion(w, r, wsUUID, issues) {
 		return
 	}
@@ -5385,14 +5459,18 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 	}
-	deleteResult, err := h.deleteIssuesAndCollectAttachmentURLs(r.Context(), issues, excludedIDs)
+	// Batch deletion is intentionally transaction-per-issue: each issue's
+	// archive/delete pair either commits or rolls back independently, so one
+	// bad member cannot turn already-deleted members into a misleading all-
+	// or-nothing response. This is not a synthetic batch header; the API
+	// reports each requested member explicitly.
+	deleteResult, err := h.deleteIssuesAndCollectAttachmentURLs(r.Context(), issues, excludedIDs, actorType, actorID, fingerprint, sourceIP)
 	if err != nil {
 		slog.Warn("batch delete issues failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete issues")
 		return
 	}
 	h.deleteS3Objects(r.Context(), deleteResult.AttachmentURLs)
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	for _, issue := range issues {
 		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": uuidToString(issue.ID), "project_id": uuidToPtr(issue.ProjectID)})
 	}
