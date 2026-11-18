@@ -5,6 +5,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // A sticky "current task" follow-up keeps the run's machine even though the
@@ -59,5 +60,53 @@ func TestPlannedCommentRuntimeOriginatorRoundTrip(t *testing.T) {
 	}
 	if _, err := plannedCommentRuntimeOriginator([]byte(`{"planned_runtime_originators":{"`+util.UUIDToString(commentID)+`":"not-a-uuid"}}`), commentID); err == nil {
 		t.Fatal("a malformed entry must error, not fall back to the sticky chain")
+	}
+}
+
+// A sticky replay continues a run that a plain member (not the template
+// owner) claimed on their own private machine. The completion-replay stamp
+// vouches for that machine — the fence re-checks the source run really
+// dispatched there — so the run owner's daemon claims the follow-up instead
+// of it stranding in queued.
+func TestSmartRuntimeStickyInheritanceClaimableByRunOwner(t *testing.T) {
+	ctx := t.Context()
+	templateOwner := dbfx.User(t, "Sticky Template Owner", "sticky-inherit-template@example.test")
+	dbfx.Member(t, testWorkspaceID, templateOwner, "member")
+	runOwner := dbfx.User(t, "Sticky Run Owner", "sticky-inherit-run-owner@example.test")
+	dbfx.Member(t, testWorkspaceID, runOwner, "member")
+	joiner := dbfx.User(t, "Sticky Joiner", "sticky-inherit-joiner@example.test")
+	dbfx.Member(t, testWorkspaceID, joiner, "member")
+	machine := dbfx.Runtime(t, "Run owner machine", testutil.Cols{"provider": "codex", "owner_id": runOwner})
+	agentID := dbfx.Agent(t, "inherit-review-agent", "", testutil.Cols{
+		"share_runtime": false, "recommended_cli": "codex", "owner_id": templateOwner,
+	})
+	issueID := dbfx.Issue(t, "Sticky inheritance", testutil.Cols{"assignee_type": "agent", "assignee_id": agentID})
+
+	// The source run: dispatched (claimed and delivered) on the run owner's
+	// machine, attributed to the run owner.
+	sourceID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": machine, "issue_id": issueID, "status": "completed",
+		"originator_user_id": runOwner, "accountable_user_id": runOwner,
+		"runtime_config_source": "recommended_match", "dispatched_at": testutil.Raw("now()"),
+	})
+	source := parseUUID(sourceID)
+
+	// The replay: same machine, attributed to the joining member, then stamped
+	// by the completion replay through the real marking statement.
+	followUp := parseUUID(dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": machine, "issue_id": issueID, "status": "queued",
+		"originator_user_id": joiner, "accountable_user_id": joiner,
+		"runtime_config_source": "recommended_match",
+	}))
+	if _, err := testHandler.Queries.MarkTaskStickyRuntimeInheritance(ctx, db.MarkTaskStickyRuntimeInheritanceParams{
+		TaskID:       followUp,
+		SourceTaskID: source,
+	}); err != nil {
+		t.Fatalf("stamp sticky inheritance: %v", err)
+	}
+
+	claimed, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(machine))
+	if err != nil || claimed == nil {
+		t.Fatalf("the run owner's machine failed to claim the stamped follow-up (task=%v, err=%v)", claimed != nil, err)
 	}
 }

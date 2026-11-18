@@ -1675,6 +1675,19 @@ WHERE id = (
                         OR r.owner_id = a.owner_id
                     )
                 )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
+                    )
+                )
             )
             -- Queued private-runtime rows are claimable so the handler can
             -- settle an owner mismatch through the existing FailTask path
@@ -5128,6 +5141,33 @@ func (q *Queries) GetLatestTaskRolloutMissing(ctx context.Context, arg GetLatest
 	return session_rollout_missing, err
 }
 
+const getQueuedFollowUpTaskForAgent = `-- name: GetQueuedFollowUpTaskForAgent :one
+SELECT id
+FROM agent_task_queue
+WHERE agent_id = $1
+  AND issue_id = $2
+  AND trigger_comment_id = $3
+  AND status = 'queued'
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetQueuedFollowUpTaskForAgentParams struct {
+	AgentID          pgtype.UUID `json:"agent_id"`
+	IssueID          pgtype.UUID `json:"issue_id"`
+	TriggerCommentID pgtype.UUID `json:"trigger_comment_id"`
+}
+
+// Locates the follow-up a completion replay just queued, so the caller can
+// stamp its sticky runtime inheritance. Newest first; nothing matches when the
+// replay merged into an existing task instead of enqueueing one.
+func (q *Queries) GetQueuedFollowUpTaskForAgent(ctx context.Context, arg GetQueuedFollowUpTaskForAgentParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getQueuedFollowUpTaskForAgent, arg.AgentID, arg.IssueID, arg.TriggerCommentID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getWorkspaceAgentActivity30d = `-- name: GetWorkspaceAgentActivity30d :many
 SELECT
     atq.agent_id,
@@ -6867,6 +6907,19 @@ WHERE atq.runtime_id = $1
                         OR r.owner_id = a.owner_id
                     )
                 )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
+                    )
+                )
         )
         AND (
             r.visibility = 'public'
@@ -7002,6 +7055,19 @@ WHERE atq.runtime_id = ANY($1::uuid[])
                         )
                         OR r.owner_id = atq.originator_user_id
                         OR r.owner_id = a.owner_id
+                    )
+                )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
                     )
                 )
         )
@@ -8204,6 +8270,39 @@ func (q *Queries) MarkChatFinalizeDeferred(ctx context.Context, id pgtype.UUID) 
 	return i, err
 }
 
+const markTaskStickyRuntimeInheritance = `-- name: MarkTaskStickyRuntimeInheritance :one
+UPDATE agent_task_queue
+SET context = COALESCE(context, '{}'::jsonb) || jsonb_build_object(
+    'sticky_runtime_inherited', true,
+    'sticky_runtime_inherited_runtime_id', runtime_id::text,
+    'sticky_runtime_inherited_task_id', id::text,
+    'sticky_runtime_source_task_id', $1::uuid
+)
+WHERE id = $2::uuid
+  AND status = 'queued'
+  AND runtime_id IS NOT NULL
+RETURNING id
+`
+
+type MarkTaskStickyRuntimeInheritanceParams struct {
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
+	TaskID       pgtype.UUID `json:"task_id"`
+}
+
+// A sticky "current task" replay inherits the authorization of the run it
+// continues: the completed run claimed and delivered on this machine, so the
+// replay may claim there too even though the joining member owns nothing on
+// it. The marker carries the replay task's own id (so a copied context cannot
+// vouch for another task) and the source task's id; the claim fence re-checks
+// that the source really dispatched on the same machine. Queued only: once
+// claimed, the normal fences take over.
+func (q *Queries) MarkTaskStickyRuntimeInheritance(ctx context.Context, arg MarkTaskStickyRuntimeInheritanceParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, markTaskStickyRuntimeInheritance, arg.SourceTaskID, arg.TaskID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const mergeCommentIntoPendingTask = `-- name: MergeCommentIntoPendingTask :one
 UPDATE agent_task_queue
 SET runtime_id = COALESCE($1::uuid, runtime_id),
@@ -9223,6 +9322,19 @@ WHERE id = (
                         OR r.owner_id = a.owner_id
                     )
                 )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
+                    )
+                )
             )
             AND (
                 r.visibility = 'public'
@@ -9244,6 +9356,19 @@ WHERE id = (
                         )
                         OR r.owner_id = atq.originator_user_id
                         OR r.owner_id = a.owner_id
+                    )
+                )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
                     )
                 )
                     )
@@ -9388,6 +9513,19 @@ WITH candidates AS MATERIALIZED (
                         OR r.owner_id = a.owner_id
                     )
                 )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
+                    )
+                )
             )
             AND (
                 r.visibility = 'public'
@@ -9409,6 +9547,19 @@ WITH candidates AS MATERIALIZED (
                         )
                         OR r.owner_id = atq.originator_user_id
                         OR r.owner_id = a.owner_id
+                    )
+                )
+                OR (
+                    NOT a.share_runtime
+                    AND atq.context @> '{"sticky_runtime_inherited":true}'::jsonb
+                    AND atq.context->>'sticky_runtime_inherited_runtime_id' = atq.runtime_id::text
+                    AND atq.context->>'sticky_runtime_inherited_task_id' = atq.id::text
+                    AND EXISTS (
+                        SELECT 1
+                        FROM agent_task_queue src
+                        WHERE src.id = (atq.context->>'sticky_runtime_source_task_id')::uuid
+                          AND src.runtime_id = atq.runtime_id
+                          AND src.dispatched_at IS NOT NULL
                     )
                 )
                     )

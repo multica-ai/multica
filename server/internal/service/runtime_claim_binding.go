@@ -24,6 +24,13 @@ func RuntimeBindingAllowsClaim(ctx context.Context, q *db.Queries, agent db.Agen
 	if task.AgentID != agent.ID {
 		return false, nil
 	}
+	inherited, inheritErr := stickyRuntimeInheritanceAllowed(ctx, q, task)
+	if inheritErr != nil {
+		return false, inheritErr
+	}
+	if inherited {
+		return true, nil
+	}
 	if agent.ShareRuntime {
 		return agent.RuntimeID == runtimeID || taskHasFixedRuntimeRetention(task), nil
 	}
@@ -69,6 +76,13 @@ func PrivateRuntimePermitsAgent(ctx context.Context, q *db.Queries, agent db.Age
 	if task.AgentID != agent.ID || runtime.ID != task.RuntimeID || runtime.WorkspaceID != agent.WorkspaceID {
 		return false, nil
 	}
+	inherited, inheritErr := stickyRuntimeInheritanceAllowed(ctx, q, task)
+	if inheritErr != nil {
+		return false, inheritErr
+	}
+	if inherited {
+		return true, nil
+	}
 	if runtime.Visibility != "private" || !runtime.OwnerID.Valid {
 		return true, nil
 	}
@@ -107,6 +121,38 @@ func taskOriginatorOwnsRuntime(runtime db.AgentRuntime, task db.AgentTaskQueue) 
 		return false
 	}
 	return task.OriginatorUserID.Valid && runtime.OwnerID == task.OriginatorUserID
+}
+
+// stickyRuntimeInheritanceAllowed reports whether the task carries the
+// completion-replay marker vouching that the run it continues claimed and
+// delivered on this machine. The SQL fence keeps a copy of this check; the
+// source task is re-read here so a stale or forged marker cannot outlive the
+// run's own authorization.
+func stickyRuntimeInheritanceAllowed(ctx context.Context, q *db.Queries, task db.AgentTaskQueue) (bool, error) {
+	if len(task.Context) == 0 || !task.RuntimeID.Valid {
+		return false, nil
+	}
+	var marker struct {
+		Inherited bool   `json:"sticky_runtime_inherited"`
+		RuntimeID string `json:"sticky_runtime_inherited_runtime_id"`
+		TaskID    string `json:"sticky_runtime_inherited_task_id"`
+		SourceID  string `json:"sticky_runtime_source_task_id"`
+	}
+	if json.Unmarshal(task.Context, &marker) != nil || !marker.Inherited {
+		return false, nil
+	}
+	if marker.RuntimeID != util.UUIDToString(task.RuntimeID) || marker.TaskID != util.UUIDToString(task.ID) {
+		return false, nil
+	}
+	sourceID, err := util.ParseUUID(marker.SourceID)
+	if err != nil {
+		return false, nil
+	}
+	source, err := q.GetAgentTask(ctx, sourceID)
+	if err != nil {
+		return false, nil
+	}
+	return source.RuntimeID == task.RuntimeID && source.DispatchedAt.Valid, nil
 }
 
 func taskHasFixedRuntimeRetention(task db.AgentTaskQueue) bool {

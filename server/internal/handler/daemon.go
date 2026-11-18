@@ -5223,6 +5223,44 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 	))
 }
 
+// markStickyRuntimeInheritance stamps the follow-up a completion replay just
+// queued with the marker its claim fence reads: the source run dispatched on
+// the same machine, so the replay may claim there even when the joining
+// member owns nothing on it. Best-effort and queued-only — a failed stamp
+// leaves the follow-up to the ordinary fences rather than failing the replay.
+func (h *Handler) markStickyRuntimeInheritance(ctx context.Context, issue db.Issue, agentID string, commentID pgtype.UUID, sourceTask *db.AgentTaskQueue) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		slog.Warn("reconcile comments on completion: sticky inheritance stamp skipped", "error", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	followUpID, err := qtx.GetQueuedFollowUpTaskForAgent(ctx, db.GetQueuedFollowUpTaskForAgentParams{
+		AgentID:          parseUUID(agentID),
+		IssueID:          issue.ID,
+		TriggerCommentID: commentID,
+	})
+	if err != nil {
+		slog.Warn("reconcile comments on completion: locate sticky follow-up failed",
+			"issue_id", uuidToString(issue.ID), "agent_id", agentID,
+			"comment_id", uuidToString(commentID), "error", err)
+		return
+	}
+	if _, err := qtx.MarkTaskStickyRuntimeInheritance(ctx, db.MarkTaskStickyRuntimeInheritanceParams{
+		TaskID:       followUpID,
+		SourceTaskID: sourceTask.ID,
+	}); err != nil {
+		slog.Warn("reconcile comments on completion: stamp sticky inheritance failed",
+			"task_id", uuidToString(followUpID), "source_task_id", uuidToString(sourceTask.ID), "error", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		slog.Warn("reconcile comments on completion: sticky inheritance stamp not committed",
+			"task_id", uuidToString(followUpID), "error", err)
+	}
+}
+
 // plannedCommentRuntimeOriginator reads the per-comment requester override a
 // deferral persisted on the completed task's context. A missing entry keeps the
 // zero value: the replay then follows the sticky chain. A malformed entry is an
@@ -5419,6 +5457,11 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		}
 		res := h.enqueueCommentAgentTriggers(ctx, issue, c.ID, scoped)[agentID]
 		handled := res.status != DispatchBlocked
+		// The replay continues this run, so it inherits the run's own
+		// machine authorization: stamp the marker the claim fence reads.
+		// A joining member owns nothing on that machine, yet the run it
+		// continues already claimed and delivered there.
+		h.markStickyRuntimeInheritance(ctx, issue, agentID, c.ID, task)
 		if res.status == DispatchBlocked {
 			headSha := h.TaskService.ResolveIssueReviewSHAParam(ctx, task.IssueID)
 			if h.propagateUncoveredCommentObligation(ctx, issue, scoped[0], c.ID, runtimeOriginatorOverride, headSha) {
