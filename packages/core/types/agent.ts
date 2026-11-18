@@ -727,11 +727,19 @@ export interface Agent {
   /**
    * Empty string when the agent is unbound: it kept its configuration, chats and
    * task history when its runtime was deleted, and needs a new runtime before it
-   * can run again (MUL-5559). Use `isAgentRuntimeBound` so additive and legacy
-   * signals stay compatible, and do not confuse it with a bound-but-offline
-   * runtime — that one just needs the machine back.
+   * can run again (MUL-5559) — **or** when a smart agent stores only a
+   * recommended CLI: that empty value is convention, not unbind. Use
+   * `isAgentRuntimeBound` so additive and legacy signals stay compatible, and do
+   * not confuse it with a bound-but-offline runtime — that one just needs the
+   * machine back.
    */
   runtime_id: string;
+  /**
+   * Smart-runtime recommended CLI slug (`cursor`, `codex`, …). Not a machine
+   * id. Older servers omit it; fall back to
+   * `runtime_config_summary.recommended.cli`.
+   */
+  cli?: string;
   /** False exactly when the agent has no runtime. Older backends omit it. */
   runtime_bound?: boolean;
   /** Privacy-safe coarse liveness for a runtime hidden from the runtime list. */
@@ -825,6 +833,14 @@ export interface Agent {
    */
   invocation_targets: AgentInvocationTarget[];
   status: AgentStatus;
+  /**
+   * False means smart runtime: each caller runs with their own runtime config
+   * instead of the agent's bound runtime. Older servers omit it; absent reads
+   * as shared (fixed binding).
+   */
+  share_runtime?: boolean;
+  /** Per-viewer recommended-vs-current resolution; absent on older servers. */
+  runtime_config_summary?: AgentRuntimeConfigSummary;
   max_concurrent_tasks: number;
   model: string;
   /**
@@ -901,6 +917,8 @@ export interface CreateAgentRequest {
   conversation_starters?: AgentConversationStarter[];
   avatar_url?: string;
   runtime_id: string;
+  /** Smart-runtime recommended CLI. Omitted for fixed agents. */
+  cli?: string;
   runtime_config?: Record<string, unknown>;
   custom_env?: Record<string, string>;
   custom_args?: string[];
@@ -917,6 +935,11 @@ export interface CreateAgentRequest {
   invocation_targets?: AgentInvocationTargetInput[];
   max_concurrent_tasks?: number;
   model?: string;
+  /**
+   * False creates a smart agent (callers run with their own runtime config);
+   * omitted or true keeps the fixed runtime binding. Older servers ignore it.
+   */
+  share_runtime?: boolean;
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
   thinking_level?: string;
   /** Optional Codex service-tier catalog ID. See `Agent.service_tier`. */
@@ -1000,6 +1023,8 @@ export interface UpdateAgentRequest {
   conversation_starters?: AgentConversationStarter[];
   avatar_url?: string;
   runtime_id?: string;
+  /** Smart-runtime recommended CLI. Omitted to leave the stored value unchanged. */
+  cli?: string;
   runtime_config?: Record<string, unknown>;
   /**
    * NOTE: `custom_env` is intentionally NOT updatable through this
@@ -1047,6 +1072,12 @@ export interface UpdateAgentRequest {
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;
+  /**
+   * Runtime strategy. Tri-state: omitted → no change; `false` → move the
+   * agent onto smart runtime; `true` → back onto a fixed runtime binding.
+   * Older servers ignore it.
+   */
+  share_runtime?: boolean;
   /**
    * Runtime-native reasoning/effort token. Tri-state semantics (MUL-2339):
    *   - field omitted → no change

@@ -10,6 +10,21 @@ export const agentTaskSnapshotKeys = {
   list: (wsId: string) => [...agentTaskSnapshotKeys.all(wsId), "list"] as const,
 };
 
+export const recentAgentSelectionKeys = {
+  all: (userId: string, wsId: string) =>
+    ["users", userId, "workspaces", wsId, "recent-agents"] as const,
+  current: (userId: string, wsId: string) =>
+    [...recentAgentSelectionKeys.all(userId, wsId), "current"] as const,
+};
+
+export function recentAgentSelectionOptions(userId: string, wsId: string) {
+  return queryOptions({
+    queryKey: recentAgentSelectionKeys.current(userId, wsId),
+    queryFn: () => api.getRecentAgentSelections(wsId),
+    staleTime: 0,
+  });
+}
+
 export const workspaceWorkingAgentsKeys = {
   all: (wsId: string) => ["workspaces", wsId, "working-agents"] as const,
   list: (
@@ -39,6 +54,23 @@ export const agentRunCountsKeys = {
   all: (wsId: string) => ["workspaces", wsId, "agent-run-counts"] as const,
   last30d: (wsId: string) => [...agentRunCountsKeys.all(wsId), "30d"] as const,
 };
+
+export const agentRuntimeConfigKeys = {
+  all: (agentId: string) => ["agents", agentId, "runtime-config"] as const,
+  current: (agentId: string) =>
+    [...agentRuntimeConfigKeys.all(agentId), "current"] as const,
+};
+
+export function agentRuntimeCurrentConfigOptions(
+  agentId: string,
+  enabled = true,
+) {
+  return queryOptions({
+    queryKey: agentRuntimeConfigKeys.current(agentId),
+    queryFn: () => api.getAgentRuntimeCurrentConfig(agentId),
+    enabled: enabled && !!agentId,
+  });
+}
 
 // Workspace-scoped agent task snapshot — every active task plus each agent's
 // most recent terminal task. This is the single shared source of truth that
