@@ -2,6 +2,7 @@ import { onlineManager, useMutation, useQuery, useQueryClient } from "@tanstack/
 import { api } from "../api";
 import { projectKeys, projectMembersOptions } from "./queries";
 import { issueKeys } from "../issues/queries";
+import { refreshFeaturesOnLockedError } from "../billing/paid-features";
 import type { Project, ProjectVisibility } from "../types";
 
 // Mirrors the server (canManageProjectAccess in project_member.go). The caller
@@ -76,6 +77,7 @@ export function useProjectAccessMutation(wsId: string, projectId: string) {
         await api.removeProjectMember(projectId, change.userId);
       }
     },
+    onError: (err) => refreshFeaturesOnLockedError(qc, wsId, err),
     onSettled: async () => {
       await qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
       await qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });

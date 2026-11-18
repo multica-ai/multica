@@ -186,5 +186,11 @@
     "workspace_missing_description": "Has vuelto de Stripe, pero este espacio de trabajo ya no está disponible para ti: puede que se haya eliminado o que tu acceso haya cambiado. Abre Facturación en el espacio de trabajo que esperabas para comprobar el estado actual.",
     "retry": "Reintentar",
     "go_to_app": "Ir a Multica"
+  },
+  "paid_feature": {
+    "read_only": "Solo lectura. Mejora el plan para editar.",
+    "unavailable": "No está incluido en el plan de este espacio de trabajo.",
+    "view_plans": "Ver planes",
+    "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más."
   }
 }
