@@ -4,8 +4,10 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,8 +110,8 @@ func TestDetectVersionHermesDoesNotFallBackOnTimeout(t *testing.T) {
 	detectVersionTimeout = time.Second
 	t.Cleanup(func() { detectVersionTimeout = orig })
 
-	if _, err := DetectVersion(context.Background(), Command{Path: script}.ForVersionProbe("hermes")); err == nil {
-		t.Fatal("expected an error from a hanging probe, got nil")
+	if _, err := DetectVersion(context.Background(), Command{Path: script}.ForVersionProbe("hermes")); !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "version probe timed out") {
+		t.Fatalf("hanging Hermes probe error = %v, want an explicit timeout", err)
 	}
 	// The kill can land before a cold shell writes its log line, so assert only
 	// that the root --version never ran.
@@ -117,6 +119,15 @@ func TestDetectVersionHermesDoesNotFallBackOnTimeout(t *testing.T) {
 		if got != "acp --version" {
 			t.Fatalf("hermes was invoked as %q after the probe timed out; want no fallback", got)
 		}
+	}
+}
+
+func TestDetectVersionNonzeroExitIsNotATimeout(t *testing.T) {
+	script, _ := fakeHermesForVersionProbe(t, `exit 3`)
+	_, err := DetectVersion(context.Background(), Command{Path: script})
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 3 || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("version probe error = %v, want ordinary exit status 3", err)
 	}
 }
 

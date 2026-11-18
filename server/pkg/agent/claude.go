@@ -1661,8 +1661,8 @@ func versionProbeRejectedArgs(ctx context.Context, err error) bool {
 }
 
 // runVersionProbe runs one `<cli> <args>` version probe and returns the
-// recognised version line. The error is unwrapped; detectCLIVersion adds the
-// command and the exec diagnosis.
+// recognised version line. detectCLIVersion adds the command and the exec
+// diagnosis to any probe error.
 func runVersionProbe(ctx context.Context, runtimeCmd Command, args []string) (string, error) {
 	var cmd *exec.Cmd
 	_, zcodeDesktop := zcodeDesktopScript(runtimeCmd.Path)
@@ -1696,6 +1696,9 @@ func runVersionProbe(ctx context.Context, runtimeCmd Command, args []string) (st
 		// answer.
 		if salvageProbeAnswer(runtimeCmd, strings.Join(args, " "), recognised, err) {
 			return version, nil
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("version probe timed out: %w (%w)", context.DeadlineExceeded, err)
 		}
 		return "", err
 	}
