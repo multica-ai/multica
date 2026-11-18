@@ -34,6 +34,9 @@ type ExecOptions struct {
 	// PiSkillPaths contains only the SKILL.md files written for this task by
 	// the daemon. Pi loads them explicitly without trusting other project files.
 	PiSkillPaths []string
+	// ClaudeRuntimeDir supplies the task's CLAUDE.md and skills from outside
+	// the checkout (local worktree runs only). It is passed as --add-dir.
+	ClaudeRuntimeDir string
 	// SystemPrompt carries the Multica runtime brief for the few providers
 	// that cannot pick it up from disk. The daemon leaves it empty for every
 	// other provider (see daemon.providerNeedsInlineSystemPrompt), because the

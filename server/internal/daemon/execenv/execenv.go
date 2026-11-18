@@ -58,7 +58,10 @@ type PrepareParams struct {
 	Profile      string
 	Provider     string // agent provider (determines runtime config and skill injection paths)
 	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	// RuntimeVersion is the version of the provider CLI this task runs, or ""
+	// for a custom command; it selects out-of-checkout delivery (MUL-9445).
+	RuntimeVersion string
+	OpenclawBin    string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Cursor, OpenClaw, and OMP consume it here;
@@ -169,7 +172,11 @@ type TaskContextForEnv struct {
 	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
 	ProjectArchived               bool                    // project is archived; rendered as a note in the Project Context section
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
-	ChatSessionID                 string                  // non-empty for chat tasks
+	// ProjectResourcesOutsideCheckout: resources.json sits in the task
+	// directory that contains the checkout, not under WorkDir. A flag rather
+	// than a path keeps the brief byte-identical across task roots (MUL-5377).
+	ProjectResourcesOutsideCheckout bool
+	ChatSessionID                   string // non-empty for chat tasks
 	// ChatChannelType is the IM platform behind a chat session ("slack",
 	// "feishu", "wecom"); empty for a web/mobile chat. It names the surface in
 	// the brief's copy; what that surface can DELIVER is the separate field
@@ -279,6 +286,11 @@ type SkillFileContextForEnv struct {
 
 // Environment represents a prepared, isolated execution environment.
 type Environment struct {
+	// RuntimeDir is set when a local worktree task's runtime configuration is
+	// delivered outside the checkout (MUL-9445): Claude's CLAUDE.md and skills
+	// live here, Codex's brief lives in CodexHome. Empty means the brief and
+	// sidecars are written into WorkDir as before.
+	RuntimeDir string
 	// SkillDirectories records successful writes by skill ID, including any
 	// filesystem collision suffix. It crosses the preparation-helper JSON
 	// boundary like PreparedSkillNames.
@@ -630,7 +642,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}()
 	}
 
-	preparedSkillNames, err := writeContextFilesTracked(workDir, params.Provider, params.Task, manifest, env.SkillDirectories)
+	if err := env.selectRuntimeDelivery(params.Provider, params.RuntimeVersion, logger); err != nil {
+		return nil, err
+	}
+	preparedSkillNames, err := env.prepareRuntimeContext(params.Provider, params.Task, manifest)
 	if err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}

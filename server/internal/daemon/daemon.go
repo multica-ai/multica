@@ -8744,6 +8744,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		if localAssignment.UsesWorktree() {
 			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
+			// Out-of-checkout delivery was verified against the vendor CLIs,
+			// not arbitrary commands speaking their protocol (MUL-9445).
+			if !usesCustomProfileCommand {
+				prepParams.RuntimeVersion = resolvedVersion
+			}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
 			// enough that worktree tasks still overlap for the run itself.
@@ -8919,7 +8924,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				return // Preserve files that an unconfirmed process may still use.
 			}
 			var cleanupErr error
-			if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {
+			if cerr := env.CleanupRuntimeConfig(provider); cerr != nil {
 				cleanupErr = cerr
 				d.logger.Warn("execenv: cleanup runtime config failed", "error", cerr)
 			}
@@ -9047,13 +9052,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// Build the runtime brief and inject it into the provider-specific
 	// instruction file when supported.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+	runtimeBrief, err := env.InjectRuntimeConfig(provider, taskCtx)
 	runtimeBriefWritten := err == nil
 	if err != nil {
+		if env.RuntimeDir != "" {
+			// The out-of-checkout file is the brief's only channel; without it
+			// the agent would run with no runtime instructions at all.
+			return TaskResult{}, fmt.Errorf("write runtime config outside the worktree: %w", err)
+		}
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
 	if env.LocalWorktree != nil {
-		if err := env.LocalWorktree.ProtectRuntimeConfig(provider); err != nil {
+		if err := env.ProtectRuntimeConfig(provider); err != nil {
 			return TaskResult{}, fmt.Errorf("protect worktree runtime config: %w", err)
 		}
 	}
@@ -9172,6 +9182,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	if provider == "claude" && env.RuntimeDir != "" {
+		// --add-dir loads the directory's skills on its own; its CLAUDE.md
+		// (the brief) only with this switch.
+		agentEnv["CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD"] = "1"
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
@@ -9251,7 +9266,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}()
 	retiredSessionID = gateOpenCodeResumeToSaneClock(ctx, &task, &taskCtx, provider, backendConfig, env.WorkDir, effectiveMcpConfig, taskLog)
 	if retiredSessionID != "" {
-		if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
+		if freshBrief, briefErr := env.InjectRuntimeConfig(provider, taskCtx); briefErr != nil {
 			return TaskResult{}, fmt.Errorf("prepare fresh OpenCode session after clock check: %w", briefErr)
 		} else {
 			runtimeBrief = freshBrief
@@ -9369,6 +9384,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		OpenclawMode:           openclawMode,
 		OpenclawModelOverride:  openclawModelOverride,
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
+		ClaudeRuntimeDir:       claudeRuntimeDir(provider, env),
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
@@ -9460,6 +9476,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		TaskCtx:              taskCtx,
 		Skills:               env.SkillReceipts(provider, taskCtx.AgentSkills),
 		ExistingInstructions: execenv.ExistingRuntimeConfigContent(env.WorkDir, provider),
+		BriefPath:            env.RuntimeConfigReceiptPath(provider),
 	}
 	d.reportContextReceipt(ctx, task.ID, buildContextReceipt(receiptInput), taskLog)
 
@@ -9552,7 +9569,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		execOpts.ResumeContinuityNotice = ""
 		taskCtx.PriorSessionResumed = false
 		runtimeBriefWritten = false
-		freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+		freshBrief, briefErr := env.InjectRuntimeConfig(provider, taskCtx)
 		if briefErr != nil {
 			taskLog.Warn("execenv: re-inject cold runtime config for fresh retry failed (non-fatal)", "error", briefErr)
 		} else {
@@ -11502,6 +11519,15 @@ func annotateCodexRetiredCompaction(errMsg, provider string) string {
 		return errMsg
 	}
 	return errMsg + codexRetiredCompactionHint
+}
+
+// claudeRuntimeDir is the --add-dir directory holding a Claude task's brief
+// and skills when they are delivered outside a local worktree (MUL-9445).
+func claudeRuntimeDir(provider string, env *execenv.Environment) string {
+	if provider != "claude" {
+		return ""
+	}
+	return env.RuntimeDir
 }
 
 func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayHome string, logger *slog.Logger) {

@@ -200,6 +200,31 @@ func TestHumanLocalCommandRejectsWorkdirTaskMarker(t *testing.T) {
 	}
 }
 
+func TestHumanLocalCommandRejectsExternalWorktreeMarker(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, execenv.TaskContextMarkerRelPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"managed_by":"multica-daemon-task","agent_id":"agent"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(root, "worktree", "subdirectory")
+	if err := os.MkdirAll(cwd, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(cwd)
+	for _, key := range []string{"MULTICA_AGENT_ID", "MULTICA_TASK_ID", "MULTICA_DAEMON_PORT", cli.TaskConfigRootEnv} {
+		t.Setenv(key, "")
+	}
+	if got := daemonTaskContextMarkerPathFrom(cwd); got != path {
+		t.Fatalf("marker=%q want %q", got, path)
+	}
+	if err := requireHumanLocalCommand("daemon stop"); err == nil {
+		t.Fatal("stripped environment bypassed task boundary")
+	}
+}
+
 func TestHumanLocalCommandRejectsExplicitTaskIdentity(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // Context receipt (MUL-9013): a per-run record of which context sources this
@@ -147,6 +148,10 @@ type contextReceiptInput struct {
 	// ExistingInstructions is the repository's own content in the runtime
 	// config file, outside the managed block.
 	ExistingInstructions string
+	// BriefPath is set when a local worktree task's brief was written outside
+	// the checkout (MUL-9445); the repository's own file then holds only
+	// ExistingInstructions.
+	BriefPath string
 }
 
 func buildContextReceipt(in contextReceiptInput) ContextReceipt {
@@ -180,6 +185,15 @@ func buildContextReceipt(in contextReceiptInput) ContextReceipt {
 		// Inline wins over the file: providerNeedsInlineSystemPrompt exists
 		// because these runtimes do not read the file the daemon also writes.
 		brief.Delivery, brief.Load = ReceiptDeliveryInline, ReceiptLoadDelivered
+	case in.BriefPath != "" && in.BriefWritten:
+		// Out-of-checkout delivery is selected only for a vendor CLI at or
+		// above the version that canary verified.
+		brief.Delivery, brief.Path = ReceiptDeliveryFile, in.BriefPath
+		brief.VerifiedVersion = agent.ExternalRuntimeConfigMinVersions[in.Provider]
+		brief.Load = ReceiptLoadVerifiedOtherVersion
+		if receiptVersionPattern.FindString(in.RuntimeVersion) == brief.VerifiedVersion {
+			brief.Load = ReceiptLoadVerified
+		}
 	case configPath != "" && in.BriefWritten:
 		brief.Delivery, brief.Path = ReceiptDeliveryFile, configPath
 		brief.Load, brief.VerifiedVersion = fileLoad, fileVerifiedAt

@@ -90,6 +90,13 @@ type SkillReceipt struct {
 // skill, not neighboring user-installed skills or runtime-generated files.
 func (e *Environment) SkillReceipts(provider string, skills []SkillContextForEnv) []SkillReceipt {
 	dir := skillsDirPath(e.WorkDir, provider)
+	location := SkillDeliveryLocation(e.WorkDir, provider)
+	if provider == "claude" && e.RuntimeDir != "" {
+		dir = skillsDirPath(e.RuntimeDir, provider)
+		if rel, err := filepath.Rel(e.WorkDir, dir); err == nil {
+			location = filepath.ToSlash(rel)
+		}
+	}
 	switch provider {
 	case "codex":
 		dir = filepath.Join(e.CodexHome, "skills")
@@ -102,7 +109,7 @@ func (e *Environment) SkillReceipts(provider string, skills []SkillContextForEnv
 	for _, skill := range skills {
 		r := SkillReceipt{
 			Name: skill.Name,
-			Path: SkillDeliveryLocation(e.WorkDir, provider) + "/" + skill.Name + "/SKILL.md",
+			Path: location + "/" + skill.Name + "/SKILL.md",
 		}
 		paths := map[string]struct{}{"SKILL.md": {}}
 		for _, f := range skill.Files {
@@ -143,4 +150,21 @@ func (e *Environment) SkillReceipts(provider string, skills []SkillContextForEnv
 		receipts = append(receipts, r)
 	}
 	return receipts
+}
+
+// RuntimeConfigReceiptPath names where out-of-checkout delivery put the brief,
+// for display only, or "" when the brief went into the checkout as usual.
+func (e *Environment) RuntimeConfigReceiptPath(provider string) string {
+	if e.RuntimeDir == "" {
+		return ""
+	}
+	switch provider {
+	case "codex":
+		return "$CODEX_HOME/AGENTS.md"
+	case "claude":
+		if rel, err := filepath.Rel(e.WorkDir, e.runtimeConfigTarget(provider)); err == nil {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return e.runtimeConfigTarget(provider)
 }
