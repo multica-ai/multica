@@ -39,6 +39,7 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Devin CLI | `devin` | ✓ | ✓ | ✓ | `.devin/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | ✓ | `.opencode/skills/` |
+| San | `san` | ✓ | ✓ | — | — |
 | Pi | `pi` | ✓ | ✓ | ✓ | `.pi/skills/` |
 | Oh-My-Pi | `omp` | ✓ | ✓ | ✓ | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | ✓ | `.qoder/skills/` |
@@ -75,7 +76,7 @@ Devin's picker lists the model choices advertised by its ACP session. Choose a c
 
 Devin reads `WINDSURF_API_KEY` when set, otherwise the login saved by `devin auth login`; unknown ACP auth methods do not block that stored login. Model discovery uses the daemon user's credentials: a key set only in an agent's custom environment is unavailable to the runtime model picker. An empty session model list prompts you to check those credentials and your team's model allowlist. Multica preserves Devin's configured session mode rather than raising permissions. If it defaults to `plan`, switch to an editing mode in Devin before dispatching work that must change files.
 
-QwenPaw, MiniMax Code, and ZeroClaw are exceptions: they do not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in the tool's own configuration instead. An empty model list for these tools is expected and does not mean the runtime is offline.
+QwenPaw, MiniMax Code, ZeroClaw, and San are exceptions: they do not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in the tool's own configuration instead. An empty model list for these tools is expected and does not mean the runtime is offline.
 
 DeepSeek Harness advertises its model catalog from the runtime itself (`dsh --profile multica --list-models`). Its model ids use the `provider/model` form (for example `deepseek-official/deepseek-chat`), so select the full id from the list.
 
@@ -84,6 +85,8 @@ Model names are not shared across tools. After switching AI coding tools, the pr
 </Callout>
 
 ## Session resumption
+
+For San, the daemon launches `san acp` using your existing San provider and model configuration. Multica uses standard Agent Client Protocol (ACP) session creation and loading, passes the agent's MCP configuration, and streams run updates.
 
 Tools marked ✓ can continue an existing session in a later run, provided the original session still exists and the run is executed by a runtime that can reach it. MiniMax Code 0.1.2 advertises no session-loading capability over ACP, so Multica starts a fresh MCode session for a later run.
 

@@ -28,6 +28,7 @@ var MinVersions = map[string]string{
 	"muse":        "1.4.10",    // MSP stable surface: session/start, turn/start, item stream
 	"devin":       "3000.3.22", // devin acp --model was introduced in 3000.3.22
 	"zeroclaw":    "0.8.0",     // persistent ACP sessions and session/resume were added in 0.8.0
+	"san":         "1.25.1",    // first release with native ACP, session/load and MCP
 	"zcode":       "0.16.0",    // native NDJSON app-server protocol
 	// opencode: honors TMPDIR/TMP/TEMP from 1.1.54. Earlier builds ignore all
 	// three when their embedded Bun runtime extracts a native module, writing

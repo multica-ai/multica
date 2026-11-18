@@ -39,6 +39,7 @@ Multica currently detects these commands:
 | ZCode | `zcode` / ZCode Desktop | [ZCode](https://zcode.z.ai/) |
 | OpenClaw | `openclaw` | [Install OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode quickstart](https://opencode.ai/en/docs) |
+| San | `san` | [San getting started](https://genai-io.github.io/san/getting-started.html) (v1.25.1 or later) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
 | Oh-My-Pi | `omp` | [Oh-My-Pi install](https://omp.sh) |
 | Qoder CLI | `qodercli` | [Qoder CLI quickstart](https://docs.qoder.com/en/cli/quick-start) |
@@ -86,6 +87,11 @@ Below the minimum version, the daemon does not register the corresponding runtim
 A few tools need extra setup beyond signing in:
 
 <Accordions type="multiple">
+<Accordion title="San" id="san">
+
+Install San on the daemon's machine; Multica does not install it automatically. The daemon finds `san` on `PATH`, or you can set `MULTICA_SAN_PATH` to the executable's absolute path. Configure the provider, model, and allowed tools in San. The daemon declines permission requests that need human approval instead of bypassing San's policy. Multica does not accept custom arguments for San.
+
+</Accordion>
 <Accordion title="Amp" id="amp">
 
 Install the latest [Amp CLI](https://ampcode.com/docs/cli) on the daemon machine. Amp supports macOS, Linux and Windows through WSL; run the daemon inside WSL when using Windows. Set an Amp access token in `AMP_API_KEY` in the daemon or agent environment, following the official non-interactive setup. Interactive login and saved login sessions alone are not supported by this adapter. Do not put credentials in prompts or custom arguments.

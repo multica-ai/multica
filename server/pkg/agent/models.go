@@ -298,8 +298,8 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discoverCodebuddyModels(ctx, runtimeCmd)
 		})
-	case "amp":
-		// Amp selects its own models; manual IDs select native modes.
+	case "amp", "san":
+		// Neither runtime offers a Multica model catalog.
 		return Catalog{Models: []Model{}}, nil
 	case "qwen", "droid":
 		// Qwen Code and Droid use runtime defaults or manual model IDs. An
@@ -477,6 +477,8 @@ func QualifyModelID(catalog Catalog, model string) (string, bool) {
 // in splitZcodeModelSelection.
 func ModelSelectionSupported(providerType string) bool {
 	switch providerType {
+	case "san":
+		return false
 	case "qwenpaw", "mcode", "zeroclaw", "museapp":
 		// QwenPaw's `session/set_model` persists to agent.json at the agent
 		// scope, not the session scope. Calling it would mutate the user's
