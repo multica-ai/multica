@@ -2,7 +2,7 @@
 --
 -- Databases that already committed the upstream 667 file replaced the check
 -- with weixin_chat and not sharecrm_chat. VALIDATE then raises 23514, this
--- version is not recorded, and 683 never runs. New sharecrm_chat writes are
+-- version is not recorded, and 685 never runs. New sharecrm_chat writes are
 -- already rejected. Repair that check before scanning.
 --
 -- When weixin_chat and sharecrm_chat are both already allowed, the repair

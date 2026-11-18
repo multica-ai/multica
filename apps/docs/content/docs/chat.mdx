@@ -106,6 +106,16 @@ Queued messages appear above the input and run in order. You can remove them, us
 
 Steering applies to direct Chat sessions on updated web, desktop, and mobile clients. On mobile, queued messages appear at the end of the conversation; remove or edit them on web or desktop. Older clients and Slack and Lark channel conversations keep their existing queue behavior.
 
+## Follow up later [#follow-up-later]
+
+Ask the agent to report back when something happens, for example, "Tell me when this issue is ready for review" or "Remind me in two hours." It can create a wakeup that starts another run in this conversation when an issue reaches a status, sub-issues finish, a GitHub PR merges or closes, its checks finish, a run ends, or a member comments on an issue. It can also return at a set time or check periodically.
+
+On web and desktop, a card under the reply records the follow-up. The strip above the input shows what the agent is waiting for and its deadline. Open the strip or the clock button in the conversation header to see **Wakeups**, including those that ended in the past 7 days. Use **Cancel wakeup** to stop waiting; if a report run fails or is cancelled, use **Retry** to request it again.
+
+Conditions and periodic checks wait 24 hours by default, at most 7 days. If the deadline arrives first, the agent gets one final turn to report where things stand. One-time reminders can be scheduled up to 30 days ahead. A conversation can have at most 10 active wakeups. Archiving the conversation cancels its active wakeups; losing access to the agent or watched work can also end them.
+
+For ongoing schedules such as a daily report, use an [autopilot](/autopilots). Agents manage follow-ups with [`chat wakeup`](/cli#chat-wakeups).
+
 ## Organize the conversation list
 
 Conversations can be renamed, pinned, archived, and deleted:

@@ -197,7 +197,7 @@ func TestHandleTask_CancelAckCarriesRetiredSession(t *testing.T) {
 		RuntimeID: "rt-1",
 		IssueID:   "issue-retire-ack",
 		Agent:     &AgentData{Name: "test-agent"},
-	}, 0)
+	}, newTestTaskSlot(0))
 
 	mu.Lock()
 	defer mu.Unlock()

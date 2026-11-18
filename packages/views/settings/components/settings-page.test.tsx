@@ -8,6 +8,7 @@ import {
   PLUGINS_V1_FLAG,
 } from "@multica/core/feature-flags";
 import { renderWithI18n } from "../../test/i18n";
+import { ScrollRestorationProvider } from "../../platform";
 
 // This file tests the settings SHELL — the chrome around the tabs — so every
 // tab panel is stubbed out. Their contents have their own test files. Profile
@@ -224,6 +225,36 @@ describe("SettingsPage header", () => {
     expect(back.getAttribute("href")).not.toContain("integration");
     expect(header.getByText("Acme workspace")).toBeInTheDocument();
     expect(screen.queryByText("Messaging", { selector: "nav" })).toBeNull();
+  });
+});
+
+describe("SettingsPage scroll restoration", () => {
+  // Every settings page shares the route, so one page's offset must not land
+  // on another when the content remounts.
+  it("gives each page its own saved offset", () => {
+    const get = vi.fn((key: string) =>
+      key === "settings:members:" ? { top: 360, height: 1400 } : undefined,
+    );
+    navigationState.search = "tab=members";
+    const { rerender } = renderWithI18n(
+      <ScrollRestorationProvider adapter={{ get }}>
+        <SettingsPage />
+      </ScrollRestorationProvider>,
+    );
+
+    const members = screen.getByText("MembersTab").closest<HTMLElement>("[data-tab-scroll-root]")!;
+    expect(members.getAttribute("data-tab-scroll-root")).toBe("settings:members:");
+    expect(members.scrollTop).toBe(360);
+
+    navigationState.search = "tab=labels";
+    rerender(
+      <ScrollRestorationProvider adapter={{ get }}>
+        <SettingsPage />
+      </ScrollRestorationProvider>,
+    );
+    const labels = screen.getByText("LabelsTab").closest<HTMLElement>("[data-tab-scroll-root]")!;
+    expect(labels.getAttribute("data-tab-scroll-root")).toBe("settings:labels:");
+    expect(labels.scrollTop).toBe(0);
   });
 });
 

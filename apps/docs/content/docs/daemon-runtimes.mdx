@@ -103,6 +103,8 @@ Detailed states and retry rules are in [Runs](/tasks).
 
 One daemon executes at most 20 runs at a time by default; each agent at most 6. Effective concurrency is the smaller of the two.
 
+Runs waiting for a Direct local directory do not use a daemon execution slot. They reacquire a slot before starting and still count as owned work for shutdown and update safety.
+
 Once a limit is reached, new runs keep queueing. Adjust a single agent's concurrency in the agent settings, and the machine-wide cap with `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Parallel runs compete for machine capacity, tool account quota, and the same working directory all at once.
 
 Token usage, cost, and failures across runs are summarized per workspace on the [Analytics](/analytics) page; `multica runtime usage <runtime-id>` shows token usage for a single runtime.

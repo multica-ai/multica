@@ -22,9 +22,15 @@ interface InboxSelectionState {
    * moves on every click. The issue page replays its landing (the comment or
    * app request the link names) when the counter moves, which a click on the
    * row already open needs: the page neither remounts nor sees a new link.
+   *
+   * Until the page reports it `landed`, the click outranks the page's record
+   * that it already landed on that comment. The record belongs to the issue's
+   * route, which a click on another page cannot reach before it navigates.
    */
-  landing: { issueId: string; token: number } | null;
+  landing: { issueId: string; token: number; landed: boolean } | null;
   requestLanding: (issueId: string) => void;
+  /** The issue page landed the click with this token. */
+  completeLanding: (token: number) => void;
   /**
    * The open notification's row as each list last showed it, by
    * `${wsId}:${list}`, so the list can keep it in place (`keepOpenInboxRow`).
@@ -83,7 +89,11 @@ export const useInboxSelectionStore = create<InboxSelectionState>()((set) => ({
     }),
   landing: null,
   requestLanding: (issueId) =>
-    set((state) => ({ landing: { issueId, token: (state.landing?.token ?? 0) + 1 } })),
+    set((state) => ({ landing: { issueId, token: (state.landing?.token ?? 0) + 1, landed: false } })),
+  completeLanding: (token) =>
+    set((state) => state.landing?.token === token && !state.landing.landed
+      ? { landing: { ...state.landing, landed: true } }
+      : state),
   heldRows: {},
   holdRow: (wsId, list, row) =>
     set((state) => {

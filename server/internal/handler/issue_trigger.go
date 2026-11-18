@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -77,21 +78,146 @@ func (h *Handler) shouldSuppressActiveSelfAssignment(ctx context.Context, actorT
 	return active || err != nil
 }
 
+// logDeclinedIssueRun records why an issue write that could have started a run
+// did not (#10845). The precise cause goes to server logs, not the write
+// response (see admission.go). Parking an assignment in backlog is routine, so
+// it logs at debug.
+func logDeclinedIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger) {
+	if trigger.DeclineReason == "" {
+		return
+	}
+	level := slog.LevelInfo
+	if trigger.DeclineReason == ReasonDeferred {
+		level = slog.LevelDebug
+	}
+	slog.Log(ctx, level, "issue write did not start a run",
+		"issue_id", uuidToString(issue.ID),
+		"assignee_type", issue.AssigneeType.String,
+		"assignee_id", uuidToString(issue.AssigneeID),
+		"reason", trigger.DeclineReason,
+	)
+}
+
+// IssueRunOutcome tells the caller of an issue write what happened to the run
+// it could have started (#10845). It has the shape of CommentTriggerOutcome:
+// target_id is the assignee the issue names (the squad id for a squad) and
+// reason_code a stable dispatch code. Like trigger_outcomes it goes to the
+// caller only, never into the issue:updated broadcast.
+type IssueRunOutcome struct {
+	TargetType string             `json:"target_type"` // "agent" | "squad"
+	TargetID   string             `json:"target_id"`
+	Status     DispatchStatus     `json:"status"` // queued | coalesced | deferred | blocked
+	ReasonCode DispatchReasonCode `json:"reason_code"`
+}
+
+// resolveIssueRun starts the run an issue write decided on and reports the
+// result. willRun is the predicate's decision before suppress_run; a write
+// that could not have started a run (no reason either) reports nothing.
+//
+// The write probe admits every caller, so a promotion can start a private
+// agent the caller may not invoke. Its outcome would then expose that agent's
+// readiness, so the caller gets no outcome; the server log keeps the cause.
+func (h *Handler) resolveIssueRun(r *http.Request, issue db.Issue, trigger service.IssueRunTrigger, willRun, suppressRun bool, actorType, actorID, workspaceID, handoffNote string) *IssueRunOutcome {
+	if issue.AssigneeType.String != "agent" && issue.AssigneeType.String != "squad" {
+		return nil
+	}
+	var status DispatchStatus
+	var reason DispatchReasonCode
+	switch {
+	case willRun && suppressRun:
+		status, reason = DispatchDeferred, ReasonDeferred
+	case willRun:
+		status, reason = h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
+	case trigger.DeclineReason != "":
+		status, reason = declinedRunStatus(trigger.DeclineReason), trigger.DeclineReason
+	default:
+		return nil
+	}
+	if !h.callerCanInvokeIssueAssignee(r, issue, actorType, actorID, workspaceID) {
+		return nil
+	}
+	return &IssueRunOutcome{
+		TargetType: issue.AssigneeType.String,
+		TargetID:   uuidToString(issue.AssigneeID),
+		Status:     status,
+		ReasonCode: reason,
+	}
+}
+
+// declinedRunStatus maps a decline reason to its status, matching the comment
+// path: a run already pending or active covers the write, backlog parks it,
+// and anything else is blocked.
+func declinedRunStatus(reason DispatchReasonCode) DispatchStatus {
+	switch reason {
+	case ReasonCoalesced:
+		return DispatchCoalesced
+	case ReasonDeferred, ReasonAlreadyActive:
+		return DispatchDeferred
+	}
+	return DispatchBlocked
+}
+
+// callerCanInvokeIssueAssignee applies the preview probe's gate to the agent
+// that runs: the assignee, or a squad's leader. A target that no longer
+// resolves has no readiness to expose.
+func (h *Handler) callerCanInvokeIssueAssignee(r *http.Request, issue db.Issue, actorType, actorID, workspaceID string) bool {
+	agentID := issue.AssigneeID
+	if issue.AssigneeType.String == "squad" {
+		squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{ID: issue.AssigneeID, WorkspaceID: issue.WorkspaceID})
+		if err != nil {
+			return true
+		}
+		agentID = squad.LeaderID
+	}
+	agent, err := h.Queries.GetAgent(r.Context(), agentID)
+	if err != nil {
+		return true
+	}
+	return h.invokeAgentDecision(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID)
+}
+
 // dispatchIssueRun executes the enqueue side effect for a decision produced by
-// WillEnqueueRun. handoffNote is a legacy API input retained for installed
-// clients and travels only with a run that actually starts. The squad path
-// still flows through enqueueSquadLeaderTask so the leader access gate and
-// pending dedup stay in one place.
-func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) {
+// WillEnqueueRun and reports what happened. handoffNote is a legacy API input
+// retained for installed clients and travels only with a run that actually
+// starts. The squad path still flows through enqueueSquadLeaderTask so the
+// leader access gate and pending dedup stay in one place.
+func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) (DispatchStatus, DispatchReasonCode) {
 	switch trigger.AssigneeType {
 	case "agent":
 		// The member who performed this assign/promote is the accountable human
 		// for the run (MUL-4302 §4). An agent actor is not a human, so only a
 		// member actor is threaded; otherwise attribution falls back to the chain.
-		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
+		_, err := h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
+		if err == nil {
+			return DispatchQueued, ReasonQueued
+		}
+		return issueEnqueueFailure(issue, issue.AssigneeID, err)
 	case "squad":
-		h.enqueueSquadLeaderTask(ctx, issue, actorType, actorID, handoffNote, trigger.WorkflowHandoff)
+		return h.enqueueSquadLeaderTask(ctx, issue, actorType, actorID, handoffNote, trigger.WorkflowHandoff)
 	}
+	return DispatchBlocked, ReasonTargetUnavailable
+}
+
+// issueEnqueueFailure types an enqueue error on the issue write path. A
+// pending task that won the slot already covers the write; the service logs
+// that coalesce at debug. Anything else is logged here.
+func issueEnqueueFailure(issue db.Issue, agentID pgtype.UUID, err error) (DispatchStatus, DispatchReasonCode) {
+	if errors.Is(err, service.ErrDuplicatePendingTask) {
+		return DispatchCoalesced, ReasonCoalesced
+	}
+	log := slog.Default()
+	if issue.AssigneeType.String == "squad" {
+		log = log.With("squad_id", uuidToString(issue.AssigneeID))
+	}
+	log.Warn("issue write: run enqueue failed",
+		"issue_id", uuidToString(issue.ID),
+		"agent_id", uuidToString(agentID),
+		"error", err,
+	)
+	if errors.Is(err, service.ErrIssueInTriage) {
+		return DispatchBlocked, ReasonIssueInTriage
+	}
+	return DispatchBlocked, commentEnqueueFailureReason(err)
 }
 
 // memberActorUserID returns the acting member's user id as a pgtype.UUID when the

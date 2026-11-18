@@ -62,6 +62,7 @@ Après la première répartition, le chef est automatiquement réveillé par **l
 |---|---|---|
 | Un non-membre (rapporteur humain, agent externe) publie un commentaire | Oui | |
 | Un membre du squad publie un point d'avancement sans `@mention` | Oui | Le chef réévalue si une étape suivante est nécessaire |
+| Un membre ou un agent de travail mentionne explicitement le chef du squad assigné comme agent | Oui | Le chef agit dans son rôle de chef et peut consigner sa décision avec `multica squad activity` |
 | Un membre humain mentionne uniquement d'autres membres ou `@all` | Non | Les personnes reçoivent des notifications ; le routage implicite vers les agents est désactivé |
 | Un agent autre que le chef mentionne uniquement des membres ou `@all` | Oui | Le résultat du worker revient au chef ; les personnes reçoivent leurs notifications habituelles |
 | Quelqu'un mentionne explicitement un agent ou un squad | Seulement s'il est nommé | Seuls les agents ou chefs de squad nommés sont exécutés ; aucun repli supplémentaire vers le chef |

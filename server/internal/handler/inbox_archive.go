@@ -212,8 +212,10 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 	if resp.HasMore {
 		rows = rows[:limit]
 	}
+	issuePrefix := h.getIssuePrefix(r.Context(), filters.WorkspaceID)
 	for _, row := range rows {
 		item := inboxToResponse(row.InboxItem)
+		item.IssueIdentifier = inboxIssueIdentifier(issuePrefix, row.IssueNumber)
 		item.Body = inboxListBody(row.InboxItem.Type, row.InboxItem.IssueID, row.InboxItem.Body)
 		item.IssueStatus, item.IssuePriority = textToPtr(row.IssueStatus), textToPtr(row.IssuePriority)
 		item.IssueProjectID, item.IssueDueDate = uuidToPtr(row.IssueProjectID), dateToPtr(row.IssueDueDate)
