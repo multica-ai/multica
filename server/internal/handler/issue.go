@@ -2976,12 +2976,24 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// — but with the verdict's own code, so "CLI cannot run" no longer arrives
 	// as "runtime is offline" and sends the user to reconnect a machine that is
 	// already connected (MUL-6164).
-	if verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent); err != nil {
+	if verdict, err := service.EffectiveAgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent, requesterUUID, h.liveRuntimeModels()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check agent runtime")
 		return
 	} else if !verdict.Ready() {
 		writeAgentUnavailable(w, verdict.Detail, verdict.Reason)
 		return
+	}
+
+	runtimeID := agent.RuntimeID
+	if !agent.ShareRuntime {
+		runtime, err := h.resolveEffectiveAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent, requesterUUID)
+		if err != nil {
+			if !writeRuntimeConfigResolutionHTTPError(w, err) {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime")
+			}
+			return
+		}
+		runtimeID = runtime.ID
 	}
 
 	// Daemon CLI version gate. The agent-side prompt + create-flow rely on
@@ -2993,17 +3005,17 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// twenty seconds later. Dev-built
 	// daemons (git-describe shape) are exempted inside CheckMinCLIVersion
 	// so `make daemon` works without weakening staging or production.
-	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID); status != 0 {
+	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), obsmetrics.RuntimeLookupSourceIssue, runtimeID); status != 0 {
 		writeJSON(w, status, payload)
 		return
 	}
-	if status, payload := h.checkQuickCreateQoderLimits(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, len(req.AttachmentIDs) > 0); status != 0 {
+	if status, payload := h.checkQuickCreateQoderLimits(r.Context(), obsmetrics.RuntimeLookupSourceIssue, runtimeID, len(req.AttachmentIDs) > 0); status != 0 {
 		writeJSON(w, status, payload)
 		return
 	}
 	if priority != "" || dueDate != "" {
 		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(
-			r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
+			r.Context(), obsmetrics.RuntimeLookupSourceIssue, runtimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
 		); status != 0 {
 			writeJSON(w, status, payload)
 			return
@@ -3073,6 +3085,9 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
 	if err != nil {
+		if writeRuntimeConfigResolutionHTTPError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrProjectAccessDenied) {
 			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonProjectAccessBlocked)
 			return

@@ -281,7 +281,11 @@ func (h *Handler) UpdateAgentRuntimeCurrentConfig(w http.ResponseWriter, r *http
 	}
 	runtimeConfig := req.RuntimeConfig
 	if effective.RuntimeID.Valid == runtime.ID.Valid && effective.RuntimeID.Bytes == runtime.ID.Bytes {
-		runtimeConfig = restoreMaskedRuntimeConfig(runtimeConfig, effective.RuntimeConfig)
+		if len(runtimeConfig) == 0 {
+			runtimeConfig = effective.RuntimeConfig
+		} else {
+			runtimeConfig = restoreMaskedRuntimeConfig(runtimeConfig, effective.RuntimeConfig)
+		}
 	}
 	providerFields := service.RuntimeConfigFieldsForTarget(
 		effective.RuntimeID,

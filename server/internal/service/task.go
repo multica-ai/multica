@@ -503,35 +503,6 @@ func (s *TaskService) resolveOriginatorForIssueTask(ctx context.Context, issue d
 	return s.attributionForIssueTask(ctx, issue, triggerCommentID, attribution.SourceCommentSource, pgtype.UUID{}).UserID
 }
 
-// resolveOriginatorForIssueTaskWithOverride lets a caller pin the smart-runtime
-// originator to a member it already resolved (the rerun clicker, a wakeup's
-// run-as person, an Autopilot's actor), falling back to the shared
-// comment-chain resolver.
-func (s *TaskService) resolveOriginatorForIssueTaskWithOverride(ctx context.Context, issue db.Issue, triggerCommentID, originatorOverride pgtype.UUID) pgtype.UUID {
-	if originatorOverride.Valid {
-		return originatorOverride
-	}
-	return s.resolveOriginatorForIssueTask(ctx, issue, triggerCommentID)
-}
-
-// runtimeOriginatorForTask returns the member whose personal runtime
-// configuration a task was enqueued with. runtime_config_source is the
-// immutable task-time mode snapshot: a NULL source predates the snapshot
-// column and keeps the legacy behavior of inheriting the task originator;
-// a shared stamp means the agent's fixed runtime and the task originator
-// again; any personal source routes to the effective runtime's owner, whose
-// machine actually executes the task.
-func (s *TaskService) runtimeOriginatorForTask(ctx context.Context, task db.AgentTaskQueue) pgtype.UUID {
-	if !task.RuntimeConfigSource.Valid || task.RuntimeConfigSource.String == string(RuntimeConfigSourceShared) {
-		return task.OriginatorUserID
-	}
-	runtime, err := s.runtimeLookup().Get(ctx, task.RuntimeID)
-	if err != nil {
-		return pgtype.UUID{}
-	}
-	return runtime.OwnerID
-}
-
 type runtimeAvailabilityPolicy uint8
 
 const (
