@@ -1969,7 +1969,11 @@ it.each(["pending", "denied"])(
   },
 );
 
-it("refreshes a pasted protected image against its owning workspace", async () => {
+it.each([
+  "/api/attachments/11111111-2222-3333-4444-555555555555/download",
+  "/uploads/workspaces/aaaaaaaa-2222-3333-4444-555555555555/11111111-2222-3333-4444-555555555555.png",
+  "https://api.example.test/uploads/workspaces/aaaaaaaa-2222-3333-4444-555555555555/11111111-2222-3333-4444-555555555555.png",
+])("refreshes a pasted protected image against its owning workspace: %s", async (url) => {
   const id = "11111111-2222-3333-4444-555555555555";
   const fresh = makeAttachment({
     id,
@@ -1982,7 +1986,7 @@ it("refreshes a pasted protected image against its owning workspace", async () =
     <AttachmentPreviewModal
       source={{
         kind: "url",
-        url: `/api/attachments/${id}/download`,
+        url,
         filename: fresh.filename,
       }}
       open
@@ -1999,7 +2003,7 @@ it("refreshes a pasted protected image against its owning workspace", async () =
 });
 
 describe("image viewer prefetch reuse", () => {
-  it.each(["full", "url"] as const)(
+  it.each(["full", "url", "legacy-url", "absolute-legacy-url"] as const)(
     "uses the prefetched signature without another metadata request for a %s source",
     async (kind) => {
       const att = makeAttachment({
@@ -2009,11 +2013,18 @@ describe("image viewer prefetch reuse", () => {
         download_url: "https://cdn.example.test/neighbor.png?Signature=expired",
       });
       const fresh = { ...att, download_url: "https://cdn.example.test/neighbor.png?Signature=prefetched" };
-      getAttachmentMock.mockResolvedValue(fresh);
+      if (kind === "full") getAttachmentMock.mockResolvedValue(fresh);
       getAttachmentForDownloadMock.mockResolvedValue(fresh);
+      const legacyUrl = `/uploads/workspaces/aaaaaaaa-2222-3333-4444-555555555555/${att.id}.png`;
       const source = kind === "full"
         ? { kind, attachment: att }
-        : { kind, url: `/api/attachments/${att.id}/download`, filename: att.filename };
+        : {
+            kind: "url" as const,
+            url: kind === "url"
+              ? `/api/attachments/${att.id}/download`
+              : kind === "legacy-url" ? legacyUrl : `https://api.example.test${legacyUrl}`,
+            filename: att.filename,
+          };
       const src = vi.spyOn(HTMLImageElement.prototype, "src", "set");
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
       const view = rtlRender(

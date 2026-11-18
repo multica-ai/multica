@@ -417,7 +417,7 @@ export function PreviewImagePrefetch({ source }: { source: PreviewSource }) {
     true,
     {
       refreshOnMount: true,
-      metadataSource: source.kind === "url" && attachmentIdFromDownloadURL(source.url)
+      metadataSource: source.kind === "url" && state.attachmentId
         ? "markdown-link"
         : "workspace",
     },
@@ -820,7 +820,7 @@ function PreviewPanel({
     kind === "image",
     {
       refreshOnMount: kind === "image",
-      metadataSource: source.kind === "url" && attachmentIdFromDownloadURL(source.url)
+      metadataSource: source.kind === "url" && state.attachmentId
         ? "markdown-link"
         : "workspace",
       currentMetadata: kind === "image" ? currentImageMetadata : undefined,
