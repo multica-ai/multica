@@ -958,6 +958,7 @@ function CommentRow({
               onUploadingChange={edit.onUploadingChange}
               debounceMs={100}
               currentIssueId={issueId}
+              enableRuntimeAgentMentions
               attachments={edit.editorAttachments}
             />
           </div>
@@ -1571,6 +1572,7 @@ function CommentCardImpl({
                     onUploadingChange={edit.onUploadingChange}
                     debounceMs={100}
                     currentIssueId={issueId}
+                    enableRuntimeAgentMentions
                     attachments={edit.editorAttachments}
                   />
                 </div>

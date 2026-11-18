@@ -313,6 +313,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           onUploadingChange={uploadGate.onUploadingChange}
           debounceMs={100}
           currentIssueId={issueId}
+          enableRuntimeAgentMentions
           attachments={pendingAttachments}
           enableSlashCommands={!guest}
           slashCommandMode="command"

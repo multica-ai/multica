@@ -491,6 +491,15 @@ export interface AgentTask {
   id: string;
   agent_id: string;
   runtime_id: string;
+  /** Run-scoped runtime identity, including machines outside the viewer's list. */
+  runtime_owner_id?: string;
+  runtime_provider?: string;
+  originator_user_id?: string;
+  effective_model?: string;
+  effective_thinking_level?: string;
+  effective_service_tier?: string;
+  runtime_config_source?: string;
+  runtime_config_hint?: RuntimeConfigHint;
   // Empty string ("") when the task has no linked issue — either chat- or
   // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
   // which source produced it.

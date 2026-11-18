@@ -26,7 +26,7 @@ import type {
   UpdateDocRequest,
   CreateDocFolderRequest,
 } from "../types/doc";
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -638,6 +638,7 @@ import {
   RecentAgentSelectionResponseSchema,
   EMPTY_RECENT_AGENT_SELECTION_RESPONSE,
   AgentRuntimeConfigSummarySchema,
+  RuntimeConfigHintSchema,
   MALFORMED_AGENT_RUNTIME_CONFIG_SUMMARY,
   MigrateAgentsToRuntimeResponseSchema,
   MALFORMED_MIGRATE_AGENTS_TO_RUNTIME_RESPONSE,
@@ -1934,10 +1935,16 @@ export class ApiClient {
     parent_issue_id?: string | null;
     attachment_ids?: string[];
   }): Promise<{ task_id: string; runtime_config_hint?: RuntimeConfigHint }> {
-    return this.fetch("/api/issues/quick-create", {
+    const raw = await this.fetch<unknown>("/api/issues/quick-create", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    const response = parseWithFallback(raw, z.object({
+      task_id: z.string().min(1),
+      runtime_config_hint: RuntimeConfigHintSchema.optional().catch(undefined),
+    }), null, { endpoint: "POST /api/issues/quick-create" });
+    if (!response) throw new Error("Invalid quick-create response");
+    return response;
   }
 
   async getCommentSubIssuePreview(anchorCommentId: string): Promise<SourceContextPreview> {

@@ -2453,6 +2453,34 @@ const TaskUsageSchema = z.object({
   credits_micros: z.number().optional().catch(undefined),
 }).loose();
 
+const RuntimeConfigHintSourceSchema = z.enum(["recommended", "default", "saved"]);
+const RuntimeConfigResolutionStatusSchema = z.enum([
+  "ready", "no_user_runtime", "runtime_unavailable", "runtime_offline", "model_unavailable",
+]);
+const runtimeHintFields = {
+  should_show: z.boolean().default(false),
+  hint_key: z.string().optional(),
+  resolution_status: RuntimeConfigResolutionStatusSchema.optional().catch(undefined),
+  resolution_message: z.string().optional(),
+};
+export const RuntimeConfigHintSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("agent"),
+    ...runtimeHintFields,
+    runtime_name: z.string().default(""),
+    model_name: z.string().nullable().optional(),
+    model_label: z.string().default(""),
+    source: RuntimeConfigHintSourceSchema,
+  }),
+  z.object({
+    kind: z.literal("squad"),
+    ...runtimeHintFields,
+    affected_count: z.number().default(0),
+    recommended_count: z.number().optional(),
+    default_count: z.number().optional(),
+  }),
+]);
+
 export const AgentTaskSchema = z.object({
   wakeup_id: z.string().optional().catch(undefined),
   cancelled_by_comment_change: z.boolean().optional().catch(undefined),
@@ -2460,6 +2488,14 @@ export const AgentTaskSchema = z.object({
   id: z.string(),
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
+  runtime_owner_id: z.string().optional().catch(undefined),
+  runtime_provider: z.string().optional().catch(undefined),
+  originator_user_id: z.string().optional().catch(undefined),
+  effective_model: z.string().optional().catch(undefined),
+  effective_thinking_level: z.string().optional().catch(undefined),
+  effective_service_tier: z.string().optional().catch(undefined),
+  runtime_config_source: z.string().optional().catch(undefined),
+  runtime_config_hint: RuntimeConfigHintSchema.optional().catch(undefined),
   issue_id: z.string().default(""),
   issue_identifier: z.string().optional().catch(undefined),
   issue_title: z.string().optional().catch(undefined),

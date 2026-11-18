@@ -340,6 +340,7 @@ function ReplyInput({
             onUploadingChange={uploadGate.onUploadingChange}
             debounceMs={100}
             currentIssueId={issueId}
+            enableRuntimeAgentMentions
             attachments={pendingAttachments}
             enableSlashCommands
             slashCommandMode="command"
