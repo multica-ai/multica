@@ -49,9 +49,17 @@ const LIST_MARKER_GAP = 20;
 
 interface HandlePosition {
   target: BlockTarget;
+  /** Hover area: from the handle to the block's left edge, the block's full height. */
   top: number;
   left: number;
+  width: number;
+  height: number;
+  /** Offset of the buttons inside the area, centered on the first line. */
+  buttonTop: number;
 }
+
+/** How long the handle survives the pointer leaving the editor on its way over. */
+const HIDE_DELAY_MS = 200;
 
 /** Vertical center of the block's first line, so the handle lines up with text. */
 function firstLineCenter(view: EditorView, target: BlockTarget): number | null {
@@ -99,10 +107,16 @@ export function measureBlockHandle(
   const blockRect = dom.getBoundingClientRect();
   const center = firstLineCenter(view, target) ?? blockRect.top + HANDLE_HEIGHT / 2;
   const markerGap = target.node.type.name === "listItem" ? LIST_MARKER_GAP : 0;
+  // The area runs right up to the block and down its whole height, so moving
+  // the pointer left from any line of the block lands on the handle instead of
+  // crossing empty margin, which would leave the editor and hide it.
   return {
     target,
-    top: center - containerRect.top - HANDLE_HEIGHT / 2,
+    top: blockRect.top - containerRect.top,
     left: blockRect.left - containerRect.left - HANDLE_OFFSET - markerGap,
+    width: HANDLE_OFFSET + markerGap,
+    height: Math.max(blockRect.height, HANDLE_HEIGHT),
+    buttonTop: Math.max(0, center - blockRect.top - HANDLE_HEIGHT / 2),
   };
 }
 
@@ -142,12 +156,25 @@ export function BlockHandle({
     const container = containerRef.current;
     if (!container) return;
     let frame = 0;
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const cancelHide = () => {
+      clearTimeout(hideTimer);
+      hideTimer = undefined;
+    };
     const hide = () => {
+      cancelHide();
       if (pinnedRef.current || draggingRef.current) return;
       cancelAnimationFrame(frame);
       setPosition(null);
     };
+    // Leaving the editor is often the pointer heading for the handle along a
+    // path that grazes outside it; give it a moment to arrive.
+    const hideSoon = () => {
+      cancelHide();
+      hideTimer = setTimeout(hide, HIDE_DELAY_MS);
+    };
     const onMove = (event: MouseEvent) => {
+      cancelHide();
       // A held button means a text selection or a drag is under way; moving
       // the handle then would detach the drag source.
       if (pinnedRef.current || draggingRef.current || event.buttons !== 0) return;
@@ -159,15 +186,16 @@ export function BlockHandle({
       });
     };
     container.addEventListener("mousemove", onMove);
-    container.addEventListener("mouseleave", hide);
+    container.addEventListener("mouseleave", hideSoon);
     // Typing and remote updates move blocks under a handle; hide until the
     // pointer moves again.
     editor.view.dom.addEventListener("keydown", hide);
     editor.on("update", hide);
     return () => {
       cancelAnimationFrame(frame);
+      cancelHide();
       container.removeEventListener("mousemove", onMove);
-      container.removeEventListener("mouseleave", hide);
+      container.removeEventListener("mouseleave", hideSoon);
       editor.view.dom.removeEventListener("keydown", hide);
       editor.off("update", hide);
     };
@@ -211,35 +239,45 @@ export function BlockHandle({
   return (
     <div
       data-block-handle=""
-      className="absolute z-10 flex items-center gap-0.5"
-      style={{ top: position.top, left: position.left, height: HANDLE_HEIGHT }}
+      className="absolute z-10"
+      style={{
+        top: position.top,
+        left: position.left,
+        width: position.width,
+        height: position.height,
+      }}
     >
-      <button
-        type="button"
-        aria-label={t(($) => $.block_handle.add)}
-        title={t(($) => $.block_handle.add)}
-        className="flex size-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        // Keep the caret in the editor; the click places it on the new line.
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={() => run(() => openInsertMenuBelow(editor, target))}
+      <div
+        className="absolute left-0 flex items-center gap-0.5"
+        style={{ top: position.buttonTop, height: HANDLE_HEIGHT }}
       >
-        <Plus className="size-4" />
-      </button>
-      <button
-        ref={gripRef}
-        type="button"
-        draggable
-        aria-label={t(($) => $.block_handle.options)}
-        title={t(($) => $.block_handle.options)}
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-        className="flex h-6 w-4 cursor-grab items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:cursor-grabbing"
-        onClick={() => setMenuOpen(true)}
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-      >
-        <GripVertical className="size-4" />
-      </button>
+        <button
+          type="button"
+          aria-label={t(($) => $.block_handle.add)}
+          title={t(($) => $.block_handle.add)}
+          className="flex size-6 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          // Keep the caret in the editor; the click places it on the new line.
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => run(() => openInsertMenuBelow(editor, target))}
+        >
+          <Plus className="size-4" />
+        </button>
+        <button
+          ref={gripRef}
+          type="button"
+          draggable
+          aria-label={t(($) => $.block_handle.options)}
+          title={t(($) => $.block_handle.options)}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          className="flex h-6 w-4 cursor-grab items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground active:cursor-grabbing"
+          onClick={() => setMenuOpen(true)}
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+        >
+          <GripVertical className="size-4" />
+        </button>
+      </div>
       <DropdownMenu
         open={menuOpen}
         onOpenChange={(open) => {

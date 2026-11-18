@@ -206,9 +206,19 @@ test("block menu, block handle and outline shape a document", async ({ page }, i
   await expect.poll(content).toContain("## Timeline");
   await expect(outline.getByRole("button")).toHaveText(["Goals", "Scope", "Risks", "Timeline"]);
 
-  // The handle's grip opens turn-into.
-  await page.getByText("Ship Docs.", { exact: true }).hover();
-  await page.getByRole("button", { name: "Drag to move, click for options" }).click();
+  // The handle's grip opens turn-into. Glide to it like a person: the path
+  // crosses the margin between the text and the handle.
+  const line = (await page.getByText("Ship Docs.", { exact: true }).boundingBox())!;
+  await page.mouse.move(line.x + line.width / 2, line.y + line.height - 2);
+  const grip = page.getByRole("button", { name: "Drag to move, click for options" });
+  const gripBox = (await grip.boundingBox())!;
+  await page.mouse.move(gripBox.x + gripBox.width / 2, gripBox.y + gripBox.height / 2, {
+    steps: 40,
+  });
+  await page.waitForTimeout(400);
+  await expect(grip).toBeVisible();
+  await page.mouse.down();
+  await page.mouse.up();
   await expect(page.getByRole("group", { name: "Turn into" })).toBeVisible();
   await page.getByRole("menuitem", { name: "Quote", exact: true }).click();
   await expect.poll(content).toContain("> Ship Docs.");
