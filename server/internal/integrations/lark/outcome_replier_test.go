@@ -900,12 +900,10 @@ func mustUUID(s string) pgtype.UUID {
 // reaching for via reflection in future test cases.
 var _ = pgx.ErrNoRows
 
-// TestLarkOutcomeReplierRepliesNativelyInOrdinaryGroup is the outcome
-// replier's half of #8234: the /issue confirmation now attaches to the
-// message that asked for it even outside a topic. reply_in_thread stays
-// false — there is no topic to stay inside — so the reply lands in the
-// group as a native quote-reply rather than a standalone message.
-func TestLarkOutcomeReplierRepliesNativelyInOrdinaryGroup(t *testing.T) {
+// TestLarkOutcomeReplierOpensTopicForCommandInOrdinaryGroup: a command sent
+// at the chat level of an ordinary group gets its result in a new topic under
+// the command message, where the subscription updates that follow land too.
+func TestLarkOutcomeReplierOpensTopicForCommandInOrdinaryGroup(t *testing.T) {
 	t.Parallel()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	stub := &stubAPIClientWithRecorder{configured: true}
@@ -936,8 +934,8 @@ func TestLarkOutcomeReplierRepliesNativelyInOrdinaryGroup(t *testing.T) {
 	if got.MessageID != "om_trigger" {
 		t.Errorf("ordinary group confirmation must reply to the trigger; got %+v", got)
 	}
-	if got.InThread {
-		t.Errorf("no thread id, so reply_in_thread must be false; got %+v", got)
+	if !got.InThread {
+		t.Errorf("a command reply must open a topic under the command; got %+v", got)
 	}
 }
 

@@ -35,6 +35,9 @@ const (
 	// refuses the same person at the same point; this is that verdict on the
 	// channel side.
 	OutcomeInvokeDenied Outcome = "invoke_denied"
+	// OutcomeIssueSubscription — a /subscribe or /unsubscribe command ran for
+	// an issue or a project; Result.Subscription carries the verdict.
+	OutcomeIssueSubscription Outcome = "issue_subscription"
 )
 
 // DropReason enumerates the drop-audit categories. Values match the legacy
@@ -79,6 +82,12 @@ type Result struct {
 	// message also carried downloadable media. Repliers use it to tell the
 	// sender to include that media again with the corrected command.
 	IssueUsageHadMedia bool
+	// IssueChatSubscribed marks an /issue confirmation whose group chat now
+	// follows the created issue (see IssueChatSubscribedNote).
+	IssueChatSubscribed bool
+	// Subscription describes an OutcomeIssueSubscription result; render it
+	// with SubscriptionReplyText.
+	Subscription SubscriptionOutcome
 	// runScheduled reports whether this ingest scheduled a normal chat run.
 	// It is Router-internal state: repliers must continue to use Outcome.
 	runScheduled bool
@@ -449,8 +458,8 @@ type TypingNotifier interface {
 }
 
 // ResolverSet is the per-platform bundle the Router runs the pipeline through.
-// Installation/Identity/Dedup/Session/Audit are required; Replier/Typing are
-// optional. OriginType is the issue.origin_type label written for /issue
+// Installation/Identity/Dedup/Session/Audit are required; Replier/Typing/Poster
+// are optional. OriginType is the issue.origin_type label written for /issue
 // commands from this channel (Feishu: "lark_chat").
 type ResolverSet struct {
 	Installation InstallationResolver
@@ -461,7 +470,10 @@ type ResolverSet struct {
 	Audit        Auditor
 	Replier      OutboundReplier
 	Typing       TypingNotifier
-	OriginType   string
+	// Poster delivers chat issue subscription updates. Nil means the platform
+	// does not support /subscribe and /issue does not auto-subscribe.
+	Poster     ChatPoster
+	OriginType string
 }
 
 // IssueCreator is the narrow subset of service.IssueService the Router needs

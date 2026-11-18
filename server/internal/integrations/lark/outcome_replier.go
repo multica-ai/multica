@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -197,7 +198,7 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 		if res.IssueUsageHadMedia {
 			copy = issueUsageWithMediaCopy
 		}
-		if err := r.sendChatNotice(ctx, inst, msg, copy); err != nil {
+		if err := r.sendNoticeCard(ctx, inst, msg, copy, commandReplyTarget(msg)); err != nil {
 			r.log.Warn("lark outcome replier: issue usage reply failed",
 				"installation_id", uuidString(inst.ID),
 				"chat_id", string(msg.ChatID),
@@ -219,8 +220,28 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst Installation, msg I
 				)
 			}
 		}
+	case OutcomeIssueSubscription:
+		text := engine.SubscriptionReplyText(engineSubscriptionResult(res), r.appURL, nil)
+		if err := r.sendReplyText(ctx, inst, msg, text); err != nil {
+			r.log.Warn("lark outcome replier: issue subscription reply failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"err", err.Error(),
+			)
+		}
 	case OutcomeDropped:
 		// OutcomeDropped is informational; no user-visible reply.
+	}
+}
+
+func engineSubscriptionResult(res DispatchResult) engine.Result {
+	return engine.Result{
+		IssueID:            res.IssueID,
+		IssueNumber:        res.IssueNumber,
+		IssueIdentifier:    res.IssueIdentifier,
+		IssueWorkspaceSlug: res.IssueWorkspaceSlug,
+		IssueTitle:         res.IssueTitle,
+		Subscription:       res.Subscription,
 	}
 }
 
@@ -263,6 +284,18 @@ func isBindingPromptUnavailable(err error) bool {
 // sendIssueOutcome posts either the created confirmation or active-duplicate
 // conflict as plain text, with a link to the relevant issue when configured.
 func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installation, msg InboundMessage, res DispatchResult) error {
+	text := issueCreatedText(res, r.appURL)
+	if res.IssueDuplicate {
+		text = issueDuplicateText(res, r.appURL)
+	} else if res.IssueChatSubscribed {
+		text += "\n" + engine.IssueChatSubscribedNote(engineSubscriptionResult(res))
+	}
+	return r.sendReplyText(ctx, inst, msg, text)
+}
+
+// sendReplyText posts a command's plain-text result (/issue, /subscribe,
+// /unsubscribe) in a topic under the command message; see commandReplyTarget.
+func (r *LarkOutcomeReplier) sendReplyText(ctx context.Context, inst Installation, msg InboundMessage, text string) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
 	}
@@ -270,16 +303,12 @@ func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installa
 	if err != nil {
 		return err
 	}
-	text := issueCreatedText(res, r.appURL)
-	if res.IssueDuplicate {
-		text = issueDuplicateText(res, r.appURL)
-	}
 	// Share the Patcher's classified fallback: a thread reply that
 	// fails because the topic cannot receive it (recalled trigger,
 	// topics disabled, aggregated message) falls back to a chat-level
 	// send so the product result is not lost; transport/5xx/rate-limit
 	// failures stay failures rather than leaking into the group chat.
-	return sendWithReplyFallback(r.log, "send issue outcome text", inboundReplyTarget(msg), func(t ReplyTarget) error {
+	return sendWithReplyFallback(r.log, "send issue outcome text", commandReplyTarget(msg), func(t ReplyTarget) error {
 		_, err := r.client.SendTextMessage(ctx, SendTextParams{
 			InstallationID: creds,
 			ChatID:         msg.ChatID,
@@ -288,6 +317,19 @@ func (r *LarkOutcomeReplier) sendIssueOutcome(ctx context.Context, inst Installa
 		})
 		return err
 	})
+}
+
+// commandReplyTarget places a group command's reply in a topic under the
+// command message, opening one when the command was sent at chat level, so
+// command results and the subscription updates that follow (posted under the
+// same message, see chatPoster) stay out of the main chat. Agent replies keep
+// inboundReplyTarget: a follow-up inside a new topic would start a separate
+// topic session. Direct messages stay chat-level.
+func commandReplyTarget(msg InboundMessage) ReplyTarget {
+	if msg.MessageID == "" || (msg.ThreadID == "" && msg.ChatType != ChatTypeGroup) {
+		return ReplyTarget{}
+	}
+	return ReplyTarget{MessageID: msg.MessageID, InThread: true}
 }
 
 // inboundReplyTarget mirrors threadReplyTarget (used by the event-driven
@@ -356,6 +398,10 @@ func issueDuplicateText(res DispatchResult, appURL string) string {
 }
 
 func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installation, msg InboundMessage, body string) error {
+	return r.sendNoticeCard(ctx, inst, msg, body, inboundReplyTarget(msg))
+}
+
+func (r *LarkOutcomeReplier) sendNoticeCard(ctx context.Context, inst Installation, msg InboundMessage, body string, target ReplyTarget) error {
 	if msg.ChatID == "" {
 		return errors.New("missing chat_id")
 	}
@@ -374,7 +420,7 @@ func (r *LarkOutcomeReplier) sendChatNotice(ctx context.Context, inst Installati
 	// Same classified fallback as sendIssueOutcome: only thread-reply
 	// failures that mean the topic cannot receive the message fall back
 	// to a chat-level send; ambiguous/transport failures stay failures.
-	return sendWithReplyFallback(r.log, "send notice card", inboundReplyTarget(msg), func(t ReplyTarget) error {
+	return sendWithReplyFallback(r.log, "send notice card", target, func(t ReplyTarget) error {
 		_, err := r.client.SendInteractiveCard(ctx, SendCardParams{
 			InstallationID: creds,
 			ChatID:         msg.ChatID,

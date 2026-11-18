@@ -4,6 +4,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 // This file holds the Feishu adapter's native-ish inbound/outbound value
@@ -103,6 +104,8 @@ const (
 	OutcomeAgentOffline Outcome = "agent_offline"
 	// OutcomeAgentArchived — landed, but the agent is archived.
 	OutcomeAgentArchived Outcome = "agent_archived"
+	// OutcomeIssueSubscription mirrors engine.OutcomeIssueSubscription.
+	OutcomeIssueSubscription Outcome = "issue_subscription"
 )
 
 // DispatchResult is the Feishu-side verdict the OutcomeReplier consumes to
@@ -130,4 +133,8 @@ type DispatchResult struct {
 	// IssueUsageHadMedia asks the usage reply to tell the sender to include the
 	// current message's media again with the corrected command.
 	IssueUsageHadMedia bool
+	// IssueChatSubscribed appends the follow note to an /issue confirmation.
+	IssueChatSubscribed bool
+	// Subscription carries an OutcomeIssueSubscription verdict.
+	Subscription engine.SubscriptionOutcome
 }

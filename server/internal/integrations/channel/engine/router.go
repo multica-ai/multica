@@ -25,7 +25,7 @@ import (
 // channel.InboundMessage and calls Handle, which routes by ChannelType to that
 // platform's registered resolver set and runs the same ordered pipeline for
 // every platform — installation route → two-phase dedup → group @bot filter →
-// identity + membership → invoke permission → ensure session → append+mark → /issue → durable
+// identity + membership → invoke permission → /subscribe → ensure session → append+mark → /issue → durable
 // debounced run trigger + detached media binding — then drives the detached
 // outbound replier + typing indicator.
 //
@@ -41,6 +41,8 @@ type Router struct {
 	tasks     TaskEnqueuer
 	reader    SessionReader
 	lifecycle ChannelChatLifecycle
+
+	subscriptions ChatSubscriptionQueries
 
 	batcher *pendingBatcher
 
@@ -78,6 +80,9 @@ type RouterConfig struct {
 	MediaConcurrency int
 	Logger           *slog.Logger
 	Lifecycle        ChannelChatLifecycle
+	// Subscriptions backs chat subscriptions (/subscribe, /unsubscribe,
+	// /issue auto-subscribe, PublishIssueUpdate). Nil disables the feature.
+	Subscriptions ChatSubscriptionQueries
 }
 
 // NewRouter builds a Router around the shared (platform-agnostic) services:
@@ -99,18 +104,19 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 	}
 	mediaCtx, mediaCancel := context.WithCancel(context.Background())
 	return &Router{
-		sets:         make(map[channel.Type]ResolverSet),
-		issues:       issues,
-		tasks:        tasks,
-		reader:       reader,
-		lifecycle:    cfg.Lifecycle,
-		replyTimeout: cfg.ReplyTimeout,
-		mediaTimeout: cfg.MediaTimeout,
-		mediaCtx:     mediaCtx,
-		mediaCancel:  mediaCancel,
-		mediaSem:     make(chan struct{}, cfg.MediaConcurrency),
-		logger:       cfg.Logger,
-		mediaQueues:  make(map[string]*mediaQueueEntry),
+		sets:          make(map[channel.Type]ResolverSet),
+		issues:        issues,
+		tasks:         tasks,
+		reader:        reader,
+		lifecycle:     cfg.Lifecycle,
+		subscriptions: cfg.Subscriptions,
+		replyTimeout:  cfg.ReplyTimeout,
+		mediaTimeout:  cfg.MediaTimeout,
+		mediaCtx:      mediaCtx,
+		mediaCancel:   mediaCancel,
+		mediaSem:      make(chan struct{}, cfg.MediaConcurrency),
+		logger:        cfg.Logger,
+		mediaQueues:   make(map[string]*mediaQueueEntry),
 	}
 }
 
@@ -406,6 +412,18 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}, finalizeMark, nil
 	}
 
+	// 4c. /subscribe and /unsubscribe act on the chat itself, not on its
+	//     conversation: they are answered here and never stored or run.
+	if !startChat {
+		if cmd, ok := ParseSubscriptionCommand(msg.CommandText); ok {
+			res, err := r.handleSubscriptionCommand(ctx, set, inst, identity, msg, cmd)
+			if err != nil {
+				return Result{}, finalizeRelease, err
+			}
+			return res, finalizeMark, nil
+		}
+	}
+
 	// 5-6. Resolve the current Chat route, then either append normally or
 	// atomically create the next Chat route with its optional first turn.
 	sessionCreator := identity.UserID
@@ -652,6 +670,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		// show the chat "#42" while the realtime list shows "-42".
 		res.IssueIdentifier = service.IssueIdentifier(prefix, issueRes.Issue.Number)
 		res.IssueWorkspaceSlug = workspaceSlug
+		res.IssueChatSubscribed = r.autoSubscribeCreatedIssue(ctx, set, inst, msg, issueRes.Issue, identity.UserID)
 		// IssueService.Create already enqueues the assigned agent's issue task.
 		// Scheduling the command as a chat run too makes the agent execute the
 		// same /issue input again. A synchronous issue command is terminal.

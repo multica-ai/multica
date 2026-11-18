@@ -498,6 +498,9 @@ cleared_pr_exclusions AS (
 cleared_unread AS (
     DELETE FROM issue_unread WHERE issue_id IN (SELECT target.id FROM target)
 ),
+cleared_channel_issue_subscriptions AS (
+    DELETE FROM channel_issue_subscription WHERE issue_id IN (SELECT target.id FROM target)
+),
 cleared_environments AS (
     DELETE FROM issue_environment WHERE issue_id IN (SELECT target.id FROM target)
 ),
