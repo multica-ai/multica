@@ -3,14 +3,8 @@ export const RUNTIME_DEFAULT_MODEL_SENTINEL = "Default" as const;
 
 const LEGACY_RUNTIME_DEFAULT_MODEL_LABELS = new Set([
   RUNTIME_DEFAULT_MODEL_SENTINEL,
-  "默认模型",
-  "运行时默认模型",
   "Runtime default model",
   "Runtime default",
-  "런타임 기본 모델",
-  "런타임 기본값",
-  "ランタイムのデフォルトモデル",
-  "ランタイム既定",
 ]);
 
 export function isRuntimeDefaultModelLabel(

@@ -105,13 +105,13 @@ describe("unbound Builder runtime recovery", () => {
     expect(apiMocks.switchRuntime).not.toHaveBeenCalled();
 
     fireEvent.click(view.trigger());
-    fireEvent.click(await screen.findByRole("button", { name: /Claude.*available\.local/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Claude(?: Code)?$/ }));
     expect(apiMocks.switchRuntime).toHaveBeenCalledExactlyOnceWith(session.session_id, { runtime_id: runtime.id });
     expect(view.trigger()).toHaveTextContent("Select a runtime first");
     expect(view.trigger()).toBeDisabled();
 
     await act(async () => resolveBinding({ runtime_id: runtime.id }));
-    await waitFor(() => expect(view.trigger()).toHaveTextContent("Available machine"));
+    await waitFor(() => expect(view.trigger()).toHaveTextContent("Claude"));
     expect(view.trigger()).toBeEnabled();
   });
 
