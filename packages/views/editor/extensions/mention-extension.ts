@@ -44,7 +44,7 @@ function findMentionStart(src: string): number {
 /** A mention as text, the way its pill reads: issues and projects by name. */
 export function mentionText(attrs: Record<string, unknown>): string {
   const type = attrs.type ?? "member";
-  const prefix = type === "issue" || type === "project" ? "" : "@";
+  const prefix = type === "issue" || type === "project" || type === "doc" ? "" : "@";
   return `${prefix}${String(attrs.label ?? attrs.id ?? "")}`;
 }
 
@@ -112,7 +112,7 @@ export const BaseMentionExtension = Mention.extend({
   },
   renderMarkdown: (node: any) => {
     const { id, label, type = "member" } = node.attrs || {};
-    const prefix = type === "issue" || type === "project" ? "" : "@";
+    const prefix = type === "issue" || type === "project" || type === "doc" ? "" : "@";
     // Escape [ ] \ ( ) in the label so the markdown link syntax is not broken
     // and the label survives the linear tokenizer (which now treats "\" as an
     // escape lead, not an ordinary char). Must stay in sync with the unescape

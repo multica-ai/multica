@@ -11,7 +11,8 @@
     "delete": "삭제",
     "cancel": "취소",
     "history": "기록",
-    "more": "더 보기"
+    "more": "더 보기",
+    "copy_link": "링크 복사"
   },
   "errors": {
     "move": "이동하지 못했습니다",
@@ -54,5 +55,6 @@
     "loading": "불러오는 중..."
   },
   "edited": "{{time}} 편집",
-  "outline": "개요"
+  "outline": "개요",
+  "link_copied": "링크를 복사했습니다"
 }

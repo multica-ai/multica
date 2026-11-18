@@ -11,7 +11,8 @@
     "delete": "Delete",
     "cancel": "Cancel",
     "history": "History",
-    "more": "More"
+    "more": "More",
+    "copy_link": "Copy link"
   },
   "errors": {
     "move": "Couldn't move it",
@@ -54,5 +55,6 @@
     "loading": "Loading..."
   },
   "edited": "Edited {{time}}",
-  "outline": "Outline"
+  "outline": "Outline",
+  "link_copied": "Link copied"
 }

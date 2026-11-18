@@ -11,7 +11,8 @@
     "delete": "Eliminar",
     "cancel": "Cancelar",
     "history": "Historial",
-    "more": "Más"
+    "more": "Más",
+    "copy_link": "Copiar enlace"
   },
   "errors": {
     "move": "No se pudo mover",
@@ -54,5 +55,6 @@
     "loading": "Cargando..."
   },
   "edited": "Editado {{time}}",
-  "outline": "Esquema"
+  "outline": "Esquema",
+  "link_copied": "Enlace copiado"
 }

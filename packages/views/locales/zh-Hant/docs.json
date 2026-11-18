@@ -11,7 +11,8 @@
     "delete": "刪除",
     "cancel": "取消",
     "history": "歷史",
-    "more": "更多"
+    "more": "更多",
+    "copy_link": "複製連結"
   },
   "errors": {
     "move": "移動失敗",
@@ -54,5 +55,6 @@
     "loading": "載入中..."
   },
   "edited": "{{time}}編輯",
-  "outline": "大綱"
+  "outline": "大綱",
+  "link_copied": "連結已複製"
 }
