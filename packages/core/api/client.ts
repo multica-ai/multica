@@ -264,6 +264,7 @@ import type {
   CreateBillingPortalSessionResponse,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrices,
+  WorkspaceFeatures,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspaceSubscriptionSeatReconcileResult,
@@ -421,6 +422,7 @@ import {
   BatchUpdateIssuesResponseSchema,
   UNCONFIRMED_BATCH_UPDATE,
   WorkspaceSubscriptionPricesSchema,
+  WorkspaceFeaturesSchema,
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
   WorkspaceSeatPurchasePreviewSchema,
@@ -2466,6 +2468,19 @@ export class ApiClient {
       WorkspaceSubscriptionSummarySchema,
       null,
       { endpoint: "GET /api/cloud-subscriptions/summary" },
+    );
+  }
+
+  // Paid-feature states for read-only and upgrade UI (MUL-9482). A response
+  // that cannot be read falls back to every feature available: the server
+  // still enforces on write.
+  async getWorkspaceFeatures(workspaceId: string): Promise<WorkspaceFeatures> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/features`);
+    return parseWithFallback<WorkspaceFeatures>(
+      raw,
+      WorkspaceFeaturesSchema,
+      { features: {} },
+      { endpoint: "GET /api/workspaces/:id/features" },
     );
   }
 

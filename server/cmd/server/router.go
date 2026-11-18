@@ -480,6 +480,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		opts.BusinessMetrics.RecordEntitlementConfigError()
 	} else if entitlementClient.Enabled() {
 		h.Entitlements = entitlementClient
+		h.Features = entitlementClient
 		h.AutopilotService.Entitlements = entitlementClient
 		h.AutopilotService.QuotaMetrics = opts.BusinessMetrics
 	}
@@ -1834,6 +1835,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetWorkspace)
 					r.Put("/pin", h.SetWorkspacePinned)
 					r.Get("/members", h.ListMembersWithUser)
+					// Paid-feature states for read-only and upgrade UI; the
+					// server enforces on every write regardless.
+					r.Get("/features", h.GetWorkspaceFeatures)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 					// Listing GitHub installations is member-visible so the

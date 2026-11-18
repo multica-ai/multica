@@ -179,5 +179,11 @@
     "workspace_missing_description": "你已從 Stripe 返回，但該工作區對你已不可用——可能已被刪除，或你的訪問權限發生了變化。請到你預期的那個工作區的帳單頁確認當前狀態。",
     "retry": "重試",
     "go_to_app": "前往 Multica"
+  },
+  "paid_feature": {
+    "read_only": "唯讀，升級後可編輯",
+    "unavailable": "目前工作區的套餐不包含此功能。",
+    "view_plans": "查看套餐",
+    "locked_error": "目前工作區的套餐不包含此功能。既有設定繼續生效，升級後可以新增。"
   }
 }
