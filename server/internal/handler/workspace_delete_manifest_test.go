@@ -84,7 +84,6 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	// identifier and survives workspace teardown.
 	"issue_archive":                      workspaceDeleteAudit,
 	"issue_archive_comment":              workspaceDeleteKeep,
-	"issue_delete_audit":                 workspaceDeleteAudit,
 	"issue_wakeup_receipt":               workspaceDelete,
 	"issue_child_event":                  workspaceDelete,
 	"issue_view":                         workspaceDelete,
