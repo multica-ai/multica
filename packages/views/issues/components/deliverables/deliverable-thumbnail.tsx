@@ -5,8 +5,8 @@ import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { Download, ImageIcon, Link2 } from "@multica/ui/icons";
-import { copyImage, copyText } from "@multica/ui/lib/clipboard";
+import { Download, Eye, ImageIcon, Link2 } from "@multica/ui/icons";
+import { canCopyImage, copyImage, copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../i18n";
 import { CLOSED_ROW_MENU, type RowMenuState } from "../../../common/point-menu";
@@ -16,6 +16,7 @@ import {
   useAttachmentThumbnailURL,
   useResignedInlineMedia,
 } from "../../../editor/hooks/use-inline-media-url";
+import { useOpenAttachment } from "./use-open-attachment";
 import { fileTypeLabel, getPreviewKind } from "../../../editor/utils/preview";
 import { fileIcon } from "../../../editor/utils/file-icon";
 
@@ -113,7 +114,6 @@ function ResizedImageThumbnail({
 }) {
   const { url, pending, failed } = useAttachmentThumbnailURL(attachment.id, thumbnailPath);
   const [menu, setMenu] = useState<RowMenuState>(CLOSED_ROW_MENU);
-  const actions = useOriginalImageActions(attachment);
   useEffect(() => {
     if (failed) onFail();
   }, [failed, onFail]);
@@ -141,18 +141,27 @@ function ResizedImageThumbnail({
         )}
       </span>
       {menu.point && (
-        <RowActionsPointMenu
+        <OriginalImageMenu
+          attachment={attachment}
           menu={menu}
           onOpenChange={(open) => setMenu((current) => ({ ...current, open }))}
-          groups={[actions]}
         />
       )}
     </>
   );
 }
 
-function useOriginalImageActions(attachment: Attachment): RowActionItem[] {
+function OriginalImageMenu({
+  attachment,
+  menu,
+  onOpenChange,
+}: {
+  attachment: Attachment;
+  menu: RowMenuState;
+  onOpenChange: (open: boolean) => void;
+}) {
   const { t } = useT("editor");
+  const { open, modal } = useOpenAttachment();
   const download = useDownloadAttachment();
   const link = resolvePublicFileUrl(attachment.markdown_url);
   const copyOriginal = async () => {
@@ -170,13 +179,25 @@ function useOriginalImageActions(attachment: Attachment): RowActionItem[] {
       toast.error(t(($) => $.image.copy_link_failed));
     }
   };
-  return [
+  const actions: RowActionItem[] = [
+    // The viewer shows the original, where the browser's own Copy image works
+    // even without the async Clipboard API that Copy image here needs.
     {
-      key: "copy-image",
-      icon: <ImageIcon />,
-      label: t(($) => $.image.copy_image),
-      onSelect: () => void copyOriginal(),
+      key: "view",
+      icon: <Eye />,
+      label: t(($) => $.image.view),
+      onSelect: () => open(attachment),
     },
+    ...(canCopyImage()
+      ? [
+          {
+            key: "copy-image",
+            icon: <ImageIcon />,
+            label: t(($) => $.image.copy_image),
+            onSelect: () => void copyOriginal(),
+          },
+        ]
+      : []),
     {
       key: "download",
       icon: <Download />,
@@ -194,6 +215,12 @@ function useOriginalImageActions(attachment: Attachment): RowActionItem[] {
         ]
       : []),
   ];
+  return (
+    <>
+      <RowActionsPointMenu menu={menu} onOpenChange={onOpenChange} groups={[actions]} />
+      {modal}
+    </>
+  );
 }
 
 // Loads the original, so callers keep these few (the sidebar shows three) or

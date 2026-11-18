@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
@@ -495,41 +495,89 @@ describe("a thumbnail tile's right-click menu", () => {
     ["viewer details", () => <DetailsSiblings />],
   ];
 
+  function tileOf() {
+    return document.querySelector<HTMLImageElement>('img[src="/api/attachments/render/thumbnail"]')!;
+  }
+
+  async function pick(name: string) {
+    fireEvent.contextMenu(tileOf());
+    fireEvent.click(await screen.findByRole("menuitem", { name }));
+  }
+
+  async function menuItems() {
+    fireEvent.contextMenu(tileOf());
+    const items = (await screen.findAllByRole("menuitem")).map((item) => item.textContent);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    return items;
+  }
+
+  describe("with the async Clipboard API", () => {
+    beforeEach(() => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { write: vi.fn() },
+      });
+      vi.stubGlobal("ClipboardItem", class {});
+    });
+
+    afterEach(() => {
+      Reflect.deleteProperty(navigator, "clipboard");
+      vi.unstubAllGlobals();
+    });
+
+    it.each(surfaces)(
+      "%s: browsing loads only thumbnails, the menu acts on the original",
+      async (_surface, renderSurface) => {
+        renderWithI18n(withQuery(renderSurface()));
+
+        // Every tile shows its thumbnail; no original is requested.
+        expect(tileOf()).toBeInTheDocument();
+        const sources = Array.from(document.querySelectorAll("img"), (img) => img.getAttribute("src"));
+        expect(sources.every((src) => src?.endsWith("/thumbnail"))).toBe(true);
+        expect(resignedMediaMock).not.toHaveBeenCalled();
+        expect(await menuItems()).toEqual(["View image", "Copy image", "Download", "Copy link"]);
+
+        await pick("Copy image");
+        expect(copyImageMock).toHaveBeenCalledTimes(1);
+        expect(originalBlobMock).not.toHaveBeenCalled();
+        const load = copyImageMock.mock.calls[0]![0] as () => Promise<Blob>;
+        expect(await (await load()).text()).toBe("original");
+        expect(originalBlobMock).toHaveBeenCalledWith("render");
+
+        await pick("Download");
+        expect(downloadMock).toHaveBeenCalledWith("render");
+
+        await pick("Copy link");
+        expect(copyTextMock).toHaveBeenCalledWith(RENDER.markdown_url);
+
+        // Picking an item does not also open the file under it.
+        expect(openAtMock).not.toHaveBeenCalled();
+        expect(tryOpenMock).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  // Plain http:// self-hosting (not localhost) has no async Clipboard API, and
+  // nothing can copy an image there but the browser's own menu.
   it.each(surfaces)(
-    "%s: browsing loads only thumbnails, the menu acts on the original",
+    "%s: without the async Clipboard API, offers the original in the viewer instead of a copy that fails",
     async (_surface, renderSurface) => {
+      const actual = await vi.importActual<typeof import("@multica/ui/lib/clipboard")>(
+        "@multica/ui/lib/clipboard",
+      );
+      copyImageMock.mockImplementation(actual.copyImage);
+      onTestFinished(() => {
+        copyImageMock.mockReset();
+      });
+      expect(navigator.clipboard?.write).toBeUndefined();
       renderWithI18n(withQuery(renderSurface()));
 
-      // Every tile shows its thumbnail; no original is requested.
-      const tile = document.querySelector<HTMLImageElement>(
-        'img[src="/api/attachments/render/thumbnail"]',
-      )!;
-      expect(tile).toBeInTheDocument();
-      const sources = Array.from(document.querySelectorAll("img"), (img) => img.getAttribute("src"));
-      expect(sources.every((src) => src?.endsWith("/thumbnail"))).toBe(true);
-      expect(resignedMediaMock).not.toHaveBeenCalled();
-
-      const pick = async (name: string) => {
-        fireEvent.contextMenu(tile);
-        fireEvent.click(await screen.findByRole("menuitem", { name }));
-      };
-
-      await pick("Copy image");
-      expect(copyImageMock).toHaveBeenCalledTimes(1);
+      expect(await menuItems()).toEqual(["View image", "Download", "Copy link"]);
+      await pick("View image");
+      expect(openAtMock).toHaveBeenCalledWith("render");
+      expect(copyImageMock).not.toHaveBeenCalled();
       expect(originalBlobMock).not.toHaveBeenCalled();
-      const load = copyImageMock.mock.calls[0]![0] as () => Promise<Blob>;
-      expect(await (await load()).text()).toBe("original");
-      expect(originalBlobMock).toHaveBeenCalledWith("render");
-
-      await pick("Download");
-      expect(downloadMock).toHaveBeenCalledWith("render");
-
-      await pick("Copy link");
-      expect(copyTextMock).toHaveBeenCalledWith(RENDER.markdown_url);
-
-      // Picking an item does not also open the file under it.
-      expect(openAtMock).not.toHaveBeenCalled();
-      expect(tryOpenMock).not.toHaveBeenCalled();
+      expect(resignedMediaMock).not.toHaveBeenCalled();
     },
   );
 });

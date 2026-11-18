@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { copyImage, copyText, copyTextAndHtml } from "./clipboard";
+import { canCopyImage, copyImage, copyText, copyTextAndHtml } from "./clipboard";
 
 const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
 
@@ -240,6 +240,17 @@ describe("copyImage", () => {
 
     expect(await copied).toBe(true);
     expect(written).toEqual([png]);
+  });
+
+  it("is unavailable without the async Clipboard API, as on plain http://", async () => {
+    vi.stubGlobal("ClipboardItem", FakeClipboardItem);
+    const loader = vi.fn(async () => new Blob(["png"], { type: "image/png" }));
+    expect(canCopyImage()).toBe(false);
+    expect(await copyImage(loader)).toBe(false);
+    expect(loader).not.toHaveBeenCalled();
+
+    stubClipboard();
+    expect(canCopyImage()).toBe(true);
   });
 
   it("fails when the loader does", async () => {

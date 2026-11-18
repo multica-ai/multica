@@ -130,6 +130,19 @@ export async function copyTextAndHtml(
 }
 
 /**
+ * Whether `copyImage` can work here. Images need the async Clipboard API,
+ * which has no legacy fallback and exists only in a secure context, so a
+ * self-hosted deployment on plain http:// (not localhost) has none.
+ */
+export function canCopyImage(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    !!navigator.clipboard?.write &&
+    typeof ClipboardItem !== "undefined"
+  );
+}
+
+/**
  * Copy an image to the clipboard as a PNG: the one at a URL, or the bytes a
  * loader returns.
  *
@@ -143,13 +156,7 @@ export async function copyTextAndHtml(
  * don't decode as an image, no async Clipboard API, permission denied).
  */
 export async function copyImage(source: string | (() => Promise<Blob>)): Promise<boolean> {
-  if (
-    typeof navigator === "undefined" ||
-    !navigator.clipboard?.write ||
-    typeof ClipboardItem === "undefined"
-  ) {
-    return false;
-  }
+  if (!canCopyImage()) return false;
   try {
     // The item takes the pending PNG rather than the finished one so the
     // write starts inside the click that asked for it; Safari rejects a
