@@ -1569,6 +1569,21 @@ func cleanupMcpConfigTemp(path string) {
 // tests can shrink it without waiting out the real bound.
 var detectVersionTimeout = 10 * time.Second
 
+// Keep the deadline in the error chain without its network-timeout wording:
+// task failures are also classified from the diagnostic text.
+type versionProbeTimeoutError struct {
+	limit time.Duration
+	cause error
+}
+
+func (e *versionProbeTimeoutError) Error() string {
+	return fmt.Sprintf("version probe timed out (limit %s): %v", e.limit, e.cause)
+}
+
+func (e *versionProbeTimeoutError) Unwrap() []error {
+	return []error{context.DeadlineExceeded, e.cause}
+}
+
 func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
@@ -1698,7 +1713,7 @@ func runVersionProbe(ctx context.Context, runtimeCmd Command, args []string) (st
 			return version, nil
 		}
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("version probe timed out: %w (%w)", context.DeadlineExceeded, err)
+			return "", &versionProbeTimeoutError{limit: detectVersionTimeout, cause: err}
 		}
 		return "", err
 	}
