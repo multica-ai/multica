@@ -1,8 +1,8 @@
-import { AlarmClock, BellOff, CircleDot, Command, FolderKanban, Gauge, Globe, History, Layers, ListChecks, ListPlus, Lock, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Terminal, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
+import { AlarmClock, BellOff, CircleDot, Command, Folder, FolderKanban, Gauge, Globe, History, Layers, ListChecks, ListPlus, Lock, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Terminal, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
-import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
+import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, PROJECT_FOLDERS_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -142,6 +142,38 @@ export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
           fr: {
             title: "Discutez avec un agent depuis WeChat",
             body: "Ouvrez un agent dont vous êtes propriétaire, choisissez Ajouter un canal de messagerie sous Messagerie, puis WeChat, et scannez le code QR avec votre propre compte WeChat. Écrivez ensuite au bot en privé dans WeChat : les réponses et les fichiers y reviennent.",
+          },
+        },
+      },
+      {
+        id: "project-folders",
+        icon: Folder,
+        hero: PROJECT_FOLDERS_HERO,
+        action: { kind: "route", to: (p) => p.projects() },
+        copy: {
+          en: {
+            title: "Organize projects into folders",
+            body: "In the sidebar, click + next to Projects and choose New folder, then drag projects into it or pick Move to folder from a project's menu. On Projects, open Display settings to group by folder.",
+          },
+          "zh-Hans": {
+            title: "用文件夹整理项目",
+            body: "在侧栏「项目」旁点「+」→「新建文件夹」，再把项目拖进去，或在项目菜单里选「移动到文件夹」。在「项目」页打开「显示设置」，还可以按文件夹分组。",
+          },
+          "zh-Hant": {
+            title: "用資料夾整理專案",
+            body: "在側欄「專案」旁點「+」→「新增資料夾」，再把專案拖進去，或在專案選單裡選「移動到資料夾」。在「專案」頁打開「顯示設定」，還可以按資料夾分組。",
+          },
+          ja: {
+            title: "フォルダでプロジェクトを整理",
+            body: "サイドバーの「プロジェクト」横の「+」から「新しいフォルダ」を選び、プロジェクトをドラッグして入れるか、プロジェクトのメニューで「フォルダに移動」を選びます。「プロジェクト」ページの「表示設定」では、フォルダごとにグループ化もできます。",
+          },
+          ko: {
+            title: "폴더로 프로젝트 정리하기",
+            body: "사이드바의 '프로젝트' 옆 '+'에서 '새 폴더'를 고른 뒤, 프로젝트를 끌어다 넣거나 프로젝트 메뉴에서 '폴더로 이동'을 고르세요. '프로젝트' 페이지의 '표시 설정'에서 폴더별로 그룹화할 수도 있습니다.",
+          },
+          fr: {
+            title: "Rangez vos projets dans des dossiers",
+            body: "Dans la barre latérale, cliquez sur + à côté de Projets puis sur Nouveau dossier, et glissez-y des projets ou choisissez Déplacer vers un dossier dans le menu d'un projet. Dans Projets, ouvrez Affichage pour regrouper par dossier.",
           },
         },
       },

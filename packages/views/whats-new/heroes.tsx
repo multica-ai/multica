@@ -13,6 +13,9 @@ import {
   ChevronDown,
   Clock,
   Ellipsis,
+  Folder,
+  FolderKanban,
+  FolderOpen,
   Laptop,
   Paperclip,
   Plus,
@@ -571,6 +574,45 @@ function WeixinArt() {
   );
 }
 
+/* ── Project folders: dragging a project into a sidebar folder ──────── */
+
+const FOLDER_SAMPLE = { open: "Atlas", target: "Orbit", dragged: "API" };
+
+function FolderTreeRow({ icon, label, className }: { icon: ReactNode; label: string; className?: string }) {
+  return (
+    <div className={cn("flex h-7 items-center gap-2.5 rounded-md px-3 text-label [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground", className)}>
+      {icon}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </div>
+  );
+}
+
+function ProjectFoldersArt() {
+  const { t } = useT("layout");
+  return (
+    <>
+      <Surface className="top-3 left-6 w-[15rem]">
+        <div className="flex h-8 items-center gap-1 px-3">
+          <span className="text-label font-medium">{t(($) => $.nav.projects)}</span>
+          <ChevronDown className="size-3 text-muted-foreground" />
+          <Plus className="ml-auto size-3.5 text-muted-foreground" />
+        </div>
+        <div className="space-y-px px-1 pb-8">
+          <FolderTreeRow icon={<FolderOpen />} label={FOLDER_SAMPLE.open} />
+          <div className="ml-5 space-y-px border-l border-surface-border pl-[5px]">
+            <FolderTreeRow icon={<FolderKanban />} label={SAMPLE.webApp} />
+            <FolderTreeRow icon={<FolderKanban />} label={SAMPLE.desktopApp} />
+          </div>
+          <FolderTreeRow icon={<Folder />} label={FOLDER_SAMPLE.target} className="bg-accent ring-1 ring-surface-border" />
+        </div>
+      </Surface>
+      <Menu className="top-[7.6rem] left-[10.5rem] w-36 -rotate-3 py-0.5">
+        <FolderTreeRow icon={<FolderKanban />} label={FOLDER_SAMPLE.dragged} />
+      </Menu>
+    </>
+  );
+}
+
 export const THEMES_HERO: WhatsNewHero = { ground: "orange", Art: ThemesArt };
 export const ENVIRONMENTS_HERO: WhatsNewHero = { ground: "ice", Art: EnvironmentsArt };
 export const ANNOTATIONS_HERO: WhatsNewHero = { ground: "lime", Art: AnnotationsArt };
@@ -579,3 +621,4 @@ export const VOICE_HERO: WhatsNewHero = { ground: "orange", Art: VoiceArt };
 export const CHAT_WAKEUP_HERO: WhatsNewHero = { ground: "lime", Art: ChatWakeupArt };
 export const CHAT_STEERING_HERO: WhatsNewHero = { ground: "orange", Art: ChatSteeringArt };
 export const WEIXIN_HERO: WhatsNewHero = { ground: "ice", Art: WeixinArt };
+export const PROJECT_FOLDERS_HERO: WhatsNewHero = { ground: "brand", Art: ProjectFoldersArt };
