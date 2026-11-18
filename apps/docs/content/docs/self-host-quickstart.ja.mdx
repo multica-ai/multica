@@ -377,7 +377,7 @@ docker compose -f docker-compose.selfhost.yml exec -T postgres \
   pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
 ```
 
-`POSTGRES_USER` / `POSTGRES_DB` を `multica` のデフォルトから変更している場合は、`.env` の値に置き換えてください。データは `multica_pgdata` という名前付きボリュームにあり、`docker compose down` では消えませんが、`down -v` では消えます。
+`POSTGRES_USER` / `POSTGRES_DB` を `multica` のデフォルトから変更している場合は、`.env` の値に置き換えてください。データは `multica_pgdata` という名前付きボリュームにあり（`.env` で `COMPOSE_PROJECT_NAME=<name>` を設定している場合は `<name>_pgdata`。同じマシンの別のチェックアウトがすでに `multica` を使っていると、`make selfhost` が自動で設定します）、`docker compose down` では消えませんが、`down -v` では消えます。
 
 <Callout type="warning">
 **`pg_dump` を直接 `gzip` にパイプしないでください。** シェルはパイプラインの**最後**のコマンドの終了ステータスを返すため、`pg_dump … | gzip > backup.sql.gz` はダンプが失敗しても `0` で終了し、形式としては完全に正当な、中身が空の 20 バイトのアーカイブが残ります。先にファイルへリダイレクトすれば `pg_dump` 自身の終了ステータスが効くようになり、`&&` は実際に成功したダンプだけを圧縮します。
