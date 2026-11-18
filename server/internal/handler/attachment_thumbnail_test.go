@@ -225,6 +225,59 @@ func TestAttachmentThumbnail_NonMemberGets404(t *testing.T) {
 	if _, ok := store.files[key+".thumb"]; ok {
 		t.Fatal("non-member request generated a thumbnail")
 	}
+	if w := originalRequest(t, id); w.Code != http.StatusNotFound {
+		t.Fatalf("original: status = %d, want 404 for non-member", w.Code)
+	}
+}
+
+func originalRequest(t *testing.T, attachmentID string) *httptest.ResponseRecorder {
+	t.Helper()
+	r := chi.NewRouter()
+	r.Get("/api/attachments/{id}/original", testHandler.GetAttachmentOriginal)
+	req := httptest.NewRequest("GET", "/api/attachments/"+attachmentID+"/original", nil)
+	req.Header.Set("X-User-ID", testUserID)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func TestAttachmentOriginal_StreamsThroughTheAPI(t *testing.T) {
+	if testPool == nil {
+		t.Skip("test database not available")
+	}
+	store := useThumbnailTestStorage(t)
+	origMode := testHandler.cfg.AttachmentDownloadMode
+	// /download redirects to storage in this mode; /original never does.
+	testHandler.cfg.AttachmentDownloadMode = "presign"
+	t.Cleanup(func() { testHandler.cfg.AttachmentDownloadMode = origMode })
+
+	key := "thumbs/original.jpg"
+	original := testJPEG(t, 2000, 1500)
+	store.put(key, original)
+	id := seedAttachmentURL(t, "https://s3.example.com/test-bucket/"+key, "render.jpg", "image/jpeg", 600<<10)
+
+	w := originalRequest(t, id)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); got != "image/jpeg" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+	if !bytes.Equal(w.Body.Bytes(), original) {
+		t.Fatal("body is not the original")
+	}
+
+	// Only images that have a thumbnail are served: anything else keeps
+	// /download as its one route.
+	smallKey := "thumbs/original-small.jpg"
+	store.put(smallKey, testJPEG(t, 100, 100))
+	smallID := seedAttachmentURL(t, "https://s3.example.com/test-bucket/"+smallKey, "small.jpg", "image/jpeg", 10<<10)
+	if w := originalRequest(t, smallID); w.Code != http.StatusNotFound {
+		t.Fatalf("small image: status = %d, want 404", w.Code)
+	}
 }
 
 func TestDeleteS3ObjectsRemovesThumbnails(t *testing.T) {

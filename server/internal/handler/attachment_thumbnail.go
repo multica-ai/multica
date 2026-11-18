@@ -103,6 +103,29 @@ func (h *Handler) GetAttachmentThumbnail(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+// GetAttachmentOriginal — GET /api/attachments/{id}/original
+//
+// Serves the original bytes of an image that has a thumbnail, always through
+// the API. A tile shows the thumbnail, so copying the image from it reads the
+// original from script, and web script can't read the storage CDN, which
+// sends no CORS headers. /download redirects there in CDN and presign modes.
+func (h *Handler) GetAttachmentOriginal(w http.ResponseWriter, r *http.Request) {
+	att, ok := h.loadAttachmentForDownload(w, r)
+	if !ok {
+		return
+	}
+	store := h.Storage
+	if store == nil {
+		writeFeatureDisabled(w, "storage_not_configured", "storage not configured")
+		return
+	}
+	if !hasThumbnail(store, att) {
+		writeError(w, http.StatusNotFound, "original not available")
+		return
+	}
+	h.proxyAttachmentDownload(w, r, att, store.KeyFromURL(att.Url), false)
+}
+
 // prewarmAttachmentThumbnail renders a new upload's thumbnail in the
 // background, so the first grid that shows it does not wait for the render.
 func (h *Handler) prewarmAttachmentThumbnail(att db.Attachment) {
