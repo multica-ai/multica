@@ -2989,18 +2989,16 @@ describe("IssueDetail (shared)", () => {
 
     it("restarts a comment landing that a timeline update cancels while it is still aligning", async () => {
       mockApiObj.listTasksByIssue.mockResolvedValue([]);
-      // The anchor keeps moving for 300ms, like reply heights settling, so the
-      // alignment loop is still running when the update arrives.
-      let driftStart = 0;
-      const drift = () => {
-        driftStart ||= performance.now();
-        return Math.min(performance.now() - driftStart, 300);
-      };
+      // Keep the anchor moving between measurements until the timeline update
+      // arrives. The test must also work when the CI worker is slow.
+      let measured = 0;
+      let settled = false;
       const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
         const container = this.closest<HTMLElement>("[data-tab-scroll-root]");
         if (this === container) return new DOMRect(0, 0, 400, 200);
         if (this.id === "comment-comment-2" && container) {
-          return new DOMRect(0, 250 + drift() - container.scrollTop, 400, 100);
+          const top = settled ? 550 : 250 + 10 * (++measured % 2);
+          return new DOMRect(0, top - container.scrollTop, 400, 100);
         }
         return new DOMRect(0, 0, 0, 0);
       });
@@ -3008,15 +3006,15 @@ describe("IssueDetail (shared)", () => {
         const { queryClient } = renderIssueDetailWithHighlight("comment-2");
         await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
         const container = document.querySelector<HTMLElement>("[data-tab-scroll-root]")!;
+        await waitFor(() => expect(container.scrollTop).toBeGreaterThan(0));
+        settled = true;
         act(() => {
           queryClient.setQueryData<TimelineEntry[]>(["issues", "timeline", "issue-1"], (old) => [
             ...(old ?? []),
             { ...mockTimeline[0]!, id: "comment-late", content: "Arrived mid-landing", created_at: "2026-01-18T00:00:00Z" },
           ]);
         });
-        expect(driftStart).toBeGreaterThan(0);
-        expect(performance.now() - driftStart).toBeLessThan(300);
-        // 250 + 300 drift - 16 top gap: where the comment sits once settled.
+        // 550 minus the 16px top gap once the comment settles.
         await waitFor(() => expect(container.scrollTop).toBe(534), { timeout: 2000 });
       } finally {
         rect.mockRestore();
