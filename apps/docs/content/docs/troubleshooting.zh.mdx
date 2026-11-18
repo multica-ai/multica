@@ -177,6 +177,17 @@ multica issue runs <issue-id>
 每次升级 CLI 后都需要重复这些步骤。只有连接 Multica Cloud 的守护进程默认开启自动更新；用 `--no-auto-update` 启动守护进程后，只在你手动升级时更新。[桌面应用](/desktop-app)内置的 CLI 使用 Developer ID 签名，授权在升级后依然有效。
 
 </Accordion>
+<Accordion title="使用 Hermes CLI 后，Hermes 运行会重新安装依赖" id="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli" value="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli">
+
+如果你交替使用 Hermes CLI 或 Hermes 桌面应用和 Multica 中的 Hermes，每次切换都可能多花 30–60 秒启动，因为 Hermes 会重建共享的 Python 依赖环境。每次重建都会在磁盘上留下一个新版本的依赖环境，直到 Hermes 将它清理掉。
+
+如果你常用的 Hermes 主目录把 `memory.provider` 设成了带 Python 依赖的插件，就会出现这个现象。每次 Multica 运行使用独立的 Hermes 主目录，共享已安装的依赖，并关闭外部记忆提供方，让记忆不在不同运行之间共享。Hermes 根据当前主目录中的插件判断需要哪些依赖。两个主目录的需求不同，都会把对方安装的环境视为过期。上游在 [NousResearch/hermes-agent#137726](https://github.com/NousResearch/hermes-agent/issues/137726) 跟踪这个问题。
+
+要确认是否正在重装，请在[守护进程日志](#日志位置)中查找 `hermes is reinstalling its dependency environment before this task starts`。随后的 `hermes dependency reinstall finished` 日志会在 `startup_delay_ms` 中记录从启动到就绪的总耗时，包括重装时间。
+
+在 Hermes 修复这个问题之前，可以在自己常用的 Hermes `config.yaml` 中设置 `memory.provider: ""` 来避免重建。这样也会关闭 CLI 的记忆插件。如果继续使用该插件，每次切换后的第一次启动都可能变慢。
+
+</Accordion>
 </Accordions>
 
 ## Web 应用与自托管服务

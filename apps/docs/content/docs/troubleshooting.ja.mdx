@@ -177,6 +177,17 @@ Homebrew でインストールした `multica` CLI が `brew upgrade`、`multica
 CLI をアップグレードするたびにこの手順を繰り返してください。自動更新がデフォルトで有効なのは Multica Cloud に接続したデーモンだけです。`--no-auto-update` を付けてデーモンを起動すると、手動で実行したときだけアップグレードされます。[Multica Desktop](/desktop-app) に同梱の CLI は Developer ID で署名されているため、アップグレード後も許可が維持されます。
 
 </Accordion>
+<Accordion title="Hermes CLI を使った後に依存関係が再インストールされる" id="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli" value="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli">
+
+Hermes CLI または Hermes デスクトップアプリと Multica の Hermes 実行を切り替えると、共有 Python 環境の再構築で起動に 30〜60 秒余分にかかることがあります。再構築するたびに新しい環境がディスクに作られ、Hermes がクリーンアップするまで残ります。
+
+この現象は、普段使う Hermes ホームの `memory.provider` に Python の依存関係を持つプラグインを指定している場合に起きます。Multica は実行ごとに独立した Hermes ホームを使い、インストール済みの依存関係を共有します。実行間でメモリを共有しないように、外部メモリプロバイダーは無効にします。Hermes はアクティブなホームのプラグインから必要な依存関係を判定するため、一方のホームで用意した環境を、もう一方では古い環境として扱います。[NousResearch/hermes-agent#137726](https://github.com/NousResearch/hermes-agent/issues/137726) でこの問題を追跡しています。
+
+確認するには、[デーモンのログ](#ログの場所)で `hermes is reinstalling its dependency environment before this task starts` を探します。続く `hermes dependency reinstall finished` の `startup_delay_ms` には、再インストールを含め、Hermes が起動して準備完了になるまでの時間が記録されます。
+
+Hermes 側で修正されるまでは、普段使う Hermes の `config.yaml` に `memory.provider: ""` を設定すると再構築を回避できます。この設定は CLI のメモリプラグインも無効にします。プラグインを有効にしたままにすると、切り替え後の最初の起動が遅くなることがあります。
+
+</Accordion>
 </Accordions>
 
 ## Web アプリとセルフホストサービス
