@@ -234,6 +234,25 @@ multica issue wakeup runs MUL-123 <wakeup-id>
 
 Creating one from a terminal as a member requires `--agent-id`; an agent creating one inside its own run wakes itself by default.
 
+## Chat wakeups [#chat-wakeups]
+
+Only an agent inside a chat run can use `chat wakeup`; the current conversation is implicit. These commands do not accept a session ID and cannot be used from an ordinary member terminal or an issue run. See [Follow up later](/chat#follow-up-later) for the user controls.
+
+```bash
+multica chat wakeup create --title "Review ready" \
+  --until-issue MUL-123 --state in_review --expires-in 48h \
+  --instruction "Summarize the result in this conversation"
+multica chat wakeup create --title "Check back in two hours" \
+  --after 2h --instruction "Remind the user to review the result"
+multica chat wakeup list
+```
+
+Use exactly one `--until-*` condition, `--at` / `--after`, or `--every`. Creation and update require `--title` and `--instruction` (or `--instruction-file`). `update` replaces the configuration and restarts relative deadlines; it cannot switch a wakeup between a condition, a reminder, and a check. Conditions and checks default to 24 hours and allow at most 7 days via `--expires-in` or `--expires-at`; reminders allow at most 30 days and do not accept expiry flags. Checks run at least 10 minutes apart, and the deadline may allow at most 100 checks: `--every 10m` with the default 24 hours would be 144 checks and is rejected, so use a longer interval or an earlier deadline such as `--expires-in 16h`.
+
+Conditions support `--until-issue` with `--state` or `--status`, `--until-children-done` with optional `--stage`, `--until-pr`, `--until-run`, and `--until-reply` with optional `--from <user-id>`. A PR condition uses a GitHub PR mirrored in this workspace: `owner/repo#N[:merged|closed|checks]`. `checks` waits for checks to finish on the current head, whether they pass or fail. A `checks` condition can be created only when the server reads CI status from GitHub; a self-hosted server needs `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` (see [GitHub integration](/github-integration)). An already-finished check result at creation is recorded as a baseline and does not immediately wake the agent.
+
+Use `list`, `get <id>`, or `cancel <id>` to inspect or cancel a wakeup. During a periodic check, `checkin <id> --note "..."` records a quiet update without sending a reply; `finish <id>` ends the check when its goal is met. The final deadline turn must report back and cannot check in quietly.
+
 ## Agents and skills
 
 ```bash
@@ -542,6 +561,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `member list/add/set-role/remove` | Manage squad members | |
 | | `activity <issue-id> <outcome>` | Record a leader evaluation | |
 | `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
+| | `wakeup create/list/get/update/cancel/finish/checkin` | Manage follow-ups in the current chat run; see [Chat wakeups](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | [Read your active notifications](/inbox) without marking them read | `--project`, `--type`, `--output` (`table` or `json`); filters apply locally |
 
 ### Runtime
