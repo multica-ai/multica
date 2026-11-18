@@ -18,9 +18,11 @@ func init() { chatCmd.AddCommand(newChatWakeupCommand()) }
 
 const chatWakeupLong = `Come back to this conversation later, on your own, to report.
 
-Create one whenever you tell the user you will report back: after work you
-handed off finishes, at a time they named, or while you keep an eye on
-something. The wakeup starts a new turn in THIS conversation (and its IM
+Create one when you act toward someone else for the user and they want the
+outcome back (a decision, an answer, a review, work done), and whenever you
+tell the user you will report back: at a time they named, or while you keep an
+eye on something. Skip it when the user only wanted someone told. The wakeup
+starts a new turn in THIS conversation (and its IM
 thread, when it came from one), so your reply lands where the user asked.
 
 Kinds (pick exactly one):

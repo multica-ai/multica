@@ -8444,6 +8444,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
 	var cursorMcpAuthStore string
+	var cursorUserDataDir string
 	remoteMCPConfig, remoteMCPDiagnostics, remoteMCPBrokers, remoteMCPErr := startTaskRemoteMCPBrokers(
 		prepareCtx, ctx, task.ID, provider, task.RemoteMCPConnections,
 		func(resolveCtx context.Context, contributionID string) (http.Header, error) {
@@ -8508,6 +8509,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if provider == "cursor" {
 			cursorMcpAuthSource = strings.TrimSpace(task.Agent.CustomEnv[execenv.CursorMcpAuthSourceEnv])
 			cursorMcpAuthStore = execenv.CursorMcpAuthStorePath(d.cfg.Profile, task.AgentID)
+			cursorUserDataDir = execenv.CursorUserDataDir()
 		}
 	}
 	// Decode openclaw-specific runtime_config knobs once so reuse / prepare /
@@ -8659,6 +8661,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
 			CursorMcpAuthStore:    cursorMcpAuthStore,
+			CursorUserDataDir:     cursorUserDataDir,
 			OpenclawGateway:       openclawGateway,
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
@@ -8710,6 +8713,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
 			CursorMcpAuthStore:    cursorMcpAuthStore,
+			CursorUserDataDir:     cursorUserDataDir,
 			OpenclawGateway:       openclawGateway,
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
@@ -9446,7 +9450,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var msgSeq atomic.Int32
 	d.reportThinkingLevelWarning(ctx, task.ID, selection.ThinkingLevelWarning, &msgSeq, taskLog)
 	var pendingCursorLoginCheck *cursorMcpLoginCheck
-	if provider == "cursor" && env.CursorDataDir != "" {
+	if provider == "cursor" && (env.CursorDataDir != "" || env.CursorUserDataDir != "") {
 		check := cursorMcpLoginCheck{
 			TaskWorkDir:       env.WorkDir,
 			TaskCursorDataDir: env.CursorDataDir,
@@ -9455,6 +9459,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			McpConfig:         effectiveMcpConfig,
 			Host:              d.cfg.DeviceName,
 			GOOS:              runtime.GOOS,
+		}
+		if env.CursorDataDir == "" {
+			check.TaskCursorDataDir = env.CursorUserDataDir
+			check.UserDataDir = true
 		}
 		if !usesCustomProfileCommand {
 			check.Executable = entry.Path

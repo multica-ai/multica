@@ -115,6 +115,7 @@
     "./projects/mutations": "./projects/mutations.ts",
     "./projects/access": "./projects/access.ts",
     "./projects/config": "./projects/config.ts",
+    "./projects/folder-tree": "./projects/folder-tree.ts",
     "./plugins": "./plugins/index.ts",
     "./plugins/queries": "./plugins/queries.ts",
     "./plugins/mutations": "./plugins/mutations.ts",

@@ -104,6 +104,20 @@ describe("RateLimitSection", () => {
     expect(meters.map((m) => m.getAttribute("aria-valuenow"))).toEqual(["72", "41"]);
   });
 
+  it.each([
+    ["62500.0000000000", "62,500 left"],
+    ["12.3456", "12.35 left"],
+  ])("trims the reported credit balance %s", async (balance, shown) => {
+    getRuntimeRateLimits.mockResolvedValue({
+      rate_limits: {
+        ...SNAPSHOT.rate_limits!,
+        credits: { has_credits: true, unlimited: false, balance },
+      },
+    });
+    render(<RateLimitSection runtime={RUNTIME} />, { wrapper: Wrapper });
+    expect(await screen.findByText(shown)).toBeInTheDocument();
+  });
+
   it("explains an empty runtime instead of showing zeros", async () => {
     getRuntimeRateLimits.mockResolvedValue({ rate_limits: null });
     render(<RateLimitSection runtime={RUNTIME} />, { wrapper: Wrapper });
