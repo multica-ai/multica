@@ -4532,6 +4532,13 @@ export class ApiClient {
     return res.blob();
   }
 
+  // The original bytes of an image that has a thumbnail, for copying it from
+  // a tile. Proxied by the API in every storage mode, so script can read it.
+  async getAttachmentOriginalBlob(id: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.fetchRaw(`/api/attachments/${id}/original`, { signal });
+    return res.blob();
+  }
+
   // Projects
   async listProjects(params?: { status?: string; include_archived?: boolean }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();

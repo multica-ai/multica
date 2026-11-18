@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
+import { toast } from "sonner";
+import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import { Download, ImageIcon, Link2 } from "@multica/ui/icons";
+import { copyImage, copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
+import { useT } from "../../../i18n";
+import { CLOSED_ROW_MENU, type RowMenuState } from "../../../common/point-menu";
+import { RowActionsPointMenu, type RowActionItem } from "../../../common/row-actions-menu";
+import { useDownloadAttachment } from "../../../editor";
 import {
   useAttachmentThumbnailURL,
   useResignedInlineMedia,
@@ -89,6 +97,9 @@ function ImageThumbnail({
   return <OriginalImageThumbnail attachment={attachment} className={className} />;
 }
 
+// The browser's image menu, and the desktop's Copy image, would act on the
+// thumbnail the tile shows, so the tile brings its own menu, acting on the
+// original. Handling the right-click keeps either from opening.
 function ResizedImageThumbnail({
   attachment,
   thumbnailPath,
@@ -101,26 +112,88 @@ function ResizedImageThumbnail({
   className?: string;
 }) {
   const { url, pending, failed } = useAttachmentThumbnailURL(attachment.id, thumbnailPath);
+  const [menu, setMenu] = useState<RowMenuState>(CLOSED_ROW_MENU);
+  const actions = useOriginalImageActions(attachment);
   useEffect(() => {
     if (failed) onFail();
   }, [failed, onFail]);
 
-  if (pending || failed || !url) {
-    return (
-      <FileFace attachment={attachment} showTypeLabel={false} className={className} />
-    );
-  }
+  const openMenu = (event: MouseEvent) => {
+    event.preventDefault();
+    setMenu({ open: true, point: { x: event.clientX, y: event.clientY } });
+  };
+
   return (
-    <img
-      src={url}
-      alt=""
-      loading="lazy"
-      decoding="async"
-      draggable={false}
-      onError={onFail}
-      className={cn("bg-muted object-cover", className)}
-    />
+    <>
+      <span className="contents" onContextMenu={openMenu}>
+        {pending || failed || !url ? (
+          <FileFace attachment={attachment} showTypeLabel={false} className={className} />
+        ) : (
+          <img
+            src={url}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            onError={onFail}
+            className={cn("bg-muted object-cover", className)}
+          />
+        )}
+      </span>
+      {menu.point && (
+        <RowActionsPointMenu
+          menu={menu}
+          onOpenChange={(open) => setMenu((current) => ({ ...current, open }))}
+          groups={[actions]}
+        />
+      )}
+    </>
   );
+}
+
+function useOriginalImageActions(attachment: Attachment): RowActionItem[] {
+  const { t } = useT("editor");
+  const download = useDownloadAttachment();
+  const link = resolvePublicFileUrl(attachment.markdown_url);
+  const copyOriginal = async () => {
+    if (await copyImage(() => api.getAttachmentOriginalBlob(attachment.id))) {
+      toast.success(t(($) => $.image.image_copied));
+    } else {
+      toast.error(t(($) => $.image.copy_image_failed));
+    }
+  };
+  const copyLink = async (url: string) => {
+    // Same-origin web resolves the durable URL to a site-relative path.
+    if (await copyText(new URL(url, window.location.href).href)) {
+      toast.success(t(($) => $.image.link_copied));
+    } else {
+      toast.error(t(($) => $.image.copy_link_failed));
+    }
+  };
+  return [
+    {
+      key: "copy-image",
+      icon: <ImageIcon />,
+      label: t(($) => $.image.copy_image),
+      onSelect: () => void copyOriginal(),
+    },
+    {
+      key: "download",
+      icon: <Download />,
+      label: t(($) => $.image.download),
+      onSelect: () => void download(attachment.id),
+    },
+    ...(link
+      ? [
+          {
+            key: "copy-link",
+            icon: <Link2 />,
+            label: t(($) => $.image.copy_link),
+            onSelect: () => void copyLink(link),
+          },
+        ]
+      : []),
+  ];
 }
 
 // Loads the original, so callers keep these few (the sidebar shows three) or
