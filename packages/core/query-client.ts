@@ -1,4 +1,4 @@
-import { QueryClient } from "@tanstack/react-query";
+import { isServer, QueryClient } from "@tanstack/react-query";
 import { setWorkspaceSlugLookup } from "./paths/workspace-slugs";
 import { workspaceKeys } from "./workspace/queries";
 import type { Workspace } from "./types";
@@ -8,7 +8,11 @@ export function createQueryClient(): QueryClient {
     defaultOptions: {
       queries: {
         staleTime: Infinity,
-        gcTime: 10 * 60 * 1000, // 10 minutes
+        // A server render builds one client per request. Any finite gcTime
+        // starts a timer inside the request's async context that keeps the
+        // whole render in memory until it fires, so the server keeps
+        // TanStack's own default of no GC timer.
+        gcTime: isServer ? Infinity : 10 * 60 * 1000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: true,
         retry: 1,
