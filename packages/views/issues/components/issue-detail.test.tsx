@@ -140,11 +140,18 @@ vi.mock("../../navigation", async () => ({
   ...(await vi.importActual<typeof import("../../navigation/use-held-until-arrival")>(
     "../../navigation/use-held-until-arrival",
   )),
-  AppLink: ({ children, href, ...props }: any) => (
-    <a href={href} {...props}>
-      {children}
-    </a>
-  ),
+  // Forwards ref: the header wraps the link in `TruncatedTooltip`, which
+  // measures the anchor it clones, exactly as the real AppLink supports.
+  AppLink: forwardRef<HTMLAnchorElement, any>(function MockAppLink(
+    { children, href, ...props },
+    ref,
+  ) {
+    return (
+      <a ref={ref} href={href} {...props}>
+        {children}
+      </a>
+    );
+  }),
   useNavigation: () => ({
     push: settingsPush,
     pathname: "/issues/issue-1",
@@ -1570,6 +1577,31 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByRole("button", { name: "Close preview" })).toBeInTheDocument();
     // The header leaf names the issue by identifier only — the title is right below.
     expect(screen.getByRole("link", { name: mockIssue.identifier })).toBeInTheDocument();
+  });
+
+  it("reveals the header's clipped identifier and title on hover", async () => {
+    renderIssueDetail();
+    await screen.findByText("Implement authentication");
+
+    const link = screen.getByRole("link", { name: `${mockIssue.identifier} ${mockIssue.title}` });
+    // jsdom never lays out the header: model the clip the actions leave the leaf.
+    const leaf = link.firstElementChild as HTMLElement;
+    leaf.style.overflowX = "hidden";
+    Object.defineProperties(leaf, {
+      scrollWidth: { configurable: true, value: 320 },
+      clientWidth: { configurable: true, value: 100 },
+    });
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(link, { pointerType: "mouse" });
+      await act(async () => { vi.advanceTimersByTime(550); });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(document.querySelector("[data-slot=tooltip-content]"))
+      .toHaveTextContent(`${mockIssue.identifier} ${mockIssue.title}`);
   });
 
   describe("header icon buttons", () => {

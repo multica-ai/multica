@@ -3630,6 +3630,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
 
   const titleSizeClass = isPeek ? "text-title-lg font-semibold" : "text-display-sm font-semibold";
 
+  // What the header names the issue: the identifier only in a peek, where the
+  // title is right below it; identifier and title on the page.
+  const headerLeafLabel = isPeek ? issue.identifier : `${issue.identifier} ${issue.title}`;
+
   const detailContent = (
     <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
     <div
@@ -3658,14 +3662,19 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
           leading={leadingAction}
           segments={breadcrumbSegments}
           leaf={
-            <AppLink
-              href={paths.issueDetail(issue.id)}
-              className="flex min-w-0 transition-opacity hover:opacity-80"
-            >
-              <span className="truncate font-medium text-foreground">
-                {isPeek ? issue.identifier : `${issue.identifier} ${issue.title}`}
-              </span>
-            </AppLink>
+            // The header shares its line with the actions, so a long title is
+            // cut off; hover (or focus) reveals it for the whole header width.
+            // Below the trigger, since the header sits at the top of the page.
+            <TruncatedTooltip content={headerLeafLabel} side="bottom">
+              <AppLink
+                href={paths.issueDetail(issue.id)}
+                className="flex min-w-0 transition-opacity hover:opacity-80"
+              >
+                <span className="truncate font-medium text-foreground">
+                  {headerLeafLabel}
+                </span>
+              </AppLink>
+            </TruncatedTooltip>
           }
           actions={
             <>
