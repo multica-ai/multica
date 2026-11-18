@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeSMTPAuthClient struct {
@@ -258,7 +260,7 @@ func TestSendSMTPRequiresConfiguredFromEmail(t *testing.T) {
 		smtpPassword: "testpass",
 	}
 
-	err := s.sendSMTP("to@example.com", "Test Subject", "<p>Hello</p>")
+	err := s.sendSMTP(context.Background(), "to@example.com", "Test Subject", "<p>Hello</p>")
 	if err == nil {
 		t.Fatal("expected missing from email error")
 	}
@@ -487,12 +489,21 @@ func TestSendSMTP_OpenClientFailureNoPanic(t *testing.T) {
 		smtpUsername: "user",
 		smtpPassword: "pass",
 	}
-	err := s.sendSMTP("to@example.com", "Subject", "<p>body</p>")
+	sendCtx, cancel := context.WithTimeout(context.Background(), 2*smtpDialTimeout)
+	defer cancel()
+
+	start := time.Now()
+	err := s.sendSMTP(sendCtx, "to@example.com", "Subject", "<p>body</p>")
+	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("expected error from unreachable SMTP server")
 	}
-	// The important assertion: we reached here without panicking.
-	t.Logf("sendSMTP correctly returned error: %v", err)
+	// An unreachable relay must fail inside the dial budget, not hold a
+	// connection for the OS default.
+	if elapsed > smtpDialTimeout+500*time.Millisecond {
+		t.Errorf("unreachable relay took %v, want under %v", elapsed, smtpDialTimeout+500*time.Millisecond)
+	}
+	t.Logf("sendSMTP correctly returned error after %v: %v", elapsed, err)
 }
 
 // --- Full sendSMTP flow tests with a mock SMTP server ---
@@ -658,7 +669,7 @@ func TestSendSMTP_FallbackReconnectsAndAuthsWithLOGIN(t *testing.T) {
 	// test server accepts. No STARTTLS advertised → plain connection to
 	// localhost, which loginAuth.Start allows.
 
-	err := s.sendSMTP("to@example.com", "Test Subject", "<p>Hello</p>")
+	err := s.sendSMTP(context.Background(), "to@example.com", "Test Subject", "<p>Hello</p>")
 	if err != nil {
 		t.Fatalf("sendSMTP failed: %v", err)
 	}
@@ -682,7 +693,7 @@ func TestSendSMTP_PlainAuthSucceedsWithoutFallback(t *testing.T) {
 		smtpPassword: "testpass",
 	}
 
-	err := s.sendSMTP("to@example.com", "Test Subject", "<p>Hello</p>")
+	err := s.sendSMTP(context.Background(), "to@example.com", "Test Subject", "<p>Hello</p>")
 	if err != nil {
 		t.Fatalf("sendSMTP failed: %v", err)
 	}
@@ -702,7 +713,7 @@ func TestSendSMTP_NoAuthWhenUsernameEmpty(t *testing.T) {
 		// smtpUsername is empty → unauthenticated relay
 	}
 
-	err := s.sendSMTP("to@example.com", "Test Subject", "<p>Hello</p>")
+	err := s.sendSMTP(context.Background(), "to@example.com", "Test Subject", "<p>Hello</p>")
 	if err != nil {
 		t.Fatalf("sendSMTP failed for unauthenticated relay: %v", err)
 	}
@@ -726,5 +737,101 @@ func TestSendSMTP_LoginAuthRejectsUnencryptedRemote(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unencrypted connection") {
 		t.Errorf("expected 'unencrypted connection' error, got: %v", err)
+	}
+}
+
+// startStallingSMTPServer accepts a connection, prints the banner, and then
+// never answers — the shape of a relay that is reachable but wedged. This is
+// what the connection deadline exists for.
+func startStallingSMTPServer(t *testing.T) (host, port string) {
+	t.Helper()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	release := make(chan struct{})
+	t.Cleanup(func() {
+		l.Close()
+		close(release)
+	})
+
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				fmt.Fprintf(conn, "220 stalling ESMTP\r\n")
+				<-release
+			}(conn)
+		}
+	}()
+
+	host, port, err = net.SplitHostPort(l.Addr().String())
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+	return host, port
+}
+
+func TestSendSMTP_StallingRelayStopsAtSessionDeadline(t *testing.T) {
+	host, port := startStallingSMTPServer(t)
+	s := &EmailService{
+		fromEmail: "from@example.com",
+		smtpHost:  host,
+		smtpPort:  port,
+	}
+
+	start := time.Now()
+	err := s.sendSMTP(context.Background(), "to@example.com", "Test Subject", "<p>Hello</p>")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected a deadline error from a relay that never answers")
+	}
+	// The session budget is the whole wait: a stalled relay must not fall back
+	// on the OS default, which is what let one send hang for tens of seconds.
+	if elapsed > smtpSessionTimeout+time.Second {
+		t.Errorf("stalled relay took %v, want under %v", elapsed, smtpSessionTimeout+time.Second)
+	}
+}
+
+func TestSendSMTP_CallerDeadlineBeatsSessionBudget(t *testing.T) {
+	host, port := startStallingSMTPServer(t)
+	s := &EmailService{
+		fromEmail: "from@example.com",
+		smtpHost:  host,
+		smtpPort:  port,
+	}
+
+	sendCtx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := s.sendSMTP(sendCtx, "to@example.com", "Test Subject", "<p>Hello</p>")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("expected the caller's deadline to stop the send")
+	}
+	if elapsed > time.Second {
+		t.Errorf("send took %v, want the 300ms caller deadline rather than the %v budget", elapsed, smtpSessionTimeout)
+	}
+}
+
+func TestSessionDeadlineUsesEarlierOfCallerAndBudget(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second))
+	defer cancel()
+	if got := sessionDeadline(ctx, smtpSessionTimeout); got.After(time.Now().Add(2 * time.Second)) {
+		t.Errorf("caller deadline ignored: %v", time.Until(got))
+	}
+	if got := sessionDeadline(context.Background(), smtpSessionTimeout); time.Until(got) < smtpSessionTimeout-time.Second {
+		t.Errorf("budget ignored: %v", time.Until(got))
+	}
+	longCtx, longCancel := context.WithTimeout(context.Background(), time.Hour)
+	defer longCancel()
+	if got := sessionDeadline(longCtx, smtpSessionTimeout); time.Until(got) > smtpSessionTimeout+time.Second {
+		t.Errorf("hour-long caller deadline overrode the session budget: %v", time.Until(got))
 	}
 }

@@ -69,6 +69,8 @@ SMTP_FROM_EMAIL=noreply@example.com
 SMTP_EHLO_NAME=mail.example.com
 ```
 
+验证码和邀请邮件是在登录或邀请请求已经返回之后才交给 relay 的，所以中继变慢不会拖住浏览器，发送失败也不会显示在页面上。排查请看 backend 日志中的 `email send failed`，以及 `multica_email_send_total{result="failure"}` 指标。每次与 relay 的会话给 3 秒连接、8 秒通信，中继不可达时会尽快放弃，而不是占住请求。
+
 ### 无邮件服务时的行为
 
 服务器仍可启动，但验证码和邀请链接只会写入日志，不会发送邮件。这种模式只适合本地开发。

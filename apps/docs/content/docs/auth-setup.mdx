@@ -69,6 +69,8 @@ Some strict relays also require a valid EHLO name:
 SMTP_EHLO_NAME=mail.example.com
 ```
 
+Verification codes and invitation emails are handed to the relay after the sign-in or invite request has answered, so a slow relay never delays the browser and a failing one never reports there. Look for `email send failed` in the backend log and the `multica_email_send_total{result="failure"}` counter. Each relay conversation gets 3s to connect and 8s to talk, so an unreachable host is given up on instead of holding a request open.
+
 ### Behavior without an email service
 
 The server still starts, but verification codes and invitation links are only written to the log; no email is sent. This mode is only suitable for local development.

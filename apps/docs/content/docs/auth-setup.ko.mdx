@@ -69,6 +69,8 @@ SMTP_FROM_EMAIL=noreply@example.com
 SMTP_EHLO_NAME=mail.example.com
 ```
 
+인증 코드와 초대 메일은 로그인 또는 초대 요청이 응답한 뒤에 relay로 전달됩니다. 따라서 relay가 느려도 브라우저 응답이 지연되지 않고, 전송에 실패해도 화면에 표시되지 않습니다. 확인하려면 backend 로그의 `email send failed`와 `multica_email_send_total{result="failure"}` 지표를 보세요. relay 세션은 연결 3초, 통신 8초가 상한이라 접속할 수 없는 relay에서는 요청을 붙잡지 않고 즉시 중단됩니다.
+
 ### 이메일 서비스가 없을 때의 동작
 
 서버는 계속 시작되지만 인증 코드와 초대 링크가 이메일로 전송되지 않고 로그에만 기록됩니다. 이 모드는 로컬 개발에만 적합합니다.

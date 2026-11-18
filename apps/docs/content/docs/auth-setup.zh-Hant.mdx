@@ -69,6 +69,8 @@ SMTP_FROM_EMAIL=noreply@example.com
 SMTP_EHLO_NAME=mail.example.com
 ```
 
+驗證碼和邀請郵件是在登入或邀請請求已經返回之後才交給 relay 的，所以中繼變慢不會拖住瀏覽器，發送失敗也不會顯示在頁面上。排查請看 backend 日誌中的 `email send failed`，以及 `multica_email_send_total{result="failure"}` 指標。每次與 relay 的會話給 3 秒連線、8 秒通訊，中繼無法連線時會盡快放棄，而不是佔住請求。
+
 ### 無郵件服務時的行為
 
 伺服器仍可啟動，但驗證碼和邀請連結只會寫入日誌，不會傳送郵件。這種模式只適合本地開發。

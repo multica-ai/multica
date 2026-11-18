@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
@@ -22,6 +23,18 @@ import (
 // inviter name) can land in an email Subject. Prevents attackers from stuffing
 // a full phishing pitch into a workspace name that gets sent from our domain.
 const maxSubjectFieldRunes = 60
+
+// A SMTP conversation against a public relay is ~7 round trips (banner, EHLO,
+// AUTH, MAIL FROM, RCPT TO, DATA commit, QUIT), so a healthy session finishes in
+// about a second. These caps decide what "the relay is not answering" costs:
+// without them net/smtp waits on the OS, which can hold a connection for minutes.
+const (
+	// smtpDialTimeout bounds connect, including the implicit-TLS handshake.
+	smtpDialTimeout = 3 * time.Second
+	// smtpSessionTimeout bounds one conversation on an established connection.
+	// The PLAIN→LOGIN fallback opens a second connection and gets its own.
+	smtpSessionTimeout = 8 * time.Second
+)
 
 type EmailService struct {
 	client          *resend.Client
@@ -125,7 +138,19 @@ func resolveFromEmail(smtpHost string) string {
 	return resendFrom
 }
 
-func (s *EmailService) openSMTPClient() (*smtp.Client, error) {
+// sessionDeadline returns the earlier of the caller's context deadline and a
+// per-connection budget. The context deadline is what bounds a whole send that
+// reconnects (the PLAIN→LOGIN fallback), the budget is what bounds one relay
+// that has stopped answering mid-conversation.
+func sessionDeadline(ctx context.Context, budget time.Duration) time.Time {
+	limit := time.Now().Add(budget)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(limit) {
+		return dl
+	}
+	return limit
+}
+
+func (s *EmailService) openSMTPClient(ctx context.Context) (*smtp.Client, error) {
 	addr := net.JoinHostPort(s.smtpHost, s.smtpPort)
 
 	tlsCfg := &tls.Config{
@@ -133,18 +158,29 @@ func (s *EmailService) openSMTPClient() (*smtp.Client, error) {
 		InsecureSkipVerify: s.smtpTLSInsecure, //nolint:gosec // opt-in via SMTP_TLS_INSECURE=true
 	}
 
-	var conn net.Conn
-	var err error
-	if s.smtpTLSImplicit {
-		dialer := &net.Dialer{Timeout: 10 * time.Second}
-		conn, err = tls.DialWithDialer(dialer, "tcp", addr, tlsCfg)
-	} else {
-		conn, err = net.DialTimeout("tcp", addr, 10*time.Second)
-	}
+	dialer := &net.Dialer{Timeout: smtpDialTimeout}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("smtp dial %s: %w", addr, err)
 	}
-	if err = conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+
+	if s.smtpTLSImplicit {
+		// Handshake is part of connect: it gets the dial budget, not the
+		// session budget, so a relay that accepts TCP and then goes silent
+		// still fails fast.
+		if err = conn.SetDeadline(sessionDeadline(ctx, smtpDialTimeout)); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("smtp set dial deadline: %w", err)
+		}
+		tlsConn := tls.Client(conn, tlsCfg)
+		if err = tlsConn.HandshakeContext(ctx); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("smtp tls handshake %s: %w", addr, err)
+		}
+		conn = tlsConn
+	}
+
+	if err = conn.SetDeadline(sessionDeadline(ctx, smtpSessionTimeout)); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("smtp set deadline: %w", err)
 	}
@@ -254,12 +290,14 @@ func NewEmailService() *EmailService {
 // Supports unauthenticated relay (SMTP_USERNAME empty) and authenticated SMTP.
 // Upgrades to STARTTLS when advertised by the server.
 // Set SMTP_TLS_INSECURE=true for self-signed or private CA certificates.
-func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
+// ctx bounds the whole send, including the fallback reconnect; callers that are
+// already off the request path pass their own deadline rather than a request one.
+func (s *EmailService) sendSMTP(ctx context.Context, to, subject, htmlBody string) error {
 	if strings.TrimSpace(s.fromEmail) == "" {
 		return fmt.Errorf("SMTP_FROM_EMAIL or RESEND_FROM_EMAIL is required when SMTP_HOST is set")
 	}
 
-	c, err := s.openSMTPClient()
+	c, err := s.openSMTPClient(ctx)
 	if err != nil {
 		return err
 	}
@@ -273,7 +311,7 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 			}
 
 			c.Close()
-			c, err = s.openSMTPClient()
+			c, err = s.openSMTPClient(ctx)
 			if err != nil {
 				return fmt.Errorf("smtp auth: plain auth failed (%v); login reconnect failed: %w", authErr, err)
 			}
@@ -337,7 +375,7 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 // SendVerificationCode sends a one-time login code. The code is server-generated
 // (6-digit numeric) so no user-controlled text reaches the email body here.
 // Delivery priority: SMTP relay → Resend API → DEV stdout.
-func (s *EmailService) SendVerificationCode(to, code string) error {
+func (s *EmailService) SendVerificationCode(ctx context.Context, to, code string) error {
 	body := fmt.Sprintf(
 		`<div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">
 			<h2>Your verification code</h2>
@@ -347,7 +385,7 @@ func (s *EmailService) SendVerificationCode(to, code string) error {
 		</div>`, code)
 
 	if s.smtpHost != "" {
-		return s.sendSMTP(to, "Your Multica verification code", body)
+		return s.sendSMTP(ctx, to, "Your Multica verification code", body)
 	}
 	if s.client == nil {
 		fmt.Printf("[DEV] Verification code for %s: %s\n", to, code)
@@ -359,13 +397,13 @@ func (s *EmailService) SendVerificationCode(to, code string) error {
 		Subject: "Your Multica verification code",
 		Html:    body,
 	}
-	_, err := s.client.Emails.Send(params)
+	_, err := s.client.Emails.SendWithContext(ctx, params)
 	return err
 }
 
 // SendInvitationEmail notifies the invitee that they have been invited to a workspace.
 // invitationID is included in the URL so the email deep-links to /invite/{id}.
-func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invitationID string) error {
+func (s *EmailService) SendInvitationEmail(ctx context.Context, to, inviterName, workspaceName, invitationID string) error {
 	appURL := strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN"))
 	if appURL == "" {
 		appURL = "https://multica.ai"
@@ -374,14 +412,14 @@ func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invit
 
 	if s.smtpHost != "" {
 		params := buildInvitationParams(s.fromEmail, to, inviterName, workspaceName, inviteURL)
-		return s.sendSMTP(to, params.Subject, params.Html)
+		return s.sendSMTP(ctx, to, params.Subject, params.Html)
 	}
 	if s.client == nil {
 		fmt.Printf("[DEV] Invitation email to %s: %s invited you to %s — %s\n", to, inviterName, workspaceName, inviteURL)
 		return nil
 	}
 	params := buildInvitationParams(s.fromEmail, to, inviterName, workspaceName, inviteURL)
-	_, err := s.client.Emails.Send(params)
+	_, err := s.client.Emails.SendWithContext(ctx, params)
 	return err
 }
 

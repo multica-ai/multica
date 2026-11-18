@@ -229,18 +229,14 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		"email",
 	))
 
-	// Send invitation email (fire-and-forget).
+	// Send invitation email (fire-and-forget, through the bounded queue).
 	if h.EmailService != nil && workspaceName != "" {
 		inviterName := email // fallback
 		if inviter, err := h.Queries.GetUser(r.Context(), requester.UserID); err == nil {
 			inviterName = inviter.Name
 		}
 		invID := uuidToString(inv.ID)
-		go func() {
-			if err := h.EmailService.SendInvitationEmail(email, inviterName, workspaceName, invID); err != nil {
-				slog.Warn("failed to send invitation email", "email", email, "error", err)
-			}
-		}()
+		h.EmailQueue.SendInvitation(email, inviterName, workspaceName, invID)
 	}
 
 	writeJSON(w, http.StatusCreated, resp)

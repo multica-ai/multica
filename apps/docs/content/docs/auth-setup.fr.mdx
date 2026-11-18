@@ -69,6 +69,8 @@ Certains relais stricts exigent aussi un nom EHLO valide :
 SMTP_EHLO_NAME=mail.example.com
 ```
 
+Les codes de vérification et les e-mails d'invitation sont transmis au relais après la réponse de la requête de connexion ou d'invitation : un relais lent ne retarde donc plus le navigateur, et un échec d'envoi ne s'y affiche pas. Consultez le journal du backend pour `email send failed` et le compteur `multica_email_send_total{result="failure"}`. Chaque conversation avec le relais dispose de 3 s pour se connecter et de 8 s pour échanger : un relais injoignable est donc abandonné au lieu de retenir la requête.
+
 ### Comportement sans service d'e-mail
 
 Le serveur démarre quand même, mais les codes de vérification et les liens d'invitation sont uniquement écrits dans le journal ; aucun e-mail n'est envoyé. Ce mode ne convient qu'au développement local.

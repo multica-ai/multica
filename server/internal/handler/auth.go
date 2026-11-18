@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -397,9 +398,14 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.EmailService.SendVerificationCode(email, code); err != nil {
-		slog.Error("failed to send verification code", "email", email, "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to send verification code")
+	// The relay conversation costs ~7 round trips, so it runs off this request:
+	// waiting on it made every login form look broken for a second and pushed
+	// impatient users into the 60s rate limit above. A rejected queue slot is the
+	// one failure this endpoint can still report; a send that fails later is
+	// logged and counted by EmailQueue.
+	if err := h.EmailQueue.SendVerificationCode(email, code, chimw.GetReqID(r.Context())); err != nil {
+		slog.Error("failed to queue verification code", append(logger.RequestAttrs(r), "email", email, "error", err)...)
+		writeError(w, http.StatusServiceUnavailable, "email is busy, please try again later")
 		return
 	}
 
