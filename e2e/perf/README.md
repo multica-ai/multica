@@ -162,6 +162,50 @@ These are observed local measurements, not latency thresholds. Stop other
 run-owned builds/tests before measuring; the report also records system load.
 Destroy the API environment after the comparison with `make destroy ARGS="--yes"`.
 
+## Inbox jump
+
+`inbox-jump.spec.ts` opens a notification about a reply deep in a long issue
+from the sidebar Inbox and measures the time from the pointer press to the
+reply being mounted and on screen, plus long tasks and how many comment bodies
+mounted on the way. It runs against production builds and an isolated local
+API, as the issue-history scenario does (MUL-9538).
+
+The first run seeds a deterministic issue shaped like GitHub #10775: 49
+comments (18 replies, agent reports with tables and code), 72 runs, 24
+sub-issues and 20 activity entries, plus a small neighbour issue. It writes
+the ids and the user's token to `PERF_MANIFEST`; later runs reuse it, so every
+build is measured on the same rows. Each sample:
+
+- **cold**: a fresh browser context loads the Inbox, waits
+  `PERF_COLD_SETTLE_MS` (default 1500), then opens the notification. Every
+  sample starts from an unread notification.
+- **warm**: in the same context, it opens the neighbour, then the long issue's
+  notification again.
+
+```bash
+make up C=api ARGS="--ephemeral"
+# Build each ref with NEXT_PUBLIC_API_URL='' NEXT_PUBLIC_WS_URL='' and serve it
+# with REMOTE_API_URL pointing at the API (see the issue-history section).
+PERF_SCENARIO=inbox-jump PERF_REPEATS=6 \
+  PERF_MANIFEST=<absolute-path>/inbox-jump-manifest.json \
+  PERF_TARGETS="main=http://localhost:3101,head=http://localhost:3102" \
+  PERF_REPORT_PATH=<absolute-report-path> \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts inbox-jump.spec.ts"
+```
+
+Rounds alternate between the `PERF_TARGETS` builds, after one warmup round.
+`PERF_LATENCY_MS` adds a round-trip latency to every request, standing in for
+a remote API. `PERF_TRACE_DIR` writes a Chrome trace and CPU profile of the
+last round, or of every round with `PERF_TRACE_ALL=1`. The trace is bounded
+by the `bench:click` and `bench:visible` user-timing marks.
+
+The report holds per-target medians. Budgets on those medians are enforced
+only when set: `PERF_BUDGET_WARM_MS`, `PERF_BUDGET_WARM_LONGEST_TASK_MS`,
+`PERF_BUDGET_COLD_MS` and `PERF_BUDGET_COLD_LONGEST_TASK_MS`. The MUL-9538
+targets are 100, 50, 300 and none. Machine load moves these numbers, and the
+report records it, so compare builds from one alternating run, not across
+runs.
+
 ## When to run the typing scenarios
 
 Nothing runs this automatically. The routine guard is the component test from
