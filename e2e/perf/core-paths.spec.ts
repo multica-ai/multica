@@ -44,6 +44,11 @@ const CPU_THROTTLE = Number(process.env.PERF_CPU_THROTTLE ?? 1);
  * a user can pick, or `all`, after "Show N more" mounts every row.
  */
 const INBOX_ROWS = process.env.PERF_INBOX_ROWS === "all" ? "all" : "20";
+/**
+ * Where an Inbox switch ends: the notified comment in view (default), or just
+ * the issue's title, for refs that do not scroll to the comment (before #10872).
+ */
+const INBOX_UNTIL = process.env.PERF_INBOX_UNTIL === "title" ? "title" : "comment";
 
 test.describe.configure({ mode: "serial" });
 
@@ -71,7 +76,7 @@ test.afterAll(async ({ browser }) => {
     environment: {
       browser: browser.version(), viewport: `${VIEWPORT.width}x${VIEWPORT.height}`, cpu_throttle: CPU_THROTTLE,
       cpu: cpus()[0]?.model, cores: cpus().length, load_1m_end: loadavg()[0], repeats: REPEATS,
-      inbox_rows: INBOX_ROWS,
+      inbox_rows: INBOX_ROWS, inbox_until: INBOX_UNTIL,
     },
     summary: summarize(),
     samples: report,
@@ -112,13 +117,14 @@ function summarizeToggles(toggles: Toggle[]) {
 const detailSelector = '[data-mc="issue-detail"][data-view="page"]';
 
 /** Resolves with page-clock marks once the issue's title and the target comment are on screen. */
-async function waitForIssue(page: Page, title: string, commentId: string, mode: "mounted" | "in-view") {
+async function waitForIssue(page: Page, title: string, commentId: string, mode: "mounted" | "in-view" | "title") {
   const handle = await page.waitForFunction(({ title, commentId, mode, detailSelector }) => {
     const marks = window.__corePerf.marks;
     const details = [...document.querySelectorAll(detailSelector)];
     const detail = details.find((d) => d.querySelector('[data-mc="issue-title"]')?.textContent?.includes(title));
     if (!detail) return false;
     marks.title ??= performance.now();
+    if (mode === "title") return { title: marks.title, content: marks.title };
     const root = detail.querySelector<HTMLElement>("[data-tab-scroll-root]");
     const target = root?.querySelector<HTMLElement>(`[data-comment-content="${commentId}"]`);
     if (!root || !target || !target.textContent?.trim()) return false;
@@ -267,7 +273,7 @@ test("switch between Inbox rows in the Work panel", async ({ browser }) => {
         const issue = manifest.issues[key]!;
         await page.evaluate(() => { window.__corePerf.marks = {}; });
         await rows.filter({ hasText: issue.title }).locator("a").first().click();
-        const marks = await waitForIssue(page, issue.title, issue.targetCommentId, "in-view");
+        const marks = await waitForIssue(page, issue.title, issue.targetCommentId, INBOX_UNTIL === "title" ? "title" : "in-view");
         const click = await lastClick(page);
         await settle(page, SWITCH_DWELL_MS);
         const end = await pageNow(page);

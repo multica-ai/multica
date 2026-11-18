@@ -40,7 +40,7 @@ const ISSUE_ROWS = [
   ]),
 ];
 const INBOX_ROWS = [
-  ["ready_median_ms", "Click → issue and comment visible, median (ms)"],
+  ["ready_median_ms", "Click → content visible, median (ms)"],
   ["ready_p95_ms", "… p95 (ms)"],
   ["ready_max_ms", "… worst (ms)"],
   ["next_paint_median_ms", "Click → next paint, median (ms)"],
@@ -75,6 +75,12 @@ const env = inputs[0].report;
 lines.push(
   "",
   `Dataset ${env.dataset.version} (${env.dataset.digest}): ${Object.entries(env.dataset.counts).map(([k, v]) => `${v} ${k}`).join(", ")}.`,
-  `Chromium ${env.environment.browser}, ${env.environment.viewport}, ${env.environment.cpu} × ${env.environment.cores}, CPU throttle ${env.environment.cpu_throttle}×, ${env.environment.repeats} samples per column.`,
+  `Chromium ${env.environment.browser}, ${env.environment.viewport}, ${env.environment.cpu} × ${env.environment.cores}.`,
+  ...inputs.map(({ label, report }) => {
+    const e = report.environment;
+    const until = e.inbox_until === "title" ? "issue title is visible" : "notified comment is in view";
+    return `${label}: ref ${report.ref ?? "?"}, CPU ${e.cpu_throttle}×, ${e.repeats} samples` +
+      (report.summary?.inbox?.["first-visit"] ? `, ${e.inbox_rows} Inbox rows, switch ends when the ${until}` : "") + ".";
+  }),
 );
 console.log(lines.join("\n"));

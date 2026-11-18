@@ -176,6 +176,9 @@ UI against a real local API, with a seeded "large workspace":
 - **inbox**: click through twenty rows of the Work panel's Inbox, then go back
   and forth between the first five. `PERF_INBOX_ROWS=20` (default) uses the
   largest section limit; `PERF_INBOX_ROWS=all` first presses "Show N more".
+  A switch ends when the notified comment is in view; `PERF_INBOX_UNTIL=title`
+  ends it at the issue title instead, for refs older than #10872 that do not
+  bring the comment into view.
 
 Each step reports **time until the content is on screen** and **stalls**:
 frames longer than 50 ms (Long Animation Frames), the longest one, and the
