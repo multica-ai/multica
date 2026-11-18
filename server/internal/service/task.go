@@ -602,11 +602,17 @@ func (s *TaskService) runtimeOriginatorForTask(ctx context.Context, task db.Agen
 // source. A sticky continuation pins this machine instead of re-resolving:
 // with two online machines of the same CLI a fresh resolution would drift to
 // whichever heartbeated last, splitting one conversation across machines.
-func (s *TaskService) stickyRuntimeForContinuation(ctx context.Context, issueID pgtype.UUID) (pgtype.UUID, pgtype.UUID, bool) {
-	if s == nil || s.Queries == nil || !issueID.Valid {
+func (s *TaskService) stickyRuntimeForContinuation(ctx context.Context, issueID, agentID pgtype.UUID) (pgtype.UUID, pgtype.UUID, bool) {
+	if s == nil || s.Queries == nil || !issueID.Valid || !agentID.Valid {
 		return pgtype.UUID{}, pgtype.UUID{}, false
 	}
-	src, err := s.Queries.GetLatestIssueTaskStickyRuntime(ctx, issueID)
+	// Scoped to the target agent: two smart agents on one issue run on two of
+	// the owner's machines, and a continuation of agent A must not inherit
+	// agent B's machine just because B's run is newer.
+	src, err := s.Queries.GetLatestIssueTaskStickyRuntime(ctx, db.GetLatestIssueTaskStickyRuntimeParams{
+		IssueID: issueID,
+		AgentID: agentID,
+	})
 	if err != nil {
 		return pgtype.UUID{}, pgtype.UUID{}, false
 	}
@@ -1544,7 +1550,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	taskID := dbid.NewV7()
 	var stickyInheritance []byte
 	if !agent.ShareRuntime && !originatorOverride.Valid {
-		if sourceTaskID, pinnedRuntime, ok := s.stickyRuntimeForContinuation(ctx, issue.ID); ok {
+		if sourceTaskID, pinnedRuntime, ok := s.stickyRuntimeForContinuation(ctx, issue.ID, issue.AssigneeID); ok {
 			effective.RuntimeID = pinnedRuntime
 			stickyInheritance = stickyInheritanceMarker(taskID, pinnedRuntime, sourceTaskID)
 		}
@@ -1747,7 +1753,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	mentionTaskID := dbid.NewV7()
 	var stickyInheritance []byte
 	if !agent.ShareRuntime && !originatorOverride.Valid {
-		if sourceTaskID, pinnedRuntime, ok := s.stickyRuntimeForContinuation(ctx, issue.ID); ok {
+		if sourceTaskID, pinnedRuntime, ok := s.stickyRuntimeForContinuation(ctx, issue.ID, agentID); ok {
 			effective.RuntimeID = pinnedRuntime
 			stickyInheritance = stickyInheritanceMarker(mentionTaskID, pinnedRuntime, sourceTaskID)
 		}

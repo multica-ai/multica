@@ -2525,6 +2525,7 @@ LIMIT 1;
 SELECT atq.id AS source_task_id, atq.runtime_id
 FROM agent_task_queue atq
 WHERE atq.issue_id = $1
+  AND atq.agent_id = sqlc.arg('agent_id')::uuid
   AND atq.runtime_id IS NOT NULL
   AND atq.runtime_config_source IS NOT NULL
   AND atq.runtime_config_source <> 'shared'

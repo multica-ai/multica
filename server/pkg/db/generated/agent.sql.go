@@ -5123,12 +5123,18 @@ const getLatestIssueTaskStickyRuntime = `-- name: GetLatestIssueTaskStickyRuntim
 SELECT atq.id AS source_task_id, atq.runtime_id
 FROM agent_task_queue atq
 WHERE atq.issue_id = $1
+  AND atq.agent_id = $2::uuid
   AND atq.runtime_id IS NOT NULL
   AND atq.runtime_config_source IS NOT NULL
   AND atq.runtime_config_source <> 'shared'
 ORDER BY atq.created_at DESC, atq.id DESC
 LIMIT 1
 `
+
+type GetLatestIssueTaskStickyRuntimeParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+}
 
 type GetLatestIssueTaskStickyRuntimeRow struct {
 	SourceTaskID pgtype.UUID `json:"source_task_id"`
@@ -5140,8 +5146,8 @@ type GetLatestIssueTaskStickyRuntimeRow struct {
 // machine instead of re-resolving: with two online machines of the same CLI a
 // fresh resolution would drift to whichever heartbeated last, splitting one
 // conversation across machines.
-func (q *Queries) GetLatestIssueTaskStickyRuntime(ctx context.Context, issueID pgtype.UUID) (GetLatestIssueTaskStickyRuntimeRow, error) {
-	row := q.db.QueryRow(ctx, getLatestIssueTaskStickyRuntime, issueID)
+func (q *Queries) GetLatestIssueTaskStickyRuntime(ctx context.Context, arg GetLatestIssueTaskStickyRuntimeParams) (GetLatestIssueTaskStickyRuntimeRow, error) {
+	row := q.db.QueryRow(ctx, getLatestIssueTaskStickyRuntime, arg.IssueID, arg.AgentID)
 	var i GetLatestIssueTaskStickyRuntimeRow
 	err := row.Scan(&i.SourceTaskID, &i.RuntimeID)
 	return i, err

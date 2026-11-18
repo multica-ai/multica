@@ -5,9 +5,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	service "github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
-	service "github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -231,5 +231,53 @@ func TestSmartRuntimeContinuationPinsLatestRunMachine(t *testing.T) {
 	}
 	if claimed, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(machineA)); err != nil || claimed == nil || claimed.ID != task.ID {
 		t.Fatalf("machine A failed to claim the pinned continuation (task=%v, err=%v)", claimed != nil, err)
+	}
+}
+
+// Two smart agents on one issue run on two of Bob's machines. A sticky
+// continuation of agent A must scope the recovery to A's own runs — it must
+// not inherit agent B's machine just because B's run is newer.
+func TestSmartRuntimeContinuationScopesToTargetAgent(t *testing.T) {
+	ctx := t.Context()
+	templateOwner := dbfx.User(t, "Scope Template Owner", "scope-template@example.test")
+	dbfx.Member(t, testWorkspaceID, templateOwner, "member")
+	runOwner := dbfx.User(t, "Scope Run Owner", "scope-run-owner@example.test")
+	dbfx.Member(t, testWorkspaceID, runOwner, "member")
+	codexMachine := dbfx.Runtime(t, "Scope Codex machine", testutil.Cols{"provider": "codex", "owner_id": runOwner})
+	claudeMachine := dbfx.Runtime(t, "Scope Claude machine", testutil.Cols{"provider": "claude", "owner_id": runOwner})
+	studioID := dbfx.Agent(t, "studio-helper", "", testutil.Cols{
+		"share_runtime": false, "recommended_cli": "codex", "owner_id": templateOwner,
+	})
+	reviewID := dbfx.Agent(t, "review-helper", "", testutil.Cols{
+		"share_runtime": false, "recommended_cli": "claude", "owner_id": templateOwner,
+	})
+	issueID := dbfx.Issue(t, "Scoped continuation", testutil.Cols{"assignee_type": "agent", "assignee_id": studioID})
+
+	// Studio Helper ran on the Codex machine, then Review Helper ran on the
+	// Claude machine — the newest run on this issue belongs to the OTHER agent.
+	dbfx.Task(t, studioID, testutil.Cols{
+		"runtime_id": codexMachine, "issue_id": issueID, "status": "completed",
+		"originator_user_id": runOwner, "accountable_user_id": runOwner,
+		"runtime_config_source": "recommended_match", "dispatched_at": testutil.Raw("now()"),
+	})
+	dbfx.Task(t, reviewID, testutil.Cols{
+		"runtime_id": claudeMachine, "issue_id": issueID, "status": "completed",
+		"originator_user_id": runOwner, "accountable_user_id": runOwner,
+		"runtime_config_source": "recommended_match", "dispatched_at": testutil.Raw("now()"),
+	})
+
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, parseUUID(studioID), pgtype.UUID{}, service.OriginNamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if util.UUIDToString(task.RuntimeID) != codexMachine {
+		t.Fatalf("continuation runtime = %s, want Studio Helper's Codex machine %s", util.UUIDToString(task.RuntimeID), codexMachine)
+	}
+	if claimed, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(codexMachine)); err != nil || claimed == nil || claimed.ID != task.ID {
+		t.Fatalf("the Codex machine failed to claim the scoped continuation (task=%v, err=%v)", claimed != nil, err)
 	}
 }
