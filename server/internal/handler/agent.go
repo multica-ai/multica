@@ -2193,7 +2193,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		params.RecommendedCli = pgtype.Text{String: targetProvider, Valid: true}
 		targetRuntimeID = pgtype.UUID{}
-		params.RuntimeMode = pgtype.Text{String: "daemon", Valid: true}
+		params.RuntimeMode = pgtype.Text{String: "local", Valid: true}
 	} else if req.ShareRuntime != nil || req.CLI != nil {
 		if !existing.RuntimeID.Valid && req.RuntimeID == nil {
 			writeError(w, http.StatusBadRequest, "fixed strategy requires runtime_id")

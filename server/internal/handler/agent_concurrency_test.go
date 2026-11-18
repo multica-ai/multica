@@ -209,3 +209,24 @@ func TestUpdateAgent_MaxConcurrentTasksChangeWakesRuntime(t *testing.T) {
 		t.Fatalf("updates that leave the cap unchanged: expected no wakeup, got %d", got)
 	}
 }
+
+func TestCreateAgent_SmartStrategyWithoutRuntime(t *testing.T) {
+	w := httptest.NewRecorder()
+	testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", map[string]any{
+		"name": "smart-strategy-without-runtime", "share_runtime": false, "cli": "Codex",
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", w.Code, w.Body.String())
+	}
+	var response AgentResponse
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, response.ID) })
+	if response.ShareRuntime || response.RuntimeID != "" || response.CLI != "codex" || !response.RuntimeBound {
+		t.Fatalf("smart agent returned share_runtime=%v, runtime_id=%q, cli=%q, runtime_bound=%v", response.ShareRuntime, response.RuntimeID, response.CLI, response.RuntimeBound)
+	}
+	if response.RuntimeConfigSummary == nil || response.RuntimeConfigSummary.Recommended.CLI != "codex" {
+		t.Fatal("smart agent response did not include its CLI recommendation")
+	}
+}
