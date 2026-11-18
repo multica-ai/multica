@@ -281,3 +281,52 @@ func TestSmartRuntimeContinuationScopesToTargetAgent(t *testing.T) {
 		t.Fatalf("the Codex machine failed to claim the scoped continuation (task=%v, err=%v)", claimed != nil, err)
 	}
 }
+
+// A sticky continuation adopts the source run's whole snapshot: after Bob
+// saves a personal Claude configuration for the agent, the continuation of a
+// run that executed on his Codex with gpt-5.4 keeps Codex / gpt-5.4 — the
+// machine never advertised the later-saved Claude model.
+func TestSmartRuntimeContinuationAdoptsRunSnapshot(t *testing.T) {
+	ctx := t.Context()
+	templateOwner := dbfx.User(t, "Snapshot Template Owner", "snapshot-template@example.test")
+	dbfx.Member(t, testWorkspaceID, templateOwner, "member")
+	runOwner := dbfx.User(t, "Snapshot Run Owner", "snapshot-run-owner@example.test")
+	dbfx.Member(t, testWorkspaceID, runOwner, "member")
+	codexMachine := dbfx.Runtime(t, "Snapshot Codex machine", testutil.Cols{"provider": "codex", "owner_id": runOwner})
+	claudeMachine := dbfx.Runtime(t, "Snapshot Claude machine", testutil.Cols{"provider": "claude", "owner_id": runOwner})
+	agentID := dbfx.Agent(t, "snapshot-review-agent", "", testutil.Cols{
+		"share_runtime": false, "recommended_cli": "codex", "owner_id": templateOwner,
+	})
+	issueID := dbfx.Issue(t, "Snapshot continuation", testutil.Cols{"assignee_type": "agent", "assignee_id": agentID})
+
+	// The run: Codex machine, gpt-5.4.
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": codexMachine, "issue_id": issueID, "status": "completed",
+		"originator_user_id": runOwner, "accountable_user_id": runOwner,
+		"runtime_config_source": "recommended_match", "dispatched_at": testutil.Raw("now()"),
+		"effective_model": "gpt-5.4",
+	})
+	// Saved AFTER the run: Bob's personal Claude configuration.
+	if _, err := testPool.Exec(ctx, `INSERT INTO agent_user_runtime_config
+		(agent_id, user_id, runtime_id, model)
+		VALUES ($1, $2, $3, 'claude-sonnet-4-6')`,
+		parseUUID(agentID), parseUUID(runOwner), parseUUID(claudeMachine)); err != nil {
+		t.Fatalf("save personal Claude config: %v", err)
+	}
+
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, parseUUID(agentID), pgtype.UUID{}, service.OriginNamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if util.UUIDToString(task.RuntimeID) != codexMachine || task.EffectiveModel.String != "gpt-5.4" {
+		t.Fatalf("continuation = (%s, %s), want the run snapshot (Codex machine, gpt-5.4)",
+			util.UUIDToString(task.RuntimeID), task.EffectiveModel.String)
+	}
+	if claimed, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(codexMachine)); err != nil || claimed == nil || claimed.ID != task.ID {
+		t.Fatalf("the Codex machine failed to claim the snapshot continuation (task=%v, err=%v)", claimed != nil, err)
+	}
+}

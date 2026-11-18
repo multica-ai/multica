@@ -5120,8 +5120,12 @@ func (q *Queries) GetLatestIssueTaskRuntimeOriginator(ctx context.Context, issue
 }
 
 const getLatestIssueTaskStickyRuntime = `-- name: GetLatestIssueTaskStickyRuntime :one
-SELECT atq.id AS source_task_id, atq.runtime_id
+SELECT atq.id AS source_task_id, atq.runtime_id, COALESCE(ar.name, '') AS runtime_name,
+       atq.effective_model, atq.effective_thinking_level,
+       atq.effective_service_tier, atq.effective_runtime_config,
+       atq.effective_max_concurrent_tasks, atq.runtime_config_source
 FROM agent_task_queue atq
+LEFT JOIN agent_runtime ar ON ar.id = atq.runtime_id
 WHERE atq.issue_id = $1
   AND atq.agent_id = $2::uuid
   AND atq.runtime_id IS NOT NULL
@@ -5137,19 +5141,37 @@ type GetLatestIssueTaskStickyRuntimeParams struct {
 }
 
 type GetLatestIssueTaskStickyRuntimeRow struct {
-	SourceTaskID pgtype.UUID `json:"source_task_id"`
-	RuntimeID    pgtype.UUID `json:"runtime_id"`
+	SourceTaskID                pgtype.UUID `json:"source_task_id"`
+	RuntimeID                   pgtype.UUID `json:"runtime_id"`
+	RuntimeName                 string      `json:"runtime_name"`
+	EffectiveModel              pgtype.Text `json:"effective_model"`
+	EffectiveThinkingLevel      pgtype.Text `json:"effective_thinking_level"`
+	EffectiveServiceTier        pgtype.Text `json:"effective_service_tier"`
+	EffectiveRuntimeConfig      []byte      `json:"effective_runtime_config"`
+	EffectiveMaxConcurrentTasks pgtype.Int4 `json:"effective_max_concurrent_tasks"`
+	RuntimeConfigSource         pgtype.Text `json:"runtime_config_source"`
 }
 
-// The machine the issue's latest personal run resolved to, with that run's id
-// as the authorization source. A sticky "current task" continuation pins this
-// machine instead of re-resolving: with two online machines of the same CLI a
-// fresh resolution would drift to whichever heartbeated last, splitting one
-// conversation across machines.
+// The full execution snapshot of the issue's latest personal run, with that
+// run's id as the authorization source. A sticky "current task" continuation
+// adopts this snapshot wholesale instead of re-resolving: with two online
+// machines of the same CLI a fresh resolution would drift to whichever
+// heartbeated last, and a personal configuration saved after the run would
+// swap the model under a machine that never reported it.
 func (q *Queries) GetLatestIssueTaskStickyRuntime(ctx context.Context, arg GetLatestIssueTaskStickyRuntimeParams) (GetLatestIssueTaskStickyRuntimeRow, error) {
 	row := q.db.QueryRow(ctx, getLatestIssueTaskStickyRuntime, arg.IssueID, arg.AgentID)
 	var i GetLatestIssueTaskStickyRuntimeRow
-	err := row.Scan(&i.SourceTaskID, &i.RuntimeID)
+	err := row.Scan(
+		&i.SourceTaskID,
+		&i.RuntimeID,
+		&i.RuntimeName,
+		&i.EffectiveModel,
+		&i.EffectiveThinkingLevel,
+		&i.EffectiveServiceTier,
+		&i.EffectiveRuntimeConfig,
+		&i.EffectiveMaxConcurrentTasks,
+		&i.RuntimeConfigSource,
+	)
 	return i, err
 }
 

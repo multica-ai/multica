@@ -602,21 +602,46 @@ func (s *TaskService) runtimeOriginatorForTask(ctx context.Context, task db.Agen
 // source. A sticky continuation pins this machine instead of re-resolving:
 // with two online machines of the same CLI a fresh resolution would drift to
 // whichever heartbeated last, splitting one conversation across machines.
-func (s *TaskService) stickyRuntimeForContinuation(ctx context.Context, issueID, agentID pgtype.UUID) (pgtype.UUID, pgtype.UUID, bool) {
+// stickyRuntimeForContinuation recovers the latest personal run's full
+// execution snapshot. Scoped to the target agent: two smart agents on one
+// issue run on two of the owner's machines, and a continuation of agent A
+// must not inherit agent B's machine (or model) just because B's run is
+// newer.
+func (s *TaskService) stickyRuntimeForContinuation(ctx context.Context, issueID, agentID pgtype.UUID) (db.GetLatestIssueTaskStickyRuntimeRow, bool) {
 	if s == nil || s.Queries == nil || !issueID.Valid || !agentID.Valid {
-		return pgtype.UUID{}, pgtype.UUID{}, false
+		return db.GetLatestIssueTaskStickyRuntimeRow{}, false
 	}
-	// Scoped to the target agent: two smart agents on one issue run on two of
-	// the owner's machines, and a continuation of agent A must not inherit
-	// agent B's machine just because B's run is newer.
 	src, err := s.Queries.GetLatestIssueTaskStickyRuntime(ctx, db.GetLatestIssueTaskStickyRuntimeParams{
 		IssueID: issueID,
 		AgentID: agentID,
 	})
-	if err != nil {
-		return pgtype.UUID{}, pgtype.UUID{}, false
+	if err != nil || !src.RuntimeID.Valid {
+		return db.GetLatestIssueTaskStickyRuntimeRow{}, false
 	}
-	return src.SourceTaskID, src.RuntimeID, true
+	return src, true
+}
+
+// adoptStickySnapshot overlays the source run's whole execution snapshot onto
+// the resolved config. Machine, model, and every execution knob come from the
+// same run: keeping the pinned machine while re-reading a personal config
+// saved after that run would send a model the machine never advertised.
+func adoptStickySnapshot(effective *EffectiveRuntimeConfig, src db.GetLatestIssueTaskStickyRuntimeRow) {
+	effective.RuntimeID = src.RuntimeID
+	effective.RuntimeName = src.RuntimeName
+	effective.Model = src.EffectiveModel.String
+	effective.ThinkingLevel = src.EffectiveThinkingLevel.String
+	effective.ServiceTier = src.EffectiveServiceTier.String
+	if len(src.EffectiveRuntimeConfig) > 0 {
+		effective.RuntimeConfig = src.EffectiveRuntimeConfig
+	}
+	if src.EffectiveMaxConcurrentTasks.Valid && src.EffectiveMaxConcurrentTasks.Int32 > 0 {
+		effective.MaxConcurrentTasks = src.EffectiveMaxConcurrentTasks.Int32
+	}
+	if src.RuntimeConfigSource.Valid && src.RuntimeConfigSource.String != "" {
+		effective.Source = RuntimeConfigSummarySource(src.RuntimeConfigSource.String)
+	}
+	effective.ResolutionStatus = RuntimeConfigResolutionReady
+	effective.ResolutionMessage = ""
 }
 
 // stickyInheritanceMarker builds the context stamp the claim fence reads for
@@ -1550,9 +1575,9 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	taskID := dbid.NewV7()
 	var stickyInheritance []byte
 	if !agent.ShareRuntime && !originatorOverride.Valid {
-		if sourceTaskID, pinnedRuntime, ok := s.stickyRuntimeForContinuation(ctx, issue.ID, issue.AssigneeID); ok {
-			effective.RuntimeID = pinnedRuntime
-			stickyInheritance = stickyInheritanceMarker(taskID, pinnedRuntime, sourceTaskID)
+		if src, ok := s.stickyRuntimeForContinuation(ctx, issue.ID, issue.AssigneeID); ok {
+			adoptStickySnapshot(&effective, src)
+			stickyInheritance = stickyInheritanceMarker(taskID, src.RuntimeID, src.SourceTaskID)
 		}
 	}
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, runtimeOriginatorUserID, agent)
@@ -1753,9 +1778,9 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	mentionTaskID := dbid.NewV7()
 	var stickyInheritance []byte
 	if !agent.ShareRuntime && !originatorOverride.Valid {
-		if sourceTaskID, pinnedRuntime, ok := s.stickyRuntimeForContinuation(ctx, issue.ID, agentID); ok {
-			effective.RuntimeID = pinnedRuntime
-			stickyInheritance = stickyInheritanceMarker(mentionTaskID, pinnedRuntime, sourceTaskID)
+		if src, ok := s.stickyRuntimeForContinuation(ctx, issue.ID, agentID); ok {
+			adoptStickySnapshot(&effective, src)
+			stickyInheritance = stickyInheritanceMarker(mentionTaskID, src.RuntimeID, src.SourceTaskID)
 		}
 	}
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, runtimeOriginatorUserID, agent)

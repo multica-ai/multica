@@ -2517,13 +2517,18 @@ ORDER BY created_at DESC
 LIMIT 1;
 
 -- name: GetLatestIssueTaskStickyRuntime :one
--- The machine the issue's latest personal run resolved to, with that run's id
--- as the authorization source. A sticky "current task" continuation pins this
--- machine instead of re-resolving: with two online machines of the same CLI a
--- fresh resolution would drift to whichever heartbeated last, splitting one
--- conversation across machines.
-SELECT atq.id AS source_task_id, atq.runtime_id
+-- The full execution snapshot of the issue's latest personal run, with that
+-- run's id as the authorization source. A sticky "current task" continuation
+-- adopts this snapshot wholesale instead of re-resolving: with two online
+-- machines of the same CLI a fresh resolution would drift to whichever
+-- heartbeated last, and a personal configuration saved after the run would
+-- swap the model under a machine that never reported it.
+SELECT atq.id AS source_task_id, atq.runtime_id, COALESCE(ar.name, '') AS runtime_name,
+       atq.effective_model, atq.effective_thinking_level,
+       atq.effective_service_tier, atq.effective_runtime_config,
+       atq.effective_max_concurrent_tasks, atq.runtime_config_source
 FROM agent_task_queue atq
+LEFT JOIN agent_runtime ar ON ar.id = atq.runtime_id
 WHERE atq.issue_id = $1
   AND atq.agent_id = sqlc.arg('agent_id')::uuid
   AND atq.runtime_id IS NOT NULL
