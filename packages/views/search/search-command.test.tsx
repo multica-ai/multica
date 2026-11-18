@@ -757,7 +757,7 @@ describe("SearchCommand", () => {
           {
             ...makeIssue({ id: "issue-snippet", identifier: "MUL-99", title: "HTML rendering pipeline" }),
             match_source: "title",
-            matched_description_snippet: "...uses HTML templates for rendering...",
+            matched_description_snippet: "...uses HTML templates from [Render guide](mention://doc/doc-1) for rendering...",
             matched_comment_snippet: "...we should migrate away from HTML...",
           },
         ],
@@ -768,7 +768,7 @@ describe("SearchCommand", () => {
 
       await waitFor(() => expect(renderedValues()).toContain("issue-snippet"), { timeout: 2000 });
       expect(
-        screen.getByText((_, el) => !!el?.textContent?.includes("uses HTML templates") && el?.tagName === "SPAN"),
+        screen.getByText((_, el) => !!el?.textContent?.includes("uses HTML templates from Render guide for") && el?.tagName === "SPAN"),
       ).toBeInTheDocument();
       expect(
         screen.getByText((_, el) => !!el?.textContent?.includes("migrate away from HTML") && el?.tagName === "SPAN"),
