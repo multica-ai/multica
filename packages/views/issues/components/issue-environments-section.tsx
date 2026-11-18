@@ -385,6 +385,27 @@ export function IssueEnvironmentsSection({
     );
   };
 
+  const startMenu = (inline: boolean) => (
+    <EnvironmentStartMenu
+      inline={inline}
+      configs={configs}
+      machineFor={(runtimeId) => ({ title: machineTitle(runtimeId), offline: isOffline(runtimeId) })}
+      runLabel={runLabel}
+      declaredState={declaredState}
+      onStart={(config, declared) =>
+        runControl({ action: "start", body: { task_id: config.task_id, repo: declared.repo, name: declared.name } })
+      }
+      agent={startAgent}
+      agentChoices={activeAgents}
+      preparing={!!preparing || justRequested !== null}
+      onAskAgent={askAgent}
+    />
+  );
+
+  const showsPreparing = !!(preparingShown || justRequested) && !!preparingAgentName;
+  if (!data) return null;
+  if (mainItems.length === 0 && ended.length === 0 && !showsPreparing) return startMenu(true);
+
   return (
     <div>
       <IssueSidebarSectionHeader
@@ -398,25 +419,11 @@ export function IssueEnvironmentsSection({
             {t(($) => $.environments.running_count, { count: running })}
           </span>
         ) : undefined}
-        actions={
-          <EnvironmentStartMenu
-            configs={configs}
-            machineFor={(runtimeId) => ({ title: machineTitle(runtimeId), offline: isOffline(runtimeId) })}
-            runLabel={runLabel}
-            declaredState={declaredState}
-            onStart={(config, declared) =>
-              runControl({ action: "start", body: { task_id: config.task_id, repo: declared.repo, name: declared.name } })
-            }
-            agent={startAgent}
-            agentChoices={activeAgents}
-            preparing={!!preparing || justRequested !== null}
-            onAskAgent={askAgent}
-          />
-        }
+        actions={startMenu(false)}
       />
       {open && (
         <div className="px-2">
-          {(preparingShown || justRequested) && preparingAgentName && (
+          {showsPreparing && (
             <StatusRow
               icon={<Bot className="mt-px size-3.5 shrink-0 text-muted-foreground" />}
               title={t(($) => $.environments.preparing_title, { name: preparingAgentName })}

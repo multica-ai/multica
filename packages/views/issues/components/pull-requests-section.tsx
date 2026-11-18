@@ -1,6 +1,6 @@
 "use client";
 
-import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
+import { IssueSidebarAddRow, IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -47,24 +47,30 @@ export function PullRequestsSection({
   onOpenChange: (open: boolean) => void;
 }) {
   const { t } = useT("issues");
-  const { data, isLoading, isError } = useQuery(issuePullRequestsOptions(issueId));
+  const { data, isLoading, isError, errorUpdateCount } = useQuery(issuePullRequestsOptions(issueId));
   // Older backends have no link / auto-complete endpoints; keep the header
   // actions hidden until the server says it supports them.
   const supported = !!data?.auto_complete;
   const count = data?.pull_requests.length ?? 0;
+  // A retry after a failure stays on the error row; dropping it would unmount
+  // the list, whose remount retries again.
+  const failed = isError || (isLoading && errorUpdateCount > 0);
 
-  if (!isLoading && !isError && count === 0 && !supported) return null;
+  if (isLoading && !failed) return null;
+  if (count === 0 && !failed) {
+    return supported ? <LinkPullRequestPopover issueId={issueId} identifier={identifier} onLinked={() => onOpenChange(true)} inline /> : null;
+  }
 
   return (
     <div>
       <IssueSidebarSectionHeader
-        title={t(($) => $.detail.section_pull_requests)} open={open} onOpenChange={onOpenChange} count={count} collapsible={count > 0 || isLoading || isError}
+        title={t(($) => $.detail.section_pull_requests)} open={open} onOpenChange={onOpenChange} count={count}
         actions={supported ? <>
           <LinkPullRequestPopover issueId={issueId} identifier={identifier} onLinked={() => onOpenChange(true)} />
           <AutoCompleteMenu issueId={issueId} disabled={data?.auto_complete?.issue_disabled ?? false} workspaceEnabled={data?.auto_complete?.workspace_enabled ?? true} />
         </> : undefined}
       />
-      {open && (count > 0 || isLoading || isError) && (
+      {open && (
         <div className="px-2">
           <PullRequestList issueId={issueId} identifier={identifier} />
         </div>
@@ -77,10 +83,13 @@ function LinkPullRequestPopover({
   issueId,
   identifier,
   onLinked,
+  inline = false,
 }: {
   issueId: string;
   identifier: string;
   onLinked: () => void;
+  /** Stands in for the whole section while it has no pull requests. */
+  inline?: boolean;
 }) {
   const { t } = useT("issues");
   const { autoLinkPRs } = useGitHubSettings();
@@ -105,13 +114,13 @@ function LinkPullRequestPopover({
       }}
     >
       <PopoverTrigger
-        render={
+        render={inline ? <IssueSidebarAddRow label={t(($) => $.pr_automation.link_action)} /> : (
           <IconButton variant="ghost" size="icon-xs" label={t(($) => $.pr_automation.link_action)}>
             <Plus />
           </IconButton>
-        }
+        )}
       />
-      <PopoverContent align="end" className="w-80">
+      <PopoverContent align={inline ? "start" : "end"} className="w-80">
         <form
           className="flex flex-col gap-2"
           onSubmit={(e) => {

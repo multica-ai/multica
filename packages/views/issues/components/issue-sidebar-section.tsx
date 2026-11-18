@@ -1,7 +1,7 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { ChevronRight } from "@multica/ui/icons";
+import type { ComponentProps, ReactNode } from "react";
+import { ChevronRight, Plus } from "@multica/ui/icons";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 
@@ -51,6 +51,27 @@ export function IssueSidebarSectionHeader({
       {status}
       {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
     </div>
+  );
+}
+
+/**
+ * What an empty section shows instead of its header: the one way to add its
+ * first item, so an empty section leaves no title behind. Used as a menu or
+ * popover trigger, so it passes every prop through.
+ */
+export function IssueSidebarAddRow({ label, className, ...props }: ComponentProps<"button"> & { label: string }) {
+  return (
+    <button
+      type="button"
+      {...props}
+      className={cn(
+        "mx-2 flex h-7 items-center gap-1.5 rounded-md px-2 text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground aria-expanded:bg-accent/50 aria-expanded:text-foreground",
+        className,
+      )}
+    >
+      <Plus aria-hidden="true" className="size-3 shrink-0" />
+      <span className="truncate">{label}</span>
+    </button>
   );
 }
 

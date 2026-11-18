@@ -2900,23 +2900,29 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     [deliverableSources],
   );
 
-  // File origins use the deep-link landing path: load missing thread context,
+  // In-page jumps use the deep-link landing path: load missing thread context,
   // unfold it and wait for virtual rows and their measured heights to settle.
+  const landOnComment = useCallback(
+    (commentId: string) => {
+      setDeliverableJump((previous) => ({
+        issueId: id,
+        linkedCommentId,
+        linkedRequestToken,
+        commentId,
+        token: Math.max(previous?.token ?? 0, linkedRequestToken ?? 0) + 1,
+      }));
+    },
+    [id, linkedCommentId, linkedRequestToken],
+  );
   const locateOrigin = useCallback(
     (origin: DeliverableOrigin) => {
       if (origin.kind === "description") {
         scrollContainerEl?.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
-      setDeliverableJump((previous) => ({
-        issueId: id,
-        linkedCommentId,
-        linkedRequestToken,
-        commentId: origin.commentId,
-        token: Math.max(previous?.token ?? 0, linkedRequestToken ?? 0) + 1,
-      }));
+      landOnComment(origin.commentId);
     },
-    [scrollContainerEl, id, linkedCommentId, linkedRequestToken],
+    [scrollContainerEl, landOnComment],
   );
 
   // Identifier form, like the issue's own copy link: a pasted link should say
@@ -3324,20 +3330,18 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   );
 
   // A blocked issue waits on whoever wrote last; when that is an agent, the
-  // overview card offers to jump to its thread. The raw timeline, because the
-  // display one folds a run's comment into the run.
-  const latestComment = issue.status === "blocked" ? timeline.findLast((e) => e.type === "comment") : undefined;
+  // overview card offers to jump to that comment. The raw timeline, because the
+  // display one folds a run's comment into the run; the jump then lands where
+  // the comment renders — inside its run, wherever that run was regrouped —
+  // and unfolds whatever hides it.
+  const latestComment = issue.status === "blocked"
+    ? timeline.findLast((e) => e.type === "comment" && !isDeletedComment(e))
+    : undefined;
   const nextStepReply = latestComment?.actor_type === "agent" ? {
     authorName: getActorName("agent", latestComment.actor_id),
     onReply: () => {
       setMobileSidebarOpen(false);
-      let root = latestComment;
-      while (root.parent_id) {
-        const parent = timeline.find((e) => e.id === root.parent_id);
-        if (!parent) break;
-        root = parent;
-      }
-      jumpToThread(root.id);
+      landOnComment(latestComment.id);
     },
   } : null;
 

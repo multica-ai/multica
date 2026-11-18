@@ -213,11 +213,16 @@ describe("IssueEnvironmentsSection", () => {
     apiMock.getIssueEnvironmentCommand.mockReset();
   });
 
-  it("keeps the header and its start menu while the issue has no environments", async () => {
+  it("leaves only the start entry while the issue has no environments", async () => {
     mockTasks = [];
-    renderSection();
-    expect(await screen.findByText("Environments")).toBeVisible();
+    const { container } = renderSection();
+    const start = await screen.findByRole("button", { name: "Start an environment" });
+    expect(start).toHaveTextContent("Start an environment");
+    expect(container.querySelector('[data-slot="issue-sidebar-section-header"]')).toBeNull();
+    expect(screen.queryByText("Environments")).not.toBeInTheDocument();
     expect(screen.queryByTestId("environment-row")).not.toBeInTheDocument();
+    fireEvent.click(start);
+    expect(await screen.findByRole("menu")).toBeVisible();
   });
 
   it("groups live environments by machine and links the running ones", async () => {

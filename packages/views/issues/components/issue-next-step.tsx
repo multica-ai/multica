@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { issuePullRequestsOptions } from "@multica/core/github";
+import { issuePullRequestsOptions, useGitHubSettings } from "@multica/core/github";
 import { GitPullRequest, MessageSquare } from "@multica/ui/icons";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
@@ -29,9 +29,12 @@ export function IssueNextStep({
   reply: IssueNextStepReply | null;
 }) {
   const { t } = useT("issues");
-  const inReview = status === "in_review";
-  const { data } = useQuery({ ...issuePullRequestsOptions(issueId), enabled: inReview });
-  const openPr = inReview ? data?.pull_requests.find((pr) => pr.state === "open") : undefined;
+  // Off with the workspace's GitHub integration or its PR sidebar, the same
+  // switch that hides the Pull requests section.
+  const { prSidebar } = useGitHubSettings();
+  const asksReview = status === "in_review" && prSidebar;
+  const { data } = useQuery({ ...issuePullRequestsOptions(issueId), enabled: asksReview });
+  const openPr = asksReview ? data?.pull_requests.find((pr) => pr.state === "open") : undefined;
 
   if (openPr) {
     return (

@@ -2045,6 +2045,59 @@ describe("IssueDetail (shared)", () => {
     expect(container.querySelector(`#comment-${root.id}`)?.querySelector(`[data-run-id="${second.id}"]`)).not.toBeNull();
   });
 
+  describe("overview Reply", () => {
+    const replyButton = async () => {
+      const nextStep = await waitFor(() => {
+        const el = document.querySelector<HTMLElement>('[data-slot="issue-next-step"]');
+        expect(el).not.toBeNull();
+        return el!;
+      });
+      return within(nextStep).getByRole("button", { name: "Reply" });
+    };
+
+    it("lands on an agent comment its run regrouped under the triggering comment", async () => {
+      const root = mockTimeline[0]!;
+      const task: AgentTask = { id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789ab0", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+        status: "completed", priority: 0, created_at: root.created_at, started_at: root.created_at, dispatched_at: root.created_at,
+        completed_at: "2026-01-16T00:01:00Z", result: null, error: null, trigger_comment_id: root.id, delivered_comment_ids: [root.id] };
+      const answer: TimelineEntry = { ...mockTimeline[1]!, id: "agent-answer", parent_id: null, source_task_id: task.id,
+        content: "Which schema should I keep?", created_at: "2026-01-16T00:01:00Z", updated_at: "2026-01-16T00:01:00Z" };
+      mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, status: "blocked" });
+      mockApiObj.listTimeline.mockResolvedValue([root, answer]);
+      mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+      useCommentCollapseStore.setState({ collapsedByIssue: { "issue-1": [root.id] } });
+      renderIssueDetail();
+
+      await screen.findByText("Started working on this");
+      expect(document.getElementById("comment-agent-answer")).toBeNull();
+      fireEvent.click(await replyButton());
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-agent-answer")?.className).toContain(highlightedCommentBackgroundClass);
+      });
+      expect(document.getElementById("comment-agent-answer")?.closest(`#comment-${root.id}`)).not.toBeNull();
+      expect(useCommentCollapseStore.getState().isCollapsed("issue-1", root.id)).toBe(false);
+    });
+
+    it("unfolds a collapsed thread to land on the agent's latest reply", async () => {
+      const reply: TimelineEntry = { ...mockTimeline[1]!, id: "agent-reply", parent_id: "comment-1",
+        content: "Blocked on the API key", created_at: "2026-01-18T00:00:00Z", updated_at: "2026-01-18T00:00:00Z" };
+      mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, status: "blocked" });
+      mockApiObj.listTimeline.mockResolvedValue([...mockTimeline, reply]);
+      useCommentCollapseStore.setState({ collapsedByIssue: { "issue-1": ["comment-1"] } });
+      renderIssueDetail();
+
+      await screen.findByText("Started working on this");
+      expect(document.getElementById("comment-agent-reply")).toBeNull();
+      fireEvent.click(await replyButton());
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-agent-reply")?.className).toContain(highlightedCommentBackgroundClass);
+      });
+      expect(useCommentCollapseStore.getState().isCollapsed("issue-1", "comment-1")).toBe(false);
+    });
+  });
+
   // MUL-7628: Elon was asked first but replied last; his review used to render
   // under the request, above the rest of the thread.
   it("orders thread replies by send time and quotes the request a late reply answers", async () => {

@@ -17,6 +17,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useT } from "../../i18n";
+import { IssueSidebarAddRow } from "./issue-sidebar-section";
 
 export type DeclaredState = "available" | "running" | "starting";
 
@@ -42,7 +43,10 @@ export function EnvironmentStartMenu({
   agentChoices,
   preparing,
   onAskAgent,
+  inline = false,
 }: {
+  /** Stands in for the whole section while it has nothing to list. */
+  inline?: boolean;
   configs: IssueEnvironmentConfig[];
   machineFor: (runtimeId: string) => StartMenuMachine;
   runLabel: (taskId: string) => string | null;
@@ -64,13 +68,13 @@ export function EnvironmentStartMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={
+        render={inline ? <IssueSidebarAddRow label={t(($) => $.environments.start_menu.trigger)} /> : (
           <IconButton variant="ghost" size="icon-xs" label={t(($) => $.environments.start_menu.trigger)}>
             <Plus />
           </IconButton>
-        }
+        )}
       />
-      <DropdownMenuContent align="end" className="w-80 max-w-(--available-width)">
+      <DropdownMenuContent align={inline ? "start" : "end"} className="w-80 max-w-(--available-width)">
         {declaring.map((config, index) => {
           const machine = machineFor(config.runtime_id);
           const run = runLabel(config.task_id);
