@@ -107,11 +107,11 @@ func runCodexPrecedenceTurn(t *testing.T, cli string, env *Environment, extraEnv
 	return result
 }
 
-// TestCodexRuntimePrecedenceWire checks what reaches the model, with
-// inference on a local fixture: the brief precedes the repository's AGENTS.md,
-// the developer message carries the user's developer_instructions and then
-// RuntimeBriefPrecedence, and a resumed thread carries it exactly once.
-func TestCodexRuntimePrecedenceWire(t *testing.T) {
+// codexPrecedenceFixture prepares a conflicting Codex task whose user config
+// sets developer_instructions and whose inference runs on a local Responses
+// fixture. last returns the newest request the fixture received.
+func codexPrecedenceFixture(t *testing.T) (cli string, env *Environment, fixtureEnv map[string]string, last func() string) {
+	t.Helper()
 	cli, version := requireCLIForPrecedence(t, "codex")
 	var mu sync.Mutex
 	var requests []string
@@ -127,7 +127,7 @@ func TestCodexRuntimePrecedenceWire(t *testing.T) {
 		mu.Unlock()
 		writeFixtureResponse(w)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 	source := t.TempDir()
 	writeFile(t, filepath.Join(source, "config.toml"), fmt.Sprintf(`model = "fixture-model"
 model_provider = "fixture"
@@ -143,12 +143,21 @@ request_max_retries = 0
 stream_max_retries = 0
 `, precedenceUserConfig, server.URL+"/v1"))
 	t.Setenv("CODEX_HOME", source)
-	env := prepareConflictingTask(t, "codex", version)
-	fixtureEnv := map[string]string{"PRECEDENCE_FIXTURE_KEY": "fixture-only", "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
+	env = prepareConflictingTask(t, "codex", version)
+	fixtureEnv = map[string]string{"PRECEDENCE_FIXTURE_KEY": "fixture-only", "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
+	return cli, env, fixtureEnv, func() string { return lastRequest(t, &mu, &requests) }
+}
+
+// TestCodexRuntimePrecedenceWire checks what reaches the model: the brief
+// precedes the repository's AGENTS.md, the developer message carries the
+// user's developer_instructions and then RuntimeBriefPrecedence, and a resumed
+// thread carries it exactly once.
+func TestCodexRuntimePrecedenceWire(t *testing.T) {
+	cli, env, fixtureEnv, last := codexPrecedenceFixture(t)
 	opts := agent.ExecOptions{CodexDeveloperInstructions: env.CodexDeveloperInstructions("codex")}
 
 	first := runCodexPrecedenceTurn(t, cli, env, fixtureEnv, opts)
-	developer, instructions := fixtureRequestParts(t, lastRequest(t, &mu, &requests))
+	developer, instructions := fixtureRequestParts(t, last())
 	if !strings.Contains(developer, precedenceUserConfig+"\n\n"+RuntimeBriefPrecedence) {
 		t.Errorf("developer message lacks the user's developer_instructions followed by RuntimeBriefPrecedence:\n%s", developer)
 	}
@@ -159,17 +168,42 @@ stream_max_retries = 0
 
 	opts.ResumeSessionID = first.SessionID
 	runCodexPrecedenceTurn(t, cli, env, fixtureEnv, opts)
-	resumed := lastRequest(t, &mu, &requests)
-	if n := strings.Count(resumed, jsonEscaped(t, RuntimeBriefPrecedence)); n != 1 {
-		t.Errorf("resumed request carries RuntimeBriefPrecedence %d times, want 1", n)
+	if developer, _ := fixtureRequestParts(t, last()); strings.Count(developer, RuntimeBriefPrecedence) != 1 {
+		t.Errorf("resumed request carries RuntimeBriefPrecedence %d times in developer messages, want 1", strings.Count(developer, RuntimeBriefPrecedence))
+	}
+}
+
+// TestCodexRuntimePrecedenceUpgradedThreadWire resumes a thread started
+// without developer instructions, as an earlier daemon version did. The first
+// resumed turn must already carry RuntimeBriefPrecedence as a developer
+// message, and later resumes must not repeat it.
+func TestCodexRuntimePrecedenceUpgradedThreadWire(t *testing.T) {
+	cli, env, fixtureEnv, last := codexPrecedenceFixture(t)
+
+	first := runCodexPrecedenceTurn(t, cli, env, fixtureEnv, agent.ExecOptions{})
+	if developer, _ := fixtureRequestParts(t, last()); strings.Contains(developer, RuntimeBriefPrecedence) {
+		t.Fatal("thread started without developer instructions already carries RuntimeBriefPrecedence")
+	}
+	opts := agent.ExecOptions{ResumeSessionID: first.SessionID, CodexDeveloperInstructions: env.CodexDeveloperInstructions("codex")}
+	for _, run := range []string{"first resume after upgrade", "next resume"} {
+		runCodexPrecedenceTurn(t, cli, env, fixtureEnv, opts)
+		developer, _ := fixtureRequestParts(t, last())
+		if n := strings.Count(developer, RuntimeBriefPrecedence); n != 1 {
+			t.Errorf("%s: RuntimeBriefPrecedence in developer messages %d times, want 1", run, n)
+		}
+		if !strings.Contains(developer, precedenceUserConfig) {
+			t.Errorf("%s: user's developer_instructions lost", run)
+		}
 	}
 }
 
 // TestCodexRuntimePrecedenceRealModel asks the user's configured Codex model
 // to reply under conflicting rules: the agent identity in the brief and the
-// repository's AGENTS.md each claim the last word of every reply. It uses the
-// user's Codex config and account and consumes quota. The run without
-// developer instructions is logged as the baseline, not asserted.
+// repository's AGENTS.md each claim the last word of every reply. The thread
+// first runs without developer instructions, as before this change, then is
+// resumed with them, as after an upgrade; a new thread with them follows. It
+// uses the user's Codex config and account and consumes quota. The baseline
+// is logged, not asserted.
 func TestCodexRuntimePrecedenceRealModel(t *testing.T) {
 	cli, version := requireCLIForPrecedence(t, "codex")
 	home, err := os.UserHomeDir()
@@ -196,10 +230,16 @@ func TestCodexRuntimePrecedenceRealModel(t *testing.T) {
 
 	baseline := runCodexPrecedenceTurn(t, cli, env, nil, agent.ExecOptions{})
 	t.Logf("without developer instructions: %q", baseline.Output)
-	result := runCodexPrecedenceTurn(t, cli, env, nil, agent.ExecOptions{CodexDeveloperInstructions: env.CodexDeveloperInstructions("codex")})
-	t.Logf("with RuntimeBriefPrecedence: %q", result.Output)
-	if !strings.Contains(result.Output, "RUNTIME_RULE_WINS") || strings.Contains(result.Output, "REPO_RULE_WINS") {
-		t.Errorf("reply followed the repository over the agent identity: %q", result.Output)
+	precedence := env.CodexDeveloperInstructions("codex")
+	for name, opts := range map[string]agent.ExecOptions{
+		"upgraded thread": {ResumeSessionID: baseline.SessionID, CodexDeveloperInstructions: precedence},
+		"new thread":      {CodexDeveloperInstructions: precedence},
+	} {
+		result := runCodexPrecedenceTurn(t, cli, env, nil, opts)
+		t.Logf("%s with RuntimeBriefPrecedence: %q", name, result.Output)
+		if !strings.Contains(result.Output, "RUNTIME_RULE_WINS") || strings.Contains(result.Output, "REPO_RULE_WINS") {
+			t.Errorf("%s: reply followed the repository over the agent identity: %q", name, result.Output)
+		}
 	}
 }
 

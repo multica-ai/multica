@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -2008,12 +2009,7 @@ func (c *codexClient) developerInstructions(ctx context.Context, opts ExecOption
 	if opts.CodexDeveloperInstructions == "" {
 		return nil
 	}
-	readCtx, cancel := ctx, context.CancelFunc(func() {})
-	if c.handshakeTimeout > 0 {
-		readCtx, cancel = context.WithTimeout(ctx, c.handshakeTimeout)
-	}
-	defer cancel()
-	raw, err := c.request(readCtx, "config/read", map[string]any{"cwd": opts.Cwd})
+	raw, err := c.boundedRequest(ctx, "config/read", map[string]any{"cwd": opts.Cwd})
 	if err != nil {
 		logger.Warn("codex config/read failed; developer instructions left to the user's config", "task_id", c.cfg.TaskID, "error", err)
 		return nil
@@ -2031,6 +2027,94 @@ func (c *codexClient) developerInstructions(ctx context.Context, opts ExecOption
 		return strings.TrimRight(*configured, " \t\r\n") + "\n\n" + opts.CodexDeveloperInstructions
 	}
 	return opts.CodexDeveloperInstructions
+}
+
+// injectMissingDeveloperInstructions gives a resumed thread started without
+// CodexDeveloperInstructions — one an earlier daemon version created — the
+// text once, as a developer message after its history. Codex keeps showing a
+// cold-resumed thread the developer instructions it started with
+// (openai/codex#19045); the resent parameter only takes over once a compaction
+// rebuilds the context. The thread's rollout records whether an earlier run
+// already injected it. A rollout that cannot be read, such as one Codex has
+// compressed after a week idle, gets the text again.
+func (c *codexClient) injectMissingDeveloperInstructions(ctx context.Context, threadID string, resumeResult json.RawMessage, opts ExecOptions, logger *slog.Logger) {
+	if opts.CodexDeveloperInstructions == "" {
+		return
+	}
+	var resp struct {
+		Thread struct {
+			Path string `json:"path"`
+		} `json:"thread"`
+	}
+	_ = json.Unmarshal(resumeResult, &resp)
+	if resp.Thread.Path != "" {
+		found, err := codexRolloutHasDeveloperMessage(resp.Thread.Path, opts.CodexDeveloperInstructions)
+		if found {
+			return
+		}
+		if err != nil {
+			logger.Info("codex rollout unreadable; injecting developer instructions", "task_id", c.cfg.TaskID, "thread_id", threadID, "error", err)
+		}
+	}
+	item := map[string]any{
+		"type":    "message",
+		"role":    "developer",
+		"content": []any{map[string]any{"type": "input_text", "text": opts.CodexDeveloperInstructions}},
+	}
+	if _, err := c.boundedRequest(ctx, "thread/inject_items", map[string]any{"threadId": threadID, "items": []any{item}}); err != nil {
+		logger.Warn("codex thread/inject_items failed; resumed thread lacks developer instructions until compaction", "task_id", c.cfg.TaskID, "thread_id", threadID, "error", err)
+		return
+	}
+	logger.Info("codex developer instructions injected into resumed thread", "task_id", c.cfg.TaskID, "thread_id", threadID)
+}
+
+// codexRolloutHasDeveloperMessage reports whether a rollout records a
+// model-visible developer message containing text.
+func codexRolloutHasDeveloperMessage(path, text string) (bool, error) {
+	var escaped strings.Builder
+	enc := json.NewEncoder(&escaped)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(text); err != nil {
+		return false, err
+	}
+	quoted := strings.TrimSpace(escaped.String())
+	needle := []byte(quoted[1 : len(quoted)-1])
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	r := bufio.NewReaderSize(f, 64*1024)
+	for {
+		line, err := r.ReadBytes('\n')
+		if bytes.Contains(line, needle) {
+			var row struct {
+				Type    string `json:"type"`
+				Payload struct {
+					Role string `json:"role"`
+				} `json:"payload"`
+			}
+			if json.Unmarshal(line, &row) == nil && row.Type == "response_item" && row.Payload.Role == "developer" {
+				return true, nil
+			}
+		}
+		if err == io.EOF {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+	}
+}
+
+// boundedRequest sends a non-handshake RPC under the handshake timeout.
+func (c *codexClient) boundedRequest(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if c.handshakeTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.handshakeTimeout)
+		defer cancel()
+	}
+	return c.request(ctx, method, params)
 }
 
 // startOrResumeThread picks between Codex's thread/resume and thread/start
@@ -2089,6 +2173,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 					"latency", time.Since(c.threadSetupStarted).Round(time.Millisecond).String(),
 					"latency_ms", time.Since(c.threadSetupStarted).Milliseconds(),
 				)
+				c.injectMissingDeveloperInstructions(ctx, threadID, resumeResult, opts, logger)
 				return threadID, true, nil
 			}
 			logger.Warn("codex thread/resume returned no thread ID; falling back to thread/start", "prior_thread_id", priorThreadID)

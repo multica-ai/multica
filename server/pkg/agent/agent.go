@@ -39,8 +39,9 @@ type ExecOptions struct {
 	ClaudeRuntimeDir string
 	// CodexDeveloperInstructions is fixed text Codex receives as developer
 	// instructions on thread/start and thread/resume, after the user's own
-	// developer_instructions (local worktree runs only). It must not vary
-	// between runs: Codex keeps a resumed thread's original value.
+	// developer_instructions (local worktree runs only); a resumed thread
+	// started without it gets it once as an injected developer message. It
+	// must not vary between runs: Codex keeps a resumed thread's original value.
 	CodexDeveloperInstructions string
 	// SystemPrompt carries the Multica runtime brief for the few providers
 	// that cannot pick it up from disk. The daemon leaves it empty for every

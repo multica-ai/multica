@@ -2652,26 +2652,34 @@ func TestCodexDeveloperInstructionsFollowConfiguredOnStart(t *testing.T) {
 	}
 }
 
-// Resume must resend the value: after a compaction Codex rebuilds the context
-// from the thread's current settings, and a nil here would fall back to the
-// configured value alone.
-func TestCodexDeveloperInstructionsResentOnResume(t *testing.T) {
-	t.Parallel()
+// writeCodexRollout writes a rollout whose lines are the given JSON values and
+// returns a thread/resume result pointing at it.
+func writeCodexRollout(t *testing.T, lines ...string) json.RawMessage {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "rollout-2026-11-18T00-00-00-thr_prior.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := json.Marshal(map[string]any{"thread": map[string]any{"id": "thr_prior", "path": path}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
 
+func codexRolloutDeveloperLine(text string) string {
+	line, _ := json.Marshal(map[string]any{"type": "response_item", "payload": map[string]any{"type": "message", "role": "developer", "content": []any{map[string]any{"type": "input_text", "text": text}}}})
+	return string(line)
+}
+
+// resumeWithPrecedence resumes thr_prior with codexPrecedenceCanary through
+// the scripted RPCs, failing fast instead of hanging on an unscripted one.
+func resumeWithPrecedence(t *testing.T, script []rpcResponse) []string {
+	t.Helper()
 	c, fs, _ := newTestCodexClient(t)
-	wait := drainRPCScript(t, c, fs, []rpcResponse{
-		{
-			method: "config/read",
-			result: json.RawMessage(`{"config":{"developer_instructions":null},"origins":{}}`),
-		},
-		{
-			method:   "thread/resume",
-			result:   json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
-			assertFn: assertDeveloperInstructions(codexPrecedenceCanary),
-		},
-	})
+	c.handshakeTimeout = 200 * time.Millisecond
+	wait := drainRPCScript(t, c, fs, script)
 	defer wait()
-
 	if _, resumed, err := c.startOrResumeThread(
 		context.Background(),
 		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior", CodexDeveloperInstructions: codexPrecedenceCanary},
@@ -2679,6 +2687,79 @@ func TestCodexDeveloperInstructionsResentOnResume(t *testing.T) {
 	); err != nil || !resumed {
 		t.Fatalf("startOrResumeThread: resumed=%v err=%v", resumed, err)
 	}
+	return fs.Lines()
+}
+
+// Resume must resend the value: after a compaction Codex rebuilds the context
+// from the thread's current settings, and a nil here would fall back to the
+// configured value alone. A thread that already holds it gets nothing more.
+func TestCodexDeveloperInstructionsResentOnResume(t *testing.T) {
+	t.Parallel()
+
+	sent := resumeWithPrecedence(t, []rpcResponse{
+		{
+			method: "config/read",
+			result: json.RawMessage(`{"config":{"developer_instructions":null},"origins":{}}`),
+		},
+		{
+			method:   "thread/resume",
+			result:   writeCodexRollout(t, `{"type":"session_meta","payload":{"id":"thr_prior"}}`, codexRolloutDeveloperLine("User rule.\n\n"+codexPrecedenceCanary)),
+			assertFn: assertDeveloperInstructions(codexPrecedenceCanary),
+		},
+	})
+	if len(sent) != 2 {
+		t.Fatalf("sent %d requests, want config/read and thread/resume only:\n%s", len(sent), strings.Join(sent, "\n"))
+	}
+}
+
+// A thread an earlier daemon version started never received the text, and
+// Codex does not surface the resent parameter on its first resumed turn, so it
+// is injected into the history once.
+func TestCodexDeveloperInstructionsInjectedIntoOlderThread(t *testing.T) {
+	t.Parallel()
+
+	assertInjected := func(t *testing.T, params map[string]any) {
+		t.Helper()
+		items, _ := params["items"].([]any)
+		if params["threadId"] != "thr_prior" || len(items) != 1 {
+			t.Fatalf("thread/inject_items params = %v", params)
+		}
+		item, _ := items[0].(map[string]any)
+		content, _ := item["content"].([]any)
+		part, _ := content[0].(map[string]any)
+		if item["type"] != "message" || item["role"] != "developer" || part["type"] != "input_text" || part["text"] != codexPrecedenceCanary {
+			t.Errorf("injected item = %v, want a developer message with the precedence text only", item)
+		}
+	}
+	for name, resume := range map[string]json.RawMessage{
+		// The text in a non-message record, e.g. a turn context that recorded
+		// the resent parameter, never reached the model.
+		"rollout without it": writeCodexRollout(t,
+			codexRolloutDeveloperLine("User rule."),
+			`{"type":"turn_context","payload":{"developer_instructions":"`+codexPrecedenceCanary+`"}}`),
+		"unreadable rollout": json.RawMessage(`{"thread":{"id":"thr_prior","path":"/nonexistent/rollout.jsonl"}}`),
+		"no rollout path":    json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			resumeWithPrecedence(t, []rpcResponse{
+				{method: "config/read", result: json.RawMessage(`{"config":{},"origins":{}}`)},
+				{method: "thread/resume", result: resume},
+				{method: "thread/inject_items", result: json.RawMessage(`{}`), assertFn: assertInjected},
+			})
+		})
+	}
+}
+
+// A failed injection leaves the run to proceed on the resumed thread.
+func TestCodexDeveloperInstructionsInjectionFailureKeepsResume(t *testing.T) {
+	t.Parallel()
+
+	resumeWithPrecedence(t, []rpcResponse{
+		{method: "config/read", result: json.RawMessage(`{"config":{},"origins":{}}`)},
+		{method: "thread/resume", result: json.RawMessage(`{"thread":{"id":"thr_prior"}}`)},
+		{method: "thread/inject_items", errMsg: "thread busy", errCode: -32603},
+	})
 }
 
 func TestCodexDeveloperInstructionsKeptWhenResumeFallsBack(t *testing.T) {
