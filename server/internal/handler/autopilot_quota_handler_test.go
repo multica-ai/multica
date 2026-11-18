@@ -9,10 +9,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/entitlement/entitlementtest"
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
+// A member pressing "Run now" is a run a person started, which is never
+// metered. The same press made by an agent on a member's behalf, and every
+// webhook delivery, count and are refused once the period is full.
 func TestAutopilotQuotaManualAndWebhookEnforcement(t *testing.T) {
 	workspaceUUID := uuid.MustParse(testWorkspaceID)
 	start := time.Now().UTC().Truncate(time.Second)
@@ -36,21 +41,34 @@ func TestAutopilotQuotaManualAndWebhookEnforcement(t *testing.T) {
 
 	agentID := createWebhookTestAgent(t, "Quota Handler Agent")
 	autopilotID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE autopilot_run_id IN (SELECT id FROM autopilot_run WHERE autopilot_id = $1)`, autopilotID)
+	dbfx.Cleanup(t, `DELETE FROM autopilot_run WHERE autopilot_id = $1`, autopilotID)
 
-	manual := httptest.NewRecorder()
-	manualReq := newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger", nil)
-	manualReq.Header.Set("Idempotency-Key", "manual-over-limit")
-	manualReq = withURLParam(manualReq, "id", autopilotID)
-	testHandler.TriggerAutopilot(manual, manualReq)
-	if manual.Code != http.StatusTooManyRequests {
-		t.Fatalf("manual status = %d body=%s, want 429", manual.Code, manual.Body.String())
+	memberReq := newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger", nil)
+	memberReq.Header.Set("Idempotency-Key", "member-over-limit")
+	memberReq = withURLParam(memberReq, "id", autopilotID)
+	var memberRun AutopilotRunResponse
+	testutil.Call(t, testHandler.TriggerAutopilot, memberReq).Want(http.StatusOK).JSON(&memberRun)
+	if memberRun.Status == "skipped" {
+		t.Fatalf("member run now was skipped (reason_code %v), want it admitted past a full quota", derefStr(memberRun.ReasonCode))
 	}
-	if manual.Header().Get("Retry-After") == "" {
-		t.Fatal("manual quota refusal must include Retry-After")
+	var reservationID pgtype.UUID
+	if err := testPool.QueryRow(context.Background(), `SELECT quota_reservation_id FROM autopilot_run WHERE id = $1`, memberRun.ID).Scan(&reservationID); err != nil {
+		t.Fatalf("load member run: %v", err)
 	}
-	var manualBody map[string]any
-	if err := json.Unmarshal(manual.Body.Bytes(), &manualBody); err != nil || manualBody["reason_code"] != "quota_exceeded" {
-		t.Fatalf("manual body = %#v, err=%v", manualBody, err)
+	if reservationID.Valid {
+		t.Fatal("member run now reserved quota, want an unmetered run")
+	}
+
+	agentResp := triggerAsAgent(t, autopilotID, agentID, callerTask(t, agentID, testUserID))
+	agentResp.Want(http.StatusTooManyRequests)
+	if agentResp.Header().Get("Retry-After") == "" {
+		t.Fatal("agent quota refusal must include Retry-After")
+	}
+	var agentBody map[string]any
+	agentResp.JSON(&agentBody)
+	if agentBody["reason_code"] != "quota_exceeded" {
+		t.Fatalf("agent body = %#v, want quota_exceeded", agentBody)
 	}
 
 	trigger := createWebhookTriggerViaHandler(t, autopilotID)
@@ -67,8 +85,8 @@ func TestAutopilotQuotaManualAndWebhookEnforcement(t *testing.T) {
 	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM autopilot_run WHERE autopilot_id = $1`, autopilotID).Scan(&runCount); err != nil {
 		t.Fatalf("count runs: %v", err)
 	}
-	if runCount != 0 {
-		t.Fatalf("blocked manual/webhook requests created %d runs, want zero", runCount)
+	if runCount != 1 {
+		t.Fatalf("autopilot has %d runs, want only the member's unmetered run", runCount)
 	}
 
 	usageRecorder := httptest.NewRecorder()
@@ -82,6 +100,9 @@ func TestAutopilotQuotaManualAndWebhookEnforcement(t *testing.T) {
 		t.Fatalf("decode usage response: %v", err)
 	}
 	if usage.BlockedCounts["manual"] != 1 || usage.BlockedCounts["webhook"] != 1 {
-		t.Fatalf("blocked counts = %#v, want one manual and one webhook", usage.BlockedCounts)
+		t.Fatalf("blocked counts = %#v, want the agent's manual run and one webhook", usage.BlockedCounts)
+	}
+	if usage.Used == nil || usage.Reserved == nil || *usage.Used != 0 || *usage.Reserved != 0 {
+		t.Fatalf("usage used=%v reserved=%v, want nothing counted", usage.Used, usage.Reserved)
 	}
 }

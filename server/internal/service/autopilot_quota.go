@@ -105,6 +105,38 @@ func (s *AutopilotService) quotaPolicy(ctx context.Context, workspaceID pgtype.U
 	}, true
 }
 
+// autopilotRunMetering says whether a run counts toward the workspace's
+// autopilot run quota. Runs a person starts are not metered.
+type autopilotRunMetering bool
+
+const (
+	meteredRun   autopilotRunMetering = true
+	unmeteredRun autopilotRunMetering = false
+)
+
+// createUnmeteredAutopilotRun inserts a run that never counts toward the quota,
+// whatever the policy: no reservation, no quota-table access, so the
+// idempotency key is unused, exactly as under an off policy. It shares
+// createAutopilotRunWithQuota's signature so dispatch can pick either one.
+func (s *AutopilotService) createUnmeteredAutopilotRun(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	source, _ string,
+	params db.CreateAutopilotRunParams,
+) (db.AutopilotRun, bool, error) {
+	if !validAutopilotExecutionSource(source) {
+		return db.AutopilotRun{}, false, fmt.Errorf("invalid autopilot execution source %q", source)
+	}
+	run, err := s.Queries.CreateAutopilotRun(ctx, params)
+	if err != nil {
+		return db.AutopilotRun{}, false, err
+	}
+	if policy, enabled := s.quotaPolicy(ctx, workspaceID); enabled {
+		s.recordAutopilotQuotaDecision(policy.action, source, "unmetered")
+	}
+	return run, false, nil
+}
+
 // createAutopilotRunWithQuota reserves and links a run in one transaction.
 // When policy is off, it intentionally uses the legacy direct INSERT so a
 // self-hosted deployment never touches the quota tables.
