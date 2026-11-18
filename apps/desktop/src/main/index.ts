@@ -8,6 +8,7 @@ import {
   Notification,
   screen,
 } from "electron";
+import { homedir } from "os";
 import { join } from "path";
 import { mkdir, writeFile } from "fs/promises";
 import { pathToFileURL } from "url";
