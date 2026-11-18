@@ -93,13 +93,22 @@ export function resolveDetailItem(
 }
 
 /**
+ * How a notification addresses its issue in a link: the identifier when the
+ * server sent one, so the issue route opens without rewriting its URL (a
+ * rewrite mounts the whole issue page again on web), else the UUID.
+ */
+export function inboxIssueRef(item: Pick<InboxItem, "issue_identifier">, issueId: string): string {
+  return item.issue_identifier || issueId;
+}
+
+/**
  * Where a notification row leads: its issue, at the comment or app request it
  * is about when it names one. An issue-less notification opens on the Inbox
  * page, which shows the detail of the row picked there.
  */
 export function inboxRowHref(p: WorkspacePaths, item: InboxItem): string {
   if (!item.issue_id) return `${p.inbox()}?${new URLSearchParams({ issue: item.id }).toString()}`;
-  const issueHref = p.issueDetail(item.issue_id);
+  const issueHref = p.issueDetail(inboxIssueRef(item, item.issue_id));
   const requestId = item.type.startsWith("app_") ? item.details?.request_id : undefined;
   if (requestId) return `${issueHref}#app-request-${requestId}`;
   const commentId = item.details?.comment_id;

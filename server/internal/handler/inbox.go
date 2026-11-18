@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -24,13 +25,18 @@ type InboxItemResponse struct {
 	Type          string  `json:"type"`
 	Severity      string  `json:"severity"`
 	IssueID       *string `json:"issue_id"`
-	Title         string  `json:"title"`
-	Body          *string `json:"body"`
-	Read          bool    `json:"read"`
-	Archived      bool    `json:"archived"`
-	CreatedAt     string  `json:"created_at"`
-	IssueStatus   *string `json:"issue_status"`
-	IssuePriority *string `json:"issue_priority"`
+	// The issue's identifier (MUL-123), so a client links to the canonical
+	// issue URL. Opening `/issues/<uuid>` instead rewrites the address once
+	// the issue loads, and on web that mounts the whole page a second time.
+	// Null when the item has no issue or the prefix could not be resolved.
+	IssueIdentifier *string `json:"issue_identifier"`
+	Title           string  `json:"title"`
+	Body            *string `json:"body"`
+	Read            bool    `json:"read"`
+	Archived        bool    `json:"archived"`
+	CreatedAt       string  `json:"created_at"`
+	IssueStatus     *string `json:"issue_status"`
+	IssuePriority   *string `json:"issue_priority"`
 	// Issue fields the inbox filters match on. List rows always carry them
 	// (an empty label list included), which is how a client tells a server
 	// that supports those filters from an older one.
@@ -125,10 +131,21 @@ func inboxListBody(notifType string, issueID pgtype.UUID, body pgtype.Text) *str
 	return full
 }
 
+// inboxIssueIdentifier formats an inbox row's issue identifier the way issue
+// responses do. `prefix` is the workspace's effective issue prefix; empty when
+// it could not be loaded, which leaves the client on the UUID link.
+func inboxIssueIdentifier(prefix string, number pgtype.Int4) *string {
+	if prefix == "" || !number.Valid {
+		return nil
+	}
+	identifier := prefix + "-" + strconv.Itoa(int(number.Int32))
+	return &identifier
+}
+
 // inboxRowToResponse maps a LIST row — the main inbox and, through
 // archivedInboxRowToResponse, the archived view. Single-item responses go
 // through inboxToResponse and keep the full body.
-func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
+func inboxRowToResponse(r db.ListInboxItemsRow, issuePrefix string) InboxItemResponse {
 	return InboxItemResponse{
 		ID:                uuidToString(r.ID),
 		WorkspaceID:       uuidToString(r.WorkspaceID),
@@ -137,6 +154,7 @@ func inboxRowToResponse(r db.ListInboxItemsRow) InboxItemResponse {
 		Type:              r.Type,
 		Severity:          r.Severity,
 		IssueID:           uuidToPtr(r.IssueID),
+		IssueIdentifier:   inboxIssueIdentifier(issuePrefix, r.IssueNumber),
 		Title:             r.Title,
 		Body:              inboxListBody(r.Type, r.IssueID, r.Body),
 		Read:              r.Read,
@@ -168,8 +186,8 @@ func inboxLabelIDs(ids []string) []string {
 // queries select `inbox_item.*` plus the joined issue projections), so the archived
 // row converts to the active one and reuses its mapper. If either query's
 // column list drifts, this conversion stops compiling — which is the point.
-func archivedInboxRowToResponse(r db.ListArchivedInboxItemsRow) InboxItemResponse {
-	return inboxRowToResponse(db.ListInboxItemsRow(r))
+func archivedInboxRowToResponse(r db.ListArchivedInboxItemsRow, issuePrefix string) InboxItemResponse {
+	return inboxRowToResponse(db.ListInboxItemsRow(r), issuePrefix)
 }
 
 func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemResponse, issueID pgtype.UUID) InboxItemResponse {
@@ -178,6 +196,7 @@ func (h *Handler) enrichInboxResponse(ctx context.Context, resp InboxItemRespons
 	}
 	issue, err := h.Queries.GetIssue(ctx, issueID)
 	if err == nil {
+		resp.IssueIdentifier = inboxIssueIdentifier(h.getIssuePrefix(ctx, issue.WorkspaceID), pgtype.Int4{Int32: issue.Number, Valid: true})
 		s := issue.Status
 		resp.IssueStatus = &s
 		p := issue.Priority
@@ -234,9 +253,10 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	issuePrefix := h.getIssuePrefix(r.Context(), wsUUID)
 	resp := make([]InboxItemResponse, len(items))
 	for i, item := range items {
-		resp[i] = inboxRowToResponse(item)
+		resp[i] = inboxRowToResponse(item, issuePrefix)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -335,9 +355,10 @@ func (h *Handler) ListArchivedInbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	issuePrefix := h.getIssuePrefix(r.Context(), wsUUID)
 	resp := make([]InboxItemResponse, len(items))
 	for i, item := range items {
-		resp[i] = archivedInboxRowToResponse(item)
+		resp[i] = archivedInboxRowToResponse(item, issuePrefix)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

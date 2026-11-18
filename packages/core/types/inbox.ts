@@ -68,6 +68,12 @@ export interface InboxItem {
   type: InboxItemType;
   severity: InboxSeverity;
   issue_id: string | null;
+  /**
+   * The linked issue's identifier (MUL-123). Links use it so they open the
+   * canonical issue URL directly; a UUID URL is rewritten after load, which
+   * mounts the issue page twice on web. Absent on older servers.
+   */
+  issue_identifier?: string | null;
   title: string;
   body: string | null;
   issue_status: IssueStatus | null;
