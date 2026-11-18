@@ -302,6 +302,8 @@ export type {
   AppCallOutcome,
   IssueAppCall,
   TeamAppImpact,
+  PersonalAppImpact,
+  AppTeamRequest,
   AppRequestStatus,
   AppRequest,
   AppRequestList,

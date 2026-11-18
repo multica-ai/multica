@@ -5,6 +5,7 @@ import type { CommandBarContext } from "@multica/core/command-bar";
 import { WORKSPACE_PAGES, type WorkspacePageKey } from "@multica/core/paths";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
+import { useComposioAvailable } from "../common/use-composio-available";
 import { useT } from "../i18n";
 import { useAgentCommandGroup, useAutopilotCommandGroup, useChatCommandGroup, useInboxCommandGroup, useProjectCommandGroup } from "./commands/context-commands";
 import { useGlobalCommands } from "./commands/global-commands";
@@ -43,6 +44,7 @@ const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
   usage: ["usage", "analytics", "stats", "metrics", "统计", "分析", "用量"],
   runtimes: ["runtimes", "environments", "machines", "运行时"],
   skills: ["skills", "library", "技能"],
+  apps: ["apps", "integrations", "connected", "accounts", "composio", "应用", "集成"],
   settings: ["settings", "config", "preferences", "设置", "配置"],
 };
 
@@ -153,14 +155,15 @@ export function useRootModel(
   const objects = useObjectSearch(scope === "issues" || scope === "commands" ? "" : q, active);
   const recent = useRecentItems(active && !rawQuery.trim());
 
+  const appsAvailable = useComposioAvailable();
   const navPages = useMemo<NavPage[]>(
     () =>
-      NAV_PAGE_KEYS.map((key) => ({
+      NAV_PAGE_KEYS.filter((key) => key !== "apps" || appsAvailable).map((key) => ({
         key,
         label: tNav(($) => $.nav[WORKSPACE_PAGES[key].navKey]),
         keywords: PAGE_KEYWORDS[key],
       })),
-    [tNav],
+    [tNav, appsAvailable],
   );
 
   return useMemo<RootModel>(() => {

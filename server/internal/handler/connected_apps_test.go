@@ -117,6 +117,7 @@ func newAppsFixture(t *testing.T) *appsFixture {
 	h.Composio = svc
 	apps, err := connectedapps.New(connectedapps.Config{
 		Queries:       h.Queries,
+		TxStarter:     testPool,
 		Composio:      svc,
 		TokenSecret:   connectedapps.DeriveTokenSecret([]byte("apps-test-secret")),
 		PublicBaseURL: "https://api.multica.test",
@@ -149,7 +150,7 @@ func newAppsFixture(t *testing.T) *appsFixture {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		testPool.Exec(ctx, `DELETE FROM user_composio_connection WHERE connected_account_id = $1`, account)
-		for _, table := range []string{"app_tool_call", "app_action_request", "app_action_rule", "agent_app", "workspace_app_setting", "app_tool_class_override"} {
+		for _, table := range []string{"app_tool_call", "app_action_request", "app_action_rule", "agent_app", "workspace_app_setting", "app_tool_class_override", "app_team_request"} {
 			testPool.Exec(ctx, `DELETE FROM `+table+` WHERE workspace_id = $1`, testWorkspaceID)
 		}
 		testPool.Exec(ctx, `DELETE FROM inbox_item WHERE workspace_id = $1 AND type LIKE 'app\_%'`, testWorkspaceID)

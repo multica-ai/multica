@@ -4616,6 +4616,22 @@ export const AppsOverviewSchema = z.object({
   team: z.array(AppConnectionSchema).default([]),
   personal: z.array(AppConnectionSchema).default([]),
   agent_apps: z.array(AgentAppSchema).default([]),
+  team_requests: z.array(z.object({
+    toolkit_slug: z.string(),
+    requested_by: z.array(z.string()).default([]).catch([]),
+    agent_ids: z.array(z.string()).default([]).catch([]),
+    last_requested_at: z.string().default(""),
+  }).loose()).default([]).catch([]),
+}).loose();
+
+export const PersonalAppImpactSchema = z.object({
+  agents: z.array(z.object({
+    id: z.string(),
+    name: z.string().default(""),
+    workspace_id: z.string().default(""),
+    workspace_name: z.string().default(""),
+    running: z.boolean().default(false).catch(false),
+  }).loose()).default([]),
 }).loose();
 
 const AppCatalogEntrySchema = z.object({
@@ -4693,6 +4709,7 @@ export const AppRequestSchema = z.object({
   reason: appNullableString,
   // Withhold the details unless the server said otherwise.
   redacted: z.boolean().default(true).catch(true),
+  adds_app: z.boolean().default(false).catch(false),
   expires_at: z.string(),
   decided_by: appNullableString,
   decided_at: appNullableString,
@@ -4741,6 +4758,7 @@ export const EMPTY_APPS_OVERVIEW: AppsOverview = {
   team: [],
   personal: [],
   agent_apps: [],
+  team_requests: [],
 };
 
 export const EMPTY_APP_CATALOG: AppCatalogResponse = { catalog_mode: "curated", apps: [] };

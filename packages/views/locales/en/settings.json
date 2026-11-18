@@ -585,6 +585,7 @@
       "issue": "Issue",
       "notifications": "Notifications",
       "tokens": "API Tokens",
+      "connected_accounts": "Connected accounts",
       "general": "General",
       "github": "GitHub",
       "labs": "Labs",
@@ -598,7 +599,6 @@
       "billing": "Billing",
       "code": "Code",
       "channels": "Messaging",
-      "apps": "Connected apps",
       "workflows": "Workflows",
       "voice_input": "Voice input"
     },
@@ -1663,6 +1663,7 @@
   "layout": {
     "scope": {
       "account": "Account · synced",
+      "all_workspaces": "All your workspaces",
       "device": "This device only",
       "device_workspace": "This device · {{name}}",
       "workspace": "{{name}} workspace",
@@ -1753,22 +1754,8 @@
     "authorization_expired": "WeChat authorization expired. Scan again to reconnect."
   },
   "connected_apps": {
-    "description": "Accounts your agents use to access external apps. Allowed actions run immediately.",
     "loading": "Loading apps…",
     "load_failed": "Couldn't load apps.",
-    "team_title": "Team accounts",
-    "team_description": "Shared accounts the workspace owns, such as a support inbox or the company GitHub. Admins connect them; agents given the team account act as it.",
-    "team_empty": "No team accounts yet.",
-    "team_empty_member": "No team accounts yet. Ask a workspace admin to connect one.",
-    "personal_title": "My accounts",
-    "personal_description": "Your own accounts. When you trigger a run, agents use these for apps set to the triggerer's account.",
-    "personal_empty": "You haven't connected any accounts.",
-    "connected_by": "Connected by {{name}}",
-    "last_used": "Last used {{when}}",
-    "last_used_never": "Never used",
-    "used_by_one": "Used by {{count}} agent",
-    "used_by_other": "Used by {{count}} agents",
-    "expired": "Needs reconnecting",
     "reconnect": "Reconnect",
     "rules": "Rules",
     "activity": "Activity",
@@ -1791,7 +1778,6 @@
       "recommended_personal": "Usually a personal account",
       "connect_team": "Connect team account",
       "connect_personal": "Connect my account",
-      "connecting": "Connecting…",
       "connected": "Connected",
       "connect": "Connect",
       "team_description": "A shared workspace account. Choose which agents can use it on each agent’s Apps page.",
@@ -1809,10 +1795,15 @@
       "confirm": "Disconnect"
     },
     "disconnect_personal": {
-      "title": "Disconnect your {{app}} account?",
-      "description": "Runs you trigger can no longer use it. You can reconnect later.",
+      "title": "Disconnect {{app}}?",
+      "description": "It's removed from every workspace you're in.",
+      "agents": "These agents will ask you to connect again",
+      "no_agents": "No agent uses it.",
+      "uses_it": "uses it in runs you start",
+      "running": "has a run in progress — it stops",
+      "impact_failed": "Couldn't check which agents use it.",
       "cancel": "Cancel",
-      "confirm": "Disconnect"
+      "confirm": "Disconnect everywhere"
     },
     "detail": {
       "team_title": "{{app}} · team account",
@@ -1862,6 +1853,25 @@
     "scopes": {
       "team": "Team account",
       "personal": "Triggerer's account"
+    },
+    "status": {
+      "connected": "Connected",
+      "expired": "Sign-in expired",
+      "needs_your_account": "Needs your account",
+      "no_team_account": "No team account yet"
+    },
+    "disclosure": {
+      "title": "Connect {{app}}",
+      "personal_subtitle": "Your own account. You'll sign in to the app on the next screen.",
+      "team_subtitle": "A team account the whole workspace shares. You'll sign in to the app on the next screen.",
+      "without_asking": "Agents can do this without asking each time",
+      "logged": "Every call an agent makes is recorded on the issue or chat it ran for.",
+      "used_by": "Agents using {{app}}: {{agents}}. They'll act as this account.",
+      "used_by_none": "No agent uses this app yet. Add it to an agent from the agent's page.",
+      "visibility_personal": "Only runs you start use it. It also works in your other workspaces.",
+      "visibility_team": "Agents given the team account act as it, whoever starts the run.",
+      "cancel": "Cancel",
+      "continue": "Continue"
     },
     "levels": {
       "read": "Read only",
@@ -1936,6 +1946,78 @@
       "cancel": "Cancel",
       "admin_required": "A workspace admin can restore access.",
       "account_link": "This account has saved action restrictions. Restore access in Connected apps."
+    },
+    "hub": {
+      "description": "Everything agents in {{workspace}} can work in, and whose account they use.",
+      "tabs": {
+        "in_use": "In use",
+        "attention": "Needs attention",
+        "all": "All apps"
+      },
+      "search": "Search apps",
+      "popular": "Popular in {{workspace}}",
+      "scope_team": "Team account",
+      "scope_personal": "Personal account",
+      "scope_both": "Team and personal accounts",
+      "used_by": "Used by {{agents}}",
+      "wanted_by": "Wanted by {{agents}}",
+      "asked_by": "Asked for by {{names}}",
+      "members_asked_one": "{{count}} member asked",
+      "members_asked_other": "{{count}} members asked",
+      "set_up": "Set up",
+      "connect": "Connect",
+      "reconnect": "Reconnect",
+      "ask_admin": "Ask an admin",
+      "requested": "Requested",
+      "toast_requested": "Workspace admins were asked to connect {{app}}.",
+      "empty_in_use": "No apps in use yet. Set one up to let agents work in it.",
+      "empty_attention": "Nothing needs your attention.",
+      "no_matches": "No apps match your search.",
+      "unavailable": "Apps aren't available on this server.",
+      "retry": "Try again"
+    },
+    "app_page": {
+      "agents_title": "Agents",
+      "agents_empty": "This workspace has no agents yet.",
+      "source_label": "Account {{agent}} uses for {{app}}",
+      "source_team": "Team account",
+      "source_personal": "Personal account of whoever starts the run",
+      "not_using": "Not using {{app}}",
+      "enable": "Let {{agent}} use {{app}}",
+      "team_admin_only": "Only workspace admins can change team account access.",
+      "save_failed": "Couldn't update the agent.",
+      "activity_title": "Recent activity",
+      "activity_empty": "No agent has used {{app}} yet.",
+      "as_team": "as team account",
+      "as_you": "as you",
+      "in_chat": "chat",
+      "accounts_title": "Accounts",
+      "your_account": "Your account",
+      "team_account": "Team account",
+      "not_connected": "Not connected",
+      "account_actions": "{{account}} actions",
+      "dismiss": "Dismiss",
+      "toast_dismissed": "Requests dismissed",
+      "capabilities_title": "What agents can do",
+      "capabilities_note": "Without asking each time."
+    },
+    "accounts_page": {
+      "description": "Your own accounts in other apps. They come with you into every workspace you're in. Agents use them only in runs you start, and nobody else can use them.",
+      "waiting_title": "Waiting for you",
+      "waiting_description": "Agents that stopped because they need one of your accounts.",
+      "needs_on_issue": "{{agent}} needs your {{app}} on {{issue}}",
+      "needs_in_chat": "{{agent}} needs your {{app}} in a chat",
+      "open_issue": "Open issue",
+      "open_chat": "Open chat",
+      "connect_app": "Connect {{app}}",
+      "reconnect_app": "Reconnect {{app}}",
+      "accounts_title": "Accounts",
+      "accounts_description": "Connect an account before an agent asks, or when it asks on an issue.",
+      "connect_account": "Connect account",
+      "empty": "You haven't connected any accounts.",
+      "used_by": "Used by {{agents}}",
+      "actions": "{{app}} actions",
+      "footer": "Disconnecting an account removes it from every workspace. Agents ask again next time they need it."
     }
   },
   "voice_input": {

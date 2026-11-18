@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/connectedapps"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // Composio integration handlers (MUL-3720, Stage 2 MVP). A Composio connection
@@ -132,7 +136,91 @@ func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 			h.ConnectedApps.ResolveConnectRequests(r.Context(), userID, result.ToolkitSlug)
 		}
 	}
+	if result.Team() {
+		if workspaceID, perr := parseUUIDStrict(result.WorkspaceID); perr == nil {
+			if err := h.Queries.DeleteAppTeamRequestsForToolkit(r.Context(), db.DeleteAppTeamRequestsForToolkitParams{
+				WorkspaceID: workspaceID, ToolkitSlug: connectedapps.NormalizeSlug(result.ToolkitSlug),
+			}); err != nil {
+				slog.Warn("apps: clear team account requests failed", "workspace_id", result.WorkspaceID, "toolkit", result.ToolkitSlug, "error", err)
+			}
+		}
+	}
 	http.Redirect(w, r, h.Composio.CallbackRedirect(result, true), http.StatusFound)
+}
+
+// ComposioImpactAgent is one agent that acts through a personal account.
+type ComposioImpactAgent struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspaceName string `json:"workspace_name"`
+	// Running is true while a run the caller started on the agent is active.
+	Running bool `json:"running"`
+}
+
+// GetComposioConnectionImpact (GET
+// /api/integrations/composio/connections/{id}/impact) is what disconnecting
+// one of the caller's personal accounts would stop: the agents, across the
+// caller's workspaces, that act through it when the caller runs them.
+func (h *Handler) GetComposioConnectionImpact(w http.ResponseWriter, r *http.Request) {
+	if h.Composio == nil || !h.composioMCPAppsEnabled(r.Context()) {
+		writeFeatureDisabled(w, "composio_not_configured", "composio integration not configured")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	userUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	connUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "connection id")
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	conn, err := h.Queries.GetUserComposioConnection(ctx, db.GetUserComposioConnectionParams{ID: connUUID, UserID: userUUID})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "composio connection not found")
+		return
+	}
+	rows, err := h.Queries.ListPersonalAppAgentsForUser(ctx, db.ListPersonalAppAgentsForUserParams{
+		UserID: userUUID, ToolkitSlug: connectedapps.NormalizeSlug(conn.ToolkitSlug),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list agents")
+		return
+	}
+	agents := make([]ComposioImpactAgent, 0, len(rows))
+	ids := make([]pgtype.UUID, 0, len(rows))
+	for _, row := range rows {
+		if !h.CanActFor(ctx, row.WorkspaceID, row.ID, userUUID) {
+			continue
+		}
+		ids = append(ids, row.ID)
+		agents = append(agents, ComposioImpactAgent{
+			ID: uuidToString(row.ID), Name: row.Name,
+			WorkspaceID: uuidToString(row.WorkspaceID), WorkspaceName: row.WorkspaceName,
+		})
+	}
+	if len(ids) > 0 {
+		running, err := h.Queries.ListAgentsWithActiveTasksForOriginator(ctx, db.ListAgentsWithActiveTasksForOriginatorParams{
+			AgentIds: ids, OriginatorUserID: userUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list active runs")
+			return
+		}
+		active := make(map[string]bool, len(running))
+		for _, id := range running {
+			active[uuidToString(id)] = true
+		}
+		for i := range agents {
+			agents[i].Running = active[agents[i].ID]
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
 }
 
 // ListComposioConnections (GET /api/integrations/composio/connections) returns

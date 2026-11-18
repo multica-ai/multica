@@ -65,14 +65,16 @@ const shell = vi.hoisted(() => ({
   appsAvailable: false,
   role: "owner" as "owner" | "admin" | "member",
 }));
-vi.mock("./connected-apps-tab", () => ({
-  ConnectedAppsTab: () => <div>ConnectedAppsTab</div>,
+vi.mock("./connected-accounts-tab", () => ({
+  ConnectedAccountsTab: () => <div>ConnectedAccountsTab</div>,
+}));
+vi.mock("../../common/use-composio-available", () => ({
   useComposioAvailable: () => shell.appsAvailable,
 }));
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme" }),
-  useWorkspacePaths: () => ({ autopilots: () => "/acme/autopilots" }),
+  useWorkspacePaths: () => ({ autopilots: () => "/acme/autopilots", apps: () => "/acme/apps" }),
 }));
 vi.mock("@multica/core/workspace/avatar-url", () => ({
   resolvePublicFileUrl: (url: string | null | undefined) => url ?? null,
@@ -359,20 +361,41 @@ describe("SettingsPage information architecture", () => {
     );
   });
 
-  it("lists Connected apps with the workspace connections only when Composio is available", () => {
+  it("lists Connected accounts with the personal pages only when Composio is available", () => {
     const first = renderWithI18n(<SettingsPage />);
-    expect(screen.queryByRole("link", { name: "Connected apps" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Connected accounts" })).toBeNull();
     first.unmount();
 
     shell.appsAvailable = true;
     navigationState.search = "tab=integrations&connected=notion";
     renderWithI18n(<SettingsPage />);
     const personal = within(nav()).getByRole("region", { name: /Personal/ });
-    expect(within(personal).queryByRole("link", { name: "Connected apps" })).toBeNull();
     expect(
-      within(nav()).getByRole("link", { name: "Connected apps" }),
+      within(personal).getByRole("link", { name: "Connected accounts" }),
     ).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText("ConnectedAppsTab")).toBeInTheDocument();
+    expect(within(nav()).queryByRole("link", { name: "Connected apps" })).toBeNull();
+    expect(screen.getByText("ConnectedAccountsTab")).toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("sends the retired Apps tab and team connect returns to the Apps page", () => {
+    shell.appsAvailable = true;
+    navigationState.search = "tab=apps";
+    const first = renderWithI18n(<SettingsPage />);
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps");
+    first.unmount();
+
+    navigationState.search = "tab=apps&connected=notion&scope=team";
+    renderWithI18n(<SettingsPage />);
+    expect(replace).toHaveBeenLastCalledWith("/acme/apps?connected=notion");
+  });
+
+  it("opens a personal connect return on Connected accounts", () => {
+    shell.appsAvailable = true;
+    navigationState.search = "tab=apps&connected=notion";
+    renderWithI18n(<SettingsPage />);
+    expect(screen.getByText("ConnectedAccountsTab")).toBeInTheDocument();
+    expect(replace).not.toHaveBeenCalled();
   });
 
   it("marks pages a member can only view", () => {

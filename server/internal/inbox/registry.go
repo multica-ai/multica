@@ -59,6 +59,8 @@ var typeGroups = map[string]string{
 	"app_action_requested":  "",
 	"app_action_reminder":   "",
 	"app_connect_requested": "",
+	// A member asks the admins for a team account; once per member and app.
+	"app_team_requested": "",
 }
 
 // legacyTypes are types earlier releases wrote and this server no longer

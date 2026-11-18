@@ -1383,6 +1383,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						// key and applies account rules and confirmations.
 						appsSvc, aerr := connectedapps.New(connectedapps.Config{
 							Queries:       queries,
+							TxStarter:     pool,
 							Composio:      svc,
 							TokenSecret:   connectedapps.DeriveTokenSecret(stateSecret),
 							PublicBaseURL: callbackBase,
@@ -2062,6 +2063,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/toolkits", h.ListComposioToolkits)
 			r.Get("/connections", h.ListComposioConnections)
 			r.Delete("/connections/{id}", h.DeleteComposioConnection)
+			r.Get("/connections/{id}/impact", h.GetComposioConnectionImpact)
 		})
 
 		// User-scoped invitation routes (no workspace context required)
@@ -2689,6 +2691,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/team/connect", h.ConnectTeamApp)
 				r.Get("/team/impact", h.GetTeamAppImpact)
 				r.Delete("/team/connections/{id}", h.DisconnectTeamApp)
+				r.Post("/team/requests", h.RequestTeamApp)
+				r.Delete("/team/requests", h.DismissTeamAppRequests)
 				r.Post("/personal/connect", h.ConnectPersonalApp)
 				r.Get("/rules", h.GetAppRules)
 				r.Put("/rules", h.UpdateAppRules)

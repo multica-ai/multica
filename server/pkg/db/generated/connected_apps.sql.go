@@ -495,6 +495,36 @@ func (q *Queries) DeleteAgentAppsExcept(ctx context.Context, arg DeleteAgentApps
 	return err
 }
 
+const deleteAppTeamRequestsByMember = `-- name: DeleteAppTeamRequestsByMember :exec
+DELETE FROM app_team_request
+WHERE workspace_id = $1 AND requested_by = $2
+`
+
+type DeleteAppTeamRequestsByMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RequestedBy pgtype.UUID `json:"requested_by"`
+}
+
+func (q *Queries) DeleteAppTeamRequestsByMember(ctx context.Context, arg DeleteAppTeamRequestsByMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteAppTeamRequestsByMember, arg.WorkspaceID, arg.RequestedBy)
+	return err
+}
+
+const deleteAppTeamRequestsForToolkit = `-- name: DeleteAppTeamRequestsForToolkit :exec
+DELETE FROM app_team_request
+WHERE workspace_id = $1 AND toolkit_slug = $2
+`
+
+type DeleteAppTeamRequestsForToolkitParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ToolkitSlug string      `json:"toolkit_slug"`
+}
+
+func (q *Queries) DeleteAppTeamRequestsForToolkit(ctx context.Context, arg DeleteAppTeamRequestsForToolkitParams) error {
+	_, err := q.db.Exec(ctx, deleteAppTeamRequestsForToolkit, arg.WorkspaceID, arg.ToolkitSlug)
+	return err
+}
+
 const deleteAppToolClassOverride = `-- name: DeleteAppToolClassOverride :exec
 DELETE FROM app_tool_class_override
 WHERE workspace_id = $1 AND toolkit_slug = $2 AND tool_slug = $3
@@ -885,6 +915,38 @@ func (q *Queries) ListAgentAppsInWorkspace(ctx context.Context, workspaceID pgty
 	return items, nil
 }
 
+const listAgentsWithActiveTasksForOriginator = `-- name: ListAgentsWithActiveTasksForOriginator :many
+SELECT DISTINCT agent_id FROM agent_task_queue
+WHERE agent_id = ANY($1::uuid[])
+  AND originator_user_id = $2
+  AND status IN ('queued', 'dispatched', 'running')
+`
+
+type ListAgentsWithActiveTasksForOriginatorParams struct {
+	AgentIds         []pgtype.UUID `json:"agent_ids"`
+	OriginatorUserID pgtype.UUID   `json:"originator_user_id"`
+}
+
+func (q *Queries) ListAgentsWithActiveTasksForOriginator(ctx context.Context, arg ListAgentsWithActiveTasksForOriginatorParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAgentsWithActiveTasksForOriginator, arg.AgentIds, arg.OriginatorUserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var agent_id pgtype.UUID
+		if err := rows.Scan(&agent_id); err != nil {
+			return nil, err
+		}
+		items = append(items, agent_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAppActionRules = `-- name: ListAppActionRules :many
 SELECT id, workspace_id, owner_user_id, toolkit_slug, action_class, policy, updated_by, updated_at FROM app_action_rule
 WHERE workspace_id = $1
@@ -961,6 +1023,52 @@ func (q *Queries) ListAppActionRulesForRun(ctx context.Context, arg ListAppActio
 			&i.Policy,
 			&i.UpdatedBy,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAppTeamRequestSummaries = `-- name: ListAppTeamRequestSummaries :many
+SELECT toolkit_slug,
+       array_agg(requested_by ORDER BY created_at, requested_by)::uuid[] AS requested_by,
+       COALESCE(array_agg(DISTINCT agent_id) FILTER (WHERE agent_id IS NOT NULL), '{}')::uuid[] AS agent_ids,
+       max(created_at)::timestamptz AS last_requested_at
+FROM app_team_request
+WHERE workspace_id = $1
+GROUP BY toolkit_slug
+ORDER BY max(created_at) DESC
+LIMIT 500
+`
+
+type ListAppTeamRequestSummariesRow struct {
+	ToolkitSlug     string             `json:"toolkit_slug"`
+	RequestedBy     []pgtype.UUID      `json:"requested_by"`
+	AgentIds        []pgtype.UUID      `json:"agent_ids"`
+	LastRequestedAt pgtype.Timestamptz `json:"last_requested_at"`
+}
+
+// One row per app members asked a team account for: who asked, oldest first,
+// and for which agents.
+func (q *Queries) ListAppTeamRequestSummaries(ctx context.Context, workspaceID pgtype.UUID) ([]ListAppTeamRequestSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listAppTeamRequestSummaries, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAppTeamRequestSummariesRow{}
+	for rows.Next() {
+		var i ListAppTeamRequestSummariesRow
+		if err := rows.Scan(
+			&i.ToolkitSlug,
+			&i.RequestedBy,
+			&i.AgentIds,
+			&i.LastRequestedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1417,6 +1525,60 @@ func (q *Queries) ListPendingConnectRequestsForUser(ctx context.Context, arg Lis
 			&i.DecidedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPersonalAppAgentsForUser = `-- name: ListPersonalAppAgentsForUser :many
+SELECT a.id, a.name, a.workspace_id, w.name AS workspace_name
+FROM agent_app aa
+JOIN agent a ON a.id = aa.agent_id AND a.workspace_id = aa.workspace_id
+JOIN member m ON m.workspace_id = aa.workspace_id AND m.user_id = $1
+JOIN workspace w ON w.id = aa.workspace_id
+WHERE aa.toolkit_slug = $2
+  AND aa.account_scope = 'personal'
+  AND a.archived_at IS NULL
+  AND a.kind = 'user'
+ORDER BY w.name, a.name, a.id
+LIMIT 200
+`
+
+type ListPersonalAppAgentsForUserParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	ToolkitSlug string      `json:"toolkit_slug"`
+}
+
+type ListPersonalAppAgentsForUserRow struct {
+	ID            pgtype.UUID `json:"id"`
+	Name          string      `json:"name"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	WorkspaceName string      `json:"workspace_name"`
+}
+
+// Agents in every workspace the user belongs to that act through the
+// personal account of whoever triggers them for one app. The caller still
+// filters by who may run each agent.
+func (q *Queries) ListPersonalAppAgentsForUser(ctx context.Context, arg ListPersonalAppAgentsForUserParams) ([]ListPersonalAppAgentsForUserRow, error) {
+	rows, err := q.db.Query(ctx, listPersonalAppAgentsForUser, arg.UserID, arg.ToolkitSlug)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPersonalAppAgentsForUserRow{}
+	for rows.Next() {
+		var i ListPersonalAppAgentsForUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.WorkspaceID,
+			&i.WorkspaceName,
 		); err != nil {
 			return nil, err
 		}
@@ -1887,6 +2049,36 @@ func (q *Queries) UpsertAppActionRule(ctx context.Context, arg UpsertAppActionRu
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertAppTeamRequest = `-- name: UpsertAppTeamRequest :one
+INSERT INTO app_team_request (workspace_id, toolkit_slug, requested_by, agent_id)
+VALUES ($1, $2, $3, $4::uuid)
+ON CONFLICT (workspace_id, toolkit_slug, requested_by) DO UPDATE SET
+    agent_id   = EXCLUDED.agent_id,
+    created_at = now()
+RETURNING (xmax = 0)::boolean AS inserted
+`
+
+type UpsertAppTeamRequestParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ToolkitSlug string      `json:"toolkit_slug"`
+	RequestedBy pgtype.UUID `json:"requested_by"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+}
+
+// A member asking again refreshes their ask; inserted is false then, so the
+// admins are notified once per member and app.
+func (q *Queries) UpsertAppTeamRequest(ctx context.Context, arg UpsertAppTeamRequestParams) (bool, error) {
+	row := q.db.QueryRow(ctx, upsertAppTeamRequest,
+		arg.WorkspaceID,
+		arg.ToolkitSlug,
+		arg.RequestedBy,
+		arg.AgentID,
+	)
+	var inserted bool
+	err := row.Scan(&inserted)
+	return inserted, err
 }
 
 const upsertAppToolClassOverride = `-- name: UpsertAppToolClassOverride :exec

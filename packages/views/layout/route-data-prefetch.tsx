@@ -9,6 +9,7 @@ import {
 } from "@multica/core/agents/queries";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { appCatalogOptions, appsOverviewOptions } from "@multica/core/connected-apps";
 import { inboxListOptions } from "@multica/core/inbox/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { paths, useCurrentWorkspace, useWorkspaceSlug } from "@multica/core/paths";
@@ -45,6 +46,11 @@ const ROUTES = {
     void qc.prefetchQuery(agentListOptions(wsId));
     void qc.prefetchQuery(memberListOptions(wsId));
     void qc.prefetchQuery(runtimeListOptions(wsId));
+  },
+  apps: (qc, wsId) => {
+    void qc.prefetchQuery(appsOverviewOptions(wsId));
+    void qc.prefetchQuery(appCatalogOptions(wsId));
+    void qc.prefetchQuery(agentListOptions(wsId));
   },
   squads: (qc, wsId) => {
     void qc.prefetchQuery(squadListOptions(wsId));

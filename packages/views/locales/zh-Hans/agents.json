@@ -211,7 +211,48 @@
     "status": "状态",
     "runs_7d": "运行（7 天）",
     "edit_access_aria": "访问权限：{{value}}。更改访问权限",
-    "all_settings": "全部设置"
+    "all_settings": "全部设置",
+    "apps": "应用",
+    "apps_needs_account_other": "{{count}} 个需要你的账号",
+    "apps_count_other": "{{count}} 个应用",
+    "apps_none": "无",
+    "apps_aria": "应用：{{value}}。查看应用"
+  },
+  "apps_section": {
+    "title": "应用",
+    "empty": "这个智能体还没有使用任何应用。",
+    "scopes": {
+      "personal": "个人账号",
+      "team": "团队账号"
+    },
+    "connect_yours": "连接我的账号",
+    "reconnect": "重新连接",
+    "connect_team": "连接团队账号",
+    "ask_admin": "请管理员连接",
+    "requested": "已请求",
+    "asked_toast": "已请管理员为 {{app}} 连接团队账号。",
+    "ask_failed_toast": "请求发送失败。"
+  },
+  "add_app_dialog": {
+    "title": "为 {{agent}} 添加应用",
+    "description": "使用个人账号的应用会用发起运行者的账号，所以即使你自己没有账号也可以添加。",
+    "search_other": "搜索 {{count}} 个应用",
+    "search_label": "搜索应用",
+    "curated": "精选",
+    "recommended_team": "通常用团队账号",
+    "recommended_personal": "通常用个人账号",
+    "team_connected": "团队账号已连接",
+    "add": "添加",
+    "add_aria": "添加 {{app}}",
+    "empty": "没有匹配的应用。",
+    "load_failed": "无法加载应用。",
+    "added_toast": "已将 {{app}} 添加给 {{agent}}。"
+  },
+  "app_requests": {
+    "title_adds_app": "{{agent}} 想使用 {{app}}",
+    "new_app": "此智能体的新应用",
+    "adds_app_note": "回应后，{{agent}} 之后的运行都可以使用 {{app}}。",
+    "add_to_agent": "将 {{app}} 添加给 {{agent}}"
   },
   "pickers": {
     "concurrency_range": "最大并行运行数（{{min}}–{{max}}）",
@@ -786,10 +827,6 @@
       "load_failed": "无法加载此智能体的应用。",
       "empty": "暂无已连接的应用。",
       "level": "权限",
-      "team_connected": "团队账号已连接",
-      "team_missing": "团队账号未连接",
-      "personal_connected": "你的账号已连接",
-      "personal_missing": "你还没有连接这个应用",
       "team_admin_only": "只有工作区管理员可以给智能体团队账号。",
       "team_shared_warning": "能运行这个智能体的人，都能通过它使用该团队账号。",
       "manage_link": "在 设置 → 已连接应用 中管理账号",

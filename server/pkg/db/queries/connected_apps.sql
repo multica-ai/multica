@@ -358,3 +358,56 @@ WHERE id = $1 AND status = 'queued';
 -- Keeps the legacy allowlist column in step with agent_app for older clients.
 UPDATE agent SET composio_toolkit_allowlist = sqlc.arg('slugs')::text[], updated_at = now()
 WHERE id = $1;
+
+-- name: UpsertAppTeamRequest :one
+-- A member asking again refreshes their ask; inserted is false then, so the
+-- admins are notified once per member and app.
+INSERT INTO app_team_request (workspace_id, toolkit_slug, requested_by, agent_id)
+VALUES ($1, $2, $3, sqlc.narg('agent_id')::uuid)
+ON CONFLICT (workspace_id, toolkit_slug, requested_by) DO UPDATE SET
+    agent_id   = EXCLUDED.agent_id,
+    created_at = now()
+RETURNING (xmax = 0)::boolean AS inserted;
+
+-- name: ListAppTeamRequestSummaries :many
+-- One row per app members asked a team account for: who asked, oldest first,
+-- and for which agents.
+SELECT toolkit_slug,
+       array_agg(requested_by ORDER BY created_at, requested_by)::uuid[] AS requested_by,
+       COALESCE(array_agg(DISTINCT agent_id) FILTER (WHERE agent_id IS NOT NULL), '{}')::uuid[] AS agent_ids,
+       max(created_at)::timestamptz AS last_requested_at
+FROM app_team_request
+WHERE workspace_id = $1
+GROUP BY toolkit_slug
+ORDER BY max(created_at) DESC
+LIMIT 500;
+
+-- name: DeleteAppTeamRequestsForToolkit :exec
+DELETE FROM app_team_request
+WHERE workspace_id = $1 AND toolkit_slug = $2;
+
+-- name: DeleteAppTeamRequestsByMember :exec
+DELETE FROM app_team_request
+WHERE workspace_id = $1 AND requested_by = $2;
+
+-- name: ListPersonalAppAgentsForUser :many
+-- Agents in every workspace the user belongs to that act through the
+-- personal account of whoever triggers them for one app. The caller still
+-- filters by who may run each agent.
+SELECT a.id, a.name, a.workspace_id, w.name AS workspace_name
+FROM agent_app aa
+JOIN agent a ON a.id = aa.agent_id AND a.workspace_id = aa.workspace_id
+JOIN member m ON m.workspace_id = aa.workspace_id AND m.user_id = sqlc.arg('user_id')
+JOIN workspace w ON w.id = aa.workspace_id
+WHERE aa.toolkit_slug = sqlc.arg('toolkit_slug')
+  AND aa.account_scope = 'personal'
+  AND a.archived_at IS NULL
+  AND a.kind = 'user'
+ORDER BY w.name, a.name, a.id
+LIMIT 200;
+
+-- name: ListAgentsWithActiveTasksForOriginator :many
+SELECT DISTINCT agent_id FROM agent_task_queue
+WHERE agent_id = ANY(sqlc.arg('agent_ids')::uuid[])
+  AND originator_user_id = sqlc.arg('originator_user_id')
+  AND status IN ('queued', 'dispatched', 'running');

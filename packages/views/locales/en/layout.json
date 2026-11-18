@@ -11,6 +11,7 @@
     "usage": "Analytics",
     "runtimes": "Runtimes",
     "skills": "Skills",
+    "apps": "Apps",
     "settings": "Settings",
     "views": "Views"
   },
@@ -22,6 +23,7 @@
     "member": "Member",
     "squad": "Squad",
     "skill": "Skill",
+    "app": "App",
     "machine": "Machine",
     "runtime": "Runtime",
     "attachment": "Attachment",

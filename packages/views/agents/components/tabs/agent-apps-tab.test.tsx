@@ -16,8 +16,11 @@ vi.mock("@multica/core/api", () => ({ api: {
 } }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/paths", () => ({ useWorkspacePaths: () => ({ settings: () => "/ws/settings" }) }));
+vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Agent" }) }));
 vi.mock("../../../navigation", () => ({
   AppLink: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
+  useNavigation: () => ({ pathname: "/ws/agents/a1", searchParams: new URLSearchParams(), hash: "" }),
+  currentPath: () => "/ws/agents/a1",
 }));
 
 const apps: AgentApp[] = [
@@ -66,7 +69,7 @@ describe("AgentAppsTab", () => {
     overview.personal = [{ id: "expired-calendar", toolkit_slug: "googlecalendar", status: "expired", connected_at: "", last_used_at: null }];
     renderApps();
     await screen.findByText("Gmail");
-    expect(screen.getByText(/You haven't connected this app/)).toBeVisible();
+    expect(screen.getByText(/Needs your account/)).toBeVisible();
     expect(screen.getByRole("switch", { name: "Enable Gmail" })).toBeChecked();
     expect(screen.getByRole("switch", { name: "Enable Notion" })).not.toBeChecked();
     expect(screen.getByText("Notion").closest("li")?.querySelector("img")).toHaveAttribute("src", expect.stringContaining("notion"));
@@ -152,14 +155,24 @@ describe("AgentAppsTab", () => {
     expect(api.updateAgentApps).toHaveBeenCalledTimes(1);
   });
 
-  it("does not let a member enable a team-only app", async () => {
+  it("adds a team-only app for a member as a personal-account app", async () => {
     overview.can_manage = false;
     const user = userEvent.setup();
     renderApps();
-    const toggle = await screen.findByRole("switch", { name: "Enable Notion" });
-    expect(toggle).toHaveAttribute("aria-disabled", "true");
-    await user.click(toggle);
-    expect(api.updateAgentApps).not.toHaveBeenCalled();
+    await user.click(await screen.findByRole("switch", { name: "Enable Notion" }));
+    await waitFor(() => expect(api.updateAgentApps).toHaveBeenCalledWith("a1", {
+      apps: [
+        { toolkit_slug: "gmail", account_scope: "personal", level: "read" },
+        { toolkit_slug: "notion", account_scope: "personal", level: "write" },
+      ],
+    }));
+  });
+
+  it("connects a missing account through the pre-connect notice", async () => {
+    const user = userEvent.setup();
+    renderApps();
+    await user.click(await screen.findByRole("button", { name: "Connect yours" }));
+    expect(await screen.findByRole("dialog", { name: "Connect Gmail" })).toBeVisible();
   });
 
   it("retains saved apps missing from the catalog and allows removing them", async () => {

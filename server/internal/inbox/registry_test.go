@@ -122,7 +122,7 @@ func TestConnectedAppTypeGroups(t *testing.T) {
 	if !Muted(muted, "app_action_result") {
 		t.Error("app_action_result must follow the agent_activity mute")
 	}
-	for _, notifType := range []string{"app_action_requested", "app_action_reminder", "app_connect_requested"} {
+	for _, notifType := range []string{"app_action_requested", "app_action_reminder", "app_connect_requested", "app_team_requested"} {
 		if Muted(muted, notifType) {
 			t.Errorf("%s must always be delivered", notifType)
 		}
