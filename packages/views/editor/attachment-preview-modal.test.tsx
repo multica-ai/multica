@@ -337,7 +337,7 @@ describe("AttachmentPreviewModal — dispatch", () => {
     const att = makeAttachment({ filename: "README.md", content_type: "text/markdown" });
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
 
-    expect(getAttachmentTextContentMock).toHaveBeenCalledWith("att-1");
+    expect(getAttachmentTextContentMock).toHaveBeenCalledWith("att-1", { workspaceId: "ws-1" });
 
     await waitFor(() => {
       expect(screen.getByTestId("readonly-content")).toBeTruthy();
@@ -703,7 +703,7 @@ describe("AttachmentPreviewModal — streamed media (MUL-8892)", () => {
     const att = staleVideo();
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
 
-    expect(getAttachmentMock).toHaveBeenCalledWith("att-1");
+    expect(getAttachmentMock).toHaveBeenCalledWith("att-1", { workspaceId: "ws-1" });
     expect(document.querySelector("video")).toBeNull();
     expect(screen.getByText("Loading preview…")).toBeInTheDocument();
 
@@ -767,7 +767,7 @@ describe("AttachmentPreviewModal — streamed media (MUL-8892)", () => {
     expect(screen.getByText("Couldn't load preview")).toBeInTheDocument();
     const downloads = screen.getAllByRole("button", { name: "Download" });
     fireEvent.click(downloads[downloads.length - 1]!);
-    expect(downloadMock).toHaveBeenCalledWith("att-1");
+    expect(downloadMock).toHaveBeenCalledWith("att-1", "ws-1");
   });
 });
 
@@ -790,7 +790,7 @@ describe("AttachmentPreviewModal — controls", () => {
     const buttons = screen.getAllByRole("button", { name: "Download" });
     expect(buttons.length).toBeGreaterThan(0);
     fireEvent.click(buttons[0]!);
-    expect(downloadMock).toHaveBeenCalledWith("att-1");
+    expect(downloadMock).toHaveBeenCalledWith("att-1", "ws-1");
   });
 
   it("describes the file by type and size instead of its MIME type", () => {
@@ -1059,7 +1059,7 @@ describe("attachment preview download feedback", () => {
     expect(button).toHaveAttribute("aria-busy", "true");
     expect(button.querySelector(".animate-spin")).toBeInTheDocument();
     fireEvent.click(button);
-    expect(downloadMock).toHaveBeenCalledExactlyOnceWith(attachment.id);
+    expect(downloadMock).toHaveBeenCalledExactlyOnceWith(attachment.id, attachment.workspace_id);
 
     await act(async () => pending.resolve());
 
@@ -1083,7 +1083,7 @@ describe("attachment preview download feedback", () => {
       expect(button.querySelector(".animate-spin")).toBeInTheDocument();
       fireEvent.click(button);
     }
-    expect(downloadMock).toHaveBeenCalledExactlyOnceWith(attachment.id);
+    expect(downloadMock).toHaveBeenCalledExactlyOnceWith(attachment.id, attachment.workspace_id);
     await act(async () => pending.resolve());
   });
 
@@ -1143,7 +1143,10 @@ describe("attachment preview download feedback", () => {
     expect(button).toBeEnabled();
     fireEvent.click(button);
 
-    expect(downloadMock.mock.calls).toEqual([[first.id], [second.id]]);
+    expect(downloadMock.mock.calls).toEqual([
+      [first.id, first.workspace_id],
+      [second.id, second.workspace_id],
+    ]);
     await act(async () => firstDownload.resolve());
     expect(button).toBeDisabled();
     await act(async () => secondDownload.resolve());
@@ -1842,7 +1845,7 @@ describe("AttachmentPreviewModal — expired cached image access", () => {
         onImageError={onImageError}
       />,
     );
-    expect(getAttachmentMock).toHaveBeenCalledWith(att.id);
+    expect(getAttachmentMock).toHaveBeenCalledWith(att.id, { workspaceId: att.workspace_id });
     expect(document.querySelector('img[src*="Signature=expired"]')).toBeNull();
     expect(screen.getByText("Loading preview…")).toBeInTheDocument();
     expect(onImageError).not.toHaveBeenCalled();
@@ -1943,7 +1946,7 @@ it.each(["pending", "denied"])(
       rtlRender(<QueryClientProvider client={client}><Harness /></QueryClientProvider>);
       await screen.findByRole("img", { name: a.filename });
       fireEvent.click(screen.getByText("Select B"));
-      await waitFor(() => expect(getAttachmentMock).toHaveBeenCalledWith(b.id));
+      await waitFor(() => expect(getAttachmentMock).toHaveBeenCalledWith(b.id, { workspaceId: b.workspace_id }));
       client.setQueryData(["attachment-inline-resign", a.id], a, {
         updatedAt: Date.now() - 6 * 60 * 1000,
       });

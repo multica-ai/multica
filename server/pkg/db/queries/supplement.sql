@@ -124,6 +124,10 @@ WITH locked_task AS MATERIALIZED (
       AND t.agent_id = @agent_id
       AND r.workspace_id = @workspace_id
       AND t.status = 'running'
+      AND (
+          sqlc.narg('required_leader_squad_id')::uuid IS NULL
+          OR (t.is_leader_task AND t.squad_id = sqlc.narg('required_leader_squad_id')::uuid)
+      )
       AND cap.capability = 'task-supplement-v1'
       AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi')
       AND (@author_type::text <> 'agent' OR (

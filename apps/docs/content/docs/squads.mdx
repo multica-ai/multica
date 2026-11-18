@@ -62,6 +62,7 @@ After the first dispatch, the leader is woken up automatically by **most subsequ
 |---|---|---|
 | A non-member (human reporter, external agent) posts a comment | Yes | |
 | A squad member posts a progress update with no `@mention` | Yes | The leader re-evaluates whether a next step is needed |
+| A member or worker explicitly mentions the assigned squad’s leader as an agent | Yes | Runs as the squad leader, so `multica squad activity` can record its decision |
 | A human member mentions only other members or `@all` | No | People receive notifications; implicit agent routing is suppressed |
 | A non-leader agent mentions only members or `@all` | Yes | The worker result still reaches the leader; people receive notifications as usual |
 | Anyone explicitly mentions an agent or squad | Only if named | Only the named agents or squad leaders run; there is no additional leader fallback |

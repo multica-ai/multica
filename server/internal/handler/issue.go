@@ -109,6 +109,9 @@ type IssueResponse struct {
 	// SourceContext is detail-only. List, board, search, and children responses
 	// deliberately omit the potentially large immutable snapshot.
 	SourceContext *sourceContextDetailResponse `json:"source_context,omitempty"`
+	// RunOutcome is set only on the response to the caller's own update
+	// (#10845); see IssueRunOutcome.
+	RunOutcome *IssueRunOutcome `json:"run_outcome,omitempty"`
 	// duplicateOfIssueID is the raw mark, kept off the wire; see DuplicateOf.
 	duplicateOfIssueID pgtype.UUID
 }
@@ -4363,6 +4366,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		},
 		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 	)
+	logDeclinedIssueRun(r.Context(), issue, trigger)
+	runDecided := willRun
 	willRun = willRun && !req.SuppressRun
 
 	updatedPayload := map[string]any{
@@ -4430,9 +4435,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if handoff != nil && req.StopPreviousAssigneeRuns {
 		h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 	}
-	if willRun {
-		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
-	}
+	resp.RunOutcome = h.resolveIssueRun(r, issue, trigger, runDecided, req.SuppressRun, actorType, actorID, workspaceID, handoffNote)
 
 	// Sub-issue rules on the parent (the child_done system rule and sub-issue
 	// conditions): the write recorded the change; process it now. A failure
@@ -5206,6 +5209,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		var runOutcome *IssueRunOutcome
 		if hasFieldUpdate {
 			resp := issueToResponse(issue, prefix)
 			h.advanceRunStep(r.Context(), callerRun, prevIssue, issue)
@@ -5228,6 +5232,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				},
 				h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 			)
+			logDeclinedIssueRun(r.Context(), issue, trigger)
+			runDecided := willRun
 			willRun = willRun && !req.Updates.SuppressRun
 			batchPayload := map[string]any{
 				"issue":                      resp,
@@ -5257,9 +5263,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if handoff != nil && req.Updates.StopPreviousAssigneeRuns {
 				h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 			}
-			if willRun {
-				h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, batchHandoffNote)
-			}
+			runOutcome = h.resolveIssueRun(r, issue, trigger, runDecided, req.Updates.SuppressRun, actorType, actorID, workspaceID, batchHandoffNote)
 
 			// No status change — not even → cancelled — cancels active tasks here,
 			// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.
@@ -5289,7 +5293,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if issue.Revision == prevIssue.Revision {
 			outcome = batchOutcomeUnchanged
 		}
-		results = append(results, batchIssueResult{IssueID: issueID, Identifier: identifier, Outcome: outcome})
+		results = append(results, batchIssueResult{IssueID: issueID, Identifier: identifier, Outcome: outcome, RunOutcome: runOutcome})
 		updated++
 	}
 

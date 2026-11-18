@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -47,6 +48,10 @@ type AddProjectMembersRequest struct {
 type projectAccessUpdate struct {
 	visibility string // target visibility; "" leaves it unchanged
 	addIDs     []pgtype.UUID
+	// privateAddition names how the update adds to private-project
+	// configuration ("make_private", "add_members"), or is "" when it does
+	// not. It decides whether the private_projects paid feature applies.
+	privateAddition string
 }
 
 func (u projectAccessUpdate) empty() bool { return u.visibility == "" && len(u.addIDs) == 0 }
@@ -216,6 +221,7 @@ func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Requ
 				}
 			}
 			update.addIDs = ids
+			update.privateAddition = privateProjectOpMakePrivate
 		} else if !h.requireExistingProjectMembers(w, r, project, rawMemberIDs) {
 			return projectAccessUpdate{}, false
 		}
@@ -247,18 +253,59 @@ func (h *Handler) prepareProjectAccessUpdate(w http.ResponseWriter, r *http.Requ
 		}
 		update.addIDs = ids
 	}
-	if !leadChanged || !memberLead {
-		return update, true
+	if leadChanged && memberLead && !slices.Contains(update.addIDs, newLeadID) {
+		isMember, err := h.isProjectMember(r, project, newLeadID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check project membership")
+			return projectAccessUpdate{}, false
+		}
+		if !isMember {
+			update.addIDs = append(update.addIDs, newLeadID)
+		}
 	}
-	isMember, err := h.isProjectMember(r, project, newLeadID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to check project membership")
-		return projectAccessUpdate{}, false
-	}
-	if !isMember && !slices.Contains(update.addIDs, newLeadID) {
-		update.addIDs = append(update.addIDs, newLeadID)
+	// The web app's access dialog writes back the current member list, so only
+	// someone who is not a member yet adds to the private project.
+	if len(update.addIDs) > 0 {
+		grows, err := h.projectMembersGrow(r, project, update.addIDs)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list project members")
+			return projectAccessUpdate{}, false
+		}
+		if grows {
+			update.privateAddition = privateProjectOpAddMembers
+		}
 	}
 	return update, true
+}
+
+// Private-project operations restricted by the private_projects paid feature.
+// Everything else on a private project stays allowed under the restriction:
+// removing members, making it workspace-visible, deleting or archiving it,
+// changing the lead to an existing member, an agent or nobody, editing any
+// other field, and the workspace owner's recovery join (JoinPrivateProject),
+// which must keep a project with no members reachable.
+const (
+	privateProjectOpCreate      = "create"
+	privateProjectOpMakePrivate = "make_private"
+	privateProjectOpAddMembers  = "add_members"
+)
+
+// projectMembersGrow reports whether adding ids to project would add anyone
+// who is not a member yet.
+func (h *Handler) projectMembersGrow(r *http.Request, project db.Project, ids []pgtype.UUID) (bool, error) {
+	existing, err := h.Queries.ListProjectMemberUserIDs(r.Context(), db.ListProjectMemberUserIDsParams{
+		ProjectID:   project.ID,
+		WorkspaceID: project.WorkspaceID,
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, id := range ids {
+		if !slices.Contains(existing, id) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // requireExistingProjectMembers answers 400 unless every id in member_ids is
@@ -492,6 +539,19 @@ func (h *Handler) AddProjectMembers(w http.ResponseWriter, r *http.Request) {
 	if !h.requireProjectAccessManager(w, r, member, project, "only workspace admins and the member who manages this project's access can add members") {
 		return
 	}
+	var admission featureAdmission
+	if projectVisibilityOrDefault(project.Visibility) == projectaccess.VisibilityPrivate {
+		grows, err := h.projectMembersGrow(r, project, ids)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list project members")
+			return
+		}
+		if grows {
+			if admission, ok = h.requireFeatureAddition(w, r, project.WorkspaceID, entitlement.FeaturePrivateProjects, privateProjectOpAddMembers); !ok {
+				return
+			}
+		}
+	}
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -520,6 +580,7 @@ func (h *Handler) AddProjectMembers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit project members")
 		return
 	}
+	admission.admitted(r.Context())
 	h.publishProjectMembersChanged(project, member.UserID)
 	h.ListProjectMembers(w, r)
 }

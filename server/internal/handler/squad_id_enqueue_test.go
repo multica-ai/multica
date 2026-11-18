@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -126,5 +127,93 @@ func TestCreateRetryTask_InheritsSquadID(t *testing.T) {
 	}
 	if !child.IsLeaderTask {
 		t.Fatalf("child.IsLeaderTask = false, want true (provenance must survive retry)")
+	}
+}
+
+// TestCreateComment_LeaderAgentMentionOnAssignedSquadIssueIsLeaderTask covers
+// #8875: an explicit @agent mention of the leader of the squad the issue is
+// assigned to must enqueue a leader task (is_leader_task + squad_id), exactly
+// like the implicit squad-assignee wake, so the leader can record
+// `multica squad activity`. A plain @agent mention of a non-leader stays a
+// plain mention task.
+func TestCreateComment_LeaderAgentMentionOnAssignedSquadIssueIsLeaderTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	for _, author := range []string{"member", "worker"} {
+		t.Run(author, func(t *testing.T) {
+			ctx := context.Background()
+			fx := newSquadCommentTriggerFixture(t)
+			issueID := uuidToString(fx.Issue.ID)
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `DELETE FROM activity_log WHERE issue_id = $1`, issueID)
+				testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+				testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+			})
+
+			w := httptest.NewRecorder()
+			r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+				"content": "[@Leader](mention://agent/" + fx.LeaderID + ") and [@Other](mention://agent/" + fx.OtherID + ") please review",
+			})
+			r = withURLParam(r, "id", issueID)
+			expectedAuthorType, expectedAuthorID := "member", testUserID
+			if author == "worker" {
+				workerID := createHandlerTestAgent(t, "Leader Mention Worker", nil)
+				dbfx.SquadMember(t, fx.SquadID, "agent", workerID)
+				workerTaskID := dbfx.Task(t, workerID, testutil.Cols{
+					"runtime_id": handlerTestRuntimeID(t), "issue_id": issueID,
+					"status": "running", "squad_id": fx.SquadID,
+				})
+				r.Header.Set("X-Agent-ID", workerID)
+				r.Header.Set("X-Task-ID", workerTaskID)
+				expectedAuthorType, expectedAuthorID = "agent", workerID
+			}
+			testHandler.CreateComment(w, r)
+			if w.Code != http.StatusCreated {
+				t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+			}
+			var authorType, authorID string
+			if err := testPool.QueryRow(ctx, `SELECT author_type, author_id FROM comment WHERE issue_id = $1`, issueID).Scan(&authorType, &authorID); err != nil {
+				t.Fatal(err)
+			}
+			if authorType != expectedAuthorType || authorID != expectedAuthorID {
+				t.Fatalf("comment actor = %s/%s, want %s/%s", authorType, authorID, expectedAuthorType, expectedAuthorID)
+			}
+
+			load := func(agentID string) (string, string, bool) {
+				t.Helper()
+				var squadID *string
+				var isLeader bool
+				var taskID string
+				if err := testPool.QueryRow(ctx, `
+			SELECT id, squad_id::text, is_leader_task
+			FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		`, issueID, agentID).Scan(&taskID, &squadID, &isLeader); err != nil {
+					t.Fatalf("load task for agent %s: %v", agentID, err)
+				}
+				if squadID == nil {
+					return taskID, "", isLeader
+				}
+				return taskID, *squadID, isLeader
+			}
+
+			leaderTaskID, squadID, isLeader := load(fx.LeaderID)
+			if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running' WHERE id = $1`, leaderTaskID); err != nil {
+				t.Fatal(err)
+			}
+			testutil.Call(t, testHandler.RecordSquadLeaderEvaluation,
+				evaluationRequest(issueID, fx.LeaderID, leaderTaskID, "no_action")).Want(http.StatusCreated)
+			got := loadEvaluations(t, issueID)
+			if len(got) != 1 || got[0].ActorID != fx.LeaderID || got[0].SquadID != fx.SquadID || got[0].Outcome != "no_action" {
+				t.Fatalf("leader mention did not persist its evaluation: %+v", got)
+			}
+			if !isLeader || squadID != fx.SquadID {
+				t.Fatalf("leader mention task: is_leader_task=%v squad_id=%q, want true / %q", isLeader, squadID, fx.SquadID)
+			}
+			if _, squadID, isLeader := load(fx.OtherID); isLeader || squadID != "" {
+				t.Fatalf("non-leader mention task: is_leader_task=%v squad_id=%q, want false / empty", isLeader, squadID)
+			}
+		})
 	}
 }

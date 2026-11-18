@@ -514,6 +514,7 @@ WITH eligible_archived AS MATERIALIZED (
     SELECT id FROM comment_anchors
 )
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, i.snoozed_until, i.snoozed_at,
+       iss.number AS issue_number,
        iss.status AS issue_status,
        iss.priority AS issue_priority,
        iss.project_id AS issue_project_id,
@@ -555,6 +556,7 @@ type ListArchivedInboxItemsRow struct {
 	Section           pgtype.Text        `json:"section"`
 	SnoozedUntil      pgtype.Timestamptz `json:"snoozed_until"`
 	SnoozedAt         pgtype.Timestamptz `json:"snoozed_at"`
+	IssueNumber       pgtype.Int4        `json:"issue_number"`
 	IssueStatus       pgtype.Text        `json:"issue_status"`
 	IssuePriority     pgtype.Text        `json:"issue_priority"`
 	IssueProjectID    pgtype.UUID        `json:"issue_project_id"`
@@ -618,6 +620,7 @@ func (q *Queries) ListArchivedInboxItems(ctx context.Context, arg ListArchivedIn
 			&i.Section,
 			&i.SnoozedUntil,
 			&i.SnoozedAt,
+			&i.IssueNumber,
 			&i.IssueStatus,
 			&i.IssuePriority,
 			&i.IssueProjectID,
@@ -638,6 +641,7 @@ func (q *Queries) ListArchivedInboxItems(ctx context.Context, arg ListArchivedIn
 
 const listInboxItems = `-- name: ListInboxItems :many
 SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, i.snoozed_until, i.snoozed_at,
+       iss.number AS issue_number,
        iss.status AS issue_status,
        iss.priority AS issue_priority,
        iss.project_id AS issue_project_id,
@@ -684,6 +688,7 @@ type ListInboxItemsRow struct {
 	Section           pgtype.Text        `json:"section"`
 	SnoozedUntil      pgtype.Timestamptz `json:"snoozed_until"`
 	SnoozedAt         pgtype.Timestamptz `json:"snoozed_at"`
+	IssueNumber       pgtype.Int4        `json:"issue_number"`
 	IssueStatus       pgtype.Text        `json:"issue_status"`
 	IssuePriority     pgtype.Text        `json:"issue_priority"`
 	IssueProjectID    pgtype.UUID        `json:"issue_project_id"`
@@ -729,6 +734,7 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			&i.Section,
 			&i.SnoozedUntil,
 			&i.SnoozedAt,
+			&i.IssueNumber,
 			&i.IssueStatus,
 			&i.IssuePriority,
 			&i.IssueProjectID,
