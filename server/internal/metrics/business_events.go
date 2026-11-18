@@ -19,6 +19,10 @@ var runtimeReadyBuckets = []float64{1, 2.5, 5, 10, 30, 60, 120, 300, 600}
 // (status pings) to ~30s (provision). Aligns with cloudruntime.defaultTimeout.
 var cloudRuntimeRequestBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30}
 
+// emailSendBuckets spans a healthy relay conversation (~1s of round trips) to
+// the timeout that aborts a wedged one.
+var emailSendBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20}
+
 // prMergeSecondsBuckets covers PR-open → PR-merged latency from minutes to weeks.
 var prMergeSecondsBuckets = []float64{
 	300, 900, 1800,
@@ -57,6 +61,8 @@ type businessEventMetrics struct {
 	webhookDelivery                 *prometheus.CounterVec
 	webhookRateLimited              *prometheus.CounterVec
 	emailRateLimited                *prometheus.CounterVec
+	emailSend                       *prometheus.CounterVec
+	emailSendSeconds                *prometheus.HistogramVec
 	githubEventReceived             *prometheus.CounterVec
 	githubPRReview                  *prometheus.CounterVec
 	githubPRMergeSeconds            prometheus.Histogram
@@ -178,6 +184,15 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_email_rate_limited_total",
 			Help: "Total email-producing actions rejected by a bounded safety gate.",
 		}, metricLabels("multica_email_rate_limited_total")),
+		emailSend: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "multica_email_send_total",
+			Help: "Total emails handed to a provider off the request path, by kind and outcome.",
+		}, metricLabels("multica_email_send_total")),
+		emailSendSeconds: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "multica_email_send_seconds",
+			Help:    "Time an email send occupied a provider conversation, by kind (seconds).",
+			Buckets: emailSendBuckets,
+		}, metricLabels("multica_email_send_seconds")),
 		githubEventReceived: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_github_event_received_total",
 			Help: "Total GitHub webhook events received by event kind and action.",
@@ -247,6 +262,8 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 		e.webhookDelivery,
 		e.webhookRateLimited,
 		e.emailRateLimited,
+		e.emailSend,
+		e.emailSendSeconds,
 		e.githubEventReceived,
 		e.githubPRReview,
 		e.githubPRMergeSeconds,
@@ -422,6 +439,17 @@ func (m *BusinessMetrics) RecordEmailRateLimited(action, gate string) {
 		NormalizeEmailRateLimitAction(action),
 		NormalizeEmailRateLimitGate(gate),
 	).Inc()
+}
+
+// RecordEmailSend counts one off-request-path email send and how long its
+// provider conversation took. Email is now invisible to the requesting client,
+// so this plus the failure log is what makes a lost code observable.
+func (m *BusinessMetrics) RecordEmailSend(kind, result string, durationSeconds float64) {
+	if m == nil || m.events == nil {
+		return
+	}
+	m.events.emailSend.WithLabelValues(kind, result).Inc()
+	m.events.emailSendSeconds.WithLabelValues(kind).Observe(durationSeconds)
 }
 
 // RecordGithubEventReceived counts a GitHub webhook event by event kind / action.
