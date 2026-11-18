@@ -946,9 +946,13 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		WorkspaceID:            workspaceID,
 		Status:                 t.Status,
 		Priority:               t.Priority,
-		DispatchedAt:           timestampToPtr(t.DispatchedAt),
-		StartedAt:              timestampToPtr(t.StartedAt),
-		CompletedAt:            timestampToPtr(t.CompletedAt),
+		// Sub-second precision keeps the mention popover's run ordering
+		// (agentTaskSortTime) distinguishable within one second — the sticky
+		// continuation recovery sorts by the same instants server-side, so
+		// both must see the same granularity.
+		DispatchedAt:           timestampToNanoPtr(t.DispatchedAt),
+		StartedAt:              timestampToNanoPtr(t.StartedAt),
+		CompletedAt:            timestampToNanoPtr(t.CompletedAt),
 		Result:                 result,
 		Error:                  textToPtr(t.Error),
 		FailureReason:          failureReason,

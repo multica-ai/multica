@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
+	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -378,5 +381,45 @@ func TestSmartRuntimeContinuationMatchesFrontendSort(t *testing.T) {
 	if util.UUIDToString(task.RuntimeID) != codexMachine || task.EffectiveModel.String != "gpt-5.4" {
 		t.Fatalf("continuation = (%s, %s), want the popover's pick (Codex machine, gpt-5.4)",
 			util.UUIDToString(task.RuntimeID), task.EffectiveModel.String)
+	}
+}
+
+// Same-second starts must stay distinguishable in the task-runs payload: the
+// popover sorts by these instants, and second-precision strings collapsed two
+// same-second runs into one ordering slot while the server's recovery used
+// the full database timestamps.
+func TestTaskRunsStartedAtKeepsSubSecondPrecision(t *testing.T) {
+	owner := dbfx.User(t, "Nano owner", "nano-owner@example.test")
+	dbfx.Member(t, testWorkspaceID, owner, "member")
+	machine := dbfx.Runtime(t, "Nano machine", testutil.Cols{"provider": "codex", "owner_id": owner})
+	agentID := dbfx.Agent(t, "nano-agent", machine, testutil.Cols{})
+	issueID := dbfx.Issue(t, "Nano precision")
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": machine, "issue_id": issueID, "status": "completed",
+		"started_at": testutil.Raw("now()"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": machine, "issue_id": issueID, "status": "completed",
+		"started_at": testutil.Raw("now() + interval '70 milliseconds'"),
+	})
+
+	req := newOwnerDaemonRequest(http.MethodGet, "/api/issues/"+issueID+"/task-runs", nil)
+	req = withURLParam(req, "id", issueID)
+	w := testutil.Call(t, testHandler.ListTasksByIssue, req).Want(http.StatusOK)
+	var runs []struct {
+		ID        string  `json:"id"`
+		StartedAt *string `json:"started_at"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &runs); err != nil {
+		t.Fatalf("decode task runs: %v", err)
+	}
+	precisionLost := 0
+	for _, run := range runs {
+		if run.StartedAt == nil || !strings.Contains(*run.StartedAt, ".") {
+			precisionLost++
+		}
+	}
+	if precisionLost > 0 {
+		t.Fatalf("%d of %d runs lost sub-second started_at precision", precisionLost, len(runs))
 	}
 }
