@@ -140,7 +140,7 @@ func TestAgentDefaultDirectoryUsesExistingPathLockAndChatExemption(t *testing.T)
 	defer srv.Close()
 	d := &Daemon{cfg: Config{DaemonID: "default-daemon", AgentLocalDirectories: map[string]string{directoryTestAgentID: directory}}, client: NewClient(srv.URL), localPathLocks: NewLocalPathLocker(), logger: slog.Default(), cancelPollInterval: time.Hour}
 	worker := Task{ID: "writer", AgentID: directoryTestAgentID, IssueID: "issue"}
-	release, abort := d.acquireLocalDirectoryLockIfNeeded(t.Context(), worker, slog.Default())
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(t.Context(), worker, slog.Default(), newTestTaskSlot(0))
 	if abort || release == nil {
 		t.Fatal("configured issue writer did not acquire its directory lock")
 	}
@@ -174,7 +174,7 @@ func TestAgentDefaultDirectoryUsesExistingPathLockAndChatExemption(t *testing.T)
 	}
 	chatCtx, chatCancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer chatCancel()
-	chatRelease, abort := d.acquireLocalDirectoryLockIfNeeded(chatCtx, Task{ID: "chat", AgentID: directoryTestAgentID, ChatSessionID: "session"}, slog.Default())
+	chatRelease, abort := d.acquireLocalDirectoryLockIfNeeded(chatCtx, Task{ID: "chat", AgentID: directoryTestAgentID, ChatSessionID: "session"}, slog.Default(), newTestTaskSlot(0))
 	if chatRelease != nil {
 		chatRelease()
 	}
@@ -195,7 +195,7 @@ func TestAgentDefaultDirectoryMissingPathFailsBeforeExecution(t *testing.T) {
 	}))
 	defer srv.Close()
 	d := &Daemon{cfg: Config{DaemonID: "default-daemon", AgentLocalDirectories: map[string]string{directoryTestAgentID: missing}}, client: NewClient(srv.URL), localPathLocks: NewLocalPathLocker(), logger: slog.Default()}
-	release, abort := d.acquireLocalDirectoryLockIfNeeded(t.Context(), Task{ID: "missing-directory-task", AgentID: directoryTestAgentID}, slog.Default())
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(t.Context(), Task{ID: "missing-directory-task", AgentID: directoryTestAgentID}, slog.Default(), newTestTaskSlot(0))
 	if release != nil {
 		release()
 	}

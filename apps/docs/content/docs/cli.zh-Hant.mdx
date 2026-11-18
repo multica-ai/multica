@@ -225,6 +225,25 @@ multica issue wakeup runs MUL-123 <wakeup-id>
 
 在終端裡以成員身份建立時需要 `--agent-id`；AI 代理在自己的執行中建立時預設喚醒它自己。
 
+## 聊天喚醒 [#chat-wakeups]
+
+`chat wakeup` 僅供聊天執行中的 AI 代理使用，目標就是目前對話。不接受工作階段 ID，也不能從一般成員終端或任務執行中使用。使用者入口見[稍後跟進](/chat#follow-up-later)。
+
+```bash
+multica chat wakeup create --title "Review ready" \
+  --until-issue MUL-123 --state in_review --expires-in 48h \
+  --instruction "Summarize the result in this conversation"
+multica chat wakeup create --title "Check back in two hours" \
+  --after 2h --instruction "Remind the user to review the result"
+multica chat wakeup list
+```
+
+從單個 `--until-*` 條件、`--at` / `--after`、`--every` 中選一種。建立和更新都需要 `--title` 與 `--instruction`（或 `--instruction-file`）。`update` 會取代設定，並從更新時重新計算相對截止時間，但不能在條件、提醒和定期檢查之間切換。條件等待和檢查預設 24 小時，可用 `--expires-in` 或 `--expires-at` 設定，最長 7 天；單次提醒最遠 30 天，不接受到期參數。檢查間隔至少 10 分鐘，截止時間內最多容納 100 次檢查：`--every 10m` 搭配預設 24 小時會達到 144 次而被拒絕，需要加大間隔或提前截止時間，例如 `--expires-in 16h`。
+
+條件包括 `--until-issue` 搭配 `--state` 或 `--status`、`--until-children-done` 搭配可選的 `--stage`、`--until-pr`、`--until-run`，以及 `--until-reply` 搭配可選的 `--from <user-id>`。PR 條件使用目前工作區已鏡像的 GitHub PR，格式為 `owner/repo#N[:merged|closed|checks]`。`checks` 等待目前 head 的檢查結束，成功或失敗都算結束。只有伺服器能從 GitHub 讀取 CI 狀態時才能建立 `checks` 條件；自託管伺服器需要設定 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY`（見 [GitHub 整合](/github-integration)）。建立時已經結束的檢查結果會作為基準，不會立即喚醒 AI 代理。
+
+用 `list`、`get <id>` 查看記錄，`cancel <id>` 取消喚醒。定期檢查執行中，`checkin <id> --note "..."` 記錄進展但不傳送回覆；目標達成後用 `finish <id>` 結束檢查。到期的最後一次執行必須回報，不能靜默簽到。
+
 ## AI 代理和 skill
 
 ```bash
@@ -516,6 +535,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `member list/add/set-role/remove` | 管理小隊成員 | |
 | | `activity <issue-id> <outcome>` | 記錄隊長評價 | |
 | `chat` | `history`、`thread [id]` | 讀取 AI 代理當前正在處理的外部聊天會話 | `--limit`、`--before` |
+| | `wakeup create/list/get/update/cancel/finish/checkin` | 管理目前聊天執行的跟進；見[聊天喚醒](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | [讀取目前通知](/inbox)，不標為已讀 | `--project`、`--type`、`--output`（`table` 或 `json`）；篩選在本機套用 |
 
 ### Runtime

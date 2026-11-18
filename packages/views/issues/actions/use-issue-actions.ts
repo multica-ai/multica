@@ -106,23 +106,25 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
           ...options,
         });
       } else {
-        updateIssue.mutate(
-          { id: issueId, ...updates },
-          {
-            onSuccess: options?.onSuccess,
-            onError: (err) => {
-              toast.error(
-                errorCode(err) === "revision_conflict"
-                  ? t(($) => $.revision.conflict)
-                  : err instanceof Error && err.message
-                  ? err.message
-                  : t(($) => $.detail.update_failed),
-              );
-              options?.onError?.(err);
+        // Keep UI callbacks observer-scoped; error feedback belongs to the request.
+        void updateIssue
+          .mutateAsync(
+            { id: issueId, ...updates },
+            {
+              onSuccess: (issue) => options?.onSuccess?.(issue),
+              onError: (err) => options?.onError?.(err),
+              onSettled: () => options?.onSettled?.(),
             },
-            onSettled: () => options?.onSettled?.(),
-          },
-        );
+          )
+          .catch((err: unknown) => {
+            toast.error(
+              errorCode(err) === "revision_conflict"
+                ? t(($) => $.revision.conflict)
+                : err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.update_failed),
+            );
+          });
       }
     },
     [issue, issueId, entryOf, surfaceActions, updateIssue, openModal, t],

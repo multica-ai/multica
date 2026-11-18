@@ -88,7 +88,7 @@ cat >/dev/null
 			}
 			d.cfg.AgentLocalDirectories = configured
 			task.PriorWorkDir = previous.WorkDir
-			d.handleTask(t.Context(), task, 0)
+			d.handleTask(t.Context(), task, newTestTaskSlot(0))
 			read := func(name string) string {
 				t.Helper()
 				data, err := os.ReadFile(filepath.Join(capture, name))
