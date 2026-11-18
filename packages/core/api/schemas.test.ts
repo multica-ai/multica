@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AgentTaskSchema,
+  IssueSchema,
   AppConfigSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
@@ -874,6 +875,13 @@ describe("ChatPendingTaskSchema", () => {
       status: "running",
     });
     expect(parsed.queued_tasks).toBeUndefined();
+    expect(parsed.can_supplement).toBeUndefined();
+  });
+
+  it("accepts explicit steering capability and ignores malformed values", () => {
+    expect(ChatPendingTaskSchema.parse({ can_supplement: true }).can_supplement).toBe(true);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: false }).can_supplement).toBe(false);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: "yes" }).can_supplement).toBeUndefined();
   });
 
   it("parses queued task summaries", () => {
@@ -929,6 +937,14 @@ describe("SendChatMessageResponseSchema", () => {
 
   it("ignores a malformed additive queue position without losing the accepted send", () => {
     expect(SendChatMessageResponseSchema.parse({ ...base, queued: "no" }).queued).toBeUndefined();
+  });
+
+  it("preserves steering acceptance and tolerates older or malformed metadata", () => {
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true }).steered).toBe(true);
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true, message_task_id: "root-task" }).message_task_id).toBe("root-task");
+    expect(SendChatMessageResponseSchema.parse(base).steered).toBeUndefined();
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: "yes", message_created_at: 42, message_task_id: 42 }))
+      .toMatchObject({ ...base, steered: undefined, message_created_at: undefined, message_task_id: undefined });
   });
 });
 
@@ -2071,6 +2087,11 @@ describe("SidebarProjectPrefsDocSchema", () => {
 // dialog, the "ask your operator" state, the revoked-vs-active badge), so a
 // malformed response must degrade to the safe state rather than a broken one.
 describe("WeCom installation schemas", () => {
+  it("accepts the bot display name while remaining compatible with older servers", () => {
+    expect(WecomInstallationSchema.parse({ id: "i1", bot_name: "Support Bot" }).bot_name).toBe("Support Bot");
+    expect(WecomInstallationSchema.parse({ id: "i1" }).bot_name).toBeUndefined();
+    expect(WecomInstallationSchema.safeParse({ id: "i1", bot_name: 42 }).success).toBe(false);
+  });
   it("parses a well-formed installation", () => {
     const parsed = WecomInstallationSchema.parse({
       id: "i1",
@@ -2515,5 +2536,15 @@ describe("task usage credits", () => {
     });
     expect(parsed.usage).toHaveLength(1);
     expect(parsed.usage?.[0]?.credits_micros).toBeUndefined();
+  });
+});
+
+
+describe("Issue requester compatibility", () => {
+  it("preserves known null versus unknown legacy or malformed values", () => {
+    expect(IssueSchema.parse(baseIssue).requester_id).toBeUndefined();
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: null }).requester_id).toBeNull();
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: "member" }).requester_id).toBe("member");
+    expect(IssueSchema.parse({ ...baseIssue, requester_id: 42 }).requester_id).toBeUndefined();
   });
 });

@@ -235,7 +235,6 @@ func emitAutopilotPausedNotifications(
 		"reason":               "auto_paused_high_failure_rate",
 	})
 
-	workspaceID := util.UUIDToString(autopilot.WorkspaceID)
 	autopilotIDStr := util.UUIDToString(autopilot.ID)
 
 	emitted := make(map[string]bool, len(recipients))
@@ -246,7 +245,7 @@ func emitAutopilotPausedNotifications(
 		}
 		emitted[key] = true
 
-		item, inserted, err := inbox.CreateIfEligible(ctx, queries, db.CreateInboxItemParams{
+		_, _, err := inbox.Deliver(ctx, queries, bus, inbox.Notification{Params: db.CreateInboxItemParams{
 			ID:            dbid.NewV7(),
 			WorkspaceID:   autopilot.WorkspaceID,
 			RecipientType: r.Type,
@@ -259,7 +258,7 @@ func emitAutopilotPausedNotifications(
 			ActorType:     util.StrToText("system"),
 			ActorID:       pgtype.UUID{},
 			Details:       details,
-		})
+		}})
 		if err != nil {
 			slog.Warn("autopilot failure monitor: inbox write failed",
 				"autopilot_id", autopilotIDStr,
@@ -267,20 +266,7 @@ func emitAutopilotPausedNotifications(
 				"recipient_id", util.UUIDToString(r.ID),
 				"error", err,
 			)
-			continue
 		}
-
-		if !inserted {
-			continue
-		}
-
-		bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
-			WorkspaceID: workspaceID,
-			ActorType:   "system",
-			ActorID:     "",
-			Payload:     map[string]any{"item": inboxItemToResponse(item)},
-		})
 	}
 }
 

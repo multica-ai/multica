@@ -21,7 +21,7 @@ import { useAppShell } from "./app-shell-context";
  * anywhere that edge matters instead of writing the class again; a page that
  * spells its own gutter is the bug coming back.
  */
-export const PAGE_GUTTER = "px-4";
+export const PAGE_GUTTER = "px-[var(--page-padding-x,var(--space-md,1rem))]";
 
 /**
  * The centred column a detail page reads inside: `runtimes`, and the agent and
@@ -161,6 +161,7 @@ export function PageHeader({ children, leading, className }: PageHeaderProps) {
   const titleBar = usePageHeaderTitleBar();
   return (
     <header
+      data-mc="page-header"
       className={cn(
         "flex h-12 shrink-0 items-center gap-2 border-b",
         className,

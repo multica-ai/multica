@@ -85,6 +85,8 @@ describe("subtree execution log", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     queryClient.setQueryData(issueKeys.tasks("issue-1"), own);
     queryClient.setQueryData(issueKeys.subtreeTasks("issue-1"), subtree);
+    queryClient.setQueryData([...issueKeys.tasks("issue-1"), "history"], own);
+    queryClient.setQueryData([...issueKeys.subtreeTasks("issue-1"), "history"], subtree);
     return renderWithI18n(
       <QueryClientProvider client={queryClient}>
         <ExecutionLogSection issueId="issue-1" identifier="MUL-1" hasChildren />
@@ -275,7 +277,7 @@ describe("subtree execution log", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Include sub-issues" }));
     expect(screen.getByRole("status", { name: "Loading runs..." })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Execution log 1" })).not.toBeInTheDocument();
-    expect(list).toHaveBeenCalledWith("issue-1", true);
+    expect(list).toHaveBeenCalledWith("issue-1", true, { view: "timeline" });
     await act(async () => { rejectRequest(new Error("unavailable")); });
     const retry = await screen.findByRole("button", { name: "Could not load runs. Retry" });
     list.mockResolvedValue([makeTask({ id: "deep", issue_id: "deep-issue" })]);
@@ -543,7 +545,7 @@ describe("per-run token usage", () => {
 
 // Header figures stay readable at every supported sidebar width.
 describe("execution log header geometry", () => {
-  function renderSection(tasks: AgentTask[]) {
+  function renderSection(tasks: AgentTask[], seedHistory = true) {
     // Seed the cache instead of mocking the API: the query is fresh for 30s,
     // so `listTasksByIssue` is never reached and the section renders its real
     // header markup.
@@ -551,12 +553,25 @@ describe("execution log header geometry", () => {
       defaultOptions: { queries: { retry: false } },
     });
     queryClient.setQueryData(issueKeys.tasks("issue-1"), tasks);
+    if (seedHistory) queryClient.setQueryData([...issueKeys.tasks("issue-1"), "history"], tasks);
     return renderWithI18n(
       <QueryClientProvider client={queryClient}>
         <ExecutionLogSection issueId="issue-1" identifier="MUL-1" />
       </QueryClientProvider>,
     );
   }
+
+  it("requests complete run history only when its dialog opens", async () => {
+    const client = new ApiClient("http://localhost");
+    setApiInstance(client);
+    const request = vi.spyOn(client, "listTasksByIssue").mockResolvedValue([]);
+    try {
+      renderSection([makeTask({ status: "completed", completed_at: "2026-06-08T08:01:00Z" })], false);
+      expect(request).not.toHaveBeenCalled();
+      await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open timeline" })));
+      expect(request).toHaveBeenCalledWith("issue-1", false);
+    } finally { request.mockRestore(); }
+  });
 
   it("shows the running task before pending tasks in queue order", () => {
     renderSection([

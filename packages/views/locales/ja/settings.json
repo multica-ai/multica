@@ -84,23 +84,6 @@
     "workflow_usage_other": "{{count}} 件のワークフローで使用中",
     "workflow_usage_none": "ワークフローで未使用"
   },
-  "wakeups": {
-    "description": "すべてのタスクに適用されるプラットフォームのルールです。各タスクの「ウェイクアップ」セクションで個別に変更できます。",
-    "child_done_title": "サブタスクが終わったとき",
-    "child_done_description": "あるステージが終わり、後のステージが待っているときに親タスクの担当者を起こし、すべてのサブタスクが終わったときにもう一度起こします。担当者がメンバーの場合は受信トレイに通知します。",
-    "enabled": "既定でオン",
-    "instruction": "既定の指示",
-    "instruction_hint": "起こしたエージェントに送られます。空欄のままなら下の組み込みの指示を使います。",
-    "instruction_placeholder": "空欄なら組み込みの指示を使います",
-    "builtin": "組み込みの指示",
-    "instruction_invalid": "指示は 4,000 バイト以内にしてください。",
-    "save": "保存",
-    "saving": "保存中…",
-    "save_error": "既定値を保存できませんでした。",
-    "customized_other": "進行中の {{count}} 件のタスクが個別の設定を使っており、この既定値に従いません。",
-    "admin_only": "既定値を変更できるのはオーナーと管理者だけです。",
-    "load_error": "ウェイクアップの既定値を読み込めませんでした。"
-  },
   "quick_actions": {
     "title": "クイックアクション",
     "description": "タスクのサイドバーから、設定済みのエージェントとプロンプトを実行します。",
@@ -157,12 +140,6 @@
     "toast_saved": "変更を保存しました"
   },
   "preferences": {
-    "theme": {
-      "title": "テーマ",
-      "light": "ライト",
-      "dark": "ダーク",
-      "system": "システム"
-    },
     "language": {
       "title": "言語",
       "english": "English",
@@ -192,15 +169,198 @@
       "after_run": "この実行の後に開始",
       "hint": "既定の動作だけを決めます。送信前にメッセージごとに変更できます。"
     },
+    "comment_images": {
+      "title": "コメント内の画像",
+      "thumbnails": "サムネイル",
+      "full": "元のサイズ",
+      "hint": "サムネイルにすると長いスレッドも短く収まります。画像をクリックすると元のサイズで表示します。"
+    },
     "comments_title": "コメントとチャット",
     "region_title": "言語と地域",
-    "appearance_title": "外観",
     "issue_fields_title": "タスク作成時に表示するフィールド",
     "issue_fields": {
       "field": "フィールド",
       "quick": "エージェントで作成",
       "manual": "手動作成",
       "unsupported": "エージェントでの作成では使用できません"
+    }
+  },
+  "appearance": {
+    "reset": "デフォルトに戻す",
+    "color": {
+      "title": "カラー"
+    },
+    "mode": {
+      "title": "モード",
+      "light": "ライト",
+      "dark": "ダーク",
+      "system": "システム"
+    },
+    "theme": {
+      "title": "テーマ",
+      "description": "アプリ全体の色、枠線、影、角丸。",
+      "default": "デフォルト",
+      "pop": "ポップ",
+      "built_in": "組み込み",
+      "installed": "インストール済み",
+      "remove": "{{name}} を削除",
+      "safe_mode": "セーフモード：このウィンドウを閉じるまでテーマを停止しています。",
+      "safe_mode_exit": "テーマを戻す",
+      "folder": "テーマフォルダ",
+      "folder_problems": "テーマフォルダ内の一部のテーマがチェックを通りません。修正して保存してください。それまでは最後に通ったバージョンを使います。"
+    },
+    "import": {
+      "button": "テーマを読み込む",
+      "from_zip": "テーマファイル（.zip）",
+      "from_folder": "テーマフォルダ",
+      "storage_full": "このデバイスにテーマを保存する空き容量がありません。ほかのテーマを削除してからもう一度お試しください。",
+      "confirm_title": "「{{name}}」をインストールしますか？",
+      "warning": "テーマはダイアログや警告を含むすべての画面の見た目を変えられます。信頼できる作者のテーマだけをインストールしてください。",
+      "author": "作者",
+      "version": "バージョン",
+      "replaces": "{{to}}（{{from}} を置き換え）",
+      "includes": "内容",
+      "cancel": "キャンセル",
+      "confirm": "インストールして使う",
+      "error_title": "このテーマをインストールできません",
+      "error_description": "何も変更していません。テーマファイルに次の問題があります：",
+      "close": "閉じる",
+      "has_options_other": "オプション {{count}} 個",
+      "has_assets_other": "フォント・画像 {{count}} 個",
+      "beta": "ベータ",
+      "beta_note": "カスタムテーマはベータ版です。テーマが使う変数やマニフェストは変わることがあり、テーマの更新が必要になる場合があります。"
+    },
+    "store": {
+      "manage": "管理",
+      "title": "テーマ",
+      "description": "インストールしたテーマと、コミュニティが作ったテーマです。",
+      "description_local": "インストールしたテーマです。",
+      "search": "テーマを検索",
+      "installed_only": "インストール済みのみ表示",
+      "showing_other": "{{count}} 個のテーマを表示中",
+      "installed": "インストール済み",
+      "loading": "テーマを読み込み中",
+      "error": "テーマストアを読み込めませんでした。しばらくしてからもう一度お試しください。",
+      "retry": "再試行",
+      "none_installed": "インストール済みのテーマはまだありません。",
+      "no_results": "「{{query}}」に一致するテーマはありません。",
+      "by": "作者：{{author}}",
+      "downloads_other": "{{downloads}} 回ダウンロード",
+      "source": "GitHub で {{repo}} を見る",
+      "no_preview": "プレビューなし",
+      "screenshot_alt": "{{name}}（{{mode}}モード）",
+      "install": "インストール",
+      "installing": "インストール中…",
+      "use": "使う",
+      "in_use": "使用中",
+      "update": "{{version}} に更新",
+      "remove": "削除",
+      "taken": "同じ ID のテーマがインストール済みです",
+      "installed_toast": "「{{name}}」をインストールしました。",
+      "updated": "「{{name}}」を {{version}} に更新しました。",
+      "install_failed": "「{{name}}」をインストールできませんでした",
+      "warning": "テーマはダイアログや警告を含むすべてのページのスタイルを変更できます。ストアのテーマは自動でチェックされますが、コミュニティが作成したものです。"
+    },
+    "updates": {
+      "title": "ストアのテーマ",
+      "description_other": "ストアのテーマを {{count}} 個インストールしています。",
+      "check": "アップデートを確認",
+      "checking": "確認中…",
+      "up_to_date": "ストアのテーマはすべて最新です。",
+      "update_all": "すべてアップデート ({{count}})"
+    },
+    "own": {
+      "title": "自分で作る",
+      "description": "チャットやタスクで任意のエージェントに作ってもらうか、.zip またはフォルダからテーマを読み込むか、現在のテーマのコピーから始めます。"
+    },
+    "tools": {
+      "duplicate": "「{{name}}」を複製して新しいテーマにする",
+      "open_folder": "テーマフォルダを開く",
+      "guide": "テーマの作り方",
+      "duplicated_web": "{{file}} をダウンロードしました。展開して theme.css を編集し、フォルダを読み込んでください。",
+      "duplicated_desktop": "テーマフォルダに「{{name}}」を作成しました。theme.css を保存するとすぐに反映されます。",
+      "duplicate_failed": "複製を作成できませんでした：{{error}}"
+    },
+    "theme_options": {
+      "title": "テーマのオプション",
+      "description": "{{name}} が提供しています。",
+      "reset": "オプションをリセット"
+    },
+    "ui_text": {
+      "title": "インターフェースの文字",
+      "description": "メニュー、ボタン、リスト、サイドバー、見出し。"
+    },
+    "latin_font": {
+      "title": "欧文フォント"
+    },
+    "ui_font": {
+      "inter": "デフォルト",
+      "system": "システム",
+      "serif": "セリフ",
+      "mono": "等幅"
+    },
+    "cjk_font": {
+      "title": "和文フォント",
+      "description": "漢字の字形。仮名とハングルもこれに従います。",
+      "sans": "ゴシック",
+      "serif": "明朝",
+      "kai": "楷書",
+      "built_in": "標準",
+      "local": "このデバイス",
+      "load_local": "このデバイスのフォントを表示…",
+      "loading": "フォントを探しています…",
+      "none": "このデバイスに漢字を含むフォントはありません。",
+      "load_failed": "このデバイスのフォントを読み込めませんでした。",
+      "sample": "永和九年 いろは"
+    },
+    "follow_ui": "インターフェースと同じ",
+    "theme_font": "テーマのフォント",
+    "font_size": {
+      "title": "文字サイズ",
+      "description": "文字だけを拡大します。余白とレイアウトは変わりません。",
+      "value": "{{size}} px",
+      "default": "{{size}} px · デフォルト"
+    },
+    "content_text": {
+      "title": "本文の文字",
+      "description": "課題の説明、コメント、チャット、ドキュメントの本文。",
+      "sample": "説明やコメントはじっくり読むものなので、読みやすい書体にできます。リストやボタンはコンパクトなままです。"
+    },
+    "code_font": {
+      "title": "コードフォント",
+      "description": "コードブロック、インラインコード、ログ。",
+      "geist": "デフォルト",
+      "jetbrains": "合字",
+      "system": "システム等幅"
+    },
+    "content_size": {
+      "title": "文字サイズ",
+      "description": "本文だけ。初期設定ではインターフェースと同じです。",
+      "follow": "インターフェースの文字サイズに合わせる"
+    },
+    "content_leading": {
+      "title": "行の高さ",
+      "compact": "詰める",
+      "default": "標準",
+      "relaxed": "ゆったり"
+    },
+    "layout": {
+      "title": "レイアウトとアクセシビリティ"
+    },
+    "density": {
+      "title": "表示密度",
+      "description": "課題リスト、検索結果、サイドバーの行の高さと、ボードの余白。",
+      "compact": "コンパクト",
+      "default": "標準",
+      "comfortable": "ゆったり"
+    },
+    "reduce_motion": {
+      "title": "視差効果を減らす",
+      "description": "アニメーションとトランジションをオフにします。オフでもシステム設定は適用されます。"
+    },
+    "high_contrast": {
+      "title": "コントラストを上げる",
+      "description": "補助テキストを濃く、枠線をはっきりさせます。"
     }
   },
   "shortcuts": {
@@ -227,6 +387,7 @@
     "reserved_error": "ブラウザまたはデスクトップウィンドウで予約されています。",
     "send_error": "送信には Enter または Mod+Enter のみ使用できます。",
     "unsafe_error": "このキーは文字入力や基本的なキーボード操作と競合します。",
+    "unrecognized_error": "このキーの組み合わせは記録できません。別の組み合わせをお試しください。",
     "send_enter_hint": "Shift+Enterで段落の挿入、リストの継続、コードブロック内の改行ができます。",
     "categories": {
       "general": "一般",
@@ -253,6 +414,10 @@
         "label": "チャットウィンドウを切り替え",
         "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。"
       },
+      "newChat": {
+        "label": "Multica に質問",
+        "description": "フローティングチャットで新しいチャットを始めます。"
+      },
       "findInIssue": {
         "label": "タスク内を検索",
         "description": "開いているタスクの詳細を検索します。"
@@ -260,6 +425,14 @@
       "archiveInboxItem": {
         "label": "通知をアーカイブ",
         "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。"
+      },
+      "unsubscribeArchiveInboxItem": {
+        "label": "購読解除してアーカイブ",
+        "description": "開いている通知のタスクの購読を解除し、アーカイブします。自分や自分のエージェントのタスク以外で使えます。"
+      },
+      "snoozeInboxItem": {
+        "label": "通知をスヌーズ",
+        "description": "インボックスから開いたタスクをスヌーズします。スヌーズ中なら今すぐ戻します。"
       },
       "send": {
         "label": "送信",
@@ -320,6 +493,10 @@
       "goSettings": {
         "label": "設定へ移動",
         "description": "ワークスペース設定を開きます。"
+      },
+      "voiceInput": {
+        "label": "音声入力",
+        "description": "最後に使った入力欄に口述します。長押しで話します。"
       }
     },
     "fixed": {
@@ -337,7 +514,10 @@
   },
   "chat": {
     "floating_label": "フローティングチャット",
-    "floating_hint": "すべてのページにフローティングチャットボタンを表示します。"
+    "floating_hint": "すべてのページにフローティングチャットボタンを表示します。",
+    "ask_agent_label": "「Multica に聞く」のエージェント",
+    "ask_agent_hint": "このワークスペースで、下部バーから始める新しいチャットの相手になるエージェント。",
+    "ask_agent_last_used": "最後に使用したエージェント"
   },
   "issue": {
     "opening": {
@@ -394,6 +574,7 @@
     "tabs": {
       "profile": "プロフィール",
       "preferences": "環境設定",
+      "appearance": "外観",
       "shortcuts": "ショートカット",
       "issue": "タスク",
       "notifications": "通知",
@@ -404,7 +585,6 @@
       "members": "メンバー",
       "labels": "ラベル",
       "issue_statuses": "タスクステータス",
-      "wakeups": "ウェイクアップ",
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",
       "plugins": "プラグイン",
@@ -413,7 +593,8 @@
       "code": "コード",
       "channels": "メッセージング",
       "apps": "接続済みアプリ",
-      "workflows": "ワークフロー"
+      "workflows": "ワークフロー",
+      "voice_input": "音声入力"
     },
     "groups": {
       "personal": "個人",
@@ -540,6 +721,7 @@
     "save_failed": "プロパティを保存できませんでした",
     "limit_hint": "{{count}}/{{max}} 個の有効なプロパティ",
     "archived_badge": "アーカイブ済み",
+    "options_preview": "{{name}} のすべてのオプションを表示",
     "types": {
       "text": "テキスト",
       "number": "数値",
@@ -649,8 +831,32 @@
     "toast_profile_failed": "プロフィールを更新できませんでした"
   },
   "notifications": {
-    "title": "インボックス通知",
-    "description": "通知をオフにしても、タスク上で履歴を確認できます。",
+    "title": "インボックス",
+    "description": "「作業」サイドバーのインボックスに届くイベントを選びます。オフにしたイベントは通知を作らず、オンに戻しても見逃した通知は戻りません。",
+    "categories": {
+      "direct": "あなたに関するもの",
+      "issues": "購読中のタスク",
+      "projects": "購読中のプロジェクト",
+      "agents": "エージェント"
+    },
+    "others_issues": {
+      "label": "他の人のタスク",
+      "description": "他の人やその人のエージェントに割り当てられたタスクで、作成・コメント・メンションによって自動的に購読しているもの。重要な更新とは、あなたへの @メンション、参加したスレッドへの返信、そしてステータス変更がオンならレビュー待ち・ブロック・完了など人の確認が必要なステータスです。",
+      "key_updates": "重要な更新のみ",
+      "all": "すべてのアクティビティ"
+    },
+    "leaving": {
+      "title": "インボックスから外れるとき",
+      "description": "既読にしてもインボックスからは消えません。",
+      "manual_label": "手動でアーカイブ",
+      "manual_description": "サイドバーの行、または通知の上部から",
+      "manual_value": "いつでも",
+      "done_label": "自分が完了したタスクをアーカイブ",
+      "done_description": "タスクを完了系またはキャンセル系のステータスにすると、その通知はアーカイブされます。他の人が完了したタスクはインボックスに残ります。",
+      "archived_label": "アーカイブ済みの通知",
+      "archived_description": "ここから見つけてアーカイブを解除できます",
+      "archived_action": "アーカイブ済みを表示"
+    },
     "toast_failed": "通知設定を更新できませんでした",
     "groups": {
       "assignments": {
@@ -669,13 +875,24 @@
         "label": "メンション",
         "description": "誰かがあなたを @メンションしたとき（@all と @squad を含む）"
       },
+      "reactions": {
+        "label": "リアクション",
+        "description": "あなたが作成したタスクや書いたコメントに誰かがリアクションしたとき"
+      },
       "updates": {
         "label": "優先度と期限",
         "description": "フォロー中のタスクの優先度や期限が変わったとき"
       },
+      "new_issues": {
+        "label": "新しいタスク",
+        "description": "購読中のプロジェクトでタスクが作成されたとき"
+      },
       "agent_activity": {
         "label": "エージェントのアクティビティ",
-        "description": "エージェントの実行が失敗したとき"
+        "description": "エージェントの実行が失敗したとき、またはエージェントが求めたアプリ操作がブロックされたか期限切れになったとき"
+      },
+      "chat_replies": {
+        "label": "チャットの返信を含める"
       }
     },
     "system": {
@@ -684,7 +901,7 @@
     },
     "browser": {
       "label": "ブラウザ通知",
-      "hint": "このブラウザで新しいインボックス項目の通知バナーを表示できるようにします。",
+      "hint": "受信トレイの通知とチャットの返信のバナー表示を、このブラウザに許可します。",
       "enable": "有効にする",
       "granted": "このブラウザは通知バナーを表示できます。",
       "denied": "ブラウザによってブロックされています。ブラウザの設定でこのサイトの通知を許可してください。",
@@ -768,7 +985,7 @@
     "confirm_cancel": "キャンセル",
     "confirm_action": "確認",
     "change_logo_aria": "ワークスペースのロゴを変更",
-    "click_logo_hint": "ロゴをクリックして新しい画像をアップロード",
+    "click_logo_hint": "ロゴをクリックして画像をアップロードするか、文字アイコンを作成します",
     "toast_logo_failed": "ワークスペースのロゴをアップロードできませんでした",
     "context_hint": "このワークスペースのエージェントに、実行のたびに渡されます。",
     "slug_hint": "ワークスペースの URL に使われます。作成後は変更できません。",
@@ -804,7 +1021,7 @@
     "disconnect": "接続解除",
     "disconnecting": "接続解除中…",
     "disconnect_confirm_title": "GitHub App の接続を解除",
-    "disconnect_confirm_description": "Multica はこのインストールの Webhook 受信を停止します。既存の PR ミラーとリンクは保持され、いつでも再接続して更新を再開できます。",
+    "disconnect_confirm_description": "このワークスペースから {{login}} の接続を解除しますか？このアカウントの更新は停止します。既存の PR 記録とリンクは保持され、他の接続には影響しません。",
     "disconnect_confirm_cancel": "キャンセル",
     "disconnect_confirm_action": "接続解除",
     "not_configured": "このデプロイには GitHub 連携が設定されていません。運営者が次の値を設定する必要があります:",
@@ -825,7 +1042,18 @@
     "feature_auto_link_description": "タイトルかブランチ名にタスク番号（例: {{example}}）を含む PR、または説明に「Closes {{example}}」と書いた PR を、そのタスクに関連付けます。",
     "status_paused": "一時停止中",
     "pause": "GitHub 機能を一時停止",
-    "resume": "GitHub 機能を再開"
+    "resume": "GitHub 機能を再開",
+    "add_account": "アカウントまたは組織を追加",
+    "disconnect_account": "{{login}} の接続を解除",
+    "errors": {
+      "missing_authorization": "GitHub からユーザー認証が返されませんでした。再接続して認証を完了してください。既存のインストールで繰り返す場合は、Multica の運用担当者に連絡してください。",
+      "installation_not_authorized": "個人のインストールには所有者の GitHub アカウントを使用してください。組織の場合は、承認された全リポジトリの管理権限を持つアカウントを使用し、少なくとも 1 つのリポジトリを選択してください。",
+      "invalid_state": "GitHub 接続リクエストの期限が切れているか、無効です。設定 → コードから再接続してください。",
+      "incomplete_callback": "GitHub の接続応答が不完全です。設定 → コードから再接続してください。",
+      "bad_workspace": "接続先のワークスペースが見つかりません。対象のワークスペースを開き、設定 → コードから再試行してください。",
+      "verification_failed": "GitHub インストールへの管理権限を確認できませんでした。再接続し、繰り返す場合は Multica の運用担当者に GitHub App の設定確認を依頼してください。",
+      "persist_failed": "GitHub 接続を保存できませんでした。設定 → コードから再試行し、繰り返す場合は Multica の運用担当者に連絡してください。"
+    }
   },
   "vcs": {
     "section_title": "セルフホスト Git",
@@ -1193,7 +1421,8 @@
     "github_load_more": "さらに読み込む",
     "github_selected_count": "{{count}} 件選択",
     "github_cancel": "キャンセル",
-    "github_import": "リポジトリを追加",
+    "github_import": "{{count}} 件のリポジトリを追加",
+    "github_import_other": "{{count}} 件のリポジトリを追加",
     "save": "保存",
     "saving": "保存中...",
     "saved_hint": "すべての変更を保存しました",
@@ -1226,7 +1455,10 @@
       "close_others": "他のタブを閉じる",
       "open_window": "新しいウィンドウで開く",
       "new": "新しいタブ",
-      "pinned_name": "{{title}}（ピン留め）"
+      "pinned_name": "{{title}}（ピン留め）",
+      "copy_link": "リンクをコピー",
+      "link_copied": "リンクをコピーしました",
+      "close_right": "右側のタブを閉じる"
     },
     "updates": {
       "title": "アップデート",
@@ -1239,7 +1471,13 @@
       "up_to_date": "最新バージョンを使用しています。",
       "downloading": "v{{version}} をバックグラウンドでダウンロード中です。インストールの準備が整うとお知らせします。",
       "check_now": "今すぐ確認",
-      "checking": "確認中…"
+      "checking": "確認中…",
+      "check_unavailable": "現在アップデートを確認できません。しばらくしてから再試行してください。",
+      "check_network": "更新サービスに接続できません。ネットワーク接続を確認して再試行してください。",
+      "check_failed": "アップデートの確認に失敗しました。再試行してください。",
+      "download_failed": "更新のダウンロードに失敗しました。現在のバージョンを使い続け、再試行できます。",
+      "download_ready": "v{{version}} をインストールできます。",
+      "retry": "再試行"
     },
     "daemon": {
       "title": "デーモン",
@@ -1428,7 +1666,40 @@
     "github_actions": "GitHub の操作"
   },
   "channels": {
-    "breadcrumb": "パンくずリスト"
+    "breadcrumb": "パンくずリスト",
+    "add": "メッセージチャネルを追加",
+    "connect": "接続",
+    "disconnect": "接続を解除",
+    "open": "開く",
+    "normal": "接続済み",
+    "waiting_message": "最初のメッセージを待機中",
+    "disconnected": "未接続",
+    "find_me": "{{platform}} で話す",
+    "manage": "{{platform}} を管理",
+    "last_message": "最終メッセージ：{{time}}",
+    "ask_admin": "管理者に依頼",
+    "unavailable": "接続できません",
+    "permissions_title": "接続できるユーザー",
+    "owner_or_admin": "エージェント所有者またはワークスペース管理者",
+    "admin_only": "ワークスペース管理者のみ",
+    "connect_title": "メッセージチャネルを接続",
+    "choose_description": "エージェントとプラットフォームを選択してください。",
+    "authorize_description": "{{agent}} を {{platform}} に接続します。",
+    "agent_label": "エージェント",
+    "choose_agent": "エージェントを選択",
+    "platform_label": "プラットフォーム",
+    "region_label": "地域",
+    "method_label": "接続方法",
+    "feishu": "Feishu（中国）",
+    "lark": "Lark（国際版）",
+    "setup_guide": "設定ガイド",
+    "connection_changed": "この接続は利用できなくなりました。閉じて再試行してください。",
+    "connect_failed": "ボットを接続できませんでした。",
+    "connect_success": "メッセージチャネルを接続しました。",
+    "disconnect_failed": "ボットの接続を解除できませんでした。",
+    "disconnect_title": "メッセージチャネルの接続を解除しますか？",
+    "disconnect_description": "このエージェントは {{platform}} からのメッセージを受信しなくなります。",
+    "agent_unavailable": "エージェントを利用できません"
   },
   "mcp_usage": {
     "agent_count_other": "{{count}} 個のエージェントが使用中",
@@ -1438,12 +1709,35 @@
     "title": "エージェントにツールを与える方法",
     "current": "このページ",
     "mcp": "管理者が追加してワークスペースで共有し、エージェントごとに割り当てます。",
-    "apps": "Multica で接続したチームまたは個人のアカウント。エージェントごとにアカウントと権限レベルを割り当てます。",
+    "apps": "Multica で接続したチームまたは個人のアカウントを、各エージェントに追加します。",
     "plugins": "インストールするとツール、定期フック、ストレージを追加でき、プラグインごとに権限を付与します。"
   },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "接続用 QR コードを読み取ったアカウントとの個別メッセージ。",
+    "loading": "接続中…",
+    "empty": "エージェントの「連携」タブから WeChat に接続してください。",
+    "close": "閉じる",
+    "action_failed": "操作を完了できませんでした。もう一度お試しください。",
+    "privacy_hint": "メッセージはこのワークスペースであなたの権限で実行されます。QR コードを共有しないでください。",
+    "qr_label": "WeChat 接続用 QR コード",
+    "scan_hint": "WeChat で読み取り、スマートフォンで確認してください。",
+    "scanned": "読み取り済み。WeChat で接続を確認してください。",
+    "verify_hint": "WeChat による認証が必要です。スマートフォンに表示されたコードを入力してください。",
+    "verify_label": "認証コード",
+    "verify": "認証",
+    "success": "接続しました。WeChat でボットに新しいメッセージを送信してください。",
+    "expired": "QR コードの有効期限が切れました。新しく生成してください。",
+    "blocked": "WeChat により認証が制限されています。しばらくしてからお試しください。",
+    "already_bound": "このボットはすでに WeChat に接続されています。以前のクライアントの接続を解除して再試行してください。",
+    "refresh": "新しい QR コード",
+    "retry": "再試行",
+    "already_connected": "このWeChatアカウントは{{agent}}に接続されています。先にそちらで接続を解除してください。",
+    "connected_elsewhere": "このWeChatアカウントは別の場所で接続されています。先に既存の接続を解除してください。",
+    "authorization_expired": "WeChatの認証が失効しました。もう一度スキャンして接続してください。"
+  },
   "connected_apps": {
-    "description": "エージェントが外部アプリを操作するアカウントです。すべての呼び出しは Multica を経由し、ルールを適用し、送信・削除・共有の前に確認を求めます。",
-    "add_app": "アプリを追加",
+    "description": "エージェントが外部アプリを操作するアカウントです。許可された操作はすぐに実行されます。",
     "loading": "アプリを読み込み中…",
     "load_failed": "アプリを読み込めませんでした。",
     "team_title": "チームアカウント",
@@ -1473,17 +1767,18 @@
     "toast_disconnected": "接続を解除しました",
     "toast_failed": "問題が発生しました。もう一度お試しください。",
     "add": {
-      "title": "アプリを追加",
-      "description": "チームまたは自分用にアカウントを接続します。どのエージェントが使うかは各エージェントの「アプリ」ページで設定します。",
       "search": "アプリを検索…",
       "empty": "一致するアプリはありません。",
       "curated": "厳選",
       "recommended_team": "通常はチームアカウント",
       "recommended_personal": "通常は個人アカウント",
-      "connect_team": "チーム用に接続",
+      "connect_team": "チームアカウントを接続",
       "connect_personal": "自分のアカウントを接続",
       "connecting": "接続中…",
-      "connected": "接続済み"
+      "connected": "接続済み",
+      "connect": "接続",
+      "team_description": "ワークスペース共有のアカウントを接続します。利用するエージェントは、各エージェントの「アプリ」で設定します。",
+      "personal_description": "自分のアカウントを接続します。「実行者のアカウント」に設定されたアプリは、自分が実行を開始するときにこのアカウントを使います。"
     },
     "disconnect_team": {
       "title": "チームの {{app}} アカウントの接続を解除しますか？",
@@ -1607,6 +1902,139 @@
       "edit": "リストを編集",
       "row_label": "許可するアプリ",
       "row_description_other": "{{count}} 個のアプリを許可"
+    },
+    "saved_access": {
+      "account": "保存済みの操作制限が、このアカウントの一部の操作をブロックしています。",
+      "agent": "このアプリには以前の読み取り専用設定が残っています。",
+      "catalog": "保存済みのアプリ一覧により、他のアプリが非表示になっています。",
+      "allow_actions": "すべての操作を許可",
+      "open_catalog": "すべてのアプリを表示",
+      "account_confirm": "このアカウントを割り当てられたエージェントは、読み取り、書き込み、送信、削除、共有を行えるようになります。保存済みの操作制限は置き換えられます。",
+      "agent_confirm": "このエージェントは、アカウントで許可された範囲で、このアプリの読み取り、書き込み、送信、削除、共有を行えるようになります。",
+      "catalog_confirm": "ワークスペースですべての接続可能なアプリを選べるようになります。既存の接続とエージェントへの割り当ては変わりません。",
+      "cancel": "キャンセル",
+      "admin_required": "ワークスペース管理者が制限を解除できます。",
+      "account_link": "このアカウントには保存済みの操作制限があります。接続済みアプリで解除してください。"
     }
+  },
+  "voice_input": {
+    "description": "チャット、コメント、返信を音声で入力します。音声はこのコンピューター上で文字起こしされ、外部に送られません。",
+    "model_title": "音声モデル",
+    "model_hint": "モデルはこのコンピューター上で動作します。ダウンロードするか、ダウンロード済みのモデルを切り替えます。",
+    "engine_unavailable": "このコンピューターではオンデバイスの文字起こしを利用できません。",
+    "enabled": {
+      "title": "音声入力",
+      "hint": "チャット、コメント、返信にマイクボタンを表示し、音声入力のショートカットを有効にします。"
+    },
+    "input_title": "入力",
+    "shortcut": {
+      "title": "ショートカット",
+      "hint": "入力欄が画面にあれば、フォーカスしていなくても使えます。",
+      "change": "変更",
+      "unassigned": "未設定"
+    },
+    "activation": {
+      "title": "起動方法",
+      "auto": "タップまたは長押し",
+      "toggle": "タップ",
+      "hold": "長押し",
+      "hints": {
+        "auto": "タップで開始し、もう一度タップで挿入。長押しで話し、離すと挿入。",
+        "toggle": "タップで開始し、もう一度タップで挿入。",
+        "hold": "長押しで話し、離すと挿入。"
+      }
+    },
+    "recognition_title": "認識",
+    "language": {
+      "title": "話す言語",
+      "hint": "ほとんどの場合は自動検出で十分です。短いフレーズが別の言語として認識される場合は指定してください。",
+      "auto": "自動検出"
+    },
+    "fillers": {
+      "title": "フィラーを除去",
+      "hint": "「えー」「あの」などのつなぎ言葉を取り除きます。"
+    },
+    "vocabulary": {
+      "title": "語彙",
+      "hint": "製品名や同僚の名前など、表記を指定したい名称や用語。最大 {{max}} 件。",
+      "placeholder": "単語を追加",
+      "remove": "{{word}} を削除"
+    },
+    "microphone_title": "マイク",
+    "device": {
+      "title": "入力デバイス",
+      "default": "システムのデフォルト",
+      "unnamed": "マイク {{index}}",
+      "permission_hint": "一度マイクをテストするとデバイス名が表示されます。"
+    },
+    "test": {
+      "title": "マイクをテスト",
+      "hint": "話して音量を確認します。録音はされません。",
+      "blocked": "マイクへのアクセスがブロックされています。ブラウザまたはシステム設定で許可してください。",
+      "start": "テスト",
+      "stop": "停止"
+    },
+    "history": {
+      "title": "履歴",
+      "description": "録音と文字起こしはこのコンピューターにのみ保存され、アップロードされません。失敗または中断した録音は、元の音声から再度文字起こしできます。",
+      "keep": {
+        "title": "履歴の保存期間",
+        "hint": "録音をこのコンピューターに保存する期間です。",
+        "options": {
+          "off": "保存しない",
+          "1d": "1 日",
+          "7d": "7 日",
+          "30d": "30 日",
+          "forever": "無期限"
+        }
+      },
+      "clear": "すべて消去",
+      "clear_dialog": {
+        "title": "音声入力の履歴を消去しますか？",
+        "description": "このコンピューターに保存されたすべての録音と文字起こしが削除されます。",
+        "cancel": "キャンセル"
+      },
+      "empty": "音声入力の履歴がここに表示されます。",
+      "off": "履歴はオフです。新しい録音は保存されません。",
+      "today": "今日",
+      "yesterday": "昨日",
+      "status": {
+        "transcribing": "文字起こし中…",
+        "failed": "文字起こしに失敗しました",
+        "interrupted": "文字起こし前に中断されました"
+      },
+      "actions": {
+        "play": "録音を再生",
+        "pause": "一時停止",
+        "retranscribe": "もう一度文字起こし",
+        "copy": "テキストをコピー",
+        "delete": "削除"
+      },
+      "copied": "コピーしました",
+      "copy_failed": "コピーできませんでした",
+      "retry_failed": "この録音を文字起こしできませんでした",
+      "show_more": "さらに表示"
+    }
+  },
+  "private_projects": {
+    "title": "プライベートプロジェクト",
+    "description": "プライベートプロジェクトを開けるのは、そのメンバーだけです。ワークスペースのオーナーは各プロジェクトのメンバーを確認でき、対応が必要なときは自分を追加できます。",
+    "empty": "このワークスペースにプライベートプロジェクトはありません。",
+    "load_failed": "プライベートプロジェクトを読み込めませんでした。",
+    "retry": "再試行",
+    "no_members": "メンバーなし",
+    "lead_name": "{{name}}（リード）",
+    "more_members": "ほか {{count}} 人",
+    "archived": "アーカイブ済み",
+    "member": "参加済み",
+    "open": "開く",
+    "join": "参加",
+    "join_title": "「{{title}}」に参加しますか？",
+    "join_description": "このプロジェクトのメンバーリストに追加され、タスク、コメント、添付ファイルを閲覧できるようになります。現在のメンバーに通知されます。",
+    "join_description_empty": "このプロジェクトにはメンバーがいません。参加すると唯一のメンバーになり、タスク、コメント、添付ファイルを閲覧できるようになります。",
+    "join_confirm": "プロジェクトに参加",
+    "cancel": "キャンセル",
+    "toast_joined": "{{title}} に参加しました",
+    "toast_failed": "プロジェクトに参加できませんでした。"
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, SearchIcon, Sparkles } from "@multica/ui/icons";
+import { ChevronRight, SearchIcon } from "@multica/ui/icons";
 import { Command as CommandPrimitive } from "cmdk";
 import {
   selectCommandBarContexts,
@@ -9,7 +9,7 @@ import {
   useSearchStore,
 } from "@multica/core/command-bar";
 import { createShortcutChord } from "@multica/core/shortcuts";
-import { isImeComposing } from "@multica/core/utils";
+import { useWorkspaceSlug } from "@multica/core/paths";
 import {
   Dialog,
   DialogContent,
@@ -25,9 +25,8 @@ import { PaletteFooter } from "./footer";
 import { PaletteHostDialogs } from "./host-dialogs";
 import { PageView } from "./pages/page-view";
 import { RootView } from "./root-view";
-import { useDelegateSubmit } from "./delegate/use-delegate";
 import { useRootModel } from "./use-root-model";
-import type { DelegateActor, PaletteHostDialog, PaletteStackEntry } from "./types";
+import type { PaletteHostDialog, PaletteStackEntry } from "./types";
 
 const ESCAPE = createShortcutChord("Escape");
 
@@ -38,6 +37,7 @@ const ESCAPE = createShortcutChord("Escape");
  */
 export function SearchCommand() {
   const { t } = useT("search");
+  const workspaceSlug = useWorkspaceSlug();
   const open = useSearchStore((s) => s.open);
   const setOpen = useSearchStore((s) => s.setOpen);
   const [hostDialog, setHostDialog] = useState<PaletteHostDialog | null>(null);
@@ -62,7 +62,9 @@ export function SearchCommand() {
             <DialogTitle>{t(($) => $.title)}</DialogTitle>
             <DialogDescription>{t(($) => $.description)}</DialogDescription>
           </DialogHeader>
-          {open && <PaletteBody close={close} openHostDialog={openHostDialog} />}
+          {/* The desktop shell survives workspace navigation. Reset its query,
+              selection and pending searches together with their workspace. */}
+          {open && <PaletteBody key={workspaceSlug} close={close} openHostDialog={openHostDialog} />}
         </DialogContent>
       </Dialog>
       <PaletteHostDialogs dialog={hostDialog} onClose={() => setHostDialog(null)} />
@@ -107,9 +109,11 @@ function PaletteBody({
     () => ({
       close,
       push,
-      navigate: (href) => {
+      navigate: (href, onNavigateInPlace) => {
         close();
-        intentNavigate(href, consumeIntent());
+        const intent = consumeIntent();
+        if (intent === "push") onNavigateInPlace?.();
+        intentNavigate(href, intent);
       },
       openHostDialog,
     }),
@@ -160,16 +164,10 @@ function PaletteFrame({
   const entries = useCommandBarContextStore(selectCommandBarContexts);
   const contexts = useMemo(() => entries.map((entry) => entry.context), [entries]);
   const [rawQuery, setRawQuery] = useState("");
-  const [dismissedDelegateFor, setDismissedDelegateFor] = useState<string | null>(null);
   const current = stack[stack.length - 1] ?? null;
   const inputValue = current ? pageQuery : rawQuery;
 
-  const model = useRootModel(rawQuery, contexts, { active: true, dismissedDelegateFor });
-  const submitDelegate = useDelegateSubmit();
-  const onDelegate = useCallback(
-    (actor: DelegateActor, prompt: string) => void submitDelegate(actor, prompt, model.attachments),
-    [model.attachments, submitDelegate],
-  );
+  const model = useRootModel(rawQuery, contexts, { active: true });
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     // cmdk's root handler intercepts Home/End for list navigation; stop
@@ -181,20 +179,13 @@ function PaletteFrame({
     if (e.key === "Backspace" && current && pageQuery === "") {
       e.preventDefault();
       setStack((prev) => prev.slice(0, -1));
-      return;
-    }
-    // ⇧↵ treats an input that read as an instruction as a plain search.
-    if (!current && e.key === "Enter" && e.shiftKey && model.delegate && !isImeComposing(e)) {
-      e.preventDefault();
-      setDismissedDelegateFor(rawQuery);
     }
   };
-
-  const delegate = !current ? model.delegate : null;
 
   return (
     <>
       <CommandPrimitive
+        data-mc="command-palette"
         key={stack.length}
         label={t(($) => $.title)}
         shouldFilter={false}
@@ -208,11 +199,7 @@ function PaletteFrame({
         className="flex size-full flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground"
       >
         <div className="flex items-center gap-2 border-b px-4 py-3">
-          {delegate ? (
-            <Sparkles className="size-4 shrink-0 text-brand" aria-hidden="true" />
-          ) : (
-            <SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          )}
+          <SearchIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           {current && (
             <nav aria-label={t(($) => $.breadcrumb_aria)} className="flex min-w-0 shrink items-center gap-1">
               {current.crumbs.map((crumb, index) => (
@@ -239,27 +226,18 @@ function PaletteFrame({
             }}
             className="min-w-0 flex-1 bg-transparent text-body outline-none placeholder:text-muted-foreground"
           />
-          {delegate && (
-            <span className="hidden shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-caption text-muted-foreground sm:inline-flex">
-              <Sparkles className="size-3" aria-hidden="true" />
-              {t(($) => $.delegate.detected)}
-            </span>
-          )}
           <ShortcutKeycaps shortcut={ESCAPE} className="hidden shrink-0 sm:inline-flex" />
         </div>
 
         <CommandPrimitive.List className="max-h-[min(440px,55vh)] overflow-y-auto overflow-x-hidden py-1">
           {current ? (
-            <PageView page={current.page} query={pageQuery} onDelegate={onDelegate} />
+            <PageView page={current.page} query={pageQuery} />
           ) : (
-            <RootView model={model} rawQuery={rawQuery} onDelegate={onDelegate} />
+            <RootView model={model} rawQuery={rawQuery} />
           )}
         </CommandPrimitive.List>
 
-        <PaletteFooter
-          mode={current ? "page" : delegate ? "delegate" : "root"}
-          delegateName={delegate?.actor.name}
-        />
+        <PaletteFooter mode={current ? "page" : "root"} />
       </CommandPrimitive>
     </>
   );

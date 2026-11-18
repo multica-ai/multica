@@ -1,6 +1,5 @@
 // Package connectedapps owns how agents use external apps (MUL-8516): which
-// account a run acts as, what each tool call is allowed to do, and the
-// confirmation flow for calls that need a person's approval.
+// account a run acts as and what each tool call is allowed to do.
 //
 // Agents never see a provider credential. A run reaches its apps through the
 // Multica MCP gateway, which resolves the account, classifies the tool, applies
@@ -37,8 +36,6 @@ type CuratedApp struct {
 	Slug string
 	// Scope is the recommended account type: team, personal, or "" for either.
 	Scope string
-	// Defaults overrides the workspace default policy for this app.
-	Defaults map[string]string
 	// Overrides pins the class of specific tools, keyed by upper-case tool slug.
 	Overrides map[string]string
 }
@@ -68,11 +65,7 @@ var curatedApps = []CuratedApp{
 	{Slug: "hubspot", Scope: ScopeTeam},
 	{Slug: "zendesk", Scope: ScopeTeam},
 	{Slug: "intercom", Scope: ScopeTeam},
-	{Slug: "stripe", Scope: ScopeTeam, Defaults: map[string]string{
-		ClassWrite:  PolicyBlock,
-		ClassSend:   PolicyBlock,
-		ClassDelete: PolicyBlock,
-	}},
+	{Slug: "stripe", Scope: ScopeTeam},
 	{Slug: "airtable", Scope: ScopeTeam},
 }
 
@@ -109,14 +102,9 @@ func ValidScope(scope string) bool {
 	return scope == ScopeTeam || scope == ScopePersonal
 }
 
-// DefaultLevel is the level an app joins an agent at. Only the owner can run
-// a private agent, so the owner is the one who would confirm each write;
-// shared agents ask first.
-func DefaultLevel(agentPermissionMode string) string {
-	if agentPermissionMode == "private" {
-		return LevelWrite
-	}
-	return LevelConfirmWrites
+// DefaultLevel lets newly attached apps run directly for every agent.
+func DefaultLevel(_ string) string {
+	return LevelWrite
 }
 
 // ValidLevel reports whether level is an agent permission level.

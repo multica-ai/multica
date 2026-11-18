@@ -30,7 +30,7 @@ The monorepo enforces strict package boundaries:
 
 | Package | May depend on | Must NOT depend on |
 | --- | --- | --- |
-| `packages/core` | nothing app-specific | `react-dom`, `next/*`, UI libraries, `process.env`, direct `localStorage` (persist through `StorageAdapter`) |
+| `packages/core` | nothing app-specific | `react-dom`, `next/*`, UI libraries, `process.env`, direct `localStorage` or `sessionStorage` (persist through `StorageAdapter`; only `analytics/exception-dedupe.ts` and `appearance/safe-mode.ts` use tab-scoped `sessionStorage`) |
 | `packages/ui` | nothing | `@multica/core`, business logic |
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, store definitions |
 | `apps/web/platform/` | `next/*` | other apps |
@@ -303,6 +303,7 @@ See `auth.json` for the canonical example (the `web` section contains `prefer_de
 - Quotes: straight double quotes `"..."` to match the English source. Do not use `「」` or curly quotes.
 - Ellipsis: three dots `...` not the single character `…`. Match the English source.
 - Mixed Chinese-English: a single space on each side of the English word (see Word combination rules).
+- Bold next to punctuation: a closing `**` that follows punctuation and runs straight into text does not close, so the asterisks show on the page. Chinese, Japanese, and Korean text often runs from bold into the next word with no space. Move the punctuation outside the bold (`**问题（Problem）**和` → `**问题**（Problem）和`), or add a space when the punctuation belongs to a label (`点击 **+**添加` → `点击 **+** 添加`). `apps/docs/lib/unrendered-bold.test.ts` fails on any `**` left unrendered in the docs.
 
 ### Style principles
 

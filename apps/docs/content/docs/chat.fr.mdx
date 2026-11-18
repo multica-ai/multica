@@ -6,7 +6,6 @@ description: "Conversation en tête-à-tête avec un agent, visible de vous seul
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 import { ChatDemo } from "@/components/demos/chat-demo";
-import { ChatQueueDemo } from "@/components/demos/chat-queue-demo";
 
 Discussion convient aux sujets qui n'ont pas encore pris la forme d'une tâche claire : clarifier des idées, faire le point sur l'espace de travail, discuter d'une approche, poser une question qui ne relève d'aucune tâche, ou confier d'abord un petit travail à un agent.
 
@@ -51,13 +50,24 @@ Après la réponse de l'agent, des **Questions de suivi** s'affichent parfois en
 
 ## Discuter depuis n'importe quelle page
 
-Inutile de quitter la page en cours pour discuter. Les pages de l'espace de travail affichent un bouton de discussion rond en bas à droite (son info-bulle indique « Demander à Multica ») qui ouvre une fenêtre de discussion flottante. Cette fenêtre et la page **Discussion** partagent les mêmes conversations : une discussion commencée d'un côté se poursuit de l'autre.
+Inutile de quitter la page en cours pour discuter. Les pages de l'espace de travail peuvent ouvrir une discussion dans une fenêtre flottante. Cette fenêtre et la page **Discussion** partagent les mêmes conversations : une discussion commencée d'un côté se poursuit de l'autre.
+
+Dans une fenêtre large, la discussion rapide se trouve à l'extrémité droite de la barre d'état, en bas de l'application :
+
+- **Demander à Multica** démarre une nouvelle discussion.
+- Une discussion obtient une puce dans la barre pendant que l'agent y travaille, tant qu'elle contient une réponse non lue, et dès que vous l'avez ouverte dans la fenêtre flottante. Un indicateur qui tourne sur la puce signale que l'agent répond, un point de couleur une réponse non lue ; survolez la puce pour voir le titre et l'état de la discussion. Cliquez sur une puce pour ouvrir cette discussion, puis de nouveau pour fermer la fenêtre. Les puces qui ne tiennent pas passent dans un menu **+N**.
+- Pour fermer une puce, survolez-la et cliquez sur **×**. Elle revient quand la discussion reçoit un nouveau message ou quand vous la rouvrez.
+- **Historique des discussions**, le dernier bouton de la barre, liste vos discussions récentes avec les mêmes marques « en cours » et « non lu ». Choisissez-en une pour l'ouvrir, ou cliquez sur **Toutes les discussions** pour aller sur la page **Discussion**.
+- La fenêtre s'ouvre au-dessus du bouton ou de la puce sur lequel vous avez cliqué.
+
+Une fenêtre étroite n'a pas de barre d'état : c'est un bouton de discussion rond, en bas à droite, qui ouvre la fenêtre. Le bouton pulse légèrement pendant qu'un agent répond, et son info-bulle indique quand une discussion est en cours ou contient des réponses non lues.
 
 - Appuyez sur `⌘J` (`Ctrl+J` sous Windows et Linux) pour ouvrir ou fermer la fenêtre flottante ; à l'ouverture, le curseur se place dans la zone de saisie. La touche fonctionne aussi pendant que vous tapez dans cette zone. Vous pouvez la modifier dans **Paramètres → Raccourcis** ; voir [Recherche, raccourcis et préférences](/shortcuts).
-- Faites glisser les bords de la fenêtre pour la redimensionner, ou développez-la et réduisez-la. Pendant qu'un agent répond, le bouton de discussion fermé pulse légèrement.
-- La page **Discussion** elle-même n'affiche pas ce bouton, et `⌘J` n'y fait rien : la page montre déjà la même conversation.
+- Appuyez sur `⇧⌘J` (`Ctrl+Maj+J` sous Windows et Linux) pour démarrer plutôt une nouvelle discussion, comme avec **Demander à Multica** ; `⌘J` rouvre la dernière discussion ouverte. Appuyez de nouveau sur la nouvelle discussion pour fermer la fenêtre.
+- Faites glisser les bords de la fenêtre pour la redimensionner, ou développez-la et réduisez-la.
+- Sur la page **Discussion** elle-même, la discussion rapide n'apparaît pas dans la barre d'état et le bouton rond ne s'affiche pas ; ni `⌘J` ni `⇧⌘J` n'y font rien : la page montre déjà la même conversation.
 
-Si vous ne voulez pas de la fenêtre flottante, désactivez **Fenêtre de discussion flottante** dans **Paramètres → Préférences → Commentaires et discussion**. La discussion n'est alors accessible que depuis la barre latérale. Ce réglage ne s'applique qu'à l'appareil utilisé.
+Si vous ne voulez pas de la fenêtre flottante, désactivez **Fenêtre de discussion flottante** dans **Paramètres → Préférences → Commentaires et discussion**. La discussion rapide quitte alors la barre d'état, le bouton rond n'apparaît plus, et la discussion n'est accessible que depuis la barre latérale. Ce réglage ne s'applique qu'à l'appareil utilisé.
 
 ## Discussion ou tâches
 
@@ -86,22 +96,15 @@ Si l'agent n'avait encore rien produit, le message que vous venez d'envoyer est 
 
 ## Envoyer des messages pendant une réponse
 
-Vous pouvez continuer à écrire pendant que l'agent répond. Dès que la zone de saisie contient du texte, le bouton d'envoi devient **Mettre le message en file d'attente**. Les messages en file n'interrompent pas la réponse en cours : ils attendent dans une file au-dessus de la zone de saisie et sont traités dans l'ordre une fois la réponse terminée.
+Vous pouvez écrire pendant que l’agent répond. Si le runtime le permet, **Envoyer** ajoute un message texte sans lien de skill à la réponse en cours sans arrêter l’exécution. L’agent le lit au prochain moment approprié et poursuit la tâche initiale. Mettez votre daemon à jour pour activer cette fonction.
 
-| Action | Résultat |
-|---|---|
-| **Réorienter** | Place ce message en tête de file et arrête la réponse en cours. Ce que l'agent a déjà écrit reste dans la conversation, puis il traite ce message. |
-| Retirer (icône corbeille) | Retire le message de la file ; il n'est jamais envoyé à l'agent. |
-| **⋯ → Modifier le message en file d'attente** | Remet le message et ses pièces jointes dans la zone de saisie pour le modifier et le renvoyer. |
-| **⋯ → Tout effacer** | Retire tous les messages en file. La réponse en cours continue. |
+Sur le web et sur ordinateur, **Ajouter à l'exécution en cours** au-dessus du brouillon indique que votre texte rejoindra la réponse en cours. **Démarrer après cette exécution** indique que le message sera mis en file, par exemple s'il contient des pièces jointes ou un lien de skill, ou si l'exécution ne prend pas en charge cette fonction.
 
-**Réorienter** n'est pas disponible tant que la réponse en cours n'a pas vraiment commencé (par exemple quand elle attend encore qu'un runtime la prenne en charge), ni si vous avez perdu la permission d'exécuter l'agent.
+Les messages avec pièces jointes ou liens de skill, envoyés avant le début de la réponse ou à un runtime incompatible sont automatiquement mis en file. Un message non transmis avant la fin de la réponse rejoint automatiquement la file ; inutile de le renvoyer. Si vous arrêtez pendant la transmission, Chat attend son résultat avant de mettre les messages non transmis en file. En cas de nouvelle tentative automatique, les instructions supplémentaires restent associées à la demande initiale pour être traitées ensemble. Lors de la reprise de la même session, les instructions déjà transmises ne sont pas renvoyées.
 
-<ChatQueueDemo />
+La file apparaît au-dessus du champ de saisie et suit l’ordre des messages. Vous pouvez supprimer un message, le modifier via **⋯**, ou vider la file. **Envoyer maintenant (arrête la réponse)** place le message en tête et arrête la réponse en cours. Cette action nécessite une réponse démarrée et le droit d’exécuter l’agent.
 
-<Callout>
-Ici, **Réorienter** arrête d'abord la réponse en cours. Dans les commentaires d'une tâche, [Ajouter à l'exécution en cours](/mentioning-agents#réorienter-un-agent-en-cours-dexécution) fonctionne autrement : l'exécution n'est pas interrompue, l'agent lit le message à la fin de l'étape en cours et poursuit la tâche d'origine.
-</Callout>
+Cette fonction concerne les conversations Chat directes sur les clients web, de bureau et mobile à jour. Sur mobile, les messages en file apparaissent à la fin de la conversation ; supprimez-les ou modifiez-les depuis le web ou le bureau. Les anciens clients et les conversations Slack et Lark conservent leur file habituelle.
 
 ## Organiser la liste des conversations
 

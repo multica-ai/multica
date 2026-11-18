@@ -2,6 +2,7 @@ import { onlineManager, useMutation, useQueryClient } from "@tanstack/react-quer
 import { api } from "../api";
 import { projectKeys } from "./queries";
 import { issueKeys } from "../issues/queries";
+import { autopilotKeys } from "../autopilots/queries";
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import { clearIssueSurfaceViewState } from "../issues/stores/surface-view-store";
@@ -99,6 +100,79 @@ export function useDeleteProject() {
       // event invalidates too, but a delivery gap must not leave the window
       // wrong forever — the global staleTime is Infinity.
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+    },
+  });
+}
+
+function useWriteProjectToCache() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return (project: Project) => {
+    qc.setQueryData<ListProjectsResponse>(projectKeys.list(wsId), (old) =>
+      old ? { ...old, projects: old.projects.map((p) => (p.id === project.id ? { ...p, ...project } : p)) } : old,
+    );
+    qc.setQueryData<Project>(projectKeys.detail(wsId, project.id), (old) =>
+      old ? { ...old, ...project } : project,
+    );
+  };
+}
+
+export function useArchiveProject() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  const writeProject = useWriteProjectToCache();
+  return useMutation({
+    mutationFn: (id: string) => api.archiveProject(id),
+    onSuccess: ({ paused_autopilot_ids: _paused, ...project }) => writeProject(project),
+    onSettled: (_data, _err, id) => {
+      qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, id) });
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      // Archiving pauses the autopilots that file into the project.
+      qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+    },
+  });
+}
+
+export function useRestoreProject() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  const writeProject = useWriteProjectToCache();
+  return useMutation({
+    mutationFn: (id: string) => api.restoreProject(id),
+    onSuccess: (project) => writeProject(project),
+    onSettled: (_data, _err, id) => {
+      qc.invalidateQueries({ queryKey: projectKeys.detail(wsId, id) });
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+    },
+  });
+}
+
+// A workspace owner adding themselves to a private project they could not see.
+// Everything keyed on project visibility may have changed for them, the same
+// as when someone else adds them.
+export function useJoinPrivateProject() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.joinPrivateProject(id),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    },
+  });
+}
+
+export function useSetProjectSubscription() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, subscribed }: { id: string; subscribed: boolean }) =>
+      api.setProjectSubscription(id, subscribed),
+    onSuccess: (subscribed, { id }) => {
+      qc.setQueryData(projectKeys.subscription(wsId, id), subscribed);
+      // Issue subscriber lists include project subscribers, so any open issue
+      // of this project may have just gained or lost the caller.
+      qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
     },
   });
 }

@@ -1731,15 +1731,17 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// A running turn receives text only, so a comment that carries files is
-	// always a normal trigger.
-	steer := commentSteerRequest{TaskIDs: steerTaskIDs, All: req.Steer}
-	if len(attachmentIDs) > 0 {
-		steer = commentSteerRequest{}
-	}
-
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+
+	// A running turn receives text only, so a comment that carries files is
+	// always a normal trigger. A member's explicit skill selection is the
+	// same: the text-only channel cannot invoke a skill, so the comment
+	// needs a turn of its own.
+	steer := commentSteerRequest{TaskIDs: steerTaskIDs, All: req.Steer}
+	if len(attachmentIDs) > 0 || (authorType == "member" && strings.Contains(req.Content, "](slash://skill/")) {
+		steer = commentSteerRequest{}
+	}
 
 	// sourceTaskID captures the agent's currently-executing task when it posts
 	// via the CLI (X-Task-ID header). Stamping it on the comment row keeps the
@@ -1868,15 +1870,11 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		// a delete, so there is no window at all. Mirrors the attachment-set
 		// edit in UpdateComment.
 		//
-		// Owner first: the CreateComment statement takes the issue row, and only
-		// then are the attachments locked — the issue -> comment -> child order
-		// LockIssueForDelete, UpdateComment, LockLiveComment and DeleteAttachment
-		// all share. Taking the attachments first inverts it against issue
-		// teardown, which holds the issue and then reaches the same rows through
-		// the issue_id cascade, and Postgres aborts one side. Locking them at all
-		// still pins the requested set: an attachment deleted while this waited
-		// is refused before the comment is committed, rather than the comment
-		// committing without it.
+		// Ownerless uploads are locked before the issue, matching issue updates.
+		// Existing issue attachments are locked only after CreateComment takes
+		// the issue: the issue -> comment -> child order shared with deletion.
+		// Keeping those two sets separate avoids inverting either lock order.
+		// Both sets stay pinned until the comment and its bindings commit.
 		tx, beginErr := h.beginWakeupWrite(r.Context())
 		if beginErr != nil {
 			slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", beginErr, "issue_id", issueID)...)
@@ -1885,10 +1883,17 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
-		created, err = qtx.CreateComment(r.Context(), createParams)
+		var unboundIDs []pgtype.UUID
+		unboundIDs, err = qtx.LockUnboundAttachmentsForCommentLink(r.Context(), db.LockUnboundAttachmentsForCommentLinkParams{
+			WorkspaceID:   issue.WorkspaceID,
+			AttachmentIds: attachmentIDs,
+		})
+		if err == nil {
+			created, err = qtx.CreateComment(r.Context(), createParams)
+		}
 		if err == nil {
 			var missing pgtype.UUID
-			missing, err = lockCommentAttachments(r.Context(), qtx, issue.WorkspaceID, issue.ID, attachmentIDs)
+			missing, err = lockCommentAttachments(r.Context(), qtx, issue.WorkspaceID, issue.ID, attachmentIDs, unboundIDs)
 			if err == nil && missing.Valid {
 				writeError(w, http.StatusConflict, "attachment "+uuidToString(missing)+" is no longer available")
 				return
@@ -1896,9 +1901,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		if err == nil {
 			err = qtx.LinkAttachmentsToComment(r.Context(), db.LinkAttachmentsToCommentParams{
-				CommentID: created.ID,
-				IssueID:   issue.ID,
-				Column3:   attachmentIDs,
+				CommentID:     created.ID,
+				IssueID:       issue.ID,
+				WorkspaceID:   issue.WorkspaceID,
+				AttachmentIds: attachmentIDs,
 			})
 		}
 		if err == nil {
@@ -2303,6 +2309,9 @@ func commentEnqueueFailureReason(err error) DispatchReasonCode {
 	if errors.Is(err, service.ErrAttributionFailClosed) {
 		return ReasonAttributionBlocked
 	}
+	if errors.Is(err, service.ErrProjectAccessDenied) {
+		return ReasonProjectAccessBlocked
+	}
 	return ReasonInternalError
 }
 
@@ -2700,10 +2709,12 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	if hasAgentOrSquadMention(mentions) {
 		return h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
 	}
-	if util.HasMentionAll(mentions) {
-		return nil, nil
-	}
-	if hasMemberMention(mentions) {
+	// A member who @mentions people (a member or @all) and no agent/squad is
+	// talking to humans, so the implicit fallbacks stay quiet. An agent's
+	// member mention or @all only notifies humans: a worker result that pings
+	// a reviewer still has to reach its squad leader, or the
+	// leader→worker→leader loop stalls.
+	if actorType == "member" && (util.HasMentionAll(mentions) || hasMemberMention(mentions)) {
 		return nil, nil
 	}
 
@@ -3100,11 +3111,10 @@ func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, a
 // mentions from the current comment and returns the runnable agent recipients.
 // Skips agents with on_mention trigger disabled, and private agents mentioned
 // by non-owner members (only the agent owner or workspace admin/owner can
-// mention a private agent). Self-mentions are intentionally allowed so an
-// agent running in one issue can explicitly enqueue itself on another (e.g.
-// a child-issue run notifying the parent issue whose assignee is the same
-// agent); runaway loops are prevented by HasPendingTaskForIssueAndAgent
-// dedupe and the natural queued/dispatched coalescing of the task queue.
+// mention a private agent). A self-mention from a trusted authoring task on
+// this issue is suppressed, including during completion replay. Cross-issue
+// self-mentions remain explicit handoffs (e.g. a child-issue run notifying the
+// parent issue whose assignee is the same agent).
 // Note: no issue status gate here — @mention is an explicit action and should
 // work even on done/cancelled issues (the agent can reopen the issue if needed).
 // commentMentionTarget is one EXPLICIT @agent / @squad mention and how it
@@ -3316,6 +3326,22 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			blockUnusableTarget("agent", m.ID, agent, verdict)
 			continue
 		}
+		if authorType == "agent" && authorID == uuidToString(agent.ID) && opts.AuthoringTaskID.Valid {
+			sourceTask, err := h.Queries.GetAgentTask(ctx, opts.AuthoringTaskID)
+			if err != nil {
+				blockTarget("agent", m.ID, ReasonInternalError)
+				continue
+			}
+			// Compare the exact authoring task, never the assignee or latest
+			// run: the same agent may be notifying this issue from another.
+			// Terminal source tasks still match when completion replays a comment.
+			if sourceTask.AgentID == agent.ID && sourceTask.IssueID == issue.ID {
+				active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, agent.ID, opts.ThreadCommentID)
+				status, reason := decideSuppressedLeaderOutcome(active, activeErr)
+				addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, Status: status, ReasonCode: reason})
+				continue
+			}
+		}
 		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts)
 		if err != nil {
 			blockTarget("agent", m.ID, ReasonInternalError)
@@ -3353,6 +3379,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// A deleted comment's tombstone has nothing left to edit.
 	if err != nil || existing.DeletedAt.Valid {
 		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
+	if !h.requireIssueIDVisible(w, r, workspaceID, existing.IssueID, http.StatusNotFound, "comment not found") {
 		return
 	}
 	if bound, err := h.Queries.CommentHasTaskSupplement(r.Context(), db.CommentHasTaskSupplementParams{
@@ -3635,6 +3664,9 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
+	if !h.requireIssueIDVisible(w, r, workspaceID, comment.IssueID, http.StatusNotFound, "comment not found") {
+		return
+	}
 
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
@@ -3743,12 +3775,10 @@ type commentDeletion struct {
 	IssueRevision  int64
 }
 
-// lockCommentAttachments locks the unbound issue attachments a comment is
-// being created with and reports the first requested id that is not among
-// them: never eligible, or deleted while the lock waited. The caller must
-// already hold the issue's row lock — these are its children, and taking them
-// first is the inversion CreateComment documents.
-func lockCommentAttachments(ctx context.Context, qtx *db.Queries, workspaceID, issueID pgtype.UUID, ids []pgtype.UUID) (missing pgtype.UUID, err error) {
+// lockCommentAttachments validates and pins the full requested set, including
+// existing issue attachments. The caller must already hold the issue's row
+// lock and have locked ownerless uploads before it; see CreateComment.
+func lockCommentAttachments(ctx context.Context, qtx *db.Queries, workspaceID, issueID pgtype.UUID, ids, unboundIDs []pgtype.UUID) (missing pgtype.UUID, err error) {
 	locked, err := qtx.LockAttachmentsForCommentLink(ctx, db.LockAttachmentsForCommentLinkParams{
 		WorkspaceID:   workspaceID,
 		IssueID:       issueID,
@@ -3757,7 +3787,10 @@ func lockCommentAttachments(ctx context.Context, qtx *db.Queries, workspaceID, i
 	if err != nil {
 		return pgtype.UUID{}, err
 	}
-	have := make(map[pgtype.UUID]struct{}, len(locked))
+	have := make(map[pgtype.UUID]struct{}, len(locked)+len(unboundIDs))
+	for _, id := range unboundIDs {
+		have[id] = struct{}{}
+	}
 	for _, id := range locked {
 		have[id] = struct{}{}
 	}
@@ -4052,6 +4085,9 @@ func (h *Handler) loadCommentForActor(w http.ResponseWriter, r *http.Request) (d
 	// A deleted comment's tombstone cannot be a thread's resolution.
 	if err != nil || comment.DeletedAt.Valid {
 		writeError(w, http.StatusNotFound, "comment not found")
+		return db.Comment{}, "", "", "", false
+	}
+	if !h.requireIssueIDVisible(w, r, workspaceID, comment.IssueID, http.StatusNotFound, "comment not found") {
 		return db.Comment{}, "", "", "", false
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)

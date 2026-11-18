@@ -32,7 +32,7 @@ Select the text and choose **Add to reply** in the selection toolbar.
 </Step>
 <Step>
 
-Write your note beside the selection and click **Add annotation**. Only a confirmed note joins the thread's reply draft and gets a number; an empty note can't be confirmed.
+Write your note beside the selection and click **Add**. Only a confirmed note joins the thread's reply draft and gets a number; an empty note can't be confirmed.
 
 </Step>
 <Step>
@@ -49,7 +49,7 @@ For comment annotations, the first one you save fixes the reply target, includin
 <Accordions>
 <Accordion title="Editing, removing, and shortcuts" id="annotation-editing">
 
-- After editing an existing annotation, click **Save annotation** to apply the change.
+- After editing an existing annotation, click **Save** to apply the change.
 - In the annotation editor, Enter adds or saves an annotation; Shift + Enter inserts a newline. Cmd + Enter (macOS) or Ctrl + Enter (Windows/Linux) saves the current annotation and sends the entire draft, including saved annotations, body text, and attachments. These keys do not follow your Send shortcut preference. Escape or clicking outside cancels unconfirmed changes.
 - Click the numbered marker in the source text to edit the note again. The trash button beside the note removes the annotation together with its marker and draft entry.
 - Hovering over the annotation count opens a panel where you can review or remove quotes, or click a quote to jump back and edit its note. Clicking or using the keyboard opens the panel too.
@@ -96,9 +96,10 @@ Type `@` and pick a target from the list:
 |---|---|
 | **Member** | Gets a mention notification in the inbox; an @ in a comment does not create a subscription. |
 | **Agent** | Creates a run for that agent; agents have no inbox. |
-| **Squad** | Notifies the squad's members and triggers the squad leader. |
+| **Squad** | Triggers the squad leader; squad members are not notified. |
 | **Issue** | Inserts a link to another issue — no notification, no agent trigger. |
-| **@all** | Notifies every workspace member and triggers no agent. |
+| **Project** | Inserts a link to a project — no notification, no agent trigger. |
+| **@all** | Notifies every workspace member; the mention itself starts no agent. A worker agent's comment still returns to the assigned squad leader, or the guest squad leader in its delegation thread, unless an agent or squad is explicitly mentioned. |
 
 Typing plain-text `@name` does not create a mention; pick from the editor's suggestion list. Typing a valid issue key converts it into an issue link automatically.
 

@@ -350,15 +350,30 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
-  async createComment(issueId: string, content: string) {
+  async createComment(issueId: string, content: string, parentId?: string) {
     const res = await this.authedFetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, ...(parentId ? { parent_id: parentId } : {}) }),
     });
     if (!res.ok) {
       throw new Error(`create comment failed: ${res.status} ${await res.text()}`);
     }
     return (await res.json()) as { id: string };
+  }
+
+  async seedCommentNotification(issueId: string, commentId: string, title: string) {
+    if (!this.workspaceId || !this.email) throw new Error("Select a workspace before seeding a notification");
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      await client.query(
+        `INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, actor_type, actor_id, type, issue_id, title, details)
+         SELECT $1, 'member', id, 'member', id, 'new_comment', $2, $3, $4::jsonb FROM "user" WHERE email = $5`,
+        [this.workspaceId, issueId, title, JSON.stringify({ comment_id: commentId }), this.email],
+      );
+    } finally {
+      await client.end();
+    }
   }
 
   /** Seed an owned runtime without launching an actual agent tool. */

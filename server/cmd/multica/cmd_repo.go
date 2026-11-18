@@ -51,6 +51,9 @@ var repoCheckoutCmd = &cobra.Command{
 	Use:   "checkout <url>",
 	Short: "Check out a repository into the working directory",
 	Long: "Creates a git worktree from the daemon's bare clone cache. Used by agents to check out repos on demand.\n\n" +
+		"The checkout goes in a subdirectory of the current directory named after the repository. Run from inside " +
+		"an existing checkout of the same repository, it targets that checkout instead of nesting a second one in it; " +
+		"a different repository is still placed inside the current directory.\n\n" +
 		"Running it again where the repository is already checked out never silently discards work: a checkout " +
 		"that has uncommitted changes, untracked files, or unpushed commits, or is already on this task's branch, " +
 		"is kept as it is and only its remote refs are fetched. Pass --fresh to discard its uncommitted changes and " +

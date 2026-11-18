@@ -30,7 +30,7 @@ Multica のコードを書く、翻訳を変更する、あるいは中国語の
 
 | パッケージ | 依存可能 | 依存禁止 |
 | --- | --- | --- |
-| `packages/core` | アプリ固有でないもののみ | `react-dom`, `next/*`, UI ライブラリ, `process.env`, `localStorage` の直接利用（永続化は `StorageAdapter` 経由） |
+| `packages/core` | アプリ固有でないもののみ | `react-dom`, `next/*`, UI ライブラリ, `process.env`, `localStorage`・`sessionStorage` の直接利用（永続化は `StorageAdapter` 経由。タブ単位の `sessionStorage` を使うのは `analytics/exception-dedupe.ts` と `appearance/safe-mode.ts` のみ） |
 | `packages/ui` | なし | `@multica/core`, ビジネスロジック |
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, store の定義 |
 | `apps/web/platform/` | `next/*` | 他のアプリ |
@@ -286,6 +286,7 @@ i18next は `_one` / `_other` を使います。中国語には文法的な数�
 - 引用符: 英語の原文に合わせて、まっすぐな二重引用符 `"..."` を使用。`「」` や丸い引用符は使わないでください。
 - 省略記号: 単一文字の `…` ではなく、3 つの点 `...`。英語の原文に合わせてください。
 - 中国語と英語の混在: 英語の単語の両側にそれぞれ単一の空白（単語の組み合わせルールを参照）。
+- 句読点と太字: 句読点の直後にある閉じの `**` は、すぐ後に文字が続くと閉じとして扱われず、アスタリスクがそのまま表示されます。中国語・日本語・韓国語では太字の直後に空白なしで次の語が続きやすいので注意してください。句読点を太字の外に出す（`**问题（Problem）**和` → `**问题**（Problem）和`）か、句読点がラベルの一部なら `**` の後に空白を入れます（`点击 **+**添加` → `点击 **+** 添加`）。ドキュメントに未レンダリングの `**` が残ると `apps/docs/lib/unrendered-bold.test.ts` が失敗します。
 
 ### スタイルの原則
 

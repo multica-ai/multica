@@ -140,6 +140,8 @@ An issue belongs to at most one [project](/projects); the project provides share
 
 Larger work can be split into sub-issues: the parent issue keeps the overall goal while sub-issues progress independently. Parent and child statuses do not affect each other.
 
+Open a direct child from **Sub-issues** in the issue's right sidebar. With 10 or fewer children, their order matches the inline list. With more, it initially shows 10, putting unfinished children first and keeping stage order within each group. **Show N more** expands all children in the sidebar; **Collapse** returns to the first 10. Both keep your reading position and leave the narrow-screen sidebar open. Progress counts all children. **Customize sidebar** lets you hide or reorder this section.
+
 Creating a sub-issue from a parent prefills its project and, when set, its assignee. In manual create, **Copy parent fields** lets you choose priority, labels, dates, or individual custom properties to copy. Only the selected values replace your form values, once; later parent changes do not sync. The child keeps its own description and status. Labels, start date, and custom properties stay in the manual draft when switching to Create with agent.
 
 Sub-issues can be given a **stage** to advance in batches — 1, 2, 3. When every sub-issue in the earliest unfinished stage reaches `done` or `cancelled`, the parent issue receives a "sub-issues completed" notification; when the parent's assignee is an agent, it wakes up and decides whether to start the next stage. Sub-issues without a stage count as one batch and notify once when they all finish. The system triggers this wakeup; see [Issue wakeups](/issue-wakeups) for its rules and the other kinds of wakeup.
@@ -159,9 +161,11 @@ Save a combination of filters and display settings you use often as a view: clic
 | **Only visible to me** | Only you | You |
 | **Visible to workspace members** | Every workspace member | You, plus workspace `owner` and `admin` |
 
-The display settings saved in a view are its **Default display**: members see the view that way the first time they open it, then adjust it for themselves without affecting anyone else. A view lives on the page it was created on: one created in a project belongs to that project, and views created in **My Issues** are always private.
+The display settings saved in a view are its **Default display**: members see the view that way the first time they open it, then adjust it for themselves without affecting anyone else. A view lives on the page it was created on: one created in a project belongs to that project, and views created on the **My Issues** page are always private.
 
-Drag views in the view bar to reorder them; ordering and visibility in **Manage views** affect only you. Right-click a view to edit it, delete it, or **Pin to sidebar**.
+Drag views in the view bar to reorder them; ordering and visibility in **Manage views** affect only you. Right-click a view to edit it, delete it, or **Add to sidebar**, which lists it in the **Views** section of the Work panel.
+
+The Views section also offers five built-in views: **All issues**; **My work**, issues assigned to you or to your agents; **Working**, issues an agent is running on; and **Subscribed**, every issue you subscribe to. **Snoozed** lists issues you have [snoozed in your inbox](/inbox#snooze-an-issue). My work, Working, and Subscribed are All issues under a fixed condition: other filters can narrow them, but that condition can't be removed or widened. The sliders button in the Views section header turns each built-in view on or off.
 
 ### Side preview
 
@@ -171,7 +175,11 @@ While the preview is open, `J` / `K` move to the next or previous issue, `H` / `
 
 ## Batch edits
 
-Select several issues in a list, a table, or a sub-issue list, and a batch toolbar appears at the bottom to change status, priority, or assignee, or delete them all at once. In a table, Shift-click selects a range.
+Select several issues in a list, a table, or a sub-issue list to show the batch toolbar. In a table, Shift-click selects a range. The toolbar edits status, priority, assignee, labels, project, and due date. **More actions** adds start date, parent, stage for sub-issues, custom properties, copying links, and deletion. The selection's right-click menu offers the same actions.
+
+Labels show whether they are on all, some, or none of the selected issues. Add or remove one without changing other labels, or clear all labels. Custom properties can be set or cleared; multi-value properties replace the whole value.
+
+If some issues cannot take a change, the others are still updated. The result names skipped issues and their reasons, with an action to select only those issues for correction and retry.
 
 - When the selection spans several projects, the status menu offers only statuses every selected issue's workflow allows. An issue that does not support a change keeps its value, and the rest are updated.
 - Batch status changes apply directly. Agent-assigned issues that leave `backlog` start running as usual.

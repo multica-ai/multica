@@ -85,24 +85,6 @@
     "workflow_usage_other": "{{count}} workflows use it",
     "workflow_usage_none": "In no workflow"
   },
-  "wakeups": {
-    "description": "Platform rules that apply to every issue. Each issue can change them in its Wakeups section.",
-    "child_done_title": "When sub-issues finish",
-    "child_done_description": "Wakes the parent's assignee when a stage finishes and a later stage is waiting, and once more when every sub-issue is closed. A member assignee gets an inbox notification instead.",
-    "enabled": "On by default",
-    "instruction": "Default instruction",
-    "instruction_hint": "Sent to the woken agent. Leave empty to use the built-in instruction below.",
-    "instruction_placeholder": "Leave empty to use the built-in instruction",
-    "builtin": "Built-in instruction",
-    "instruction_invalid": "Keep the instruction within 4,000 bytes.",
-    "save": "Save",
-    "saving": "Saving…",
-    "save_error": "Could not save the default.",
-    "customized_one": "{{count}} open issue has its own setting and ignores this default.",
-    "customized_other": "{{count}} open issues have their own setting and ignore this default.",
-    "admin_only": "Only owners and admins can change these defaults.",
-    "load_error": "Could not load wakeup defaults."
-  },
   "quick_actions": {
     "title": "Quick Actions",
     "description": "Run a preset agent and prompt from an issue's sidebar.",
@@ -159,12 +141,6 @@
     "toast_saved": "Changes saved"
   },
   "preferences": {
-    "theme": {
-      "title": "Theme",
-      "light": "Light",
-      "dark": "Dark",
-      "system": "System"
-    },
     "language": {
       "title": "Language",
       "english": "English",
@@ -194,15 +170,203 @@
       "after_run": "Start after this run",
       "hint": "Sets the default only. You can still change it for any message before sending."
     },
+    "comment_images": {
+      "title": "Images in comments",
+      "thumbnails": "Thumbnails",
+      "full": "Full size",
+      "hint": "Thumbnails keep long threads short; click an image to see it full size."
+    },
     "comments_title": "Comments & chat",
     "region_title": "Language & region",
-    "appearance_title": "Appearance",
     "issue_fields_title": "Fields shown when creating issues",
     "issue_fields": {
       "field": "Field",
       "quick": "Create with agent",
       "manual": "Manual create",
       "unsupported": "Not available when creating with an agent"
+    }
+  },
+  "appearance": {
+    "reset": "Reset to defaults",
+    "color": {
+      "title": "Color"
+    },
+    "mode": {
+      "title": "Mode",
+      "light": "Light",
+      "dark": "Dark",
+      "system": "System"
+    },
+    "theme": {
+      "title": "Theme",
+      "description": "Colors, borders, shadows and corners across the app.",
+      "default": "Default",
+      "pop": "Pop",
+      "built_in": "Built in",
+      "installed": "Installed",
+      "remove": "Remove {{name}}",
+      "safe_mode": "Safe mode: your theme is paused until you close this window.",
+      "safe_mode_exit": "Use my theme",
+      "folder": "Themes folder",
+      "folder_problems": "Some themes in the themes folder don't pass the checks. Fix them and save; the last version that passed stays in use."
+    },
+    "import": {
+      "button": "Import theme",
+      "from_zip": "Theme file (.zip)",
+      "from_folder": "Theme folder",
+      "storage_full": "There isn't enough space on this device to save the theme. Remove another theme and try again.",
+      "confirm_title": "Install “{{name}}”?",
+      "warning": "A theme can restyle every page, including dialogs and warnings. Only install themes from people you trust.",
+      "author": "Author",
+      "version": "Version",
+      "replaces": "{{to}} (replaces {{from}})",
+      "includes": "Includes",
+      "cancel": "Cancel",
+      "confirm": "Install and use",
+      "error_title": "Couldn't install this theme",
+      "error_description": "Nothing was changed. The theme file has these problems:",
+      "close": "Close",
+      "has_options_one": "{{count}} option",
+      "has_options_other": "{{count}} options",
+      "has_assets_one": "{{count}} font or image",
+      "has_assets_other": "{{count}} fonts and images",
+      "beta": "Beta",
+      "beta_note": "Custom themes are in beta. The variables and manifest a theme uses may change, and a theme may need updating."
+    },
+    "store": {
+      "manage": "Manage",
+      "title": "Themes",
+      "description": "The themes you installed, and themes made by the community.",
+      "description_local": "The themes you installed.",
+      "search": "Search themes",
+      "installed_only": "Show installed only",
+      "showing_one": "Showing {{count}} theme",
+      "showing_other": "Showing {{count}} themes",
+      "installed": "Installed",
+      "loading": "Loading themes",
+      "error": "Couldn't load the theme store. Try again in a moment.",
+      "retry": "Try again",
+      "none_installed": "No themes are installed yet.",
+      "no_results": "No themes match “{{query}}”.",
+      "by": "by {{author}}",
+      "downloads_one": "{{downloads}} download",
+      "downloads_other": "{{downloads}} downloads",
+      "source": "{{repo}} on GitHub",
+      "no_preview": "No preview",
+      "screenshot_alt": "{{name}} in {{mode}} mode",
+      "install": "Install",
+      "installing": "Installing…",
+      "use": "Use",
+      "in_use": "In use",
+      "update": "Update to {{version}}",
+      "remove": "Remove",
+      "taken": "A theme with this id is installed",
+      "installed_toast": "Installed “{{name}}”.",
+      "updated": "Updated “{{name}}” to {{version}}.",
+      "install_failed": "Couldn't install “{{name}}”",
+      "warning": "Themes can restyle every page, including dialogs and warnings. Store themes are checked automatically, but they are made by the community."
+    },
+    "updates": {
+      "title": "Store themes",
+      "description_one": "You have {{count}} theme from the store.",
+      "description_other": "You have {{count}} themes from the store.",
+      "check": "Check for updates",
+      "checking": "Checking…",
+      "up_to_date": "Your store themes are up to date.",
+      "update_all": "Update all ({{count}})"
+    },
+    "own": {
+      "title": "Make your own",
+      "description": "Ask any agent to build one in a chat or an issue, import a theme as a .zip or folder, or start from a copy of the current one."
+    },
+    "tools": {
+      "duplicate": "Duplicate “{{name}}” as a new theme",
+      "open_folder": "Open themes folder",
+      "guide": "How to make a theme",
+      "duplicated_web": "Downloaded {{file}}. Unzip it, edit theme.css, then import the folder.",
+      "duplicated_desktop": "Created “{{name}}” in the themes folder. Edits to its theme.css apply when you save.",
+      "duplicate_failed": "Couldn't create the copy: {{error}}"
+    },
+    "theme_options": {
+      "title": "Theme options",
+      "description": "Provided by {{name}}.",
+      "reset": "Reset options"
+    },
+    "ui_text": {
+      "title": "Interface text",
+      "description": "Menus, buttons, lists, the sidebar and headings."
+    },
+    "latin_font": {
+      "title": "Latin font"
+    },
+    "ui_font": {
+      "inter": "Default",
+      "system": "System",
+      "serif": "Serif",
+      "mono": "Monospace"
+    },
+    "cjk_font": {
+      "title": "CJK font",
+      "description": "Chinese characters; Japanese and Korean follow it.",
+      "sans": "Sans",
+      "serif": "Serif",
+      "kai": "Kai",
+      "built_in": "Built in",
+      "local": "On this device",
+      "load_local": "Show fonts on this device…",
+      "loading": "Looking for fonts…",
+      "none": "No fonts with Chinese characters on this device.",
+      "load_failed": "Couldn't read this device's fonts.",
+      "sample": "永和九年 汉字"
+    },
+    "follow_ui": "Same as interface",
+    "theme_font": "Theme font",
+    "font_size": {
+      "title": "Font size",
+      "description": "Scales text only. Spacing and layout stay the same.",
+      "value": "{{size}} px",
+      "default": "{{size}} px · Default"
+    },
+    "content_text": {
+      "title": "Content text",
+      "description": "Issue descriptions, comments, chat and documents.",
+      "sample": "Descriptions and comments are read in full, so they can use a font made for reading while lists and buttons stay compact."
+    },
+    "code_font": {
+      "title": "Code font",
+      "description": "Code blocks, inline code and logs.",
+      "geist": "Default",
+      "jetbrains": "Ligatures",
+      "system": "System monospace"
+    },
+    "content_size": {
+      "title": "Font size",
+      "description": "Only content text. Matches the interface by default.",
+      "follow": "Match interface size"
+    },
+    "content_leading": {
+      "title": "Line height",
+      "compact": "Compact",
+      "default": "Default",
+      "relaxed": "Relaxed"
+    },
+    "layout": {
+      "title": "Layout and accessibility"
+    },
+    "density": {
+      "title": "Density",
+      "description": "Row height in issue lists, search and the sidebar, and spacing on the board.",
+      "compact": "Compact",
+      "default": "Default",
+      "comfortable": "Comfortable"
+    },
+    "reduce_motion": {
+      "title": "Reduce motion",
+      "description": "Turn off animations and transitions. When off, your system setting still applies."
+    },
+    "high_contrast": {
+      "title": "Increase contrast",
+      "description": "Darker secondary text and stronger borders."
     }
   },
   "shortcuts": {
@@ -229,6 +393,7 @@
     "reserved_error": "Reserved by the browser or desktop window.",
     "send_error": "Send can only use Enter or Mod+Enter.",
     "unsafe_error": "This key would interfere with typing or basic keyboard navigation.",
+    "unrecognized_error": "This key combination can't be recorded. Try another one.",
     "send_enter_hint": "Shift+Enter inserts a paragraph, continues a list, or adds a code-block newline.",
     "categories": {
       "general": "General",
@@ -255,6 +420,10 @@
         "label": "Toggle chat window",
         "description": "Open or close the floating chat window. Opening it focuses the message input."
       },
+      "newChat": {
+        "label": "Ask Multica",
+        "description": "Start a new chat in the floating chat window."
+      },
       "findInIssue": {
         "label": "Find in issue",
         "description": "Search within the open issue detail."
@@ -262,6 +431,14 @@
       "archiveInboxItem": {
         "label": "Archive notification",
         "description": "Archive the open inbox notification, or restore it while reading the archive."
+      },
+      "unsubscribeArchiveInboxItem": {
+        "label": "Unsubscribe & archive",
+        "description": "Leave the open notification's issue and archive it. Offered on issues that are not yours or your agents'."
+      },
+      "snoozeInboxItem": {
+        "label": "Snooze notification",
+        "description": "Snooze the open inbox issue, or bring it back now if it is snoozed."
       },
       "send": {
         "label": "Send",
@@ -322,6 +499,10 @@
       "goSettings": {
         "label": "Go to Settings",
         "description": "Open workspace settings."
+      },
+      "voiceInput": {
+        "label": "Voice input",
+        "description": "Dictate into the composer you used last. Hold to talk."
       }
     },
     "fixed": {
@@ -339,7 +520,10 @@
   },
   "chat": {
     "floating_label": "Floating chat window",
-    "floating_hint": "Show the floating chat button on every page."
+    "floating_hint": "Show the floating chat button on every page.",
+    "ask_agent_label": "Ask Multica agent",
+    "ask_agent_hint": "The agent a new chat from the bottom bar starts with, in this workspace.",
+    "ask_agent_last_used": "Last used"
   },
   "issue": {
     "opening": {
@@ -396,6 +580,7 @@
     "tabs": {
       "profile": "Profile",
       "preferences": "Preferences",
+      "appearance": "Appearance",
       "shortcuts": "Shortcuts",
       "issue": "Issue",
       "notifications": "Notifications",
@@ -406,7 +591,6 @@
       "members": "Members",
       "labels": "Labels",
       "issue_statuses": "Issue Statuses",
-      "wakeups": "Wakeups",
       "properties": "Properties",
       "quick_actions": "Quick Actions",
       "plugins": "Plugins",
@@ -415,7 +599,8 @@
       "code": "Code",
       "channels": "Messaging",
       "apps": "Connected apps",
-      "workflows": "Workflows"
+      "workflows": "Workflows",
+      "voice_input": "Voice input"
     },
     "groups": {
       "personal": "Personal",
@@ -545,6 +730,7 @@
     "save_failed": "Couldn't save property",
     "limit_hint": "{{count}}/{{max}} active properties",
     "archived_badge": "Archived",
+    "options_preview": "Show all options for {{name}}",
     "types": {
       "text": "Text",
       "number": "Number",
@@ -654,8 +840,32 @@
     "toast_profile_failed": "Failed to update profile"
   },
   "notifications": {
-    "title": "Inbox Notifications",
-    "description": "Muted events remain visible on the issue.",
+    "title": "Inbox",
+    "description": "Choose which events reach the Inbox in the Work sidebar. A turned-off event creates no notification, and turning it back on doesn't bring back what you missed.",
+    "categories": {
+      "direct": "About you",
+      "issues": "Issues you subscribe to",
+      "projects": "Projects you subscribe to",
+      "agents": "Agents"
+    },
+    "others_issues": {
+      "label": "Other people's issues",
+      "description": "Issues assigned to someone else or their agent, that you only follow because you created, commented on or were mentioned in them. Key updates are @mentions, replies in threads you joined, and, with Status changes on, statuses that need a person, like in review, blocked or done.",
+      "key_updates": "Key updates only",
+      "all": "All activity"
+    },
+    "leaving": {
+      "title": "Leaving the Inbox",
+      "description": "Reading a notification doesn't take it out of the Inbox.",
+      "manual_label": "Archive by hand",
+      "manual_description": "From its row in the sidebar, or the top of the notification",
+      "manual_value": "Anytime",
+      "done_label": "Archive issues you complete",
+      "done_description": "When you move an issue to Done or Cancelled, its notifications are archived. Issues others complete stay in your Inbox.",
+      "archived_label": "Archived notifications",
+      "archived_description": "Find them again and unarchive them",
+      "archived_action": "View archived"
+    },
     "toast_failed": "Failed to update notification settings",
     "groups": {
       "assignments": {
@@ -674,13 +884,24 @@
         "label": "Mentions",
         "description": "When someone @mentions you, including @all and @squad"
       },
+      "reactions": {
+        "label": "Reactions",
+        "description": "When someone reacts to an issue you created or a comment you wrote"
+      },
       "updates": {
         "label": "Priority & Due date",
         "description": "When priority or due date changes on issues you follow"
       },
+      "new_issues": {
+        "label": "New issues",
+        "description": "When an issue is created in a project you subscribe to"
+      },
       "agent_activity": {
         "label": "Agent activity",
-        "description": "When an agent run fails"
+        "description": "When an agent run fails, or an app action an agent asked to run is blocked or expires"
+      },
+      "chat_replies": {
+        "label": "Include chat replies"
       }
     },
     "system": {
@@ -689,7 +910,7 @@
     },
     "browser": {
       "label": "Browser notifications",
-      "hint": "Allow this browser to show notification banners for new inbox items.",
+      "hint": "Allow this browser to show banners for Inbox notifications and chat replies.",
       "enable": "Enable",
       "granted": "This browser can show notification banners.",
       "denied": "Blocked by your browser. Enable notifications for this site in your browser settings.",
@@ -745,7 +966,7 @@
     "section_general": "Workspace details",
     "logo_label": "Workspace logo",
     "change_logo_aria": "Change workspace logo",
-    "click_logo_hint": "Click the logo to upload a new image",
+    "click_logo_hint": "Click the logo to upload an image or create a text icon",
     "toast_logo_failed": "Failed to upload workspace logo",
     "name_label": "Name",
     "description_label": "Description",
@@ -809,7 +1030,7 @@
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting…",
     "disconnect_confirm_title": "Disconnect GitHub App",
-    "disconnect_confirm_description": "Multica will stop receiving webhooks for this installation. Existing PR mirrors and links are kept; reconnect any time to resume updates.",
+    "disconnect_confirm_description": "Disconnect {{login}} from this workspace? Updates for this account will stop. Existing PR records and links are kept; other connections are unaffected.",
     "disconnect_confirm_cancel": "Cancel",
     "disconnect_confirm_action": "Disconnect",
     "not_configured": "GitHub integration is not configured for this deployment. Operators must set",
@@ -830,7 +1051,18 @@
     "feature_auto_link_description": "Links a PR to the issue whose ID, e.g. {{example}}, is in its title or branch name, or follows “Closes” in its description.",
     "status_paused": "Paused",
     "pause": "Pause GitHub features",
-    "resume": "Resume GitHub features"
+    "resume": "Resume GitHub features",
+    "add_account": "Add account or organization",
+    "disconnect_account": "Disconnect {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub did not return user authorization. Retry connecting and complete authorization. If it repeats for an existing installation, ask your Multica operator for help.",
+      "installation_not_authorized": "Use the owning GitHub account for a personal installation, or an account with admin access to every authorized repository for an organization. Select at least one repository.",
+      "invalid_state": "This GitHub connection request expired or is invalid. Start the connection again from Settings → Code.",
+      "incomplete_callback": "GitHub returned an incomplete connection response. Start the connection again from Settings → Code.",
+      "bad_workspace": "Could not find the workspace for this connection. Open the intended workspace and retry from Settings → Code.",
+      "verification_failed": "Could not verify your GitHub installation access. Retry connecting; if it repeats, ask your Multica operator to check the GitHub App configuration.",
+      "persist_failed": "Could not save the GitHub connection. Retry from Settings → Code; if it repeats, contact your Multica operator."
+    }
   },
   "vcs": {
     "section_title": "Self-hosted Git",
@@ -1199,7 +1431,9 @@
     "github_load_more": "Load more",
     "github_selected_count": "{{count}} selected",
     "github_cancel": "Cancel",
-    "github_import": "Add repositories",
+    "github_import": "Add {{count}} repositories",
+    "github_import_one": "Add {{count}} repository",
+    "github_import_other": "Add {{count}} repositories",
     "save": "Save",
     "saving": "Saving...",
     "saved_hint": "All changes saved",
@@ -1232,7 +1466,10 @@
       "close_others": "Close other tabs",
       "open_window": "Open as new window",
       "new": "New tab",
-      "pinned_name": "{{title}} (pinned)"
+      "pinned_name": "{{title}} (pinned)",
+      "copy_link": "Copy link",
+      "link_copied": "Link copied",
+      "close_right": "Close tabs to the right"
     },
     "updates": {
       "title": "Updates",
@@ -1245,7 +1482,13 @@
       "up_to_date": "You're on the latest version.",
       "downloading": "v{{version}} is downloading in the background — you'll be notified when it's ready to install.",
       "check_now": "Check now",
-      "checking": "Checking…"
+      "checking": "Checking…",
+      "check_unavailable": "Unable to check for updates right now. Please try again later.",
+      "check_network": "Cannot reach the update service. Check your connection and try again.",
+      "check_failed": "Unable to check for updates. Please try again.",
+      "download_failed": "Update download failed. You can keep using the current version and retry.",
+      "download_ready": "v{{version}} is ready to install.",
+      "retry": "Retry"
     },
     "daemon": {
       "title": "Daemon",
@@ -1438,7 +1681,40 @@
     "github_actions": "GitHub actions"
   },
   "channels": {
-    "breadcrumb": "Breadcrumb"
+    "breadcrumb": "Breadcrumb",
+    "add": "Add messaging channel",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "open": "Open",
+    "normal": "Connected",
+    "waiting_message": "Waiting for first message",
+    "disconnected": "Disconnected",
+    "find_me": "Find me on {{platform}}",
+    "manage": "Manage {{platform}}",
+    "last_message": "Last message {{time}}",
+    "ask_admin": "Ask an admin",
+    "unavailable": "Connection unavailable",
+    "permissions_title": "Who can connect",
+    "owner_or_admin": "Agent owner or workspace admin",
+    "admin_only": "Workspace admins only",
+    "connect_title": "Connect messaging channel",
+    "choose_description": "Choose an agent and a platform.",
+    "authorize_description": "Connect {{agent}} to {{platform}}.",
+    "agent_label": "Agent",
+    "choose_agent": "Choose an agent",
+    "platform_label": "Platform",
+    "region_label": "Region",
+    "method_label": "Connection method",
+    "feishu": "Feishu (China)",
+    "lark": "Lark (International)",
+    "setup_guide": "Setup guide",
+    "connection_changed": "This connection is no longer available. Close this dialog and try again.",
+    "connect_failed": "Could not connect the bot.",
+    "connect_success": "Messaging channel connected.",
+    "disconnect_failed": "Could not disconnect the bot.",
+    "disconnect_title": "Disconnect messaging channel?",
+    "disconnect_description": "This agent will stop receiving messages from {{platform}}.",
+    "agent_unavailable": "Agent unavailable"
   },
   "mcp_usage": {
     "agent_count_one": "Used by {{count}} agent",
@@ -1449,12 +1725,35 @@
     "title": "Ways to give agents tools",
     "current": "This page",
     "mcp": "Added by admins and shared across the workspace, then assigned per agent.",
-    "apps": "Team or personal accounts connected through Multica, given to each agent with an account and a permission level.",
+    "apps": "Team or personal accounts connected through Multica and added to each agent.",
     "plugins": "Installed packages that can add tools, scheduled hooks, and storage, each with its own permissions."
   },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "Private messages with the account that scans the connection QR code.",
+    "loading": "Connecting…",
+    "empty": "Connect WeChat from an agent’s Integrations tab.",
+    "close": "Close",
+    "action_failed": "Could not complete this action. Try again.",
+    "privacy_hint": "Messages will run as you in this workspace. Do not share this QR code.",
+    "qr_label": "WeChat connection QR code",
+    "scan_hint": "Scan with WeChat and confirm on your phone.",
+    "scanned": "Scanned. Confirm the connection in WeChat.",
+    "verify_hint": "WeChat requires a verification code. Enter the code shown on your phone.",
+    "verify_label": "Verification code",
+    "verify": "Verify",
+    "success": "Connected. Send a new message to the bot in WeChat to start.",
+    "expired": "This QR code has expired. Generate a new one.",
+    "blocked": "WeChat has blocked further verification attempts. Try again later.",
+    "already_bound": "This bot is already bound in WeChat. Disconnect the previous client and try again.",
+    "refresh": "New QR code",
+    "retry": "Retry",
+    "already_connected": "This WeChat account is connected to {{agent}}. Disconnect it there first.",
+    "connected_elsewhere": "This WeChat account is connected elsewhere. Disconnect the existing connection first.",
+    "authorization_expired": "WeChat authorization expired. Scan again to reconnect."
+  },
   "connected_apps": {
-    "description": "Accounts your agents act through. Every call goes through Multica, which applies your rules and asks before sending, deleting or sharing.",
-    "add_app": "Add app",
+    "description": "Accounts your agents use to access external apps. Allowed actions run immediately.",
     "loading": "Loading apps…",
     "load_failed": "Couldn't load apps.",
     "team_title": "Team accounts",
@@ -1485,17 +1784,18 @@
     "toast_disconnected": "Disconnected",
     "toast_failed": "Something went wrong. Please try again.",
     "add": {
-      "title": "Add an app",
-      "description": "Connect an account for the team or for yourself. Which agents use it is set on each agent's Apps page.",
       "search": "Search apps…",
       "empty": "No apps match.",
       "curated": "Curated",
       "recommended_team": "Usually a team account",
       "recommended_personal": "Usually a personal account",
-      "connect_team": "Connect for team",
+      "connect_team": "Connect team account",
       "connect_personal": "Connect my account",
       "connecting": "Connecting…",
-      "connected": "Connected"
+      "connected": "Connected",
+      "connect": "Connect",
+      "team_description": "A shared workspace account. Choose which agents can use it on each agent’s Apps page.",
+      "personal_description": "Your own account. Apps set to the triggerer’s account use it when you trigger a run."
     },
     "disconnect_team": {
       "title": "Disconnect the team {{app}} account?",
@@ -1623,6 +1923,139 @@
       "row_label": "Allowed apps",
       "row_description_one": "{{count}} app allowed",
       "row_description_other": "{{count}} apps allowed"
+    },
+    "saved_access": {
+      "account": "Saved action restrictions are still blocking this account.",
+      "agent": "This app still has read-only access from an earlier setup.",
+      "catalog": "A saved app list is hiding other apps.",
+      "allow_actions": "Allow all actions",
+      "open_catalog": "Show all apps",
+      "account_confirm": "Agents assigned this account will be able to read, write, send, delete, and share through it. Saved action restrictions will be replaced.",
+      "agent_confirm": "This agent will be able to read, write, send, delete, and share through this app, within the account’s allowed actions.",
+      "catalog_confirm": "All connectable apps will be available to the workspace. Existing connections and agent assignments will stay as they are.",
+      "cancel": "Cancel",
+      "admin_required": "A workspace admin can restore access.",
+      "account_link": "This account has saved action restrictions. Restore access in Connected apps."
     }
+  },
+  "voice_input": {
+    "description": "Dictate into chat, comments and replies. Speech is transcribed on this computer and never leaves it.",
+    "model_title": "Speech model",
+    "model_hint": "Models run on this computer. Download one, or switch between the ones you have.",
+    "engine_unavailable": "On-device transcription isn't available for this computer.",
+    "enabled": {
+      "title": "Voice input",
+      "hint": "Show the mic in chat, comments and replies, and turn on the voice shortcut."
+    },
+    "input_title": "Input",
+    "shortcut": {
+      "title": "Shortcut",
+      "hint": "Works whenever a composer is on screen, even if it isn't focused.",
+      "change": "Change",
+      "unassigned": "Not set"
+    },
+    "activation": {
+      "title": "Activation",
+      "auto": "Tap or hold",
+      "toggle": "Tap",
+      "hold": "Hold",
+      "hints": {
+        "auto": "Tap to start and tap again to insert. Hold to talk and release to insert.",
+        "toggle": "Tap to start, tap again to insert.",
+        "hold": "Hold to talk, release to insert."
+      }
+    },
+    "recognition_title": "Recognition",
+    "language": {
+      "title": "Spoken language",
+      "hint": "Auto-detect handles most speech. Pick a language if short phrases come out in the wrong one.",
+      "auto": "Auto-detect"
+    },
+    "fillers": {
+      "title": "Remove filler words",
+      "hint": "Drop “um”, “uh” and similar hesitations."
+    },
+    "vocabulary": {
+      "title": "Vocabulary",
+      "hint": "Names and terms to spell your way, such as product or teammate names. Up to {{max}}.",
+      "placeholder": "Add a word",
+      "remove": "Remove {{word}}"
+    },
+    "microphone_title": "Microphone",
+    "device": {
+      "title": "Input device",
+      "default": "System default",
+      "unnamed": "Microphone {{index}}",
+      "permission_hint": "Test the microphone once to see device names."
+    },
+    "test": {
+      "title": "Test microphone",
+      "hint": "Speak to check the level. Nothing is recorded.",
+      "blocked": "Microphone access is blocked. Allow it in your browser or system settings.",
+      "start": "Test",
+      "stop": "Stop"
+    },
+    "history": {
+      "title": "History",
+      "description": "Recordings and their text stay on this computer and are never uploaded. One that failed or was interrupted can be transcribed again from its audio.",
+      "keep": {
+        "title": "Keep history",
+        "hint": "How long recordings stay on this computer.",
+        "options": {
+          "off": "Don't keep",
+          "1d": "1 day",
+          "7d": "7 days",
+          "30d": "30 days",
+          "forever": "Forever"
+        }
+      },
+      "clear": "Clear all",
+      "clear_dialog": {
+        "title": "Clear voice history?",
+        "description": "Every recording and transcript kept on this computer will be deleted.",
+        "cancel": "Cancel"
+      },
+      "empty": "Your dictations will appear here.",
+      "off": "History is off. New recordings are not kept.",
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "status": {
+        "transcribing": "Transcribing…",
+        "failed": "Transcription failed",
+        "interrupted": "Interrupted before it was transcribed"
+      },
+      "actions": {
+        "play": "Play recording",
+        "pause": "Pause",
+        "retranscribe": "Transcribe again",
+        "copy": "Copy text",
+        "delete": "Delete"
+      },
+      "copied": "Copied",
+      "copy_failed": "Couldn't copy",
+      "retry_failed": "Couldn't transcribe this recording",
+      "show_more": "Show more"
+    }
+  },
+  "private_projects": {
+    "title": "Private projects",
+    "description": "Only the members of a private project can open it. As a workspace owner you can see who is in each one, and add yourself when you need to step in.",
+    "empty": "This workspace has no private projects.",
+    "load_failed": "Could not load private projects.",
+    "retry": "Retry",
+    "no_members": "No members",
+    "lead_name": "{{name}} (lead)",
+    "more_members": "+{{count}} more",
+    "archived": "Archived",
+    "member": "You're a member",
+    "open": "Open",
+    "join": "Join",
+    "join_title": "Join “{{title}}”?",
+    "join_description": "You will be added to this project's member list and will see its issues, comments, and attachments. Its current members will be notified.",
+    "join_description_empty": "This project has no members. You will be its only member, and will see its issues, comments, and attachments.",
+    "join_confirm": "Join project",
+    "cancel": "Cancel",
+    "toast_joined": "You joined {{title}}",
+    "toast_failed": "Could not join the project."
   }
 }

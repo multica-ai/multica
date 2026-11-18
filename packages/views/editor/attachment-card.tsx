@@ -149,6 +149,8 @@ export interface AttachmentCardProps {
   onDownload: () => void | Promise<unknown>;
   /** Optional remove button, used by editable comment/file-card surfaces. */
   onDelete?: () => void;
+  /** Registers the card with the right-click menu. */
+  scopeRef?: (element: HTMLElement | null) => void;
 }
 
 export function AttachmentCard({
@@ -160,6 +162,7 @@ export function AttachmentCard({
   onPreview,
   onDownload,
   onDelete,
+  scopeRef,
 }: AttachmentCardProps) {
   const kind = filename ? getPreviewKind(contentType, filename) : null;
   // Without an attachmentId only the URL-renderable kinds open — otherwise
@@ -167,7 +170,7 @@ export function AttachmentCard({
   const canPreview = !!href && canOpenPreview(kind, !!attachmentId);
 
   return (
-    <div className="my-1">
+    <div ref={scopeRef} className="my-1">
       <AttachmentCardChrome
         filename={filename}
         uploading={uploading}
@@ -195,6 +198,8 @@ export interface AttachmentFileCardProps {
   onPreview: () => void;
   onDownload: () => void | Promise<unknown>;
   onDelete?: () => void;
+  /** Registers the card with the right-click menu. */
+  scopeRef?: (element: HTMLElement | null) => void;
 }
 
 /**
@@ -213,6 +218,7 @@ export function AttachmentFileCard({
   onPreview,
   onDownload,
   onDelete,
+  scopeRef,
 }: AttachmentFileCardProps) {
   const { t } = useT("editor");
   const { downloading, handleDownload } = useAttachmentDownloadState(onDownload);
@@ -223,7 +229,7 @@ export function AttachmentFileCard({
   const open = canPreview ? onPreview : canDownload ? handleDownload : undefined;
 
   return (
-    <div className="group/file-card relative flex min-w-0 items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/50">
+    <div ref={scopeRef} className="group/file-card relative flex min-w-0 items-center gap-3 rounded-lg border border-border bg-card px-3 py-2.5 transition-colors hover:bg-muted/50">
       {/* The card's click target, under the content so text stays
           selectable-looking but every click lands here; the action buttons
           sit above it. */}

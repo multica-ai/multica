@@ -1,6 +1,6 @@
 {
   "name": "@multica/web",
-  "version": "0.8.1",
+  "version": "0.10.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@multica/core": "workspace:*",
+    "@multica/ee": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
     "@tanstack/react-query": "catalog:",

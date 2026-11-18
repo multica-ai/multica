@@ -112,6 +112,16 @@ describe("annotation draft submission through the real composer", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
   });
 
+  it("keeps the popover compact: icon send, short confirm label with a descriptive name", async () => {
+    const view = renderWithI18n(<Fixture onSubmit={vi.fn<Submit>(async () => "published")} />);
+    const input = await open(view.container, "Compact note");
+    const confirm = popup(input).getByRole("button", { name: "Add annotation" });
+    expect(confirm).toHaveTextContent(/^Add$/);
+    const send = popup(input).getByRole("button", { name: "Send" });
+    expect(send.textContent).toBe("");
+    expect(send.querySelector("svg")).not.toBeNull();
+  });
+
   it("uses Enter to save and Shift+Enter for a newline despite the Enter-send preference", async () => {
     useShortcutStore.getState().setShortcut("send", createShortcutChord("Enter"));
     const onSubmit = vi.fn(async () => true);

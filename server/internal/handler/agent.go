@@ -397,6 +397,10 @@ type TaskCancellationActor struct {
 }
 
 type AgentTaskResponse struct {
+	// Restricted marks a run on an issue in a private project the caller
+	// cannot see (MUL-8472): only identity, status, timing and usage remain.
+	Restricted bool `json:"restricted,omitempty"`
+
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
 	CodexRetryMustResume     bool                   `json:"codex_retry_must_resume,omitempty"`
 	CodexRetryExpectedBranch string                 `json:"codex_retry_expected_branch,omitempty"`
@@ -463,6 +467,7 @@ type AgentTaskResponse struct {
 	ProjectID          string                   `json:"project_id,omitempty"`          // issue's project, when present
 	ProjectTitle       string                   `json:"project_title,omitempty"`       // for surfacing in agent context
 	ProjectDescription string                   `json:"project_description,omitempty"` // durable project-level context injected into the brief
+	ProjectArchived    bool                     `json:"project_archived,omitempty"`    // project is archived: the brief tells the agent not to file new issues into it
 	ProjectResources   []ProjectResourceData    `json:"project_resources,omitempty"`   // resources attached to the project
 	CreatedAt          string                   `json:"created_at"`
 	PriorSessionID     string                   `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
@@ -560,6 +565,8 @@ type AgentTaskResponse struct {
 	ChatSource               *protocol.ChatSource `json:"chat_source,omitempty"`
 	ChatInThread             bool                 `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
 	ChatMessage              string               `json:"chat_message,omitempty"`                // user message for chat tasks
+	ChatSkillMessage         *string              `json:"chat_skill_message,omitempty"`          // verified member-authored input eligible for explicit skill selection
+	ChatResumeMessage        *string              `json:"chat_resume_message,omitempty"`         // excludes guidance already delivered to the resumed session
 	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
 	ChatIntro                bool                 `json:"chat_intro,omitempty"`                  // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
 	AutopilotRunID           string               `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
@@ -632,6 +639,10 @@ type AgentTaskResponse struct {
 	// owning user; the daemon must not fall back to its own credential. See
 	// MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+
+	// ChatFeishuSource is the Feishu ids of the message this task answers,
+	// from its frozen delivery. Absent for other surfaces.
+	ChatFeishuSource *protocol.FeishuSource `json:"chat_feishu_source,omitempty"`
 }
 
 // TaskAttribution is the wire shape of a run's accountable-human provenance
@@ -2532,6 +2543,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			h.TaskService.NotifyRuntimeMayHaveWork(pendingMovedTo)
 		}
 	}
+	// A cap change can make the agent's queued work claimable right away
+	// (#10455). Nudge its runtime now that the write is visible, as a runtime
+	// cap change does, instead of leaving the queue to the daemon's next poll.
+	// A runtime switch above already woke the same runtime.
+	capChanged := req.MaxConcurrentTasks != nil && *req.MaxConcurrentTasks != existing.MaxConcurrentTasks
+	if capChanged && updated.RuntimeID.Valid && updated.RuntimeID != pendingMovedTo && h.TaskService != nil {
+		h.TaskService.NotifyRuntimeCapacityChanged(updated.RuntimeID)
+	}
 
 	// Nullable runtime overrides: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
@@ -3017,6 +3036,9 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		PageLimit: int32(limit + 1),
 	})
 	if err != nil {
+		if writeQueryCancellation(w, r, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
 		return
 	}
@@ -3039,20 +3061,37 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), tasks, resp); err != nil {
+		if writeQueryCancellation(w, r, err) {
+			return
+		}
 		slog.Warn("list agent tasks: resolve chat owners failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
 		return
 	}
 	h.hydrateTaskSupplementMetadata(r.Context(), r, agent.WorkspaceID, tasks, resp)
+	if err := h.redactHiddenProjectTasks(r, workspaceID, tasks, resp); err != nil {
+		if writeQueryCancellation(w, r, err) {
+			return
+		}
+		slog.Warn("list agent tasks: resolve project access failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agent tasks")
+		return
+	}
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 	if includeUsage {
 		if err := h.hydrateAgentTaskUsage(r.Context(), agent.ID, taskIDs, resp); err != nil {
+			if writeQueryCancellation(w, r, err) {
+				return
+			}
 			slog.Warn("list agent task usage failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to list agent task usage")
 			return
 		}
 	}
 
+	if writeQueryCancellation(w, r, r.Context().Err()) {
+		return
+	}
 	if nextCursor != "" {
 		w.Header().Set(HeaderAgentTasksNextCursor, nextCursor)
 	}
@@ -3196,18 +3235,44 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Issues in private projects the caller cannot see (MUL-8472) are left
+	// out of issue_ids; the agent and its running count stay, as on the
+	// redacted run list.
+	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	var issueIDs []pgtype.UUID
+	for _, row := range rows {
+		issueIDs = append(issueIDs, row.IssueIds...)
+	}
+	hiddenIssues, err := h.hiddenIssueIDs(r, hidden, issueIDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return
+	}
+
 	resp := make([]WorkspaceWorkingAgent, 0, len(rows))
 	for _, row := range rows {
 		agentID := uuidToString(row.ID)
 		if _, ok := allowed[agentID]; !ok {
 			continue
 		}
+		visibleIssues := row.IssueIds
+		if len(hiddenIssues) > 0 {
+			visibleIssues = make([]pgtype.UUID, 0, len(row.IssueIds))
+			for _, id := range row.IssueIds {
+				if _, hide := hiddenIssues[id]; !hide {
+					visibleIssues = append(visibleIssues, id)
+				}
+			}
+		}
 		resp = append(resp, WorkspaceWorkingAgent{
 			ID:               agentID,
 			Name:             row.Name,
 			AvatarURL:        h.resolveAvatarURLPtr(textToPtr(row.AvatarUrl)),
 			RunningTaskCount: row.RunningTaskCount,
-			IssueIDs:         uuidStringsOrEmpty(row.IssueIds),
+			IssueIDs:         uuidStringsOrEmpty(visibleIssues),
 		})
 	}
 
@@ -3342,6 +3407,11 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	}
 	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), kept, resp); err != nil {
 		slog.Warn("agent task snapshot: resolve chat owners failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to list agent task snapshot")
+		return
+	}
+	if err := h.redactHiddenProjectTasks(r, workspaceID, kept, resp); err != nil {
+		slog.Warn("agent task snapshot: resolve project access failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list agent task snapshot")
 		return
 	}

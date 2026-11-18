@@ -104,7 +104,7 @@ WITH locked_task AS MATERIALIZED (
       AND r.workspace_id = $4
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
+      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi')
       AND ($5::text <> 'agent' OR (
           (SELECT count(*) FROM task_supplement s
            JOIN comment c ON c.id = s.comment_id
@@ -293,7 +293,7 @@ WITH locked_task AS MATERIALIZED (
       AND r.workspace_id = $3
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
+      AND r.provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi')
     FOR UPDATE OF t
 ), touched_issue AS (
     UPDATE issue i SET
@@ -843,7 +843,7 @@ func (q *Queries) SettleTerminalTaskSupplements(ctx context.Context, taskIds []p
 
 const startAgentTaskWithSupplement = `-- name: StartAgentTaskWithSupplement :one
 WITH candidate AS MATERIALIZED (
-    SELECT t.id, t.issue_id, r.workspace_id, r.provider
+    SELECT t.id, t.issue_id, t.chat_session_id, r.workspace_id, r.provider
     FROM agent_task_queue t
     JOIN agent_runtime r ON r.id = t.runtime_id
     WHERE t.id = $2
@@ -854,8 +854,8 @@ WITH candidate AS MATERIALIZED (
     SELECT id, workspace_id, issue_id, 'task-supplement-v1'
     FROM candidate
     WHERE $3::boolean
-      AND provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro')
-      AND issue_id IS NOT NULL
+      AND provider IN ('codex', 'claude', 'grok', 'cursor', 'kiro', 'pi')
+      AND (issue_id IS NOT NULL OR chat_session_id IS NOT NULL)
     ON CONFLICT DO NOTHING
     RETURNING task_id
 )
@@ -864,7 +864,9 @@ SET status = 'running',
     started_at = now(),
     wait_reason = NULL,
     prepare_lease_expires_at = NULL,
-    result = CASE WHEN $1::boolean AND candidate.provider IN ('pi', 'omp')
+    result = CASE WHEN $1::boolean AND candidate.provider = 'museapp'
+                  THEN COALESCE(t.result, '{}'::jsonb) || '{"process_cleanup_capability":"museapp-process-cleanup-v1"}'::jsonb
+                  WHEN $1::boolean AND candidate.provider IN ('pi', 'omp')
                   THEN COALESCE(t.result, '{}'::jsonb) || '{"process_cleanup_capability":"pi-process-cleanup-v1"}'::jsonb
                   ELSE t.result END
 FROM candidate

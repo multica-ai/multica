@@ -13,7 +13,21 @@
     "unread_other": "{{count}} discussions non lues",
     "default": "Demander à Multica"
   },
+  "bar": {
+    "history": "Historique des discussions",
+    "history_group": {
+      "today": "Aujourd'hui",
+      "week": "7 derniers jours",
+      "older": "Plus anciennes"
+    },
+    "close_chip": "Fermer {{title}}",
+    "all_chats": "Toutes les discussions",
+    "more_one": "{{count}} autre discussion",
+    "more_other": "{{count}} autres discussions"
+  },
   "input": {
+    "page_context_add": "Ajouter cette page comme contexte",
+    "page_context_remove": "Retirer le contexte de la page",
     "placeholder_no_agent": "Créez un agent pour commencer à discuter",
     "placeholder_archived": "Cette session est archivée",
     "placeholder_archived_agent": "Cet agent a été archivé",
@@ -41,10 +55,10 @@
     "title_one": "{{count}} message en file d'attente",
     "title_other": "{{count}} messages en file d'attente",
     "clear": "Tout effacer",
-    "steer": "Réorienter",
-    "steer_unavailable": "La réorientation est possible une fois la réponse en cours démarrée",
+    "steer": "Envoyer maintenant (arrête la réponse)",
+    "steer_unavailable": "Disponible après le début de la réponse",
     "steer_no_permission": "Vous n'avez plus l'autorisation d'exécuter cet agent",
-    "steer_unavailable_toast": "La réorientation est indisponible. Actualisation de la file d'attente.",
+    "steer_unavailable_toast": "Envoi immédiat indisponible. Actualisation de la file.",
     "edit": "Modifier le message en file d'attente",
     "remove": "Retirer le message de la file d'attente",
     "more": "Plus d'actions sur la file d'attente",
@@ -52,6 +66,8 @@
     "action_failed_toast": "Impossible de mettre à jour le message en file d'attente"
   },
   "message_list": {
+    "jump_to_latest": "Aller au plus récent",
+    "new_reply": "Nouvelle réponse",
     "show_details": "Afficher les détails",
     "replied_in": "Réponse en {{elapsed}}",
     "failed_after": "Échec après {{elapsed}}",
@@ -133,6 +149,7 @@
     "restore_tooltip": "Restaurer",
     "expand_tooltip": "Développer",
     "minimize_tooltip": "Réduire",
+    "close_tooltip": "Fermer",
     "another_running": "Une autre discussion est en cours",
     "another_unread": "Une autre discussion a des réponses non lues",
     "running": "En cours",
@@ -172,7 +189,6 @@
       "label": "Recommander une action",
       "prompt": "Examinez ce que vous savez de mon espace de travail et recommandez une première action utile."
     },
-    "customize": "Personnaliser les amorces",
     "uploading": "Attendez la fin des téléversements avant d’utiliser une amorce.",
     "draft_in_progress": "Envoyez ou effacez votre brouillon avant d’utiliser une amorce."
   },
@@ -238,8 +254,6 @@
     "no_response_preview": "Aucune réponse textuelle",
     "quick_agents": "Agents fréquents",
     "add": "Ajouter",
-    "add_agent": "Ajouter un agent fréquent",
-    "unpin_agent": "Retirer des agents fréquents",
     "waiting": "En attente de réponse",
     "pin": "Épingler",
     "unpin": "Détacher",
@@ -247,7 +261,9 @@
     "archive": "Archiver",
     "unarchive": "Désarchiver",
     "archived_title": "Archivées",
-    "row_actions_aria": "Actions de discussion"
+    "row_actions_aria": "Actions de discussion",
+    "wakeup_preview": "Revenu faire le point",
+    "wakeup_active": "Attend pour faire le point"
   },
   "header": {
     "agent_settings": "Paramètres de l'agent",
@@ -255,5 +271,52 @@
     "archive": "Archiver la discussion",
     "unarchive": "Désarchiver la discussion",
     "delete": "Supprimer la discussion"
+  },
+  "wakeup": {
+    "panel_title": "Réveils",
+    "panel_empty": "Aucun réveil dans cette conversation",
+    "panel_ended": "Terminés récemment",
+    "limits_hint": "Chaque réveil a une fin : l'attente dure 24 heures par défaut et 7 jours au maximum. Si l'échéance arrive d'abord, l'agent revient une fois pour vous dire où en sont les choses.",
+    "strip_waiting": "En attente : {{title}}",
+    "card": "Reviendra faire le point : {{title}}",
+    "ends": "se termine {{relative}}",
+    "reminder_at": "rappel {{relative}}",
+    "next_check": "prochaine vérification {{relative}}",
+    "last_check": "Dernière vérification : {{note}}",
+    "cancel": "Annuler le réveil",
+    "cancel_failed": "Impossible d'annuler le réveil",
+    "retry": "Réessayer",
+    "retry_failed": "Impossible de relancer le réveil",
+    "status": {
+      "active": "En attente",
+      "fired": "Point fait",
+      "expired": "Échéance atteinte",
+      "cancelled": "Annulé",
+      "failed": "N'a pas pu s'exécuter"
+    },
+    "report": {
+      "waiting": "En attente du compte rendu",
+      "running": "Compte rendu en cours…",
+      "failed": "Compte rendu impossible"
+    },
+    "failure": {
+      "permission_revoked": "La personne à l'origine de la demande ne peut plus exécuter cet agent",
+      "access_lost": "L'élément surveillé est passé dans un projet privé",
+      "dispatch_failed": "L'agent n'a pas pu s'exécuter"
+    },
+    "kind": {
+      "condition": "Quand cela arrive",
+      "at": "Rappel",
+      "check": "Vérification régulière"
+    },
+    "divider": {
+      "condition": "Retour pour faire le point · c'est arrivé",
+      "at": "Retour pour faire le point · rappel",
+      "check": "Retour pour faire le point · vérification",
+      "expired": "Retour pour faire le point · échéance atteinte",
+      "generic": "Retour pour faire le point"
+    },
+    "queue_label": "Réveil : {{title}}",
+    "queue_fallback": "Réveil"
   }
 }

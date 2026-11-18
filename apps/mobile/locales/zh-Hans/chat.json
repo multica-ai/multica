@@ -14,6 +14,7 @@
     "upload_image": "上传图片",
     "upload_file": "上传文件",
     "send": "发送",
+    "queue": "排队发送",
     "default_placeholder": "输入消息...",
     "unavailable": "聊天不可用",
     "stop_agent": "停止智能体",

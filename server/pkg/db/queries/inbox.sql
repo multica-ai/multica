@@ -15,6 +15,11 @@ SELECT i.*,
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
+  -- MUL-9333: a snoozed issue stays out of the inbox until its time. A row
+  -- whose time has passed is listed again and keeps snoozed_until, which is
+  -- how the client tells an issue that came back on its own.
+  AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR iss.project_id IS NULL OR NOT (iss.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
 ORDER BY i.created_at DESC;
 
 -- name: ListArchivedInboxItems :many
@@ -49,6 +54,12 @@ WITH eligible_archived AS MATERIALIZED (
       AND i.recipient_type = $2
       AND i.recipient_id = $3
       AND i.archived = true
+      -- MUL-8472: private projects the caller cannot see.
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+          SELECT 1 FROM issue hidden_issue
+          WHERE hidden_issue.id = i.issue_id
+            AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+      ))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1
           FROM inbox_item active
@@ -98,10 +109,6 @@ JOIN selected_ids selected ON selected.id = i.id
 LEFT JOIN issue iss ON iss.id = i.issue_id
 ORDER BY i.created_at DESC, i.id DESC;
 
--- name: GetInboxItem :one
-SELECT * FROM inbox_item
-WHERE id = $1;
-
 -- name: GetInboxItemInWorkspace :one
 SELECT * FROM inbox_item
 WHERE id = $1 AND workspace_id = $2;
@@ -109,16 +116,44 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateInboxItem :one
 -- A missing recipient is a quiet skip (pgx.ErrNoRows), not a delivery failure.
 -- Check the insertion snapshot without adding recipient row locks.
+--
+-- MUL-9333: a row written on an issue the recipient has snoozed joins the
+-- snooze, so it stays out of the inbox with the rest of the issue.
+-- inbox.Deliver ends the snooze instead when the row is one that
+-- wakes it.
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
-    actor_type, actor_id, details, id
+    actor_type, actor_id, details, id,
+    snoozed_until, snoozed_at
 )
-SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE ($2::text = 'member' AND EXISTS (
+SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
+       snoozed.snoozed_until, snoozed.snoozed_at
+FROM (SELECT 1) AS one
+LEFT JOIN LATERAL (
+    SELECT s.snoozed_until, s.snoozed_at
+    FROM inbox_item s
+    WHERE s.workspace_id = $1 AND s.recipient_type = $2 AND s.recipient_id = $3
+      AND s.issue_id = $6 AND s.archived = false AND s.snoozed_until > now()
+    ORDER BY s.snoozed_until DESC
+    LIMIT 1
+) AS snoozed ON true
+WHERE (($2::text = 'member' AND EXISTS (
     SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
 )) OR ($2::text = 'agent' AND EXISTS (
     SELECT 1 FROM agent WHERE workspace_id = $1 AND id = $3
+)))
+-- MUL-8472: a member outside a private project gets no notification about its
+-- issues, whatever their workspace role. Only project members do.
+AND NOT ($2::text = 'member' AND EXISTS (
+    SELECT 1 FROM issue private_issue
+    JOIN project private_project ON private_project.id = private_issue.project_id
+    WHERE private_issue.id = $6
+      AND private_project.visibility = 'private'
+      AND NOT EXISTS (
+          SELECT 1 FROM project_member pm
+          WHERE pm.project_id = private_project.id AND pm.user_id = $3
+      )
 ))
 RETURNING *;
 
@@ -162,12 +197,30 @@ WHERE id = $1
 RETURNING *;
 
 -- name: ArchiveInboxItem :one
-UPDATE inbox_item SET archived = true
+-- Archiving ends a snooze (MUL-9333), on every archive path below: a row
+-- restored later must not come back still hidden.
+UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL
 WHERE id = $1
 RETURNING *;
 
+-- name: DeleteInboxGroup :execrows
+-- A visible inbox row groups notifications on an issue. Remove that group
+-- only in the selected view, so older siblings cannot bring the row back and
+-- deleting an active row does not erase its archived history.
+WITH target AS (
+    SELECT selected.* FROM inbox_item selected
+    WHERE selected.id = $1 AND selected.workspace_id = $2
+      AND selected.recipient_type = 'member' AND selected.recipient_id = $3
+)
+DELETE FROM inbox_item item USING target
+WHERE item.workspace_id = target.workspace_id
+  AND item.recipient_type = target.recipient_type
+  AND item.recipient_id = target.recipient_id
+  AND item.archived = target.archived
+  AND (item.id = target.id OR item.issue_id = target.issue_id);
+
 -- name: ArchiveInboxByIssue :execrows
-UPDATE inbox_item SET archived = true
+UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;
 
 -- name: UnarchiveInboxItem :one
@@ -186,13 +239,24 @@ UPDATE inbox_item SET archived = false
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = true;
 
 -- name: ArchiveInboxByIssueAndType :many
-UPDATE inbox_item SET archived = true
+UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL
 WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
 RETURNING recipient_type, recipient_id;
 
 -- name: CountUnreadInbox :one
-SELECT count(*) FROM inbox_item
-WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false;
+SELECT count(*) FROM inbox_item i
+WHERE i.workspace_id = sqlc.arg('workspace_id')
+  AND i.recipient_type = sqlc.arg('recipient_type')
+  AND i.recipient_id = sqlc.arg('recipient_id')
+  AND i.read = false
+  AND i.archived = false
+  AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
+  -- MUL-8472: private projects the caller cannot see.
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
+      SELECT 1 FROM issue hidden_issue
+      WHERE hidden_issue.id = i.issue_id
+        AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+  ));
 
 -- name: CountUnreadInboxByWorkspace :many
 -- Per-workspace unread inbox counts for a recipient member, matching the
@@ -215,14 +279,31 @@ FROM (
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
+      -- MUL-9333: a snoozed issue does not count until it comes back.
+      AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
+      -- MUL-8472: issues in private projects the recipient is not a member
+      -- of do not count.
+      AND NOT EXISTS (
+          SELECT 1 FROM issue private_issue
+          JOIN project private_project ON private_project.id = private_issue.project_id
+          WHERE private_issue.id = i.issue_id
+            AND private_project.visibility = 'private'
+            AND NOT EXISTS (
+                SELECT 1 FROM project_member pm
+                WHERE pm.project_id = private_project.id AND pm.user_id = i.recipient_id
+            )
+      )
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false
 GROUP BY newest.workspace_id;
 
 -- name: MarkAllInboxRead :execrows
+-- The batch actions act on what the inbox lists, so they skip snoozed issues
+-- (MUL-9333).
 UPDATE inbox_item SET read = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false AND read = false;
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false AND read = false
+  AND (snoozed_until IS NULL OR snoozed_until <= now());
 
 -- name: MarkInboxReadByIssue :execrows
 -- Reading an issue outside the inbox (its page, a side peek, the Unread view)
@@ -234,13 +315,17 @@ WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND 
 -- same through MarkInboxRead. Archived rows are left as they are, as in
 -- MarkAllInboxRead, which also keeps the lookup on the partial index
 -- idx_inbox_active_by_issue.
+-- A snoozed issue is left unread: viewing it elsewhere does not end the
+-- snooze, and it comes back as something to look at (MUL-9333).
 UPDATE inbox_item SET read = true
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
-  AND issue_id = $3 AND archived = false AND read = false;
+  AND issue_id = $3 AND archived = false AND read = false
+  AND (snoozed_until IS NULL OR snoozed_until <= now());
 
 -- name: ArchiveAllInbox :execrows
 UPDATE inbox_item SET archived = true
-WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false;
+WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false
+  AND (snoozed_until IS NULL OR snoozed_until <= now());
 
 -- name: ArchiveAllReadInbox :execrows
 -- "Read" is the state of the one issue row the inbox renders: the newest
@@ -257,6 +342,7 @@ WITH newest_groups AS (
       AND i.recipient_type = 'member'
       AND i.recipient_id = $2
       AND i.archived = false
+      AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
     ORDER BY COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
 ), read_groups AS (
     SELECT group_id
@@ -272,10 +358,94 @@ WHERE i.workspace_id = $1
   AND COALESCE(i.issue_id, i.id) = selected.group_id;
 
 -- name: ArchiveCompletedInbox :execrows
-UPDATE inbox_item i SET archived = true
+-- Snoozed issues included: a done issue leaves the inbox either way.
+UPDATE inbox_item i SET archived = true, snoozed_until = NULL, snoozed_at = NULL
 WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
   AND i.issue_id IN (
     SELECT id FROM issue
     WHERE workspace_id = $1
       AND status = ANY(sqlc.arg('terminal_status_keys')::text[])
   );
+
+-- name: SnoozeInboxGroup :many
+-- Snooze is issue-level, like archive (MUL-9333): every active row the
+-- recipient has on the item's issue carries the time it comes back. Changing
+-- the time of a running snooze keeps when it started, so the count of what
+-- arrived meanwhile carries on. The newest row turns unread, so the issue
+-- comes back as something to look at.
+WITH target AS (
+    SELECT t.workspace_id, t.recipient_type, t.recipient_id, t.issue_id
+    FROM inbox_item t
+    WHERE t.id = sqlc.arg('id') AND t.issue_id IS NOT NULL AND t.archived = false
+), newest AS (
+    SELECT n.id
+    FROM inbox_item n
+    JOIN target ON n.workspace_id = target.workspace_id
+        AND n.recipient_type = target.recipient_type
+        AND n.recipient_id = target.recipient_id
+        AND n.issue_id = target.issue_id
+    WHERE n.archived = false
+    ORDER BY n.created_at DESC, n.id DESC
+    LIMIT 1
+)
+UPDATE inbox_item item
+SET snoozed_until = sqlc.arg('snoozed_until')::timestamptz,
+    snoozed_at = CASE WHEN item.snoozed_until > now() AND item.snoozed_at IS NOT NULL THEN item.snoozed_at ELSE now() END,
+    read = CASE WHEN item.id = (SELECT id FROM newest) THEN false ELSE item.read END
+FROM target
+WHERE item.workspace_id = target.workspace_id
+  AND item.recipient_type = target.recipient_type
+  AND item.recipient_id = target.recipient_id
+  AND item.issue_id = target.issue_id
+  AND item.archived = false
+RETURNING item.*;
+
+-- name: UnsnoozeInboxGroup :many
+-- Ends a snooze on one issue: back in the inbox now. Also clears the time a
+-- snooze that already ran out left on the rows.
+UPDATE inbox_item SET snoozed_until = NULL, snoozed_at = NULL
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4
+  AND archived = false AND snoozed_until IS NOT NULL
+RETURNING *;
+
+-- name: ListSnoozedInbox :many
+-- The recipient's snoozed issues, soonest back first (MUL-9333). `updates` is
+-- how many rows arrived while snoozed; `item_id` is the issue's newest row,
+-- the one the snooze endpoints take.
+SELECT g.issue_id::uuid AS issue_id,
+       newest.id AS item_id,
+       g.snoozed_until::timestamptz AS snoozed_until,
+       g.snoozed_at::timestamptz AS snoozed_at,
+       g.updates::bigint AS updates
+FROM (
+    SELECT i.issue_id,
+           max(i.snoozed_until) AS snoozed_until,
+           min(i.snoozed_at) AS snoozed_at,
+           count(*) FILTER (WHERE i.snoozed_at IS NOT NULL AND i.created_at > i.snoozed_at) AS updates
+    FROM inbox_item i
+    WHERE i.workspace_id = sqlc.arg('workspace_id')
+      AND i.recipient_type = 'member'
+      AND i.recipient_id = sqlc.arg('recipient_id')
+      AND i.archived = false
+      AND i.issue_id IS NOT NULL
+      AND i.snoozed_until > now()
+      -- MUL-8472: private projects the caller cannot see.
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT EXISTS (
+          SELECT 1 FROM issue hidden_issue
+          WHERE hidden_issue.id = i.issue_id
+            AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+      ))
+    GROUP BY i.issue_id
+) g
+JOIN LATERAL (
+    SELECT n.id
+    FROM inbox_item n
+    WHERE n.workspace_id = sqlc.arg('workspace_id')
+      AND n.recipient_type = 'member'
+      AND n.recipient_id = sqlc.arg('recipient_id')
+      AND n.issue_id = g.issue_id
+      AND n.archived = false
+    ORDER BY n.created_at DESC, n.id DESC
+    LIMIT 1
+) newest ON true
+ORDER BY g.snoozed_until ASC, g.issue_id;

@@ -7,12 +7,11 @@ import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { useAuthStore } from "@multica/core/auth";
 import { useChatStore } from "@multica/core/chat";
-import { useConfigStore } from "@multica/core/config";
 import { formatStarCount, githubStarsOptions, MULTICA_GITHUB_URL } from "@multica/core/github/stars";
 import { createLogger } from "@multica/core/logger";
 import { needsSourceBackfill } from "@multica/core/onboarding";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import { useSessionPromptStore } from "@multica/core/session-prompt";
+import { useDevPromptStore, useSessionPromptStore } from "@multica/core/session-prompt";
 import {
   agentDoneIssueCountOptions,
   claimStarPromptShowing,
@@ -24,6 +23,7 @@ import {
 } from "@multica/core/star-prompt";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility";
+import { isQuietMoment } from "../common/quiet-moment";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { GitHubIcon } from "../onboarding/components/brand-icons";
@@ -33,24 +33,6 @@ const logger = createLogger("star-prompt");
 
 /** Lets the status change settle before the card slides in. */
 export const STAR_PROMPT_DELAY_MS = 2500;
-
-/**
- * Nothing is open or being typed into. A card that appears mid-sentence or
- * over a dialog reads as an interruption, so such moments are skipped rather
- * than deferred.
- */
-function isQuietMoment(): boolean {
-  if (document.visibilityState !== "visible") return false;
-  if (document.querySelector("[role='dialog'][aria-modal='true'], [role='alertdialog']")) return false;
-  const active = document.activeElement;
-  if (
-    active instanceof HTMLElement &&
-    (active.isContentEditable || active.tagName === "INPUT" || active.tagName === "TEXTAREA")
-  ) {
-    return false;
-  }
-  return true;
-}
 
 interface Showing {
   agentName: string;
@@ -70,7 +52,6 @@ export function StarPrompt() {
   const wsId = useCurrentWorkspace()?.id ?? null;
   const qc = useQueryClient();
   const moment = useStarPromptStore((s) => s.moment);
-  const disabled = useConfigStore((s) => s.starPromptDisabled);
   const chatOpen = useChatStore((s) => s.isOpen);
   const floatingChatEnabled = useChatStore((s) => s.floatingChatEnabled);
   const { pathname } = useNavigation();
@@ -92,13 +73,15 @@ export function StarPrompt() {
     if (!moment || !wsId) return;
 
     const consider = async (m: StarPromptMoment, workspaceId: string) => {
-      if (m.wsId !== workspaceId || disabled) return;
+      if (m.wsId !== workspaceId) return;
       if (useSessionPromptStore.getState().prompted) return;
       const user = useAuthStore.getState().user;
       if (!starPromptDue(user, Date.now())) return;
       // The attribution survey owns this session's one interruption.
       if (needsSourceBackfill(user, readSourceBackfillDismissCount(user?.id))) return;
       if (!isQuietMoment()) return;
+      // The What's new deck holds the corner; the next finished issue tries again.
+      if (useSessionPromptStore.getState().corner !== null) return;
 
       const [doneCount, agents] = await Promise.all([
         qc.fetchQuery(agentDoneIssueCountOptions(workspaceId, m.agentId)),
@@ -107,8 +90,9 @@ export function StarPrompt() {
       const agent = agents.find((a) => a.id === m.agentId);
       if (!agent || doneCount < STAR_PROMPT_MIN_AGENT_DONE_ISSUES) return;
       if (!mountedRef.current || !(await claimStarPromptShowing())) return;
+      if (!mountedRef.current || !useSessionPromptStore.getState().claimCorner("star")) return;
       useSessionPromptStore.getState().markPrompted();
-      if (mountedRef.current) setShowing({ agentName: agent.name, doneCount });
+      setShowing({ agentName: agent.name, doneCount });
     };
 
     const timer = window.setTimeout(() => {
@@ -116,12 +100,28 @@ export function StarPrompt() {
       consider(moment, wsId).catch((err) => logger.warn("failed to evaluate star prompt", err));
     }, STAR_PROMPT_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [moment, wsId, disabled, qc]);
+  }, [moment, wsId, qc]);
+
+  useEffect(() => {
+    if (!wsId) return;
+    const answer = () => {
+      if (!useDevPromptStore.getState().take("star")) return;
+      useSessionPromptStore.getState().claimCorner("star");
+      setShowing({ agentName: "Dev agent", doneCount: STAR_PROMPT_MIN_AGENT_DONE_ISSUES });
+    };
+    answer();
+    return useDevPromptStore.subscribe(answer);
+  }, [wsId]);
+
+  useEffect(() => () => useSessionPromptStore.getState().releaseCorner("star"), []);
 
   // The chat window covers this corner while it is open.
   if (!showing || chatOpen) return null;
 
-  const close = () => setShowing(null);
+  const close = () => {
+    setShowing(null);
+    useSessionPromptStore.getState().releaseCorner("star");
+  };
   const star = () => {
     close();
     markStarPromptStarred().catch((err) => logger.warn("failed to record star click", err));
@@ -133,7 +133,7 @@ export function StarPrompt() {
       aria-live="polite"
       data-slot="star-prompt"
       className={cn(
-        "absolute right-[var(--chat-launcher-inset)] z-50 w-[min(23.75rem,calc(100%-2*var(--chat-launcher-inset)))] rounded-xl bg-surface-raised p-4 pb-3 text-popover-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border",
+        "absolute right-[var(--chat-launcher-inset)] z-50 w-[min(23.75rem,calc(100%-2*var(--chat-launcher-inset)))] rounded-xl bg-surface-raised p-4 pb-3 text-popover-foreground shadow-[var(--floating-shadow)] ring-1 ring-floating-border",
         "animate-in fade-in-0 slide-in-from-bottom-2 duration-200 motion-reduce:animate-none",
         launcherVisible ? "above-chat-launcher" : "bottom-[var(--chat-launcher-inset)]",
       )}

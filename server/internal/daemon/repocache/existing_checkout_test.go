@@ -1,6 +1,9 @@
 package repocache
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -408,6 +411,80 @@ func TestFreshMigrationCarriesUnpushedBranch(t *testing.T) {
 				t.Fatalf("agent branches = %q, want only %q (no other task's cache branch)", got, want)
 			}
 		})
+	}
+}
+
+// Two repositories whose checkout directories share a name — an upstream and
+// its fork — target the same path. The second checkout is refused before it
+// retargets, resets, cleans, or migrates the first one, whatever the modes
+// and fresh flag (MUL-9099).
+func TestCheckoutRefusesPathHoldingAnotherRepository(t *testing.T) {
+	t.Parallel()
+	for _, existing := range checkoutModes {
+		for _, requested := range checkoutModes {
+			for _, fresh := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s-then-%s/fresh=%t", existing.name, requested.name, fresh), func(t *testing.T) {
+					t.Parallel()
+					sources := make([]string, 2)
+					for i := range sources {
+						dir := filepath.Join(t.TempDir(), "repo")
+						if err := os.Mkdir(dir, 0o755); err != nil {
+							t.Fatalf("mkdir source: %v", err)
+						}
+						sources[i] = createTestRepoAt(t, dir)
+					}
+					a, b := sources[0], sources[1]
+					cache := New(t.TempDir(), testLogger())
+					if err := cache.Sync("ws-1", []RepoInfo{{URL: a}, {URL: b}}); err != nil {
+						t.Fatalf("sync failed: %v", err)
+					}
+					workDir := t.TempDir()
+					checkout := func(url string, isolated, fresh bool) (*WorktreeResult, error) {
+						return cache.CreateWorktree(WorktreeParams{
+							WorkspaceID:         "ws-1",
+							RepoURL:             url,
+							WorkDir:             workDir,
+							AgentName:           "Agent",
+							TaskID:              firstTaskID,
+							IsolatedGitMetadata: isolated,
+							Fresh:               fresh,
+						})
+					}
+					first, err := checkout(a, existing.isolated, false)
+					if err != nil {
+						t.Fatalf("checkout of A failed: %v", err)
+					}
+					if !CheckoutBelongsTo(context.Background(), cache.Lookup("ws-1", a), first.Path) {
+						t.Fatal("A's checkout does not belong to A's cache")
+					}
+					if CheckoutBelongsTo(context.Background(), cache.Lookup("ws-1", b), first.Path) {
+						t.Fatal("A's checkout belongs to B's cache")
+					}
+					originBefore, _ := runGitOutput("-C", first.Path, "config", "--get", "remote.origin.url")
+					headBefore := gitHead(t, first.Path)
+					note := filepath.Join(first.Path, "local-work.txt")
+					if err := os.WriteFile(note, []byte("keep\n"), 0o644); err != nil {
+						t.Fatalf("write local work: %v", err)
+					}
+
+					if _, err := checkout(b, requested.isolated, fresh); !errors.Is(err, ErrCheckoutPathTaken) {
+						t.Fatalf("checkout of B into A's path: err = %v, want ErrCheckoutPathTaken", err)
+					}
+					if got, _ := runGitOutput("-C", first.Path, "config", "--get", "remote.origin.url"); string(got) != string(originBefore) {
+						t.Errorf("A's origin changed: %q -> %q", originBefore, got)
+					}
+					if got := gitHead(t, first.Path); got != headBefore {
+						t.Errorf("A's HEAD moved: %s -> %s", headBefore, got)
+					}
+					if got := readFile(t, note); got != "keep\n" {
+						t.Errorf("A's local work = %q, want it kept", got)
+					}
+					if isIsolatedCheckout(first.Path) != existing.isolated {
+						t.Error("A's checkout was migrated to another metadata shape")
+					}
+				})
+			}
+		}
 	}
 }
 

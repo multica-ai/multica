@@ -10,16 +10,18 @@ Les touches ci-dessous sont notées pour macOS. Sous Windows et Linux, `⌘` dev
 
 ## Recherche
 
-Appuyez sur `⌘K`, ou cliquez sur **Rechercher...** en haut de la barre latérale. Sans saisie, la fenêtre propose **Nouvelle tâche** et les tâches ouvertes récemment. Dès que vous tapez, les résultats sont regroupés :
+Appuyez sur `⌘K`, ou cliquez sur **Rechercher...** dans la barre d'applications. Sans saisie, la fenêtre propose **Nouvelle tâche** et les tâches ouvertes récemment. Dès que vous tapez, les résultats sont regroupés :
 
 | Groupe | Ce qu'il trouve |
 |---|---|
 | **Pages** | Les pages de l'espace de travail : boîte de réception, discussion, tâches, projets, agents, paramètres, etc. |
+| **Vues** | Les vues de tâches intégrées et les vues enregistrées auxquelles vous avez accès, recherchées par nom. |
 | **Commandes** | Nouvelle tâche, Nouveau projet, et le passage au thème clair, sombre ou du système. Sur la page d'une tâche s'ajoutent Copier le lien de la tâche, Copier l'identifiant, Replier tous les commentaires et Déplier tous les commentaires. |
 | **Membres** | Recherche par nom ou par e-mail. |
 | **Espaces de travail** | Vos autres espaces de travail ; en choisir un vous y fait passer. |
 | **Projets**, **Tâches** | Correspondances dans les titres, mais aussi dans les descriptions de projets et de tâches et dans les commentaires. L'extrait trouvé s'affiche sous le résultat, et les tâches terminées sont incluses. |
 | **Annulés** | Les projets et tâches annulés sont regroupés à la fin au lieu de se mêler au reste. |
+| **Confier à un agent** | Toujours la dernière ligne pendant la saisie. Elle ouvre **Créer avec un agent** avec ce que vous avez tapé, le projet courant et la tâche ouverte comme parente ; rien n'est créé avant votre confirmation. |
 
 Choisir un résultat l'ouvre. Maintenez `⌘` (`Ctrl` sous Windows et Linux) en cliquant ou en appuyant sur Entrée pour l'ouvrir dans un nouvel onglet. `Échap` ferme la recherche.
 
@@ -32,15 +34,18 @@ Choisir un résultat l'ouvre. Maintenez `⌘` (`Ctrl` sous Windows et Linux) en 
 | Afficher ou masquer la barre latérale gauche | `⌘B` | `Ctrl+B` | |
 | Afficher ou masquer la barre latérale droite | `⌘/` | `Ctrl+/` | Uniquement sur les pages qui en ont une, comme une tâche. |
 | Afficher ou masquer la fenêtre de discussion | `⌘J` | `Ctrl+J` | À l'ouverture, le curseur se place dans la zone de saisie. Voir [Discuter depuis n'importe quelle page](/chat#discuter-depuis-nimporte-quelle-page). |
+| Demander à Multica | `⇧⌘J` | `Ctrl+Maj+J` | Démarre une nouvelle discussion dans la fenêtre flottante. |
 | Rechercher dans la tâche | `⌘F` | `Ctrl+F` | Voir plus bas. |
-| Archiver la notification | `E` | `E` | Archive la notification ouverte dans la boîte de réception, ou la restaure quand vous consultez les archives. |
+| Archiver la notification | `E` | `E` | Sur une tâche ouverte depuis la boîte de réception, archive sa notification et ouvre la suivante. Dans les notifications archivées, restaure celle qui est ouverte. Voir [Boîte de réception](/inbox#traiter-les-notifications). |
+| Reporter la notification | `H` | `H` | Sur une tâche ouverte depuis la boîte de réception, la reporte et ouvre la suivante. Sur une tâche reportée, la fait revenir maintenant. |
 | Envoyer | `⌘↵` | `Ctrl+Enter` | Envoie commentaires et messages de discussion, et sert aussi à créer des tâches. |
+| Saisie vocale | Non défini | Non défini | Desktop uniquement ; activez-la d’abord dans Paramètres → Saisie vocale. Voir [Saisie vocale](/desktop-app#saisie-vocale). |
 | Revenir en arrière | `⌘[` | `Ctrl+[` | |
 | Avancer | `⌘]` | `Ctrl+]` | |
 
-Les raccourcis à une seule touche (`C`, `E`) et Revenir en arrière / Avancer ne réagissent pas pendant que vous tapez dans un champ.
+Les raccourcis à une seule touche (`C`, `E`, `H`) et Revenir en arrière / Avancer ne réagissent pas pendant que vous tapez dans un champ.
 
-Le groupe **Navigation** propose aussi d'aller à la boîte de réception, aux discussions, à Mes tâches, aux tâches, aux projets, aux automatisations, aux agents, aux squads, aux statistiques, aux runtimes, aux skills et aux paramètres. Aucune de ces actions n'a de touche par défaut : attribuez-en à celles que vous utilisez.
+Le groupe **Navigation** propose aussi d'aller à la boîte de réception, aux discussions, à Mes tâches, aux tâches, aux projets, aux automatisations, aux agents, aux squads, aux statistiques, aux runtimes, aux skills et aux paramètres. Aucune de ces actions n'a de touche par défaut : attribuez-en à celles que vous utilisez. Aller à la boîte de réception ouvre la page Boîte de réception ; la liste des notifications elle-même est la première section du panneau Travail. Aller à Mes tâches ouvre la page Mes tâches, qui n'est pas la vue **Mon travail** du panneau Travail.
 
 ### Raccourcis système fixes
 
@@ -81,7 +86,7 @@ L'enregistrement refuse certaines combinaisons et en indique la raison sous les 
 
 - une combinaison déjà attribuée à une autre action ;
 - les combinaisons réservées au navigateur, à la fenêtre de bureau ou au système, comme `⌘W`, `⌘R`, `⌘Q`, `⌘,`, les touches d'édition (copier, coller…), `⌘0`–`⌘9` et les touches de zoom. Dans un navigateur, `⌘P`, `⌘L`, `⌘T`, `⌘N`, `⌘D` et `⌘U` sont aussi exclus ; l'application de bureau les accepte. Sous Windows et Linux, toute combinaison avec la touche Windows / Super est refusée ;
-- les actions qui fonctionnent aussi dans un champ de saisie, comme Ouvrir la recherche, la fenêtre de discussion ou Rechercher dans la tâche, exigent `⌘`, `Ctrl` ou `Control`, pour ne jamais se déclencher pendant la frappe ;
+- les actions qui fonctionnent aussi dans un champ de saisie, comme Ouvrir la recherche, la fenêtre de discussion ou Rechercher dans la tâche, exigent `⌘`, `Ctrl` ou `Control`, pour ne jamais se déclencher pendant la frappe ; La saisie vocale accepte aussi `Option` / `Alt` avec une touche non imprimable, comme `Space`, sauf si la combinaison est réservée.
 - **Envoyer** ne peut être que `↵` ou `⌘↵`.
 
 <Callout>
@@ -103,8 +108,8 @@ Les préférences personnelles se trouvent dans **Paramètres → Préférences*
 | Groupe | Réglage | Enregistré |
 |---|---|---|
 | **Langue et région** | Langue : English, 中文, 한국어, 日本語, Français. La page se recharge après un changement.<br />Fuseau horaire : suit le navigateur par défaut ; sert aux dates et graphiques de tous vos espaces de travail. La liste couvre tous les fuseaux et se filtre par recherche. | Dans votre compte, synchronisé sur vos autres appareils |
-| **Apparence** | Thème : Clair, Sombre ou Système. Vous pouvez aussi taper « thème » dans la recherche pour en changer. | Sur cet appareil |
-| **Commentaires et discussion** | **Épingler la barre de commentaire en bas** : la zone de commentaire reste visible pendant la lecture d'une longue chronologie.<br />**En répondant à un agent en cours d'exécution** : choix par défaut entre « Ajouter à l'exécution en cours » et « Démarrer après cette exécution », modifiable pour chaque message avant l'envoi ; voir [Réorienter un agent en cours d'exécution](/mentioning-agents#réorienter-un-agent-en-cours-dexécution).<br />**Fenêtre de discussion flottante** : désactivée, le bouton de discussion n'apparaît plus en bas à droite. | Sur cet appareil |
+| **Apparence** | A sa propre page, **Paramètres → Apparence** : mode (Clair, Sombre ou Système), thème, polices et mise en page. Vous pouvez aussi taper « thème » dans la recherche pour changer de mode. Voir [Thèmes et apparence](/themes). | Sur cet appareil |
+| **Commentaires et discussion** | **Épingler la barre de commentaire en bas** : la zone de commentaire reste visible pendant la lecture d'une longue chronologie.<br />**En répondant à un agent en cours d'exécution** : choix par défaut entre « Ajouter à l'exécution en cours » et « Démarrer après cette exécution », modifiable pour chaque message avant l'envoi ; voir [Réorienter un agent en cours d'exécution](/mentioning-agents#réorienter-un-agent-en-cours-dexécution).<br />**Fenêtre de discussion flottante** : désactivée, la discussion rapide quitte la barre d'état (et, dans une fenêtre étroite, le bouton de discussion rond n'apparaît plus en bas à droite). | Sur cet appareil |
 | **Ouverture des tâches** | Un clic sur une carte ou une ligne ouvre la page complète ou l'aperçu latéral. Maj+clic ouvre l'autre. | Sur cet appareil |
 | **Champs affichés à la création de tâches** | Les champs gardés dans la barre d'outils pour « Création avec un agent » et « Création manuelle ». Les champs masqués restent accessibles depuis le menu ⋯ et réapparaissent tant qu'ils contiennent une valeur. | Sur cet appareil, pour l'espace de travail actuel |
 

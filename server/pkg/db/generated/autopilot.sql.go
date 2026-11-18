@@ -284,6 +284,13 @@ func (q *Queries) CreateAutopilotRun(ctx context.Context, arg CreateAutopilotRun
 
 const createAutopilotTask = `-- name: CreateAutopilotTask :one
 
+WITH enqueue_agent AS MATERIALIZED (
+    SELECT a.id, COALESCE(a.runtime_id, $12::uuid) AS runtime_id
+    FROM agent a
+    WHERE a.id = $1
+      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, $12::uuid))
+    FOR KEY SHARE OF a
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
     originator_user_id, accountable_user_id, rule_version_id,
@@ -291,21 +298,20 @@ INSERT INTO agent_task_queue (
     id
 )
 SELECT
-    $1, $2, NULL, 'queued', $3, $4, $5,
+    $1, enqueue_agent.runtime_id, NULL, 'queued', $2, $3, $4,
+    $5,
     $6,
     $7,
     $8,
     $9,
     $10,
-    $11,
-    COALESCE($12::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, NULL, $2)
+    COALESCE($11::uuid, gen_random_uuid())
+FROM enqueue_agent
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step
 `
 
 type CreateAutopilotTaskParams struct {
 	AgentID              pgtype.UUID `json:"agent_id"`
-	RuntimeID            pgtype.UUID `json:"runtime_id"`
 	Priority             int32       `json:"priority"`
 	AutopilotRunID       pgtype.UUID `json:"autopilot_run_id"`
 	TriggerSummary       pgtype.Text `json:"trigger_summary"`
@@ -316,6 +322,7 @@ type CreateAutopilotTaskParams struct {
 	TriggerEvidenceKind  pgtype.Text `json:"trigger_evidence_kind"`
 	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
 	ID                   pgtype.UUID `json:"id"`
+	RuntimeID            pgtype.UUID `json:"runtime_id"`
 }
 
 // =====================
@@ -340,7 +347,6 @@ type CreateAutopilotTaskParams struct {
 func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createAutopilotTask,
 		arg.AgentID,
-		arg.RuntimeID,
 		arg.Priority,
 		arg.AutopilotRunID,
 		arg.TriggerSummary,
@@ -351,6 +357,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		arg.TriggerEvidenceKind,
 		arg.TriggerEvidenceRefID,
 		arg.ID,
+		arg.RuntimeID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -909,6 +916,7 @@ func (q *Queries) GetAutopilotRunByTriggerAndPlanned(ctx context.Context, arg Ge
 const getAutopilotRunByWebhookDelivery = `-- name: GetAutopilotRunByWebhookDelivery :one
 SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id, quota_reservation_id, reason_code FROM autopilot_run
 WHERE webhook_delivery_id = $1
+   OR id = (SELECT autopilot_run_id FROM webhook_delivery WHERE id = $1)
 LIMIT 1
 `
 
@@ -1672,6 +1680,62 @@ func (q *Queries) LockAutopilotForUpdate(ctx context.Context, arg LockAutopilotF
 	return i, err
 }
 
+const pauseAutopilotsByArchivedProject = `-- name: PauseAutopilotsByArchivedProject :many
+UPDATE autopilot
+SET status = 'paused',
+    pause_reason = 'project_archived',
+    updated_at = now()
+WHERE status = 'active'
+  AND workspace_id = $1
+  AND project_id = $2
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, pause_reason
+`
+
+type PauseAutopilotsByArchivedProjectParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectID   pgtype.UUID `json:"project_id"`
+}
+
+// An archived project accepts no new issues, so an automation filing into it
+// would fail every run. Pause it, keeping the configuration; restoring the
+// project leaves it paused for an explicit resume.
+func (q *Queries) PauseAutopilotsByArchivedProject(ctx context.Context, arg PauseAutopilotsByArchivedProjectParams) ([]Autopilot, error) {
+	rows, err := q.db.Query(ctx, pauseAutopilotsByArchivedProject, arg.WorkspaceID, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Autopilot{}
+	for rows.Next() {
+		var i Autopilot
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.AssigneeID,
+			&i.Status,
+			&i.ExecutionMode,
+			&i.IssueTitleTemplate,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.LastRunAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.AssigneeType,
+			&i.ProjectID,
+			&i.PauseReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const pauseAutopilotsByUnboundAgents = `-- name: PauseAutopilotsByUnboundAgents :many
 UPDATE autopilot a
 SET status = 'paused',
@@ -1851,6 +1915,60 @@ func (q *Queries) RecoverPartialAutopilotRun(ctx context.Context, id pgtype.UUID
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const resumeFailedWebhookIssueDelivery = `-- name: ResumeFailedWebhookIssueDelivery :one
+WITH candidate AS (
+    SELECT retry.id AS retry_id, prior.id AS prior_id,
+           linked.status = 'failed' AND linked.task_id IS NULL AND NOT EXISTS (
+               SELECT 1 FROM agent_task_queue task WHERE task.issue_id = linked.issue_id
+           ) AS reopen
+    FROM webhook_delivery retry
+    JOIN webhook_delivery prior ON prior.trigger_id = retry.trigger_id
+      AND prior.workspace_id = retry.workspace_id AND prior.dedupe_key = retry.dedupe_key
+    JOIN autopilot_run linked ON linked.webhook_delivery_id = prior.id
+    WHERE retry.id = $1 AND retry.status = 'queued' AND prior.status = 'failed'
+      AND linked.issue_id IS NOT NULL
+    ORDER BY prior.created_at DESC, prior.id DESC
+    LIMIT 1
+)
+UPDATE autopilot_run r
+SET webhook_delivery_id = candidate.retry_id,
+    status = CASE WHEN candidate.reopen THEN 'issue_created' ELSE r.status END,
+    completed_at = CASE WHEN candidate.reopen THEN NULL ELSE r.completed_at END,
+    failure_reason = CASE WHEN candidate.reopen THEN NULL ELSE r.failure_reason END,
+    reason_code = CASE WHEN candidate.reopen THEN NULL ELSE r.reason_code END
+FROM candidate
+WHERE r.webhook_delivery_id = candidate.prior_id
+RETURNING r.id, r.autopilot_id, r.trigger_id, r.source, r.status, r.issue_id, r.task_id, r.triggered_at, r.completed_at, r.failure_reason, r.trigger_payload, r.result, r.created_at, r.squad_id, r.planned_at, r.webhook_delivery_id, r.quota_reservation_id, r.reason_code
+`
+
+// Keep the original run, issue, and consumed quota. The old delivery retains
+// its audit link to the run when the new delivery takes over dispatch.
+func (q *Queries) ResumeFailedWebhookIssueDelivery(ctx context.Context, id pgtype.UUID) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, resumeFailedWebhookIssueDelivery, id)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PlannedAt,
+		&i.WebhookDeliveryID,
+		&i.QuotaReservationID,
+		&i.ReasonCode,
+	)
+	return i, err
 }
 
 const rotateAutopilotTriggerWebhookToken = `-- name: RotateAutopilotTriggerWebhookToken :one

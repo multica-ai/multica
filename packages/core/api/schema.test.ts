@@ -41,6 +41,15 @@ describe("ApiClient schema fallback", () => {
   });
 
   describe("GitHub repository import", () => {
+    it("accepts attributed connections alongside legacy rows without a connector name", async () => {
+      const installation = { id: "inst-1", workspace_id: "ws-1", account_login: "alice", account_type: "User", account_avatar_url: null, created_at: "2026-11-17T00:00:00Z" };
+      stubFetchJson({ installations: [installation, { ...installation, id: "inst-2", account_login: "acme-org", connected_by: "Ada" }], can_manage: false });
+      const response = await new ApiClient("https://api.example.test").listGitHubInstallations("ws-1");
+      expect(response.installations).toEqual([installation, { ...installation, id: "inst-2", account_login: "acme-org", connected_by: "Ada" }]);
+      expect(response.can_manage).toBe(false);
+      expect(response.installations.every((row) => row.installation_id === undefined)).toBe(true);
+    });
+
     it("falls back safely when installation or repository responses are malformed", async () => {
       stubFetchJson({ installations: "not-an-array", configured: true });
       const client = new ApiClient("https://api.example.test");
@@ -61,18 +70,34 @@ describe("ApiClient schema fallback", () => {
       });
     });
 
-    it("adds the allowlisted repository return target to the connect request", async () => {
+    it.each([undefined, "all", "selected", "future-selection", 42])("handles repository selection metadata safely (%s)", async (selection) => {
+      stubFetchJson({ repositories: [], total_count: 0, next_page: null, repository_selection: selection });
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.listGitHubInstallationRepositories("ws-1", "install-1");
+      expect(response.repository_selection).toBe(selection === undefined ? undefined : selection === "all" || selection === "selected" ? selection : "unknown");
+    });
+
+    it.each([undefined, "desktop-nonce", 42])("accepts missing or malformed connect correlation metadata (%s)", async (connectionID) => {
+      stubFetchJson({ configured: true, url: "https://github.com/apps/test/installations/new", connection_id: connectionID });
+      const client = new ApiClient("https://api.example.test");
+      const response = await client.getGitHubConnectURL("ws-1", { desktop: true });
+      expect(response.configured).toBe(true);
+      expect(response.connection_id).toBe(typeof connectionID === "string" ? connectionID : undefined);
+      expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("https://api.example.test/api/workspaces/ws-1/github/connect?desktop=1");
+    });
+
+    it("uses the unified GitHub connect endpoint", async () => {
       stubFetchJson({
         configured: true,
         url: "https://github.com/apps/multica/installations/new",
       });
       const client = new ApiClient("https://api.example.test");
 
-      await client.getGitHubConnectURL("ws-1", "repositories");
+      await client.getGitHubConnectURL("ws-1");
 
       const fetchMock = vi.mocked(fetch);
       expect(fetchMock).toHaveBeenCalledWith(
-        "https://api.example.test/api/workspaces/ws-1/github/connect?return_to=repositories",
+        "https://api.example.test/api/workspaces/ws-1/github/connect",
         expect.any(Object),
       );
     });
@@ -1076,6 +1101,36 @@ describe("ApiClient schema fallback", () => {
       const subs = await client.listIssueSubscribers("issue-1");
       expect(subs).toEqual([]);
     });
+
+    const subscriber = (delivery?: unknown) => ({
+      issue_id: "issue-1",
+      user_type: "member",
+      user_id: "user-1",
+      reason: "commenter",
+      created_at: "2026-01-01T00:00:00Z",
+      ...(delivery === undefined ? {} : { delivery }),
+    });
+
+    it("keeps each valid delivery tier", async () => {
+      stubFetchJson(["all", "key_updates", "delegated"].map(subscriber));
+      const client = new ApiClient("https://api.example.test");
+      const subs = await client.listIssueSubscribers("issue-1");
+      expect(subs.map((s) => s.delivery)).toEqual(["all", "key_updates", "delegated"]);
+    });
+
+    it.each([
+      { name: "missing", delivery: undefined },
+      { name: "unknown", delivery: "muted" },
+      { name: "malformed", delivery: 42 },
+      { name: "null", delivery: null },
+    ])("keeps the row without a tier when delivery is $name", async ({ delivery }) => {
+      stubFetchJson([subscriber(delivery)]);
+      const client = new ApiClient("https://api.example.test");
+      const subs = await client.listIssueSubscribers("issue-1");
+      expect(subs).toHaveLength(1);
+      expect(subs[0]).toMatchObject({ user_id: "user-1", reason: "commenter" });
+      expect(subs[0]!.delivery).toBeUndefined();
+    });
   });
 
   describe("listChildIssues", () => {
@@ -1110,6 +1165,51 @@ describe("ApiClient schema fallback", () => {
 
       await expect(client.getChildIssueProgress()).resolves.toEqual({
         progress: [],
+      });
+    });
+  });
+
+  describe("listIssuePullRequestSummaries", () => {
+    it("drops a malformed row instead of blanking every card's PR chips", async () => {
+      stubFetchJson({
+        pull_requests: [
+          {
+            issue_id: "issue-1",
+            id: "pr-1",
+            repo_owner: "acme",
+            repo_name: "widget",
+            number: 1,
+            state: "merged",
+            html_url: "https://github.com/acme/widget/pull/1",
+          },
+          { issue_id: "issue-1", id: "pr-2", number: "two" },
+        ],
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listIssuePullRequestSummaries()).resolves.toEqual({
+        pull_requests: [
+          {
+            issue_id: "issue-1",
+            id: "pr-1",
+            provider: "github",
+            repo_owner: "acme",
+            repo_name: "widget",
+            number: 1,
+            title: "",
+            state: "merged",
+            html_url: "https://github.com/acme/widget/pull/1",
+          },
+        ],
+      });
+    });
+
+    it("falls back to no PRs when the list is not an array", async () => {
+      stubFetchJson({ pull_requests: "invalid" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listIssuePullRequestSummaries()).resolves.toEqual({
+        pull_requests: [],
       });
     });
   });
@@ -1462,35 +1562,12 @@ describe("workspace subscription contract", () => {
     status: "active",
     seats: 3,
     limits: {
-      issue_count: { mode: "unlimited" },
       autopilot_runs: { mode: "unlimited" },
     },
     current_period_end: "2026-09-01T00:00:00Z",
     snapshot_expires_at: null,
     version: 7,
   };
-
-  it("maps limited issue usage and accepts a no-content unlimited response", async () => {
-    stubFetchJson({
-      used: 11,
-      limit: 17,
-    });
-    const client = new ApiClient("https://api.example.test");
-
-    await expect(client.getIssueLimitUsage()).resolves.toEqual({
-      used: 11,
-      limit: 17,
-    });
-
-    stubFetchJson({ used: 11 });
-    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
-    );
-    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
-  });
 
   it("maps a full summary to camelCase without inventing values", async () => {
     stubFetchJson({

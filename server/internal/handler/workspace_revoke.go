@@ -117,6 +117,13 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		if err != nil {
 			return empty, err
 		}
+		cancelledIDs := make([]pgtype.UUID, 0, len(result.CancelledTasks))
+		for _, task := range result.CancelledTasks {
+			cancelledIDs = append(cancelledIDs, task.ID)
+		}
+		if err = qtx.WithdrawChatTaskSupplementsByTasks(ctx, cancelledIDs); err != nil {
+			return empty, err
+		}
 		if err = service.SettleTerminalTaskState(ctx, qtx, result.CancelledTasks...); err != nil {
 			return empty, err
 		}
@@ -265,6 +272,18 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		result.ReadyChats = append(result.ReadyChats, readyChats...)
 	}
 
+	// No FK cascade (repo rule): a departing member leaves every private
+	// project in the workspace and stops watching every project.
+	if err := qtx.DeleteProjectMembersByUser(ctx, db.DeleteProjectMembersByUserParams{
+		WorkspaceID: workspaceID, UserID: userID,
+	}); err != nil {
+		return empty, err
+	}
+	if err := qtx.DeleteProjectSubscribersByUser(ctx, db.DeleteProjectSubscribersByUserParams{
+		WorkspaceID: workspaceID, UserID: userID,
+	}); err != nil {
+		return empty, err
+	}
 	if err := qtx.DeleteMember(ctx, memberID); err != nil {
 		return empty, err
 	}

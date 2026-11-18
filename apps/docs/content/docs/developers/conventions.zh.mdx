@@ -28,7 +28,7 @@ monorepo 的包边界是硬约束：
 
 | 包 | 可依赖 | 不能依赖 |
 | --- | --- | --- |
-| `packages/core` | 仅平台无关基础库 | `react-dom`、`next/*`、UI 库、`process.env`、直接使用 `localStorage`（持久化走 `StorageAdapter`） |
+| `packages/core` | 仅平台无关基础库 | `react-dom`、`next/*`、UI 库、`process.env`、直接使用 `localStorage` 或 `sessionStorage`（持久化走 `StorageAdapter`；仅 `analytics/exception-dedupe.ts` 和 `appearance/safe-mode.ts` 使用标签页级的 `sessionStorage`） |
 | `packages/ui` | 无业务依赖 | `@multica/core`、业务逻辑 |
 | `packages/views` | `core/`、`ui/` | `next/*`、`react-router-dom`、store 定义 |
 | `apps/web/platform/` | `next/*` | 其他 app |
@@ -301,6 +301,7 @@ i18next 用 `_one` / `_other`；中文不区分语法单复数，只填 `_other`
 - 引号：用 `"..."`（直引号），与英文 source 保持一致。**不要**用 `「」` 或弯引号
 - 省略号：用 `...`（三点）而非 `…`（单字符），与英文 source 保持一致
 - 中英混排：英文词左右各加 1 个空格（详见词组组合规则）
+- 粗体挨着标点：结束的 `**` 紧跟在标点后面、后面又直接接文字时不算闭合，页面上会直接显示星号。中日韩文本里粗体后面常常直接接下一个词，最容易踩到。把标点移到粗体外面（`**问题（Problem）**和` → `**问题**（Problem）和`）；标点属于按钮名等标签时，在 `**` 后面加空格（`点击 **+**添加` → `点击 **+** 添加`）。文档里残留未渲染的 `**` 会让 `apps/docs/lib/unrendered-bold.test.ts` 失败
 
 ### 风格原则
 

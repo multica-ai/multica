@@ -13,7 +13,21 @@
     "unread_other": "{{count}} unread chats",
     "default": "Ask Multica"
   },
+  "bar": {
+    "history": "Chat history",
+    "history_group": {
+      "today": "Today",
+      "week": "Last 7 days",
+      "older": "Older"
+    },
+    "close_chip": "Close {{title}}",
+    "all_chats": "All chats",
+    "more_one": "{{count}} more chat",
+    "more_other": "{{count}} more chats"
+  },
   "input": {
+    "page_context_add": "Add this page as context",
+    "page_context_remove": "Remove page context",
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",
     "placeholder_archived_agent": "This agent has been archived",
@@ -41,10 +55,10 @@
     "title_one": "{{count}} queued message",
     "title_other": "{{count}} queued messages",
     "clear": "Clear all",
-    "steer": "Steer",
-    "steer_unavailable": "Steer is available after the current reply starts",
+    "steer": "Send now (stops current reply)",
+    "steer_unavailable": "Available after the current reply starts",
     "steer_no_permission": "You no longer have permission to run this agent",
-    "steer_unavailable_toast": "Steer is unavailable. Refreshing the queue.",
+    "steer_unavailable_toast": "Send now is unavailable. Refreshing the queue.",
     "edit": "Edit queued message",
     "remove": "Remove queued message",
     "more": "More queue actions",
@@ -52,6 +66,8 @@
     "action_failed_toast": "Couldn't update the queued message"
   },
   "message_list": {
+    "jump_to_latest": "Jump to latest",
+    "new_reply": "New reply",
     "show_details": "Show details",
     "replied_in": "Replied in {{elapsed}}",
     "failed_after": "Failed after {{elapsed}}",
@@ -133,6 +149,7 @@
     "restore_tooltip": "Restore",
     "expand_tooltip": "Expand",
     "minimize_tooltip": "Minimize",
+    "close_tooltip": "Close",
     "another_running": "Another chat is running",
     "another_unread": "Another chat has unread replies",
     "running": "Running",
@@ -172,7 +189,6 @@
       "label": "Recommend an action",
       "prompt": "Review what you know about my workspace and recommend a useful first action."
     },
-    "customize": "Customize starters",
     "uploading": "Wait for uploads to finish before using a starter.",
     "draft_in_progress": "Send or clear your draft before using a starter."
   },
@@ -238,8 +254,6 @@
     "no_response_preview": "No text reply",
     "quick_agents": "Frequent agents",
     "add": "Add",
-    "add_agent": "Add a frequent agent",
-    "unpin_agent": "Remove from frequent",
     "waiting": "Waiting for reply",
     "pin": "Pin",
     "unpin": "Unpin",
@@ -247,7 +261,9 @@
     "archive": "Archive",
     "unarchive": "Unarchive",
     "archived_title": "Archived",
-    "row_actions_aria": "Chat actions"
+    "row_actions_aria": "Chat actions",
+    "wakeup_preview": "Came back to report",
+    "wakeup_active": "Waiting to report back"
   },
   "header": {
     "agent_settings": "Agent settings",
@@ -255,5 +271,52 @@
     "archive": "Archive chat",
     "unarchive": "Unarchive chat",
     "delete": "Delete chat"
+  },
+  "wakeup": {
+    "panel_title": "Wakeups",
+    "panel_empty": "No wakeups in this conversation",
+    "panel_ended": "Ended recently",
+    "limits_hint": "Every wakeup ends: waits last 24 hours by default and 7 days at most. If the deadline comes first, the agent comes back once to tell you where things stand.",
+    "strip_waiting": "Waiting: {{title}}",
+    "card": "Will report back: {{title}}",
+    "ends": "ends {{relative}}",
+    "reminder_at": "reminder {{relative}}",
+    "next_check": "next check {{relative}}",
+    "last_check": "Last check: {{note}}",
+    "cancel": "Cancel wakeup",
+    "cancel_failed": "Couldn't cancel the wakeup",
+    "retry": "Retry",
+    "retry_failed": "Couldn't retry the wakeup",
+    "status": {
+      "active": "Waiting",
+      "fired": "Reported back",
+      "expired": "Deadline reached",
+      "cancelled": "Cancelled",
+      "failed": "Couldn't run"
+    },
+    "report": {
+      "waiting": "Waiting to report",
+      "running": "Reporting…",
+      "failed": "Couldn't report"
+    },
+    "failure": {
+      "permission_revoked": "The person who asked can no longer run this agent",
+      "access_lost": "What it watched moved to a private project",
+      "dispatch_failed": "The agent couldn't run"
+    },
+    "kind": {
+      "condition": "When it happens",
+      "at": "Reminder",
+      "check": "Periodic check"
+    },
+    "divider": {
+      "condition": "Back to report · it happened",
+      "at": "Back to report · reminder",
+      "check": "Back to report · check",
+      "expired": "Back to report · deadline reached",
+      "generic": "Back to report"
+    },
+    "queue_label": "Wakeup: {{title}}",
+    "queue_fallback": "Wakeup"
   }
 }

@@ -157,3 +157,23 @@ export function agentBuilderSessionListOptions(wsId: string) {
     staleTime: 0,
   });
 }
+
+export const taskContextReceiptKeys = {
+  all: (wsId: string) => ["workspaces", wsId, "task-context-receipt"] as const,
+  detail: (wsId: string, taskId: string) =>
+    [...taskContextReceiptKeys.all(wsId), taskId] as const,
+};
+
+/**
+ * A run's context receipt (MUL-9013). The daemon writes it once before the
+ * agent starts (and again for a fresh-session retry), so a finished run's
+ * receipt never changes; a live run's is refetched whenever the dialog opens.
+ */
+export function taskContextReceiptOptions(wsId: string, taskId: string) {
+  return queryOptions({
+    queryKey: taskContextReceiptKeys.detail(wsId, taskId),
+    queryFn: () => api.getTaskContextReceipt(taskId),
+    enabled: !!wsId && !!taskId,
+    staleTime: 60_000,
+  });
+}

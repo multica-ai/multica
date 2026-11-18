@@ -113,7 +113,7 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 - **[Workspaces](https://multica.ai/docs/workspaces) →** Separate agents, issues, and settings per team.
 - **[Roles](https://multica.ai/docs/members-roles) and [access scopes](https://multica.ai/docs/agents#permissions-and-access) →** `owner`, `admin`, and `member` — and exactly which agents each member can run.
 - **[Security model](https://multica.ai/docs/security-model) →** What an agent can reach, and what it can't.
-- **[Slack, Feishu/Lark, DingTalk, WeCom, and Telegram](https://multica.ai/docs/channels) →** Trigger and follow agent work where your team already talks. New Feishu/Lark connections are open to mainland-China Feishu only for now; DingTalk, WeCom, and Telegram are [community-maintained](https://multica.ai/docs/community-maintained).
+- **[Slack, Feishu/Lark, DingTalk, WeCom, Telegram, and WeChat](https://multica.ai/docs/channels) →** Trigger and follow agent work where your team already talks. WeChat accepts private messages only from the account that scans its connection QR code. New Feishu/Lark connections are open to mainland-China Feishu only for now; DingTalk, WeCom, and Telegram are [community-maintained](https://multica.ai/docs/community-maintained).
 - **Web, [desktop](https://multica.ai/docs/desktop-app), and [mobile](https://multica.ai/docs/mobile-app) →** The same workspace on macOS, Windows, Linux, iPhone, and iPad — the iOS app builds from source today, not yet on the App Store.
 - **[CLI and API](https://multica.ai/docs/cli) →** Every surface is scriptable. Agents drive Multica through the same CLI you do.
 
@@ -175,7 +175,7 @@ Full walkthrough: [Quickstart](https://multica.ai/docs/cloud-quickstart) · [Tut
 ## Runtimes
 
 Multica does not ship a model. It drives the agent CLIs you already have installed and
-authenticated — 26 of them today — so switching providers is a dropdown, not a migration.
+authenticated — the current source supports 31 — so switching providers is a dropdown, not a migration.
 
 | Provider | CLI | Provider | CLI |
 | --- | --- | --- | --- |
@@ -192,6 +192,8 @@ authenticated — 26 of them today — so switching providers is a dropdown, not
 | DeepSeek Harness | `dsh` | Oh-My-Pi | `omp` |
 | MiniMax Code | `mcode` | Dim | `dim` |
 | Huawei Cloud CodeArts | `codearts` | ZeroClaw | `zeroclaw` |
+| Muse Code | `muse` | Devin CLI | `devin` |
+| Amp | `amp` | Factory Droid | `droid` |
 | ZCode | `zcode` / ZCode Desktop | | |
 
 Installing and authenticating them: [Install an agent runtime](https://multica.ai/docs/install-agent-runtime) ·

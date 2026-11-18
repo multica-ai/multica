@@ -34,6 +34,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AppLink, resolveClickIntent } from "../navigation";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { isProjectArchived } from "@multica/core/projects";
 import {
   useQuickCreateStore,
   type QuickCreateActorType,
@@ -62,6 +63,7 @@ import {
 } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { ClearablePillButton, PillButton } from "../common/pill-button";
+import { useComposerVoice, VoiceDialogFooter, VoiceMicButton } from "../voice";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { DueDatePicker, PriorityIcon, PriorityPicker } from "../issues/components";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
@@ -87,7 +89,6 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
-import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
 type ActorSelection =
   | { type: "agent"; id: string }
@@ -139,7 +140,6 @@ export function AgentCreatePanel({
     : undefined;
   const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
   const sourceContextFailureMessage = useSourceContextFailureMessage();
-  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -277,10 +277,11 @@ export function AgentCreatePanel({
   // Project has exactly two seeds, both carrying explicit user intent: the
   // project page (or manual panel) the modal was opened from, and the user's
   // own unfinished draft. It is deliberately NOT seeded from the last create
-  // — see quick-create-store (MUL-5862).
+  // — see quick-create-store (MUL-5862). An opener that passes `project_id:
+  // null` ("No project") means none, so the draft's does not fill in.
   const [projectId, setProjectId] = useState<string | null>(() => {
-    const seed = (data?.project_id as string | undefined) ?? draft.shared.projectId;
-    return seed ?? null;
+    if (data && "project_id" in data) return (data.project_id as string | null | undefined) ?? null;
+    return draft.shared.projectId ?? null;
   });
   const [priority, setPriority] = useState<IssuePriority>(
     (data?.priority as IssuePriority | undefined) ?? draft.shared.priority,
@@ -309,12 +310,13 @@ export function AgentCreatePanel({
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
-  // another session. Clear local state AND the unfinished draft — the draft
-  // is the only persisted copy left, and leaving it would make the next open
-  // re-seed and submit the same dead value.
+  // another session; an archived one takes no new issues either. Clear local
+  // state AND the unfinished draft — the draft is the only persisted copy
+  // left, and leaving it would make the next open re-seed and submit the same
+  // dead value.
   useEffect(() => {
     if (!projectsLoaded || projectId === null) return;
-    if (projects.some((p) => p.id === projectId)) return;
+    if (projects.some((p) => p.id === projectId && !isProjectArchived(p))) return;
     setProjectId(null);
     if (draft.shared.projectId === projectId) {
       setShared({ projectId: undefined });
@@ -373,7 +375,13 @@ export function AgentCreatePanel({
     (baseVersionCheck.state !== "ok" ||
       (usesExplicitFields && fieldVersionCheck.state !== "ok"));
 
-  const initialPrompt = draft.agent.prompt || (data?.prompt as string) || "";
+  // An opener's prompt (⌘K "Hand to agent") is newer than any unfinished
+  // draft, so it wins, and is written through so a mode switch keeps it.
+  const seedPrompt = typeof data?.prompt === "string" && data.prompt.trim() ? data.prompt : null;
+  const initialPrompt = seedPrompt ?? (draft.agent.prompt || "");
+  useEffect(() => {
+    if (seedPrompt) setAgent({ prompt: seedPrompt });
+  }, [seedPrompt, setAgent]);
   // The editor is uncontrolled — we read the latest markdown via the ref at
   // submit/switch time. `hasContent` mirrors emptiness so the Create button
   // can disable correctly without a controlled-input rerender on every keystroke.
@@ -499,10 +507,6 @@ export function AgentCreatePanel({
             current_version?: string;
             min_version?: string;
           };
-          if (body.code === "issue_limit_reached") {
-            showIssueLimitUpgradePrompt();
-            return false;
-          }
           if (body.code === "agent_unavailable") {
             setError(body.reason || t(($) => $.create_issue.agent.error_agent_unavailable_fallback));
             return false;
@@ -588,6 +592,11 @@ export function AgentCreatePanel({
     void composer.submit();
   };
   const submitting = composer.submitting;
+  const canCreate = !!actor && !versionBlocked && !qoderAttachmentBlocked && !(anchorCommentId && !sourcePreview);
+  const voice = useComposerVoice({
+    insert: (text) => editorRef.current?.insertText(text) ?? false,
+    submit: canCreate ? submit : undefined,
+  });
 
   // Switch to the manual form WITHOUT destroying the agent draft. The agent
   // slot (prompt + actor) is left untouched so a later manual→agent flip
@@ -762,6 +771,8 @@ export function AgentCreatePanel({
             editor unbounded and pushed the modal past the viewport. */}
         <div
           {...dropZoneProps}
+          ref={voice.rootRef}
+          onFocusCapture={voice.onFocusCapture}
           className="relative px-5 pb-3 flex flex-1 min-h-[140px] overflow-y-auto"
         >
           <ContentEditor
@@ -932,54 +943,56 @@ export function AgentCreatePanel({
               attach group reproduces what `justify-between` did when the
               children were two wrapper divs, and `justify-self-end` goes
               inert on flex items. */}
-        <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-          <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
-            {/* Deliberately NOT disabled while uploading: each file is its
-                own queue entry, so queueing a second one is safe and waiting
-                for the first to land just to attach the next is busywork. */}
-            <FileUploadButton
-              size="sm"
-              multiple
-              onSelect={(file) => editorRef.current?.uploadFile(file)}
-            />
-            {keepOpen && sentCount > 0 && (
-              <span className="text-caption text-emerald-600 dark:text-emerald-400">
-                {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
-              </span>
+        <VoiceDialogFooter voice={voice}>
+          <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+            <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+              {/* Deliberately NOT disabled while uploading: each file is its
+                  own queue entry, so queueing a second one is safe and waiting
+                  for the first to land just to attach the next is busywork. */}
+              <FileUploadButton
+                multiple
+                onSelect={(file) => editorRef.current?.uploadFile(file)}
+              />
+              <VoiceMicButton voice={voice} />
+              {keepOpen && sentCount > 0 && (
+                <span className="text-caption text-emerald-600 dark:text-emerald-400">
+                  {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
+                </span>
+              )}
+            </div>
+            <TooltipHint label={t(($) => $.create_issue.switch_to_manual_tooltip)}>
+              <button
+                type="button"
+                onClick={switchToManual}
+                disabled={gate.uploading}
+                aria-disabled={gate.uploading || undefined}
+                aria-busy={gate.uploading || undefined}
+                className="flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ArrowLeftRight className="size-3.5" />
+                {t(($) => $.create_issue.switch_to_manual)}
+              </button>
+            </TooltipHint>
+            <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+              <Switch
+                size="sm"
+                checked={keepOpen}
+                onCheckedChange={setKeepOpen}
+              />
+              {t(($) => $.create_issue.create_another)}
+            </label>
+            {versionBlocked ? (
+              <Tooltip>
+                <TooltipTrigger render={createButton} />
+                <TooltipContent side="top">
+                  {t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })}
+                </TooltipContent>
+              </Tooltip>
+            ) : (
+              createButton
             )}
           </div>
-          <TooltipHint label={t(($) => $.create_issue.switch_to_manual_tooltip)}>
-            <button
-              type="button"
-              onClick={switchToManual}
-              disabled={gate.uploading}
-              aria-disabled={gate.uploading || undefined}
-              aria-busy={gate.uploading || undefined}
-              className="flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <ArrowLeftRight className="size-3.5" />
-              {t(($) => $.create_issue.switch_to_manual)}
-            </button>
-          </TooltipHint>
-          <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
-            <Switch
-              size="sm"
-              checked={keepOpen}
-              onCheckedChange={setKeepOpen}
-            />
-            {t(($) => $.create_issue.create_another)}
-          </label>
-          {versionBlocked ? (
-            <Tooltip>
-              <TooltipTrigger render={createButton} />
-              <TooltipContent side="top">
-                {t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })}
-              </TooltipContent>
-            </Tooltip>
-          ) : (
-            createButton
-          )}
-        </div>
+        </VoiceDialogFooter>
     </>
   );
 }

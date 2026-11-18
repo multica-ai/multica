@@ -12,7 +12,20 @@
     "unread_other": "읽지 않은 채팅 {{count}}개",
     "default": "Multica에 묻기"
   },
+  "bar": {
+    "history": "채팅 기록",
+    "history_group": {
+      "today": "오늘",
+      "week": "지난 7일",
+      "older": "이전"
+    },
+    "close_chip": "{{title}} 닫기",
+    "all_chats": "모든 채팅",
+    "more_other": "채팅 {{count}}개 더 보기"
+  },
   "input": {
+    "page_context_add": "이 페이지를 컨텍스트로 추가",
+    "page_context_remove": "페이지 컨텍스트 제거",
     "placeholder_no_agent": "채팅을 시작하려면 에이전트를 만드세요",
     "placeholder_archived": "보관된 세션입니다",
     "placeholder_archived_agent": "보관된 에이전트입니다",
@@ -39,10 +52,10 @@
   "queue": {
     "title_other": "대기 중인 메시지 {{count}}개",
     "clear": "모두 지우기",
-    "steer": "지시",
-    "steer_unavailable": "현재 답변이 시작되면 지시할 수 있습니다",
+    "steer": "지금 보내기 (현재 응답 중지)",
+    "steer_unavailable": "현재 응답이 시작되면 사용할 수 있습니다",
     "steer_no_permission": "이 에이전트를 실행할 권한이 없습니다",
-    "steer_unavailable_toast": "현재는 지시할 수 없습니다. 대기열을 새로 고치는 중입니다.",
+    "steer_unavailable_toast": "지금 보낼 수 없습니다. 대기열을 새로 고칩니다.",
     "edit": "대기 중인 메시지 편집",
     "remove": "대기열에서 삭제",
     "more": "추가 대기열 작업",
@@ -50,6 +63,8 @@
     "action_failed_toast": "대기 중인 메시지를 업데이트하지 못했습니다"
   },
   "message_list": {
+    "jump_to_latest": "최신으로 이동",
+    "new_reply": "새 답장",
     "show_details": "세부 정보 보기",
     "replied_in": "{{elapsed}} 만에 답변",
     "failed_after": "{{elapsed}} 후 실패",
@@ -129,6 +144,7 @@
     "restore_tooltip": "복원",
     "expand_tooltip": "펼치기",
     "minimize_tooltip": "최소화",
+    "close_tooltip": "닫기",
     "another_running": "다른 채팅이 실행 중입니다",
     "another_unread": "다른 채팅에 읽지 않은 답변이 있습니다",
     "running": "실행 중",
@@ -168,7 +184,6 @@
       "label": "작업 추천",
       "prompt": "내 워크스페이스에 대해 알고 있는 내용을 바탕으로 유용한 첫 작업을 추천해 주세요."
     },
-    "customize": "시작 예시 편집",
     "uploading": "업로드가 완료된 후 대화 시작 예시를 사용해 주세요.",
     "draft_in_progress": "대화 시작 예시를 사용하려면 먼저 초안을 보내거나 지워 주세요."
   },
@@ -234,8 +249,6 @@
     "no_response_preview": "텍스트 답변 없음",
     "quick_agents": "자주 쓰는 Agent",
     "add": "추가",
-    "add_agent": "자주 쓰는 Agent 추가",
-    "unpin_agent": "자주 쓰기에서 제거",
     "waiting": "답장 대기 중",
     "pin": "고정",
     "unpin": "고정 해제",
@@ -243,7 +256,9 @@
     "archive": "보관",
     "unarchive": "보관 해제",
     "archived_title": "보관됨",
-    "row_actions_aria": "채팅 작업"
+    "row_actions_aria": "채팅 작업",
+    "wakeup_preview": "보고하러 돌아옴",
+    "wakeup_active": "보고 대기 중"
   },
   "header": {
     "agent_settings": "에이전트 설정",
@@ -251,5 +266,52 @@
     "delete": "채팅 삭제",
     "archive": "채팅 보관",
     "unarchive": "채팅 보관 해제"
+  },
+  "wakeup": {
+    "panel_title": "웨이크업",
+    "panel_empty": "이 대화에는 웨이크업이 없습니다",
+    "panel_ended": "최근 종료됨",
+    "limits_hint": "모든 웨이크업에는 끝이 있습니다. 기본 대기 시간은 24시간, 최대 7일입니다. 기한이 먼저 오면 에이전트가 한 번 돌아와 현재 상황을 알려 드립니다.",
+    "strip_waiting": "대기 중: {{title}}",
+    "card": "나중에 보고: {{title}}",
+    "ends": "{{relative}} 만료",
+    "reminder_at": "{{relative}} 알림",
+    "next_check": "다음 확인 {{relative}}",
+    "last_check": "마지막 확인: {{note}}",
+    "cancel": "웨이크업 취소",
+    "cancel_failed": "웨이크업을 취소하지 못했습니다",
+    "retry": "다시 시도",
+    "retry_failed": "웨이크업을 다시 시도하지 못했습니다",
+    "status": {
+      "active": "대기 중",
+      "fired": "보고함",
+      "expired": "기한 도달",
+      "cancelled": "취소됨",
+      "failed": "실행하지 못함"
+    },
+    "report": {
+      "waiting": "보고 대기 중",
+      "running": "보고 중…",
+      "failed": "보고하지 못했습니다"
+    },
+    "failure": {
+      "permission_revoked": "요청한 사람이 더 이상 이 에이전트를 실행할 수 없습니다",
+      "access_lost": "지켜보던 항목이 비공개 프로젝트로 이동했습니다",
+      "dispatch_failed": "에이전트를 실행할 수 없습니다"
+    },
+    "kind": {
+      "condition": "조건 충족 시",
+      "at": "알림",
+      "check": "주기적 확인"
+    },
+    "divider": {
+      "condition": "보고하러 돌아옴 · 조건 충족",
+      "at": "보고하러 돌아옴 · 알림",
+      "check": "보고하러 돌아옴 · 확인",
+      "expired": "보고하러 돌아옴 · 기한 도달",
+      "generic": "보고하러 돌아옴"
+    },
+    "queue_label": "웨이크업: {{title}}",
+    "queue_fallback": "웨이크업"
   }
 }

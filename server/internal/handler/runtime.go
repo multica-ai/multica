@@ -235,9 +235,10 @@ func (h *Handler) GetRuntimeUsageByAgent(w http.ResponseWriter, r *http.Request)
 	}
 
 	// No date bucketing — tz only sets the cutoff boundary so "last 30
-	// days" means 30 of the viewer's days.
+	// days" means 30 of the viewer's days. Without a date column the client
+	// cannot trim the extra day, so the window closes here.
 	viewTZ := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, viewTZ)
+	since := parseExactSinceParamInTZ(r, 30, viewTZ)
 
 	rows, err := h.Queries.ListRuntimeUsageByAgent(r.Context(), db.ListRuntimeUsageByAgentParams{
 		RuntimeID: rt.ID,
@@ -348,14 +349,9 @@ func (h *Handler) GetRuntimeUsageByHour(w http.ResponseWriter, r *http.Request) 
 //
 // The cutoff yields N+1 calendar buckets (today-days … today inclusive).
 // The extra day versus a naive "-(days-1)" is deliberate headroom, not an
-// off-by-one:
-//   - Runtime detail's sliceWindow filters `date >= today-days` (closed) and
-//     its prior-window delta reaches back to today-2*days, so the today-days
-//     bucket MUST exist or the oldest bar / KPI delta silently loses data.
-//   - The workspace dashboard re-filters client-side with -(days-1); the one
-//     extra day the backend returns is trimmed there — harmless.
-//
-// Do not "tighten" this to -(days-1): it would break the runtime detail page.
+// off-by-one: date-bucketed clients (runtime detail's sliceWindow, the
+// workspace dashboard) trim to -(days-1) themselves. Responses without a date
+// column cannot be trimmed and should use parseExactSinceParamInTZ instead.
 func sinceFromDays(now time.Time, days int, loc *time.Location) time.Time {
 	local := now.In(loc)
 	startOfToday := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, loc)
@@ -373,15 +369,13 @@ func parseSinceParamInTZ(r *http.Request, defaultDays int, tzName string) pgtype
 
 // parseExactSinceParamInTZ is parseSinceParamInTZ without the extra day of
 // headroom: `days=N` yields exactly N calendar buckets (today's partial
-// bucket + N-1 prior full days), which is the window the workspace dashboard
-// actually displays.
+// bucket + N-1 prior full days), which is the window the runtime detail page
+// and workspace dashboard actually display.
 //
-// The N+1 cutoff exists so date-bucketed series can reach one bucket further
-// back than they render (runtime detail's prior-window delta needs it), and
-// the dashboard trims the surplus client-side with `-(days-1)`. A response
-// with NO date dimension cannot be trimmed that way, so an aggregate served
-// off the N+1 cutoff silently covers one more day than the chart beside it.
-// Endpoints whose rows carry no date use this variant instead.
+// Date-bucketed clients trim the surplus client-side with `-(days-1)`. A
+// response with NO date dimension cannot be trimmed that way, so an aggregate
+// served off the N+1 cutoff silently covers one more day than the chart beside
+// it. Endpoints whose rows carry no date should use this variant instead.
 func parseExactSinceParamInTZ(r *http.Request, defaultDays int, tzName string) pgtype.Timestamptz {
 	return parseDaysCutoff(r, defaultDays, tzName, 1)
 }
@@ -884,6 +878,9 @@ func (h *Handler) requireRuntimeReadAccess(w http.ResponseWriter, r *http.Reques
 
 	rt, err := h.getAgentRuntime(r.Context(), source, runtimeUUID)
 	if err != nil {
+		if writeQueryCancellation(w, r, err) {
+			return db.AgentRuntime{}, db.Member{}, false
+		}
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return db.AgentRuntime{}, db.Member{}, false
 	}
@@ -946,6 +943,7 @@ func (h *Handler) runtimeLiveProfile(ctx context.Context, rt db.AgentRuntime) (d
 func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile, blockers profileInstanceBlockers) map[string]any {
 	known := blockers.known
 	ttlDays := service.OfflineRuntimeTTLDays()
+	keepsLegacyAnchor := !profile.DaemonID.Valid && profile.CreatedBy.Valid && profile.CreatedBy == rt.OwnerID
 	name := rt.Name
 	if rt.CustomName.Valid && strings.TrimSpace(rt.CustomName.String) != "" {
 		name = rt.CustomName.String
@@ -959,6 +957,8 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 
 	parts := []string{lead}
 	switch {
+	case keepsLegacyAnchor:
+		parts = append(parts, "Edit this custom runtime and choose the machine that should keep it. Unused copies on other machines are removed when the binding is saved; move or archive their agents and finish pending tasks first. Until then, this legacy instance is kept so the machine can reconnect.")
 	case rt.Status == "online":
 		parts = append(parts, fmt.Sprintf(
 			"It is still online, so its daemon would register it again. Stop that daemon first; Multica then removes the runtime automatically after %d days offline, once no agent is bound to it and nothing is still running on it.",
@@ -1011,6 +1011,10 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 		"runtime_status":          rt.Status,
 		"last_seen_at":            timestampToPtr(rt.LastSeenAt),
 		"auto_cleanup_after_days": ttlDays,
+	}
+	if keepsLegacyAnchor {
+		resp["auto_cleanup_after_days"] = 0
+		resp["requires_machine_binding"] = true
 	}
 	if known {
 		resp["active_agent_count"] = len(blockers.agents)

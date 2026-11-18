@@ -12,43 +12,39 @@ type ModalType =
   | "issue-mark-duplicate"
   | "issue-add-child"
   | "project-add-issue"
+  | "project-rename"
   | "issue-rename"
   | "issue-delete-confirm"
   | "issue-run-confirm"
   | "issue-workflow-handoff"
   | null;
 
-export type IssueLimitRecoveryReason = "issue_limit" | "autopilot_quota";
+// Each reason is a Cloud-enforced limit whose recovery dialog offers billing
+// actions. Add a reason here when a new limit gets its own recovery copy.
+export type LimitRecoveryReason = "autopilot_quota";
 
 interface ModalStore {
   modal: ModalType;
   data: Record<string, unknown> | null;
-  issueLimitRecoveryWorkspaceId: string | null;
-  issueLimitRecoveryReason: IssueLimitRecoveryReason;
+  limitRecoveryWorkspaceId: string | null;
+  limitRecoveryReason: LimitRecoveryReason;
   open: (modal: NonNullable<ModalType>, data?: Record<string, unknown> | null) => void;
   close: () => void;
-  showIssueLimitRecovery: (
-    workspaceId: string,
-    reason?: IssueLimitRecoveryReason,
-  ) => void;
-  dismissIssueLimitRecovery: () => void;
+  showLimitRecovery: (workspaceId: string, reason: LimitRecoveryReason) => void;
+  dismissLimitRecovery: () => void;
 }
 
 export const useModalStore = create<ModalStore>((set) => ({
   modal: null,
   data: null,
-  issueLimitRecoveryWorkspaceId: null,
-  issueLimitRecoveryReason: "issue_limit",
+  limitRecoveryWorkspaceId: null,
+  limitRecoveryReason: "autopilot_quota",
   open: (modal, data = null) => set({ modal, data }),
   close: () => set({ modal: null, data: null }),
-  showIssueLimitRecovery: (workspaceId, reason = "issue_limit") =>
+  showLimitRecovery: (workspaceId, reason) =>
     set({
-      issueLimitRecoveryWorkspaceId: workspaceId,
-      issueLimitRecoveryReason: reason,
+      limitRecoveryWorkspaceId: workspaceId,
+      limitRecoveryReason: reason,
     }),
-  dismissIssueLimitRecovery: () =>
-    set({
-      issueLimitRecoveryWorkspaceId: null,
-      issueLimitRecoveryReason: "issue_limit",
-    }),
+  dismissLimitRecovery: () => set({ limitRecoveryWorkspaceId: null }),
 }));

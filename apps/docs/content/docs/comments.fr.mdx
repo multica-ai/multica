@@ -32,7 +32,7 @@ Sélectionnez le texte et choisissez **Ajouter à la réponse** dans la barre d'
 </Step>
 <Step>
 
-Rédigez votre note à côté de la sélection et cliquez sur **Ajouter une annotation**. Seule une note confirmée rejoint le brouillon de réponse du fil et reçoit un numéro ; une note vide ne peut pas être confirmée.
+Rédigez votre note à côté de la sélection et cliquez sur **Ajouter**. Seule une note confirmée rejoint le brouillon de réponse du fil et reçoit un numéro ; une note vide ne peut pas être confirmée.
 
 </Step>
 <Step>
@@ -49,7 +49,7 @@ Pour les annotations de commentaire, la première que vous enregistrez fixe la c
 <Accordions>
 <Accordion title="Modifier, supprimer et raccourcis" id="annotation-editing">
 
-- Après avoir modifié une annotation existante, cliquez sur **Enregistrer l'annotation** pour appliquer le changement.
+- Après avoir modifié une annotation existante, cliquez sur **Enregistrer** pour appliquer le changement.
 - Dans l’éditeur d’annotation, Entrée ajoute ou enregistre l’annotation ; Maj + Entrée insère un saut de ligne. Cmd + Entrée (macOS) ou Ctrl + Entrée (Windows/Linux) enregistre l’annotation actuelle et envoie tout le brouillon, y compris les annotations enregistrées, le texte et les pièces jointes. Ces touches ne dépendent pas de votre raccourci d’envoi personnel. Échap ou un clic à l’extérieur annule les modifications non confirmées.
 - Cliquez sur le marqueur numéroté dans le texte source pour modifier à nouveau la note. Le bouton corbeille à côté de la note supprime l'annotation, son marqueur et son entrée dans le brouillon.
 - Survoler le compteur d'annotations ouvre un panneau où vous pouvez consulter ou retirer les citations, ou cliquer sur une citation pour revenir à la source et modifier sa note. Ce panneau s'ouvre aussi d'un clic ou au clavier.
@@ -96,9 +96,10 @@ Tapez `@` et choisissez une cible dans la liste :
 |---|---|
 | **Membre** | Reçoit une notification de mention dans la boîte de réception ; une @mention dans un commentaire ne crée pas d'abonnement. |
 | **Agent** | Crée une exécution pour cet agent ; les agents n'ont pas de boîte de réception. |
-| **Squad** | Notifie les membres du squad et déclenche le chef du squad. |
+| **Squad** | Déclenche le chef du squad ; les membres du squad ne sont pas notifiés. |
 | **Tâche** | Insère un lien vers une autre tâche — aucune notification, aucun déclenchement d'agent. |
-| **@all** | Notifie tous les membres de l'espace de travail et ne déclenche aucun agent. |
+| **Projet** | Insère un lien vers un projet — aucune notification, aucun déclenchement d'agent. |
+| **@all** | Notifie tous les membres de l'espace de travail ; la mention elle-même ne lance aucun agent. Le commentaire d'un agent worker revient toujours au chef du squad assigné, ou au chef du squad invité dans son fil de délégation, sauf si un agent ou un squad est explicitement mentionné. |
 
 Taper `@name` en texte brut ne crée pas de mention ; choisissez dans la liste de suggestions de l'éditeur. Taper un identifiant de tâche valide le convertit automatiquement en lien vers la tâche.
 

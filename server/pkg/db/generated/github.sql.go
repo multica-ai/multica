@@ -508,6 +508,52 @@ func (q *Queries) ListGitHubInstallationsByWorkspace(ctx context.Context, worksp
 	return items, nil
 }
 
+const listGitHubInstallationsWithConnectedBy = `-- name: ListGitHubInstallationsWithConnectedBy :many
+SELECT gi.id, gi.workspace_id, gi.installation_id, gi.account_login, gi.account_type, gi.account_avatar_url, gi.connected_by_id, gi.created_at, gi.updated_at, COALESCE(u.name, '')::text AS connected_by
+FROM github_installation gi
+LEFT JOIN member m ON m.user_id = gi.connected_by_id AND m.workspace_id = gi.workspace_id
+LEFT JOIN "user" u ON u.id = m.user_id
+WHERE gi.workspace_id = $1
+ORDER BY gi.created_at ASC
+`
+
+type ListGitHubInstallationsWithConnectedByRow struct {
+	GithubInstallation GithubInstallation `json:"github_installation"`
+	ConnectedBy        string             `json:"connected_by"`
+}
+
+// Only disclose the connector's display name while they belong to this workspace.
+func (q *Queries) ListGitHubInstallationsWithConnectedBy(ctx context.Context, workspaceID pgtype.UUID) ([]ListGitHubInstallationsWithConnectedByRow, error) {
+	rows, err := q.db.Query(ctx, listGitHubInstallationsWithConnectedBy, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGitHubInstallationsWithConnectedByRow{}
+	for rows.Next() {
+		var i ListGitHubInstallationsWithConnectedByRow
+		if err := rows.Scan(
+			&i.GithubInstallation.ID,
+			&i.GithubInstallation.WorkspaceID,
+			&i.GithubInstallation.InstallationID,
+			&i.GithubInstallation.AccountLogin,
+			&i.GithubInstallation.AccountType,
+			&i.GithubInstallation.AccountAvatarUrl,
+			&i.GithubInstallation.ConnectedByID,
+			&i.GithubInstallation.CreatedAt,
+			&i.GithubInstallation.UpdatedAt,
+			&i.ConnectedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueIDsForPullRequest = `-- name: ListIssueIDsForPullRequest :many
 SELECT issue_id FROM issue_pull_request
 WHERE pull_request_id = $1
@@ -526,6 +572,85 @@ func (q *Queries) ListIssueIDsForPullRequest(ctx context.Context, pullRequestID 
 			return nil, err
 		}
 		items = append(items, issue_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssuePullRequestSummaries = `-- name: ListIssuePullRequestSummaries :many
+SELECT
+    ipr.issue_id,
+    pr.id, 'github'::text AS provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
+WHERE pr.workspace_id = $1
+  AND i.workspace_id = $1
+  AND ($2::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($2::uuid[])))
+UNION ALL
+SELECT
+    ipr.issue_id,
+    pr.id, pr.provider, pr.repo_owner, pr.repo_name,
+    pr.pr_number, pr.title, pr.state, pr.html_url, pr.pr_created_at
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+JOIN issue i ON i.id = ipr.issue_id
+WHERE pr.workspace_id = $1
+  AND i.workspace_id = $1
+  AND ($2::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($2::uuid[])))
+ORDER BY pr_created_at DESC
+`
+
+type ListIssuePullRequestSummariesParams struct {
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	HiddenProjectIds []pgtype.UUID `json:"hidden_project_ids"`
+}
+
+type ListIssuePullRequestSummariesRow struct {
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	ID          pgtype.UUID        `json:"id"`
+	Provider    string             `json:"provider"`
+	RepoOwner   string             `json:"repo_owner"`
+	RepoName    string             `json:"repo_name"`
+	PrNumber    int32              `json:"pr_number"`
+	Title       string             `json:"title"`
+	State       string             `json:"state"`
+	HtmlUrl     string             `json:"html_url"`
+	PrCreatedAt pgtype.Timestamptz `json:"pr_created_at"`
+}
+
+// Every issue -> PR link in the workspace, GitHub and self-hosted providers
+// together, newest first. Carries only what an issue card or row needs to
+// render a PR chip (no CI/merge snapshot). Backs the workspace wide "Pull
+// requests" display option on board / list / table views. Links on issues in
+// private projects the caller cannot see are left out, as in the issue lists.
+func (q *Queries) ListIssuePullRequestSummaries(ctx context.Context, arg ListIssuePullRequestSummariesParams) ([]ListIssuePullRequestSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listIssuePullRequestSummaries, arg.WorkspaceID, arg.HiddenProjectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssuePullRequestSummariesRow{}
+	for rows.Next() {
+		var i ListIssuePullRequestSummariesRow
+		if err := rows.Scan(
+			&i.IssueID,
+			&i.ID,
+			&i.Provider,
+			&i.RepoOwner,
+			&i.RepoName,
+			&i.PrNumber,
+			&i.Title,
+			&i.State,
+			&i.HtmlUrl,
+			&i.PrCreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
