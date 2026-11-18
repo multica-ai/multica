@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { Pencil } from "@multica/ui/icons";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NavigationProvider, type NavigationAdapter } from "../navigation";
+import { ScrollRestorationProvider, type ScrollRestorationAdapter } from "../platform";
 import { renderWithI18n } from "../test/i18n";
 import {
   ObjectIdentity,
@@ -24,25 +25,37 @@ function makeAdapter(): NavigationAdapter {
   };
 }
 
-function renderPage(panel?: React.ReactNode) {
+function renderPage(
+  panel?: React.ReactNode,
+  {
+    scroll = { get: () => undefined },
+    scrollRef,
+  }: {
+    scroll?: ScrollRestorationAdapter;
+    scrollRef?: (el: HTMLDivElement | null) => void;
+  } = {},
+) {
   return renderWithI18n(
     <NavigationProvider value={makeAdapter()}>
-      <ObjectPage
-        type="agent"
-        layoutId="test_object_page"
-        segments={[{ href: "/acme/agents", label: "Agents" }]}
-        leaf={<span>Lambda</span>}
-        actions={<button type="button">Assign work</button>}
-        panel={panel}
-      >
-        <ObjectIdentity media={<span />} title="Lambda" description="Design and frontend" />
-        <ObjectSection
-          title="Instructions"
-          action={<ObjectSectionAction icon={Pencil}>Edit</ObjectSectionAction>}
+      <ScrollRestorationProvider adapter={scroll}>
+        <ObjectPage
+          type="agent"
+          layoutId="test_object_page"
+          segments={[{ href: "/acme/agents", label: "Agents" }]}
+          leaf={<span>Lambda</span>}
+          actions={<button type="button">Assign work</button>}
+          panel={panel}
+          scrollRef={scrollRef}
         >
-          <p>Mock before you build.</p>
-        </ObjectSection>
-      </ObjectPage>
+          <ObjectIdentity media={<span />} title="Lambda" description="Design and frontend" />
+          <ObjectSection
+            title="Instructions"
+            action={<ObjectSectionAction icon={Pencil}>Edit</ObjectSectionAction>}
+          >
+            <p>Mock before you build.</p>
+          </ObjectSection>
+        </ObjectPage>
+      </ScrollRestorationProvider>
     </NavigationProvider>,
   );
 }
@@ -66,6 +79,21 @@ describe("ObjectPage", () => {
   it("adds the panel toggle only when the page has a panel", () => {
     renderPage();
     expect(screen.queryByRole("button", { name: "Toggle right sidebar" })).toBeNull();
+  });
+
+  it("brings the body back to where it was scrolled and still hands it to scrollRef", () => {
+    const scrollRef = vi.fn();
+    renderPage(undefined, {
+      scroll: { get: (key) => (key === "object" ? { top: 480, height: 1600 } : undefined) },
+      scrollRef,
+    });
+
+    const body = screen.getByText("Mock before you build.").closest<HTMLElement>("[data-tab-scroll-root]")!;
+    // Marked so the tab coordinator captures it on the way out …
+    expect(body.getAttribute("data-tab-scroll-root")).toBe("object");
+    // … and given the saved offset back when it attaches.
+    expect(body.scrollTop).toBe(480);
+    expect(scrollRef).toHaveBeenCalledWith(body);
   });
 
   it("renders the properties panel beside the body", () => {
