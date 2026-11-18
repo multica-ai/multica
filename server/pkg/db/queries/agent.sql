@@ -435,7 +435,7 @@ SELECT
         WHEN sqlc.narg(workflow_handoff_revision)::bigint IS NOT NULL
         THEN jsonb_build_object('workflow_handoff_revision', sqlc.narg(workflow_handoff_revision)::bigint)
         ELSE '{}'::jsonb
-    END, '{}'::jsonb),
+    END || COALESCE(sqlc.narg('sticky_inheritance')::jsonb, '{}'::jsonb), '{}'::jsonb),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
@@ -2514,6 +2514,21 @@ WHERE agent_id = @agent_id
   AND trigger_comment_id = @trigger_comment_id
   AND status = 'queued'
 ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetLatestIssueTaskStickyRuntime :one
+-- The machine the issue's latest personal run resolved to, with that run's id
+-- as the authorization source. A sticky "current task" continuation pins this
+-- machine instead of re-resolving: with two online machines of the same CLI a
+-- fresh resolution would drift to whichever heartbeated last, splitting one
+-- conversation across machines.
+SELECT atq.id AS source_task_id, atq.runtime_id
+FROM agent_task_queue atq
+WHERE atq.issue_id = $1
+  AND atq.runtime_id IS NOT NULL
+  AND atq.runtime_config_source IS NOT NULL
+  AND atq.runtime_config_source <> 'shared'
+ORDER BY atq.created_at DESC, atq.id DESC
 LIMIT 1;
 
 -- name: MergeDelegatedFailureCommentIntoPendingTask :one

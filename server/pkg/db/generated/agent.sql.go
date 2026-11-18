@@ -2564,10 +2564,10 @@ func (q *Queries) CreateAgentBuilder(ctx context.Context, arg CreateAgentBuilder
 
 const createAgentTask = `-- name: CreateAgentTask :one
 WITH enqueue_agent AS MATERIALIZED (
-    SELECT a.id, COALESCE(a.runtime_id, $34::uuid) AS runtime_id
+    SELECT a.id, COALESCE(a.runtime_id, $35::uuid) AS runtime_id
     FROM agent a
     WHERE a.id = $1
-      AND lock_task_owner_rows(a.id, $2, COALESCE(a.runtime_id, $34::uuid))
+      AND lock_task_owner_rows(a.id, $2, COALESCE(a.runtime_id, $35::uuid))
     FOR KEY SHARE OF a
 )
 INSERT INTO agent_task_queue (
@@ -2601,8 +2601,7 @@ SELECT
         WHEN $14::bigint IS NOT NULL
         THEN jsonb_build_object('workflow_handoff_revision', $14::bigint)
         ELSE '{}'::jsonb
-    END, '{}'::jsonb),
-    $15,
+    END || COALESCE($15::jsonb, '{}'::jsonb), '{}'::jsonb),
     $16,
     $17,
     $18,
@@ -2619,10 +2618,11 @@ SELECT
     $29,
     $30,
     $31,
+    $32,
     -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
-    COALESCE($32::text, (SELECT i.status FROM issue i WHERE i.id = $2)),
+    COALESCE($33::text, (SELECT i.status FROM issue i WHERE i.id = $2)),
     $3,
-    COALESCE($33::uuid, gen_random_uuid())
+    COALESCE($34::uuid, gen_random_uuid())
 FROM enqueue_agent
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, workflow_step, effective_model, effective_thinking_level, effective_runtime_config, effective_max_concurrent_tasks, runtime_config_source, runtime_config_hint, effective_service_tier
 `
@@ -2642,6 +2642,7 @@ type CreateAgentTaskParams struct {
 	HeadSha                     pgtype.Text        `json:"head_sha"`
 	FreshRerun                  pgtype.Bool        `json:"fresh_rerun"`
 	WorkflowHandoffRevision     pgtype.Int8        `json:"workflow_handoff_revision"`
+	StickyInheritance           []byte             `json:"sticky_inheritance"`
 	OriginatorUserID            pgtype.UUID        `json:"originator_user_id"`
 	AccountableUserID           pgtype.UUID        `json:"accountable_user_id"`
 	RuntimeMcpOverlay           []byte             `json:"runtime_mcp_overlay"`
@@ -2704,6 +2705,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		arg.HeadSha,
 		arg.FreshRerun,
 		arg.WorkflowHandoffRevision,
+		arg.StickyInheritance,
 		arg.OriginatorUserID,
 		arg.AccountableUserID,
 		arg.RuntimeMcpOverlay,
@@ -5115,6 +5117,34 @@ func (q *Queries) GetLatestIssueTaskRuntimeOriginator(ctx context.Context, issue
 	var runtime_originator_user_id pgtype.UUID
 	err := row.Scan(&runtime_originator_user_id)
 	return runtime_originator_user_id, err
+}
+
+const getLatestIssueTaskStickyRuntime = `-- name: GetLatestIssueTaskStickyRuntime :one
+SELECT atq.id AS source_task_id, atq.runtime_id
+FROM agent_task_queue atq
+WHERE atq.issue_id = $1
+  AND atq.runtime_id IS NOT NULL
+  AND atq.runtime_config_source IS NOT NULL
+  AND atq.runtime_config_source <> 'shared'
+ORDER BY atq.created_at DESC, atq.id DESC
+LIMIT 1
+`
+
+type GetLatestIssueTaskStickyRuntimeRow struct {
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
+	RuntimeID    pgtype.UUID `json:"runtime_id"`
+}
+
+// The machine the issue's latest personal run resolved to, with that run's id
+// as the authorization source. A sticky "current task" continuation pins this
+// machine instead of re-resolving: with two online machines of the same CLI a
+// fresh resolution would drift to whichever heartbeated last, splitting one
+// conversation across machines.
+func (q *Queries) GetLatestIssueTaskStickyRuntime(ctx context.Context, issueID pgtype.UUID) (GetLatestIssueTaskStickyRuntimeRow, error) {
+	row := q.db.QueryRow(ctx, getLatestIssueTaskStickyRuntime, issueID)
+	var i GetLatestIssueTaskStickyRuntimeRow
+	err := row.Scan(&i.SourceTaskID, &i.RuntimeID)
+	return i, err
 }
 
 const getLatestTaskRoleForIssueAndAgent = `-- name: GetLatestTaskRoleForIssueAndAgent :one

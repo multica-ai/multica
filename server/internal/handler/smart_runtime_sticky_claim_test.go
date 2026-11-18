@@ -3,8 +3,11 @@ package handler
 import (
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
+	service "github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -174,5 +177,59 @@ func TestSmartRuntimeAutoRetryReinheritsStickyMarker(t *testing.T) {
 	claimed, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(machine))
 	if err != nil || claimed == nil || claimed.ID != retry.ID {
 		t.Fatalf("the run owner's machine failed to claim the retry (task=%v, err=%v)", claimed != nil, err)
+	}
+}
+
+// With two online machines of the same CLI owned by the run's member, a
+// sticky continuation pins the machine the pinned run actually resolved to
+// (A) instead of drifting to whichever heartbeated last (B), and stamps its
+// own inheritance marker so A can claim it.
+func TestSmartRuntimeContinuationPinsLatestRunMachine(t *testing.T) {
+	ctx := t.Context()
+	templateOwner := dbfx.User(t, "Pin Template Owner", "pin-template@example.test")
+	dbfx.Member(t, testWorkspaceID, templateOwner, "member")
+	runOwner := dbfx.User(t, "Pin Run Owner", "pin-run-owner@example.test")
+	dbfx.Member(t, testWorkspaceID, runOwner, "member")
+	machineA := dbfx.Runtime(t, "Pin machine A", testutil.Cols{"provider": "codex", "owner_id": runOwner})
+	// B heartbeats after A, so a fresh resolution would prefer B.
+	machineB := dbfx.Runtime(t, "Pin machine B", testutil.Cols{
+		"provider": "codex", "owner_id": runOwner, "last_seen_at": testutil.Raw("now() + interval '1 second'"),
+	})
+	_ = machineB
+	agentID := dbfx.Agent(t, "pin-review-agent", "", testutil.Cols{
+		"share_runtime": false, "recommended_cli": "codex", "owner_id": templateOwner,
+	})
+	issueID := dbfx.Issue(t, "Pin continuation", testutil.Cols{"assignee_type": "agent", "assignee_id": agentID})
+
+	// The run: claimed and delivered on machine A.
+	sourceID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": machineA, "issue_id": issueID, "status": "completed",
+		"originator_user_id": runOwner, "accountable_user_id": runOwner,
+		"runtime_config_source": "recommended_match", "dispatched_at": testutil.Raw("now()"),
+	})
+
+	// The joining member's sticky continuation enqueues straight onto A.
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, parseUUID(agentID), pgtype.UUID{}, service.OriginNamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if util.UUIDToString(task.RuntimeID) != machineA {
+		t.Fatalf("continuation runtime = %s, want the pinned machine A %s", util.UUIDToString(task.RuntimeID), machineA)
+	}
+	var markerTask, markerSource string
+	if err := testPool.QueryRow(ctx, `SELECT context->>'sticky_runtime_inherited_task_id', context->>'sticky_runtime_source_task_id'
+		FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&markerTask, &markerSource); err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	if markerTask != util.UUIDToString(task.ID) || markerSource != sourceID {
+		t.Fatalf("marker = (task %s, source %s), want (self %s, source %s)",
+			markerTask, markerSource, util.UUIDToString(task.ID), sourceID)
+	}
+	if claimed, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(machineA)); err != nil || claimed == nil || claimed.ID != task.ID {
+		t.Fatalf("machine A failed to claim the pinned continuation (task=%v, err=%v)", claimed != nil, err)
 	}
 }

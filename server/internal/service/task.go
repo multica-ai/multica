@@ -597,6 +597,43 @@ func (s *TaskService) runtimeOriginatorForTask(ctx context.Context, task db.Agen
 	return runtime.OwnerID
 }
 
+// stickyRuntimeForContinuation recovers the machine the issue's latest
+// personal run resolved to, together with that run's id as the authorization
+// source. A sticky continuation pins this machine instead of re-resolving:
+// with two online machines of the same CLI a fresh resolution would drift to
+// whichever heartbeated last, splitting one conversation across machines.
+func (s *TaskService) stickyRuntimeForContinuation(ctx context.Context, issueID pgtype.UUID) (pgtype.UUID, pgtype.UUID, bool) {
+	if s == nil || s.Queries == nil || !issueID.Valid {
+		return pgtype.UUID{}, pgtype.UUID{}, false
+	}
+	src, err := s.Queries.GetLatestIssueTaskStickyRuntime(ctx, issueID)
+	if err != nil {
+		return pgtype.UUID{}, pgtype.UUID{}, false
+	}
+	return src.SourceTaskID, src.RuntimeID, true
+}
+
+// stickyInheritanceMarker builds the context stamp the claim fence reads for
+// an inherited machine: the task's own id (so a copied context cannot vouch
+// for another task), the pinned machine, and the source run.
+func stickyInheritanceMarker(taskID, runtimeID, sourceTaskID pgtype.UUID) []byte {
+	marker, err := json.Marshal(struct {
+		Inherited bool   `json:"sticky_runtime_inherited"`
+		RuntimeID string `json:"sticky_runtime_inherited_runtime_id"`
+		TaskID    string `json:"sticky_runtime_inherited_task_id"`
+		SourceID  string `json:"sticky_runtime_source_task_id"`
+	}{
+		Inherited: true,
+		RuntimeID: util.UUIDToString(runtimeID),
+		TaskID:    util.UUIDToString(taskID),
+		SourceID:  util.UUIDToString(sourceTaskID),
+	})
+	if err != nil {
+		return nil
+	}
+	return marker
+}
+
 func (s *TaskService) latestIssueTaskRuntimeOriginator(ctx context.Context, issueID pgtype.UUID) pgtype.UUID {
 	if s == nil || s.Queries == nil || !issueID.Valid {
 		return pgtype.UUID{}
@@ -1502,12 +1539,23 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	if err != nil {
 		return db.AgentTaskQueue{}, err
 	}
+	// A smart continuation pins the latest run's machine: the fence would
+	// otherwise re-resolve and drift to another online CLI of the same owner.
+	taskID := dbid.NewV7()
+	var stickyInheritance []byte
+	if !agent.ShareRuntime && !originatorOverride.Valid {
+		if sourceTaskID, pinnedRuntime, ok := s.stickyRuntimeForContinuation(ctx, issue.ID); ok {
+			effective.RuntimeID = pinnedRuntime
+			stickyInheritance = stickyInheritanceMarker(taskID, pinnedRuntime, sourceTaskID)
+		}
+	}
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, runtimeOriginatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	createParams := db.CreateAgentTaskParams{
-		ID:                          dbid.NewV7(),
+		ID:                          taskID,
 		AgentID:                     issue.AssigneeID,
 		RuntimeID:                   effective.RuntimeID,
+		StickyInheritance:           stickyInheritance,
 		EffectiveModel:              TaskEffectiveModel(effective),
 		EffectiveThinkingLevel:      TaskEffectiveThinkingLevel(effective),
 		EffectiveServiceTier:        TaskEffectiveServiceTier(effective),
@@ -1694,12 +1742,23 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	if err != nil {
 		return db.AgentTaskQueue{}, err
 	}
+	// Same smart continuation pin as the issue-assignee path: keep the run's
+	// machine instead of re-resolving across the owner's online machines.
+	mentionTaskID := dbid.NewV7()
+	var stickyInheritance []byte
+	if !agent.ShareRuntime && !originatorOverride.Valid {
+		if sourceTaskID, pinnedRuntime, ok := s.stickyRuntimeForContinuation(ctx, issue.ID); ok {
+			effective.RuntimeID = pinnedRuntime
+			stickyInheritance = stickyInheritanceMarker(mentionTaskID, pinnedRuntime, sourceTaskID)
+		}
+	}
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, runtimeOriginatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	params := db.CreateAgentTaskParams{
-		ID:                          dbid.NewV7(),
+		ID:                          mentionTaskID,
 		AgentID:                     agentID,
 		RuntimeID:                   effective.RuntimeID,
+		StickyInheritance:           stickyInheritance,
 		EffectiveModel:              TaskEffectiveModel(effective),
 		EffectiveThinkingLevel:      TaskEffectiveThinkingLevel(effective),
 		EffectiveServiceTier:        TaskEffectiveServiceTier(effective),
