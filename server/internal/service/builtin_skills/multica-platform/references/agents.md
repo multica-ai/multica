@@ -84,7 +84,7 @@ objects (at most 3); pass `'[]'` on update to clear.
 
 The HTTP body accepts: `name`, `description`, `instructions`,
 `conversation_starters`, `avatar_url`, `runtime_id`, `share_runtime`,
-`recommended_cli`, `runtime_config`, `custom_env`, `custom_args`, `model`,
+`cli`, `runtime_config`, `custom_env`, `custom_args`, `model`,
 `thinking_level`, `service_tier`, `visibility`, `max_concurrent_tasks`,
 `mcp_config`, `skill_ids`.
 
