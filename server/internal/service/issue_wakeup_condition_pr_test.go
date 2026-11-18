@@ -135,22 +135,25 @@ func TestWakeupConditionPREvaluation(t *testing.T) {
 	}
 }
 
-// Without the snapshot client an unlinked rule is blocked by the missing
-// client only when no self-hosted VCS PR could be linked instead; otherwise
-// the missing link is what to fix.
+// Without the snapshot client an unlinked checks rule is blocked by the
+// missing client only when no self-hosted VCS PR could be linked instead;
+// otherwise the missing link is what to fix. Conflicts need snapshots
+// whichever PR is linked, so they keep the snapshot diagnostic.
 func TestWakeupConditionPRUnlinkedDiagnostic(t *testing.T) {
 	for _, event := range []string{"checks_finished", "conflicts", "merged"} {
 		for _, available := range []bool{false, true} {
 			for _, hasVCS := range []bool{false, true} {
-				// merged needs no snapshots, so only checks and conflicts
-				// without the client ask whether a VCS PR could be linked.
-				gated := event != "merged" && !available
+				// merged needs no snapshots; only checks without the client
+				// asks whether a VCS PR could be linked.
 				wantErr, wantChecks := errPRNotLinked, 0
-				if gated {
+				switch {
+				case event == "checks_finished" && !available:
 					wantChecks = 1
 					if !hasVCS {
 						wantErr = errPRSnapshotsUnavailable
 					}
+				case event == "conflicts" && !available:
+					wantErr = errPRSnapshotsUnavailable
 				}
 				t.Run(fmt.Sprintf("%s/snapshots=%t/vcs=%t", event, available, hasVCS), func(t *testing.T) {
 					s := &IssueWakeupService{Tasks: &TaskService{PRSnapshotsEnabled: available}}

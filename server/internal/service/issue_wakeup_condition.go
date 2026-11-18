@@ -376,13 +376,16 @@ func (s *IssueWakeupService) evaluateCondition(ctx context.Context, tx pgx.Tx, q
 		// Any matching PR satisfies the rule; diagnostics only explain a wait.
 		if len(keys) == 0 {
 			if linked == 0 && vcsLinked == 0 {
-				// Without the snapshot client a GitHub PR cannot progress the
+				// Without the snapshot client a GitHub PR cannot finish a checks
 				// rule but a self-hosted VCS PR can, so blame the missing client
 				// only when the workspace has no VCS connection to link one from.
+				// Conflicts need snapshots whichever PR is linked.
 				if !githubChecks {
 					var hasVCS bool
-					if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM vcs_connection WHERE workspace_id=$1)", w.WorkspaceID).Scan(&hasVCS); err != nil {
-						return false, "", nil, err
+					if c.Event == "checks_finished" {
+						if err = tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM vcs_connection WHERE workspace_id=$1)", w.WorkspaceID).Scan(&hasVCS); err != nil {
+							return false, "", nil, err
+						}
 					}
 					if !hasVCS {
 						return false, "", nil, errPRSnapshotsUnavailable
