@@ -34,6 +34,14 @@ export function useDocDraft(doc: Doc) {
   const ownerId = useRef(useAuthStore.getState().user?.id).current;
   const statusRef = useRef(status);
   const saveRef = useRef<() => Promise<void>>(async () => {});
+  // The response of our last save. Clearing the draft re-renders this hook
+  // before the parent passes the refreshed `doc`, so falling back to the prop
+  // would briefly hand the editor the pre-save content and reset its caret.
+  const savedDoc = useRef<Doc | null>(null);
+  const latestDoc =
+    savedDoc.current && savedDoc.current.revision > doc.revision
+      ? savedDoc.current
+      : doc;
   const inScope = () =>
     getCurrentWsId() === wsId && useAuthStore.getState().user?.id === ownerId;
   const updateStatus = (next: typeof status) => {
@@ -65,7 +73,7 @@ export function useDocDraft(doc: Doc) {
         setDocDraft(key, { ...fromDoc(doc), backup: current.backup });
     }
   }, [doc, key]);
-  const value = draft ?? fromDoc(doc);
+  const value = draft ?? fromDoc(latestDoc);
   const dirty =
     value.title !== value.baseTitle || value.content !== value.baseContent;
   const save = async () => {
@@ -93,6 +101,7 @@ export function useDocDraft(doc: Doc) {
         return;
       }
       qc.setQueryData(docKeys.detail(wsId, doc.id), updated);
+      savedDoc.current = updated;
       const next = {
         ...current,
         title: current.title === sent.title ? updated.title : current.title,
@@ -135,7 +144,7 @@ export function useDocDraft(doc: Doc) {
   const change = (patch: Partial<Pick<DocDraft, "title" | "content">>) => {
     if (!inScope()) return;
     const current =
-      useDocDraftStore.getState().draft.entries[key] ?? fromDoc(doc);
+      useDocDraftStore.getState().draft.entries[key] ?? fromDoc(latestDoc);
     setDocDraft(key, { ...current, ...patch });
   };
   const reload = async () => {

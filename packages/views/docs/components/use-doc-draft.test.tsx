@@ -341,3 +341,22 @@ it("settles an in-flight save without writing the old workspace's draft into the
   expect(view.client.getQueryCache().getAll()).toEqual([]);
   expect(useDocDraftStore.getState().draft.entries).toEqual({});
 });
+
+it("keeps showing the saved content while the doc prop catches up", async () => {
+  const view = mount();
+  act(() => view.result.current.change({ content: "Edited at the end" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1600);
+  });
+  expect(api.updateDoc).toHaveBeenCalledTimes(1);
+  // The hook still receives the pre-save `doc`; the editor must not be handed
+  // the old content (it would reset the caret).
+  expect(view.result.current.draft.content).toBe("Edited at the end");
+  expect(view.result.current.dirty).toBe(false);
+  act(() => view.result.current.change({ title: "Renamed" }));
+  expect(view.result.current.draft).toMatchObject({
+    title: "Renamed",
+    content: "Edited at the end",
+    baseRevision: 2,
+  });
+});
