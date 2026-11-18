@@ -96,6 +96,7 @@ func TestInboxListFiltersAndCommentAnchors(t *testing.T) {
 }
 
 func TestInboxListTableAndDeniedRequest(t *testing.T) {
+	const longTitle = "Need input on the archive pagination rewrite before the Friday release goes out"
 	status := http.StatusOK
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,7 +109,7 @@ func TestInboxListTableAndDeniedRequest(t *testing.T) {
 			_, _ = w.Write([]byte(`{"error":"inbox access denied"}`))
 			return
 		}
-		_, _ = w.Write([]byte(`[{"id":"n1","type":"mentioned","title":"Need input","issue_id":"i1","issue_project_id":"p1","read":true,"details":{"comment_id":"c1"}}]`))
+		_, _ = w.Write([]byte(`[{"id":"n1","type":"mentioned","title":"` + longTitle + `","issue_id":"i1","issue_project_id":"p1","read":true,"details":{"comment_id":"c1"}}]`))
 	}))
 	defer srv.Close()
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
@@ -118,7 +119,11 @@ func TestInboxListTableAndDeniedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"ID", "TYPE", "TITLE", "ISSUE", "COMMENT", "PROJECT", "READ", "CREATED", "n1", "c1", "true"} {
+	header := strings.Fields(strings.SplitN(out, "\n", 2)[0])
+	if want := []string{"ID", "TYPE", "TITLE", "ISSUE", "COMMENT", "PROJECT", "READ", "CREATED", "KEY", "FROM", "SUMMARY"}; strings.Join(header, " ") != strings.Join(want, " ") {
+		t.Errorf("header = %v, want the original columns first, then %v", header, want[8:])
+	}
+	for _, value := range []string{"n1", longTitle, "i1", "c1", "p1", "true"} {
 		if !strings.Contains(out, value) {
 			t.Errorf("table missing %q: %s", value, out)
 		}

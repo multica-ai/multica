@@ -404,7 +404,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | 태스크 생성, 업데이트, 할당, 검색. 댓글, 구독, 라벨, 속성, 깨우기, 타임라인, 실행 기록 관리 |
 | `project` | 프로젝트와 프로젝트 리소스 관리 |
-| `inbox` | 읽음 상태를 바꾸지 않고 내 알림 읽기 |
+| `inbox` | 내 알림 읽기와 관리: 목록, 읽음 표시, 보관, 다시 알림 |
 | `label`, `property` | 워크스페이스 라벨과 사용자 지정 속성 관리 |
 | `view` | 저장된 뷰를 읽고 뷰에 보이는 태스크 나열 |
 | `agent`, `skill`, `squad` | 에이전트, 스킬, 스쿼드 관리 |
@@ -527,7 +527,14 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `activity <issue-id> <outcome>` | 리더 평가 기록 | |
 | `chat` | `history`, `thread [id]` | 에이전트가 현재 처리 중인 외부 채팅 대화 읽기 | `--limit`, `--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | 현재 채팅 실행의 후속 작업 관리. [채팅 웨이크업](#chat-wakeups) 참고 | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
-| `inbox` | `list` | 읽음으로 표시하지 않고 [현재 알림 읽기](/inbox) | `--project`, `--type`, `--output` (`table` 또는 `json`); 필터는 로컬에서 적용 |
+| `inbox` | `list` | 읽음으로 표시하지 않고 [알림 목록 보기](/inbox). `--archived` 또는 `--snoozed`는 해당 목록을 보여 줌 | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` 또는 `json`); `--archived`는 모든 페이지를 읽음 |
+| | `count` | 이 워크스페이스와 소속된 각 워크스페이스의 읽지 않은 알림 수 | `--output` |
+| | `read [<id>...]` | 알림을 읽음으로 표시(각 알림의 태스크 전체에 적용). 또는 한 태스크의 모든 알림, 또는 전체 | `--issue`, `--all` (`--yes` 필요) |
+| | `unread <id>...` | 알림을 읽지 않음으로 표시 | |
+| | `archive [<id>...]` | 알림 보관(각 알림의 태스크 전체에 적용). 또는 일괄 보관 | `--all`, `--read`, `--completed` (모두 `--yes` 필요) |
+| | `unarchive <id>...` | 보관한 알림 복원 | |
+| | `snooze <id>...` | 알림의 태스크를 지정한 시간까지 인박스에서 빼기 | `--until` (RFC 3339, `30m`, `3h`, `1d`, `1w`, `tomorrow`) |
+| | `unsnooze <id>...` | 다시 알림 중인 태스크를 지금 되돌리기 | |
 
 ### Runtime
 
