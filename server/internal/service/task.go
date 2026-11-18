@@ -636,11 +636,13 @@ func (s *TaskService) stickyRuntimeForExplicitSource(ctx context.Context, issueI
 // member to re-select.
 func (s *TaskService) EnqueueCommentTaskWithStickySource(ctx context.Context, issue db.Issue, agentID, squadID, commentID, sourceTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
 	// No actorUserID: attribution resolves from the trigger comment itself,
-	// exactly like the plain comment-triggered paths.
+	// exactly like the plain comment-triggered paths. The continuation always
+	// follows the MENTIONED agent — the issue's assignee is irrelevant, and an
+	// unassigned issue must not block the member's explicit pick.
 	if squadID.Valid {
 		return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, commentID, nil, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, sourceTaskID, origin, false, false)
 	}
-	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, commentID, nil, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, sourceTaskID, pgtype.Timestamptz{}, origin, false)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, commentID, nil, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, sourceTaskID, origin, false, false)
 }
 
 // ErrStickySourceUnavailable: the explicitly picked run can no longer vouch
