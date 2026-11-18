@@ -161,6 +161,8 @@ func init() {
 	agentCreateCmd.Flags().String("description", "", "Agent description")
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
 	agentCreateCmd.Flags().String("conversation-starters", "", "Conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Shown above the Chat composer; selecting one fills the composer and does not start a run. Omit to default to none.")
+	agentCreateCmd.Flags().String("runtime-strategy", "", "Runtime strategy: smart or fixed")
+	agentCreateCmd.Flags().String("cli", "", "Recommended CLI for smart strategy")
 	agentCreateCmd.Flags().String("runtime-id", "", "Runtime ID (required)")
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
@@ -185,6 +187,8 @@ func init() {
 	agentUpdateCmd.Flags().String("description", "", "New description")
 	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
 	agentUpdateCmd.Flags().String("conversation-starters", "", "New conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Pass '[]' to clear. Omit to leave the stored value unchanged.")
+	agentUpdateCmd.Flags().String("runtime-strategy", "", "Runtime strategy: smart or fixed")
+	agentUpdateCmd.Flags().String("cli", "", "Recommended CLI for smart strategy")
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
@@ -645,13 +649,17 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--name is required")
 	}
 	runtimeID, _ := cmd.Flags().GetString("runtime-id")
-	if runtimeID == "" {
+	strategy, _ := cmd.Flags().GetString("runtime-strategy")
+	if runtimeID == "" && strategy != "smart" {
 		return fmt.Errorf("--runtime-id is required")
 	}
 
 	body := map[string]any{
 		"name":       name,
 		"runtime_id": runtimeID,
+	}
+	if err := applyRuntimeStrategyFlags(cmd, body); err != nil {
+		return err
 	}
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
@@ -741,6 +749,9 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{}
+	if err := applyRuntimeStrategyFlags(cmd, body); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("name") {
 		v, _ := cmd.Flags().GetString("name")
 		body["name"] = v
@@ -1502,4 +1513,22 @@ func strVal(m map[string]any, key string) string {
 		return ""
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+func applyRuntimeStrategyFlags(cmd *cobra.Command, body map[string]any) error {
+	strategy, _ := cmd.Flags().GetString("runtime-strategy")
+	cli, _ := cmd.Flags().GetString("cli")
+	switch strategy {
+	case "":
+	case "smart":
+		body["share_runtime"] = false
+	case "fixed":
+		body["share_runtime"] = true
+	default:
+		return fmt.Errorf("--runtime-strategy must be smart or fixed")
+	}
+	if cmd.Flags().Changed("cli") {
+		body["cli"] = cli
+	}
+	return nil
 }

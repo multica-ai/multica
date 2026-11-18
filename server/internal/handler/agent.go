@@ -60,11 +60,14 @@ type AgentResponse struct {
 	// runtime before it can run again (MUL-5559). The wire type stays a string
 	// so installed clients keep parsing; RuntimeBound is the explicit signal.
 	RuntimeID string `json:"runtime_id"`
+	CLI       string `json:"cli,omitempty"`
 	// RuntimeBound is false exactly when the agent has no runtime. UI should
 	// branch on this rather than on RuntimeID being falsy, and must not confuse
 	// it with a bound-but-offline runtime (a different user story: reconnect the
 	// machine vs. pick a new one).
-	RuntimeBound bool `json:"runtime_bound"`
+	RuntimeBound         bool                       `json:"runtime_bound"`
+	ShareRuntime         bool                       `json:"share_runtime"`
+	RuntimeConfigSummary *AgentRuntimeConfigSummary `json:"runtime_config_summary,omitempty"`
 	// RuntimeAvailability is the coarse liveness projection for a runtime that
 	// may be hidden from the caller's runtime list. It deliberately carries no
 	// timestamp, device, owner, configuration, or credential fields; clients
@@ -213,7 +216,9 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ID:                       uuidToString(a.ID),
 		WorkspaceID:              uuidToString(a.WorkspaceID),
 		RuntimeID:                uuidToString(a.RuntimeID),
-		RuntimeBound:             a.RuntimeID.Valid,
+		RuntimeBound:             service.AgentHasRuntimeBinding(a),
+		ShareRuntime:             a.ShareRuntime,
+		CLI:                      service.RecommendedCLI(a),
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,
@@ -1328,6 +1333,9 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		} else if actorType == "agent" || uuidToString(a.OwnerID) != userID {
 			redactComposioToolkitAllowlist(&resp)
 		}
+		if actorType != "agent" && !alwaysRedact && !a.ShareRuntime {
+			h.attachRuntimeConfigSummaryForMember(r.Context(), &resp, a, member)
+		}
 		visible = append(visible, resp)
 	}
 
@@ -1355,6 +1363,9 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	viewerRole := ""
 	if member, ok := ctxMember(r.Context()); ok {
 		viewerRole = member.Role
+		if actorType != "agent" && !agent.ShareRuntime {
+			h.attachRuntimeConfigSummaryForMember(r.Context(), &resp, agent, member)
+		}
 	}
 	runtimeAvailability, err := h.loadAgentRuntimeAvailability(r.Context(), []db.Agent{agent}, workspaceID, userID, viewerRole, time.Now())
 	if err != nil {
@@ -1405,6 +1416,8 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
+	ShareRuntime         *bool                      `json:"share_runtime"`
+	CLI                  string                     `json:"cli"`
 	Name                 string                     `json:"name"`
 	Description          string                     `json:"description"`
 	Instructions         string                     `json:"instructions"`
@@ -1530,9 +1543,22 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
-	if !ok {
-		return
+	share := req.ShareRuntime == nil || *req.ShareRuntime
+	var runtimeUUID pgtype.UUID
+	var cli string
+	if share {
+		var ok bool
+		runtimeUUID, ok = parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
+		if !ok {
+			return
+		}
+	} else {
+		var ok bool
+		cli, ok = service.NormalizeRecommendedCLI(req.CLI)
+		if !ok || req.RuntimeID != "" {
+			writeError(w, http.StatusBadRequest, "smart strategy requires a CLI and no runtime_id")
+			return
+		}
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
@@ -1550,20 +1576,24 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, permErr.Error())
 		return
 	}
-	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-		ID:          runtimeUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid runtime_id")
-		return
+	runtime := db.AgentRuntime{Provider: cli, RuntimeMode: "daemon"}
+	if share {
+		runtime, err = h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+			ID:          runtimeUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+
 	}
 
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
 		return
 	}
-	if !canUseRuntimeForAgent(member, runtime) {
+	if share && !canUseRuntimeForAgent(member, runtime) {
 		writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
 		return
 	}
@@ -1714,14 +1744,17 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	runtime, err = qtx.LockAgentRuntimeForAccessChange(r.Context(), runtimeUUID)
-	if err != nil || runtime.WorkspaceID != wsUUID {
-		writeError(w, http.StatusBadRequest, "invalid runtime_id")
-		return
-	}
-	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
-		return
+	if share {
+		runtime, err = qtx.LockAgentRuntimeForAccessChange(r.Context(), runtimeUUID)
+		if err != nil || runtime.WorkspaceID != wsUUID {
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+		if share && !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before creating agents")
+			return
+		}
+
 	}
 
 	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
@@ -1733,6 +1766,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		RuntimeMode:              runtime.RuntimeMode,
 		RuntimeConfig:            rc,
 		RuntimeID:                runtime.ID,
+		ShareRuntime:             pgtype.Bool{Bool: share, Valid: true},
+		RecommendedCli:           cli,
 		Visibility:               perm.legacyVisibility(),
 		PermissionMode:           perm.mode,
 		MaxConcurrentTasks:       req.MaxConcurrentTasks,
@@ -1817,6 +1852,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateAgentRequest struct {
+	ShareRuntime         *bool                       `json:"share_runtime"`
+	CLI                  *string                     `json:"cli"`
 	Name                 *string                     `json:"name"`
 	Description          *string                     `json:"description"`
 	Instructions         *string                     `json:"instructions"`
@@ -2129,7 +2166,31 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// runtime to validate a thinking_level change. Resolve once and reuse.
 	targetRuntimeID := existing.RuntimeID
 	targetProvider := ""
-	if req.RuntimeID != nil {
+	share := existing.ShareRuntime
+	if req.ShareRuntime != nil {
+		share = *req.ShareRuntime
+		params.ShareRuntime = pgtype.Bool{Bool: share, Valid: true}
+	}
+	if !share {
+		targetProvider = service.RecommendedCLI(existing)
+		if req.CLI != nil {
+			targetProvider, _ = service.NormalizeRecommendedCLI(*req.CLI)
+		}
+		if targetProvider == "" || (req.RuntimeID != nil && *req.RuntimeID != "") {
+			writeError(w, http.StatusBadRequest, "smart strategy requires a CLI and no runtime_id")
+			return
+		}
+		params.RecommendedCli = pgtype.Text{String: targetProvider, Valid: true}
+		targetRuntimeID = pgtype.UUID{}
+		params.RuntimeMode = pgtype.Text{String: "daemon", Valid: true}
+	} else if req.ShareRuntime != nil || req.CLI != nil {
+		if !existing.RuntimeID.Valid && req.RuntimeID == nil {
+			writeError(w, http.StatusBadRequest, "fixed strategy requires runtime_id")
+			return
+		}
+		params.RecommendedCli = pgtype.Text{Valid: true}
+	}
+	if share && req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
 			return

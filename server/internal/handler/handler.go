@@ -525,6 +525,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	)
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
+	modelCatalogCache := NewInMemoryModelCatalogCache()
+	taskSvc.LiveRuntimeModels = LiveRuntimeModelsFromCache(modelCatalogCache)
 	taskSvc.Analytics = analyticsClient
 	taskSvc.SourceContextStorage = store
 	// Chat follow-up suggestions run through the same internal LLM layer that
@@ -550,7 +552,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		EmailService:                 emailService,
 		UpdateStore:                  NewInMemoryUpdateStore(),
 		ModelListStore:               NewInMemoryModelListStore(),
-		ModelCatalogCache:            NewInMemoryModelCatalogCache(),
+		ModelCatalogCache:            modelCatalogCache,
 		LocalSkillListStore:          NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore:        NewInMemoryLocalSkillImportStore(),
 		LivenessStore:                NewNoopLivenessStore(),
