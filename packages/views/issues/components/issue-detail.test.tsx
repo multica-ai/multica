@@ -3299,6 +3299,76 @@ describe("IssueDetail (shared)", () => {
       });
     });
 
+    it("holds the composer back until a landing on cached data puts its target on screen (MUL-9538)", async () => {
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(issueKeys.detail("ws-1", "issue-1"), mockIssue);
+      queryClient.setQueryData(issueKeys.timeline("issue-1"), mockTimeline);
+      queryClient.setQueryData(issueKeys.tasks("issue-1"), []);
+      render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" highlightCommentId="comment-2" />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+
+      // The landing frame renders the target, not the composer below it.
+      expect(document.getElementById("comment-comment-2")).not.toBeNull();
+      expect(screen.queryByTestId("comment-composer-shell")).toBeNull();
+
+      await waitFor(() => expect(
+        hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
+      ).toBe(true));
+      expect(await screen.findByTestId("comment-composer-shell")).toBeInTheDocument();
+    });
+
+    it("holds the composer for an Inbox landing whose comment arrives a render later (MUL-9538)", async () => {
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(issueKeys.detail("ws-1", "issue-1"), mockIssue);
+      queryClient.setQueryData(issueKeys.timeline("issue-1"), mockTimeline);
+      queryClient.setQueryData(issueKeys.tasks("issue-1"), []);
+      const page = (highlightCommentId?: string) => (
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" highlightRequestPending highlightCommentId={highlightCommentId} />
+          </QueryClientProvider>
+        </I18nProvider>
+      );
+      // Web reads the comment from the URL fragment, which the router writes
+      // after the page's first render.
+      const { rerender } = render(page());
+      expect(screen.queryByTestId("comment-composer-shell")).toBeNull();
+      rerender(page("comment-2"));
+      expect(screen.queryByTestId("comment-composer-shell")).toBeNull();
+
+      await waitFor(() => expect(
+        hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
+      ).toBe(true));
+      expect(await screen.findByTestId("comment-composer-shell")).toBeInTheDocument();
+    });
+
+    it("lets the composer in at once when an Inbox landing names no comment", async () => {
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(issueKeys.detail("ws-1", "issue-1"), mockIssue);
+      queryClient.setQueryData(issueKeys.timeline("issue-1"), mockTimeline);
+      queryClient.setQueryData(issueKeys.tasks("issue-1"), []);
+      render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" highlightRequestPending />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+      // Within a frame, well before the hold's upper bound.
+      expect(await screen.findByTestId("comment-composer-shell", {}, { timeout: 200 })).toBeInTheDocument();
+    });
+
+    it("renders the composer while a deep link's timeline is still loading", async () => {
+      mockApiObj.listTimeline.mockReturnValue(new Promise(() => {}));
+      renderIssueDetailWithHighlight("comment-2");
+      expect(await screen.findByTestId("comment-composer-shell")).toBeInTheDocument();
+    });
+
     it("auto-expands a folded resolved thread when deep-link target is a reply inside it", async () => {
       // Seed a timeline where comment-3 is resolved (so it renders as a
       // resolved-bar by default) and has a reply, reply-1, whose id is the
