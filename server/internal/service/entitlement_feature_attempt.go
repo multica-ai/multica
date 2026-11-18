@@ -34,7 +34,7 @@ func FeatureAttemptOutcomeFor(decision entitlement.FeatureDecision) (FeatureAtte
 	case entitlement.ActionEnforce:
 		return FeatureAttemptEnforced, true
 	case entitlement.ActionObserve:
-		if decision.Reason == entitlement.ReasonStale {
+		if decision.Downgraded {
 			return FeatureAttemptDegraded, true
 		}
 		return FeatureAttemptObserved, true
@@ -74,16 +74,32 @@ type FeatureAttemptDay struct {
 // self-hosted deployment never touches the table.
 type EntitlementFeatureAttempts struct {
 	Queries *db.Queries
+	// RecordTimeout bounds one Record; zero means defaultFeatureAttemptRecordTimeout.
+	RecordTimeout time.Duration
 }
+
+// Recording runs before the caller writes its response, so it gets its own
+// short deadline: a contended row lock or a slow database drops the record
+// instead of holding a request whose outcome is already decided.
+const defaultFeatureAttemptRecordTimeout = time.Second
 
 // Record stores one attempt. It is best-effort: callers record an admitted
 // attempt after their write commits and a rejected one after authorization,
-// and a failure here never changes the operation's result.
+// and a failure here never changes the operation's result. It is detached from
+// the caller's cancellation, so a client that disconnects after a committed
+// write still leaves a record, and bounded by RecordTimeout, so it can never
+// hold the response.
 func (a EntitlementFeatureAttempts) Record(ctx context.Context, attempt FeatureAttempt) {
 	outcome, ok := FeatureAttemptOutcomeFor(attempt.Decision)
 	if !ok || a.Queries == nil {
 		return
 	}
+	timeout := a.RecordTimeout
+	if timeout <= 0 {
+		timeout = defaultFeatureAttemptRecordTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	defer cancel()
 	_, err := a.Queries.RecordEntitlementFeatureAttempt(ctx, db.RecordEntitlementFeatureAttemptParams{
 		WorkspaceID:         attempt.WorkspaceID,
 		Feature:             string(attempt.Feature),

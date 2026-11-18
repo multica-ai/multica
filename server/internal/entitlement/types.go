@@ -119,7 +119,7 @@ func (n FeatureName) Valid() bool {
 //   - off: the feature is fully usable.
 //   - observe: fully usable; each attempt to add to its configuration is
 //     recorded. A stale cached enforce is also downgraded to observe, with
-//     Reason stale, so a Cloud outage never keeps blocking.
+//     Downgraded set, so a Cloud outage never keeps blocking.
 //   - enforce: existing configuration keeps working and can always be reduced
 //     or removed; attempts to add to it are rejected.
 //
@@ -127,8 +127,13 @@ func (n FeatureName) Valid() bool {
 // feature (who sees a private project, who may invoke an agent) stays exactly
 // as configured whatever the decision is.
 type FeatureDecision struct {
-	Action              Action
-	Reason              Reason
+	Action Action
+	Reason Reason
+	// Downgraded is set when Cloud sent enforce but the cached policy has gone
+	// stale, so Action was lowered to observe. A stale policy whose feature
+	// was already observe keeps Downgraded false: Reason stale alone does not
+	// say whether anything would have been blocked.
+	Downgraded          bool
 	PolicyRevision      int64
 	SubscriptionVersion int64
 	CloudValidUntil     time.Time

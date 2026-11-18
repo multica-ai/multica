@@ -45,7 +45,7 @@ type featureAdmission struct {
 
 func (a featureAdmission) admitted(ctx context.Context) {
 	if a.record {
-		a.attempts.Record(context.WithoutCancel(ctx), a.attempt)
+		a.attempts.Record(ctx, a.attempt)
 	}
 }
 
@@ -70,7 +70,7 @@ func (h *Handler) requireFeatureAddition(w http.ResponseWriter, r *http.Request,
 		Decision:    decision,
 	}
 	if decision.Restricted() {
-		attempts.Record(context.WithoutCancel(r.Context()), attempt)
+		attempts.Record(r.Context(), attempt)
 		writeFeatureLocked(w, feature)
 		return featureAdmission{}, false
 	}

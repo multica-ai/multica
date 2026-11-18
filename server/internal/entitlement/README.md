@@ -149,8 +149,8 @@ permission checks, so a caller refused by those gets the ordinary error.
 | --- | --- | --- |
 | `private_projects` | create a private project; make a project private; add someone who is not a member yet, directly or by making them the lead | remove members; make it workspace-visible; delete or archive; set the lead to an existing member, an agent or nobody; other fields; the owner's recovery join |
 
-A stale cached `enforce` is downgraded to `observe` with reason `stale`, then
-to `off`, exactly like gates, so a Cloud outage admits additions rather than
+A stale cached `enforce` is downgraded to `observe` with reason `stale` and
+`Downgraded` set, then to `off`, exactly like gates, so a Cloud outage admits additions rather than
 blocking them. Cloud failure before any policy was cached is `off`.
 
 Attempts are aggregated per workspace, feature, and UTC day in
@@ -159,8 +159,11 @@ Attempts are aggregated per workspace, feature, and UTC day in
 (admitted only because a stale enforce was downgraded), and `enforced_count`
 (rejected), with the latest operation, action, reason, policy and subscription
 revisions, and first/last attempt times. Admitted attempts are recorded after
-the write commits, rejections after authorization; recording is best-effort
-and never changes the result. Attempts measure demand, not existing
+the write commits, rejections after authorization; recording is best-effort,
+bounded by its own one-second timeout so a contended row cannot hold the
+response, and never changes the result. A configured `observe` served from a
+stale cache still counts as observed; only a downgraded `enforce` counts as
+degraded. Attempts measure demand, not existing
 configuration: count existing private projects from the product tables.
 
 Clients read `GET /api/workspaces/{id}/features`, which returns only

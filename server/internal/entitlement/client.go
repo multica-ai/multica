@@ -457,12 +457,14 @@ func featureDecisionFromEntry(entry cacheEntry, name FeatureName, reason Reason,
 		reason = feature.reason
 	}
 	action := feature.action
-	if stale && action == ActionEnforce {
+	downgraded := stale && action == ActionEnforce
+	if downgraded {
 		action = ActionObserve
 	}
 	return FeatureDecision{
 		Action:              action,
 		Reason:              reason,
+		Downgraded:          downgraded,
 		PolicyRevision:      entry.policy.policyRevision,
 		SubscriptionVersion: entry.policy.subscriptionVersion,
 		CloudValidUntil:     entry.policy.cloudValidUntil,

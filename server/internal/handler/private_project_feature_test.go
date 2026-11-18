@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -211,14 +212,74 @@ func TestPrivateProjectOwnerRecoveryJoinIsNotRestricted(t *testing.T) {
 }
 
 // Additions admitted only because a stale enforce was downgraded during a
-// Cloud outage are recorded apart from a configured observe rollout.
-func TestPrivateProjectStaleDowngradeIsRecordedAsDegraded(t *testing.T) {
-	f := newPrivateProjectFixture(t)
-	usePrivateProjectsFeature(t, entitlement.FeatureDecision{Action: entitlement.ActionObserve, Reason: entitlement.ReasonStale})
+// Cloud outage are recorded apart from a configured observe rollout, and a
+// configured observe served from a stale cache still counts as observed.
+func TestPrivateProjectStaleDecisionsAreRecordedByOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		decision entitlement.FeatureDecision
+		want     featureAttemptCounts
+	}{
+		{"stale enforce downgraded", entitlement.FeatureDecision{Action: entitlement.ActionObserve, Reason: entitlement.ReasonStale, Downgraded: true},
+			featureAttemptCounts{degraded: 1, lastOperation: "add_members"}},
+		{"stale observe", entitlement.FeatureDecision{Action: entitlement.ActionObserve, Reason: entitlement.ReasonStale},
+			featureAttemptCounts{observed: 1, lastOperation: "add_members"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPrivateProjectFixture(t)
+			usePrivateProjectsFeature(t, tc.decision)
+			addProjectMembersAs(t, testUserID, f.projectID, f.outsider).Want(http.StatusOK)
+			if got := privateProjectAttempts(t); got != tc.want {
+				t.Fatalf("attempts = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
 
-	addProjectMembersAs(t, testUserID, f.projectID, f.outsider).Want(http.StatusOK)
-	if got := privateProjectAttempts(t); got != (featureAttemptCounts{degraded: 1, lastOperation: "add_members"}) {
-		t.Fatalf("attempts = %+v, want one degraded add_members", got)
+// Recording happens before the response is written. A contended attempt row
+// must cost at most the record's own short timeout, and the already-decided
+// result is returned either way: the committed create for observe, the
+// refusal for enforce.
+func TestPrivateProjectAttemptRecordCannotHoldTheResponse(t *testing.T) {
+	for _, tc := range []struct {
+		action entitlement.Action
+		want   int
+	}{
+		{entitlement.ActionObserve, http.StatusCreated},
+		{entitlement.ActionEnforce, http.StatusForbidden},
+	} {
+		t.Run(string(tc.action), func(t *testing.T) {
+			usePrivateProjectsFeature(t, entitlement.FeatureDecision{Action: tc.action})
+			ctx := context.Background()
+			// Hold today's attempt row for this workspace and feature in an
+			// open transaction, so the handler's upsert has to wait for it.
+			tx, err := testPool.Begin(ctx)
+			if err != nil {
+				t.Fatalf("begin: %v", err)
+			}
+			defer tx.Rollback(ctx)
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO entitlement_feature_attempt (workspace_id, feature, day, last_operation, last_action, last_reason)
+				VALUES ($1, 'private_projects', (now() AT TIME ZONE 'UTC')::date, 'lock', 'observe', '')`, testWorkspaceID); err != nil {
+				t.Fatalf("hold attempt row: %v", err)
+			}
+
+			title := "feature contended " + string(tc.action) + " " + uuid.NewString()
+			started := time.Now()
+			resp := createPrivateProjectAs(t, testUserID, title)
+			elapsed := time.Since(started)
+			resp.Want(tc.want)
+			if elapsed > 3*time.Second {
+				t.Fatalf("response took %s while the attempt row was locked", elapsed)
+			}
+			wantProjects := 0
+			if tc.want == http.StatusCreated {
+				wantProjects = 1
+			}
+			if n := projectCountByTitle(t, title); n != wantProjects {
+				t.Fatalf("projects = %d, want %d", n, wantProjects)
+			}
+		})
 	}
 }
 

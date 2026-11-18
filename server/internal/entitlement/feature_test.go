@@ -139,13 +139,44 @@ func TestStaleFeatureEnforceDowngradesThenFailsOpen(t *testing.T) {
 	fail.Store(true)
 	clock = clock.Add(6 * time.Second)
 	stale := client.Feature(context.Background(), workspaceID, FeaturePrivateProjects)
-	if stale.Action != ActionObserve || stale.Reason != ReasonStale || stale.Restricted() {
+	if stale.Action != ActionObserve || stale.Reason != ReasonStale || !stale.Downgraded || stale.Restricted() {
 		t.Fatalf("stale = %+v", stale)
 	}
 	clock = clock.Add(10 * time.Second)
 	expired := client.Feature(context.Background(), workspaceID, FeaturePrivateProjects)
 	if expired.Action != ActionOff || expired.Reason != ReasonUnavailable {
 		t.Fatalf("expired = %+v", expired)
+	}
+}
+
+// A feature Cloud already sent as observe stays an ordinary observe when the
+// cache goes stale: nothing was downgraded, so attempts count as observed.
+func TestStaleFeatureObserveIsNotDowngraded(t *testing.T) {
+	clock := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
+	var fail atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if fail.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		policy := samplePolicy(4, 0, 5, ActionEnforce)
+		policy.Features = json.RawMessage(`{"private_projects":{"action":"observe"}}`)
+		writePolicy(t, w, policy)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server.URL, nil)
+	client.staleGrace = 10 * time.Second
+	client.now = func() time.Time { return clock }
+	workspaceID := uuid.New()
+
+	if fresh := client.Feature(context.Background(), workspaceID, FeaturePrivateProjects); fresh.Action != ActionObserve || fresh.Downgraded {
+		t.Fatalf("fresh = %+v", fresh)
+	}
+	fail.Store(true)
+	clock = clock.Add(6 * time.Second)
+	stale := client.Feature(context.Background(), workspaceID, FeaturePrivateProjects)
+	if stale.Action != ActionObserve || stale.Reason != ReasonStale || stale.Downgraded {
+		t.Fatalf("stale observe = %+v, want observe without Downgraded", stale)
 	}
 }
 
