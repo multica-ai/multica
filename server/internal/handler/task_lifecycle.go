@@ -203,6 +203,11 @@ func (h *Handler) RerunTaskByUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
 	}
+	// A run in a private project the caller cannot see is a missing run
+	// (MUL-8472), before its issue's own lookup can answer for it.
+	if !h.requireTaskVisible(w, r, uuidToString(workspaceID), source, http.StatusNotFound, "task not found") {
+		return
+	}
 	if !source.IssueID.Valid {
 		writeError(w, http.StatusBadRequest, "only issue-linked runs can be rerun with this endpoint")
 		return
