@@ -11,7 +11,8 @@
     "delete": "刪除",
     "cancel": "取消",
     "history": "歷史",
-    "more": "更多"
+    "more": "更多",
+    "copy_link": "複製連結"
   },
   "errors": {
     "move": "移動失敗",
@@ -34,7 +35,8 @@
   },
   "tree": {
     "more": "{{title}} 的更多操作",
-    "empty": "還沒有文件"
+    "empty": "還沒有文件",
+    "new_doc_in": "在「{{title}}」中新增文件"
   },
   "editor": {
     "placeholder": "開始寫，或輸入 / 叫出命令...",
@@ -54,5 +56,6 @@
     "loading": "載入中..."
   },
   "edited": "{{time}}編輯",
-  "outline": "大綱"
+  "outline": "大綱",
+  "link_copied": "連結已複製"
 }

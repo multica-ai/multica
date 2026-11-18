@@ -13,6 +13,7 @@ import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { docTreeOptions } from "@multica/core/docs";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { WORKSPACE_PAGES } from "@multica/core/paths";
@@ -692,6 +693,26 @@ describe("SearchCommand", () => {
       expect(renderedValues()).toContain("best-action:chat");
     });
 
+    it("finds a doc by title, names its folder, and opens it", async () => {
+      seed(docTreeOptions("ws-test"), {
+        folders: [{ id: "folder-eng", title: "Engineering" }],
+        docs: [
+          { id: "doc-runbook", title: "Release runbook", folderId: "folder-eng" },
+          { id: "doc-blank", title: "", folderId: null },
+        ],
+      });
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "runbook");
+
+      const docs = await screen.findByRole("group", { name: "Docs" });
+      const rows = within(docs).getAllByRole("option");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toHaveTextContent("Release runbookEngineering");
+      fireEvent.click(rows[0]!);
+      expect(mockPush).toHaveBeenCalledWith("/ws-test/docs/doc-runbook");
+    });
+
     it("lists workspace members and navigates to the member page", async () => {
       const user = userEvent.setup();
       seed(memberListOptions("ws-test"), [
@@ -736,7 +757,7 @@ describe("SearchCommand", () => {
           {
             ...makeIssue({ id: "issue-snippet", identifier: "MUL-99", title: "HTML rendering pipeline" }),
             match_source: "title",
-            matched_description_snippet: "...uses HTML templates for rendering...",
+            matched_description_snippet: "...uses HTML templates from [Render guide](mention://doc/doc-1) for rendering...",
             matched_comment_snippet: "...we should migrate away from HTML...",
           },
         ],
@@ -747,7 +768,7 @@ describe("SearchCommand", () => {
 
       await waitFor(() => expect(renderedValues()).toContain("issue-snippet"), { timeout: 2000 });
       expect(
-        screen.getByText((_, el) => !!el?.textContent?.includes("uses HTML templates") && el?.tagName === "SPAN"),
+        screen.getByText((_, el) => !!el?.textContent?.includes("uses HTML templates from Render guide for") && el?.tagName === "SPAN"),
       ).toBeInTheDocument();
       expect(
         screen.getByText((_, el) => !!el?.textContent?.includes("migrate away from HTML") && el?.tagName === "SPAN"),

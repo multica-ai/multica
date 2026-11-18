@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState, type DragEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -39,6 +39,8 @@ import {
   docTreeOptions,
   useCreateDoc,
   useCreateDocFolder,
+  useMoveDoc,
+  useMoveDocFolder,
   useRenameDocFolder,
   useUpdateDoc,
   useDeleteDoc,
@@ -55,6 +57,36 @@ import { MoveDialog, type MoveTarget } from "./move-dialog";
 type Item =
   | { kind: "doc"; item: DocSummary }
   | { kind: "folder"; item: DocFolder };
+
+/** Folders a folder cannot move into: itself and everything beneath it. */
+export function folderAndDescendants(
+  folders: readonly Pick<DocFolder, "id" | "parentId">[],
+  id: string,
+): Set<string> {
+  const blocked = new Set([id]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const f of folders) {
+      if (f.parentId && blocked.has(f.parentId) && !blocked.has(f.id)) {
+        blocked.add(f.id);
+        grew = true;
+      }
+    }
+  }
+  return blocked;
+}
+
+/** Where a dragged item may land: a folder id, or `null` for the top level. */
+export function canDropInto(
+  dragged: Item,
+  destination: string | null,
+  folders: readonly Pick<DocFolder, "id" | "parentId">[],
+): boolean {
+  if (dragged.kind === "doc") return dragged.item.folderId !== destination;
+  if (dragged.item.parentId === destination) return false;
+  return destination === null || !folderAndDescendants(folders, dragged.item.id).has(destination);
+}
 export function DeleteDocDialog({
   target,
   onOpenChange,
@@ -137,6 +169,12 @@ export function DocTree() {
   const createFolder = useCreateDocFolder();
   const renameFolder = useRenameDocFolder();
   const updateDoc = useUpdateDoc();
+  const moveDoc = useMoveDoc();
+  const moveFolder = useMoveDocFolder();
+  const [dragged, setDragged] = useState<Item | null>(null);
+  // `undefined`: no drop target; `null`: the top level; otherwise a folder id.
+  const [dropTarget, setDropTarget] = useState<string | null | undefined>(undefined);
+  const folders = useMemo(() => tree.data?.folders ?? [], [tree.data]);
   const [form, setForm] = useState<{
     kind: "doc" | "folder";
     parentId: string | null;
@@ -150,6 +188,75 @@ export function DocTree() {
     createFolder.isPending ||
     renameFolder.isPending ||
     updateDoc.isPending;
+  // A new doc opens straight away, untitled; its page puts the caret in the
+  // title, so naming it is just typing.
+  const newDoc = async (folderId: string | null) => {
+    try {
+      const doc = await createDoc.mutateAsync({ title: "", folderId });
+      push(p.docDetail(doc.id));
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t(($) => $.errors.save),
+      );
+    }
+  };
+  const dragProps = (item: Item) => ({
+    draggable: true,
+    onDragStart: (event: DragEvent) => {
+      event.stopPropagation();
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", item.item.title);
+      setDragged(item);
+    },
+    onDragEnd: () => {
+      setDragged(null);
+      setDropTarget(undefined);
+    },
+  });
+  // Every row is the drop target its position means: a folder row is that
+  // folder, a doc row is the doc's folder, the blank tree is the top level.
+  // The innermost target always answers and stops the event, even to refuse:
+  // a refusal that bubbled would reach the top-level zone and move the item
+  // to the root.
+  const dropProps = (destination: string | null) => ({
+    onDragOver: (event: DragEvent) => {
+      if (!dragged) return;
+      event.stopPropagation();
+      if (!canDropInto(dragged, destination, folders)) {
+        setDropTarget(undefined);
+        return;
+      }
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      setDropTarget(destination);
+    },
+    onDragLeave: (event: DragEvent) => {
+      if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+      setDropTarget((current) => (current === destination ? undefined : current));
+    },
+    onDrop: (event: DragEvent) => {
+      if (!dragged) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (!canDropInto(dragged, destination, folders)) {
+        setDragged(null);
+        setDropTarget(undefined);
+        return;
+      }
+      const item = dragged;
+      setDragged(null);
+      setDropTarget(undefined);
+      const move =
+        item.kind === "doc"
+          ? moveDoc.mutateAsync({ id: item.item.id, folderId: destination })
+          : moveFolder.mutateAsync({ id: item.item.id, parentId: destination });
+      move.catch((error: unknown) => {
+        toast.error(
+          error instanceof Error ? error.message : t(($) => $.errors.move),
+        );
+      });
+    },
+  });
   const openForm = (
     kind: "doc" | "folder",
     parentId: string | null,
@@ -173,18 +280,11 @@ export function DocTree() {
           id: form.target.item.id,
           title: name.trim(),
         });
-      else if (form.kind === "folder")
+      else
         await createFolder.mutateAsync({
           title: name.trim(),
           parentId: form.parentId,
         });
-      else {
-        const doc = await createDoc.mutateAsync({
-          title: name.trim(),
-          folderId: form.parentId,
-        });
-        push(p.docDetail(doc.id));
-      }
       setForm(null);
     } catch (error) {
       toast.error(
@@ -208,7 +308,7 @@ export function DocTree() {
       <DropdownMenuContent align="end">
         {target.kind === "folder" && (
           <>
-            <DropdownMenuItem onClick={() => openForm("doc", target.item.id)}>
+            <DropdownMenuItem onClick={() => void newDoc(target.item.id)}>
               <Plus />
               {t(($) => $.actions.new_doc)}
             </DropdownMenuItem>
@@ -256,12 +356,31 @@ export function DocTree() {
         .map((folder) => (
           <li key={folder.id}>
             <details open>
-              <summary className="flex cursor-pointer items-center gap-1 rounded-md px-1 py-1 text-body hover:bg-surface-hover">
+              <summary
+                {...dragProps({ kind: "folder", item: folder })}
+                {...dropProps(folder.id)}
+                className={`group flex cursor-pointer items-center gap-1 rounded-md px-1 py-1 text-body hover:bg-surface-hover ${dropTarget === folder.id ? "bg-surface-hover ring-1 ring-ring" : ""}`}
+              >
                 <Folder className="size-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate">{folder.title}</span>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={t(($) => $.tree.new_doc_in, { title: folder.title })}
+                  title={t(($) => $.actions.new_doc)}
+                  className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                  disabled={createDoc.isPending}
+                  onClick={(event) => {
+                    // Inside <summary>: a click would also fold the folder.
+                    event.preventDefault();
+                    void newDoc(folder.id);
+                  }}
+                >
+                  <Plus className="size-3.5" />
+                </Button>
                 {menu({ kind: "folder", item: folder })}
               </summary>
-              <div className="ml-3 border-l pl-2">
+              <div className="ml-3 border-l pl-2" {...dropProps(folder.id)}>
                 {branch(folder.id, new Set([...ancestors, folder.id]))}
               </div>
             </details>
@@ -272,6 +391,8 @@ export function DocTree() {
         .map((doc) => (
           <li
             key={doc.id}
+            {...dragProps({ kind: "doc", item: doc })}
+            {...dropProps(doc.folderId)}
             className={`flex items-center gap-1 rounded-md px-1 py-1 text-body ${pathname === p.docDetail(doc.id) ? "bg-surface-selected text-surface-selected-foreground" : "hover:bg-surface-hover"}`}
           >
             <FileText className="size-4 shrink-0 text-muted-foreground" />
@@ -305,7 +426,7 @@ export function DocTree() {
             <Plus className="size-4" />
           </DropdownMenuTrigger>
           <DropdownMenuContent>
-            <DropdownMenuItem onClick={() => openForm("doc", null)}>
+            <DropdownMenuItem onClick={() => void newDoc(null)}>
               {t(($) => $.actions.new_doc)}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => openForm("folder", null)}>
@@ -314,7 +435,10 @@ export function DocTree() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto px-2 pb-3">
+      <div
+        {...dropProps(null)}
+        className={`min-h-0 flex-1 overflow-auto px-2 pb-3 ${dropTarget === null ? "bg-surface-hover/50" : ""}`}
+      >
         {tree.isError ? (
           <Button variant="ghost" onClick={() => void tree.refetch()}>
             {t(($) => $.editor.retry)}

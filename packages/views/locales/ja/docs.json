@@ -11,7 +11,8 @@
     "delete": "削除",
     "cancel": "キャンセル",
     "history": "履歴",
-    "more": "その他"
+    "more": "その他",
+    "copy_link": "リンクをコピー"
   },
   "errors": {
     "move": "移動できませんでした",
@@ -34,7 +35,8 @@
   },
   "tree": {
     "more": "{{title}} のその他の操作",
-    "empty": "ドキュメントはまだありません"
+    "empty": "ドキュメントはまだありません",
+    "new_doc_in": "「{{title}}」にドキュメントを作成"
   },
   "editor": {
     "placeholder": "入力するか / でコマンド...",
@@ -54,5 +56,6 @@
     "loading": "読み込み中..."
   },
   "edited": "最終編集 {{time}}",
-  "outline": "目次"
+  "outline": "目次",
+  "link_copied": "リンクをコピーしました"
 }

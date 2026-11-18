@@ -3,10 +3,13 @@ import { useCallback, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   History,
+  Link as LinkIcon,
   MoreHorizontal,
   FolderInput,
   Trash2,
 } from "@multica/ui/icons";
+import { toast } from "sonner";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Tooltip,
@@ -31,7 +34,7 @@ import type { Doc } from "@multica/core/types";
 import { ContentEditor, useEditorUpload } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
-import { AppLink } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
 import { useDocDraft } from "./use-doc-draft";
 import { DocOutline, MIN_OUTLINE_HEADINGS, useDocOutline } from "./doc-outline";
@@ -67,6 +70,12 @@ function DocEditor({ doc }: { doc: Doc }) {
   const [deleting, setDeleting] = useState(false);
   const ancestors = folderAncestry(tree?.folders ?? [], doc.folderId);
   const author = getActorName(doc.updatedByType, doc.updatedById);
+  const { getShareableUrl } = useNavigation();
+  const copyLink = () => {
+    void copyText(getShareableUrl(p.docDetail(doc.id))).then((ok) => {
+      if (ok) toast.success(t(($) => $.link_copied));
+    });
+  };
   const { uploadWithToast } = useEditorUpload();
   const uploadFile = useCallback((file: File) => uploadWithToast(file), [uploadWithToast]);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -99,6 +108,15 @@ function DocEditor({ doc }: { doc: Doc }) {
                 t(($) => $.editor.saved)
               ) : null}
             </span>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={t(($) => $.actions.copy_link)}
+              title={t(($) => $.actions.copy_link)}
+              onClick={copyLink}
+            >
+              <LinkIcon className="size-4" />
+            </Button>
             <AppLink
               href={p.docHistory(doc.id)}
               className="flex items-center gap-1 rounded-md px-2 py-1 text-caption hover:bg-surface-hover"
@@ -168,6 +186,8 @@ function DocEditor({ doc }: { doc: Doc }) {
               <input
                 aria-label={t(($) => $.editor.title_label)}
                 value={draft.title}
+                // A doc just created from the tree is blank: start in its title.
+                autoFocus={!doc.title && !doc.content}
                 maxLength={300}
                 placeholder={t(($) => $.untitled)}
                 onChange={(e) => change({ title: e.target.value })}

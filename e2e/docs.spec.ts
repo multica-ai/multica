@@ -142,10 +142,9 @@ test("create a nested doc, edit Markdown, and delete it with confirmation", asyn
   await page.getByRole("dialog").getByRole("button", {name: "New", exact: true}).click();
   await page.getByRole("button", {name: "More actions for Product", exact: true}).click();
   await page.getByRole("menuitem", {name: "New doc", exact: true}).click();
-  await page.getByRole("dialog").getByRole("textbox", {name: "Title", exact: true}).fill("Architecture notes");
-  await page.getByRole("dialog").getByRole("button", {name: "New", exact: true}).click();
-  await expect(page.getByRole("textbox", {name: "Title", exact: true})).toHaveValue("Architecture notes");
   await expect(page).toHaveURL(/\/docs\/[0-9a-f-]{36}$/);
+  await expect(page.getByRole("textbox", {name: "Title", exact: true})).toBeFocused();
+  await page.keyboard.type("Architecture notes");
   const id = page.url().split("/").at(-1)!;
   const editor = page.locator('[contenteditable="true"]').first();
   await editor.fill("A shared architecture decision.");
@@ -255,4 +254,59 @@ test("block menu, block handle and outline shape a document", async ({ page }, i
     animations: "disabled",
     style: "nextjs-portal { display: none; }",
   });
+});
+
+test("docs link from issues, show up in Cmd+K, and reorganize from the tree", async ({
+  page,
+}, info) => {
+  const folder = await api.createDocFolder("Engineering");
+  const doc = await api.createDoc("Release runbook", "Steps for every release.");
+  const issue = await api.createIssue("Ship the release", {
+    description: `See [Release runbook](mention://doc/${doc.id}).`,
+  });
+
+  // A doc mention renders as a chip that opens the doc.
+  await page.goto(`/${slug}/issues/${issue.id}`);
+  const chip = page.locator("a.doc-mention").filter({ hasText: "Release runbook" }).first();
+  await expect(chip).toHaveAttribute("href", new RegExp(`/${slug}/docs/${doc.id}$`));
+
+  // `@` offers docs in their own section.
+  await expect(page.locator("text=Properties")).toBeVisible();
+  const composer = page
+    .locator('.ProseMirror[data-placeholder="Leave a comment..."], .ProseMirror:has([data-placeholder="Leave a comment..."])')
+    .first();
+  await expect(async () => {
+    await page.getByTestId("comment-composer-shell").click({ timeout: 2000 });
+    await composer.click({ force: true, timeout: 2000 });
+  }).toPass();
+  await page.keyboard.type("@runbook");
+  await page.getByRole("button", { name: "Release runbook" }).click();
+  await page.keyboard.press("ControlOrMeta+Enter");
+  await expect(page.locator("a.doc-mention")).toHaveCount(2);
+  await page.screenshot({ path: info.outputPath("docs-mention.png"), animations: "disabled", style: "nextjs-portal { display: none; }" });
+
+  // Cmd+K finds the doc by title.
+  await page.getByRole("button", { name: "Search..." }).click();
+  await page.getByRole("combobox", { name: "Command bar" }).fill("runbook");
+  await page.getByRole("group", { name: "Docs" }).getByRole("option", { name: /Release runbook/ }).click();
+  await expect(page).toHaveURL(new RegExp(`/docs/${doc.id}$`));
+
+  // Drag the doc onto the folder in the tree.
+  await page
+    .getByRole("link", { name: "Release runbook", exact: true })
+    .dragTo(page.getByText("Engineering", { exact: true }));
+  await expect.poll(async () => (await api.getDoc(doc.id)).folder_id).toBe(folder.id);
+
+  // The folder's "+" opens a new untitled doc inside it, caret in the title.
+  await page.getByRole("complementary").getByText("Engineering", { exact: true }).hover();
+  await page.getByRole("button", { name: "New doc in Engineering" }).click();
+  await expect(page).not.toHaveURL(new RegExp(doc.id));
+  await expect(page).toHaveURL(/\/docs\/[0-9a-f-]{36}$/);
+  const created = page.url().split("/").at(-1)!;
+  const title = page.getByRole("textbox", { name: "Title", exact: true });
+  await expect(title).toBeFocused();
+  await page.keyboard.type("On-call handbook");
+  await expect.poll(async () => (await api.getDoc(created)).title).toBe("On-call handbook");
+  expect((await api.getDoc(created)).folder_id).toBe(folder.id);
+  await page.screenshot({ path: info.outputPath("docs-tree.png"), animations: "disabled", style: "nextjs-portal { display: none; }" });
 });

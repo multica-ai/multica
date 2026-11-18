@@ -11,7 +11,8 @@
     "delete": "Eliminar",
     "cancel": "Cancelar",
     "history": "Historial",
-    "more": "Más"
+    "more": "Más",
+    "copy_link": "Copiar enlace"
   },
   "errors": {
     "move": "No se pudo mover",
@@ -34,7 +35,8 @@
   },
   "tree": {
     "more": "Más acciones para {{title}}",
-    "empty": "Aún no hay documentos"
+    "empty": "Aún no hay documentos",
+    "new_doc_in": "Nuevo documento en {{title}}"
   },
   "editor": {
     "placeholder": "Escribe o pulsa / para ver los comandos...",
@@ -54,5 +56,6 @@
     "loading": "Cargando..."
   },
   "edited": "Editado {{time}}",
-  "outline": "Esquema"
+  "outline": "Esquema",
+  "link_copied": "Enlace copiado"
 }

@@ -25,6 +25,7 @@ import { ArchivedProjectTag } from "../projects/components/project-archive";
 import { useProjectStatusLabels } from "../projects/components/labels";
 import { useT } from "../i18n";
 import { HighlightText } from "./highlight-text";
+import { stripMentionMarkdown } from "../issues/utils/strip-mention-markdown";
 import { ROW_CLASS, RowHint } from "./rows";
 
 function IssueAssigneeAvatar({
@@ -89,7 +90,7 @@ export function ProjectResultRow({
       {project.match_source === "description" && project.matched_snippet && (
         <div className={SNIPPET_CLASS}>
           <span className="truncate text-caption text-muted-foreground">
-            <HighlightText text={project.matched_snippet} query={query} />
+            <HighlightText text={stripMentionMarkdown(project.matched_snippet)} query={query} />
           </span>
         </div>
       )}
@@ -146,7 +147,7 @@ export function IssueResultRow({
         <div className={SNIPPET_CLASS}>
           <FileText className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
           <span className="truncate text-caption text-muted-foreground">
-            <HighlightText text={descriptionSnippet} query={query} />
+            <HighlightText text={stripMentionMarkdown(descriptionSnippet)} query={query} />
           </span>
         </div>
       )}
@@ -154,7 +155,7 @@ export function IssueResultRow({
         <div className={SNIPPET_CLASS}>
           <MessageSquare className="mt-0.5 size-3 shrink-0 text-muted-foreground" />
           <span className="truncate text-caption text-muted-foreground">
-            <HighlightText text={commentSnippet} query={query} />
+            <HighlightText text={stripMentionMarkdown(commentSnippet)} query={query} />
           </span>
         </div>
       )}

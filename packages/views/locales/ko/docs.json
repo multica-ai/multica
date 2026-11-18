@@ -11,7 +11,8 @@
     "delete": "삭제",
     "cancel": "취소",
     "history": "기록",
-    "more": "더 보기"
+    "more": "더 보기",
+    "copy_link": "링크 복사"
   },
   "errors": {
     "move": "이동하지 못했습니다",
@@ -34,7 +35,8 @@
   },
   "tree": {
     "more": "{{title}} 더 보기",
-    "empty": "아직 문서가 없습니다"
+    "empty": "아직 문서가 없습니다",
+    "new_doc_in": "'{{title}}'에 새 문서"
   },
   "editor": {
     "placeholder": "입력하거나 /로 명령어...",
@@ -54,5 +56,6 @@
     "loading": "불러오는 중..."
   },
   "edited": "{{time}} 편집",
-  "outline": "개요"
+  "outline": "개요",
+  "link_copied": "링크를 복사했습니다"
 }

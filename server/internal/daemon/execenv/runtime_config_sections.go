@@ -846,6 +846,7 @@ func writeMentions(b *strings.Builder) {
 	// agent writes this form (or pastes the project URL, which the reader's
 	// client unfurls into the same chip) a project reference stays dead text.
 	b.WriteString("- `[Project Name](mention://project/<project-id>)` — clickable link (no side effect)\n")
+	b.WriteString("- `[Doc Title](mention://doc/<doc-id>)` — clickable link (no side effect); read it with `multica doc get <doc-id>`\n")
 	b.WriteString("- `[@Name](mention://member/<user-id>)` — **notifies a human**\n")
 	b.WriteString("- `[@Name](mention://agent/<agent-id>)` — **enqueues a new run for that agent**\n\n")
 	// No prescriptive default here (MUL-6417): the mention syntax hides its

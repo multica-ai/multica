@@ -11,7 +11,8 @@
     "delete": "Delete",
     "cancel": "Cancel",
     "history": "History",
-    "more": "More"
+    "more": "More",
+    "copy_link": "Copy link"
   },
   "errors": {
     "move": "Couldn't move it",
@@ -34,7 +35,8 @@
   },
   "tree": {
     "more": "More actions for {{title}}",
-    "empty": "No docs yet"
+    "empty": "No docs yet",
+    "new_doc_in": "New doc in {{title}}"
   },
   "editor": {
     "placeholder": "Write, or type / for commands...",
@@ -54,5 +56,6 @@
     "loading": "Loading..."
   },
   "edited": "Edited {{time}}",
-  "outline": "Outline"
+  "outline": "Outline",
+  "link_copied": "Link copied"
 }
