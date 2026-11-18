@@ -158,7 +158,10 @@
     "footer_close": "Esc Close",
     "role_trigger": "Initiator",
     "no_results_with_query": "No results for \"{{query}}\"",
-    "no_results_hint": "Try filtering by type: {{words}}"
+    "no_results_hint": "Try filtering by type: {{words}}",
+    "hover_runtime": "Среда выполнения",
+    "hover_owner": "Владелец",
+    "hover_model": "Модель"
   },
   "slash_command": {
     "no_skills_configured": "Навыки не настроены",

@@ -146,7 +146,10 @@
     "footer_close": "Esc 关闭",
     "role_trigger": "触发人",
     "no_results_with_query": "未找到与「{{query}}」相关的结果",
-    "no_results_hint": "试试按类型筛选：{{words}}"
+    "no_results_hint": "试试按类型筛选：{{words}}",
+    "hover_runtime": "執行環境",
+    "hover_owner": "擁有者",
+    "hover_model": "模型"
   },
   "slash_command": {
     "no_skills_configured": "暫無配置的技能",

@@ -104,6 +104,7 @@ import {
 // Types
 
 import type { MentionItem } from "./mention-suggestion";
+import { AgentRuntimeHoverCard } from "../../agents/components/agent-runtime-hover";
 
 interface MentionListProps {
   items: MentionItem[];
@@ -187,7 +188,7 @@ function groupItems(items: MentionItem[], query: string): MentionGroup[] {
   const seenRuntimeKeys = new Set<string>();
   const claimAgent = (item: MentionItem): boolean => {
     if (item.type !== "agent") return true;
-    const key = `${item.id}:${item.runtime?.id ?? "none"}`;
+    const key = `${item.id}:${item.runtimeId ?? item.runtime?.id ?? "none"}`;
     if (seenRuntimeKeys.has(key)) return false;
     seenRuntimeKeys.add(key);
     return true;
@@ -1507,13 +1508,33 @@ function AgentMentionRow({
     </button>
   );
 
-  if (!disabledMessage) return row;
+  if (!disabledMessage && (!isRuntimeGroupRow || !item.runtimeId)) return row;
 
   return (
     <Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}>
       <TooltipTrigger render={row} />
       <TooltipContent side="top" className="max-w-72 text-caption">
-        {disabledMessage}
+        {disabledMessage ?? (
+          <AgentRuntimeHoverCard
+            agentId={item.id}
+            agentName={item.label}
+            runtimeName={item.runtime?.name || hostText || t(($) => $.mention.runtime_unavailable)}
+            runtimeProvider={item.cliProvider ?? ""}
+            ownerMember={item.runtimeOwner ?? null}
+            ownerName={runtimeOwnerName || t(($) => $.mention.runtime_owner_unknown)}
+            modelLabel={runtimeModelLabel}
+            shareRuntime={item.shareRuntime}
+            showAvailability={false}
+            labels={{
+              runtime: t(($) => $.mention.hover_runtime),
+              owner: t(($) => $.mention.hover_owner),
+              model: t(($) => $.mention.hover_model),
+              defaultModel: item.agentRuntimeGroup === "issue" ? "" : t(($) => $.mention.runtime_default_model),
+              online: t(($) => $.mention.runtime_online),
+              offline: t(($) => $.mention.runtime_offline),
+            }}
+          />
+        )}
       </TooltipContent>
     </Tooltip>
   );
@@ -1676,6 +1697,7 @@ function hostInsideRuntimeName(name: string): string {
  * missing.
  */
 interface RecoveredRuntimeInfo {
+  runtimeId?: string;
   /**
    * The task row carries server hydration evidence (runtime_owner_id /
    * runtime_provider) that the run's machine still exists, even when it is
@@ -1693,7 +1715,7 @@ interface RecoveredRuntimeInfo {
 }
 
 /**
- * Owner display for a resolved runtime row, following the machine (* ): the runtime's owner, never the run's originator — originator
+ * Owner display follows the runtime's owner. The originator
  * re-stamps to whoever triggered the latest run. Only when the owner id is
  * present but its member can no longer be resolved does the originator name
  * read better than "Unknown member". An empty result means the owner is
@@ -1745,6 +1767,8 @@ function createRuntimeAgentItem(
     agentRuntimeGroup: group,
     runtime,
     runtimeOwner,
+    runtimeId: runtime?.id ?? recovered?.runtimeId,
+    shareRuntime: agent.share_runtime,
     ownerLabel,
     runtimeModelLabel,
     cli: mentionCliFromProvider(cliProvider),
@@ -1854,16 +1878,15 @@ function buildRuntimeAgentMentions({
     // owner is unknown.
     const ownerMember =
       task.runtime_owner_id ? memberById.get(task.runtime_owner_id) : null;
-    const originatorMember =
-      (task.originator_user_id ?? task.attribution?.originator?.id)
-        ? memberById.get((task.originator_user_id ?? task.attribution?.originator?.id)!)
-        : null;
+    const originatorId = task.originator_user_id ?? task.attribution?.originator?.id;
+    const originatorMember = originatorId ? memberById.get(originatorId) : null;
     const hint = task.runtime_config_hint;
     const provider = task.runtime_provider?.trim() || null;
     return {
       // Mirrors the server's hydrateTaskRuntimeIdentities: owner/provider are
       // stamped only when the runtime row still exists (private included).
-      hydrated: Boolean(task.runtime_owner_id?.trim() || provider),
+      runtimeId: task.runtime_id?.trim() || undefined,
+      hydrated: Boolean(task.runtime_id?.trim() && (task.runtime_owner_id?.trim() || provider)),
       ownerName: ownerMember?.name?.trim() || undefined,
       originatorName: originatorMember?.name?.trim() || undefined,
       hostName:

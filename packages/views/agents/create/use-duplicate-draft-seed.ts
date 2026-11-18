@@ -60,7 +60,12 @@ export function useDuplicateDraftSeed({
       nameSuffix,
       canAddInvocationMembers,
     });
-    onSeedRef.current(draft, draft.runtimeId !== source.runtime_id);
+    const sourceCli = source.cli || source.runtime_config_summary?.recommended.cli;
+    const chosenRuntime = runtimes.find((runtime) => runtime.id === draft.runtimeId);
+    const runtimeReset = source.share_runtime === false
+      ? !sourceCli || chosenRuntime?.provider !== sourceCli
+      : draft.runtimeId !== source.runtime_id;
+    onSeedRef.current(draft, runtimeReset);
   }, [
     canAddInvocationMembers,
     currentUserId,

@@ -38,6 +38,7 @@ export function AgentRuntimeHoverCard({
   modelLabel,
   labels,
   shareRuntime,
+  showAvailability = true,
 }: {
   agentId: string;
   agentName: string;
@@ -49,6 +50,7 @@ export function AgentRuntimeHoverCard({
   modelLabel: string;
   labels: AgentRuntimeHoverLabels;
   shareRuntime?: boolean | null;
+  showAvailability?: boolean;
 }) {
   const displayModelLabel = resolveRuntimeModelDisplayLabel(
     modelLabel,
@@ -68,7 +70,7 @@ export function AgentRuntimeHoverCard({
             <p className="truncate text-body font-semibold">{agentName}</p>
             <SmartRuntimeAgentBadge shareRuntime={shareRuntime} />
           </div>
-          <AgentAvailabilityLine agentId={agentId} />
+          {showAvailability && <AgentAvailabilityLine agentId={agentId} />}
         </div>
       </div>
       <div className="grid grid-cols-[3.25rem_minmax(0,1fr)] gap-x-2 gap-y-1.5 text-caption">

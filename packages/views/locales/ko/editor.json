@@ -146,7 +146,10 @@
     "footer_close": "Esc 닫기",
     "role_trigger": "트리거",
     "no_results_with_query": "\"{{query}}\"에 대한 결과가 없습니다",
-    "no_results_hint": "유형별 필터: {{words}}"
+    "no_results_hint": "유형별 필터: {{words}}",
+    "hover_runtime": "런타임",
+    "hover_owner": "소유자",
+    "hover_model": "모델"
   },
   "code_block": {
     "html_preview": "HTML 미리보기",

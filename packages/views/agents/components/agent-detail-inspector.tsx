@@ -1,6 +1,6 @@
 "use client";
 
-import { catalogRuntimeForCli } from "@multica/core/agents";
+import { buildSmartRecommendedRuntimeUpdate, catalogRuntimeForCli, recommendedRuntimeCli } from "@multica/core/agents";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
@@ -34,6 +34,7 @@ import { ConversationStartersEditor } from "./conversation-starters-editor";
 import { NewChatPreview } from "./new-chat-preview";
 import { useConversationStartersFocus } from "./use-conversation-starters-focus";
 import { ModelPicker } from "./inspector/model-picker";
+import { RuntimeStrategySection } from "./runtime-strategy-section";
 import { CurrentRuntimeConfigSection } from "./current-runtime-config-section";
 import { RuntimeCliPicker } from "./inspector/runtime-cli-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
@@ -98,7 +99,8 @@ export function AgentDetailInspector({
   );
 
   const smart = agent.share_runtime === false;
-  const recommendedCli = agent.cli || agent.runtime_config_summary?.recommended.cli || "";
+  const recommendedCli = recommendedRuntimeCli(agent, smart ? null : runtime);
+  const [selectingFixedRuntime, setSelectingFixedRuntime] = useState(false);
   const catalogRuntime = smart ? catalogRuntimeForCli(runtimes, recommendedCli, currentUserId) : runtime;
   const modelRuntimeId = smart ? catalogRuntime?.id ?? "" : agent.runtime_id;
   const [name, setName] = useState(agent.name);
@@ -108,6 +110,7 @@ export function AgentDetailInspector({
   );
 
   useEffect(() => {
+    setSelectingFixedRuntime(false);
     setName(agent.name);
     setDescription(agent.description ?? "");
     setStarters(agent.conversation_starters ?? []);
@@ -296,16 +299,30 @@ export function AgentDetailInspector({
             }
           >
             <SettingsCard>
+              {canEdit && (smart || recommendedCli) && (
+                <div className="px-4 py-4">
+                  <RuntimeStrategySection
+                    shareRuntime={!smart || selectingFixedRuntime}
+                    onShareRuntimeChange={(fixed) => {
+                      if (smart) {
+                        setSelectingFixedRuntime(fixed);
+                      } else if (!fixed && recommendedCli) {
+                        void update({ share_runtime: false, cli: recommendedCli }).catch(() => undefined);
+                      }
+                    }}
+                  />
+                </div>
+              )}
               <SettingsRow
-                label={smart ? t(($) => $.inspector.prop_recommended_runtime) : t(($) => $.inspector.prop_runtime)}
+                label={smart && !selectingFixedRuntime ? t(($) => $.inspector.prop_recommended_runtime) : t(($) => $.inspector.prop_runtime)}
                 size="select-wide"
               >
-                {smart ? (
+                {smart && !selectingFixedRuntime ? (
                   <RuntimeCliPicker
                     value={recommendedCli}
                     runtimes={runtimes}
                     canEdit={canEdit}
-                    onChange={(cli) => update({ cli, runtime_id: "", model: "", thinking_level: "", service_tier: "" })}
+                    onChange={(cli) => update(buildSmartRecommendedRuntimeUpdate(cli))}
                   />
                 ) : (
                 <RuntimePicker
@@ -316,7 +333,16 @@ export function AgentDetailInspector({
                   members={members}
                   currentUserId={currentUserId}
                   canEdit={canEdit && !qoderRuntime}
-                  onChange={changeRuntime}
+                  onChange={selectingFixedRuntime ? async (runtimeId) => {
+                    await update({
+                      share_runtime: true,
+                      runtime_id: runtimeId,
+                      model: "",
+                      thinking_level: "",
+                      service_tier: "",
+                    });
+                    setSelectingFixedRuntime(false);
+                  } : changeRuntime}
                 />
                 )}
               </SettingsRow>

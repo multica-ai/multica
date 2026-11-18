@@ -146,7 +146,10 @@
     "footer_close": "Esc 閉じる",
     "role_trigger": "トリガー",
     "no_results_with_query": "「{{query}}」に一致する結果は見つかりません",
-    "no_results_hint": "タイプで絞り込み：{{words}}"
+    "no_results_hint": "タイプで絞り込み：{{words}}",
+    "hover_runtime": "ランタイム",
+    "hover_owner": "所有者",
+    "hover_model": "モデル"
   },
   "code_block": {
     "html_preview": "HTML プレビュー",

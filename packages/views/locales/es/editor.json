@@ -150,7 +150,10 @@
     "footer_close": "Esc Close",
     "role_trigger": "Initiator",
     "no_results_with_query": "No results for \"{{query}}\"",
-    "no_results_hint": "Try filtering by type: {{words}}"
+    "no_results_hint": "Try filtering by type: {{words}}",
+    "hover_runtime": "Entorno de ejecución",
+    "hover_owner": "Propietario",
+    "hover_model": "Modelo"
   },
   "slash_command": {
     "no_skills_configured": "No hay skills configuradas",

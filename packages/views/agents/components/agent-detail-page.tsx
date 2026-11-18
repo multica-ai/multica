@@ -1,5 +1,6 @@
 "use client";
 
+import { SmartRuntimeAgentBadge } from "./agent-runtime-hover";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRegisterCommandBarContext } from "../../search/register-context";
 import {
@@ -660,6 +661,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               profileLink={false}
             />
             <span className="truncate">{agent.name}</span>
+            <SmartRuntimeAgentBadge shareRuntime={agent.share_runtime} archived={isArchived} />
           </span>
         }
         actions={actions}
