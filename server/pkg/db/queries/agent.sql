@@ -539,8 +539,10 @@ WHERE id = $1 AND issue_id IS NULL
 -- Claims fence on agent.runtime_id = task.runtime_id, so a retry stamped with a
 -- runtime the agent moved off while the parent ran would be claimable by neither
 -- daemon (#10717); UpdateAgent re-stamps only rows queued at switch time. An
--- unbound agent keeps the parent's runtime. Resume needs no change here: claim
--- resumes a session only on the runtime that recorded it.
+-- unbound agent keeps the parent's runtime. A retry that moves leaves the
+-- parent's session behind: it belongs to the runtime that recorded it, and an
+-- attempt that ends before reporting its own would file it under the new one,
+-- where the next claim would be told to resume it.
 --
 -- Keep work_dir for every retry, but clear resume context for unsafe sessions.
 -- Keep failure predicates aligned with resumeUnsafeFailureReason and resume lookups.
@@ -569,7 +571,9 @@ SELECT
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
+    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
+              OR COALESCE(a.runtime_id, p.runtime_id) IS DISTINCT FROM p.runtime_id THEN NULL
+         ELSE p.session_id END,
     p.work_dir,
     p.attempt + 1, COALESCE(sqlc.narg(max_attempts)::int, p.max_attempts), p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
