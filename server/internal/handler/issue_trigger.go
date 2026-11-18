@@ -118,6 +118,9 @@ type IssueRunOutcome struct {
 // agent the caller may not invoke. Its outcome would then expose that agent's
 // readiness, so the caller gets no outcome; the server log keeps the cause.
 func (h *Handler) resolveIssueRun(r *http.Request, issue db.Issue, trigger service.IssueRunTrigger, willRun, suppressRun bool, actorType, actorID, workspaceID, handoffNote string) *IssueRunOutcome {
+	if issue.AssigneeType.String != "agent" && issue.AssigneeType.String != "squad" {
+		return nil
+	}
 	var status DispatchStatus
 	var reason DispatchReasonCode
 	switch {
@@ -170,7 +173,7 @@ func (h *Handler) callerCanInvokeIssueAssignee(r *http.Request, issue db.Issue, 
 	if err != nil {
 		return true
 	}
-	return h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID)
+	return h.invokeAgentDecision(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID)
 }
 
 // dispatchIssueRun executes the enqueue side effect for a decision produced by
@@ -202,7 +205,11 @@ func issueEnqueueFailure(issue db.Issue, agentID pgtype.UUID, err error) (Dispat
 	if errors.Is(err, service.ErrDuplicatePendingTask) {
 		return DispatchCoalesced, ReasonCoalesced
 	}
-	slog.Warn("issue write: run enqueue failed",
+	log := slog.Default()
+	if issue.AssigneeType.String == "squad" {
+		log = log.With("squad_id", uuidToString(issue.AssigneeID))
+	}
+	log.Warn("issue write: run enqueue failed",
 		"issue_id", uuidToString(issue.ID),
 		"agent_id", uuidToString(agentID),
 		"error", err,

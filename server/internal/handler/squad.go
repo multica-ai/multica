@@ -1268,6 +1268,12 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, au
 			HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, issue.ID),
 		})
 		if err != nil {
+			slog.WarnContext(ctx, "issue write: squad leader pending lookup failed",
+				"issue_id", uuidToString(issue.ID),
+				"squad_id", uuidToString(squad.ID),
+				"leader_id", uuidToString(squad.LeaderID),
+				"error", err,
+			)
 			return DispatchBlocked, ReasonInternalError
 		}
 		if hasPending {

@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -151,4 +154,101 @@ func TestBatchUpdateIssuesReportsRunOutcomePerIssue(t *testing.T) {
 	}
 	wantRunOutcome(t, resultFor(t, resp, ready.ID).RunOutcome, "agent", agentID, DispatchQueued, ReasonQueued)
 	wantRunOutcome(t, resultFor(t, resp, triage.ID).RunOutcome, "agent", agentID, DispatchBlocked, ReasonIssueInTriage)
+}
+
+func TestIssueWritesOmitRunOutcomeForMemberAssignees(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		for _, tc := range []struct {
+			name    string
+			status  string
+			triage  bool
+			promote bool
+		}{
+			{name: "backlog assignment", status: "backlog"},
+			{name: "triage assignment", status: "todo", triage: true},
+			{name: "active assignment", status: "todo"},
+			{name: "backlog promotion", status: "backlog", promote: true},
+			{name: "triage promotion", status: "backlog", triage: true, promote: true},
+		} {
+			t.Run(fmt.Sprintf("batch=%v/%s", batch, tc.name), func(t *testing.T) {
+				cols := testutil.Cols{"status": tc.status}
+				if tc.triage {
+					cols["triage_state"] = "pending"
+				}
+				updates := map[string]any{"assignee_type": "member", "assignee_id": testUserID}
+				if tc.promote {
+					cols["assignee_type"], cols["assignee_id"] = "member", testUserID
+					updates = map[string]any{"status": "todo"}
+				}
+				issueID := dbfx.Issue(t, "member outcome "+tc.name, cols)
+				var outcome *IssueRunOutcome
+				if batch {
+					code, resp, raw := batchUpdate(t, map[string]any{"issue_ids": []string{issueID}, "updates": updates})
+					if code != http.StatusOK {
+						t.Fatalf("batch update: %d %s", code, raw)
+					}
+					outcome = resultFor(t, resp, issueID).RunOutcome
+				} else {
+					resp := updateIssueForOutcome(t, issueID, updates)
+					outcome = resp.RunOutcome
+				}
+				if outcome != nil {
+					t.Errorf("member run_outcome = %+v, want none", outcome)
+				}
+				var assigneeType, assigneeID string
+				dbfx.QueryRow(t, `SELECT assignee_type, assignee_id FROM issue WHERE id = $1`, issueID).Scan(&assigneeType, &assigneeID)
+				if assigneeType != "member" || assigneeID != testUserID {
+					t.Fatalf("assignee = %s/%s, want member/%s", assigneeType, assigneeID, testUserID)
+				}
+				var tasks int
+				dbfx.QueryRow(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, issueID).Scan(&tasks)
+				if tasks != 0 {
+					t.Fatalf("member tasks = %d, want none", tasks)
+				}
+			})
+		}
+	}
+}
+
+func TestUpdateIssueOutcomeVisibilityDoesNotLogInvocationDenial(t *testing.T) {
+	readyAgent := seededReadyAgentID(t)
+	var runtimeID string
+	dbfx.QueryRow(t, `SELECT runtime_id FROM agent WHERE id = $1`, readyAgent).Scan(&runtimeID)
+	actor := dbfx.Agent(t, "outcome caller", runtimeID)
+	callerIssue := dbfx.Issue(t, "outcome caller issue")
+	// The request's delegation chain has no human, while the promoted issue
+	// has a member creator. Enqueue and outcome visibility judge those separately.
+	callerTask := dbfx.Task(t, actor, testutil.Cols{"issue_id": callerIssue, "runtime_id": runtimeID, "status": "running"})
+
+	for _, targetType := range []string{"agent", "squad"} {
+		t.Run(targetType, func(t *testing.T) {
+			leader := dbfx.Agent(t, "outcome private "+targetType, runtimeID)
+			targetID := leader
+			if targetType == "squad" {
+				targetID = dbfx.Squad(t, "outcome private squad", leader)
+			}
+			issueID := dbfx.Issue(t, "outcome promotion "+targetType, testutil.Cols{
+				"status": "backlog", "assignee_type": targetType, "assignee_id": targetID,
+			})
+			dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+			t.Cleanup(func() { slog.SetDefault(prev) })
+
+			var resp IssueResponse
+			testutil.Call(t, testHandler.UpdateIssue, asRun(withURLParam(
+				newRequest("PUT", "/api/issues/"+issueID, map[string]any{"status": "todo"}), "id", issueID), actor, callerTask)).
+				Want(http.StatusOK).JSON(&resp)
+			if resp.RunOutcome != nil {
+				t.Errorf("run_outcome = %+v, want none without invocation permission", resp.RunOutcome)
+			}
+			if got := taskCountFor(t, issueID, leader); got != 1 {
+				t.Fatalf("tasks = %d, want promotion to start one run", got)
+			}
+			if strings.Contains(logs.String(), "agent invoke denied") {
+				t.Errorf("outcome visibility logged a denial after enqueue:\n%s", logs.String())
+			}
+		})
+	}
 }
