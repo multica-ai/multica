@@ -139,11 +139,11 @@ Si la liste des runtimes ne contient pas un outil attendu, vérifiez d'abord que
 </Tab>
 <Tab value="waiting_local_directory">
 
-Ce statut (affiché « En attente du répertoire local ») signifie qu'une autre exécution en cours utilise le même répertoire local. Multica attend que le verrou du répertoire soit libéré, afin que deux agents ne modifient jamais les mêmes fichiers en même temps.
+Avant le démarrage, cette exécution attend son répertoire local ou un slot d'exécution libre du daemon. L'indication `held by task ...` désigne le détenteur observé au début de l'attente ; elle ne suit pas le propriétaire actuel.
 
-Cette attente n'existe qu'en mode `in_place` (« Direct ») du répertoire. Si le répertoire est un dépôt git, passer la ressource en `worktree` (« Parallèle ») supprime complètement la file d'attente : chaque exécution obtient son propre worktree et rend son travail sous forme de branche, si bien que rien n'attend quoi que ce soit. Consultez [Ressources de projet](/project-resources#comment-les-exécutions-partagent-le-répertoire).
+Les exécutions Direct (`in_place`) sérialisent les écritures dans le même répertoire. Les exécutions Parallèle (`worktree`) utilisent des copies distinctes, mais la préparation d'un instantané de la source peut encore attendre si ce chemin est partagé avec des exécutions Direct. Consultez [Ressources de projet](/project-resources#comment-les-exécutions-partagent-le-répertoire).
 
-Sinon, il suffit d'attendre la fin de l'exécution précédente. Si elle est bloquée, arrêtez-la depuis son journal d'exécution (**Annuler l'exécution**), ou choisissez un autre répertoire local pour l'agent actuel. Ce verrou d'exclusion mutuelle du répertoire réside dans la mémoire du daemon ; aucun fichier de verrou n'est écrit sur le disque. Si vous soupçonnez un état de verrou obsolète, `multica daemon restart` le libère ; il n'y a rien à supprimer manuellement.
+Vérifiez que le détenteur indiqué est toujours en cours d'exécution avant de l'arrêter. S'il est réellement bloqué, arrêtez-le depuis son journal d'exécution ou choisissez un autre répertoire local. Si le répertoire est libre mais que le daemon exécute d'autres travaux, attendez qu'un slot se libère. Le verrou du répertoire réside dans la mémoire du daemon ; aucun fichier de verrou n'est à supprimer. Utilisez `multica daemon restart` pour un verrou en mémoire dont l'état obsolète est confirmé.
 
 </Tab>
 </Tabs>

@@ -5551,8 +5551,8 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 
 // runBatchPoller is the single machine-level claim+dispatch loop. Each cycle it
 // acquires whatever execution slots are free (slot-before-claim, so a claimed
-// task never sits server-side `dispatched` without local capacity to run it and
-// race the dispatch-timeout sweeper), asks the server for up to that many tasks
+// newly claimed task has startup capacity rather than waiting server-side as
+// `dispatched` and racing the timeout sweeper), asks for up to that many tasks
 // across all of the daemon's runtimes in one call, and dispatches each returned
 // task — routed to its runtime by handleTask — into a slot.
 //
@@ -5667,16 +5667,9 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			go func(t Task, slot int) {
 				defer taskWG.Done()
 				defer d.activeTasks.Add(-1)
-				defer func() {
-					// Release local capacity before waking the poller. The task's
-					// terminal callback and local cleanup have both finished at this
-					// point, so a successor that was previously blocked by agent
-					// capacity or per-(issue, agent) serialization can be claimed
-					// immediately instead of waiting for PollInterval.
-					sem <- slot
-					signalPollerWakeup(wakeup)
-				}()
-				d.handleTask(parentCtx, t, slot)
+				executionSlot := newTaskSlotLease(sem, slot, wakeup)
+				defer executionSlot.release()
+				d.handleTask(parentCtx, t, executionSlot)
 			}(t, slot)
 			dispatched++
 		}
@@ -6017,7 +6010,7 @@ func (d *Daemon) watchTaskCancellation(ctx context.Context, taskID string, pollI
 	return cancelled
 }
 
-func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
+func (d *Daemon) handleTask(ctx context.Context, task Task, slot *taskSlotLease) {
 	d.mu.Lock()
 	rt, tracked := d.runtimeIndex[task.RuntimeID]
 	d.mu.Unlock()
@@ -6086,7 +6079,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// fires only after execenv.Prepare/Reuse has put env.WorkDir on disk,
 	// so consumers that read status==running can resolve the workdir path
 	// without racing the daemon's os.MkdirAll.
-	localRelease, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, taskLog)
+	localRelease, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, taskLog, slot)
 	if abort {
 		return
 	}
@@ -6139,7 +6132,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}()
 
-	result, err := d.runner.run(runCtx, task, provider, slot, taskLog)
+	result, err := d.runner.run(runCtx, task, provider, slot.index, taskLog)
 	if errors.Is(err, errStartClaimRejected) {
 		// The row belongs to another claim (or is terminal). A task-id-only
 		// failure callback from this stale delivery could kill its new owner.
@@ -6439,10 +6432,11 @@ func withoutWorktreePreserved(err error) error {
 //     blacklist) — fail the task fast with a user-facing reason.
 //  3. The mutex is held by another task — call MarkTaskWaitingLocalDirectory
 //     so the row flips to waiting_local_directory while we block on the
-//     lock, then return the release callback once we win.
+//     lock, returning execution capacity during the wait. Reacquire capacity
+//     before returning the path release callback.
 //  4. The blocking wait is cancelled (daemon shutdown, server-side cancel)
 //     — fail the task with the ctx error.
-func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger) (release func(), abort bool) {
+func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger, slot *taskSlotLease) (release func(), abort bool) {
 	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
 		return nil, false
 	}
@@ -6546,11 +6540,15 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	}()
 
 	onWait := func(holder string) {
-		// LocalPathLocker invokes onWait synchronously and at most once for an
-		// Acquire call. Count the actual mutex wait even if the best-effort
-		// server status update below fails.
+		// Retrying the path after capacity becomes available can contend again.
+		// Keep one wait lifecycle while returning the slot on every conflict.
+		if waitCounted {
+			slot.release()
+			return
+		}
 		d.resourceWaitTasks.Add(1)
 		waitCounted = true
+		slot.release()
 		// Rendered to the user, so it names the directory rather than its path
 		// (see localDirectoryAssignment.DisplayName). The absolute path stays in
 		// the daemon's own logs, which is where an operator debugging a wedged
@@ -6590,7 +6588,30 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			}()
 		})
 	}
-	release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
+	for {
+		release, err = d.localPathLocks.Acquire(waitCtx, assignment.RealPath, task.ID, onWait)
+		if err != nil {
+			break
+		}
+		acquired, acquireErr := slot.tryAcquire(waitCtx)
+		if acquireErr != nil {
+			release()
+			release = nil
+			err = acquireErr
+			break
+		}
+		if acquired {
+			break
+		}
+		// Worktree snapshot preparation takes the same path mutex while owning
+		// its execution slot. Never hold the path while blocking on capacity.
+		release()
+		release = nil
+		taskLog.Debug("local_directory: waiting for execution capacity")
+		if err = slot.acquire(waitCtx); err != nil {
+			break
+		}
+	}
 	if err != nil {
 		// If the wait was cut short because the server finalized the task
 		// (terminal state) or deleted the row, the row is already in a

@@ -103,6 +103,8 @@ Les états détaillés et les règles de relance figurent dans [Exécutions](/ta
 
 Par défaut, un daemon traite au maximum 20 exécutions simultanées, et chaque agent au maximum 6. Le parallélisme effectif correspond à la plus petite de ces deux valeurs.
 
+Les exécutions qui attendent un répertoire local en mode Direct n'occupent pas de slot d'exécution du daemon. Elles en reprennent un avant de démarrer et restent comptées comme du travail détenu par le daemon pour la sécurité de l'arrêt et des mises à jour.
+
 Une fois une limite atteinte, les nouvelles exécutions restent en file d'attente. Le parallélisme d'un agent se règle dans ses paramètres, le plafond global de la machine avec `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Les exécutions en parallèle se disputent en même temps la capacité de la machine, le quota du compte de l'outil et le même répertoire de travail.
 
 La consommation de tokens, les coûts et les échecs des exécutions sont regroupés par espace de travail sur la page [Statistiques](/analytics) ; `multica runtime usage <runtime-id>` affiche la consommation de tokens d'un seul runtime.

@@ -104,6 +104,8 @@ multica daemon autostart disable
 
 一臺守護程序預設最多同時執行 20 次執行；每個 AI 代理預設最多同時執行 6 次。實際併發取兩者中的較小值。
 
+等待直接修改模式本地目錄的執行不佔用守護程序執行槽位。開始前會重新取得槽位；等待期間仍由守護程序持有，關閉和更新時的安全檢查仍會計入這些執行。
+
 達到上限後，新執行繼續排隊。單個 AI 代理的併發數在 AI 代理設定中調整，整臺電腦的上限用 `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` 調整。並行執行會同時佔用機器效能、工具帳號額度和同一工作目錄。
 
 執行消耗的 token、費用和失敗情況在[統計](/analytics)頁按工作區彙總；單條執行時的 token 用量也可以用 `multica runtime usage <runtime-id>` 檢視。
