@@ -76,6 +76,7 @@ export function AgentPropertiesPanel({
   );
   const {
     qoderRuntime,
+    kagentRuntime,
     canDiscoverRuntimeModels,
     runtimeOptions,
     changeModel,
@@ -126,7 +127,7 @@ export function AgentPropertiesPanel({
             runtimes={runtimeOptions}
             members={members}
             currentUserId={currentUserId}
-            canEdit={canEdit && !qoderRuntime}
+            canEdit={canEdit && !qoderRuntime && !kagentRuntime}
             onChange={changeRuntime}
           />
         </ObjectProperty>
@@ -146,7 +147,9 @@ export function AgentPropertiesPanel({
 
         {/* A Qoder agent's model lives on its agent in Qoder Cloud Agents; the
             bound agent id is what identifies it here. */}
-        {qoderRuntime ? (
+        {kagentRuntime ? (
+          <p className="px-1.5 text-caption text-foreground">{t(($) => $.kagent.native_text_note)}</p>
+        ) : qoderRuntime ? (
           <ObjectProperty label={tr(($) => $.qoder.agent)}>
             <Value>
               <span className="truncate font-mono">

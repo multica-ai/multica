@@ -763,6 +763,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
           rowMenu={(row) => (
             <AgentRowActions
               agent={row.agent}
+              runtime={row.runtime}
               presence={row.presence}
               canManage={row.canManage}
               duplicateHref={duplicateHref(row.agent)}

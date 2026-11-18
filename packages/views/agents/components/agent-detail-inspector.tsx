@@ -138,6 +138,7 @@ export function AgentDetailInspector({
 
   const {
     qoderRuntime,
+    kagentRuntime,
     canDiscoverRuntimeModels,
     runtimeOptions,
     changeModel,
@@ -284,7 +285,7 @@ export function AgentDetailInspector({
           <SettingsSection
             title={t(($) => $.inspector.section_execution)}
             description={
-              qoderRuntime ? t(($) => $.inspector.qoder_execution_note) : undefined
+              kagentRuntime ? t(($) => $.kagent.native_text_note) : qoderRuntime ? t(($) => $.inspector.qoder_execution_note) : undefined
             }
           >
             <SettingsCard>
@@ -299,11 +300,11 @@ export function AgentDetailInspector({
                   runtimes={runtimeOptions}
                   members={members}
                   currentUserId={currentUserId}
-                  canEdit={canEdit && !qoderRuntime}
+                  canEdit={canEdit && !qoderRuntime && !kagentRuntime}
                   onChange={changeRuntime}
                 />
               </SettingsRow>
-              {qoderRuntime ? null : (
+              {qoderRuntime || kagentRuntime ? null : (
                 <>
                   <SettingsRow
                     label={t(($) => $.inspector.prop_model)}

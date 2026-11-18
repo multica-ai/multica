@@ -13,6 +13,7 @@ const (
 	workspaceDeleteDetach workspaceDeleteAction = "detach"
 	workspaceDeleteKeep   workspaceDeleteAction = "keep"
 	workspaceDeleteSettle workspaceDeleteAction = "settle"
+	workspaceDeleteBlock  workspaceDeleteAction = "block"
 )
 
 // workspaceDeletionManifest is the schema coverage contract for workspace
@@ -97,6 +98,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"issue_to_label":                     workspaceDelete,
 	"issue_unread":                       workspaceDelete,
 	"issue_vcs_pull_request":             workspaceDelete,
+	"kagent_enrollment":                  workspaceDeleteBlock, // Retain all rows and block teardown until verified remote drain and cleanup are supported.
 	"lark_binding_token":                 workspaceDelete,
 	"lark_chat_session_binding":          workspaceDelete,
 	"lark_inbound_audit":                 workspaceDelete,
@@ -251,7 +253,7 @@ WHERE table_schema = 'public'
 			if hasWorkspaceID {
 				t.Errorf("KEEP table %s gained workspace_id; classify its teardown behavior", table)
 			}
-		case workspaceDeleteDetach, workspaceDeleteSettle:
+		case workspaceDeleteDetach, workspaceDeleteSettle, workspaceDeleteBlock:
 			if !hasWorkspaceID {
 				t.Errorf("%s table %s lost workspace_id; update its teardown selector", action, table)
 			}

@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -112,6 +113,12 @@ func TestChatSubmissionConcurrentParentDelete(t *testing.T) {
 			hub := realtime.NewHub()
 			go hub.Run()
 			router, h := NewRouterWithOptions(testPool, hub, events.New(), analytics.NoopClient{}, nil, RouterOptions{})
+			fencePool, err := handler.NewTeardownFencePool(t.Context(), testPool.Config())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(fencePool.Close)
+			h.TeardownFencePool = fencePool
 			server := httptest.NewServer(router)
 			t.Cleanup(server.Close)
 			barrier := &submissionCommitBarrier{testPool, make(chan struct{}), make(chan struct{})}

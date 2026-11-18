@@ -1279,6 +1279,12 @@ func (h *Handler) mergeLegacyRuntime(ctx context.Context, newRuntimeID, oldRunti
 		}
 	}
 
+	for _, row := range locked {
+		if err := service.GuardRuntimeKagentTeardown(ctx, tx, row.ID); err != nil {
+			return err
+		}
+	}
+
 	reassignment, err := qtx.ReassignTasksToRuntime(ctx, db.ReassignTasksToRuntimeParams{
 		NewRuntimeID: newRuntimeID,
 		OldRuntimeID: oldRuntimeID,
@@ -2373,7 +2379,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
-		resp.AuthToken = tokenStr
+		resp.AuthToken = claimExecutionToken(rt.Provider, tokenStr)
 		resp.RemoteMCPDaemonToken = remoteMCPToken
 		resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
 		out = append(out, resp)
@@ -3134,6 +3140,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		RuntimeConfig:         runtimeConfig,
 		DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 	}
+	if runtime.Provider == "kagent" {
+		if err := validateRemoteAgentConfig(runtime.Provider, runtimeConfig); err != nil {
+			return resp, nil, nil, 0, 0, h.failClaimedTaskBeforeLaunch(r.Context(), task,
+				err.Error(), taskfailure.ReasonInvalidTaskIdentity, "kagent_disabled_or_invalid", http.StatusConflict, "Kagent native-text opt-in required")
+		}
+	}
 	// Snapshot the agent's persistent OpenClaw model override for this claim.
 	// It applies to every claim until changed or cleared; later edits do not
 	// affect payloads already delivered to the daemon.
@@ -3152,7 +3164,16 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if agent.SystemKey.String == service.MikaSystemKey {
 		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
 	}
-	if useSkillRefs {
+	if runtime.Provider == "kagent" {
+		// Native text has no platform skill injection. Explicit skills remain
+		// in the claim so the daemon rejects unsupported configuration.
+		skills, err := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+		if err != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
+		}
+		agentSkillCount = len(skills)
+		resp.Agent.Skills = skills
+	} else if useSkillRefs {
 		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, agent.SystemKey.String, legacySkillRedirects)
 		if err != nil {
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
@@ -4578,7 +4599,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
 		return
 	}
-	resp.AuthToken = tokenStr
+	resp.AuthToken = claimExecutionToken(runtime.Provider, tokenStr)
 	resp.RemoteMCPDaemonToken = remoteMCPToken
 	task.DeliveredCommentIds = receipt
 	resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
@@ -4846,7 +4867,7 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 	offered := service.TaskStartCapabilities{
 		Supplement:     slices.Contains(req.Capabilities, protocol.DaemonCapabilityTaskSupplementV1),
-		ProcessCleanup: slices.Contains(req.Capabilities, protocol.DaemonCapabilityPiProcessCleanupV1) || slices.Contains(req.Capabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1),
+		ProcessCleanup: slices.Contains(req.Capabilities, protocol.DaemonCapabilityPiProcessCleanupV1) || slices.Contains(req.Capabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1) || slices.Contains(req.Capabilities, protocol.DaemonCapabilityKagentProcessCleanupV1),
 	}
 	var task *db.AgentTaskQueue
 	var err error

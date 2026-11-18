@@ -74,6 +74,13 @@ func TestMain(m *testing.M) {
 	bus := events.New()
 	emailSvc := service.NewEmailService()
 	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, analytics.NoopClient{}, Config{AllowSignup: true})
+	fencePool, err := NewTeardownFencePool(ctx, pool.Config())
+	if err != nil {
+		fmt.Printf("Failed to initialize teardown fence pool: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
+	testHandler.TeardownFencePool = fencePool
 	// httptest.NewRequest defaults RemoteAddr to 192.0.2.1, so every webhook
 	// test in the suite shares one IP bucket. With the production default
 	// (30/min) the budget runs out partway through the suite and unrelated
@@ -106,6 +113,7 @@ func TestMain(m *testing.M) {
 			code = 1
 		}
 	}
+	fencePool.Close()
 	pool.Close()
 	os.Exit(code)
 }
@@ -211,6 +219,16 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add(key, value)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+// withRequestContext attaches ctx to req while preserving the chi routing
+// context injected by withURLParam: req.WithContext would otherwise replace the
+// entire context chain and drop URL params, which URL-param handlers read.
+func withRequestContext(req *http.Request, ctx context.Context) *http.Request {
+	if rctx := req.Context().Value(chi.RouteCtxKey); rctx != nil {
+		ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)
+	}
+	return req.WithContext(ctx)
 }
 
 func setWorkspaceIssuePrefixForTest(t *testing.T, prefix string) {

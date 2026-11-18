@@ -1,4 +1,12 @@
 {
+  "kagent": {
+    "lifecycle_unavailable": "Kagent agents cannot be archived or restored.",
+    "native_text_note": "Kagent uses native text mode only. Workspace access, skills, model and thinking overrides, tools, MCP, custom arguments and environment variables are unavailable. Runtime changes are unavailable after creation.",
+    "clear_required": "Creation is blocked while this draft contains incompatible model, thinking, speed, remote agent or skill options. Clear them to continue, or choose another runtime.",
+    "clear_options": "Clear incompatible options",
+    "duplicate_args_blocked": "This copy includes custom arguments that Kagent cannot use. Choose another runtime or create a new agent without copying.",
+    "builder_unavailable": "Kagent native text mode does not support the agent builder. Use manual creation."
+  },
   "page": {
     "title": "Agents",
     "new_agent": "New agent",

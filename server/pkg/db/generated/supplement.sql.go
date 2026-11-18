@@ -870,7 +870,9 @@ SET status = 'running',
     started_at = now(),
     wait_reason = NULL,
     prepare_lease_expires_at = NULL,
-    result = CASE WHEN $1::boolean AND candidate.provider = 'museapp'
+    result = CASE WHEN $1::boolean AND candidate.provider = 'kagent'
+                  THEN COALESCE(t.result, '{}'::jsonb) || '{"process_cleanup_capability":"kagent-process-cleanup-v1"}'::jsonb
+                  WHEN $1::boolean AND candidate.provider = 'museapp'
                   THEN COALESCE(t.result, '{}'::jsonb) || '{"process_cleanup_capability":"museapp-process-cleanup-v1"}'::jsonb
                   WHEN $1::boolean AND candidate.provider IN ('pi', 'omp')
                   THEN COALESCE(t.result, '{}'::jsonb) || '{"process_cleanup_capability":"pi-process-cleanup-v1"}'::jsonb

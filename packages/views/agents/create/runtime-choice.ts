@@ -9,6 +9,9 @@ import {
 } from "../../runtimes/components/runtime-machines";
 
 export const QODER_PROVIDER = "qoder_cloud";
+/** Kagent (native text) agents are created manually; the AI builder never
+ * runs on a kagent runtime, so it is excluded from runtime choices. */
+export const KAGENT_PROVIDER = "kagent";
 
 /** Harness rows shown under an open machine before the rest fold into one row. */
 export const HARNESS_PREVIEW_COUNT = 6;
@@ -80,8 +83,10 @@ export function buildRuntimeChoiceGroups(
   let qoderRuntime: RuntimeDevice | null = null;
 
   for (const machine of machines) {
-    const usable = machine.runtimes.filter((runtime) =>
-      isRuntimeUsableForUser(runtime, currentUserId),
+    const usable = machine.runtimes.filter(
+      (runtime) =>
+        runtime.provider !== KAGENT_PROVIDER &&
+        isRuntimeUsableForUser(runtime, currentUserId),
     );
     if (machine.section === "local") {
       local = {

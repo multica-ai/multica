@@ -1,0 +1,88 @@
+{
+  "id": "44444444-4444-4444-8444-444444444444",
+  "artifacts": [
+    {
+      "artifactId": "result",
+      "extensions": [
+        "https://kagent.dev/a2a/extension"
+      ],
+      "metadata": {
+        "private": "gateway-credential"
+      },
+      "name": "answer",
+      "parts": [
+        {
+          "text": "alpha7 answer",
+          "metadata": {
+            "kagent.dev/a2a/part-type": "text",
+            "private": "gateway-credential"
+          }
+        }
+      ]
+    }
+  ],
+  "contextId": "55555555-5555-4555-8555-555555555555",
+  "history": [
+    {
+      "messageId": "33333333-3333-4333-8333-333333333333",
+      "contextId": "55555555-5555-4555-8555-555555555555",
+      "parts": [
+        {
+          "text": "hello"
+        }
+      ],
+      "role": "ROLE_USER",
+      "taskId": "44444444-4444-4444-8444-444444444444"
+    },
+    {
+      "messageId": "agent-message-1",
+      "contextId": "55555555-5555-4555-8555-555555555555",
+      "extensions": [
+        "https://kagent.dev/a2a/extension"
+      ],
+      "metadata": {
+        "kagent.dev/a2a/timeline-position": "2026-11-18T10:00:00Z"
+      },
+      "parts": [
+        {
+          "text": "alpha7 answer",
+          "metadata": {
+            "kagent.dev/a2a/part-type": "text",
+            "private": "gateway-credential"
+          }
+        }
+      ],
+      "role": "ROLE_AGENT",
+      "taskId": "44444444-4444-4444-8444-444444444444"
+    }
+  ],
+  "metadata": {
+    "kagent.dev/a2a/task-created-at": "2026-11-18T10:00:00Z",
+    "private": "caller-credential"
+  },
+  "status": {
+    "message": {
+      "messageId": "agent-message-1",
+      "contextId": "55555555-5555-4555-8555-555555555555",
+      "extensions": [
+        "https://kagent.dev/a2a/extension"
+      ],
+      "metadata": {
+        "kagent.dev/a2a/timeline-position": "2026-11-18T10:00:00Z"
+      },
+      "parts": [
+        {
+          "text": "alpha7 answer",
+          "metadata": {
+            "kagent.dev/a2a/part-type": "text",
+            "private": "gateway-credential"
+          }
+        }
+      ],
+      "role": "ROLE_AGENT",
+      "taskId": "44444444-4444-4444-8444-444444444444"
+    },
+    "state": "TASK_STATE_COMPLETED",
+    "timestamp": "2026-11-18T10:00:00Z"
+  }
+}

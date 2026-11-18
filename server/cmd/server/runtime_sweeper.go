@@ -511,6 +511,9 @@ func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Qu
 		return result, fmt.Errorf("lock runtime: %w", err)
 	}
 	result.workspaceID = util.UUIDToString(runtime.WorkspaceID)
+	if err := service.GuardRuntimeKagentTeardown(ctx, tx, runtimeID); err != nil {
+		return result, err
+	}
 
 	lockedAgents, err := qtx.ListUserAgentsByRuntimeForUpdate(ctx, runtimeID)
 	if err != nil {
@@ -553,7 +556,7 @@ func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Qu
 		return result, nil
 	}
 
-	teardown, err := service.TeardownRuntime(ctx, qtx, runtimeID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: false})
+	teardown, err := service.TeardownRuntime(ctx, tx, runtimeID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: false})
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeNotDrained) {
 			result.skipReason = obsmetrics.RuntimeGCSkipNonTerminalTask

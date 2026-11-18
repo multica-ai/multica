@@ -52,21 +52,29 @@ func (h *Handler) DisconnectQoderConnection(w http.ResponseWriter, r *http.Reque
 	}
 	wsID := uuidToString(ws)
 
-	if !h.stopQoderForDisconnect(w, r, ws, expected) {
+	fence, ok := h.requireTeardownFence(w, r.Context(), wsID)
+	if !ok {
 		return
 	}
-	if err := h.cleanupQoderJournal(r.Context(), wsID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	defer fence.Close()
+	if !allowWorkspaceKagentTeardown(w, r.Context(), fence.conn, ws) {
+		return
+	}
+	if !h.stopQoderForDisconnect(w, r, ws, expected, fence) {
+		return
+	}
+	if err := h.cleanupQoderJournalFenced(r.Context(), wsID, fence); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		slog.Warn("qoder disconnect waiting on remote cleanup", "workspace_id", wsID, "error", err)
 		writeError(w, http.StatusConflict, "Qoder is stopped and still cancelling remote sessions; retry shortly")
 		return
 	}
 
-	tx, err := h.TxStarter.Begin(r.Context())
+	tx, err := fence.conn.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot disconnect Qoder")
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer rollbackTeardownTx(tx)
 	if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1,19))`, wsID); err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot lock Qoder Cloud Agents configuration")
 		return
@@ -78,7 +86,7 @@ func (h *Handler) DisconnectQoderConnection(w http.ResponseWriter, r *http.Reque
 	}
 	teardowns := make([]service.RuntimeTeardownResult, 0, len(runtimeIDs))
 	for _, runtimeID := range runtimeIDs {
-		teardown, err := service.TeardownRuntime(r.Context(), qtx, runtimeID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
+		teardown, err := service.TeardownRuntime(r.Context(), tx, runtimeID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
 		if err != nil {
 			if errors.Is(err, service.ErrRuntimeNotDrained) {
 				writeError(w, http.StatusConflict, "Qoder still has tasks in flight; retry in a moment")
@@ -120,13 +128,13 @@ func (h *Handler) DisconnectQoderConnection(w http.ResponseWriter, r *http.Reque
 // stopQoderForDisconnect disables the connection and revokes the bridge's
 // credential, after the same checks as stop plus the confirmed agent plan.
 // It reports whether the caller may continue; on false a response was written.
-func (h *Handler) stopQoderForDisconnect(w http.ResponseWriter, r *http.Request, ws pgtype.UUID, expected map[string]struct{}) bool {
-	tx, err := h.TxStarter.Begin(r.Context())
+func (h *Handler) stopQoderForDisconnect(w http.ResponseWriter, r *http.Request, ws pgtype.UUID, expected map[string]struct{}, fence *teardownFence) bool {
+	tx, err := fence.conn.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot disconnect Qoder")
 		return false
 	}
-	defer tx.Rollback(r.Context())
+	defer rollbackTeardownTx(tx)
 	if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1,19))`, uuidToString(ws)); err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot lock Qoder Cloud Agents configuration")
 		return false
@@ -180,6 +188,11 @@ func (h *Handler) checkQoderDisconnectPlan(w http.ResponseWriter, ctx context.Co
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot load Qoder runtime")
 		return nil, true
+	}
+	for _, runtimeID := range runtimeIDs {
+		if !allowRuntimeKagentTeardown(w, ctx, tx, runtimeID) {
+			return nil, true
+		}
 	}
 	var active bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_task_queue t JOIN agent_runtime rt ON rt.id=t.runtime_id WHERE rt.workspace_id=$1 AND rt.provider='qoder_cloud' AND t.status IN ('running','dispatched'))`, ws).Scan(&active); err != nil {

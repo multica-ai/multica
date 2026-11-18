@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -756,6 +757,10 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 	requesterUserID := requestUserID(r)
 	result, err := h.revokeAndRemoveMember(r.Context(), target.WorkspaceID, target.UserID, target.ID, parseUUID(requesterUserID))
 	if err != nil {
+		if errors.Is(err, service.ErrRuntimeKagentEnrollment) {
+			writeError(w, http.StatusConflict, kagentTeardownBlockedMessage)
+			return
+		}
 		slog.Warn("delete member failed", append(logger.RequestAttrs(r), "error", err, "member_id", memberID, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete member")
 		return
@@ -801,6 +806,10 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.revokeAndRemoveMember(r.Context(), member.WorkspaceID, member.UserID, member.ID, member.UserID)
 	if err != nil {
+		if errors.Is(err, service.ErrRuntimeKagentEnrollment) {
+			writeError(w, http.StatusConflict, kagentTeardownBlockedMessage)
+			return
+		}
 		slog.Warn("leave workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to leave workspace")
 		return
@@ -1141,6 +1150,12 @@ func lockWorkspaceTaskOwners(ctx context.Context, qtx *db.Queries, workspaceID p
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
 
+	fence, ok := h.requireTeardownFence(w, r.Context(), workspaceID)
+	if !ok {
+		return
+	}
+	defer fence.Close()
+
 	// Defense in depth: the route is already gated by the
 	// RequireWorkspaceRoleFromURL("owner") middleware, but we re-check here
 	// so that the handler is safe regardless of how it gets wired up
@@ -1154,9 +1169,16 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Remote Qoder cleanup commits independently of the workspace deletion.
+	// Refuse existing enrollment intent before invoking that cleanup as well as
+	// checking again under the workspace lock below.
+	if !allowWorkspaceKagentTeardown(w, r.Context(), fence.conn, requester.WorkspaceID) {
+		return
+	}
+
 	// Stop remote work before deleting the only durable session journal.
 	// A pending step/cancellation leaves the workspace intact for a safe retry.
-	if err := h.prepareQoderWorkspaceDeletion(r.Context(), uuidToString(requester.WorkspaceID)); err != nil {
+	if err := h.prepareQoderWorkspaceDeletionFenced(r.Context(), uuidToString(requester.WorkspaceID), fence); err != nil {
 		writeError(w, http.StatusConflict, "Qoder cleanup is pending; retry workspace deletion shortly")
 		return
 	}
@@ -1189,13 +1211,13 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	// delete window would otherwise slip in a session nobody locked, and its
 	// restore would outlive the cascade the same way. Holding the workspace row
 	// FOR UPDATE blocks that insert on its workspace FK (FOR KEY SHARE).
-	tx, err := h.TxStarter.Begin(r.Context())
+	tx, err := fence.conn.Begin(r.Context())
 	if err != nil {
 		slog.Warn("begin workspace delete tx failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
 		return
 	}
-	defer tx.Rollback(r.Context())
+	defer rollbackTeardownTx(tx)
 	qtx := h.Queries.WithTx(tx)
 	var sourceContextAttachmentURLs []string
 	var sourceContextIntentURLs []string
@@ -1212,6 +1234,12 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := qtx.LockWorkspaceForDelete(r.Context(), requester.WorkspaceID); err != nil {
 		failWorkspaceDelete(w, r, workspaceID, "lock workspace", err)
+		return
+	}
+	// Enrollment writers take the workspace lock before the runtime lock.
+	// Retain all intent, including tombstones, until remote drain and cleanup
+	// have a supported workflow; local phase alone cannot prove remote removal.
+	if !allowWorkspaceKagentTeardown(w, r.Context(), tx, requester.WorkspaceID) {
 		return
 	}
 	// Take a best-effort snapshot for post-commit daemon invalidation. Runtime
@@ -1464,4 +1492,17 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	h.notifyDaemonWorkspacesChanged(affectedUserIDs...)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func allowWorkspaceKagentTeardown(w http.ResponseWriter, ctx context.Context, query db.DBTX, workspaceID pgtype.UUID) bool {
+	var enrolled bool
+	if err := query.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM kagent_enrollment WHERE workspace_id=$1)`, workspaceID).Scan(&enrolled); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check kagent enrollments")
+		return false
+	}
+	if enrolled {
+		writeError(w, http.StatusConflict, kagentTeardownBlockedMessage)
+		return false
+	}
+	return true
 }

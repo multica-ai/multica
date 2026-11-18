@@ -75,6 +75,9 @@ function runtime(id: string, provider: string): AgentRuntime {
 }
 
 const claude = runtime("rt-claude", "claude");
+const codex = runtime("rt-codex", "codex");
+const kagent = runtime("rt-kagent", "kagent");
+const secondKagent = runtime("rt-kagent-2", "kagent");
 const qoder = runtime("rt-qoder", "qoder_cloud");
 
 const owner = { user_id: "user-2", name: "Ada" } as MemberWithUser;
@@ -112,7 +115,7 @@ function renderPanel(
       <AgentPropertiesPanel
         agent={agent}
         runtime={bound}
-        runtimes={[claude, qoder]}
+        runtimes={[claude, codex, qoder, kagent, secondKagent]}
         presence={null}
         owner={owner}
         members={[owner]}
@@ -147,6 +150,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("AgentPropertiesPanel", () => {
+  it("locks Kagent runtime selection without changing the binding", () => {
+    const { onUpdate } = renderPanel(kagent);
+    expect(pickers.runtime?.canEdit).toBe(false);
+    expect(pickers.runtime?.runtimes.map((r) => r.id)).toEqual([kagent.id]);
+    for (const target of [secondKagent.id, claude.id, qoder.id]) {
+      pickers.runtime?.onChange(target);
+    }
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(pickers.model).toBeNull();
+  });
+
+
   it("lists the agent's properties", () => {
     renderPanel(claude);
 
@@ -171,9 +186,9 @@ describe("AgentPropertiesPanel", () => {
     const { onUpdate } = renderPanel(claude);
 
     expect(pickers.runtime?.canEdit).toBe(true);
-    pickers.runtime?.onChange("rt-other");
+    pickers.runtime?.onChange("rt-codex");
     expect(onUpdate).toHaveBeenCalledWith("agent-1", {
-      runtime_id: "rt-other",
+      runtime_id: "rt-codex",
       model: "",
       thinking_level: "",
       service_tier: "",
@@ -201,7 +216,7 @@ describe("AgentPropertiesPanel", () => {
   it("does not offer the Qoder runtime to other agents", () => {
     renderPanel(claude);
 
-    expect(pickers.runtime?.runtimes.map((r) => r.id)).toEqual(["rt-claude"]);
+    expect(pickers.runtime?.runtimes.map((r) => r.id)).toEqual(["rt-claude", "rt-codex"]);
   });
 
   it("locks the runtime and shows the Qoder agent instead of a model on Qoder", () => {

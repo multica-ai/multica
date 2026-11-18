@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
@@ -220,7 +221,9 @@ type RuntimeRecoveryNotifier interface {
 }
 
 type Handler struct {
-	InboxReads             *inboxread.Guard
+	InboxReads *inboxread.Guard
+	// TeardownFencePool is dedicated to session-affine teardown ownership.
+	TeardownFencePool      *pgxpool.Pool
 	Queries                *db.Queries
 	ReadSelector           *dbreader.Selector
 	DB                     dbExecutor

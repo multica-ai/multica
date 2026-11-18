@@ -443,7 +443,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const queuedCount = presence?.queuedCount ?? 0;
   const hasActiveWork = runningCount + queuedCount > 0;
   // Multica's built-in agents cannot be archived — the server refuses it.
-  const canArchive = canEdit.allowed && !isArchived && !agent.system_key;
+  const kagentRuntime = runtime?.provider === "kagent";
+  const canRestore = canEdit.allowed && !kagentRuntime;
+  const canArchive = canEdit.allowed && !isArchived && !agent.system_key && !kagentRuntime;
 
   // Chat shares the invocation gate with assignment (MUL-3963): starting a
   // chat triggers agent runs. The button stays visible either way — a denied
@@ -564,7 +566,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               {t(($) => $.row_actions.cancel_all_tasks)}
             </DropdownMenuItem>
           )}
-          {canEdit.allowed && isArchived && (
+          {canRestore && isArchived && (
             <DropdownMenuItem onClick={() => handleRestore(agent.id)}>
               <RotateCcw />
               {t(($) => $.detail.restore)}
@@ -601,7 +603,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         key="archived"
         icon={<Archive className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
         action={
-          canEdit.allowed ? (
+          canRestore ? (
             <Button
               variant="outline"
               size="xs"
@@ -633,6 +635,11 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         }
       >
         {t(($) => $.detail.runtime_required_banner)}
+      </Notice>
+    ),
+    kagentRuntime && (
+      <Notice key="kagent-lifecycle" tone="warning" icon={<AlertCircle className="size-3.5 shrink-0 text-warning" aria-hidden="true" />}>
+        {t(($) => $.kagent.lifecycle_unavailable)}
       </Notice>
     ),
   ].filter(Boolean);
@@ -706,7 +713,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           />
 
           {/* Qoder agents take their skills from Qoder Cloud Agents. */}
-          {runtime?.provider === "qoder_cloud" ? null : (
+          {(runtime?.provider === "qoder_cloud" || runtime?.provider === "kagent") ? null : (
             <AgentSkillsSection
               agent={agent}
               canEdit={canEdit.allowed}

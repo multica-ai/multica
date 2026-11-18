@@ -12,7 +12,7 @@ import {
 } from "@multica/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import type { Agent } from "@multica/core/types";
+import type { Agent, AgentRuntime } from "@multica/core/types";
 import type { AgentPresenceDetail } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -38,6 +38,7 @@ import { CollectionRowMenu } from "../../layout/collection-list";
 
 interface AgentRowActionsProps {
   agent: Agent;
+  runtime?: AgentRuntime | null;
   presence: AgentPresenceDetail | null | undefined;
   // True when the current user can manage this agent (owner of agent or
   // workspace admin/owner). Mirrors the back-end's canManageAgent check —
@@ -62,6 +63,7 @@ interface AgentRowActionsProps {
  */
 export function AgentRowActions({
   agent,
+  runtime,
   presence,
   canManage,
   duplicateHref,
@@ -92,8 +94,9 @@ export function AgentRowActions({
   // the workspace's entry point runs through one. Hide the action rather than
   // let it fail with a toast.
   const isSystemAgent = !!agent.system_key;
-  const showArchive = canManage && !isArchived && !isSystemAgent;
-  const showRestore = canManage && isArchived;
+  const kagentRuntime = runtime?.provider === "kagent";
+  const showArchive = canManage && !isArchived && !isSystemAgent && !kagentRuntime;
+  const showRestore = canManage && isArchived && !kagentRuntime;
 
   const invalidateAgents = () => {
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
@@ -183,6 +186,11 @@ export function AgentRowActions({
           <DropdownMenuItem render={<AppLink href={duplicateHref} />}>
             <Copy className="h-3.5 w-3.5" />
             {t(($) => $.row_actions.duplicate)}
+          </DropdownMenuItem>
+        )}
+        {kagentRuntime && (
+          <DropdownMenuItem disabled>
+            {t(($) => $.kagent.lifecycle_unavailable)}
           </DropdownMenuItem>
         )}
         {showRestore && (

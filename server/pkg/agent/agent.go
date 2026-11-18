@@ -366,6 +366,9 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
+	// Kagent is supplied by the daemon's trusted DEV configuration, never by
+	// agent custom_env or runtime_config. Remote identities are claim-scoped.
+	Kagent         *KagentConfig
 	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, codearts, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, muse, dim, zeroclaw)
 	CLIVersion     string            // detected version paired with ExecutablePath; vendor-specific usage semantics also require BuiltinRuntime
 	Env            map[string]string // extra environment variables
@@ -511,6 +514,11 @@ func New(agentType string, cfg Config) (Backend, error) {
 	cfg.LaunchPrefix = filterLaunchPrefix(cfg.LaunchPrefix, agentType, cfg.Logger)
 
 	switch agentType {
+	case "kagent":
+		if cfg.Kagent == nil {
+			return nil, fmt.Errorf("kagent: explicit DEV configuration required")
+		}
+		return NewKagentBackend(*cfg.Kagent)
 	case "claude":
 		return &claudeBackend{cfg: cfg}, nil
 	case "codebuddy":

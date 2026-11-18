@@ -74,7 +74,10 @@ export const EMPTY_AGENT_DRAFT: AgentDraft = {
 export function applyDraftRuntimeChange(
   draft: AgentDraft,
   runtimeId: string,
+  runtimeProvider?: string,
 ): AgentDraft {
+  // Keep incompatible options visible for explicit clearing on Kagent.
+  if (runtimeProvider === "kagent") return { ...draft, runtimeId };
   return {
     ...draft,
     runtimeId,
@@ -168,7 +171,7 @@ export function deriveDuplicateAccess(
  *
  * `model` / `thinkingLevel` / `serviceTier` only mean something on the runtime
  * they were chosen for, so they ride along only when the copy stays on that
- * exact runtime. When the source runtime is gone, private to somebody else or
+ * exact runtime. Kagent retains them for explicit clearing before submission. When the source runtime is gone, private to somebody else or
  * offline, the draft falls back to another runtime and the three are cleared
  * for the user to pick again — the same rule `multica agent copy` already
  * enforces server-side (cmd_agent_copy.go). Before MUL-5390 the fallback kept
@@ -190,6 +193,9 @@ export function buildDuplicateDraft(
         runtime.id === source.runtime_id &&
         isRuntimeUsableForUser(runtime, options.currentUserId),
     );
+  const preserveOptions = keepsRuntime || options.runtimes.some(
+    (runtime) => runtime.id === options.fallbackRuntimeId && runtime.provider === "kagent",
+  );
   return {
     ...EMPTY_AGENT_DRAFT,
     name: `${source.name}${options.nameSuffix}`,
@@ -200,10 +206,10 @@ export function buildDuplicateDraft(
     runtimeId: keepsRuntime
       ? (source.runtime_id as string)
       : options.fallbackRuntimeId,
-    qoderAgentId: keepsRuntime ? qoderAgentId(source.runtime_config) : "",
-    model: keepsRuntime ? source.model ?? "" : "",
-    thinkingLevel: keepsRuntime ? source.thinking_level ?? "" : "",
-    serviceTier: keepsRuntime ? source.service_tier ?? "" : "",
+    qoderAgentId: preserveOptions ? qoderAgentId(source.runtime_config) : "",
+    model: preserveOptions ? source.model ?? "" : "",
+    thinkingLevel: preserveOptions ? source.thinking_level ?? "" : "",
+    serviceTier: preserveOptions ? source.service_tier ?? "" : "",
     skillIds: new Set(source.skills.map((skill) => skill.id)),
     ...deriveDuplicateAccess(source),
   };
@@ -218,13 +224,19 @@ export function buildDuplicateDraft(
 export function buildCreateAgentRequest(options: {
   draft: AgentDraft;
   runtimeId: string;
-  /** Provider of `runtimeId`; drafts outlive runtime switches, so fields the target runtime cannot run are dropped here. */
+  /** Provider of `runtimeId`; Kagent rejects incompatible options until explicitly cleared. */
   runtimeProvider?: string;
   /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
   duplicateSource?: Agent | null;
 }): CreateAgentRequest {
   const { runtimeId, runtimeProvider, template, duplicateSource } = options;
+  const kagent = runtimeProvider === "kagent";
+  if (kagent && (
+    hasKagentIncompatibleDraftOptions(options.draft) || duplicateSource?.custom_args.length
+  )) {
+    throw new Error("Clear incompatible options before creating a Kagent native-text agent.");
+  }
   const qoder = runtimeProvider === QODER_PROVIDER;
   // The Qoder bridge refuses skills and execution overrides, and the form
   // hides them once Qoder is chosen.
@@ -253,6 +265,7 @@ export function buildCreateAgentRequest(options: {
       : {}),
     avatar_url: draft.avatarUrl ?? undefined,
     runtime_id: runtimeId,
+    ...(kagent ? { runtime_config: { mode: "native-text" } } : {}),
     ...(draft.qoderAgentId ? { runtime_config: { qoder_agent_id: draft.qoderAgentId } } : {}),
     model: draft.model.trim() || undefined,
     thinking_level: draft.thinkingLevel.trim() || undefined,
@@ -277,4 +290,8 @@ export function buildCreateAgentRequest(options: {
     }
   }
   return request;
+}
+
+export function hasKagentIncompatibleDraftOptions(draft: AgentDraft): boolean {
+  return !!(draft.model || draft.thinkingLevel || draft.serviceTier || draft.qoderAgentId || draft.skillIds.size);
 }

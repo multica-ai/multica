@@ -699,6 +699,13 @@ func main() {
 		LLMMaxRetries:       llmMaxRetries,
 		LLMDisableThinking:  llmDisableThinking,
 	})
+	fencePool, err := handler.NewTeardownFencePool(context.Background(), pool.Config())
+	if err != nil {
+		slog.Error("cannot initialize teardown fence pool", "error", err)
+		os.Exit(1)
+	}
+	defer fencePool.Close()
+	h.TeardownFencePool = fencePool
 	// member_delegation_day exists only for self-host telemetry; DO_NOT_TRACK
 	// stops writing it as well as sending the snapshot.
 	h.TaskService.RecordMemberActivity = telemetryConfig.Enabled

@@ -1,4 +1,12 @@
 {
+  "kagent": {
+    "lifecycle_unavailable": "Les agents Kagent ne peuvent pas être archivés ni restaurés.",
+    "native_text_note": "Kagent utilise uniquement le mode texte natif. L’accès à l’espace de travail, les compétences, les réglages de modèle et de réflexion, les outils, MCP, les arguments personnalisés et les variables d’environnement sont indisponibles. Le runtime ne peut pas être modifié après la création.",
+    "clear_required": "Ce brouillon contient des options incompatibles de modèle, réflexion, vitesse, agent distant ou compétences. Effacez-les pour continuer ou choisissez un autre runtime.",
+    "clear_options": "Effacer les options incompatibles",
+    "duplicate_args_blocked": "Cette copie contient des arguments personnalisés incompatibles avec Kagent. Choisissez un autre runtime ou créez un nouvel agent sans copie.",
+    "builder_unavailable": "Le mode texte natif de Kagent ne prend pas en charge le générateur d’agents. Utilisez la création manuelle."
+  },
   "page": {
     "title": "Agents",
     "new_agent": "Nouvel agent",

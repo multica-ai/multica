@@ -8,11 +8,13 @@ import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   applyDraftModelChange,
   applyDraftRuntimeChange,
+  hasKagentIncompatibleDraftOptions,
   type AgentDraft,
   type AgentPermissionScope,
 } from "@multica/core/agents";
 import { useConfigStore } from "@multica/core/config";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -92,6 +94,7 @@ export function AgentConfigurationPanel({
   const runtimeLocked = runtimeSwitchPending || runtimeSwitchInFlight;
   // The Qoder bridge refuses tasks from agents with skills or per-agent
   // config, so the fields that would produce them are not offered.
+  const kagentRuntime = selectedRuntime?.provider === "kagent";
   const qoderRuntime = selectedRuntime?.provider === "qoder_cloud";
   const handleRuntimeSelect = (id: string) => {
     if (id === draft.runtimeId) return;
@@ -102,7 +105,7 @@ export function AgentConfigurationPanel({
     // Model is per-runtime; clear it — and the per-model thinking / speed
     // overrides — on runtime change so the new runtime resolves its own
     // defaults instead of stale values.
-    onChange(applyDraftRuntimeChange(draft, id));
+    onChange(applyDraftRuntimeChange(draft, id, runtimes.find((runtime) => runtime.id === id)?.provider));
   };
 
   return (
@@ -200,7 +203,7 @@ export function AgentConfigurationPanel({
               className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
-          {qoderRuntime ? (
+          {kagentRuntime ? null : qoderRuntime ? (
             <p className="px-4 py-3 text-caption text-muted-foreground">
               {t(($) => $.creation_studio.cloud_fields_note)}
             </p>
@@ -226,7 +229,7 @@ export function AgentConfigurationPanel({
             <div className="min-w-0">
               {runtimeSummary ?? (
               <RuntimePicker
-                runtimes={runtimes}
+                runtimes={onRuntimeSelect ? runtimes.filter((runtime) => runtime.provider !== "kagent") : runtimes}
                 runtimesLoading={runtimesLoading}
                 members={members}
                 currentUserId={currentUserId}
@@ -245,7 +248,7 @@ export function AgentConfigurationPanel({
                 </p>
               )}
             </div>
-            {qoderRuntime ? (
+            {kagentRuntime ? null : qoderRuntime ? (
               <QoderAgentSelect
                 value={draft.qoderAgentId}
                 onChange={(value) => set("qoderAgentId", value)}
@@ -273,12 +276,37 @@ export function AgentConfigurationPanel({
               already set and needs clearing), so an offline runtime, a failed
               discovery or an empty model shows nothing instead of an input
               that cannot be honoured. */}
-          <AgentExecutionOverrides
-            draft={draft}
-            runtime={selectedRuntime}
-            disabled={runtimeLocked}
-            onChange={onChange}
-          />
+          {kagentRuntime ? (
+            <div className="space-y-3 px-4 py-3 text-body text-foreground">
+              <p>{t(($) => $.kagent.native_text_note)}</p>
+              {hasKagentIncompatibleDraftOptions(draft) ? (
+                <>
+                  <p role="alert">{t(($) => $.kagent.clear_required)}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => onChange({
+                      ...draft,
+                      model: "",
+                      thinkingLevel: "",
+                      serviceTier: "",
+                      qoderAgentId: "",
+                      skillIds: new Set(),
+                    })}
+                  >
+                    {t(($) => $.kagent.clear_options)}
+                  </Button>
+                </>
+              ) : null}
+            </div>
+          ) : (
+            <AgentExecutionOverrides
+              draft={draft}
+              runtime={selectedRuntime}
+              disabled={runtimeLocked}
+              onChange={onChange}
+            />
+          )}
         </SettingsCard>
       </SettingsSection>
 

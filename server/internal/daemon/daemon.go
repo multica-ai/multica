@@ -2187,6 +2187,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
 	go d.terminalReportReplayLoop(ctx)
+	go d.kagentReconcileLoop(ctx, 5*time.Second, time.Minute)
 
 	// Discover agent CLIs installed after startup (MUL-5439). Separate from the
 	// workspace sync loop because that one runs on a thirty-minute consistency
@@ -2572,6 +2573,12 @@ type builtinProbeResult struct {
 // not installed" apart from "CLI installed but dropped at registration", which
 // was previously only visible in the daemon log (MUL-5439).
 func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) builtinProbeResult {
+	if name == "kagent" {
+		if _, err := loadKagentDaemonConfig(); err != nil {
+			return builtinProbeResult{version: "", reason: err.Error(), verdict: builtinProbeUnavailable}
+		}
+		return builtinProbeResult{version: "alpha7-native-text-dev", verdict: builtinProbeOK}
+	}
 	// museapp has no local binary: version detection runs against the remote
 	// receptionist instead. This must come before any path resolution — an
 	// empty entry.Path is expected here, not a missing CLI.
@@ -6324,7 +6331,7 @@ func taskCancelAcknowledgement(result TaskResult, runErr error, provider string)
 		ack.FailureReason = "local_directory_error"
 	}
 	confirmed := result.FailureReason != taskfailure.ReasonProcessCleanupUnconfirmed.String()
-	if provider == "pi" || provider == "omp" || provider == "museapp" {
+	if provider == "pi" || provider == "omp" || provider == "museapp" || provider == "kagent" {
 		ack.ProcessCleanupConfirmed = &confirmed
 	}
 	if !confirmed {
@@ -8204,6 +8211,12 @@ func qualifyTaskModel(
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (taskResult TaskResult, returnErr error) {
+	if provider == "kagent" {
+		if err := d.authorizeKagentTask(ctx, task); err != nil {
+			return TaskResult{}, err
+		}
+		return d.runKagentTask(ctx, task, taskLog)
+	}
 	phaseRecorder := taskPhaseRecorderFromContext(ctx)
 	phaseRecorder.Mark(taskPhasePrepareStarted)
 	// A claim carries the task-row agent id both at the top level and inside

@@ -30,17 +30,21 @@ export function useExecutionControls({
   // between Qoder and any other runtime would need a different configuration
   // the server either rejects or the bridge refuses, so neither direction is
   // offered.
+  // Kagent bindings cannot change until the server supports a verified remote drain.
+  const kagentRuntime = runtime?.provider === "kagent";
   const qoderRuntime = runtime?.provider === "qoder_cloud";
   const isOnline = runtime?.status === "online";
   const canReadRuntime =
     runtime != null && isRuntimeUsableForUser(runtime, currentUserId);
-  const canDiscoverRuntimeModels = isOnline && canReadRuntime && !qoderRuntime;
+  const canDiscoverRuntimeModels = isOnline && canReadRuntime && !qoderRuntime && !kagentRuntime;
   const runtimeOptions = useMemo(
     () =>
-      qoderRuntime
-        ? runtimes
-        : runtimes.filter((r) => r.provider !== "qoder_cloud"),
-    [qoderRuntime, runtimes],
+      kagentRuntime
+        ? runtimes.filter((r) => r.id === agent.runtime_id)
+        : qoderRuntime
+          ? runtimes.filter((r) => r.provider !== "kagent")
+          : runtimes.filter((r) => r.provider !== "qoder_cloud" && r.provider !== "kagent"),
+    [agent.runtime_id, kagentRuntime, qoderRuntime, runtimes],
   );
 
   // Same query the Thinking / Speed fields already use, so switching model
@@ -61,7 +65,7 @@ export function useExecutionControls({
 
   const changeModel = useCallback(
     (model: string) =>
-      update(
+      kagentRuntime ? Promise.resolve() : update(
         buildModelChangeUpdate({
           provider: runtime?.provider ?? "",
           model,
@@ -70,25 +74,29 @@ export function useExecutionControls({
           catalog: modelCatalog,
         }),
       ),
-    [agent.service_tier, agent.thinking_level, modelCatalog, runtime?.provider, update],
+    [kagentRuntime, agent.service_tier, agent.thinking_level, modelCatalog, runtime?.provider, update],
   );
 
   // Model, thinking level, and service tier are runtime/model native. Clear
   // them together so the new runtime resolves its own defaults instead of
   // inheriting incompatible tokens.
   const changeRuntime = useCallback(
-    (runtimeId: string) =>
-      update({
+    (runtimeId: string) => {
+      const target = runtimeOptions.find((item) => item.id === runtimeId);
+      if (!target || qoderRuntime || kagentRuntime) return Promise.resolve();
+      return update({
         runtime_id: runtimeId,
         model: "",
         thinking_level: "",
         service_tier: "",
-      }),
-    [update],
+      });
+    },
+    [kagentRuntime, qoderRuntime, runtimeOptions, update],
   );
 
   return {
     qoderRuntime,
+    kagentRuntime,
     canDiscoverRuntimeModels,
     runtimeOptions,
     changeModel,

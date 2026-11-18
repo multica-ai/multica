@@ -1170,6 +1170,9 @@ func (h *Handler) RevokeRuntimeWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusForbidden, "only the runtime owner can change its visibility")
 		return
 	}
+	if !allowRuntimeKagentTeardown(w, r.Context(), tx, rt.ID) {
+		return
+	}
 	private := "private"
 	next, err := resolveRuntimeAccess(r.Context(), qtx, lockedRuntime, UpdateAgentRuntimeRequest{Visibility: &private, SharedWith: &req.SharedWith, sharedWithIDs: sharedWithIDs})
 	if err != nil {
@@ -1410,6 +1413,9 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to lock runtime")
 		return
 	}
+	if !allowRuntimeKagentTeardown(w, r.Context(), tx, rt.ID) {
+		return
+	}
 	if _, err := qtx.ListUserAgentsByRuntimeForUpdate(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to lock runtime dependencies")
 		return
@@ -1428,7 +1434,7 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	// their task history, cancel what was still active, remove only the system
 	// agents. There is no active agent here by definition, but archived ones and
 	// their history can still be bound to this runtime.
-	teardown, err := service.TeardownRuntime(r.Context(), qtx, rt.ID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
+	teardown, err := service.TeardownRuntime(r.Context(), tx, rt.ID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeNotDrained) {
 			slog.Error("runtime delete aborted: tasks not drained",
@@ -1616,6 +1622,9 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "failed to lock runtime")
 		return
 	}
+	if !allowRuntimeKagentTeardown(w, r.Context(), tx, rt.ID) {
+		return
+	}
 	if _, err := qtx.ListUserAgentsByRuntimeForUpdate(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to lock runtime dependencies")
 		return
@@ -1650,7 +1659,7 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 	// agent (active and archived) plus their task history, cancel what was
 	// running or queued, and hard-delete only the system agents. Nothing the
 	// user configured is destroyed — the agents just need a new runtime.
-	teardown, err := service.TeardownRuntime(r.Context(), qtx, rt.ID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
+	teardown, err := service.TeardownRuntime(r.Context(), tx, rt.ID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeNotDrained) {
 			slog.Error("runtime delete aborted: tasks not drained",
@@ -1753,6 +1762,23 @@ func taskSetMatches(current []db.AgentTaskQueue, expected map[string]struct{}) b
 		if _, ok := expected[uuidToString(task.ID)]; !ok {
 			return false
 		}
+	}
+	return true
+}
+
+const kagentTeardownBlockedMessage = "kagent enrollments prevent teardown until verified remote drain and cleanup are supported"
+
+// Call only after locking the runtime, before any unbind or cancellation.
+// Enrollment creation holds the same runtime lock through its commit.
+func allowRuntimeKagentTeardown(w http.ResponseWriter, ctx context.Context, tx pgx.Tx, runtimeID pgtype.UUID) bool {
+	err := service.GuardRuntimeKagentTeardown(ctx, tx, runtimeID)
+	if errors.Is(err, service.ErrRuntimeKagentEnrollment) {
+		writeError(w, http.StatusConflict, kagentTeardownBlockedMessage)
+		return false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check kagent enrollments")
+		return false
 	}
 	return true
 }

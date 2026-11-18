@@ -60,6 +60,9 @@ func TestMuseAppInfrastructureRecoveryPolicies(t *testing.T) {
 			rebound                            bool
 			protected                          bool
 		}{
+			{"kagent started", "kagent", "running", "kagent-process-cleanup-v1", false, true},
+			{"kagent provider fallback", "kagent", "running", "", false, true},
+			{"kagent runtime changed", "kagent", "running", "kagent-process-cleanup-v1", true, true},
 			{"started", "museapp", "running", "museapp-process-cleanup-v1", false, true},
 			{"legacy daemon", "museapp", "running", "", false, true},
 			{"runtime changed", "museapp", "running", "museapp-process-cleanup-v1", true, true},

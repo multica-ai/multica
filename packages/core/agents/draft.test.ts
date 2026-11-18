@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { Agent, RuntimeDevice } from "../types";
 import {
@@ -346,4 +347,49 @@ it("drops settings a Qoder runtime cannot run from a draft started elsewhere", (
   const local = buildCreateAgentRequest({ draft: current, runtimeId: "runtime-1", runtimeProvider: "codex" });
   expect(local).not.toHaveProperty("runtime_config");
   expect(local.skill_ids).toEqual(["skill-1"]);
+});
+
+
+describe("Kagent native-text creation", () => {
+  const nativeDraft = (): AgentDraft => ({ ...draft(), model: "", skillIds: new Set() });
+
+  it("sends exactly the native-text runtime config without provider overrides", () => {
+    const request = buildCreateAgentRequest({ draft: nativeDraft(), runtimeId: "kagent-1", runtimeProvider: "kagent" });
+    expect(request.runtime_config).toEqual({ mode: "native-text" });
+    expect(request.skill_ids).toEqual([]);
+    for (const field of ["model", "thinking_level", "service_tier", "custom_args", "custom_env"] as const) {
+      expect(request[field]).toBeUndefined();
+    }
+    expect(request).not.toHaveProperty("mcp_config");
+  });
+
+  it.each([
+    { model: "model-1" }, { thinkingLevel: "high" }, { serviceTier: "priority" },
+    { qoderAgentId: "remote-1" }, { skillIds: new Set(["skill-1"]) },
+  ])("rejects incompatible options without modifying the draft: %o", (overrides) => {
+    const current = { ...nativeDraft(), ...overrides };
+    expect(() => buildCreateAgentRequest({ draft: current, runtimeId: "kagent-1", runtimeProvider: "kagent" })).toThrow("Clear incompatible options");
+    expect(current).toMatchObject(overrides);
+  });
+
+  it("blocks duplication of custom arguments instead of dropping them", () => {
+    expect(() => buildCreateAgentRequest({
+      draft: nativeDraft(), runtimeId: "kagent-1", runtimeProvider: "kagent", duplicateSource: sourceAgent(),
+    })).toThrow("Clear incompatible options");
+  });
+
+  it("preserves incompatible settings on a runtime switch for explicit clearing", () => {
+    const current = { ...draft(), thinkingLevel: "high", serviceTier: "priority", qoderAgentId: "remote-1" };
+    expect(applyDraftRuntimeChange(current, "kagent-1", "kagent")).toEqual({ ...current, runtimeId: "kagent-1" });
+  });
+
+  it("preserves source options when a duplicate falls back to Kagent", () => {
+    const source = sourceAgent();
+    const copy = buildDuplicateDraft(source, {
+      runtimes: [{ ...OTHER_RUNTIME, provider: "kagent" }],
+      currentUserId: "user-1", fallbackRuntimeId: OTHER_RUNTIME.id, nameSuffix: " copy",
+    });
+    expect(copy).toMatchObject({ model: source.model, thinkingLevel: source.thinking_level, serviceTier: source.service_tier });
+    expect(copy.skillIds).toEqual(new Set(["skill-1"]));
+  });
 });

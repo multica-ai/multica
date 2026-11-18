@@ -7,7 +7,7 @@ import type { Agent, AgentRuntime } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
 const picker = vi.hoisted(() => ({
-  props: null as null | { runtimes: AgentRuntime[]; canEdit?: boolean },
+  props: null as null | { runtimes: AgentRuntime[]; canEdit?: boolean; onChange: (id: string) => Promise<void> },
 }));
 const mockInitiateListModels = vi.hoisted(() => vi.fn());
 
@@ -21,7 +21,7 @@ vi.mock("../../common/avatar-upload-control", () => ({
   AvatarUploadControl: () => <div data-testid="avatar-upload" />,
 }));
 vi.mock("./inspector/runtime-picker", () => ({
-  RuntimePicker: (props: { runtimes: AgentRuntime[]; canEdit?: boolean }) => {
+  RuntimePicker: (props: { runtimes: AgentRuntime[]; canEdit?: boolean; onChange: (id: string) => Promise<void> }) => {
     picker.props = props;
     return <div data-testid="runtime-picker" />;
   },
@@ -50,6 +50,8 @@ function runtime(id: string, provider: string): AgentRuntime {
 }
 
 const claude = runtime("rt-claude", "claude");
+const kagent = runtime("rt-kagent", "kagent");
+const secondKagent = runtime("rt-kagent-2", "kagent");
 const qoder = runtime("rt-qoder", "qoder_cloud");
 
 function renderInspector(bound: AgentRuntime) {
@@ -62,6 +64,7 @@ function renderInspector(bound: AgentRuntime) {
     model: "",
     max_concurrent_tasks: 6,
   } as Agent;
+  const onUpdate = vi.fn(async () => {});
   renderWithI18n(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
@@ -69,14 +72,15 @@ function renderInspector(bound: AgentRuntime) {
       <AgentDetailInspector
         agent={agent}
         runtime={bound}
-        runtimes={[claude, qoder]}
+        runtimes={[claude, qoder, kagent, secondKagent]}
         members={[]}
         currentUserId="user-1"
         canEdit
-        onUpdate={vi.fn(async () => {})}
+        onUpdate={onUpdate}
       />
     </QueryClientProvider>,
   );
+  return { onUpdate };
 }
 
 describe("AgentDetailInspector and the Qoder runtime", () => {
@@ -85,6 +89,20 @@ describe("AgentDetailInspector and the Qoder runtime", () => {
     mockInitiateListModels.mockReset();
   });
   afterEach(cleanup);
+
+  it("locks Kagent runtime changes and hides model controls", async () => {
+    const { onUpdate } = renderInspector(kagent);
+    expect(picker.props?.runtimes.map((r) => r.id)).toEqual([kagent.id]);
+    expect(picker.props?.canEdit).toBe(false);
+    expect(screen.queryByText("Model")).toBeNull();
+    expect(screen.getByText(/Kagent uses native text mode only/)).toBeInTheDocument();
+    expect(mockInitiateListModels).not.toHaveBeenCalled();
+    await picker.props?.onChange(secondKagent.id);
+    expect(onUpdate).not.toHaveBeenCalled();
+    onUpdate.mockClear();
+    await picker.props?.onChange(claude.id);
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
 
   it("locks the runtime and drops model overrides for a Qoder agent", () => {
     renderInspector(qoder);
@@ -97,8 +115,10 @@ describe("AgentDetailInspector and the Qoder runtime", () => {
     expect(mockInitiateListModels).not.toHaveBeenCalled();
   });
 
-  it("does not offer the Qoder runtime to other agents", () => {
-    renderInspector(claude);
+  it("does not offer Kagent or Qoder runtimes to other agents", async () => {
+    const { onUpdate } = renderInspector(claude);
+    await picker.props?.onChange(kagent.id);
+    expect(onUpdate).not.toHaveBeenCalled();
     expect(picker.props?.canEdit).toBe(true);
     expect(picker.props?.runtimes.map((r) => r.id)).toEqual(["rt-claude"]);
     expect(screen.getByText("Model")).toBeInTheDocument();

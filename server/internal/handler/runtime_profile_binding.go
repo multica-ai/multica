@@ -66,7 +66,7 @@ func (h *Handler) bindRuntimeProfileMachine(ctx context.Context, params db.Updat
 				return result, fmt.Errorf("%w (%s)", errProfileMachineInUse, rt.Name)
 			}
 		}
-		teardown, err := service.TeardownRuntime(ctx, qtx, id, service.RuntimeTeardownOptions{CancelNonTerminalTasks: false})
+		teardown, err := service.TeardownRuntime(ctx, tx, id, service.RuntimeTeardownOptions{CancelNonTerminalTasks: false})
 		if errors.Is(err, service.ErrRuntimeNotDrained) || errors.Is(err, service.ErrRuntimeWorkspaceMismatch) {
 			return result, fmt.Errorf("%w (%s)", errProfileMachineInUse, rt.Name)
 		}

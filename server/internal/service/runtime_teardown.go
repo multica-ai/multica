@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -32,6 +33,27 @@ var (
 	// corrupted data binds an agent to a runtime from another workspace.
 	ErrRuntimeWorkspaceMismatch = errors.New("runtime agent workspace mismatch")
 )
+
+// ErrRuntimeKagentEnrollment blocks local teardown even for orphan tombstones.
+var ErrRuntimeKagentEnrollment = errors.New("kagent enrollments prevent teardown until verified remote drain and cleanup are supported")
+
+// GuardRuntimeKagentTeardown locks the runtime before checking all enrollment
+// rows, independent of provider, workspace, agent existence or lifecycle phase.
+// Callers must retain this transaction through every subsequent mutation.
+// Enrollment writers must take the same runtime lock before inserting intent.
+func GuardRuntimeKagentTeardown(ctx context.Context, tx pgx.Tx, runtimeID pgtype.UUID) error {
+	if _, err := db.New(tx).LockAgentRuntime(ctx, runtimeID); err != nil {
+		return fmt.Errorf("lock runtime for enrollment guard: %w", err)
+	}
+	var enrolled bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM kagent_enrollment WHERE runtime_id=$1)`, runtimeID).Scan(&enrolled); err != nil {
+		return fmt.Errorf("check kagent enrollments: %w", err)
+	}
+	if enrolled {
+		return ErrRuntimeKagentEnrollment
+	}
+	return nil
+}
 
 // RuntimeTeardownOptions controls the only intentional semantic difference
 // between user-confirmed deletion and retention GC. Manual deletion cancels
@@ -70,8 +92,12 @@ func ValidateRuntimeAgentWorkspaces(runtime db.AgentRuntime, agents []db.Agent) 
 // non-FK dependencies are pruned; their runtime-local builder drafts and chat
 // draft restores are deleted with them. Task history is detached before runtime
 // deletion so the legacy ON DELETE CASCADE cannot erase it.
-func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID, opts RuntimeTeardownOptions) (RuntimeTeardownResult, error) {
+func TeardownRuntime(ctx context.Context, tx pgx.Tx, runtimeID pgtype.UUID, opts RuntimeTeardownOptions) (RuntimeTeardownResult, error) {
 	var out RuntimeTeardownResult
+	if err := GuardRuntimeKagentTeardown(ctx, tx, runtimeID); err != nil {
+		return out, err
+	}
+	qtx := db.New(tx)
 
 	runtime, err := qtx.LockAgentRuntime(ctx, runtimeID)
 	if err != nil {

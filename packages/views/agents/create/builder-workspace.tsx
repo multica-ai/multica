@@ -86,7 +86,7 @@ export function BuilderWorkspace({
     }),
     [fallbackRuntimeId, session?.runtime_id, sessionSettled],
   );
-  const form = useCreateAgentForm({ runtimeSeed });
+  const form = useCreateAgentForm({ runtimeSeed, builder: true });
   const { draft, setDraft, selectedRuntime } = form;
 
   const draftSync = useBuilderDraftSync({

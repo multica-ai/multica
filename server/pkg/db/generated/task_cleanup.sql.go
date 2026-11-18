@@ -110,24 +110,37 @@ func (q *Queries) FailCancelledTaskProcessCleanup(ctx context.Context, arg FailC
 	return i, err
 }
 
+const markKagentBulkCleanupPending = `-- name: MarkKagentBulkCleanupPending :exec
+UPDATE agent_task_queue
+SET result = COALESCE(result, '{}'::jsonb) || '{"process_cleanup_pending":true}'::jsonb
+WHERE id = ANY($1::uuid[]) AND status = 'cancelled' AND started_at IS NOT NULL
+  AND result->>'process_cleanup_capability' = 'kagent-process-cleanup-v1'
+`
+
+// Bulk cancellation must commit the remote-work fence with the terminal write.
+func (q *Queries) MarkKagentBulkCleanupPending(ctx context.Context, taskIds []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markKagentBulkCleanupPending, taskIds)
+	return err
+}
+
 const markMuseAppRecoveryCleanupUnconfirmed = `-- name: MarkMuseAppRecoveryCleanupUnconfirmed :many
 UPDATE agent_task_queue task
 SET failure_reason = 'cleanup_unconfirmed',
     error = concat_ws('; ', NULLIF(task.error, ''),
-        'Muse worker may still be running after daemon recovery or loss of contact. Check and stop it before manually rerunning.')
+        'Remote worker may still be running after daemon recovery or loss of contact. Check and stop it before manually rerunning.')
 WHERE task.id = ANY($1::uuid[])
   AND task.status = 'failed' AND task.started_at IS NOT NULL
   AND task.failure_reason IN ('runtime_recovery', 'runtime_offline', 'timeout')
-  AND (task.result->>'process_cleanup_capability' = 'museapp-process-cleanup-v1'
+  AND (task.result->>'process_cleanup_capability' IN ('museapp-process-cleanup-v1', 'kagent-process-cleanup-v1')
     OR EXISTS (SELECT 1 FROM agent_runtime runtime
-               WHERE runtime.id = task.runtime_id AND runtime.provider = 'museapp'))
+               WHERE runtime.id = task.runtime_id AND runtime.provider IN ('museapp', 'kagent')))
 RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.workflow_step
 `
 
 // Run inside the bulk terminal-write transaction, before its rows reach the
 // retry pipeline. Losing a daemon cannot stop an independently running worker.
 // Keep the start-time capability as evidence if the runtime was later changed
-// or removed; legacy Muse daemons are recognized by their runtime provider.
+// or removed; remote daemons are also recognized by their runtime provider.
 func (q *Queries) MarkMuseAppRecoveryCleanupUnconfirmed(ctx context.Context, taskIds []pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, markMuseAppRecoveryCleanupUnconfirmed, taskIds)
 	if err != nil {
@@ -217,7 +230,8 @@ WHERE task.id = $1 AND task.status = 'cancelled' AND task.started_at IS NOT NULL
       SELECT 1 FROM agent_runtime runtime
       WHERE runtime.id = task.runtime_id
         AND ((runtime.provider IN ('pi', 'omp') AND task.result->>'process_cleanup_capability' = 'pi-process-cleanup-v1')
-          OR (runtime.provider = 'museapp' AND task.result->>'process_cleanup_capability' = 'museapp-process-cleanup-v1'))
+          OR (runtime.provider = 'museapp' AND task.result->>'process_cleanup_capability' = 'museapp-process-cleanup-v1')
+          OR (runtime.provider = 'kagent' AND task.result->>'process_cleanup_capability' = 'kagent-process-cleanup-v1'))
   )
 `
 
@@ -230,6 +244,20 @@ func (q *Queries) MarkPiTaskProcessCleanupPending(ctx context.Context, id pgtype
 
 const taskBlockedByProcessCleanup = `-- name: TaskBlockedByProcessCleanup :one
 SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue gate
+    WHERE gate.id = $1 AND (
+EXISTS (
+    SELECT 1
+    FROM agent_task_queue candidate
+    JOIN agent_task_queue unsafe
+      ON unsafe.agent_id = candidate.agent_id AND unsafe.runtime_id = candidate.runtime_id
+    WHERE candidate.id = $1
+      AND candidate.status IN ('queued', 'dispatched', 'waiting_local_directory')
+      AND unsafe.id <> candidate.id
+      AND unsafe.result->>'process_cleanup_capability' = 'kagent-process-cleanup-v1'
+      AND (unsafe.failure_reason = 'cleanup_unconfirmed'
+           OR (unsafe.status = 'cancelled' AND unsafe.result->>'process_cleanup_pending' = 'true'))
+) OR EXISTS (
     SELECT 1
     FROM agent_task_queue candidate
     JOIN LATERAL (
@@ -258,13 +286,18 @@ SELECT EXISTS (
             AND manual.created_at > unsafe.completed_at
             AND (manual.id = candidate.id OR manual.status = 'completed')
       )
-)
+)))
 `
 
 // A cleanup failure fences this agent on this runtime, including already queued
 // work and future scheduled runs. Only a NEW explicit manual rerun can cross
 // the fence; its successful completion allows later automated work again.
 // Existing failure and result fields are the durable safety markers.
+// Kagent is different: a manual rerun cannot prove an independent remote
+// worker stopped. Keep every unresolved Kagent attempt fenced regardless of
+// later successes; a verified cleanup-resolution workflow is still required.
+// The kagent capability marker is stamped server-side at claim time, so every
+// kagent run that can reach a cleanup-unconfirmed terminal state carries it.
 func (q *Queries) TaskBlockedByProcessCleanup(ctx context.Context, taskID pgtype.UUID) (bool, error) {
 	row := q.db.QueryRow(ctx, taskBlockedByProcessCleanup, taskID)
 	var exists bool

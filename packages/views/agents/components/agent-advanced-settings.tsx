@@ -119,11 +119,17 @@ export function AgentAdvancedSettings({
     undefined,
   );
 
+  // The kagent runtime configures its toolset on the kagent Agent itself;
+  // skills, MCP, env, args and model overrides are not offered here.
+  const kagentRuntime = runtime?.provider === "kagent";
   const qoderRuntime = runtime?.provider === "qoder_cloud";
 
   const settingsSections = useMemo(
     () =>
       SETTINGS_SECTIONS.filter((item) => {
+        if (kagentRuntime) {
+          return item.id !== "env" && item.id !== "custom_args" && item.id !== "runtime_config";
+        }
         if (qoderRuntime) return item.id !== "env" && item.id !== "custom_args";
         // Env is the only section backed by a secret-bearing endpoint.
         // GET/PUT /api/agents/{id}/env admits the agent owner or a workspace
@@ -138,11 +144,11 @@ export function AgentAdvancedSettings({
           ? { ...item, labelKey: "qoder_agent" as const }
           : item,
       ),
-    [canEdit, qoderRuntime, runtime?.provider],
+    [canEdit, kagentRuntime, qoderRuntime, runtime?.provider],
   );
 
   const capabilitySections = useMemo(() => {
-    if (qoderRuntime) return [];
+    if (qoderRuntime || kagentRuntime) return [];
     const showMcp = runtime ? providerSupportsMcpConfig(runtime.provider) : true;
     const showComposioMcp = composioMCPAppsEnabled && canEdit;
     return CAPABILITY_SECTIONS.filter((item) => {
@@ -153,6 +159,7 @@ export function AgentAdvancedSettings({
   }, [
     canEdit,
     composioMCPAppsEnabled,
+    kagentRuntime,
     qoderRuntime,
     runtime,
   ]);

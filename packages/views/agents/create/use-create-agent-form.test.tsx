@@ -16,6 +16,7 @@ import {
 import { EMPTY_SKILL_SUMMARY } from "@multica/core/api/schemas";
 import type { Agent, SkillSummary } from "@multica/core/types";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { runtimeKeys } from "@multica/core/runtimes/queries";
 import { useBuilderDraftSync } from "./use-builder-draft-sync";
 import { useCreateAgentForm } from "./use-create-agent-form";
 import { useManualDraftSync } from "./use-manual-draft-sync";
@@ -75,6 +76,68 @@ describe("useCreateAgentForm skill reconciliation", () => {
     cleanup();
     qc.clear();
     useManualAgentDraftStore.getState().clearDraft();
+  });
+
+  it("defaults the builder to an eligible provider and follows late runtime arrivals", async () => {
+    const kagent = { id: "kagent-1", provider: "kagent", status: "online", visibility: "public", owner_id: "owner-1" };
+    const claude = { ...kagent, id: "claude-1", provider: "claude" };
+    api.listRuntimes.mockResolvedValue([kagent]);
+    const { result } = renderHook(() => useCreateAgentForm({ builder: true }), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.runtimesSettled).toBe(true));
+    expect(result.current.draft.runtimeId).toBe("");
+    act(() => qc.setQueryData(runtimeKeys.list(workspace.id), [kagent, claude]));
+    await waitFor(() => expect(result.current.draft.runtimeId).toBe(claude.id));
+    expect(result.current.usableRuntimes.map((r) => r.id)).toEqual([claude.id]);
+    act(() => result.current.setDraft((draft) => ({ ...draft, runtimeId: "chosen-runtime", name: "My edits" })));
+    act(() => qc.setQueryData(runtimeKeys.list(workspace.id), [kagent]));
+    expect(result.current.draft.runtimeId).toBe("chosen-runtime");
+    expect(result.current.draft.name).toBe("My edits");
+  });
+
+  it("skips Kagent when it is first in the builder catalog", async () => {
+    api.listRuntimes.mockResolvedValue([
+      { id: "kagent-1", provider: "kagent", status: "online", visibility: "public", owner_id: "owner-1" },
+      { id: "codex-1", provider: "codex", status: "online", visibility: "public", owner_id: "owner-1" },
+    ]);
+    const { result } = renderHook(() => useCreateAgentForm({ builder: true }), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.draft.runtimeId).toBe("codex-1"));
+    act(() => result.current.setDraft((draft) => ({ ...draft, runtimeId: "kagent-1" })));
+    expect(result.current.draft.runtimeId).toBe("kagent-1");
+    expect(result.current.draftReady).toBe(false);
+  });
+
+  it("preserves a selected runtime when its provider changes and blocks builder readiness", async () => {
+    const runtime = { id: "runtime-1", provider: "codex", status: "online", visibility: "public", owner_id: "owner-1" };
+    api.listRuntimes.mockResolvedValue([runtime]);
+    const { result } = renderHook(() => useCreateAgentForm({ builder: true }), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.draft.runtimeId).toBe(runtime.id));
+    expect(result.current.draftReady).toBe(true);
+    act(() => qc.setQueryData(runtimeKeys.list(workspace.id), [{ ...runtime, provider: "kagent" }]));
+    await waitFor(() => expect(result.current.draftReady).toBe(false));
+    expect(result.current.draft.runtimeId).toBe(runtime.id);
+    expect(result.current.usableRuntimes).toEqual([]);
+  });
+
+  it("does not default the builder to offline or ownerless runtimes", async () => {
+    api.listRuntimes.mockResolvedValue([
+      { id: "offline", provider: "codex", status: "offline", visibility: "public", owner_id: "owner-1" },
+      { id: "ownerless", provider: "claude", status: "online", visibility: "public", owner_id: null },
+      { id: "eligible", provider: "claude", status: "online", visibility: "public", owner_id: "owner-1" },
+    ]);
+    const { result } = renderHook(() => useCreateAgentForm({ builder: true }), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.draft.runtimeId).toBe("eligible"));
+    expect(result.current.usableRuntimes.map((runtime) => runtime.id)).toEqual(["eligible"]);
+  });
+
+  it("blocks incompatible Kagent drafts until explicitly cleared", async () => {
+    api.listRuntimes.mockResolvedValue([{ id: "kagent-1", provider: "kagent", status: "online", visibility: "public", owner_id: "owner-1" }]);
+    const { result } = renderHook(() => useCreateAgentForm(), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.selectedRuntime?.id).toBe("kagent-1"));
+    act(() => result.current.setDraft({ ...EMPTY_AGENT_DRAFT, runtimeId: "kagent-1", model: "old-model" }));
+    expect(result.current.draftReady).toBe(false);
+    expect(result.current.draft.model).toBe("old-model");
+    act(() => result.current.setDraft({ ...EMPTY_AGENT_DRAFT, runtimeId: "kagent-1" }));
+    expect(result.current.draftReady).toBe(true);
   });
 
   it("waits for a successful catalog before pruning a draft", async () => {

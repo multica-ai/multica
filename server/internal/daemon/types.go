@@ -80,6 +80,7 @@ type Task struct {
 	StartClaimSupported  bool                   `json:"start_claim_supported,omitempty"`
 	DispatchedAt         string                 `json:"dispatched_at,omitempty"`
 	ID                   string                 `json:"id"`
+	Attempt              int32                  `json:"attempt"`
 	AgentID              string                 `json:"agent_id"`
 	RuntimeID            string                 `json:"runtime_id"`
 	IssueID              string                 `json:"issue_id"`

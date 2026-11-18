@@ -104,8 +104,9 @@ export function ManualCreateAgentPage() {
     duplicateId,
     draft: form.draft,
     setDraft: form.setDraft,
-    ready: !duplicateId || duplicateSeeded,
+    ready: (!duplicateId || duplicateSeeded) && (!runtimeParam || form.runtimesSettled),
     runtimeId: runtimeParam,
+    runtimeProvider: form.runtimes.find((runtime) => runtime.id === runtimeParam)?.provider,
   });
 
   const submit = useCreateAgentSubmit({
@@ -141,7 +142,10 @@ export function ManualCreateAgentPage() {
   const [aiError, setAiError] = useState<string | null>(null);
   const runtime = form.selectedRuntime;
   const canAskAi =
-    !!runtime && runtime.runtime_mode !== "cloud" && runtime.status === "online";
+    !!runtime &&
+    runtime.provider !== "kagent" &&
+    runtime.runtime_mode !== "cloud" &&
+    runtime.status === "online";
   const askAi = async () => {
     if (!runtime) return;
     setStartingAi(true);
@@ -175,8 +179,9 @@ export function ManualCreateAgentPage() {
     }
   };
 
+  const duplicateArgsBlocked = runtime?.provider === "kagent" && !!duplicateAgent?.custom_args.length;
   const canCreate =
-    form.draft.name.trim().length > 0 && form.draftReady && !submit.creating;
+    form.draft.name.trim().length > 0 && form.draftReady && !duplicateArgsBlocked && !submit.creating;
 
   if (needsRuntime) return null;
 
@@ -209,7 +214,7 @@ export function ManualCreateAgentPage() {
               {t(($) => $.creation_studio.duplicate_env_notice)}
             </div>
           )}
-          {duplicateRuntimeReset && (
+          {duplicateRuntimeReset && runtime?.provider !== "kagent" && (
             <div className="mb-5 rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-body">
               {t(($) => $.creation_studio.duplicate_runtime_reset_notice)}
             </div>
@@ -241,6 +246,11 @@ export function ManualCreateAgentPage() {
                 </div>
               ) : null}
             </div>
+          ) : null}
+          {duplicateArgsBlocked ? (
+            <p role="alert" className="text-body text-foreground">
+              {t(($) => $.kagent.duplicate_args_blocked)}
+            </p>
           ) : null}
           <AgentConfigurationPanel
             draft={form.draft}

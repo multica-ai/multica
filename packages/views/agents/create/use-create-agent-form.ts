@@ -10,6 +10,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import {
   EMPTY_AGENT_DRAFT,
+  hasKagentIncompatibleDraftOptions,
   isDraftDescriptionWithinLimit,
   AGENT_CONVERSATION_STARTER_LABEL_MAX_LENGTH,
   AGENT_CONVERSATION_STARTER_MAX_LENGTH,
@@ -77,6 +78,8 @@ export function useCreateAgentForm(options?: {
    * MUL-5163 presented runtime A while every message ran on B.
    */
   runtimeSeed?: RuntimeSeed;
+  /** Builder conversations require a provider that supports the builder. */
+  builder?: boolean;
 }): CreateAgentForm {
   const wsId = useWorkspaceId();
   const currentUser = useAuthStore((state) => state.user);
@@ -111,14 +114,16 @@ export function useCreateAgentForm(options?: {
     });
   }, [draft.skillIds, workspaceSkills, workspaceSkillsLoaded, workspaceSkillsFetchStatus]);
 
+  const builder = options?.builder === true;
   const usableRuntimes = useMemo(
     () =>
       runtimes.filter(
         (runtime) =>
           runtime.status === "online" &&
+          (!builder || runtime.provider !== "kagent") &&
           isRuntimeUsableForUser(runtime, currentUserId),
       ),
-    [currentUserId, runtimes],
+    [builder, currentUserId, runtimes],
   );
   const selectedRuntime =
     runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
@@ -168,8 +173,10 @@ export function useCreateAgentForm(options?: {
     currentUserId,
     draftReady:
       selectedRuntime != null &&
+      (!builder || selectedRuntime.provider !== "kagent") &&
       isRuntimeUsableForUser(selectedRuntime, currentUserId) &&
       (selectedRuntime.provider !== "qoder_cloud" || !!draft.qoderAgentId) &&
+      (selectedRuntime.provider !== "kagent" || !hasKagentIncompatibleDraftOptions(draft)) &&
       isDraftDescriptionWithinLimit(draft.description) &&
       !accessInvalid &&
       !conversationStartersInvalid,

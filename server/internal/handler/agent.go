@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -1552,14 +1553,14 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if runtime.Provider == "qoder_cloud" {
+	if runtime.Provider == "qoder_cloud" || runtime.Provider == "kagent" {
 		raw, _ := json.Marshal(req.RuntimeConfig)
-		if err := validateQoderAgentConfig(raw); err != nil {
+		if err := validateRemoteAgentConfig(runtime.Provider, raw); err != nil {
 			writeError(w, 400, err.Error())
 			return
 		}
 		overrides := qoderOverrides{skills: len(req.SkillIDs), customEnv: len(req.CustomEnv), customArgs: len(req.CustomArgs), mcpConfig: req.McpConfig, model: req.Model, thinkingLevel: req.ThinkingLevel, serviceTier: req.ServiceTier}
-		if err := overrides.validate(); err != nil {
+		if err := overrides.validateFor(runtime.Provider); err != nil {
 			writeError(w, 400, err.Error())
 			return
 		}
@@ -1666,12 +1667,16 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	validatedProvider := runtime.Provider
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start agent create transaction")
 		return
 	}
 	defer tx.Rollback(r.Context())
+	if !tryEnrollmentFence(w, r.Context(), tx, workspaceID) {
+		return
+	}
 	qtx := h.Queries.WithTx(tx)
 
 	// The preflight runtime can become private while validation is in flight.
@@ -1685,9 +1690,18 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	member, err = qtx.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{UserID: parseUUID(ownerID), WorkspaceID: wsUUID})
+	if err != nil {
+		writeError(w, http.StatusForbidden, "workspace membership is required")
+		return
+	}
 	runtime, err = qtx.LockAgentRuntimeForAccessChange(r.Context(), runtimeUUID)
 	if err != nil || runtime.WorkspaceID != wsUUID {
 		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return
+	}
+	if runtime.Provider != validatedProvider {
+		writeError(w, http.StatusConflict, "runtime provider changed; reload and retry")
 		return
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
@@ -1728,6 +1742,18 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("create agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create agent")
 		return
+	}
+	if runtime.Provider == "kagent" {
+		if err := validateRemoteAgentConfig(runtime.Provider, rc); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if _, err := qtx.UpsertKagentEnrollment(r.Context(), db.UpsertKagentEnrollmentParams{
+			AgentID: created.ID, WorkspaceID: created.WorkspaceID, RuntimeID: runtime.ID,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to enroll kagent agent")
+			return
+		}
 	}
 	if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, created.ID, parseUUID(ownerID), perm.targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save agent access")
@@ -2012,6 +2038,36 @@ func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent d
 	return true
 }
 
+// lockManagedAgent serializes agent configuration and app writes. Scope the
+// lock to the authorized workspace and recheck management on the locked row.
+func (h *Handler) lockManagedAgent(w http.ResponseWriter, r *http.Request, tx pgx.Tx, existing db.Agent) (db.Agent, bool) {
+	var id pgtype.UUID
+	err := tx.QueryRow(r.Context(), `SELECT id FROM agent WHERE id=$1 AND workspace_id=$2 FOR UPDATE`, existing.ID, existing.WorkspaceID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return db.Agent{}, false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock agent")
+		return db.Agent{}, false
+	}
+	locked, err := h.Queries.WithTx(tx).GetAgent(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load locked agent")
+		return db.Agent{}, false
+	}
+	return locked, h.canManageAgent(w, r, locked)
+}
+
+func agentConfigurationChanged(existing, locked db.Agent) bool {
+	// Task transitions update status and updated_at without changing the
+	// configuration used by validation or the lifecycle's desired state.
+	existing.Status, locked.Status = "", ""
+	existing.UpdatedAt, locked.UpdatedAt = pgtype.Timestamptz{}, pgtype.Timestamptz{}
+	existing.CreatedAt, locked.CreatedAt = pgtype.Timestamptz{}, pgtype.Timestamptz{}
+	return !reflect.DeepEqual(existing, locked)
+}
+
 func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	existing, ok := h.loadAgentForUser(w, r, id)
@@ -2144,6 +2200,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if provider == "" {
 			var ok bool
 			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			targetProvider = provider
 			if !ok {
 				writeError(w, 400, "cannot resolve agent runtime")
 				return
@@ -2164,13 +2221,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		if provider == "qoder_cloud" {
+		if provider == "qoder_cloud" || provider == "kagent" {
 			if runtimeChange {
 				raw := existing.RuntimeConfig
 				if req.RuntimeConfig != nil {
 					raw, _ = json.Marshal(req.RuntimeConfig)
 				}
-				if err := validateQoderAgentConfig(raw); err != nil {
+				if err := validateRemoteAgentConfig(provider, raw); err != nil {
 					writeError(w, 400, err.Error())
 					return
 				}
@@ -2199,7 +2256,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			if req.ServiceTier != nil {
 				overrides.serviceTier = *req.ServiceTier
 			}
-			if err := overrides.validate(); err != nil {
+			if err := overrides.validateFor(provider); err != nil {
 				writeError(w, 400, err.Error())
 				return
 			}
@@ -2442,64 +2499,120 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Only binding writes need this transaction. Hold the same runtime lock as
-	// revocation until the new binding commits; a preflight-only check is stale
-	// as soon as a public runtime becomes private.
-	updateQueries := h.Queries
-	var bindingTx pgx.Tx
-	// Set when queued/deferred rows were re-stamped, so the new runtime's daemon
-	// is woken after commit instead of waiting out its empty-claim cache.
+	// Keep configuration, access changes and lifecycle intent in one commit.
+	bindingTx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start agent update transaction")
+		return
+	}
+	defer bindingTx.Rollback(r.Context())
+	if !tryEnrollmentFence(w, r.Context(), bindingTx, uuidToString(existing.WorkspaceID)) {
+		return
+	}
+	updateQueries := h.Queries.WithTx(bindingTx)
+	if _, err := updateQueries.LockWorkspaceForChatSessionCreate(r.Context(), existing.WorkspaceID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		return
+	}
+	freshMember, err := updateQueries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{UserID: parseUUID(requestUserID(r)), WorkspaceID: existing.WorkspaceID})
+	if err != nil {
+		writeError(w, http.StatusForbidden, "workspace membership is required")
+		return
+	}
+	if freshMember.UserID != existing.OwnerID && freshMember.Role != "owner" && freshMember.Role != "admin" {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
 	var pendingMovedTo pgtype.UUID
-	if req.RuntimeID != nil {
-		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
-		if !ok {
-			return
-		}
-		bindingTx, err = h.TxStarter.Begin(r.Context())
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to start agent binding transaction")
-			return
-		}
-		defer bindingTx.Rollback(r.Context())
-		updateQueries = h.Queries.WithTx(bindingTx)
-		if _, err := updateQueries.LockWorkspaceForChatSessionCreate(r.Context(), existing.WorkspaceID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				writeError(w, http.StatusNotFound, "workspace not found")
-			} else {
-				writeError(w, http.StatusInternalServerError, "failed to lock workspace")
-			}
-			return
-		}
-		runtime, err := updateQueries.LockAgentRuntimeForAccessChange(r.Context(), params.RuntimeID)
+	var runtime db.AgentRuntime
+	if targetRuntimeID.Valid {
+		runtime, err = updateQueries.LockAgentRuntimeForAccessChange(r.Context(), targetRuntimeID)
 		if err != nil || runtime.WorkspaceID != existing.WorkspaceID {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
 			return
 		}
-		if !canUseRuntimeForAgent(member, runtime) {
-			writeError(w, http.StatusForbidden, "this runtime is private; ask its owner to grant you access before moving agents onto it")
+	}
+	if targetRuntimeID.Valid {
+		if targetProvider != "" && runtime.Provider != targetProvider {
+			writeError(w, http.StatusConflict, "runtime provider changed; reload and retry")
 			return
 		}
-		if runtime.Visibility == "private" && !service.RuntimeAllowsUser(runtime, existing.OwnerID) {
-			writeError(w, http.StatusForbidden, "the agent owner does not have access to this runtime")
+		// Re-binding is the only operation that can hand this agent a runtime
+		// the actor or owner cannot use, so the under-lock recheck mirrors the
+		// preflight gate for explicit runtime changes only. Writes that keep
+		// the existing binding retain the historical admin/owner edit
+		// semantics: the fence and delivery gates still apply at dispatch.
+		if req.RuntimeID != nil {
+			// The agent row can move workspaces between the preflight snapshot
+			// and this transaction; a stale authorization must not leak runtime
+			// access state for an agent the actor can no longer see.
+			var currentWorkspace pgtype.UUID
+			if err := bindingTx.QueryRow(r.Context(), `SELECT workspace_id FROM agent WHERE id=$1`, existing.ID).Scan(&currentWorkspace); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load agent")
+				return
+			}
+			if currentWorkspace != existing.WorkspaceID {
+				writeError(w, http.StatusNotFound, "agent not found")
+				return
+			}
+			if !canUseRuntimeForAgent(freshMember, runtime) || (runtime.Visibility == "private" && !service.RuntimeAllowsUser(runtime, existing.OwnerID)) {
+				writeError(w, http.StatusForbidden, "the agent owner does not have access to this runtime")
+				return
+			}
+		}
+	}
+	locked, ok := h.lockManagedAgent(w, r, bindingTx, existing)
+	if !ok {
+		return
+	}
+	// Validation used the preflight snapshot. Retry rather than persisting a
+	// configuration validated against a superseded runtime or set of overrides.
+	if agentConfigurationChanged(existing, locked) {
+		writeError(w, http.StatusConflict, "agent changed while editing; reload and retry")
+		return
+	}
+	isKagent, err := hasKagentLifecycle(r.Context(), bindingTx, locked)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read kagent lifecycle")
+		return
+	}
+	if targetRuntimeID != locked.RuntimeID && (isKagent || runtime.Provider == "kagent") {
+		writeError(w, http.StatusConflict, "kagent runtime changes require verified remote drain and are not supported")
+		return
+	}
+	var enrollment db.KagentEnrollment
+	if isKagent {
+		if runtime.Provider != "kagent" || locked.ArchivedAt.Valid {
+			writeError(w, http.StatusConflict, "kagent lifecycle does not permit this update")
 			return
 		}
-		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
-
-		// Runtime row, then agent row: the order teardown and revocation use.
-		// FOR UPDATE waits out an enqueue holding the agent FOR KEY SHARE, so its
-		// row is committed with the old runtime before the re-stamp below sees it.
-		locked, err := updateQueries.GetAgentForUpdate(r.Context(), existing.ID)
+		raw := locked.RuntimeConfig
+		if params.RuntimeConfig != nil {
+			raw = params.RuntimeConfig
+		}
+		if err := validateRemoteAgentConfig(runtime.Provider, raw); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		// Lock the enrollment before reading its generation. Status reporters
+		// also write this row; the desired-state write below still uses CAS.
+		enrollment, err = lockKagentEnrollment(r.Context(), bindingTx, updateQueries, locked)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to lock agent")
+			writeError(w, http.StatusInternalServerError, "failed to lock kagent enrollment")
 			return
 		}
+		if enrollment.DesiredState != "present" {
+			writeError(w, http.StatusConflict, "kagent enrollment is not present")
+			return
+		}
+	}
+	if req.RuntimeID != nil {
+		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		if locked.RuntimeID != runtime.ID {
 			reassignment, err := updateQueries.ReassignPendingAgentTasksToRuntime(r.Context(), db.ReassignPendingAgentTasksToRuntimeParams{
-				AgentID:      existing.ID,
-				NewRuntimeID: runtime.ID,
+				AgentID: locked.ID, NewRuntimeID: runtime.ID,
 			})
 			if err != nil {
-				slog.Warn("update agent: reassign pending tasks failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 				writeError(w, http.StatusInternalServerError, "failed to move queued tasks to the new runtime")
 				return
 			}
@@ -2532,29 +2645,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if bindingTx != nil {
-		if err := bindingTx.Commit(r.Context()); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to commit agent binding")
-			return
-		}
-		if pendingMovedTo.Valid {
-			h.TaskService.NotifyRuntimeMayHaveWork(pendingMovedTo)
-		}
-	}
-	// A cap change can make the agent's queued work claimable right away
-	// (#10455). Nudge its runtime now that the write is visible, as a runtime
-	// cap change does, instead of leaving the queue to the daemon's next poll.
-	// A runtime switch above already woke the same runtime.
-	capChanged := req.MaxConcurrentTasks != nil && *req.MaxConcurrentTasks != existing.MaxConcurrentTasks
-	if capChanged && updated.RuntimeID.Valid && updated.RuntimeID != pendingMovedTo && h.TaskService != nil {
-		h.TaskService.NotifyRuntimeCapacityChanged(updated.RuntimeID)
-	}
-
 	// Nullable runtime overrides: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
 	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
 	if shouldClearMcpConfig {
-		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
+		updated, err = updateQueries.ClearAgentMcpConfig(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config")
@@ -2562,7 +2657,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearThinkingLevel {
-		updated, err = h.Queries.ClearAgentThinkingLevel(r.Context(), updated.ID)
+		updated, err = updateQueries.ClearAgentThinkingLevel(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level")
@@ -2570,7 +2665,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearServiceTier {
-		updated, err = h.Queries.ClearAgentServiceTier(r.Context(), updated.ID)
+		updated, err = updateQueries.ClearAgentServiceTier(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent service_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear service_tier")
@@ -2578,7 +2673,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearComposioAllowlist {
-		updated, err = h.Queries.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
+		updated, err = updateQueries.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist")
@@ -2586,7 +2681,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearComposioAllowlist || params.ComposioToolkitAllowlist != nil {
-		if err := syncAgentAppsFromAllowlist(r.Context(), h.Queries, updated, params.ComposioToolkitAllowlist, parseUUID(requestUserID(r))); err != nil {
+		if err := syncAgentAppsFromAllowlist(r.Context(), updateQueries, updated, params.ComposioToolkitAllowlist, parseUUID(requestUserID(r))); err != nil {
 			slog.Warn("update agent: sync agent apps failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update agent apps")
 			return
@@ -2597,11 +2692,36 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// permission. Done after the row update so a permission_mode flip and its
 	// targets land together.
 	if replacePermissionTargets {
-		if err := h.replaceInvocationTargets(r.Context(), updated.ID, parseUUID(requestUserID(r)), resolvedPerm.targets); err != nil {
+		if err := replaceInvocationTargetsWithQueries(r.Context(), updateQueries, updated.ID, parseUUID(requestUserID(r)), resolvedPerm.targets); err != nil {
 			slog.Warn("update agent: persist invocation targets failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update invocation targets")
 			return
 		}
+	}
+
+	if isKagent {
+		if _, err := updateQueries.RequestKagentEnrollmentDesiredState(r.Context(), db.RequestKagentEnrollmentDesiredStateParams{
+			WorkspaceID: updated.WorkspaceID, RuntimeID: updated.RuntimeID, AgentID: updated.ID,
+			ExpectedGeneration: enrollment.Generation, DesiredState: "present",
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update kagent lifecycle")
+			return
+		}
+	}
+	if err := bindingTx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit agent update")
+		return
+	}
+	if pendingMovedTo.Valid {
+		h.TaskService.NotifyRuntimeMayHaveWork(pendingMovedTo)
+	}
+	// A cap change can make the agent's queued work claimable right away
+	// (#10455). Nudge its runtime now that the write is visible, as a runtime
+	// cap change does, instead of leaving the queue to the daemon's next poll.
+	// A runtime switch above already woke the same runtime.
+	capChanged := req.MaxConcurrentTasks != nil && *req.MaxConcurrentTasks != existing.MaxConcurrentTasks
+	if capChanged && updated.RuntimeID.Valid && updated.RuntimeID != pendingMovedTo && h.TaskService != nil {
+		h.TaskService.NotifyRuntimeCapacityChanged(updated.RuntimeID)
 	}
 
 	resp := h.agentToResponse(updated)
@@ -2854,6 +2974,10 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	if !h.canManageAgent(w, r, agent) {
 		return
 	}
+	if !h.allowKagentArchiveOrRestore(w, r, agent) {
+		return
+	}
+
 	if agent.ArchivedAt.Valid {
 		writeError(w, http.StatusConflict, "agent is already archived")
 		return
@@ -2912,6 +3036,10 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	if !h.canManageAgent(w, r, agent) {
 		return
 	}
+	if !h.allowKagentArchiveOrRestore(w, r, agent) {
+		return
+	}
+
 	if !agent.ArchivedAt.Valid {
 		writeError(w, http.StatusConflict, "agent is not archived")
 		return

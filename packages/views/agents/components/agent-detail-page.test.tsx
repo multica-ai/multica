@@ -522,14 +522,14 @@ describe("AgentDetailPage layout", () => {
     expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
   });
 
-  it("shows the Skills section, except on a Qoder Cloud Agents runtime", async () => {
+  it.each(["qoder_cloud", "kagent"])("hides the Skills section on %s", async (provider) => {
     const { unmount } = renderPage();
     expect(
       await screen.findByRole("button", { name: "manage skills" }),
     ).toBeInTheDocument();
     unmount();
 
-    runtimesRef.current = [{ id: "runtime-1", provider: "qoder_cloud" }];
+    runtimesRef.current = [{ id: "runtime-1", provider }];
     renderPage();
     await screen.findByRole("button", { name: "Assign work" });
     await waitFor(() =>
@@ -716,6 +716,17 @@ describe("AgentDetailPage DM button", () => {
 });
 
 describe("AgentDetailPage more actions", () => {
+  it.each([false, true])("hides all Kagent lifecycle actions (archived: %s)", async (archived) => {
+    agentsRef.current = [{ ...baseAgent, archived_at: archived ? "2026-01-01" : null }];
+    runtimesRef.current = [{ id: baseAgent.runtime_id, provider: "kagent" }];
+    renderPage();
+    await screen.findByText("Kagent agents cannot be archived or restored.");
+    expect(screen.queryByRole("button", { name: "Restore" })).toBeNull();
+    const menu = openMoreActions();
+    expect(within(menu).queryByRole("menuitem", { name: "Archive Agent" })).toBeNull();
+    expect(within(menu).queryByRole("menuitem", { name: "Restore" })).toBeNull();
+  });
+
   it("keeps Settings and copy actions but no Archive for a system agent", async () => {
     // An admin passes `canEditAgent`, so only the system key keeps Archive
     // out of the menu.

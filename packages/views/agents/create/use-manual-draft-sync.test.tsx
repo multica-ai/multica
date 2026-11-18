@@ -35,6 +35,15 @@ afterEach(() => {
 });
 
 describe("useManualDraftSync", () => {
+  it("retains provider options when restoring onto Kagent for explicit clearing", () => {
+    useManualAgentDraftStore.getState().setDraft({ byOwner: { blank: {
+      runtimeId: "runtime-1", draft: toStoredAgentDraft({ ...EMPTY_AGENT_DRAFT, model: "old-model", thinkingLevel: "high" }, null),
+    } } });
+    const setDraft = vi.fn();
+    renderHook(() => useManualDraftSync({ duplicateId: null, draft: EMPTY_AGENT_DRAFT, setDraft, ready: true, runtimeId: "kagent-1", runtimeProvider: "kagent" }));
+    expect(setDraft).toHaveBeenCalledWith(expect.objectContaining({ runtimeId: "kagent-1", model: "old-model", thinkingLevel: "high" }));
+  });
+
   it("restores the draft belonging to this flow", () => {
     seedStoredDraft("duplicate:agent-A", "Half-finished copy of A");
 

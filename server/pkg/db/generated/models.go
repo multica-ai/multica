@@ -1350,6 +1350,20 @@ type IssueWorkflow struct {
 	OwnerID          pgtype.UUID        `json:"owner_id"`
 }
 
+type KagentEnrollment struct {
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	RuntimeID         pgtype.UUID        `json:"runtime_id"`
+	Revision          int64              `json:"revision"`
+	Generation        int64              `json:"generation"`
+	DesiredState      string             `json:"desired_state"`
+	Phase             string             `json:"phase"`
+	AppliedGeneration pgtype.Int8        `json:"applied_generation"`
+	LastError         string             `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type LarkBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

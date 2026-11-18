@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -74,7 +75,14 @@ func TestMain(m *testing.M) {
 	registerListeners(bus, hub)
 	// Same wiring as main.go: HTTP writes through the test server log activity.
 	registerActivityListeners(bus, db.New(pool))
-	router := NewRouter(pool, hub, bus, analytics.NoopClient{}, nil)
+	router, srvHandler := NewRouterWithOptions(pool, hub, bus, analytics.NoopClient{}, nil, RouterOptions{})
+	fencePool, err := handler.NewTeardownFencePool(ctx, pool.Config())
+	if err != nil {
+		fmt.Printf("Failed to initialize teardown fence pool: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
+	srvHandler.TeardownFencePool = fencePool
 	testServer = httptest.NewServer(router)
 
 	// Generate a JWT token directly for the test user

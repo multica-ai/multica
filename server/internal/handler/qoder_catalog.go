@@ -229,13 +229,13 @@ func storedQoderOverrides(agent db.Agent) qoderOverrides {
 }
 
 // rejectQoderOverrides writes a 400 and reports true when the agent runs on
-// Qoder and o would leave it with settings the bridge refuses at run time.
+// a remote provider and o would leave it with unsupported execution settings.
 func (h *Handler) rejectQoderOverrides(w http.ResponseWriter, r *http.Request, agent db.Agent, o qoderOverrides) bool {
 	provider, ok := h.resolveAgentProvider(r, agent.WorkspaceID, agent.RuntimeID)
-	if !ok || provider != "qoder_cloud" {
+	if !ok || (provider != "qoder_cloud" && provider != "kagent") {
 		return false
 	}
-	if err := o.validate(); err != nil {
+	if err := o.validateFor(provider); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return true
 	}

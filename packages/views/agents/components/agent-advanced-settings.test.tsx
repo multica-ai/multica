@@ -199,6 +199,15 @@ describe("AgentAdvancedSettings MCP section visibility", () => {
     expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
   });
 
+  it("hides unsupported Kagent editors and handles a direct link to one", () => {
+    renderDialog([makeRuntime("kagent")], { section: "runtime_config" });
+    expect(screen.getByText("general-form")).toBeInTheDocument();
+    for (const key of ["skills", "environment", "custom_args", "runtime_config", "mcp_config", "composio_mcp"] as const) {
+      expect(screen.queryByRole("tab", { name: enAgents.tabs[key] })).not.toBeInTheDocument();
+    }
+    expect(screen.queryByText("runtime-config-tab")).not.toBeInTheDocument();
+  });
+
   it("hides MCP for providers whose backend does not read mcp_config", () => {
     // Saving an MCP config on e.g. Gemini would be a silent no-op at run
     // time — that's the bug this hiding logic is meant to prevent.

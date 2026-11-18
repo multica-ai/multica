@@ -1,4 +1,12 @@
 {
+  "kagent": {
+    "lifecycle_unavailable": "Kagent AI 代理無法封存或還原。",
+    "native_text_note": "Kagent 僅支援原生文字模式。工作區存取、skill、模型和思考覆寫、工具、MCP、自訂引數和環境變數均無法使用。建立後無法變更執行階段。",
+    "clear_required": "此草稿包含不相容的模型、思考、速度、遠端 AI 代理或 skill 選項，暫時無法建立。請清除這些選項，或選擇其他執行階段。",
+    "clear_options": "清除不相容選項",
+    "duplicate_args_blocked": "此副本包含 Kagent 不支援的自訂引數。請選擇其他執行階段，或直接建立新的 AI 代理。",
+    "builder_unavailable": "Kagent 原生文字模式不支援 AI 代理建構工具。請手動建立。"
+  },
   "page": {
     "title": "AI 代理",
     "new_agent": "新建 AI 代理",

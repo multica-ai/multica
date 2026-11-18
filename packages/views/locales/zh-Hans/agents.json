@@ -1,4 +1,12 @@
 {
+  "kagent": {
+    "lifecycle_unavailable": "Kagent 智能体无法归档或恢复。",
+    "native_text_note": "Kagent 仅支持原生文本模式。工作区访问、skill、模型和思考覆盖、工具、MCP、自定义参数和环境变量均不可用。创建后无法更改运行时。",
+    "clear_required": "此草稿含有不兼容的模型、思考、速度、远端智能体或 skill 选项，暂时无法创建。请清除这些选项，或选择其他运行时。",
+    "clear_options": "清除不兼容选项",
+    "duplicate_args_blocked": "此副本包含 Kagent 不支持的自定义参数。请选择其他运行时，或直接新建智能体。",
+    "builder_unavailable": "Kagent 原生文本模式不支持智能体构建器。请手动创建。"
+  },
   "page": {
     "title": "智能体",
     "new_agent": "新建智能体",

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/multica-ai/multica/server/internal/qoderruntime"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -36,6 +37,28 @@ func (h *Handler) cleanupInactiveQoder(ctx context.Context) {
 }
 
 func (h *Handler) cleanupQoderJournal(ctx context.Context, ws string) error {
+	fence, err := h.acquireTeardownFence(ctx, ws)
+	if err != nil {
+		return err
+	}
+	defer fence.Close()
+	return h.cleanupQoderJournalFenced(ctx, ws, fence)
+}
+
+func (h *Handler) cleanupQoderJournalFenced(ctx context.Context, ws string, fence *teardownFence) error {
+	// Use the owned session for reads and every cleanup commit. TaskService's
+	// separate task transitions do not delete enrollment or the journal.
+	scoped := *h
+	scoped.DB = fence.conn
+	h = &scoped
+	var intent bool
+	if err := fence.conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kagent_enrollment WHERE workspace_id=$1)`, ws).Scan(&intent); err != nil {
+		return err
+	}
+	if intent {
+		return service.ErrRuntimeKagentEnrollment
+	}
+
 	cfg, _, _, _, err := h.readQoderSettings(ctx, ws)
 	if err != nil {
 		return err
@@ -85,16 +108,23 @@ func (h *Handler) cleanupQoderJournal(ctx context.Context, ws string) error {
 			return fmt.Errorf("remote cleanup pending: %w", err)
 		}
 	}
-	_, err = h.DB.Exec(ctx, `UPDATE cloud_agent_connection SET journal_encrypted='' WHERE provider='qoder_cloud' AND workspace_id=$1`, ws)
-	return err
-}
-
-func (h *Handler) prepareQoderWorkspaceDeletion(ctx context.Context, ws string) error {
-	tx, err := h.TxStarter.Begin(ctx)
+	tx, err := fence.conn.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer rollbackTeardownTx(tx)
+	if _, err = tx.Exec(ctx, `UPDATE cloud_agent_connection SET journal_encrypted='' WHERE provider='qoder_cloud' AND workspace_id=$1`, ws); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (h *Handler) prepareQoderWorkspaceDeletionFenced(ctx context.Context, ws string, fence *teardownFence) error {
+	tx, err := fence.conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer rollbackTeardownTx(tx)
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,19))`, ws); err != nil {
 		return err
 	}
@@ -112,5 +142,5 @@ func (h *Handler) prepareQoderWorkspaceDeletion(ctx context.Context, ws string) 
 	if busy {
 		return fmt.Errorf("remote step still active")
 	}
-	return h.cleanupQoderJournal(ctx, ws)
+	return h.cleanupQoderJournalFenced(ctx, ws, fence)
 }

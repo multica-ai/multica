@@ -6694,8 +6694,20 @@ func settleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.Age
 	}
 
 	taskIDs := make([]pgtype.UUID, 0, len(tasks))
+	var cancelledIDs []pgtype.UUID
 	for _, task := range tasks {
 		taskIDs = append(taskIDs, task.ID)
+		if task.Status == "cancelled" && task.StartedAt.Valid {
+			cancelledIDs = append(cancelledIDs, task.ID)
+		}
+	}
+	// Unlike local processes, remote Kagent work may survive a bulk cancel.
+	// Record its negotiated cleanup fence in the same transaction as the
+	// terminal state; a later claim must not race an unacknowledged worker.
+	if len(cancelledIDs) != 0 {
+		if err := q.MarkKagentBulkCleanupPending(ctx, cancelledIDs); err != nil {
+			return nil, fmt.Errorf("mark remote cancellation cleanup pending: %w", err)
+		}
 	}
 	if _, err := q.SettleTerminalTaskSupplements(ctx, taskIDs); err != nil {
 		return nil, fmt.Errorf("settle terminal task supplements: %w", err)

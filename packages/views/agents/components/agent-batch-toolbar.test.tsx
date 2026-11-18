@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -110,6 +110,8 @@ function renderToolbar(rows: AgentListRow[]) {
 }
 
 beforeEach(() => {
+  archiveSpy.mockClear();
+  restoreSpy.mockClear();
   updateAgentSpy.mockClear();
   updateAgentSpy.mockResolvedValue({});
 });
@@ -267,5 +269,33 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
       screen.getByRole("radio", { name: /Entire workspace/ }),
     ).not.toBeChecked();
     expect(updateAgentSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("AgentBatchToolbar Kagent lifecycle", () => {
+  it.each([false, true])("blocks mixed selections containing Kagent (archived: %s)", (archived) => {
+    const kagent = makeRow("kagent", "user-1", { archived_at: archived ? "2026-01-01" : null });
+    kagent.runtime = { provider: "kagent" } as NonNullable<AgentListRow["runtime"]>;
+    renderToolbar([kagent, makeRow("other", "user-1", { archived_at: archived ? "2026-01-01" : null })]);
+    const action = screen.getByRole("button", { name: archived ? "Restore" : "Archive" });
+    expect(action).toBeDisabled();
+    fireEvent.click(action);
+    expect(archiveSpy).not.toHaveBeenCalled();
+    expect(restoreSpy).not.toHaveBeenCalled();
+    expect(screen.getByText("Kagent agents cannot be archived or restored.")).toBeInTheDocument();
+  });
+
+  it("restores other providers", async () => {
+    renderToolbar([makeRow("other", "user-1", { archived_at: "2026-01-01" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+    await waitFor(() => expect(restoreSpy).toHaveBeenCalledWith("other"));
+  });
+
+  it("archives other providers after confirmation", async () => {
+    renderToolbar([makeRow("other", "user-1")]);
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(archiveSpy).toHaveBeenCalledWith("other"));
   });
 });

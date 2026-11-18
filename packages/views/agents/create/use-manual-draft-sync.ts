@@ -41,10 +41,12 @@ export function useManualDraftSync(options: {
    *  persist the empty form the seed is about to replace. */
   ready: boolean;
   /** The runtime chosen in step 1. It outranks the stored draft's, whose
-   *  per-runtime fields are dropped when the two differ. */
+   *  per-runtime fields are dropped when the two differ, except Kagent
+   *  retains them for explicit clearing before submission. */
   runtimeId?: string | null;
+  runtimeProvider?: string;
 }): void {
-  const { duplicateId, draft, setDraft, ready, runtimeId } = options;
+  const { duplicateId, draft, setDraft, ready, runtimeId, runtimeProvider } = options;
   const owner = manualDraftOwner(duplicateId);
 
   const setStored = useManualAgentDraftStore((state) => state.setDraft);
@@ -59,12 +61,12 @@ export function useManualDraftSync(options: {
       const stored = fromStoredAgentDraft(persisted.draft, persisted.runtimeId);
       setDraft(
         runtimeId && runtimeId !== stored.runtimeId
-          ? applyDraftRuntimeChange(stored, runtimeId)
+          ? applyDraftRuntimeChange(stored, runtimeId, runtimeProvider)
           : stored,
       );
     }
     setRestored(true);
-  }, [owner, ready, restored, runtimeId, setDraft]);
+  }, [owner, ready, restored, runtimeId, runtimeProvider, setDraft]);
 
   useEffect(() => {
     if (!restored) return;

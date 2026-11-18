@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -53,12 +55,19 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 
 	qtx := h.Queries.WithTx(tx)
 
-	// Taken FIRST, before this tx touches member or issue_subscriber. The
+	// Enrollment/binding writers take workspace -> runtime locks. Fence them
+	// before taking subscriber/member locks and keep the fence through commit.
+	if _, err := qtx.LockWorkspaceForDelete(ctx, workspaceID); err != nil {
+		return empty, err
+	}
+	if err := guardMemberKagentRevocation(ctx, tx, workspaceID, userID); err != nil {
+		return empty, err
+	}
+
+	// Taken before this tx touches member or issue_subscriber. The
 	// delegated auto-subscribe rule takes the same (workspace, user) lock, so
 	// a run that is mid-decomposition cannot slip a new subscriber row in
 	// between this tx's membership delete and its subscription cleanup below.
-	// First also means every holder acquires it in the same order, so these
-	// paths cannot deadlock against each other (MUL-5483 review round 7).
 	if err := qtx.LockSubscriberWrites(ctx, db.LockSubscriberWritesParams{
 		WorkspaceID: workspaceID,
 		UserID:      userID,
@@ -293,6 +302,61 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	}
 
 	return result, nil
+}
+
+// guardMemberKagentRevocation runs before any revocation writes. The caller
+// holds the workspace fence and retains this transaction through commit.
+func guardMemberKagentRevocation(ctx context.Context, tx pgx.Tx, workspaceID, userID pgtype.UUID) error {
+	// Public runtimes can serve any member, including without shared_with.
+	// Lock the workspace's runtimes together in UUID order rather than locking
+	// owned runtimes first and shared runtimes later. NO KEY UPDATE serializes
+	// enrollment/access writers without blocking legacy FK KEY SHARE readers.
+	rows, err := tx.Query(ctx, `SELECT id FROM agent_runtime
+		WHERE workspace_id=$1 ORDER BY id FOR NO KEY UPDATE`, workspaceID)
+	if err != nil {
+		return fmt.Errorf("lock member revocation runtimes: %w", err)
+	}
+	var runtimeIDs []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		runtimeIDs = append(runtimeIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// Do not join intent exclusively through agent: orphan tombstones are
+	// authoritative too. Agent identity also catches unbound/rebound agents
+	// whose enrollment still points to an older or missing runtime.
+	var enrolled bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM kagent_enrollment e
+		WHERE (e.workspace_id=$1 AND NOT EXISTS (
+			SELECT 1 FROM agent_runtime r WHERE r.id=e.runtime_id
+		)) OR e.runtime_id IN (
+			SELECT r.id FROM agent_runtime r
+			WHERE r.id=ANY($3::uuid[]) AND
+				(r.owner_id=$2 OR r.visibility='public' OR $2=ANY(r.shared_with))
+		) OR e.agent_id IN (
+			SELECT a.id FROM agent a
+			WHERE (a.workspace_id=$1 AND a.owner_id=$2)
+				OR a.runtime_id IN (
+					SELECT r.id FROM agent_runtime r
+					WHERE r.id=ANY($3::uuid[]) AND r.owner_id=$2
+				)
+		)
+	)`, workspaceID, userID, runtimeIDs).Scan(&enrolled); err != nil {
+		return fmt.Errorf("check member kagent enrollments: %w", err)
+	}
+	if enrolled {
+		return service.ErrRuntimeKagentEnrollment
+	}
+	return nil
 }
 
 // revocationResult captures everything revokeMemberRuntimes touched so the

@@ -3,7 +3,26 @@
 -- work and future scheduled runs. Only a NEW explicit manual rerun can cross
 -- the fence; its successful completion allows later automated work again.
 -- Existing failure and result fields are the durable safety markers.
+-- Kagent is different: a manual rerun cannot prove an independent remote
+-- worker stopped. Keep every unresolved Kagent attempt fenced regardless of
+-- later successes; a verified cleanup-resolution workflow is still required.
+-- The kagent capability marker is stamped server-side at claim time, so every
+-- kagent run that can reach a cleanup-unconfirmed terminal state carries it.
 SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue gate
+    WHERE gate.id = @task_id AND (
+EXISTS (
+    SELECT 1
+    FROM agent_task_queue candidate
+    JOIN agent_task_queue unsafe
+      ON unsafe.agent_id = candidate.agent_id AND unsafe.runtime_id = candidate.runtime_id
+    WHERE candidate.id = @task_id
+      AND candidate.status IN ('queued', 'dispatched', 'waiting_local_directory')
+      AND unsafe.id <> candidate.id
+      AND unsafe.result->>'process_cleanup_capability' = 'kagent-process-cleanup-v1'
+      AND (unsafe.failure_reason = 'cleanup_unconfirmed'
+           OR (unsafe.status = 'cancelled' AND unsafe.result->>'process_cleanup_pending' = 'true'))
+) OR EXISTS (
     SELECT 1
     FROM agent_task_queue candidate
     JOIN LATERAL (
@@ -32,7 +51,7 @@ SELECT EXISTS (
             AND manual.created_at > unsafe.completed_at
             AND (manual.id = candidate.id OR manual.status = 'completed')
       )
-);
+)));
 
 -- name: FailCancelledTaskProcessCleanup :one
 -- The daemon's cancellation acknowledgement can discover that local work did
@@ -57,8 +76,16 @@ WHERE task.id = @id AND task.status = 'cancelled' AND task.started_at IS NOT NUL
       SELECT 1 FROM agent_runtime runtime
       WHERE runtime.id = task.runtime_id
         AND ((runtime.provider IN ('pi', 'omp') AND task.result->>'process_cleanup_capability' = 'pi-process-cleanup-v1')
-          OR (runtime.provider = 'museapp' AND task.result->>'process_cleanup_capability' = 'museapp-process-cleanup-v1'))
+          OR (runtime.provider = 'museapp' AND task.result->>'process_cleanup_capability' = 'museapp-process-cleanup-v1')
+          OR (runtime.provider = 'kagent' AND task.result->>'process_cleanup_capability' = 'kagent-process-cleanup-v1'))
   );
+
+-- name: MarkKagentBulkCleanupPending :exec
+-- Bulk cancellation must commit the remote-work fence with the terminal write.
+UPDATE agent_task_queue
+SET result = COALESCE(result, '{}'::jsonb) || '{"process_cleanup_pending":true}'::jsonb
+WHERE id = ANY(@task_ids::uuid[]) AND status = 'cancelled' AND started_at IS NOT NULL
+  AND result->>'process_cleanup_capability' = 'kagent-process-cleanup-v1';
 
 -- name: ClearTaskProcessCleanupPending :exec
 UPDATE agent_task_queue
@@ -70,17 +97,17 @@ WHERE id = @id AND status IN ('cancelled', 'failed')
 -- Run inside the bulk terminal-write transaction, before its rows reach the
 -- retry pipeline. Losing a daemon cannot stop an independently running worker.
 -- Keep the start-time capability as evidence if the runtime was later changed
--- or removed; legacy Muse daemons are recognized by their runtime provider.
+-- or removed; remote daemons are also recognized by their runtime provider.
 UPDATE agent_task_queue task
 SET failure_reason = 'cleanup_unconfirmed',
     error = concat_ws('; ', NULLIF(task.error, ''),
-        'Muse worker may still be running after daemon recovery or loss of contact. Check and stop it before manually rerunning.')
+        'Remote worker may still be running after daemon recovery or loss of contact. Check and stop it before manually rerunning.')
 WHERE task.id = ANY(@task_ids::uuid[])
   AND task.status = 'failed' AND task.started_at IS NOT NULL
   AND task.failure_reason IN ('runtime_recovery', 'runtime_offline', 'timeout')
-  AND (task.result->>'process_cleanup_capability' = 'museapp-process-cleanup-v1'
+  AND (task.result->>'process_cleanup_capability' IN ('museapp-process-cleanup-v1', 'kagent-process-cleanup-v1')
     OR EXISTS (SELECT 1 FROM agent_runtime runtime
-               WHERE runtime.id = task.runtime_id AND runtime.provider = 'museapp'))
+               WHERE runtime.id = task.runtime_id AND runtime.provider IN ('museapp', 'kagent')))
 RETURNING task.*;
 
 -- name: TaskWaitingForProcessCleanup :one

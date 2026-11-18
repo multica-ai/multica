@@ -68,6 +68,7 @@ export function AgentBatchToolbar({
     setConfirmAccess(open);
   }, []);
 
+  const hasKagent = rows.some((row) => row.runtime?.provider === "kagent");
   const allManageable = rows.every((r) => r.canManage);
   const ownedRows = rows.filter((r) => r.isOwnedByMe);
   const anyOwned = ownedRows.length > 0;
@@ -136,7 +137,7 @@ export function AgentBatchToolbar({
           <Button
             variant="ghost"
             size="sm"
-            disabled={!allManageable || busy}
+            disabled={!allManageable || hasKagent || busy}
             onClick={() =>
               runBatch(
                 (id) => api.restoreAgent(id),
@@ -164,12 +165,17 @@ export function AgentBatchToolbar({
           <Button
             variant="ghost"
             size="sm"
-            disabled={!allManageable || busy}
+            disabled={!allManageable || hasKagent || busy}
             onClick={() => setConfirmArchive(true)}
           >
             <Archive className="mr-1 size-3.5" />
             {t(($) => $.row_actions.archive)}
           </Button>
+        )}
+        {hasKagent && (
+          <span className="text-caption text-muted-foreground">
+            {t(($) => $.kagent.lifecycle_unavailable)}
+          </span>
         )}
       </CollectionBatchBar>
 
@@ -203,7 +209,7 @@ export function AgentBatchToolbar({
               type="button"
               variant="destructive"
               size="sm"
-              disabled={busy}
+              disabled={busy || hasKagent}
               onClick={async () => {
                 await runBatch(
                   (id) => api.archiveAgent(id),

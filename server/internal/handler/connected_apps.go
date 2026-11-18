@@ -873,7 +873,20 @@ func (h *Handler) UpdateAgentApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	existing, err := h.Queries.ListAgentApps(ctx, agent.ID)
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save agent apps")
+		return
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	// Match UpdateAgent's agent -> apps order, and evaluate app permissions
+	// against the rows protected by that lock.
+	agent, ok = h.lockManagedAgent(w, r, tx, agent)
+	if !ok {
+		return
+	}
+	existing, err := qtx.ListAgentApps(ctx, agent.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list agent apps")
 		return
@@ -919,13 +932,6 @@ func (h *Handler) UpdateAgentApps(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	tx, err := h.TxStarter.Begin(ctx)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save agent apps")
-		return
-	}
-	defer tx.Rollback(ctx)
-	qtx := h.Queries.WithTx(tx)
 	if err := qtx.DeleteAgentAppsExcept(ctx, db.DeleteAgentAppsExceptParams{AgentID: agent.ID, Keep: keep}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save agent apps")
 		return
@@ -954,6 +960,8 @@ func (h *Handler) UpdateAgentApps(w http.ResponseWriter, r *http.Request) {
 // composio_toolkit_allowlist field into agent_app: new slugs join as personal
 // apps at the default level, missing slugs leave, existing ones keep their
 // scope and level.
+// Callers hold the agent row lock, or have just inserted the agent in the
+// same transaction (CreateAgent), before touching app rows.
 func syncAgentAppsFromAllowlist(ctx context.Context, q *db.Queries, agent db.Agent, slugs []string, actorID pgtype.UUID) error {
 	existing, err := q.ListAgentApps(ctx, agent.ID)
 	if err != nil {

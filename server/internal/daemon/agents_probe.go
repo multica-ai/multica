@@ -356,6 +356,9 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// probeBuiltinRuntime (there is no --version to run).
 	// MULTICA_MUSEAPP_MODEL is informational only — the backend's wire
 	// protocol has no model parameter, see ModelSelectionSupported.
+	if os.Getenv("MULTICA_KAGENT_ENABLED") == "1" {
+		agents["kagent"] = AgentEntry{Command: "kagent"}
+	}
 	if strings.TrimSpace(os.Getenv("MULTICA_MUSEAPP_ENDPOINT")) != "" {
 		agents["museapp"] = AgentEntry{
 			Command: "museapp",

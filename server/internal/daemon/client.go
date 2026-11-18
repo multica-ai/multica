@@ -537,6 +537,9 @@ func (c *Client) StartTask(ctx context.Context, task Task, capabilities ...strin
 		if slices.Contains(capabilities, protocol.DaemonCapabilityMuseAppProcessCleanupV1) && response.ProcessCleanupCapability != protocol.DaemonCapabilityMuseAppProcessCleanupV1 {
 			return fmt.Errorf("%w: Muse app requires server support for remote execution cleanup; upgrade the Multica server before using this runtime", errInvalidResponseBody)
 		}
+		if slices.Contains(capabilities, protocol.DaemonCapabilityKagentProcessCleanupV1) && response.ProcessCleanupCapability != protocol.DaemonCapabilityKagentProcessCleanupV1 {
+			return fmt.Errorf("%w: Kagent requires server support for remote execution cleanup", errInvalidResponseBody)
+		}
 		return nil
 	}
 	path := fmt.Sprintf("/api/daemon/tasks/%s/start", task.ID)
