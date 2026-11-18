@@ -137,7 +137,8 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			r.logger.WarnContext(ctx, "slack replier: new-chat confirmation failed", "installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeHelp:
-		if err := r.postResult(ctx, inst, msg, res, engine.HelpTextEnglish); err != nil {
+		helpText := strings.ReplaceAll(engine.HelpTextEnglish, "`/", "`@Multica /")
+		if err := r.postResult(ctx, inst, msg, res, helpText); err != nil {
 			r.logger.WarnContext(ctx, "slack replier: help reply failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
