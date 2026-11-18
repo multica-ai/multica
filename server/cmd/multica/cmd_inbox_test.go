@@ -118,7 +118,7 @@ func TestInboxListTableAndDeniedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, value := range []string{"ID", "TYPE", "TITLE", "ISSUE", "COMMENT", "PROJECT", "READ", "CREATED", "n1", "c1", "true"} {
+	for _, value := range []string{"ID", "ISSUE", "TYPE", "FROM", "TITLE", "SUMMARY", "READ", "CREATED", "n1", "i1", "true"} {
 		if !strings.Contains(out, value) {
 			t.Errorf("table missing %q: %s", value, out)
 		}
