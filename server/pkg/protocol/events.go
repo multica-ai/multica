@@ -255,4 +255,12 @@ const (
 	EventWeixinInstallationRevoked   = "weixin_installation:revoked"
 	EventTelegramInstallationCreated = "telegram_installation:created"
 	EventTelegramInstallationRevoked = "telegram_installation:revoked"
+
+	// InfoFlow installation lifecycle. Same create/revoke semantics as the
+	// Slack/DingTalk pair. BindingUpdated shares the infoflow_installation
+	// prefix because it changes the member-scoped account identifiers returned
+	// by the installation listing.
+	EventInfoFlowInstallationCreated   = "infoflow_installation:created"
+	EventInfoFlowInstallationRevoked   = "infoflow_installation:revoked"
+	EventInfoFlowAccountBindingUpdated = "infoflow_installation:binding_updated"
 )

@@ -85,11 +85,11 @@ func dingtalkInstallationToResponse(row db.ChannelInstallation) DingTalkInstalla
 	}
 }
 
-// dingtalkAgentVisibility resolves the Agent side of the Settings inventory in
+// agentVisibilityForChannel resolves the Agent side of the Settings inventory in
 // one batch. The available set distinguishes an orphaned installation from an
 // inaccessible Agent for admins. The visible set enforces the same owner / role
 // / invocation-target rules as the Agent list for ordinary members.
-func (h *Handler) dingtalkAgentVisibility(
+func (h *Handler) agentVisibilityForChannel(
 	ctx context.Context,
 	workspaceID pgtype.UUID,
 	userID string,
@@ -151,7 +151,7 @@ func (h *Handler) ListDingTalkInstallations(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	availableAgentIDs, visibleAgentIDs, loaded := h.dingtalkAgentVisibility(
+	availableAgentIDs, visibleAgentIDs, loaded := h.agentVisibilityForChannel(
 		r.Context(), wsUUID, userID, member,
 	)
 	if !loaded {
@@ -234,7 +234,7 @@ func (h *Handler) ListDingTalkGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	var visibleAgentIDs map[string]struct{}
 	if !roleAllowed(member.Role, "owner", "admin") {
-		_, visible, loaded := h.dingtalkAgentVisibility(r.Context(), wsUUID, userID, member)
+		_, visible, loaded := h.agentVisibilityForChannel(r.Context(), wsUUID, userID, member)
 		if !loaded {
 			writeError(w, http.StatusInternalServerError, "failed to resolve dingtalk group visibility")
 			return

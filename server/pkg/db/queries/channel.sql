@@ -1562,3 +1562,16 @@ SELECT EXISTS (
           AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
       ))
 );
+
+-- name: ListChannelUserBindingsForMember :many
+-- Returns the requesting Multica member's platform identities for ONE channel
+-- type. The installation list is member-visible, so returning every member's
+-- platform id here would expose those values more broadly than necessary; the
+-- channel_type is a sqlc arg so each adapter (dingtalk, infoflow, …) reuses the
+-- same query instead of growing a private copy.
+SELECT installation_id, channel_user_id
+FROM channel_user_binding
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND multica_user_id = sqlc.arg(multica_user_id)
+  AND channel_type = sqlc.arg(channel_type)
+ORDER BY bound_at DESC, id ASC;

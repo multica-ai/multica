@@ -36,6 +36,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
+	"github.com/multica-ai/multica/server/internal/integrations/infoflow"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
@@ -1341,6 +1342,40 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("telegram integration disabled (MULTICA_TELEGRAM_SECRET_KEY not set)")
 	}
 
+	// InfoFlow integration. BYO app key/secret per agent; inbound over the
+	// InfoFlow bot WebSocket, outbound via the SDK's IM send API. Gated by
+	// MULTICA_INFOFLOW_SECRET_KEY (at-rest encryption of each bot's secret);
+	// when unset no Factory is registered and the handlers refuse with 403
+	// infoflow_not_configured, so self-hosters who have not opted in are
+	// unaffected.
+	if infoflowKey, err := secretbox.LoadKey("MULTICA_INFOFLOW_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(infoflowKey)
+		if err != nil {
+			slog.Error("infoflow: secretbox.New failed; infoflow integration disabled", "error", err)
+		} else {
+			infoflowBindingSvc := infoflow.NewBindingTokenService(queries, pool)
+			h.InfoFlowBindingTokens = infoflowBindingSvc
+			infoflowReplier := infoflow.NewOutboundReplier(infoflow.OutboundReplierConfig{
+				Binding: infoflowBindingSvc,
+				Box:     box,
+				AppURL:  appURLFromEnv(),
+				Logger:  slog.Default(),
+			})
+			channelRouter.Register(infoflow.TypeInfoFlow, infoflow.NewInfoFlowResolverSet(queries, pool, infoflowReplier))
+			infoflow.NewOutbound(queries, box, slog.Default()).Register(bus)
+			infoflow.RegisterInfoFlow(channelRegistry, infoflow.ChannelDeps{Box: box, Logger: slog.Default()})
+			installSvc, ierr := infoflow.NewInstallService(queries, pool, box, slog.Default())
+			if ierr != nil {
+				slog.Error("infoflow: InstallService init failed; install disabled", "error", ierr)
+			} else {
+				h.InfoFlowInstall = installSvc
+			}
+			slog.Info("infoflow integration enabled (BYO per-installation websocket)")
+		}
+	} else {
+		slog.Info("infoflow integration disabled (MULTICA_INFOFLOW_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -2024,6 +2059,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/telegram/installations/{installationId}", h.RevokeTelegramInstallation)
 					r.Post("/telegram/install", h.RegisterTelegramBot)
 				})
+
+				// InfoFlow integration. Listing is member-visible; install +
+				// revoke authorize the target agent's owner or a workspace
+				// owner/admin inside the handler (same split as DingTalk).
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/infoflow/installations", h.ListInfoFlowInstallations)
+					r.Delete("/infoflow/installations/{installationId}", h.RevokeInfoFlowInstallation)
+					r.Post("/infoflow/install/byo", h.RegisterInfoFlowBYO)
+				})
 			})
 		})
 
@@ -2051,6 +2096,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// workspace-scoped, identity from the session, token proves only
 		// "this Telegram user id requested binding".
 		r.Post("/api/telegram/binding/redeem", h.RedeemTelegramBindingToken)
+		// InfoFlow binding redemption. Same rationale: user-scoped, the token
+		// carries only the InfoFlow user id to bind.
+		r.Post("/api/infoflow/binding/redeem", h.RedeemInfoFlowBindingToken)
 
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
 		// a connection belongs to a user. These four require a logged-in

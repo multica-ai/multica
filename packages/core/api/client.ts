@@ -246,6 +246,10 @@ import type {
   BeginWecomInstallResponse,
   WecomInstallStatusResponse,
   RedeemWecomBindingTokenResponse,
+  InfoFlowInstallation,
+  ListInfoFlowInstallationsResponse,
+  RegisterInfoFlowBYORequest,
+  RedeemInfoFlowBindingTokenResponse,
   TelegramInstallation,
   ListTelegramInstallationsResponse,
   RegisterTelegramRequest,
@@ -446,6 +450,12 @@ import {
   ListLarkInstallationsResponseSchema,
   EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+  InfoFlowInstallationSchema,
+  ListInfoFlowInstallationsResponseSchema,
+  RedeemInfoFlowBindingTokenResponseSchema,
+  EMPTY_INFOFLOW_INSTALLATION,
+  EMPTY_LIST_INFOFLOW_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_INFOFLOW_BINDING_TOKEN_RESPONSE,
   TelegramInstallationSchema,
   ListTelegramInstallationsResponseSchema,
   RedeemTelegramBindingTokenResponseSchema,
@@ -6033,6 +6043,68 @@ export class ApiClient {
       { endpoint: "POST /api/dingtalk/binding/redeem" },
     );
   }
+  // InfoFlow (如流) robot integration. Bring-your-own-app: the agent owner or
+  // a workspace owner/admin pastes the robot's AppKey + AppSecret from the
+  // InfoFlow admin console. The backend seals the secret with
+  // MULTICA_INFOFLOW_SECRET_KEY before persisting; inbound arrives over the
+  // per-installation WebSocket and outbound goes through the SDK's IM API.
+  async listInfoFlowInstallations(
+    workspaceId: string,
+  ): Promise<ListInfoFlowInstallationsResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/infoflow/installations`,
+    );
+    return parseWithFallback(
+      raw,
+      ListInfoFlowInstallationsResponseSchema,
+      EMPTY_LIST_INFOFLOW_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/infoflow/installations" },
+    );
+  }
+
+  async registerInfoFlowBYO(
+    workspaceId: string,
+    agentId: string,
+    body: RegisterInfoFlowBYORequest,
+  ): Promise<InfoFlowInstallation> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/infoflow/install/byo?${search.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    return parseWithFallback(raw, InfoFlowInstallationSchema, EMPTY_INFOFLOW_INSTALLATION, {
+      endpoint: "POST /api/workspaces/:id/infoflow/install/byo",
+    });
+  }
+
+  async deleteInfoFlowInstallation(
+    workspaceId: string,
+    installationId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/workspaces/${workspaceId}/infoflow/installations/${installationId}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async redeemInfoFlowBindingToken(
+    token: string,
+  ): Promise<RedeemInfoFlowBindingTokenResponse> {
+    const raw = await this.fetch<unknown>(`/api/infoflow/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    return parseWithFallback(
+      raw,
+      RedeemInfoFlowBindingTokenResponseSchema,
+      EMPTY_REDEEM_INFOFLOW_BINDING_TOKEN_RESPONSE,
+      { endpoint: "POST /api/infoflow/binding/redeem" },
+    );
+  }
+
   // WeCom smart-bot ("智能机器人" / aibot) integration. The bot dials a
   // WebSocket long connection to wss://openws.work.weixin.qq.com and stays
   // authenticated with (bot_id, secret); no public callback URL is required.

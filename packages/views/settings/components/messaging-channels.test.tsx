@@ -56,6 +56,7 @@ vi.mock("@multica/core/api", async (original) => ({
       "listSlackInstallations",
       "listDingTalkInstallations",
       "listWecomInstallations",
+      "listInfoFlowInstallations",
       "listTelegramInstallations",
       "listWeixinInstallations",
       "beginWeixinLogin",
@@ -64,11 +65,13 @@ vi.mock("@multica/core/api", async (original) => ({
       "registerSlackBYO",
       "registerDingTalkBYO",
       "registerWecomBYO",
+      "registerInfoFlowBYO",
       "registerTelegramBot",
       "deleteLarkInstallation",
       "deleteSlackInstallation",
       "deleteDingTalkInstallation",
       "deleteWecomInstallation",
+      "deleteInfoFlowInstallation",
       "deleteTelegramInstallation",
       "deleteWeixinInstallation",
       "listAgentDingTalkGroups",
@@ -127,6 +130,7 @@ beforeEach(() => {
     "listSlackInstallations",
     "listDingTalkInstallations",
     "listWecomInstallations",
+    "listInfoFlowInstallations",
     "listTelegramInstallations",
     "listWeixinInstallations",
   ] as const) {
@@ -349,7 +353,7 @@ describe("agent messaging channels", () => {
     expect(screen.queryByText("Telegram")).toBeNull();
   });
 
-  it.each(["lark", "slack", "dingtalk", "wecom", "telegram", "weixin"] as const)(
+  it.each(["lark", "slack", "dingtalk", "wecom", "infoflow", "telegram", "weixin"] as const)(
     "confirms %s disconnect and preserves the connection on failure",
     async (channel) => {
       if (channel === "weixin") state.role = "member";
@@ -358,6 +362,7 @@ describe("agent messaging channels", () => {
         slack: ["listSlackInstallations", "deleteSlackInstallation"],
         dingtalk: ["listDingTalkInstallations", "deleteDingTalkInstallation"],
         wecom: ["listWecomInstallations", "deleteWecomInstallation"],
+        infoflow: ["listInfoFlowInstallations", "deleteInfoFlowInstallation"],
         telegram: ["listTelegramInstallations", "deleteTelegramInstallation"],
         weixin: ["listWeixinInstallations", "deleteWeixinInstallation"],
       } as const;
@@ -397,6 +402,7 @@ const platformName = {
   slack: "Slack",
   dingtalk: "DingTalk",
   wecom: "WeCom",
+  infoflow: "InfoFlow",
   telegram: "Telegram",
 } as const;
 
@@ -666,7 +672,7 @@ describe("workspace overview", () => {
     );
     expect(state.replace).toHaveBeenCalledWith("/acme/settings?tab=channels");
     expect(screen.getByText("Who can connect")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(6);
+    expect(screen.getAllByRole("button", { name: "Connect" })).toHaveLength(7);
   });
 
   it("reports failed reads as unavailable and keeps a retry control", async () => {

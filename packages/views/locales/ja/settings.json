@@ -1355,6 +1355,18 @@
     "scan_error_rate_limited": "試行回数が多すぎます。数分待ってから再試行してください。",
     "byo_failed_toast": "WeCom ボットを接続できませんでした"
   },
+  "infoflow": {
+    "section_title": "InfoFlow（如流）",
+    "page_description": "InfoFlow（如流）でエージェントとチャットしたり、/issue で課題を作成できます。Bot は自身の WebSocket で接続するため、公開コールバック URL は不要です。",
+    "byo_app_key_label": "App Key",
+    "byo_app_secret_label": "App Secret",
+    "byo_conflict_same_workspace": "この InfoFlow アプリは、このワークスペースの別のエージェントに接続されています。先それを解除してから、ここで接続してください。",
+    "byo_conflict_archived_agent": "この InfoFlow アプリは、このワークスペースでアーカイブされたエージェントに接続されています。そのエージェントを復元するか、アプリの接続を解除してから接続してください。",
+    "byo_conflict_other_workspace": "この InfoFlow アプリは別の Multica ワークスペースに接続されています。先それを解除してから、ここで接続してください。",
+    "byo_install_failed": "InfoFlow Bot に接続できませんでした。InfoFlow 管理コンソールの App Key と App Secret を確認してから再試行してください。",
+    "byo_install_rejected": "App Key または App Secret がありません。InfoFlow 管理コンソールの両方の値を入力してください。",
+    "byo_not_configured": "このサーバーでは InfoFlow 統合が有効になっていません。"
+  },
   "telegram": {
     "section_title": "Telegram",
     "page_description": "Telegram でエージェントと対話し、/issue でタスクを作成できます。",

@@ -47,6 +47,7 @@ import { larkKeys } from "../lark/queries";
 import { slackKeys } from "../slack/queries";
 import { dingtalkKeys } from "../dingtalk/queries";
 import { wecomKeys } from "../wecom/queries";
+import { infoflowKeys } from "../infoflow/queries";
 import { telegramKeys } from "../telegram/queries";
 import {
   onIssueCreated,
@@ -1082,6 +1083,10 @@ export function useRealtimeSync(
       wecom_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
+      },
+      infoflow_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: infoflowKeys.installations(wsId) });
       },
       weixin_installation: () => {
         const wsId = getCurrentWsId();

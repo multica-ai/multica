@@ -68,8 +68,10 @@ function AgentChannelContact({
   const name =
     connection.channel === "wecom"
       ? connection.installation.bot_name
-      : (data?.bot_identities?.[installation.id]?.bot_name ??
-        getDingTalkBotIdentity(data?.groups ?? [], installation.id)?.bot_name);
+      : connection.channel === "infoflow"
+        ? connection.installation.bot_name
+        : (data?.bot_identities?.[installation.id]?.bot_name ??
+          getDingTalkBotIdentity(data?.groups ?? [], installation.id)?.bot_name);
   const href = channelChatLink(connection);
   return href ? (
     <Button variant="outline" size="sm" onClick={() => openExternal(href)}>
@@ -216,7 +218,9 @@ function AgentChannelRow({
       ? identity?.bot_name
       : connection.channel === "wecom"
         ? connection.installation.bot_name
-        : connection.channel === "telegram" &&
+        : connection.channel === "infoflow"
+          ? connection.installation.bot_name
+          : connection.channel === "telegram" &&
             connection.installation.bot_username
           ? `@${connection.installation.bot_username}`
           : undefined;
