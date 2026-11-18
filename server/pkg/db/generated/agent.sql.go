@@ -1662,7 +1662,19 @@ WHERE id = (
                         AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
                         AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
                 ))
-                OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+                OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
             )
             -- Queued private-runtime rows are claimable so the handler can
             -- settle an owner mismatch through the existing FailTask path
@@ -6842,7 +6854,19 @@ WHERE atq.runtime_id = $1
                     AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
                     AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
             ))
-            OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+            OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
         )
         AND (
             r.visibility = 'public'
@@ -6967,7 +6991,19 @@ WHERE atq.runtime_id = ANY($1::uuid[])
                     AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
                     AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
             ))
-            OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+            OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
         )
         AND (
             r.visibility = 'public'
@@ -9174,7 +9210,19 @@ WHERE id = (
                         AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
                         AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
                 ))
-                OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+                OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
             )
             AND (
                 r.visibility = 'public'
@@ -9185,7 +9233,19 @@ WHERE id = (
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
                         OR a.owner_id = ANY(r.shared_with)
-                        OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+                        OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
                     )
                 )
             )
@@ -9315,7 +9375,19 @@ WITH candidates AS MATERIALIZED (
                         AND atq.context->>'fixed_runtime_batch_retained_runtime_id' = atq.runtime_id::text
                         AND atq.context->>'fixed_runtime_batch_retained_task_id' = atq.id::text)
                 ))
-                OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+                OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
             )
             AND (
                 r.visibility = 'public'
@@ -9326,7 +9398,19 @@ WITH candidates AS MATERIALIZED (
                         OR a.owner_id IS NULL
                         OR r.owner_id = a.owner_id
                         OR a.owner_id = ANY(r.shared_with)
-                        OR (NOT a.share_runtime AND r.owner_id = atq.originator_user_id)
+                        OR (
+                    NOT a.share_runtime
+                    AND (
+                        EXISTS (
+                            SELECT 1
+                            FROM agent_user_runtime_config c
+                            WHERE c.agent_id = atq.agent_id
+                              AND c.runtime_id = atq.runtime_id
+                        )
+                        OR r.owner_id = atq.originator_user_id
+                        OR r.owner_id = a.owner_id
+                    )
+                )
                     )
                 )
             )
@@ -9627,16 +9711,31 @@ SET coalesced_comment_ids = (
         SELECT COALESCE(array_agg(DISTINCT e), '{}')
         FROM unnest(array_append(coalesced_comment_ids, $1::uuid)) AS e
         WHERE e IS NOT NULL
-    )
+    ),
+    -- A claim-receipt task cannot adopt a newly-arrived requester's runtime:
+    -- its dispatch payload is already built. Persist the per-comment requester
+    -- instead so completion reconciliation can apply the same takeover to the
+    -- bounded follow-up task.
+    context = CASE
+        WHEN $2::uuid IS NULL THEN context
+        ELSE COALESCE(context, '{}'::jsonb) || jsonb_build_object(
+            'planned_runtime_originators',
+            COALESCE(context->'planned_runtime_originators', '{}'::jsonb)
+                || jsonb_build_object(
+                    $1::text,
+                    to_jsonb($2::uuid)
+                )
+        )
+    END
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
-    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $2
-      AND t.agent_id = $3
+    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $3
+      AND t.agent_id = $4
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid)
       AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
       AND (
-          COALESCE($4::text, '') = ''
-          OR t.context->>'head_sha' = $4::text
+          COALESCE($5::text, '') = ''
+          OR t.context->>'head_sha' = $5::text
       )
     ORDER BY t.created_at DESC
     LIMIT 1
@@ -9646,10 +9745,11 @@ RETURNING id, coalesced_comment_ids
 `
 
 type RegisterPlannedCommentForActiveTaskParams struct {
-	CommentID pgtype.UUID `json:"comment_id"`
-	IssueID   pgtype.UUID `json:"issue_id"`
-	AgentID   pgtype.UUID `json:"agent_id"`
-	HeadSha   pgtype.Text `json:"head_sha"`
+	CommentID               pgtype.UUID `json:"comment_id"`
+	RuntimeOriginatorUserID pgtype.UUID `json:"runtime_originator_user_id"`
+	IssueID                 pgtype.UUID `json:"issue_id"`
+	AgentID                 pgtype.UUID `json:"agent_id"`
+	HeadSha                 pgtype.Text `json:"head_sha"`
 }
 
 type RegisterPlannedCommentForActiveTaskRow struct {
@@ -9686,6 +9786,7 @@ type RegisterPlannedCommentForActiveTaskRow struct {
 func (q *Queries) RegisterPlannedCommentForActiveTask(ctx context.Context, arg RegisterPlannedCommentForActiveTaskParams) (RegisterPlannedCommentForActiveTaskRow, error) {
 	row := q.db.QueryRow(ctx, registerPlannedCommentForActiveTask,
 		arg.CommentID,
+		arg.RuntimeOriginatorUserID,
 		arg.IssueID,
 		arg.AgentID,
 		arg.HeadSha,
