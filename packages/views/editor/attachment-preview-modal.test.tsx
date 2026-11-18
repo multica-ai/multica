@@ -4,6 +4,7 @@ import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-
 import { useState, type ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
 import { ApiError } from "@multica/core/api/client";
+import { configStore } from "@multica/core/config";
 
 const { openExternalMock, isDesktopShellMock, copyImageMock, copyTextMock, toastMock } =
   vi.hoisted(() => ({
@@ -187,6 +188,7 @@ vi.mock("../i18n", () => ({
 import {
   AttachmentPreviewModal,
   AttachmentPreviewStandalone,
+  PreviewImagePrefetch,
   useAttachmentPreview,
 } from "./attachment-preview-modal";
 import { withFragmentNavShim } from "./utils/iframe-fragment-nav";
@@ -1936,11 +1938,15 @@ it.each(["pending", "denied"])(
         </>
       );
     }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     try {
-      render(<Harness />);
+      rtlRender(<QueryClientProvider client={client}><Harness /></QueryClientProvider>);
       await screen.findByRole("img", { name: a.filename });
       fireEvent.click(screen.getByText("Select B"));
       await waitFor(() => expect(getAttachmentMock).toHaveBeenCalledWith(b.id));
+      client.setQueryData(["attachment-inline-resign", a.id], a, {
+        updatedAt: Date.now() - 6 * 60 * 1000,
+      });
       fireEvent.click(screen.getByText("Select A"));
       await waitFor(() => expect(aCalls).toBe(2));
       if (phase === "pending") {
@@ -1957,6 +1963,7 @@ it.each(["pending", "denied"])(
         expect(copyImageMock).not.toHaveBeenCalled();
       }
     } finally {
+      client.clear();
       delete (HTMLImageElement.prototype as { decode?: unknown }).decode;
     }
   },
@@ -1989,4 +1996,68 @@ it("refreshes a pasted protected image against its owning workspace", async () =
   ).toBe(fresh.download_url);
   expect(getAttachmentForDownloadMock).toHaveBeenCalledWith(id);
   expect(getAttachmentMock).not.toHaveBeenCalled();
+});
+
+describe("image viewer prefetch reuse", () => {
+  it.each(["full", "url"] as const)(
+    "uses the prefetched signature without another metadata request for a %s source",
+    async (kind) => {
+      const att = makeAttachment({
+        id: "11111111-2222-3333-4444-555555555555",
+        filename: "neighbor.png",
+        content_type: "image/png",
+        download_url: "https://cdn.example.test/neighbor.png?Signature=expired",
+      });
+      const fresh = { ...att, download_url: "https://cdn.example.test/neighbor.png?Signature=prefetched" };
+      getAttachmentMock.mockResolvedValue(fresh);
+      getAttachmentForDownloadMock.mockResolvedValue(fresh);
+      const source = kind === "full"
+        ? { kind, attachment: att }
+        : { kind, url: `/api/attachments/${att.id}/download`, filename: att.filename };
+      const src = vi.spyOn(HTMLImageElement.prototype, "src", "set");
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const view = rtlRender(
+        <QueryClientProvider client={client}>
+          <PreviewImagePrefetch source={source} />
+        </QueryClientProvider>,
+      );
+      await waitFor(() => expect(src).toHaveBeenCalledWith(fresh.download_url));
+      expect(src).not.toHaveBeenCalledWith(att.download_url);
+      view.rerender(
+        <QueryClientProvider client={client}>
+          <AttachmentPreviewModal source={source} open onClose={() => {}} />
+        </QueryClientProvider>,
+      );
+      expect((await screen.findByRole("img", { name: att.filename })).getAttribute("src"))
+        .toBe(fresh.download_url);
+      expect(kind === "full" ? getAttachmentMock : getAttachmentForDownloadMock).toHaveBeenCalledTimes(1);
+      expect(kind === "full" ? getAttachmentForDownloadMock : getAttachmentMock).not.toHaveBeenCalled();
+      view.unmount();
+      client.clear();
+    },
+  );
+});
+
+it("keeps a bare CDN image from another workspace loadable without workspace metadata", async () => {
+  const cdnDomain = configStore.getState().cdnDomain;
+  configStore.setState({ cdnDomain: "cdn.example.test" });
+  const url = "https://cdn.example.test/workspaces/aaaaaaaa-2222-3333-4444-555555555555/11111111-2222-3333-4444-555555555555.png";
+  const onImageError = vi.fn();
+  try {
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "url", url, filename: "cross-workspace.png" }}
+        open
+        onClose={() => {}}
+        onImageError={onImageError}
+      />,
+    );
+    expect((await screen.findByRole("img", { name: "cross-workspace.png" })).getAttribute("src")).toBe(url);
+    expect(getAttachmentMock).not.toHaveBeenCalled();
+    expect(getAttachmentForDownloadMock).not.toHaveBeenCalled();
+    expect(getAttachmentBlobMock).not.toHaveBeenCalled();
+    expect(onImageError).not.toHaveBeenCalled();
+  } finally {
+    configStore.setState({ cdnDomain });
+  }
 });

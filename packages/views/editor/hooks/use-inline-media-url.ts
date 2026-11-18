@@ -24,6 +24,9 @@ import {
 // server/internal/handler/file.go) so a re-render never serves an expired
 // signature from the query cache.
 const RESIGN_STALE_MS = 20 * 60 * 1000;
+// Neighbour prefetch and the viewer must use the same signature to reuse
+// browser-cached bytes, while refreshing well before the default 30-min TTL.
+const PREVIEW_RESIGN_STALE_MS = 5 * 60 * 1000;
 
 // How long fetched image bytes stay in the query cache after the last <img>
 // using them unmounts. The bytes themselves never go stale (an attachment id
@@ -80,7 +83,8 @@ export function __resetInlineMediaBlobCacheForTests(): void {
 // picked URL, which this client may be unable to load. A caller that treats a
 // load failure as meaningful (the viewer skips broken images) waits it out
 // instead of rendering it.
-// Viewers opt into reauthentication on mount; inline thumbnails stay lazy.
+// Viewers and neighbour prefetch reauthenticate stale metadata on mount;
+// inline thumbnails stay lazy.
 export function useResignedInlineMedia(
   attachmentId: string | undefined,
   rawPickedUrl: string,
@@ -124,12 +128,12 @@ export function useResignedInlineMedia(
       ? api.getAttachmentForDownload(resignAttachmentId as string)
       : api.getAttachment(resignAttachmentId as string),
     enabled: needsResign && !currentMetadata,
-    staleTime: refreshOnMount ? 0 : RESIGN_STALE_MS,
+    staleTime: refreshOnMount ? PREVIEW_RESIGN_STALE_MS : RESIGN_STALE_MS,
     gcTime: RESIGN_STALE_MS,
     ...(refreshOnMount
       ? {
           retry: retryAttachmentPreview,
-          refetchOnMount: "always" as const,
+          refetchOnMount: true,
           refetchOnWindowFocus: recoverFailedPreview,
           refetchOnReconnect: recoverFailedPreview,
         }

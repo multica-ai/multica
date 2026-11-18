@@ -158,7 +158,43 @@ describe("registered image viewer access", () => {
     expect(getAttachment).toHaveBeenCalledWith(id);
     expect(getAttachmentBlob).not.toHaveBeenCalled();
   });
-  it("waits for current authentication instead of reusing metadata cached on an earlier open", async () => {
+  it("reuses a recent signature on reopen and refreshes after the short cache window or signature expiry", async () => {
+    vi.useFakeTimers();
+    getAttachment.mockImplementation(async () => ({
+      id,
+      download_url: `https://cdn.example.test/design.png?Signature=${getAttachment.mock.calls.length}`,
+    }));
+    const { client, wrapper } = setup();
+    const first = renderHook(useOpenedImage, { wrapper });
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    expect(first.result.current.url).toContain("Signature=1");
+    first.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(60 * 1000); });
+    const recent = renderHook(useOpenedImage, { wrapper });
+    expect(recent.result.current.pending).toBe(false);
+    expect(recent.result.current.url).toContain("Signature=1");
+    expect(getAttachment).toHaveBeenCalledTimes(1);
+    recent.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60 * 1000); });
+    const stale = renderHook(useOpenedImage, { wrapper });
+    expect(stale.result.current.pending).toBe(true);
+    expect(stale.result.current.url).toBe("");
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    expect(stale.result.current.url).toContain("Signature=2");
+    expect(getAttachment).toHaveBeenCalledTimes(2);
+    // Keep the cached entry alive beyond the default 30-minute signature TTL.
+    await act(async () => { await vi.advanceTimersByTimeAsync(31 * 60 * 1000); });
+    stale.unmount();
+    const expired = renderHook(useOpenedImage, { wrapper });
+    expect(expired.result.current.url).toBe("");
+    expect(expired.result.current.pending).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10); });
+    expect(expired.result.current.url).toContain("Signature=3");
+    expect(getAttachment).toHaveBeenCalledTimes(3);
+    expired.unmount();
+    client.clear();
+  });
+  it("waits for current authentication when metadata from an earlier open is stale", async () => {
     getAttachment.mockResolvedValueOnce({
       id,
       download_url: "https://cdn.example.test/first.png?Signature=first",
@@ -169,6 +205,10 @@ describe("registered image viewer access", () => {
       expect(first.result.current.url).toContain("Signature=first"),
     );
     first.unmount();
+    client.setQueryData(["attachment-inline-resign", id], {
+      id,
+      download_url: "https://cdn.example.test/first.png?Signature=first",
+    }, { updatedAt: Date.now() - 6 * 60 * 1000 });
     let finish!: (value: { id: string; download_url: string }) => void;
     getAttachment.mockImplementationOnce(
       () =>
@@ -198,7 +238,7 @@ describe("registered image viewer access", () => {
       client.setQueryData(["attachment-inline-resign", id], {
         id,
         download_url: "https://cdn.example.test/previous.png?Signature=private",
-      });
+      }, { updatedAt: Date.now() - 6 * 60 * 1000 });
       getAttachment.mockRejectedValue(
         new ApiError("not available", status, "Denied"),
       );
@@ -300,7 +340,7 @@ describe("fresh image access on proxy storage", () => {
     client.setQueryData(["attachment-inline-resign", other], {
       id: other,
       download_url: "https://cdn.example.test/other.png?Signature=old",
-    });
+    }, { updatedAt: Date.now() - 6 * 60 * 1000 });
     let finish!: (value: { id: string; download_url: string }) => void;
     getAttachment.mockImplementation((selected: string) =>
       selected === id
@@ -337,13 +377,17 @@ describe("fresh image access on proxy storage", () => {
 });
 
 describe("image viewer current authorization regressions", () => {
-  it("waits when an offline reopen pauses the metadata refresh", () => {
+  it("waits for an offline stale refresh and continues after reconnecting", async () => {
     onlineManager.setOnline(false);
+    getAttachment.mockResolvedValueOnce({
+      id,
+      download_url: "https://cdn.example.test/private.png?Signature=reconnected",
+    });
     const { client, wrapper } = setup();
     client.setQueryData(["attachment-inline-resign", id], {
       id,
       download_url: "https://cdn.example.test/private.png?Signature=old",
-    });
+    }, { updatedAt: Date.now() - 6 * 60 * 1000 });
     const hook = renderHook(
       () => useResignedInlineMedia(id, stable, true, { refreshOnMount: true }),
       { wrapper },
@@ -351,6 +395,10 @@ describe("image viewer current authorization regressions", () => {
     expect(hook.result.current.url).toBe("");
     expect(hook.result.current.pending).toBe(true);
     expect(getAttachment).not.toHaveBeenCalled();
+    await act(async () => { onlineManager.setOnline(true); });
+    await waitFor(() => expect(hook.result.current.url).toContain("Signature=reconnected"));
+    expect(hook.result.current.pending).toBe(false);
+    expect(getAttachment).toHaveBeenCalledTimes(1);
   });
 
   it("uses the owning-workspace metadata endpoint for a pasted download link", async () => {

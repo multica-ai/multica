@@ -415,6 +415,12 @@ export function PreviewImagePrefetch({ source }: { source: PreviewSource }) {
     state.attachmentId ?? undefined,
     state.mediaUrl,
     true,
+    {
+      refreshOnMount: true,
+      metadataSource: source.kind === "url" && attachmentIdFromDownloadURL(source.url)
+        ? "markdown-link"
+        : "workspace",
+    },
   );
 
   useEffect(() => {
@@ -804,13 +810,12 @@ function PreviewPanel({
     htmlLocation,
   };
 
-  // Cached attachment records can outlive their signed URLs. Revalidate on
-  // opening the viewer; external images without an identity keep their URL.
+  // Cached attachment records can outlive their signed URLs. Reuse recent
+  // prefetch metadata and revalidate stale entries when opening the viewer.
+  // Bare CDN links keep their native URL and cookie-based access.
   const cdnDomain = useConfigStore((s) => s.cdnDomain);
   const resigned = useResignedInlineMedia(
-    kind === "image"
-      ? state.attachmentId ?? attachmentIdFromStorageURL(state.mediaUrl, cdnDomain)
-      : undefined,
+    kind === "image" ? state.attachmentId ?? undefined : undefined,
     state.mediaUrl,
     kind === "image",
     {
