@@ -247,9 +247,9 @@ multica chat wakeup create --title "Check back in two hours" \
 multica chat wakeup list
 ```
 
-하나의 `--until-*` 조건, `--at` / `--after`, `--every` 중 하나를 선택하세요. 생성과 업데이트에는 `--title`과 `--instruction`(또는 `--instruction-file`)이 필요합니다. `update`는 설정을 교체하고 상대 기한을 업데이트 시점부터 다시 계산합니다. 조건 대기와 확인은 기본 24시간이며 `--expires-in` 또는 `--expires-at`으로 최대 7일까지 설정합니다. 일회성 알림은 최대 30일 뒤까지이며 만료 플래그를 받지 않습니다. 확인 간격은 최소 10분이고 웨이크업 하나당 최대 100회입니다.
+하나의 `--until-*` 조건, `--at` / `--after`, `--every` 중 하나를 선택하세요. 생성과 업데이트에는 `--title`과 `--instruction`(또는 `--instruction-file`)이 필요합니다. `update`는 설정을 교체하고 상대 기한을 업데이트 시점부터 다시 계산합니다. 단, 조건·알림·주기적 확인 사이에서 종류를 바꿀 수는 없습니다. 조건 대기와 확인은 기본 24시간이며 `--expires-in` 또는 `--expires-at`으로 최대 7일까지 설정합니다. 일회성 알림은 최대 30일 뒤까지이며 만료 플래그를 받지 않습니다. 확인 간격은 최소 10분이며, 기한까지 확인 횟수는 최대 100회입니다. `--every 10m`에 기본 24시간을 쓰면 144회가 되어 거부되므로 간격을 늘리거나 `--expires-in 16h`처럼 기한을 앞당기세요.
 
-조건은 `--until-issue`와 `--state` 또는 `--status`, `--until-children-done`과 선택 사항인 `--stage`, `--until-pr`, `--until-run`, `--until-reply`와 선택 사항인 `--from <user-id>`를 지원합니다. PR 조건은 이 워크스페이스에 미러링된 GitHub PR을 `owner/repo#N[:merged|closed|checks]` 형식으로 지정합니다. `checks`는 현재 head의 검사가 성공 또는 실패로 끝날 때까지 기다립니다. 생성 시 이미 끝난 검사 결과는 기준으로 기록되며 그 결과만으로 에이전트를 즉시 깨우지는 않습니다.
+조건은 `--until-issue`와 `--state` 또는 `--status`, `--until-children-done`과 선택 사항인 `--stage`, `--until-pr`, `--until-run`, `--until-reply`와 선택 사항인 `--from <user-id>`를 지원합니다. PR 조건은 이 워크스페이스에 미러링된 GitHub PR을 `owner/repo#N[:merged|closed|checks]` 형식으로 지정합니다. `checks`는 현재 head의 검사가 성공 또는 실패로 끝날 때까지 기다립니다. `checks` 조건은 서버가 GitHub에서 CI 상태를 읽을 수 있을 때만 만들 수 있습니다. 자체 호스팅 서버에는 `GITHUB_APP_ID`와 `GITHUB_APP_PRIVATE_KEY`가 필요합니다([GitHub 연동](/github-integration) 참고). 생성 시 이미 끝난 검사 결과는 기준으로 기록되며 그 결과만으로 에이전트를 즉시 깨우지는 않습니다.
 
 `list`, `get <id>`로 조회하고 `cancel <id>`로 취소하세요. 주기적 확인 실행에서는 `checkin <id> --note "..."`으로 답변 없이 상황을 기록할 수 있습니다. 목표를 달성하면 `finish <id>`로 확인을 끝냅니다. 기한에 도달한 마지막 실행은 반드시 보고해야 하며 조용히 체크인할 수 없습니다.
 
