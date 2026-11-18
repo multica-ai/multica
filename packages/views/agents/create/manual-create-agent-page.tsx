@@ -67,13 +67,19 @@ export function ManualCreateAgentPage() {
     }
   }, [needsRuntime, navigation, paths, squadId]);
 
-  const form = useCreateAgentForm({
-    runtimeSeed: { ready: !needsRuntime, runtimeId: runtimeParam ?? "" },
-  });
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const duplicateAgent = duplicateId
     ? agents.find((agent) => agent.id === duplicateId) ?? null
     : null;
+  const runtimeStrategy = useRuntimeStrategy(duplicateAgent);
+  const smartDraft = runtimeStrategy.shareRuntime === false;
+  // A machine-less member picks a bare recommended CLI; it lives beside the
+  // form because the draft's runtime fields stay machine-shaped.
+  const [recommendedCli, setRecommendedCli] = useState("");
+  const form = useCreateAgentForm({
+    runtimeSeed: { ready: !needsRuntime, runtimeId: runtimeParam ?? "" },
+    runtimeOptional: smartDraft,
+  });
 
   // A new agent has no member list yet, so a locked plan is "unavailable".
   const invocationMembers = usePaidFeatureAccess(wsId, "agent_invocation_members", {
@@ -119,13 +125,11 @@ export function ManualCreateAgentPage() {
     runtimeId: runtimeParam,
   });
 
-  const runtimeStrategy = useRuntimeStrategy(duplicateAgent);
-
   const submit = useCreateAgentSubmit({
     draft: form.draft,
     runtimeId: form.selectedRuntime?.id ?? null,
-    runtimeCli: form.selectedRuntime?.provider,
-    runtimeProvider: form.selectedRuntime?.provider,
+    runtimeCli: form.selectedRuntime?.provider ?? recommendedCli,
+    runtimeProvider: form.selectedRuntime?.provider ?? recommendedCli,
     squadId,
     duplicateSource: duplicateAgent,
     shareRuntime: runtimeStrategy.shareRuntime,
@@ -273,6 +277,7 @@ export function ManualCreateAgentPage() {
             onShareRuntimeChange={
               runtimeStrategy.setShareRuntime
             }
+            onRecommendedCliSelect={setRecommendedCli}
             runtimeSummary={
               duplicateId ? undefined : (
                 // Under the smart runtime policy the panel

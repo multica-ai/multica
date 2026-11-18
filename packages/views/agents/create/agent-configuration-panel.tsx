@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
-import {useQuery} from "@tanstack/react-query";
-import {runtimeModelsOptions} from "@multica/core/runtimes";
-import {findModelCapabilityEntry,thinkingLevelRequiredForProvider} from "../components/inspector/model-capability";
+import { useQuery } from "@tanstack/react-query";
+import { runtimeModelsOptions } from "@multica/core/runtimes";
+import {
+  findModelCapabilityEntry,
+  thinkingLevelRequiredForProvider,
+} from "../components/inspector/model-capability";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
   applyDraftModelChange,
@@ -68,6 +71,9 @@ export type AgentConfigurationPanelProps = {
   /** Replaces the runtime picker when the runtime was chosen in an earlier
    *  step and changing it means going back there. */
   runtimeSummary?: ReactNode;
+  /** Receives a bare recommended CLI when the member has no local runtime to
+   *  host model discovery; absent means the caller cannot accept one. */
+  onRecommendedCliSelect?: (cli: string) => void;
 };
 
 export function AgentConfigurationPanel({
@@ -87,6 +93,7 @@ export function AgentConfigurationPanel({
   shareRuntime = false,
   onShareRuntimeChange,
   runtimeSummary,
+  onRecommendedCliSelect,
 }: AgentConfigurationPanelProps) {
   const { t } = useT("agents");
   const conversationStartersSupported = useConfigStore(
@@ -129,9 +136,7 @@ export function AgentConfigurationPanel({
 
   return (
     <div className={cn("space-y-8", compact && "space-y-6")}>
-      <SettingsSection
-        title={t(($) => $.creation_studio.sections.identity)}
-      >
+      <SettingsSection title={t(($) => $.creation_studio.sections.identity)}>
         <SettingsCard>
           <DraftFieldRow
             compact={compact}
@@ -199,9 +204,7 @@ export function AgentConfigurationPanel({
         </SettingsCard>
       </SettingsSection>
 
-      <SettingsSection
-        title={t(($) => $.creation_studio.sections.behavior)}
-      >
+      <SettingsSection title={t(($) => $.creation_studio.sections.behavior)}>
         <SettingsCard>
           <DraftFieldRow
             compact
@@ -255,22 +258,23 @@ export function AgentConfigurationPanel({
           >
             <div className="min-w-0">
               {runtimeSummary ?? (
-              <RuntimePicker
-                runtimes={runtimes}
-                runtimesLoading={runtimesLoading}
-                members={members}
-                currentUserId={currentUserId}
-                selectedRuntimeId={draft.runtimeId}
-                onSelect={handleRuntimeSelect}
-                disabled={runtimeLocked}
-                cliOnly={showRecommendedLabels}
-                label={
-                  showRecommendedLabels
-                    ? t(($) => $.create_dialog.recommended_runtime_label)
-                    : undefined
-                }
-                autoSelect={!onRuntimeSelect}
-              />
+                <RuntimePicker
+                  runtimes={runtimes}
+                  runtimesLoading={runtimesLoading}
+                  members={members}
+                  currentUserId={currentUserId}
+                  selectedRuntimeId={draft.runtimeId}
+                  onSelect={handleRuntimeSelect}
+                  disabled={runtimeLocked}
+                  cliOnly={showRecommendedLabels}
+                  onSelectCli={onRecommendedCliSelect}
+                  label={
+                    showRecommendedLabels
+                      ? t(($) => $.create_dialog.recommended_runtime_label)
+                      : undefined
+                  }
+                  autoSelect={!onRuntimeSelect}
+                />
               )}
               {/* A silently greyed-out picker is the worst version of this: the
                   user reaches for it exactly when the current runtime has gone
@@ -292,7 +296,9 @@ export function AgentConfigurationPanel({
                 runtimeId={selectedRuntime?.id ?? null}
                 runtimeOnline={selectedRuntime?.status === "online"}
                 value={draft.model}
-                onChange={(value) => onChange(applyDraftModelChange(draft, value))}
+                onChange={(value) =>
+                  onChange(applyDraftModelChange(draft, value))
+                }
                 onAutomaticChange={(value) =>
                   onAutomaticChange(applyDraftModelChange(draft, value))
                 }
@@ -321,9 +327,7 @@ export function AgentConfigurationPanel({
         </SettingsCard>
       </SettingsSection>
 
-      <SettingsSection
-        title={t(($) => $.creation_studio.sections.access)}
-      >
+      <SettingsSection title={t(($) => $.creation_studio.sections.access)}>
         <SettingsCard>
           <div
             className="space-y-1 p-2"
@@ -502,14 +506,40 @@ export function AgentExecutionOverrides({
 }) {
   const { t } = useT("agents");
   const runtimeOnline = runtime?.status === "online";
-  const modelsQuery = useQuery(runtimeModelsOptions(runtimeOnline && thinkingLevelRequiredForProvider(runtime?.provider ?? "") ? runtime?.id ?? null : null));
+  const modelsQuery = useQuery(
+    runtimeModelsOptions(
+      runtimeOnline && thinkingLevelRequiredForProvider(runtime?.provider ?? "")
+        ? (runtime?.id ?? null)
+        : null,
+    ),
+  );
   useEffect(() => {
-    if (disabled || !thinkingLevelRequiredForProvider(runtime?.provider ?? "")) return;
-    if (draft.thinkingLevel || !draft.model || !modelsQuery.isSuccess || !modelsQuery.data?.supported) return;
-    const entry = findModelCapabilityEntry(modelsQuery.data.models, draft.model, runtime?.provider ?? "");
-    const level = entry?.thinking?.default_level ?? entry?.thinking?.supported_levels[0]?.value;
+    if (disabled || !thinkingLevelRequiredForProvider(runtime?.provider ?? ""))
+      return;
+    if (
+      draft.thinkingLevel ||
+      !draft.model ||
+      !modelsQuery.isSuccess ||
+      !modelsQuery.data?.supported
+    )
+      return;
+    const entry = findModelCapabilityEntry(
+      modelsQuery.data.models,
+      draft.model,
+      runtime?.provider ?? "",
+    );
+    const level =
+      entry?.thinking?.default_level ??
+      entry?.thinking?.supported_levels[0]?.value;
     if (level) onChange({ ...draft, thinkingLevel: level });
-  }, [disabled, draft, modelsQuery.data, modelsQuery.isSuccess, onChange, runtime?.provider]);
+  }, [
+    disabled,
+    draft,
+    modelsQuery.data,
+    modelsQuery.isSuccess,
+    onChange,
+    runtime?.provider,
+  ]);
 
   return (
     <>

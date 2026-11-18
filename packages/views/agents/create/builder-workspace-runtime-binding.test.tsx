@@ -115,10 +115,19 @@ describe("unbound Builder runtime recovery", () => {
     expect(view.trigger()).toBeEnabled();
   });
 
-  it("keeps the empty picker state when there are no runtimes", () => {
+  it("offers the fallback CLI catalog when there are no runtimes", () => {
     const view = mount([]);
     expect(view.trigger()).toHaveTextContent("No runtime available");
-    expect(view.trigger()).toBeDisabled();
+    // The smart-runtime picker recommends a CLI, not a machine, so an empty
+    // runtime list still opens and offers the common harnesses.
+    expect(view.trigger()).toBeEnabled();
+    expect(apiMocks.switchRuntime).not.toHaveBeenCalled();
+
+    fireEvent.click(view.trigger());
+    for (const cli of ["Claude", "Codex", "Cursor", "Opencode"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`^${cli}`) }))
+        .toBeInTheDocument();
+    }
     expect(apiMocks.switchRuntime).not.toHaveBeenCalled();
   });
 });

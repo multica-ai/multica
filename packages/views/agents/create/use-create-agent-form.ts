@@ -77,7 +77,11 @@ export function useCreateAgentForm(options?: {
    * MUL-5163 presented runtime A while every message ran on B.
    */
   runtimeSeed?: RuntimeSeed;
+  /** True for a smart-runtime draft: the recommended CLI replaces the machine,
+   *  so the create button must not wait for a local runtime to exist. */
+  runtimeOptional?: boolean;
 }): CreateAgentForm {
+  const { runtimeOptional = false } = options ?? {};
   const wsId = useWorkspaceId();
   const currentUser = useAuthStore((state) => state.user);
   const currentUserId = currentUser?.id ?? null;
@@ -167,9 +171,10 @@ export function useCreateAgentForm(options?: {
     workspaceSkills,
     currentUserId,
     draftReady:
-      selectedRuntime != null &&
-      isRuntimeUsableForUser(selectedRuntime, currentUserId) &&
-      (selectedRuntime.provider !== "qoder_cloud" || !!draft.qoderAgentId) &&
+      (runtimeOptional ||
+        (selectedRuntime != null &&
+          isRuntimeUsableForUser(selectedRuntime, currentUserId) &&
+          (selectedRuntime.provider !== "qoder_cloud" || !!draft.qoderAgentId))) &&
       isDraftDescriptionWithinLimit(draft.description) &&
       !accessInvalid &&
       !conversationStartersInvalid,

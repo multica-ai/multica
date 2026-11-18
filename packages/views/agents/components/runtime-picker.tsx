@@ -11,6 +11,7 @@ import {
 import {
   isRuntimeUsableForUser,
   providerDisplayName,
+  RECOMMENDED_CLI_OPTIONS,
   runtimeDisplayName,
 } from "@multica/core/runtimes";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
@@ -43,6 +44,7 @@ export function RuntimePicker({
   selectedRuntimeId,
   label,
   onSelect,
+  onSelectCli,
   disabled = false,
   cliOnly = false,
   autoSelect = true,
@@ -54,6 +56,9 @@ export function RuntimePicker({
   selectedRuntimeId: string;
   label?: string;
   onSelect: (id: string) => void;
+  /** Selects a bare CLI when no local runtime exists to host model discovery
+   *  (smart-runtime recommendation for a machine-less member). */
+  onSelectCli?: (cli: string) => void;
   /** Blocks opening the picker while the selection cannot be honoured yet
    *  (e.g. a builder reply or a runtime rebind is in flight). */
   disabled?: boolean;
@@ -98,7 +103,16 @@ export function RuntimePicker({
   const selectedRuntime =
     runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
   const selectedCli = selectedRuntime?.provider?.trim().toLowerCase() ?? "";
-  const clis = useMemo(() => uniqueRuntimeClis(runtimes), [runtimes]);
+  const knownClis = useMemo(() => uniqueRuntimeClis(runtimes), [runtimes]);
+  const clis = useMemo(
+    () =>
+      knownClis.length > 0
+        ? knownClis
+        : cliOnly
+          ? [...RECOMMENDED_CLI_OPTIONS]
+          : [],
+    [knownClis, cliOnly],
+  );
 
   // With autoSelect, seed the parent's selection when it's empty
   // — first mount with no template runtime, runtimes arriving later over
@@ -174,7 +188,9 @@ export function RuntimePicker({
         }}
       >
         <PopoverTrigger
-          disabled={disabled || (runtimes.length === 0 && !runtimesLoading)}
+          disabled={
+            disabled || (!cliOnly && runtimes.length === 0 && !runtimesLoading)
+          }
           className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
         >
           {runtimesLoading ? (
@@ -253,10 +269,14 @@ export function RuntimePicker({
                     <button
                       key={cli}
                       type="button"
-                      disabled={!catalog}
                       onClick={() => {
-                        if (!catalog) return;
-                        onSelect(catalog.id);
+                        if (catalog) {
+                          onSelect(catalog.id);
+                        } else if (onSelectCli) {
+                          onSelectCli(cli);
+                        } else {
+                          return;
+                        }
                         setOpen(false);
                       }}
                       className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-body transition-colors ${

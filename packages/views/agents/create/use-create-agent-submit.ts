@@ -82,15 +82,17 @@ export function useCreateAgentSubmit(options: {
   } = options;
 
   const create = async () => {
-    if (!runtimeId || creating) return;
+    // A smart draft carries a recommended CLI instead of a machine, so an
+    // empty runtimeId is a valid submission for it — and only for it.
+    if ((!runtimeId && shareRuntime !== false) || creating) return;
     setCreating(true);
     setNameError(null);
     setFormError(null);
     try {
       const request = buildCreateAgentRequest({
         draft,
-        runtimeId,
-        runtimeCli: shareRuntime === false ? runtimeCli : undefined,
+        runtimeId: runtimeId ?? '',
+        runtimeCli: shareRuntime === false ? (runtimeCli ?? undefined) : undefined,
         runtimeProvider,
         template,
         duplicateSource,
