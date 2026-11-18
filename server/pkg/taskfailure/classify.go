@@ -78,8 +78,10 @@ func isTokenRateLimit(lower string) bool {
 // Shared by Classify and NormalizeDaemonReason, like isUsageLimit403, so new
 // and old daemons land on the same reason.
 func isTokenQuotaRejection(lower string) bool {
+	// A request larger than the entire TPM allowance cannot succeed after the
+	// quota resets. Preserve its existing resume-unsafe overflow handling.
 	return strings.Contains(lower, "token") && strings.Contains(lower, "limit") &&
-		isTokenRateLimit(lower)
+		isTokenRateLimit(lower) && !strings.Contains(lower, "request too large")
 }
 
 // explicitContextOverflow reports wording that names the context window or the

@@ -716,3 +716,30 @@ func TestNormalizeDaemonReasonUpgradesTokenQuota(t *testing.T) {
 		t.Errorf("ordinary token overflow changed to %q", got)
 	}
 }
+
+func TestTokenQuotaRequestSize(t *testing.T) {
+	t.Parallel()
+
+	const oversized = "Request too large for gpt-4o on tokens per min (TPM): Limit 30000, Requested 45000. The input or output tokens must be reduced in order to run successfully."
+	cases := []struct {
+		name string
+		in   string
+		want Reason
+	}{
+		{"Azure token rate limit without per-minute wording", "rate_limit_exceeded: Your requests to gpt-6.1-sol for gpt-6.1-sol in eastus2 have exceeded token rate limit.", ReasonAgentProviderCapacityOrRateLimit},
+		{"temporary TPM exhaustion", "Rate limit reached for gpt-4o on tokens per min (TPM): Limit 30000, Used 29000, Requested 2000. Please try again in 2s.", ReasonAgentProviderCapacityOrRateLimit},
+		{"single request exceeds TPM allowance", oversized, ReasonAgentContextOverflow},
+		{"single request exceeds TPM allowance with HTTP wrapper", "API Error: 429 " + oversized, ReasonAgentContextOverflow},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := Classify(tc.in); got != tc.want {
+				t.Errorf("Classify(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if got := NormalizeDaemonReason(string(ReasonAgentContextOverflow), tc.in); got != tc.want {
+				t.Errorf("NormalizeDaemonReason(context_overflow, %q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
