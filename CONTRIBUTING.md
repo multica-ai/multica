@@ -593,6 +593,14 @@ make migrate-down
 
 These generic targets require a valid env file in the current directory.
 
+`make test` prepares and migrates the database before running the Go tests. In a worktree without `.env`, `make` automatically selects `.env.worktree`; you can also select it explicitly with `make test ENV_FILE=.env.worktree`.
+
+Before `make test`, `make check`, or `make check-worktree`, stop any development API using the same database so its background workers cannot pick up test jobs. Use the stop command that matches how you started it:
+
+- `make up` → `make down C=api`.
+- `make start` / `make dev` → `make stop`; `make start-worktree` → `make stop-worktree`.
+- `make server` → press Ctrl-C in its terminal.
+
 ### Dev Toolbar
 
 Set `VITE_DEV_TOOLBAR=1` to pin a status bar to the bottom of the Web and Desktop dev builds. It shows the client, backend host, workspace, your role, and route, plus live JS heap, last navigation time, main-thread long-task share, in-flight requests, and WebSocket state. Production builds never render it.
