@@ -5,7 +5,7 @@ import { Lock, UserMinus } from "@multica/ui/icons";
 import type { Agent, IssueAssigneeType, MemberWithUser, Squad, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
-import { isAgentRuntimeBound } from "@multica/core/agents";
+import { useRecentAgents } from "@multica/core/agents";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -23,6 +23,10 @@ import {
 } from "./property-picker";
 import { useT } from "../../../i18n";
 import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
+import { SmartRuntimeAgentBadge } from "../../../agents/components/agent-runtime-hover";
+import { isAgentRuntimeBound } from "@multica/core/agents";
+import { useRecentAgentRecordError } from "../../../common/use-recent-agent-record-error";
+import { RecentAgentLoadError } from "../../../common/recent-agent-load-error";
 
 /**
  * Legacy boolean shape kept around for callers (e.g. `use-issue-actions.ts`)
@@ -117,7 +121,7 @@ function AssigneePickerImpl({
   const open = controlledOpen ?? internalOpen;
   const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const [filter, setFilter] = useState("");
-  const choices = useAssigneeChoices(filter);
+  const choices = useAssigneeChoices(filter, { open });
   const { getActorName } = useActorName();
 
   const triggerLabel =
@@ -207,6 +211,7 @@ export function AssigneePickerPanel({
   );
 }
 
+<<<<<<< HEAD
 /**
  * Records a manual pick in this device's per-user, per-workspace queue that
  * ranks the picker. Exported for the create-issue dialog, which records only
@@ -222,16 +227,47 @@ export function useRecordAssigneePick() {
 }
 
 function useAssigneeChoices(filter: string) {
+=======
+function useAssigneeChoices(filter: string, options?: { open?: boolean }) {
+>>>>>>> 993a8f4443 (feat(pickers): share recent agents across execution entry points)
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
+<<<<<<< HEAD
   const picks = useAssigneePicksStore(selectAssigneePicks(user?.id, wsId));
   const ranked = useMemo(() => rankAssigneePicks(picks), [picks]);
+=======
+  const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
+  const onRecentAgentRecordError = useRecentAgentRecordError();
+>>>>>>> 993a8f4443 (feat(pickers): share recent agents across execution entry points)
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
+  const selectableAgents = useMemo(
+    () =>
+      agents.filter(
+        (agent) =>
+          !agent.archived_at &&
+          isAgentRuntimeBound(agent) &&
+          canAssignAgent(agent, user?.id, memberRole),
+      ),
+    [agents, memberRole, user?.id],
+  );
+  const {
+    recentAgents,
+    recentIds,
+    recordRecentAgent,
+    isRecentAgentsError,
+    refetchRecentAgents,
+  } = useRecentAgents({
+    agents: selectableAgents,
+    userId: user?.id,
+    wsId,
+    enabled: (options?.open ?? true),
+    onRecordError: onRecentAgentRecordError,
+  });
 
   const freqMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -264,11 +300,24 @@ function useAssigneeChoices(filter: string) {
   const filteredMembers = members
     .filter((m) => m.name.toLowerCase().includes(query) || matchesPinyin(m.name, query))
     .sort((a, b) => getFreq("member", b.user_id) - getFreq("member", a.user_id));
+<<<<<<< HEAD
   const filteredAgents = assignableAgents
     .filter((a) => a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
   const filteredSquads = assignableSquads
     .filter((s) => s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query))
+=======
+  const matchingAgents = agents
+    .filter((a) => !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)))
+    .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
+  const filteredRecentAgents = recentAgents.filter(
+    (agent) =>
+      agent.name.toLowerCase().includes(query) || matchesPinyin(agent.name, query),
+  );
+  const filteredAgents = matchingAgents.filter((agent) => !recentIds.has(agent.id));
+  const filteredSquads = squads
+    .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)))
+>>>>>>> 993a8f4443 (feat(pickers): share recent agents across execution entry points)
     .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
   // Recent: the top 3 actors this user picked most often on this device in
   // this workspace. Entries whose actor is gone or no longer pickable —
@@ -295,8 +344,12 @@ function useAssigneeChoices(filter: string) {
   return {
     recent,
     filteredMembers,
+    filteredRecentAgents,
     filteredAgents,
     filteredSquads,
+    recordRecentAgent,
+    isRecentAgentsError,
+    refetchRecentAgents,
   };
 }
 
@@ -323,12 +376,29 @@ function AssigneeOptions({
   onPick: (updates: Partial<UpdateIssueRequest>) => void;
 }) {
   const { t } = useT("issues");
+<<<<<<< HEAD
   const { recent, filteredMembers, filteredAgents, filteredSquads } = choices;
   const recordPick = useRecordAssigneePick();
+=======
+  const { t: tCommon } = useT("common");
+  const {
+    userId,
+    memberRole,
+    filteredMembers,
+    filteredRecentAgents,
+    filteredAgents,
+    filteredSquads,
+    runnableAgentIds,
+    recordRecentAgent,
+    isRecentAgentsError,
+    refetchRecentAgents,
+  } = choices;
+>>>>>>> 993a8f4443 (feat(pickers): share recent agents across execution entry points)
 
   const isSelected = (type: string, id: string) =>
     assigneeType === type && assigneeId === id;
 
+<<<<<<< HEAD
   // One click is one pick, single issue or batch. Re-picking the current
   // assignee changes nothing, so it does not count.
   const pickActor = (type: IssueAssigneeType, id: string) => {
@@ -374,8 +444,56 @@ function AssigneeOptions({
     </PickerItem>
   );
 
+=======
+  const renderAgent = (agent: Agent) => {
+    const decision = canAssignAgentToIssue(agent, {
+      userId,
+      role:
+        memberRole === "owner" ||
+        memberRole === "admin" ||
+        memberRole === "member"
+          ? memberRole
+          : null,
+    });
+    const runtimeBound = isAgentRuntimeBound(agent);
+    const allowed = decision.allowed && runtimeBound;
+    return (
+      <PickerItem
+        key={agent.id}
+        selected={isSelected("agent", agent.id)}
+        disabled={!allowed}
+        tooltip={
+          !decision.allowed
+            ? decision.message
+            : !runtimeBound
+              ? t(($) => $.pickers.assignee.agent_runtime_required)
+              : undefined
+        }
+        onClick={() => {
+          if (!allowed) return;
+          recordRecentAgent(agent.id);
+          onPick({
+            assignee_type: "agent",
+            assignee_id: agent.id,
+          });
+        }}
+      >
+        <ActorAvatar actorType="agent" actorId={agent.id} size="sm" showStatusDot />
+        <span className={`truncate ${allowed ? "" : "text-muted-foreground"}`}>{agent.name}</span>
+        <SmartRuntimeAgentBadge shareRuntime={agent.share_runtime} />
+        {agent.visibility === "private" && (
+          <Lock className="ml-auto h-3 w-3 text-muted-foreground" />
+        )}
+      </PickerItem>
+    );
+  };
+
+>>>>>>> 993a8f4443 (feat(pickers): share recent agents across execution entry points)
   return (
     <>
+      {isRecentAgentsError && (
+        <RecentAgentLoadError onRetry={refetchRecentAgents} />
+      )}
       {/* Unassigned — always the first row, search active or not. Every
           picker in the app puts the empty value there, so "clear this field"
           never moves. */}
@@ -388,6 +506,7 @@ function AssigneeOptions({
         <span className="text-muted-foreground">{t(($) => $.pickers.assignee.trigger_unassigned)}</span>
       </PickerItem>
 
+<<<<<<< HEAD
       {/* Recent — empty (and hidden) while searching or without history. The
           same actors still appear in their own groups below. */}
       {recent.length > 0 && (
@@ -402,6 +521,15 @@ function AssigneeOptions({
         </PickerSection>
       )}
 
+=======
+      {filteredRecentAgents.length > 0 && (
+        <PickerSection label={tCommon(($) => $.recently_used)}>
+          {filteredRecentAgents.map(renderAgent)}
+        </PickerSection>
+      )}
+
+      {/* Members */}
+>>>>>>> 993a8f4443 (feat(pickers): share recent agents across execution entry points)
       {filteredMembers.length > 0 && (
         <PickerSection label={t(($) => $.pickers.assignee.members_group)}>
           {filteredMembers.map(renderMember)}
@@ -423,6 +551,7 @@ function AssigneeOptions({
       )}
 
       {filteredMembers.length === 0 &&
+        filteredRecentAgents.length === 0 &&
         filteredAgents.length === 0 &&
         filteredSquads.length === 0 &&
         filter && <PickerEmpty />}

@@ -144,5 +144,13 @@
   },
   "navigation": {
     "open_in_new_tab": "在新标签页打开"
-  }
+  },
+  "agents": {
+    "recent": {
+      "load_failed": "无法加载最近使用的智能体。",
+      "retry": "重试",
+      "sync_failed": "智能体已选择，但最近使用记录未能跨端同步。"
+    }
+  },
+  "recently_used": "最近使用"
 }

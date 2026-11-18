@@ -144,5 +144,13 @@
   },
   "navigation": {
     "open_in_new_tab": "Открыть в новой вкладке"
-  }
+  },
+  "agents": {
+    "recent": {
+      "load_failed": "Recently used agents couldn't be loaded.",
+      "retry": "Retry",
+      "sync_failed": "Agent selected, but recently used could not sync across devices."
+    }
+  },
+  "recently_used": "Recently used"
 }
