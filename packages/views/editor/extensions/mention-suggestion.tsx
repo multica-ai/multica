@@ -956,6 +956,17 @@ export function createMentionSuggestion(
     return [...allItem, ...userItems, ...issueItems, ...projectItems, ...docItems];
   }
 
+  // Adds the cached docs matching `query` that `items` (computed at the last
+  // keystroke) predates. Selection survives: MentionList pins it by identity.
+  function withCachedDocs(items: MentionItem[], query: string): MentionItem[] {
+    const wsId = getCurrentWsId();
+    const docTree = wsId ? qc.getQueryData<DocTree>(docKeys.tree(wsId)) : undefined;
+    if (!docTree) return items;
+    const listed = new Set(items.filter((item) => item.type === "doc").map((item) => item.id));
+    const fresh = matchDocMentions(docTree.docs, query).filter((doc) => !listed.has(doc.id));
+    return fresh.length > 0 ? [...items, ...fresh] : items;
+  }
+
   return {
     pluginKey,
     allowSpaces: true,
@@ -981,8 +992,20 @@ export function createMentionSuggestion(
     render: createSuggestionPopupRender<MentionItem, MentionItem, MentionListRef, MentionListProps>({
       pluginKey,
       component: MentionList,
+      // The doc tree may still be loading when `@` opens the menu (see
+      // buildSyncItems); re-render the open menu once it lands so the docs
+      // appear without another keystroke.
+      subscribe: (refresh) => {
+        const wsId = getCurrentWsId();
+        const cache = qc.getQueryCache?.();
+        if (!wsId || !cache) return () => {};
+        const treeKey = JSON.stringify(docKeys.tree(wsId));
+        return cache.subscribe((event) => {
+          if (event.type === "updated" && JSON.stringify(event.query.queryKey) === treeKey) refresh();
+        });
+      },
       getProps: (props) => ({
-        items: props.items,
+        items: withCachedDocs(props.items, props.query),
         query: props.query,
         command: props.command,
         contextSearch: options.mode === "context",
