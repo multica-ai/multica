@@ -32,6 +32,12 @@ export function DesktopLoginPage() {
           // Initial workspace navigation happens in routes.tsx via IndexRedirect.
         }}
         onGoogleLogin={handleGoogleLogin}
+        serverConfig={{
+          apiUrl: window.desktopAPI.runtimeConfig.ok
+            ? window.desktopAPI.runtimeConfig.config.apiUrl
+            : "https://api.multica.ai",
+          onSave: (apiUrl) => window.desktopAPI.setRuntimeConfig(apiUrl),
+        }}
       />
     </div>
   );

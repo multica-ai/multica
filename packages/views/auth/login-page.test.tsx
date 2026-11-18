@@ -134,6 +134,44 @@ describe("LoginPage", () => {
     expect(screen.queryByText(/your session expired/i)).not.toBeInTheDocument();
   });
 
+  it("shows the server selector only when a desktop config is provided", () => {
+    renderWithI18n(
+      <LoginPage
+        onSuccess={onSuccess}
+        serverConfig={{ apiUrl: "https://api.multica.ai", onSave: vi.fn() }}
+      />,
+    );
+
+    expect(screen.getByLabelText("Log in to")).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Multica Cloud" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Self-hosted" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Server address")).not.toBeInTheDocument();
+  });
+
+  it("saves a custom server URL through the desktop callback", async () => {
+    const onSave = vi.fn().mockResolvedValue({ ok: true });
+    renderWithI18n(
+      <LoginPage
+        onSuccess={onSuccess}
+        serverConfig={{ apiUrl: "https://api.multica.ai", onSave }}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByLabelText("Log in to"), "custom");
+    await user.type(
+      screen.getByLabelText("Server address"),
+      "https://multica.example.com",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Use server and restart" }),
+    );
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith("https://multica.example.com");
+    });
+  });
+
   it("renders email form with 'Sign in to Multica' title", () => {
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);
     expect(

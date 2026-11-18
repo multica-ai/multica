@@ -55,6 +55,11 @@ interface LoginPageProps {
   onTokenObtained?: () => void;
   /** Override Google login handler (e.g. desktop opens browser externally). When provided, renders the Google button even if `google` config is omitted. */
   onGoogleLogin?: () => void;
+  /** Desktop endpoint picker. Saving an endpoint restarts the desktop app. */
+  serverConfig?: {
+    apiUrl: string;
+    onSave: (apiUrl: string) => Promise<{ ok: boolean; error?: string }>;
+  };
   /** Slot rendered at the bottom of the sign-in card, below the
    *  Google button. The web shell uses it for a "Prefer the desktop
    *  app?" prompt; desktop omits it (a download prompt inside the app
@@ -101,6 +106,7 @@ export function LoginPage({
   onTokenObtained,
   onGoogleLogin,
   extra,
+  serverConfig,
 }: LoginPageProps) {
   const { t } = useT("auth");
   const qc = useQueryClient();
@@ -111,6 +117,14 @@ export function LoginPage({
   const [loading, setLoading] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [existingUser, setExistingUser] = useState<User | null>(null);
+  const [serverChoice, setServerChoice] = useState(
+    serverConfig?.apiUrl === "https://api.multica.ai" ? "cloud" : "custom",
+  );
+  const [serverUrl, setServerUrl] = useState(
+    serverConfig?.apiUrl === "https://api.multica.ai" ? "" : serverConfig?.apiUrl ?? "",
+  );
+  const [serverError, setServerError] = useState("");
+  const [savingServer, setSavingServer] = useState(false);
   // Tracks how the existing session was detected so handleCliAuthorize
   // uses the matching token source (cookie → issueCliToken, localStorage → direct).
   const authSourceRef = useRef<"cookie" | "localStorage">("cookie");
@@ -293,6 +307,28 @@ export function LoginPage({
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
 
+  const handleSaveServer = async () => {
+    if (!serverConfig) return;
+    setSavingServer(true);
+    setServerError("");
+    try {
+      const result = await serverConfig.onSave(
+        serverChoice === "cloud" ? "https://api.multica.ai" : serverUrl,
+      );
+      if (!result.ok) {
+        setServerError(result.error ?? t(($) => $.desktop.server.invalid));
+      }
+    } catch (error) {
+      setServerError(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.desktop.server.invalid),
+      );
+    } finally {
+      setSavingServer(false);
+    }
+  };
+
   // CLI confirm step
 
   if (step === "cli_confirm" && existingUser) {
@@ -444,6 +480,65 @@ export function LoginPage({
               <p className="text-body text-destructive">{error}</p>
             )}
           </form>
+          {serverConfig && (
+            <div className="space-y-2 border-t pt-3">
+              <Label htmlFor="desktop-server-choice">
+                {t(($) => $.desktop.server.label)}
+              </Label>
+              <select
+                id="desktop-server-choice"
+                className="border-input bg-background text-body focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-3 py-1 shadow-xs outline-none focus-visible:ring-[3px]"
+                value={serverChoice}
+                onChange={(event) => {
+                  setServerChoice(event.target.value);
+                  setServerError("");
+                }}
+              >
+                <option value="cloud">Multica Cloud</option>
+                <option value="custom">{t(($) => $.desktop.server.custom)}</option>
+              </select>
+              {serverChoice === "custom" && (
+                <div className="space-y-2">
+                  <Label htmlFor="desktop-server-url">
+                    {t(($) => $.desktop.server.url)}
+                  </Label>
+                  <Input
+                    id="desktop-server-url"
+                    type="url"
+                    placeholder="https://multica.example.com"
+                    value={serverUrl}
+                    onChange={(event) => setServerUrl(event.target.value)}
+                    autoComplete="url"
+                    required
+                  />
+                </div>
+              )}
+              {serverError && (
+                <p className="text-body text-destructive" role="alert">
+                  {serverError}
+                </p>
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="w-full"
+                disabled={
+                  savingServer ||
+                  (serverChoice === "custom" && !serverUrl.trim()) ||
+                  (serverChoice === "cloud" &&
+                    serverConfig.apiUrl === "https://api.multica.ai") ||
+                  (serverChoice === "custom" &&
+                    serverUrl.trim() === serverConfig.apiUrl)
+                }
+                onClick={handleSaveServer}
+              >
+                {savingServer
+                  ? t(($) => $.desktop.server.restarting)
+                  : t(($) => $.desktop.server.connect)}
+              </Button>
+            </div>
+          )}
         </CardContent>
         <CardFooter className="flex flex-col gap-3">
           <Button

@@ -8,8 +8,8 @@ import {
   Notification,
   screen,
 } from "electron";
-import { homedir } from "os";
 import { join } from "path";
+import { mkdir, writeFile } from "fs/promises";
 import { pathToFileURL } from "url";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
@@ -32,8 +32,8 @@ import { installNavigationGuard } from "./navigation-guard";
 import { installWindowForegroundEvents, windowForeground } from "./window-foreground";
 import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
-import { loadRuntimeConfig } from "./runtime-config-loader";
-import type { RuntimeConfigResult } from "../shared/runtime-config";
+import { desktopConfigPath, loadRuntimeConfig } from "./runtime-config-loader";
+import { parseRuntimeConfig, type RuntimeConfigResult } from "../shared/runtime-config";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
   sanitizeRendererRouteContext,
@@ -882,6 +882,31 @@ if (!gotTheLock) {
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
+    });
+
+    ipcMain.handle("runtime-config:set", async (event, apiUrl: unknown) => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      if (!window || !mainWindows.has(window) || typeof apiUrl !== "string") {
+        return { ok: false, error: "Invalid runtime config request" };
+      }
+      try {
+        const config = parseRuntimeConfig(
+          JSON.stringify({ schemaVersion: 1, apiUrl }),
+        );
+        const configPath = desktopConfigPath();
+        await mkdir(join(app.getPath("home"), ".multica"), { recursive: true });
+        await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
+        setTimeout(() => {
+          app.relaunch();
+          app.exit(0);
+        }, 300);
+        return { ok: true };
+      } catch (error) {
+        return {
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
     });
 
     installDevToolbarToggle({
