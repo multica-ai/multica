@@ -77,6 +77,8 @@ Devin 优先读取 `WINDSURF_API_KEY`，否则使用 `devin auth login` 保存�
 
 QwenPaw、MiniMax Code 和 ZeroClaw 例外：它们不接受在 Multica 侧选择的模型，选择框不可用，显示为"由运行时管理"，模型要在工具自身的配置里选。它们的模型列表为空是正常的，不表示运行时离线。
 
+Antigravity 会把 `agy models` 中的推理变体显示为独立模型。在模型选择器中选用完整的变体名称，包括后缀。Multica 不为 Antigravity 提供单独的**思考**设置。如果在自定义参数中传入 `--effort`，Antigravity 会检查它能否与所选模型同时使用。
+
 DeepSeek Harness 的模型目录由运行时自身提供（`dsh --profile multica --list-models`）。它的模型 id 采用 `provider/model` 形式（例如 `deepseek-official/deepseek-chat`），请从列表中选择完整 id。
 
 <Callout type="info">
