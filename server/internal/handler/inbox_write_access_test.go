@@ -1,9 +1,7 @@
 package handler
 
 import (
-	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -15,7 +13,10 @@ import (
 
 // Every inbox endpoint beyond the list reads, writes included, shares the
 // list's owner gate: an agent acts on the runtime owner's inbox only when that
-// owner triggered the task, and cloud-node credentials never do.
+// owner triggered the task. This table drives the credential matrix and the
+// allowed path; TestEveryInboxRouteDeniesMachineCredentialsWithoutOwnerTrigger
+// (cmd/server) walks the router so every /api/inbox route, new ones included,
+// denies the other human's run and cloud-node credentials.
 type inboxOwnerEndpoint struct {
 	name, method string
 	// path receives the inbox item and its issue; param names the chi URL
@@ -81,21 +82,21 @@ func (f inboxWriteFixture) taskToken(t *testing.T, originator any) string {
 	return inboxTaskCredential(t, taskID, f.agentID, f.workspaceID, testUserID)
 }
 
-func serveInboxEndpoint(handler func(*Handler, http.ResponseWriter, *http.Request), cloud *auth.CloudPATVerifier) http.HandlerFunc {
-	return middleware.Auth(testHandler.Queries, nil, cloud, nil)(
+func serveInboxEndpoint(handler func(*Handler, http.ResponseWriter, *http.Request)) http.HandlerFunc {
+	return middleware.Auth(testHandler.Queries, nil, nil, nil)(
 		middleware.RequireWorkspaceMember(testHandler.Queries)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			handler(testHandler, w, r)
 		})),
 	).ServeHTTP
 }
 
-func (e inboxOwnerEndpoint) request(f inboxWriteFixture, item, token string, headers ...string) *http.Request {
+func (e inboxOwnerEndpoint) request(f inboxWriteFixture, item, token string) *http.Request {
 	var body any
 	if e.body != nil {
 		body = e.body
 	}
 	req := testutil.WithHeaders(testutil.JSONRequest(e.method, e.path(item, f.issueID), body),
-		append([]string{"Authorization", "Bearer " + token, "X-Workspace-ID", f.workspaceID}, headers...)...)
+		"Authorization", "Bearer "+token, "X-Workspace-ID", f.workspaceID)
 	switch e.param {
 	case "id":
 		req = withURLParam(req, "id", item)
@@ -128,35 +129,16 @@ func TestInboxEndpointsShareOwnerGate(t *testing.T) {
 			for name, token := range map[string]string{"another human": foreignTriggered, "unattributed": unattributed} {
 				t.Run(name, func(t *testing.T) {
 					item := f.item(t)
-					testutil.Call(t, serveInboxEndpoint(e.handler, nil), e.request(f, item, token)).Want(http.StatusForbidden)
+					testutil.Call(t, serveInboxEndpoint(e.handler), e.request(f, item, token)).Want(http.StatusForbidden)
 					requireInboxItemUntouched(t, item)
 				})
 			}
 
 			item := f.item(t)
-			testutil.Call(t, serveInboxEndpoint(e.handler, nil), e.request(f, item, allowed)).Want(http.StatusOK)
+			testutil.Call(t, serveInboxEndpoint(e.handler), e.request(f, item, allowed)).Want(http.StatusOK)
 			if changed := loadInboxItemState(t, item) != (inboxItemState{}); changed != e.changes {
 				t.Fatalf("self-triggered call changed=%v, want %v", changed, e.changes)
 			}
-		})
-	}
-}
-
-func TestInboxEndpointsRejectCloudPAT(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"valid": true, "owner_id": testUserID})
-	}))
-	defer srv.Close()
-	verifier := auth.NewCloudPATVerifier(auth.CloudPATVerifierConfig{FleetBaseURL: srv.URL})
-	f := newInboxWriteFixture(t)
-	taskID := dbfx.Task(t, f.agentID, testutil.Cols{"runtime_id": f.runtimeID, "status": "running",
-		"originator_user_id": testUserID, "accountable_user_id": testUserID})
-	for _, e := range inboxOwnerEndpoints {
-		t.Run(e.name, func(t *testing.T) {
-			item := f.item(t)
-			req := e.request(f, item, "mcn_inbox-write-test", "X-Actor-Source", "task_token", "X-Task-ID", taskID, "X-Agent-ID", f.agentID)
-			testutil.Call(t, serveInboxEndpoint(e.handler, verifier), req).Want(http.StatusForbidden)
-			requireInboxItemUntouched(t, item)
 		})
 	}
 }
@@ -196,7 +178,7 @@ func TestInboxItemWritesReportChangedCount(t *testing.T) {
 			ID    string `json:"id"`
 			Count *int64 `json:"count"`
 		}
-		testutil.Call(t, serveInboxEndpoint(e.handler, nil), e.request(f, step.item, token)).Want(http.StatusOK).JSON(&resp)
+		testutil.Call(t, serveInboxEndpoint(e.handler), e.request(f, step.item, token)).Want(http.StatusOK).JSON(&resp)
 		if resp.ID != step.item || resp.Count == nil || *resp.Count != step.want {
 			t.Fatalf("%s %s: id=%s count=%v, want %d", step.action, step.item, resp.ID, resp.Count, step.want)
 		}
@@ -208,12 +190,12 @@ func TestDeleteInboxItemIsHumanOnly(t *testing.T) {
 	endpoint := inboxOwnerEndpoint{method: http.MethodDelete, path: func(item, _ string) string { return "/api/inbox/" + item }, param: "id"}
 
 	item := f.item(t)
-	testutil.Call(t, serveInboxEndpoint((*Handler).DeleteInboxItem, nil), endpoint.request(f, item, f.taskToken(t, testUserID))).Want(http.StatusForbidden)
+	testutil.Call(t, serveInboxEndpoint((*Handler).DeleteInboxItem), endpoint.request(f, item, f.taskToken(t, testUserID))).Want(http.StatusForbidden)
 	requireInboxItemUntouched(t, item)
 
 	pat := "mul_" + uuid.NewString()
 	dbfx.Insert(t, "personal_access_token", testutil.Cols{"user_id": testUserID, "name": "Inbox delete test", "token_hash": auth.HashToken(pat), "token_prefix": pat[:12]})
-	testutil.Call(t, serveInboxEndpoint((*Handler).DeleteInboxItem, nil), endpoint.request(f, item, pat)).Want(http.StatusOK)
+	testutil.Call(t, serveInboxEndpoint((*Handler).DeleteInboxItem), endpoint.request(f, item, pat)).Want(http.StatusOK)
 	var remaining int
 	dbfx.QueryRow(t, `SELECT count(*) FROM inbox_item WHERE id = $1`, item).Scan(&remaining)
 	if remaining != 0 {
