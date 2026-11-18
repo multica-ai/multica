@@ -330,3 +330,53 @@ func TestSmartRuntimeContinuationAdoptsRunSnapshot(t *testing.T) {
 		t.Fatalf("the Codex machine failed to claim the snapshot continuation (task=%v, err=%v)", claimed != nil, err)
 	}
 }
+
+// Two threads of one agent: thread 1 (Codex) enqueued FIRST but claimed LAST,
+// thread 2 (Claude) enqueued later and ran earlier. The popover sorts by
+// start time and shows thread 1's Codex run as "current task" — the server's
+// snapshot recovery must pick the same run, not the later-enqueued one.
+func TestSmartRuntimeContinuationMatchesFrontendSort(t *testing.T) {
+	ctx := t.Context()
+	templateOwner := dbfx.User(t, "Sort Template Owner", "sort-template@example.test")
+	dbfx.Member(t, testWorkspaceID, templateOwner, "member")
+	runOwner := dbfx.User(t, "Sort Run Owner", "sort-run-owner@example.test")
+	dbfx.Member(t, testWorkspaceID, runOwner, "member")
+	codexMachine := dbfx.Runtime(t, "Sort Codex machine", testutil.Cols{"provider": "codex", "owner_id": runOwner})
+	claudeMachine := dbfx.Runtime(t, "Sort Claude machine", testutil.Cols{"provider": "claude", "owner_id": runOwner})
+	agentID := dbfx.Agent(t, "sort-review-agent", "", testutil.Cols{
+		"share_runtime": false, "recommended_cli": "codex", "owner_id": templateOwner,
+	})
+	issueID := dbfx.Issue(t, "Sort continuation", testutil.Cols{"assignee_type": "agent", "assignee_id": agentID})
+
+	// Thread 1: enqueued first, claimed (started) last — the popover's pick.
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": codexMachine, "issue_id": issueID, "status": "completed",
+		"originator_user_id": runOwner, "accountable_user_id": runOwner,
+		"runtime_config_source": "recommended_match",
+		"effective_model":       "gpt-5.4",
+		"created_at":            testutil.Raw("now() - interval '10 minutes'"),
+		"started_at":            testutil.Raw("now() - interval '1 minute'"),
+	})
+	// Thread 2: enqueued later, ran and finished earlier.
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": claudeMachine, "issue_id": issueID, "status": "completed",
+		"originator_user_id": runOwner, "accountable_user_id": runOwner,
+		"runtime_config_source": "recommended_match",
+		"effective_model":       "claude-sonnet-4-6",
+		"created_at":            testutil.Raw("now() - interval '5 minutes'"),
+		"started_at":            testutil.Raw("now() - interval '8 minutes'"),
+	})
+
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, parseUUID(agentID), pgtype.UUID{}, service.OriginNamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if util.UUIDToString(task.RuntimeID) != codexMachine || task.EffectiveModel.String != "gpt-5.4" {
+		t.Fatalf("continuation = (%s, %s), want the popover's pick (Codex machine, gpt-5.4)",
+			util.UUIDToString(task.RuntimeID), task.EffectiveModel.String)
+	}
+}

@@ -2534,7 +2534,12 @@ WHERE atq.issue_id = $1
   AND atq.runtime_id IS NOT NULL
   AND atq.runtime_config_source IS NOT NULL
   AND atq.runtime_config_source <> 'shared'
-ORDER BY atq.created_at DESC, atq.id DESC
+-- Sort by the same key the mention popover uses (agentTaskSortTime:
+-- started_at ?? dispatched_at ?? completed_at ?? created_at), so the server's
+-- snapshot and the row the member picked in the popover are always the same
+-- run — started_at ranks a late-claimed run above an earlier-claimed one even
+-- when the latter was enqueued later.
+ORDER BY COALESCE(atq.started_at, atq.dispatched_at, atq.completed_at, atq.created_at) DESC, atq.id DESC
 LIMIT 1;
 
 -- name: MergeDelegatedFailureCommentIntoPendingTask :one

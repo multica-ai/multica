@@ -5131,7 +5131,7 @@ WHERE atq.issue_id = $1
   AND atq.runtime_id IS NOT NULL
   AND atq.runtime_config_source IS NOT NULL
   AND atq.runtime_config_source <> 'shared'
-ORDER BY atq.created_at DESC, atq.id DESC
+ORDER BY COALESCE(atq.started_at, atq.dispatched_at, atq.completed_at, atq.created_at) DESC, atq.id DESC
 LIMIT 1
 `
 
@@ -5158,6 +5158,11 @@ type GetLatestIssueTaskStickyRuntimeRow struct {
 // machines of the same CLI a fresh resolution would drift to whichever
 // heartbeated last, and a personal configuration saved after the run would
 // swap the model under a machine that never reported it.
+// Sort by the same key the mention popover uses (agentTaskSortTime:
+// started_at ?? dispatched_at ?? completed_at ?? created_at), so the server's
+// snapshot and the row the member picked in the popover are always the same
+// run — started_at ranks a late-claimed run above an earlier-claimed one even
+// when the latter was enqueued later.
 func (q *Queries) GetLatestIssueTaskStickyRuntime(ctx context.Context, arg GetLatestIssueTaskStickyRuntimeParams) (GetLatestIssueTaskStickyRuntimeRow, error) {
 	row := q.db.QueryRow(ctx, getLatestIssueTaskStickyRuntime, arg.IssueID, arg.AgentID)
 	var i GetLatestIssueTaskStickyRuntimeRow
