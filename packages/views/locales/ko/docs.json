@@ -35,7 +35,8 @@
   },
   "tree": {
     "more": "{{title}} 더 보기",
-    "empty": "아직 문서가 없습니다"
+    "empty": "아직 문서가 없습니다",
+    "new_doc_in": "'{{title}}'에 새 문서"
   },
   "editor": {
     "placeholder": "입력하거나 /로 명령어...",

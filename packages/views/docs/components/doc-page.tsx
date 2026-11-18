@@ -186,6 +186,8 @@ function DocEditor({ doc }: { doc: Doc }) {
               <input
                 aria-label={t(($) => $.editor.title_label)}
                 value={draft.title}
+                // A doc just created from the tree is blank: start in its title.
+                autoFocus={!doc.title && !doc.content}
                 maxLength={300}
                 placeholder={t(($) => $.untitled)}
                 onChange={(e) => change({ title: e.target.value })}

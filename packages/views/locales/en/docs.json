@@ -35,7 +35,8 @@
   },
   "tree": {
     "more": "More actions for {{title}}",
-    "empty": "No docs yet"
+    "empty": "No docs yet",
+    "new_doc_in": "New doc in {{title}}"
   },
   "editor": {
     "placeholder": "Write, or type / for commands...",

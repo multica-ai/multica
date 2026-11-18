@@ -35,7 +35,8 @@
   },
   "tree": {
     "more": "Más acciones para {{title}}",
-    "empty": "Aún no hay documentos"
+    "empty": "Aún no hay documentos",
+    "new_doc_in": "Nuevo documento en {{title}}"
   },
   "editor": {
     "placeholder": "Escribe o pulsa / para ver los comandos...",

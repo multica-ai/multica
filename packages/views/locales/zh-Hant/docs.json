@@ -35,7 +35,8 @@
   },
   "tree": {
     "more": "{{title}} 的更多操作",
-    "empty": "還沒有文件"
+    "empty": "還沒有文件",
+    "new_doc_in": "在「{{title}}」中新增文件"
   },
   "editor": {
     "placeholder": "開始寫，或輸入 / 叫出命令...",

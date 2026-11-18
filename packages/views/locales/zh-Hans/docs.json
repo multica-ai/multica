@@ -35,7 +35,8 @@
   },
   "tree": {
     "more": "{{title}} 的更多操作",
-    "empty": "还没有文档"
+    "empty": "还没有文档",
+    "new_doc_in": "在“{{title}}”中新建文档"
   },
   "editor": {
     "placeholder": "开始写，或输入 / 调出命令...",
