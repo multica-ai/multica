@@ -92,7 +92,10 @@ func PrivateRuntimePermitsAgent(ctx context.Context, q *db.Queries, agent db.Age
 		}
 		return taskOriginatorOwnsRuntime(runtime, task), nil
 	}
-	return agent.RuntimeID == task.RuntimeID || taskHasFixedRuntimeRetention(task), nil
+	// A fixed agent on a foreign private runtime stays a denial the handler
+	// settles before delivery; the claim SQL's retention marker handles the
+	// batch-migration shape.
+	return false, nil
 }
 
 // taskOriginatorOwnsRuntime is the Go copy of ClaimAgentTask's originator-owned
