@@ -117,6 +117,8 @@ make migrate-down
 make sqlc
 ```
 
+`make test` prépare la base de données et applique les migrations avant les tests Go. Si l’API de développement utilise cette base, arrêtez-la d’abord avec `make down C=api` pour que ses tâches de fond ne traitent pas les travaux de test. Dans un worktree, utilisez `make test ENV_FILE=.env.worktree`.
+
 Pour exécuter une commande CLI depuis les sources :
 
 ```bash

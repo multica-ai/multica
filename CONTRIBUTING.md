@@ -593,6 +593,8 @@ make migrate-down
 
 These generic targets require a valid env file in the current directory.
 
+`make test` prepares and migrates the database before running the Go tests. If the development API is using that database, stop it first with `make down C=api` so its background workers cannot pick up test jobs. In a worktree, use `make test ENV_FILE=.env.worktree`.
+
 ### Dev Toolbar
 
 Set `VITE_DEV_TOOLBAR=1` to pin a status bar to the bottom of the Web and Desktop dev builds. It shows the client, backend host, workspace, your role, and route, plus live JS heap, last navigation time, main-thread long-task share, in-flight requests, and WebSocket state. Production builds never render it.

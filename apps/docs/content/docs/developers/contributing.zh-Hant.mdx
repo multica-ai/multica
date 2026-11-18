@@ -102,6 +102,8 @@ make migrate-down
 make sqlc
 ```
 
+`make test` 會在執行 Go 測試前準備資料庫並套用遷移。如果開發 API 正在使用同一資料庫，請先執行 `make down C=api` 停止它，避免其背景工作程序領取測試工作。在 worktree 中使用 `make test ENV_FILE=.env.worktree`。
+
 從源碼執行某條 CLI 命令：
 
 ```bash

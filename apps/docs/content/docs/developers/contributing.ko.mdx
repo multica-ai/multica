@@ -102,6 +102,8 @@ make migrate-down
 make sqlc
 ```
 
+`make test`는 Go 테스트를 실행하기 전에 데이터베이스를 준비하고 마이그레이션을 적용합니다. 개발 API가 같은 데이터베이스를 사용 중이라면 백그라운드 워커가 테스트 작업을 가져가지 않도록 먼저 `make down C=api`로 중지하세요. 워크트리에서는 `make test ENV_FILE=.env.worktree`를 사용하세요.
+
 소스에서 CLI 명령을 실행하려면 다음을 사용합니다.
 
 ```bash
