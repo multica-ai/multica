@@ -39,6 +39,7 @@ Multica 支援 31 款 AI 程式設計工具。它不替代你在用的工具：�
 | Devin CLI | `devin` | ✓ | ✓ | ✓ | `.devin/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | ✓ | `.opencode/skills/` |
+| San | `san` | ✓ | ✓ | — | — |
 | Pi | `pi` | ✓ | ✓ | ✓ | `.pi/skills/` |
 | Oh-My-Pi | `omp` | ✓ | ✓ | ✓ | `.omp/skills/` |
 | Qoder CLI | `qodercli` | ✓ | ✓ | ✓ | `.qoder/skills/` |
@@ -116,7 +117,7 @@ Devin 優先讀取 `WINDSURF_API_KEY`，否則使用 `devin auth login` 儲存�
 
 使用 Kiro CLI 時，建立和設定 AI 代理頁面中的**思考**選項來自所選模型支援的 effort 檔位，選擇會套用到新建和恢復的會話。不選擇時沿用 Kiro 自身的 effort 設定。模型或 CLI 版本未返回 effort 選項時，不顯示該選擇器。
 
-QwenPaw、MiniMax Code 和 ZeroClaw 例外：它們不接受在 Multica 側選擇的模型，選擇框不可用，顯示為"由執行時管理"，模型要在工具自身的配置裡選。它們的模型列表為空是正常的，不表示執行時離線。
+QwenPaw、MiniMax Code、ZeroClaw 和 San 例外：它們不接受在 Multica 側選擇的模型，選擇框不可用，顯示為"由執行時管理"，模型要在工具自身的配置裡選。它們的模型列表為空是正常的，不表示執行時離線。
 
 Antigravity 會把 `agy models` 中的推理變體顯示為獨立模型。在模型選擇框中選用完整的變體名稱，包括後綴。Multica 不為 Antigravity 提供單獨的**思考**設定。如果在自定義參數中傳入 `--effort`，Antigravity 會檢查它能否與所選模型同時使用。
 

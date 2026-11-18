@@ -107,7 +107,7 @@ func (c Command) ForVersionProbe(provider string) Command {
 	if provider == "hermes" {
 		c.versionArgs = hermesVersionProbeArgs
 	}
-	if provider == "amp" {
+	if provider == "amp" || provider == "san" {
 		c.versionArgs = []string{"version"}
 	}
 	return c
@@ -538,6 +538,9 @@ func ValidateCustomArgs(agentType string, args []string) error {
 	if family, ok := RuntimeProtocolFamily(agentType); ok {
 		protocolFamily = family
 	}
+	if protocolFamily == "san" && len(args) > 0 {
+		return fmt.Errorf("custom_args: runtime %q does not support custom arguments", agentType)
+	}
 	blocked := launchPrefixBlockedArgs[protocolFamily]
 	for _, arg := range args {
 		flag := unshellQuoteArg(arg)
@@ -594,7 +597,7 @@ func FilterLaunchPrefix(agentType string, prefix []string, logger *slog.Logger) 
 // so `--permission-mode ask` cannot leave a stray `ask` behind to be read as a
 // subcommand.
 func filterLaunchPrefix(prefix []string, agentType string, logger *slog.Logger) []string {
-	if len(prefix) == 0 {
+	if len(prefix) == 0 || agentType == "san" {
 		return nil
 	}
 	blocked, ok := launchPrefixBlockedArgs[agentType]
