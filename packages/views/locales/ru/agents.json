@@ -220,7 +220,7 @@
     "description_placeholder": "Чем занимается этот агент?",
     "cancel": "Отмена",
     "prop_recommended_runtime": "Рекомендуемый CLI",
-    "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel run limit."
+    "section_execution_hint": "Выберите среду выполнения, модель, уровень рассуждений, скорость и предел параллельных запусков."
   },
   "overview": {
     "attention_title": "Запуски требуют внимания",
@@ -287,10 +287,10 @@
     "service_tier_tooltip": "Скорость · {{value}}",
     "service_tier_clear": "По умолчанию для среды выполнения",
     "service_tier_clear_title": "Сбросить переопределение скорости и позволить локальной конфигурации Codex решить это",
-    "cli_empty": "No CLIs",
-    "cli_none": "No CLI",
+    "cli_empty": "Нет доступных CLI",
+    "cli_none": "Без CLI",
     "cli_tooltip": "CLI · {{name}}",
-    "cli_tooltip_none": "CLI · none selected"
+    "cli_tooltip_none": "CLI · не выбрана"
   },
   "model_dropdown": {
     "label": "Модель",
@@ -301,7 +301,7 @@
     "managed_by_runtime_hint": "Настройте модель на хосте среды выполнения (например, Hermes считывает её из собственного файла конфигурации).",
     "discovery_failed": "не удалось получить список",
     "clear_full": "Очистить выбор (использовать значение провайдера по умолчанию)",
-    "recommended_label": "Recommended model"
+    "recommended_label": "Рекомендуемая модель"
   },
   "tabs": {
     "work": "Работа",
@@ -534,11 +534,11 @@
     },
     "recommended_runtime_label": "Рекомендуемый CLI",
     "share_runtime": {
-      "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
-      "fixed_title": "Fixed runtime",
-      "label": "Runtime policy",
+      "fixed_desc": "Все пользователи запускают этого агента с настройками привязанной среды выполнения.",
+      "fixed_title": "Фиксированная среда",
+      "label": "Стратегия выполнения",
       "smart_desc": "Каждый пользователь запускает агента в своей среде выполнения. Выбранная модель должна быть доступна в этой среде.",
-      "smart_title": "Smart runtime"
+      "smart_title": "Умная среда выполнения"
     }
   },
   "conversation_starters": {
@@ -1175,32 +1175,32 @@
     "title": "Создайте первого ИИ-коллегу"
   },
   "runtime_config": {
-    "confirm_notice": "Got it",
-    "confirming_notice": "Saving…",
-    "current_concurrency": "Concurrency",
-    "current_model": "Model",
-    "current_runtime": "Runtime",
-    "current_section": "My Current Configuration",
-    "current_speed": "Speed",
-    "current_strategy": "Configuration strategy",
-    "current_thinking": "Thinking",
-    "load_failed": "Failed to load current configuration.",
-    "loading": "Loading current configuration…",
-    "not_editable": "Please add a runtime first.",
-    "notice_required": "This agent used your runtime with recommended or default settings. Review and save your own configuration here if needed.",
-    "notice_seen_failed_toast": "Failed to confirm runtime notice",
+    "confirm_notice": "Понятно",
+    "confirming_notice": "Сохранение…",
+    "current_concurrency": "Параллельные запуски",
+    "current_model": "Модель",
+    "current_runtime": "Среда выполнения",
+    "current_section": "Мои текущие настройки",
+    "current_speed": "Скорость",
+    "current_strategy": "Стратегия настройки",
+    "current_thinking": "Рассуждения",
+    "load_failed": "Не удалось загрузить текущие настройки.",
+    "loading": "Загрузка текущих настроек…",
+    "not_editable": "Сначала добавьте среду выполнения.",
+    "notice_required": "Этот агент использовал вашу среду с рекомендуемыми настройками или настройками по умолчанию. Здесь можно проверить и сохранить собственные настройки.",
+    "notice_seen_failed_toast": "Не удалось подтвердить уведомление",
     "resolution": {
-      "model_unavailable": "Runtime model unavailable",
-      "no_user_runtime": "Please add a runtime first",
-      "runtime_offline": "Runtime offline",
-      "runtime_unavailable": "Runtime unavailable"
+      "model_unavailable": "Модель недоступна в среде выполнения",
+      "no_user_runtime": "Сначала добавьте среду выполнения",
+      "runtime_offline": "Среда выполнения не в сети",
+      "runtime_unavailable": "Среда выполнения недоступна"
     },
-    "save_failed_toast": "Failed to save current configuration",
-    "saved_toast": "Current configuration saved",
-    "strategy_custom": "Custom",
-    "strategy_recommended": "Recommended"
+    "save_failed_toast": "Не удалось сохранить текущие настройки",
+    "saved_toast": "Текущие настройки сохранены",
+    "strategy_custom": "Пользовательская",
+    "strategy_recommended": "Рекомендуемая"
   },
   "runtime_policy": {
-    "smart": "Smart"
+    "smart": "Умный"
   }
 }

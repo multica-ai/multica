@@ -193,7 +193,7 @@
     "description_placeholder": "このエージェントは何をしますか？",
     "cancel": "キャンセル",
     "prop_recommended_runtime": "推奨 CLI",
-    "section_execution_hint": "ランタイム、モデル、思考レベル、速度、同時実行数を設定します。"
+    "section_execution_hint": "ランタイム、モデル、推論レベル、速度、同時実行数の上限を選択します。"
   },
   "overview": {
     "attention_title": "対応が必要な実行",
@@ -251,7 +251,7 @@
     "service_tier_tooltip": "速度 · {{value}}",
     "service_tier_clear": "ランタイムのデフォルト",
     "service_tier_clear_title": "速度の上書きをクリアし、ローカルの Codex 設定に任せます",
-    "cli_empty": "CLI なし",
+    "cli_empty": "利用できる CLI がありません",
     "cli_none": "CLI なし",
     "cli_tooltip": "CLI · {{name}}",
     "cli_tooltip_none": "CLI · 未選択"
@@ -265,7 +265,7 @@
     "managed_by_runtime_hint": "ランタイムホストでモデルを設定してください（例: Hermes は自身の設定ファイルから読み込みます）。",
     "discovery_failed": "検出に失敗しました",
     "clear_full": "選択をクリア（プロバイダーのデフォルトを使用）",
-    "recommended_label": "Recommended model"
+    "recommended_label": "推奨モデル"
   },
   "tabs": {
     "work": "作業",
@@ -342,11 +342,11 @@
     },
     "recommended_runtime_label": "推奨 CLI",
     "share_runtime": {
-      "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
-      "fixed_title": "Fixed runtime",
-      "label": "Runtime policy",
+      "fixed_desc": "すべてのユーザーが、紐付けられたランタイムの設定でこのエージェントを実行します。",
+      "fixed_title": "固定ランタイム",
+      "label": "ランタイムポリシー",
       "smart_desc": "呼び出したユーザーは自分のランタイムを使います。設定したモデルがそのランタイムで利用できる必要があります。",
-      "smart_title": "Smart runtime"
+      "smart_title": "スマートランタイム"
     }
   },
   "conversation_starters": {
@@ -1088,32 +1088,32 @@
     }
   },
   "runtime_config": {
-    "confirm_notice": "Got it",
-    "confirming_notice": "Saving…",
-    "current_concurrency": "Concurrency",
-    "current_model": "Model",
-    "current_runtime": "Runtime",
-    "current_section": "My Current Configuration",
-    "current_speed": "Speed",
-    "current_strategy": "Configuration strategy",
-    "current_thinking": "Thinking",
-    "load_failed": "Failed to load current configuration.",
-    "loading": "Loading current configuration…",
-    "not_editable": "Please add a runtime first.",
-    "notice_required": "This agent used your runtime with recommended or default settings. Review and save your own configuration here if needed.",
-    "notice_seen_failed_toast": "Failed to confirm runtime notice",
+    "confirm_notice": "了解",
+    "confirming_notice": "保存中…",
+    "current_concurrency": "同時実行数",
+    "current_model": "モデル",
+    "current_runtime": "ランタイム",
+    "current_section": "現在の個人設定",
+    "current_speed": "速度",
+    "current_strategy": "設定方式",
+    "current_thinking": "推論",
+    "load_failed": "現在の設定を読み込めませんでした。",
+    "loading": "現在の設定を読み込み中…",
+    "not_editable": "先にランタイムを追加してください。",
+    "notice_required": "このエージェントは推奨または既定の設定であなたのランタイムを使用しました。必要に応じて、ここで個人設定を確認して保存できます。",
+    "notice_seen_failed_toast": "通知を確認できませんでした",
     "resolution": {
-      "model_unavailable": "Runtime model unavailable",
-      "no_user_runtime": "Please add a runtime first",
-      "runtime_offline": "Runtime offline",
-      "runtime_unavailable": "Runtime unavailable"
+      "model_unavailable": "ランタイムでモデルを利用できません",
+      "no_user_runtime": "先にランタイムを追加してください",
+      "runtime_offline": "ランタイムがオフラインです",
+      "runtime_unavailable": "ランタイムを利用できません"
     },
-    "save_failed_toast": "Failed to save current configuration",
-    "saved_toast": "Current configuration saved",
-    "strategy_custom": "Custom",
-    "strategy_recommended": "Recommended"
+    "save_failed_toast": "現在の設定を保存できませんでした",
+    "saved_toast": "現在の設定を保存しました",
+    "strategy_custom": "カスタム",
+    "strategy_recommended": "推奨"
   },
   "runtime_policy": {
-    "smart": "Smart"
+    "smart": "スマート"
   }
 }

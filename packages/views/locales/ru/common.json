@@ -147,10 +147,10 @@
   },
   "agents": {
     "recent": {
-      "load_failed": "Recently used agents couldn't be loaded.",
-      "retry": "Retry",
-      "sync_failed": "Agent selected, but recently used could not sync across devices."
+      "load_failed": "Не удалось загрузить недавно использованных агентов.",
+      "retry": "Повторить",
+      "sync_failed": "Агент выбран, но не удалось синхронизировать список недавних агентов между устройствами."
     }
   },
-  "recently_used": "Recently used"
+  "recently_used": "Недавно использованные"
 }

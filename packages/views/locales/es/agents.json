@@ -202,7 +202,7 @@
     "cancel": "Cancelar",
     "qoder_execution_note": "El modelo, las herramientas y las skills se configuran en el agente desde Qoder Cloud Agents.",
     "prop_recommended_runtime": "CLI recomendada",
-    "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel run limit."
+    "section_execution_hint": "Elige el entorno de ejecución, el modelo, el nivel de razonamiento, la velocidad y el límite de ejecuciones simultáneas."
   },
   "overview": {
     "attention_title": "Ejecuciones que requieren atención",
@@ -245,10 +245,10 @@
     "service_tier_tooltip": "Velocidad · {{value}}",
     "service_tier_clear": "Predeterminado del runtime",
     "service_tier_clear_title": "Quitar la sobreescritura de velocidad y dejar que la configuración local de Codex decida",
-    "cli_empty": "No CLIs",
-    "cli_none": "No CLI",
+    "cli_empty": "No hay CLI disponibles",
+    "cli_none": "Sin CLI",
     "cli_tooltip": "CLI · {{name}}",
-    "cli_tooltip_none": "CLI · none selected"
+    "cli_tooltip_none": "CLI · ninguna seleccionada"
   },
   "model_dropdown": {
     "label": "Modelo",
@@ -259,7 +259,7 @@
     "managed_by_runtime_hint": "Configura el modelo en el host del runtime (p. ej., Hermes lo lee de su propio archivo de configuración).",
     "discovery_failed": "falló el descubrimiento",
     "clear_full": "Limpiar selección (usar el predeterminado del proveedor)",
-    "recommended_label": "Recommended model"
+    "recommended_label": "Modelo recomendado"
   },
   "tabs": {
     "work": "Trabajo",
@@ -482,11 +482,11 @@
     },
     "recommended_runtime_label": "CLI recomendada",
     "share_runtime": {
-      "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
-      "fixed_title": "Fixed runtime",
-      "label": "Runtime policy",
+      "fixed_desc": "Todos ejecutan este agente con la configuración del entorno asignado.",
+      "fixed_title": "Entorno fijo",
+      "label": "Estrategia de ejecución",
       "smart_desc": "Cada persona usa su propio entorno de ejecución. El modelo configurado debe estar disponible en ese entorno.",
-      "smart_title": "Smart runtime"
+      "smart_title": "Entorno inteligente"
     }
   },
   "conversation_starters": {
@@ -1117,32 +1117,32 @@
     }
   },
   "runtime_config": {
-    "confirm_notice": "Got it",
-    "confirming_notice": "Saving…",
-    "current_concurrency": "Concurrency",
-    "current_model": "Model",
-    "current_runtime": "Runtime",
-    "current_section": "My Current Configuration",
-    "current_speed": "Speed",
-    "current_strategy": "Configuration strategy",
-    "current_thinking": "Thinking",
-    "load_failed": "Failed to load current configuration.",
-    "loading": "Loading current configuration…",
-    "not_editable": "Please add a runtime first.",
-    "notice_required": "This agent used your runtime with recommended or default settings. Review and save your own configuration here if needed.",
-    "notice_seen_failed_toast": "Failed to confirm runtime notice",
+    "confirm_notice": "Entendido",
+    "confirming_notice": "Guardando…",
+    "current_concurrency": "Ejecuciones simultáneas",
+    "current_model": "Modelo",
+    "current_runtime": "Entorno de ejecución",
+    "current_section": "Mi configuración actual",
+    "current_speed": "Velocidad",
+    "current_strategy": "Estrategia de configuración",
+    "current_thinking": "Razonamiento",
+    "load_failed": "No se pudo cargar la configuración actual.",
+    "loading": "Cargando la configuración actual…",
+    "not_editable": "Añade primero un entorno de ejecución.",
+    "notice_required": "El agente usó tu entorno con la configuración recomendada o predeterminada. Puedes revisar y guardar aquí tu propia configuración.",
+    "notice_seen_failed_toast": "No se pudo confirmar el aviso",
     "resolution": {
-      "model_unavailable": "Runtime model unavailable",
-      "no_user_runtime": "Please add a runtime first",
-      "runtime_offline": "Runtime offline",
-      "runtime_unavailable": "Runtime unavailable"
+      "model_unavailable": "Modelo no disponible en el entorno",
+      "no_user_runtime": "Añade primero un entorno de ejecución",
+      "runtime_offline": "Entorno desconectado",
+      "runtime_unavailable": "Entorno no disponible"
     },
-    "save_failed_toast": "Failed to save current configuration",
-    "saved_toast": "Current configuration saved",
-    "strategy_custom": "Custom",
-    "strategy_recommended": "Recommended"
+    "save_failed_toast": "No se pudo guardar la configuración actual",
+    "saved_toast": "Configuración actual guardada",
+    "strategy_custom": "Personalizada",
+    "strategy_recommended": "Recomendada"
   },
   "runtime_policy": {
-    "smart": "Smart"
+    "smart": "Inteligente"
   }
 }

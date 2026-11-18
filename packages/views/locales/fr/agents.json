@@ -202,7 +202,7 @@
     "description_placeholder": "Que fait cet agent ?",
     "cancel": "Annuler",
     "prop_recommended_runtime": "CLI recommandée",
-    "section_execution_hint": "Choisissez le runtime, le modèle, le niveau de raisonnement, la vitesse et la limite d’exécutions parallèles."
+    "section_execution_hint": "Choisissez l’environnement, le modèle, le niveau de raisonnement, la vitesse et la limite d’exécutions simultanées."
   },
   "overview": {
     "attention_title": "Des exécutions demandent votre attention",
@@ -263,10 +263,10 @@
     "service_tier_tooltip": "Vitesse · {{value}}",
     "service_tier_clear": "Valeur par défaut du runtime",
     "service_tier_clear_title": "Effacer la surcharge de vitesse et laisser la configuration locale de Codex décider",
-    "cli_empty": "No CLIs",
-    "cli_none": "No CLI",
+    "cli_empty": "Aucune CLI disponible",
+    "cli_none": "Aucune CLI",
     "cli_tooltip": "CLI · {{name}}",
-    "cli_tooltip_none": "CLI · none selected"
+    "cli_tooltip_none": "CLI · aucune sélection"
   },
   "model_dropdown": {
     "label": "Modèle",
@@ -277,7 +277,7 @@
     "managed_by_runtime_hint": "Configurez le modèle sur l'hôte du runtime (Hermes, par exemple, le lit dans son propre fichier de configuration).",
     "discovery_failed": "échec de la détection",
     "clear_full": "Effacer la sélection (utiliser la valeur par défaut du fournisseur)",
-    "recommended_label": "Recommended model"
+    "recommended_label": "Modèle recommandé"
   },
   "tabs": {
     "work": "Travail",
@@ -500,11 +500,11 @@
     },
     "recommended_runtime_label": "CLI recommandée",
     "share_runtime": {
-      "fixed_desc": "Everyone runs this agent with the bound runtime configuration.",
-      "fixed_title": "Fixed runtime",
-      "label": "Runtime policy",
+      "fixed_desc": "Tout le monde exécute cet agent avec la configuration de l’environnement associé.",
+      "fixed_title": "Environnement fixe",
+      "label": "Stratégie d’exécution",
       "smart_desc": "Chaque personne utilise son propre environnement d’exécution. Le modèle configuré doit y être disponible.",
-      "smart_title": "Smart runtime"
+      "smart_title": "Environnement intelligent"
     }
   },
   "conversation_starters": {
@@ -1117,32 +1117,32 @@
     }
   },
   "runtime_config": {
-    "confirm_notice": "Got it",
-    "confirming_notice": "Saving…",
-    "current_concurrency": "Concurrency",
-    "current_model": "Model",
-    "current_runtime": "Runtime",
-    "current_section": "My Current Configuration",
-    "current_speed": "Speed",
-    "current_strategy": "Configuration strategy",
-    "current_thinking": "Thinking",
-    "load_failed": "Failed to load current configuration.",
-    "loading": "Loading current configuration…",
-    "not_editable": "Please add a runtime first.",
-    "notice_required": "This agent used your runtime with recommended or default settings. Review and save your own configuration here if needed.",
-    "notice_seen_failed_toast": "Failed to confirm runtime notice",
+    "confirm_notice": "Compris",
+    "confirming_notice": "Enregistrement…",
+    "current_concurrency": "Exécutions simultanées",
+    "current_model": "Modèle",
+    "current_runtime": "Environnement d’exécution",
+    "current_section": "Ma configuration actuelle",
+    "current_speed": "Vitesse",
+    "current_strategy": "Stratégie de configuration",
+    "current_thinking": "Raisonnement",
+    "load_failed": "Impossible de charger la configuration actuelle.",
+    "loading": "Chargement de la configuration actuelle…",
+    "not_editable": "Ajoutez d’abord un environnement d’exécution.",
+    "notice_required": "Cet agent a utilisé votre environnement avec les paramètres recommandés ou par défaut. Vous pouvez vérifier et enregistrer votre propre configuration ici.",
+    "notice_seen_failed_toast": "Impossible de confirmer l’avis",
     "resolution": {
-      "model_unavailable": "Runtime model unavailable",
-      "no_user_runtime": "Please add a runtime first",
-      "runtime_offline": "Runtime offline",
-      "runtime_unavailable": "Runtime unavailable"
+      "model_unavailable": "Modèle indisponible dans l’environnement",
+      "no_user_runtime": "Ajoutez d’abord un environnement d’exécution",
+      "runtime_offline": "Environnement hors ligne",
+      "runtime_unavailable": "Environnement indisponible"
     },
-    "save_failed_toast": "Failed to save current configuration",
-    "saved_toast": "Current configuration saved",
-    "strategy_custom": "Custom",
-    "strategy_recommended": "Recommended"
+    "save_failed_toast": "Impossible d’enregistrer la configuration actuelle",
+    "saved_toast": "Configuration actuelle enregistrée",
+    "strategy_custom": "Personnalisée",
+    "strategy_recommended": "Recommandée"
   },
   "runtime_policy": {
-    "smart": "Smart"
+    "smart": "Intelligent"
   }
 }
