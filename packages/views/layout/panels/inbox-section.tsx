@@ -50,6 +50,7 @@ import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
+import { useInboxIssuePrefetch } from "../../inbox/components/use-inbox-issue-prefetch";
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
 import { useInboxUnsubscribable, useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
 import {
@@ -168,6 +169,7 @@ export function InboxSection({
     const key = inboxRowKey(item);
     if (key === openRowKey) leave(key, nextInboxRow(all, key));
   };
+  const prefetchRow = useInboxIssuePrefetch(wsId, collapsed ? [] : displayed, (item) => inboxRowHref(p, item));
   // What arrived on each issue while it was snoozed, for the rows back from one.
   const updatesWhileSnoozed = useMemo(() => {
     const counts = new Map<string, number>();
@@ -186,6 +188,7 @@ export function InboxSection({
       item={item}
       measure={measure}
       href={inboxRowHref(p, item)}
+      onPrefetch={() => void prefetchRow(item)}
       active={
         (!!item.issue_id && item.issue_id === activeIssueId) ||
         (!!openKey && (item.issue_id ?? item.id) === openKey)
@@ -508,6 +511,7 @@ function InboxRow({
   item,
   measure,
   href,
+  onPrefetch,
   active,
   compact,
   kept,
@@ -521,6 +525,8 @@ function InboxRow({
   /** Set when the row is one of a virtualized list's window. */
   measure?: RowMeasure;
   href: string;
+  /** Warms the issue this row opens, so the click renders from cache. */
+  onPrefetch: () => void;
   active: boolean;
   /** One line (status, title, agents, dot or time) instead of the actor line under the title. */
   compact: boolean;
@@ -618,6 +624,8 @@ function InboxRow({
       data-inbox-row
       data-read={unread ? "false" : "true"}
       className="group/inbox relative"
+      onPointerEnter={onPrefetch}
+      onFocus={onPrefetch}
     >
       <HoverCard
         open={cardOpen && !snoozeOpen}
