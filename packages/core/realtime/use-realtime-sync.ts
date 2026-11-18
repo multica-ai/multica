@@ -1,4 +1,5 @@
 "use client";
+import { docKeys } from "../docs/queries";
 
 import { weixinKeys } from "../weixin/queries";
 
@@ -719,6 +720,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: issueViewPrefKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: docKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -1421,6 +1423,13 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
     };
 
+    const docUnsubs = ([
+      "doc:created", "doc:updated", "doc:deleted",
+      "doc_folder:created", "doc_folder:updated", "doc_folder:deleted",
+    ] as const).map((event) => ws.on(event, () => {
+      const wsId = getCurrentWsId();
+      if (wsId) void qc.invalidateQueries({ queryKey: docKeys.all(wsId) });
+    }));
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment, issue_revision: issueRevision } = p as CommentCreatedPayload;
       if (!comment?.issue_id) return;
@@ -2109,6 +2118,7 @@ export function useRealtimeSync(
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());
       unsubInboxNew();
+      docUnsubs.forEach(unsub => unsub());
       unsubCommentCreated();
       unsubCommentUpdated();
       unsubCommentDeleted();

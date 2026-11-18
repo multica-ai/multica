@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Clock, Layers, Loader2, MessageSquare, Sparkles, SquarePen, UserPlus, Zap, type IconComponent } from "@multica/ui/icons";
+import { Clock, FileText, Layers, Loader2, MessageSquare, Sparkles, SquarePen, UserPlus, Zap, type IconComponent } from "@multica/ui/icons";
 import { Command as CommandPrimitive } from "cmdk";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -41,6 +41,7 @@ const TYPE_ORDER = [
   "squads",
   "members",
   "projects",
+  "docs",
   "issues",
   "autopilots",
   "chats",
@@ -335,6 +336,28 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               query={query}
               detail={skill.description}
               onSelect={() => palette.navigate(p.skillDetail(skill.id))}
+            />
+          ))}
+        </PaletteGroup>
+      ),
+    });
+  }
+  if (objects.docs.length > 0) {
+    groups.push({
+      key: "docs",
+      type: "docs",
+      score: objects.docs[0]!.score,
+      node: (
+        <PaletteGroup key="docs" heading={t(($) => $.groups.docs)}>
+          {objects.docs.map(({ item: { doc, folder } }) => (
+            <ObjectRow
+              key={doc.id}
+              value={`doc:${doc.id}`}
+              icon={<FileText className={ROW_ICON_CLASS} />}
+              title={doc.title}
+              query={query}
+              detail={folder ?? undefined}
+              onSelect={() => palette.navigate(p.docDetail(doc.id))}
             />
           ))}
         </PaletteGroup>

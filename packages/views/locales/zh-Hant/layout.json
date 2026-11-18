@@ -12,7 +12,8 @@
     "runtimes": "執行時",
     "skills": "Skills",
     "settings": "設定",
-    "views": "檢視"
+    "views": "檢視",
+    "docs": "知識庫"
   },
   "tab": {
     "issue": "任務",
@@ -27,7 +28,9 @@
     "attachment": "附件",
     "create_agent": "建立 AI 代理",
     "my_agents": "我的 AI 代理在做",
-    "unknown": "未知頁面"
+    "unknown": "未知頁面",
+    "doc": "知識庫",
+    "docFolder": "資料夾"
   },
   "help": {
     "trigger": "幫助",
@@ -116,7 +119,8 @@
     "mark_all_read_failed": "全部標為已讀失敗",
     "reset_order": "恢復預設順序",
     "copy_workspace_link": "複製工作區連結",
-    "workspace_meta_other": "{{slug}} · {{count}} 位成員"
+    "workspace_meta_other": "{{slug}} · {{count}} 位成員",
+    "docs": "知識庫"
   },
   "bottom_bar": {
     "label": "狀態列",
