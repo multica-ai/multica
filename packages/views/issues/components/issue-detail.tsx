@@ -213,7 +213,7 @@ import { IssueSidebarSections, letSidebarSettingsDragKeysThrough } from "./issue
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useIssueTimelineAnchor } from "../hooks/use-issue-timeline-anchor";
-import { scrollToTimelineComment } from "../utils/scroll-to-timeline-comment";
+import { revealTimelineList, scrollToTimelineComment } from "../utils/scroll-to-timeline-comment";
 import { buildTimelineFindUnits, type TimelineFindUnit } from "../utils/timeline-find-units";
 import { useJumpToLatest } from "../hooks/use-jump-to-latest";
 import { useNewCommentsWhileAway } from "../hooks/use-new-comments-while-away";
@@ -2158,8 +2158,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     if (index < 0) { completeAnchorRestore(); return; }
     if (measuredTimelineId !== id) {
       const list = virtualTimelineRef.current;
-      if (list) container.scrollTop += list.getBoundingClientRect().top - container.getBoundingClientRect().top;
-      return;
+      return list ? revealTimelineList(container, list) : undefined;
     }
     return scrollToTimelineComment({
       container, virtualizer: virtuosoRef.current, index,
@@ -2620,11 +2619,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     if (!container) return;
     if (targetIdx < 0) return;
     if (measuredTimelineId !== id) {
-      // A long description can put the whole list below the scroll viewport.
-      // Bring its probe row into view so Virtuoso can measure before jumping.
+      // Virtuoso measures nothing while the list is below the viewport.
       const list = virtualTimelineRef.current;
-      if (list) container.scrollTop += list.getBoundingClientRect().top - container.getBoundingClientRect().top;
-      return;
+      return list ? revealTimelineList(container, list) : undefined;
     }
 
     interruptedLandingRef.current = null;

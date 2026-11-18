@@ -501,7 +501,7 @@ const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 const scrollToIndexSpy = vi.hoisted(() => vi.fn());
 const scrollIntoViewIndexSpy = vi.hoisted(() => vi.fn());
 const mockVirtualWindow = vi.hoisted(() => ({
-  enabled: false, delayedViewport: false, lateScrollReset: false, offscreenViewport: false, pendingSizeCorrection: false, holdAtIndex: false,
+  enabled: false, delayedViewport: false, lateScrollReset: false, offscreenViewport: false, contentSettlesAbove: false, pendingSizeCorrection: false, holdAtIndex: false,
   targetId: "", targetHeight: 100, scrollParent: null as HTMLElement | null,
 }));
 
@@ -532,8 +532,14 @@ vi.mock("react-virtuoso", () => ({
       if (mockVirtualWindow.offscreenViewport && customScrollParent) {
         const list = document.querySelector('[data-testid="virtuoso-mock"]')?.parentElement;
         if (list) list.getBoundingClientRect = () => new DOMRect(0, 1000 - customScrollParent.scrollTop, 400, 100);
+        // Content above the list can still grow once after the first reveal
+        // and push the list back out of view before it measures.
+        let settled = !mockVirtualWindow.contentSettlesAbove;
         const timer = window.setInterval(() => {
-          if (customScrollParent.scrollTop > 0) { window.clearInterval(timer); measured(); }
+          if (customScrollParent.scrollTop <= 0) return;
+          if (!settled) { settled = true; customScrollParent.scrollTop = 0; return; }
+          window.clearInterval(timer);
+          measured();
         }, 10);
         return () => window.clearInterval(timer);
       }
@@ -593,6 +599,7 @@ beforeEach(() => {
   mockVirtualWindow.holdAtIndex = false;
   mockVirtualWindow.delayedViewport = false;
   mockVirtualWindow.offscreenViewport = false;
+  mockVirtualWindow.contentSettlesAbove = false;
   mockVirtualWindow.lateScrollReset = false;
   mockVirtualWindow.targetId = "";
   mockVirtualWindow.targetHeight = 100;
@@ -2895,14 +2902,16 @@ describe("IssueDetail (shared)", () => {
       { kind: "root", delayedViewport: true, lateScrollReset: false },
       { kind: "reply", delayedViewport: false, lateScrollReset: true },
       { kind: "reply", delayedViewport: false, lateScrollReset: false, offscreenViewport: true },
+      { kind: "reply", delayedViewport: false, lateScrollReset: false, offscreenViewport: true, contentSettlesAbove: true },
       { kind: "reply", delayedViewport: false, lateScrollReset: false, pendingSizeCorrection: true },
       { kind: "reply", delayedViewport: false, lateScrollReset: false, holdAtIndex: true },
-    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport, late scroll: $lateScrollReset, below fold: $offscreenViewport)", async ({ kind, delayedViewport, lateScrollReset, offscreenViewport, pendingSizeCorrection, holdAtIndex }) => {
+    ])("keeps long history virtualized for a $kind (late viewport: $delayedViewport, late scroll: $lateScrollReset, below fold: $offscreenViewport, settling above: $contentSettlesAbove)", async ({ kind, delayedViewport, lateScrollReset, offscreenViewport, contentSettlesAbove, pendingSizeCorrection, holdAtIndex }) => {
       mockVirtualWindow.holdAtIndex = !!holdAtIndex;
       mockVirtualWindow.pendingSizeCorrection = !!pendingSizeCorrection;
       mockVirtualWindow.enabled = true;
       mockVirtualWindow.delayedViewport = delayedViewport;
       mockVirtualWindow.offscreenViewport = !!offscreenViewport;
+      mockVirtualWindow.contentSettlesAbove = !!contentSettlesAbove;
       mockVirtualWindow.lateScrollReset = lateScrollReset;
       const history = Array.from({ length: 120 }, (_, index) => ({
         ...mockTimeline[0]!,
