@@ -1078,7 +1078,7 @@ describe("BillingTab", () => {
     ],
     [
       "plan_change_in_progress",
-      "A plan change is being processed. Try again after it finishes.",
+      "A plan change is still being processed. Try again in a few minutes.",
     ],
   ])("maps purchase conflict %s to actionable copy", async (code, copy) => {
     const user = userEvent.setup();
@@ -1756,12 +1756,74 @@ describe("BillingTab", () => {
 
       expect(
         await within(dialog).findByText(
-          "Another plan change is being processed. Try again after it finishes.",
+          "A plan change is still being processed. Try again in a few minutes.",
         ),
       ).toBeInTheDocument();
       expect(mocks.refetchSummary).toHaveBeenCalled();
       // Not treated as a changed quote: no new preview is requested.
       expect(mocks.previewPlanChange).toHaveBeenCalledTimes(1);
+    });
+
+    it("recovers after a lost confirmation once the dialog is reopened", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.changePlan.mockRejectedValueOnce(
+        new ApiError("request failed", 503, "Service Unavailable", {}),
+      );
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      let dialog = await screen.findByRole("dialog");
+      await within(dialog).findByText("$30.00");
+      await user.click(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      );
+      await waitFor(() => expect(mocks.changePlan).toHaveBeenCalledOnce());
+      const lostKey = mocks.changePlan.mock.calls[0]?.[0].idempotencyKey;
+      // Closing the dialog drops the retry key, as a reload would.
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+      );
+
+      // Right after the timeout Cloud still holds the change.
+      mocks.previewPlanChange.mockRejectedValueOnce(
+        new ApiError("request failed", 409, "Conflict", {
+          code: "plan_change_in_progress",
+        }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      dialog = await screen.findByRole("dialog");
+      expect(
+        await within(dialog).findByText(
+          "A plan change is still being processed. Try again in a few minutes.",
+        ),
+      ).toBeInTheDocument();
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+      );
+
+      // Once Cloud has settled it, a fresh quote goes through under a new key.
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      dialog = await screen.findByRole("dialog");
+      await within(dialog).findByText("$30.00");
+      await user.click(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      );
+      await waitFor(() => expect(mocks.changePlan).toHaveBeenCalledTimes(2));
+      expect(mocks.changePlan.mock.calls[1]?.[0].idempotencyKey).not.toBe(
+        lostKey,
+      );
+      expect(
+        await screen.findByText("This workspace is now on Business."),
+      ).toBeInTheDocument();
     });
 
     it("explains a quote refused while another plan change is in flight", async () => {
@@ -1781,7 +1843,7 @@ describe("BillingTab", () => {
 
       expect(
         await within(dialog).findByText(
-          "Another plan change is being processed. Try again after it finishes.",
+          "A plan change is still being processed. Try again in a few minutes.",
         ),
       ).toBeInTheDocument();
     });
