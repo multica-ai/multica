@@ -246,7 +246,24 @@ export interface WorkspaceSubscriptionSummary {
     purchaseSeats: boolean;
     /** Switch the active subscription between Pro and Business. */
     changePlan: boolean;
+    /** Ask Cloud to settle a plan change that is still confirming. */
+    checkPlanChange: boolean;
   };
+  /**
+   * A plan change that still holds the subscription. While present, seat
+   * purchases and other plan changes are unavailable.
+   */
+  planChange: WorkspacePlanChangeHold | null;
+}
+
+export interface WorkspacePlanChangeHold {
+  targetPlan: string;
+  /**
+   * "confirming": Cloud is establishing Stripe's outcome. "unresolved": Cloud
+   * could not, and support has to settle it.
+   */
+  state: "confirming" | "unresolved";
+  since: string;
 }
 
 export interface WorkspaceSeatCapacity {

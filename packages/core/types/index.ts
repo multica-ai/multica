@@ -416,6 +416,7 @@ export type {
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPlanPrices,
   WorkspaceSubscriptionPrices,
+  WorkspacePlanChangeHold,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
   PreviewWorkspaceSeatPurchaseRequest,

@@ -33,7 +33,8 @@
       "manage": "管理账单",
       "add_seats": "添加席位",
       "cancel": "取消",
-      "continue_to_stripe": "前往 Stripe"
+      "continue_to_stripe": "前往 Stripe",
+      "check_status": "检查状态"
     },
     "errors": {
       "action_title": "账单操作失败",
@@ -85,7 +86,12 @@
       "billing_interval": "付款周期",
       "period_end": "当前周期结束时间",
       "change_plan": "更换套餐",
-      "business_adds": "Business 增加私有项目、按成员授权、团队应用账号，以及更高的自动化额度。"
+      "business_adds": "Business 增加私有项目、按成员授权、团队应用账号，以及更高的自动化额度。",
+      "plan_change_hold": "套餐变更",
+      "plan_change_confirming": "正在切换到 {{plan}}，等待 Stripe 确认。确认之前不能更换套餐或增加席位。",
+      "plan_change_unresolved": "切换到 {{plan}} 的结果没有确认。请联系支持处理；处理完成之前不能更换套餐或增加席位。",
+      "plan_change_state_confirming": "确认中",
+      "plan_change_state_unresolved": "需要支持处理"
     },
     "upgrade": {
       "title": "升级",
@@ -181,7 +187,8 @@
       "delayed_description": "自动检查已停止，购买仍可能完成。开始另一笔购买前，请稍后再查看或联系支持人员。",
       "delayed_description_with_expiry": "自动检查已停止。若到 {{date}} 仍在等待，请重新加载页面后再获取报价；若状态仍未更新，请联系支持人员。",
       "submitted_other": "购买 {{count}} 个席位的请求已提交。Stripe 确认后会显示新容量。",
-      "error_title": "无法更新估算金额"
+      "error_title": "无法更新估算金额",
+      "plan_change_unresolved": "有一次套餐变更的结果没有确认。请先联系支持，再增加席位。"
     },
     "plan_change": {
       "upgrade_description": "立即生效。本计费周期剩余时间的差价现在扣款。",
@@ -203,7 +210,9 @@
       "unreadable": "无法读取响应。请重试；系统会复用同一请求。",
       "error_title": "无法更换套餐",
       "success_title": "套餐已更换",
-      "success_description": "这个工作区现在使用 {{plan}}。"
+      "success_description": "这个工作区现在使用 {{plan}}。",
+      "unresolved": "上一次套餐变更的结果没有确认。请先联系支持，再更换套餐。",
+      "check_failed": "无法检查套餐变更，请重试。"
     },
     "confirm": {
       "title": "前往 Stripe Checkout？",

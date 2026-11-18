@@ -7,12 +7,14 @@ const actions = (
     portal: boolean;
     purchaseSeats: boolean;
     changePlan: boolean;
+    checkPlanChange: boolean;
   }> = {},
 ) => ({
   checkout: false,
   portal: false,
   purchaseSeats: false,
   changePlan: false,
+  checkPlanChange: false,
   ...overrides,
 });
 

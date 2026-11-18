@@ -33,7 +33,8 @@
       "manage": "請求を管理",
       "add_seats": "席を追加",
       "cancel": "キャンセル",
-      "continue_to_stripe": "Stripe に進む"
+      "continue_to_stripe": "Stripe に進む",
+      "check_status": "状態を確認"
     },
     "errors": {
       "action_title": "請求操作に失敗しました",
@@ -85,7 +86,12 @@
       "billing_interval": "請求期間",
       "period_end": "現在の期間終了日",
       "change_plan": "プランを変更",
-      "business_adds": "Business では、非公開プロジェクト、メンバー単位のアクセス設定、チームのアプリアカウント、より多い自動化の上限を利用できます。"
+      "business_adds": "Business では、非公開プロジェクト、メンバー単位のアクセス設定、チームのアプリアカウント、より多い自動化の上限を利用できます。",
+      "plan_change_hold": "プラン変更",
+      "plan_change_confirming": "{{plan}} に切り替えています。Stripe の確認を待っています。確認されるまで席数とプランは変更できません。",
+      "plan_change_unresolved": "{{plan}} への切り替えを確認できませんでした。サポートにお問い合わせください。解決するまで席数とプランは変更できません。",
+      "plan_change_state_confirming": "確認中",
+      "plan_change_state_unresolved": "サポートが必要"
     },
     "upgrade": {
       "title": "アップグレード",
@@ -181,7 +187,8 @@
       "delayed_description": "自動確認を停止しました。購入はまだ完了する可能性があります。別の購入を始める前に、後でもう一度確認するかサポートへお問い合わせください。",
       "delayed_description_with_expiry": "自動確認を停止しました。{{date}} を過ぎても保留中の場合は、ページを再読み込みしてから新しい見積もりを取得してください。保留状態が続く場合はサポートへお問い合わせください。",
       "submitted_other": "{{count}}席の購入を送信しました。Stripe の確認後に新しい容量が表示されます。",
-      "error_title": "見積もりを更新できません"
+      "error_title": "見積もりを更新できません",
+      "plan_change_unresolved": "プラン変更を確認できませんでした。席を追加する前にサポートにお問い合わせください。"
     },
     "plan_change": {
       "upgrade_description": "すぐに反映されます。現在の請求期間の残り分の差額を今すぐ請求します。",
@@ -203,7 +210,9 @@
       "unreadable": "レスポンスを読み取れませんでした。再試行すると、同じリクエストが再利用されます。",
       "error_title": "プランを変更できませんでした",
       "success_title": "プランを変更しました",
-      "success_description": "このワークスペースは {{plan}} になりました。"
+      "success_description": "このワークスペースは {{plan}} になりました。",
+      "unresolved": "前回のプラン変更を確認できませんでした。プランを変更する前にサポートにお問い合わせください。",
+      "check_failed": "プラン変更を確認できませんでした。再度お試しください。"
     },
     "confirm": {
       "title": "Stripe Checkout に進みますか？",

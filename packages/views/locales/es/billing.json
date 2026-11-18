@@ -33,7 +33,8 @@
       "manage": "Gestionar facturación",
       "add_seats": "Añadir puestos",
       "cancel": "Cancelar",
-      "continue_to_stripe": "Continuar a Stripe"
+      "continue_to_stripe": "Continuar a Stripe",
+      "check_status": "Comprobar estado"
     },
     "errors": {
       "action_title": "La acción de facturación falló",
@@ -86,7 +87,12 @@
       "billing_interval": "Intervalo de facturación",
       "period_end": "El periodo actual termina",
       "change_plan": "Cambiar de plan",
-      "business_adds": "Business añade proyectos privados, acceso por miembro, cuentas de apps del equipo y límites de automatización más altos."
+      "business_adds": "Business añade proyectos privados, acceso por miembro, cuentas de apps del equipo y límites de automatización más altos.",
+      "plan_change_hold": "Cambio de plan",
+      "plan_change_confirming": "Cambiando a {{plan}}. Esperando la confirmación de Stripe; hasta entonces no se pueden cambiar los puestos ni el plan.",
+      "plan_change_unresolved": "No se ha podido confirmar el cambio a {{plan}}. Contacta con soporte para resolverlo; hasta entonces no se pueden cambiar los puestos ni el plan.",
+      "plan_change_state_confirming": "Confirmando",
+      "plan_change_state_unresolved": "Requiere soporte"
     },
     "upgrade": {
       "title": "Actualizar",
@@ -187,7 +193,8 @@
       "delayed_description_with_expiry": "La comprobación automática se ha detenido. Si el intento sigue pendiente después del {{date}}, recarga esta página antes de solicitar otro presupuesto; contacta con soporte si sigue pendiente.",
       "submitted_one": "Se ha enviado una compra de {{count}} puesto. La nueva capacidad aparecerá cuando Stripe la confirme.",
       "submitted_other": "Se ha enviado una compra de {{count}} puestos. La nueva capacidad aparecerá cuando Stripe la confirme.",
-      "error_title": "No se ha podido actualizar el cálculo"
+      "error_title": "No se ha podido actualizar el cálculo",
+      "plan_change_unresolved": "No se ha podido confirmar un cambio de plan. Contacta con soporte antes de añadir puestos."
     },
     "plan_change": {
       "upgrade_description": "Se aplica de inmediato. La diferencia del resto de este periodo de facturación se cobra ahora.",
@@ -209,7 +216,9 @@
       "unreadable": "No se ha podido leer la respuesta. Vuelve a intentarlo; se reutilizará la misma solicitud.",
       "error_title": "No se ha podido cambiar el plan",
       "success_title": "Plan cambiado",
-      "success_description": "Este espacio de trabajo ahora usa {{plan}}."
+      "success_description": "Este espacio de trabajo ahora usa {{plan}}.",
+      "unresolved": "No se ha podido confirmar el cambio de plan anterior. Contacta con soporte antes de cambiar de plan.",
+      "check_failed": "No se ha podido comprobar el cambio de plan. Vuelve a intentarlo."
     },
     "confirm": {
       "title": "¿Continuar a Stripe Checkout?",

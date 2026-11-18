@@ -22,6 +22,7 @@ import {
   useCreateWorkspaceSubscriptionCheckout,
   useCreateWorkspaceSubscriptionPortal,
   usePreviewWorkspacePlanChange,
+  useReconcileWorkspaceSubscriptionSeats,
   usePreviewWorkspaceSeatPurchase,
   usePurchaseWorkspaceSeats,
   workspaceSubscriptionPricesOptions,
@@ -382,6 +383,7 @@ function BillingTabContent() {
   const purchaseSeatsMutation = usePurchaseWorkspaceSeats(wsId);
   const previewPlanChangeMutation = usePreviewWorkspacePlanChange();
   const changePlanMutation = useChangeWorkspacePlan(wsId);
+  const checkPlanChangeMutation = useReconcileWorkspaceSubscriptionSeats(wsId);
   const refetchSummary = summaryQuery.refetch;
   const previewSeatPurchase = previewSeatPurchaseMutation.mutateAsync;
   const previewPlanChange = previewPlanChangeMutation.mutateAsync;
@@ -433,7 +435,9 @@ function BillingTabContent() {
               ? t(($) => $.workspace.plan_change.in_progress)
               : code === "plan_change_in_progress"
                 ? t(($) => $.workspace.plan_change.change_in_progress)
-                : t(($) => $.workspace.plan_change.preview_failed),
+                : code === "plan_change_unresolved"
+                  ? t(($) => $.workspace.plan_change.unresolved)
+                  : t(($) => $.workspace.plan_change.preview_failed),
         );
       });
   }, [
@@ -574,7 +578,9 @@ function BillingTabContent() {
               ? t(($) => $.workspace.seat_purchase.in_progress)
               : previewErrorCode === "plan_change_in_progress"
                 ? t(($) => $.workspace.seat_purchase.plan_change_in_progress)
-                : t(($) => $.workspace.seat_purchase.preview_failed),
+                : previewErrorCode === "plan_change_unresolved"
+                  ? t(($) => $.workspace.seat_purchase.plan_change_unresolved)
+                  : t(($) => $.workspace.seat_purchase.preview_failed),
           );
         });
     }, SEAT_PURCHASE_PREVIEW_DEBOUNCE_MS);
@@ -783,10 +789,15 @@ function BillingTabContent() {
           setPlanChangeError(t(($) => $.workspace.plan_change.in_progress));
           return;
         }
-        if (code === "plan_change_in_progress") {
+        if (
+          code === "plan_change_in_progress" ||
+          code === "plan_change_unresolved"
+        ) {
           setPlanChangePreview(null);
           setPlanChangeError(
-            t(($) => $.workspace.plan_change.change_in_progress),
+            code === "plan_change_unresolved"
+              ? t(($) => $.workspace.plan_change.unresolved)
+              : t(($) => $.workspace.plan_change.change_in_progress),
           );
           await summaryQuery.refetch();
           return;
@@ -811,6 +822,18 @@ function BillingTabContent() {
       }
       setPlanChangeError(t(($) => $.workspace.plan_change.failed));
     }
+  };
+
+  // Asks Cloud to settle a plan change that is still being confirmed now,
+  // rather than at its next reconcile pass, then shows the result.
+  const handleCheckPlanChange = async () => {
+    setActionError(null);
+    try {
+      await checkPlanChangeMutation.mutateAsync();
+    } catch (error) {
+      reportActionError(error, t(($) => $.workspace.plan_change.check_failed));
+    }
+    await summaryQuery.refetch();
   };
 
   const handlePortal = async () => {
@@ -908,9 +931,14 @@ function BillingTabContent() {
           await summaryQuery.refetch();
           return;
         }
-        if (purchaseErrorCode === "plan_change_in_progress") {
+        if (
+          purchaseErrorCode === "plan_change_in_progress" ||
+          purchaseErrorCode === "plan_change_unresolved"
+        ) {
           setSeatPurchaseError(
-            t(($) => $.workspace.seat_purchase.plan_change_in_progress),
+            purchaseErrorCode === "plan_change_unresolved"
+              ? t(($) => $.workspace.seat_purchase.plan_change_unresolved)
+              : t(($) => $.workspace.seat_purchase.plan_change_in_progress),
           );
           await summaryQuery.refetch();
           return;
@@ -1096,6 +1124,7 @@ function BillingTabContent() {
     ],
   };
   const availablePlanChange = resolvePlanChangeTarget(summaryQuery.data);
+  const planChangeHold = summaryQuery.data?.planChange ?? null;
   const planChangeIsUpgrade = planChangeTarget === "business";
   const formattedPlanChangeProration = planChangePreview
     ? formatStripeMinorAmount(
@@ -1371,6 +1400,50 @@ function BillingTabContent() {
                       plan: planLabel("pro"),
                     })}
               </Button>
+            </SettingsRow>
+          ) : null}
+          {planChangeHold ? (
+            <SettingsRow
+              label={t(($) => $.workspace.current.plan_change_hold)}
+              description={
+                planChangeHold.state === "unresolved"
+                  ? t(($) => $.workspace.current.plan_change_unresolved, {
+                      plan: planLabel(planChangeHold.targetPlan),
+                    })
+                  : t(($) => $.workspace.current.plan_change_confirming, {
+                      plan: planLabel(planChangeHold.targetPlan),
+                    })
+              }
+            >
+              {planChangeHold.state === "confirming" &&
+              summaryQuery.data?.availableActions.checkPlanChange === true ? (
+                <Button
+                  className="h-11 w-full sm:w-auto"
+                  variant="outline"
+                  aria-busy={checkPlanChangeMutation.isPending}
+                  disabled={checkPlanChangeMutation.isPending || isMutating}
+                  onClick={() => void handleCheckPlanChange()}
+                >
+                  {checkPlanChangeMutation.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <RefreshCw />
+                  )}
+                  {t(($) => $.workspace.actions.check_status)}
+                </Button>
+              ) : (
+                <Badge
+                  variant={
+                    planChangeHold.state === "unresolved"
+                      ? "destructive"
+                      : "secondary"
+                  }
+                >
+                  {planChangeHold.state === "unresolved"
+                    ? t(($) => $.workspace.current.plan_change_state_unresolved)
+                    : t(($) => $.workspace.current.plan_change_state_confirming)}
+                </Badge>
+              )}
             </SettingsRow>
           ) : null}
         </SettingsCard>

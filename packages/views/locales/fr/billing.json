@@ -33,7 +33,8 @@
       "manage": "Gérer la facturation",
       "add_seats": "Ajouter des sièges",
       "cancel": "Annuler",
-      "continue_to_stripe": "Continuer vers Stripe"
+      "continue_to_stripe": "Continuer vers Stripe",
+      "check_status": "Vérifier l'état"
     },
     "errors": {
       "action_title": "Échec de l'action de facturation",
@@ -86,7 +87,12 @@
       "billing_interval": "Intervalle de facturation",
       "period_end": "Fin de la période en cours",
       "change_plan": "Changer de forfait",
-      "business_adds": "Business ajoute les projets privés, l'accès par membre, les comptes d'applications d'équipe et des limites d'automatisation plus élevées."
+      "business_adds": "Business ajoute les projets privés, l'accès par membre, les comptes d'applications d'équipe et des limites d'automatisation plus élevées.",
+      "plan_change_hold": "Changement de forfait",
+      "plan_change_confirming": "Passage à {{plan}} en cours. En attente de la confirmation de Stripe ; les sièges et le forfait ne peuvent pas être modifiés d'ici là.",
+      "plan_change_unresolved": "Le passage à {{plan}} n'a pas pu être confirmé. Contactez l'assistance pour le régler ; les sièges et le forfait ne peuvent pas être modifiés d'ici là.",
+      "plan_change_state_confirming": "Confirmation en cours",
+      "plan_change_state_unresolved": "Assistance requise"
     },
     "upgrade": {
       "title": "Mettre à niveau",
@@ -187,7 +193,8 @@
       "delayed_description_with_expiry": "La vérification automatique s'est arrêtée. Si la tentative est encore en attente après {{date}}, rechargez cette page avant de demander un autre devis ; contactez l'assistance si l'attente persiste.",
       "submitted_one": "Un achat de {{count}} siège a été soumis. La nouvelle capacité apparaîtra après confirmation par Stripe.",
       "submitted_other": "Un achat de {{count}} sièges a été soumis. La nouvelle capacité apparaîtra après confirmation par Stripe.",
-      "error_title": "Impossible de mettre à jour l'estimation"
+      "error_title": "Impossible de mettre à jour l'estimation",
+      "plan_change_unresolved": "Un changement de forfait n'a pas pu être confirmé. Contactez l'assistance avant d'ajouter des sièges."
     },
     "plan_change": {
       "upgrade_description": "Prend effet immédiatement. La différence pour le reste de la période de facturation est facturée maintenant.",
@@ -209,7 +216,9 @@
       "unreadable": "La réponse est illisible. Réessayez ; la même demande sera réutilisée.",
       "error_title": "Impossible de changer de forfait",
       "success_title": "Forfait changé",
-      "success_description": "Cet espace de travail utilise désormais {{plan}}."
+      "success_description": "Cet espace de travail utilise désormais {{plan}}.",
+      "unresolved": "Le changement de forfait précédent n'a pas pu être confirmé. Contactez l'assistance avant de changer de forfait.",
+      "check_failed": "Impossible de vérifier le changement de forfait. Réessayez."
     },
     "confirm": {
       "title": "Continuer vers Stripe Checkout ?",

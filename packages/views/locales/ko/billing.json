@@ -33,7 +33,8 @@
       "manage": "결제 관리",
       "add_seats": "좌석 추가",
       "cancel": "취소",
-      "continue_to_stripe": "Stripe로 이동"
+      "continue_to_stripe": "Stripe로 이동",
+      "check_status": "상태 확인"
     },
     "errors": {
       "action_title": "결제 작업 실패",
@@ -85,7 +86,12 @@
       "billing_interval": "결제 주기",
       "period_end": "현재 결제 기간 종료일",
       "change_plan": "요금제 변경",
-      "business_adds": "Business에서는 비공개 프로젝트, 멤버별 접근 권한, 팀 앱 계정, 더 높은 자동화 한도를 사용할 수 있습니다."
+      "business_adds": "Business에서는 비공개 프로젝트, 멤버별 접근 권한, 팀 앱 계정, 더 높은 자동화 한도를 사용할 수 있습니다.",
+      "plan_change_hold": "요금제 변경",
+      "plan_change_confirming": "{{plan}}(으)로 전환하는 중입니다. Stripe의 확인을 기다리고 있으며, 확인될 때까지 좌석과 요금제를 변경할 수 없습니다.",
+      "plan_change_unresolved": "{{plan}}(으)로의 전환을 확인할 수 없습니다. 지원팀에 문의하세요. 해결될 때까지 좌석과 요금제를 변경할 수 없습니다.",
+      "plan_change_state_confirming": "확인 중",
+      "plan_change_state_unresolved": "지원 필요"
     },
     "upgrade": {
       "title": "업그레이드",
@@ -181,7 +187,8 @@
       "delayed_description": "자동 확인이 중지되었습니다. 구매는 계속 완료될 수 있습니다. 다른 구매를 시작하기 전에 나중에 다시 확인하거나 지원팀에 문의하세요.",
       "delayed_description_with_expiry": "자동 확인이 중지되었습니다. {{date}} 이후에도 대기 중이면 페이지를 다시 불러온 후 새 견적을 요청하세요. 대기 상태가 계속되면 지원팀에 문의하세요.",
       "submitted_other": "좌석 {{count}}개 구매를 제출했습니다. Stripe 확인 후 새 용량이 표시됩니다.",
-      "error_title": "예상 금액을 업데이트할 수 없습니다"
+      "error_title": "예상 금액을 업데이트할 수 없습니다",
+      "plan_change_unresolved": "요금제 변경을 확인할 수 없습니다. 좌석을 추가하기 전에 지원팀에 문의하세요."
     },
     "plan_change": {
       "upgrade_description": "즉시 적용됩니다. 현재 결제 기간의 남은 기간에 대한 차액이 지금 청구됩니다.",
@@ -203,7 +210,9 @@
       "unreadable": "응답을 읽을 수 없습니다. 다시 시도하면 같은 요청이 재사용됩니다.",
       "error_title": "요금제를 변경할 수 없음",
       "success_title": "요금제가 변경됨",
-      "success_description": "이제 이 워크스페이스는 {{plan}} 요금제를 사용합니다."
+      "success_description": "이제 이 워크스페이스는 {{plan}} 요금제를 사용합니다.",
+      "unresolved": "이전 요금제 변경을 확인할 수 없습니다. 요금제를 변경하기 전에 지원팀에 문의하세요.",
+      "check_failed": "요금제 변경을 확인할 수 없습니다. 다시 시도하세요."
     },
     "confirm": {
       "title": "Stripe Checkout으로 이동할까요?",

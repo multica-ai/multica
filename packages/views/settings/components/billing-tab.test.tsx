@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   purchaseSeats: vi.fn(),
   previewPlanChange: vi.fn(),
   changePlan: vi.fn(),
+  checkPlanChange: vi.fn(),
   changePlanPending: false,
   refetch: vi.fn(),
   refetchSummary: vi.fn(),
@@ -79,7 +80,9 @@ const mocks = vi.hoisted(() => ({
       portal: false,
       purchaseSeats: false,
       changePlan: false,
+      checkPlanChange: false,
     },
+    planChange: null as WorkspaceSubscriptionSummary["planChange"],
   } as WorkspaceSubscriptionSummary,
   usage: {
     action: "enforce" as "off" | "observe" | "enforce",
@@ -129,6 +132,10 @@ vi.mock("@multica/core/billing", () => ({
   useChangeWorkspacePlan: () => ({
     mutateAsync: mocks.changePlan,
     isPending: mocks.changePlanPending,
+  }),
+  useReconcileWorkspaceSubscriptionSeats: () => ({
+    mutateAsync: mocks.checkPlanChange,
+    isPending: false,
   }),
 }));
 
@@ -290,7 +297,9 @@ describe("BillingTab", () => {
         portal: false,
         purchaseSeats: false,
         changePlan: false,
+        checkPlanChange: false,
       },
+      planChange: null,
     });
     Object.assign(mocks.usage, {
       action: "enforce",
@@ -1602,6 +1611,85 @@ describe("BillingTab", () => {
       mocks.summary.billingInterval = "month";
       mocks.summary.availableActions.changePlan = true;
     }
+
+    it("shows a confirming plan change and lets a manager check it now", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.summary.availableActions.changePlan = false;
+      mocks.summary.availableActions.checkPlanChange = true;
+      mocks.summary.planChange = {
+        targetPlan: "business",
+        state: "confirming",
+        since: "2030-01-15T00:00:00Z",
+      };
+      mocks.checkPlanChange.mockResolvedValue({
+        workspaceId: "workspace-1",
+        action: "none",
+        version: 8,
+      });
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Plan change")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Switching to Business. Waiting for Stripe to confirm; seats and the plan can't be changed until then.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Change plan")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Check status" }));
+
+      await waitFor(() => expect(mocks.checkPlanChange).toHaveBeenCalledOnce());
+      expect(mocks.refetchSummary).toHaveBeenCalled();
+    });
+
+    it("tells the user to contact support when a plan change is unresolved", () => {
+      setPaidPlan("pro");
+      mocks.summary.availableActions.changePlan = false;
+      mocks.summary.planChange = {
+        targetPlan: "business",
+        state: "unresolved",
+        since: "2030-01-15T00:00:00Z",
+      };
+      renderWithI18n(<BillingTab />);
+
+      expect(
+        screen.getByText(
+          "The switch to Business could not be confirmed. Contact support to settle it; seats and the plan can't be changed until then.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Needs support")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Check status" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("explains a plan change refused by an unresolved one", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.changePlan.mockRejectedValueOnce(
+        new ApiError("request failed", 409, "Conflict", {
+          code: "plan_change_unresolved",
+        }),
+      );
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      await within(dialog).findByText("$30.00");
+      await user.click(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      );
+
+      expect(
+        await within(dialog).findByText(
+          "The previous plan change could not be confirmed. Contact support before changing plans.",
+        ),
+      ).toBeInTheDocument();
+      expect(mocks.refetchSummary).toHaveBeenCalled();
+    });
 
     it("offers no switch unless Cloud allows it", () => {
       setPaidPlan("pro");

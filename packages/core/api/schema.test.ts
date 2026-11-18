@@ -1629,7 +1629,64 @@ describe("workspace subscription contract", () => {
       portal: true,
       purchaseSeats: false,
       changePlan: true,
+      checkPlanChange: false,
     });
+    expect(summary?.planChange).toBeNull();
+  });
+
+  it("reads a plan change that still holds the subscription", async () => {
+    stubFetchJson({
+      entitlement,
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+      available_actions: {
+        checkout: false,
+        portal: true,
+        purchase_seats: false,
+        change_plan: false,
+        check_plan_change: true,
+      },
+      plan_change: {
+        target_plan: "business",
+        state: "confirming",
+        since: "2026-11-18T08:00:00Z",
+      },
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary?.availableActions.checkPlanChange).toBe(true);
+    expect(summary?.planChange).toEqual({
+      targetPlan: "business",
+      state: "confirming",
+      since: "2026-11-18T08:00:00Z",
+    });
+  });
+
+  it.each([
+    ["an unknown state", { target_plan: "business", state: "settling", since: "2026-11-18T08:00:00Z" }, "confirming"],
+    ["a malformed hold", { state: "unresolved" }, null],
+  ])("tolerates %s in plan_change", async (_name, planChange, expected) => {
+    stubFetchJson({
+      entitlement,
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+      available_actions: { checkout: false, portal: true, purchase_seats: false },
+      plan_change: planChange,
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary).not.toBeNull();
+    expect(summary?.planChange?.state ?? null).toBe(expected);
   });
 
   it("offers no plan switch when cloud does not report change_plan", async () => {

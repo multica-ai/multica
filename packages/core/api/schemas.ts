@@ -3672,7 +3672,22 @@ export const WorkspaceSubscriptionSummarySchema = z
       purchase_seats: z.boolean(),
       // Absent on a cloud that predates plan switching: no switch is offered.
       change_plan: z.boolean().optional(),
+      check_plan_change: z.boolean().optional(),
     }).loose(),
+    // Absent on an older cloud, and a malformed value reads as no hold: the
+    // server still refuses the operations a hold blocks.
+    plan_change: z
+      .object({
+        target_plan: z.string().min(1),
+        // An unknown state from a newer cloud is shown as still confirming,
+        // the state that asks the user to wait rather than act.
+        state: z.enum(["confirming", "unresolved"]).catch("confirming"),
+        since: z.string().min(1),
+      })
+      .loose()
+      .nullable()
+      .optional()
+      .catch(null),
   })
   .loose()
   .transform(
@@ -3710,7 +3725,15 @@ export const WorkspaceSubscriptionSummarySchema = z
         portal: value.available_actions.portal,
         purchaseSeats: value.available_actions.purchase_seats,
         changePlan: value.available_actions.change_plan ?? false,
+        checkPlanChange: value.available_actions.check_plan_change ?? false,
       },
+      planChange: value.plan_change
+        ? {
+            targetPlan: value.plan_change.target_plan,
+            state: value.plan_change.state,
+            since: value.plan_change.since,
+          }
+        : null,
     }),
   );
 

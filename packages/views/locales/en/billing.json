@@ -33,7 +33,8 @@
       "manage": "Manage billing",
       "add_seats": "Add seats",
       "cancel": "Cancel",
-      "continue_to_stripe": "Continue to Stripe"
+      "continue_to_stripe": "Continue to Stripe",
+      "check_status": "Check status"
     },
     "errors": {
       "action_title": "Billing action failed",
@@ -86,7 +87,12 @@
       "billing_interval": "Billing interval",
       "period_end": "Current period ends",
       "change_plan": "Change plan",
-      "business_adds": "Business adds private projects, member-level access, team app accounts, and higher automation limits."
+      "business_adds": "Business adds private projects, member-level access, team app accounts, and higher automation limits.",
+      "plan_change_hold": "Plan change",
+      "plan_change_confirming": "Switching to {{plan}}. Waiting for Stripe to confirm; seats and the plan can't be changed until then.",
+      "plan_change_unresolved": "The switch to {{plan}} could not be confirmed. Contact support to settle it; seats and the plan can't be changed until then.",
+      "plan_change_state_confirming": "Confirming",
+      "plan_change_state_unresolved": "Needs support"
     },
     "upgrade": {
       "title": "Upgrade",
@@ -187,7 +193,8 @@
       "delayed_description_with_expiry": "Automatic checking has stopped. If the attempt is still pending after {{date}}, reload this page before requesting another quote; contact support if it remains pending.",
       "submitted_one": "A purchase for {{count}} seat was submitted. The new capacity appears after Stripe confirms it.",
       "submitted_other": "A purchase for {{count}} seats was submitted. The new capacity appears after Stripe confirms it.",
-      "error_title": "Could not update the estimate"
+      "error_title": "Could not update the estimate",
+      "plan_change_unresolved": "A plan change could not be confirmed. Contact support before adding seats."
     },
     "plan_change": {
       "upgrade_description": "Takes effect immediately. The difference for the rest of this billing period is charged now.",
@@ -209,7 +216,9 @@
       "unreadable": "The response could not be read. Retry; the same request will be reused.",
       "error_title": "Could not change the plan",
       "success_title": "Plan changed",
-      "success_description": "This workspace is now on {{plan}}."
+      "success_description": "This workspace is now on {{plan}}.",
+      "unresolved": "The previous plan change could not be confirmed. Contact support before changing plans.",
+      "check_failed": "Could not check the plan change. Try again."
     },
     "confirm": {
       "title": "Continue to Stripe Checkout?",
