@@ -7,7 +7,7 @@ import {
 } from "@multica/core/issues/stores";
 
 const STORAGE_KEY = "multica_issue_sidebar_sections";
-// The order persisted before the Sub-issues section was introduced.
+// The order persisted before the Sub-issues and Waiting sections were introduced.
 const OLD_ORDER = [
   "properties", "quick_actions", "wakeups", "plugins", "parent", "duplicates",
   "pull_requests", "environments", "deliverables", "apps", "execution_log", "details", "metadata",
@@ -37,8 +37,9 @@ describe("Sub-issues sidebar persisted preferences", () => {
     await useIssueSidebarSectionsStore.persist.rehydrate();
     const state = useIssueSidebarSectionsStore.getState();
     const order = [...selectIssueSidebarOrder(state)];
-    expect(order.filter((id) => id !== "sub_issues")).toEqual(savedOrder);
+    expect(order.filter((id) => id !== "sub_issues" && id !== "waiting")).toEqual(savedOrder);
     expect(order.indexOf("sub_issues")).toBe(order.indexOf("parent") + 1);
+    expect(order.indexOf("waiting")).toBe(order.indexOf("sub_issues") + 1);
     expect(order.filter((id) => id === "sub_issues")).toHaveLength(1);
     expect(state.hidden).toEqual(["parent", "apps"]);
     await reloadPreferences();
