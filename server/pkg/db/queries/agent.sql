@@ -395,12 +395,15 @@ LIMIT 1;
 -- Workflow handoffs pass their original step and source revision explicitly.
 -- A fire_at value admits a durable deferred task outside the pending slot;
 -- existing callers omit it and continue to insert queued tasks.
--- The runtime is resolved by the caller before INSERT — the agent's bound
--- machine for a fixed agent, the originator's effective runtime for a smart
--- one — and arrives as a parameter, together with the effective configuration
--- stamp (model / thinking level / service tier / concurrency / source) that
--- pins what the claimed task must launch with. lock_task_owner_rows still
--- fences workspace teardown.
+-- Lock the selected agent tuple so a rebind that commits during the owner-fence
+-- wait refreshes the runtime used by INSERT. Materialize that locked route once.
+WITH enqueue_agent AS MATERIALIZED (
+    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    FROM agent a
+    WHERE a.id = sqlc.arg(agent_id)
+      AND lock_task_owner_rows(a.id, sqlc.narg(issue_id), COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+    FOR KEY SHARE OF a
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
@@ -411,9 +414,9 @@ INSERT INTO agent_task_queue (
     workflow_step, fire_at, id
 )
 SELECT
-    $1, $2, $3,
+    sqlc.arg(agent_id), enqueue_agent.runtime_id, sqlc.narg(issue_id),
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NULL THEN 'queued' ELSE 'deferred' END,
-    $4, sqlc.narg(trigger_comment_id),
+    sqlc.arg(priority), sqlc.narg(trigger_comment_id),
     COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
@@ -451,10 +454,10 @@ SELECT
     sqlc.narg(runtime_config_source),
     sqlc.narg(runtime_config_hint),
     -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
-    COALESCE(sqlc.narg(workflow_step)::text, (SELECT i.status FROM issue i WHERE i.id = $3)),
+    COALESCE(sqlc.narg(workflow_step)::text, (SELECT i.status FROM issue i WHERE i.id = sqlc.narg(issue_id))),
     sqlc.narg(fire_at),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, $3, $2)
+FROM enqueue_agent
 RETURNING *;
 
 -- name: CreateDeferredChannelIssueTask :one
@@ -465,8 +468,15 @@ RETURNING *;
 -- Channel /issue media resolves after issue creation. Persist the assigned
 -- issue task up front for crash safety, but keep it inert until attachment
 -- binding settles or the fire_at fallback is promoted by the normal sweeper.
--- The runtime and the effective configuration stamp are caller-resolved, as in
--- CreateAgentTask.
+-- Lock the selected agent tuple so a rebind that commits during the owner-fence
+-- wait refreshes the runtime used by INSERT. Materialize that locked route once.
+WITH enqueue_agent AS MATERIALIZED (
+    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    FROM agent a
+    WHERE a.id = sqlc.arg(agent_id)
+      AND lock_task_owner_rows(a.id, sqlc.narg(issue_id), COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+    FOR KEY SHARE OF a
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
@@ -478,7 +488,7 @@ INSERT INTO agent_task_queue (
     workflow_step, id
 )
 SELECT
-    $1, $2, $3, 'deferred', $4, sqlc.narg(trigger_comment_id),
+    sqlc.arg(agent_id), enqueue_agent.runtime_id, sqlc.narg(issue_id), 'deferred', sqlc.arg(priority), sqlc.narg(trigger_comment_id),
     COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
@@ -508,9 +518,9 @@ SELECT
     sqlc.narg(runtime_config_source),
     sqlc.narg(runtime_config_hint),
     -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
-    (SELECT i.status FROM issue i WHERE i.id = $3),
+    (SELECT i.status FROM issue i WHERE i.id = sqlc.narg(issue_id)),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, $3, $2)
+FROM enqueue_agent
 RETURNING *;
 
 -- name: PromoteDeferredChannelIssueTask :one
@@ -545,9 +555,15 @@ WHERE id = @id
 -- The requester who opened the quick-create modal is a direct_human originator
 -- and accountable; attribution provenance is stamped so this path is not a
 -- NULL-source enqueue bypass (MUL-4302 §2).
--- The runtime and the effective configuration stamp are caller-resolved, as in
--- CreateAgentTask: a smart quick-create run lands on the requester's own
--- machine.
+-- Lock the selected agent tuple so a rebind that commits during the owner-fence
+-- wait refreshes the runtime used by INSERT. Materialize that locked route once.
+WITH enqueue_agent AS MATERIALIZED (
+    SELECT a.id, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid) AS runtime_id
+    FROM agent a
+    WHERE a.id = sqlc.arg(agent_id)
+      AND lock_task_owner_rows(a.id, NULL, COALESCE(a.runtime_id, sqlc.narg(runtime_id)::uuid))
+    FOR KEY SHARE OF a
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
     accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
@@ -557,7 +573,7 @@ INSERT INTO agent_task_queue (
     id
 )
 SELECT
-    $1, $2, NULL, 'queued', $3, $4,
+    sqlc.arg(agent_id), enqueue_agent.runtime_id, NULL, 'queued', sqlc.arg(priority), sqlc.narg(context),
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
@@ -573,7 +589,7 @@ SELECT
     sqlc.narg(runtime_config_source),
     sqlc.narg(runtime_config_hint),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, NULL, $2)
+FROM enqueue_agent
 RETURNING *;
 
 -- name: LinkTaskToIssue :exec
