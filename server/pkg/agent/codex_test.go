@@ -2605,6 +2605,148 @@ func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
 	}
 }
 
+// codexPrecedenceCanary stands in for the fixed instructions the daemon sends
+// with an out-of-checkout brief (MUL-9445).
+const codexPrecedenceCanary = "MULTICA-PRECEDENCE-CANARY"
+
+func assertDeveloperInstructions(want string) func(*testing.T, map[string]any) {
+	return func(t *testing.T, params map[string]any) {
+		t.Helper()
+		if got := params["developerInstructions"]; got != want {
+			t.Errorf("developerInstructions = %#v, want %q", got, want)
+		}
+	}
+}
+
+func assertConfigReadCwd(t *testing.T, params map[string]any) {
+	t.Helper()
+	if params["cwd"] != "/work" {
+		t.Errorf("config/read cwd = %v, want /work so project config layers resolve as they do for the thread", params["cwd"])
+	}
+}
+
+func TestCodexDeveloperInstructionsFollowConfiguredOnStart(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:   "config/read",
+			result:   json.RawMessage(`{"config":{"developer_instructions":"User rule.\n"},"origins":{}}`),
+			assertFn: assertConfigReadCwd,
+		},
+		{
+			method:   "thread/start",
+			result:   json.RawMessage(`{"thread":{"id":"thr_fresh"}}`),
+			assertFn: assertDeveloperInstructions("User rule.\n\n" + codexPrecedenceCanary),
+		},
+	})
+	defer wait()
+
+	if _, _, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", CodexDeveloperInstructions: codexPrecedenceCanary},
+		slog.Default(),
+	); err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+}
+
+// Resume must resend the value: after a compaction Codex rebuilds the context
+// from the thread's current settings, and a nil here would fall back to the
+// configured value alone.
+func TestCodexDeveloperInstructionsResentOnResume(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "config/read",
+			result: json.RawMessage(`{"config":{"developer_instructions":null},"origins":{}}`),
+		},
+		{
+			method:   "thread/resume",
+			result:   json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+			assertFn: assertDeveloperInstructions(codexPrecedenceCanary),
+		},
+	})
+	defer wait()
+
+	if _, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior", CodexDeveloperInstructions: codexPrecedenceCanary},
+		slog.Default(),
+	); err != nil || !resumed {
+		t.Fatalf("startOrResumeThread: resumed=%v err=%v", resumed, err)
+	}
+}
+
+func TestCodexDeveloperInstructionsKeptWhenResumeFallsBack(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	want := "User rule.\n\n" + codexPrecedenceCanary
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method: "config/read",
+			result: json.RawMessage(`{"config":{"developer_instructions":"User rule."},"origins":{}}`),
+		},
+		{
+			method:   "thread/resume",
+			errMsg:   "unknown thread",
+			errCode:  -32602,
+			assertFn: assertDeveloperInstructions(want),
+		},
+		{
+			method:   "thread/start",
+			result:   json.RawMessage(`{"thread":{"id":"thr_new"}}`),
+			assertFn: assertDeveloperInstructions(want),
+		},
+	})
+	defer wait()
+
+	if _, _, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_stale", CodexDeveloperInstructions: codexPrecedenceCanary},
+		slog.Default(),
+	); err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+}
+
+// Sending only the fixed text would replace the user's configured
+// developer_instructions, so an unreadable config sends nothing.
+func TestCodexDeveloperInstructionsOmittedWhenConfigUnreadable(t *testing.T) {
+	t.Parallel()
+
+	for name, read := range map[string]rpcResponse{
+		"rpc error":    {method: "config/read", errMsg: "invalid config", errCode: -32603},
+		"bad response": {method: "config/read", result: json.RawMessage(`{"config":"unexpected"}`)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			c, fs, _ := newTestCodexClient(t)
+			wait := drainRPCScript(t, c, fs, []rpcResponse{
+				read,
+				{
+					method:   "thread/start",
+					result:   json.RawMessage(`{"thread":{"id":"thr_fresh"}}`),
+					assertFn: assertNoDeveloperInstructions,
+				},
+			})
+			defer wait()
+
+			if _, _, err := c.startOrResumeThread(
+				context.Background(),
+				ExecOptions{Cwd: "/work", CodexDeveloperInstructions: codexPrecedenceCanary},
+				slog.Default(),
+			); err != nil {
+				t.Fatalf("startOrResumeThread: %v", err)
+			}
+		})
+	}
+}
+
 func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	t.Parallel()
 

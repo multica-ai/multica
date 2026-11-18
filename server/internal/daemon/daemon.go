@@ -9387,6 +9387,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ClaudeRuntimeDir:       claudeRuntimeDir(provider, env),
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
+	execOpts.CodexDeveloperInstructions = env.CodexDeveloperInstructions(provider)
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
 	//   - openclaw is pinned to the task workdir via the per-task config we

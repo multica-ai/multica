@@ -1998,6 +1998,41 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 	return []map[string]any{{"type": "text", "text": text}}
 }
 
+// developerInstructions returns the developerInstructions value for
+// thread/start and thread/resume: nil without CodexDeveloperInstructions,
+// otherwise the user's effective developer_instructions followed by them. The
+// parameter replaces the configured value rather than extending it, hence the
+// config/read. When the configured value cannot be read, it returns nil so
+// the user's own instructions are not dropped.
+func (c *codexClient) developerInstructions(ctx context.Context, opts ExecOptions, logger *slog.Logger) any {
+	if opts.CodexDeveloperInstructions == "" {
+		return nil
+	}
+	readCtx, cancel := ctx, context.CancelFunc(func() {})
+	if c.handshakeTimeout > 0 {
+		readCtx, cancel = context.WithTimeout(ctx, c.handshakeTimeout)
+	}
+	defer cancel()
+	raw, err := c.request(readCtx, "config/read", map[string]any{"cwd": opts.Cwd})
+	if err != nil {
+		logger.Warn("codex config/read failed; developer instructions left to the user's config", "task_id", c.cfg.TaskID, "error", err)
+		return nil
+	}
+	var resp struct {
+		Config struct {
+			DeveloperInstructions *string `json:"developer_instructions"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		logger.Warn("codex config/read returned an unreadable config; developer instructions left to the user's config", "task_id", c.cfg.TaskID, "error", err)
+		return nil
+	}
+	if configured := resp.Config.DeveloperInstructions; configured != nil && strings.TrimSpace(*configured) != "" {
+		return strings.TrimRight(*configured, " \t\r\n") + "\n\n" + opts.CodexDeveloperInstructions
+	}
+	return opts.CodexDeveloperInstructions
+}
+
 // startOrResumeThread picks between Codex's thread/resume and thread/start
 // based on opts.ResumeSessionID. When a prior thread ID is provided it first
 // tries thread/resume; recoverable protocol errors (unknown thread, schema
@@ -2007,16 +2042,17 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 // turn/start calls must reference, and resumed indicates whether the prior
 // thread was picked up (only useful for logging).
 func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions, logger *slog.Logger) (string, bool, error) {
+	developerInstructions := c.developerInstructions(ctx, opts, logger)
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
-		// developerInstructions stays nil for the reason given on thread/start
-		// below.
+		// developerInstructions is resent so that context rebuilt after a
+		// compaction still carries it.
 		resumeParams := map[string]any{
 			"threadId":              priorThreadID,
 			"cwd":                   opts.Cwd,
 			"model":                 nilIfEmpty(opts.Model),
-			"developerInstructions": nil,
+			"developerInstructions": developerInstructions,
 			// Only omit history from the response, not the resumed model context.
 			// We need the thread ID, not an unbounded single-line turns payload.
 			"excludeTurns": true,
@@ -2065,12 +2101,12 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		}
 	}
 
-	// developerInstructions is always nil: a thread started with this cwd loads
-	// the per-task AGENTS.md the daemon wrote there, so the runtime brief is
-	// already in context and inlining it would duplicate it on every turn.
-	// Confirmed end-to-end against codex-cli 0.144.6 driving the real
-	// app-server (thread/start -> turn/start) with developerInstructions unset
-	// (MUL-5392).
+	// developerInstructions never carries the runtime brief: Codex loads it
+	// from an AGENTS.md the daemon wrote, so inlining it would duplicate it on
+	// every turn. Confirmed end-to-end against codex-cli 0.144.6 driving the
+	// real app-server (thread/start -> turn/start) with developerInstructions
+	// unset (MUL-5392). It is nil unless the daemon supplied
+	// CodexDeveloperInstructions.
 	startParams := map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,
@@ -2080,7 +2116,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"sandbox":                nil,
 		"config":                 nil,
 		"baseInstructions":       nil,
-		"developerInstructions":  nil,
+		"developerInstructions":  developerInstructions,
 		"compactPrompt":          nil,
 		"includeApplyPatchTool":  nil,
 		"experimentalRawEvents":  false,

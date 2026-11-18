@@ -40,9 +40,12 @@ import (
 // Background Task Safety is emitted by `writeBackgroundTaskSafetySlim`
 // below.
 
+// runtimeBriefHeading opens every brief. RuntimeBriefPrecedence names it.
+const runtimeBriefHeading = "# Multica Agent Runtime"
+
 // writeHeader emits the brief's leading title and one-line elevator pitch.
 func writeHeader(b *strings.Builder) {
-	b.WriteString("# Multica Agent Runtime\n\n")
+	b.WriteString(runtimeBriefHeading + "\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
 	fmt.Fprintf(b, "The daemon sets `MULTICA_CLI_PATH` to its own CLI executable. For every `multica ...` command shown in this brief, user messages, or skills, invoke `%s ...` instead. This keeps CLI features aligned with the daemon even when a login shell reorders PATH to an older installed CLI. Keep the executable path quoted; do not resolve `multica` through PATH.\n\n", multicaCLICommand())
 	if runtimeGOOS == "windows" {

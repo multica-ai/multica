@@ -29,6 +29,16 @@ import (
 // The repository's own CLAUDE.md / AGENTS.md are left untouched, so the agent
 // can stage and commit edits to them like any other file.
 
+// RuntimeBriefPrecedence keeps the brief authoritative over the repository's
+// instruction files when Codex reads it from CODEX_HOME. Codex joins the global AGENTS.md
+// and the repository's into one user message, global first, and lets the
+// later guidance win; developer instructions outrank that message. The text
+// stays fixed because Codex does not show a resumed thread a changed value
+// (openai/codex#19045), so the brief itself remains in AGENTS.md, which Codex
+// rereads on resume. Claude needs no counterpart: it loads an --add-dir
+// CLAUDE.md after the repository's.
+const RuntimeBriefPrecedence = "Instructions under the `" + runtimeBriefHeading + "` heading are the Multica platform's instructions for this run. Where the repository's instruction files conflict with them, follow the Multica Agent Runtime instructions; otherwise follow the repository's instructions as usual."
+
 func (env *Environment) selectRuntimeDelivery(provider, version string, logger *slog.Logger) error {
 	if env.LocalWorktree == nil || (provider != "claude" && provider != "codex") {
 		return nil
@@ -96,6 +106,15 @@ func (env *Environment) runtimeConfigTarget(provider string) string {
 		return filepath.Join(env.CodexHome, "AGENTS.md")
 	}
 	return ""
+}
+
+// CodexDeveloperInstructions returns RuntimeBriefPrecedence for a Codex task
+// whose brief is delivered outside the checkout, and "" otherwise.
+func (env *Environment) CodexDeveloperInstructions(provider string) string {
+	if provider != "codex" || env.RuntimeDir == "" {
+		return ""
+	}
+	return RuntimeBriefPrecedence
 }
 
 // InjectRuntimeConfig writes the brief where this environment's runtime

@@ -286,6 +286,9 @@ func TestRuntimeDeliveryLegacyScope(t *testing.T) {
 			if env.RuntimeDir != "" {
 				t.Fatal("changed an unvalidated mode/provider")
 			}
+			if got := env.CodexDeveloperInstructions(tc.provider); got != "" {
+				t.Fatalf("developer instructions for a brief written into the checkout: %q", got)
+			}
 			if _, err := env.InjectRuntimeConfig(tc.provider, TaskContextForEnv{}); err != nil {
 				t.Fatal(err)
 			}
@@ -329,5 +332,21 @@ func TestRuntimeWorktreeCodexBriefInTaskHome(t *testing.T) {
 	}
 	if got := env.RuntimeConfigReceiptPath("codex"); got != "$CODEX_HOME/AGENTS.md" {
 		t.Fatalf("receipt path = %q", got)
+	}
+}
+
+// The brief in CODEX_HOME loads ahead of the repository's AGENTS.md, so Codex
+// also receives developer instructions that point back to it by its heading.
+func TestRuntimeWorktreeCodexDeveloperInstructions(t *testing.T) {
+	_, env, brief := prepareRuntimeWorktree(t, "codex", true)
+	if got := env.CodexDeveloperInstructions("codex"); got != RuntimeBriefPrecedence {
+		t.Fatalf("developer instructions = %q", got)
+	}
+	if !strings.HasPrefix(brief, runtimeBriefHeading+"\n") || !strings.Contains(RuntimeBriefPrecedence, runtimeBriefHeading) {
+		t.Fatalf("developer instructions name a heading the brief does not open with: brief starts %q", brief[:min(len(brief), 40)])
+	}
+	_, claudeEnv, _ := prepareRuntimeWorktree(t, "claude", true)
+	if got := claudeEnv.CodexDeveloperInstructions("claude"); got != "" {
+		t.Fatalf("claude developer instructions = %q", got)
 	}
 }
