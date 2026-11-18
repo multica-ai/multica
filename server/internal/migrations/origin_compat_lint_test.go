@@ -9,9 +9,9 @@ import (
 
 // historicalShareCRMOriginVersions are ledger keys already applied by older
 // ShareCRM releases. The runner stores the full filename, so these strings
-// are not 681/682. The files must not return: a database that never recorded
+// are not 683/684. The files must not return: a database that never recorded
 // that exact key would execute them again, and those numbers now belong to
-// other migrations.
+// other migrations. 681/682 are upstream's project_folder migrations.
 var historicalShareCRMOriginVersions = []string{
 	"649_issue_origin_sharecrm_chat",
 	"650_issue_origin_sharecrm_chat_validate",
@@ -23,11 +23,13 @@ var historicalShareCRMOriginVersions = []string{
 	"666_issue_origin_sharecrm_chat_validate",
 	"673_issue_origin_sharecrm_chat",
 	"674_issue_origin_sharecrm_chat_validate",
+	"681_issue_origin_sharecrm_chat",
+	"682_issue_origin_sharecrm_chat_validate",
 }
 
 func TestHistoricalShareCRMOriginFilesStayRetired(t *testing.T) {
 	dir := realMigrationsDir(t)
-	recorded := readMigrationFile(t, "681_issue_origin_sharecrm_chat.up.sql")
+	recorded := readMigrationFile(t, "683_issue_origin_sharecrm_chat.up.sql")
 	for _, version := range historicalShareCRMOriginVersions {
 		for _, suffix := range []string{".up.sql", ".down.sql"} {
 			path := filepath.Join(dir, version+suffix)
@@ -36,14 +38,14 @@ func TestHistoricalShareCRMOriginFilesStayRetired(t *testing.T) {
 			}
 		}
 		if !strings.Contains(recorded, version) {
-			t.Errorf("681 up migration must name retired ledger key %s", version)
+			t.Errorf("683 up migration must name retired ledger key %s", version)
 		}
 	}
 }
 
 func TestIssueOriginRepairDoesNotValidateInsideTheExclusiveSwap(t *testing.T) {
 	up667 := readMigrationFile(t, "667_issue_origin_weixin_chat.up.sql")
-	up673 := readMigrationFile(t, "681_issue_origin_sharecrm_chat.up.sql")
+	up673 := readMigrationFile(t, "683_issue_origin_sharecrm_chat.up.sql")
 	up668 := readMigrationFile(t, "668_issue_origin_weixin_chat_validate.up.sql")
 	for _, sql := range []string{up667, up673} {
 		if strings.Contains(sql, "VALIDATE CONSTRAINT") || strings.Contains(sql, "COMMIT") {
@@ -60,7 +62,7 @@ func TestIssueOriginRepairDoesNotValidateInsideTheExclusiveSwap(t *testing.T) {
 	}
 	for _, name := range []string{
 		"667_issue_origin_weixin_chat.down.sql",
-		"681_issue_origin_sharecrm_chat.down.sql",
+		"683_issue_origin_sharecrm_chat.down.sql",
 	} {
 		sql := readMigrationFile(t, name)
 		if strings.Contains(sql, "COMMIT") {

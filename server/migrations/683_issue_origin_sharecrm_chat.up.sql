@@ -3,19 +3,27 @@
 -- Older releases used these full ledger keys for the same logical change.
 -- The runner does not delete them, and the files must not come back: a
 -- database that never recorded that exact string would execute them again,
--- and 649/657/661/665/673/674 are now different migrations.
+-- and 649/657/661/665/673/674/681/682 are now different migrations.
 --   649_issue_origin_sharecrm_chat / 650_issue_origin_sharecrm_chat_validate
 --   657_issue_origin_sharecrm_chat / 658_issue_origin_sharecrm_chat_validate
 --   661_issue_origin_sharecrm_chat / 662_issue_origin_sharecrm_chat_validate
 --   665_issue_origin_sharecrm_chat / 666_issue_origin_sharecrm_chat_validate
 --   673_issue_origin_sharecrm_chat / 674_issue_origin_sharecrm_chat_validate
+--   681_issue_origin_sharecrm_chat / 682_issue_origin_sharecrm_chat_validate
+--
+-- 681/682 on upstream are project_folder and its name index. A database
+-- that already recorded the ShareCRM filenames above still runs this file:
+-- the ledger key is the whole filename, not the numeric prefix. When
+-- weixin_chat and sharecrm_chat are already allowed, including when the
+-- retired 681 left the check NOT VALID, this file returns without another
+-- catalog swap. Migration 684 validates.
 --
 -- 667/668 on this fork already union sharecrm_chat in, including on a
 -- database whose 667 committed before that repair existed (668 reads the
 -- rows and puts the value back). This file is then a catalog no-op: it
 -- does not take ACCESS EXCLUSIVE and does not schedule another scan.
 -- A database that already validated upstream 667/668 (no sharecrm_chat)
--- still widens here. Migration 682 validates. No table scan in this file.
+-- still widens here. No table scan in this file.
 DO $$
 DECLARE
   def text;
