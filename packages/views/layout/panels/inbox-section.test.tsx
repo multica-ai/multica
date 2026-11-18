@@ -257,7 +257,7 @@ describe("InboxSection", () => {
     fireEvent.click(screen.getByRole("link", { name: /^Commented/ }));
 
     expect(first?.issueId).toBe("issue-a");
-    expect(useInboxSelectionStore.getState().landing).toEqual({ issueId: "issue-a", token: first!.token + 1 });
+    expect(useInboxSelectionStore.getState().landing).toEqual({ issueId: "issue-a", token: first!.token + 1, landed: false });
   });
 
   it("lists under the Inbox filters, keeping the open row once reading it", () => {
