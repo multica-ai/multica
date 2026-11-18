@@ -215,6 +215,7 @@ import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-re
 import { useIssueTimelineAnchor } from "../hooks/use-issue-timeline-anchor";
 import { revealTimelineList, scrollToTimelineComment } from "../utils/scroll-to-timeline-comment";
 import { buildTimelineFindUnits, type TimelineFindUnit } from "../utils/timeline-find-units";
+import { estimateTimelineItemHeights, timelineCharsPerLine } from "../utils/timeline-height-estimates";
 import { useJumpToLatest } from "../hooks/use-jump-to-latest";
 import { useNewCommentsWhileAway } from "../hooks/use-new-comments-while-away";
 import { useInPageFind } from "../hooks/use-in-page-find";
@@ -1604,6 +1605,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // Virtuoso prop would never receive the element. Callback ref + state fixes
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  // Read once when the container attaches, for the timeline's row height
+  // estimates; 0 while it is not laid out (a hidden desktop tab).
+  const [scrollContainerWidth, setScrollContainerWidth] = useState(0);
   // Bottom comment composer. Measured when scrolling a freshly posted comment
   // into view so its bottom lands above the composer rather than behind it.
   const composerRef = useRef<HTMLDivElement | null>(null);
@@ -1651,6 +1655,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
       // The peek has no sidebar, so it must not claim the toggle shortcut.
       rightSidebarShortcutTargetRef.current = isPeek ? null : el;
       setScrollContainerEl(el);
+      setScrollContainerWidth(el?.clientWidth ?? 0);
       restoreScrollRef(el);
     },
     [isPeek, restoreScrollRef],
@@ -2122,6 +2127,41 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   const handleTimelineHeightChange = useCallback((height: number) => {
     if (height > 0) setMeasuredTimelineId(id);
   }, [id]);
+  // Row heights estimated from content, so Virtuoso's first layout of a long
+  // history is roughly right: a deep link then lands on its target by mounting
+  // only the rows around it (see estimateTimelineItemHeights). Virtuoso reads
+  // estimates only until it has measured a row, so they stop being computed
+  // once the list has a height.
+  const timelineMeasured = measuredTimelineId === id;
+  const timelineHeightEstimates = useMemo(() => {
+    if (timelineMeasured || scrollContainerWidth <= 0) return undefined;
+    const activityCounts = new Map<string, number>();
+    for (const item of items) if (item.kind === "activity-group") activityCounts.set(item.id, item.entries.length);
+    return estimateTimelineItemHeights(
+      items,
+      timelineView.threadReplies,
+      commentRuns,
+      { expandedResolved, collapsed: new Set(collapsedThreadIds) },
+      {
+        charsPerLine: timelineCharsPerLine(scrollContainerWidth),
+        // Mirrors renderItem: only the trailing block opens by default, and it
+        // shows its latest entries until the reader asks for older ones.
+        activityLines: (itemId) => {
+          const expanded = expandedActivityIds.has(itemId) || (!collapsedActivityIds.has(itemId) && itemId === lastActivityGroupId);
+          if (!expanded) return 0;
+          const count = activityCounts.get(itemId) ?? 0;
+          return itemId === lastActivityGroupId && !showOlderActivityIds.has(itemId)
+            ? Math.min(count, LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT) : count;
+        },
+      },
+    );
+  }, [timelineMeasured, scrollContainerWidth, items, timelineView.threadReplies, commentRuns, expandedResolved,
+    collapsedThreadIds, expandedActivityIds, collapsedActivityIds, showOlderActivityIds, lastActivityGroupId]);
+  // Whether Virtuoso can place a row by index. Without estimates it needs one
+  // measured row first: the timeline is scrolled into view to get it. With
+  // estimates it already can, and that detour would mount the top of the
+  // history before a deep link jumps away from it.
+  const timelineSized = timelineMeasured || timelineHeightEstimates !== undefined;
   // Whether Virtuoso's rendered rows (overscan included) stop short of the
   // last one; rows past them are only estimated. Settled from Virtuoso's own
   // range report, not `items.length`: a comment appended at the bottom is
@@ -2169,7 +2209,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     }
     const index = items.findIndex((item) => item.id === rootId);
     if (index < 0) { completeAnchorRestore(); return; }
-    if (measuredTimelineId !== id) {
+    if (!timelineSized) {
       const list = virtualTimelineRef.current;
       return list ? revealTimelineList(container, list) : undefined;
     }
@@ -2178,7 +2218,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
       commentId: commentLandingTarget(readingAnchor.commentId, rootId, timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES),
       offset: readingAnchor.offset, onComplete: completeAnchorRestore,
     });
-  }, [readingAnchor, scrollContainerEl, issueLoading, timelineLoading, commentTasksLoading, replyToRoot, commentRuns, items, measuredTimelineId, id, timelineView.threadReplies, completeAnchorRestore]);
+  }, [readingAnchor, scrollContainerEl, issueLoading, timelineLoading, commentTasksLoading, replyToRoot, commentRuns, items, timelineSized, timelineView.threadReplies, completeAnchorRestore]);
   // Scroll a freshly posted comment into view, aligned so its bottom sits just
   // above the sticky composer (never behind it). A reply lives inside its root
   // CommentCard, so the containing top-level row is the scroll target.
@@ -2631,8 +2671,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     const container = scrollContainerEl;
     if (!container) return;
     if (targetIdx < 0) return;
-    if (measuredTimelineId !== id) {
-      // Virtuoso measures nothing while the list is below the viewport.
+    if (!timelineSized) {
+      // Virtuoso measures nothing while the list is below the viewport, and
+      // without height estimates it cannot place the target until it does.
       const list = virtualTimelineRef.current;
       return list ? revealTimelineList(container, list) : undefined;
     }
@@ -2664,7 +2705,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
         interruptedLandingRef.current = highlightCommentId;
       }
     };
-  }, [highlightCommentId, highlightTargetId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, measuredTimelineId, timelineLoading, commentTasksLoading, flashJumpTarget]);
+  }, [highlightCommentId, highlightTargetId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, timelineSized, timelineLoading, commentTasksLoading, flashJumpTarget]);
 
   // Land on the comment in-page find stepped to, the way a deep link lands.
   useEffect(() => {
@@ -4352,6 +4393,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                     customScrollParent={scrollContainerEl}
                     data={items}
                     initialScrollTop={readingAnchor ? undefined : restoredScrollTop}
+                    heightEstimates={timelineHeightEstimates}
                     increaseViewportBy={{ top: 800, bottom: 800 }}
                     totalListHeightChanged={handleTimelineHeightChange}
                     rangeChanged={handleTimelineRangeChanged}

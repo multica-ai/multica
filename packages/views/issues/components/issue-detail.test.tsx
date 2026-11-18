@@ -19,6 +19,7 @@ import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores/issue-sidebar-sections-store";
 import { useSubIssuesCollapseStore } from "@multica/core/issues/stores/sub-issues-collapse-store";
+import { configureShortcutPlatform } from "@multica/core/shortcuts";
 
 vi.mock("./issue-wakeup-header-chip", () => ({
   IssueWakeupHeaderChip: ({ onOpen }: { onOpen: () => void }) => (
@@ -1063,6 +1064,9 @@ describe("IssueDetail (shared)", () => {
     // Find only answers in a visible page; jsdom lays nothing out.
     const rects = vi.spyOn(HTMLElement.prototype, "getClientRects")
       .mockReturnValue([new DOMRect(0, 0, 1, 1)] as unknown as DOMRectList);
+    // jsdom's user agent names the host OS, which would make the find chord
+    // Cmd+F on a Mac host.
+    configureShortcutPlatform("linux");
     try {
       renderIssueDetail();
       await screen.findByText("Historical comment 0");
@@ -1079,6 +1083,7 @@ describe("IssueDetail (shared)", () => {
       expect(screen.getByTestId("virtuoso-mock")).toBeInTheDocument();
     } finally {
       rects.mockRestore();
+      configureShortcutPlatform(null);
     }
   });
 
