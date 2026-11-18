@@ -32,6 +32,9 @@ interface IssuePickerModalProps {
   description: string;
   excludeIds: string[];
   onSelect: (issue: Issue) => void;
+  closeOnSelect?: boolean;
+  error?: string;
+  pending?: boolean;
   /** Shown while the query is empty; groups without issues are skipped. */
   suggestions?: IssuePickerSuggestionGroup[];
   /** Drops issues from results and suggestions alike; excludeIds always applies. */
@@ -46,6 +49,9 @@ export function IssuePickerModal({
   excludeIds,
   onSelect,
   suggestions,
+  closeOnSelect = true,
+  error,
+  pending = false,
   isSelectable,
 }: IssuePickerModalProps) {
   const { t } = useT("modals");
@@ -112,8 +118,9 @@ export function IssuePickerModal({
       key={issue.id}
       value={issue.id}
       onSelect={() => {
+        if (pending) return;
         onSelect(issue);
-        onOpenChange(false);
+        if (closeOnSelect) onOpenChange(false);
       }}
     >
       <StatusIcon
@@ -144,6 +151,7 @@ export function IssuePickerModal({
             search(v);
           }}
         />
+        {error && <p role="alert" className="px-3 py-2 text-caption text-destructive">{error}</p>}
         <CommandList>
           {isLoading && (
             <div className="py-6 text-center text-body text-muted-foreground">

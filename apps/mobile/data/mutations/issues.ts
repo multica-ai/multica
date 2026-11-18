@@ -547,6 +547,8 @@ export function useUpdateIssue(issueId: string) {
           description_base: _descriptionBase,
           title_base: _titleBase,
           expected_revision: _expectedRevision,
+          blocked_by: _blockedBy,
+          remove_blocked_by: _removeBlockedBy,
           ...optimisticPatch
         } = patch;
         qc.setQueryData<Issue>(key, {

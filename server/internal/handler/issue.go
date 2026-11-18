@@ -63,14 +63,16 @@ type IssueResponse struct {
 	// field at all: with omitempty a built-in fixture hides it from BOTH
 	// renderings, and the drift guard goes green on a payload that has drifted.
 	// (MUL-6749)
-	StatusName    string  `json:"status_name"`
-	Priority      string  `json:"priority"`
-	AssigneeType  *string `json:"assignee_type"`
-	AssigneeID    *string `json:"assignee_id"`
-	CreatorType   string  `json:"creator_type"`
-	CreatorID     string  `json:"creator_id"`
-	RequesterID   *string `json:"requester_id"`
-	ParentIssueID *string `json:"parent_issue_id"`
+	StatusName    string                 `json:"status_name"`
+	Priority      string                 `json:"priority"`
+	AssigneeType  *string                `json:"assignee_type"`
+	AssigneeID    *string                `json:"assignee_id"`
+	CreatorType   string                 `json:"creator_type"`
+	CreatorID     string                 `json:"creator_id"`
+	RequesterID   *string                `json:"requester_id"`
+	ParentIssueID *string                `json:"parent_issue_id"`
+	BlockedBy     []IssueBlockerResponse `json:"blocked_by"`
+	BlockedCount  int                    `json:"blocked_count"`
 	// DuplicateOf is the original this issue duplicates (MUL-7349), set only
 	// while the mark counts: the issue is cancelled and the original still
 	// exists. newStatusCategoryFiller resolves it from duplicateOfIssueID;
@@ -353,10 +355,12 @@ func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []str
 // status still belongs in its category's column. (MUL-6243)
 func (h *Handler) fillStatusCategories(ctx context.Context, wsID pgtype.UUID, hidden projectaccess.Hidden, resps []IssueResponse) {
 	var originals []pgtype.UUID
+	var blockerPageIDs []pgtype.UUID
 	for i := range resps {
 		originals = appendDuplicateOriginal(originals, resps[i].Status, resps[i].duplicateOfIssueID)
+		blockerPageIDs = append(blockerPageIDs, parseUUID(resps[i].ID))
 	}
-	fill := h.newStatusCategoryFiller(ctx, wsID, hidden, originals...)
+	fill := h.newStatusCategoryFiller(ctx, wsID, hidden, originals, blockerPageIDs...)
 	for i := range resps {
 		fill(&resps[i])
 	}
@@ -376,9 +380,10 @@ func (h *Handler) fillStatusCategories(ctx context.Context, wsID pgtype.UUID, hi
 // hidden is the reader's hidden projects: an original in one of them is left
 // off like a missing one (MUL-8472). Broadcasts, which reach every member,
 // pass the zero value; per-reader filtering of those is the fanout's job.
-func (h *Handler) newStatusCategoryFiller(ctx context.Context, wsID pgtype.UUID, hidden projectaccess.Hidden, originals ...pgtype.UUID) func(*IssueResponse) {
+func (h *Handler) newStatusCategoryFiller(ctx context.Context, wsID pgtype.UUID, hidden projectaccess.Hidden, originals []pgtype.UUID, issueIDs ...pgtype.UUID) func(*IssueResponse) {
 	resolver := issuestatus.NewResolver(wsID)
 	refs := duplicateOriginals{}
+	fillBlockers := h.newIssueBlockerFiller(ctx, wsID, issueIDs)
 	h.loadDuplicateOriginals(ctx, wsID, refs, originals)
 	return func(resp *IssueResponse) {
 		if resp == nil {
@@ -387,6 +392,7 @@ func (h *Handler) newStatusCategoryFiller(ctx context.Context, wsID pgtype.UUID,
 		// Every response that resolves its status also resolves its duplicate
 		// mark, so the two never disagree about which endpoints carry them.
 		h.fillDuplicateOf(ctx, wsID, resp, refs, hidden)
+		fillBlockers(resp)
 		if resp.StatusCategory != "" {
 			return
 		}
@@ -400,7 +406,7 @@ func (h *Handler) newStatusCategoryFiller(ctx context.Context, wsID pgtype.UUID,
 // fillStatusCategory is the single-response form. Only for endpoints that build
 // exactly ONE response; anything looping must use newStatusCategoryFiller.
 func (h *Handler) fillStatusCategory(ctx context.Context, wsID pgtype.UUID, hidden projectaccess.Hidden, resp *IssueResponse) {
-	h.newStatusCategoryFiller(ctx, wsID, hidden)(resp)
+	h.newStatusCategoryFiller(ctx, wsID, hidden, nil, parseUUID(resp.ID))(resp)
 }
 
 // duplicateOfPointer keeps a duplicate mark only while the issue is
@@ -501,6 +507,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatorID:          uuidToString(i.CreatorID),
 		RequesterID:        uuidToPtr(i.RequesterUserID),
 		ParentIssueID:      uuidToPtr(i.ParentIssueID),
+		BlockedBy:          []IssueBlockerResponse{},
 		duplicateOfIssueID: duplicateOfPointer(i.Status, i.DuplicateOfIssueID),
 		ProjectID:          uuidToPtr(i.ProjectID),
 		Position:           i.Position,
@@ -540,6 +547,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		CreatorID:          uuidToString(i.CreatorID),
 		RequesterID:        uuidToPtr(i.RequesterUserID),
 		ParentIssueID:      uuidToPtr(i.ParentIssueID),
+		BlockedBy:          []IssueBlockerResponse{},
 		duplicateOfIssueID: duplicateOfPointer(i.Status, i.DuplicateOfIssueID),
 		ProjectID:          uuidToPtr(i.ProjectID),
 		Position:           i.Position,
@@ -611,6 +619,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		CreatorID:          uuidToString(i.CreatorID),
 		RequesterID:        uuidToPtr(i.RequesterUserID),
 		ParentIssueID:      uuidToPtr(i.ParentIssueID),
+		BlockedBy:          []IssueBlockerResponse{},
 		duplicateOfIssueID: duplicateOfPointer(i.Status, i.DuplicateOfIssueID),
 		ProjectID:          uuidToPtr(i.ProjectID),
 		Position:           i.Position,
@@ -1157,6 +1166,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 }
 
 func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	ctx := r.Context()
 	workspaceID := h.resolveWorkspaceID(r)
 
@@ -1289,10 +1299,12 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 
 	prefix := h.getIssuePrefix(ctx, wsUUID)
 	var originals []pgtype.UUID
+	var blockerPageIDs []pgtype.UUID
 	for _, sr := range results {
 		originals = appendDuplicateOriginal(originals, sr.issue.Status, sr.issue.DuplicateOfIssueID)
+		blockerPageIDs = append(blockerPageIDs, sr.issue.ID)
 	}
-	fillSearch := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals...)
+	fillSearch := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals, blockerPageIDs...)
 	resp := make([]SearchIssueResponse, len(results))
 	for i, sr := range results {
 		sir := SearchIssueResponse{
@@ -1334,6 +1346,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 // as ListIssues' query parameters; the handler rebuilds the query string and
 // delegates, so the two transports cannot drift.
 func (h *Handler) QueryIssues(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	var params map[string]string
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&params); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1348,6 +1361,7 @@ func (h *Handler) QueryIssues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	ctx := r.Context()
 
 	workspaceID := h.resolveWorkspaceID(r)
@@ -1457,6 +1471,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
+			BlockedOnly:        r.URL.Query().Get("blocked") == "true",
 			WorkspaceID:        wsUUID,
 			TerminalStatusKeys: terminalStatusKeys,
 			Priority:           priorityFilter,
@@ -1478,12 +1493,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		prefix := h.getIssuePrefix(ctx, wsUUID)
 		ids := make([]pgtype.UUID, len(issues))
 		var originals []pgtype.UUID
+		var blockerPageIDs []pgtype.UUID
 		for i, issue := range issues {
 			ids[i] = issue.ID
 			originals = appendDuplicateOriginal(originals, issue.Status, issue.DuplicateOfIssueID)
+			blockerPageIDs = append(blockerPageIDs, issue.ID)
 		}
 		labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
-		fillOpen := h.newStatusCategoryFiller(ctx, wsUUID, openHidden, originals...)
+		fillOpen := h.newStatusCategoryFiller(ctx, wsUUID, openHidden, originals, blockerPageIDs...)
 		resp := make([]IssueResponse, len(issues))
 		for i, issue := range issues {
 			resp[i] = openIssueRowToResponse(issue, prefix)
@@ -1622,6 +1639,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// Build dynamic SQL — same approach as ListGroupedIssues.
 	where := []string{"i.workspace_id = $1"}
+	if r.URL.Query().Get("blocked") == "true" {
+		where = append(where, "issue_has_open_blockers(i.workspace_id,i.id)")
+	}
 	args := []any{wsUUID}
 	addArg := func(v any) string {
 		args = append(args, v)
@@ -2087,6 +2107,7 @@ func parseActorFilterList(w http.ResponseWriter, raw, fieldName string) ([]issue
 }
 
 func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	ctx := r.Context()
 	if h.DB == nil {
 		writeError(w, http.StatusInternalServerError, "database is unavailable")
@@ -2125,6 +2146,9 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	where := []string{"i.workspace_id = $1"}
+	if r.URL.Query().Get("blocked") == "true" {
+		where = append(where, "issue_has_open_blockers(i.workspace_id,i.id)")
+	}
 	args := []any{wsUUID}
 	addArg := func(v any) string {
 		args = append(args, v)
@@ -2536,15 +2560,17 @@ ORDER BY
 
 	ids := make([]pgtype.UUID, len(groupedRows))
 	var originals []pgtype.UUID
+	var blockerPageIDs []pgtype.UUID
 	for i, row := range groupedRows {
 		ids[i] = row.ID
 		originals = appendDuplicateOriginal(originals, row.Status, row.DuplicateOfIssueID)
+		blockerPageIDs = append(blockerPageIDs, row.ID)
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
 	prefix := h.getIssuePrefix(ctx, wsUUID)
 	// One Resolver for the whole page — a per-row filler would query the
 	// catalog once per custom-status row. (MUL-6243)
-	fillGrouped := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals...)
+	fillGrouped := h.newStatusCategoryFiller(ctx, wsUUID, hidden, originals, blockerPageIDs...)
 
 	groups := []IssueAssigneeGroupResponse{}
 	groupIndex := map[string]int{}
@@ -2577,6 +2603,7 @@ ORDER BY
 }
 
 func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
@@ -2644,6 +2671,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
@@ -2700,6 +2728,7 @@ const listChildrenByParentsLimit = 200
 // belong to the caller's workspace simply yields zero children, so callers
 // can't probe parents across workspace boundaries.
 func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
@@ -2778,6 +2807,7 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	wsID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, wsID, "workspace_id")
 	if !ok {
@@ -2862,6 +2892,7 @@ type QuickCreateIssueResponse struct {
 }
 
 func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	var req QuickCreateIssueRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -3072,6 +3103,9 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
 	if err != nil {
+		if writeIssueBlockerError(w, err) {
+			return
+		}
 		if errors.Is(err, service.ErrProjectAccessDenied) {
 			h.writeDispatchBlocked(w, http.StatusForbidden, ReasonProjectAccessBlocked)
 			return
@@ -3202,6 +3236,7 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
+	BlockedBy     []string `json:"blocked_by,omitempty"`
 	Title         string   `json:"title"`
 	Description   *string  `json:"description"`
 	Status        string   `json:"status"`
@@ -3364,6 +3399,7 @@ func duplicateIssueMessage(issue IssueResponse) string {
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	r = h.withWakeupActor(r)
 	var req CreateIssueRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -3628,7 +3664,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// One filler for this create, shared by the broadcast payload and the HTTP
 	// response below, so a custom-status create reads the catalog once per
 	// request rather than once per payload. (MUL-6243)
-	fillCreated := h.newStatusCategoryFiller(r.Context(), wsUUID, projectaccess.Hidden{})
+	fillCreated := h.newStatusCategoryFiller(r.Context(), wsUUID, projectaccess.Hidden{}, nil)
 
 	// Analytics agent ID: assignee agent when the issue is being assigned
 	// to an agent, otherwise the creator agent for agent-authored issues.
@@ -3653,7 +3689,15 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return out
 	}
 
+	blockerIDs, ok := h.parseBlockerIDs(w, req.BlockedBy)
+	if !ok {
+		return
+	}
+	if !h.validateBlockerVisibility(w, r, wsUUID, req.BlockedBy) {
+		return
+	}
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
+		BlockedBy:              blockerIDs,
 		WorkspaceID:            wsUUID,
 		Title:                  req.Title,
 		Description:            ptrToText(req.Description),
@@ -3694,7 +3738,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			// issue_labels:changed broadcast is gone.
 			labelResponses := labelsToResponse(labels)
 			payload.Labels = &labelResponses
-			return map[string]any{"issue": payload}
+			return map[string]any{"issue": publicBlockerResponse(payload)}
 		},
 	})
 
@@ -3733,6 +3777,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if writeIssueCreatePropertyError(w, err) {
 		return
 	}
+	if writeIssueBlockerError(w, err) {
+		return
+	}
 	if writeIssueNumberCollision(w, err) {
 		return
 	}
@@ -3760,8 +3807,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
-	Title            *string `json:"title"`
+	BlockedBy        []string `json:"blocked_by,omitempty"`
+	RemoveBlockedBy  []string `json:"remove_blocked_by,omitempty"`
+	ExpectedRevision *int64   `json:"expected_revision,omitempty"`
+	Title            *string  `json:"title"`
 	// TitleBase is the title adopted by the editor before producing Title. It
 	// protects title edits without coupling them to unrelated issue mutations.
 	TitleBase   *string `json:"title_base,omitempty"`
@@ -3913,6 +3962,11 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	if err := assertIssueStatusStillActive(ctx, qtx, workspaceID, statusKey); err != nil {
 		return db.Issue{}, db.Issue{}, false, err
 	}
+	if issueBlockerGraphTouched(rawFields) {
+		if err := qtx.LockIssueBlockerGraph(ctx, workspaceID); err != nil {
+			return db.Issue{}, db.Issue{}, false, err
+		}
+	}
 	if len(attachmentIDs) > 0 {
 		if _, err := qtx.LockAttachmentsForIssueLink(ctx, db.LockAttachmentsForIssueLinkParams{
 			WorkspaceID:   workspaceID,
@@ -3973,6 +4027,32 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
 	}
 
+	var blockerInput UpdateIssueRequest
+	_ = json.Unmarshal(rawFields["blocked_by"], &blockerInput.BlockedBy)
+	_ = json.Unmarshal(rawFields["remove_blocked_by"], &blockerInput.RemoveBlockedBy)
+	for _, value := range blockerInput.RemoveBlockedBy {
+		if err = qtx.RemoveIssueBlocker(ctx, db.RemoveIssueBlockerParams{WorkspaceID: workspaceID, IssueID: issue.ID, BlockerIssueID: parseUUID(value)}); err != nil {
+			return db.Issue{}, current, false, err
+		}
+	}
+	blockerActor, _ := ctx.Value(wakeupActorKey{}).(wakeupActor)
+	if blockerActor.id == "" {
+		blockerActor = wakeupActor{kind: issue.CreatorType, id: uuidToString(issue.CreatorID)}
+	}
+	for _, value := range blockerInput.BlockedBy {
+		if err = service.AddIssueBlocker(ctx, qtx, workspaceID, issue.ID, parseUUID(value), blockerActor.kind, parseUUID(blockerActor.id)); err != nil {
+			return db.Issue{}, current, false, err
+		}
+	}
+	if len(blockerInput.BlockedBy)+len(blockerInput.RemoveBlockedBy) > 0 {
+		if _, err = tx.Exec(ctx, "UPDATE issue SET revision=revision+1,updated_at=clock_timestamp(),last_activity_at=clock_timestamp() WHERE id=$1 AND workspace_id=$2", issue.ID, workspaceID); err != nil {
+			return db.Issue{}, current, false, err
+		}
+		issue, err = qtx.GetIssue(ctx, issue.ID)
+		if err != nil {
+			return db.Issue{}, current, false, err
+		}
+	}
 	attachmentsChanged := false
 	if len(attachmentIDs) > 0 {
 		linked, linkErr := qtx.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
@@ -4003,6 +4083,7 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	r = h.withWakeupActor(r)
 	id := chi.URLParam(r, "id")
 	prevIssue, ok := h.loadIssueForUser(w, r, id)
@@ -4022,6 +4103,16 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	var req UpdateIssueRequest
 	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if _, ok := h.parseBlockerIDs(w, req.BlockedBy); !ok {
+		return
+	}
+	if _, ok := h.parseBlockerIDs(w, req.RemoveBlockedBy); !ok {
+		return
+	}
+	if !h.validateBlockerVisibility(w, r, prevIssue.WorkspaceID, req.BlockedBy) {
 		return
 	}
 
@@ -4289,7 +4380,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	writeCtx := withWakeupHandedTo(r.Context(), h.handedToAgent(r.Context(), prevIssue, params, handoff != nil))
 	var issue db.Issue
 	attachmentsChanged := false
-	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
+	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 || issueBlockerGraphTouched(rawFields) {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
 			writeCtx, prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard, handoff != nil,
@@ -4301,6 +4392,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		issue, err = h.updateIssueWithStatusGuard(writeCtx, prevIssue.WorkspaceID, statusKeyForGuard, params)
 	}
 	if err != nil {
+		if writeIssueBlockerError(w, err) {
+			return
+		}
 		if writeIssueStatusRaceError(w, err) {
 			return
 		}
@@ -4381,6 +4475,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"description_changed":  descriptionChanged,
 		"title_changed":        titleChanged,
 		"parent_changed":       prevIssue.ParentIssueID != issue.ParentIssueID,
+		"stage_changed":        prevIssue.Stage != issue.Stage,
 		"prev_parent_issue_id": uuidToPtr(prevIssue.ParentIssueID),
 		"prev_title":           prevIssue.Title,
 		"prev_assignee_type":   textToPtr(prevIssue.AssigneeType),
@@ -4627,6 +4722,7 @@ func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue
 }
 
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	r = h.withWakeupActor(r)
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
@@ -4647,6 +4743,7 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.processChildEvents(r.Context(), issue.ParentIssueID)
 	h.deleteS3Objects(r.Context(), deleteResult.AttachmentURLs)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
@@ -4697,6 +4794,11 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 	}
 	defer tx.Rollback(ctx)
 	qtx := h.Queries.WithTx(tx)
+	if len(issues) > 0 {
+		if err = qtx.LockIssueBlockerGraph(ctx, issues[0].WorkspaceID); err != nil {
+			return issueDeleteResult{}, err
+		}
+	}
 
 	result := issueDeleteResult{}
 	for _, issue := range issues {
@@ -4814,6 +4916,7 @@ type BatchUpdateIssuesRequest struct {
 }
 
 func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	r = h.withWakeupActor(r)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -4827,6 +4930,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if _, ok := h.parseBlockerIDs(w, req.Updates.BlockedBy); !ok {
+		return
+	}
+	if _, ok := h.parseBlockerIDs(w, req.Updates.RemoveBlockedBy); !ok {
+		return
+	}
 	if len(req.IssueIDs) == 0 {
 		writeError(w, http.StatusBadRequest, "issue_ids is required")
 		return
@@ -4863,7 +4972,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		req.Updates.Priority != nil ||
 		req.Updates.Position != nil
 	if !hasFieldUpdate {
-		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id", "stage"} {
+		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id", "stage", "blocked_by", "remove_blocked_by"} {
 			if _, ok := rawUpdates[k]; ok {
 				hasFieldUpdate = true
 				break
@@ -4880,6 +4989,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "a batch update cannot change description together with labels or properties; send them as two requests")
 		return
 	}
+	_, addsBlockers := rawUpdates["blocked_by"]
+	_, removesBlockers := rawUpdates["remove_blocked_by"]
+	if (addsBlockers || removesBlockers) && (hasLabelOps || hasPropertyOps) {
+		writeError(w, http.StatusBadRequest, "a batch update cannot change blocked_by together with labels or properties; send them as two requests")
+		return
+	}
 	if req.Updates.Priority != nil {
 		if !validateIssueEnum(w, "priority", *req.Updates.Priority, validIssuePriorities) {
 			return
@@ -4889,6 +5004,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
+		return
+	}
+	if !h.validateBlockerVisibility(w, r, wsUUID, req.Updates.BlockedBy) {
 		return
 	}
 	// Status is validated against this workspace's catalog, so it has to wait
@@ -4957,7 +5075,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	// One Resolver for the whole batch — a per-issue filler would query the
 	// catalog once per custom-status row. (MUL-6243)
-	fillBatch := h.newStatusCategoryFiller(r.Context(), wsUUID, projectaccess.Hidden{})
+	fillBatch := h.newStatusCategoryFiller(r.Context(), wsUUID, projectaccess.Hidden{}, nil)
 	// Parents whose sub-issues changed this batch. Their rules are evaluated
 	// once after the loop against the final state (MUL-4155), not per child
 	// against a mid-batch snapshot.
@@ -5167,7 +5285,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		var issue db.Issue
 		labelsChanged, propertiesChanged := false, false
 		switch {
-		case req.Updates.Description != nil:
+		case req.Updates.Description != nil || (issueBlockerGraphTouched(rawUpdates) && !hasLabelOps && !hasPropertyOps):
 			// One batch-level base cannot describe multiple issue documents.
 			// Preserve every marked channel-media block conservatively, matching
 			// legacy single-update clients that omit description_base.
@@ -5195,6 +5313,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			// The archive race is a property of the batch's shared target
 			// status, not of one issue, so every remaining item would fail the
 			// same way. Abort with 409 instead of reporting a partial update.
+			if writeIssueBlockerError(w, err) {
+				return
+			}
 			if writeIssueStatusRaceError(w, err) {
 				return
 			}
@@ -5317,6 +5438,7 @@ type BatchDeleteIssuesRequest struct {
 }
 
 func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
+	r = h.withBlockerViewer(r)
 	var req BatchDeleteIssuesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

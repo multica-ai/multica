@@ -208,6 +208,21 @@ describe("ChatSessionSchema", () => {
   });
 });
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  it("keeps older and malformed blocker projections from breaking an issue list", () => {
+    for (const fields of [{}, { blocked_count: "one", blocked_by: "bad" }, { blocked_count: -1, blocked_by: [{}] }]) {
+      const parsed = ListIssuesResponseSchema.parse({ issues: [{ ...baseIssue, ...fields }], total: 1 });
+      expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+      expect(parsed.issues[0]?.blocked_count).toBeUndefined();
+      expect(parsed.issues[0]?.blocked_by).toBeUndefined();
+    }
+  });
+  it("carries manual and stage blockers independently of status", () => {
+    const blocker = { id: "b", identifier: "MUL-2", title: "Contract", status: "done", via: "stage", closed: true };
+    const parsed = ListIssuesResponseSchema.parse({ issues: [{ ...baseIssue, blocked_by: [blocker], blocked_count: 0 }], total: 1 });
+    expect(parsed.issues[0]?.blocked_by).toEqual([blocker]);
+    expect(parsed.issues[0]?.status).toBe(baseIssue.status);
+  });
+
   // A custom status key can be derived rather than readable — "客户确认" becomes
   // `in_review_2` — so the display name travels with it. The field has to
   // survive a server that predates it, since an issue that fails validation

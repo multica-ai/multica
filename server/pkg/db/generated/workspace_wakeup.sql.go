@@ -88,7 +88,7 @@ LEFT JOIN "user" actor_user ON actor_user.id=actor_member.user_id
   WHERE t.context->>'wakeup_id'=w.id::text AND t.issue_id=w.issue_id
    AND t.status IN ('queued','deferred','dispatched','running','waiting_local_directory')
  ) sr ON true
- WHERE w.workspace_id= $4 AND w.system_rule IS NOT NULL AND agg.open_count>0
+ WHERE w.workspace_id= $4 AND w.system_rule='child_done' AND agg.open_count>0
   -- MUL-8472: private projects the caller cannot see.
   AND ($5::uuid[] IS NULL OR p.project_id IS NULL OR NOT (p.project_id = ANY($5::uuid[])))
   AND p.status NOT IN ('done','cancelled')

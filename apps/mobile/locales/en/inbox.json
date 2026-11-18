@@ -66,6 +66,7 @@
     "quick_create_unconfirmed": "Quick-create needs a check",
     "autopilot_paused": "Autopilot paused",
     "children_done": "Sub-issues finished",
+    "blockers_done": "Waiting tasks ended",
     "project_owner_joined": "Owner joined project",
     "autopilot_quota_exceeded": "Autopilot run limit reached",
     "set_status": "Set status to",

@@ -15,6 +15,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, useId, Fragment, typ
 import { Virtuoso, type ListRange, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
+import { IssueBlockersSection } from "./issue-blockers";
 import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
   AlertTriangle,
@@ -3476,6 +3477,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
           </div>}
         </div>
     ),
+    waiting: <IssueBlockersSection issue={issue} />,
     sub_issues: childIssuesLoaded && childIssues.length > 0 && (
       <div>
         <IssueSidebarSectionHeader
