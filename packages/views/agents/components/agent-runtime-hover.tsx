@@ -135,7 +135,7 @@ function AgentAvailabilityLine({ agentId }: { agentId: string }) {
 export function SmartRuntimeBadge({ label }: { label: string }) {
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-0.5 rounded bg-info/10 px-1 text-micro font-medium text-info"
+      className="inline-flex shrink-0 items-center gap-0.5 rounded-sm bg-info/10 px-1 text-micro font-medium text-info"
       title={label}
     >
       <Sparkles className="h-2.5 w-2.5" />

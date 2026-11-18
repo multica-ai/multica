@@ -668,7 +668,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
               aria-selected={active}
               tabIndex={-1}
               className={cn(
-                "shrink-0 whitespace-nowrap rounded-[7px] border border-transparent px-2.5 py-1 text-caption transition-colors",
+                "shrink-0 whitespace-nowrap rounded-md border border-transparent px-2.5 py-1 text-caption transition-colors",
                 active
                   ? "bg-accent font-semibold text-foreground"
                   : "text-muted-foreground hover:bg-accent/60",
@@ -1010,7 +1010,7 @@ function MentionRow({
             {statusWord && (
               <span
                 className={cn(
-                  "rounded-[5px] px-[7px] py-[2px] text-micro font-medium",
+                  "rounded-sm px-[7px] py-[2px] text-micro font-medium",
                   statusBadgeClass,
                 )}
               >
@@ -1018,7 +1018,7 @@ function MentionRow({
               </span>
             )}
             {priorityWord && (
-              <span className="rounded-[4px] border border-border bg-muted px-[5px] py-[1px] font-mono text-micro text-muted-foreground">
+              <span className="rounded-sm border border-border bg-muted px-[5px] py-[1px] font-mono text-micro text-muted-foreground">
                 {priorityWord}
               </span>
             )}
@@ -1039,7 +1039,7 @@ function MentionRow({
         className={rowShellClass(selected, isClosed)}
         onClick={onSelect}
       >
-        <span className="flex size-9 shrink-0 items-center justify-center rounded-[9px] bg-info/10">
+        <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-info/10">
           {item.status ? (
             <StatusIcon
               status={item.status}
@@ -1077,7 +1077,7 @@ function MentionRow({
           {statusWord && (
             <span
               className={cn(
-                "rounded-[5px] px-[7px] py-[2px] text-micro font-medium",
+                "rounded-sm px-[7px] py-[2px] text-micro font-medium",
                 statusBadgeClass,
               )}
             >
@@ -1202,7 +1202,7 @@ function MentionRow({
         </span>
       </span>
       {memberTagWord && !isAllRow && (
-        <span className="shrink-0 rounded-[5px] border border-border bg-muted px-[7px] py-[1.5px] text-micro text-muted-foreground">
+        <span className="shrink-0 rounded-sm border border-border bg-muted px-[7px] py-[1.5px] text-micro text-muted-foreground">
           {memberTagWord}
         </span>
       )}
@@ -1274,7 +1274,7 @@ function SquadMentionRow({
         size="lg"
         profileLink={false}
         className={cn(
-          "rounded-[9px] border border-border",
+          "rounded-lg border border-border",
           selected && "bg-background",
         )}
       />
@@ -1288,7 +1288,7 @@ function SquadMentionRow({
           </span>
         )}
       </span>
-      <span className="shrink-0 rounded-[5px] border border-border bg-muted px-[7px] py-[1.5px] text-micro text-muted-foreground">
+      <span className="shrink-0 rounded-sm border border-border bg-muted px-[7px] py-[1.5px] text-micro text-muted-foreground">
         {t(($) => $.mention.squad_tag)}
       </span>
     </button>
@@ -1485,7 +1485,7 @@ function AgentMentionRow({
             {item.label}
           </span>
           {presence === "disabled" && (
-            <span className="shrink-0 rounded-[5px] border border-border bg-muted px-[6px] py-[0.5px] text-micro text-muted-foreground">
+            <span className="shrink-0 rounded-sm border border-border bg-muted px-[6px] py-[0.5px] text-micro text-muted-foreground">
               {t(($) => $.mention.disabled_tag)}
             </span>
           )}

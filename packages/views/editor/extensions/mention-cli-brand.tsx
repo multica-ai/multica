@@ -273,7 +273,7 @@ export function MentionCliTextTag({
     <span
       style={{ color: visual.tagText, backgroundColor: visual.tagBg }}
       className={cn(
-        "shrink-0 rounded-[5px] px-[7px] py-[2px] font-mono text-[10.5px] font-medium tracking-[0.01em]",
+        "shrink-0 rounded-sm px-[7px] py-[2px] font-mono text-[10.5px] font-medium tracking-[0.01em]",
         className,
       )}
     >
