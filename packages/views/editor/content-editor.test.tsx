@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { createRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Attachment } from "@multica/core/types";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 
@@ -78,6 +79,16 @@ vi.mock("./attachment-download-context", () => ({
     providerProps.attachments = attachments;
     return <>{children}</>;
   },
+}));
+
+const openAttachmentLinkMock = vi.hoisted(() => vi.fn((_href: string) => false));
+const attachmentLinkModal = vi.hoisted<{ current: React.ReactNode }>(() => ({ current: null }));
+vi.mock("./use-open-attachment-link", () => ({
+  useOpenAttachmentLink: () => ({
+    resolve: () => undefined,
+    open: openAttachmentLinkMock,
+    modal: attachmentLinkModal.current,
+  }),
 }));
 
 const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
@@ -194,6 +205,80 @@ describe("ContentEditor", () => {
 
     const shell = screen.getByTestId("editor-content").parentElement;
     expect(shell).toHaveClass("min-w-0");
+  });
+
+  describe("link clicks", () => {
+    type DomHandler = (view: unknown, event: MouseEvent) => boolean;
+    const domHandler = (name: "click" | "auxclick") =>
+      (latestEditorOptions.current as unknown as {
+        editorProps: { handleDOMEvents: Record<string, DomHandler> };
+      }).editorProps.handleDOMEvents[name]!;
+    const clickOn = (href: string, init: MouseEventInit = {}) => {
+      const anchor = document.createElement("a");
+      anchor.setAttribute("href", href);
+      document.body.appendChild(anchor);
+      const event = new MouseEvent("click", { bubbles: true, cancelable: true, ...init });
+      Object.defineProperty(event, "target", { value: anchor });
+      return event;
+    };
+    const cdnVideo =
+      "https://static.example/workspaces/0e0e0e0e-0000-4000-8000-000000000000/01a13179-08aa-7898-ae86-3a1994d2147e.mp4";
+
+    it("opens an attachment link in the app instead of the browser", () => {
+      openAttachmentLinkMock.mockReturnValueOnce(true);
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      render(<ContentEditor />);
+
+      expect(domHandler("click")({}, clickOn(cdnVideo))).toBe(true);
+
+      expect(openAttachmentLinkMock).toHaveBeenCalledWith(cdnVideo);
+      expect(openSpy).not.toHaveBeenCalled();
+      openSpy.mockRestore();
+    });
+
+    it("routes a middle click on an attachment link the same way", () => {
+      openAttachmentLinkMock.mockReturnValueOnce(true);
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      render(<ContentEditor />);
+
+      expect(domHandler("auxclick")({}, clickOn(cdnVideo, { button: 1 }))).toBe(true);
+
+      expect(openAttachmentLinkMock).toHaveBeenCalledWith(cdnVideo);
+      expect(openSpy).not.toHaveBeenCalled();
+      openSpy.mockRestore();
+    });
+
+    it("still opens a regular link in the browser", () => {
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      render(<ContentEditor />);
+
+      domHandler("click")({}, clickOn("https://github.com/multica-ai/multica"));
+
+      expect(openSpy).toHaveBeenCalledWith(
+        "https://github.com/multica-ai/multica",
+        "_blank",
+        "noopener,noreferrer",
+      );
+      openSpy.mockRestore();
+    });
+  });
+
+  it("ignores presses that bubble out of a portaled overlay", () => {
+    // React delivers a portal's events to its React parent — the editor shell
+    // — although the press landed outside the shell's DOM.
+    attachmentLinkModal.current = createPortal(
+      <div data-testid="overlay-surface" />,
+      document.body,
+    );
+    try {
+      render(<ContentEditor placeholder="Add description..." />);
+
+      fireEvent.mouseDown(screen.getAllByTestId("overlay-surface")[0]!);
+
+      expect(mockFocus).not.toHaveBeenCalled();
+    } finally {
+      attachmentLinkModal.current = null;
+    }
   });
 
   it("does not hijack clicks that land inside the ProseMirror node", () => {

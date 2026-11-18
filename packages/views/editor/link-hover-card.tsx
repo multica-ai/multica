@@ -21,6 +21,7 @@ import { useAppOrigin } from "../navigation";
 import { useT } from "../i18n";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { useEditorOverlayOwner } from "./overlay-owner";
+import { useOpenAttachmentLink } from "./use-open-attachment-link";
 
 function truncateUrl(url: string, max = 48): string {
   if (url.length <= max) return url;
@@ -145,6 +146,7 @@ function LinkHoverCard({
   const appOrigin = useAppOrigin();
   const { t } = useT("editor");
   const overlayOwner = useEditorOverlayOwner();
+  const attachmentLink = useOpenAttachmentLink();
 
   // Position the card when the portal div is mounted (ref callback).
   // Using useEffect would race with portal rendering — the div might
@@ -173,8 +175,6 @@ function LinkHoverCard({
     if (!visible) setPositioned(false);
   }, [visible]);
 
-  if (!visible || !anchorEl) return null;
-
   const handleCopy = async (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
@@ -188,50 +188,61 @@ function LinkHoverCard({
   const handleOpen = (e: React.MouseEvent) => {
     e.stopPropagation();
     e.preventDefault();
+    if (attachmentLink.open(href)) return;
     openLink(href, slug, appOrigin);
   };
 
-  return createPortal(
-    <div
-      ref={setCardRef}
-      className="link-hover-card"
-      data-editor-overlay-owner={overlayOwner}
-      style={{
-        position: "fixed",
-        top: pos.top,
-        left: pos.left,
-        zIndex: 50,
-        display: positioned ? undefined : "none",
-      }}
-      onMouseEnter={onCardEnter}
-      onMouseLeave={onCardLeave}
-    >
-      <span
-        className="min-w-0 flex-1 truncate text-caption text-muted-foreground px-1"
-        title={href}
-      >
-        {truncateUrl(href)}
-      </span>
-      <IconButton
-        size="icon-xs"
-        variant="ghost"
-        className="text-muted-foreground"
-        onClick={handleCopy}
-        label={t(($) => $.link_hover.copy_link)}
-      >
-        <Copy className="size-3.5" />
-      </IconButton>
-      <IconButton
-        size="icon-xs"
-        variant="ghost"
-        className="text-muted-foreground"
-        onClick={handleOpen}
-        label={t(($) => $.link_hover.open_link)}
-      >
-        <ExternalLink className="size-3.5" />
-      </IconButton>
-    </div>,
-    document.body,
+  // The viewer keeps one position in the tree whether or not the card shows:
+  // the card hides as soon as the pointer leaves it, which must not remount
+  // the viewer opened from it.
+  return (
+    <>
+      {attachmentLink.modal}
+      {visible && anchorEl
+        ? createPortal(
+            <div
+              ref={setCardRef}
+              className="link-hover-card"
+              data-editor-overlay-owner={overlayOwner}
+              style={{
+                position: "fixed",
+                top: pos.top,
+                left: pos.left,
+                zIndex: 50,
+                display: positioned ? undefined : "none",
+              }}
+              onMouseEnter={onCardEnter}
+              onMouseLeave={onCardLeave}
+            >
+              <span
+                className="min-w-0 flex-1 truncate text-caption text-muted-foreground px-1"
+                title={href}
+              >
+                {truncateUrl(href)}
+              </span>
+              <IconButton
+                size="icon-xs"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={handleCopy}
+                label={t(($) => $.link_hover.copy_link)}
+              >
+                <Copy className="size-3.5" />
+              </IconButton>
+              <IconButton
+                size="icon-xs"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={handleOpen}
+                label={t(($) => $.link_hover.open_link)}
+              >
+                <ExternalLink className="size-3.5" />
+              </IconButton>
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   );
 }
 

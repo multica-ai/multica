@@ -72,6 +72,7 @@ import { EditorBubbleMenu } from "./bubble-menu";
 import { posFromAnchor, type TextAnchor } from "./text-anchor";
 import { insertDictation } from "./utils/insert-dictation";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
+import { useOpenAttachmentLink } from "./use-open-attachment-link";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
@@ -520,6 +521,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const appOriginRef = useRef(appOrigin);
     appOriginRef.current = appOrigin;
 
+    // A link to one of this deployment's attachments opens in the viewer
+    // rather than as a raw storage URL in the browser.
+    const attachmentLink = useOpenAttachmentLink();
+    const openAttachmentLinkRef = useRef(attachmentLink.open);
+    openAttachmentLinkRef.current = attachmentLink.open;
+
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
@@ -685,6 +692,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             if (!href || isMentionHref(href)) return false;
 
             event.preventDefault();
+            if (openAttachmentLinkRef.current(href)) return true;
             openLink(
               href,
               workspaceSlugRef.current,
@@ -703,6 +711,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             const href = target.closest("a")?.getAttribute("href");
             if (!href || isMentionHref(href)) return false;
             event.preventDefault();
+            if (openAttachmentLinkRef.current(href)) return true;
             openLink(
               href,
               workspaceSlugRef.current,
@@ -1035,6 +1044,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       if (!editor) return;
 
       const target = event.target as HTMLElement;
+      // React events bubble through portals: a press inside an overlay (the
+      // attachment viewer) is not a press on the editor's empty area.
+      if (!event.currentTarget.contains(target)) return;
       if (target.closest(".ProseMirror")) return;
       if (target.closest("a, button, input, textarea, [role='button'], [data-node-view-wrapper]")) return;
 
@@ -1056,6 +1068,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} selectionAction={selectionAction} />
           )}
           <LinkHoverCard {...hover} />
+          {attachmentLink.modal}
         </div>
       </AttachmentDownloadProvider>
     );
