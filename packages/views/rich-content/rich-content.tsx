@@ -42,9 +42,7 @@ import rehypeSanitize from "rehype-sanitize";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useConfigStore } from "@multica/core/config";
-import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
-import { attachmentIdFromDownloadURL } from "@multica/core/types";
 import {
   isAllowedFileCardHref,
   isIssueIdentifier,
@@ -69,7 +67,7 @@ import {
 import { preprocessMarkdown } from "../editor/utils/preprocess";
 import { highlightToHtml } from "../editor/utils/highlight-markdown";
 import { AttachmentDownloadProvider } from "../editor/attachment-download-context";
-import { useDownloadAttachment } from "../editor/use-download-attachment";
+import { useOpenAttachmentLink } from "../editor/use-open-attachment-link";
 import { Attachment as AttachmentRenderer } from "../editor/attachment";
 import { computeClosedFences, type ClosedFence } from "./streaming-fence";
 import { remarkRepairCjkStrongTrailingWhitespace } from "./cjk-emphasis";
@@ -207,40 +205,10 @@ function unfurlableEntityLink(
   return entity;
 }
 
-function ownAttachmentDownloadId(
-  href: string,
-  appOrigin: string | null,
-  attachmentPublicUrl: string,
-): string | undefined {
-  const id = attachmentIdFromDownloadURL(href);
-  if (!id) return undefined;
-  if (href.startsWith("/") && !href.startsWith("//")) return id;
-
-  // The path and UUID alone do not establish which deployment owns a link.
-  // PublicURL can differ from both the web app origin and the browser's
-  // same-origin API proxy, so the server supplies that origin via /api/config.
-  try {
-    const target = new URL(href);
-    if (target.username || target.password) return undefined;
-    const ownOrigins = [appOrigin, api.getBaseUrl?.(), attachmentPublicUrl];
-    return ownOrigins.some((base) => {
-      if (!base) return false;
-      try {
-        return new URL(base).origin === target.origin;
-      } catch {
-        return false;
-      }
-    }) ? id : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   const slug = useWorkspaceSlug();
   const appOrigin = useAppOrigin();
-  const attachmentPublicUrl = useConfigStore((s) => s.attachmentPublicUrl);
-  const downloadAttachment = useDownloadAttachment("markdown-link");
+  const attachmentLink = useOpenAttachmentLink();
   // Platform probe only: `openInNewTab` present means desktop, where native
   // anchor behavior is a dead end and every click must be intercepted. Absent
   // (web), modified clicks are left to the browser — the only way to get a
@@ -251,22 +219,15 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
     return <span className="slash-command">{children}</span>;
   }
 
-  // An attachment download URL written as a plain link — the shape the
-  // server persists into bodies via `buildMarkdownURL`, which in private-
-  // storage deployments is ABSOLUTE and pinned to the API host
-  // (`MULTICA_PUBLIC_URL`). A bare navigation there cannot authenticate:
-  // web's session cookie is host-locked to the API origin and
-  // SameSite=Strict (and Desktop/mobile carry a bearer token no <a> can
-  // send), so the browser gets `401 missing authorization`. Route through
-  // the download hook instead, which refreshes the authenticated metadata
-  // and navigates to the credential-bearing URL the server mints for this
-  // click (capability / presign / CloudFront, per deployment mode). Same
-  // click-time re-sign the file-card renderer already does (MUL-3130).
-  // Also require this deployment's origin; another Multica instance may use
-  // the same path shape with unrelated attachment IDs.
-  const attachmentId = href
-    ? ownAttachmentDownloadId(href, appOrigin, attachmentPublicUrl)
-    : undefined;
+  // A link to one of this deployment's attachments — the stable download URL
+  // `buildMarkdownURL` persists, or a raw storage URL on the CDN. A bare
+  // navigation there either cannot authenticate (the API host's session
+  // cookie is host-locked and SameSite=Strict; Desktop/mobile carry a bearer
+  // token no <a> can send) or lands on the CDN's native media page in a tab
+  // with no way back into the app. The file opens in the app's viewer
+  // instead, and one the viewer cannot show downloads through the
+  // credentialed download hook.
+  const isAttachmentLink = href ? !!attachmentLink.resolve(href) : false;
 
   if (isMentionHref(href)) {
     const match = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/);
@@ -302,21 +263,16 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
           e.preventDefault();
           return;
         }
-        // An attachment link downloads through the re-sign path instead of a
-        // credential-less navigation (see attachmentId note above). This holds
-        // on every platform: web's session cookie is host-locked to the API
-        // origin and SameSite=Strict, and Desktop/mobile carry a bearer token
-        // no <a> can send, so a bare navigation 401s either way. The download
-        // hook owns the per-platform mechanism (capability anchor on web,
-        // native bridge on Desktop). Modified clicks stay native — the browser
-        // owns "open in background tab" and the raw URL remains the durable
-        // reference.
-        if (attachmentId && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        // Modified clicks on web stay native — the browser owns "open in
+        // background tab" and the raw URL remains the durable reference.
+        // Desktop has no such tab to give, so every click opens in the app.
+        const modified = e.metaKey || e.ctrlKey || e.shiftKey;
+        if (isAttachmentLink && (desktopTabs || !modified)) {
           e.preventDefault();
-          void downloadAttachment(attachmentId);
+          attachmentLink.open(href);
           return;
         }
-        if (!desktopTabs && (e.metaKey || e.ctrlKey || e.shiftKey)) return;
+        if (!desktopTabs && modified) return;
         e.preventDefault();
         openLink(href, slug, appOrigin, resolveClickIntent(e));
       }}
@@ -327,12 +283,24 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
         // (denied, then dropped by the http/https allowlist), so route it.
         if (!desktopTabs) return;
         e.preventDefault();
+        if (attachmentLink.open(href)) return;
         openLink(href, slug, appOrigin, "background-tab");
       }}
     >
       {children}
     </a>
   );
+
+  // The viewer renders beside the anchor, not in it: React events bubble
+  // through portals, so clicks inside the viewer would reach the anchor.
+  if (isAttachmentLink) {
+    return (
+      <>
+        {plainLink}
+        {attachmentLink.modal}
+      </>
+    );
+  }
 
   // A bare in-app entity URL renders as the chip its mention form would.
   const entity = href

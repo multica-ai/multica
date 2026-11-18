@@ -79,6 +79,7 @@ func TestReplierCommandConfirmationsKeepSuccessMarker(t *testing.T) {
 		success    bool
 		plainReply bool
 	}{
+		{name: "help", result: engine.Result{Outcome: engine.OutcomeHelp}, text: engine.HelpTextEnglish},
 		{name: "clear", result: engine.Result{Outcome: engine.OutcomeFreshPending}, text: "Fresh start ready. Your next chat message will run without previous context.", success: true},
 		{name: "new", result: engine.Result{Outcome: engine.OutcomeChatStarted}, text: "Started a new Multica chat. Your next message will enter it.", success: true},
 		{name: "issue", result: engine.Result{Outcome: engine.OutcomeIngested, IssueID: pgtype.UUID{Valid: true}, IssueWorkspaceSlug: "team-b", IssueIdentifier: "MUL-42", IssueTitle: "✅ Keep this title"}, text: "Created [MUL-42](https://multica.example/team-b/issues/00000000-0000-0000-0000-000000000000) — ✅ Keep this title", success: true},

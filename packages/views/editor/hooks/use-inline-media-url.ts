@@ -92,10 +92,13 @@ export function useResignedInlineMedia(
   {
     refreshOnMount = false,
     metadataSource = "workspace",
+    workspaceId,
     currentMetadata,
   }: {
     refreshOnMount?: boolean;
     metadataSource?: "workspace" | "markdown-link";
+    /** Workspace that owns the attachment, when it may not be the current one. */
+    workspaceId?: string;
     currentMetadata?: Attachment;
   } = {},
 ): { url: string; pending: boolean; failed: boolean } {
@@ -126,7 +129,9 @@ export function useResignedInlineMedia(
       : ["attachment-inline-resign", resignAttachmentId],
     queryFn: () => metadataSource === "markdown-link"
       ? api.getAttachmentForDownload(resignAttachmentId as string)
-      : api.getAttachment(resignAttachmentId as string),
+      : workspaceId
+        ? api.getAttachment(resignAttachmentId as string, { workspaceId })
+        : api.getAttachment(resignAttachmentId as string),
     enabled: needsResign && !currentMetadata,
     staleTime: refreshOnMount ? PREVIEW_RESIGN_STALE_MS : RESIGN_STALE_MS,
     gcTime: RESIGN_STALE_MS,
@@ -226,6 +231,7 @@ export function useFreshStreamedMediaURL(
   rawPickedUrl: string,
   enabled: boolean,
   pdf = false,
+  workspaceId?: string | null,
 ): { url: string; pending: boolean; failed: boolean; refreshIfExpired: () => Promise<boolean> } {
   const pickedUrl = resolveLegacyLocalMediaURL(rawPickedUrl);
   const id = attachmentId ?? attachmentIdFromDownloadURL(pickedUrl);
@@ -233,7 +239,10 @@ export function useFreshStreamedMediaURL(
   const stablePDFURL = id ? absolutizeAPIPath(attachmentDownloadPath(id)) : "";
   const { data: fresh, error, isError, refetch } = useQuery({
     queryKey: ["attachment-stream-resign", id],
-    queryFn: () => api.getAttachment(id as string),
+    queryFn: () =>
+      workspaceId
+        ? api.getAttachment(id as string, { workspaceId })
+        : api.getAttachment(id as string),
     enabled: active,
     staleTime: Infinity,
     gcTime: 0,
