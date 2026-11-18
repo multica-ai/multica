@@ -209,7 +209,8 @@ import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { MetadataSection } from "./metadata-section";
 import { IssueSidebarSectionHeader, IssueSidebarPropertyGrid } from "./issue-sidebar-section";
-import { IssueSidebarSections, letSidebarSettingsDragKeysThrough } from "./issue-sidebar-settings";
+import { IssueSidebarSections } from "./issue-sidebar-settings";
+import { IssueNextStep } from "./issue-next-step";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useIssueTimelineAnchor } from "../hooks/use-issue-timeline-anchor";
@@ -1577,7 +1578,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   }, [isMobile]);
   const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
   const [propertiesOpen, setPropertiesOpen] = useState(true);
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [sidebarSubIssuesOpen, setSidebarSubIssuesOpen] = useState(true);
   const [sidebarSubIssuesExpanded, setSidebarSubIssuesExpanded] = useState(false);
@@ -2900,23 +2900,29 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     [deliverableSources],
   );
 
-  // File origins use the deep-link landing path: load missing thread context,
+  // In-page jumps use the deep-link landing path: load missing thread context,
   // unfold it and wait for virtual rows and their measured heights to settle.
+  const landOnComment = useCallback(
+    (commentId: string) => {
+      setDeliverableJump((previous) => ({
+        issueId: id,
+        linkedCommentId,
+        linkedRequestToken,
+        commentId,
+        token: Math.max(previous?.token ?? 0, linkedRequestToken ?? 0) + 1,
+      }));
+    },
+    [id, linkedCommentId, linkedRequestToken],
+  );
   const locateOrigin = useCallback(
     (origin: DeliverableOrigin) => {
       if (origin.kind === "description") {
         scrollContainerEl?.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
-      setDeliverableJump((previous) => ({
-        issueId: id,
-        linkedCommentId,
-        linkedRequestToken,
-        commentId: origin.commentId,
-        token: Math.max(previous?.token ?? 0, linkedRequestToken ?? 0) + 1,
-      }));
+      landOnComment(origin.commentId);
     },
-    [scrollContainerEl, id, linkedCommentId, linkedRequestToken],
+    [scrollContainerEl, landOnComment],
   );
 
   // Identifier form, like the issue's own copy link: a pasted link should say
@@ -3238,12 +3244,12 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   // that opens a Popover listing optional fields not yet displayed. Hidden
   // once every optional field is on screen.
   const addPropertyRow = canAddProperty && (
-    <div className="col-span-2 mt-1">
+    <div className="col-span-2">
       <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
         <PopoverTrigger
-          className="-mx-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+          className="-mx-2 flex h-8 items-center gap-2 rounded-md px-2 text-label text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
         >
-          <Plus className="h-3 w-3 shrink-0" />
+          <span aria-hidden="true" className="flex size-3.5 shrink-0 items-center justify-center"><Plus className="size-3" /></span>
           <span>{t(($) => $.detail.add_property_action)}</span>
         </PopoverTrigger>
         {/* Each option leads with the icon the resulting picker uses, so the
@@ -3323,26 +3329,49 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     </div>
   );
 
+  // A blocked issue waits on whoever wrote last; when that is an agent, the
+  // overview card offers to jump to that comment. The raw timeline, because the
+  // display one folds a run's comment into the run; the jump then lands where
+  // the comment renders — inside its run, wherever that run was regrouped —
+  // and unfolds whatever hides it.
+  const latestComment = issue.status === "blocked"
+    ? timeline.findLast((e) => e.type === "comment" && !isDeletedComment(e))
+    : undefined;
+  const nextStepReply = latestComment?.actor_type === "agent" ? {
+    authorName: getActorName("agent", latestComment.actor_id),
+    onReply: () => {
+      setMobileSidebarOpen(false);
+      landOnComment(latestComment.id);
+    },
+  } : null;
+
+  const sidebarOverview = (
+    <div>
+      <IssueSidebarPropertyGrid>
+        <PropRow label={t(($) => $.detail.prop_status)}>
+          <StatusPicker
+            status={issue.status}
+            onUpdate={handleUpdateField}
+            align="start"
+            projectId={issue.project_id}
+            issue={issue}
+            onMarkDuplicate={actions.openMarkDuplicate}
+            isDuplicate={isDuplicateIssue(issue)}
+          />
+        </PropRow>
+        <PropRow label={t(($) => $.detail.prop_assignee)}>
+          <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
+        </PropRow>
+      </IssueSidebarPropertyGrid>
+      <IssueNextStep issueId={id} status={issue.status} reply={nextStepReply} />
+    </div>
+  );
+
   const sidebarSections: Record<IssueSidebarSection, ReactNode> = {
     properties: (
       <div>
         <IssueSidebarSectionHeader title={t(($) => $.detail.section_properties)} open={propertiesOpen} onOpenChange={setPropertiesOpen}  />
         {propertiesOpen && <IssueSidebarPropertyGrid>
-          {/* Core props — always rendered. */}
-          <PropRow label={t(($) => $.detail.prop_status)}>
-            <StatusPicker
-              status={issue.status}
-              onUpdate={handleUpdateField}
-              align="start"
-              projectId={issue.project_id}
-              issue={issue}
-              onMarkDuplicate={actions.openMarkDuplicate}
-              isDuplicate={isDuplicateIssue(issue)}
-            />
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_assignee)}>
-            <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
-          </PropRow>
           <PropRow label={t(($) => $.detail.prop_project)}>
             <IssueProjectPicker
               projectId={issue.project_id}
@@ -3505,7 +3534,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                   href={paths.issueDetail(child.id)}
                   title={`${child.identifier} ${child.title}`}
                   aria-label={`${child.identifier} ${child.title}, ${resolveStatusLabel(child.status)}`}
-                  className="group flex min-w-0 items-center gap-1.5 rounded-md px-2 py-2 text-label transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="group flex min-w-0 items-center gap-2 rounded-md px-2 py-2 text-label transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <span role="img" aria-label={resolveStatusLabel(child.status)} className="shrink-0">
                     <StatusIcon
@@ -3569,54 +3598,42 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     apps: <IssueAppsSection issueId={id} />,
     // Execution summary owns its query, realtime updates and disclosure.
     execution_log: <ExecutionLogSection key={id} issueId={id} identifier={issue.identifier} issueTitle={issue.title} hasChildren={childIssues.length > 0} />,
-    // Details — creator and timestamps. Defaults to below the execution
-    // log because it is the least-read block in the sidebar: the values
-    // never change once the issue exists, while the log above it is
-    // what people actually come here to check.
+    // Details — creator and timestamps, as small print under the cards: the
+    // values never change once the issue exists, so they never need a card.
     details: (
-      <div>
-        <IssueSidebarSectionHeader title={t(($) => $.detail.section_details)} open={detailsOpen} onOpenChange={setDetailsOpen} />
-        {detailsOpen && <IssueSidebarPropertyGrid>
-          <PropRow
-            interactive={false}
-            label={t(($) => $.detail.prop_created_by)}
-            className={requesterName ? "items-start py-1.5" : undefined}
-          >
-            <div className="flex min-w-0 flex-1 items-start gap-1.5">
-              <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
-              <div className="flex min-w-0 flex-1 flex-col">
-                <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
-                {requesterName && issue.requester_id && (
-                  <HoverCard>
-                    <HoverCardTrigger
-                      render={<AppLink href={paths.memberDetail(issue.requester_id)} />}
-                      className="block truncate text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      title={t(($) => $.execution_log.attribution.on_behalf_of, { name: requesterName })}
-                    >
-                      {t(($) => $.execution_log.attribution.on_behalf_of, { name: requesterName })}
-                    </HoverCardTrigger>
-                    <HoverCardContent align="start" className="w-72">
-                      <MemberProfileCard userId={issue.requester_id} />
-                    </HoverCardContent>
-                  </HoverCard>
-                )}
-              </div>
-            </div>
-          </PropRow>
-          <PropRow interactive={false} label={t(($) => $.detail.prop_created)}>
-            <span className="text-muted-foreground">{shortDate(issue.created_at, locale)}</span>
-          </PropRow>
-          <PropRow interactive={false} label={t(($) => $.detail.prop_updated)}>
-            <span className="text-muted-foreground">{shortDate(issue.updated_at, locale)}</span>
-          </PropRow>
-        </IssueSidebarPropertyGrid>}
-      </div>
+      <section aria-label={t(($) => $.detail.section_details)} className="flex flex-col gap-1 px-4 text-caption text-muted-foreground">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0">{t(($) => $.detail.prop_created_by)}</span>
+          <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="xs" enableHoverCard />
+          <span className="truncate text-foreground">{getActorName(issue.creator_type, issue.creator_id)}</span>
+        </div>
+        {requesterName && issue.requester_id && (
+          <HoverCard>
+            <HoverCardTrigger
+              render={<AppLink href={paths.memberDetail(issue.requester_id)} />}
+              className="block truncate hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              title={t(($) => $.execution_log.attribution.on_behalf_of, { name: requesterName })}
+            >
+              {t(($) => $.execution_log.attribution.on_behalf_of, { name: requesterName })}
+            </HoverCardTrigger>
+            <HoverCardContent align="start" className="w-72">
+              <MemberProfileCard userId={issue.requester_id} />
+            </HoverCardContent>
+          </HoverCard>
+        )}
+        <p className="truncate">
+          {t(($) => $.detail.prop_created)} {shortDate(issue.created_at, locale)}
+          <span aria-hidden="true" className="px-1.5 text-faint-foreground">·</span>
+          {t(($) => $.detail.prop_updated)} {shortDate(issue.updated_at, locale)}
+        </p>
+      </section>
     ),
     metadata: <MetadataSection metadata={issue.metadata ?? {}} />,
   };
 
   const sidebarContent = landingChromeHeld ? null : (
     <IssueSidebarSections
+      overview={sidebarOverview}
       sections={sidebarSections}
       available={ISSUE_SIDEBAR_SECTIONS.filter(
         (section) => (section !== "pull_requests" || githubSettings.prSidebar) && (section !== "plugins" || pluginsEnabled),
@@ -4628,8 +4645,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
           <SheetContent
             side="right"
             showCloseButton={false}
-            className="w-[320px] overflow-y-auto [scrollbar-gutter:stable] px-2 py-4"
-            onKeyDown={letSidebarSettingsDragKeysThrough}
+            className="w-[320px] overflow-y-auto [scrollbar-gutter:stable] pb-4"
           >
             {sidebarContent}
           </SheetContent>
@@ -4656,10 +4672,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
         panelRef={sidebarRef}
         onResize={handleDesktopSidebarResize}
       >
-        {/* Sections inset their own bodies and rows, so the panel itself only
-            needs a narrow gutter. pt-2.5 centres the first 28px section
-            header on the 48px page header beside it. */}
-        <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled} contentClassName="px-2 pt-2.5 pb-4">
+        {/* No divider: the cards sit on the same canvas as the reading
+            column, under a strip that carries the page header's rule across. */}
+        <AnimatedRightSidebar open={desktopSidebarVisualOpen} motionEnabled={desktopSidebarMotionEnabled} className="border-l-0" contentClassName="pb-4">
           {sidebarContent}
         </AnimatedRightSidebar>
       </ResizablePanel>

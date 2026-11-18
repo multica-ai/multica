@@ -1,16 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  ISSUE_SIDEBAR_SECTIONS,
-  selectIssueSidebarOrder,
-  useIssueSidebarSectionsStore,
-} from "@multica/core/issues/stores";
+import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores";
 
 const STORAGE_KEY = "multica_issue_sidebar_sections";
-// The order persisted before the Sub-issues section was introduced.
+// A save from before the sidebar became cards, when sections could be reordered.
 const OLD_ORDER = [
-  "properties", "quick_actions", "wakeups", "plugins", "parent", "duplicates",
-  "pull_requests", "environments", "deliverables", "apps", "execution_log", "details", "metadata",
+  "execution_log", "properties", "quick_actions", "wakeups", "plugins", "parent", "sub_issues", "duplicates",
+  "pull_requests", "environments", "deliverables", "apps", "details", "metadata",
 ];
 
 async function reloadPreferences() {
@@ -20,54 +16,31 @@ async function reloadPreferences() {
   await useIssueSidebarSectionsStore.persist.rehydrate();
 }
 
-describe("Sub-issues sidebar persisted preferences", () => {
+describe("issue sidebar persisted preferences", () => {
   beforeEach(() => {
     localStorage.clear();
     useIssueSidebarSectionsStore.getState().reset();
   });
 
-  it.each([
-    { name: "default", order: OLD_ORDER },
-    { name: "customized", order: [...OLD_ORDER].reverse() },
-  ])("hydrates an older $name order without changing existing relative order", async ({ order: savedOrder }) => {
+  it("keeps the sections an older save hid and drops its order", async () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      state: { order: [...savedOrder, "unknown", "parent"], hidden: ["parent", "apps", "properties", "apps", "unknown"] },
+      state: { order: OLD_ORDER, hidden: ["parent", "apps", "properties", "apps", "unknown"] },
       version: 0,
     }));
     await useIssueSidebarSectionsStore.persist.rehydrate();
-    const state = useIssueSidebarSectionsStore.getState();
-    const order = [...selectIssueSidebarOrder(state)];
-    expect(order.filter((id) => id !== "sub_issues")).toEqual(savedOrder);
-    expect(order.indexOf("sub_issues")).toBe(order.indexOf("parent") + 1);
-    expect(order.filter((id) => id === "sub_issues")).toHaveLength(1);
-    expect(state.hidden).toEqual(["parent", "apps"]);
-    await reloadPreferences();
-    expect(selectIssueSidebarOrder(useIssueSidebarSectionsStore.getState())).toEqual(order);
     expect(useIssueSidebarSectionsStore.getState().hidden).toEqual(["parent", "apps"]);
+
+    useIssueSidebarSectionsStore.getState().setHidden("metadata", true);
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).state).toEqual({ hidden: ["parent", "apps", "metadata"] });
   });
 
-  it("persists hiding and reordering Sub-issues, then restores defaults", async () => {
+  it("persists hiding a section, then restores defaults", async () => {
     const store = useIssueSidebarSectionsStore;
     store.getState().setHidden("sub_issues", true);
-    store.getState().setOrder(["sub_issues", ...ISSUE_SIDEBAR_SECTIONS]);
     await reloadPreferences();
-    expect(selectIssueSidebarOrder(store.getState())[0]).toBe("sub_issues");
     expect(store.getState().hidden).toEqual(["sub_issues"]);
-    store.getState().setHidden("sub_issues", false);
-    await reloadPreferences();
-    expect(store.getState().hidden).toEqual([]);
-    expect(selectIssueSidebarOrder(store.getState())[0]).toBe("sub_issues");
     store.getState().reset();
     await reloadPreferences();
-    expect(store.getState().order).toBeNull();
     expect(store.getState().hidden).toEqual([]);
-    expect(selectIssueSidebarOrder(store.getState())).toEqual(ISSUE_SIDEBAR_SECTIONS);
-  });
-
-  it("shows a newly added section for an uncustomized older save", async () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ state: { order: null, hidden: ["metadata"] }, version: 0 }));
-    await useIssueSidebarSectionsStore.persist.rehydrate();
-    expect(selectIssueSidebarOrder(useIssueSidebarSectionsStore.getState())).toContain("sub_issues");
-    expect(useIssueSidebarSectionsStore.getState().hidden).toEqual(["metadata"]);
   });
 });
