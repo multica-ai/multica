@@ -215,6 +215,170 @@ export type TaskFailureReason =
   | "runtime_recovery"
   | "manual";
 
+export type RuntimeConfigHintSource = "recommended" | "default" | "saved";
+
+export type RuntimeConfigResolutionStatus =
+  | "ready"
+  | "no_user_runtime"
+  | "runtime_unavailable"
+  | "runtime_offline"
+  | "model_unavailable";
+
+export interface RuntimeConfigHintAgentDetail {
+  agent_name: string;
+  runtime_name: string;
+  model_label: string;
+  source: RuntimeConfigHintSource;
+}
+
+export interface AgentRuntimeConfigHint {
+  kind: "agent";
+  should_show: boolean;
+  runtime_name: string;
+  model_name?: string | null;
+  model_label: string;
+  source: RuntimeConfigHintSource;
+  hint_key?: string;
+  resolution_status?: RuntimeConfigResolutionStatus;
+  resolution_message?: string;
+}
+
+export interface SquadRuntimeConfigHint {
+  kind: "squad";
+  should_show: boolean;
+  affected_count: number;
+  recommended_count?: number;
+  default_count?: number;
+  hint_key?: string;
+  // Backend may include this for diagnostics, but UI prompts should render
+  // aggregate counts only so a large squad never expands into a noisy list.
+  affected_agents?: RuntimeConfigHintAgentDetail[];
+  resolution_status?: RuntimeConfigResolutionStatus;
+  resolution_message?: string;
+}
+
+export type RuntimeConfigHint =
+  | AgentRuntimeConfigHint
+  | SquadRuntimeConfigHint;
+
+export type AgentRuntimeConfigSummarySource =
+  | "shared"
+  | "user_override"
+  | "recommended_match"
+  | "default_user_runtime"
+  | "missing_user_runtime";
+
+export type AgentRuntimeConfigStrategy = "recommended" | "custom";
+
+export interface AgentRuntimeConfigSummary {
+  recommended: {
+    /**
+     * Smart-runtime CLI selector (cursor/codex/...). Empty for fixed agents.
+     * Empty `runtime_id` is convention, not unbind.
+     */
+    cli?: string;
+    runtime_id: string;
+    model: string;
+    thinking_level: string;
+    /** Additive for compatibility with older servers and cached Agent rows. */
+    serviceTier?: string;
+    max_concurrent_tasks: number;
+    /** Additive for compatibility with older servers and cached Agent rows. */
+    runtimeConfig?: Record<string, unknown>;
+    editable: boolean;
+  };
+  current: {
+    runtime_id: string | null;
+    model: string;
+    thinking_level: string;
+    /** Additive for compatibility with older servers and cached Agent rows. */
+    service_tier?: string;
+    max_concurrent_tasks: number;
+    /** Additive for compatibility with older servers and cached Agent rows. */
+    runtime_config?: Record<string, unknown>;
+    strategy: AgentRuntimeConfigStrategy;
+    source: AgentRuntimeConfigSummarySource;
+    persisted: boolean;
+    editable: boolean;
+    notice_required: boolean;
+    resolution_status: RuntimeConfigResolutionStatus;
+    resolution_message?: string;
+  };
+}
+
+export interface UpdateAgentRuntimeCurrentConfigRequest {
+  strategy?: AgentRuntimeConfigStrategy;
+  runtime_id?: string;
+  model?: string;
+  thinking_level?: string;
+  service_tier?: string;
+  max_concurrent_tasks?: number;
+  runtime_config?: Record<string, unknown>;
+}
+
+/** Request shared by the dry-run and apply paths for the uniform batch
+ * runtime configuration flow. */
+export interface MigrateAgentsToRuntimeRequest {
+  agentIds: string[];
+  dryRun?: boolean;
+  model: string;
+  thinkingLevel: string;
+  serviceTier: string;
+  maxConcurrentTasks: number;
+  /** Omit to preserve each selected agent's existing runtime config. */
+  runtimeConfig?: Record<string, unknown>;
+  /** When true, smart-runtime agents keep their recommended configuration. */
+  useRecommendedConfigForSmartAgents?: boolean;
+  /** Opaque signed preview proof required when a preview is applied later. */
+  confirmationToken?: string;
+}
+
+export interface MigratedRuntimeCurrentConfig {
+  runtimeId: string;
+  model: string;
+  thinkingLevel: string;
+  serviceTier: string;
+  maxConcurrentTasks: number;
+  runtimeConfig: Record<string, unknown>;
+  strategy: AgentRuntimeConfigStrategy;
+  source: AgentRuntimeConfigSummarySource | (string & {});
+  /** Kept open so installed desktop clients tolerate new server statuses. */
+  resolutionStatus: RuntimeConfigResolutionStatus | (string & {});
+  resolutionMessage?: string;
+}
+
+export interface MigratedRuntimeAgent {
+  agentId: string;
+  name: string;
+  previousRuntimeId: string | null;
+  currentConfig: MigratedRuntimeCurrentConfig;
+  /** Kept open so installed desktop clients tolerate future server scopes. */
+  configScope: "personal" | "agent" | (string & {});
+}
+
+export interface SkippedRuntimeAgent {
+  agentId: string;
+  /** Omitted for hidden or cross-workspace agents. */
+  name?: string;
+  /** Open string: newer backends may add per-agent skip reasons. */
+  reason: string;
+  resolutionStatus?: RuntimeConfigResolutionStatus | (string & {});
+  resolutionMessage?: string;
+}
+
+export interface MigrateAgentsToRuntimeResponse {
+  targetRuntimeId: string;
+  /** Open string for forward-compatible runtime health states. */
+  targetRuntimeStatus: string;
+  dryRun: boolean;
+  migrated: MigratedRuntimeAgent[];
+  skipped: SkippedRuntimeAgent[];
+  tasksMigrated: number;
+  tasksStayingActive: number;
+  confirmationToken?: string;
+  confirmationExpiresAt?: string;
+}
+
 // One daily bucket for the Agents-list ACTIVITY sparkline. The back-end
 // only returns days that had at least one completion; the front-end fills
 // in missing days with zero when rendering the 7-bucket series. The series
