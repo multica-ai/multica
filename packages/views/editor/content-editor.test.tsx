@@ -83,12 +83,17 @@ vi.mock("./attachment-download-context", () => ({
 
 const openAttachmentLinkMock = vi.hoisted(() => vi.fn((_href: string) => false));
 const attachmentLinkModal = vi.hoisted<{ current: React.ReactNode }>(() => ({ current: null }));
+const attachmentLinkRecords = vi.hoisted<{ current?: ReadonlyArray<Attachment> }>(() => ({}));
 vi.mock("./use-open-attachment-link", () => ({
-  useOpenAttachmentLink: () => ({
+  useOpenAttachmentLink: (attachments?: ReadonlyArray<Attachment>) => {
+    // The hover card inside the editor calls it too, without records.
+    if (attachments) attachmentLinkRecords.current = attachments;
+    return {
     resolve: () => undefined,
-    open: openAttachmentLinkMock,
-    modal: attachmentLinkModal.current,
-  }),
+      open: openAttachmentLinkMock,
+      modal: attachmentLinkModal.current,
+    };
+  },
 }));
 
 const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
@@ -165,6 +170,7 @@ vi.mock("@tiptap/react", () => ({
 }));
 
 import { ContentEditor, type ContentEditorRef } from "./content-editor";
+import { NavigationProvider, type NavigationAdapter } from "../navigation";
 
 describe("ContentEditor", () => {
   beforeEach(() => {
@@ -178,6 +184,7 @@ describe("ContentEditor", () => {
     onCreateFired.value = false;
     latestEditorOptions.current = undefined;
     providerProps.attachments = undefined;
+    attachmentLinkRecords.current = undefined;
     capturedExtOptions.current = undefined;
     preprocessMarkdownMock.mockImplementation((value: string) => value);
   });
@@ -223,6 +230,16 @@ describe("ContentEditor", () => {
     };
     const cdnVideo =
       "https://static.example/workspaces/0e0e0e0e-0000-4000-8000-000000000000/01a13179-08aa-7898-ae86-3a1994d2147e.mp4";
+    const desktopNavigation = {
+      push: vi.fn(),
+      replace: vi.fn(),
+      back: vi.fn(),
+      pathname: "/acme/issues",
+      searchParams: new URLSearchParams(),
+      hash: "",
+      getShareableUrl: (path: string) => `https://app.example${path}`,
+      openInNewTab: vi.fn(),
+    } as unknown as NavigationAdapter;
 
     it("opens an attachment link in the app instead of the browser", () => {
       openAttachmentLinkMock.mockReturnValueOnce(true);
@@ -236,12 +253,38 @@ describe("ContentEditor", () => {
       openSpy.mockRestore();
     });
 
-    it("routes a middle click on an attachment link the same way", () => {
-      openAttachmentLinkMock.mockReturnValueOnce(true);
+    // Web: a modified or middle click keeps opening the link in a new
+    // browser tab, as it did before attachment links opened the viewer.
+    it.each([
+      ["Cmd-click", "click", { metaKey: true }],
+      ["Ctrl-click", "click", { ctrlKey: true }],
+      ["Shift-click", "click", { shiftKey: true }],
+      ["middle click", "auxclick", { button: 1 }],
+    ] as const)("leaves a web %s on an attachment link to the browser", (_label, name, init) => {
       const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
       render(<ContentEditor />);
 
-      expect(domHandler("auxclick")({}, clickOn(cdnVideo, { button: 1 }))).toBe(true);
+      domHandler(name)({}, clickOn(cdnVideo, init));
+
+      expect(openAttachmentLinkMock).not.toHaveBeenCalled();
+      expect(openSpy).toHaveBeenCalledWith(cdnVideo, "_blank", "noopener,noreferrer");
+      openSpy.mockRestore();
+    });
+
+    // Desktop has no browser tab to give, so those clicks open in the app too.
+    it.each([
+      ["Cmd-click", "click", { metaKey: true }],
+      ["middle click", "auxclick", { button: 1 }],
+    ] as const)("opens a desktop %s on an attachment link in the app", (_label, name, init) => {
+      openAttachmentLinkMock.mockReturnValueOnce(true);
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      render(
+        <NavigationProvider value={desktopNavigation}>
+          <ContentEditor />
+        </NavigationProvider>,
+      );
+
+      expect(domHandler(name)({}, clickOn(cdnVideo, init))).toBe(true);
 
       expect(openAttachmentLinkMock).toHaveBeenCalledWith(cdnVideo);
       expect(openSpy).not.toHaveBeenCalled();
@@ -937,6 +980,39 @@ describe("ContentEditor — in-session attachment tracking (MUL-3192)", () => {
 
     expect(providerProps.attachments).toHaveLength(1);
     expect(providerProps.attachments?.[0]?.id).toBe("uploaded-1");
+  });
+
+  // The editor runs its own hooks above the provider it renders, so the link
+  // opener cannot read the provider: it must get the same records directly,
+  // or a legacy storage link to a record the editor holds opens raw.
+  it("hands attachment links the same records as the provider, uploads included", async () => {
+    const seeded = makeAttachment("seed-1");
+    let capturedHandler: ((file: File) => Promise<UploadResult | null>) | undefined;
+    uploadAndInsertFileMock.mockImplementation(
+      async (_editor: unknown, file: File, handler: typeof capturedHandler) => {
+        capturedHandler = handler;
+        await handler?.(file);
+      },
+    );
+    let imperativeRef: { uploadFile: (file: File) => void } | null = null;
+    render(
+      <ContentEditor
+        attachments={[seeded]}
+        onUploadFile={async () => asUploadResult(makeAttachment("uploaded-1"))}
+        ref={(r) => {
+          imperativeRef = r;
+        }}
+      />,
+    );
+    expect(attachmentLinkRecords.current).toEqual([seeded]);
+
+    await act(async () => {
+      imperativeRef?.uploadFile(new File(["payload"], "clip.mp4", { type: "video/mp4" }));
+    });
+
+    expect(capturedHandler).toBeTypeOf("function");
+    expect(attachmentLinkRecords.current?.map((a) => a.id)).toEqual(["seed-1", "uploaded-1"]);
+    expect(attachmentLinkRecords.current).toBe(providerProps.attachments);
   });
 
   it("merges in-session uploads with the caller's attachments prop, preferring the prop on id collision", async () => {

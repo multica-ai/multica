@@ -66,7 +66,7 @@ import {
 import { configStore } from "@multica/core/config";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { repairEmptyListItems } from "./utils/repair-list-items";
-import { resolveClickIntent, useAppOrigin } from "../navigation";
+import { resolveClickIntent, useAppOrigin, useOptionalNavigation } from "../navigation";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { posFromAnchor, type TextAnchor } from "./text-anchor";
@@ -522,10 +522,16 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     appOriginRef.current = appOrigin;
 
     // A link to one of this deployment's attachments opens in the viewer
-    // rather than as a raw storage URL in the browser.
-    const attachmentLink = useOpenAttachmentLink();
+    // rather than as a raw storage URL in the browser. This component renders
+    // the AttachmentDownloadProvider itself, so its records are passed in.
+    const attachmentLink = useOpenAttachmentLink(providerAttachments);
     const openAttachmentLinkRef = useRef(attachmentLink.open);
     openAttachmentLinkRef.current = attachmentLink.open;
+    // `openInNewTab` present means Desktop, which has no browser tab to give a
+    // modified or middle click; on web those still open the link in one.
+    const desktopTabs = !!useOptionalNavigation()?.openInNewTab;
+    const desktopTabsRef = useRef(desktopTabs);
+    desktopTabsRef.current = desktopTabs;
 
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
@@ -692,7 +698,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             if (!href || isMentionHref(href)) return false;
 
             event.preventDefault();
-            if (openAttachmentLinkRef.current(href)) return true;
+            const modified = event.metaKey || event.ctrlKey || event.shiftKey;
+            if (
+              (desktopTabsRef.current || !modified) &&
+              openAttachmentLinkRef.current(href)
+            ) {
+              return true;
+            }
             openLink(
               href,
               workspaceSlugRef.current,
@@ -711,7 +723,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             const href = target.closest("a")?.getAttribute("href");
             if (!href || isMentionHref(href)) return false;
             event.preventDefault();
-            if (openAttachmentLinkRef.current(href)) return true;
+            if (desktopTabsRef.current && openAttachmentLinkRef.current(href)) return true;
             openLink(
               href,
               workspaceSlugRef.current,

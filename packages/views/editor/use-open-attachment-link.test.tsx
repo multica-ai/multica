@@ -91,6 +91,18 @@ describe("useOpenAttachmentLink", () => {
     toastError.mockReset();
   });
 
+  it("resolves a legacy storage URL against records the caller passes in", async () => {
+    const att = record();
+    getAttachmentForDownload.mockResolvedValue(att);
+    const { result } = renderHook(() => useOpenAttachmentLink([att]));
+
+    await act(async () => {
+      expect(result.current.open(att.url)).toBe(true);
+    });
+
+    expect(getAttachmentForDownload).toHaveBeenCalledWith(ID);
+  });
+
   it("does nothing for a regular link", () => {
     const { result } = renderHook(() => useOpenAttachmentLink());
     expect(result.current.open("https://github.com/multica-ai/multica")).toBe(false);

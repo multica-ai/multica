@@ -103,7 +103,14 @@ export interface OpenAttachmentLinkHandle {
   modal: ReactNode;
 }
 
-export function useOpenAttachmentLink(): OpenAttachmentLinkHandle {
+/**
+ * `attachments` are records a caller holds outside any surrounding
+ * `AttachmentDownloadProvider` — a component that renders the provider itself
+ * runs its own hooks above it. They match alongside the provider's records.
+ */
+export function useOpenAttachmentLink(
+  attachments?: ReadonlyArray<Attachment>,
+): OpenAttachmentLinkHandle {
   const { t } = useT("editor");
   const appOrigin = useAppOrigin();
   const attachmentPublicUrl = useConfigStore((s) => s.attachmentPublicUrl);
@@ -121,10 +128,10 @@ export function useOpenAttachmentLink(): OpenAttachmentLinkHandle {
         appOrigin,
         attachmentPublicUrl,
         cdnDomain,
-        attachments: surfaceRecord ? [surfaceRecord] : undefined,
+        attachments: surfaceRecord ? [surfaceRecord, ...(attachments ?? [])] : attachments,
       });
     },
-    [resolveAttachment, appOrigin, attachmentPublicUrl, cdnDomain],
+    [resolveAttachment, attachments, appOrigin, attachmentPublicUrl, cdnDomain],
   );
 
   const openById = useCallback(
