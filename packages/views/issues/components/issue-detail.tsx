@@ -730,6 +730,12 @@ function TimelineSkeleton() {
 // as badly as N blocks of 1 would. Older entries fold behind a "Show N more
 // activities" line that expands in place.
 const LAST_ACTIVITY_BLOCK_VISIBLE_LIMIT = 8;
+/** Rows Virtuoso keeps mounted beyond the viewport, in px each way. */
+const TIMELINE_OVERSCAN = { top: 800, bottom: 800 };
+/** Upper bound on a deep link holding the overscan back (see landingOverscanStep). */
+const LANDING_OVERSCAN_HOLD_MAX_MS = 3000;
+/** Overscan while a deep link lands, then on each idle step after it, before TIMELINE_OVERSCAN. */
+const LANDING_OVERSCAN_STEPS = [0, 200, 400];
 
 // Collapsible wrapper for an activity block. Older blocks default to a single
 // "N activities" summary line so the timeline isn't dominated by status /
@@ -1646,6 +1652,36 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     !!highlightCommentId && !highlightRequestPending && consumedHighlightId === highlightCommentId;
   const highlightConsumedRef = useRef(highlightConsumed);
   highlightConsumedRef.current = highlightConsumed;
+  // While a deep link lands, the timeline mounts only the rows the viewport
+  // shows; its overscan (800px each way, several comment bodies) waits until
+  // the target is on screen, so the landing frame renders the target thread
+  // and little else. Afterwards the overscan grows back one step per idle
+  // period, so the neighbours mount a few at a time instead of in one long
+  // task. The hold is bounded in case the landing never runs (a target that
+  // is gone). `null`: the full overscan.
+  const [landingOverscanStep, setLandingOverscanStep] = useState<number | null>(
+    () => (highlightCommentId && !highlightConsumed ? 0 : null),
+  );
+  const [landingSettled, setLandingSettled] = useState(false);
+  const releaseLandingOverscan = useCallback(() => setLandingSettled(true), []);
+  useEffect(() => {
+    if (landingOverscanStep === null) return;
+    if (!landingSettled) {
+      const timer = window.setTimeout(releaseLandingOverscan, LANDING_OVERSCAN_HOLD_MAX_MS);
+      return () => window.clearTimeout(timer);
+    }
+    const grow = () => setLandingOverscanStep((step) =>
+      step === null || step + 1 >= LANDING_OVERSCAN_STEPS.length ? null : step + 1);
+    if (typeof window.requestIdleCallback === "function") {
+      const idle = window.requestIdleCallback(grow, { timeout: 250 });
+      return () => window.cancelIdleCallback(idle);
+    }
+    const timer = window.setTimeout(grow, 16);
+    return () => window.clearTimeout(timer);
+  }, [landingOverscanStep, landingSettled, releaseLandingOverscan]);
+  const timelineOverscan = landingOverscanStep === null
+    ? TIMELINE_OVERSCAN
+    : LANDING_OVERSCAN_STEPS[landingOverscanStep]!;
   const onHighlightLandedRef = useRef(onHighlightLanded);
   onHighlightLandedRef.current = onHighlightLanded;
   const writeViewState = useViewStateWriter();
@@ -2691,7 +2727,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
         // highlight on.
         flashJumpTarget(landingId, 2500);
       },
-      onComplete: () => { completed = true; },
+      onComplete: () => {
+        completed = true;
+        // After the aligned frame paints, not inside it.
+        window.setTimeout(releaseLandingOverscan, 0);
+      },
     });
     return () => {
       cancel();
@@ -2705,7 +2745,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
         interruptedLandingRef.current = highlightCommentId;
       }
     };
-  }, [highlightCommentId, highlightTargetId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, timelineSized, timelineLoading, commentTasksLoading, flashJumpTarget]);
+  }, [highlightCommentId, highlightTargetId, highlightRequestToken, activeDeliverableJump, id, writeViewState, items, targetIdx, scrollContainerEl, highlightRootId, expandedResolved, timelineView, toggleResolvedExpand, timelineSized, timelineLoading, commentTasksLoading, flashJumpTarget, releaseLandingOverscan]);
 
   // Land on the comment in-page find stepped to, the way a deep link lands.
   useEffect(() => {
@@ -4394,7 +4434,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
                     data={items}
                     initialScrollTop={readingAnchor ? undefined : restoredScrollTop}
                     heightEstimates={timelineHeightEstimates}
-                    increaseViewportBy={{ top: 800, bottom: 800 }}
+                    increaseViewportBy={timelineOverscan}
                     totalListHeightChanged={handleTimelineHeightChange}
                     rangeChanged={handleTimelineRangeChanged}
                     computeItemKey={(_i, item) => `${item.kind}:${item.kind === "run" ? item.run.task.id : item.id}`}
