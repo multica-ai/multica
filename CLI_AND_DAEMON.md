@@ -415,7 +415,7 @@ export MULTICA_AGENT_LOCAL_DIRECTORIES='{"12ab5678-1234-4567-890a-123456789abc":
 multica daemon restart
 ```
 
-The mapping applies to issue, chat, and autopilot runs without a project `local_directory` binding. Project bindings take precedence, including bindings owned by another daemon. Squad coordinators keep their managed working directories. Unconfigured agents keep the existing behavior.
+The mapping applies to issue, chat, quick-create, and autopilot runs without a project `local_directory` binding. Project bindings take precedence, including bindings owned by another daemon. Squad coordinators keep their managed working directories. Unconfigured agents keep the existing behavior.
 
 Runs use the existing `in_place` flow: local instructions, skills, and tool settings are available, and the agent can change files in that directory. Issue and autopilot writers share the existing path lock; chat turns retain their lock exemption. The daemon does not delete the user directory during cleanup.
 

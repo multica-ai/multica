@@ -66,9 +66,9 @@ export MULTICA_AGENT_LOCAL_DIRECTORIES='{"12ab5678-1234-4567-890a-123456789abc":
 multica daemon restart
 ```
 
-La correspondance s’applique aux exécutions de tâches, de chats et d’automatisations sans liaison `local_directory` de projet. Les liaisons de projet restent prioritaires, y compris celles d’un autre daemon. Les agents coordinateurs conservent leur répertoire de travail géré. Les agents non configurés gardent le comportement existant.
+La correspondance s’applique aux exécutions de tâches, de chats, de création rapide et d’automatisations sans liaison `local_directory` de projet. Les liaisons de projet restent prioritaires, y compris celles d’un autre daemon. Les agents coordinateurs conservent leur répertoire de travail géré. Les agents non configurés gardent le comportement existant.
 
-Le flux `in_place` existant rend accessibles les instructions, les skills et les réglages locaux des outils ; l’agent peut modifier les fichiers du répertoire. Les exécutions de tâches et d’automatisations partagent le verrou de chemin existant ; les tours de chat restent exemptés. Le nettoyage ne supprime pas le répertoire utilisateur.
+Le flux `in_place` existant rend accessibles les instructions, les skills et les réglages locaux des outils ; l’agent peut modifier les fichiers du répertoire. Les exécutions de tâches, de création rapide et d’automatisations partagent le verrou de chemin existant ; les tours de chat restent exemptés. Le nettoyage ne supprime pas le répertoire utilisateur.
 
 Un JSON incorrect, un UUID d’agent invalide ou un chemin vide ou relatif empêche le démarrage du daemon. Le répertoire doit exister et être accessible en écriture au début de l’exécution. Redémarrez le daemon après avoir modifié son environnement de démarrage. Cette correspondance n’est pas un réglage d’agent côté serveur.
 
