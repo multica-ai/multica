@@ -132,6 +132,7 @@ func TestReply_CommandOutcomes_PostGuidance(t *testing.T) {
 		want    string
 	}{
 		{engine.OutcomeFreshPending, freshPendingText},
+		{engine.OutcomeHelp, engine.HelpTextEnglish},
 		{engine.OutcomeIssueUsage, issueUsageText},
 	} {
 		sender := &fakeReplySender{}
