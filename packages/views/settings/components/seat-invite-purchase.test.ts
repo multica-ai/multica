@@ -58,6 +58,7 @@ function summary(purchased: number, available: number): WorkspaceSubscriptionSum
       checkout: false,
       portal: true,
       purchaseSeats: true,
+      changePlan: false,
     },
   };
 }
