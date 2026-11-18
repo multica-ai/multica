@@ -7,7 +7,7 @@ import {
   type NavigationAdapter,
 } from "@multica/views/navigation";
 import { canGoBackInApp } from "./in-app-history";
-import { useLaunchQueueNavigation } from "./pwa-launch";
+import { resolveLaunchPath } from "./pwa-launch";
 
 /**
  * Web half of the `multica:navigate` bridge — the event shared content
@@ -45,6 +45,28 @@ function useInternalLinkHandler(router: ReturnType<typeof useRouter>) {
   }, [router]);
 }
 
+/** Minimal shape of the Launch Handler API — not in TypeScript's DOM lib yet. */
+type LaunchQueue = {
+  setConsumer(consumer: (params: { targetURL?: string }) => void): void;
+};
+
+/**
+ * A launch of the installed app that reused this window (see
+ * platform/pwa-launch.ts) navigates in place with the client router.
+ */
+function useLaunchQueueNavigation(router: ReturnType<typeof useRouter>) {
+  useEffect(() => {
+    const launchQueue = (window as { launchQueue?: LaunchQueue }).launchQueue;
+    if (!launchQueue) return;
+    launchQueue.setConsumer(({ targetURL }) => {
+      if (!targetURL) return;
+      const path = resolveLaunchPath(targetURL, new URL(window.location.href));
+      if (path) router.push(path);
+    });
+    return () => launchQueue.setConsumer(() => {});
+  }, [router]);
+}
+
 /**
  * The fragment is client-only state Next.js never surfaces: `usePathname()`
  * drops it, and a `router.replace("/x#y")` mutates `window.location` without
@@ -75,7 +97,7 @@ function NavigationProviderInner({
     () => "",
   );
   useInternalLinkHandler(router);
-  useLaunchQueueNavigation(router.push);
+  useLaunchQueueNavigation(router);
 
   const adapter: NavigationAdapter = {
     push: router.push,

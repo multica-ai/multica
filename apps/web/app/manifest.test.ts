@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { proxy } from "../proxy";
-import { PWA_START_URL, resolveLaunchPath } from "../platform/pwa-launch";
-import manifest from "./manifest";
+import { resolveLaunchPath } from "../platform/pwa-launch";
+import manifest, { PWA_START_URL } from "./manifest";
 
 function launch(cookies: Record<string, string>, host = "www.multica.ai") {
   const cookieHeader = Object.entries(cookies)

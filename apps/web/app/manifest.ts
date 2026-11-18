@@ -1,5 +1,4 @@
 import type { MetadataRoute } from "next";
-import { PWA_SHORTCUT_PARAM, PWA_START_URL } from "@/platform/pwa-launch";
 
 /**
  * Installable web manifest. Start at /inbox so session-aware proxy routing
@@ -9,6 +8,16 @@ import { PWA_SHORTCUT_PARAM, PWA_START_URL } from "@/platform/pwa-launch";
  * Standard icons share desktop artwork. The maskable SVG supplies full-bleed
  * artwork for launcher cropping; regenerate raster sizes from those source assets.
  */
+
+/** Launch path. Shortcuts must not reuse it; see platform/pwa-launch.ts. */
+export const PWA_START_URL = "/inbox";
+
+/**
+ * Query flag that sets a shortcut apart from a plain launch when both point at
+ * the same page. The launch URL is the only signal the launch queue delivers.
+ */
+export const PWA_SHORTCUT_PARAM = "launch";
+
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
