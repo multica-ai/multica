@@ -893,6 +893,7 @@ export function useCreateComment(issueId: string) {
       suppressAgentIds,
       steerTaskIds,
       requesterRuntimeAgentIds,
+      runtimeSourceTaskIds,
     }: {
       content: string;
       type?: string;
@@ -902,7 +903,9 @@ export function useCreateComment(issueId: string) {
       /** Running turns this comment goes into instead of a follow-up run. */
       steerTaskIds?: string[];
       requesterRuntimeAgentIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds, ...(requesterRuntimeAgentIds ? [requesterRuntimeAgentIds] : [])),
+      /** Pins a sticky "current task" continuation per agent to the picked run. */
+      runtimeSourceTaskIds?: Record<string, string>;
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds, ...(requesterRuntimeAgentIds ? [requesterRuntimeAgentIds] : []), runtimeSourceTaskIds),
     onSuccess: (comment) => {
       if (comment.issue_revision) {
         onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
@@ -967,6 +970,7 @@ export function useUpdateComment(issueId: string) {
       contentBase,
       expectedRevision,
       requesterRuntimeAgentIds,
+      runtimeSourceTaskIds,
     }: {
       commentId: string;
       content: string;
@@ -975,7 +979,8 @@ export function useUpdateComment(issueId: string) {
       contentBase?: string;
       expectedRevision?: number;
       requesterRuntimeAgentIds?: string[];
-    }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds, contentBase, expectedRevision, ...(requesterRuntimeAgentIds ? [requesterRuntimeAgentIds] : [])),
+      runtimeSourceTaskIds?: Record<string, string>;
+    }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds, contentBase, expectedRevision, ...(requesterRuntimeAgentIds ? [requesterRuntimeAgentIds] : []), runtimeSourceTaskIds),
     onMutate: async ({ commentId, content, attachmentIds }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));

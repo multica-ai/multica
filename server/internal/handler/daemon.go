@@ -5287,6 +5287,32 @@ func plannedCommentRuntimeOriginator(taskContext []byte, commentID pgtype.UUID) 
 	return originator, nil
 }
 
+// plannedCommentRuntimeSourceTask reads the per-comment source task a
+// "current task" pick persisted on the completed task's context. A missing
+// entry keeps the zero value: the replay then follows the latest-run
+// recovery. A malformed entry is an error so the caller refuses the replay
+// rather than silently continuing on a different run.
+func plannedCommentRuntimeSourceTask(taskContext []byte, commentID pgtype.UUID) (pgtype.UUID, error) {
+	if len(taskContext) == 0 || !commentID.Valid {
+		return pgtype.UUID{}, nil
+	}
+	var payload struct {
+		PlannedRuntimeSourceTasks map[string]string `json:"planned_runtime_source_tasks"`
+	}
+	if err := json.Unmarshal(taskContext, &payload); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("decode planned runtime source tasks: %w", err)
+	}
+	raw, ok := payload.PlannedRuntimeSourceTasks[uuidToString(commentID)]
+	if !ok {
+		return pgtype.UUID{}, nil
+	}
+	sourceTaskID, err := util.ParseUUID(raw)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("parse planned runtime source task: %w", err)
+	}
+	return sourceTaskID, nil
+}
+
 // reconcileCommentsOnCompletion replays qualifying comments absent from this
 // run's delivered_comment_ids receipt. Planned/coalesced IDs do not prove the
 // provider received them, particularly with older daemons or deleted comments.
@@ -5434,9 +5460,9 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		// task and is not in its planned ids), so dropping the failure here is
 		// exactly how a promised follow-up is lost. Hand the obligation to that
 		// blocker instead, keeping it alive until some run provably covers it.
-		// An explicit "my runtime" selection made while this run was active is
-		// persisted per planned comment; the replay must honor it instead of
-		// letting the sticky chain recover the previous owner.
+		// An explicit "current task" pick (or "my runtime" selection) made while
+		// this run was active is persisted per planned comment; the replay must
+		// honor it instead of letting the sticky chain recover the latest run.
 		runtimeOriginatorOverride, err := plannedCommentRuntimeOriginator(task.Context, c.ID)
 		if err != nil {
 			slog.Error("reconcile comments on completion: invalid planned runtime originator; refusing sticky fallback",
@@ -5446,12 +5472,28 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 				"error", err)
 			continue
 		}
+		sourceTaskID, srcErr := plannedCommentRuntimeSourceTask(task.Context, c.ID)
+		if srcErr != nil {
+			slog.Error("reconcile comments on completion: invalid planned runtime source task; refusing sticky fallback",
+				"issue_id", uuidToString(task.IssueID),
+				"agent_id", agentID,
+				"comment_id", uuidToString(c.ID),
+				"error", srcErr)
+			continue
+		}
 		if runtimeOriginatorOverride.Valid {
 			// Same application rule as the creation path: only smart agents take
 			// a requester runtime, and the override is scoped to this agent.
 			for i := range scoped {
 				if !scoped[i].Agent.ShareRuntime {
 					scoped[i].RuntimeRequester = runtimeOriginatorOverride
+				}
+			}
+		}
+		if sourceTaskID.Valid {
+			for i := range scoped {
+				if !scoped[i].Agent.ShareRuntime {
+					scoped[i].RuntimeSourceTaskID = sourceTaskID
 				}
 			}
 		}
@@ -5464,7 +5506,7 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		h.markStickyRuntimeInheritance(ctx, issue, agentID, c.ID, task)
 		if res.status == DispatchBlocked {
 			headSha := h.TaskService.ResolveIssueReviewSHAParam(ctx, task.IssueID)
-			if h.propagateUncoveredCommentObligation(ctx, issue, scoped[0], c.ID, runtimeOriginatorOverride, headSha) {
+			if h.propagateUncoveredCommentObligation(ctx, issue, scoped[0], c.ID, runtimeOriginatorOverride, sourceTaskID, headSha) {
 				handled = true
 				slog.Info("reconcile comments on completion: replay blocked, obligation handed to the active task",
 					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID))

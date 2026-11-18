@@ -607,6 +607,46 @@ func (s *TaskService) runtimeOriginatorForTask(ctx context.Context, task db.Agen
 // issue run on two of the owner's machines, and a continuation of agent A
 // must not inherit agent B's machine (or model) just because B's run is
 // newer.
+// stickyRuntimeForExplicitSource resolves the continuation against the run
+// the member explicitly picked in the popover. A missing or ineligible row is
+// a typed error — the caller surfaces "re-select the run" instead of silently
+// continuing on the latest run, which is exactly the drift the explicit pick
+// exists to prevent.
+func (s *TaskService) stickyRuntimeForExplicitSource(ctx context.Context, issueID, agentID, sourceTaskID pgtype.UUID) (db.GetStickyContinuationSourceTaskRow, error) {
+	if s == nil || s.Queries == nil {
+		return db.GetStickyContinuationSourceTaskRow{}, ErrStickySourceUnavailable
+	}
+	src, err := s.Queries.GetStickyContinuationSourceTask(ctx, db.GetStickyContinuationSourceTaskParams{
+		SourceTaskID: sourceTaskID,
+		IssueID:      issueID,
+		AgentID:      agentID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.GetStickyContinuationSourceTaskRow{}, ErrStickySourceUnavailable
+	}
+	if err != nil {
+		return db.GetStickyContinuationSourceTaskRow{}, fmt.Errorf("load sticky continuation source: %w", err)
+	}
+	return src, nil
+}
+
+// EnqueueCommentTaskWithStickySource continues the run the member explicitly
+// picked in the popover. The normal issue/project authorization still runs;
+// a stale pick returns ErrStickySourceUnavailable so the client can ask the
+// member to re-select.
+func (s *TaskService) EnqueueCommentTaskWithStickySource(ctx context.Context, issue db.Issue, agentID, squadID, commentID, sourceTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
+	// No actorUserID: attribution resolves from the trigger comment itself,
+	// exactly like the plain comment-triggered paths.
+	if squadID.Valid {
+		return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, commentID, nil, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, sourceTaskID, origin, false, false)
+	}
+	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, commentID, nil, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, sourceTaskID, pgtype.Timestamptz{}, origin, false)
+}
+
+// ErrStickySourceUnavailable: the explicitly picked run can no longer vouch
+// for a continuation (deleted, never dispatched, or switched strategies).
+var ErrStickySourceUnavailable = errors.New("the selected run is no longer available; re-open the @ menu and pick the current task again")
+
 func (s *TaskService) stickyRuntimeForContinuation(ctx context.Context, issueID, agentID pgtype.UUID) (db.GetLatestIssueTaskStickyRuntimeRow, bool) {
 	if s == nil || s.Queries == nil || !issueID.Valid || !agentID.Valid {
 		return db.GetLatestIssueTaskStickyRuntimeRow{}, false
@@ -625,20 +665,20 @@ func (s *TaskService) stickyRuntimeForContinuation(ctx context.Context, issueID,
 // the resolved config. Machine, model, and every execution knob come from the
 // same run: keeping the pinned machine while re-reading a personal config
 // saved after that run would send a model the machine never advertised.
-func adoptStickySnapshot(effective *EffectiveRuntimeConfig, src db.GetLatestIssueTaskStickyRuntimeRow) {
-	effective.RuntimeID = src.RuntimeID
-	effective.RuntimeName = src.RuntimeName
-	effective.Model = src.EffectiveModel.String
-	effective.ThinkingLevel = src.EffectiveThinkingLevel.String
-	effective.ServiceTier = src.EffectiveServiceTier.String
-	if len(src.EffectiveRuntimeConfig) > 0 {
-		effective.RuntimeConfig = src.EffectiveRuntimeConfig
+func adoptStickySnapshot(effective *EffectiveRuntimeConfig, sourceTaskID, runtimeID pgtype.UUID, runtimeName string, model, thinkingLevel, serviceTier pgtype.Text, runtimeConfig []byte, maxConcurrentTasks pgtype.Int4, runtimeConfigSource pgtype.Text) {
+	effective.RuntimeID = runtimeID
+	effective.RuntimeName = runtimeName
+	effective.Model = model.String
+	effective.ThinkingLevel = thinkingLevel.String
+	effective.ServiceTier = serviceTier.String
+	if len(runtimeConfig) > 0 {
+		effective.RuntimeConfig = runtimeConfig
 	}
-	if src.EffectiveMaxConcurrentTasks.Valid && src.EffectiveMaxConcurrentTasks.Int32 > 0 {
-		effective.MaxConcurrentTasks = src.EffectiveMaxConcurrentTasks.Int32
+	if maxConcurrentTasks.Valid && maxConcurrentTasks.Int32 > 0 {
+		effective.MaxConcurrentTasks = maxConcurrentTasks.Int32
 	}
-	if src.RuntimeConfigSource.Valid && src.RuntimeConfigSource.String != "" {
-		effective.Source = RuntimeConfigSummarySource(src.RuntimeConfigSource.String)
+	if runtimeConfigSource.Valid && runtimeConfigSource.String != "" {
+		effective.Source = RuntimeConfigSummarySource(runtimeConfigSource.String)
 	}
 	effective.ResolutionStatus = RuntimeConfigResolutionReady
 	effective.ResolutionMessage = ""
@@ -1523,10 +1563,10 @@ func (s *TaskService) ResolveIssueReviewSHAParam(ctx context.Context, issueID pg
 }
 
 func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, pgtype.UUID{}, fireAt, origin, false)
+	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, pgtype.UUID{}, pgtype.UUID{}, fireAt, origin, false)
 }
 
-func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, originatorOverride pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, freshRerun bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, originatorOverride pgtype.UUID, stickySourceTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin, freshRerun bool) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1575,8 +1615,15 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	taskID := dbid.NewV7()
 	var stickyInheritance []byte
 	if !agent.ShareRuntime && !originatorOverride.Valid {
-		if src, ok := s.stickyRuntimeForContinuation(ctx, issue.ID, issue.AssigneeID); ok {
-			adoptStickySnapshot(&effective, src)
+		if stickySourceTaskID.Valid {
+			src, srcErr := s.stickyRuntimeForExplicitSource(ctx, issue.ID, issue.AssigneeID, stickySourceTaskID)
+			if srcErr != nil {
+				return db.AgentTaskQueue{}, srcErr
+			}
+			adoptStickySnapshot(&effective, src.SourceTaskID, src.RuntimeID, src.RuntimeName, src.EffectiveModel, src.EffectiveThinkingLevel, src.EffectiveServiceTier, src.EffectiveRuntimeConfig, src.EffectiveMaxConcurrentTasks, src.RuntimeConfigSource)
+			stickyInheritance = stickyInheritanceMarker(taskID, src.RuntimeID, src.SourceTaskID)
+		} else if src, ok := s.stickyRuntimeForContinuation(ctx, issue.ID, issue.AssigneeID); ok {
+			adoptStickySnapshot(&effective, src.SourceTaskID, src.RuntimeID, src.RuntimeName, src.EffectiveModel, src.EffectiveThinkingLevel, src.EffectiveServiceTier, src.EffectiveRuntimeConfig, src.EffectiveMaxConcurrentTasks, src.RuntimeConfigSource)
 			stickyInheritance = stickyInheritanceMarker(taskID, src.RuntimeID, src.SourceTaskID)
 		}
 	}
@@ -1734,10 +1781,10 @@ func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, 
 }
 
 func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, pgtype.UUID{}, origin, false, false)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, pgtype.UUID{}, pgtype.UUID{}, origin, false, false)
 }
 
-func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, originatorOverride pgtype.UUID, origin RunOrigin, freshRerun, workflowHandoff bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, originatorOverride pgtype.UUID, stickySourceTaskID pgtype.UUID, origin RunOrigin, freshRerun, workflowHandoff bool) (db.AgentTaskQueue, error) {
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -1778,8 +1825,15 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	mentionTaskID := dbid.NewV7()
 	var stickyInheritance []byte
 	if !agent.ShareRuntime && !originatorOverride.Valid {
-		if src, ok := s.stickyRuntimeForContinuation(ctx, issue.ID, agentID); ok {
-			adoptStickySnapshot(&effective, src)
+		if stickySourceTaskID.Valid {
+			src, srcErr := s.stickyRuntimeForExplicitSource(ctx, issue.ID, agentID, stickySourceTaskID)
+			if srcErr != nil {
+				return db.AgentTaskQueue{}, srcErr
+			}
+			adoptStickySnapshot(&effective, src.SourceTaskID, src.RuntimeID, src.RuntimeName, src.EffectiveModel, src.EffectiveThinkingLevel, src.EffectiveServiceTier, src.EffectiveRuntimeConfig, src.EffectiveMaxConcurrentTasks, src.RuntimeConfigSource)
+			stickyInheritance = stickyInheritanceMarker(mentionTaskID, src.RuntimeID, src.SourceTaskID)
+		} else if src, ok := s.stickyRuntimeForContinuation(ctx, issue.ID, agentID); ok {
+			adoptStickySnapshot(&effective, src.SourceTaskID, src.RuntimeID, src.RuntimeName, src.EffectiveModel, src.EffectiveThinkingLevel, src.EffectiveServiceTier, src.EffectiveRuntimeConfig, src.EffectiveMaxConcurrentTasks, src.RuntimeConfigSource)
 			stickyInheritance = stickyInheritanceMarker(mentionTaskID, src.RuntimeID, src.SourceTaskID)
 		}
 	}
@@ -6767,9 +6821,9 @@ func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agen
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
 		// A manual rerun resolves a new placement: the clicking member's own
 		// machine, not the failed attempt's.
-		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, actorUserID, pgtype.Timestamptz{}, origin, fresh)
+		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, actorUserID, pgtype.UUID{}, pgtype.Timestamptz{}, origin, fresh)
 	}
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, actorUserID, origin, fresh, false)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, actorUserID, pgtype.UUID{}, origin, fresh, false)
 }
 
 // The bulk terminal writes below are the sweeper, archive and daemon-recovery
@@ -9036,7 +9090,7 @@ func (s *TaskService) EnqueueCommentTaskForRequester(ctx context.Context, issue 
 	// The member explicitly picked their own runtime, so the override pins it:
 	// without it the sticky chain would recover the previous owner instead.
 	if assignee && !squadID.Valid {
-		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, commentID, nil, false, "", requesterID, pgtype.UUID{}, requesterID, pgtype.Timestamptz{}, origin, false)
+		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, commentID, nil, false, "", requesterID, pgtype.UUID{}, requesterID, pgtype.UUID{}, pgtype.Timestamptz{}, origin, false)
 	}
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, commentID, nil, squadID.Valid, squadID, false, "", requesterID, pgtype.UUID{}, requesterID, origin, false, false)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, commentID, nil, squadID.Valid, squadID, false, "", requesterID, pgtype.UUID{}, requesterID, pgtype.UUID{}, origin, false, false)
 }

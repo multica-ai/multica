@@ -2457,13 +2457,19 @@ SET coalesced_comment_ids = (
     -- instead so completion reconciliation can apply the same takeover to the
     -- bounded follow-up task.
     context = CASE
-        WHEN sqlc.narg('runtime_originator_user_id')::uuid IS NULL THEN context
+        WHEN sqlc.narg('runtime_originator_user_id')::uuid IS NULL AND sqlc.narg('runtime_source_task_id')::uuid IS NULL THEN context
         ELSE COALESCE(context, '{}'::jsonb) || jsonb_build_object(
             'planned_runtime_originators',
             COALESCE(context->'planned_runtime_originators', '{}'::jsonb)
                 || jsonb_build_object(
                     @comment_id::text,
                     to_jsonb(sqlc.narg('runtime_originator_user_id')::uuid)
+                ),
+            'planned_runtime_source_tasks',
+            COALESCE(context->'planned_runtime_source_tasks', '{}'::jsonb)
+                || jsonb_build_object(
+                    @comment_id::text,
+                    to_jsonb(sqlc.narg('runtime_source_task_id')::uuid)
                 )
         )
     END
@@ -2541,6 +2547,26 @@ WHERE atq.issue_id = $1
 -- when the latter was enqueued later.
 ORDER BY COALESCE(atq.started_at, atq.dispatched_at, atq.completed_at, atq.created_at) DESC, atq.id DESC
 LIMIT 1;
+
+-- name: GetStickyContinuationSourceTask :one
+-- Loads the run an explicit "current task" pick names, scoped to the same
+-- issue and agent, with its dispatch proven intact — the authorization the
+-- continuation inherits. No row means the pick is stale (the run was deleted
+-- or never dispatched); the caller refuses with an explainable error instead
+-- of silently continuing on the latest run.
+SELECT atq.id AS source_task_id, atq.runtime_id, COALESCE(ar.name, '') AS runtime_name,
+       atq.effective_model, atq.effective_thinking_level,
+       atq.effective_service_tier, atq.effective_runtime_config,
+       atq.effective_max_concurrent_tasks, atq.runtime_config_source
+FROM agent_task_queue atq
+LEFT JOIN agent_runtime ar ON ar.id = atq.runtime_id
+WHERE atq.id = sqlc.arg('source_task_id')::uuid
+  AND atq.issue_id = sqlc.arg('issue_id')::uuid
+  AND atq.agent_id = sqlc.arg('agent_id')::uuid
+  AND atq.runtime_id IS NOT NULL
+  AND atq.dispatched_at IS NOT NULL
+  AND atq.runtime_config_source IS NOT NULL
+  AND atq.runtime_config_source <> 'shared';
 
 -- name: MergeDelegatedFailureCommentIntoPendingTask :one
 -- A delegated failure is a platform-owned input, not a new human instruction:

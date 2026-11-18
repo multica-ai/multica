@@ -2146,7 +2146,10 @@ export class ApiClient {
     suppressAgentIds?: string[],
     steerTaskIds?: string[],
     requesterRuntimeAgentIds?: string[],
+    /** Pins a sticky "current task" continuation per agent to the run the member picked. */
+    runtimeSourceTaskIds?: Record<string, string>,
   ): Promise<Comment> {
+    const sourceTaskEntries = Object.entries(runtimeSourceTaskIds ?? {});
     return this.fetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
       body: JSON.stringify({
@@ -2157,6 +2160,7 @@ export class ApiClient {
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
         ...(steerTaskIds?.length ? { steer_task_ids: steerTaskIds } : {}),
         ...(requesterRuntimeAgentIds?.length ? { runtime_originator_mode: "requester", runtime_originator_agent_ids: requesterRuntimeAgentIds } : {}),
+        ...(sourceTaskEntries.length ? { runtime_source_task_ids: runtimeSourceTaskIds } : {}),
       }),
     });
   }
@@ -2206,7 +2210,7 @@ export class ApiClient {
     });
   }
 
-  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number, requesterRuntimeAgentIds?: string[]): Promise<Comment> {
+  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number, requesterRuntimeAgentIds?: string[], runtimeSourceTaskIds?: Record<string, string>): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}`, {
       method: "PUT",
       body: JSON.stringify({
@@ -2216,6 +2220,7 @@ export class ApiClient {
         ...(contentBase !== undefined ? { content_base: contentBase } : {}),
         ...(expectedRevision !== undefined ? { expected_revision: expectedRevision } : {}),
         ...(requesterRuntimeAgentIds?.length ? { runtime_originator_mode: "requester", runtime_originator_agent_ids: requesterRuntimeAgentIds } : {}),
+        ...(runtimeSourceTaskIds && Object.keys(runtimeSourceTaskIds).length ? { runtime_source_task_ids: runtimeSourceTaskIds } : {}),
       }),
     });
   }

@@ -423,3 +423,63 @@ func TestTaskRunsStartedAtKeepsSubSecondPrecision(t *testing.T) {
 		t.Fatalf("%d of %d runs lost sub-second started_at precision", precisionLost, len(runs))
 	}
 }
+
+// The explicit "current task" pick wins over the latest-run recovery: after a
+// newer thread of the same agent finished on another machine, continuing the
+// picked run still lands on the picked machine with the picked model, and a
+// stale pick (no dispatch to vouch for) fails with a typed error instead of
+// silently re-resolving.
+func TestSmartRuntimeContinuationHonorsExplicitSource(t *testing.T) {
+	ctx := t.Context()
+	templateOwner := dbfx.User(t, "Explicit Template Owner", "explicit-template@example.test")
+	dbfx.Member(t, testWorkspaceID, templateOwner, "member")
+	runOwner := dbfx.User(t, "Explicit Run Owner", "explicit-run-owner@example.test")
+	dbfx.Member(t, testWorkspaceID, runOwner, "member")
+	codexMachine := dbfx.Runtime(t, "Explicit Codex machine", testutil.Cols{"provider": "codex", "owner_id": runOwner})
+	claudeMachine := dbfx.Runtime(t, "Explicit Claude machine", testutil.Cols{"provider": "claude", "owner_id": runOwner})
+	agentID := dbfx.Agent(t, "explicit-review-agent", "", testutil.Cols{
+		"share_runtime": false, "recommended_cli": "codex", "owner_id": templateOwner,
+	})
+	issueID := dbfx.Issue(t, "Explicit continuation", testutil.Cols{"assignee_type": "agent", "assignee_id": agentID})
+
+	// The picked run: Codex / gpt-5.4, dispatched (the popover's vouch).
+	pickedID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": codexMachine, "issue_id": issueID, "status": "completed",
+		"originator_user_id": runOwner, "accountable_user_id": runOwner,
+		"runtime_config_source": "recommended_match",
+		"effective_model":       "gpt-5.4", "dispatched_at": testutil.Raw("now()"),
+	})
+	// The newer run on the other machine — what the latest-run recovery would pick.
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": claudeMachine, "issue_id": issueID, "status": "completed",
+		"originator_user_id": runOwner, "accountable_user_id": runOwner,
+		"runtime_config_source": "recommended_match",
+		"effective_model":       "claude-sonnet-4-6",
+	})
+
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := testHandler.TaskService.EnqueueCommentTaskWithStickySource(ctx, issue, parseUUID(agentID), pgtype.UUID{}, pgtype.UUID{}, parseUUID(pickedID), service.OriginNamed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if util.UUIDToString(task.RuntimeID) != codexMachine || task.EffectiveModel.String != "gpt-5.4" {
+		t.Fatalf("explicit continuation = (%s, %s), want the picked run (Codex machine, gpt-5.4)",
+			util.UUIDToString(task.RuntimeID), task.EffectiveModel.String)
+	}
+	if claimed, err := testHandler.TaskService.ClaimTaskForRuntime(ctx, parseUUID(codexMachine)); err != nil || claimed == nil || claimed.ID != task.ID {
+		t.Fatalf("the picked machine failed to claim the continuation (task=%v, err=%v)", claimed != nil, err)
+	}
+
+	// A stale pick (never dispatched) must fail typed, not re-resolve.
+	undispatchedID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": claudeMachine, "issue_id": issueID, "status": "completed",
+		"runtime_config_source": "recommended_match",
+	})
+	_, err = testHandler.TaskService.EnqueueCommentTaskWithStickySource(ctx, issue, parseUUID(agentID), pgtype.UUID{}, pgtype.UUID{}, parseUUID(undispatchedID), service.OriginNamed)
+	if err == nil {
+		t.Fatal("a stale pick must be refused, not silently re-resolved")
+	}
+}

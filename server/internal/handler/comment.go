@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1441,11 +1442,15 @@ func keepRootConnected(byID map[string]db.Comment) []db.Comment {
 type CreateCommentRequest struct {
 	RuntimeOriginatorMode     string   `json:"runtime_originator_mode"`
 	RuntimeOriginatorAgentIDs []string `json:"runtime_originator_agent_ids"`
-	Content                   string   `json:"content"`
-	Type                      string   `json:"type"`
-	ParentID                  *string  `json:"parent_id"`
-	AttachmentIDs             []string `json:"attachment_ids"`
-	SuppressAgentIDs          []string `json:"suppress_agent_ids"`
+	// RuntimeSourceTaskIDs pins a sticky "current task" continuation to the
+	// run the member picked in the popover (agent id → that run's task id).
+	// Sticky-only: an explicit requester override ignores it.
+	RuntimeSourceTaskIDs map[string]string `json:"runtime_source_task_ids"`
+	Content              string            `json:"content"`
+	Type                 string            `json:"type"`
+	ParentID             *string           `json:"parent_id"`
+	AttachmentIDs        []string          `json:"attachment_ids"`
+	SuppressAgentIDs     []string          `json:"suppress_agent_ids"`
 	// SteerTaskIDs are the running turns the author chose to add this comment
 	// to, instead of starting a follow-up run for their agents. A turn that
 	// has ended, or cannot take additional input, is never swapped for another
@@ -1490,11 +1495,12 @@ const (
 )
 
 type commentAgentTrigger struct {
-	RuntimeRequester pgtype.UUID
-	Agent            db.Agent
-	Source           commentAgentTriggerSource
-	Squad            *db.Squad
-	AlreadyPending   bool
+	RuntimeRequester    pgtype.UUID
+	RuntimeSourceTaskID pgtype.UUID
+	Agent               db.Agent
+	Source              commentAgentTriggerSource
+	Squad               *db.Squad
+	AlreadyPending      bool
 	// NonLeaderAgentReply marks an agent comment routed back to a squad leader
 	// from worker context. The worker need not be a squad member. Completion may
 	// replay it only if creation recorded it as a planned input.
@@ -1743,6 +1749,18 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	routing, ok := parseCommentRuntimeRouting(w, r, req.RuntimeOriginatorMode, req.RuntimeOriginatorAgentIDs, authorType, authorID)
 	if !ok {
 		return
+	}
+	sourceTasks, ok := parseRuntimeSourceTaskIDs(w, req.RuntimeSourceTaskIDs, authorType)
+	if !ok {
+		return
+	}
+	if len(sourceTasks) > 0 && req.RuntimeOriginatorMode == "requester" {
+		// The two pick kinds contradict: the popover only sends one.
+		writeError(w, http.StatusBadRequest, "runtime_source_task_ids conflicts with runtime_originator_mode=requester")
+		return
+	}
+	if len(sourceTasks) > 0 {
+		routing.sourceTasks = sourceTasks
 	}
 
 	// A running turn receives text only, so a comment that carries files is
@@ -2029,6 +2047,9 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 			if !triggers[i].Agent.ShareRuntime && (len(routing[0].agents) == 0 || routing[0].agents[id]) {
 				triggers[i].RuntimeRequester = routing[0].user
 			}
+			if sourceTaskID, ok := routing[0].sourceTasks[id]; ok && !triggers[i].Agent.ShareRuntime {
+				triggers[i].RuntimeSourceTaskID = sourceTaskID
+			}
 		}
 	}
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
@@ -2101,6 +2122,10 @@ type commentEnqueueResult struct {
 	reason      DispatchReasonCode
 	execSquadID string
 }
+
+// ReasonStaleRuntimePick mirrors dispatch.ReasonStaleRuntimePick: the picked
+// run is stale, and the client asks for a re-selection.
+const ReasonStaleRuntimePick = dispatch.ReasonStaleRuntimePick
 
 // enqueueCommentAgentTriggers enqueues each resolved trigger (already deduped by
 // executing agent) and returns the result keyed by executing agent id
@@ -2222,7 +2247,7 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 				// CLAIM-RECEIPT task (dispatched/running/waiting; queued is excluded
 				// — it must fold through the atomic merge above), turning the drop
 				// into a bounded follow-up (#5914, Elon round 2).
-				registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, trigger.RuntimeRequester, getHeadSha())
+				registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, trigger.RuntimeRequester, trigger.RuntimeSourceTaskID, getHeadSha())
 				if err != nil {
 					slog.Warn("register planned comment failed",
 						"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
@@ -2329,6 +2354,9 @@ func commentBlockedTargetOutcomes(targets []commentMentionTarget) []CommentTrigg
 // infrastructure error that stays an unclassified internal error rather than
 // leaking the raw message.
 func commentEnqueueFailureReason(err error) DispatchReasonCode {
+	if errors.Is(err, service.ErrStickySourceUnavailable) {
+		return ReasonStaleRuntimePick
+	}
 	if reason, ok := service.RuntimeConfigDispatchReason(err); ok {
 		return reason
 	}
@@ -2590,12 +2618,13 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 // the task just terminated), so the caller falls back to the active-task
 // decision. Delivered ids are untouched, so completion reconcile replays the
 // comment as a single bounded follow-up (#5914). See the query doc.
-func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue db.Issue, agentID, commentID, runtimeOriginatorOverride pgtype.UUID, headSha pgtype.Text) (bool, error) {
+func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue db.Issue, agentID, commentID, runtimeOriginatorOverride, runtimeSourceTaskID pgtype.UUID, headSha pgtype.Text) (bool, error) {
 	row, err := h.Queries.RegisterPlannedCommentForActiveTask(ctx, db.RegisterPlannedCommentForActiveTaskParams{
 		CommentID:               commentID,
 		IssueID:                 issue.ID,
 		AgentID:                 agentID,
 		RuntimeOriginatorUserID: runtimeOriginatorOverride,
+		RuntimeSourceTaskID:     runtimeSourceTaskID,
 		HeadSha:                 headSha,
 	})
 	if err != nil {
@@ -2648,10 +2677,10 @@ func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue
 // different-head QUEUED blocker); the caller logs that loudly — it is the one
 // shape today's schema has no safe place to park, and closing it needs a durable
 // obligation record rather than an in-request hand-off.
-func (h *Handler) propagateUncoveredCommentObligation(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID, runtimeOriginatorOverride pgtype.UUID, headSha pgtype.Text) bool {
+func (h *Handler) propagateUncoveredCommentObligation(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID, runtimeOriginatorOverride, runtimeSourceTaskID pgtype.UUID, headSha pgtype.Text) bool {
 	const maxAttempts = 3
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, commentID, runtimeOriginatorOverride, pgtype.Text{})
+		registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, commentID, runtimeOriginatorOverride, runtimeSourceTaskID, pgtype.Text{})
 		if err != nil {
 			slog.Warn("propagate comment obligation: register on active task failed",
 				"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID),
@@ -2706,6 +2735,20 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 			squadID = trigger.Squad.ID
 		}
 		_, err := h.TaskService.EnqueueCommentTaskForRequester(ctx, issue, trigger.Agent.ID, squadID, triggerCommentID, trigger.RuntimeRequester, trigger.Source == commentTriggerSourceIssueAssignee, origin)
+		return err
+	}
+	if trigger.RuntimeSourceTaskID.Valid {
+		// An explicit "current task" pick: continue THAT run, even when a newer
+		// run of the same agent has since taken over the recovery slot.
+		origin := service.OriginNamed
+		if trigger.Source == commentTriggerSourceIssueAssignee {
+			origin = service.OriginDerived
+		}
+		var squadID pgtype.UUID
+		if trigger.Squad != nil {
+			squadID = trigger.Squad.ID
+		}
+		_, err := h.TaskService.EnqueueCommentTaskWithStickySource(ctx, issue, trigger.Agent.ID, squadID, triggerCommentID, trigger.RuntimeSourceTaskID, origin)
 		return err
 	}
 
@@ -3549,13 +3592,14 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		RuntimeOriginatorMode     string    `json:"runtime_originator_mode"`
-		RuntimeOriginatorAgentIDs []string  `json:"runtime_originator_agent_ids"`
-		Content                   string    `json:"content"`
-		ContentBase               *string   `json:"content_base,omitempty"`
-		AttachmentIDs             *[]string `json:"attachment_ids"`
-		SuppressAgentIDs          []string  `json:"suppress_agent_ids"`
-		ExpectedRevision          *int64    `json:"expected_revision,omitempty"`
+		RuntimeOriginatorMode     string            `json:"runtime_originator_mode"`
+		RuntimeOriginatorAgentIDs []string          `json:"runtime_originator_agent_ids"`
+		RuntimeSourceTaskIDs      map[string]string `json:"runtime_source_task_ids"`
+		Content                   string            `json:"content"`
+		ContentBase               *string           `json:"content_base,omitempty"`
+		AttachmentIDs             *[]string         `json:"attachment_ids"`
+		SuppressAgentIDs          []string          `json:"suppress_agent_ids"`
+		ExpectedRevision          *int64            `json:"expected_revision,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -3564,6 +3608,18 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	routing, ok := parseCommentRuntimeRouting(w, r, req.RuntimeOriginatorMode, req.RuntimeOriginatorAgentIDs, actorType, actorID)
 	if !ok {
 		return
+	}
+	sourceTasks, ok := parseRuntimeSourceTaskIDs(w, req.RuntimeSourceTaskIDs, actorType)
+	if !ok {
+		return
+	}
+	if len(sourceTasks) > 0 && req.RuntimeOriginatorMode == "requester" {
+		// The two pick kinds contradict: the popover only sends one.
+		writeError(w, http.StatusBadRequest, "runtime_source_task_ids conflicts with runtime_originator_mode=requester")
+		return
+	}
+	if len(sourceTasks) > 0 {
+		routing.sourceTasks = sourceTasks
 	}
 
 	// See CreateComment: strip NUL / invalid-UTF-8 bytes PostgreSQL's TEXT column
@@ -4446,6 +4502,34 @@ func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
 type commentRuntimeRouting struct {
 	user   pgtype.UUID
 	agents map[pgtype.UUID]bool
+	// sourceTasks pins a sticky continuation to the run the member picked
+	// (agent id → that run's task id). Only consulted in sticky mode.
+	sourceTasks map[pgtype.UUID]pgtype.UUID
+}
+
+// parseRuntimeSourceTaskIDs validates the pick map: every key and value must
+// be a UUID, and human members only — machine credentials have no popover.
+func parseRuntimeSourceTaskIDs(w http.ResponseWriter, raw map[string]string, actorType string) (map[pgtype.UUID]pgtype.UUID, bool) {
+	if len(raw) == 0 {
+		return nil, true
+	}
+	if actorType != "member" {
+		writeError(w, http.StatusForbidden, "runtime_source_task_ids requires a human member")
+		return nil, false
+	}
+	out := make(map[pgtype.UUID]pgtype.UUID, len(raw))
+	for agentRaw, taskRaw := range raw {
+		agentID, ok := parseUUIDOrBadRequest(w, agentRaw, "runtime_source_task_ids agent id")
+		if !ok {
+			return nil, false
+		}
+		taskID, ok := parseUUIDOrBadRequest(w, taskRaw, "runtime_source_task_ids task id")
+		if !ok {
+			return nil, false
+		}
+		out[agentID] = taskID
+	}
+	return out, true
 }
 
 func parseCommentRuntimeRouting(w http.ResponseWriter, r *http.Request, mode string, rawIDs []string, actorType, actorID string) (commentRuntimeRouting, bool) {

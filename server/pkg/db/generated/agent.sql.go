@@ -5269,6 +5269,62 @@ func (q *Queries) GetQueuedFollowUpTaskForAgent(ctx context.Context, arg GetQueu
 	return id, err
 }
 
+const getStickyContinuationSourceTask = `-- name: GetStickyContinuationSourceTask :one
+SELECT atq.id AS source_task_id, atq.runtime_id, COALESCE(ar.name, '') AS runtime_name,
+       atq.effective_model, atq.effective_thinking_level,
+       atq.effective_service_tier, atq.effective_runtime_config,
+       atq.effective_max_concurrent_tasks, atq.runtime_config_source
+FROM agent_task_queue atq
+LEFT JOIN agent_runtime ar ON ar.id = atq.runtime_id
+WHERE atq.id = $1::uuid
+  AND atq.issue_id = $2::uuid
+  AND atq.agent_id = $3::uuid
+  AND atq.runtime_id IS NOT NULL
+  AND atq.dispatched_at IS NOT NULL
+  AND atq.runtime_config_source IS NOT NULL
+  AND atq.runtime_config_source <> 'shared'
+`
+
+type GetStickyContinuationSourceTaskParams struct {
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
+	IssueID      pgtype.UUID `json:"issue_id"`
+	AgentID      pgtype.UUID `json:"agent_id"`
+}
+
+type GetStickyContinuationSourceTaskRow struct {
+	SourceTaskID                pgtype.UUID `json:"source_task_id"`
+	RuntimeID                   pgtype.UUID `json:"runtime_id"`
+	RuntimeName                 string      `json:"runtime_name"`
+	EffectiveModel              pgtype.Text `json:"effective_model"`
+	EffectiveThinkingLevel      pgtype.Text `json:"effective_thinking_level"`
+	EffectiveServiceTier        pgtype.Text `json:"effective_service_tier"`
+	EffectiveRuntimeConfig      []byte      `json:"effective_runtime_config"`
+	EffectiveMaxConcurrentTasks pgtype.Int4 `json:"effective_max_concurrent_tasks"`
+	RuntimeConfigSource         pgtype.Text `json:"runtime_config_source"`
+}
+
+// Loads the run an explicit "current task" pick names, scoped to the same
+// issue and agent, with its dispatch proven intact — the authorization the
+// continuation inherits. No row means the pick is stale (the run was deleted
+// or never dispatched); the caller refuses with an explainable error instead
+// of silently continuing on the latest run.
+func (q *Queries) GetStickyContinuationSourceTask(ctx context.Context, arg GetStickyContinuationSourceTaskParams) (GetStickyContinuationSourceTaskRow, error) {
+	row := q.db.QueryRow(ctx, getStickyContinuationSourceTask, arg.SourceTaskID, arg.IssueID, arg.AgentID)
+	var i GetStickyContinuationSourceTaskRow
+	err := row.Scan(
+		&i.SourceTaskID,
+		&i.RuntimeID,
+		&i.RuntimeName,
+		&i.EffectiveModel,
+		&i.EffectiveThinkingLevel,
+		&i.EffectiveServiceTier,
+		&i.EffectiveRuntimeConfig,
+		&i.EffectiveMaxConcurrentTasks,
+		&i.RuntimeConfigSource,
+	)
+	return i, err
+}
+
 const getWorkspaceAgentActivity30d = `-- name: GetWorkspaceAgentActivity30d :many
 SELECT
     atq.agent_id,
@@ -9969,25 +10025,31 @@ SET coalesced_comment_ids = (
     -- instead so completion reconciliation can apply the same takeover to the
     -- bounded follow-up task.
     context = CASE
-        WHEN $2::uuid IS NULL THEN context
+        WHEN $2::uuid IS NULL AND $3::uuid IS NULL THEN context
         ELSE COALESCE(context, '{}'::jsonb) || jsonb_build_object(
             'planned_runtime_originators',
             COALESCE(context->'planned_runtime_originators', '{}'::jsonb)
                 || jsonb_build_object(
                     $1::text,
                     to_jsonb($2::uuid)
+                ),
+            'planned_runtime_source_tasks',
+            COALESCE(context->'planned_runtime_source_tasks', '{}'::jsonb)
+                || jsonb_build_object(
+                    $1::text,
+                    to_jsonb($3::uuid)
                 )
         )
     END
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
-    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $3
-      AND t.agent_id = $4
+    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $4
+      AND t.agent_id = $5
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid)
       AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
       AND (
-          COALESCE($5::text, '') = ''
-          OR t.context->>'head_sha' = $5::text
+          COALESCE($6::text, '') = ''
+          OR t.context->>'head_sha' = $6::text
       )
     ORDER BY t.created_at DESC
     LIMIT 1
@@ -9999,6 +10061,7 @@ RETURNING id, coalesced_comment_ids
 type RegisterPlannedCommentForActiveTaskParams struct {
 	CommentID               pgtype.UUID `json:"comment_id"`
 	RuntimeOriginatorUserID pgtype.UUID `json:"runtime_originator_user_id"`
+	RuntimeSourceTaskID     pgtype.UUID `json:"runtime_source_task_id"`
 	IssueID                 pgtype.UUID `json:"issue_id"`
 	AgentID                 pgtype.UUID `json:"agent_id"`
 	HeadSha                 pgtype.Text `json:"head_sha"`
@@ -10039,6 +10102,7 @@ func (q *Queries) RegisterPlannedCommentForActiveTask(ctx context.Context, arg R
 	row := q.db.QueryRow(ctx, registerPlannedCommentForActiveTask,
 		arg.CommentID,
 		arg.RuntimeOriginatorUserID,
+		arg.RuntimeSourceTaskID,
 		arg.IssueID,
 		arg.AgentID,
 		arg.HeadSha,

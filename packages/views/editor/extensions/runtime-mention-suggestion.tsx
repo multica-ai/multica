@@ -1742,6 +1742,7 @@ function createRuntimeAgentItem(
   runtimeOwner: MemberWithUser | null,
   runtimeModelLabel = "",
   recovered?: RecoveredRuntimeInfo,
+  sourceTaskId?: string,
 ): MentionItem {
   const ownerLabel = runtime
     ? runtimeOwnerDisplayLabel(runtime, runtimeOwner, recovered?.originatorName)
@@ -1765,6 +1766,7 @@ function createRuntimeAgentItem(
     type: "agent",
     group: group === "issue" ? "issue_runtime" : "requester_runtime",
     agentRuntimeGroup: group,
+    sourceTaskId: group === "issue" ? sourceTaskId : undefined,
     runtime,
     runtimeOwner,
     runtimeId: runtime?.id ?? recovered?.runtimeId,
@@ -1958,6 +1960,7 @@ function buildRuntimeAgentMentions({
           ownerFor(runtime),
           taskRuntimeModelLabel(task),
           recoveredRuntimeInfo(task),
+          task?.id,
         );
       }),
     );
