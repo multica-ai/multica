@@ -242,6 +242,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | `MULTICA_DAEMON_WS_CLAIM_POLL_INTERVAL` | `3m` | 健康 WebSocket 下 claim 安全輪詢的上限，與 `MULTICA_DAEMON_POLL_INTERVAL` 獨立配置；向下抖動後預設實際為 `2m30s`–`2m45s`，舊 Server 或結果不確定的 claim 仍使用普通輪詢間隔 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 心跳間隔 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 單個守護程序的併發執行上限 |
+| `MULTICA_DAEMON_HEALTH_PORT` | 預設設定檔為 `19514` | 優先使用的回送連接埠。啟動或重新啟動時為 `--health-port` 指定正數可覆寫此值。若首選連接埠無法使用，守護程序會使用空閒的回送連接埠，並記錄實際連接埠供狀態查詢和停止指令使用。 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 單次執行的絕對時限；`0` 表示不設定 |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 沒有輸出且沒有工具執行時的靜默上限；`0` 表示整套 watchdog 關閉 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 單個工具呼叫持續靜默的上限；只有希望工具比模型有更多餘量時才單獨設定，`0` 表示工具執行期間永不強制停止。Cursor 的後臺 shell 在它啟動的程序退出前一直算作執行中；到達這個上限時，守護程序會停止這些程序，並給 Cursor 一段新的 watchdog 預算來產出終態結果。若程序歸屬或清理無法驗證，則回到普通的執行取消策略 |
