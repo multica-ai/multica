@@ -396,6 +396,16 @@ setup_server() {
       sed -i -E "s#^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)#\1$pgpass\2#" .env
     fi
     ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
+    # Another checkout on this machine may already run the default "multica"
+    # Compose project; sharing it would recreate that stack's postgres (#7967).
+    if [ -f scripts/selfhost-project.sh ]; then
+      local project
+      project=$(bash scripts/selfhost-project.sh pick-name)
+      if [ "$project" != "multica" ]; then
+        printf '\n# Set by the installer: another checkout already uses the "multica" Compose project.\nCOMPOSE_PROJECT_NAME=%s\n' "$project" >>.env
+        ok "Another checkout already uses the 'multica' Compose project; using '$project'"
+      fi
+    fi
   else
     ok "Using existing .env"
   fi
@@ -403,6 +413,9 @@ setup_server() {
   # Start Docker Compose
   info "Pulling official Multica images..."
   pull_official_selfhost_images
+  if [ -f scripts/selfhost-project.sh ] && ! bash scripts/selfhost-project.sh check; then
+    fail "Refusing to start: the Compose project above belongs to another Multica checkout."
+  fi
   info "Starting Multica services (this may take a few minutes on first run)..."
   docker compose -f docker-compose.selfhost.yml up -d
 
@@ -510,6 +523,9 @@ run_stop() {
   if [ -d "$INSTALL_DIR" ]; then
     cd "$INSTALL_DIR"
     if [ -f docker-compose.selfhost.yml ]; then
+      if [ -f scripts/selfhost-project.sh ] && ! bash scripts/selfhost-project.sh check; then
+        fail "Refusing to stop: the Compose project above belongs to another Multica checkout."
+      fi
       docker compose -f docker-compose.selfhost.yml down
       ok "Docker services stopped"
     else
