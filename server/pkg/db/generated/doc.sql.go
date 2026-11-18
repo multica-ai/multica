@@ -515,7 +515,7 @@ WHERE doc_id = $3
   AND author_type = $5
   AND author_id = $6
   AND task_id IS NOT DISTINCT FROM $7
-  AND created_at > now() - interval '10 minutes'
+  AND created_at > now() - interval '30 minutes'
 `
 
 type MergeDocEditIntoVersionParams struct {
@@ -529,7 +529,7 @@ type MergeDocEditIntoVersionParams struct {
 }
 
 // Folds an edit into the latest snapshot while the same author keeps editing:
-// an unlabeled edit from the same author and task within 10 minutes of the
+// an unlabeled edit from the same author and task within 30 minutes of the
 // snapshot's start. Creates, restores and labeled edits always stand alone.
 func (q *Queries) MergeDocEditIntoVersion(ctx context.Context, arg MergeDocEditIntoVersionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, mergeDocEditIntoVersion,

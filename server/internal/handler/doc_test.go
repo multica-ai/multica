@@ -132,7 +132,11 @@ func TestDocEditsMergeIntoOneVersionPerEditingStretch(t *testing.T) {
 	if got := save(map[string]any{"content": "abcde"}); got.VersionCount != 4 {
 		t.Fatalf("edit after a labeled save must append: %+v", got)
 	}
-	testPool.Exec(context.Background(), "UPDATE doc_version SET created_at = now() - interval '11 minutes' WHERE doc_id = $1 AND number = 4", doc.ID)
+	testPool.Exec(context.Background(), "UPDATE doc_version SET created_at = now() - interval '20 minutes' WHERE doc_id = $1 AND number = 4", doc.ID)
+	if got := save(map[string]any{"content": "abcde!"}); got.VersionCount != 4 {
+		t.Fatalf("edit inside the 30-minute window must merge: %+v", got)
+	}
+	testPool.Exec(context.Background(), "UPDATE doc_version SET created_at = now() - interval '31 minutes' WHERE doc_id = $1 AND number = 4", doc.ID)
 	if got := save(map[string]any{"content": "abcdef"}); got.VersionCount != 5 {
 		t.Fatalf("edit after the window must append: %+v", got)
 	}
