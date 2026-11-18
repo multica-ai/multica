@@ -412,9 +412,14 @@ type AgentTaskResponse struct {
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
+	ID                string                     `json:"id"`
+	AgentID           string                     `json:"agent_id"`
+	RuntimeID         string                     `json:"runtime_id"`
+	RuntimeOwnerID    string                     `json:"runtime_owner_id,omitempty"`
+	RuntimeProvider   string                     `json:"runtime_provider,omitempty"`
+	EffectiveModel    string                     `json:"effective_model,omitempty"`
+	RuntimeConfigHint *service.RuntimeConfigHint `json:"runtime_config_hint,omitempty"`
+
 	IssueID              string                 `json:"issue_id"`
 	WorkspaceID          string                 `json:"workspace_id"`
 	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
@@ -935,6 +940,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		ID:                     uuidToString(t.ID),
 		AgentID:                uuidToString(t.AgentID),
 		RuntimeID:              uuidToString(t.RuntimeID),
+		EffectiveModel:         t.EffectiveModel.String,
+		RuntimeConfigHint:      service.DecodeRuntimeConfigHint(t.RuntimeConfigHint),
 		IssueID:                uuidToString(t.IssueID),
 		WorkspaceID:            workspaceID,
 		Status:                 t.Status,
@@ -1526,10 +1533,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxAgentDescriptionLength))
 		return
 	}
-	if req.RuntimeID == "" {
-		writeError(w, http.StatusBadRequest, "runtime_id is required")
-		return
-	}
 	conversationStarters, err := normaliseAgentConversationStarters(req.ConversationStarters)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -1547,6 +1550,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	var runtimeUUID pgtype.UUID
 	var cli string
 	if share {
+		if req.RuntimeID == "" {
+			writeError(w, http.StatusBadRequest, "runtime_id is required")
+			return
+		}
 		var ok bool
 		runtimeUUID, ok = parseUUIDOrBadRequest(w, req.RuntimeID, "runtime_id")
 		if !ok {
@@ -1825,6 +1832,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := h.agentToResponse(created)
+	if !created.ShareRuntime && !isMachineCredentialActor(r) {
+		h.attachRuntimeConfigSummaryForMember(r.Context(), &resp, created, member)
+	}
 	if err := h.attachAgentSkills(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("create agent: load skills for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
 	}
@@ -1961,6 +1971,7 @@ func canViewAgentSecrets(agent db.Agent, userID string, memberRole string) bool 
 // broadcast copy.
 func broadcastAgentResponse(resp AgentResponse) AgentResponse {
 	out := resp
+	out.RuntimeConfigSummary = nil
 	redactMcpConfig(&out)
 	redactComposioToolkitAllowlist(&out)
 	// Belt-and-suspenders: agentToResponse already masks gateway.token on
@@ -2714,6 +2725,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	invocationAdmission.admitted(r.Context())
 
 	resp := h.agentToResponse(updated)
+	if viewer, ok := ctxMember(r.Context()); ok && !updated.ShareRuntime && !isMachineCredentialActor(r) {
+		h.attachRuntimeConfigSummaryForMember(r.Context(), &resp, updated, viewer)
+	}
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, updated.ID); err != nil {
 		slog.Warn("update agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
@@ -3187,6 +3201,7 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 			taskIDs[i] = t.ID
 		}
 	}
+	h.hydrateTaskRuntimeIdentity(r.Context(), agent.WorkspaceID, tasks, resp)
 	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), tasks, resp); err != nil {
 		if writeQueryCancellation(w, r, err) {
 			return
@@ -3532,6 +3547,7 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 		resp = append(resp, taskToResponse(t, workspaceID))
 		kept = append(kept, t)
 	}
+	h.hydrateTaskRuntimeIdentity(r.Context(), parseUUID(workspaceID), kept, resp)
 	if err := h.redactForeignChatTaskContent(r.Context(), requestUserID(r), kept, resp); err != nil {
 		slog.Warn("agent task snapshot: resolve chat owners failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list agent task snapshot")
@@ -3545,4 +3561,31 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// hydrateTaskRuntimeIdentity projects the machine recorded on each task.
+func (h *Handler) hydrateTaskRuntimeIdentity(ctx context.Context, workspaceID pgtype.UUID, tasks []db.AgentTaskQueue, responses []AgentTaskResponse) {
+	ids := make([]pgtype.UUID, 0, len(tasks))
+	seen := make(map[pgtype.UUID]bool)
+	for _, task := range tasks {
+		if task.RuntimeID.Valid && !seen[task.RuntimeID] {
+			ids = append(ids, task.RuntimeID)
+			seen[task.RuntimeID] = true
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	runtimes, err := h.runtimeLookup(obsmetrics.RuntimeLookupSourceTask).GetMany(ctx, ids)
+	if err != nil {
+		slog.WarnContext(ctx, "load task runtime identity", "error", err)
+		return
+	}
+	for i, response := range responses {
+		runtime, ok := runtimes[response.RuntimeID]
+		if ok && runtime.WorkspaceID == workspaceID {
+			responses[i].RuntimeOwnerID = uuidToString(runtime.OwnerID)
+			responses[i].RuntimeProvider = runtime.Provider
+		}
+	}
 }

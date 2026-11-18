@@ -146,7 +146,7 @@ func (h *Handler) runtimeConfigSummaryFromEffective(recommended AgentRuntimeConf
 		noticeRequired = effective.Hint.ShouldShow
 	}
 	maxConcurrentTasks := effective.MaxConcurrentTasks
-	if maxConcurrentTasks <= 0 {
+	if maxConcurrentTasks == 0 {
 		maxConcurrentTasks = a.MaxConcurrentTasks
 	}
 	isShared := effective.Source == service.RuntimeConfigSourceShared
@@ -208,6 +208,9 @@ func (h *Handler) UpdateAgentRuntimeCurrentConfig(w http.ResponseWriter, r *http
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
+		if !lockPersonalRuntimeConfigAgent(w, r, qtx, a, member) {
+			return
+		}
 		if _, err := qtx.ClearAgentUserRuntimeConfigOverride(r.Context(), db.ClearAgentUserRuntimeConfigOverrideParams{
 			AgentID: a.ID,
 			UserID:  member.UserID,
@@ -311,7 +314,16 @@ func (h *Handler) UpdateAgentRuntimeCurrentConfig(w http.ResponseWriter, r *http
 		return
 	}
 	defer tx.Rollback(r.Context())
-	repointed, err := applyPersonalRuntimeCurrentConfigs(r.Context(), h.Queries.WithTx(tx), runtime.ID, member.UserID, []personalRuntimeConfigWrite{{
+	qtx := h.Queries.WithTx(tx)
+	lockedRuntime, err := qtx.LockAgentRuntimeForAccessChange(r.Context(), runtime.ID)
+	if err != nil || lockedRuntime.OwnerID != member.UserID || lockedRuntime.WorkspaceID != a.WorkspaceID {
+		writeError(w, http.StatusConflict, "runtime ownership changed")
+		return
+	}
+	if !lockPersonalRuntimeConfigAgent(w, r, qtx, a, member) {
+		return
+	}
+	repointed, err := applyPersonalRuntimeCurrentConfigs(r.Context(), qtx, runtime.ID, member.UserID, []personalRuntimeConfigWrite{{
 		AgentID: a.ID,
 		Config:  prepared,
 	}}, []pgtype.UUID{a.ID})
@@ -382,8 +394,11 @@ func prepareAgentRuntimeCurrentConfig(
 			ResolutionStatus: service.RuntimeConfigResolutionModelUnavailable,
 		}
 	}
-	if maxConcurrentTasks <= 0 {
+	if maxConcurrentTasks == 0 {
 		maxConcurrentTasks = a.MaxConcurrentTasks
+	}
+	if err := validateAgentMaxConcurrentTasks(maxConcurrentTasks); err != nil {
+		return preparedAgentRuntimeCurrentConfig{}, &agentRuntimeCurrentConfigInputError{HTTPStatus: http.StatusBadRequest, Code: "invalid_max_concurrent_tasks", Message: err.Error()}
 	}
 	normalizedRuntimeConfig := []byte("{}")
 	if len(runtimeConfig) > 0 && !bytes.Equal(bytes.TrimSpace(runtimeConfig), []byte("null")) {
@@ -657,4 +672,18 @@ func mergeRuntimeConfigHintIntoAggregate(aggregate, hint *service.RuntimeConfigH
 	if aggregate.HintKey == "" {
 		aggregate.HintKey = "squad:runtime-config"
 	}
+}
+
+// Lock the agent before writing the FK-free config row, then recheck membership.
+func lockPersonalRuntimeConfigAgent(w http.ResponseWriter, r *http.Request, q *db.Queries, agent db.Agent, member db.Member) bool {
+	locked, err := q.GetAgentForUpdate(r.Context(), agent.ID)
+	if err != nil || locked.WorkspaceID != agent.WorkspaceID || locked.ArchivedAt.Valid || locked.ShareRuntime {
+		writeError(w, http.StatusConflict, "agent runtime strategy changed")
+		return false
+	}
+	if _, err := q.LockActiveMember(r.Context(), db.LockActiveMemberParams{WorkspaceID: agent.WorkspaceID, UserID: member.UserID}); err != nil {
+		writeError(w, http.StatusForbidden, "workspace membership is required")
+		return false
+	}
+	return true
 }

@@ -470,6 +470,14 @@ func (s *IssueWakeupService) save(ctx context.Context, issueID, member, source, 
 	if err = s.authorize(ctx, q, issue.WorkspaceID, member, agent); err != nil {
 		return out, err
 	}
+	verdict, err := EffectiveAgentReadiness(ctx, s.runtimeLookup(q), agent, member, s.Tasks.LiveRuntimeModels)
+	if err != nil {
+		return out, err
+	}
+	if verdict.Blocked() {
+		return out, fmt.Errorf("%w: %s", ErrWakeupInput, verdict.Detail)
+	}
+
 	filterAgent, err := wakeupUUID(in.FilterAgentID)
 	if err != nil {
 		return out, err

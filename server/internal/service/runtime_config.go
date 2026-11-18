@@ -209,16 +209,15 @@ type ClaimModelSelection struct {
 }
 
 // ResolveClaimModelSelection returns the model layer a claimed task must
-// launch with, keyed on runtime_config_source the way smart-runtime defined the
-// stamp. A stamped row launches with its enqueue-time effective config; a
+// launch with, keyed on the enqueue-time runtime_config_source stamp. A stamped row launches with its enqueue-time effective config; a
 // smart-runtime row without the stamp (pre-stamp backlog, delegated-failure
 // recovery) has no authoritative model layer, and the agent's template model
-// must never become one — it is only a CLI + model recommendation (smart-runtime).
+// must never become one. It is only a CLI and model recommendation.
 // Every source is finally checked against the claiming runtime's live model
 // catalog: a model that left it falls back to the originator's current user
 // config, or fails the claim with an explainable
 // RuntimeConfigResolutionModelUnavailable error instead of launching into a
-// bare provider 400 [1211] (smart-runtime).
+// provider-side model error.
 func ResolveClaimModelSelection(ctx context.Context, queries *db.Queries, task db.AgentTaskQueue, agent db.Agent, catalog LiveRuntimeModels) (ClaimModelSelection, error) {
 	if !agent.ShareRuntime && !task.RuntimeConfigSource.Valid {
 		return resolveClaimSelectionFromOriginator(ctx, queries, task, agent, catalog)
@@ -592,8 +591,7 @@ func RecommendedCLI(agent db.Agent) string {
 }
 
 // AgentHasRuntimeBinding reports whether the Agent is configured enough to
-// dispatch. Fixed agents need a bound machine; smart agents need a recommended
-// CLI (or a leftover pre-migration runtime_id that still carries that CLI).
+// dispatch. Fixed agents need a bound machine; smart agents need a recommended CLI.
 func AgentHasRuntimeBinding(agent db.Agent) bool {
 	if agent.ShareRuntime {
 		return agent.RuntimeID.Valid

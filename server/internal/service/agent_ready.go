@@ -172,11 +172,11 @@ func AgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent) (
 // requester will actually use. This is the admission counterpart of task
 // enqueue for smart-runtime agents; the template runtime is only a CLI +
 // model recommendation and must never become the execution machine.
-func EffectiveAgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent, requesterID pgtype.UUID) (AgentVerdict, error) {
+func EffectiveAgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db.Agent, requesterID pgtype.UUID, catalogs ...LiveRuntimeModels) (AgentVerdict, error) {
 	if agent.ArchivedAt.Valid {
 		return AgentVerdict{Availability: AgentBlocked, Reason: dispatch.ReasonTargetUnavailable, Detail: "agent is archived"}, nil
 	}
-	effective, err := ResolveEffectiveRuntimeConfig(ctx, lookup.Queries, agent, requesterID)
+	effective, err := ResolveEffectiveRuntimeConfig(ctx, lookup.Queries, agent, requesterID, catalogs...)
 	if err == nil {
 		runtime, runtimeErr := lookup.GetForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
 			ID:          effective.RuntimeID,
@@ -185,7 +185,7 @@ func EffectiveAgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db
 		if runtimeErr != nil {
 			return AgentVerdict{}, runtimeErr
 		}
-		return runtimeVerdict(runtime, agent), nil
+		return effectiveRuntimeVerdict(runtime, agent), nil
 	}
 	status, _, ok := RuntimeConfigResolutionFromError(err)
 	if !ok {
@@ -200,7 +200,7 @@ func EffectiveAgentReadiness(ctx context.Context, lookup RuntimeLookup, agent db
 		if runtimeErr != nil {
 			return AgentVerdict{}, runtimeErr
 		}
-		return runtimeVerdict(runtime, agent), nil
+		return effectiveRuntimeVerdict(runtime, agent), nil
 	}
 	switch status {
 	case RuntimeConfigResolutionNoUserRuntime, RuntimeConfigResolutionRuntimeUnavailable:
@@ -222,13 +222,25 @@ func runtimeVerdict(rt db.AgentRuntime, agent db.Agent) AgentVerdict {
 	// the fixed-agent check here would skip an Autopilot collaborator "Run now"
 	// as runtime_access_denied before a task is even enqueued.
 	// RuntimeAllowsUser admits SharedWith recipients (upstream runtime sharing).
-	if agent.ShareRuntime && rt.Visibility == "private" && rt.OwnerID.Valid && !RuntimeAllowsUser(rt, agent.OwnerID) {
+	if rt.Visibility == "private" && rt.OwnerID.Valid && !RuntimeAllowsUser(rt, agent.OwnerID) {
 		return AgentVerdict{
 			Availability: AgentBlocked,
 			Reason:       dispatch.ReasonRuntimeAccessDenied,
 			Detail:       "agent owner does not have access to the private runtime",
 		}
 	}
+	return RuntimeReadiness(rt)
+}
+
+func effectiveRuntimeVerdict(rt db.AgentRuntime, agent db.Agent) AgentVerdict {
+	if agent.ShareRuntime {
+		return runtimeVerdict(rt, agent)
+	}
+	return RuntimeReadiness(rt)
+}
+
+// RuntimeReadiness evaluates health after the caller has checked runtime access.
+func RuntimeReadiness(rt db.AgentRuntime) AgentVerdict {
 	if rt.Status == "online" {
 		return AgentVerdict{Availability: AgentAvailable}
 	}
@@ -263,13 +275,6 @@ func runtimeVerdict(rt db.AgentRuntime, agent db.Agent) AgentVerdict {
 		Reason:       dispatch.ReasonRuntimeOffline,
 		Detail:       "agent runtime is " + rt.Status,
 	}
-}
-
-// RuntimeReadiness exposes the runtime half of the shared readiness decision
-// to handlers that have already resolved a requester-specific effective
-// runtime for a smart-runtime agent.
-func RuntimeReadiness(rt db.AgentRuntime) AgentVerdict {
-	return runtimeVerdict(rt, db.Agent{})
 }
 
 // runtimeInstallClaimWindow is how long an `installing` claim on a runtime row

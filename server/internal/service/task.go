@@ -5651,9 +5651,14 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		if createRetry {
 			var child db.AgentTaskQueue
 			_, cerr := qtx.LockAgentForTaskEnqueue(ctx, t.AgentID)
+			var runtimeFallback pgtype.UUID
+			if cerr == nil {
+				runtimeFallback, cerr = s.resolveRetryRuntimeFallback(ctx, qtx, t.ID)
+			}
 			if cerr == nil {
 				child, cerr = qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 					NewTaskID:            dbid.NewV7(),
+					RuntimeID:            runtimeFallback,
 					ID:                   taskID,
 					FireAt:               retryFireAt,
 					MaxAttempts:          retryMaxAttempts,
@@ -6161,9 +6166,14 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	}
 	var child db.AgentTaskQueue
 	_, err = qtx.LockAgentForTaskEnqueue(ctx, parent.AgentID)
+	var runtimeFallback pgtype.UUID
+	if err == nil {
+		runtimeFallback, err = s.resolveRetryRuntimeFallback(ctx, qtx, parent.ID)
+	}
 	if err == nil {
 		child, err = qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 			NewTaskID:            dbid.NewV7(),
+			RuntimeID:            runtimeFallback,
 			ID:                   parent.ID,
 			FireAt:               retryFireAt,
 			MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
@@ -8822,4 +8832,20 @@ func agentToMap(a db.Agent) map[string]any {
 		"archived_at":          util.TimestampToPtr(a.ArchivedAt),
 		"archived_by":          util.UUIDToPtr(a.ArchivedBy),
 	}
+}
+
+func (s *TaskService) resolveRetryRuntimeFallback(ctx context.Context, q *db.Queries, parentID pgtype.UUID) (pgtype.UUID, error) {
+	parent, err := q.GetAgentTask(ctx, parentID)
+	if err != nil || parent.RuntimeID.Valid {
+		return pgtype.UUID{}, err
+	}
+	agent, err := q.GetAgent(ctx, parent.AgentID)
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	fallback, resolvable, err := s.retryRuntimeFallbackForParent(ctx, q, agent, parent)
+	if err == nil && !resolvable {
+		return pgtype.UUID{}, pgx.ErrNoRows
+	}
+	return fallback, err
 }

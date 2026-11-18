@@ -1024,7 +1024,7 @@ func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Is
 	if err != nil {
 		return AgentVerdict{}, false
 	}
-	verdict, err := AgentReadiness(ctx, lookup, agent)
+	verdict, err := EffectiveAgentReadiness(ctx, lookup, agent, issue.CreatorID)
 	if err != nil {
 		return AgentVerdict{}, false
 	}
@@ -1053,7 +1053,7 @@ func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) b
 	if err != nil {
 		return false
 	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), agent)
+	verdict, err := EffectiveAgentReadiness(ctx, s.runtimeLookup(s.Queries), agent, issue.CreatorID)
 	if err != nil {
 		return false
 	}

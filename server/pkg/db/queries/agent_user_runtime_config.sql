@@ -5,8 +5,7 @@ WHERE agent_id = $1 AND user_id = $2;
 -- name: LockAgentUserRuntimeConfigsForUpdate :many
 -- Bulk personal runtime migration locks existing overrides after locking the
 -- corresponding agent rows. Existing single-agent upserts then serialize on
--- these rows; a first-time insert serializes on the agent row through its FK
--- check, so the migration cannot overwrite a current config it did not plan.
+-- these rows. Writers also lock the agent before changing its overrides.
 SELECT * FROM agent_user_runtime_config
 WHERE agent_id = ANY(@agent_ids::uuid[])
   AND user_id = @user_id
@@ -38,9 +37,7 @@ SELECT EXISTS (
 
 -- name: ClearAgentUserRuntimeConfigsByRuntime :execrows
 -- Runtime deletion locks the parent agent_runtime row before this update. The
--- FK check used by concurrent override writes takes a conflicting parent-row
--- lock, so either the override commits first and is cleared here, or it waits
--- until deletion commits and can no longer reference the removed runtime.
+-- runtime lock used by override writers serializes with this cleanup.
 UPDATE agent_user_runtime_config
 SET runtime_id = NULL, updated_at = now()
 WHERE runtime_id = $1;
@@ -89,3 +86,11 @@ ON CONFLICT (agent_id, user_id) DO UPDATE SET
     notice_seen_at = now(),
     updated_at = now()
 RETURNING *;
+
+-- name: DeleteAgentUserRuntimeConfigsForMember :exec
+DELETE FROM agent_user_runtime_config c USING agent a
+WHERE c.agent_id = a.id AND a.workspace_id = @workspace_id AND c.user_id = @user_id;
+
+-- name: DeleteAgentUserRuntimeConfigsByWorkspace :exec
+DELETE FROM agent_user_runtime_config c USING agent a
+WHERE c.agent_id = a.id AND a.workspace_id = @workspace_id;
