@@ -71,3 +71,17 @@ WHERE id = sqlc.arg(source_chat_id)
 DELETE FROM chat_session
 WHERE id = sqlc.arg(destination_chat_id)
   AND fork_initialization_task_id = sqlc.arg(task_id);
+
+-- name: CopyChatForkMessages :exec
+-- Preserve the visible transcript at enqueue time. Message tasks, wakeups,
+-- quick actions and channel delivery metadata still belong to the source.
+INSERT INTO chat_message (
+    id, chat_session_id, role, content, created_at, failure_reason, elapsed_ms, message_kind
+)
+SELECT gen_random_uuid(), sqlc.arg(destination_chat_id), message.role, message.content, message.created_at,
+       message.failure_reason, message.elapsed_ms, message.message_kind
+FROM chat_message AS message
+WHERE message.chat_session_id = sqlc.arg(source_chat_id)
+  AND message.created_at <= sqlc.arg(snapshot_at)
+  AND message.message_kind != 'channel_command'
+ORDER BY message.created_at ASC, message.id ASC;

@@ -43,6 +43,11 @@ func settleNativeChatFork(ctx context.Context, q *db.Queries, task db.AgentTaskQ
 		}); err != nil {
 			return fmt.Errorf("complete pending chat fork: %w", err)
 		}
+		if err := q.CopyChatForkMessages(ctx, db.CopyChatForkMessagesParams{
+			DestinationChatID: child.ID, SourceChatID: child.ForkedFromChatID, SnapshotAt: task.CreatedAt,
+		}); err != nil {
+			return fmt.Errorf("copy visible chat fork history: %w", err)
+		}
 	} else {
 		if _, err := q.DeletePendingChatFork(ctx, db.DeletePendingChatForkParams{
 			DestinationChatID: child.ID, TaskID: task.ID,
