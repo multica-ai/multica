@@ -1007,6 +1007,8 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 			h.writeChatSubmissionError(w, err)
 		case submissionID.Valid && errors.Is(err, service.ErrChatSessionNotFound):
 			writeError(w, http.StatusNotFound, "chat session not found")
+		case errors.Is(err, service.ErrChatSessionForkPending):
+			writeError(w, http.StatusConflict, "chat fork is pending")
 		case errors.Is(err, service.ErrChatSessionArchived):
 			writeError(w, http.StatusConflict, "chat session is archived")
 		case errors.Is(err, service.ErrChatTaskAgentArchived):

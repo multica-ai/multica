@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -83,5 +84,43 @@ func TestChatForkReservationAndPublication(t *testing.T) {
 	original, err := q.GetChatSession(ctx, sourceID)
 	if err != nil || original.ForkSnapshotTaskID.Valid || original.SessionID.String != "source-session" {
 		t.Fatalf("original source=%+v error=%v", original, err)
+	}
+}
+
+func TestQueueChatForkReservesSourceAndQueuesOriginalRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := t.Context()
+	agentID, runtimeID, _ := createRuntimeGuardAgent(t, ctx)
+	sourceID := parseUUID(dbfx.ChatSession(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID, "session_id": "source-session",
+	}))
+	source, err := testHandler.Queries.GetChatSession(ctx, sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := testHandler.queueChatFork(ctx, source, source.CreatorID); !errors.Is(err, errChatForkUnavailable) {
+		t.Fatalf("unsupported runtime accepted fork request: %v", err)
+	}
+	dbfx.Exec(t, `UPDATE agent_runtime SET provider='codex', metadata=$1 WHERE id=$2`,
+		[]byte(`{"capabilities":["codex-chat-fork-v1"]}`), runtimeID)
+	child, task, err := testHandler.queueChatFork(ctx, source, source.CreatorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		dbfx.Exec(t, `DELETE FROM agent_task_queue WHERE id=$1`, task.ID)
+		dbfx.Exec(t, `DELETE FROM chat_session WHERE id=$1`, child.ID)
+	})
+	if task.Status != "queued" || task.RuntimeID != source.RuntimeID || task.ChatSessionID != child.ID ||
+		child.ForkInitializationTaskID != task.ID {
+		t.Fatalf("child=%+v queued task=%+v", child, task)
+	}
+	if _, _, err := testHandler.queueChatFork(ctx, source, source.CreatorID); !errors.Is(err, errChatForkUnavailable) {
+		t.Fatalf("overlapping fork accepted: %v", err)
+	}
+	if _, err := testHandler.TaskService.EnqueueChatTask(ctx, source, source.CreatorID, false); !errors.Is(err, service.ErrChatSessionForkPending) {
+		t.Fatalf("source task enqueue during snapshot returned %v", err)
 	}
 }
