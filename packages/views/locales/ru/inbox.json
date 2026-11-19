@@ -79,7 +79,8 @@
     "open_project": "Открыть проект",
     "autopilot_quota_upgrade": "Посмотреть варианты обновления",
     "archive": "Архивировать",
-    "unarchive": "Восстановить из архива"
+    "unarchive": "Восстановить из архива",
+    "open_doc": "Открыть документ"
   },
   "types": {
     "issue_assigned": "Назначено",
@@ -109,7 +110,9 @@
     "app_action_requested": "Требуется ваше подтверждение",
     "app_action_reminder": "Срок подтверждения скоро истечёт",
     "app_connect_requested": "Подключить приложение",
-    "app_action_result": "Результат действия приложения"
+    "app_action_result": "Результат действия приложения",
+    "doc_comment": "Новый комментарий в документе",
+    "doc_mentioned": "Вас упомянули в документе"
   },
   "labels": {
     "set_status_to": "Установлен статус",

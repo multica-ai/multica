@@ -73,7 +73,8 @@
     "open_project": "打开项目",
     "autopilot_quota_upgrade": "查看升级方案",
     "archive": "归档",
-    "unarchive": "取消归档"
+    "unarchive": "取消归档",
+    "open_doc": "打开文档"
   },
   "types": {
     "issue_assigned": "已分配",
@@ -103,7 +104,9 @@
     "app_action_requested": "等待你确认",
     "app_action_reminder": "确认即将过期",
     "app_connect_requested": "请连接应用",
-    "app_action_result": "应用操作结果"
+    "app_action_result": "应用操作结果",
+    "doc_comment": "文档有新评论",
+    "doc_mentioned": "在文档中提到了你"
   },
   "labels": {
     "set_status_to": "状态设为",

@@ -8,12 +8,16 @@ import {
   DocVersionSchema,
   DocVersionListSchema,
   DocSearchResponseSchema,
+  DocCommentSchema,
+  DocCommentListSchema,
 } from "../docs/schemas";
 import type {
   Doc,
   DocSummary,
   DocFolder,
   SearchDocsResponse,
+  DocComment,
+  CreateDocCommentRequest,
   DocTree,
   DocVersion,
   CreateDocRequest,
@@ -1010,6 +1014,38 @@ export class ApiClient {
   }
   async deleteDoc(id: string): Promise<void> {
     await this.fetch(`/api/docs/${id}`, { method: "DELETE" });
+  }
+  async listDocComments(docId: string): Promise<DocComment[]> {
+    return parseWithFallback(
+      await this.fetch<unknown>(`/api/docs/${docId}/comments`),
+      DocCommentListSchema,
+      { comments: [] },
+      { endpoint: "GET /api/docs/{id}/comments" },
+    ).comments;
+  }
+  // Writes reject a malformed body instead of inventing a comment.
+  async createDocComment(docId: string, data: CreateDocCommentRequest): Promise<DocComment> {
+    const raw = await this.fetch<unknown>(`/api/docs/${docId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        content: data.content,
+        ...(data.parentId ? { parent_id: data.parentId } : {}),
+        ...(data.anchorQuote !== undefined
+          ? { anchor_quote: data.anchorQuote, anchor_prefix: data.anchorPrefix ?? "", anchor_suffix: data.anchorSuffix ?? "" }
+          : {}),
+      }),
+    });
+    return DocCommentSchema.parse(raw);
+  }
+  async setDocCommentResolved(docId: string, commentId: string, resolved: boolean): Promise<DocComment> {
+    const raw = await this.fetch<unknown>(
+      `/api/docs/${docId}/comments/${commentId}/${resolved ? "resolve" : "reopen"}`,
+      { method: "POST" },
+    );
+    return DocCommentSchema.parse(raw);
+  }
+  async deleteDocComment(docId: string, commentId: string): Promise<void> {
+    await this.fetch(`/api/docs/${docId}/comments/${commentId}`, { method: "DELETE" });
   }
   async listDocVersions(id: string): Promise<DocVersion[]> {
     return parseWithFallback(

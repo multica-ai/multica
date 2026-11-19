@@ -81,6 +81,48 @@ export const DocSearchResponseSchema = z.object({
       }),
     ),
 });
+export const DocCommentSchema = z
+  .object({
+    id: z.string().min(1),
+    doc_id: z.string(),
+    parent_id: z.string().nullable().default(null),
+    author_type: actor,
+    author_id: z.string(),
+    content: z.string(),
+    anchor_quote: z.string().default(""),
+    anchor_prefix: z.string().default(""),
+    anchor_suffix: z.string().default(""),
+    resolved_at: z.string().nullable().default(null),
+    resolved_by_type: actor.nullable().default(null),
+    resolved_by_id: z.string().nullable().default(null),
+    created_at: z.string(),
+    updated_at: z.string(),
+  })
+  .transform((c) => ({
+    id: c.id,
+    docId: c.doc_id,
+    parentId: c.parent_id,
+    authorType: c.author_type,
+    authorId: c.author_id,
+    content: c.content,
+    anchorQuote: c.anchor_quote,
+    anchorPrefix: c.anchor_prefix,
+    anchorSuffix: c.anchor_suffix,
+    resolvedAt: c.resolved_at,
+    resolvedByType: c.resolved_by_type,
+    resolvedById: c.resolved_by_id,
+    createdAt: c.created_at,
+    updatedAt: c.updated_at,
+  }));
+// One unreadable comment is dropped instead of emptying the discussion list.
+export const DocCommentListSchema = z.object({
+  comments: z.array(z.unknown()).transform((rows) =>
+    rows.flatMap((row) => {
+      const comment = DocCommentSchema.safeParse(row);
+      return comment.success ? [comment.data] : [];
+    }),
+  ),
+});
 export const DocVersionSchema = z
   .object({
     doc_id: z.string(),

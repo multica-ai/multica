@@ -75,7 +75,8 @@
     "open_project": "Open project",
     "autopilot_quota_upgrade": "View upgrade options",
     "archive": "Archive",
-    "unarchive": "Unarchive"
+    "unarchive": "Unarchive",
+    "open_doc": "Open doc"
   },
   "types": {
     "issue_assigned": "Assigned",
@@ -105,7 +106,9 @@
     "app_action_requested": "Needs your confirmation",
     "app_action_reminder": "Confirmation expiring soon",
     "app_connect_requested": "Connect an app",
-    "app_action_result": "App action result"
+    "app_action_result": "App action result",
+    "doc_comment": "New comment on a doc",
+    "doc_mentioned": "Mentioned in a doc"
   },
   "labels": {
     "set_status_to": "Set status to",
