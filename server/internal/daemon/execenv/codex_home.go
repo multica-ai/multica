@@ -654,16 +654,28 @@ func prepareCodexSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions
 // A published fork holds the active rollout and archived lineage in one unit.
 func mountCodexForkStore(codexHome, storeDir string, logger *slog.Logger) error {
 	forkDir := filepath.Join(storeDir, "fork")
-	names := []string{"sessions", "archived_sessions"}
-	for _, name := range names {
-		info, err := os.Lstat(filepath.Join(forkDir, name))
+	var missing []string
+	for _, name := range []string{"sessions", "archived_sessions"} {
+		source := filepath.Join(forkDir, name)
+		info, err := os.Lstat(source)
 		if err != nil || !info.IsDir() {
 			return fmt.Errorf("required Codex fork history is unavailable: %s", name)
 		}
+		dest := filepath.Join(codexHome, name)
+		if _, err := os.Lstat(dest); os.IsNotExist(err) {
+			missing = append(missing, name)
+			continue
+		} else if err != nil {
+			return fmt.Errorf("inspect Codex fork mount %s: %w", name, err)
+		}
+		mounted, err := os.Stat(dest)
+		if err != nil || !os.SameFile(info, mounted) {
+			return fmt.Errorf("Codex fork mount path is occupied: %s", name)
+		}
 	}
-	for _, name := range names {
-		if err := ensureCodexSessionsLink(filepath.Join(codexHome, name), filepath.Join(forkDir, name)); err != nil {
-			return err
+	for _, name := range missing {
+		if err := createDirLink(filepath.Join(forkDir, name), filepath.Join(codexHome, name)); err != nil {
+			return fmt.Errorf("mount Codex fork history %s: %w", name, err)
 		}
 	}
 	touchCodexSessionStore(storeDir, logger)

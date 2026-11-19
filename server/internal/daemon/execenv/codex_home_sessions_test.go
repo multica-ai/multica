@@ -811,6 +811,28 @@ func TestPrepareCodexSessionsMountsPublishedForkLineage(t *testing.T) {
 			t.Fatalf("%s resolves to %q, error=%v", name, got, err)
 		}
 	}
+	if err := prepareCodexSessionsDir(taskHome, sharedHome, opts, testLogger()); err != nil {
+		t.Fatalf("existing correct links should be reusable: %v", err)
+	}
+
+	occupiedHome := t.TempDir()
+	occupiedArchive := filepath.Join(occupiedHome, "archived_sessions")
+	if err := os.Mkdir(occupiedArchive, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(occupiedArchive, "preserve.jsonl")
+	if err := os.WriteFile(marker, []byte("existing history"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareCodexSessionsDir(occupiedHome, sharedHome, opts, testLogger()); err == nil {
+		t.Error("required resume should reject an occupied archive path")
+	}
+	if got, err := os.ReadFile(marker); err != nil || string(got) != "existing history" {
+		t.Errorf("occupied archive was altered: got %q, error=%v", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(occupiedHome, "sessions")); !os.IsNotExist(err) {
+		t.Errorf("failed preparation should not mount sessions: %v", err)
+	}
 	if err := prepareCodexSessionsDir(t.TempDir(), t.TempDir(), opts, testLogger()); err == nil {
 		t.Fatal("required resume silently accepted a missing fork store")
 	}
