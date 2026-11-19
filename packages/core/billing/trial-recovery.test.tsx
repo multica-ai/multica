@@ -331,3 +331,54 @@ it.each([
     qc.clear();
   }
 });
+
+// A paid-feature read already in flight when the refresh runs (a project
+// opened a moment before), which then fails: the refresh waits for it and
+// retries with backoff instead of skipping it.
+it.each([
+  ["with an earlier answer cached", true],
+  ["with nothing cached", false],
+] as const)("retries a paid-feature read that was in flight at the refresh and then failed (%s)", async (_name, cached) => {
+  vi.useFakeTimers();
+  const t0 = endsAt - 7 * 24 * 60 * 60 * 1000;
+  vi.setSystemTime(t0);
+  setApiInstance({
+    getWorkspaceSubscriptionSummary: async () => paid,
+    getWorkspaceFeatures: async () => {
+      const startedAt = Date.now() - t0;
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+      if (startedAt >= 69_000 && startedAt < 80_000) throw new Error("HTTP 503");
+      return { features: { private_projects: startedAt < 50_000 ? "available" : "locked" } };
+    },
+  } as unknown as ApiClient);
+  const qc = createQueryClient();
+  if (cached) {
+    qc.setQueryData(workspaceFeatureKeys.all(ws), { features: { private_projects: "available" } });
+  }
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  const shell = renderHook(() => useWorkspaceTrial(ws, true), { wrapper });
+  let unmountPage: (() => void) | null = null;
+  try {
+    await advance(10);
+    // The project opens at 69 s; its read is still in flight at the 70 s refresh.
+    await advance(69_000);
+    if (cached) {
+      await act(async () => {
+        await qc.invalidateQueries({ queryKey: workspaceFeatureKeys.all(ws) });
+      });
+    }
+    const page = renderHook(
+      () => usePaidFeatureAccess(ws, "private_projects", { hasExistingConfig: true }),
+      { wrapper },
+    );
+    unmountPage = page.unmount;
+    for (let i = 0; i < 60; i++) await advance(10_000);
+    expect(page.result.current.state).toBe("read_only");
+  } finally {
+    unmountPage?.();
+    shell.unmount();
+    qc.clear();
+  }
+});

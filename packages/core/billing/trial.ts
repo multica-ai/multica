@@ -178,11 +178,15 @@ async function refreshPaidReadsBefore(
   isCancelled: () => boolean,
 ): Promise<void> {
   const keys = [workspaceFeatureKeys.all(wsId), autopilotKeys.usage(wsId)];
-  const outdated = (query: { state: { dataUpdatedAt: number; fetchStatus: string } }) =>
-    query.state.fetchStatus !== "fetching" && query.state.dataUpdatedAt < boundary;
+  const outdated = (query: { state: { dataUpdatedAt: number } }) =>
+    query.state.dataUpdatedAt < boundary;
   for (let attempt = 0; ; attempt++) {
+    // A read already in flight is awaited rather than restarted, so one that
+    // goes on to fail is still caught by the check below.
     await Promise.all(
-      keys.map((queryKey) => qc.invalidateQueries({ queryKey, predicate: outdated })),
+      keys.map((queryKey) =>
+        qc.invalidateQueries({ queryKey, predicate: outdated }, { cancelRefetch: false }),
+      ),
     );
     if (isCancelled()) return;
     const failing = keys.some((queryKey) =>
