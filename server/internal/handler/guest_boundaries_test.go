@@ -544,8 +544,9 @@ func TestProjectSharingWithGuestFollowsThePlanAndFlag(t *testing.T) {
 	member := createPlainMember(t, f.marker+"-share-member@multica.test")
 	update(f.secret, map[string]any{"member_ids": []string{member}}).Want(http.StatusOK)
 
+	// Cloud before the commercial launch: guests are not released yet.
 	useGuestsFeature(t, entitlement.FeatureDecision{Action: entitlement.ActionOff})
-	withFeatureFlag(t, testHandler, featureflags.WorkspaceGuests, false)
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, false)
 	resp := addTo(f.other, f.guest)
 	if resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), "workspace_guests_disabled") {
 		t.Fatalf("share with a guest while guests are off = %d %s, want 403 workspace_guests_disabled", resp.Code, resp.Body.String())
@@ -594,13 +595,12 @@ func TestGuestInvitationAcceptanceFollowsThePlanAndFlag(t *testing.T) {
 	wantPending("plan without guests")
 
 	useGuestsFeature(t, entitlement.FeatureDecision{Action: entitlement.ActionOff})
-	withFeatureFlag(t, testHandler, featureflags.WorkspaceGuests, false)
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, false)
 	if resp := accept(); resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), "workspace_guests_disabled") {
 		t.Fatalf("accept with guests off = %d %s, want 403 workspace_guests_disabled", resp.Code, resp.Body.String())
 	}
 	wantPending("guests off")
 
-	withFeatureFlag(t, testHandler, featureflags.WorkspaceGuests, true)
 	useGuestsFeature(t, entitlement.FeatureDecision{Action: entitlement.ActionObserve})
 	accept().Want(http.StatusOK)
 	if got := guestAttempts(t); got.observed != 1 || got.lastOperation != "accept_invitation" {
