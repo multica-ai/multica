@@ -45,7 +45,7 @@ still found by `--issue`.
 
 ```bash
 multica inbox read <id>...                  # and the rest of each issue
-multica inbox read --issue MUL-123          # every notification on one issue
+multica inbox read --issue MUL-123          # every notification on one issue, unless it is snoozed
 multica inbox unread <id>...                # only that notification
 multica inbox archive <id>...               # and the rest of each issue
 multica inbox unarchive <id>...

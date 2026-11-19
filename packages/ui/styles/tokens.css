@@ -170,10 +170,6 @@
     --surface-selected-foreground: oklch(0.141 0.005 285.823);
     --surface-border: oklch(0.92 0.004 286.32);
     --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
-    /* A surface card resting on the page canvas, outlined by its shadow
-       rather than a border: a hairline ring, faintest on top, and a short
-       drop below. */
-    --surface-card-shadow: 0 0 0 1px rgb(0 0 0 / 0.03), 0 1px 2px rgb(0 0 0 / 0.05), 0 3px 6px -1px rgb(0 0 0 / 0.06);
     --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
 
     /* Below `md` the chat launcher is an overlay pinned to the dashboard's
@@ -297,7 +293,6 @@
     --surface-selected-foreground: oklch(0.985 0 0);
     --surface-border: oklch(1 0 0 / 10%);
     --surface-shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 1px 1px rgb(0 0 0 / 0.16);
-    --surface-card-shadow: 0 0 0 1px rgb(255 255 255 / 0.07), 0 1px 2px rgb(0 0 0 / 0.3), 0 3px 6px -1px rgb(0 0 0 / 0.3);
     --floating-shadow: 0 20px 48px rgb(0 0 0 / 0.46), 0 4px 12px rgb(0 0 0 / 0.28);
     --menu-shadow: 0 10px 28px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.18);
     --tooltip: oklch(0.3 0.006 286.033);

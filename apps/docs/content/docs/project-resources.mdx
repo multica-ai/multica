@@ -30,7 +30,7 @@ A local directory only applies to the daemon it is bound to. When the daemon exe
 
 Open the project and click **Add repository** in **Resources → Repositories**. Search for a repository already linked to the workspace, or paste a Git URL. Workspace repositories are managed in **Settings → Code**; once GitHub is connected, the same page offers **Pick from GitHub** to import repositories the App is authorized for.
 
-Pasting a GitHub branch URL (`https://github.com/owner/repo/tree/branch`) fills in the repository URL and starting branch separately. URL-encoded branch names are decoded; query parameters and page anchors are excluded. Check the starting branch before adding the repository.
+Pasting a GitHub branch URL (`https://github.com/owner/repo/tree/branch`) fills in the repository URL and starting branch separately. URL-encoded branch names are decoded; query parameters and page anchors are excluded. Check the starting branch before adding the repository. Changing the repository URL clears the previous starting branch unless the new URL specifies one.
 
 Repositories are not limited to GitHub: any Git URL the runtime can reach works as a repository resource. Self-hosted Multica can also connect self-hosted Forgejo, Gitea, or GitLab under **Settings → Code**; see [Self-hosted Git hosting](/vcs-integration).
 

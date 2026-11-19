@@ -3370,6 +3370,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.Title = sanitizeNullBytes(req.Title)
 
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
@@ -4024,6 +4025,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// PostgreSQL TEXT rejects NUL, which survives a JSON round trip. The bases
+	// are compared with the stored text, so they are cleaned the same way.
+	req.Title = sanitizeNullBytesPtr(req.Title)
+	req.TitleBase = sanitizeNullBytesPtr(req.TitleBase)
+	req.Description = sanitizeNullBytesPtr(req.Description)
+	req.DescriptionBase = sanitizeNullBytesPtr(req.DescriptionBase)
 
 	// Track which fields were explicitly present in JSON (even if null)
 	var rawFields map[string]json.RawMessage
@@ -4826,6 +4833,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// See UpdateIssue: a failed write here is only logged and skipped.
+	req.Updates.Title = sanitizeNullBytesPtr(req.Updates.Title)
+	req.Updates.Description = sanitizeNullBytesPtr(req.Updates.Description)
 
 	if len(req.IssueIDs) == 0 {
 		writeError(w, http.StatusBadRequest, "issue_ids is required")

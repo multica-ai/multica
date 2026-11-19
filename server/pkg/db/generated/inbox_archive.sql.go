@@ -291,7 +291,7 @@ WITH base AS MATERIALIZED (
     ORDER BY created_at DESC, id DESC
     LIMIT $20::int
 )
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, i.snoozed_until, i.snoozed_at, selected.issue_status, selected.issue_priority,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, i.snoozed_until, i.snoozed_at, i.returned_at, selected.issue_status, selected.issue_priority,
        iss.number AS issue_number,
        iss.project_id AS issue_project_id,
        iss.assignee_type AS issue_assignee_type,
@@ -414,6 +414,7 @@ func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInb
 			&i.InboxItem.Section,
 			&i.InboxItem.SnoozedUntil,
 			&i.InboxItem.SnoozedAt,
+			&i.InboxItem.ReturnedAt,
 			&i.IssueStatus,
 			&i.IssuePriority,
 			&i.IssueNumber,

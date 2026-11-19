@@ -58,6 +58,12 @@ Revision 4 (`features`) is safe in either order: an older consumer ignores
 `features`, and this consumer treats a policy without it as every feature
 `off`.
 
+`gates.members` (revision 5) is optional and safe in either order too: an
+older consumer ignores the unknown gate, and this consumer reads a policy
+without it, or with a malformed one, as `members` `off` with reason
+`gate_missing` or `gate_invalid`. Only that gate falls back; `autopilot_runs`
+and the features keep their instructions. See [Member limit](#member-limit).
+
 Responses tolerate unknown JSON fields and gates for additive compatibility.
 Unknown schema/action, malformed fields, a missing `autopilot_runs` gate, HTTP
 failures, and timeouts fail open.
@@ -120,6 +126,46 @@ structured localization; in-app quota views localize from `details`.
 
 Future consumers should depend on the small `Provider` interface. Tests can use
 `server/internal/entitlement/entitlementtest.Stub` without Cloud.
+
+## Refreshing before a refusal
+
+A consumer about to refuse an operation can call `Refresher.RefreshGate`
+instead of trusting the cache. It fetches the policy again unless the cached
+one arrived within the last five seconds, so a workspace that has just
+upgraded is not refused on a policy cached before the upgrade, and repeated
+refusals cost at most one Cloud request per workspace per five seconds. A
+failed fetch answers exactly like `Gate`. The Cloud client implements it;
+`entitlementtest.Stub` does too (`SetRefreshed`).
+
+## Member limit
+
+`members` caps the members of a workspace on a plan with a member limit
+(Free). It carries a `limit` and no period: it is a ceiling on headcount, not
+a budget that resets. Cloud sends it `off` for paid plans and trials, whose
+seats are governed by purchased seat capacity (`server/internal/seatcapacity`).
+
+The handler checks it wherever a member is added
+(`server/internal/handler/member_limit.go`):
+
+| Operation | Counted against the limit |
+| --- | --- |
+| Create an invitation (`POST /api/workspaces/{id}/members`) | members + live pending invitations + 1 |
+| Join by share link | the same, or members + 1 when the joiner holds a pending invitation |
+| Accept an invitation | members + 1: the invitation already holds its slot |
+
+Guests take no slot and are never checked. A refused invitation acceptance
+leaves the invitation pending. Each path counts once before its side effects
+(Cloud seat calls, rate-limit budgets), re-reading the policy with
+`RefreshGate` before refusing, and again inside the transaction that writes
+the member or invitation, under a per-workspace advisory lock taken before any
+row lock; the second count decides races for the last slot. `enforce` refuses
+with `403 member_limit_reached`. Attempts are recorded in
+`entitlement_limit_overage` under gate `members`, grouped by UTC calendar month
+since the gate has no period of its own.
+
+Clients read `GET /api/workspaces/{id}/member-limit` (member-readable), which
+returns `action` and, while a limit applies, `limit`, `members` and
+`pending_invitations`.
 
 ## Paid features
 

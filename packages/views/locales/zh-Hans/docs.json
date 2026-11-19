@@ -47,7 +47,8 @@
     "retry": "重试",
     "conflict": "{{name}} 已更新文档。草稿已保留，刷新后继续编辑。",
     "reload": "刷新最新版本",
-    "draft": "保留的草稿"
+    "draft": "保留的草稿",
+    "unsaved_changes": "未保存的修改"
   },
   "history": {
     "title": "历史",
@@ -55,7 +56,15 @@
     "restore": "恢复此版本",
     "loading": "加载中..."
   },
+  "not_found": {
+    "title": "未找到该文档",
+    "description": "它可能已被删除。"
+  },
   "edited": "{{time}}编辑",
   "outline": "大纲",
-  "link_copied": "链接已复制"
+  "link_copied": "链接已复制",
+  "unavailable": {
+    "title": "知识库暂未开放",
+    "description": "当前工作区尚未开启知识库。"
+  }
 }

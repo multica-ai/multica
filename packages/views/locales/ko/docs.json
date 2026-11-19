@@ -47,7 +47,8 @@
     "retry": "다시 시도",
     "conflict": "{{name}}님이 수정했습니다. 초안이 보존됩니다. 다시 불러와 계속하세요.",
     "reload": "최신 버전 불러오기",
-    "draft": "보존된 초안"
+    "draft": "보존된 초안",
+    "unsaved_changes": "저장하지 않은 변경사항"
   },
   "history": {
     "title": "기록",
@@ -55,7 +56,15 @@
     "restore": "이 버전 복원",
     "loading": "불러오는 중..."
   },
+  "not_found": {
+    "title": "문서를 찾을 수 없습니다",
+    "description": "삭제되었을 수 있습니다."
+  },
   "edited": "{{time}} 편집",
   "outline": "개요",
-  "link_copied": "링크를 복사했습니다"
+  "link_copied": "링크를 복사했습니다",
+  "unavailable": {
+    "title": "문서를 아직 사용할 수 없습니다",
+    "description": "이 워크스페이스에서는 문서가 켜져 있지 않습니다."
+  }
 }

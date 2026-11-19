@@ -7,6 +7,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { getCurrentWsId } from "@multica/core/platform";
 import {
   docKeys,
+  isDocNotFound,
   isDocRevisionConflict,
   setDocDraft,
   removeDocDraft,
@@ -38,6 +39,9 @@ export function useDocDraft(doc: Doc) {
   // before the parent passes the refreshed `doc`, so falling back to the prop
   // would briefly hand the editor the pre-save content and reset its caret.
   const savedDoc = useRef<Doc | null>(null);
+  // The server trims titles. Keep what was typed in the field, so a pause
+  // after a space does not join the next word to the previous one.
+  const typedTitle = useRef<{ typed: string; saved: string } | null>(null);
   const latestDoc =
     savedDoc.current && savedDoc.current.revision > doc.revision
       ? savedDoc.current
@@ -73,9 +77,13 @@ export function useDocDraft(doc: Doc) {
         setDocDraft(key, { ...fromDoc(doc), backup: current.backup });
     }
   }, [doc, key]);
-  const value = draft ?? fromDoc(latestDoc);
+  const stored = draft ?? fromDoc(latestDoc);
   const dirty =
-    value.title !== value.baseTitle || value.content !== value.baseContent;
+    stored.title !== stored.baseTitle || stored.content !== stored.baseContent;
+  const value =
+    typedTitle.current?.saved === stored.title
+      ? { ...stored, title: typedTitle.current.typed }
+      : stored;
   const save = async () => {
     const sent = useDocDraftStore.getState().draft.entries[key];
     if (
@@ -102,6 +110,8 @@ export function useDocDraft(doc: Doc) {
       }
       qc.setQueryData(docKeys.detail(wsId, doc.id), updated);
       savedDoc.current = updated;
+      if (current.title === sent.title && updated.title !== sent.title)
+        typedTitle.current = { typed: sent.title, saved: updated.title };
       const next = {
         ...current,
         title: current.title === sent.title ? updated.title : current.title,
@@ -125,7 +135,8 @@ export function useDocDraft(doc: Doc) {
         return;
       }
       updateStatus(isDocRevisionConflict(error) ? "conflict" : "error");
-      if (isDocRevisionConflict(error))
+      // A doc deleted elsewhere answers 404: refetch so the page says so.
+      if (isDocRevisionConflict(error) || isDocNotFound(error))
         void qc.invalidateQueries({ queryKey: docKeys.detail(wsId, doc.id) });
     } finally {
       saving.current = false;
@@ -145,6 +156,7 @@ export function useDocDraft(doc: Doc) {
     if (!inScope()) return;
     const current =
       useDocDraftStore.getState().draft.entries[key] ?? fromDoc(latestDoc);
+    if (patch.title !== undefined) typedTitle.current = null;
     setDocDraft(key, { ...current, ...patch });
   };
   const reload = async () => {

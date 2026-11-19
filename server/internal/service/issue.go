@@ -231,6 +231,10 @@ type IssueCreateResult struct {
 // savepoint has to be established before the statement that might fail, so every
 // successful create would pay for it too.
 func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
+	// PostgreSQL TEXT rejects NUL, which survives a JSON round trip. Cleaned
+	// here so every create entry stores the same text.
+	p.Title = util.SanitizeTextForPostgres(p.Title)
+	p.Description.String = util.SanitizeTextForPostgres(p.Description.String)
 	res, err := s.createOnce(ctx, p, opts)
 	if err == nil {
 		return res, nil

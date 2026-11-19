@@ -13,14 +13,16 @@
 --   681_issue_origin_sharecrm_chat / 682_issue_origin_sharecrm_chat_validate
 --   683_issue_origin_sharecrm_chat / 684_issue_origin_sharecrm_chat_validate
 --   685_issue_origin_sharecrm_chat / 686_issue_origin_sharecrm_chat_validate
+--   695_issue_origin_sharecrm_chat / 696_issue_origin_sharecrm_chat_validate
 --
 -- 681/682 on upstream are project_folder and its name index. 683/684 are
 -- entitlement_feature_attempt and its scope index. 685-694 are the docs
--- tables and their keys. A database that already recorded the ShareCRM
+-- tables and their keys. 695/696 are inbox_item.returned_at and
+-- idx_inbox_active_shown. A database that already recorded the ShareCRM
 -- filenames above still runs this file: the ledger key is the whole
 -- filename, not the numeric prefix. When weixin_chat and sharecrm_chat are
 -- already allowed, including when a retired widen left the check NOT VALID,
--- this file returns without another catalog swap. Migration 696 validates.
+-- this file returns without another catalog swap. Migration 698 validates.
 --
 -- 667/668 on this fork already union sharecrm_chat in, including on a
 -- database whose 667 committed before that repair existed (668 reads the

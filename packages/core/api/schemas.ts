@@ -38,10 +38,14 @@ import type {
   WorkspaceSubscriptionEntitlements,
   WorkspaceFeatureState,
   WorkspaceFeatures,
+  MemberLimit,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrice,
+  WorkspaceSubscriptionPlanPrices,
   WorkspaceSubscriptionPrices,
   CreateWorkspaceSubscriptionCheckoutResponse,
+  WorkspacePlanChangePreview,
+  ChangeWorkspacePlanResponse,
   WorkspaceSubscriptionSeatReconcileResult,
   WorkspaceSeatPurchasePreview,
   PurchaseWorkspaceSeatsResponse,
@@ -3577,6 +3581,7 @@ export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSe
 //     surface as unknown rather than be coerced into a known one.
 
 const WorkspaceSubscriptionIntervalSchema = z.enum(["month", "year"]);
+const WorkspaceSubscriptionPaidPlanSchema = z.enum(["pro", "business"]);
 
 // Stripe hosts Checkout and Portal, so those URLs leave the app. `z.string()
 // .url()` is not enough on its own — `new URL("javascript:...")` parses — and
@@ -3670,7 +3675,42 @@ export const WorkspaceSubscriptionSummarySchema = z
       checkout: z.boolean(),
       portal: z.boolean(),
       purchase_seats: z.boolean(),
+      // Absent on a cloud that predates plan switching: no switch is offered.
+      change_plan: z.boolean().optional(),
+      check_plan_change: z.boolean().optional(),
     }).loose(),
+    // Absent on an older cloud, and a malformed value reads as no hold: the
+    // server still refuses the operations a hold blocks.
+    plan_change: z
+      .object({
+        target_plan: z.string().min(1),
+        // An unknown state from a newer cloud is shown as still confirming,
+        // the state that asks the user to wait rather than act.
+        state: z.enum(["confirming", "unresolved"]).catch("confirming"),
+        since: z.string().min(1),
+      })
+      .loose()
+      .nullable()
+      .optional()
+      .catch(null),
+    // Absent on a cloud that predates trials. A malformed value reads as no
+    // trial: the entitlement still carries the plan the workspace has.
+    trial: z
+      .object({
+        plan: z.string().min(1),
+        state: z.enum(["active", "expired", "converted"]),
+        started_at: z.string().min(1),
+        ends_at: z.string().min(1),
+      })
+      .loose()
+      .refine(
+        (value) =>
+          !Number.isNaN(Date.parse(value.started_at)) &&
+          !Number.isNaN(Date.parse(value.ends_at)),
+      )
+      .nullable()
+      .optional()
+      .catch(null),
   })
   .loose()
   .transform(
@@ -3707,7 +3747,24 @@ export const WorkspaceSubscriptionSummarySchema = z
         checkout: value.available_actions.checkout,
         portal: value.available_actions.portal,
         purchaseSeats: value.available_actions.purchase_seats,
+        changePlan: value.available_actions.change_plan ?? false,
+        checkPlanChange: value.available_actions.check_plan_change ?? false,
       },
+      planChange: value.plan_change
+        ? {
+            targetPlan: value.plan_change.target_plan,
+            state: value.plan_change.state,
+            since: value.plan_change.since,
+          }
+        : null,
+      trial: value.trial
+        ? {
+            plan: value.trial.plan,
+            state: value.trial.state,
+            startedAt: value.trial.started_at,
+            endsAt: value.trial.ends_at,
+          }
+        : null,
     }),
   );
 
@@ -3787,16 +3844,31 @@ const WorkspaceSubscriptionPriceSchema = (
       }),
     );
 
-export const WorkspaceSubscriptionPricesSchema = z
+const WorkspaceSubscriptionPlanPricesSchema = z
   .object({
     month: WorkspaceSubscriptionPriceSchema("month"),
     year: WorkspaceSubscriptionPriceSchema("year"),
   })
   .loose()
   .transform(
-    (value): WorkspaceSubscriptionPrices => ({
+    (value): WorkspaceSubscriptionPlanPrices => ({
       month: value.month,
       year: value.year,
+    }),
+  );
+
+// Every paid plan must be priced: a response missing one plan reads as "prices
+// unavailable" as a whole rather than offering one plan without the other.
+export const WorkspaceSubscriptionPricesSchema = z
+  .object({
+    pro: WorkspaceSubscriptionPlanPricesSchema,
+    business: WorkspaceSubscriptionPlanPricesSchema,
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSubscriptionPrices => ({
+      pro: value.pro,
+      business: value.business,
     }),
   );
 
@@ -3818,6 +3890,29 @@ export const WorkspaceFeaturesSchema = z
     (value): WorkspaceFeatures => ({
       features: value.features as WorkspaceFeatures["features"],
     }),
+  );
+
+// A limit that cannot be read, or an action from a newer server, reads as off:
+// the server still checks every admission, so the worst case is a refusal
+// shown after the attempt instead of before it.
+export const MemberLimitSchema = z
+  .object({
+    action: z.enum(["off", "observe", "enforce"]).catch("off"),
+    limit: z.number().int().nonnegative().nullable().catch(null).default(null),
+    members: z.number().int().nonnegative().nullable().catch(null).default(null),
+    pending_invitations: z.number().int().nonnegative().nullable().catch(null).default(null),
+  })
+  .loose()
+  .transform(
+    (value): MemberLimit =>
+      value.action === "off" || value.limit === null
+        ? { action: "off", limit: null, members: null, pendingInvitations: null }
+        : {
+            action: value.action,
+            limit: value.limit,
+            members: value.members ?? 0,
+            pendingInvitations: value.pending_invitations ?? 0,
+          },
   );
 
 export const CreateWorkspaceSubscriptionCheckoutResponseSchema = z
@@ -3897,6 +3992,62 @@ export const PurchaseWorkspaceSeatsResponseSchema = z
       prorationAmount: value.proration_amount,
       nextInvoiceAmount: value.next_invoice_amount,
       status: value.status,
+    }),
+  );
+
+export const WorkspacePlanChangePreviewSchema = z
+  .object({
+    current_plan: WorkspaceSubscriptionPaidPlanSchema,
+    target_plan: WorkspaceSubscriptionPaidPlanSchema,
+    interval: WorkspaceSubscriptionIntervalSchema,
+    seats: z.number().int().positive(),
+    subscription_version: z.number().int().positive(),
+    currency: z.string().regex(/^[a-z]{3}$/),
+    // Negative for a downgrade: the unused difference is a credit.
+    proration_amount: z.number().int(),
+    next_invoice_amount: z.number().int().nonnegative(),
+    invoice_now: z.boolean(),
+    quoted_at: z.string().min(1),
+  })
+  .loose()
+  .refine((value) => value.current_plan !== value.target_plan, {
+    message: "plan change preview must name two different plans",
+  })
+  .transform(
+    (value): WorkspacePlanChangePreview => ({
+      currentPlan: value.current_plan,
+      targetPlan: value.target_plan,
+      interval: value.interval,
+      seats: value.seats,
+      subscriptionVersion: value.subscription_version,
+      currency: value.currency,
+      prorationAmount: value.proration_amount,
+      nextInvoiceAmount: value.next_invoice_amount,
+      invoiceNow: value.invoice_now,
+      quotedAt: value.quoted_at,
+    }),
+  );
+
+export const ChangeWorkspacePlanResponseSchema = z
+  .object({
+    plan: WorkspaceSubscriptionPaidPlanSchema,
+    previous_plan: WorkspaceSubscriptionPaidPlanSchema,
+    interval: WorkspaceSubscriptionIntervalSchema,
+    seats: z.number().int().positive(),
+    currency: z.string().regex(/^[a-z]{3}$/),
+    proration_amount: z.number().int(),
+    invoice_now: z.boolean(),
+  })
+  .loose()
+  .transform(
+    (value): ChangeWorkspacePlanResponse => ({
+      plan: value.plan,
+      previousPlan: value.previous_plan,
+      interval: value.interval,
+      seats: value.seats,
+      currency: value.currency,
+      prorationAmount: value.proration_amount,
+      invoiceNow: value.invoice_now,
     }),
   );
 

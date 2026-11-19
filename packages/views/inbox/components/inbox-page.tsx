@@ -7,6 +7,7 @@ import {
   useDeferredValue,
   useMemo,
   useRef,
+  type ReactNode,
 } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -119,7 +120,7 @@ import {
 } from "./inbox-display";
 import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
 import { InboxKeptActions, useKeptInboxRowText } from "./inbox-kept-actions";
-import { useFilteredInboxRows } from "./use-filtered-inbox-rows";
+import { inboxListLoad, useFilteredInboxRows } from "./use-filtered-inbox-rows";
 import { useKeptOpenInboxRow } from "./use-kept-open-inbox-row";
 import { useArchiveInboxBatchWithUndo, useArchiveInboxWithUndo, useRestoreInbox } from "./use-leave-inbox-row";
 import { useInboxSnooze } from "./use-inbox-snooze";
@@ -173,6 +174,9 @@ export function InboxPage() {
     ...inboxListOptions(wsId), enabled: !isArchivedView,
   });
   const { data: rawItems = [], isLoading: loading } = inboxQuery;
+  // The live list never loaded (a refresh that fails keeps the loaded one).
+  // An empty list is not an empty Inbox then.
+  const liveFailed = !isArchivedView && inboxListLoad(inboxQuery) === "failed";
   const items = useMemo(() => deduplicateInboxItems(rawItems), [rawItems]);
   // The filters read every notification of an issue, not just its newest.
   const activeRows = useMemo(() => rawItems.filter((item) => !item.archived), [rawItems]);
@@ -300,7 +304,7 @@ export function InboxPage() {
   // Inbox zero: the bleeding m rises once, at the moment the last notification
   // leaves; opening an already-empty inbox shows it at rest. Archived and
   // filtered views are not inbox zero, so they never arm it.
-  const inboxZeroCount = isArchivedView || hasActiveFilters ? -1 : visibleItems.length;
+  const inboxZeroCount = isArchivedView || hasActiveFilters || liveFailed ? -1 : visibleItems.length;
   const [prevInboxZeroCount, setPrevInboxZeroCount] = useState(inboxZeroCount);
   const [inboxZeroRises, setInboxZeroRises] = useState(false);
   if (inboxZeroCount !== prevInboxZeroCount) {
@@ -376,8 +380,9 @@ export function InboxPage() {
 
   // A targeted lookup must not hide pages that have already loaded. Its
   // pending/error states only block resolution of the off-page selection.
-  const viewLoading = isArchivedView ? archivedLoading : loading;
-  const viewError = isArchivedView ? archivedError : inboxQuery.isError && !inboxQuery.data;
+  // A list that failed and is being tried again keeps its error, not a skeleton.
+  const viewLoading = isArchivedView ? archivedLoading : loading && !liveFailed;
+  const viewError = isArchivedView ? archivedError : liveFailed;
   const needsLookup = isArchivedView && !!selectedKey && !selectedOnPage;
   const lookupLoading = needsLookup && (lookup.isLoading || presence.isLoading);
   const lookupError = needsLookup && (lookup.isError || presence.isError) && !selected;
@@ -829,16 +834,28 @@ export function InboxPage() {
     </PanelHeader>
   );
 
+  const liveLoadFailed = (
+    <LoadFailed
+      icon={<Inbox className="mb-3 h-8 w-8 text-faint-foreground" />}
+      message={t(($) => $.errors.load_failed)}
+      retryLabel={t(($) => $.list.retry)}
+      retrying={inboxQuery.isFetching}
+      onRetry={() => void inboxQuery.refetch()}
+    />
+  );
+
   const list = isArchivedView && archivedError ? (
     <div className="flex-1 min-h-0 overflow-y-auto">
-      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-        <Archive className="mb-3 h-8 w-8 text-faint-foreground" />
-        <p className="text-body">{t(($) => $.errors.archived_load_failed)}</p>
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => void archiveQuery.refetch()}>
-          {t(($) => $.list.retry)}
-        </Button>
-      </div>
+      <LoadFailed
+        icon={<Archive className="mb-3 h-8 w-8 text-faint-foreground" />}
+        message={t(($) => $.errors.archived_load_failed)}
+        retryLabel={t(($) => $.list.retry)}
+        retrying={archiveQuery.isFetching}
+        onRetry={() => void archiveQuery.refetch()}
+      />
     </div>
+  ) : liveFailed ? (
+    <div className="flex-1 min-h-0 overflow-y-auto">{liveLoadFailed}</div>
   ) : (
     <InboxContextMenuProvider
       view={view}
@@ -1216,6 +1233,9 @@ export function InboxPage() {
           </h1>
         </PageHeader>
       )}
+      {liveFailed ? (
+        <div className="flex min-h-0 flex-1 flex-col justify-center">{liveLoadFailed}</div>
+      ) : (
       <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-hidden text-muted-foreground">
         {inboxZeroCount === 0 ? (
           <MulticaBleedMark
@@ -1234,6 +1254,7 @@ export function InboxPage() {
               : t(($) => $.detail.empty)}
         </p>
       </div>
+      )}
     </>
   );
 
@@ -1281,6 +1302,31 @@ export function InboxPage() {
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
       {detailContent ?? emptyDetail}
+    </div>
+  );
+}
+
+/** A list that could not load, with another try; never an empty list. */
+function LoadFailed({
+  icon,
+  message,
+  retryLabel,
+  retrying,
+  onRetry,
+}: {
+  icon: ReactNode;
+  message: string;
+  retryLabel: string;
+  retrying: boolean;
+  onRetry: () => void;
+}) {
+  return (
+    <div role="alert" className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+      {icon}
+      <p className="text-body">{message}</p>
+      <Button variant="outline" size="sm" className="mt-3" disabled={retrying} onClick={onRetry}>
+        {retryLabel}
+      </Button>
     </div>
   );
 }

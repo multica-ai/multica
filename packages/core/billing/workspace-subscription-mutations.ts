@@ -1,7 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
+  ChangeWorkspacePlanRequest,
   CreateWorkspaceSubscriptionCheckoutRequest,
+  PreviewWorkspacePlanChangeRequest,
   PreviewWorkspaceSeatPurchaseRequest,
   PurchaseWorkspaceSeatsRequest,
 } from "../types";
@@ -47,6 +49,31 @@ export function usePurchaseWorkspaceSeats(wsId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({
         queryKey: workspaceSubscriptionKeys.summary(wsId),
+      });
+    },
+  });
+}
+
+export function usePreviewWorkspacePlanChange() {
+  return useMutation({
+    mutationFn: (data: PreviewWorkspacePlanChangeRequest) =>
+      api.previewWorkspacePlanChange(data),
+  });
+}
+
+/**
+ * Cloud persists the new plan before answering, so refreshing the whole
+ * workspace subscription scope (summary and anything keyed under it) shows the
+ * switched plan without waiting for Stripe's webhook.
+ */
+export function useChangeWorkspacePlan(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ChangeWorkspacePlanRequest) =>
+      api.changeWorkspacePlan(data),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: workspaceSubscriptionKeys.all(wsId),
       });
     },
   });
