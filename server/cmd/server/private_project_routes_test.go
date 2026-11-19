@@ -153,11 +153,25 @@ var privateProjectRoutesNotProbed = map[string]string{
 // get past: body is its JSON body, and params override a parameter's default
 // object with a more specific one.
 type privateRouteRequest struct {
+	query  string
 	body   func(f *privateRouteFixture, caller string) string
 	params map[string]privateRouteResolver
 }
 
 var privateProjectRouteRequests = map[string]privateRouteRequest{
+	"PUT /api/issues/{id}/conditional/": {query: "?expected_revision=1", body: func(*privateRouteFixture, string) string {
+		return `{"expected_revision":1,"title":"Updated private issue"}`
+	}},
+	"POST /api/issues/{id}/conditional/labels": {query: "?expected_revision=1", body: func(f *privateRouteFixture, _ string) string {
+		return fmt.Sprintf(`{"label_id":%q}`, f.shared.labelID)
+	}},
+	"DELETE /api/issues/{id}/conditional/labels/{labelId}": {query: "?expected_revision=1"},
+	"PUT /api/issues/{id}/conditional/metadata/{key}": {query: "?expected_revision=1", body: func(*privateRouteFixture, string) string {
+		return `{"value":"probe"}`
+	}},
+	"DELETE /api/issues/{id}/conditional/metadata/{key}":          {query: "?expected_revision=1"},
+	"PUT /api/issues/{id}/conditional/properties/{propertyId}":    {query: "?expected_revision=1"},
+	"DELETE /api/issues/{id}/conditional/properties/{propertyId}": {query: "?expected_revision=1"},
 	"POST /api/issues/{id}/labels": {body: func(f *privateRouteFixture, _ string) string {
 		return fmt.Sprintf(`{"label_id":%q}`, f.shared.labelID)
 	}},
@@ -545,8 +559,8 @@ func TestEveryRouteByProjectObjectIDHidesPrivateProjects(t *testing.T) {
 		}
 
 		existing, missing, body := request(outsiderID)
-		notFound := call(outsiderToken, method, routePath(pattern, missing), body)
-		hidden := call(outsiderToken, method, routePath(pattern, existing), body)
+		notFound := call(outsiderToken, method, routePath(pattern, missing)+shape.query, body)
+		hidden := call(outsiderToken, method, routePath(pattern, existing)+shape.query, body)
 		// An answer that echoes the id it was asked about still matches.
 		for i := range existing {
 			hidden.body = strings.ReplaceAll(hidden.body, existing[i], missing[i])
@@ -558,8 +572,8 @@ func TestEveryRouteByProjectObjectIDHidesPrivateProjects(t *testing.T) {
 		// Control: the same request from a project member must not look like
 		// a missing id, or the outsider's answer above proves nothing.
 		existing, missing, body = request(insiderID)
-		insiderNotFound := call(insiderToken, method, routePath(pattern, missing), body)
-		if visible := call(insiderToken, method, routePath(pattern, existing), body); visible == insiderNotFound {
+		insiderNotFound := call(insiderToken, method, routePath(pattern, missing)+shape.query, body)
+		if visible := call(insiderToken, method, routePath(pattern, existing)+shape.query, body); visible == insiderNotFound {
 			t.Errorf("a project member got the missing-id answer too, %v: the fixture does not reach the object, or the route needs a request in privateProjectRouteRequests", visible)
 		}
 	}
