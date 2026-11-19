@@ -96,9 +96,10 @@ func (d *Daemon) tryHeldServerUpdate(ctx context.Context) {
 	}
 
 	// Something else already moved this daemon to the target — auto-update,
-	// or an upgrade before the restart that lost the held request. The
-	// request is satisfied; installing again would only restart for nothing.
-	if isReleaseVersion(d.cfg.CLIVersion) && !isNewerVersion(held.targetVersion, d.cfg.CLIVersion) {
+	// or an upgrade before the restart that lost the held request. Only an
+	// exact match counts: an older target is a deliberate downgrade, which the
+	// direct-download path installs by tag.
+	if sameReleaseVersion(held.targetVersion, d.cfg.CLIVersion) {
 		d.dropHeldUpdate(held.id)
 		d.logger.Info("queued update already satisfied", "runtime_id", held.runtimeID, "update_id", held.id,
 			"target_version", held.targetVersion, "current", d.cfg.CLIVersion)
@@ -156,4 +157,13 @@ func (d *Daemon) reportHeldUpdateWaiting(ctx context.Context, held heldServerUpd
 		d.dropHeldUpdate(held.id)
 		d.logger.Info("queued update dropped: cancelled or expired on the server", "runtime_id", held.runtimeID, "update_id", held.id)
 	}
+}
+
+// sameReleaseVersion reports whether a and b name the same release, ignoring
+// a "v" prefix. Anything that is not a release version never matches.
+func sameReleaseVersion(a, b string) bool {
+	if !isReleaseVersion(a) || !isReleaseVersion(b) {
+		return false
+	}
+	return !isNewerVersion(a, b) && !isNewerVersion(b, a)
 }

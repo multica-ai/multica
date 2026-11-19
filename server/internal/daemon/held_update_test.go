@@ -242,7 +242,7 @@ func TestHeldUpdateDroppedWhenCancelledWhileQueued(t *testing.T) {
 func TestHeldUpdateAlreadySatisfiedCompletesWithoutInstalling(t *testing.T) {
 	var rec updateReportRecorder
 	d, _ := updateReportDaemon(t, rec.handler(t, nil))
-	d.cfg.CLIVersion = "v0.5.0"
+	d.cfg.CLIVersion = "0.4.14"
 	d.runUpdateFn = func(string) (string, error) {
 		t.Fatal("must not reinstall a version the daemon already runs")
 		return "", nil
@@ -253,7 +253,7 @@ func TestHeldUpdateAlreadySatisfiedCompletesWithoutInstalling(t *testing.T) {
 	if got := rec.statuses(); len(got) != 1 || got[0] != "completed" {
 		t.Fatalf("reports = %v, want [completed]", got)
 	}
-	if got := rec.last()["output"]; got != "Already on v0.5.0" {
+	if got := rec.last()["output"]; got != "Already on 0.4.14" {
 		t.Fatalf("output = %v", got)
 	}
 	if _, held := d.snapshotHeldUpdate(); held {
@@ -277,5 +277,79 @@ func TestFinishActiveTaskSignalsOnlyWhenIdle(t *testing.T) {
 	case <-d.updateIdle:
 	default:
 		t.Fatal("did not signal idle after the last task finished")
+	}
+}
+
+func TestHeldUpdateInstallsAnOlderTarget(t *testing.T) {
+	stubRestartTarget(t)
+	var rec updateReportRecorder
+	d, _ := updateReportDaemon(t, rec.handler(t, nil))
+	d.cfg.CLIVersion = "v0.11.0"
+	d.cancelFunc = func() {}
+	installed := ""
+	d.runUpdateFn = func(version string) (string, error) {
+		installed = version
+		return "downgraded", nil
+	}
+
+	d.handleUpdate(context.Background(), "runtime-1", &PendingUpdate{ID: "update-1", TargetVersion: "v0.10.0", Deferrable: true})
+
+	if installed != "v0.10.0" {
+		t.Fatalf("installed %q; a requested older version must be installed, not reported as done", installed)
+	}
+}
+
+func TestSameReleaseVersion(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{"v0.9.2", "0.9.2", true},
+		{"v0.9.2", "v0.9.3", false},
+		{"v0.10.0", "v0.11.0", false},
+		{"latest", "v0.9.2", false},
+		{"v0.9.2-3-gabc", "v0.9.2", false},
+	} {
+		if got := sameReleaseVersion(tc.a, tc.b); got != tc.want {
+			t.Errorf("sameReleaseVersion(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// The server committed the "running" report but its answer was lost. The
+// daemon keeps the request; the server's next offer (it keeps offering a
+// running request to deferrable daemons) gets an accepted report and the
+// update installs instead of timing out unstarted.
+func TestHeldUpdateRecoversWhenRunningAnswerIsLost(t *testing.T) {
+	withFastUpdateReportBackoffs(t)
+	stubRestartTarget(t)
+	var rec updateReportRecorder
+	answerLost := true
+	d, _ := updateReportDaemon(t, rec.handler(t, func(p map[string]any) int {
+		if p["status"] == "running" && answerLost {
+			return http.StatusBadGateway
+		}
+		return http.StatusOK
+	}))
+	d.cancelFunc = func() {}
+	installs := 0
+	d.runUpdateFn = func(string) (string, error) {
+		installs++
+		return "upgraded", nil
+	}
+
+	d.handleUpdate(context.Background(), "runtime-1", deferrableUpdate("update-1"))
+	if installs != 0 {
+		t.Fatal("installed without an accepted running report")
+	}
+	if _, held := d.snapshotHeldUpdate(); !held {
+		t.Fatal("dropped the request after an unanswered running report")
+	}
+	assertUpdateLockReleased(t, d)
+
+	answerLost = false
+	d.handleUpdate(context.Background(), "runtime-1", deferrableUpdate("update-1"))
+	if installs != 1 {
+		t.Fatalf("installs = %d after the re-offer, want 1", installs)
 	}
 }
