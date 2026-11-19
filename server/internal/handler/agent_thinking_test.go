@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 // TestCreateAgent_ThinkingLevel_ValidationConsistency exercises the
@@ -1144,30 +1146,35 @@ func TestAgent_OmpThinkingLevelRequiresExplicitModel(t *testing.T) {
 func TestAgentSaveWithPartialHermesEffortCatalog(t *testing.T) {
 	ctx := context.Background()
 	cache := withModelListStores(t)
-	runtimeID := createProviderRuntime(t, "hermes")
-	if err := cache.Put(ctx, runtimeID, []ModelEntry{{ID: "older"}}, nil, true); err != nil {
-		t.Fatal(err)
-	}
-	if err := cache.Put(ctx, partialEffortCatalogKey(runtimeID), []ModelEntry{
-		{ID: "confirmed", Default: true, Thinking: &ModelThinking{
-			SupportedLevels: []ThinkingLevel{{Value: "high"}, {Value: "medium"}},
-		}},
-		{ID: "unprobed"},
+	runtimeID := dbfx.Runtime(t, "Hermes with partial effort discovery", testutil.Cols{"provider": "hermes"})
+	if err := cache.Put(ctx, runtimeID, []ModelEntry{
+		{ID: "confirmed", Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "low"}}}},
+		{ID: "previously-confirmed", Thinking: &ModelThinking{SupportedLevels: []ThinkingLevel{{Value: "high"}}}},
+		{ID: "older"},
 	}, nil, true); err != nil {
 		t.Fatal(err)
 	}
 
-	picker := httptest.NewRecorder()
-	testHandler.InitiateListModels(picker, withURLParam(
-		newRequest(http.MethodPost, "/api/runtimes/"+runtimeID+"/models", nil), "runtimeId", runtimeID,
-	))
-	var listed ModelListRequest
-	if err := json.NewDecoder(picker.Body).Decode(&listed); err != nil {
-		t.Fatal(err)
-	}
-	if picker.Code != http.StatusOK || len(listed.Models) != 2 || listed.Models[0].ID != "confirmed" {
-		t.Fatalf("picker must show the same current catalog used for saving, got %d: %+v", picker.Code, listed.Models)
-	}
+	modelsPath := "/api/runtimes/" + runtimeID + "/models"
+	request := testutil.Decode[ModelListRequest](t, testHandler.InitiateListModels, withURLParam(
+		newRequest(http.MethodPost, modelsPath+"?force=true", nil), "runtimeId", runtimeID,
+	), http.StatusOK)
+	report := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/models/"+request.ID+"/result", map[string]any{
+		"status":                      "completed",
+		"supported":                   true,
+		"fallback":                    true,
+		"effort_discovery_incomplete": true,
+		"models": []ModelEntry{
+			{ID: "confirmed", Default: true, Thinking: &ModelThinking{
+				SupportedLevels: []ThinkingLevel{{Value: "high"}, {Value: "medium"}},
+			}},
+			{ID: "previously-confirmed"},
+			{ID: "unprobed"},
+		},
+	})
+	testutil.Call(t, testHandler.ReportModelListResult, testutil.WithURLParams(
+		report, "runtimeId", runtimeID, "requestId", request.ID,
+	)).Want(http.StatusOK)
 
 	created := httptest.NewRecorder()
 	testHandler.CreateAgent(created, newRequest(http.MethodPost, "/api/agents", map[string]any{
@@ -1192,6 +1199,7 @@ func TestAgentSaveWithPartialHermesEffortCatalog(t *testing.T) {
 		{"unprobed", "medium", http.StatusBadRequest},
 		{"confirmed", "low", http.StatusBadRequest},
 		{"confirmed", "medium", http.StatusOK},
+		{"previously-confirmed", "high", http.StatusOK},
 	} {
 		w := httptest.NewRecorder()
 		req := newRequest(http.MethodPatch, "/api/agents/"+result.ID, map[string]any{
@@ -1200,6 +1208,22 @@ func TestAgentSaveWithPartialHermesEffortCatalog(t *testing.T) {
 		testHandler.UpdateAgent(w, withURLParam(req, "id", result.ID))
 		if w.Code != tc.status {
 			t.Fatalf("%s/%s: got %d, want %d: %s", tc.model, tc.level, w.Code, tc.status, w.Body.String())
+		}
+	}
+
+	refreshed := testutil.Decode[ModelListRequest](t, testHandler.GetModelListRequest, testutil.WithURLParams(
+		newRequest(http.MethodGet, modelsPath+"/"+request.ID, nil), "runtimeId", runtimeID, "requestId", request.ID,
+	), http.StatusOK)
+	cached := testutil.Decode[ModelListRequest](t, testHandler.InitiateListModels, withURLParam(
+		newRequest(http.MethodPost, modelsPath, nil), "runtimeId", runtimeID,
+	), http.StatusOK)
+	for _, result := range []ModelListRequest{refreshed, cached} {
+		if len(result.Models) != 3 || result.Models[0].ID != "confirmed" || result.Models[1].ID != "previously-confirmed" || result.Models[2].ID != "unprobed" {
+			t.Fatalf("picker must preserve the latest model list, got %+v", result.Models)
+		}
+		thinking := result.Models[1].Thinking
+		if thinking == nil || len(thinking.SupportedLevels) != 1 || thinking.SupportedLevels[0].Value != "high" {
+			t.Fatalf("picker must retain previously confirmed effort, got %+v", thinking)
 		}
 	}
 }
