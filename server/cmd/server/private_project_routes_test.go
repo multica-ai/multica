@@ -116,6 +116,7 @@ var routeParamsOutsideProjects = map[string]outsideProjectParam{
 	"members/{userId}":               {why: "a user", value: func(f *privateRouteFixture) string { return f.fx.UserID }},
 	"collaborators/{userId}":         {why: "a user", value: func(f *privateRouteFixture) string { return f.fx.UserID }},
 	"sessions/{sessionId}":           {why: "a chat or agent-builder session, which only its creator reaches; a hidden project drops out of its runs' context instead"},
+	"forks/{taskId}":                 {why: "a chat fork status scoped to the caller’s source chat, whose project visibility is checked before looking up the fork"},
 	"queued-tasks/{taskId}":          {why: "a run of the caller's own chat session"},
 	"draft-restores/{restoreId}":     {why: "a draft of the caller's own chat session"},
 	"wakeups/{wakeupId}":             {why: "a wakeup of the caller's own chat session"},
