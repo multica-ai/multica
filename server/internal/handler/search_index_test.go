@@ -345,7 +345,7 @@ func TestDeleteWorkspace_ClearsSearchIndexChanges(t *testing.T) {
 	if n := dbfx.Count(t, `SELECT count(*) FROM search_index_change WHERE workspace_id = $1`, wsID); n == 0 {
 		t.Fatal("writes should have logged search index changes")
 	}
-	if _, err := testPool.Exec(ctx, `INSERT INTO member_search_access (workspace_id, user_id, narrowed_xid) VALUES ($1, $2, pg_current_xact_id())`, wsID, testUserID); err != nil {
+	if _, err := testPool.Exec(ctx, `INSERT INTO member_search_access (workspace_id, user_id, changed_xid) VALUES ($1, $2, pg_current_xact_id())`, wsID, testUserID); err != nil {
 		t.Fatalf("record search access marker: %v", err)
 	}
 

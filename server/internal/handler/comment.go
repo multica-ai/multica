@@ -3596,6 +3596,15 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				err = service.SettleTerminalTaskState(r.Context(), qtx, cancelled...)
 			}
 		}
+		if err == nil && replaceAttachments && len(attachmentIDs) > 0 {
+			_, err = qtx.BindUploaderDraftAttachmentsToIssue(r.Context(), db.BindUploaderDraftAttachmentsToIssueParams{
+				IssueID:       existing.IssueID,
+				WorkspaceID:   existing.WorkspaceID,
+				AttachmentIds: attachmentIDs,
+				UploaderType:  actorType,
+				UploaderID:    parseUUID(actorID),
+			})
+		}
 		if err == nil && replaceAttachments {
 			var changed int64
 			changed, err = qtx.ReplaceCommentAttachments(r.Context(), db.ReplaceCommentAttachmentsParams{

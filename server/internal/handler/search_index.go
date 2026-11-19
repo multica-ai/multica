@@ -483,13 +483,13 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	// Agents and other non-user callers have no per-user marker to check.
 	viewer, _ := util.ParseUUID(requestUserID(r))
 	var (
-		pruned   bool
-		narrowed bool
-		target   = cur.Target
-		changes  []db.ListSearchIndexChangesRow
-		issues   []db.Issue
-		comments []db.ListSearchIndexCommentsByIDsRow
-		projects []db.Project
+		pruned        bool
+		accessChanged bool
+		target        = cur.Target
+		changes       []db.ListSearchIndexChangesRow
+		issues        []db.Issue
+		comments      []db.ListSearchIndexCommentsByIDsRow
+		projects      []db.Project
 	)
 	err = h.runSearchIndexRead(ctx, func(q *db.Queries) error {
 		var err error
@@ -497,9 +497,9 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 			return err
 		}
 		if viewer.Valid {
-			if narrowed, err = q.SearchAccessNarrowedAfter(ctx, db.SearchAccessNarrowedAfterParams{
+			if accessChanged, err = q.SearchAccessChangedAfter(ctx, db.SearchAccessChangedAfterParams{
 				WorkspaceID: wsUUID, UserID: viewer, SinceSnapshot: cur.Since,
-			}); err != nil || narrowed {
+			}); err != nil || accessChanged {
 				return err
 			}
 		}
@@ -571,10 +571,11 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusGone, "search index cursor expired; rebuild the local index")
 		return
 	}
-	if narrowed {
-		// The caller lost access (made a guest, or a guest lost a project)
-		// after this copy's snapshot. The content it can no longer see was
-		// not rewritten, so no change would remove it; only a rebuild does.
+	if accessChanged {
+		// The caller's access changed after this copy's snapshot (made a
+		// guest or a member, or a guest gained or lost a project). The
+		// content it gained or lost was not rewritten, so no change would
+		// deliver or remove it; only a rebuild does.
 		writeError(w, http.StatusGone, "search index access changed; rebuild the local index")
 		return
 	}

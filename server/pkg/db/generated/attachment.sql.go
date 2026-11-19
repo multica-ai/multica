@@ -53,6 +53,47 @@ func (q *Queries) BindChatAttachmentsToMessage(ctx context.Context, arg BindChat
 	return items, nil
 }
 
+const bindUploaderDraftAttachmentsToIssue = `-- name: BindUploaderDraftAttachmentsToIssue :execrows
+UPDATE attachment
+SET issue_id = $1
+WHERE workspace_id = $2
+  AND id = ANY($3::uuid[])
+  AND issue_id IS NULL
+  AND comment_id IS NULL
+  AND chat_session_id IS NULL
+  AND chat_message_id IS NULL
+  AND task_id IS NULL
+  AND source_context_id IS NULL
+  AND uploader_type = $4
+  AND uploader_id = $5
+`
+
+type BindUploaderDraftAttachmentsToIssueParams struct {
+	IssueID       pgtype.UUID   `json:"issue_id"`
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
+	UploaderType  string        `json:"uploader_type"`
+	UploaderID    pgtype.UUID   `json:"uploader_id"`
+}
+
+// A comment edit's own drafts: attachments the editor uploaded that are not
+// bound to anything yet (a guest's uploads stay unbound until a comment takes
+// them, MUL-9420) join the comment's issue, so ReplaceCommentAttachments can
+// link them in the same transaction.
+func (q *Queries) BindUploaderDraftAttachmentsToIssue(ctx context.Context, arg BindUploaderDraftAttachmentsToIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, bindUploaderDraftAttachmentsToIssue,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.AttachmentIds,
+		arg.UploaderType,
+		arg.UploaderID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countUnboundChatAttachmentsForTask = `-- name: CountUnboundChatAttachmentsForTask :one
 SELECT COUNT(*) FROM attachment
 WHERE workspace_id = $1

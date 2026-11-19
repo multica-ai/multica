@@ -196,6 +196,97 @@ func TestGuestUploadsOnlyToItsOwnComments(t *testing.T) {
 	}
 }
 
+func uploadDraftToIssue(t *testing.T, userID, issueID string) AttachmentResponse {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "draft.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	part.Write([]byte("\x89PNG\r\n\x1a\nrest-of-bytes"))
+	writer.WriteField("issue_id", issueID)
+	writer.Close()
+	req := httptest.NewRequest(http.MethodPost, "/api/upload-file", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-User-ID", userID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	rec := httptest.NewRecorder()
+	testHandler.UploadFile(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("upload draft = %d %s, want 200", rec.Code, rec.Body.String())
+	}
+	var att AttachmentResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &att); err != nil {
+		t.Fatal(err)
+	}
+	return att
+}
+
+func attachmentBinding(t *testing.T, id string) (issueID, commentID *string) {
+	t.Helper()
+	dbfx.QueryRow(t, `SELECT issue_id::text, comment_id::text FROM attachment WHERE id = $1`, id).Scan(&issueID, &commentID)
+	return issueID, commentID
+}
+
+// A guest's comment draft upload does not touch the issue: it stays unbound
+// until the guest's comment (new or edited) takes it. A member's upload still
+// attaches to the issue at once.
+func TestGuestDraftUploadBindsOnlyWithItsComment(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	t.Cleanup(func() { testHandler.Storage = origStorage })
+	f := newGuestFixture(t)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE issue_id = $1 OR uploader_id = $2`, f.sharedIssue, f.guest)
+	})
+	revision := func() int64 {
+		var rev int64
+		dbfx.QueryRow(t, `SELECT revision FROM issue WHERE id = $1`, f.sharedIssue).Scan(&rev)
+		return rev
+	}
+
+	before := revision()
+	draft := uploadDraftToIssue(t, f.guest, f.sharedIssue)
+	if issueID, commentID := attachmentBinding(t, draft.ID); issueID != nil || commentID != nil {
+		t.Fatalf("guest draft bound to issue %v comment %v before any comment, want unbound", issueID, commentID)
+	}
+	if got := revision(); got != before {
+		t.Fatalf("issue revision %d -> %d from a guest draft upload, want unchanged", before, got)
+	}
+	var listed []AttachmentResponse
+	guestRequest(t, testHandler.ListAttachments, testUserID, http.MethodGet, "/api/issues/"+f.sharedIssue+"/attachments", nil, "id", f.sharedIssue).
+		Want(http.StatusOK).JSON(&listed)
+	for _, a := range listed {
+		if a.ID == draft.ID {
+			t.Fatal("the issue's attachments list a guest draft before its comment is sent")
+		}
+	}
+
+	var comment CommentResponse
+	guestRequest(t, testHandler.CreateComment, f.guest, http.MethodPost, "/api/issues/"+f.sharedIssue+"/comments",
+		CreateCommentRequest{Content: "with a file", AttachmentIDs: []string{draft.ID}}, "id", f.sharedIssue).
+		Want(http.StatusCreated).JSON(&comment)
+	if issueID, commentID := attachmentBinding(t, draft.ID); issueID == nil || *issueID != f.sharedIssue || commentID == nil || *commentID != comment.ID {
+		t.Fatalf("guest draft after its comment: issue %v comment %v, want the issue and the comment", issueID, commentID)
+	}
+
+	// Editing its comment takes a new draft the same way.
+	second := uploadDraftToIssue(t, f.guest, f.sharedIssue)
+	guestRequest(t, testHandler.UpdateComment, f.guest, http.MethodPut, "/api/comments/"+comment.ID,
+		map[string]any{"content": "with two files", "attachment_ids": []string{draft.ID, second.ID}}, "commentId", comment.ID).
+		Want(http.StatusOK)
+	if issueID, commentID := attachmentBinding(t, second.ID); issueID == nil || *issueID != f.sharedIssue || commentID == nil || *commentID != comment.ID {
+		t.Fatalf("guest edit draft: issue %v comment %v, want the issue and the comment", issueID, commentID)
+	}
+
+	// A member's upload attaches to the issue as before.
+	memberUpload := uploadDraftToIssue(t, testUserID, f.sharedIssue)
+	if issueID, _ := attachmentBinding(t, memberUpload.ID); issueID == nil || *issueID != f.sharedIssue {
+		t.Fatalf("member upload issue = %v, want bound to the issue", issueID)
+	}
+}
+
 // Editing a comment applies the same mention rule as creating one.
 func TestGuestCommentMentionRuleCoversCreateAndEdit(t *testing.T) {
 	f := newGuestFixture(t)
@@ -280,19 +371,33 @@ func TestSearchIndexRebuildsAfterGuestAccessNarrows(t *testing.T) {
 	rebuilt := searchCursorAs(t, member)
 	searchChangesAs(t, member, rebuilt).Want(http.StatusOK)
 
-	// Sharing another project narrows nothing.
+	// Re-sending the same projects changes nothing.
 	path := "/api/workspaces/" + testWorkspaceID + "/members/" + memberID + "/projects"
-	widen := withURLParams(newRequest(http.MethodPut, path, SetMemberProjectsRequest{ProjectIDs: []string{f.shared, f.other}}),
-		"id", testWorkspaceID, "memberId", memberID)
-	testutil.Call(t, testHandler.SetMemberProjects, widen).Want(http.StatusOK)
+	setProjects := func(ids ...string) {
+		t.Helper()
+		req := withURLParams(newRequest(http.MethodPut, path, SetMemberProjectsRequest{ProjectIDs: ids}),
+			"id", testWorkspaceID, "memberId", memberID)
+		testutil.Call(t, testHandler.SetMemberProjects, req).Want(http.StatusOK)
+	}
+	setProjects(f.shared)
 	searchChangesAs(t, member, rebuilt).Want(http.StatusOK)
 
-	// Taking one away does.
+	// Sharing another project: its existing issues and comments were not
+	// rewritten, so only a rebuild delivers them.
+	setProjects(f.shared, f.other)
+	searchChangesAs(t, member, rebuilt).Want(http.StatusGone)
+
+	// Taking one away.
 	beforeNarrow := searchCursorAs(t, member)
-	narrow := withURLParams(newRequest(http.MethodPut, path, SetMemberProjectsRequest{ProjectIDs: []string{f.shared}}),
-		"id", testWorkspaceID, "memberId", memberID)
-	testutil.Call(t, testHandler.SetMemberProjects, narrow).Want(http.StatusOK)
+	setProjects(f.shared)
 	searchChangesAs(t, member, beforeNarrow).Want(http.StatusGone)
+
+	// Becoming a member: every project and project-less issue is new to it.
+	beforePromotion := searchCursorAs(t, member)
+	promote := withURLParams(newRequest(http.MethodPatch, "/api/workspaces/"+testWorkspaceID+"/members/"+memberID,
+		UpdateMemberRequest{Role: "member"}), "id", testWorkspaceID, "memberId", memberID)
+	testutil.Call(t, testHandler.UpdateMember, promote).Want(http.StatusOK)
+	searchChangesAs(t, member, beforePromotion).Want(http.StatusGone)
 }
 
 // --- Plan and rollout gate on every guest addition --------------------------

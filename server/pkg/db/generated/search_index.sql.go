@@ -488,23 +488,24 @@ func (q *Queries) ListSearchIndexProjectsByIDs(ctx context.Context, arg ListSear
 	return items, nil
 }
 
-const markSearchAccessNarrowed = `-- name: MarkSearchAccessNarrowed :exec
-INSERT INTO member_search_access (workspace_id, user_id, narrowed_xid, narrowed_at)
+const markSearchAccessChanged = `-- name: MarkSearchAccessChanged :exec
+INSERT INTO member_search_access (workspace_id, user_id, changed_xid, changed_at)
 VALUES ($1, $2, pg_current_xact_id(), now())
 ON CONFLICT (workspace_id, user_id) DO UPDATE
-    SET narrowed_xid = EXCLUDED.narrowed_xid,
-        narrowed_at = EXCLUDED.narrowed_at
+    SET changed_xid = EXCLUDED.changed_xid,
+        changed_at = EXCLUDED.changed_at
 `
 
-type MarkSearchAccessNarrowedParams struct {
+type MarkSearchAccessChangedParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	UserID      pgtype.UUID `json:"user_id"`
 }
 
-// Records that this transaction narrowed what the user can see in the
-// workspace (MUL-9420), so local search copies built before it are rebuilt.
-func (q *Queries) MarkSearchAccessNarrowed(ctx context.Context, arg MarkSearchAccessNarrowedParams) error {
-	_, err := q.db.Exec(ctx, markSearchAccessNarrowed, arg.WorkspaceID, arg.UserID)
+// Records that this transaction changed what the user can see in the
+// workspace without rewriting the content (MUL-9420), so local search copies
+// built before it are rebuilt.
+func (q *Queries) MarkSearchAccessChanged(ctx context.Context, arg MarkSearchAccessChangedParams) error {
+	_, err := q.db.Exec(ctx, markSearchAccessChanged, arg.WorkspaceID, arg.UserID)
 	return err
 }
 
@@ -547,28 +548,28 @@ func (q *Queries) PruneSearchIndexChanges(ctx context.Context, arg PruneSearchIn
 	return deleted_count, err
 }
 
-const searchAccessNarrowedAfter = `-- name: SearchAccessNarrowedAfter :one
+const searchAccessChangedAfter = `-- name: SearchAccessChangedAfter :one
 SELECT EXISTS (
     SELECT 1 FROM member_search_access
     WHERE workspace_id = $1
       AND user_id = $2
-      AND NOT pg_visible_in_snapshot(narrowed_xid, ($3::text)::pg_snapshot)
-)::bool AS narrowed
+      AND NOT pg_visible_in_snapshot(changed_xid, ($3::text)::pg_snapshot)
+)::bool AS changed
 `
 
-type SearchAccessNarrowedAfterParams struct {
+type SearchAccessChangedAfterParams struct {
 	WorkspaceID   pgtype.UUID `json:"workspace_id"`
 	UserID        pgtype.UUID `json:"user_id"`
 	SinceSnapshot string      `json:"since_snapshot"`
 }
 
-// Whether the user's access in the workspace was narrowed by a transaction
-// the since snapshot does not include.
-func (q *Queries) SearchAccessNarrowedAfter(ctx context.Context, arg SearchAccessNarrowedAfterParams) (bool, error) {
-	row := q.db.QueryRow(ctx, searchAccessNarrowedAfter, arg.WorkspaceID, arg.UserID, arg.SinceSnapshot)
-	var narrowed bool
-	err := row.Scan(&narrowed)
-	return narrowed, err
+// Whether the user's access in the workspace was changed by a transaction the
+// since snapshot does not include.
+func (q *Queries) SearchAccessChangedAfter(ctx context.Context, arg SearchAccessChangedAfterParams) (bool, error) {
+	row := q.db.QueryRow(ctx, searchAccessChangedAfter, arg.WorkspaceID, arg.UserID, arg.SinceSnapshot)
+	var changed bool
+	err := row.Scan(&changed)
+	return changed, err
 }
 
 const searchIndexSinceIsPruned = `-- name: SearchIndexSinceIsPruned :one

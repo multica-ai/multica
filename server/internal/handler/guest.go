@@ -243,8 +243,9 @@ func (h *Handler) parseGuestProjectIDs(w http.ResponseWriter, r *http.Request, w
 }
 
 // setGuestProjects makes ids exactly the projects userID is a member of. When
-// that takes a project away, the guest's local search copy is made to
-// rebuild: nothing in the project changed, so sync alone would keep it.
+// that adds or takes away a project, the guest's local search copy is made to
+// rebuild: nothing in those projects changed, so sync alone would neither
+// drop what it lost nor deliver what it gained.
 func setGuestProjects(r *http.Request, q *db.Queries, workspaceID, userID, addedBy pgtype.UUID, ids []pgtype.UUID) error {
 	removed, err := q.RemoveUserFromProjectsExcept(r.Context(), db.RemoveUserFromProjectsExceptParams{
 		WorkspaceID: workspaceID, UserID: userID, KeepProjectIds: ids,
@@ -252,17 +253,26 @@ func setGuestProjects(r *http.Request, q *db.Queries, workspaceID, userID, added
 	if err != nil {
 		return err
 	}
-	if removed > 0 {
-		if err := q.MarkSearchAccessNarrowed(r.Context(), db.MarkSearchAccessNarrowedParams{
-			WorkspaceID: workspaceID, UserID: userID,
-		}); err != nil {
-			return err
-		}
-	}
-	_, err = q.AddUserToProjects(r.Context(), db.AddUserToProjectsParams{
+	added, err := q.AddUserToProjects(r.Context(), db.AddUserToProjectsParams{
 		WorkspaceID: workspaceID, UserID: userID, ProjectIds: ids, AddedBy: addedBy,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	if removed == 0 && len(added) == 0 {
+		return nil
+	}
+	return markSearchAccessChanged(r.Context(), q, workspaceID, userID)
+}
+
+// markSearchAccessChanged records, in the caller's transaction, that what
+// userID can see changed without the content changing (MUL-9420). Local
+// search copies built before the transaction then rebuild under the new
+// access; see ListSearchIndexChanges.
+func markSearchAccessChanged(ctx context.Context, q *db.Queries, workspaceID, userID pgtype.UUID) error {
+	return q.MarkSearchAccessChanged(ctx, db.MarkSearchAccessChangedParams{
+		WorkspaceID: workspaceID, UserID: userID,
+	})
 }
 
 // beginMemberSeat takes a seat for a guest becoming a member the way an
@@ -372,6 +382,11 @@ func (h *Handler) promoteGuest(w http.ResponseWriter, r *http.Request, target db
 	}
 	updated, err := qtx.UpdateMemberRole(ctx, db.UpdateMemberRoleParams{ID: target.ID, Role: role})
 	if err != nil {
+		return fail()
+	}
+	// The new member sees projects and project-less content its local
+	// search copy never received as a guest.
+	if err := markSearchAccessChanged(ctx, qtx, target.WorkspaceID, target.UserID); err != nil {
 		return fail()
 	}
 	if token != uuid.Nil {

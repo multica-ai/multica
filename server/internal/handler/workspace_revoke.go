@@ -327,9 +327,7 @@ func (h *Handler) revokeMember(ctx context.Context, workspaceID, userID, memberI
 		}
 		// The new guest no longer sees most of what its local search copy
 		// holds; make that copy rebuild.
-		if err := qtx.MarkSearchAccessNarrowed(ctx, db.MarkSearchAccessNarrowedParams{
-			WorkspaceID: workspaceID, UserID: userID,
-		}); err != nil {
+		if err := markSearchAccessChanged(ctx, qtx, workspaceID, userID); err != nil {
 			return empty, err
 		}
 	} else if err := qtx.DeleteMember(ctx, memberID); err != nil {

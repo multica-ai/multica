@@ -121,6 +121,24 @@ WHERE issue_id = $2
     OR (comment_id IS NULL AND id = ANY(sqlc.arg(attachment_ids)::uuid[]))
   );
 
+-- name: BindUploaderDraftAttachmentsToIssue :execrows
+-- A comment edit's own drafts: attachments the editor uploaded that are not
+-- bound to anything yet (a guest's uploads stay unbound until a comment takes
+-- them, MUL-9420) join the comment's issue, so ReplaceCommentAttachments can
+-- link them in the same transaction.
+UPDATE attachment
+SET issue_id = sqlc.arg(issue_id)
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND id = ANY(sqlc.arg(attachment_ids)::uuid[])
+  AND issue_id IS NULL
+  AND comment_id IS NULL
+  AND chat_session_id IS NULL
+  AND chat_message_id IS NULL
+  AND task_id IS NULL
+  AND source_context_id IS NULL
+  AND uploader_type = sqlc.arg(uploader_type)
+  AND uploader_id = sqlc.arg(uploader_id);
+
 -- name: LinkAttachmentsToChatMessage :many
 UPDATE attachment
 SET chat_message_id = sqlc.arg(chat_message_id),
