@@ -37,13 +37,18 @@ func (h *Handler) lockSeatCapacityWorkspace(ctx context.Context, workspaceID uui
 	if h.SeatCapacityLocker == nil {
 		return h.Queries, func() {}, nil
 	}
-	lockCtx, cancel := context.WithTimeout(ctx, seatCapacityWorkspaceLockWait)
-	defer cancel()
-	lockedDB, unlock, err := h.SeatCapacityLocker.Lock(lockCtx, workspaceID)
+	lockedDB, unlock, err := h.lockSeatCapacityWorkspaceDB(ctx, workspaceID)
 	if err != nil {
 		return nil, nil, err
 	}
 	return db.New(lockedDB), unlock, nil
+}
+
+// Keep the pinned session available to operations that also need a transaction.
+func (h *Handler) lockSeatCapacityWorkspaceDB(ctx context.Context, workspaceID uuid.UUID) (db.DBTX, func(), error) {
+	lockCtx, cancel := context.WithTimeout(ctx, seatCapacityWorkspaceLockWait)
+	defer cancel()
+	return h.SeatCapacityLocker.Lock(lockCtx, workspaceID)
 }
 
 func capacityIntentParams(workspaceID, token uuid.UUID, action string, due time.Time) db.UpsertSeatCapacityIntentParams {

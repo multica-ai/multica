@@ -16,6 +16,11 @@ WHERE id = $1;
 SELECT * FROM member
 WHERE user_id = $1 AND workspace_id = $2;
 
+-- name: GetMemberByUserAndWorkspaceForUpdate :one
+SELECT * FROM member
+WHERE user_id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: GetRealtimeMemberships :many
 SELECT m.user_id, m.workspace_id
 FROM member m
