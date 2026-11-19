@@ -148,6 +148,15 @@ func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
                 ($1, 'assistant', 'original reply', now() - interval '1 second')`, sourceID)
 			dbfx.Exec(t, `INSERT INTO chat_message (chat_session_id, role, content, message_kind) VALUES
                 ($1, 'user', 'internal channel command', 'channel_command')`, sourceID)
+			attachmentID := dbfx.Insert(t, "attachment", testutil.Cols{
+				"workspace_id": source.WorkspaceID, "chat_session_id": sourceID,
+				"uploader_type": "member", "uploader_id": source.CreatorID,
+				"filename": "context.txt", "url": "https://cdn.example/context.txt",
+				"content_type": "text/plain", "size_bytes": 12,
+			})
+			dbfx.Exec(t, `UPDATE attachment SET chat_message_id = (
+				SELECT id FROM chat_message WHERE chat_session_id=$2 AND content='original question'
+			) WHERE id=$1`, attachmentID, sourceID)
 			child, task, err := testHandler.queueChatFork(ctx, source, source.CreatorID)
 			if err != nil {
 				t.Fatal(err)
@@ -174,6 +183,14 @@ func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
 				if err != nil || len(messages) != 2 || messages[0].Content != "original question" ||
 					messages[1].Content != "original reply" || messages[1].TaskID.Valid {
 					t.Fatalf("branch history=%+v error=%v", messages, err)
+				}
+				files := testHandler.groupChatMessageAttachments(ctx, uuidToString(source.WorkspaceID), messages)[uuidToString(messages[0].ID)]
+				if len(files) != 1 || files[0].ID != attachmentID || files[0].Filename != "context.txt" {
+					t.Fatalf("branch attachment references=%+v, want original attachment %s", files, attachmentID)
+				}
+				dbfx.Exec(t, `DELETE FROM attachment WHERE id=$1`, attachmentID)
+				if files := testHandler.groupChatMessageAttachments(ctx, uuidToString(source.WorkspaceID), messages); len(files) != 0 {
+					t.Fatalf("branch retained deleted attachment: %+v", files)
 				}
 				if _, err := testHandler.Queries.GetChatMessageByTaskAssistant(ctx, task.ID); !errors.Is(err, pgx.ErrNoRows) {
 					t.Fatalf("fork added an assistant outcome: %v", err)

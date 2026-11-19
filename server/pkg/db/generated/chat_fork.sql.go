@@ -67,11 +67,21 @@ func (q *Queries) CompletePendingChatFork(ctx context.Context, arg CompletePendi
 
 const copyChatForkMessages = `-- name: CopyChatForkMessages :exec
 INSERT INTO chat_message (
-    id, chat_session_id, role, content, created_at, failure_reason, elapsed_ms, message_kind
+    id, chat_session_id, role, content, created_at, failure_reason, elapsed_ms, message_kind, fork_attachment_ids
 )
 SELECT gen_random_uuid(), $1, message.role, message.content, message.created_at,
-       message.failure_reason, message.elapsed_ms, message.message_kind
+       message.failure_reason, message.elapsed_ms, message.message_kind,
+       ARRAY(
+           SELECT attachment.id
+           FROM attachment
+           WHERE attachment.workspace_id = source.workspace_id
+             AND attachment.issue_id IS NULL AND attachment.comment_id IS NULL
+             AND attachment.source_context_id IS NULL
+             AND (attachment.chat_message_id = message.id OR attachment.id = ANY(message.fork_attachment_ids))
+           ORDER BY attachment.created_at, attachment.id
+       )
 FROM chat_message AS message
+JOIN chat_session AS source ON source.id = message.chat_session_id
 WHERE message.chat_session_id = $2
   AND message.created_at <= $3
   AND message.message_kind != 'channel_command'
@@ -84,8 +94,9 @@ type CopyChatForkMessagesParams struct {
 	SnapshotAt        pgtype.Timestamptz `json:"snapshot_at"`
 }
 
-// Preserve the visible transcript at enqueue time. Message tasks, wakeups,
-// quick actions and channel delivery metadata still belong to the source.
+// Preserve the visible transcript at enqueue time. Attachment IDs reference
+// the original objects so attachment deletion still applies across branches.
+// Tasks, wakeups, quick actions and channel delivery stay with the source.
 func (q *Queries) CopyChatForkMessages(ctx context.Context, arg CopyChatForkMessagesParams) error {
 	_, err := q.db.Exec(ctx, copyChatForkMessages, arg.DestinationChatID, arg.SourceChatID, arg.SnapshotAt)
 	return err

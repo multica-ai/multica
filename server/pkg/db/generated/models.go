@@ -639,6 +639,7 @@ type ChatMessage struct {
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
 	ChannelTypingSettled          bool               `json:"channel_typing_settled"`
 	WakeupID                      pgtype.UUID        `json:"wakeup_id"`
+	ForkAttachmentIds             []pgtype.UUID      `json:"fork_attachment_ids"`
 }
 
 type ChatPinnedAgent struct {

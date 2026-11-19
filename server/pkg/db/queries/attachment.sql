@@ -225,6 +225,16 @@ SELECT * FROM attachment
 WHERE chat_message_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC;
 
+-- name: ListChatForkAttachmentReferences :many
+SELECT message.id AS message_id, sqlc.embed(attachment)
+FROM chat_message AS message
+JOIN attachment ON attachment.id = ANY(message.fork_attachment_ids)
+WHERE message.id = ANY(sqlc.arg(message_ids)::uuid[])
+  AND attachment.workspace_id = sqlc.arg(workspace_id)
+  AND attachment.issue_id IS NULL AND attachment.comment_id IS NULL
+  AND attachment.source_context_id IS NULL
+ORDER BY attachment.created_at, attachment.id;
+
 -- name: LockAttachmentsForIssueLink :many
 -- Issue updates bind attachments and then touch the owner row. Only rows that
 -- belong to no issue yet are eligible, and nothing reaches those through an
