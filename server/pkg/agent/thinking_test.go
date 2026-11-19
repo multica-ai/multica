@@ -362,7 +362,8 @@ func TestNormalizeCodexModelLabelMatchesStaticGPT6Family(t *testing.T) {
 	static := map[string]string{}
 	for _, m := range codexStaticModels() {
 		static[m.ID] = m.Label
-		if m.ID == "gpt-6.1-sol" || m.ID == "gpt-6.1-terra" {
+		switch m.ID {
+		case "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6.1-terra":
 			if m.Thinking == nil || m.Thinking.DefaultLevel != "low" || len(m.Thinking.SupportedLevels) != 6 || !hasThinkingLevel(m.Thinking, "max") || !hasThinkingLevel(m.Thinking, "ultra") {
 				t.Errorf("%s fallback must match the observed live efforts: %+v", m.ID, m.Thinking)
 			}
@@ -372,6 +373,7 @@ func TestNormalizeCodexModelLabelMatchesStaticGPT6Family(t *testing.T) {
 		}
 	}
 	for id, reported := range map[string]string{
+		"gpt-6.2-astra": "GPT-6.2-Astra",
 		"gpt-6-astra":   "GPT-6-Astra",
 		"gpt-6.1-sol":   "GPT-6.1-Sol",
 		"gpt-6.1-terra": "GPT-6.1 Terra",
