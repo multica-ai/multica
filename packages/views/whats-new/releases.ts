@@ -1,8 +1,8 @@
-import { AlarmClock, BellOff, CircleDot, Command, Folder, FolderKanban, Gauge, Globe, History, Layers, ListChecks, ListPlus, Lock, MessageCircleQuestion, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Terminal, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
+import { AlarmClock, BellOff, CircleDot, Command, Folder, FolderKanban, Gauge, Globe, History, Layers, ListChecks, ListPlus, Lock, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Terminal, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
-import { ANNOTATIONS_HERO, CHAT_HELP_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, PROJECT_FOLDERS_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
+import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, PROJECT_FOLDERS_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -45,43 +45,6 @@ export const WHATS_NEW_DECK_SINCE = "0.9.0";
  * reach users only through the Help menu.
  */
 export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
-  {
-    version: "0.11.1",
-    date: "2026-11-19",
-    highlights: [
-      {
-        id: "chat-help",
-        icon: MessageCircleQuestion,
-        hero: CHAT_HELP_HERO,
-        copy: {
-          en: {
-            title: "List a bot's commands with /help",
-            body: "In WeChat, Lark, Slack, DingTalk, WeCom, or Telegram, send /help to an agent's bot to see its commands. In a group or channel, mention the bot first; on Slack, mention it in direct messages too.",
-          },
-          "zh-Hans": {
-            title: "发送 /help 查看机器人命令",
-            body: "在微信、飞书、Slack、钉钉、企业微信或 Telegram 中，向智能体的机器人发送 /help，即可查看可用命令。群聊或频道中需先 @ 机器人；在 Slack 中私聊也要 @ 机器人。",
-          },
-          "zh-Hant": {
-            title: "傳送 /help 查看機器人指令",
-            body: "在微信、飛書、Slack、釘釘、企業微信或 Telegram 中，向 AI 代理的機器人傳送 /help，即可查看可用指令。群組或頻道中需先 @ 機器人；在 Slack 中私訊也要 @ 機器人。",
-          },
-          ja: {
-            title: "/help でボットのコマンドを確認",
-            body: "WeChat、Lark、Slack、DingTalk、WeCom、Telegram でエージェントのボットに /help を送ると、使えるコマンドが表示されます。グループやチャンネルでは先にボットをメンションし、Slack では個別メッセージでもメンションしてください。",
-          },
-          ko: {
-            title: "/help로 봇 명령어 확인하기",
-            body: "WeChat, Lark, Slack, DingTalk, WeCom, Telegram에서 에이전트의 봇에 /help를 보내면 사용할 수 있는 명령어가 표시됩니다. 그룹이나 채널에서는 먼저 봇을 멘션하고, Slack에서는 개인 메시지에서도 봇을 멘션하세요.",
-          },
-          fr: {
-            title: "Listez les commandes d'un bot avec /help",
-            body: "Dans WeChat, Lark, Slack, DingTalk, WeCom ou Telegram, envoyez /help au bot d'un agent pour voir ses commandes. Dans un groupe ou un canal, mentionnez d'abord le bot ; sur Slack, mentionnez-le aussi en message privé.",
-          },
-        },
-      },
-    ],
-  },
   {
     version: "0.11.0",
     date: "2026-11-18",
