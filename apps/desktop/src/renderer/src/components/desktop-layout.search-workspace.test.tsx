@@ -61,9 +61,7 @@ const NETWORK_WAIT = { timeout: 15_000 };
 const TEST_TIMEOUT = 60_000;
 
 function payloadFor(path: string, workspace: string): unknown {
-  // Docs search sits behind docs_v1; on here so the held-search test covers
-  // all three object searches (issues, projects, docs).
-  if (path === "/api/config") return { feature_flags: { docs_v1: true }, allow_signup: false };
+  if (path === "/api/config") return { feature_flags: {}, allow_signup: false };
   if (path === "/api/me") return {
     id: "synthetic-user", name: "Synthetic user", email: "synthetic@example.test",
     onboarded_at: stamp, onboarding_questionnaire: { source: "other" },
