@@ -23,6 +23,9 @@ func TestPublishCodexForkReplaysPublishedChild(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "sessions", "rollout-2026-11-20T00-00-00-"+child+".jsonl"), []byte("{}"), 0o600); err != nil {
 			return "", err
 		}
+		if err := os.WriteFile(filepath.Join(dir, "state.sqlite"), []byte("scratch state"), 0o600); err != nil {
+			return "", err
+		}
 		return child, nil
 	}
 	for range 2 {
@@ -30,6 +33,13 @@ func TestPublishCodexForkReplaysPublishedChild(t *testing.T) {
 		if err != nil || got != child {
 			t.Fatalf("child=%q, error=%v, want %q", got, err, child)
 		}
+	}
+	entries, err := os.ReadDir(filepath.Join(store, "fork"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 3 || entries[0].Name() != "archived_sessions" || entries[1].Name() != "receipt.json" || entries[2].Name() != "sessions" {
+		t.Fatalf("unexpected published files: %v", entries)
 	}
 	if called != 1 {
 		t.Fatalf("native fork ran %d times", called)

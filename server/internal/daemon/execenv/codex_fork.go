@@ -84,14 +84,23 @@ func publishCodexFork(storeDir, requestID string, stage func(string) (string, er
 	if !validPublishedCodexFork(staging, childID) {
 		return "", errors.New("staged Codex fork history is unavailable")
 	}
+	publication := filepath.Join(staging, "publication")
+	if err := os.Mkdir(publication, 0o700); err != nil {
+		return "", fmt.Errorf("create Codex fork publication directory: %w", err)
+	}
+	for _, name := range []string{"sessions", "archived_sessions"} {
+		if err := os.Rename(filepath.Join(staging, name), filepath.Join(publication, name)); err != nil {
+			return "", fmt.Errorf("stage Codex fork publication %s: %w", name, err)
+		}
+	}
 	data, err := json.Marshal(codexForkReceipt{RequestID: requestID, ChildID: childID})
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(filepath.Join(staging, "receipt.json"), data, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(publication, "receipt.json"), data, 0o600); err != nil {
 		return "", fmt.Errorf("write Codex fork receipt: %w", err)
 	}
-	if err := os.Rename(staging, destination); err != nil {
+	if err := os.Rename(publication, destination); err != nil {
 		return "", fmt.Errorf("publish Codex fork: %w", err)
 	}
 	return childID, nil
@@ -101,8 +110,13 @@ func validPublishedCodexFork(dir, childID string) bool {
 	if err := uuid.Validate(childID); err != nil {
 		return false
 	}
-	archive, err := os.Lstat(filepath.Join(dir, "archived_sessions"))
-	return err == nil && archive.IsDir() && CodexResumeRolloutPresent(dir, childID)
+	for _, name := range []string{"sessions", "archived_sessions"} {
+		info, err := os.Lstat(filepath.Join(dir, name))
+		if err != nil || !info.IsDir() {
+			return false
+		}
+	}
+	return CodexResumeRolloutPresent(dir, childID)
 }
 
 // ForkCodexChat publishes a native fork from daemon-resolved conversation paths.
