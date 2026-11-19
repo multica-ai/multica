@@ -225,7 +225,7 @@
     "confirm": {
       "title": "¿Continuar a Stripe Checkout?",
       "description": "Plan: {{plan}}. Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago.",
-      "held_invite": "Incluye un puesto de pago más para la invitación a {{email}}. Se envía al volver aquí tras pagar; en la app de escritorio, confírmala en Facturación cuando se aplique la mejora."
+      "held_invite": "Incluye un puesto de pago más para la invitación a {{email}}. Cuando se complete el pago, envíala desde Facturación."
     },
     "held_invite": {
       "title": "El espacio de trabajo ya está en {{plan}}",

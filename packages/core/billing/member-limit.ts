@@ -56,9 +56,9 @@ export function isMemberLimitReachedError(error: unknown): boolean {
  *
  * Members saves it under a token and opens Billing with that token. Billing
  * binds it to the checkout it creates for it, identified by the checkout's
- * request id, which Cloud puts on both Stripe returns. That id is what ties a
- * success or a cancel to this invitation; nothing is ever matched by guess.
- * Members consumes the held invitation only once it has been sent.
+ * request id, which Cloud puts on both Stripe returns, so a cancel drops
+ * exactly that invitation. Once the plan is paid, Billing offers it for
+ * sending (see heldInviteToOffer); Members consumes it only once it is sent.
  */
 export interface UpgradeInvite {
   email: string;
@@ -82,8 +82,6 @@ export interface HeldInviteCheckout {
 
 interface StoredHeldInvites {
   invites: Record<string, HeldInvite>;
-  /** When this client last started a checkout not made for a held invitation. */
-  plainCheckoutAt: number | null;
 }
 
 // Checkout plus the webhook that activates the plan take minutes; a held
@@ -99,7 +97,7 @@ function newToken(): string {
 }
 
 function readStored(slug: string, storage: StorageAdapter, now: number): StoredHeldInvites {
-  const empty: StoredHeldInvites = { invites: {}, plainCheckoutAt: null };
+  const empty: StoredHeldInvites = { invites: {} };
   const raw = storage.getItem(upgradeInviteKey(slug));
   if (!raw) return empty;
   let parsed: unknown;
@@ -113,11 +111,8 @@ function readStored(slug: string, storage: StorageAdapter, now: number): StoredH
     storage.removeItem(upgradeInviteKey(slug));
     return empty;
   }
-  const value = parsed as { invites?: unknown; plainCheckoutAt?: unknown };
-  const out: StoredHeldInvites = {
-    invites: {},
-    plainCheckoutAt: typeof value.plainCheckoutAt === "number" ? value.plainCheckoutAt : null,
-  };
+  const value = parsed as { invites?: unknown };
+  const out: StoredHeldInvites = { invites: {} };
   if (typeof value.invites === "object" && value.invites !== null && !Array.isArray(value.invites)) {
     for (const [token, entry] of Object.entries(value.invites as Record<string, unknown>)) {
       const held = readHeld(token, entry, now);
@@ -199,22 +194,6 @@ export function bindUpgradeInviteCheckout(
   writeStored(slug, stored, storage);
 }
 
-/**
- * Notes that this client started a checkout not made for a held invitation.
- * Held invitations bound before it are no longer offered when an unverified
- * plan change shows up, since that change is more likely this checkout's. A
- * return naming their own checkout still sends them.
- */
-export function recordPlainCheckout(
-  slug: string,
-  storage: StorageAdapter = defaultStorage,
-  now: number = Date.now(),
-): void {
-  const stored = readStored(slug, storage, now);
-  if (Object.keys(stored.invites).length === 0) return;
-  writeStored(slug, { ...stored, plainCheckoutAt: now }, storage);
-}
-
 /** Held invitations whose checkout has started, newest first. */
 export function listCheckoutHeldInvites(
   slug: string,
@@ -224,14 +203,6 @@ export function listCheckoutHeldInvites(
   return Object.values(readStored(slug, storage, now).invites)
     .filter((held) => held.checkout !== null)
     .sort((a, b) => b.savedAt - a.savedAt);
-}
-
-export function plainCheckoutAt(
-  slug: string,
-  storage: StorageAdapter = defaultStorage,
-  now: number = Date.now(),
-): number | null {
-  return readStored(slug, storage, now).plainCheckoutAt;
 }
 
 /** Drops one held invitation. */
@@ -262,44 +233,27 @@ export function clearUpgradeInvitesFor(
 }
 
 /**
- * What the latest subscription state means for held invitations, if anything.
- *
- * Nothing happens until the plan is actually paid (an incomplete payment
- * still reads as Free) and the subscription changed after the invitation's
+ * The held invitation to offer for sending now, if any: the newest whose
+ * checkout started on this client, once the plan is paid (an incomplete first
+ * payment still reads as Free) and the subscription has changed since that
  * checkout started.
  *
- * - `send`: the Stripe return to this tab names the invitation's own
- *   checkout. Members sends it.
- * - `confirm`: the plan became paid, but no return ties it to this
- *   invitation's checkout. Desktop pays in the system browser and never sees
- *   the return; another admin may have upgraded elsewhere. The person who
- *   held it decides. Invitations bound before a plain checkout this client
- *   started later are not offered.
- *
- * A return naming another checkout leaves held invitations alone.
+ * It is only ever offered, never sent on its own. Nothing the client sees
+ * proves which checkout a plan change came from: Desktop pays in the system
+ * browser and never sees the Stripe return, another admin may have upgraded
+ * elsewhere, and several checkouts can be open at once. The person who held
+ * it sends or discards it.
  */
-export type HeldInviteHandback =
-  | { kind: "send"; held: HeldInvite }
-  | { kind: "confirm"; held: HeldInvite };
-
-export function heldInviteHandback(
+export function heldInviteToOffer(
   held: HeldInvite[],
   subscription: { version: number; paid: boolean },
-  returnRequestId: string | null,
-  plainCheckoutStartedAt: number | null = null,
-): HeldInviteHandback | null {
+): HeldInvite | null {
   if (!subscription.paid) return null;
-  const eligible = held.filter(
-    (h) => h.checkout !== null && subscription.version > h.checkout.baseVersion,
+  return (
+    held
+      .filter((h) => h.checkout !== null && subscription.version > h.checkout.baseVersion)
+      .sort((a, b) => b.savedAt - a.savedAt)[0] ?? null
   );
-  if (returnRequestId) {
-    const match = eligible.find((h) => h.checkout?.requestId === returnRequestId);
-    return match ? { kind: "send", held: match } : null;
-  }
-  const latest = eligible
-    .filter((h) => plainCheckoutStartedAt === null || h.checkout!.boundAt > plainCheckoutStartedAt)
-    .sort((a, b) => b.savedAt - a.savedAt)[0];
-  return latest ? { kind: "confirm", held: latest } : null;
 }
 
 /** The held invitation of a cancelled checkout: only the one it names. */

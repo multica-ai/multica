@@ -219,7 +219,7 @@
     "confirm": {
       "title": "前往 Stripe Checkout？",
       "description": "套餐：{{plan}}。付款週期：{{interval}}。當前成員：{{count}}。Stripe 會重新統計席位，並在付款前顯示最終金額。",
-      "held_invite": "另含 1 個付費席位，留給發給 {{email}} 的邀請。在瀏覽器裡付款後回到這裡會自動發出；在桌面端，升級生效後要在「帳單與套餐」裡確認發出。"
+      "held_invite": "另含 1 個付費席位，留給發給 {{email}} 的邀請。付款完成後，在「帳單與套餐」裡發出這份邀請。"
     },
     "held_invite": {
       "title": "工作區已升級到 {{plan}}",

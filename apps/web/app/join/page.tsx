@@ -61,6 +61,8 @@ function JoinInner() {
     }
     setJoining(true);
     setJoinError(null);
+    // A retry shows its own outcome: the link may have been revoked since.
+    setWorkspaceFull(false);
     api
       .joinByShareLink(code)
       .then(async (result) => {

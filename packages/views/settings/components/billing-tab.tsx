@@ -28,11 +28,9 @@ import {
   bindUpgradeInviteCheckout,
   clearUpgradeInvite,
   heldInviteForCancelledCheckout,
-  heldInviteHandback,
+  heldInviteToOffer,
   listCheckoutHeldInvites,
   memberLimitKeys,
-  plainCheckoutAt,
-  recordPlainCheckout,
   memberLimitOptions,
   readUpgradeInvite,
   type HeldInvite,
@@ -318,8 +316,6 @@ function BillingTabContent() {
       workspaceSlug ? listCheckoutHeldInvites(workspaceSlug).length > 0 : false,
     );
   }, [workspaceSlug]);
-  const handedBackHeldInviteRef = useRef(false);
-  const handledCancelReturnRef = useRef<string | null>(null);
   // The plan changed but nothing ties it to the held invitation's checkout:
   // ask before sending it.
   const [heldInviteToConfirm, setHeldInviteToConfirm] = useState<HeldInvite | null>(null);
@@ -666,7 +662,6 @@ function BillingTabContent() {
   }, [isCheckoutConfirmed, isSyncingCheckout]);
 
   const sendHeldInvite = (held: HeldInvite) => {
-    handedBackHeldInviteRef.current = true;
     setHeldInviteToConfirm(null);
     void queryClient.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
     // The Stripe callback params are still in this render's URL; leaving
@@ -689,59 +684,52 @@ function BillingTabContent() {
       summary.trial?.state !== "active",
   });
 
-  // Decide what the latest summary means for held invitations. This reads the
-  // plan change itself, not just the Stripe return, so Desktop, which pays in
-  // the system browser and never sees the return, gets there too. Only a
-  // return naming the invitation's own checkout sends it straight away;
-  // otherwise the person who held it confirms (see heldInviteHandback).
+  // Bumped whenever held invitations change in storage, to re-read them.
+  const [heldInvitesRevision, setHeldInvitesRevision] = useState(0);
+
+  // A Stripe cancel return names the checkout it gave up on: drop exactly
+  // that held invitation. Storage alone decides this, so it does not wait for
+  // the summary (the callback params are gone from the URL by then).
+  useEffect(() => {
+    if (returnResult !== "cancel" || !returnState.requestId || !workspaceSlug) return;
+    const cancelled = heldInviteForCancelledCheckout(
+      listCheckoutHeldInvites(workspaceSlug),
+      returnState.requestId,
+    );
+    if (!cancelled) return;
+    clearUpgradeInvite(workspaceSlug, cancelled.token);
+    setHeldInvitesRevision((revision) => revision + 1);
+  }, [returnResult, returnState.requestId, workspaceSlug]);
+
+  // Once the plan is paid, offer the held invitation for sending. It is never
+  // sent on its own (see heldInviteToOffer); reading the plan change rather
+  // than the Stripe return is what lets Desktop, which pays in the system
+  // browser, get here too.
   useEffect(() => {
     const summary = summaryQuery.data;
-    if (!summary || !workspaceSlug || handedBackHeldInviteRef.current) return;
-    if (returnResult === "cancel" && handledCancelReturnRef.current !== callbackKey) {
-      handledCancelReturnRef.current = callbackKey;
-      const cancelled = heldInviteForCancelledCheckout(
-        listCheckoutHeldInvites(workspaceSlug),
-        returnState.requestId,
-      );
-      if (cancelled) clearUpgradeInvite(workspaceSlug, cancelled.token);
-    }
+    if (!summary || !workspaceSlug) return;
     const waiting = listCheckoutHeldInvites(workspaceSlug);
-    const handback = heldInviteHandback(
-      waiting,
-      subscriptionForHeldInvites(summary),
-      returnResult === "success" ? returnState.requestId : null,
-      plainCheckoutAt(workspaceSlug),
-    );
-    setAwaitingHeldUpgrade(waiting.length > 0 && handback === null);
-    if (handback?.kind === "send") {
-      sendHeldInvite(handback.held);
-      return;
-    }
-    setHeldInviteToConfirm(handback?.held ?? null);
+    const offer = heldInviteToOffer(waiting, subscriptionForHeldInvites(summary));
+    setAwaitingHeldUpgrade(waiting.length > 0 && offer === null);
+    setHeldInviteToConfirm(offer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-check on each summary read
-  }, [summaryQuery.dataUpdatedAt, workspaceSlug, returnResult]);
+  }, [summaryQuery.dataUpdatedAt, workspaceSlug, heldInvitesRevision]);
 
   const discardHeldInvite = (held: HeldInvite) => {
     clearUpgradeInvite(workspaceSlug, held.token);
-    const summary = summaryQuery.data;
-    const next = summary
-      ? heldInviteHandback(
-          listCheckoutHeldInvites(workspaceSlug),
-          subscriptionForHeldInvites(summary),
-          null,
-          plainCheckoutAt(workspaceSlug),
-        )
-      : null;
-    setHeldInviteToConfirm(next?.held ?? null);
+    setHeldInvitesRevision((revision) => revision + 1);
   };
 
   // Members links here with `?upgrade=pro` from a full invite dialog: open the
   // Pro checkout confirmation once the summary says checkout is available.
-  // `held_invite` names the invitation that checkout is for.
+  // `held_invite` names the invitation that checkout is for. The intent waits
+  // for a summary that can decide it: a failed read keeps it, and the email
+  // and role with it, for the summary retry.
   const upgradeRequest = navigation.searchParams.get("upgrade");
   const heldInviteToken = navigation.searchParams.get("held_invite");
   useEffect(() => {
-    if (upgradeRequest === null || summaryQuery.isPending) return;
+    const summary = summaryQuery.data;
+    if (upgradeRequest === null || !summary) return;
     const params = new URLSearchParams(navigation.searchParams);
     params.delete("upgrade");
     params.delete("held_invite");
@@ -750,14 +738,14 @@ function BillingTabContent() {
       heldInviteToken && workspaceSlug
         ? readUpgradeInvite(workspaceSlug, heldInviteToken)
         : null;
-    if (upgradeRequest === "pro" && summaryQuery.data?.availableActions.checkout === true) {
+    if (upgradeRequest === "pro" && summary.availableActions.checkout === true) {
       setHeldInvite(held);
       openCheckoutConfirm("pro");
     } else if (held) {
       clearUpgradeInvite(workspaceSlug, held.token);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume the intent once the summary is known
-  }, [upgradeRequest, summaryQuery.isPending]);
+  }, [upgradeRequest, summaryQuery.dataUpdatedAt]);
 
   const planLabel = (plan: string) => {
     switch (plan) {
@@ -862,12 +850,18 @@ function BillingTabContent() {
         // a plain one and buys no seat for it.
         setHeldInvite(null);
         checkoutIntentRef.current = null;
-      } else if (workspaceSlug) {
-        recordPlainCheckout(workspaceSlug);
       }
       openExternal(response.url, { webTarget: "same-tab" });
     } catch (error) {
       setCheckoutConfirmOpen(false);
+      // A failed checkout for a held invitation ends it here: the buttons on
+      // this page only start plain checkouts, and the invitation is held
+      // again from Members if it is still wanted.
+      if (heldInvite && workspaceSlug) {
+        clearUpgradeInvite(workspaceSlug, heldInvite.token);
+        setHeldInvite(null);
+        checkoutIntentRef.current = null;
+      }
       if (error instanceof ApiError && error.status === 409) {
         checkoutIntentRef.current = null;
         setActionError(t(($) => $.workspace.errors.already_subscribed));
@@ -888,6 +882,13 @@ function BillingTabContent() {
       clearUpgradeInvite(workspaceSlug, heldInvite.token);
       setHeldInvite(null);
     }
+  };
+
+  // The plan buttons always start a checkout of their own, never one for a
+  // held invitation an earlier checkout from this page was opened for.
+  const openPlainCheckoutConfirm = (plan: WorkspaceSubscriptionPaidPlan) => {
+    setHeldInvite(null);
+    openCheckoutConfirm(plan);
   };
 
   const openCheckoutConfirm = (plan: WorkspaceSubscriptionPaidPlan) => {
@@ -1762,7 +1763,7 @@ function BillingTabContent() {
                         className="h-11 w-full"
                         variant={recommended ? "default" : "outline"}
                         disabled={isMutating}
-                        onClick={() => openCheckoutConfirm(plan)}
+                        onClick={() => openPlainCheckoutConfirm(plan)}
                       >
                         <CreditCard />
                         {t(($) => $.workspace.actions.upgrade_to, {

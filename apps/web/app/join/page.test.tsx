@@ -273,4 +273,22 @@ describe("JoinPage", () => {
     await waitFor(() => expect(screen.getByText("Joined!")).toBeInTheDocument());
     expect(mockJoinByShareLink).toHaveBeenCalledTimes(2);
   });
+
+  it("shows a retry's own failure instead of the earlier full state", async () => {
+    const user = userEvent.setup();
+    authStateRef.state.user = { id: "u1", email: "a@b.com" };
+    mockJoinByShareLink.mockRejectedValueOnce(
+      new ApiError("server fallback", 403, "Forbidden", { code: "member_limit_reached" }),
+    );
+    render(<JoinPage />, { wrapper: createWrapper() });
+    await user.click(await screen.findByRole("button", { name: "Join Workspace" }));
+    await screen.findByRole("heading", { name: "Acme is full" });
+
+    // The link was revoked in the meantime.
+    mockJoinByShareLink.mockRejectedValueOnce(new Error("share link not found or expired"));
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(screen.getByText("share link not found or expired")).toBeInTheDocument());
+    expect(screen.queryByRole("heading", { name: "Acme is full" })).not.toBeInTheDocument();
+  });
 });
