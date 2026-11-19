@@ -122,6 +122,16 @@ var guestEmptyReads = []struct {
 	{compileGuestRoutes([]string{"GET /api/runtimes"})[0], `[]`},
 	{compileGuestRoutes([]string{"GET /api/squads"})[0], `[]`},
 	{compileGuestRoutes([]string{"GET /api/squads/involved"})[0], `{"squad_ids":[]}`},
+	{compileGuestRoutes([]string{"GET /api/working-agents"})[0], `[]`},
+	{compileGuestRoutes([]string{"GET /api/issue-wakeup-summaries"})[0], `[]`},
+	{compileGuestRoutes([]string{"GET /api/issue-wakeup-paused"})[0], `[]`},
+	// Saved views and project folders organize the whole workspace; a guest
+	// has neither.
+	{compileGuestRoutes([]string{"GET /api/issue-views"})[0], `[]`},
+	{compileGuestRoutes([]string{"GET /api/project-folders"})[0], `{"folders":[],"filed":[]}`},
+	// The members tab can mount for a moment before settings knows the viewer
+	// is a guest.
+	{compileGuestRoutes([]string{"GET /api/workspaces/*/invitations"})[0], `[]`},
 }
 
 type guestRoute struct {

@@ -142,6 +142,8 @@ func TestGuestRoutesAreDenyByDefault(t *testing.T) {
 	for path, want := range map[string]string{
 		"/api/runtimes":           `[]`,
 		"/api/chat/pending-tasks": `{"tasks":[]}`,
+		"/api/issue-views":        `[]`,
+		"/api/project-folders":    `{"folders":[],"filed":[]}`,
 	} {
 		rec := guestRequest(t, ok, f.guest, http.MethodGet, path, nil)
 		if rec.Code != http.StatusOK || rec.Body.String() != want {
