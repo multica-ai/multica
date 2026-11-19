@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 )
 
 // heldServerUpdate is a deferrable update from the Runtimes page that arrived
@@ -122,11 +124,14 @@ func (d *Daemon) tryHeldServerUpdate(ctx context.Context) {
 	}
 
 	// The "running" report is the server's go-ahead: it refuses with 409 once
-	// the request was cancelled or expired. Without an answer either way, keep
-	// holding and let the next re-offer try again rather than install an
-	// update nobody may still want.
-	if err := d.reportUpdateResultErr(ctx, held.runtimeID, held.id, map[string]any{"status": "running"}); err != nil {
-		if isClientRequestError(err) {
+	// the request was cancelled or expired, and accepts it explicitly
+	// otherwise. A bare "ok" comes from a server that predates queued updates
+	// and did not check for cancellation. Without an acceptance, keep holding
+	// and let the next re-offer try again rather than install an update
+	// nobody may still want.
+	accepted, err := d.reportHeldUpdate(ctx, held, map[string]any{"status": "running"})
+	if !accepted {
+		if isUpdateWithdrawn(err) {
 			d.dropHeldUpdate(held.id)
 			d.logger.Info("queued update dropped: cancelled or expired on the server", "runtime_id", held.runtimeID, "update_id", held.id)
 		}
@@ -146,17 +151,39 @@ func (d *Daemon) reportHeldUpdateWaiting(ctx context.Context, held heldServerUpd
 		return
 	}
 	d.logger.Info("update queued until the daemon is idle", "runtime_id", held.runtimeID, "update_id", held.id, "active_tasks", active)
-	err := d.reportUpdateResultErr(ctx, held.runtimeID, held.id, map[string]any{
+	accepted, err := d.reportHeldUpdate(ctx, held, map[string]any{
 		"status":       "scheduled",
 		"active_tasks": active,
 	})
 	switch {
-	case err == nil:
+	case accepted:
 		d.setHeldUpdateReported(held.id, active)
-	case isClientRequestError(err):
+	case isUpdateWithdrawn(err):
 		d.dropHeldUpdate(held.id)
 		d.logger.Info("queued update dropped: cancelled or expired on the server", "runtime_id", held.runtimeID, "update_id", held.id)
 	}
+}
+
+// reportHeldUpdate sends a "running" or "scheduled" report and says whether
+// the server explicitly accepted it.
+func (d *Daemon) reportHeldUpdate(ctx context.Context, held heldServerUpdate, payload map[string]any) (bool, error) {
+	status, _ := payload["status"].(string)
+	var resp struct {
+		Accepted string `json:"accepted"`
+	}
+	err := d.reportUpdateResultWithRetry(ctx, held.runtimeID, held.id, func(ctx context.Context) error {
+		resp.Accepted = ""
+		return d.client.ReportUpdateResultInto(ctx, held.runtimeID, held.id, payload, &resp)
+	})
+	return err == nil && resp.Accepted == status, err
+}
+
+// isUpdateWithdrawn is the server saying the held request is gone: cancelled
+// or expired (409) or unknown (404). Any other refusal — a 400 from a server
+// that does not know "scheduled", say — leaves it held.
+func isUpdateWithdrawn(err error) bool {
+	var reqErr *requestError
+	return errors.As(err, &reqErr) && (reqErr.StatusCode == http.StatusConflict || reqErr.StatusCode == http.StatusNotFound)
 }
 
 // sameReleaseVersion reports whether a and b name the same release, ignoring

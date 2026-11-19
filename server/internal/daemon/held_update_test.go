@@ -14,6 +14,8 @@ import (
 type updateReportRecorder struct {
 	mu       sync.Mutex
 	payloads []map[string]any
+	// bareOK answers like a server that predates queued updates.
+	bareOK bool
 }
 
 func (r *updateReportRecorder) handler(t *testing.T, status func(map[string]any) int) http.HandlerFunc {
@@ -30,7 +32,12 @@ func (r *updateReportRecorder) handler(t *testing.T, status func(map[string]any)
 			code = status(payload)
 		}
 		w.WriteHeader(code)
-		_, _ = w.Write([]byte(`{}`))
+		// A current server accepts "running" and "scheduled" explicitly.
+		if s, _ := payload["status"].(string); code == http.StatusOK && !r.bareOK && (s == "running" || s == "scheduled") {
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "accepted": s})
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	}
 }
 
@@ -351,5 +358,38 @@ func TestHeldUpdateRecoversWhenRunningAnswerIsLost(t *testing.T) {
 	d.handleUpdate(context.Background(), "runtime-1", deferrableUpdate("update-1"))
 	if installs != 1 {
 		t.Fatalf("installs = %d after the re-offer, want 1", installs)
+	}
+}
+
+// A server that predates queued updates answers "running" with a bare "ok"
+// without checking whether the request was cancelled. That is no go-ahead.
+func TestHeldUpdateNeedsAnExplicitAcceptanceToInstall(t *testing.T) {
+	rec := updateReportRecorder{bareOK: true}
+	d, _ := updateReportDaemon(t, rec.handler(t, nil))
+	d.runUpdateFn = func(string) (string, error) {
+		t.Fatal("installed on a bare ok")
+		return "", nil
+	}
+
+	d.handleUpdate(context.Background(), "runtime-1", deferrableUpdate("update-1"))
+
+	if _, held := d.snapshotHeldUpdate(); !held {
+		t.Fatal("dropped the request; a current server should still get to start it")
+	}
+	assertUpdateLockReleased(t, d)
+}
+
+// A server that does not know "scheduled" answers 400; the request stays held.
+func TestHeldUpdateKeptWhenServerRejectsScheduledReport(t *testing.T) {
+	var rec updateReportRecorder
+	d, _ := updateReportDaemon(t, rec.handler(t, func(map[string]any) int {
+		return http.StatusBadRequest
+	}))
+	d.activeTasks.Store(1)
+
+	d.handleUpdate(context.Background(), "runtime-1", deferrableUpdate("update-1"))
+
+	if _, held := d.snapshotHeldUpdate(); !held {
+		t.Fatal("dropped the request after a 400 from an older server")
 	}
 }
