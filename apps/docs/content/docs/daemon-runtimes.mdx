@@ -219,6 +219,10 @@ When the owner removes members, narrows a public runtime to specific members, or
 
 Cancellation preserves chat history and stores draft/attachment recovery data on the server. Web and desktop use the existing draft recovery UI; mobile does not yet expose that recovery UI. A started turn with no output waits for the daemon's cancellation acknowledgement or the server's finalize grace period before deciding whether to restore the input. A connected daemon observes cancellation through its regular check. If the computer is offline, server-side access is still revoked immediately, but the local process may continue until it receives cancellation after reconnecting; the server cannot guarantee an immediate remote stop.
 
+### Remove a built-in local runtime [#remove-a-runtime]
+
+On the runtime detail page, open the actions menu and choose **Delete runtime**. If agents are still bound, review the list and confirm that you want to unbind them. Their instructions, chats, and run history are preserved. Queued and in-progress runs are canceled. Bind the agents to another runtime before assigning new work. A daemon that still detects the tool can register it again.
+
 ## Custom runtime profiles
 
 If your team uses an internal wrapper, a version-pinned executable, or needs fixed extra arguments for a compatible tool, create a **custom runtime profile**.
