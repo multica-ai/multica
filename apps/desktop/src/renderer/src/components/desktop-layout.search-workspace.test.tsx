@@ -70,6 +70,8 @@ function payloadFor(path: string, workspace: string): unknown {
   if (path === "/api/workspaces") return workspaces;
   if (path === "/api/issues/search") return { issues: [issue(workspace === "synthetic-b" ? "b" : "a")] };
   if (path === "/api/projects/search" || path === "/api/projects") return { projects: [], total: 0 };
+  if (path === "/api/docs/search") return { docs: [] };
+  if (path === "/api/docs") return { folders: [], docs: [] };
   if (path === "/api/issues") return { issues: [], total: 0 };
   if (path === "/api/issue-statuses") return { statuses: [] };
   if (path === "/api/autopilots") return { autopilots: [], total: 0 };
@@ -207,7 +209,8 @@ it("cancels an in-flight search when the production router switches workspace", 
   await openSearch();
   holdA = true;
   fireEvent.change(input(), { target: { value: "alpha" } });
-  await waitFor(() => expect(held.length).toBe(2), NETWORK_WAIT);
+  // Issues, projects and docs: one held search request each.
+  await waitFor(() => expect(held.length).toBe(3), NETWORK_WAIT);
   await notify("synthetic-b");
   await act(async () => {
     for (const { response, payload } of held.splice(0)) response.end(JSON.stringify(payload));

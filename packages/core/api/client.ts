@@ -7,11 +7,13 @@ import {
   DocTreeSchema,
   DocVersionSchema,
   DocVersionListSchema,
+  DocSearchResponseSchema,
 } from "../docs/schemas";
 import type {
   Doc,
   DocSummary,
   DocFolder,
+  SearchDocsResponse,
   DocTree,
   DocVersion,
   CreateDocRequest,
@@ -930,6 +932,18 @@ export class ApiClient {
       DocTreeSchema,
       { folders: [], docs: [] },
       { endpoint: "GET /api/docs" },
+    );
+  }
+  // Server-side doc search: titles and Markdown content, ranked title-first.
+  async searchDocs(params: { q: string; limit?: number; offset?: number; signal?: AbortSignal }): Promise<SearchDocsResponse> {
+    const search = new URLSearchParams({ q: params.q });
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    if (params.offset !== undefined) search.set("offset", String(params.offset));
+    return parseWithFallback(
+      await this.fetch<unknown>(`/api/docs/search?${search}`, params.signal ? { signal: params.signal } : undefined),
+      DocSearchResponseSchema,
+      { docs: [] },
+      { endpoint: "GET /api/docs/search" },
     );
   }
   async getDoc(id: string): Promise<Doc> {

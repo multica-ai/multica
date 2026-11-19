@@ -48,6 +48,8 @@ export interface ObjectHits {
 export interface PaletteDoc {
   doc: DocSummary;
   folder: string | null;
+  /** Excerpt around a content match, from server search. */
+  snippet?: string;
 }
 
 const EMPTY_AUTOPILOTS: Autopilot[] = [];
@@ -93,7 +95,10 @@ function viewScore(view: PaletteView, query: string): number {
  * the palette does not otherwise need (views, autopilots, chats, skills) load
  * only once the user types.
  */
-export function useObjectSearch(query: string, open: boolean): ObjectHits & { directory: ReturnType<typeof useActorDirectory> } {
+export function useObjectSearch(
+  query: string,
+  open: boolean,
+): ObjectHits & { directory: ReturnType<typeof useActorDirectory>; docFolders: ReadonlyMap<string, string> } {
   const wsId = useWorkspaceId();
   const directory = useActorDirectory(open);
   const typing = open && query.length > 0;
@@ -103,12 +108,13 @@ export function useObjectSearch(query: string, open: boolean): ObjectHits & { di
   const { data: chats = EMPTY_CHATS } = useQuery({ ...chatSessionsOptions(wsId), enabled: typing });
   const { data: skills = EMPTY_SKILLS } = useQuery({ ...skillListOptions(wsId), enabled: typing });
   const { data: docTree = EMPTY_DOC_TREE } = useQuery({ ...docTreeOptions(wsId), enabled: typing && !!wsId });
+  const docFolders = useMemo(() => new Map(docTree.folders.map((f) => [f.id, f.title])), [docTree]);
   const docs = useMemo<PaletteDoc[]>(() => {
-    const folders = new Map(docTree.folders.map((f) => [f.id, f.title]));
+    const folders = docFolders;
     return docTree.docs
       .filter((doc) => doc.title.trim() !== "")
       .map((doc) => ({ doc, folder: doc.folderId ? (folders.get(doc.folderId) ?? null) : null }));
-  }, [docTree]);
+  }, [docFolders, docTree]);
   // Account-level cache entry the sidebar's workspace switcher already
   // holds, so the Workspaces group adds no request of its own.
   const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
@@ -153,5 +159,5 @@ export function useObjectSearch(query: string, open: boolean): ObjectHits & { di
     };
   }, [autopilots, chats, directory, docs, query, skills, views, workspaces, wsId]);
 
-  return { ...hits, directory };
+  return { ...hits, directory, docFolders };
 }
