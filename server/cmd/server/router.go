@@ -2333,6 +2333,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/docs", func(r chi.Router) {
 				r.Get("/", h.ListDocTree)
 				r.Post("/", h.CreateDoc)
+				r.Get("/search", h.SearchDocs)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetDoc)
 					r.Patch("/", h.UpdateDoc)
