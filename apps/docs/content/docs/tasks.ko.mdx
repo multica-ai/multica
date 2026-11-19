@@ -120,8 +120,8 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | 원인 | 의미 | 처리 방법 |
 | --- | --- | --- |
 | `provider_auth_or_access` | 모델 서비스 인증 실패 또는 접근 권한 없음(401/403) | 해당 AI 코딩 도구에 다시 로그인하거나 API key 확인 |
-| `provider_quota_limit` | 사용량 또는 잔액 소진(402) | 충전하거나 계정 변경 |
-| `provider_capacity_or_rate_limit` | rate limit 또는 용량 부족(429/529) | 나중에 재시도 |
+| `provider_quota_limit` | 사용량 또는 잔액 소진 | 충전하거나 계정 변경 |
+| `provider_capacity_or_rate_limit` | rate limit 또는 용량 부족 | 나중에 재시도 |
 | `provider_server_error` | 모델 서비스 오류(5xx) | 나중에 재시도 |
 | `provider_network` | 모델 서비스와의 네트워크 오류 | 자동 재시도됩니다. 계속 발생하면 실행 컴퓨터의 네트워크 확인 |
 | `model_not_found_or_unavailable` | 모델이 없거나 현재 사용할 수 없음 | 에이전트 설정에서 사용 가능한 모델 선택 |
