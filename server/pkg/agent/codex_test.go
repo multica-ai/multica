@@ -2605,6 +2605,30 @@ func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestCodexRequiredResumeRejectsMissingLineage(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	wait := drainRPCScript(t, c, fs, []rpcResponse{{
+		method:  "thread/resume",
+		errMsg:  "invalid paginated history lineage: missing source rollout",
+		errCode: -32600,
+	}})
+	defer wait()
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	threadID, resumed, err := c.startOrResumeThread(
+		ctx, ExecOptions{ResumeSessionID: "thr_fork", RequireNativeResume: true}, slog.Default(),
+	)
+	if err == nil || !strings.Contains(err.Error(), "missing source rollout") {
+		t.Errorf("error = %v, want the native resume rejection", err)
+	}
+	if resumed || threadID != "" || len(fs.Lines()) != 1 {
+		t.Fatalf("unexpected fallback: threadID=%q resumed=%v RPCs=%v", threadID, resumed, fs.Lines())
+	}
+}
+
 func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	t.Parallel()
 

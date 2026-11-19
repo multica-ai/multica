@@ -86,6 +86,9 @@ type ExecOptions struct {
 	// the backend surfaces a continuity notice instead of silently
 	// restarting. Currently honoured by the codex backend (MUL-4424).
 	ResumeExpected bool
+	// RequireNativeResume prevents Codex from starting a new thread when the
+	// requested conversation must retain its native history.
+	RequireNativeResume bool
 	// ResumeContinuityNotice is the text to prepend to the first turn when
 	// ResumeExpected holds but the backend lands on a fresh thread anyway. The
 	// caller owns the wording because only it knows what the surface lost — an

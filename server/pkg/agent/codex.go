@@ -1039,7 +1039,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			case result.codexStartupRefreshRetrySafe:
 				retryReason = "model_catalog_refresh"
 			}
-			if retryReason == "" || attempt == 2 {
+			if retryReason == "" || attempt == 2 || (attemptOpts.RequireNativeResume && retryReason == "model_catalog_refresh") {
 				flushHeldPins()
 				resCh <- result
 				return
@@ -2007,6 +2007,9 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 // turn/start calls must reference, and resumed indicates whether the prior
 // thread was picked up (only useful for logging).
 func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions, logger *slog.Logger) (string, bool, error) {
+	if opts.RequireNativeResume && opts.ResumeSessionID == "" {
+		return "", false, fmt.Errorf("codex native resume requires a thread ID")
+	}
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
@@ -2042,6 +2045,9 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		resumeResult, err := c.request(ctx, "thread/resume", resumeParams)
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
+				if opts.RequireNativeResume && threadID != priorThreadID {
+					return "", false, fmt.Errorf("codex thread/resume returned a different thread ID")
+				}
 				logger.Info("codex lifecycle",
 					"phase", "thread_resume_response",
 					"task_id", c.cfg.TaskID,
@@ -2055,10 +2061,16 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 				)
 				return threadID, true, nil
 			}
+			if opts.RequireNativeResume {
+				return "", false, fmt.Errorf("codex thread/resume returned no thread ID")
+			}
 			logger.Warn("codex thread/resume returned no thread ID; falling back to thread/start", "prior_thread_id", priorThreadID)
 		} else {
 			if isCodexTransportError(err) {
 				logger.Warn("codex thread/resume failed due to transport error; not falling back to thread/start", "prior_thread_id", priorThreadID, "error", err)
+				return "", false, fmt.Errorf("codex thread/resume failed: %w", err)
+			}
+			if opts.RequireNativeResume {
 				return "", false, fmt.Errorf("codex thread/resume failed: %w", err)
 			}
 			logger.Warn("codex thread/resume failed; falling back to thread/start", "prior_thread_id", priorThreadID, "error", err)
