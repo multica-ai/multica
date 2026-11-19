@@ -121,16 +121,41 @@ func (m *Monitor) Put(ctx context.Context, change Change) (Record, error) {
 	if change.ExpectedVersion < 0 || (exists && old.Version != change.ExpectedVersion) || (!exists && change.ExpectedVersion != 0) {
 		return Record{}, ErrConflict
 	}
+	requestedReceiver := change.ReceiverTaskID
+	manualRearm := false
 	if exists {
+		var delivered bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM issue_continuation_incident WHERE `+keyWhere+` AND generation=$5 AND outbox_state='delivered')`, append(keyArgs(change.Key), old.Generation)...).Scan(&delivered); err != nil {
+			return Record{}, err
+		}
 		if change.Generation != old.Generation {
-			if !change.NewGeneration || change.Generation != old.Generation+1 || old.State != "resolved" {
-				return Record{}, errors.New("a new generation requires a resolved previous remainder and explicit increment")
+			if !change.NewGeneration || change.Generation != old.Generation+1 {
+				return Record{}, errors.New("a new generation requires an explicit increment of exactly one")
 			}
 			if change.CoverageConfirmed {
 				return Record{}, errors.New("enroll the new remainder without a previous resolution receipt")
 			}
+			if old.State != "resolved" {
+				if old.State != "needs_reconcile" || !delivered || requestedReceiver == "" || requestedReceiver == old.ReceiverTaskID || change.WakeupID != "" || change.WaitKind != "none" {
+					return Record{}, errors.New("rearming an unresolved delivered incident requires a new explicit live receiver without the old wakeup or wait")
+				}
+				previous := old.Contract
+				// The old wakeup may be invalidated; check the known receiver's
+				// lineage before accepting a replacement, without changing history.
+				previous.WakeupID = ""
+				prior, err := readFacts(ctx, tx, &previous)
+				if err != nil {
+					return Record{}, err
+				}
+				if liveReceiver(prior.status) && previous.ReceiverTaskID != requestedReceiver {
+					return Record{}, errors.New("previous receiver or its successor is still active")
+				}
+				manualRearm = true
+			}
 		} else if change.NewGeneration || (old.State == "resolved" && !change.CoverageConfirmed) {
 			return Record{}, errors.New("a resolved generation cannot be reopened or used as a retry budget")
+		} else if delivered && requestedReceiver != "" && requestedReceiver != old.ReceiverTaskID {
+			return Record{}, errors.New("adopt a new manual receiver after delivery with an explicit new generation")
 		}
 	} else if change.NewGeneration {
 		return Record{}, errors.New("initial enrollment does not supersede a generation")
@@ -156,6 +181,9 @@ func (m *Monitor) Put(ctx context.Context, change Change) (Record, error) {
 	}
 	if f.handoffChanged || f.receiverMissing {
 		return Record{}, errors.New("wakeup revision or receiver is not current")
+	}
+	if manualRearm && (!liveReceiver(f.status) || change.ReceiverTaskID != requestedReceiver) {
+		return Record{}, errors.New("manual rearm requires the exact verified receiver to be live")
 	}
 	if change.CoverageConfirmed {
 		var valid bool
@@ -215,9 +243,16 @@ func readFacts(ctx context.Context, tx pgx.Tx, c *Contract) (facts, error) {
 	rootReceiver := originalReceiver
 	if c.WakeupID != "" {
 		var revision int32
-		var receiver *string
-		var enabled bool
-		err := tx.QueryRow(ctx, `SELECT revision,last_task_id::text,enabled FROM issue_wakeup WHERE id=$1 AND issue_id=$2 AND workspace_id=$3 FOR SHARE`, c.WakeupID, c.IssueID, c.WorkspaceID).Scan(&revision, &receiver, &enabled)
+		var receiver, reserved *string
+		var enabled, pending bool
+		var disabledAt *time.Time
+		err := tx.QueryRow(ctx, `SELECT w.revision,w.last_task_id::text,w.enabled,w.disabled_at,COALESCE(r.pending,false),r.task_id
+            FROM issue_wakeup w LEFT JOIN LATERAL (
+                SELECT true AS pending,task_id::text FROM issue_wakeup_receipt
+                WHERE wakeup_id=w.id AND revision=w.revision AND processed_at IS NULL
+                ORDER BY (task_id IS NOT NULL) DESC,created_at,id LIMIT 1
+            ) r ON true
+            WHERE w.id=$1 AND w.issue_id=$2 AND w.workspace_id=$3 FOR SHARE OF w`, c.WakeupID, c.IssueID, c.WorkspaceID).Scan(&revision, &receiver, &enabled, &disabledAt, &pending, &reserved)
 		if errors.Is(err, pgx.ErrNoRows) {
 			f.handoffChanged = true
 			return f, nil
@@ -225,12 +260,19 @@ func readFacts(ctx context.Context, tx pgx.Tx, c *Contract) (facts, error) {
 		if err != nil {
 			return f, err
 		}
-		if revision != c.WakeupRevision || (!enabled && receiver == nil) {
+		if revision != c.WakeupRevision || disabledAt != nil || (!enabled && receiver == nil && !pending) {
 			f.handoffChanged = true
 			return f, nil
 		}
-		if receiver != nil {
+		// Once rules disable themselves before dispatch. A current pending
+		// receipt still owns the handoff, including a reserved waiting run.
+		if reserved != nil {
+			rootReceiver = *reserved
+		} else if receiver != nil {
 			rootReceiver = *receiver
+		} else if pending {
+			rootReceiver = ""
+			c.ReceiverTaskID = ""
 		}
 	}
 	if rootReceiver == "" {
@@ -357,7 +399,8 @@ func (m *Monitor) reconcile(ctx context.Context, tx pgx.Tx, r *Record) (facts, s
 	if state == "needs_reconcile" {
 		args = append(keyArgs(r.Key), r.Generation, dbid.NewV7(), reason, f.terminalAt)
 		_, err = tx.Exec(ctx, `INSERT INTO issue_continuation_incident(workspace_id,issue_id,chain_id,remainder_id,generation,id,reason,terminal_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-            ON CONFLICT(workspace_id,issue_id,chain_id,remainder_id,generation) DO UPDATE SET reason=EXCLUDED.reason,terminal_at=COALESCE(issue_continuation_incident.terminal_at,EXCLUDED.terminal_at),outbox_state=CASE WHEN issue_continuation_incident.outbox_state='delivered' THEN 'delivered' ELSE 'pending' END`, args...)
+            ON CONFLICT(workspace_id,issue_id,chain_id,remainder_id,generation) DO UPDATE SET reason=EXCLUDED.reason,terminal_at=COALESCE(issue_continuation_incident.terminal_at,EXCLUDED.terminal_at),outbox_state='pending'
+            WHERE issue_continuation_incident.outbox_state<>'delivered'`, args...)
 	} else {
 		args = append(keyArgs(r.Key), r.Generation)
 		_, err = tx.Exec(ctx, `UPDATE issue_continuation_incident SET outbox_state='suppressed' WHERE `+keyWhere+` AND generation=$5 AND outbox_state='pending'`, args...)

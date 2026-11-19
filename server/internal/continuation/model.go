@@ -20,7 +20,8 @@ type Key struct {
 }
 
 // Contract is an operator-attested handoff, not an inference from issue status
-// or free-form model output. Receiver adoption keeps the same generation.
+// or free-form model output. Automatic receiver adoption keeps the generation;
+// an operator can explicitly rearm a delivered incident for a new live receiver.
 type Contract struct {
 	Key
 	Generation        int64      `json:"generation"`
@@ -100,6 +101,15 @@ type facts struct {
 	receiverMissing bool
 	handoffChanged  bool
 	terminalAt      *time.Time
+}
+
+func liveReceiver(status string) bool {
+	switch status {
+	case "queued", "deferred", "dispatched", "running", "waiting_local_directory":
+		return true
+	default:
+		return false
+	}
 }
 
 func decide(c Contract, f facts, now time.Time) (state, reason string) {

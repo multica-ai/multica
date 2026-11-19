@@ -27,7 +27,10 @@ generation)`. `issue_continuation` holds the current contract and CAS version;
 its history preserves explicit amendments and resolved generations.
 `issue_continuation_incident` has a unique logical key and stable inbox ID.
 That same incident row is its durable delivery outbox, with pending,
-suppressed and delivered states. A receiver change does not change generation.
+suppressed and delivered states. Delivered incident rows are immutable.
+Automatic receiver adoption does not change generation. An operator can
+explicitly rearm monitoring for a new live manual receiver after delivery;
+the previous incident and unresolved contract remain in history.
 
 The states are `awaiting_event`, `receiver_queued`, `receiver_running`,
 `resolved`, and `needs_reconcile`. A failed, cancelled, missing or unknown
@@ -42,6 +45,12 @@ terminal event being delivered, an LLM response, the product worktree, or an
 online execution host. Manual successors must be explicitly adopted; an
 unrelated task or the issue's general `in_review` status does not cover this
 remainder. The source run's result and a non-empty output are not receipts.
+
+A once-wakeup can be disabled while its current-revision receipt is still
+pending. With no explicit `disabled_at`, that receipt remains a valid event
+wait, or identifies its reserved receiver. Explicit disable and revision
+changes still invalidate the binding; a pending receipt does not extend the
+contract's deadline or hide a reserved receiver's terminal outcome.
 
 A confirmed `ci`, `owner`, or `quota` wait has its own deadline and covers only
 this key. Dispatch consumes the previous event wait. Resolution requires a
@@ -100,14 +109,24 @@ copy only the contract fields, add that version as `expected_version`, and
 submit `put`. A conflict means read the current contract, not blindly retry.
 Automatic receiver adoption can also advance the version.
 
-To adopt a manual successor, set its verified `receiver_task_id`, remove the
-old `wakeup_id` and `wakeup_revision` binding, and keep generation unchanged.
+To adopt a manual successor, set its verified `receiver_task_id` and remove the
+old `wakeup_id` and `wakeup_revision` binding. Before incident delivery, keep
+generation unchanged. After delivery from `needs_reconcile`, explicitly set
+`new_generation: true` and increment generation by exactly one. Read the
+current CAS version first, clear old waits and resolution receipts, and record
+the verified handoff in `evidence`. The receiver must be a different, existing
+live task on this issue; another live predecessor/successor blocks replacement.
+This operation only adopts the task: it never creates or retries one. A new
+manual receiver cannot silently reuse an already delivered generation.
+
 To await a person or quota, explicitly clear the consumed wakeup/receiver and
 record the wait kind, end time and evidence. To resolve, set
 `result_comment_id`, `coverage_confirmed: true`, and the verified coverage in
-`evidence`. A new generation requires the previous one to be resolved,
-`new_generation: true`, and exactly one increment, solely for a new request.
-It is not a retry allowance or a way to clear delivery history.
+`evidence`. A resolved remainder can also start a new generation for a new
+request, with the same explicit flag/increment and no inherited resolution.
+A wait alone does not rearm a delivered generation. Preserve an unknown
+external outcome until it is verified; generation changes confer no retry
+allowance and never clear delivery history or downstream recovery receipts.
 
 ## Delivery boundary and crash behavior
 
