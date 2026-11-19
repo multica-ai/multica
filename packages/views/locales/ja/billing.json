@@ -136,7 +136,8 @@
       "resets_at": "{{date}} にリセット",
       "usage_unavailable": "使用量は一時的に利用できません",
       "members": "メンバー",
-      "members_pending": "保留中の招待：{{pending}} 件"
+      "members_pending": "保留中の招待：{{pending}} 件",
+      "metering": "スケジュール、Webhook、エージェントによる実行はカウントされます。メンバーが「今すぐ実行」で開始した実行はカウントされません。"
     },
     "seats": {
       "title": "席数",

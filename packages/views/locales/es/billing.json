@@ -137,7 +137,8 @@
       "resets_at": "Se reinicia el {{date}}",
       "usage_unavailable": "El uso no está disponible temporalmente",
       "members": "Miembros",
-      "members_pending": "Invitaciones pendientes: {{pending}}"
+      "members_pending": "Invitaciones pendientes: {{pending}}",
+      "metering": "Cuentan las ejecuciones de programaciones, webhooks y agentes. Las que un miembro inicia con Ejecutar ahora no cuentan."
     },
     "seats": {
       "title": "Puestos",

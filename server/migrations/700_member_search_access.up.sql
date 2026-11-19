@@ -6,7 +6,7 @@
 -- access and must be rebuilt.
 --
 -- One row per (workspace, user), overwritten by each change. The primary key
--- attaches after a concurrent build (699, 700). No foreign keys (repo rule):
+-- attaches after a concurrent build (701, 702). No foreign keys (repo rule):
 -- a row outliving its member is inert, because a later snapshot always
 -- includes its xid.
 CREATE TABLE IF NOT EXISTS member_search_access (

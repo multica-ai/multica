@@ -1886,6 +1886,11 @@ function BillingTabContent() {
         <SettingsCard>
           <SettingsRow
             label={t(($) => $.workspace.limits.autopilots)}
+            description={
+              quotaUsage.kind === "unlimited"
+                ? undefined
+                : t(($) => $.workspace.limits.metering)
+            }
           >
             {quotaUsage.kind === "unlimited" ? (
               <span className="tabular-nums">
