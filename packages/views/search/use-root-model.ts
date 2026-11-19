@@ -15,6 +15,7 @@ import type { AgentEntry } from "./use-actor-directory";
 import { useObjectSearch, type ObjectHits, type PaletteDoc, type Scored } from "./use-object-search";
 import { useRecentItems, type RecentItem } from "./use-recent-items";
 import { useServerSearch, type SearchResults } from "./use-server-search";
+import { useDocSearch } from "./use-doc-search";
 
 // The palette's Pages group is generated from WORKSPACE_PAGES, the same
 // registry the sidebar nav and the desktop tab bar read. It used to be a
@@ -182,6 +183,7 @@ export function useRootModel(
 
   const searching = active && scope !== "commands" && scope !== "people" ? text : "";
   const server = useServerSearch(searching, { projects: scope === "all" });
+  const docSearch = useDocSearch(searching, scope === "all");
   const objects = useObjectSearch(scope === "issues" || scope === "commands" ? "" : q, active);
   const recent = useRecentItems(active && !rawQuery.trim());
 
@@ -265,7 +267,17 @@ export function useRootModel(
       autopilots: scope === "all" ? objects.autopilots : [],
       chats: scope === "all" ? objects.chats : [],
       skills: scope === "all" ? objects.skills : [],
-      docs: scope === "all" ? mergeDocHits(objects.docs, results.docs, objects.docFolders, resultsQ) : [],
+      // Server doc rows answering an earlier query are dropped rather than
+      // shown stale; the instant title hits cover the gap until they land.
+      docs:
+        scope === "all"
+          ? mergeDocHits(
+              objects.docs,
+              docSearch.query === searching.trim() ? docSearch.docs : [],
+              objects.docFolders,
+              q,
+            )
+          : [],
       workspaces: scope === "all" ? objects.workspaces : [],
     };
 
@@ -349,6 +361,7 @@ export function useRootModel(
     batchTarget,
     chatGroup,
     contexts,
+    docSearch,
     globalCommands,
     inboxGroup,
     issueContext,
@@ -359,6 +372,7 @@ export function useRootModel(
     q,
     recent,
     scope,
+    searching,
     server,
     singleGroup,
     singleTarget,

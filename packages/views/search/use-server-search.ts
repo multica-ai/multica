@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { SearchDocResult, SearchIssueResult, SearchProjectResult } from "@multica/core/types";
-import { isLocalSearchReady, searchDocs, searchIssues, searchProjects } from "@multica/core/search-index";
+import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
+import { isLocalSearchReady, searchIssues, searchProjects } from "@multica/core/search-index";
 
 export interface SearchResults {
   /**
@@ -14,10 +14,9 @@ export interface SearchResults {
   query: string;
   issues: SearchIssueResult[];
   projects: SearchProjectResult[];
-  docs: SearchDocResult[];
 }
 
-export const NO_RESULTS: SearchResults = { query: "", issues: [], projects: [], docs: [] };
+export const NO_RESULTS: SearchResults = { query: "", issues: [], projects: [] };
 
 /**
  * Issue (and optionally project) search for the palette. An empty query
@@ -49,19 +48,14 @@ export function useServerSearch(query: string, options: { projects: boolean }) {
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        const [issueRes, projectRes, docRes] = await Promise.all([
+        const [issueRes, projectRes] = await Promise.all([
           searchIssues({ q, limit: 20, include_closed: true, signal: controller.signal }),
           withProjects
             ? searchProjects({ q, limit: 10, include_closed: true, include_archived: true, signal: controller.signal })
             : Promise.resolve({ projects: [] as SearchProjectResult[] }),
-          // Docs share the projects gate: both belong to the unscoped search.
-          // A failed doc search must not cost the issue and project rows.
-          withProjects
-            ? searchDocs({ q, limit: 10, signal: controller.signal }).catch(() => ({ docs: [] as SearchDocResult[] }))
-            : Promise.resolve({ docs: [] as SearchDocResult[] }),
         ]);
         if (!controller.signal.aborted) {
-          setResults({ query: q, issues: issueRes.issues, projects: projectRes.projects, docs: docRes.docs });
+          setResults({ query: q, issues: issueRes.issues, projects: projectRes.projects });
           setIsLoading(false);
         }
       } catch {
@@ -69,7 +63,7 @@ export function useServerSearch(query: string, options: { projects: boolean }) {
           // Drop the previous query's rows rather than leaving them on screen
           // permanently greyed out: the request that would have replaced them
           // is never coming. The list falls through to the empty state.
-          setResults({ query: q, issues: [], projects: [], docs: [] });
+          setResults({ query: q, issues: [], projects: [] });
           setIsLoading(false);
         }
       }
