@@ -131,6 +131,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		resultCh:      make(chan struct{}),
 		usage:         make(map[string]TokenUsage),
 		seenUsage:     make(map[string]struct{}),
+		servedModels:  make(map[string]struct{}),
 	}
 	if warmHit {
 		turn.sessionID = proc.sessionID
@@ -242,6 +243,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		lastUsageResult := turn.lastUsageResult
 		lastRawModelUsage := turn.lastRawModelUsage
 		usage := turn.usage
+		servedModels := turn.servedModels
 		eventCount := turn.eventCount
 		invalidEventCount := turn.invalidEventCount
 		assistantEventCount := turn.assistantEventCount
@@ -386,7 +388,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			Error:          finalError,
 			DurationMs:     duration.Milliseconds(),
 			SessionID:      reportedSessionID,
-			Usage:          usage,
+			Usage:          resolveBedrockProfileUsage(usage, servedModels),
 			ResumeRejected: resumeRejected,
 		}
 	}()
@@ -447,6 +449,7 @@ type claudeTurn struct {
 	sawAsyncLaunch           bool
 	usage                    map[string]TokenUsage
 	seenUsage                map[string]struct{}
+	servedModels             map[string]struct{}
 	eventCount               int
 	invalidEventCount        int
 	assistantEventCount      int
@@ -466,6 +469,9 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 	case "assistant":
 		t.assistantEventCount++
 		turn := t.backend.handleAssistantWithStream(msg, t.msgCh, t.usage, t.seenUsage, t.coalescer)
+		if turn.model != "" && (!t.otherCommandStarted || t.ownCommandStarted) {
+			t.servedModels[turn.model] = struct{}{}
+		}
 		t.toolUseCount += turn.toolUses
 		if !turn.understood {
 			t.unreadableAssistantCount++
@@ -507,6 +513,7 @@ func (t *claudeTurn) handleMessage(msg claudeSDKMessage) {
 				t.lastAssistantText = ""
 			} else {
 				t.otherCommandStarted = true
+				clear(t.servedModels)
 			}
 		}
 		t.mu.Unlock()
@@ -664,7 +671,7 @@ func (b *claudeBackend) handleAssistantWithStream(msg claudeSDKMessage, ch chan<
 	if coalescer != nil && msg.ParentToolUseID == "" {
 		coalescer.flushAll()
 	}
-	turn := assistantTurn{understood: true}
+	turn := assistantTurn{understood: true, model: content.Model}
 	var assistantText strings.Builder
 	var assistantThinking strings.Builder
 	toolUseCount := 0

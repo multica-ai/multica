@@ -21,6 +21,8 @@ type assistantTurn struct {
 	// the backend cannot tell whether the model delivered its answer inside
 	// that event, so an earlier fallback must not outlive it.
 	understood bool
+	// model is the model id the provider reported on the message, if any.
+	model string
 }
 
 // resolveFallback returns the empty-result fallback after this turn, given the
