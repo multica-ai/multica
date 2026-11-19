@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 func TestFindLocalDirectoryAssignment(t *testing.T) {
@@ -792,6 +794,105 @@ func TestAcquireLocalDirectoryLock_EarlyFailureReportsWithCancelledParent(t *tes
 	}
 	if got := failCalls.Load(); got != int32(len(tests)) {
 		t.Fatalf("fail callback calls = %d, want %d", got, len(tests))
+	}
+}
+
+// MUL-9665: a project's linked folder deleted after it was linked must fail the
+// run as local_directory_missing — the generic local_directory_error gave the
+// user no hint that the folder itself was gone. Every other validation failure
+// keeps the generic reason.
+func TestAcquireLocalDirectoryLock_ReportsDeletedDirectoryAsMissing(t *testing.T) {
+	t.Parallel()
+
+	type failReport struct {
+		Error         string `json:"error"`
+		FailureReason string `json:"failure_reason"`
+	}
+	reports := make(chan failReport, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/fail") {
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		var body failReport
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Errorf("decode fail body: %v", err)
+		}
+		reports <- body
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	const daemonID = "d-test"
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.Default(),
+		localPathLocks: NewLocalPathLocker(),
+		cfg:            Config{DaemonID: daemonID},
+	}
+
+	notADirectory := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(notADirectory, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	tests := []struct {
+		name       string
+		path       func(t *testing.T) string
+		wantReason string
+	}{
+		{
+			name: "linked folder deleted",
+			path: func(t *testing.T) string {
+				dir := filepath.Join(t.TempDir(), "project")
+				if err := os.Mkdir(dir, 0o755); err != nil {
+					t.Fatalf("mkdir: %v", err)
+				}
+				if err := os.RemoveAll(dir); err != nil {
+					t.Fatalf("remove linked folder: %v", err)
+				}
+				return dir
+			},
+			wantReason: taskfailure.ReasonLocalDirectoryMissing.String(),
+		},
+		{
+			name:       "path is a file",
+			path:       func(*testing.T) string { return notADirectory },
+			wantReason: "local_directory_error",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := tc.path(t)
+			ref, err := json.Marshal(localDirectoryRef{LocalPath: path, DaemonID: daemonID})
+			if err != nil {
+				t.Fatalf("marshal ref: %v", err)
+			}
+			task := Task{
+				ID: "task-" + strings.ReplaceAll(tc.name, " ", "-"),
+				ProjectResources: []ProjectResourceData{
+					{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: ref},
+				},
+			}
+
+			release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), task, slog.Default(), newTestTaskSlot(0))
+			if !abort || release != nil {
+				t.Fatalf("acquire = (release != nil: %v, abort: %v), want the task aborted without a lock", release != nil, abort)
+			}
+			got := <-reports
+			if got.FailureReason != tc.wantReason {
+				t.Errorf("failure_reason = %q, want %q (error %q)", got.FailureReason, tc.wantReason, got.Error)
+			}
+			if !strings.Contains(got.Error, path) {
+				t.Errorf("error %q does not name the linked path %q", got.Error, path)
+			}
+			// The server upgrades older daemons' reports by this text, so the
+			// two must agree on the reason.
+			if normalized := taskfailure.NormalizeDaemonReason("local_directory_error", got.Error).String(); normalized != tc.wantReason {
+				t.Errorf("server normalization of an older daemon's report = %q, want %q", normalized, tc.wantReason)
+			}
+		})
 	}
 }
 
