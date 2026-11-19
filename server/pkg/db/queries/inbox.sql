@@ -21,11 +21,11 @@ WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND 
   -- how the client tells an issue that came back on its own.
   AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
   AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR iss.project_id IS NULL OR NOT (iss.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
--- Newest first by when the row arrived or came back (a snooze ran out, or it
--- was restored from the archive), the order idx_inbox_active_shown keeps. The
+-- Newest first by when the row arrived or came back (returned_at), the order
+-- idx_inbox_active_shown keeps. The
 -- inbox keeps only its newest rows (inbox.ActiveLimit); inbox.Trimmer archives
 -- the rest, and the limit bounds the response until it has.
-ORDER BY GREATEST(i.created_at, i.snoozed_until, i.restored_at) DESC, i.id DESC
+ORDER BY GREATEST(i.created_at, i.returned_at) DESC, i.id DESC
 LIMIT sqlc.arg('row_limit');
 
 -- name: ListArchivedInboxItems :many
@@ -207,7 +207,7 @@ RETURNING *;
 -- name: ArchiveInboxItem :one
 -- Archiving ends a snooze (MUL-9333), on every archive path below: a row
 -- restored later must not come back still hidden.
-UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL
+UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
 WHERE id = $1
 RETURNING *;
 
@@ -228,16 +228,18 @@ WHERE item.workspace_id = target.workspace_id
   AND (item.id = target.id OR item.issue_id = target.issue_id);
 
 -- name: ArchiveInboxByIssue :execrows
-UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL
+UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;
 
 -- name: UnarchiveInboxItem :one
 -- Deliberately does not touch `read`: unarchiving restores an item to the main
 -- inbox in the exact read/unread state it was archived in, so restoring an
 -- unread item legitimately raises the unread badge again (MUL-3736).
--- restored_at ranks the row as just back for the inbox limit, so a restored
--- old notification is not trimmed straight back into the archive.
-UPDATE inbox_item SET archived = false, restored_at = now()
+-- returned_at ranks the row as just back for the inbox limit, so a restored
+-- old notification is not trimmed straight back into the archive. Only the
+-- restored row: its issue's older rows, restored by UnarchiveInboxByIssue,
+-- keep their rank so a busy issue does not outrank the whole inbox.
+UPDATE inbox_item SET archived = false, returned_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -245,11 +247,11 @@ RETURNING *;
 -- Issue-level restore, mirroring ArchiveInboxByIssue: archiving one item
 -- archives every sibling for the same issue, so unarchiving must bring the
 -- whole group back. Leaves `read` untouched for the same reason as above.
-UPDATE inbox_item SET archived = false, restored_at = now()
+UPDATE inbox_item SET archived = false
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = true;
 
 -- name: ArchiveInboxByIssueAndType :many
-UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL
+UPDATE inbox_item SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
 WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
 RETURNING recipient_type, recipient_id;
 
@@ -369,7 +371,7 @@ WHERE i.workspace_id = $1
 
 -- name: ArchiveCompletedInbox :execrows
 -- Snoozed issues included: a done issue leaves the inbox either way.
-UPDATE inbox_item i SET archived = true, snoozed_until = NULL, snoozed_at = NULL
+UPDATE inbox_item i SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
 WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
   AND i.issue_id IN (
     SELECT id FROM issue
@@ -401,7 +403,10 @@ WITH target AS (
 UPDATE inbox_item item
 SET snoozed_until = sqlc.arg('snoozed_until')::timestamptz,
     snoozed_at = CASE WHEN item.snoozed_until > now() AND item.snoozed_at IS NOT NULL THEN item.snoozed_at ELSE now() END,
-    read = CASE WHEN item.id = (SELECT id FROM newest) THEN false ELSE item.read END
+    read = CASE WHEN item.id = (SELECT id FROM newest) THEN false ELSE item.read END,
+    -- The issue comes back on top when the snooze ends: the newest row ranks
+    -- by that time for the inbox limit, the others by when they arrived.
+    returned_at = CASE WHEN item.id = (SELECT id FROM newest) THEN sqlc.arg('snoozed_until')::timestamptz END
 FROM target
 WHERE item.workspace_id = target.workspace_id
   AND item.recipient_type = target.recipient_type
@@ -412,11 +417,21 @@ RETURNING item.*;
 
 -- name: UnsnoozeInboxGroup :many
 -- Ends a snooze on one issue: back in the inbox now. Also clears the time a
--- snooze that already ran out left on the rows.
-UPDATE inbox_item SET snoozed_until = NULL, snoozed_at = NULL
-WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4
-  AND archived = false AND snoozed_until IS NOT NULL
-RETURNING *;
+-- snooze that already ran out left on the rows. The issue's newest row ranks
+-- as back now for the inbox limit, or when the snooze ran out if it already
+-- had; the others rank by when they arrived.
+WITH newest AS (
+    SELECT n.id FROM inbox_item n
+    WHERE n.workspace_id = $1 AND n.recipient_type = $2 AND n.recipient_id = $3 AND n.issue_id = $4
+      AND n.archived = false
+    ORDER BY n.created_at DESC, n.id DESC
+    LIMIT 1
+)
+UPDATE inbox_item AS item SET snoozed_until = NULL, snoozed_at = NULL,
+    returned_at = CASE WHEN item.id = (SELECT id FROM newest) THEN LEAST(item.snoozed_until, now()) END
+WHERE item.workspace_id = $1 AND item.recipient_type = $2 AND item.recipient_id = $3 AND item.issue_id = $4
+  AND item.archived = false AND item.snoozed_until IS NOT NULL
+RETURNING item.*;
 
 -- name: ListSnoozedInbox :many
 -- The recipient's snoozed issues, soonest back first (MUL-9333). `updates` is
@@ -461,14 +476,19 @@ JOIN LATERAL (
 ORDER BY g.snoozed_until ASC, g.issue_id;
 
 -- name: InboxOverflows :one
--- Whether the recipient's inbox shows more than `keep` rows: active and not
--- snoozed, ranked as ListInboxItems ranks them.
+-- Whether the recipient's inbox shows more than `keep` rows, by the rules
+-- ListInboxItems shows them: active, not snoozed, outside the projects the
+-- recipient cannot see (hidden_project_ids), ranked by when they arrived or
+-- came back.
 SELECT count(*) > 0 FROM (
-    SELECT 1 FROM inbox_item
-    WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
-      AND archived = false
-      AND (snoozed_until IS NULL OR snoozed_until <= now())
-    ORDER BY GREATEST(created_at, snoozed_until, restored_at) DESC, id DESC
+    SELECT 1 FROM inbox_item i
+    LEFT JOIN issue iss ON iss.id = i.issue_id
+    WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3
+      AND i.archived = false
+      AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR iss.project_id IS NULL
+           OR NOT (iss.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+    ORDER BY GREATEST(i.created_at, i.returned_at) DESC, i.id DESC
     OFFSET sqlc.arg('keep')::int
     LIMIT 1
 ) beyond;
@@ -478,32 +498,40 @@ SELECT count(*) > 0 FROM (
 -- newest `keep`, oldest first, in ListInboxItems' order. The boundary is read
 -- in the same statement, so every batch sees the inbox as it is now. Rows are
 -- archived one by one: unlike the issue-level archive actions, newer rows on
--- the same issue stay. Snoozed rows are left alone so a snooze is never ended
--- behind the user's back. SKIP LOCKED keeps a trim from waiting on, or
+-- the same issue stay. Snoozed rows, and rows in projects the recipient can
+-- no longer see, neither count nor get archived: a snooze is never ended
+-- behind the user's back, and hidden rows never push out visible ones. SKIP LOCKED keeps a trim from waiting on, or
 -- deadlocking with, the user's own inbox writes; InboxOverflows tells the
 -- caller whether skipped rows remain.
 WITH boundary AS (
-    SELECT GREATEST(b.created_at, b.snoozed_until, b.restored_at) AS shown_at, b.id
+    SELECT GREATEST(b.created_at, b.returned_at) AS shown_at, b.id
     FROM inbox_item b
+    LEFT JOIN issue b_iss ON b_iss.id = b.issue_id
     WHERE b.workspace_id = sqlc.arg('workspace_id') AND b.recipient_type = sqlc.arg('recipient_type')
       AND b.recipient_id = sqlc.arg('recipient_id')
       AND b.archived = false
       AND (b.snoozed_until IS NULL OR b.snoozed_until <= now())
-    ORDER BY GREATEST(b.created_at, b.snoozed_until, b.restored_at) DESC, b.id DESC
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR b_iss.project_id IS NULL
+           OR NOT (b_iss.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+    ORDER BY GREATEST(b.created_at, b.returned_at) DESC, b.id DESC
     OFFSET sqlc.arg('keep')::int - 1
     LIMIT 1
 ), overflow AS (
-    SELECT o.id FROM inbox_item o, boundary
+    SELECT o.id FROM inbox_item o
+    CROSS JOIN boundary
+    LEFT JOIN issue o_iss ON o_iss.id = o.issue_id
     WHERE o.workspace_id = sqlc.arg('workspace_id') AND o.recipient_type = sqlc.arg('recipient_type')
       AND o.recipient_id = sqlc.arg('recipient_id')
       AND o.archived = false
       AND (o.snoozed_until IS NULL OR o.snoozed_until <= now())
-      AND (GREATEST(o.created_at, o.snoozed_until, o.restored_at), o.id) < (boundary.shown_at, boundary.id)
-    ORDER BY GREATEST(o.created_at, o.snoozed_until, o.restored_at), o.id
+      AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR o_iss.project_id IS NULL
+           OR NOT (o_iss.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
+      AND (GREATEST(o.created_at, o.returned_at), o.id) < (boundary.shown_at, boundary.id)
+    ORDER BY GREATEST(o.created_at, o.returned_at), o.id
     LIMIT sqlc.arg('batch_size')::int
     FOR UPDATE OF o SKIP LOCKED
 )
 -- ANY(ARRAY(...)) keeps the update on primary-key lookups; a join against the
 -- CTE lets the planner pick a scan of the whole table.
-UPDATE inbox_item AS item SET archived = true, snoozed_until = NULL, snoozed_at = NULL
+UPDATE inbox_item AS item SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
 WHERE item.id = ANY (ARRAY(SELECT overflow.id FROM overflow));

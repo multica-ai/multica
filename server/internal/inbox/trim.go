@@ -14,8 +14,8 @@ import (
 )
 
 // ActiveLimit is how many rows a recipient's inbox keeps in one workspace,
-// newest first by when each arrived or came back (a snooze ran out, or it was
-// restored from the archive). Snoozed rows do not count. Older rows are
+// newest first by when each arrived or came back (returned_at). Snoozed rows
+// and rows in projects the recipient cannot see do not count. Older rows are
 // archived, so every inbox read stays bounded however many notifications a
 // recipient collects.
 const ActiveLimit = 2000
@@ -37,6 +37,7 @@ const (
 type TrimQueries interface {
 	InboxOverflows(ctx context.Context, arg db.InboxOverflowsParams) (bool, error)
 	ArchiveInboxOverflow(ctx context.Context, arg db.ArchiveInboxOverflowParams) (int64, error)
+	ListHiddenProjectIDsForUser(ctx context.Context, arg db.ListHiddenProjectIDsForUserParams) ([]pgtype.UUID, error)
 }
 
 // Recipient identifies one inbox: a recipient in a workspace.
@@ -190,10 +191,14 @@ func (t *Trimmer) Flush(ctx context.Context) {
 // while rows beyond the limit remain: rows another write held locked, or more
 // than one round archives.
 func (t *Trimmer) trim(ctx context.Context, r Recipient) (archived int64, done bool, err error) {
+	hidden, err := t.hiddenProjects(ctx, r)
+	if err != nil {
+		return 0, false, err
+	}
 	overflows := func() (bool, error) {
 		return t.queries.InboxOverflows(ctx, db.InboxOverflowsParams{
 			WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
-			Keep: ActiveLimit,
+			HiddenProjectIds: hidden, Keep: ActiveLimit,
 		})
 	}
 	over, err := overflows()
@@ -203,7 +208,7 @@ func (t *Trimmer) trim(ctx context.Context, r Recipient) (archived int64, done b
 	for range trimMaxBatches {
 		n, err := t.queries.ArchiveInboxOverflow(ctx, db.ArchiveInboxOverflowParams{
 			WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
-			Keep: ActiveLimit, BatchSize: trimBatchSize,
+			HiddenProjectIds: hidden, Keep: ActiveLimit, BatchSize: trimBatchSize,
 		})
 		archived += n
 		if err != nil {
@@ -218,6 +223,22 @@ func (t *Trimmer) trim(ctx context.Context, r Recipient) (archived int64, done b
 		return archived, false, err
 	}
 	return archived, !over, nil
+}
+
+// hiddenProjects returns the private projects a member recipient cannot see,
+// so the limit counts the rows their own inbox list shows (ListInboxItems
+// filters the same projects). Nil when there are none, or for an agent.
+func (t *Trimmer) hiddenProjects(ctx context.Context, r Recipient) ([]pgtype.UUID, error) {
+	if r.RecipientType != "member" {
+		return nil, nil
+	}
+	ids, err := t.queries.ListHiddenProjectIDsForUser(ctx, db.ListHiddenProjectIDsForUserParams{
+		WorkspaceID: r.WorkspaceID, UserID: r.RecipientID,
+	})
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // announce tells a member's clients to drop the archived rows, as the bulk

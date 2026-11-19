@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -20,6 +21,10 @@ type fakeTrimQueries struct {
 
 func (f *fakeTrimQueries) InboxOverflows(_ context.Context, arg db.InboxOverflowsParams) (bool, error) {
 	return f.rows > int(arg.Keep), nil
+}
+
+func (f *fakeTrimQueries) ListHiddenProjectIDsForUser(context.Context, db.ListHiddenProjectIDsForUserParams) ([]pgtype.UUID, error) {
+	return nil, nil
 }
 
 func (f *fakeTrimQueries) ArchiveInboxOverflow(_ context.Context, arg db.ArchiveInboxOverflowParams) (int64, error) {
