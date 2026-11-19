@@ -20,6 +20,8 @@ func newSkillImportTestCmd() *cobra.Command {
 	cmd.Flags().String("workspace-id", "", "")
 	cmd.Flags().String("profile", "", "")
 	cmd.Flags().String("url", "", "")
+	cmd.Flags().String("file", "", "")
+	cmd.Flags().String("dir", "", "")
 	cmd.Flags().String("on-conflict", "fail", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
