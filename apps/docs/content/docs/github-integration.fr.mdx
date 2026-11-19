@@ -82,7 +82,7 @@ Resolves MUL-123
 
 Une simple mention dans la description, comme `Related to MUL-123`, n'associe pas du tout la PR à cette tâche. Les messages de commit et les commentaires de PR ne déclenchent pas non plus l'association.
 
-Vous pouvez aussi associer une PR à la main en collant son URL. Tant que la tâche n'a aucune PR, le bloc **Pull requests** est masqué : cliquez sur **+** en haut de la barre latérale de la tâche et choisissez **Lier une pull request**. Une fois une PR associée, utilisez le **+** de l'en-tête du bloc **Pull requests**. Pour retirer une PR d'une tâche, ouvrez le menu **⋯** de sa ligne et choisissez **Retirer de la tâche** ; Multica ne la réassociera plus à partir de son titre ou de sa branche.
+Vous pouvez aussi associer une PR à la main : dans le bloc **Pull requests** de la tâche, cliquez sur **+** et collez l'URL de la PR. Pour retirer une PR d'une tâche, ouvrez le menu **⋯** de sa ligne et choisissez **Retirer de la tâche** ; Multica ne la réassociera plus à partir de son titre ou de sa branche.
 
 ## Voir les PR d'une tâche
 
@@ -107,7 +107,7 @@ Une PR fusionnée ne signifie pas forcément que la tâche est terminée : c'est
 Une tâche passe au statut choisi lorsque toutes les conditions suivantes sont réunies :
 
 1. toutes les PR associées sont `Merged` : une PR `Open` ou `Draft` fait attendre la tâche, tout comme une PR fermée sans fusion tant que vous ne l'avez pas retirée de la tâche ;
-2. la tâche n'est pas `done` ou `cancelled`, n'est pas en Triage, n'a pas déjà le statut cible et n'a pas été exclue pour elle seule (**Garder le statut à la fusion des PR** : avant la première PR, dans le menu **+** en haut de la barre latérale de la tâche ; ensuite, dans le menu **⋯** du bloc **Pull requests**). Réglez-le avant d'associer une PR déjà fusionnée, car l'associer peut changer le statut immédiatement.
+2. la tâche n'est pas `done` ou `cancelled`, n'est pas en Triage, n'a pas déjà le statut cible et n'a pas été exclue pour elle seule (**Pull requests → ⋯ → Garder le statut à la fusion des PR**).
 
 <PrLinkDemo />
 

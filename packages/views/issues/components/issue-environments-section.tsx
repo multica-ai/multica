@@ -56,9 +56,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Spinner } from "@multica/ui/components/ui/spinner";
@@ -83,14 +80,7 @@ import {
   recentFailure,
   runOrdinals,
 } from "./environment-model";
-import {
-  canStartEnvironment,
-  EnvironmentStartMenu,
-  EnvironmentStartMenuItems,
-  type DeclaredState,
-  type EnvironmentStartMenuProps,
-} from "./environment-start-menu";
-import { useIssueSidebarAddEntry } from "./issue-sidebar-add-menu";
+import { EnvironmentStartMenu, type DeclaredState } from "./environment-start-menu";
 import { IssueSidebarSectionHeader } from "./issue-sidebar-section";
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
@@ -395,41 +385,6 @@ export function IssueEnvironmentsSection({
     );
   };
 
-  const startMenu: EnvironmentStartMenuProps = {
-    configs,
-    machineFor: (runtimeId) => ({ title: machineTitle(runtimeId), offline: isOffline(runtimeId) }),
-    runLabel,
-    declaredState,
-    onStart: (config, declared) =>
-      runControl({ action: "start", body: { task_id: config.task_id, repo: declared.repo, name: declared.name } }),
-    agent: startAgent,
-    agentChoices: activeAgents,
-    preparing: !!preparing || justRequested !== null,
-    onAskAgent: askAgent,
-  };
-
-  // With nothing to list the section renders nothing, and starting the first
-  // environment moves to the sidebar's "+" menu — only while something here
-  // can actually start one or ask an agent to.
-  const showsPreparing = !!(preparingShown || justRequested) && !!preparingAgentName;
-  const empty = !!data && mainItems.length === 0 && ended.length === 0 && !showsPreparing;
-  useIssueSidebarAddEntry("environments", empty && canStartEnvironment(startMenu) ? {
-    order: 1,
-    items: (
-      <DropdownMenuSub>
-        <DropdownMenuSubTrigger>
-          <Server className="text-muted-foreground" />
-          {t(($) => $.environments.start_menu.trigger)}
-        </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent className="w-80 max-w-(--available-width)">
-          <EnvironmentStartMenuItems {...startMenu} />
-        </DropdownMenuSubContent>
-      </DropdownMenuSub>
-    ),
-  } : null);
-
-  if (!data || empty) return null;
-
   return (
     <div>
       <IssueSidebarSectionHeader
@@ -443,11 +398,25 @@ export function IssueEnvironmentsSection({
             {t(($) => $.environments.running_count, { count: running })}
           </span>
         ) : undefined}
-        actions={<EnvironmentStartMenu {...startMenu} />}
+        actions={
+          <EnvironmentStartMenu
+            configs={configs}
+            machineFor={(runtimeId) => ({ title: machineTitle(runtimeId), offline: isOffline(runtimeId) })}
+            runLabel={runLabel}
+            declaredState={declaredState}
+            onStart={(config, declared) =>
+              runControl({ action: "start", body: { task_id: config.task_id, repo: declared.repo, name: declared.name } })
+            }
+            agent={startAgent}
+            agentChoices={activeAgents}
+            preparing={!!preparing || justRequested !== null}
+            onAskAgent={askAgent}
+          />
+        }
       />
       {open && (
         <div className="px-2">
-          {showsPreparing && (
+          {(preparingShown || justRequested) && preparingAgentName && (
             <StatusRow
               icon={<Bot className="mt-px size-3.5 shrink-0 text-muted-foreground" />}
               title={t(($) => $.environments.preparing_title, { name: preparingAgentName })}
