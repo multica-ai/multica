@@ -21,7 +21,11 @@ WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND 
   -- how the client tells an issue that came back on its own.
   AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
   AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR iss.project_id IS NULL OR NOT (iss.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])))
-ORDER BY i.created_at DESC;
+ORDER BY i.created_at DESC, i.id DESC
+-- The inbox keeps only its newest rows (inbox.ActiveLimit); older ones are
+-- archived by inbox.Trimmer. The limit bounds the response for a recipient the
+-- trimmer has not reached yet.
+LIMIT sqlc.arg('row_limit');
 
 -- name: ListArchivedInboxItems :many
 -- Archived counterpart of ListInboxItems, backing the inbox's "Archived"
@@ -452,3 +456,37 @@ JOIN LATERAL (
     LIMIT 1
 ) newest ON true
 ORDER BY g.snoozed_until ASC, g.issue_id;
+
+-- name: GetInboxActiveCutoff :one
+-- created_at of the recipient's inbox row at position row_offset, counting
+-- from the newest (0-based), over the rows ListInboxItems shows: active and not
+-- snoozed. pgx.ErrNoRows means the inbox holds no more than row_offset rows.
+-- Served by idx_inbox_recipient_archived_created in its own order.
+SELECT created_at FROM inbox_item
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
+  AND archived = false
+  AND (snoozed_until IS NULL OR snoozed_until <= now())
+ORDER BY created_at DESC
+OFFSET sqlc.arg('row_offset')::int
+LIMIT 1;
+
+-- name: ArchiveInboxOlderThan :execrows
+-- Archives up to batch_size of the recipient's oldest shown rows created
+-- before cutoff, row by row: unlike the issue-level archive actions, rows of
+-- the same issue newer than cutoff stay in the inbox. Snoozed rows are left
+-- alone so a snooze is never ended behind the user's back. SKIP LOCKED keeps a
+-- trim from waiting on, or deadlocking with, a user's own inbox writes.
+WITH overflow AS (
+    SELECT o.id FROM inbox_item o
+    WHERE o.workspace_id = sqlc.arg('workspace_id') AND o.recipient_type = sqlc.arg('recipient_type')
+      AND o.recipient_id = sqlc.arg('recipient_id')
+      AND o.archived = false
+      AND (o.snoozed_until IS NULL OR o.snoozed_until <= now())
+      AND o.created_at < sqlc.arg('cutoff')
+    ORDER BY o.created_at
+    LIMIT sqlc.arg('batch_size')::int
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE inbox_item AS item SET archived = true, snoozed_until = NULL, snoozed_at = NULL
+FROM overflow
+WHERE item.id = overflow.id;
