@@ -198,7 +198,7 @@ function rollbackSingleKey(
 function settleIssuePropertyCaches(qc: ReturnType<typeof useQueryClient>, wsId: string, issueId: string) {
   if (qc.isMutating({ mutationKey: ["issue-properties", wsId] }) > 1) return;
   qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
-  qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+  qc.invalidateQueries({ queryKey: propertyKeys.withUsage(wsId) });
   // Server-filtered/-sorted windows must refetch: the write may have moved
   // this issue across pages or reordered it (onIssuePropertiesChanged
   // already fires this for the WS path; local mutations need it on settle

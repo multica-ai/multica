@@ -5149,11 +5149,20 @@ export class ApiClient {
   }
 
   // Custom issue properties
-  async listProperties(includeArchived = false): Promise<ListPropertiesResponse> {
-    const suffix = includeArchived ? "?include_archived=true" : "";
+  /**
+   * Usage counts cost the server a pass over the workspace's issues, so they
+   * are opt-in: without `includeUsage` every `usage_count` comes back 0.
+   */
+  async listProperties(
+    includeArchived = false,
+    { includeUsage = false }: { includeUsage?: boolean } = {},
+  ): Promise<ListPropertiesResponse> {
+    const params = new URLSearchParams();
+    if (includeArchived) params.set("include_archived", "true");
+    if (!includeUsage) params.set("include_usage", "false");
     let raw: unknown;
     try {
-      raw = await this.fetch<unknown>(`/api/properties${suffix}`);
+      raw = await this.fetch<unknown>(`/api/properties?${params}`);
     } catch (error) {
       // A backend predating custom properties 404s here (e.g. after a
       // server-only rollback). Treat it as an empty catalog: the property
