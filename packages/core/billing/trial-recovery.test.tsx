@@ -1,0 +1,98 @@
+// @vitest-environment jsdom
+import { act, cleanup, renderHook } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { afterEach, expect, it, vi } from "vitest";
+import { setApiInstance } from "../api";
+import type { ApiClient } from "../api/client";
+import { createQueryClient } from "../query-client";
+import { usePaidFeatureAccess, workspaceFeatureKeys } from "./paid-features";
+import { useWorkspaceTrial } from "./trial";
+import { workspaceSubscriptionKeys } from "./workspace-subscription-queries";
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+const endsAt = Date.parse("2030-01-15T00:00:00Z");
+const trial = {
+  plan: "business",
+  startedAt: "2030-01-01T00:00:00Z",
+  endsAt: new Date(endsAt).toISOString(),
+};
+const active = { entitlement: { plan: "business", status: "trialing" }, trial: { ...trial, state: "active" } };
+const expired = { entitlement: { plan: "free", status: "inactive" }, trial: { ...trial, state: "expired" } };
+const paid = { entitlement: { plan: "pro", status: "active" }, trial: null };
+const ws = "ws-trial-recovery";
+
+async function advance(ms: number) {
+  await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+}
+
+// The backoff recheck keeps going through failed attempts, not only through
+// answers that are still active.
+it("recovers the expiry summary after the server briefly fails the scheduled recheck", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(endsAt - 1_000);
+  const attempts: number[] = [];
+  const getWorkspaceSubscriptionSummary = async () => {
+    const elapsed = Date.now() - endsAt;
+    attempts.push(elapsed);
+    // The browser is two minutes ahead. Both the first backoff request and
+    // React Query's normal retry hit a temporary service error.
+    if (elapsed >= 95_000 && elapsed < 110_000) throw new Error("HTTP 503");
+    return elapsed < 120_000 ? active : expired;
+  };
+  setApiInstance({ getWorkspaceSubscriptionSummary } as unknown as ApiClient);
+  const qc = createQueryClient();
+  qc.setQueryData(workspaceSubscriptionKeys.summary(ws), active);
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  const { result, unmount } = renderHook(() => useWorkspaceTrial(ws, true), { wrapper });
+  try {
+    for (const ms of [1_000, 5, 69_995, 5, 30_000, 2_000, 60_000, 300_000, 3_600_000]) await advance(ms);
+    expect(attempts.some((time) => time >= 95_000 && time < 110_000)).toBe(true);
+    expect(result.current, JSON.stringify(attempts)).toMatchObject({ kind: "ended", confirmed: true });
+  } finally {
+    unmount();
+    qc.clear();
+  }
+});
+
+// A trial that converts at its end still gets the end's follow-up refetch: reads
+// made just before the end may hold the trial's Business features.
+it("refreshes Business-only feature access after a trial converts to Pro on another device", async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(endsAt - 1_000);
+  // The Pro summary is already committed. A previously cached Business
+  // policy has half a second left when the local expiry timer fires.
+  const featureReads: number[] = [];
+  const getWorkspaceFeatures = async () => {
+    featureReads.push(Date.now() - endsAt);
+    return { features: { private_projects: Date.now() < endsAt + 500 ? "available" : "locked" } };
+  };
+  setApiInstance({
+    getWorkspaceSubscriptionSummary: async () => paid,
+    getWorkspaceFeatures,
+  } as unknown as ApiClient);
+  const qc = createQueryClient();
+  qc.setQueryData(workspaceSubscriptionKeys.summary(ws), active);
+  qc.setQueryData(workspaceFeatureKeys.all(ws), { features: { private_projects: "available" } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  const { result, unmount } = renderHook(() => ({
+    trial: useWorkspaceTrial(ws, true),
+    access: usePaidFeatureAccess(ws, "private_projects", { hasExistingConfig: true }),
+  }), { wrapper });
+  try {
+    for (const ms of [1_000, 5, 70_000, 3_600_000]) await advance(ms);
+    expect(result.current.trial.kind).toBe("none");
+    expect(result.current.access.state, JSON.stringify(featureReads)).toBe("read_only");
+  } finally {
+    unmount();
+    qc.clear();
+  }
+});

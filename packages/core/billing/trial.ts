@@ -199,6 +199,18 @@ export function useWorkspaceTrial(
       ? summary.trial.endsAt
       : null;
   const trialKey = endsAtRaw ? `${wsId}:${endsAtRaw}` : null;
+  // The last trial end this workspace showed. The end's refetches keep running
+  // when the summary stops carrying the trial (it converted to a paid plan on
+  // another device): reads made just before the end may still hold the
+  // trial's Business features.
+  const [lastEnd, setLastEnd] = useState<{ wsId: string; endsAt: string } | null>(null);
+  useEffect(() => {
+    if (!endsAtRaw) return;
+    setLastEnd((current) =>
+      current?.wsId === wsId && current.endsAt === endsAtRaw ? current : { wsId, endsAt: endsAtRaw },
+    );
+  }, [endsAtRaw, wsId]);
+  const boundaryEndRaw = endsAtRaw ?? (lastEnd?.wsId === wsId ? lastEnd.endsAt : null);
   const cloudSaysActive = summary?.trial?.state === "active";
   const cloudConfirmsEnd =
     summary?.trial?.state === "expired" && summary.entitlement.plan === "free";
@@ -225,8 +237,8 @@ export function useWorkspaceTrial(
     // A workspace switch reuses this hook: count from now, not from the
     // previous workspace's last tick.
     setNow(Date.now());
-    if (!endsAtRaw || !wsId) return;
-    const endsAt = Date.parse(endsAtRaw);
+    if (!boundaryEndRaw || !wsId) return;
+    const endsAt = Date.parse(boundaryEndRaw);
     if (Number.isNaN(endsAt)) return;
     const keys = [
       workspaceSubscriptionKeys.all(wsId),
@@ -266,7 +278,7 @@ export function useWorkspaceTrial(
       }
     }
     return () => timers.forEach((id) => window.clearTimeout(id));
-  }, [confirmedAt, endsAtRaw, qc, wsId]);
+  }, [boundaryEndRaw, confirmedAt, qc, wsId]);
 
   // This clock is past the end and its follow-up, yet Cloud still says
   // active: ask again with backoff until Cloud answers otherwise.
@@ -289,8 +301,17 @@ export function useWorkspaceTrial(
       void qc.invalidateQueries({ queryKey: workspaceSubscriptionKeys.all(wsId) });
     }, delay);
     return () => window.clearTimeout(id);
-    // Each answer that is still active (a new dataUpdatedAt) re-arms it.
-  }, [cloudSaysActive, endsAtRaw, qc, summaryQuery.dataUpdatedAt, trialKey, wsId]);
+    // Each answer that is still active (a new dataUpdatedAt) and each failed
+    // attempt (a new errorUpdatedAt; the last answer stays cached) re-arm it.
+  }, [
+    cloudSaysActive,
+    endsAtRaw,
+    qc,
+    summaryQuery.dataUpdatedAt,
+    summaryQuery.errorUpdatedAt,
+    trialKey,
+    wsId,
+  ]);
 
   return resolveWorkspaceTrial(summary, now, confirmedAt);
 }
