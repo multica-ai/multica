@@ -461,7 +461,20 @@ func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUI
 //   - `properties || '{}'` in an OFFSET 0 subquery detoasts each bag once.
 //     Bags past the TOAST threshold would otherwise be fetched and
 //     decompressed again for every `?`.
+//   - A single definition skips that subquery. Under a sequential scan the
+//     `<> '{}'` filter and the detoast would read each bag twice, against
+//     one `?` per bag for the per-definition query. With `?` written first,
+//     PostgreSQL checks it first (the filters cost the same), so only the
+//     matching bags are read again by `<>`, which is still there so the
+//     partial index can serve sparse workspaces.
 func propertyUsageQuery(workspaceID pgtype.UUID, props []db.IssueProperty) (string, []any) {
+	if len(props) == 1 {
+		return `SELECT COUNT(*)
+FROM issue i
+WHERE i.workspace_id = $1::uuid
+  AND i.properties ? $2::text
+  AND i.properties <> '{}'::jsonb`, []any{workspaceID, uuidToString(props[0].ID)}
+	}
 	args := make([]any, 0, len(props)+1)
 	args = append(args, workspaceID)
 	columns := make([]string, len(props))

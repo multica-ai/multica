@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -449,6 +451,78 @@ func TestListPropertiesUsageSingleScan(t *testing.T) {
 			t.Fatalf("ListProperties%s: %d usage queries, %d definition rows read, %d listed; want 0, %d, %d",
 				tc.query, len(observer.usageScans), observer.catalogRows, len(counts), tc.want, tc.want)
 		}
+	}
+}
+
+// Counting a single definition must not read the workspace's property bags
+// more often than the per-definition `properties ? id` query it replaced.
+// Under a sequential scan, bags past the TOAST threshold are fetched from the
+// TOAST table on every read, so the extra reads show up as buffer accesses.
+func TestPropertyUsageSingleDefinitionReadsBagsOnce(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	suffix := uuid.NewString()[:8]
+	ws := dbfx.Workspace(t, "Property usage TOAST "+suffix, "prop-toast-"+suffix)
+	active := dbfx.Insert(t, "issue_property", testutil.Cols{"workspace_id": ws, "name": "Active", "type": "text"})
+	archived := dbfx.Insert(t, "issue_property", testutil.Cols{
+		"workspace_id": ws, "name": "Archived", "type": "text", "archived_at": testutil.Raw("now()"),
+	})
+	// Random hex does not compress, so each bag is stored out of line.
+	for i := 0; i < 5; i++ {
+		noise := make([]byte, 4096)
+		if _, err := rand.Read(noise); err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(map[string]string{archived: hex.EncodeToString(noise)})
+		dbfx.Issue(t, "large archived value", testutil.Cols{"workspace_id": ws, "properties": string(raw)})
+	}
+	raw, _ := json.Marshal(map[string]string{active: "v"})
+	dbfx.Issue(t, "active value", testutil.Cols{"workspace_id": ws, "properties": string(raw)})
+
+	query, args := propertyUsageQuery(parseUUID(ws), []db.IssueProperty{{ID: parseUUID(active)}})
+	tx, err := testPool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	for _, setting := range []string{"enable_indexscan", "enable_bitmapscan", "enable_indexonlyscan"} {
+		if _, err := tx.Exec(ctx, "SET LOCAL "+setting+" = off"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL max_parallel_workers_per_gather = 0"); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := tx.QueryRow(ctx, query, args...).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("usage count: got %d (err %v), want 1", count, err)
+	}
+	buffers := func(sql string) int64 {
+		t.Helper()
+		var raw []byte
+		if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+sql, args...).Scan(&raw); err != nil {
+			t.Fatalf("explain: %v", err)
+		}
+		var plan []struct {
+			Plan struct {
+				Hit  int64 `json:"Shared Hit Blocks"`
+				Read int64 `json:"Shared Read Blocks"`
+			} `json:"Plan"`
+		}
+		if err := json.Unmarshal(raw, &plan); err != nil || len(plan) != 1 {
+			t.Fatalf("decode plan: %v", err)
+		}
+		return plan[0].Plan.Hit + plan[0].Plan.Read
+	}
+	// Measure the usage query first: rows other tests add later can only
+	// make the per-definition query read more.
+	usage := buffers(query)
+	perDefinition := buffers(`SELECT COUNT(*) FROM issue i WHERE i.workspace_id = $1::uuid AND i.properties ? $2::text`)
+	if usage > perDefinition {
+		t.Fatalf("single-definition usage count read %d buffers under a sequential scan, more than the %d of one `properties ? id` scan",
+			usage, perDefinition)
 	}
 }
 
