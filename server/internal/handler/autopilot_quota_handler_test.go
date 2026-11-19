@@ -122,3 +122,101 @@ func TestAutopilotQuotaManualAndWebhookEnforcement(t *testing.T) {
 		t.Fatalf("usage used=%v reserved=%v, want nothing counted", usage.Used, usage.Reserved)
 	}
 }
+
+// A request key is one request whichever path admitted it. Before member presses
+// were unmetered, every "Run now" went through the metered path and kept its key
+// only on the quota reservation, so a retry that reaches an upgraded server must
+// still find it. The reverse holds too: an agent retry of a key a member's
+// unmetered run already used must not start a second run.
+func TestAutopilotQuotaRequestKeySharedAcrossMeteredAndUnmeteredRuns(t *testing.T) {
+	for _, action := range []entitlement.Action{entitlement.ActionObserve, entitlement.ActionEnforce} {
+		t.Run(string(action), func(t *testing.T) {
+			workspaceUUID := uuid.MustParse(testWorkspaceID)
+			start := time.Now().UTC().Truncate(time.Second)
+			end := start.Add(17 * time.Hour)
+			limit := 5
+			stub := entitlementtest.New()
+			stub.Set(workspaceUUID, entitlement.GateAutopilotRuns, entitlement.Decision{
+				Gate: entitlement.Gate{
+					Action: action, Limit: &limit,
+					PeriodStart: &start, PeriodEnd: &end, ResetAt: &end,
+				},
+				PolicyRevision: 3, SubscriptionVersion: 5,
+			})
+			priorProvider := testHandler.AutopilotService.Entitlements
+			testHandler.AutopilotService.Entitlements = stub
+			t.Cleanup(func() {
+				testHandler.AutopilotService.Entitlements = priorProvider
+				testPool.Exec(context.Background(), `DELETE FROM autopilot_quota_reservation WHERE workspace_id = $1`, testWorkspaceID)
+				testPool.Exec(context.Background(), `DELETE FROM autopilot_quota_period WHERE workspace_id = $1`, testWorkspaceID)
+			})
+
+			agentID := createWebhookTestAgent(t, "Quota Key Agent "+string(action))
+			autopilotID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+			dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE autopilot_run_id IN (SELECT id FROM autopilot_run WHERE autopilot_id = $1)`, autopilotID)
+			dbfx.Cleanup(t, `DELETE FROM autopilot_run WHERE autopilot_id = $1`, autopilotID)
+			taskID := callerTask(t, agentID, testUserID)
+
+			asMember := func(key string) AutopilotRunResponse {
+				t.Helper()
+				r := newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger", nil)
+				r.Header.Set("Idempotency-Key", key)
+				r = withURLParam(r, "id", autopilotID)
+				var run AutopilotRunResponse
+				testutil.Call(t, testHandler.TriggerAutopilot, r).Want(http.StatusOK).JSON(&run)
+				return run
+			}
+			asAgent := func(key string) AutopilotRunResponse {
+				t.Helper()
+				r := newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, nil)
+				r.Header.Set("Idempotency-Key", key)
+				r.Header.Set("X-Actor-Source", "task_token")
+				r.Header.Set("X-Agent-ID", agentID)
+				r.Header.Set("X-Task-ID", taskID)
+				r = withURLParam(r, "id", autopilotID)
+				var run AutopilotRunResponse
+				testutil.Call(t, testHandler.TriggerAutopilot, r).Want(http.StatusOK).JSON(&run)
+				return run
+			}
+			tasksFor := func(runID string) int {
+				t.Helper()
+				var n int
+				if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM agent_task_queue WHERE autopilot_run_id = $1`, runID).Scan(&n); err != nil {
+					t.Fatalf("count tasks: %v", err)
+				}
+				return n
+			}
+
+			metered := asAgent("metered-first")
+			if retried := asMember("metered-first"); retried.ID != metered.ID {
+				t.Fatalf("member retry of a metered request = run %s, want the original run %s", retried.ID, metered.ID)
+			}
+			if n := tasksFor(metered.ID); n != 1 {
+				t.Fatalf("metered request has %d tasks after a member retry, want 1", n)
+			}
+
+			unmetered := asMember("unmetered-first")
+			if retried := asAgent("unmetered-first"); retried.ID != unmetered.ID {
+				t.Fatalf("agent retry of an unmetered request = run %s, want the original run %s", retried.ID, unmetered.ID)
+			}
+			if n := tasksFor(unmetered.ID); n != 1 {
+				t.Fatalf("unmetered request has %d tasks after an agent retry, want 1", n)
+			}
+
+			var runs int
+			if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM autopilot_run WHERE autopilot_id = $1`, autopilotID).Scan(&runs); err != nil {
+				t.Fatalf("count runs: %v", err)
+			}
+			if runs != 2 {
+				t.Fatalf("autopilot has %d runs, want 2", runs)
+			}
+			var reserved int
+			if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM autopilot_quota_reservation WHERE workspace_id = $1 AND state <> 'released'`, testWorkspaceID).Scan(&reserved); err != nil {
+				t.Fatalf("count reservations: %v", err)
+			}
+			if reserved != 1 {
+				t.Fatalf("workspace holds %d reservations, want only the agent's metered run", reserved)
+			}
+		})
+	}
+}
