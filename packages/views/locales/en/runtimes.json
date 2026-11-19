@@ -344,6 +344,8 @@
     "action": "Update",
     "retry": "Retry",
     "cancel": "Cancel",
+    "cancel_failed": "Couldn't confirm the cancel, so the update may still run. Try again.",
+    "cancel_conflict": "Couldn't cancel right now: the daemon may be starting this update. Try again in a minute.",
     "unknown_error": "Unknown error",
     "initiate_failed": "Failed to initiate update",
     "status": {

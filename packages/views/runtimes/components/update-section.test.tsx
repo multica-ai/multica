@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { ApiError } from "@multica/core/api";
 import type { RuntimeUpdate } from "@multica/core/types";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
@@ -271,6 +272,46 @@ describe("UpdateSection queued updates", () => {
     );
     expect(await screen.findByRole("button", { name: "Update" })).toBeInTheDocument();
     expect(screen.queryByText("Updates when idle")).not.toBeInTheDocument();
+  });
+
+  it("follows and cancels an update queued through another runtime of the machine", async () => {
+    follow(request({ runtime_id: "runtime-2" }));
+    mockApi.cancelUpdate.mockResolvedValue(request({ runtime_id: "runtime-2", status: "cancelled" }));
+    renderSection({ runtimeId: "runtime-1", currentVersion: "v0.9.0" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    await waitFor(() =>
+      expect(mockApi.cancelUpdate).toHaveBeenCalledWith("runtime-2", "upd-1"),
+    );
+  });
+
+  it("says so when a cancel cannot be confirmed", async () => {
+    follow(request());
+    mockApi.cancelUpdate.mockRejectedValue(new Error("network down"));
+    renderSection({ runtimeId: "runtime-1", currentVersion: "v0.9.0" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(
+      await screen.findByText(enRuntimes.update.cancel_failed),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Updates when idle")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("explains a refused cancel while the daemon picks the update up", async () => {
+    follow(request());
+    mockApi.cancelUpdate.mockRejectedValue(
+      new ApiError("conflict", 409, "Conflict", { error: "the daemon is picking this update up" }),
+    );
+    renderSection({ runtimeId: "runtime-1", currentVersion: "v0.9.0" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(
+      await screen.findByText(enRuntimes.update.cancel_conflict),
+    ).toBeInTheDocument();
   });
 
   it("queues instead of failing when the machine is busy", async () => {

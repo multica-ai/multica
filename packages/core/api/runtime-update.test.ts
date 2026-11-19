@@ -108,4 +108,16 @@ describe("runtime update API", () => {
     expect(new URL(url).pathname).toBe("/api/runtimes/rt-1/update/upd-1/cancel");
     expect(init.method).toBe("POST");
   });
+
+  // Only clients that can show a queued update may get one; installed older
+  // clients keep the fail-fast behaviour they know how to render.
+  it("asks the server to queue the update when the machine is busy", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(Response.json({ ...scheduled, status: "pending" }));
+    vi.stubGlobal("fetch", fetch);
+    await client().initiateUpdate("rt-1", "v0.9.2");
+    const [, init] = fetch.mock.calls[0]!;
+    expect(JSON.parse(init.body)).toEqual({ target_version: "v0.9.2", queue_when_busy: true });
+  });
 });

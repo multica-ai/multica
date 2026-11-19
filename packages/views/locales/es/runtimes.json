@@ -344,6 +344,8 @@
     "action": "Actualizar",
     "retry": "Reintentar",
     "cancel": "Cancelar",
+    "cancel_failed": "No se pudo confirmar la cancelación, así que la actualización aún podría ejecutarse. Inténtalo de nuevo.",
+    "cancel_conflict": "No se puede cancelar ahora: el daemon podría estar iniciando esta actualización. Inténtalo de nuevo en un minuto.",
     "unknown_error": "Error desconocido",
     "initiate_failed": "No se ha podido iniciar la actualización",
     "status": {

@@ -161,6 +161,7 @@ export function UpdateSection({
   // is dismissed and the plain version row returns.
   const [startedId, setStartedId] = useState<string | null>(null);
   const [dismissedId, setDismissedId] = useState<string | null>(null);
+  const [cancelError, setCancelError] = useState<"failed" | "conflict" | null>(null);
   const activeQuery = useQuery(runtimeActiveUpdateOptions(commandRuntimeId));
   const candidateId = startedId ?? activeQuery.data?.id ?? null;
   const trackedId =
@@ -169,8 +170,11 @@ export function UpdateSection({
     activeQuery.data && activeQuery.data.id === trackedId
       ? activeQuery.data
       : undefined;
+  // The machine's update may have been queued through another of its
+  // runtimes; poll and cancel it through that one.
+  const trackedRuntimeId = seed?.runtime_id || commandRuntimeId;
   const updateQuery = useQuery({
-    ...runtimeUpdateOptions(commandRuntimeId, trackedId),
+    ...runtimeUpdateOptions(trackedRuntimeId, trackedId),
     initialData: seed,
   });
   const update: RuntimeUpdate | null = trackedId
@@ -179,7 +183,7 @@ export function UpdateSection({
   const status = knownRuntimeUpdateStatus(update?.status);
 
   const initiate = useInitiateRuntimeUpdate(commandRuntimeId);
-  const cancel = useCancelRuntimeUpdate(commandRuntimeId);
+  const cancel = useCancelRuntimeUpdate();
 
   useEffect(() => {
     fetchLatestVersion().then(setLatestVersion);
@@ -237,13 +241,18 @@ export function UpdateSection({
   };
 
   const handleCancel = () => {
-    if (!update) return;
+    if (!update || !trackedRuntimeId) return;
     const id = update.id;
-    cancel.mutateAsync(id).then(
+    setCancelError(null);
+    cancel.mutateAsync({ runtimeId: trackedRuntimeId, updateId: id }).then(
       () => setDismissedId(id),
-      // 409: installation already started. The mutation refetches, so the
-      // section moves on to what actually happened.
-      () => undefined,
+      // The update may still start when the machine goes idle, so say the
+      // cancel did not go through. 409: installation started, or the daemon
+      // is picking the update up right now; the mutation refetches.
+      (error: unknown) =>
+        setCancelError(
+          error instanceof ApiError && error.status === 409 ? "conflict" : "failed",
+        ),
     );
   };
 
@@ -401,6 +410,14 @@ export function UpdateSection({
       {(status === "failed" || status === "timeout") && !legacyBusy && (
         <ErrorBox onRetry={handleUpdate}>
           {update?.error || t(($) => $.update.unknown_error)}
+        </ErrorBox>
+      )}
+
+      {cancelError && (status === "pending" || status === "scheduled") && (
+        <ErrorBox onRetry={handleCancel}>
+          {cancelError === "conflict"
+            ? t(($) => $.update.cancel_conflict)
+            : t(($) => $.update.cancel_failed)}
         </ErrorBox>
       )}
 

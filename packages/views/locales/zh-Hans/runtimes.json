@@ -333,6 +333,8 @@
     "action": "更新",
     "retry": "重试",
     "cancel": "取消",
+    "cancel_failed": "未能确认取消，更新仍可能执行。请重试。",
+    "cancel_conflict": "暂时无法取消：守护进程可能正在开始这次更新。请一分钟后重试。",
     "unknown_error": "未知错误",
     "initiate_failed": "启动更新失败",
     "status": {

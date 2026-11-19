@@ -3134,7 +3134,9 @@ export class ApiClient {
   ): Promise<RuntimeUpdate> {
     const raw = await this.fetch<unknown>(`/api/runtimes/${runtimeId}/update`, {
       method: "POST",
-      body: JSON.stringify({ target_version: targetVersion }),
+      // This client shows a queued update, so the server may queue it while
+      // the machine is busy instead of failing it.
+      body: JSON.stringify({ target_version: targetVersion, queue_when_busy: true }),
     });
     return parseWithFallback<RuntimeUpdate>(
       raw,

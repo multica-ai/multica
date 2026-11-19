@@ -333,6 +333,8 @@
     "action": "更新",
     "retry": "重試",
     "cancel": "取消",
+    "cancel_failed": "未能確認取消，更新仍可能執行。請重試。",
+    "cancel_conflict": "暫時無法取消：守護程序可能正在開始這次更新。請一分鐘後重試。",
     "unknown_error": "未知錯誤",
     "initiate_failed": "啟動更新失敗",
     "status": {

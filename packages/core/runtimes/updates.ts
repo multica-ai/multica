@@ -99,21 +99,23 @@ export function useInitiateRuntimeUpdate(runtimeId: string | null) {
   });
 }
 
-export function useCancelRuntimeUpdate(runtimeId: string | null) {
+/**
+ * Cancels an update through the runtime it was queued on, which can be another
+ * runtime of the same machine than the one the section uses to start updates.
+ */
+export function useCancelRuntimeUpdate() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (updateId: string) =>
-      api.cancelUpdate(runtimeId as string, updateId),
-    onSuccess: (update, updateId) => {
-      if (!runtimeId) return;
+    mutationFn: ({ runtimeId, updateId }: { runtimeId: string; updateId: string }) =>
+      api.cancelUpdate(runtimeId, updateId),
+    onSuccess: (update, { runtimeId, updateId }) => {
       qc.setQueryData(runtimeUpdateKeys.detail(runtimeId, updateId), update);
     },
-    // A 409 means installation started (or the request settled) in the
-    // meantime: refetch so the section shows what actually happened.
-    onSettled: (_data, _error, updateId) => {
-      if (!runtimeId) return;
+    // A 409 means installation started (or the daemon is picking the update
+    // up right now): refetch so the section shows what actually happened.
+    onSettled: (_data, _error, { runtimeId, updateId }) => {
       qc.invalidateQueries({ queryKey: runtimeUpdateKeys.detail(runtimeId, updateId) });
-      qc.invalidateQueries({ queryKey: runtimeUpdateKeys.active(runtimeId) });
+      qc.invalidateQueries({ queryKey: runtimeUpdateKeys.all() });
     },
   });
 }
