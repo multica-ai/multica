@@ -1145,6 +1145,9 @@ func TestAgentSaveWithPartialHermesEffortCatalog(t *testing.T) {
 	ctx := context.Background()
 	cache := withModelListStores(t)
 	runtimeID := createProviderRuntime(t, "hermes")
+	if err := cache.Put(ctx, runtimeID, []ModelEntry{{ID: "older"}}, nil, true); err != nil {
+		t.Fatal(err)
+	}
 	if err := cache.Put(ctx, partialEffortCatalogKey(runtimeID), []ModelEntry{
 		{ID: "confirmed", Default: true, Thinking: &ModelThinking{
 			SupportedLevels: []ThinkingLevel{{Value: "high"}, {Value: "medium"}},
@@ -1152,6 +1155,18 @@ func TestAgentSaveWithPartialHermesEffortCatalog(t *testing.T) {
 		{ID: "unprobed"},
 	}, nil, true); err != nil {
 		t.Fatal(err)
+	}
+
+	picker := httptest.NewRecorder()
+	testHandler.InitiateListModels(picker, withURLParam(
+		newRequest(http.MethodPost, "/api/runtimes/"+runtimeID+"/models", nil), "runtimeId", runtimeID,
+	))
+	var listed ModelListRequest
+	if err := json.NewDecoder(picker.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if picker.Code != http.StatusOK || len(listed.Models) != 2 || listed.Models[0].ID != "confirmed" {
+		t.Fatalf("picker must show the same current catalog used for saving, got %d: %+v", picker.Code, listed.Models)
 	}
 
 	created := httptest.NewRecorder()

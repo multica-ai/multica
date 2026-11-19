@@ -353,7 +353,7 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 	resolvedRuntimeID := uuidToString(rt.ID)
 
 	if r.URL.Query().Get("force") != "true" {
-		if cached := h.cachedModelCatalog(r.Context(), resolvedRuntimeID); cached != nil {
+		if cached, _ := h.currentModelCatalog(r.Context(), resolvedRuntimeID, rt.Provider); cached != nil {
 			age := cached.Age(time.Now())
 			if age >= modelCatalogRevalidateAfter {
 				h.revalidateModelCatalog(r.Context(), resolvedRuntimeID)
@@ -386,6 +386,17 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	h.requestDaemonPendingWork(resolvedRuntimeID, protocol.PendingWorkKindModelList)
 	writeJSON(w, http.StatusOK, req)
+}
+
+func (h *Handler) currentModelCatalog(ctx context.Context, runtimeID, provider string) (*ModelCatalogSnapshot, bool) {
+	complete := h.cachedModelCatalog(ctx, runtimeID)
+	if provider == "hermes" {
+		partial := h.cachedModelCatalog(ctx, partialEffortCatalogKey(runtimeID))
+		if partial != nil && (complete == nil || partial.StoredAt.After(complete.StoredAt)) {
+			return partial, true
+		}
+	}
+	return complete, false
 }
 
 // cachedModelCatalog returns a usable cached catalog, or nil when the cache is
@@ -559,7 +570,7 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		// like a failure and leave the cache untouched (MUL-5549).
 		if h.ModelCatalogCache != nil {
 			if body.Fallback && body.EffortDiscoveryIncomplete && supported && len(body.Models) > 0 {
-				if err := h.ModelCatalogCache.Put(r.Context(), partialEffortCatalogKey(runtimeID), body.Models, nil, true); err != nil {
+				if err := h.ModelCatalogCache.Put(r.Context(), partialEffortCatalogKey(runtimeID), body.Models, body.UnavailableModels, true); err != nil {
 					slog.Warn("partial effort catalog cache write failed", "error", err, "runtime_id", runtimeID)
 				}
 			} else if !body.Fallback {

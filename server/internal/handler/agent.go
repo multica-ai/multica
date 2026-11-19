@@ -2821,26 +2821,22 @@ func (h *Handler) acpThinkingDecision(ctx context.Context, provider string, runt
 	if !agent.UsesACPCatalogThinking(provider) {
 		return acpEffortPresent
 	}
-	runtimeKey := uuidToString(runtimeID)
-	snapshot := h.cachedModelCatalog(ctx, runtimeKey)
-	if provider == "hermes" {
-		partial := h.cachedModelCatalog(ctx, partialEffortCatalogKey(runtimeKey))
-		if partial != nil && (snapshot == nil || partial.StoredAt.After(snapshot.StoredAt)) {
-			for _, entry := range partial.Models {
-				if (entry.ID != model || model == "") && !(model == "" && entry.Default) {
-					continue
-				}
-				if entry.Thinking != nil {
-					for _, option := range entry.Thinking.SupportedLevels {
-						if option.Value == level {
-							return acpEffortPresent
-						}
+	snapshot, partial := h.currentModelCatalog(ctx, uuidToString(runtimeID), provider)
+	if partial {
+		for _, entry := range snapshot.Models {
+			if model == "" && !entry.Default || model != "" && entry.ID != model {
+				continue
+			}
+			if entry.Thinking != nil {
+				for _, option := range entry.Thinking.SupportedLevels {
+					if option.Value == level {
+						return acpEffortPresent
 					}
 				}
-				break
 			}
-			return acpEffortUnknown
+			break
 		}
+		return acpEffortUnknown
 	}
 	if snapshot == nil || len(snapshot.Models) == 0 {
 		if ambiguousACPEffortProviders[provider] {
