@@ -221,7 +221,7 @@ Cancellation preserves chat history and stores draft/attachment recovery data on
 
 ### Remove a built-in local runtime [#remove-a-runtime]
 
-On the runtime detail page, open the actions menu and choose **Delete runtime**. If agents are still bound, review the list and confirm that you want to unbind them. Their instructions, chats, and run history are preserved. Queued and in-progress runs are canceled. Bind the agents to another runtime before assigning new work. A daemon that still detects the tool can register it again.
+On the runtime detail page, open the actions menu and choose **Delete runtime**. If agents are still bound, review the list and confirm that you want to unbind them. Their instructions, chats, and run history are preserved. Queued and in-progress runs are canceled. Multica pauses active autopilots assigned to those agents or to squads they lead. Bind the agents to another runtime before assigning new work. After rebinding, manually resume the paused autopilots. A daemon that still detects the tool can register it again.
 
 ## Custom runtime profiles
 
