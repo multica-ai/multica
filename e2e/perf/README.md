@@ -189,10 +189,11 @@ fails rather than reporting a fast time.
 
 The dataset (`lib/core-dataset.ts`) takes its sizes from production
 aggregates: ~1,000 issues, ~1,800 notifications of which ~950 unread, and the
-issues above. Text, structure and image bytes are deterministic; the report
-carries a digest, and `scripts/perf-core-report.mjs` refuses to compare
-reports from different datasets. The first run seeds a `perf-core` workspace
-(about a minute) and later runs reuse it.
+issues above. Text, structure and image bytes are deterministic. The report
+carries a digest of the generator's source and the image bytes, so any edit to
+`lib/core-dataset.ts` gives a new digest, and both comparison scripts refuse
+to compare reports from different datasets. The first run seeds a `perf-core`
+workspace (about a minute); later runs reuse it until the digest changes.
 
 ```bash
 make up C=api ARGS="--ephemeral"
@@ -211,8 +212,20 @@ absorbs work that a mid-range laptop shows as stalls, and a fix that only
 helps there (#10767's left-nav toggle) is invisible unthrottled. Sidebar
 toggles also report main-thread work per toggle, the most stable of the
 numbers.
-To compare refs, build each ref in its own worktree and run the spec from one
-checkout against each server in turn, never two at once.
+To compare two refs, run `perf-compare.mjs` inside the API's environment. It
+builds each ref in its own worktree, serves it against the local API, runs the
+spec from this checkout, then stops it before the next side starts:
+
+```bash
+make up C=api ARGS="--ephemeral"
+make env-exec ARGS="-- node scripts/perf-compare.mjs --scenario core-paths --base origin/main --head HEAD --out perf-report"
+```
+
+`--scenario core-issue` or `core-inbox` measures one path. The `PERF_*`
+settings above pass through. It writes `base.json`, `head.json` and
+`comparison.md`, whose table is the one `perf-core-report.mjs` prints; attach
+it to the PR. The **UI performance report** workflow does not offer these
+scenarios, because a GitHub runner has no local API to run them against.
 
 ## Inbox jump
 
