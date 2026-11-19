@@ -85,3 +85,10 @@ WHERE message.chat_session_id = sqlc.arg(source_chat_id)
   AND message.created_at <= sqlc.arg(snapshot_at)
   AND message.message_kind != 'channel_command'
 ORDER BY message.created_at ASC, message.id ASC;
+
+-- name: GetChatForkTask :one
+SELECT t.* FROM agent_task_queue t
+WHERE t.id = sqlc.arg(task_id)
+  AND t.trigger_evidence_ref_id = sqlc.arg(source_chat_id)
+  AND t.initiator_user_id = sqlc.arg(creator_id)
+  AND t.context @> '{"native_chat_fork":true}'::jsonb;

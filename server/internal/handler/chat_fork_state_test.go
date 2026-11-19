@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -204,5 +205,56 @@ func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
 				t.Fatalf("original=%+v error=%v", original, err)
 			}
 		})
+	}
+}
+
+func TestChatForkEndpointsExposeOnlyPublishedDestination(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := t.Context()
+	agentID, runtimeID, _ := createRuntimeGuardAgent(t, ctx)
+	dbfx.Exec(t, `UPDATE agent_runtime SET provider='codex', metadata=$1 WHERE id=$2`,
+		[]byte(`{"capabilities":["codex-chat-fork-v1"]}`), runtimeID)
+	sourceID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID, "session_id": "source-session",
+	})
+	dbfx.Exec(t, `UPDATE chat_session SET explicitly_created_at=now() WHERE id=$1`, sourceID)
+
+	post := chatPendingCtxAs(t, withURLParam(newRequest(http.MethodPost, "/forks", nil), "sessionId", sourceID), testUserID)
+	var accepted ChatForkResponse
+	testutil.Call(t, testHandler.CreateChatFork, post).Want(http.StatusAccepted).JSON(&accepted)
+	if accepted.TaskID == "" || accepted.Status != "queued" || accepted.ChatID != "" {
+		t.Fatalf("acceptance=%+v", accepted)
+	}
+	task, err := testHandler.Queries.GetAgentTask(ctx, parseUUID(accepted.TaskID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		dbfx.Exec(t, `DELETE FROM agent_task_queue WHERE id=$1`, task.ID)
+		dbfx.Exec(t, `DELETE FROM chat_session WHERE id=$1`, task.ChatSessionID)
+	})
+	statusRequest := func(taskID string) *http.Request {
+		req := withURLParam(newRequest(http.MethodGet, "/forks/"+taskID, nil), "sessionId", sourceID)
+		chi.RouteContext(req.Context()).URLParams.Add("taskId", taskID)
+		return chatPendingCtxAs(t, req, testUserID)
+	}
+	var pending ChatForkResponse
+	testutil.Call(t, testHandler.GetChatFork, statusRequest(accepted.TaskID)).Want(http.StatusOK).JSON(&pending)
+	if pending.Status != "queued" || pending.ChatID != "" {
+		t.Fatalf("pending status exposed destination: %+v", pending)
+	}
+	testutil.Call(t, testHandler.GetChatFork, statusRequest("invalid")).Want(http.StatusBadRequest)
+
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status='running', started_at=now() WHERE id=$1`, task.ID)
+	const childSession = "019fe3de-56a2-7792-8913-ee53664dfa0f"
+	if _, transitioned, err := testHandler.TaskService.CompleteTaskWithTransition(ctx, task.ID, nil, childSession, "", "", false, "", ""); err != nil || !transitioned {
+		t.Fatalf("complete transitioned=%v error=%v", transitioned, err)
+	}
+	var ready ChatForkResponse
+	testutil.Call(t, testHandler.GetChatFork, statusRequest(accepted.TaskID)).Want(http.StatusOK).JSON(&ready)
+	if ready.Status != "completed" || ready.ChatID != uuidToString(task.ChatSessionID) {
+		t.Fatalf("ready status=%+v", ready)
 	}
 }
