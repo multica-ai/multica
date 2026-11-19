@@ -335,7 +335,9 @@ WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2
   AND (snoozed_until IS NULL OR snoozed_until <= now());
 
 -- name: ArchiveAllInbox :execrows
-UPDATE inbox_item SET archived = true
+-- Every archive clears returned_at: a row restored later earns its rank anew
+-- (UnarchiveInboxItem), so old return times never outrank the inbox again.
+UPDATE inbox_item SET archived = true, returned_at = NULL
 WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND archived = false
   AND (snoozed_until IS NULL OR snoozed_until <= now());
 
@@ -361,7 +363,7 @@ WITH newest_groups AS (
     FROM newest_groups
     WHERE read = true
 )
-UPDATE inbox_item i SET archived = true
+UPDATE inbox_item i SET archived = true, returned_at = NULL
 FROM read_groups selected
 WHERE i.workspace_id = $1
   AND i.recipient_type = 'member'
@@ -535,3 +537,39 @@ WITH boundary AS (
 -- CTE lets the planner pick a scan of the whole table.
 UPDATE inbox_item AS item SET archived = true, snoozed_until = NULL, snoozed_at = NULL, returned_at = NULL
 WHERE item.id = ANY (ARRAY(SELECT overflow.id FROM overflow));
+
+-- name: NormalizeInboxReturns :execrows
+-- Leaves at most one row per issue ranked by its return (returned_at): the
+-- issue's newest active row, carrying the latest return any of its rows had,
+-- or its snooze time. Rows that joined a snooze after it started (a comment
+-- that arrived meanwhile) thereby take over the issue's rank from the row that
+-- was newest when it was snoozed, and snoozes written without returned_at (by
+-- an older server, before the column existed) get one. The inbox limit runs
+-- this before it archives anything, so a ranking gap never costs a row.
+WITH ranked_groups AS (
+    SELECT g.issue_id,
+           max(g.returned_at) AS returned_at
+    FROM inbox_item g
+    WHERE g.workspace_id = sqlc.arg('workspace_id') AND g.recipient_type = sqlc.arg('recipient_type')
+      AND g.recipient_id = sqlc.arg('recipient_id')
+      AND g.archived = false AND g.issue_id IS NOT NULL
+      AND (g.returned_at IS NOT NULL OR g.snoozed_until IS NOT NULL)
+    GROUP BY g.issue_id
+), representative AS (
+    SELECT DISTINCT ON (r.issue_id) r.issue_id, r.id,
+           GREATEST(ranked_groups.returned_at, r.snoozed_until) AS returned_at
+    FROM inbox_item r
+    JOIN ranked_groups ON ranked_groups.issue_id = r.issue_id
+    WHERE r.workspace_id = sqlc.arg('workspace_id') AND r.recipient_type = sqlc.arg('recipient_type')
+      AND r.recipient_id = sqlc.arg('recipient_id')
+      AND r.archived = false
+    ORDER BY r.issue_id, r.created_at DESC, r.id DESC
+)
+UPDATE inbox_item AS item
+SET returned_at = CASE WHEN item.id = representative.id THEN representative.returned_at END
+FROM representative
+WHERE item.workspace_id = sqlc.arg('workspace_id') AND item.recipient_type = sqlc.arg('recipient_type')
+  AND item.recipient_id = sqlc.arg('recipient_id')
+  AND item.archived = false
+  AND item.issue_id = representative.issue_id
+  AND item.returned_at IS DISTINCT FROM (CASE WHEN item.id = representative.id THEN representative.returned_at END);

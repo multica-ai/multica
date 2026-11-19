@@ -286,3 +286,91 @@ func TestInboxTrimmerIgnoresRowsTheMemberCannotSee(t *testing.T) {
 		t.Fatalf("hidden rows active = %d, want untouched %d", n, inbox.ActiveLimit)
 	}
 }
+
+func returnedAtOf(t *testing.T, id string) *time.Time {
+	t.Helper()
+	var at *time.Time
+	dbfx.QueryRow(t, `SELECT returned_at FROM inbox_item WHERE id = $1`, id).Scan(&at)
+	return at
+}
+
+// A snooze written before returned_at existed (or by an older server during a
+// rollout) carries only snoozed_until. The trim gives its issue's newest row
+// the wake rank before it archives anything, so the woken issue stays.
+func TestInboxTrimmerKeepsSnoozeWrittenWithoutReturn(t *testing.T) {
+	workspaceID := limitInboxWorkspace(t, "Inbox limit legacy snooze")
+	seedInboxRows(t, workspaceID, testUserID, inbox.ActiveLimit, time.Now().UTC().Add(-time.Hour), time.Millisecond)
+	issueID := dbfx.Issue(t, "Legacy snoozed issue", testutil.Cols{"workspace_id": workspaceID})
+	wake := time.Now().Add(-time.Minute).UTC().Truncate(time.Microsecond)
+	legacy := testutil.Cols{"issue_id": issueID, "snoozed_until": wake, "snoozed_at": wake.Add(-24 * time.Hour)}
+	olderID := insertOldInboxRow(t, workspaceID, "legacy-older", legacy)
+	legacy["created_at"] = time.Now().Add(-47 * time.Hour)
+	newestID := insertOldInboxRow(t, workspaceID, "legacy-newest", legacy)
+
+	trimInbox(t, workspaceID)
+
+	if isArchived(t, newestID) {
+		t.Fatal("the woken issue's newest row was archived")
+	}
+	if at := returnedAtOf(t, newestID); at == nil || !at.Equal(wake) {
+		t.Fatalf("newest returned_at = %v, want the wake time %v", at, wake)
+	}
+	if !isArchived(t, olderID) {
+		t.Fatal("the woken issue's older row should rank by its own time and go")
+	}
+}
+
+// A comment that joined a running snooze is the issue's newest row when the
+// snooze ends, so it, not the row that was newest when snoozing, keeps the
+// issue's rank.
+func TestInboxTrimmerHandsReturnToRowThatJoinedSnooze(t *testing.T) {
+	workspaceID := limitInboxWorkspace(t, "Inbox limit joined snooze")
+	seedInboxRows(t, workspaceID, testUserID, inbox.ActiveLimit, time.Now().UTC().Add(-time.Hour), time.Millisecond)
+	issueID := dbfx.Issue(t, "Snoozed issue with news", testutil.Cols{"workspace_id": workspaceID})
+	wake := time.Now().Add(-time.Minute).UTC().Truncate(time.Microsecond)
+	snoozedAt := wake.Add(-24 * time.Hour)
+	beforeID := insertOldInboxRow(t, workspaceID, "before-snooze", testutil.Cols{
+		"issue_id": issueID, "snoozed_until": wake, "snoozed_at": snoozedAt, "returned_at": wake,
+	})
+	joinedID := insertOldInboxRow(t, workspaceID, "joined-snooze", testutil.Cols{
+		"issue_id": issueID, "snoozed_until": wake, "snoozed_at": snoozedAt, "created_at": time.Now().Add(-2 * time.Hour),
+	})
+
+	trimInbox(t, workspaceID)
+
+	if isArchived(t, joinedID) {
+		t.Fatal("the comment that arrived during the snooze was archived")
+	}
+	if at := returnedAtOf(t, joinedID); at == nil || !at.Equal(wake) {
+		t.Fatalf("joined row returned_at = %v, want the wake time %v", at, wake)
+	}
+	if returnedAtOf(t, beforeID) != nil || !isArchived(t, beforeID) {
+		t.Fatal("the row newest at snooze time kept the issue's rank")
+	}
+}
+
+// Bulk archives drop the return rank, so a later restore earns it anew on the
+// restored row only.
+func TestBulkArchiveClearsReturn(t *testing.T) {
+	workspaceID := limitInboxWorkspace(t, "Inbox limit bulk archive")
+	allID := insertOldInboxRow(t, workspaceID, "archive-all", testutil.Cols{"returned_at": time.Now(), "read": true})
+	ctx := context.Background()
+	if _, err := testHandler.Queries.ArchiveAllReadInbox(ctx, db.ArchiveAllReadInboxParams{
+		WorkspaceID: parseUUID(workspaceID), RecipientID: parseUUID(testUserID),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !isArchived(t, allID) || returnedAtOf(t, allID) != nil {
+		t.Fatalf("archive all read: archived=%v returned_at=%v", isArchived(t, allID), returnedAtOf(t, allID))
+	}
+
+	dbfx.Exec(t, `UPDATE inbox_item SET archived = false, returned_at = now() WHERE id = $1`, allID)
+	if _, err := testHandler.Queries.ArchiveAllInbox(ctx, db.ArchiveAllInboxParams{
+		WorkspaceID: parseUUID(workspaceID), RecipientID: parseUUID(testUserID),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !isArchived(t, allID) || returnedAtOf(t, allID) != nil {
+		t.Fatalf("archive all: archived=%v returned_at=%v", isArchived(t, allID), returnedAtOf(t, allID))
+	}
+}

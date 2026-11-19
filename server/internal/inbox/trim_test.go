@@ -17,6 +17,7 @@ type fakeTrimQueries struct {
 	rows       int
 	locked     int
 	archiveRun int
+	normalized int
 }
 
 func (f *fakeTrimQueries) InboxOverflows(_ context.Context, arg db.InboxOverflowsParams) (bool, error) {
@@ -25,6 +26,11 @@ func (f *fakeTrimQueries) InboxOverflows(_ context.Context, arg db.InboxOverflow
 
 func (f *fakeTrimQueries) ListHiddenProjectIDsForUser(context.Context, db.ListHiddenProjectIDsForUserParams) ([]pgtype.UUID, error) {
 	return nil, nil
+}
+
+func (f *fakeTrimQueries) NormalizeInboxReturns(context.Context, db.NormalizeInboxReturnsParams) (int64, error) {
+	f.normalized++
+	return 0, nil
 }
 
 func (f *fakeTrimQueries) ArchiveInboxOverflow(_ context.Context, arg db.ArchiveInboxOverflowParams) (int64, error) {
@@ -55,8 +61,8 @@ func TestTrimmerLeavesInboxAtTheLimit(t *testing.T) {
 	tr.Mark(trimRecipient)
 	tr.Flush(context.Background())
 
-	if q.rows != ActiveLimit || q.archiveRun != 0 || len(*got) != 0 {
-		t.Fatalf("rows=%d archive runs=%d events=%d; want the inbox untouched", q.rows, q.archiveRun, len(*got))
+	if q.rows != ActiveLimit || q.archiveRun != 0 || q.normalized != 0 || len(*got) != 0 {
+		t.Fatalf("rows=%d archive runs=%d normalized=%d events=%d; want the inbox untouched", q.rows, q.archiveRun, q.normalized, len(*got))
 	}
 	if len(tr.pending) != 0 {
 		t.Fatalf("pending = %v, want the inbox settled", tr.pending)
@@ -74,8 +80,8 @@ func TestTrimmerArchivesOneRowPastTheLimitAndAnnounces(t *testing.T) {
 	tr.Mark(trimRecipient)
 	tr.Flush(context.Background())
 
-	if q.rows != ActiveLimit || len(tr.pending) != 0 {
-		t.Fatalf("rows=%d pending=%v; want trimmed to %d and settled", q.rows, tr.pending, ActiveLimit)
+	if q.rows != ActiveLimit || len(tr.pending) != 0 || q.normalized != 1 {
+		t.Fatalf("rows=%d pending=%v normalized=%d; want returns settled once, trimmed to %d and settled", q.rows, tr.pending, q.normalized, ActiveLimit)
 	}
 	if len(*got) != 1 {
 		t.Fatalf("batch-archived events = %d, want 1", len(*got))

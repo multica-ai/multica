@@ -37,6 +37,7 @@ const (
 type TrimQueries interface {
 	InboxOverflows(ctx context.Context, arg db.InboxOverflowsParams) (bool, error)
 	ArchiveInboxOverflow(ctx context.Context, arg db.ArchiveInboxOverflowParams) (int64, error)
+	NormalizeInboxReturns(ctx context.Context, arg db.NormalizeInboxReturnsParams) (int64, error)
 	ListHiddenProjectIDsForUser(ctx context.Context, arg db.ListHiddenProjectIDsForUserParams) ([]pgtype.UUID, error)
 }
 
@@ -204,6 +205,13 @@ func (t *Trimmer) trim(ctx context.Context, r Recipient) (archived int64, done b
 	over, err := overflows()
 	if err != nil || !over {
 		return 0, err == nil, err
+	}
+	// Settle which row ranks each issue by its return before ranking decides
+	// what to archive (see NormalizeInboxReturns).
+	if _, err := t.queries.NormalizeInboxReturns(ctx, db.NormalizeInboxReturnsParams{
+		WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
+	}); err != nil {
+		return 0, false, err
 	}
 	for range trimMaxBatches {
 		n, err := t.queries.ArchiveInboxOverflow(ctx, db.ArchiveInboxOverflowParams{
