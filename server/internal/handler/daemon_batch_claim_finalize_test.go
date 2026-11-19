@@ -163,6 +163,9 @@ func TestClaimTasksByRuntime_PersistsCommentDeliveryReceipt(t *testing.T) {
 		t.Fatalf("response delivered_comment_ids %v missing trigger comment %s", resp.Tasks[0].DeliveredCommentIDs, commentID)
 	}
 	assertCommentDelivered(t, ctx, taskID, commentID)
+	if revisions := deliveredCommentRevisionsForTask(t, taskID); revisions[commentID] != 1 {
+		t.Fatalf("batch claim did not persist its rendered revision: %v", revisions)
+	}
 }
 
 // TestClaimTasksByRuntime_StaleReclaimRecordsDeliveryReceipt pins that a
@@ -210,6 +213,9 @@ func TestClaimTasksByRuntime_StaleReclaimRecordsDeliveryReceipt(t *testing.T) {
 		t.Fatalf("expected the stale task %s reclaimed, got %+v", taskID, resp.Tasks)
 	}
 	assertCommentDelivered(t, ctx, taskID, commentID)
+	if revisions := deliveredCommentRevisionsForTask(t, taskID); revisions[commentID] != 1 {
+		t.Fatalf("batch reclaim did not replace its rendered revision: %v", revisions)
+	}
 }
 
 // TestClaimTasksByRuntime_SkipsRuntimeOwnedByAnotherDaemon pins the MUL-4257

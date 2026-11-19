@@ -2427,6 +2427,12 @@ WITH locked_issue AS MATERIALIZED (
               comment.resolved_by_type, comment.resolved_by_id, comment.source_task_id,
               comment.quick_action_id, comment.via_plugin_id, comment.revision,
               comment.deleted_at, target.did_change
+), withdrawn_inputs AS (
+    DELETE FROM comment_delivery_obligation obligation
+    USING updated_comment
+    WHERE updated_comment.did_change
+      AND obligation.comment_id = updated_comment.id
+      AND obligation.workspace_id = updated_comment.workspace_id
 ), touched_issue AS (
     UPDATE issue
     SET revision = issue.revision + 1,

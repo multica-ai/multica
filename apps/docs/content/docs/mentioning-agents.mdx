@@ -71,7 +71,11 @@ After you send, the comment shows "Waiting for … to read it", which changes to
 
 ## Coalescing consecutive comments
 
-When the same agent already has a waiting run on the issue, new comments merge into that pending run and are handled together when it starts. If the agent is already running, each comment is handled the way you chose in the comment box; see the previous section. You can keep adding information without waiting for the agent to reply.
+When the same agent already has a waiting run on the issue, new comments normally merge into that pending run and are handled together when it starts. If the agent is already running, each comment is handled the way you chose in the comment box; see the previous section. You can keep adding information without waiting for the agent to reply.
+
+Comments accepted for a follow-up run survive a server restart. When a linked pull request's reviewed commit changes, the follow-up uses the current reviewed commit instead of joining a queued run for an older commit.
+
+Pending input is discarded if its sender loses permission or its route no longer targets that agent; restoring access or assignment does not replay it. Automatic replay after system termination is bounded: at most two newly created run attempts per accepted version of the comment. Rebuilding a batch after another comment is edited or deleted does not consume this budget. Changing the comment text starts a new budget.
 
 When one comment @-mentions several different agents, each agent gets its own run; multiple mentions resolving to the same agent keep only one.
 

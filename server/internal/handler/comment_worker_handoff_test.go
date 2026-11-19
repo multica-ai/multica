@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -226,14 +227,14 @@ func TestWorkerReplyReconcileBoundaries(t *testing.T) {
 				}
 				if mode == "completed_before_registration" {
 					registration.before = func() {
-						if _, err := testHandler.TaskService.StartTask(ctx, parseUUID(taskID)); err != nil {
-							t.Fatal(err)
-						}
-						completeWorkerReplyRun(t, taskID)
+						// Commit the terminal state before the registration statement, without
+						// re-entering HTTP reconciliation while this transaction owns the input.
+						dbfx.Exec(t, `UPDATE agent_task_queue SET status='completed', completed_at=now() WHERE id=$1`, taskID)
 					}
 				}
 				if mode == "registration_failure" || mode == "completed_before_registration" {
 					h.Queries = db.New(registration)
+					h.TaskService = service.NewTaskService(h.Queries, registration, testHandler.Hub, testHandler.TaskService.Bus)
 				}
 				testutil.Call(t, h.CreateComment, req).Want(http.StatusCreated).JSON(&response)
 				if (mode == "registration_failure" || mode == "completed_before_registration") && registration.calls != 1 {
@@ -381,15 +382,41 @@ type workerReplyRegistrationDB struct {
 	calls  int
 }
 
-func (d *workerReplyRegistrationDB) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+func (d *workerReplyRegistrationDB) probe(query string) error {
 	if strings.Contains(query, "-- name: RegisterPlannedCommentForActiveTask :one") {
 		d.calls++
 		if d.before != nil {
 			d.before()
 		}
-		if d.err != nil {
-			return errRow{err: d.err}
-		}
+		return d.err
+	}
+	return nil
+}
+func (d *workerReplyRegistrationDB) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	if err := d.probe(query); err != nil {
+		return errRow{err: err}
 	}
 	return d.DBTX.QueryRow(ctx, query, args...)
+}
+func (d *workerReplyRegistrationDB) Begin(ctx context.Context) (pgx.Tx, error) {
+	starter := d.DBTX.(interface {
+		Begin(context.Context) (pgx.Tx, error)
+	})
+	tx, err := starter.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return workerReplyRegistrationTx{Tx: tx, db: d}, nil
+}
+
+type workerReplyRegistrationTx struct {
+	pgx.Tx
+	db *workerReplyRegistrationDB
+}
+
+func (tx workerReplyRegistrationTx) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	if err := tx.db.probe(query); err != nil {
+		return errRow{err: err}
+	}
+	return tx.Tx.QueryRow(ctx, query, args...)
 }

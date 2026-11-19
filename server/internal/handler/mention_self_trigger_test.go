@@ -17,7 +17,7 @@ func enqueueMentionedAgentTasksForTest(t *testing.T, ctx context.Context, issue 
 	triggers, _ := testHandler.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, authorType, authorID, commentTriggerComputeOptions{
 		AuthoringTaskID: comment.SourceTaskID,
 	})
-	testHandler.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
+	testHandler.enqueueCommentAgentTriggers(ctx, issue, commentDeliverySourceForTest(t, comment.ID), triggers)
 }
 
 // selfMentionFixture wires the seeded "Handler Test Agent" as J plus two

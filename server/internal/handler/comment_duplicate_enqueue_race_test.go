@@ -41,6 +41,9 @@ func dupRaceFixture(t *testing.T, agentName string, issueNumber int) (agentID, i
 	})
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID) })
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM comment_delivery_obligation WHERE issue_id = $1`, issueID)
+	})
 	return agentID, issueID, runtimeID
 }
 
@@ -141,7 +144,7 @@ func TestCommentEnqueueRaceQueuedWinnerFoldsLoser(t *testing.T) {
 			t.Cleanup(func() { slog.SetDefault(prev) })
 
 			trigger := commentAgentTrigger{Agent: agent, Source: tc.source}
-			results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})
+			results := testHandler.enqueueCommentAgentTriggers(ctx, issue, commentDeliverySourceForTest(t, util.MustParseUUID(loserCommentID)), []commentAgentTrigger{trigger})
 
 			// Guards the service hunk: the lost race must coalesce, not block.
 			if res := results[agentID]; res.status != DispatchCoalesced {
@@ -202,7 +205,7 @@ func TestCommentEnqueueRaceDispatchedWinnerDurablyCoversLoser(t *testing.T) {
 	}
 
 	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
-	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})
+	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, commentDeliverySourceForTest(t, util.MustParseUUID(loserCommentID)), []commentAgentTrigger{trigger})
 
 	// Truthful outcome: deferred (a follow-up will cover it), NOT coalesced.
 	if res := results[agentID]; res.status != DispatchDeferred {
@@ -242,14 +245,10 @@ func TestCommentEnqueueRaceDispatchedWinnerDurablyCoversLoser(t *testing.T) {
 	}
 }
 
-// TestCommentEnqueueRaceDifferentHeadNotCoalesced is the regression for Elon
-// round-2 must-fix 2 + round-7: a comment for a NEW head (PR updated A→B) collides
-// with the still-pending head-A task. It must NOT be folded into the head-A run
-// (TEN-356), and — per round 7 — it must NOT be reported as a fabricated deferred
-// either, since a point-in-time "an older task exists" cannot durably promise
-// coverage. The honest outcome is a non-success; the head-A task's completion
-// reconcile still covers the head-B comment best-effort, earning head-B coverage.
-func TestCommentEnqueueRaceDifferentHeadNotCoalesced(t *testing.T) {
+// TestCommentEnqueueRaceDifferentHeadDurablyDeferred checks this invariant:
+// A different-head queued task stays unchanged; a separate durable
+// obligation backs the acknowledged deferral.
+func TestCommentEnqueueRaceDifferentHeadDurablyDeferred(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -296,17 +295,17 @@ func TestCommentEnqueueRaceDifferentHeadNotCoalesced(t *testing.T) {
 	headBcommentID := insertDupRaceComment(t, issueID, "please review head B", "1 minute")
 
 	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
-	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(headBcommentID), []commentAgentTrigger{trigger})
+	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, commentDeliverySourceForTest(t, util.MustParseUUID(headBcommentID)), []commentAgentTrigger{trigger})
 
-	// Not coalesced into the head-A run, and NOT a fabricated deferred either — a
-	// snapshot cannot durably promise the head-A task's reconcile will still cover
-	// this comment (Elon round 7). The honest outcome is a non-success; the head-A
-	// reconcile still covers it best-effort below.
-	if res := results[agentID]; res.status == DispatchDeferred || res.status == DispatchCoalesced || res.status == DispatchQueued {
-		t.Fatalf("different-head race: got success-shaped %q/%q, want a truthful non-success", res.status, res.reason)
+	// Deferral is backed by a persisted obligation, not a prediction that
+	// the old-head task will discover this input later.
+	if res := results[agentID]; res.status != DispatchDeferred || res.reason != ReasonDeferred {
+		t.Fatalf("different-head race: got %q/%q, want durable deferral", res.status, res.reason)
 	}
-	if res := results[agentID]; res.status != DispatchBlocked || res.reason != ReasonInternalError {
-		t.Fatalf("different-head race: got %q/%q, want blocked/internal_error", res.status, res.reason)
+	if _, err := testHandler.Queries.GetCommentDeliveryObligation(ctx, db.GetCommentDeliveryObligationParams{
+		WorkspaceID: issue.WorkspaceID, CommentID: util.MustParseUUID(headBcommentID), AgentID: agentUUID,
+	}); err != nil {
+		t.Fatalf("different-head deferral has no record: %v", err)
 	}
 	// The head-A task is untouched: the head-B comment was NOT folded in, and the
 	// task still carries head A.
@@ -454,7 +453,7 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 	dbfx.Exec(t, `UPDATE comment SET parent_id=$2 WHERE id=$1`, loserCommentID, winnerCommentID)
 
 	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
-	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})
+	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, commentDeliverySourceForTest(t, util.MustParseUUID(loserCommentID)), []commentAgentTrigger{trigger})
 	if res := results[agentID]; res.status != DispatchCoalesced {
 		t.Fatalf("queued-winner reattribution race: got status %q reason %q, want coalesced", res.status, res.reason)
 	}
@@ -476,13 +475,10 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 	}
 }
 
-// TestCommentEnqueueRaceNewerDifferentHeadNotDeferred is the regression for Elon
-// round-5 must-fix: when the different-head task holding the slot is NEWER than
-// the losing comment (and the comment is not in its planned ids), completion
-// reconcile's `created_at > since` window never matches it — so the resolver must
-// NOT fabricate a deferred off "head differs". It returns a truthful non-success
-// (internal_error) instead, never a success-shaped outcome that drops the comment.
-func TestCommentEnqueueRaceNewerDifferentHeadNotDeferred(t *testing.T) {
+// TestCommentEnqueueRaceNewerDifferentHeadDurablyDeferred checks this invariant:
+// A newer different-head queued task cannot discover the older
+// comment by timestamp. The persisted obligation retains that input.
+func TestCommentEnqueueRaceNewerDifferentHeadDurablyDeferred(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -528,15 +524,16 @@ func TestCommentEnqueueRaceNewerDifferentHeadNotDeferred(t *testing.T) {
 	}
 
 	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
-	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})
+	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, commentDeliverySourceForTest(t, util.MustParseUUID(loserCommentID)), []commentAgentTrigger{trigger})
 
-	// Must NOT be a fabricated deferred — the newer head-A task cannot cover C.
 	res := results[agentID]
-	if res.status == DispatchDeferred || res.status == DispatchCoalesced || res.status == DispatchQueued {
-		t.Fatalf("newer different-head: got success-shaped %q/%q, want a truthful non-success (not deferred/coalesced/queued)", res.status, res.reason)
+	if res.status != DispatchDeferred || res.reason != ReasonDeferred {
+		t.Fatalf("newer different-head: got %q/%q, want durable deferral", res.status, res.reason)
 	}
-	if res.status != DispatchBlocked || res.reason != ReasonInternalError {
-		t.Fatalf("newer different-head: got %q/%q, want blocked/internal_error", res.status, res.reason)
+	if _, err := testHandler.Queries.GetCommentDeliveryObligation(ctx, db.GetCommentDeliveryObligationParams{
+		WorkspaceID: issue.WorkspaceID, CommentID: util.MustParseUUID(loserCommentID), AgentID: agentUUID,
+	}); err != nil {
+		t.Fatalf("newer different-head deferral has no record: %v", err)
 	}
 	// The head-A winner was not mutated to fake coverage.
 	var folded bool
@@ -551,16 +548,10 @@ func TestCommentEnqueueRaceNewerDifferentHeadNotDeferred(t *testing.T) {
 	}
 }
 
-// TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred covers Elon rounds 6+9:
-// an OLDER different-head task and a NEWER one can coexist (running sits outside
-// the unique index). At decision time nothing has attached the comment, so the
-// resolver must return a truthful non-success rather than a fabricated deferred
-// (round 6). Draining the chain then pins the boundary of the hand-off: the newer
-// blocker is at a DIFFERENT head, so the obligation is NOT folded into it — that
-// would let an old-head run consume a current-head request (TEN-356, round 9).
-// This is the one documented best-effort shape; correctness rests on the fact
-// that nothing ever promised coverage here.
-func TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred(t *testing.T) {
+// TestCommentEnqueueRaceMixedCoveringAndNewerDurablyDeferred checks this invariant:
+// An older running task and a newer queued blocker can coexist.
+// Neither can discard the independently persisted comment obligation.
+func TestCommentEnqueueRaceMixedCoveringAndNewerDurablyDeferred(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -617,23 +608,18 @@ func TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred(t *testing.T) {
 	}
 
 	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
-	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})
+	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, commentDeliverySourceForTest(t, util.MustParseUUID(loserCommentID)), []commentAgentTrigger{trigger})
 
-	// Even though a covering (older) task exists, the newer one forbids deferral.
 	res := results[agentID]
-	if res.status == DispatchDeferred || res.status == DispatchCoalesced || res.status == DispatchQueued {
-		t.Fatalf("mixed covering+newer: got success-shaped %q/%q, want a truthful non-success", res.status, res.reason)
+	if res.status != DispatchDeferred || res.reason != ReasonDeferred {
+		t.Fatalf("mixed blockers: got %q/%q, want durable deferral", res.status, res.reason)
 	}
-	if res.status != DispatchBlocked || res.reason != ReasonInternalError {
-		t.Fatalf("mixed covering+newer: got %q/%q, want blocked/internal_error", res.status, res.reason)
+	if _, err := testHandler.Queries.GetCommentDeliveryObligation(ctx, db.GetCommentDeliveryObligationParams{
+		WorkspaceID: issue.WorkspaceID, CommentID: util.MustParseUUID(loserCommentID), AgentID: agentUUID,
+	}); err != nil {
+		t.Fatalf("mixed-blocker deferral has no record: %v", err)
 	}
-
-	// Draining the chain: A completes and its replay of C collides with the still-
-	// queued newer B, which is at a DIFFERENT head. The hand-off correctly declines
-	// to fold C there (that would let an old-head run consume it — TEN-356), so this
-	// is the one documented best-effort shape: C stays uncovered and the failure is
-	// logged at error. What matters for correctness is that the initial call never
-	// PROMISED coverage — it returned a non-success above.
+	// Completing A leaves C pending independently of the queued old-head B.
 	if w := completeTaskViaHandler(t, taskA, "done"); w.Code != 200 {
 		t.Fatalf("complete A: %d: %s", w.Code, w.Body.String())
 	}
@@ -699,13 +685,9 @@ func seedDupRacePR(t *testing.T, issueID string, prNumber int) {
 	}
 }
 
-// TestReconcileBlockedReplayPropagatesToClaimedBlocker is the regression for Elon
-// round-8 must-fix 2 (planned-registration path): a planned-id obligation must not
-// be consumed once. C is registered as a planned input on running task A; before A
-// completes, a NEWER different-head task B is claimed and holds the unique slot. A's
-// completion replay of C is therefore blocked — and must be HANDED to B rather than
-// discarded, so completing B finally covers C.
-func TestReconcileBlockedReplayPropagatesToClaimedBlocker(t *testing.T) {
+// TestReconcileBlockedReplayPersistsOutsideClaimedBlocker keeps the input
+// independent of a newer different-head task that cannot deliver it.
+func TestReconcileBlockedReplayPersistsOutsideClaimedBlocker(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -738,7 +720,7 @@ func TestReconcileBlockedReplayPropagatesToClaimedBlocker(t *testing.T) {
 		t.Fatalf("insert dispatched blocker B: %v", err)
 	}
 
-	// A completes: its replay of C collides with B and must be handed to B.
+	// A completes: the accepted replay remains independent of blocker B.
 	if w := completeTaskViaHandler(t, taskA, "done"); w.Code != 200 {
 		t.Fatalf("complete A: %d: %s", w.Code, w.Body.String())
 	}
@@ -749,19 +731,24 @@ func TestReconcileBlockedReplayPropagatesToClaimedBlocker(t *testing.T) {
 	`, taskB, loserCommentID).Scan(&plannedOnB, &deliveredOnB); err != nil {
 		t.Fatalf("read blocker B: %v", err)
 	}
-	if !plannedOnB {
-		t.Fatal("blocked replay was discarded — C was not handed to the blocker, so it is lost")
+	if plannedOnB || deliveredOnB {
+		t.Fatal("different-head blocker acquired the deferred input")
 	}
-	if deliveredOnB {
-		t.Fatal("C must not be faked as delivered on the already-claimed blocker")
+	if _, err := testHandler.Queries.GetCommentDeliveryObligation(ctx, db.GetCommentDeliveryObligationParams{
+		WorkspaceID: util.MustParseUUID(testWorkspaceID), CommentID: util.MustParseUUID(loserCommentID), AgentID: util.MustParseUUID(agentID),
+	}); err != nil {
+		t.Fatalf("blocked replay has no independent obligation: %v", err)
 	}
-
-	// B completes: C is in its planned ids, so it is replayed and finally covered.
+	// Once B completes, the durable drain schedules current-head coverage.
 	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskB); err != nil {
 		t.Fatalf("advance B to running: %v", err)
 	}
 	if w := completeTaskViaHandler(t, taskB, "done"); w.Code != 200 {
 		t.Fatalf("complete B: %d: %s", w.Code, w.Body.String())
+	}
+	dbfx.Exec(t, `UPDATE comment_delivery_obligation SET next_attempt_at='-infinity' WHERE comment_id=$1 AND agent_id=$2`, loserCommentID, agentID)
+	if err := testHandler.DrainCommentDeliveryObligations(ctx, 50); err != nil {
+		t.Fatal(err)
 	}
 	if !commentCoveredByAnyActiveTask(t, issueID, agentID, loserCommentID) {
 		t.Fatal("after the blocker chain drained, no task covers C — the deferral was not durable")

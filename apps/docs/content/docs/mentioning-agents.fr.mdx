@@ -71,7 +71,11 @@ Après l'envoi, le commentaire affiche d'abord « En attente de lecture par … 
 
 ## Regroupement des commentaires consécutifs
 
-Lorsque le même agent a déjà une exécution en attente sur la tâche, les nouveaux commentaires sont fusionnés dans cette exécution et traités ensemble à son démarrage. Si l'agent est déjà en cours d'exécution, chaque commentaire est traité selon le choix fait dans la zone de commentaire (voir la section précédente). Vous pouvez continuer à ajouter des informations sans attendre la réponse de l'agent.
+Lorsque le même agent a déjà une exécution en attente sur la tâche, les nouveaux commentaires sont généralement fusionnés dans cette exécution et traités ensemble à son démarrage. Si l'agent est déjà en cours d'exécution, chaque commentaire est traité selon le choix fait dans la zone de commentaire (voir la section précédente). Vous pouvez continuer à ajouter des informations sans attendre la réponse de l'agent.
+
+Les commentaires acceptés pour une exécution suivante sont conservés après un redémarrage du serveur. Si le commit à examiner d'une pull request liée change, l'exécution suivante utilise le commit à examiner actuel au lieu de rejoindre une exécution en attente pour un ancien commit.
+
+Une entrée en attente est abandonnée si son auteur perd l'autorisation ou si son routage ne cible plus cet agent ; rétablir l'accès ou l'assignation ne la rejoue pas. Après un arrêt système, le rejeu automatique est limité à deux nouvelles tentatives d'exécution par version acceptée du commentaire. Reconstruire un lot après la modification ou la suppression d’un autre commentaire ne consomme pas ce budget. Modifier le texte du commentaire ouvre un nouveau budget.
 
 Lorsqu'un commentaire @mentionne plusieurs agents différents, chaque agent obtient sa propre exécution ; plusieurs mentions qui désignent le même agent n'en produisent qu'une seule.
 

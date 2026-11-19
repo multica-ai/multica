@@ -761,6 +761,23 @@ type Comment struct {
 	SuppressedAgentIds []pgtype.UUID      `json:"suppressed_agent_ids"`
 }
 
+type CommentDeliveryObligation struct {
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	CommentID        pgtype.UUID        `json:"comment_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	CommentRevision  int64              `json:"comment_revision"`
+	CommentContent   string             `json:"comment_content"`
+	InputUpdatedAt   pgtype.Timestamptz `json:"input_updated_at"`
+	ActorType        string             `json:"actor_type"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	OriginatorUserID pgtype.UUID        `json:"originator_user_id"`
+	AuthoringTaskID  pgtype.UUID        `json:"authoring_task_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	NextAttemptAt    pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseUntil       pgtype.Timestamptz `json:"lease_until"`
+}
+
 type CommentReaction struct {
 	ID          pgtype.UUID        `json:"id"`
 	CommentID   pgtype.UUID        `json:"comment_id"`

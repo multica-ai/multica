@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/attribution"
@@ -286,11 +287,20 @@ func TestAttributionForMergedComment_HonorsFailClosedPolicy(t *testing.T) {
 		t.Fatalf("seed comment: %v", err)
 	}
 
+	issue, err := q.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	comment, err := q.GetComment(ctx, util.MustParseUUID(commentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := db.CommentDeliveryObligation{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID, AgentID: agent.ID, CommentID: comment.ID, ActorType: comment.AuthorType, ActorID: comment.AuthorID, InputUpdatedAt: comment.CreatedAt}
 	// Fail-CLOSED: the merge must be refused, not degraded.
 	if _, err := pool.Exec(ctx, `UPDATE workspace SET attribution_fail_closed = true WHERE id = $1`, workspaceID); err != nil {
 		t.Fatalf("set fail-closed: %v", err)
 	}
-	if _, err := svc.AttributionForMergedComment(ctx, util.MustParseUUID(workspaceID), util.MustParseUUID(commentID), false, agent); !errors.Is(err, ErrAttributionFailClosed) {
+	if _, err := svc.AttributionForMergedComment(ctx, issue, accepted, false, agent); !errors.Is(err, ErrAttributionFailClosed) {
 		t.Fatalf("fail-closed merge must return ErrAttributionFailClosed, got %v", err)
 	}
 
@@ -298,7 +308,7 @@ func TestAttributionForMergedComment_HonorsFailClosedPolicy(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE workspace SET attribution_fail_closed = false WHERE id = $1`, workspaceID); err != nil {
 		t.Fatalf("clear fail-closed: %v", err)
 	}
-	attr, err := svc.AttributionForMergedComment(ctx, util.MustParseUUID(workspaceID), util.MustParseUUID(commentID), false, agent)
+	attr, err := svc.AttributionForMergedComment(ctx, issue, accepted, false, agent)
 	if err != nil {
 		t.Fatalf("fail-open merge must not error, got %v", err)
 	}
@@ -1151,6 +1161,9 @@ func TestApplyAttributionFallbackRefusesOnMissingOwner(t *testing.T) {
 	if !errors.Is(err, ErrAttributionFailClosed) {
 		t.Fatalf("missing owner: err = %v, want ErrAttributionFailClosed", err)
 	}
+	if errors.Is(err, ErrAttributionPolicyRead) {
+		t.Fatal("confirmed missing owner was classified as a policy read failure")
+	}
 }
 
 // TestApplyAttributionFallbackRefusesOnPolicyReadFailure: if the workspace policy
@@ -1168,6 +1181,9 @@ func TestApplyAttributionFallbackRefusesOnPolicyReadFailure(t *testing.T) {
 	_, err := svc.applyAttributionFallback(ctx, unattr, db.Agent{WorkspaceID: missingWs, OwnerID: util.MustParseUUID(ownerID)})
 	if !errors.Is(err, ErrAttributionFailClosed) {
 		t.Fatalf("policy read failure: err = %v, want ErrAttributionFailClosed", err)
+	}
+	if !errors.Is(err, ErrAttributionPolicyRead) || !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("policy read failure must remain distinguishable and preserve its cause: %v", err)
 	}
 }
 
