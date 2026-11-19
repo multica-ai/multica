@@ -163,6 +163,8 @@ cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~
 
 守护进程启动约 30 秒后清理一次，之后每 2 小时一次。正在执行的运行用到的目录不会被清理。`multica daemon disk-usage` 可以按工作区或按运行查看占用。下文的时长都是默认值，对应的 `MULTICA_GC_*` 变量见[环境变量](/environment-variables#gc)。
 
+逐次运行表的 `MODE` 列用 `in place` 标记直接运行。如果运行元数据记录了该模式，JSON 输出会在对应条目中包含 `local_directory: true`。
+
 ### 运行目录
 
 每次运行在工作目录根目录（默认 `~/multica_workspaces`）下有一个目录，放检出的代码、输出和日志；同一任务的后续运行会续用它。整个目录在以下时机删除：

@@ -88,6 +88,7 @@ var daemonDiskUsageCmd = &cobra.Command{
 		"overridable via MULTICA_GC_ARTIFACT_PATTERNS) so the report stays in sync with what the GC reclaims.\n" +
 		"A .git directory counts toward the total but never toward the artifact subset — the GC frees it only\n" +
 		"when it removes the whole run directory. Symlinks are never followed.\n\n" +
+		"The MODE column marks in-place runs when recorded in local metadata. JSON includes local_directory: true for those runs.\n\n" +
 		"The STATUS column shows the current status of the issue each directory belongs to, which requires\n" +
 		"contacting the server. When the machine is offline, logged out, or the request fails, the column is\n" +
 		"left blank and the rest of the report still prints. --by-workspace has no STATUS column and therefore\n" +
@@ -2235,6 +2236,10 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 	for _, task := range report.Tasks {
 		displayedSize += task.SizeBytes
 		displayedArtifact += task.ArtifactSizeBytes
+		mode := "-"
+		if task.LocalDirectory {
+			mode = "in place"
+		}
 		rows = append(rows, []string{
 			task.WorkspaceShort + "/" + task.TaskShort,
 			task.Kind,
@@ -2242,9 +2247,10 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 			formatAge(task.AgeSeconds),
 			formatBytes(task.SizeBytes),
 			formatBytes(task.ArtifactSizeBytes),
+			mode,
 		})
 	}
-	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS"}, rows)
+	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS", "MODE"}, rows)
 
 	if len(report.Tasks) < report.TotalTaskCount {
 		// Report-wide totals stay anchored to the full scan; the displayed

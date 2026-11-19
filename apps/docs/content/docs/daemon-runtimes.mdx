@@ -162,6 +162,8 @@ The login applies from the agent's next run; the current run does not pick it up
 
 The daemon runs its first cleanup about 30 seconds after starting, then every 2 hours. Directories in use by a running run are never cleaned. `multica daemon disk-usage` shows usage per workspace or per run. The durations below are defaults; the matching `MULTICA_GC_*` variables are in [Environment variables](/environment-variables#gc).
 
+The per-run `MODE` column marks in-place runs with `in place`. JSON reports these rows as `local_directory: true` when the run metadata identifies the mode.
+
 ### Run directories
 
 Each run gets a directory under the workspaces root (default `~/multica_workspaces`) holding the checked-out code, output, and logs; later runs on the same issue reuse it. The whole directory is removed:
