@@ -3689,6 +3689,24 @@ export const WorkspaceSubscriptionSummarySchema = z
       .nullable()
       .optional()
       .catch(null),
+    // Absent on a cloud that predates trials. A malformed value reads as no
+    // trial: the entitlement still carries the plan the workspace has.
+    trial: z
+      .object({
+        plan: z.string().min(1),
+        state: z.enum(["active", "expired", "converted"]),
+        started_at: z.string().min(1),
+        ends_at: z.string().min(1),
+      })
+      .loose()
+      .refine(
+        (value) =>
+          !Number.isNaN(Date.parse(value.started_at)) &&
+          !Number.isNaN(Date.parse(value.ends_at)),
+      )
+      .nullable()
+      .optional()
+      .catch(null),
   })
   .loose()
   .transform(
@@ -3733,6 +3751,14 @@ export const WorkspaceSubscriptionSummarySchema = z
             targetPlan: value.plan_change.target_plan,
             state: value.plan_change.state,
             since: value.plan_change.since,
+          }
+        : null,
+      trial: value.trial
+        ? {
+            plan: value.trial.plan,
+            state: value.trial.state,
+            startedAt: value.trial.started_at,
+            endsAt: value.trial.ends_at,
           }
         : null,
     }),

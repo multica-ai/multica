@@ -1632,6 +1632,7 @@ describe("workspace subscription contract", () => {
       checkPlanChange: false,
     });
     expect(summary?.planChange).toBeNull();
+    expect(summary?.trial).toBeNull();
   });
 
   it("reads a plan change that still holds the subscription", async () => {
@@ -1687,6 +1688,64 @@ describe("workspace subscription contract", () => {
 
     expect(summary).not.toBeNull();
     expect(summary?.planChange?.state ?? null).toBe(expected);
+  });
+
+  it("reads a no-card trial", async () => {
+    stubFetchJson({
+      entitlement: {
+        ...entitlement,
+        plan: "business",
+        status: "trialing",
+        current_period_end: "2026-12-19T08:00:00Z",
+      },
+      billing_interval: null,
+      human_members: 7,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: false,
+      available_actions: { checkout: true, portal: false, purchase_seats: false },
+      trial: {
+        plan: "business",
+        state: "active",
+        started_at: "2026-12-05T08:00:00Z",
+        ends_at: "2026-12-19T08:00:00Z",
+      },
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary?.entitlement.status).toBe("trialing");
+    expect(summary?.trial).toEqual({
+      plan: "business",
+      state: "active",
+      startedAt: "2026-12-05T08:00:00Z",
+      endsAt: "2026-12-19T08:00:00Z",
+    });
+  });
+
+  it.each([
+    ["absent (an older cloud)", undefined],
+    ["an unknown state", { plan: "business", state: "paused", started_at: "2026-12-05T08:00:00Z", ends_at: "2026-12-19T08:00:00Z" }],
+    ["an unparseable end", { plan: "business", state: "active", started_at: "2026-12-05T08:00:00Z", ends_at: "soon" }],
+    ["a missing plan", { state: "active", started_at: "2026-12-05T08:00:00Z", ends_at: "2026-12-19T08:00:00Z" }],
+  ])("reads %s trial as no trial without failing the summary", async (_name, trial) => {
+    stubFetchJson({
+      entitlement,
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+      available_actions: { checkout: false, portal: true, purchase_seats: false },
+      ...(trial === undefined ? {} : { trial }),
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary).not.toBeNull();
+    expect(summary?.trial).toBeNull();
   });
 
   it("offers no plan switch when cloud does not report change_plan", async () => {

@@ -151,6 +151,7 @@
     "./issue-views/edit-store": "./issue-views/edit-store.ts",
     "./billing": "./billing/index.ts",
     "./billing/recovery": "./billing/recovery.ts",
+    "./billing/trial": "./billing/trial.ts",
     "./billing/queries": "./billing/queries.ts",
     "./billing/mutations": "./billing/mutations.ts",
     "./github": "./github/index.ts",

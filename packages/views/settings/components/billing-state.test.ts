@@ -146,6 +146,7 @@ describe("billing subscription state", () => {
         checkPlanChange: false,
       },
       planChange: null,
+      trial: null,
     } satisfies WorkspaceSubscriptionSummary;
 
     expect(hasActiveWorkspaceSeatCapacity(canceledSummary)).toBe(false);
@@ -187,6 +188,7 @@ describe("resolvePlanChangeTarget", () => {
       checkPlanChange: false,
     },
     planChange: null,
+    trial: null,
   });
 
   it("switches between Pro and Business only when Cloud offers it", () => {
