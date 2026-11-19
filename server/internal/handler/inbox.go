@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -246,11 +247,17 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 			RecipientType:    "member",
 			RecipientID:      parseUUID(userID),
 			HiddenProjectIds: hidden.Param(),
+			RowLimit:         inbox.ActiveLimit,
 		})
 	})
 	if err != nil {
 		writeInboxReadError(w, err, "failed to list inbox")
 		return
+	}
+	// A full page may mean an inbox the trimmer has not reached yet, such as
+	// one that outgrew the limit before it existed and gets no new rows.
+	if len(items) >= inbox.ActiveLimit {
+		h.InboxTrimmer.Mark(inbox.Recipient{WorkspaceID: wsUUID, RecipientType: "member", RecipientID: parseUUID(userID)})
 	}
 
 	issuePrefix := h.getIssuePrefix(r.Context(), wsUUID)

@@ -302,6 +302,34 @@ export function createEnDict(): LandingDict {
     },
     entries: [
       {
+        version: "0.11.1",
+        date: "2026-11-19",
+        title: "List bot commands with /help, manage your Inbox from the CLI, and faster long Issues",
+        changes: [],
+        features: [
+          "Send /help to an agent's bot in WeChat, Lark, Slack, DingTalk, WeCom, or Telegram to list its commands.",
+          "Manage your Inbox from the CLI: mark read or unread, archive, restore, snooze, and update many at once.",
+        ],
+        improvements: [
+          "Your Inbox keeps the newest 2,000 notifications in each workspace and archives older ones automatically.",
+          "Long Issues open faster from the Inbox and show the comment you clicked first.",
+          "Switching desktop tabs and scrolling a long Inbox in the Work panel are smoother.",
+          "Image deliverables load as thumbnails in lists, and previews still show the full image.",
+        ],
+        fixes: [
+          "When the Inbox fails to load, it retries, then shows an error, and keeps notifications already loaded.",
+          "On desktop, every page keeps its scroll position across tab switches, including settings, Issue tables, and Gantt.",
+          "Attachment links such as videos and PDFs open in the in-app preview instead of the storage page.",
+          "The Work panel's Inbox highlights the row of an Issue you open from it again.",
+          "Hover over a cut-off Issue title to read it in full.",
+          "Changing a project's repository no longer carries over the old repository's branch.",
+          "Issue and project text containing hidden control characters now saves instead of failing.",
+          "Codex tasks load the plugins bundled with your Codex setup, so finished runs release their browser tabs.",
+          "Turning off the daemon's idle watchdog no longer removes Codex's inactivity timeout.",
+          "CLI and runtime errors now tell a dropped connection from an unreachable server and name version check timeouts.",
+        ],
+      },
+      {
         version: "0.11.0",
         date: "2026-11-18",
         title: "Agents on WeChat, chat agents that report back, adding to a running reply, and project folders",
