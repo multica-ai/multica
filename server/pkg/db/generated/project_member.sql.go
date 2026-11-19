@@ -112,6 +112,34 @@ func (q *Queries) AddUserToProjects(ctx context.Context, arg AddUserToProjectsPa
 	return items, nil
 }
 
+const countGuestsNotInProject = `-- name: CountGuestsNotInProject :one
+SELECT count(*)::bigint FROM member m
+WHERE m.workspace_id = $1
+  AND m.role = 'guest'
+  AND m.user_id = ANY($2::uuid[])
+  AND NOT EXISTS (
+      SELECT 1 FROM project_member pm
+      WHERE pm.project_id = $3
+        AND pm.user_id = m.user_id
+  )
+`
+
+type CountGuestsNotInProjectParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	UserIds     []pgtype.UUID `json:"user_ids"`
+	ProjectID   pgtype.UUID   `json:"project_id"`
+}
+
+// How many of user_ids are guests (MUL-9420) of the workspace who are not
+// members of project_id yet: adding them shares another project with a
+// guest. A project that does not exist yet (the nil uuid) has no members.
+func (q *Queries) CountGuestsNotInProject(ctx context.Context, arg CountGuestsNotInProjectParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countGuestsNotInProject, arg.WorkspaceID, arg.UserIds, arg.ProjectID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countProjectsUserIsNotMemberOf = `-- name: CountProjectsUserIsNotMemberOf :one
 SELECT count(*)::bigint FROM unnest($1::uuid[]) AS requested(id)
 WHERE NOT EXISTS (
@@ -244,6 +272,73 @@ func (q *Queries) GetProjectAccessManager(ctx context.Context, arg GetProjectAcc
 	var user_id pgtype.UUID
 	err := row.Scan(&user_id)
 	return user_id, err
+}
+
+const listAgentIDsSeenByGuest = `-- name: ListAgentIDsSeenByGuest :many
+WITH visible_issue AS (
+    SELECT i.id, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id
+    FROM issue i
+    JOIN project_member pm ON pm.project_id = i.project_id
+    WHERE pm.workspace_id = $1
+      AND pm.user_id = $2
+      AND i.workspace_id = $1
+)
+SELECT v.assignee_id::uuid AS agent_id FROM visible_issue v
+WHERE v.assignee_type = 'agent' AND v.assignee_id IS NOT NULL
+UNION
+SELECT v.creator_id FROM visible_issue v WHERE v.creator_type = 'agent'
+UNION
+SELECT c.author_id FROM comment c JOIN visible_issue v ON v.id = c.issue_id
+WHERE c.author_type = 'agent'
+UNION
+SELECT cr.actor_id FROM comment_reaction cr
+JOIN comment c ON c.id = cr.comment_id
+JOIN visible_issue v ON v.id = c.issue_id
+WHERE cr.actor_type = 'agent'
+UNION
+SELECT r.actor_id FROM issue_reaction r JOIN visible_issue v ON v.id = r.issue_id
+WHERE r.actor_type = 'agent'
+UNION
+SELECT a.actor_id FROM activity_log a JOIN visible_issue v ON v.id = a.issue_id
+WHERE a.actor_type = 'agent' AND a.actor_id IS NOT NULL
+UNION
+SELECT s.user_id FROM issue_subscriber s JOIN visible_issue v ON v.id = s.issue_id
+WHERE s.user_type = 'agent'
+UNION
+SELECT p.lead_id FROM project p
+JOIN project_member pm ON pm.project_id = p.id
+WHERE pm.workspace_id = $1
+  AND pm.user_id = $2
+  AND p.lead_type = 'agent' AND p.lead_id IS NOT NULL
+`
+
+type ListAgentIDsSeenByGuestParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// The agents a guest (MUL-9420) meets in its projects: as an issue's
+// assignee or creator, a comment's author, a reaction, an activity entry, a
+// subscriber or a project lead. A guest is shown only these, to render their
+// names and avatars, not the workspace's agent directory.
+func (q *Queries) ListAgentIDsSeenByGuest(ctx context.Context, arg ListAgentIDsSeenByGuestParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAgentIDsSeenByGuest, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var agent_id pgtype.UUID
+		if err := rows.Scan(&agent_id); err != nil {
+			return nil, err
+		}
+		items = append(items, agent_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAutopilotRunProjectIDs = `-- name: ListAutopilotRunProjectIDs :many

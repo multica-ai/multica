@@ -75,7 +75,7 @@ func (h *Handler) InvokePluginHook(w http.ResponseWriter, r *http.Request) {
 		Input: rawOrNil(req.Input),
 	}
 	if req.IssueID != "" {
-		issue, ok := h.pluginIssueForUser(w, r, caller, req.IssueID)
+		issue, ok := h.pluginIssueForUser(w, r, caller, actor, req.IssueID)
 		if !ok {
 			return
 		}

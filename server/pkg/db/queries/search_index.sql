@@ -125,3 +125,25 @@ SELECT count(*)::bigint AS deleted_count FROM deleted;
 
 -- name: DeleteWorkspaceSearchIndexChanges :exec
 DELETE FROM search_index_change WHERE workspace_id = $1;
+
+-- name: MarkSearchAccessNarrowed :exec
+-- Records that this transaction narrowed what the user can see in the
+-- workspace (MUL-9420), so local search copies built before it are rebuilt.
+INSERT INTO member_search_access (workspace_id, user_id, narrowed_xid, narrowed_at)
+VALUES (@workspace_id, @user_id, pg_current_xact_id(), now())
+ON CONFLICT (workspace_id, user_id) DO UPDATE
+    SET narrowed_xid = EXCLUDED.narrowed_xid,
+        narrowed_at = EXCLUDED.narrowed_at;
+
+-- name: SearchAccessNarrowedAfter :one
+-- Whether the user's access in the workspace was narrowed by a transaction
+-- the since snapshot does not include.
+SELECT EXISTS (
+    SELECT 1 FROM member_search_access
+    WHERE workspace_id = @workspace_id
+      AND user_id = @user_id
+      AND NOT pg_visible_in_snapshot(narrowed_xid, (@since_snapshot::text)::pg_snapshot)
+)::bool AS narrowed;
+
+-- name: DeleteWorkspaceMemberSearchAccess :exec
+DELETE FROM member_search_access WHERE workspace_id = $1;

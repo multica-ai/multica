@@ -56,6 +56,9 @@ var guestRoutes = compileGuestRoutes([]string{
 	"POST /api/issues/*/unread",
 	"PUT /api/comments/*",
 	"DELETE /api/comments/*",
+	// The same delete under the path clients use when they promise to keep
+	// the replies (#8296); the handler still allows only the author.
+	"DELETE /api/comments/*/keep-replies",
 	"POST /api/comments/*/reactions",
 	"DELETE /api/comments/*/reactions",
 

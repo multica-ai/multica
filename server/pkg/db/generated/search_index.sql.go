@@ -11,6 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteWorkspaceMemberSearchAccess = `-- name: DeleteWorkspaceMemberSearchAccess :exec
+DELETE FROM member_search_access WHERE workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceMemberSearchAccess(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceMemberSearchAccess, workspaceID)
+	return err
+}
+
 const deleteWorkspaceSearchIndexChanges = `-- name: DeleteWorkspaceSearchIndexChanges :exec
 DELETE FROM search_index_change WHERE workspace_id = $1
 `
@@ -479,6 +488,26 @@ func (q *Queries) ListSearchIndexProjectsByIDs(ctx context.Context, arg ListSear
 	return items, nil
 }
 
+const markSearchAccessNarrowed = `-- name: MarkSearchAccessNarrowed :exec
+INSERT INTO member_search_access (workspace_id, user_id, narrowed_xid, narrowed_at)
+VALUES ($1, $2, pg_current_xact_id(), now())
+ON CONFLICT (workspace_id, user_id) DO UPDATE
+    SET narrowed_xid = EXCLUDED.narrowed_xid,
+        narrowed_at = EXCLUDED.narrowed_at
+`
+
+type MarkSearchAccessNarrowedParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Records that this transaction narrowed what the user can see in the
+// workspace (MUL-9420), so local search copies built before it are rebuilt.
+func (q *Queries) MarkSearchAccessNarrowed(ctx context.Context, arg MarkSearchAccessNarrowedParams) error {
+	_, err := q.db.Exec(ctx, markSearchAccessNarrowed, arg.WorkspaceID, arg.UserID)
+	return err
+}
+
 const pruneSearchIndexChanges = `-- name: PruneSearchIndexChanges :one
 WITH doomed AS (
     SELECT sic.entity_type, sic.entity_id
@@ -516,6 +545,30 @@ func (q *Queries) PruneSearchIndexChanges(ctx context.Context, arg PruneSearchIn
 	var deleted_count int64
 	err := row.Scan(&deleted_count)
 	return deleted_count, err
+}
+
+const searchAccessNarrowedAfter = `-- name: SearchAccessNarrowedAfter :one
+SELECT EXISTS (
+    SELECT 1 FROM member_search_access
+    WHERE workspace_id = $1
+      AND user_id = $2
+      AND NOT pg_visible_in_snapshot(narrowed_xid, ($3::text)::pg_snapshot)
+)::bool AS narrowed
+`
+
+type SearchAccessNarrowedAfterParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	UserID        pgtype.UUID `json:"user_id"`
+	SinceSnapshot string      `json:"since_snapshot"`
+}
+
+// Whether the user's access in the workspace was narrowed by a transaction
+// the since snapshot does not include.
+func (q *Queries) SearchAccessNarrowedAfter(ctx context.Context, arg SearchAccessNarrowedAfterParams) (bool, error) {
+	row := q.db.QueryRow(ctx, searchAccessNarrowedAfter, arg.WorkspaceID, arg.UserID, arg.SinceSnapshot)
+	var narrowed bool
+	err := row.Scan(&narrowed)
+	return narrowed, err
 }
 
 const searchIndexSinceIsPruned = `-- name: SearchIndexSinceIsPruned :one

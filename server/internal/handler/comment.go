@@ -1733,8 +1733,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
-	if authorType == "member" && h.isGuest(r, uuidToString(issue.WorkspaceID), userID) && mentionsAgent(req.Content) {
-		writeError(w, http.StatusForbidden, "guests cannot mention agents or squads")
+	if h.refuseGuestMention(w, r, uuidToString(issue.WorkspaceID), userID, authorType, req.Content) {
 		return
 	}
 
@@ -3477,6 +3476,11 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+	// The same mention rule as CreateComment: an edit must not add what a
+	// new comment could not carry.
+	if h.refuseGuestMention(w, r, workspaceID, userID, actorType, req.Content) {
 		return
 	}
 	if req.ExpectedRevision != nil {

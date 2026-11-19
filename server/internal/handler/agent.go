@@ -1223,9 +1223,18 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if projectaccess.IsGuestRole(member.Role) {
-		names := make([]AgentResponse, 0, len(agents))
+		// Not the agent directory: only the agents the guest meets in its
+		// projects, with just enough to render their names.
+		seen, err := h.guestAgentIDs(r.Context(), member)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list agents")
+			return
+		}
+		names := make([]AgentResponse, 0, len(seen))
 		for _, a := range agents {
-			names = append(names, guestAgentView(h.agentToResponse(a)))
+			if seen[a.ID.Bytes] {
+				names = append(names, guestAgentView(h.agentToResponse(a)))
+			}
 		}
 		writeJSON(w, http.StatusOK, names)
 		return

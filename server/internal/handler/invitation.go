@@ -572,6 +572,16 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	guest := projectaccess.IsGuestRole(inv.Role)
+	// Accepting adds the guest, so it passes the same gate as inviting one:
+	// an invitation sent during a trial or before guests were switched off
+	// does not admit a guest the workspace can no longer add. A refusal
+	// leaves the invitation pending, as the member limit does above.
+	var guestAdmission featureAdmission
+	if guest {
+		if guestAdmission, ok = h.requireGuestAddition(w, r, inv.WorkspaceID, "accept_invitation"); !ok {
+			return
+		}
+	}
 	capacityActive := false
 	if !guest {
 		capacityActive, err = h.beginCapacityConsume(r.Context(), uuid.UUID(inv.WorkspaceID.Bytes), uuid.UUID(inv.ID.Bytes), uuid.UUID(inv.ID.Bytes), uuid.UUID(user.ID.Bytes))
@@ -662,6 +672,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limitAdmission.record(r.Context())
+	guestAdmission.admitted(r.Context())
 	if capacityActive {
 		h.confirmCapacityIntent(r.Context(), uuid.UUID(accepted.WorkspaceID.Bytes), uuid.UUID(accepted.ID.Bytes), uuid.UUID(member.ID.Bytes))
 	}

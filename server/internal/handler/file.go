@@ -517,6 +517,13 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			if !h.requireIssueIDVisible(w, r, workspaceID, comment.IssueID, http.StatusForbidden, "invalid comment_id") {
 				return
 			}
+			// A guest attaches files only to its own comments (MUL-9420);
+			// seeing a comment is not enough to add to it.
+			if uploaderType == "member" && h.isGuest(r, workspaceID, userID) &&
+				(comment.AuthorType != "member" || uuidToString(comment.AuthorID) != userID) {
+				writeError(w, http.StatusForbidden, "invalid comment_id")
+				return
+			}
 			params.CommentID = comment.ID
 		}
 		if chatSessionID := r.FormValue("chat_session_id"); chatSessionID != "" {

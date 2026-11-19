@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -479,8 +480,11 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		limit = min(req.Limit, searchIndexChangesMaxLimit)
 	}
 
+	// Agents and other non-user callers have no per-user marker to check.
+	viewer, _ := util.ParseUUID(requestUserID(r))
 	var (
 		pruned   bool
+		narrowed bool
 		target   = cur.Target
 		changes  []db.ListSearchIndexChangesRow
 		issues   []db.Issue
@@ -491,6 +495,13 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		var err error
 		if pruned, err = q.SearchIndexSinceIsPruned(ctx, cur.Since); err != nil || pruned {
 			return err
+		}
+		if viewer.Valid {
+			if narrowed, err = q.SearchAccessNarrowedAfter(ctx, db.SearchAccessNarrowedAfterParams{
+				WorkspaceID: wsUUID, UserID: viewer, SinceSnapshot: cur.Since,
+			}); err != nil || narrowed {
+				return err
+			}
 		}
 		if target == "" {
 			if target, err = q.GetSearchIndexCurrentSnapshot(ctx); err != nil {
@@ -558,6 +569,13 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	}
 	if pruned {
 		writeError(w, http.StatusGone, "search index cursor expired; rebuild the local index")
+		return
+	}
+	if narrowed {
+		// The caller lost access (made a guest, or a guest lost a project)
+		// after this copy's snapshot. The content it can no longer see was
+		// not rewritten, so no change would remove it; only a rebuild does.
+		writeError(w, http.StatusGone, "search index access changed; rebuild the local index")
 		return
 	}
 	// Entities in a project the caller cannot see are reported as deleted, so

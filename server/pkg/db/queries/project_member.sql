@@ -178,3 +178,58 @@ WHERE NOT EXISTS (
       AND pm.user_id = sqlc.arg('user_id')
       AND pm.project_id = requested.id
 );
+
+-- name: CountGuestsNotInProject :one
+-- How many of user_ids are guests (MUL-9420) of the workspace who are not
+-- members of project_id yet: adding them shares another project with a
+-- guest. A project that does not exist yet (the nil uuid) has no members.
+SELECT count(*)::bigint FROM member m
+WHERE m.workspace_id = sqlc.arg('workspace_id')
+  AND m.role = 'guest'
+  AND m.user_id = ANY(sqlc.arg('user_ids')::uuid[])
+  AND NOT EXISTS (
+      SELECT 1 FROM project_member pm
+      WHERE pm.project_id = sqlc.arg('project_id')
+        AND pm.user_id = m.user_id
+  );
+
+-- name: ListAgentIDsSeenByGuest :many
+-- The agents a guest (MUL-9420) meets in its projects: as an issue's
+-- assignee or creator, a comment's author, a reaction, an activity entry, a
+-- subscriber or a project lead. A guest is shown only these, to render their
+-- names and avatars, not the workspace's agent directory.
+WITH visible_issue AS (
+    SELECT i.id, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id
+    FROM issue i
+    JOIN project_member pm ON pm.project_id = i.project_id
+    WHERE pm.workspace_id = sqlc.arg('workspace_id')
+      AND pm.user_id = sqlc.arg('user_id')
+      AND i.workspace_id = sqlc.arg('workspace_id')
+)
+SELECT v.assignee_id::uuid AS agent_id FROM visible_issue v
+WHERE v.assignee_type = 'agent' AND v.assignee_id IS NOT NULL
+UNION
+SELECT v.creator_id FROM visible_issue v WHERE v.creator_type = 'agent'
+UNION
+SELECT c.author_id FROM comment c JOIN visible_issue v ON v.id = c.issue_id
+WHERE c.author_type = 'agent'
+UNION
+SELECT cr.actor_id FROM comment_reaction cr
+JOIN comment c ON c.id = cr.comment_id
+JOIN visible_issue v ON v.id = c.issue_id
+WHERE cr.actor_type = 'agent'
+UNION
+SELECT r.actor_id FROM issue_reaction r JOIN visible_issue v ON v.id = r.issue_id
+WHERE r.actor_type = 'agent'
+UNION
+SELECT a.actor_id FROM activity_log a JOIN visible_issue v ON v.id = a.issue_id
+WHERE a.actor_type = 'agent' AND a.actor_id IS NOT NULL
+UNION
+SELECT s.user_id FROM issue_subscriber s JOIN visible_issue v ON v.id = s.issue_id
+WHERE s.user_type = 'agent'
+UNION
+SELECT p.lead_id FROM project p
+JOIN project_member pm ON pm.project_id = p.id
+WHERE pm.workspace_id = sqlc.arg('workspace_id')
+  AND pm.user_id = sqlc.arg('user_id')
+  AND p.lead_type = 'agent' AND p.lead_id IS NOT NULL;

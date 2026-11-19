@@ -758,12 +758,9 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 	case wasGuest && !toGuest:
 		updatedMember, ok = h.promoteGuest(w, r, target, role)
 	default:
-		updatedMember, err = h.Queries.UpdateMemberRole(r.Context(), db.UpdateMemberRoleParams{
-			ID:   target.ID,
-			Role: role,
-		})
+		updatedMember, err = h.updateMemberRoleFrom(r.Context(), target, role)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update member")
+			writeMemberUpdateError(w, err)
 			return
 		}
 	}
@@ -789,6 +786,30 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// updateMemberRoleFrom changes a role that neither starts nor ends as guest.
+// The row is locked and must still hold target's role: a concurrent change
+// (say the member became a guest and gave up its seat) is never overwritten
+// by a request decided on the role it had before.
+func (h *Handler) updateMemberRoleFrom(ctx context.Context, target db.Member, role string) (db.Member, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.Member{}, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	if _, err := lockMemberRole(ctx, qtx, target.ID, target.Role); err != nil {
+		return db.Member{}, err
+	}
+	updated, err := qtx.UpdateMemberRole(ctx, db.UpdateMemberRoleParams{ID: target.ID, Role: role})
+	if err != nil {
+		return db.Member{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.Member{}, err
+	}
+	return updated, nil
 }
 
 func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
@@ -1429,6 +1450,10 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			// and below; this clears what normal writes logged before.
 			name: "delete search index changes",
 			run:  func() error { return qtx.DeleteWorkspaceSearchIndexChanges(ctx, requester.WorkspaceID) },
+		},
+		{
+			name: "delete search access markers",
+			run:  func() error { return qtx.DeleteWorkspaceMemberSearchAccess(ctx, requester.WorkspaceID) },
 		},
 		// Keep source-context object intents after the workspace row is gone.
 		// They are the durable retry ledger for an upload that began before the

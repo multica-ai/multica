@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/entitlement"
@@ -58,15 +59,119 @@ func (h *Handler) isGuest(r *http.Request, workspaceID, userID string) bool {
 	return err == nil && projectaccess.IsGuestRole(m.Role)
 }
 
-// mentionsAgent reports whether content @-mentions an agent or a squad, which
-// would ask an agent to run.
-func mentionsAgent(content string) bool {
+// guestMentionForbidden reports whether content carries a mention a guest may
+// not write: an agent or a squad, which would ask an agent to run, or @all,
+// which would notify the whole workspace. Creating and editing a comment
+// apply the same rule.
+func guestMentionForbidden(content string) bool {
 	for _, m := range util.ParseMentions(content) {
-		if m.Type == "agent" || m.Type == "squad" {
+		if m.Type == "agent" || m.Type == "squad" || m.IsMentionAll() {
 			return true
 		}
 	}
 	return false
+}
+
+const guestMentionForbiddenMessage = "guests cannot mention agents, squads or everyone"
+
+// refuseGuestMention writes a 403 when a guest member writes a comment with a
+// mention guestMentionForbidden rejects.
+func (h *Handler) refuseGuestMention(w http.ResponseWriter, r *http.Request, workspaceID, userID, actorType, content string) bool {
+	if actorType != "member" || !h.isGuest(r, workspaceID, userID) || !guestMentionForbidden(content) {
+		return false
+	}
+	writeError(w, http.StatusForbidden, guestMentionForbiddenMessage)
+	return true
+}
+
+// guestTaskView is all of a run a guest is shown: that an agent is working on
+// the issue and since when, without its working directory, handoff, trigger
+// or result.
+func guestTaskView(full AgentTaskResponse) AgentTaskResponse {
+	view := restrictedTaskResponse(full)
+	view.IssueID = full.IssueID
+	return view
+}
+
+// guestAgentIDs is the set of agents a guest meets in its projects.
+func (h *Handler) guestAgentIDs(ctx context.Context, member db.Member) (map[[16]byte]bool, error) {
+	ids, err := h.Queries.ListAgentIDsSeenByGuest(ctx, db.ListAgentIDsSeenByGuestParams{
+		WorkspaceID: member.WorkspaceID, UserID: member.UserID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[[16]byte]bool, len(ids))
+	for _, id := range ids {
+		if id.Valid {
+			seen[id.Bytes] = true
+		}
+	}
+	return seen, nil
+}
+
+// requireGuestProjectAddition admits adding userIDs to a project when that
+// shares the project with a guest who is not a member of it yet: guests must
+// be switched on and in the plan, as for every other guest addition. projectID
+// is invalid for a project being created. Adding only members, or guests
+// already in the project, is never restricted here.
+func (h *Handler) requireGuestProjectAddition(w http.ResponseWriter, r *http.Request, workspaceID, projectID pgtype.UUID, userIDs []pgtype.UUID) (featureAdmission, bool) {
+	if len(userIDs) == 0 {
+		return featureAdmission{}, true
+	}
+	if !projectID.Valid {
+		projectID = projectaccess.NoProject
+	}
+	n, err := h.Queries.CountGuestsNotInProject(r.Context(), db.CountGuestsNotInProjectParams{
+		WorkspaceID: workspaceID, UserIds: userIDs, ProjectID: projectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check project members")
+		return featureAdmission{}, false
+	}
+	if n == 0 {
+		return featureAdmission{}, true
+	}
+	return h.requireGuestAddition(w, r, workspaceID, "add_projects")
+}
+
+// errMemberRoleChanged reports that a member's role changed between the read
+// a role change was decided on and the transaction that applies it.
+var errMemberRoleChanged = errors.New("member role changed")
+
+func writeMemberRoleChanged(w http.ResponseWriter) {
+	writeJSON(w, http.StatusConflict, map[string]string{
+		"error": "the member's role changed while this request was in flight; reload and try again",
+		"code":  "member_role_changed",
+	})
+}
+
+// lockMemberRole locks the member row in the transaction and checks it still
+// has the role the change was decided on. Concurrent changes to one member
+// then apply in turn, and a request decided on a stale role is refused
+// instead of skipping the checks the current role needs (a guest becoming a
+// member takes a seat; a member becoming a guest gives up its access).
+func lockMemberRole(ctx context.Context, q *db.Queries, memberID pgtype.UUID, expectedRole string) (db.Member, error) {
+	m, err := q.GetMemberForUpdate(ctx, memberID)
+	if err != nil {
+		return db.Member{}, err
+	}
+	if m.Role != expectedRole {
+		return db.Member{}, errMemberRoleChanged
+	}
+	return m, nil
+}
+
+// writeMemberUpdateError maps a role-change failure to its response.
+func writeMemberUpdateError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errMemberRoleChanged):
+		writeMemberRoleChanged(w)
+	case errors.Is(err, pgx.ErrNoRows):
+		writeError(w, http.StatusNotFound, "member not found")
+	default:
+		writeError(w, http.StatusInternalServerError, "failed to update member")
+	}
 }
 
 // guestAgentView is all of an agent a guest is shown: enough to render its
@@ -137,14 +242,24 @@ func (h *Handler) parseGuestProjectIDs(w http.ResponseWriter, r *http.Request, w
 	return ids, true
 }
 
-// setGuestProjects makes ids exactly the projects userID is a member of.
+// setGuestProjects makes ids exactly the projects userID is a member of. When
+// that takes a project away, the guest's local search copy is made to
+// rebuild: nothing in the project changed, so sync alone would keep it.
 func setGuestProjects(r *http.Request, q *db.Queries, workspaceID, userID, addedBy pgtype.UUID, ids []pgtype.UUID) error {
-	if _, err := q.RemoveUserFromProjectsExcept(r.Context(), db.RemoveUserFromProjectsExceptParams{
+	removed, err := q.RemoveUserFromProjectsExcept(r.Context(), db.RemoveUserFromProjectsExceptParams{
 		WorkspaceID: workspaceID, UserID: userID, KeepProjectIds: ids,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
-	_, err := q.AddUserToProjects(r.Context(), db.AddUserToProjectsParams{
+	if removed > 0 {
+		if err := q.MarkSearchAccessNarrowed(r.Context(), db.MarkSearchAccessNarrowedParams{
+			WorkspaceID: workspaceID, UserID: userID,
+		}); err != nil {
+			return err
+		}
+	}
+	_, err = q.AddUserToProjects(r.Context(), db.AddUserToProjectsParams{
 		WorkspaceID: workspaceID, UserID: userID, ProjectIds: ids, AddedBy: addedBy,
 	})
 	return err
@@ -181,10 +296,10 @@ const guestSeatReservation = time.Hour
 // revokeAndDemoteToGuest) and releases the member's seat.
 func (h *Handler) demoteMemberToGuest(w http.ResponseWriter, r *http.Request, requester, target db.Member, projects []pgtype.UUID) (db.Member, bool) {
 	ctx := r.Context()
-	result, err := h.revokeAndDemoteToGuest(ctx, target.WorkspaceID, target.UserID, target.ID, requester.UserID, projects)
+	result, err := h.revokeAndDemoteToGuest(ctx, target.WorkspaceID, target.UserID, target.ID, requester.UserID, projects, target.Role)
 	if err != nil {
 		slog.Warn("demote member to guest failed", append(logger.RequestAttrs(r), "error", err, "member_id", uuidToString(target.ID))...)
-		writeError(w, http.StatusInternalServerError, "failed to update member")
+		writeMemberUpdateError(w, err)
 		return db.Member{}, false
 	}
 	h.settleMemberCapacityRelease(ctx, uuid.UUID(target.WorkspaceID.Bytes), uuid.UUID(target.ID.Bytes))
@@ -235,6 +350,14 @@ func (h *Handler) promoteGuest(w http.ResponseWriter, r *http.Request, target db
 	qtx := h.Queries.WithTx(tx)
 	if err := memberLimit.lock(ctx, qtx); err != nil {
 		return fail()
+	}
+	// Re-check under the row lock that the target is still a guest: a
+	// concurrent change that made it a member already took its seat.
+	if _, err := lockMemberRole(ctx, qtx, target.ID, projectaccess.RoleGuest); err != nil {
+		_ = tx.Rollback(ctx)
+		compensate()
+		writeMemberUpdateError(w, err)
+		return db.Member{}, false
 	}
 	limitAdmission, err := memberLimit.admit(ctx, qtx)
 	if err != nil {
@@ -323,7 +446,14 @@ func (h *Handler) SetMemberProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(r.Context())
-	if err := setGuestProjects(r, h.Queries.WithTx(tx), target.WorkspaceID, target.UserID, requester.UserID, ids); err != nil {
+	qtx := h.Queries.WithTx(tx)
+	// The target must still be a guest: a member made one meanwhile keeps
+	// its own projects, which this would otherwise overwrite.
+	if _, err := lockMemberRole(r.Context(), qtx, target.ID, projectaccess.RoleGuest); err != nil {
+		writeMemberUpdateError(w, err)
+		return
+	}
+	if err := setGuestProjects(r, qtx, target.WorkspaceID, target.UserID, requester.UserID, ids); err != nil {
 		slog.Warn("set guest projects failed", append(logger.RequestAttrs(r), "error", err, "member_id", uuidToString(target.ID))...)
 		writeError(w, http.StatusInternalServerError, "failed to update projects")
 		return

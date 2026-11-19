@@ -38,6 +38,11 @@ UPDATE member SET role = $2
 WHERE id = $1
 RETURNING *;
 
+-- name: GetMemberForUpdate :one
+-- Locks a member row for a role change, so concurrent changes to the same
+-- member apply one after the other and each re-checks the role it starts from.
+SELECT * FROM member WHERE id = $1 FOR UPDATE;
+
 -- name: DeleteMember :exec
 DELETE FROM member WHERE id = $1;
 
