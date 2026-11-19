@@ -164,7 +164,9 @@ The daemon runs its first cleanup about 30 seconds after starting, then every 2 
 
 ### Run directories
 
-Each run gets a directory under the workspaces root (default `~/multica_workspaces`) holding the checked-out code, output, and logs; later runs on the same issue reuse it. The whole directory is removed:
+Each run gets a directory under the workspaces root (default `~/multica_workspaces`) holding the checked-out code, output, and logs; later runs on the same issue reuse it.
+
+The table covers whole-directory cleanup for directories managed by Multica. Runs in a project's local directory retain their separate record directory, as described below.
 
 | Run source | When it is removed |
 |---|---|
@@ -178,6 +180,8 @@ While the issue is still open, 12 hours after a run completes only regenerable c
 For an unarchived chat in a work directory managed by Multica, the daemon applies the same regenerable content cleanup 12 hours after its last run ends by default. After a successful cleanup, the daemon skips repeat scans for that run. A later completed run becomes eligible again after the same delay. For chats in a project's local directory, only the exact Codex cache paths above are cleaned.
 
 A run on a project's local directory works in your own directory, which the daemon never touches. Its record directory keeps daemon logs and `output/`. After `MULTICA_GC_COMPLETED_TASK_TTL` (14 days by default), the daemon removes its entire `codex-home` if session history is stored outside the record directory. Homes with task-local session history are retained. Set the variable to `0` to disable home expiry. A later run rebuilds the home and reconnects the conversation store; that store still follows its own session retention policy below.
+
+The record directory can therefore still appear in `multica daemon disk-usage --by-task` after the run ends. The completed-task TTL does not remove the record directory or expire other provider homes, such as a retained `hermes-home`.
 
 ### Shared repository cache
 
