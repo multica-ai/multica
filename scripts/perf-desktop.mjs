@@ -56,6 +56,7 @@ function fail(message) {
 }
 const log = (message) => console.log(`[perf-desktop] ${message}`);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+const CDP_TIMEOUT_MS = 120_000;
 
 for (const s of scenarios) if (!SPECS[s]) fail(`unknown scenario ${s}; pick from ${Object.keys(SPECS).join(", ")}`);
 const env = process.env;
@@ -82,8 +83,8 @@ async function waitForCdp(url, deadline, app) {
     } catch {
       // not listening yet
     }
-    if (app && app.exitCode !== null) fail(`Desktop exited with code ${app.exitCode} before serving CDP; see ${join(outDir, "desktop.log")}`);
-    if (Date.now() > deadline) fail(`Desktop never served CDP on ${url}`);
+    if (app && exited(app)) throw new Error(`Desktop exited (${app.exitCode ?? app.signalCode}) before serving CDP; see ${join(outDir, "desktop.log")}`);
+    if (Date.now() > deadline) throw new Error(`Desktop never served CDP on ${url}`);
     await sleep(500);
   }
 }
@@ -95,58 +96,67 @@ function run(command, commandArgs, options) {
   });
 }
 
+// A child killed by a signal keeps exitCode null and sets signalCode instead.
+const exited = (child) => child.exitCode !== null || child.signalCode !== null;
+
 async function stop(app) {
-  if (app.exitCode !== null) return;
+  if (exited(app)) return;
   app.kill("SIGTERM");
-  for (let i = 0; i < 40 && app.exitCode === null; i++) await sleep(250);
-  if (app.exitCode === null) app.kill("SIGKILL");
+  for (let i = 0; i < 40 && !exited(app); i++) await sleep(250);
+  if (!exited(app)) app.kill("SIGKILL");
 }
 
 async function main() {
   mkdirSync(outDir, { recursive: true });
   let app = null;
   let cdpUrl;
+  // Registered before Desktop starts, so an interrupt while it boots or while
+  // a scenario runs still stops the app this script launched.
+  const stopApp = () => (app ? stop(app) : Promise.resolve());
+  const onSignal = (signal, code) => process.once(signal, () => {
+    log(`${signal}: stopping Desktop`);
+    stopApp().finally(() => process.exit(code));
+  });
+  onSignal("SIGINT", 130);
+  onSignal("SIGTERM", 143);
   if (attach) {
     cdpUrl = env.MULTICA_DEV_DESKTOP_CDP_URL;
     if (!cdpUrl) fail('--attach needs the managed Desktop with a DevTools port: make up C=desktop ARGS="--cdp"');
     await waitForCdp(cdpUrl, Date.now() + 30_000, null);
-  } else {
-    if (!has("skip-build")) {
-      log("building Desktop (production bundle)");
-      const code = await run("pnpm", ["--filter", "@multica/desktop", "build"], {
-        cwd: repoRoot,
-        env: {
-          ...env,
-          VITE_API_URL: `http://localhost:${env.PORT}`,
-          VITE_WS_URL: `ws://localhost:${env.PORT}/ws`,
-          VITE_APP_URL: `http://localhost:${env.FRONTEND_PORT ?? 3000}`,
-        },
-      });
-      if (code !== 0) fail("the Desktop build failed");
-    }
-    const electron = createRequire(join(desktopDir, "package.json"))("electron");
-    const port = await freePort();
-    cdpUrl = `http://127.0.0.1:${port}`;
-    const appEnv = { ...env, DESKTOP_APP_SUFFIX: `Perf ${env.MULTICA_DEV_ENV ?? env.MULTICA_DEV_PROFILE}` };
-    // Without these the main process loads the built renderer from disk and
-    // starts signed out; the specs sign in themselves.
-    delete appEnv.ELECTRON_RENDERER_URL;
-    delete appEnv.MULTICA_DEV_AUTH_TOKEN;
-    const appLog = createWriteStream(join(outDir, "desktop.log"));
-    app = spawn(electron, [desktopDir, `--remote-debugging-port=${port}`], { env: appEnv, stdio: ["ignore", "pipe", "pipe"] });
-    app.stdout.pipe(appLog);
-    app.stderr.pipe(appLog);
-    log(`started Desktop (pid ${app.pid}, CDP ${cdpUrl})`);
-    await waitForCdp(cdpUrl, Date.now() + 120_000, app);
+  } else if (!has("skip-build")) {
+    log("building Desktop (production bundle)");
+    const code = await run("pnpm", ["--filter", "@multica/desktop", "build"], {
+      cwd: repoRoot,
+      env: {
+        ...env,
+        VITE_API_URL: `http://localhost:${env.PORT}`,
+        VITE_WS_URL: `ws://localhost:${env.PORT}/ws`,
+        VITE_APP_URL: `http://localhost:${env.FRONTEND_PORT ?? 3000}`,
+      },
+    });
+    if (code !== 0) fail("the Desktop build failed");
   }
-
-  const stopApp = () => (app ? stop(app) : Promise.resolve());
-  process.once("SIGINT", () => stopApp().then(() => process.exit(130)));
-  process.once("SIGTERM", () => stopApp().then(() => process.exit(143)));
 
   const reports = [];
   let failed = false;
   try {
+    if (!attach) {
+      const electron = createRequire(join(desktopDir, "package.json"))("electron");
+      const port = await freePort();
+      cdpUrl = `http://127.0.0.1:${port}`;
+      const appEnv = { ...env, DESKTOP_APP_SUFFIX: `Perf ${env.MULTICA_DEV_ENV ?? env.MULTICA_DEV_PROFILE}` };
+      // Without these the main process loads the built renderer from disk and
+      // starts signed out; the specs sign in themselves.
+      delete appEnv.ELECTRON_RENDERER_URL;
+      delete appEnv.MULTICA_DEV_AUTH_TOKEN;
+      const appLog = createWriteStream(join(outDir, "desktop.log"));
+      app = spawn(electron, [desktopDir, `--remote-debugging-port=${port}`], { env: appEnv, stdio: ["ignore", "pipe", "pipe"] });
+      app.stdout.pipe(appLog);
+      app.stderr.pipe(appLog);
+      log(`started Desktop (pid ${app.pid}, CDP ${cdpUrl})`);
+      await waitForCdp(cdpUrl, Date.now() + CDP_TIMEOUT_MS, app);
+    }
+
     for (const scenario of scenarios) {
       const report = join(outDir, `${scenario}.json`);
       log(`running ${scenario}`);

@@ -104,6 +104,37 @@ async function mainWindow(browser: Browser, deadline: number): Promise<Page> {
 /** sessionStorage key carrying the next boot's localStorage across the reload. */
 const BOOT_KEY = "__perf_boot_storage";
 
+/**
+ * Desktop picks its language from localStorage, then from the OS (the web
+ * target pins it through the context's `locale`). The specs find controls by
+ * their English names, so every desktop boot writes the Settings choice for
+ * English: on a Chinese or Japanese system the app would otherwise come up in
+ * that language and the scenarios would time out looking for
+ * "Toggle right sidebar".
+ */
+const DESKTOP_LOCALE = { "multica-locale": "en" };
+
+/** Writes `storage` (plus the English locale) for the next boot and reloads into it. */
+async function bootWith(page: Page, storage: Record<string, string>) {
+  const entries = { ...DESKTOP_LOCALE, ...storage };
+  await page.evaluate(({ key, value }) => sessionStorage.setItem(key, value), { key: BOOT_KEY, value: JSON.stringify(entries) });
+  await page.reload({ waitUntil: "commit" });
+}
+
+/**
+ * Boots once, outside any measurement, and fails with a clear message when
+ * the app still comes up in another language, instead of letting a scenario
+ * time out on a label it cannot find. index.html ships `lang="en"`; App
+ * replaces it with the resolved locale in a layout effect of its first
+ * render, so the value is final once #root has content.
+ */
+async function assertEnglish(page: Page) {
+  await bootWith(page, {});
+  await page.waitForFunction(() => !!document.getElementById("root")?.hasChildNodes(), undefined, { timeout: 60_000 });
+  const lang = await page.evaluate(() => document.documentElement.lang);
+  if (lang !== "en") throw new Error(`Desktop booted in "${lang}" despite multica-locale=en; the specs match English labels`);
+}
+
 export async function desktopTarget(cdpUrl: string, token: string): Promise<Target> {
   const deadline = Date.now() + 60_000;
   let browser: Browser | undefined;
@@ -130,6 +161,7 @@ export async function desktopTarget(cdpUrl: string, token: string): Promise<Targ
     for (const [name, value] of Object.entries(JSON.parse(raw) as Record<string, string>)) localStorage.setItem(name, value);
   }, BOOT_KEY);
   await installFrameMetrics(page, token);
+  await assertEnglish(page);
   const connected = browser;
   return {
     platform: "desktop",
@@ -145,9 +177,7 @@ export async function desktopTarget(cdpUrl: string, token: string): Promise<Targ
       return {
         page, cdp, errors,
         async open(path) {
-          const storage = { ...options.storage, multica_tabs: tabLayout(path) };
-          await page.evaluate(({ key, value }) => sessionStorage.setItem(key, value), { key: BOOT_KEY, value: JSON.stringify(storage) });
-          await page.reload({ waitUntil: "commit" });
+          await bootWith(page, { ...options.storage, multica_tabs: tabLayout(path) });
         },
         async close() {
           page.off("pageerror", onError);

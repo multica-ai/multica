@@ -289,6 +289,9 @@ app's output) and `report.md`. `--scenarios` picks a subset (`core-issue`,
   HTTP cache, writes a tab layout holding only the measured route and
   reloads: the app boots onto that tab as it does on launch. That is the
   Desktop counterpart of opening a URL in a fresh browser context.
+  Every boot also writes English as the language choice, as the web
+  context's `locale: "en-US"` does; the specs match English labels, and
+  Desktop would otherwise follow the OS language.
 - **`desktop-idle`** opens the big issue (300 comments, 70 runs), waits 15 s,
   then touches nothing for `PERF_IDLE_SECONDS` (300). CPU is sampled every
   second per process role: main, renderer, GPU, utility (network, storage).
