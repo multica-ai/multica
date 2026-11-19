@@ -650,10 +650,12 @@ func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The guard's cached value is the user's account-wide summary; a task
-	// credential gets only its bound workspace's row from it. Filtering here,
-	// after the cache, keeps the cached slice intact for the owner's own
-	// clients while nothing outside the bound workspace reaches the agent.
+	// The guard coalesces concurrent summary requests per user, so the value
+	// here may come from a query another caller started: the owner's own
+	// client or a task bound to a different workspace. It is always the
+	// account-wide summary; a task credential takes only its bound
+	// workspace's row from it, into a new slice, so the shared value stays
+	// whole for every other caller of the same coalesced query.
 	rows := value.([]db.CountUnreadInboxByWorkspaceRow)
 	resp := make([]InboxWorkspaceUnreadResponse, 0, len(rows))
 	for _, row := range rows {

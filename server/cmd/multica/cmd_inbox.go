@@ -41,7 +41,7 @@ var inboxListCmd = &cobra.Command{
 var inboxCountCmd = &cobra.Command{
 	Use:   "count",
 	Short: "Show your unread notification count",
-	Long:  "Show the unread notification count in the current workspace and in every workspace you belong to. Snoozed issues are not counted.\n\n" + inboxAccessNote,
+	Long:  "Show the unread notification count in the current workspace and in every workspace you belong to. Snoozed issues are not counted. In an agent run, only the workspace the run belongs to is listed; the owner's other workspaces are left out.\n\n" + inboxAccessNote,
 	Args:  exactArgs(0),
 	RunE:  runInboxCount,
 }

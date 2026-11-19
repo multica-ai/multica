@@ -258,6 +258,10 @@ func (g *Guard) Summary(ctx context.Context, userID string, query func(context.C
 	}
 }
 
+// SummaryWaiters reports how many callers are admitted to Summary right now,
+// either waiting for a generation or sharing one that is running.
+func (g *Guard) SummaryWaiters() int { return len(g.summaryWaiters) }
+
 func newSummaryGeneration(ctx context.Context, query func(context.Context) (any, error)) *summaryGeneration {
 	return &summaryGeneration{ctx: context.WithoutCancel(ctx), query: query, done: make(chan struct{})}
 }
