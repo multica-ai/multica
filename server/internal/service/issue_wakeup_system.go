@@ -22,13 +22,14 @@ import (
 
 // The child_done system rule wakes a parent's assignee when a stage of its
 // sub-issues closes while a later stage waits, and once more when every
-// sub-issue is closed. It is an ordinary issue_wakeup row with system_rule set:
-// the shared condition, receipts, runaway protection, activity and run model
-// apply. What differs is owned by the platform: it has no fixed agent or
-// creator (the target is the parent's assignee when it fires, a squad's leader
-// for a squad, an inbox notification for a member), it cannot be deleted or
-// edited by agents, and it is evaluated when sub-issues change instead of on a
-// polling schedule.
+// sub-issue is closed. Only a sub-issue closing, leaving or changing stage can
+// wake; adding or reopening one is recorded without a run. It is an ordinary
+// issue_wakeup row with system_rule set: the shared condition, receipts,
+// runaway protection, activity and run model apply. What differs is owned by
+// the platform: it has no fixed agent or creator (the target is the parent's
+// assignee when it fires, a squad's leader for a squad, an inbox notification
+// for a member), it cannot be deleted or edited by agents, and it is evaluated
+// when sub-issues change instead of on a polling schedule.
 const (
 	SystemRuleChildDone = "child_done"
 	// MaxSystemWakeupInstruction bounds per-issue and workspace instructions.
@@ -466,7 +467,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	// A parked parent holds: nothing fires and nothing is marked as seen, so
 	// a stage that closed meanwhile wakes the assignee once it leaves backlog.
 	if issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
-		if _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
+		if _, _, _, err = consumeConditionHints(ctx, tx, w.ID); err != nil {
 			return err
 		}
 		return tx.Commit(ctx)
@@ -475,7 +476,7 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	if err = tx.QueryRow(ctx, "SELECT now()").Scan(&now); err != nil {
 		return err
 	}
-	_, causes, err := consumeConditionHints(ctx, tx, w.ID)
+	_, causes, onlyAdded, err := consumeConditionHints(ctx, tx, w.ID)
 	if err != nil {
 		return err
 	}
@@ -485,6 +486,12 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 	}
 	state := w.ConditionState
 	switch {
+	case met && fingerprint != state && onlyAdded:
+		// Adding or reopening sub-issues closed nothing: a next stage added
+		// after the last one closed reads as a stage boundary, but the
+		// assignee was already woken for that close. Record it as seen; the
+		// next close wakes again.
+		state = fingerprint
 	case met && fingerprint != state:
 		if err = recordConditionMet(ctx, q, w, observed, causes, now); err != nil {
 			return err

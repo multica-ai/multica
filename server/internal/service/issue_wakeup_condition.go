@@ -429,25 +429,29 @@ const conditionHintSQL = "wakeup_id=$1 AND processed_at IS NULL AND event_type N
 // consumeConditionHints marks the pending hints processed. It also returns the
 // agent runs that caused them, or nil when any hint came from elsewhere (a
 // person, the platform, or several merged events), so a satisfied condition
-// can tell whether the target agent brought it about itself.
-func consumeConditionHints(ctx context.Context, tx pgx.Tx, id pgtype.UUID) (bool, []string, error) {
-	rows, err := tx.Query(ctx, "UPDATE issue_wakeup_receipt SET processed_at=now() WHERE "+conditionHintSQL+" RETURNING payload", id)
+// can tell whether the target agent brought it about itself. onlyAdded reports
+// that every hint was sub-issues being added or reopened, changes that close
+// nothing (false when there was no hint).
+func consumeConditionHints(ctx context.Context, tx pgx.Tx, id pgtype.UUID) (hinted bool, causes []string, onlyAdded bool, err error) {
+	rows, err := tx.Query(ctx, "UPDATE issue_wakeup_receipt SET processed_at=now() WHERE "+conditionHintSQL+" RETURNING event_type,payload", id)
 	if err != nil {
-		return false, nil, err
+		return false, nil, false, err
 	}
 	defer rows.Close()
-	hinted, complete := false, true
-	var causes []string
+	complete := true
+	onlyAdded = true
 	for rows.Next() {
+		var eventType string
 		var raw []byte
-		if err = rows.Scan(&raw); err != nil {
-			return false, nil, err
+		if err = rows.Scan(&eventType, &raw); err != nil {
+			return false, nil, false, err
 		}
 		hinted = true
 		var p struct {
 			SourceTaskID  string   `json:"source_task_id"`
 			SourceTaskIDs []string `json:"source_task_ids"`
 			Count         int64    `json:"coalesced_count"`
+			Changes       []string `json:"changes"`
 		}
 		_ = json.Unmarshal(raw, &p)
 		switch {
@@ -458,21 +462,29 @@ func consumeConditionHints(ctx context.Context, tx pgx.Tx, id pgtype.UUID) (bool
 		default:
 			complete = false
 		}
+		if eventType != childChangeHint || len(p.Changes) == 0 {
+			onlyAdded = false
+		}
+		for _, change := range p.Changes {
+			if change != "attached" && change != "reopened" {
+				onlyAdded = false
+			}
+		}
 	}
 	if err = rows.Err(); err != nil {
-		return false, nil, err
+		return false, nil, false, err
 	}
 	if !complete {
 		causes = nil
 	}
-	return hinted, causes, nil
+	return hinted, causes, hinted && onlyAdded, nil
 }
 
 // pollCondition evaluates a condition rule when it is due or a related event
 // arrived, and returns the next scheduled evaluation. A newly satisfied
 // predicate becomes one condition.met input for the ordinary dispatch below.
 func (s *IssueWakeupService) pollCondition(ctx context.Context, tx pgx.Tx, q *db.Queries, w db.IssueWakeup, now time.Time) (pgtype.Timestamptz, error) {
-	hinted, causes, err := consumeConditionHints(ctx, tx, w.ID)
+	hinted, causes, _, err := consumeConditionHints(ctx, tx, w.ID)
 	if err != nil {
 		return w.NextFireAt, err
 	}

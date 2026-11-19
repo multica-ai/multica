@@ -481,6 +481,49 @@ func TestChildDoneStagesThenWrapUp(t *testing.T) {
 	}
 }
 
+// Only a sub-issue closing wakes the assignee. Adding the next stage after
+// every sub-issue closed, or reopening a later one, closes nothing: the rule
+// records the new reading without a run, and the next close wakes as usual
+// (GitHub #10960).
+func TestChildDoneAddingOrReopeningAStageDoesNotWake(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+	agentID := handlerTestAgentID(t)
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+	dbfx.Exec(t, `UPDATE issue SET stage = 1 WHERE id = $1`, fx.child.ID)
+	completeRuns := func() {
+		dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE issue_id = $1`, fx.parent.ID)
+	}
+	expect := func(step string, n int) {
+		t.Helper()
+		if entries, runs := childDoneEntries(t, fx.parent.ID), childDoneRuns(t, fx.parent.ID); len(entries) != n || len(runs) != n {
+			t.Fatalf("%s: entries = %+v runs = %+v, want %d of each", step, entries, runs, n)
+		}
+	}
+
+	updateChildStatus(t, fx.child.ID, "done")
+	expect("stage 1 closed", 1)
+	completeRuns()
+
+	// Creating a sub-issue leaves its change to the scheduler sweep; process
+	// it now, as the sweep would, before stage 2 closes.
+	next := createStagedChild(t, fx.parent.ID, 2, "todo")
+	if err := (&service.IssueWakeupService{Tasks: testHandler.TaskService}).ProcessChildEvents(context.Background(), parseUUID(fx.parent.ID)); err != nil {
+		t.Fatal(err)
+	}
+	expect("stage 2 added", 1)
+
+	updateChildStatus(t, next.ID, "done")
+	expect("stage 2 closed", 2)
+	completeRuns()
+
+	updateChildStatus(t, next.ID, "in_progress")
+	runWakeupTick(t)
+	expect("stage 2 reopened", 2)
+
+	updateChildStatus(t, next.ID, "done")
+	expect("stage 2 closed again", 3)
+}
+
 // Another run of the same agent that has not started yet reads the current
 // sub-issues when it does, so the rule hands it the stage facts when it is
 // claimed instead of queuing a second run. Claimed by a daemon that cannot
