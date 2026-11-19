@@ -292,6 +292,15 @@ func (h *Handler) attachmentInHiddenProject(ctx context.Context, hidden projecta
 // issue) in a project the caller cannot see.
 func (h *Handler) requireAttachmentVisible(w http.ResponseWriter, r *http.Request, workspaceID string, att db.Attachment) bool {
 	if !att.IssueID.Valid && !att.CommentID.Valid {
+		// Outside any issue (docs, chat): a guest (MUL-9420) sees nothing
+		// outside its projects, except what it uploaded itself, such as an
+		// image in a comment it has not posted yet.
+		userID := requestUserID(r)
+		ownUpload := att.UploaderType == "member" && uuidToString(att.UploaderID) == userID
+		if !ownUpload && h.isGuest(r, workspaceID, userID) {
+			writeError(w, http.StatusNotFound, "attachment not found")
+			return false
+		}
 		return true
 	}
 	hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
