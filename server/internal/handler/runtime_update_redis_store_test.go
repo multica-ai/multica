@@ -127,19 +127,18 @@ func TestRedisUpdateStore_PopPendingAcrossInstances(t *testing.T) {
 	if popped == nil {
 		t.Fatal("node B did not see node A's pending update")
 	}
-	if popped.ID != req.ID || popped.Status != UpdateRunning {
+	// Delivery does not start the update; the daemon's "running" report does.
+	if popped.ID != req.ID || popped.Status != UpdatePending {
 		t.Fatalf("popped mismatch: %+v", popped)
 	}
-	if popped.RunStartedAt == nil {
-		t.Fatal("RunStartedAt not set after pop")
-	}
 
-	again, err := nodeB.PopPending(ctx, "runtime-cross")
+	// Node A must not deliver it again before the re-offer interval.
+	again, err := nodeA.PopPending(ctx, "runtime-cross")
 	if err != nil {
-		t.Fatalf("node B second pop: %v", err)
+		t.Fatalf("node A second pop: %v", err)
 	}
 	if again != nil {
-		t.Fatalf("expected no more pending, got %+v", again)
+		t.Fatalf("expected no due request, got %+v", again)
 	}
 }
 
@@ -220,41 +219,6 @@ func TestRedisUpdateStore_RejectsConcurrentActive(t *testing.T) {
 	}
 }
 
-func TestRedisUpdateStore_RunningTimeoutClearsActive(t *testing.T) {
-	rdb := newRedisTestClient(t)
-	ctx := context.Background()
-	store := NewRedisUpdateStore(rdb)
-
-	req, err := store.Create(ctx, "runtime-timeout", "v1.2.3", "user-1")
-	if err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	popped, err := store.PopPending(ctx, "runtime-timeout")
-	if err != nil {
-		t.Fatalf("pop: %v", err)
-	}
-	if popped == nil || popped.Status != UpdateRunning {
-		t.Fatalf("expected running, got %+v", popped)
-	}
-
-	aged := time.Now().Add(-(updateRunningTimeout + time.Second))
-	popped.RunStartedAt = &aged
-	if err := store.persistRequest(ctx, popped); err != nil {
-		t.Fatalf("persist aged request: %v", err)
-	}
-
-	got, err := store.Get(ctx, req.ID)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if got.Status != UpdateTimeout {
-		t.Fatalf("status = %s, want timeout", got.Status)
-	}
-	if _, err := store.Create(ctx, "runtime-timeout", "v1.2.4", "user-1"); err != nil {
-		t.Fatalf("create after timeout should succeed: %v", err)
-	}
-}
-
 func TestRedisUpdateStore_PopPendingConcurrent(t *testing.T) {
 	rdb := newRedisTestClient(t)
 	ctx := context.Background()
@@ -300,6 +264,90 @@ func TestRedisUpdateStore_PopPendingConcurrent(t *testing.T) {
 	}
 	if winners != 1 {
 		t.Fatalf("expected exactly one winner, got %d", winners)
+	}
+}
+
+func TestRedisUpdateStore_ReadsEnvelopeFromPreviousRelease(t *testing.T) {
+	// The previous release kept the run start beside the payload only; a
+	// request it wrote must keep it after the rollout.
+	raw := []byte(`{"r":{"id":"upd-old","runtime_id":"rt-1","status":"running","target_version":"v1.2.3","created_at":"2026-11-19T10:00:00Z","updated_at":"2026-11-19T10:00:01Z"},"s":"2026-11-19T10:00:01Z","u":"user-1"}`)
+	got, err := (&RedisUpdateStore{}).unmarshalRequest(raw)
+	if err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.InitiatorUserID != "user-1" || got.RunStartedAt == nil {
+		t.Fatalf("legacy envelope lost fields: %+v", got)
+	}
+}
+
+func TestRedisUpdateStore_StaleActiveSlotDoesNotBlockCreate(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisUpdateStore(rdb)
+
+	req, err := store.Create(ctx, "runtime-stale", "v1.2.3", "user-1")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := store.Complete(ctx, req.ID, "done"); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	// A cleanup write that failed leaves the slot pointing at a finished request.
+	if err := rdb.Set(ctx, updateActiveKey("runtime-stale"), req.ID, time.Hour).Err(); err != nil {
+		t.Fatalf("restore stale slot: %v", err)
+	}
+
+	if _, err := store.Create(ctx, "runtime-stale", "v1.2.4", "user-1"); err != nil {
+		t.Fatalf("create behind a stale slot: %v", err)
+	}
+}
+
+func TestRedisUpdateStore_RestoresDroppedOfferEntry(t *testing.T) {
+	withUpdateReofferInterval(t, 0)
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisUpdateStore(rdb)
+
+	req, err := store.Create(ctx, "runtime-rolling", "v1.2.3", "user-1")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.Schedule(ctx, req.ID, nil); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	// A replica on the previous release drops non-pending entries it pops.
+	if err := rdb.ZRem(ctx, updatePendingKey("runtime-rolling"), req.ID).Err(); err != nil {
+		t.Fatalf("drop offer entry: %v", err)
+	}
+	mustHasPending(t, store, "runtime-rolling", false)
+
+	// The UI keeps polling the queued request, which restores the entry.
+	if got := mustGetUpdate(t, store, req.ID); got.Status != UpdateScheduled {
+		t.Fatalf("status = %s, want scheduled", got.Status)
+	}
+	mustHasPending(t, store, "runtime-rolling", true)
+}
+
+func TestRedisUpdateStore_ScheduledRequestOutlivesRetention(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisUpdateStore(rdb)
+
+	req, err := store.Create(ctx, "runtime-ttl", "v1.2.3", "user-1")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.Schedule(ctx, req.ID, nil); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	for _, key := range []string{updateKey(req.ID), updateActiveKey("runtime-ttl"), updatePendingKey("runtime-ttl")} {
+		ttl, err := rdb.TTL(ctx, key).Result()
+		if err != nil {
+			t.Fatalf("ttl %s: %v", key, err)
+		}
+		if ttl < updateScheduledTimeout {
+			t.Fatalf("%s expires in %s; a queued request must last its whole %s wait", key, ttl, updateScheduledTimeout)
+		}
 	}
 }
 

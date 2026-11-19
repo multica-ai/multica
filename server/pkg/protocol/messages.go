@@ -498,10 +498,24 @@ const HeartbeatStatusRuntimeGone = "runtime_gone"
 
 // DaemonHeartbeatPendingUpdate describes a CLI-update action the daemon
 // should run for the runtime.
+//
+// Deferrable is set by servers that keep a request queued while the machine
+// is busy. A daemon that sees it reports "scheduled" instead of failing, holds
+// the request, and starts it once its last task finishes. The server re-offers
+// a queued request periodically, so a daemon that restarts in the meantime
+// picks it up again. Without the flag a daemon must fail the request with
+// RuntimeUpdateBusyError, which is what older servers understand.
 type DaemonHeartbeatPendingUpdate struct {
 	ID            string `json:"id"`
 	TargetVersion string `json:"target_version"`
+	Deferrable    bool   `json:"deferrable,omitempty"`
 }
+
+// RuntimeUpdateBusyError is the failure a daemon reports when it cannot start
+// a non-deferrable update because agent work is active. Daemons released
+// before deferrable updates send exactly this text for that case, so servers
+// match it to keep the request queued instead of failing it. Do not edit it.
+const RuntimeUpdateBusyError = "runtime update deferred because agent work is starting or still active; retry when the machine is idle"
 
 // DaemonHeartbeatPendingModelList describes a request for the daemon to
 // enumerate the runtime's supported models.

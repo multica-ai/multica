@@ -1812,6 +1812,7 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 			ack.PendingUpdate = &protocol.DaemonHeartbeatPendingUpdate{
 				ID:            pending.ID,
 				TargetVersion: pending.TargetVersion,
+				Deferrable:    true,
 			}
 		}
 	case probeUpdateErr != nil:

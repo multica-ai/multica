@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // CLI update request store
@@ -19,11 +20,18 @@ import (
 type UpdateStatus string
 
 const (
-	UpdatePending   UpdateStatus = "pending"
+	UpdatePending UpdateStatus = "pending"
+	// UpdateScheduled means the daemon was busy and the update starts
+	// automatically once the machine is idle. Still cancellable.
+	UpdateScheduled UpdateStatus = "scheduled"
 	UpdateRunning   UpdateStatus = "running"
 	UpdateCompleted UpdateStatus = "completed"
 	UpdateFailed    UpdateStatus = "failed"
 	UpdateTimeout   UpdateStatus = "timeout"
+	UpdateCancelled UpdateStatus = "cancelled"
+	// UpdateExpired is a scheduled update the machine never became idle for
+	// within updateScheduledTimeout.
+	UpdateExpired UpdateStatus = "expired"
 )
 
 // UpdateRequest represents a pending or completed CLI update request.
@@ -35,28 +43,82 @@ type UpdateRequest struct {
 	TargetVersion   string       `json:"target_version"`
 	Output          string       `json:"output,omitempty"`
 	Error           string       `json:"error,omitempty"`
-	CreatedAt       time.Time    `json:"created_at"`
-	UpdatedAt       time.Time    `json:"updated_at"`
-	RunStartedAt    *time.Time   `json:"-"`
+	// ActiveTasks is the machine-wide running-task count the daemon reported
+	// when it deferred the update. Nil for daemons that predate deferrable
+	// updates, which only report that they are busy.
+	ActiveTasks  *int       `json:"active_tasks,omitempty"`
+	ScheduledAt  *time.Time `json:"scheduled_at,omitempty"`
+	RunStartedAt *time.Time `json:"run_started_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 const (
 	updatePendingTimeout = 120 * time.Second
 	updateRunningTimeout = 150 * time.Second
+	// updateScheduledTimeout bounds how long a queued update waits for an idle
+	// machine. An update that lands days after the click would surprise the
+	// person who asked for it.
+	updateScheduledTimeout = 24 * time.Hour
+	// updateStoreRetention is how long a finished request stays readable.
 	updateStoreRetention = 5 * time.Minute
 )
+
+// updateReofferInterval is how often a delivered but unstarted request is
+// offered to the daemon again. Daemons that predate deferrable updates reject
+// a busy offer and only start when an offer lands while they are idle; newer
+// daemons hold the request and treat re-offers as a keepalive that survives
+// their own restart. A variable so tests can shorten it.
+var updateReofferInterval = 30 * time.Second
+
+var (
+	errUpdateInProgress = &updateError{msg: "an update is already in progress for this runtime"}
+	// errUpdateNotRunnable rejects a daemon starting or re-queueing a request
+	// that was cancelled, expired or already finished.
+	errUpdateNotRunnable = &updateError{msg: "this update was cancelled or is no longer queued"}
+	// errUpdateNotCancellable rejects cancelling once installation started.
+	errUpdateNotCancellable = &updateError{msg: "this update has already started or finished"}
+)
+
+type updateError struct{ msg string }
+
+func (e *updateError) Error() string { return e.msg }
 
 type UpdateStore interface {
 	Create(ctx context.Context, runtimeID, targetVersion, initiatorUserID string) (*UpdateRequest, error)
 	Get(ctx context.Context, id string) (*UpdateRequest, error)
+	// GetActive returns the runtime's unfinished request, or nil.
+	GetActive(ctx context.Context, runtimeID string) (*UpdateRequest, error)
+	// HasPending reports whether a request is due to be offered to the daemon.
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
+	// PopPending claims the oldest due request for delivery. The request keeps
+	// its status: it only becomes running when the daemon says it started, and
+	// it is offered again after updateReofferInterval until then.
 	PopPending(ctx context.Context, runtimeID string) (*UpdateRequest, error)
+	// MarkRunning records that the daemon started installing. It returns
+	// errUpdateNotRunnable once the request was cancelled, expired or finished,
+	// which is how a daemon holding a queued request learns it was cancelled.
+	MarkRunning(ctx context.Context, id string) (*UpdateRequest, error)
+	// Schedule records that the daemon deferred the update until it is idle.
+	Schedule(ctx context.Context, id string, activeTasks *int) (*UpdateRequest, error)
+	// Cancel stops a pending or scheduled request; errUpdateNotCancellable
+	// once it is running or finished.
+	Cancel(ctx context.Context, id string) (*UpdateRequest, error)
 	Complete(ctx context.Context, id string, output string) error
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
 func updateRequestTerminal(status UpdateStatus) bool {
-	return status == UpdateCompleted || status == UpdateFailed || status == UpdateTimeout
+	switch status {
+	case UpdateCompleted, UpdateFailed, UpdateTimeout, UpdateCancelled, UpdateExpired:
+		return true
+	}
+	return false
+}
+
+// updateRequestWaiting is a request the daemon has not started yet.
+func updateRequestWaiting(status UpdateStatus) bool {
+	return status == UpdatePending || status == UpdateScheduled
 }
 
 func applyUpdateTimeout(req *UpdateRequest, now time.Time) bool {
@@ -65,6 +127,13 @@ func applyUpdateTimeout(req *UpdateRequest, now time.Time) bool {
 		if now.Sub(req.CreatedAt) > updatePendingTimeout {
 			req.Status = UpdateTimeout
 			req.Error = "daemon did not respond within 120 seconds"
+			req.UpdatedAt = now
+			return true
+		}
+	case UpdateScheduled:
+		if req.ScheduledAt != nil && now.Sub(*req.ScheduledAt) > updateScheduledTimeout {
+			req.Status = UpdateExpired
+			req.Error = "the machine did not become idle within 24 hours"
 			req.UpdatedAt = now
 			return true
 		}
@@ -79,17 +148,71 @@ func applyUpdateTimeout(req *UpdateRequest, now time.Time) bool {
 	return false
 }
 
+// Transitions shared by the in-memory and Redis stores. Each mutates req in
+// place and reports an error when the transition is not allowed.
+
+func transitionToRunning(req *UpdateRequest, now time.Time) error {
+	switch {
+	case req.Status == UpdateRunning:
+		// A retried "running" report.
+		return nil
+	case !updateRequestWaiting(req.Status):
+		return errUpdateNotRunnable
+	}
+	req.Status = UpdateRunning
+	req.RunStartedAt = &now
+	req.UpdatedAt = now
+	return nil
+}
+
+func transitionToScheduled(req *UpdateRequest, activeTasks *int, now time.Time) error {
+	if !updateRequestWaiting(req.Status) {
+		return errUpdateNotRunnable
+	}
+	if req.ScheduledAt == nil {
+		req.ScheduledAt = &now
+	}
+	req.Status = UpdateScheduled
+	req.ActiveTasks = activeTasks
+	req.UpdatedAt = now
+	return nil
+}
+
+func transitionToCancelled(req *UpdateRequest, now time.Time) error {
+	if !updateRequestWaiting(req.Status) {
+		return errUpdateNotCancellable
+	}
+	req.Status = UpdateCancelled
+	req.UpdatedAt = now
+	return nil
+}
+
+// transitionToResult records a terminal daemon report. Reports for a request
+// that already ended are ignored rather than rewriting its outcome.
+func transitionToResult(req *UpdateRequest, status UpdateStatus, output, errMsg string, now time.Time) bool {
+	if updateRequestTerminal(req.Status) {
+		return false
+	}
+	req.Status = status
+	req.Output = output
+	req.Error = errMsg
+	req.UpdatedAt = now
+	return true
+}
+
 // InMemoryUpdateStore is the single-node implementation. Multi-node deploys
 // must use RedisUpdateStore so Web POST, daemon heartbeat, daemon report, and
 // UI polling agree on the same request lifecycle.
 type InMemoryUpdateStore struct {
-	mu       sync.Mutex
-	requests map[string]*UpdateRequest // keyed by update ID
+	mu        sync.Mutex
+	requests  map[string]*UpdateRequest // keyed by update ID
+	nextOffer map[string]time.Time      // update ID -> earliest next delivery
 }
 
 func NewInMemoryUpdateStore() *InMemoryUpdateStore {
 	return &InMemoryUpdateStore{
-		requests: make(map[string]*UpdateRequest),
+		requests:  make(map[string]*UpdateRequest),
+		nextOffer: make(map[string]time.Time),
 	}
 }
 
@@ -97,16 +220,20 @@ func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Clean up old requests.
+	now := time.Now()
 	for id, req := range s.requests {
-		if time.Since(req.CreatedAt) > updateStoreRetention {
+		applyUpdateTimeout(req, now)
+		// Drop finished requests once they are no longer worth reading; a
+		// queued one can legitimately be older than the retention window.
+		if updateRequestTerminal(req.Status) && now.Sub(req.UpdatedAt) > updateStoreRetention {
 			delete(s.requests, id)
+			delete(s.nextOffer, id)
 		}
 	}
 
-	// Reject if there is already a pending or running update for this runtime.
+	// Reject if this runtime already has an unfinished update.
 	for _, req := range s.requests {
-		if req.RuntimeID == runtimeID && (req.Status == UpdatePending || req.Status == UpdateRunning) {
+		if req.RuntimeID == runtimeID && !updateRequestTerminal(req.Status) {
 			return nil, errUpdateInProgress
 		}
 	}
@@ -117,18 +244,13 @@ func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion
 		InitiatorUserID: initiatorUserID,
 		Status:          UpdatePending,
 		TargetVersion:   targetVersion,
-		CreatedAt:       time.Now(),
-		UpdatedAt:       time.Now(),
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	s.requests[req.ID] = req
-	return req, nil
+	s.nextOffer[req.ID] = now
+	return cloneUpdateRequest(req), nil
 }
-
-var errUpdateInProgress = &updateError{msg: "an update is already in progress for this runtime"}
-
-type updateError struct{ msg string }
-
-func (e *updateError) Error() string { return e.msg }
 
 func (s *InMemoryUpdateStore) Get(_ context.Context, id string) (*UpdateRequest, error) {
 	s.mu.Lock()
@@ -139,69 +261,129 @@ func (s *InMemoryUpdateStore) Get(_ context.Context, id string) (*UpdateRequest,
 		return nil, nil
 	}
 	applyUpdateTimeout(req, time.Now())
-	return req, nil
+	return cloneUpdateRequest(req), nil
+}
+
+func (s *InMemoryUpdateStore) GetActive(_ context.Context, runtimeID string) (*UpdateRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now()
+	for _, req := range s.requests {
+		applyUpdateTimeout(req, now)
+		if req.RuntimeID == runtimeID && !updateRequestTerminal(req.Status) {
+			return cloneUpdateRequest(req), nil
+		}
+	}
+	return nil, nil
+}
+
+// dueLocked returns the runtime's oldest request due for delivery.
+func (s *InMemoryUpdateStore) dueLocked(runtimeID string, now time.Time) *UpdateRequest {
+	var oldest *UpdateRequest
+	for id, req := range s.requests {
+		applyUpdateTimeout(req, now)
+		if req.RuntimeID != runtimeID || !updateRequestWaiting(req.Status) {
+			continue
+		}
+		if next, ok := s.nextOffer[id]; ok && next.After(now) {
+			continue
+		}
+		if oldest == nil || req.CreatedAt.Before(oldest.CreatedAt) {
+			oldest = req
+		}
+	}
+	return oldest
 }
 
 func (s *InMemoryUpdateStore) HasPending(_ context.Context, runtimeID string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	now := time.Now()
-	for _, req := range s.requests {
-		applyUpdateTimeout(req, now)
-		if req.RuntimeID == runtimeID && req.Status == UpdatePending {
-			return true, nil
-		}
-	}
-	return false, nil
+	return s.dueLocked(runtimeID, time.Now()) != nil, nil
 }
 
-// PopPending returns and marks as running the pending update for a runtime.
 func (s *InMemoryUpdateStore) PopPending(_ context.Context, runtimeID string) (*UpdateRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var oldest *UpdateRequest
 	now := time.Now()
-	for _, req := range s.requests {
-		applyUpdateTimeout(req, now)
-		if req.RuntimeID == runtimeID && req.Status == UpdatePending {
-			if oldest == nil || req.CreatedAt.Before(oldest.CreatedAt) {
-				oldest = req
-			}
-		}
+	req := s.dueLocked(runtimeID, now)
+	if req == nil {
+		return nil, nil
 	}
-	if oldest != nil {
-		oldest.Status = UpdateRunning
-		startedAt := now
-		oldest.RunStartedAt = &startedAt
-		oldest.UpdatedAt = now
+	s.nextOffer[req.ID] = now.Add(updateReofferInterval)
+	return cloneUpdateRequest(req), nil
+}
+
+// mutate applies fn to a stored request under the lock. A nil request means
+// the ID is unknown (or already dropped from retention).
+func (s *InMemoryUpdateStore) mutate(id string, fn func(*UpdateRequest, time.Time) error) (*UpdateRequest, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	req, ok := s.requests[id]
+	if !ok {
+		return nil, nil
 	}
-	return oldest, nil
+	now := time.Now()
+	applyUpdateTimeout(req, now)
+	err := fn(req, now)
+	if updateRequestTerminal(req.Status) {
+		delete(s.nextOffer, id)
+	}
+	return cloneUpdateRequest(req), err
+}
+
+func (s *InMemoryUpdateStore) MarkRunning(_ context.Context, id string) (*UpdateRequest, error) {
+	return s.mutate(id, transitionToRunning)
+}
+
+func (s *InMemoryUpdateStore) Schedule(_ context.Context, id string, activeTasks *int) (*UpdateRequest, error) {
+	return s.mutate(id, func(req *UpdateRequest, now time.Time) error {
+		return transitionToScheduled(req, activeTasks, now)
+	})
+}
+
+func (s *InMemoryUpdateStore) Cancel(_ context.Context, id string) (*UpdateRequest, error) {
+	return s.mutate(id, transitionToCancelled)
 }
 
 func (s *InMemoryUpdateStore) Complete(_ context.Context, id string, output string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if req, ok := s.requests[id]; ok {
-		req.Status = UpdateCompleted
-		req.Output = output
-		req.UpdatedAt = time.Now()
-	}
-	return nil
+	_, err := s.mutate(id, func(req *UpdateRequest, now time.Time) error {
+		transitionToResult(req, UpdateCompleted, output, "", now)
+		return nil
+	})
+	return err
 }
 
 func (s *InMemoryUpdateStore) Fail(_ context.Context, id string, errMsg string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	_, err := s.mutate(id, func(req *UpdateRequest, now time.Time) error {
+		transitionToResult(req, UpdateFailed, "", errMsg, now)
+		return nil
+	})
+	return err
+}
 
-	if req, ok := s.requests[id]; ok {
-		req.Status = UpdateFailed
-		req.Error = errMsg
-		req.UpdatedAt = time.Now()
+// cloneUpdateRequest hands callers a snapshot so a handler reading fields
+// never races the store mutating the stored request.
+func cloneUpdateRequest(req *UpdateRequest) *UpdateRequest {
+	if req == nil {
+		return nil
 	}
-	return nil
+	out := *req
+	if req.ActiveTasks != nil {
+		n := *req.ActiveTasks
+		out.ActiveTasks = &n
+	}
+	if req.ScheduledAt != nil {
+		t := *req.ScheduledAt
+		out.ScheduledAt = &t
+	}
+	if req.RunStartedAt != nil {
+		t := *req.RunStartedAt
+		out.RunStartedAt = &t
+	}
+	return &out
 }
 
 // Handlers
@@ -286,6 +468,69 @@ func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, update)
 }
 
+// GetActiveUpdate returns the runtime's unfinished update, so a queued update
+// stays visible across reloads and to everyone who can manage the runtime.
+func (h *Handler) GetActiveUpdate(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeUpdatePoll, runtimeID)
+	if !ok {
+		return
+	}
+
+	update, err := h.UpdateStore.GetActive(r.Context(), uuidToString(rt.ID))
+	if err != nil {
+		slog.Warn("load active update failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load update")
+		return
+	}
+	if update != nil && !canEditRuntime(member, rt) && update.InitiatorUserID != uuidToString(member.UserID) {
+		update = nil
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"update": update})
+}
+
+// CancelUpdate stops an update that has not started installing yet.
+func (h *Handler) CancelUpdate(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeID)
+	if !ok {
+		return
+	}
+	updateID := chi.URLParam(r, "updateId")
+
+	existing, err := h.UpdateStore.Get(r.Context(), updateID)
+	if err != nil {
+		slog.Warn("load update failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load update")
+		return
+	}
+	if existing == nil || existing.RuntimeID != uuidToString(rt.ID) {
+		writeError(w, http.StatusNotFound, "update not found")
+		return
+	}
+	if !canEditRuntime(member, rt) && existing.InitiatorUserID != uuidToString(member.UserID) {
+		writeError(w, http.StatusForbidden, "only runtime owners, workspace admins, and the update initiator can cancel this update")
+		return
+	}
+
+	update, err := h.UpdateStore.Cancel(r.Context(), updateID)
+	switch {
+	case errors.Is(err, errUpdateNotCancellable):
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	case err != nil:
+		slog.Error("UpdateStore Cancel failed", "error", err, "update_id", updateID)
+		writeError(w, http.StatusInternalServerError, "failed to cancel the update")
+		return
+	case update == nil:
+		writeError(w, http.StatusNotFound, "update not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, update)
+}
+
 // ReportUpdateResult receives the update result from the daemon.
 func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
@@ -307,20 +552,24 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "update not found")
 		return
 	}
-	if updateRequestTerminal(existing.Status) {
-		slog.Debug("ignoring stale update report", "runtime_id", runtimeID, "update_id", updateID, "status", existing.Status)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		return
-	}
 
 	var req struct {
-		Status string `json:"status"` // "running", "completed", or "failed"
-		Output string `json:"output"`
-		Error  string `json:"error"`
+		Status      string `json:"status"` // "running", "scheduled", "completed", or "failed"
+		Output      string `json:"output"`
+		Error       string `json:"error"`
+		ActiveTasks *int   `json:"active_tasks"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+
+	// A daemon released before deferrable updates fails a busy offer with
+	// this exact text. Keep the request queued; the next re-offer that lands
+	// while the machine is idle starts it.
+	if req.Status == "failed" && req.Error == protocol.RuntimeUpdateBusyError && updateRequestWaiting(existing.Status) {
+		req.Status = string(UpdateScheduled)
+		req.ActiveTasks = nil
 	}
 
 	switch req.Status {
@@ -336,10 +585,26 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to persist failure")
 			return
 		}
-	case "running":
-		// No-op: status is already "running" from PopPending. This call is
-		// just a progress signal from the daemon to confirm it received the
-		// update command and is executing it.
+	case "running", "scheduled":
+		var transitionErr error
+		if req.Status == "running" {
+			_, transitionErr = h.UpdateStore.MarkRunning(r.Context(), updateID)
+		} else {
+			_, transitionErr = h.UpdateStore.Schedule(r.Context(), updateID, req.ActiveTasks)
+		}
+		if errors.Is(transitionErr, errUpdateNotRunnable) {
+			// The daemon must drop the request: it was cancelled, expired or
+			// finished while queued.
+			slog.Debug("rejecting update report for a request that is no longer queued",
+				"runtime_id", runtimeID, "update_id", updateID, "status", req.Status)
+			writeError(w, http.StatusConflict, transitionErr.Error())
+			return
+		}
+		if transitionErr != nil {
+			slog.Error("UpdateStore transition failed", "error", transitionErr, "update_id", updateID, "status", req.Status)
+			writeError(w, http.StatusInternalServerError, "failed to persist update status")
+			return
+		}
 	default:
 		writeError(w, http.StatusBadRequest, "invalid status: "+req.Status)
 		return

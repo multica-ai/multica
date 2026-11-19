@@ -2,110 +2,334 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"os"
 	"testing"
 	"time"
 )
 
-func TestInMemoryUpdateStore_HasPending(t *testing.T) {
-	ctx := context.Background()
-	store := NewInMemoryUpdateStore()
+// updateStoreHarness runs the same lifecycle checks against every UpdateStore.
+type updateStoreHarness struct {
+	name  string
+	store UpdateStore
+	// edit rewrites a stored request in place, standing in for the passage of
+	// time the store measures against.
+	edit func(t *testing.T, id string, fn func(*UpdateRequest))
+}
 
-	if has, err := store.HasPending(ctx, "rt-1"); err != nil || has {
-		t.Fatalf("empty store should not report pending: has=%v err=%v", has, err)
+func updateStoreHarnesses(t *testing.T) []updateStoreHarness {
+	t.Helper()
+	mem := NewInMemoryUpdateStore()
+	harnesses := []updateStoreHarness{{
+		name:  "memory",
+		store: mem,
+		edit: func(t *testing.T, id string, fn func(*UpdateRequest)) {
+			mem.mu.Lock()
+			defer mem.mu.Unlock()
+			req, ok := mem.requests[id]
+			if !ok {
+				t.Fatalf("edit: request %s not stored", id)
+			}
+			fn(req)
+		},
+	}}
+	if os.Getenv("REDIS_TEST_URL") == "" {
+		return harnesses
 	}
+	rs := NewRedisUpdateStore(newRedisTestClient(t))
+	harnesses = append(harnesses, updateStoreHarness{
+		name:  "redis",
+		store: rs,
+		edit: func(t *testing.T, id string, fn func(*UpdateRequest)) {
+			ctx := context.Background()
+			raw, err := rs.rdb.Get(ctx, updateKey(id)).Bytes()
+			if err != nil {
+				t.Fatalf("edit: load %s: %v", id, err)
+			}
+			req, err := rs.unmarshalRequest(raw)
+			if err != nil {
+				t.Fatalf("edit: decode %s: %v", id, err)
+			}
+			fn(req)
+			data, err := rs.marshalRequest(req)
+			if err != nil {
+				t.Fatalf("edit: encode %s: %v", id, err)
+			}
+			if err := rs.rdb.Set(ctx, updateKey(id), data, updateRequestTTL(req.Status)).Err(); err != nil {
+				t.Fatalf("edit: store %s: %v", id, err)
+			}
+		},
+	})
+	return harnesses
+}
 
-	if _, err := store.Create(ctx, "rt-1", "v1.2.3", "user-1"); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if has, err := store.HasPending(ctx, "rt-1"); err != nil || !has {
-		t.Fatalf("expected pending=true after Create: has=%v err=%v", has, err)
-	}
-	if has, err := store.HasPending(ctx, "rt-2"); err != nil || has {
-		t.Fatalf("expected pending=false for unrelated runtime: has=%v err=%v", has, err)
-	}
+func withUpdateReofferInterval(t *testing.T, d time.Duration) {
+	t.Helper()
+	prev := updateReofferInterval
+	updateReofferInterval = d
+	t.Cleanup(func() { updateReofferInterval = prev })
+}
 
-	if _, err := store.PopPending(ctx, "rt-1"); err != nil {
-		t.Fatalf("pop: %v", err)
+func mustHasPending(t *testing.T, store UpdateStore, runtimeID string, want bool) {
+	t.Helper()
+	got, err := store.HasPending(context.Background(), runtimeID)
+	if err != nil {
+		t.Fatalf("has pending: %v", err)
 	}
-	if has, err := store.HasPending(ctx, "rt-1"); err != nil || has {
-		t.Fatalf("expected pending=false after PopPending: has=%v err=%v", has, err)
+	if got != want {
+		t.Fatalf("has pending = %v, want %v", got, want)
 	}
 }
 
-func TestInMemoryUpdateStore_PopPendingIgnoresTerminalHistory(t *testing.T) {
-	ctx := context.Background()
-	store := NewInMemoryUpdateStore()
-
-	first, err := store.Create(ctx, "rt-1", "v1.2.3", "user-1")
-	if err != nil {
-		t.Fatalf("create first: %v", err)
-	}
-	if err := store.Fail(ctx, first.ID, "allow next request"); err != nil {
-		t.Fatalf("fail first: %v", err)
-	}
-	time.Sleep(2 * time.Millisecond)
-	second, err := store.Create(ctx, "rt-1", "v1.2.4", "user-1")
-	if err != nil {
-		t.Fatalf("create second: %v", err)
-	}
-
-	got, err := store.PopPending(ctx, "rt-1")
-	if err != nil {
-		t.Fatalf("pop: %v", err)
-	}
-	if got == nil || got.ID != second.ID {
-		t.Fatalf("expected second request, got %+v", got)
-	}
-}
-
-func TestInMemoryUpdateStore_RunningRequestTimesOut(t *testing.T) {
-	ctx := context.Background()
-	store := NewInMemoryUpdateStore()
-
-	req, err := store.Create(ctx, "rt-timeout", "v1.2.3", "user-1")
+func mustCreateUpdate(t *testing.T, store UpdateStore, runtimeID string) *UpdateRequest {
+	t.Helper()
+	req, err := store.Create(context.Background(), runtimeID, "v1.2.3", "user-1")
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	claimed, err := store.PopPending(ctx, "rt-timeout")
-	if err != nil {
-		t.Fatalf("pop: %v", err)
-	}
-	if claimed == nil || claimed.Status != UpdateRunning {
-		t.Fatalf("expected running request, got %+v", claimed)
-	}
-	if claimed.RunStartedAt == nil {
-		t.Fatal("expected RunStartedAt after PopPending")
-	}
+	return req
+}
 
-	aged := time.Now().Add(-(updateRunningTimeout + time.Second))
-	claimed.RunStartedAt = &aged
-	got, err := store.Get(ctx, req.ID)
+func mustGetUpdate(t *testing.T, store UpdateStore, id string) *UpdateRequest {
+	t.Helper()
+	req, err := store.Get(context.Background(), id)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if got.Status != UpdateTimeout {
-		t.Fatalf("status = %s, want timeout", got.Status)
+	if req == nil {
+		t.Fatalf("get: request %s not found", id)
 	}
-	if got.Error == "" {
-		t.Fatal("expected timeout error")
+	return req
+}
+
+func TestUpdateStore_OfferedAgainUntilTheDaemonStartsIt(t *testing.T) {
+	withUpdateReofferInterval(t, 40*time.Millisecond)
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			ctx := context.Background()
+			mustHasPending(t, h.store, "rt-offer", false)
+			req := mustCreateUpdate(t, h.store, "rt-offer")
+			mustHasPending(t, h.store, "rt-offer", true)
+			mustHasPending(t, h.store, "rt-other", false)
+
+			popped, err := h.store.PopPending(ctx, "rt-offer")
+			if err != nil {
+				t.Fatalf("pop: %v", err)
+			}
+			if popped == nil || popped.ID != req.ID || popped.Status != UpdatePending {
+				t.Fatalf("popped %+v, want the pending request unchanged", popped)
+			}
+			// Delivered: not offered again until the re-offer interval passes.
+			mustHasPending(t, h.store, "rt-offer", false)
+			time.Sleep(60 * time.Millisecond)
+			mustHasPending(t, h.store, "rt-offer", true)
+			again, err := h.store.PopPending(ctx, "rt-offer")
+			if err != nil || again == nil || again.ID != req.ID {
+				t.Fatalf("re-offer = %+v, %v; want the same request", again, err)
+			}
+
+			running, err := h.store.MarkRunning(ctx, req.ID)
+			if err != nil {
+				t.Fatalf("mark running: %v", err)
+			}
+			if running.Status != UpdateRunning || running.RunStartedAt == nil {
+				t.Fatalf("running = %+v", running)
+			}
+			// Installing: never offered again.
+			time.Sleep(60 * time.Millisecond)
+			mustHasPending(t, h.store, "rt-offer", false)
+			// A retried "running" report is harmless.
+			if _, err := h.store.MarkRunning(ctx, req.ID); err != nil {
+				t.Fatalf("repeated mark running: %v", err)
+			}
+		})
 	}
 }
 
-func TestInMemoryUpdateStore_RejectsConcurrentActiveUntilTerminal(t *testing.T) {
-	ctx := context.Background()
-	store := NewInMemoryUpdateStore()
+func TestUpdateStore_ScheduledUpdateStaysQueuedUntilCancelled(t *testing.T) {
+	withUpdateReofferInterval(t, 40*time.Millisecond)
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			ctx := context.Background()
+			req := mustCreateUpdate(t, h.store, "rt-queue")
+			if _, err := h.store.PopPending(ctx, "rt-queue"); err != nil {
+				t.Fatalf("pop: %v", err)
+			}
+			two := 2
+			scheduled, err := h.store.Schedule(ctx, req.ID, &two)
+			if err != nil {
+				t.Fatalf("schedule: %v", err)
+			}
+			if scheduled.Status != UpdateScheduled || scheduled.ScheduledAt == nil {
+				t.Fatalf("scheduled = %+v", scheduled)
+			}
+			if scheduled.ActiveTasks == nil || *scheduled.ActiveTasks != 2 {
+				t.Fatalf("active tasks = %v, want 2", scheduled.ActiveTasks)
+			}
+			firstScheduledAt := *scheduled.ScheduledAt
 
-	req, err := store.Create(ctx, "rt-1", "v1.2.3", "user-1")
-	if err != nil {
+			// Still offered so an idle daemon (or one that restarted) picks it up.
+			time.Sleep(60 * time.Millisecond)
+			mustHasPending(t, h.store, "rt-queue", true)
+
+			// Re-queueing keeps when the wait started.
+			if again, err := h.store.Schedule(ctx, req.ID, nil); err != nil || !again.ScheduledAt.Equal(firstScheduledAt) {
+				t.Fatalf("reschedule = %+v, %v; want scheduled_at kept", again, err)
+			}
+
+			active, err := h.store.GetActive(ctx, "rt-queue")
+			if err != nil || active == nil || active.ID != req.ID {
+				t.Fatalf("active = %+v, %v; want the queued request", active, err)
+			}
+			if _, err := h.store.Create(ctx, "rt-queue", "v1.2.4", "user-1"); !errors.Is(err, errUpdateInProgress) {
+				t.Fatalf("second create = %v, want errUpdateInProgress", err)
+			}
+
+			cancelled, err := h.store.Cancel(ctx, req.ID)
+			if err != nil {
+				t.Fatalf("cancel: %v", err)
+			}
+			if cancelled.Status != UpdateCancelled {
+				t.Fatalf("cancelled = %+v", cancelled)
+			}
+			if _, err := h.store.MarkRunning(ctx, req.ID); !errors.Is(err, errUpdateNotRunnable) {
+				t.Fatalf("start after cancel = %v, want errUpdateNotRunnable", err)
+			}
+			if _, err := h.store.Schedule(ctx, req.ID, nil); !errors.Is(err, errUpdateNotRunnable) {
+				t.Fatalf("schedule after cancel = %v, want errUpdateNotRunnable", err)
+			}
+			if active, err := h.store.GetActive(ctx, "rt-queue"); err != nil || active != nil {
+				t.Fatalf("active after cancel = %+v, %v; want none", active, err)
+			}
+			time.Sleep(60 * time.Millisecond)
+			mustHasPending(t, h.store, "rt-queue", false)
+			mustCreateUpdate(t, h.store, "rt-queue")
+		})
+	}
+}
+
+func TestUpdateStore_CancelRejectedOnceInstalling(t *testing.T) {
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			ctx := context.Background()
+			req := mustCreateUpdate(t, h.store, "rt-cancel-late")
+			if _, err := h.store.MarkRunning(ctx, req.ID); err != nil {
+				t.Fatalf("mark running: %v", err)
+			}
+			if _, err := h.store.Cancel(ctx, req.ID); !errors.Is(err, errUpdateNotCancellable) {
+				t.Fatalf("cancel while running = %v, want errUpdateNotCancellable", err)
+			}
+			if got := mustGetUpdate(t, h.store, req.ID); got.Status != UpdateRunning {
+				t.Fatalf("status = %s, want running", got.Status)
+			}
+		})
+	}
+}
+
+func TestUpdateStore_ScheduledUpdateExpiresAfter24Hours(t *testing.T) {
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			ctx := context.Background()
+			req := mustCreateUpdate(t, h.store, "rt-expire")
+			if _, err := h.store.Schedule(ctx, req.ID, nil); err != nil {
+				t.Fatalf("schedule: %v", err)
+			}
+			h.edit(t, req.ID, func(r *UpdateRequest) {
+				aged := time.Now().Add(-(updateScheduledTimeout + time.Second))
+				r.ScheduledAt = &aged
+			})
+
+			if got := mustGetUpdate(t, h.store, req.ID); got.Status != UpdateExpired || got.Error == "" {
+				t.Fatalf("expired = %+v", got)
+			}
+			if _, err := h.store.MarkRunning(ctx, req.ID); !errors.Is(err, errUpdateNotRunnable) {
+				t.Fatalf("start after expiry = %v, want errUpdateNotRunnable", err)
+			}
+			if active, err := h.store.GetActive(ctx, "rt-expire"); err != nil || active != nil {
+				t.Fatalf("active after expiry = %+v, %v; want none", active, err)
+			}
+			mustCreateUpdate(t, h.store, "rt-expire")
+		})
+	}
+}
+
+func TestUpdateStore_RunningRequestTimesOut(t *testing.T) {
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			ctx := context.Background()
+			req := mustCreateUpdate(t, h.store, "rt-timeout")
+			if _, err := h.store.MarkRunning(ctx, req.ID); err != nil {
+				t.Fatalf("mark running: %v", err)
+			}
+			h.edit(t, req.ID, func(r *UpdateRequest) {
+				aged := time.Now().Add(-(updateRunningTimeout + time.Second))
+				r.RunStartedAt = &aged
+			})
+
+			if got := mustGetUpdate(t, h.store, req.ID); got.Status != UpdateTimeout || got.Error == "" {
+				t.Fatalf("timed out = %+v", got)
+			}
+			mustCreateUpdate(t, h.store, "rt-timeout")
+		})
+	}
+}
+
+func TestUpdateStore_FinishedRequestKeepsItsOutcome(t *testing.T) {
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			ctx := context.Background()
+			req := mustCreateUpdate(t, h.store, "rt-final")
+			if err := h.store.Complete(ctx, req.ID, "Updated to v1.2.3"); err != nil {
+				t.Fatalf("complete: %v", err)
+			}
+			if err := h.store.Fail(ctx, req.ID, "late failure"); err != nil {
+				t.Fatalf("late fail: %v", err)
+			}
+			got := mustGetUpdate(t, h.store, req.ID)
+			if got.Status != UpdateCompleted || got.Output != "Updated to v1.2.3" || got.Error != "" {
+				t.Fatalf("final = %+v, want the completed outcome", got)
+			}
+		})
+	}
+}
+
+func TestUpdateStore_PopPendingIgnoresFinishedHistory(t *testing.T) {
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			ctx := context.Background()
+			first := mustCreateUpdate(t, h.store, "rt-history")
+			if err := h.store.Fail(ctx, first.ID, "allow next request"); err != nil {
+				t.Fatalf("fail first: %v", err)
+			}
+			second := mustCreateUpdate(t, h.store, "rt-history")
+
+			got, err := h.store.PopPending(ctx, "rt-history")
+			if err != nil {
+				t.Fatalf("pop: %v", err)
+			}
+			if got == nil || got.ID != second.ID {
+				t.Fatalf("popped %+v, want the second request", got)
+			}
+		})
+	}
+}
+
+func TestInMemoryUpdateStore_KeepsQueuedRequestsPastRetention(t *testing.T) {
+	store := NewInMemoryUpdateStore()
+	ctx := context.Background()
+	req := mustCreateUpdate(t, store, "rt-old-queue")
+	if _, err := store.Schedule(ctx, req.ID, nil); err != nil {
+		t.Fatalf("schedule: %v", err)
+	}
+	store.mu.Lock()
+	store.requests[req.ID].CreatedAt = time.Now().Add(-2 * updateStoreRetention)
+	store.mu.Unlock()
+
+	// Create sweeps old requests; a queued one must survive the sweep.
+	if _, err := store.Create(ctx, "rt-unrelated", "v1.2.3", "user-1"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := store.Create(ctx, "rt-1", "v1.2.4", "user-1"); err != errUpdateInProgress {
-		t.Fatalf("second create error = %v, want errUpdateInProgress", err)
-	}
-	if err := store.Complete(ctx, req.ID, "done"); err != nil {
-		t.Fatalf("complete: %v", err)
-	}
-	if _, err := store.Create(ctx, "rt-1", "v1.2.4", "user-1"); err != nil {
-		t.Fatalf("create after terminal should succeed: %v", err)
+	if got := mustGetUpdate(t, store, req.ID); got.Status != UpdateScheduled {
+		t.Fatalf("status = %s, want scheduled", got.Status)
 	}
 }
