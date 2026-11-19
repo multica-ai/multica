@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -187,15 +188,29 @@ func (h *Handler) demoteMemberToGuest(w http.ResponseWriter, r *http.Request, re
 func (h *Handler) promoteGuest(w http.ResponseWriter, r *http.Request, target db.Member, role string) (db.Member, bool) {
 	ctx := r.Context()
 	workspaceID := uuid.UUID(target.WorkspaceID.Bytes)
+	// A promoted guest takes a member slot like a new invitation does, so a
+	// full Free workspace refuses it the same way.
+	memberLimit, err := h.memberLimitFor(ctx, target.WorkspaceID, role, false)
+	if err != nil {
+		if errors.Is(err, errMemberLimitReached) {
+			writeMemberLimitReached(w)
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to update member")
+		}
+		return db.Member{}, false
+	}
 	token, err := h.beginMemberSeat(ctx, workspaceID, uuid.UUID(target.UserID.Bytes))
 	if err != nil {
 		writeSeatCapacityError(w, err)
 		return db.Member{}, false
 	}
-	fail := func() (db.Member, bool) {
+	compensate := func() {
 		if token != uuid.Nil {
 			h.compensateCapacityIntent(ctx, token)
 		}
+	}
+	fail := func() (db.Member, bool) {
+		compensate()
 		writeError(w, http.StatusInternalServerError, "failed to update member")
 		return db.Member{}, false
 	}
@@ -205,6 +220,20 @@ func (h *Handler) promoteGuest(w http.ResponseWriter, r *http.Request, target db
 	}
 	defer tx.Rollback(ctx)
 	qtx := h.Queries.WithTx(tx)
+	if err := memberLimit.lock(ctx, qtx); err != nil {
+		return fail()
+	}
+	limitAdmission, err := memberLimit.admit(ctx, qtx)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		if errors.Is(err, errMemberLimitReached) {
+			limitAdmission.record(ctx)
+			compensate()
+			writeMemberLimitReached(w)
+			return db.Member{}, false
+		}
+		return fail()
+	}
 	updated, err := qtx.UpdateMemberRole(ctx, db.UpdateMemberRoleParams{ID: target.ID, Role: role})
 	if err != nil {
 		return fail()
@@ -219,6 +248,7 @@ func (h *Handler) promoteGuest(w http.ResponseWriter, r *http.Request, target db
 		_ = tx.Rollback(ctx)
 		return fail()
 	}
+	limitAdmission.record(ctx)
 	if token != uuid.Nil {
 		h.confirmCapacityIntent(ctx, workspaceID, token, uuid.UUID(target.ID.Bytes))
 	}
