@@ -72,6 +72,7 @@ function Composer({
         ref={ref}
         defaultValue=""
         placeholder={placeholder}
+        mentionHideGuests
         onUpdate={(md) => setEmpty(!md.trim())}
         onSubmit={submit}
         debounceMs={0}
@@ -110,7 +111,10 @@ function Message({ comment, onDelete }: { comment: DocComment; onDelete?: () => 
               aria-label={t(($) => $.comments.delete)}
               title={t(($) => $.comments.delete)}
               className="ml-auto rounded-sm p-0.5 text-muted-foreground opacity-0 hover:text-destructive focus-visible:opacity-100 group-hover/message:opacity-100"
-              onClick={onDelete}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
             >
               <Trash2 className="size-3.5" />
             </button>
@@ -152,12 +156,14 @@ function ThreadCard({
   active,
   missing,
   onActivate,
+  onResolvedChange,
 }: {
   docId: string;
   thread: DocThread;
   active: boolean;
   missing: boolean;
   onActivate: () => void;
+  onResolvedChange: (resolved: boolean) => void;
 }) {
   const { t } = useT("docs");
   const { getActorName } = useActorName();
@@ -173,13 +179,24 @@ function ThreadCard({
   const own = (c: DocComment) => c.authorType === "member" && c.authorId === userId;
   const del = (c: DocComment) =>
     remove.mutateAsync(c.id).catch(() => toast.error(t(($) => $.comments.errors.delete)));
+  // The card moves to the other tab once this settles, so the follow-up hangs
+  // off the request rather than this component.
+  const setResolved = (value: boolean) =>
+    resolve.mutateAsync({ commentId: thread.root.id, resolved: value }).then(
+      () => onResolvedChange(value),
+      () => toast.error(t(($) => $.comments.errors.resolve)),
+    );
   return (
     <div
       ref={ref}
       role="group"
       aria-label={thread.root.anchorQuote}
       data-thread-id={thread.root.id}
-      onClick={onActivate}
+      // Clicks inside the open discussion (its reply box, its buttons) must not
+      // scroll the doc back to the quote.
+      onClick={() => {
+        if (!active) onActivate();
+      }}
       className={cn(
         "rounded-lg border bg-card px-3 py-2.5 transition-colors",
         active ? "border-warning shadow-sm" : "hover:border-input",
@@ -199,7 +216,10 @@ function ThreadCard({
             variant="outline"
             className="ml-auto"
             disabled={resolve.isPending}
-            onClick={() => resolve.mutate({ commentId: thread.root.id, resolved: false })}
+            onClick={(e) => {
+              e.stopPropagation();
+              void setResolved(false);
+            }}
           >
             <RotateCcw />
             {t(($) => $.comments.reopen)}
@@ -220,7 +240,7 @@ function ThreadCard({
                 disabled={resolve.isPending}
                 onClick={(e) => {
                   e.stopPropagation();
-                  resolve.mutate({ commentId: thread.root.id, resolved: true });
+                  void setResolved(true);
                 }}
               >
                 <Check />
@@ -251,6 +271,7 @@ export function DocCommentsPanel({
   activeId,
   draft,
   onActivate,
+  onDeactivate,
   onDraftDone,
   onClose,
 }: {
@@ -260,6 +281,7 @@ export function DocCommentsPanel({
   activeId: string | null;
   draft: DocAnchor | null;
   onActivate: (id: string) => void;
+  onDeactivate: () => void;
   onDraftDone: (createdId: string | null) => void;
   onClose: () => void;
 }) {
@@ -337,6 +359,16 @@ export function DocCommentsPanel({
             active={thread.root.id === activeId}
             missing={missing.has(thread.root.id)}
             onActivate={() => onActivate(thread.root.id)}
+            onResolvedChange={(resolved) => {
+              // Resolving keeps you on the open list for the next discussion;
+              // reopening brings the discussion back to it.
+              if (!resolved) {
+                setTab("open");
+                onActivate(thread.root.id);
+              } else if (thread.root.id === activeId) {
+                onDeactivate();
+              }
+            }}
           />
         ))}
         {!draft && shown.length === 0 && (

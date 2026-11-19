@@ -18,8 +18,11 @@ func TestDocCommentsDiscussNotifyAndResolve(t *testing.T) {
 	dbfx.Member(t, testWorkspaceID, other, "member")
 	third := dbfx.User(t, "Wang Xue", fmt.Sprintf("wang-xue-%d@example.test", stamp))
 	dbfx.Member(t, testWorkspaceID, third, "member")
+	guest := dbfx.User(t, "Zhou Kai", fmt.Sprintf("zhou-kai-%d@example.test", stamp))
+	dbfx.Member(t, testWorkspaceID, guest, "guest")
+	outsider := dbfx.User(t, "Chen Yu", fmt.Sprintf("chen-yu-%d@example.test", stamp))
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), "DELETE FROM inbox_item WHERE recipient_id = ANY($1::uuid[])", []string{other, third, testUserID})
+		testPool.Exec(context.Background(), "DELETE FROM inbox_item WHERE recipient_id = ANY($1::uuid[])", []string{other, third, guest, outsider, testUserID})
 	})
 
 	comments := func() []DocCommentResponse {
@@ -46,7 +49,8 @@ func TestDocCommentsDiscussNotifyAndResolve(t *testing.T) {
 
 	var root DocCommentResponse
 	testutil.Call(t, testHandler.CreateDocComment, post(map[string]any{
-		"content":       "Can index-only migrations rehearse the same day? [@Li Ran](mention://member/" + other + ")",
+		"content":       "Can index-only migrations rehearse the same day? [@Li Ran](mention://member/" + other + ") " +
+			"[@Zhou Kai](mention://member/" + guest + ") [@Chen Yu](mention://member/" + outsider + ")",
 		"anchor_quote":  "Original",
 		"anchor_prefix": "# First\n\n",
 		"anchor_suffix": "",
@@ -56,6 +60,11 @@ func TestDocCommentsDiscussNotifyAndResolve(t *testing.T) {
 	}
 	if inboxFor(other, "doc_mentioned") != 1 || inboxFor(testUserID, "doc_mentioned")+inboxFor(testUserID, "doc_comment") != 0 {
 		t.Fatal("a mention notifies the mentioned member, never the author")
+	}
+	// Guests cannot open docs and outsiders are not in the workspace; neither
+	// may read the doc's text in their inbox.
+	if inboxFor(guest, "doc_mentioned")+inboxFor(outsider, "doc_mentioned") != 0 {
+		t.Fatal("a mention must not notify a guest or a non-member")
 	}
 
 	// A reply joins the discussion; answering a reply still lands on the root.

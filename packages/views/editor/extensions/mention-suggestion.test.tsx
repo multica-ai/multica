@@ -486,6 +486,20 @@ describe("createMentionSuggestion", () => {
     expect(screen.queryByText("No results")).not.toBeInTheDocument();
   });
 
+  it("leaves guests out of the member list where they cannot follow the mention", () => {
+    const qc = fakeQc({
+      members: [
+        { user_id: "u1", name: "Alice", role: "member" },
+        { user_id: "u2", name: "Alan", role: "guest" },
+      ],
+    });
+    const members = (config: ReturnType<typeof createMentionSuggestion>) =>
+      (config.items!(itemArgs("al")) as MentionItem[]).filter((i) => i.type === "member").map((i) => i.id).sort();
+
+    expect(members(createMentionSuggestion(qc))).toEqual(["u1", "u2"]);
+    expect(members(createMentionSuggestion(qc, { hideGuests: true }))).toEqual(["u1"]);
+  });
+
   it("matches cached live projects synchronously and leaves archived ones to the server", () => {
     const qc = fakeQc({
       projects: [

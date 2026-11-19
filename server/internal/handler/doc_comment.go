@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/inbox"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -178,8 +179,8 @@ func (h *Handler) CreateDocComment(w http.ResponseWriter, r *http.Request) {
 }
 
 // notifyDocComment tells the members a new comment is for: everyone it
-// @mentions, and everyone who already wrote in the discussion. The author is
-// never notified, and a member gets one item even when both apply.
+// @mentions, and everyone who already wrote in the discussion. The author and
+// guests are never notified, and a member gets one item even when both apply.
 func (h *Handler) notifyDocComment(ctx context.Context, doc db.Doc, root, comment db.DocComment, actorType, actorID string) {
 	author := uuidToString(comment.AuthorID)
 	mentioned := map[string]bool{}
@@ -208,6 +209,14 @@ func (h *Handler) notifyDocComment(ctx context.Context, doc db.Doc, root, commen
 	deliver := func(recipient, kind string) {
 		recipientUUID, err := util.ParseUUID(recipient)
 		if err != nil {
+			return
+		}
+		// Docs are closed to guests (and to anyone outside the workspace), so
+		// a notification carrying the doc's title and text must not reach them.
+		member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID: recipientUUID, WorkspaceID: doc.WorkspaceID,
+		})
+		if err != nil || projectaccess.IsGuestRole(member.Role) {
 			return
 		}
 		if _, _, err := inbox.Deliver(ctx, h.Queries, h.Bus, inbox.Notification{Params: db.CreateInboxItemParams{
