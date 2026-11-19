@@ -1,13 +1,18 @@
 package execenv
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 type codexForkReceipt struct {
@@ -97,4 +102,111 @@ func validPublishedCodexFork(dir, childID string) bool {
 	}
 	archive, err := os.Lstat(filepath.Join(dir, "archived_sessions"))
 	return err == nil && archive.IsDir() && CodexResumeRolloutPresent(dir, childID)
+}
+
+// ForkCodexChat publishes a native fork from daemon-resolved conversation paths.
+// sourceArchiveDir is set only for a source fork whose archive is owned by that
+// conversation. The caller must pin both stores and resolve source access.
+func ForkCodexChat(ctx context.Context, cfg agent.Config, cwd, sourceSessionsDir, sourceArchiveDir, sourceID, destinationStore, requestID string) (string, error) {
+	return publishCodexFork(destinationStore, requestID, func(staging string) (string, error) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		stagedSource, err := stageCodexForkSource(sourceSessionsDir, staging, sourceID)
+		if err != nil {
+			return "", err
+		}
+		archive := filepath.Join(staging, "archived_sessions")
+		if sourceArchiveDir != "" {
+			if err := copyCodexForkArchive(sourceArchiveDir, archive); err != nil {
+				return "", err
+			}
+		}
+
+		cfg.Env = maps.Clone(cfg.Env)
+		if cfg.Env == nil {
+			cfg.Env = make(map[string]string, 1)
+		}
+		cfg.Env["CODEX_HOME"] = staging
+		childID, err := agent.ForkCodexThread(ctx, cfg, cwd, sourceID)
+		if err != nil {
+			return "", err
+		}
+		if err := os.Rename(stagedSource, filepath.Join(archive, filepath.Base(stagedSource))); err != nil {
+			return "", fmt.Errorf("archive staged Codex source: %w", err)
+		}
+		return childID, nil
+	})
+}
+
+func stageCodexForkSource(sourceSessionsDir, staging, sourceID string) (string, error) {
+	if err := uuid.Validate(sourceID); err != nil || sourceSessionsDir == "" {
+		return "", errors.New("Codex fork source history is unavailable")
+	}
+	matches := findCodexRollouts(sourceSessionsDir, sourceID)
+	if len(matches) != 1 {
+		return "", errors.New("Codex fork requires one source rollout")
+	}
+	relative, err := filepath.Rel(sourceSessionsDir, matches[0])
+	if err != nil {
+		return "", err
+	}
+	dest := filepath.Join(staging, "sessions", relative)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return "", err
+	}
+	root, err := os.OpenRoot(sourceSessionsDir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	return dest, copyCodexForkRollout(root, relative, dest)
+}
+
+func copyCodexForkArchive(sourceDir, dest string) error {
+	root, err := os.OpenRoot(sourceDir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	dir, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, "rollout-") || (!strings.HasSuffix(name, ".jsonl") && !strings.HasSuffix(name, ".jsonl.zst")) {
+			continue
+		}
+		if err := copyCodexForkRollout(root, name, filepath.Join(dest, name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyCodexForkRollout(root *os.Root, name, dest string) error {
+	info, err := root.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("Codex fork rollout is not a regular file")
+	}
+	source, err := root.Open(name)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	target, err := os.OpenFile(dest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(target, source)
+	return errors.Join(copyErr, target.Close())
 }
