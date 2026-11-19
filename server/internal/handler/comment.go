@@ -3523,6 +3523,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	sourceTaskID := existing.SourceTaskID
 	var triggerIssue *db.Issue
 	var cancelled []db.AgentTaskQueue
+	cancelInEditTx := strictContentEdit || replaceAttachments
 	if oldContent != req.Content {
 		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
 		if err != nil {
@@ -3547,9 +3548,11 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			sourceTaskID = pgtype.UUID{}
 		}
 		// Legacy clients keep the existing cancel-before-update behavior. Strict
-		// revision writes defer cancellation until the conditional UPDATE wins,
-		// so a race that returns 409 cannot mutate the task queue.
-		if !strictContentEdit {
+		// revision writes, and any edit that sets attachments, cancel inside
+		// the edit's transaction once everything else has succeeded, so a 409
+		// (a lost revision race, an attachment no longer available) leaves the
+		// task queue untouched.
+		if !cancelInEditTx {
 			cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
 			if err != nil {
 				slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
@@ -3607,12 +3610,6 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			comment = updated.Comment()
 			issueRevision = updated.IssueRevision
 		}
-		if err == nil && oldContent != req.Content && strictContentEdit {
-			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
-			if err == nil {
-				err = service.SettleTerminalTaskState(r.Context(), qtx, cancelled...)
-			}
-		}
 		if err == nil && replaceAttachments && len(attachmentIDs) > 0 {
 			_, err = qtx.BindUploaderDraftAttachmentsToIssue(r.Context(), db.BindUploaderDraftAttachmentsToIssueParams{
 				IssueID:       existing.IssueID,
@@ -3653,8 +3650,23 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 		}
+		// Last, after the attachments checked out: the runs built from the old
+		// body are cancelled in the same transaction, so any failure above
+		// rolls back with them still queued.
+		if err == nil && oldContent != req.Content {
+			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
+			if err == nil {
+				err = service.SettleTerminalTaskState(r.Context(), qtx, cancelled...)
+			}
+		}
 		if err == nil {
 			err = tx.Commit(r.Context())
+		}
+		if err != nil {
+			// Release the issue and comment locks before the error handling
+			// below reads them on other connections.
+			_ = tx.Rollback(r.Context())
+			cancelled = nil
 		}
 		if err == nil {
 			h.TaskService.BroadcastCancelledTasks(r.Context(), uuidToString(existing.WorkspaceID), cancelled)
@@ -3671,7 +3683,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
-		if triggerIssue != nil && !strictContentEdit {
+		if triggerIssue != nil && !cancelInEditTx {
 			// Cancellation committed but the edit did not. Restore the complete
 			// original batch, including the still-valid unchanged comment.
 			h.retriggerCancelledTaskSurvivors(r.Context(), *triggerIssue, cancelled, pgtype.UUID{})

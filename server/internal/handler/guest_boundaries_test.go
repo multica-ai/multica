@@ -13,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -836,5 +839,40 @@ func TestCommentEditLosingDraftToPublishIsRefused(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT content FROM comment WHERE id = $1`, existing.ID).Scan(&content)
 	if content != "before the edit" {
 		t.Fatalf("edited comment content = %q, want the refused edit rolled back", content)
+	}
+}
+
+// An installed client edits without expected_revision or content_base. When
+// such an edit also sets attachments and one is no longer available, it is
+// refused as a whole: the runs queued from the old body stay queued, and the
+// request does not hang on its own transaction's issue lock.
+func TestLegacyCommentEditWithUnavailableAttachmentKeepsQueuedRun(t *testing.T) {
+	f := newGuestFixture(t)
+	runtime := dbfx.Runtime(t, f.marker+" legacy runtime")
+	agent := dbfx.Agent(t, f.marker+" legacy agent", runtime)
+	comment := dbfx.Comment(t, f.sharedIssue, "please look", testutil.Cols{"author_type": "member", "author_id": testUserID})
+	task := dbfx.Task(t, agent, testutil.Cols{
+		"issue_id": f.sharedIssue, "runtime_id": runtime, "trigger_comment_id": comment,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req := withURLParam(newRequest(http.MethodPut, "/api/comments/"+comment,
+		map[string]any{"content": "please look again", "attachment_ids": []string{uuid.NewString()}}), "commentId", comment)
+	resp := testutil.Call(t, testHandler.UpdateComment, req.WithContext(context.WithValue(ctx, chi.RouteCtxKey, chi.RouteContext(req.Context()))))
+	if ctx.Err() != nil {
+		t.Fatalf("legacy edit did not finish within 10s (status %d)", resp.Code)
+	}
+	if resp.Code != http.StatusConflict {
+		t.Fatalf("legacy edit with an unavailable attachment = %d %s, want 409", resp.Code, resp.Body.String())
+	}
+	var status, content string
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, task).Scan(&status)
+	if status != "queued" {
+		t.Fatalf("run status after the refused edit = %q, want still queued", status)
+	}
+	dbfx.QueryRow(t, `SELECT content FROM comment WHERE id = $1`, comment).Scan(&content)
+	if content != "please look" {
+		t.Fatalf("comment content = %q, want unchanged", content)
 	}
 }
