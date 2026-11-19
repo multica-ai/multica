@@ -227,6 +227,43 @@ settings above pass through. It writes `base.json`, `head.json` and
 it to the PR. The **UI performance report** workflow does not offer these
 scenarios, because a GitHub runner has no local API to run them against.
 
+## Desktop: tab switches and Inbox clicks
+
+`desktop-tabs.spec.ts` measures what only Desktop has, in the real Electron
+app (production renderer from `electron-vite build`) on the core-path
+dataset (MUL-9609). Desktop mounts one tab at a time, so a tab switch
+unmounts the outgoing page and mounts the incoming one from the Query cache.
+
+- **tabs**: open six tabs (issue list, Inbox, the `large` issue read down to
+  its notified comment, `p99`, a 120-comment and a small issue), then click
+  through the tab strip twice.
+- **inbox**: the core-path Inbox scenario inside Desktop: click twenty Work
+  panel Inbox rows, then go back and forth between the first five.
+
+Each step reports the time from the click until the content is in view, the
+next paint (Event Timing), main-thread task time and Long Animation Frames,
+plus mounted DOM nodes. Every launch gets a fresh app-data directory and a
+temporary HOME with daemon auto-start off, so it never touches an installed
+Multica, its CLI profiles or its daemon, and hands the `multica://` handler
+back on exit.
+
+```bash
+make up C=api ARGS="--ephemeral"
+# Build each ref's Desktop against the API and keep its output under apps/desktop.
+(cd apps/desktop && VITE_API_URL=http://localhost:<api-port> VITE_WS_URL=ws://localhost:<api-port>/ws \
+  pnpm exec electron-vite build && rm -rf .perf-builds/head && cp -R out .perf-builds/head)
+PERF_SCENARIO=desktop PERF_REPORT_PATH=$PWD/perf/desktop.json \
+  PERF_DESKTOP_TARGETS=main=apps/desktop/.perf-builds/main,head=apps/desktop/.perf-builds/head \
+  make env-exec ARGS="-- pnpm exec playwright test --config=playwright.perf.config.ts desktop-tabs.spec.ts"
+```
+
+`PERF_SCENARIO=desktop-tabs` or `desktop-inbox` runs one scenario. Rounds
+alternate between the `PERF_DESKTOP_TARGETS` builds (default: this
+checkout's `apps/desktop/out`); `PERF_REPEATS`, `PERF_WARMUP` and
+`PERF_CPU_THROTTLE` work as in the core-path benchmark. `PERF_TRACE_DIR`
+writes a Chrome trace and CPU profile of the last round's last tab cycle.
+The renderer bundle is not minified, so profiles carry real function names.
+
 ## Inbox jump
 
 `inbox-jump.spec.ts` opens a notification about a reply deep in a long issue
