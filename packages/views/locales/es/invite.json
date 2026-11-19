@@ -54,6 +54,7 @@
     "seats_full": "Todos los puestos de miembro comprados están en uso. Pide a un administrador del espacio de trabajo que añada un puesto antes de volver a intentarlo.",
     "seats_unavailable": "No se pudo verificar la capacidad de miembros. Inténtalo de nuevo.",
     "full_title": "{{workspace}} está lleno",
-    "full_description": "Habla con quien te invitó. Este enlace volverá a funcionar cuando el espacio de trabajo mejore su plan."
+    "full_description": "Habla con quien te invitó. Este enlace volverá a funcionar cuando el espacio de trabajo mejore su plan.",
+    "retry": "Volver a intentarlo"
   }
 }

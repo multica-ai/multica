@@ -266,5 +266,11 @@ describe("JoinPage", () => {
       screen.getByText("Contact the person who invited you. This link works again once the workspace upgrades."),
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Join Workspace" })).not.toBeInTheDocument();
+
+    // A slot frees up (an invitation revoked): the same page joins on retry.
+    mockJoinByShareLink.mockResolvedValue({ workspace_id: "ws-1", workspace_slug: "acme" });
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getByText("Joined!")).toBeInTheDocument());
+    expect(mockJoinByShareLink).toHaveBeenCalledTimes(2);
   });
 });

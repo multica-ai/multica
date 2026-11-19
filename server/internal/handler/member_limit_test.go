@@ -320,6 +320,37 @@ func TestGetMemberLimit(t *testing.T) {
 	}
 }
 
+// A workspace that has just upgraded must not be reported full on the policy
+// cached before the upgrade: the client would keep offering the upgrade.
+func TestGetMemberLimitRefreshesBeforeReportingFull(t *testing.T) {
+	workspaceID := memberLimitWorkspace(t, 4)
+	stub := useMemberLimit(t, workspaceID, entitlement.ActionEnforce, 5)
+	stub.SetRefreshed(uuid.MustParse(workspaceID), entitlement.GateMembers, memberLimitDecision(entitlement.ActionOff, 0))
+
+	req := newRequest(http.MethodGet, "/api/workspaces/"+workspaceID+"/member-limit", nil)
+	req.Header.Set("X-Workspace-ID", workspaceID)
+	var resp MemberLimitResponse
+	testutil.Call(t, testHandler.GetMemberLimit, withURLParam(req, "id", workspaceID)).Want(http.StatusOK).JSON(&resp)
+	if resp.Action != "off" || len(stub.Refreshes()) != 1 {
+		t.Fatalf("resp = %+v, refreshes = %d; want the refreshed off policy", resp, len(stub.Refreshes()))
+	}
+}
+
+// Within the server's five-second bound on re-reading Cloud, a refusal can
+// still rest on the Free policy read just before payment. The held invitation
+// survives that (the client retries after the bound); once the refreshed
+// policy arrives the same invitation goes through.
+func TestHeldInvitationGoesThroughOnceThePolicyCatchesUp(t *testing.T) {
+	workspaceID := memberLimitWorkspace(t, 4)
+	stub := useMemberLimit(t, workspaceID, entitlement.ActionEnforce, 5)
+	email := "held-" + uuid.NewString() + "@multica.ai"
+
+	wantMemberLimitReached(t, inviteToWorkspace(t, workspaceID, email))
+
+	stub.SetRefreshed(uuid.MustParse(workspaceID), entitlement.GateMembers, memberLimitDecision(entitlement.ActionOff, 0))
+	inviteToWorkspace(t, workspaceID, email).Want(http.StatusCreated)
+}
+
 func TestMemberLimitPeriodIsTheUTCMonth(t *testing.T) {
 	start, end := memberLimitPeriod(time.Date(2026, 12, 31, 23, 30, 0, 0, time.FixedZone("UTC-5", -5*3600)))
 	if !start.Equal(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)) || !end.Equal(time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)) {

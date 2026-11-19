@@ -221,6 +221,23 @@ func (h *Handler) GetMemberLimit(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed to load member limit")
 				return
 			}
+			// Before telling the client the workspace is full, re-read the
+			// policy as an admission would: right after an upgrade the cached
+			// one is still Free's, and the client would offer an upgrade the
+			// workspace already has.
+			if m.decision.Gate.Action == entitlement.ActionEnforce && m.exceeds(slots) {
+				if refresher, ok := h.Entitlements.(entitlement.Refresher); ok {
+					m.decision = refresher.RefreshGate(r.Context(), uuid.UUID(workspaceID.Bytes), entitlement.GateMembers)
+					decision = m.decision
+				}
+			}
+		}
+		if m.active() {
+			slots, err := h.Queries.CountWorkspaceMemberSlots(r.Context(), workspaceID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load member limit")
+				return
+			}
 			limit := m.limit()
 			resp = MemberLimitResponse{
 				Action:             string(decision.Gate.Action),

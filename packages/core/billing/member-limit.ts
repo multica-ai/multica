@@ -55,9 +55,10 @@ export function isMemberLimitReachedError(error: unknown): boolean {
  * An invitation the member limit held back while its workspace upgrades.
  *
  * Members saves it under a token and opens Billing with that token. Billing
- * binds it to the checkout it creates for it, and sends it back to Members
- * only once that upgrade went through. A checkout started any other way never
- * picks it up, and several held invitations (one per tab) never get mixed.
+ * binds it to the checkout it creates for it, identified by the checkout's
+ * request id, which Cloud puts on both Stripe returns. That id is what ties a
+ * success or a cancel to this invitation; nothing is ever matched by guess.
+ * Members consumes the held invitation only once it has been sent.
  */
 export interface UpgradeInvite {
   email: string;
@@ -72,9 +73,17 @@ export interface HeldInvite extends UpgradeInvite {
 }
 
 export interface HeldInviteCheckout {
-  sessionId: string;
+  /** The checkout request id, named on both Stripe returns. */
+  requestId: string;
   /** The subscription version when the checkout started. */
   baseVersion: number;
+  boundAt: number;
+}
+
+interface StoredHeldInvites {
+  invites: Record<string, HeldInvite>;
+  /** When this client last started a checkout not made for a held invitation. */
+  plainCheckoutAt: number | null;
 }
 
 // Checkout plus the webhook that activates the plan take minutes; a held
@@ -89,24 +98,33 @@ function newToken(): string {
   return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-function readAll(slug: string, storage: StorageAdapter, now: number): Record<string, HeldInvite> {
+function readStored(slug: string, storage: StorageAdapter, now: number): StoredHeldInvites {
+  const empty: StoredHeldInvites = { invites: {}, plainCheckoutAt: null };
   const raw = storage.getItem(upgradeInviteKey(slug));
-  if (!raw) return {};
+  if (!raw) return empty;
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
     storage.removeItem(upgradeInviteKey(slug));
-    return {};
+    return empty;
   }
-  const out: Record<string, HeldInvite> = {};
-  if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
-    for (const [token, value] of Object.entries(parsed as Record<string, unknown>)) {
-      const held = readHeld(token, value, now);
-      if (held) out[token] = held;
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    storage.removeItem(upgradeInviteKey(slug));
+    return empty;
+  }
+  const value = parsed as { invites?: unknown; plainCheckoutAt?: unknown };
+  const out: StoredHeldInvites = {
+    invites: {},
+    plainCheckoutAt: typeof value.plainCheckoutAt === "number" ? value.plainCheckoutAt : null,
+  };
+  if (typeof value.invites === "object" && value.invites !== null && !Array.isArray(value.invites)) {
+    for (const [token, entry] of Object.entries(value.invites as Record<string, unknown>)) {
+      const held = readHeld(token, entry, now);
+      if (held) out.invites[token] = held;
     }
   }
-  writeAll(slug, out, storage);
+  writeStored(slug, out, storage);
   return out;
 }
 
@@ -123,25 +141,24 @@ function readHeld(token: string, value: unknown, now: number): HeldInvite | null
   ) {
     return null;
   }
+  const c = v.checkout;
   const checkout =
-    v.checkout &&
-    typeof v.checkout.sessionId === "string" &&
-    v.checkout.sessionId !== "" &&
-    typeof v.checkout.baseVersion === "number"
-      ? { sessionId: v.checkout.sessionId, baseVersion: v.checkout.baseVersion }
+    c &&
+    typeof c.requestId === "string" &&
+    c.requestId !== "" &&
+    typeof c.baseVersion === "number" &&
+    typeof c.boundAt === "number"
+      ? { requestId: c.requestId, baseVersion: c.baseVersion, boundAt: c.boundAt }
       : null;
   return { token, email: v.email, role: v.role, savedAt: v.savedAt, checkout };
 }
 
-function writeAll(slug: string, all: Record<string, HeldInvite>, storage: StorageAdapter): void {
-  const entries = Object.values(all);
-  if (entries.length === 0) {
+function writeStored(slug: string, stored: StoredHeldInvites, storage: StorageAdapter): void {
+  if (Object.keys(stored.invites).length === 0) {
     storage.removeItem(upgradeInviteKey(slug));
     return;
   }
-  const value: Record<string, Omit<HeldInvite, "token">> = {};
-  for (const { token, ...rest } of entries) value[token] = rest;
-  storage.setItem(upgradeInviteKey(slug), JSON.stringify(value));
+  storage.setItem(upgradeInviteKey(slug), JSON.stringify(stored));
 }
 
 /** Holds an invitation and returns the token that names it. */
@@ -151,10 +168,10 @@ export function saveUpgradeInvite(
   storage: StorageAdapter = defaultStorage,
   now: number = Date.now(),
 ): string {
-  const all = readAll(slug, storage, now);
+  const stored = readStored(slug, storage, now);
   const token = newToken();
-  all[token] = { token, email: invite.email, role: invite.role, savedAt: now, checkout: null };
-  writeAll(slug, all, storage);
+  stored.invites[token] = { token, email: invite.email, role: invite.role, savedAt: now, checkout: null };
+  writeStored(slug, stored, storage);
   return token;
 }
 
@@ -164,22 +181,38 @@ export function readUpgradeInvite(
   storage: StorageAdapter = defaultStorage,
   now: number = Date.now(),
 ): HeldInvite | null {
-  return readAll(slug, storage, now)[token] ?? null;
+  return readStored(slug, storage, now).invites[token] ?? null;
 }
 
 /** Records the checkout Billing created for a held invitation. */
 export function bindUpgradeInviteCheckout(
   slug: string,
   token: string,
-  checkout: HeldInviteCheckout,
+  checkout: Omit<HeldInviteCheckout, "boundAt">,
   storage: StorageAdapter = defaultStorage,
   now: number = Date.now(),
 ): void {
-  const all = readAll(slug, storage, now);
-  const held = all[token];
+  const stored = readStored(slug, storage, now);
+  const held = stored.invites[token];
   if (!held) return;
-  all[token] = { ...held, checkout };
-  writeAll(slug, all, storage);
+  stored.invites[token] = { ...held, checkout: { ...checkout, boundAt: now } };
+  writeStored(slug, stored, storage);
+}
+
+/**
+ * Notes that this client started a checkout not made for a held invitation.
+ * Held invitations bound before it are no longer offered when an unverified
+ * plan change shows up, since that change is more likely this checkout's. A
+ * return naming their own checkout still sends them.
+ */
+export function recordPlainCheckout(
+  slug: string,
+  storage: StorageAdapter = defaultStorage,
+  now: number = Date.now(),
+): void {
+  const stored = readStored(slug, storage, now);
+  if (Object.keys(stored.invites).length === 0) return;
+  writeStored(slug, { ...stored, plainCheckoutAt: now }, storage);
 }
 
 /** Held invitations whose checkout has started, newest first. */
@@ -188,43 +221,62 @@ export function listCheckoutHeldInvites(
   storage: StorageAdapter = defaultStorage,
   now: number = Date.now(),
 ): HeldInvite[] {
-  return Object.values(readAll(slug, storage, now))
+  return Object.values(readStored(slug, storage, now).invites)
     .filter((held) => held.checkout !== null)
     .sort((a, b) => b.savedAt - a.savedAt);
 }
 
-/** Drops one held invitation, or every one in the workspace without a token. */
+export function plainCheckoutAt(
+  slug: string,
+  storage: StorageAdapter = defaultStorage,
+  now: number = Date.now(),
+): number | null {
+  return readStored(slug, storage, now).plainCheckoutAt;
+}
+
+/** Drops one held invitation. */
 export function clearUpgradeInvite(
   slug: string,
-  token?: string,
+  token: string,
   storage: StorageAdapter = defaultStorage,
   now: number = Date.now(),
 ): void {
-  if (token === undefined) {
-    storage.removeItem(upgradeInviteKey(slug));
-    return;
+  const stored = readStored(slug, storage, now);
+  delete stored.invites[token];
+  writeStored(slug, stored, storage);
+}
+
+/** Drops every held invitation for email, once an invitation to it is out. */
+export function clearUpgradeInvitesFor(
+  slug: string,
+  email: string,
+  storage: StorageAdapter = defaultStorage,
+  now: number = Date.now(),
+): void {
+  const stored = readStored(slug, storage, now);
+  const normalized = email.trim().toLowerCase();
+  for (const [token, held] of Object.entries(stored.invites)) {
+    if (held.email.trim().toLowerCase() === normalized) delete stored.invites[token];
   }
-  const all = readAll(slug, storage, now);
-  delete all[token];
-  writeAll(slug, all, storage);
+  writeStored(slug, stored, storage);
 }
 
 /**
- * What a plan change means for the held invitations, if anything.
+ * What the latest subscription state means for held invitations, if anything.
  *
- * A held invitation qualifies only when its own checkout started on this
- * client and the subscription has changed since (a version above the one seen
- * when that checkout started) with checkout no longer offered.
+ * Nothing happens until the plan is actually paid (an incomplete payment
+ * still reads as Free) and the subscription changed after the invitation's
+ * checkout started.
  *
- * - `send`: the Stripe return to this tab names that invitation's checkout,
- *   so its payment went through. Members sends it.
- * - `confirm`: the plan changed, but nothing ties the change to this
+ * - `send`: the Stripe return to this tab names the invitation's own
+ *   checkout. Members sends it.
+ * - `confirm`: the plan became paid, but no return ties it to this
  *   invitation's checkout. Desktop pays in the system browser and never sees
- *   the return, and another admin may have upgraded from elsewhere. The
- *   person who held it decides whether it still goes out.
+ *   the return; another admin may have upgraded elsewhere. The person who
+ *   held it decides. Invitations bound before a plain checkout this client
+ *   started later are not offered.
  *
- * A return that names a session belonging to no held invitation (a plain
- * upgrade) leaves them all alone.
+ * A return naming another checkout leaves held invitations alone.
  */
 export type HeldInviteHandback =
   | { kind: "send"; held: HeldInvite }
@@ -232,35 +284,29 @@ export type HeldInviteHandback =
 
 export function heldInviteHandback(
   held: HeldInvite[],
-  subscription: { version: number; checkoutAvailable: boolean },
-  returnSessionId: string | null,
+  subscription: { version: number; paid: boolean },
+  returnRequestId: string | null,
+  plainCheckoutStartedAt: number | null = null,
 ): HeldInviteHandback | null {
-  if (subscription.checkoutAvailable) return null;
+  if (!subscription.paid) return null;
   const eligible = held.filter(
     (h) => h.checkout !== null && subscription.version > h.checkout.baseVersion,
   );
-  if (returnSessionId) {
-    const match = eligible.find((h) => h.checkout?.sessionId === returnSessionId);
+  if (returnRequestId) {
+    const match = eligible.find((h) => h.checkout?.requestId === returnRequestId);
     return match ? { kind: "send", held: match } : null;
   }
-  // Newest first, so a confirmation offers the latest one.
-  const latest = [...eligible].sort((a, b) => b.savedAt - a.savedAt)[0];
+  const latest = eligible
+    .filter((h) => plainCheckoutStartedAt === null || h.checkout!.boundAt > plainCheckoutStartedAt)
+    .sort((a, b) => b.savedAt - a.savedAt)[0];
   return latest ? { kind: "confirm", held: latest } : null;
 }
 
-/**
- * The held invitation a Stripe cancel return gave up on. Stripe names the
- * session only on success, so without one the cancel is attributed only when
- * a single held invitation is waiting on a checkout; with several, none is
- * dropped and they expire on their own.
- */
+/** The held invitation of a cancelled checkout: only the one it names. */
 export function heldInviteForCancelledCheckout(
   held: HeldInvite[],
-  returnSessionId: string | null,
+  returnRequestId: string | null,
 ): HeldInvite | null {
-  const bound = held.filter((h) => h.checkout !== null);
-  if (returnSessionId) {
-    return bound.find((h) => h.checkout?.sessionId === returnSessionId) ?? null;
-  }
-  return bound.length === 1 ? bound[0]! : null;
+  if (!returnRequestId) return null;
+  return held.find((h) => h.checkout?.requestId === returnRequestId) ?? null;
 }

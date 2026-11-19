@@ -139,6 +139,13 @@ function JoinInner() {
                 {t(($) => $.join.full_title, { workspace: info.workspace_name })}
               </h1>
               <p className="text-center text-muted-foreground">{t(($) => $.join.full_description)}</p>
+              {/* A slot can free up without the link changing (an invitation
+                  revoked, a member removed), so the join stays one click away. */}
+              <div className="flex justify-center pt-2">
+                <Button variant="outline" onClick={handleJoin} disabled={joining}>
+                  {joining ? t(($) => $.join.joining) : t(($) => $.join.retry)}
+                </Button>
+              </div>
             </>
           ) : (
             <>

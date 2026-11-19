@@ -54,6 +54,7 @@
     "seats_full": "已购买的成员席位都已用完。请联系工作区管理员增加席位后再试。",
     "seats_unavailable": "暂时无法核验成员席位，请稍后重试。",
     "full_title": "{{workspace}} 的成员已满",
-    "full_description": "请联系邀请你的人。工作区升级后，这个链接会恢复可用。"
+    "full_description": "请联系邀请你的人。工作区升级后，这个链接会恢复可用。",
+    "retry": "重试"
   }
 }

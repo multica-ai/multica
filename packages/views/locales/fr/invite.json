@@ -54,6 +54,7 @@
     "seats_full": "Tous les sièges achetés sont occupés. Demandez à un administrateur de l'espace de travail d'ajouter un siège avant de réessayer.",
     "seats_unavailable": "Impossible de vérifier la capacité en membres. Réessayez.",
     "full_title": "{{workspace}} est complet",
-    "full_description": "Contactez la personne qui vous a invité. Ce lien fonctionnera de nouveau une fois le forfait de l'espace de travail mis à niveau."
+    "full_description": "Contactez la personne qui vous a invité. Ce lien fonctionnera de nouveau une fois le forfait de l'espace de travail mis à niveau.",
+    "retry": "Réessayer"
   }
 }

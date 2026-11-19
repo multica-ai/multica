@@ -225,7 +225,7 @@
     "confirm": {
       "title": "Continue to Stripe Checkout?",
       "description": "Plan: {{plan}}. Billing interval: {{interval}}. Current human members: {{count}}. Stripe will re-count seats and show the final amount before payment.",
-      "held_invite": "One more seat is included for the invitation to {{email}}, which is sent once the upgrade completes."
+      "held_invite": "One more paid seat is included for the invitation to {{email}}. It is sent when you come back here after paying; in the desktop app, confirm it in Billing once the upgrade shows."
     },
     "held_invite": {
       "title": "The workspace is on {{plan}} now",

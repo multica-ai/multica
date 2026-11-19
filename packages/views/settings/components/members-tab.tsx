@@ -74,7 +74,7 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import {
-  clearUpgradeInvite,
+  clearUpgradeInvitesFor,
   isMemberLimitFull,
   isMemberLimitReachedError,
   memberLimitKeys,
@@ -117,6 +117,12 @@ import {
 } from "./seat-invite-purchase";
 
 const SEAT_PURCHASE_CONFIRM_TIMEOUT_MS = 2 * 60_000;
+
+// Sending a held invitation right after its upgrade retries a member-limit
+// refusal this many times, this far apart: past the server's five-second
+// bound on re-reading Cloud's policy.
+const HELD_INVITE_RETRIES = 2;
+const HELD_INVITE_RETRY_MS = 6_000;
 
 // Catches typos before an upgrade buys a seat for the invitation.
 const INVITE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -510,20 +516,19 @@ export function MembersTab() {
     params.delete("held_invite");
     navigation.replace(`${navigation.pathname}?${params}`);
     if (!canManageWorkspace) return;
-    let held: UpgradeInvite | null = null;
-    if (inviteRequest === "resume") {
-      held = heldInviteToken ? readUpgradeInvite(workspace.slug, heldInviteToken) : null;
-      // The upgrade is done; no other held invitation can still be bound to
-      // a checkout that will complete.
-      clearUpgradeInvite(workspace.slug);
-    }
+    const held: UpgradeInvite | null =
+      inviteRequest === "resume" && heldInviteToken
+        ? readUpgradeInvite(workspace.slug, heldInviteToken)
+        : null;
     setInviteOpen(true);
     if (!held) return;
     setInviteEmail(held.email);
     setInviteRole(held.role);
+    // The held invitation is consumed only once it has been sent; if sending
+    // still fails it stays prefilled here and held for another try.
     void qc
       .invalidateQueries({ queryKey: memberLimitKeys.all(wsId) })
-      .then(() => inviteMember(held.email, held.role));
+      .then(() => inviteMember(held.email, held.role, { retryLimitRefusals: HELD_INVITE_RETRIES }));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume the intent once the role is known
   }, [inviteRequest, heldInviteToken, currentMember?.role, workspace?.slug]);
   const isOwner = currentMember?.role === "owner";
@@ -532,10 +537,11 @@ export function MembersTab() {
   // members (the server would 403) once the current member's role is known.
   const { data: shareLinks = [] } = useQuery(shareLinkListOptions(wsId, canManageWorkspace));
   const billingEnabled = useFeatureEnabled(BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG, false);
-  const seats = useQuery({
+  const subscriptionSummary = useQuery({
     ...workspaceSubscriptionSummaryOptions(wsId),
     enabled: billingEnabled && canManageWorkspace,
-  }).data?.seatCapacity;
+  }).data;
+  const seats = subscriptionSummary?.seatCapacity;
   const memberLimit = useQuery({
     ...memberLimitOptions(wsId),
     enabled: canManageWorkspace,
@@ -551,7 +557,14 @@ export function MembersTab() {
       : null;
   const inviteBlockedByMemberLimit = isMemberLimitFull(memberLimit);
   // Upgrading needs Billing; without it a full workspace can only free a slot.
-  const canUpgradeForInvite = inviteBlockedByMemberLimit && billingEnabled;
+  // A lapsed subscription (past due beyond grace) cannot start a new
+  // checkout: it is restored in Billing, not upgraded.
+  const subscriptionNeedsAttention =
+    inviteBlockedByMemberLimit &&
+    billingEnabled &&
+    subscriptionSummary?.availableActions.checkout === false;
+  const canUpgradeForInvite =
+    inviteBlockedByMemberLimit && billingEnabled && !subscriptionNeedsAttention;
   const needle = memberQuery.trim().toLocaleLowerCase();
   const visibleMembers = needle
     ? members.filter(
@@ -565,6 +578,9 @@ export function MembersTab() {
     async (email: string, role: MemberRole) => {
       if (!workspace) return;
       await api.createMember(workspace.id, { email, role });
+      // The invitation is out, however it was sent (directly, after an
+      // upgrade, or after buying a seat): nothing held for it still waits.
+      clearUpgradeInvitesFor(workspace.slug, email);
       setInviteEmail("");
       setInviteRole("member");
       await qc.invalidateQueries({
@@ -575,20 +591,36 @@ export function MembersTab() {
     [qc, t, workspace, wsId],
   );
 
-  const inviteMember = async (email: string, role: MemberRole) => {
-    if (!workspace) return;
+  // Resolves true once the invitation is sent. retryLimitRefusals retries a
+  // member-limit refusal after HELD_INVITE_RETRY_MS: right after an upgrade
+  // the server may still hold the Free policy it re-read moments before.
+  const inviteMember = async (
+    email: string,
+    role: MemberRole,
+    { retryLimitRefusals = 0 }: { retryLimitRefusals?: number } = {},
+  ): Promise<boolean> => {
+    if (!workspace) return false;
     setInviteLoading(true);
     try {
-      await sendInvitation(email, role);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await sendInvitation(email, role);
+          break;
+        } catch (retryable) {
+          if (!isMemberLimitReachedError(retryable) || attempt >= retryLimitRefusals) throw retryable;
+          await new Promise((resolve) => setTimeout(resolve, HELD_INVITE_RETRY_MS));
+        }
+      }
       setInviteOpen(false);
       void qc.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
+      return true;
     } catch (e) {
       if (isMemberLimitReachedError(e)) {
         // The limit filled up after this dialog last read it. Refetch so the
         // dialog switches to its full state and offers the upgrade.
         await qc.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
         toast.error(t(($) => $.members.toast_member_limit_reached));
-        return;
+        return false;
       }
       const code = errorCode(e);
       const capacityFailure = seatInvitationCapacityFailure(code);
@@ -624,7 +656,7 @@ export function MembersTab() {
             billingT(($) => $.workspace.seats.members_over_capacity_title),
           );
         }
-        return;
+        return false;
       }
       if (capacityFailure === "full") {
         try {
@@ -635,7 +667,7 @@ export function MembersTab() {
             toast.error(
               billingT(($) => $.workspace.seat_purchase.preview_unreadable),
             );
-            return;
+            return false;
           }
           // Hand over to the purchase confirmation rather than stacking a
           // second modal on the invite dialog.
@@ -656,17 +688,18 @@ export function MembersTab() {
               : billingT(($) => $.workspace.seat_purchase.preview_failed),
           );
         }
-        return;
+        return false;
       }
       if (capacityFailure === "unavailable") {
         toast.error(t(($) => $.members.toast_seat_capacity_unavailable));
-        return;
+        return false;
       }
       if (capacityFailure === "rate_limited") {
         toast.error(t(($) => $.members.toast_seat_capacity_rate_limited));
-        return;
+        return false;
       }
       toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_invitation_failed));
+      return false;
     } finally {
       setInviteLoading(false);
     }
@@ -1202,7 +1235,9 @@ export function MembersTab() {
                 <AlertDescription>
                   {!billingEnabled
                     ? t(($) => $.members.member_limit_full_description_no_upgrade)
-                    : enforcedMemberLimit.pending > 0
+                    : subscriptionNeedsAttention
+                      ? t(($) => $.members.member_limit_full_description_billing)
+                      : enforcedMemberLimit.pending > 0
                       ? t(($) => $.members.member_limit_full_description_pending, {
                           pending: enforcedMemberLimit.pending,
                         })
@@ -1228,7 +1263,19 @@ export function MembersTab() {
                 >
                   {t(($) => $.members.confirm_cancel)}
                 </Button>
-                {canUpgradeForInvite ? (
+                {subscriptionNeedsAttention ? (
+                  <Button
+                    type="button"
+                    disabled={!navigation}
+                    onClick={() => {
+                      if (!navigation) return;
+                      setInviteOpen(false);
+                      navigation.push(settingsHref(navigation.pathname, navigation.searchParams, "billing"));
+                    }}
+                  >
+                    {t(($) => $.members.open_billing)}
+                  </Button>
+                ) : canUpgradeForInvite ? (
                   <Button
                     type="button"
                     disabled={inviteLoading || !inviteEmail.trim() || !navigation || !inviteChecksReady}

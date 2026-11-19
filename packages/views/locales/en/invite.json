@@ -54,6 +54,7 @@
     "seats_full": "All purchased member seats are in use. Ask a workspace admin to add a seat before trying again.",
     "seats_unavailable": "Member capacity could not be verified. Please try again.",
     "full_title": "{{workspace}} is full",
-    "full_description": "Contact the person who invited you. This link works again once the workspace upgrades."
+    "full_description": "Contact the person who invited you. This link works again once the workspace upgrades.",
+    "retry": "Try again"
   }
 }

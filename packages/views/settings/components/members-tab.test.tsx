@@ -115,6 +115,10 @@ const member = (id: string, name: string, role: string) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks keeps implementations; a rejection set by one test must not
+  // leak into the next.
+  mockCreateMember.mockReset();
+  mockRevokeInvitation.mockReset();
   url.set("tab=members");
   data.members = [
     member("user-1", "Ada Lovelace", "owner"),
@@ -357,7 +361,7 @@ describe("MembersTab", () => {
       await waitFor(() => expect(mockCreateMember).toHaveBeenCalled());
     });
 
-    it("sends the held invitation Billing hands back and drops any other", async () => {
+    it("sends the held invitation Billing hands back and consumes only that one", async () => {
       const token = saveUpgradeInvite("acme", { email: "sarah@acme.dev", role: "admin" });
       const other = saveUpgradeInvite("acme", { email: "omar@acme.dev", role: "member" });
       url.set(`tab=members&invite=resume&held_invite=${token}`);
@@ -369,12 +373,68 @@ describe("MembersTab", () => {
           role: "admin",
         }),
       );
+      await waitFor(() => expect(readUpgradeInvite("acme", token)).toBeNull());
       expect(mockCreateMember).toHaveBeenCalledTimes(1);
-      expect(readUpgradeInvite("acme", token)).toBeNull();
-      expect(readUpgradeInvite("acme", other)).toBeNull();
+      // Another tab's held invitation is still waiting on its own checkout.
+      expect(readUpgradeInvite("acme", other)).not.toBeNull();
       const params = new URLSearchParams(url.get());
       expect(params.has("invite")).toBe(false);
       expect(params.has("held_invite")).toBe(false);
+    });
+
+    // Right after the upgrade the server may still refuse on the Free policy
+    // it re-read moments before payment; the send retries past that window.
+    it("retries a held invitation the stale Free policy refused, then consumes it", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        mockCreateMember
+          .mockRejectedValueOnce(new ApiError("full", 403, "Forbidden", { code: "member_limit_reached" }))
+          .mockResolvedValueOnce(undefined);
+        const token = saveUpgradeInvite("acme", { email: "sarah@acme.dev", role: "member" });
+        url.set(`tab=members&invite=resume&held_invite=${token}`);
+        renderWithI18n(<MembersTab />);
+
+        await waitFor(() => expect(mockCreateMember).toHaveBeenCalledTimes(1));
+        expect(readUpgradeInvite("acme", token)).not.toBeNull();
+        await vi.advanceTimersByTimeAsync(6_000);
+        await waitFor(() => expect(mockCreateMember).toHaveBeenCalledTimes(2));
+        await waitFor(() => expect(readUpgradeInvite("acme", token)).toBeNull());
+        expect(toast.error).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps a held invitation that still cannot be sent, prefilled for another try", async () => {
+      mockCreateMember.mockRejectedValue(new Error("nope"));
+      const token = saveUpgradeInvite("acme", { email: "sarah@acme.dev", role: "member" });
+      url.set(`tab=members&invite=resume&held_invite=${token}`);
+      renderWithI18n(<MembersTab />);
+
+      await waitFor(() => expect(mockCreateMember).toHaveBeenCalled());
+      const dialog = screen.getByRole("dialog", { name: "Invite member" });
+      expect(within(dialog).getByRole("textbox", { name: "Email" })).toHaveValue("sarah@acme.dev");
+      expect(readUpgradeInvite("acme", token)).not.toBeNull();
+    });
+
+    it("sends a full workspace with a lapsed subscription to Billing, holding nothing", async () => {
+      enableBilling();
+      data.summary = { availableActions: { checkout: false } };
+      data.memberLimit = { action: "enforce", limit: 5, members: 5, pendingInvitations: 0 };
+      const user = userEvent.setup();
+      renderWithI18n(<MembersTab />);
+
+      const dialog = await openInvite(user);
+      expect(within(dialog).getByRole("alert")).toHaveTextContent(
+        "The workspace's subscription needs attention. Restore it in Billing to add members",
+      );
+      expect(within(dialog).queryByRole("button", { name: "Upgrade and invite" })).toBeNull();
+      await user.click(within(dialog).getByRole("button", { name: "Open Billing" }));
+
+      const params = new URLSearchParams(url.get());
+      expect(params.get("tab")).toBe("billing");
+      expect(params.has("upgrade")).toBe(false);
+      expect(localStorage.getItem("multica:upgrade_invite:acme")).toBeNull();
     });
 
     it("refreshes the limit once a revoked invitation frees its slot", async () => {

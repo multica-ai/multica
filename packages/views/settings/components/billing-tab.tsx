@@ -31,6 +31,8 @@ import {
   heldInviteHandback,
   listCheckoutHeldInvites,
   memberLimitKeys,
+  plainCheckoutAt,
+  recordPlainCheckout,
   memberLimitOptions,
   readUpgradeInvite,
   type HeldInvite,
@@ -46,6 +48,7 @@ import type {
   WorkspaceSeatPurchasePreview,
   WorkspaceSubscriptionInterval,
   WorkspaceSubscriptionPaidPlan,
+  WorkspaceSubscriptionSummary,
 } from "@multica/core/types";
 import {
   Alert,
@@ -214,21 +217,24 @@ function BillingTabContent() {
     navigation.searchParams.get("result"),
   );
   const returnSessionId = navigation.searchParams.get("session_id");
+  // Cloud names the checkout attempt on both Stripe returns; it is what ties
+  // a return to the checkout started for a held invitation.
+  const returnRequestId = navigation.searchParams.get("request_id");
   const callbackKey =
     navigation.searchParams.has("result") ||
     navigation.searchParams.has("session_id")
-      ? `${navigation.searchParams.get("result") ?? ""}:${returnSessionId ?? ""}`
+      ? `${navigation.searchParams.get("result") ?? ""}:${returnSessionId ?? ""}:${returnRequestId ?? ""}`
       : null;
   const [returnState, setReturnState] = useState<{
     workspaceId: string | null;
     result: WorkspaceBillingReturnResult | null;
     observedAt: number | null;
-    sessionId: string | null;
+    requestId: string | null;
   }>(() => ({
     workspaceId: wsId || null,
     result: returnResultParam,
     observedAt: returnResultParam === "success" ? Date.now() : null,
-    sessionId: returnSessionId,
+    requestId: returnRequestId,
   }));
   const returnStateMatchesWorkspace =
     returnState.workspaceId === null || returnState.workspaceId === wsId;
@@ -276,6 +282,7 @@ function BillingTabContent() {
     wsId: string;
     plan: WorkspaceSubscriptionPaidPlan;
     interval: WorkspaceSubscriptionInterval;
+    heldToken: string | null;
     key: string;
   } | null>(null);
   const planChangeIntentRef = useRef<{
@@ -352,18 +359,19 @@ function BillingTabContent() {
       workspaceId: wsId || null,
       result: returnResultParam,
       observedAt: returnResultParam === "success" ? Date.now() : null,
-      sessionId: returnSessionId,
+      requestId: returnRequestId,
     });
     if (returnResultParam === "cancel") checkoutIntentRef.current = null;
 
     const params = new URLSearchParams(navigation.searchParams);
     params.delete("result");
     params.delete("session_id");
+    params.delete("request_id");
     const query = params.toString();
     navigation.replace(
       query ? `${navigation.pathname}?${query}` : navigation.pathname,
     );
-  }, [callbackKey, navigation, returnResultParam, returnSessionId, wsId]);
+  }, [callbackKey, navigation, returnResultParam, returnRequestId, wsId]);
 
   useEffect(() => {
     if (returnResult !== "success") {
@@ -666,10 +674,20 @@ function BillingTabContent() {
     const params = new URLSearchParams(navigation.searchParams);
     params.delete("result");
     params.delete("session_id");
+    params.delete("request_id");
     navigation.push(
       `${settingsHref(navigation.pathname, params, "members")}&invite=resume&held_invite=${encodeURIComponent(held.token)}`,
     );
   };
+
+  // A paid plan in effect: an incomplete first payment still reads as Free,
+  // and a no-card trial is not a purchase.
+  const subscriptionForHeldInvites = (summary: WorkspaceSubscriptionSummary) => ({
+    version: summary.entitlement.version,
+    paid:
+      (summary.entitlement.plan === "pro" || summary.entitlement.plan === "business") &&
+      summary.trial?.state !== "active",
+  });
 
   // Decide what the latest summary means for held invitations. This reads the
   // plan change itself, not just the Stripe return, so Desktop, which pays in
@@ -683,18 +701,16 @@ function BillingTabContent() {
       handledCancelReturnRef.current = callbackKey;
       const cancelled = heldInviteForCancelledCheckout(
         listCheckoutHeldInvites(workspaceSlug),
-        returnState.sessionId,
+        returnState.requestId,
       );
       if (cancelled) clearUpgradeInvite(workspaceSlug, cancelled.token);
     }
     const waiting = listCheckoutHeldInvites(workspaceSlug);
     const handback = heldInviteHandback(
       waiting,
-      {
-        version: summary.entitlement.version,
-        checkoutAvailable: summary.availableActions.checkout,
-      },
-      returnResult === "success" ? returnState.sessionId : null,
+      subscriptionForHeldInvites(summary),
+      returnResult === "success" ? returnState.requestId : null,
+      plainCheckoutAt(workspaceSlug),
     );
     setAwaitingHeldUpgrade(waiting.length > 0 && handback === null);
     if (handback?.kind === "send") {
@@ -707,14 +723,15 @@ function BillingTabContent() {
 
   const discardHeldInvite = (held: HeldInvite) => {
     clearUpgradeInvite(workspaceSlug, held.token);
-    const next = heldInviteHandback(
-      listCheckoutHeldInvites(workspaceSlug),
-      {
-        version: summaryQuery.data?.entitlement.version ?? 0,
-        checkoutAvailable: summaryQuery.data?.availableActions.checkout ?? true,
-      },
-      null,
-    );
+    const summary = summaryQuery.data;
+    const next = summary
+      ? heldInviteHandback(
+          listCheckoutHeldInvites(workspaceSlug),
+          subscriptionForHeldInvites(summary),
+          null,
+          plainCheckoutAt(workspaceSlug),
+        )
+      : null;
     setHeldInviteToConfirm(next?.held ?? null);
   };
 
@@ -803,15 +820,21 @@ function BillingTabContent() {
   const handleCheckout = async () => {
     setActionError(null);
     const existing = checkoutIntentRef.current;
+    // A retry reuses the key only for the same checkout: same plan, interval
+    // and held invitation (or none), so a plain upgrade never replays one that
+    // bought a seat for an invitation.
+    const heldToken = heldInvite?.token ?? null;
     const intent =
       existing?.wsId === wsId &&
       existing.plan === checkoutPlan &&
-      existing.interval === interval
+      existing.interval === interval &&
+      existing.heldToken === heldToken
         ? existing
         : {
             wsId,
             plan: checkoutPlan,
             interval,
+            heldToken,
             key: createIdempotencyKey("workspace-checkout", wsId),
           };
     checkoutIntentRef.current = intent;
@@ -830,10 +853,17 @@ function BillingTabContent() {
       setCheckoutConfirmOpen(false);
       if (heldInvite && workspaceSlug) {
         bindUpgradeInviteCheckout(workspaceSlug, heldInvite.token, {
-          sessionId: response.sessionId,
+          requestId: response.requestId,
           baseVersion: summaryQuery.data?.entitlement.version ?? 0,
         });
         setAwaitingHeldUpgrade(true);
+        // The invitation now belongs to that checkout. Any later checkout
+        // from this page (Desktop returns here after closing the browser) is
+        // a plain one and buys no seat for it.
+        setHeldInvite(null);
+        checkoutIntentRef.current = null;
+      } else if (workspaceSlug) {
+        recordPlainCheckout(workspaceSlug);
       }
       openExternal(response.url, { webTarget: "same-tab" });
     } catch (error) {
