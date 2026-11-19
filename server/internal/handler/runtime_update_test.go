@@ -6,6 +6,11 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/featureflags"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // updateStoreHarness runs the same lifecycle checks against every UpdateStore.
@@ -358,9 +363,10 @@ func TestUpdateStore_ScheduledUpdateExpiresAfter24Hours(t *testing.T) {
 			if _, err := h.store.Schedule(ctx, req.ID, nil); err != nil {
 				t.Fatalf("schedule: %v", err)
 			}
+			// Counted from the click: a day after it the queue gives up, however
+			// recently the daemon deferred it.
 			h.edit(t, req.ID, func(r *UpdateRequest) {
-				aged := time.Now().Add(-(updateScheduledTimeout + time.Second))
-				r.ScheduledAt = &aged
+				r.CreatedAt = time.Now().Add(-(updateScheduledTimeout + time.Second))
 			})
 
 			if got := mustGetUpdate(t, h.store, req.ID); got.Status != UpdateExpired || got.Error == "" {
@@ -455,5 +461,76 @@ func TestInMemoryUpdateStore_KeepsQueuedRequestsPastRetention(t *testing.T) {
 	}
 	if got := mustGetUpdate(t, store, req.ID); got.Status != UpdateScheduled {
 		t.Fatalf("status = %s, want scheduled", got.Status)
+	}
+}
+
+func TestUpdateStore_UnpickedRequestStillTimesOutAfterTwoMinutes(t *testing.T) {
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			req := mustCreateUpdate(t, h.store, "rt-offline")
+			h.edit(t, req.ID, func(r *UpdateRequest) {
+				r.CreatedAt = time.Now().Add(-(updatePendingTimeout + time.Second))
+			})
+			if got := mustGetUpdate(t, h.store, req.ID); got.Status != UpdateTimeout {
+				t.Fatalf("status = %s; an update no daemon picked up must not wait for a day", got.Status)
+			}
+		})
+	}
+}
+
+func TestUpdateStore_FailFastRequestKeepsThePreviousContract(t *testing.T) {
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			ctx := context.Background()
+			req, err := h.store.Create(ctx, "rt-fail-fast", "", "v1.2.3", "user-1", false)
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if _, err := h.store.Create(ctx, "rt-fail-fast", "", "v1.2.4", "user-1", false); !errors.Is(err, errUpdateInProgress) {
+				t.Fatalf("second create on the runtime = %v, want errUpdateInProgress", err)
+			}
+			// Delivered once, running from delivery, never offered again.
+			popped, err := h.store.PopPending(ctx, "rt-fail-fast", true)
+			if err != nil || popped == nil || popped.Status != UpdateRunning || popped.RunStartedAt == nil {
+				t.Fatalf("pop = %+v, %v; want it running from delivery", popped, err)
+			}
+			if again, err := h.store.PopPending(ctx, "rt-fail-fast", true); err != nil || again != nil {
+				t.Fatalf("second pop = %+v, %v; want none", again, err)
+			}
+			if err := h.store.Fail(ctx, req.ID, "busy"); err != nil {
+				t.Fatalf("fail: %v", err)
+			}
+			if _, err := h.store.Create(ctx, "rt-fail-fast", "", "v1.2.4", "user-1", false); err != nil {
+				t.Fatalf("create after it ended: %v", err)
+			}
+		})
+	}
+}
+
+func TestUpdateMachineKeyIsScopedByOwner(t *testing.T) {
+	daemon := pgtype.Text{String: "shared-daemon-id", Valid: true}
+	a := db.AgentRuntime{ID: parseUUID("00000000-0000-0000-0000-00000000000a"), DaemonID: daemon, OwnerID: parseUUID("00000000-0000-0000-0000-0000000000a1")}
+	b := db.AgentRuntime{ID: parseUUID("00000000-0000-0000-0000-00000000000b"), DaemonID: daemon, OwnerID: parseUUID("00000000-0000-0000-0000-0000000000b1")}
+	sameMachine := db.AgentRuntime{ID: parseUUID("00000000-0000-0000-0000-00000000000c"), DaemonID: daemon, OwnerID: a.OwnerID}
+	if updateMachineKey(a) == updateMachineKey(b) {
+		t.Fatal("two accounts reporting the same daemon ID share a machine slot")
+	}
+	if updateMachineKey(a) != updateMachineKey(sameMachine) {
+		t.Fatal("two runtimes of one owner's daemon got different machine slots")
+	}
+}
+
+func TestRuntimeUpdateQueueNeedsTheFlagOnASharedStore(t *testing.T) {
+	h := &Handler{UpdateStore: &failingUpdateStore{}}
+	ctx := context.Background()
+	if h.runtimeUpdateQueueEnabled(ctx) {
+		t.Fatal("queueing enabled on a shared store without the flag")
+	}
+	withFeatureFlag(t, h, featureflags.RuntimeUpdateQueue, true)
+	if !h.runtimeUpdateQueueEnabled(ctx) {
+		t.Fatal("queueing still off with the flag on")
+	}
+	if !(&Handler{UpdateStore: NewInMemoryUpdateStore()}).runtimeUpdateQueueEnabled(ctx) {
+		t.Fatal("a single-node server must queue without the flag")
 	}
 }

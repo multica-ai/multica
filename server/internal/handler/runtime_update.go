@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -144,10 +145,13 @@ type UpdateStore interface {
 
 // updateMachineKey identifies the machine a runtime runs on. A daemon serves
 // every runtime (and workspace) on its machine and updates them together, so
-// the daemon ID is the key; a runtime without one stands for itself.
+// its runtimes share the key. The daemon ID is reported by the daemon, so it is
+// scoped by the runtime owner the daemon's credential belongs to (MUL-8154):
+// another account reporting the same ID gets a different key. A runtime
+// without a daemon ID or owner stands for itself.
 func updateMachineKey(rt db.AgentRuntime) string {
-	if rt.DaemonID.Valid && rt.DaemonID.String != "" {
-		return "daemon:" + rt.DaemonID.String
+	if rt.DaemonID.Valid && rt.DaemonID.String != "" && rt.OwnerID.Valid {
+		return "daemon:" + uuidToString(rt.OwnerID) + ":" + rt.DaemonID.String
 	}
 	return "runtime:" + uuidToString(rt.ID)
 }
@@ -173,13 +177,24 @@ func offerDeferrable(req *UpdateRequest, deferrableDaemon bool) bool {
 // prepareOffer decides whether a due request is delivered to this daemon and
 // records the offer on req.
 //
-//   - Deferrable offers go out every interval, also once the request is
-//     running: the daemon may have missed the answer to its "running" report,
-//     and that report is the only thing it installs on.
-//   - A fail-fast offer goes out only while no other one is unanswered, and
-//     not during the quiet period after an answer.
+//   - A fail-fast request keeps the previous release's contract: delivered
+//     once, running from delivery.
+//   - A queued request goes to a deferrable daemon every interval, also once
+//     it is running: the daemon may have missed the answer to its "running"
+//     report, and that answer is the only thing it installs on.
+//   - A queued request goes to a fail-fast daemon only while no other offer to
+//     it is unanswered, and not during the quiet period after an answer.
 func prepareOffer(req *UpdateRequest, deferrableDaemon bool, now time.Time) bool {
-	if offerDeferrable(req, deferrableDaemon) {
+	if !req.QueueWhenBusy {
+		if req.Status != UpdatePending {
+			return false
+		}
+		req.Status = UpdateRunning
+		req.RunStartedAt = &now
+		req.UpdatedAt = now
+		return true
+	}
+	if deferrableDaemon {
 		return updateRequestWaiting(req.Status) || req.Status == UpdateRunning
 	}
 	if !updateRequestWaiting(req.Status) || req.LegacyOfferAt != nil {
@@ -223,17 +238,6 @@ func applyUpdateTimeout(req *UpdateRequest, now time.Time) bool {
 	}
 	switch req.Status {
 	case UpdatePending:
-		// A request that can queue waits for an offline daemon like a queued
-		// one does; an older client still gives up after two minutes.
-		if req.QueueWhenBusy {
-			if now.Sub(req.CreatedAt) > updateScheduledTimeout {
-				req.Status = UpdateExpired
-				req.Error = "the daemon did not pick up the update within 24 hours"
-				req.UpdatedAt = now
-				return true
-			}
-			return false
-		}
 		if now.Sub(req.CreatedAt) > updatePendingTimeout {
 			req.Status = UpdateTimeout
 			req.Error = "daemon did not respond within 120 seconds"
@@ -241,7 +245,9 @@ func applyUpdateTimeout(req *UpdateRequest, now time.Time) bool {
 			return true
 		}
 	case UpdateScheduled:
-		if req.ScheduledAt != nil && now.Sub(*req.ScheduledAt) > updateScheduledTimeout {
+		// Counted from the click, so the update never lands more than a day
+		// after someone asked for it.
+		if now.Sub(req.CreatedAt) > updateScheduledTimeout {
 			req.Status = UpdateExpired
 			req.Error = "the machine did not become idle within 24 hours"
 			req.UpdatedAt = now
@@ -348,9 +354,12 @@ func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, machineKey, t
 		}
 	}
 
-	// Reject if this machine already has an unfinished update.
+	// Reject if this runtime or machine already has an unfinished update.
 	for _, req := range s.requests {
-		if req.MachineKey == machineKey && !updateRequestTerminal(req.Status) {
+		if updateRequestTerminal(req.Status) {
+			continue
+		}
+		if req.RuntimeID == runtimeID || (machineKey != "" && req.MachineKey == machineKey) {
 			return nil, errUpdateInProgress
 		}
 	}
@@ -390,7 +399,7 @@ func (s *InMemoryUpdateStore) GetActive(_ context.Context, machineKey string) (*
 	now := time.Now()
 	for _, req := range s.requests {
 		applyUpdateTimeout(req, now)
-		if req.MachineKey == machineKey && !updateRequestTerminal(req.Status) {
+		if machineKey != "" && req.MachineKey == machineKey && !updateRequestTerminal(req.Status) {
 			return cloneUpdateRequest(req), nil
 		}
 	}
@@ -535,13 +544,20 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Until every replica runs this release, requests keep the previous
+	// release's fail-fast shape (no queueing, no machine slot), so replicas of
+	// both releases can serve them during the rollout.
+	queueWhenBusy, machineKey := false, ""
+	if h.runtimeUpdateQueueEnabled(r.Context()) {
+		queueWhenBusy, machineKey = req.QueueWhenBusy, updateMachineKey(rt)
+	}
 	update, err := h.UpdateStore.Create(
 		r.Context(),
 		uuidToString(rt.ID),
-		updateMachineKey(rt),
+		machineKey,
 		req.TargetVersion,
 		uuidToString(member.UserID),
-		req.QueueWhenBusy,
+		queueWhenBusy,
 	)
 	if err != nil {
 		// Only the in-progress rejection is a conflict the caller can act on.
@@ -561,6 +577,18 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeUpdate(w, update)
+}
+
+// runtimeUpdateQueueEnabled reports whether updates may be queued. A single
+// node (the in-memory store) always may. With a shared store the
+// runtime_update_queue flag turns it on once no replica of the previous
+// release is left: those replicas fail a queued request on a busy report and
+// keep their own slots and queues.
+func (h *Handler) runtimeUpdateQueueEnabled(ctx context.Context) bool {
+	if _, singleNode := h.UpdateStore.(*InMemoryUpdateStore); singleNode {
+		return true
+	}
+	return featureflags.RuntimeUpdateQueueEnabled(ctx, h.FeatureFlags)
 }
 
 // writeUpdate answers with an update request and whether it can be cancelled.
@@ -638,9 +666,6 @@ func (h *Handler) GetActiveUpdate(w http.ResponseWriter, r *http.Request) {
 // it was queued on: its initiator, or someone who can see and manage that
 // runtime. rt is the runtime the caller asked through, already authorized.
 func (h *Handler) canSeeUpdate(ctx context.Context, update *UpdateRequest, rt db.AgentRuntime, member db.Member) (bool, error) {
-	if update.InitiatorUserID == uuidToString(member.UserID) {
-		return true, nil
-	}
 	target := rt
 	if update.RuntimeID != uuidToString(rt.ID) {
 		id, err := util.ParseUUID(update.RuntimeID)
@@ -660,7 +685,9 @@ func (h *Handler) canSeeUpdate(ctx context.Context, update *UpdateRequest, rt db
 		}
 		target = other
 	}
-	return canEditRuntime(member, target), nil
+	// The initiator exception applies only while the caller can still see
+	// that runtime, as when polling the update through it.
+	return canEditRuntime(member, target) || update.InitiatorUserID == uuidToString(member.UserID), nil
 }
 
 // CancelUpdate stops an update that has not started installing yet.

@@ -387,6 +387,53 @@ func TestRedisUpdateStore_ScheduledRequestOutlivesRetention(t *testing.T) {
 	}
 }
 
+// A fail-fast request is stored exactly where and how the previous release
+// stores every request, so its replicas can deliver and finish it.
+func TestRedisUpdateStore_FailFastRequestUsesThePreviousReleaseKeys(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisUpdateStore(rdb)
+
+	req, err := store.Create(ctx, "runtime-compat", "", "v1.2.3", "user-1", false)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if id, _ := rdb.Get(ctx, updateActiveKey("runtime-compat")).Result(); id != req.ID {
+		t.Fatalf("runtime slot = %q, want %s", id, req.ID)
+	}
+	if n, _ := rdb.ZCard(ctx, updatePendingKey("runtime-compat")).Result(); n != 1 {
+		t.Fatalf("previous-release queue entries = %d, want 1", n)
+	}
+	if n, _ := rdb.ZCard(ctx, updateOffersKey("runtime-compat")).Result(); n != 0 {
+		t.Fatalf("offer entries = %d, want none", n)
+	}
+	popped, err := store.PopPending(ctx, "runtime-compat", false)
+	if err != nil || popped == nil || popped.Status != UpdateRunning {
+		t.Fatalf("pop = %+v, %v; want running from delivery", popped, err)
+	}
+	if n, _ := rdb.ZCard(ctx, updatePendingKey("runtime-compat")).Result(); n != 0 {
+		t.Fatalf("queue entries after delivery = %d, want 0", n)
+	}
+}
+
+func TestRedisUpdateStore_QueuedRequestHoldsRuntimeAndMachineSlots(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisUpdateStore(rdb)
+
+	if _, err := store.Create(ctx, "runtime-a", "daemon:owner:m1", "v1.2.3", "user-1", true); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Neither a fail-fast request on the same runtime nor a queued one on
+	// another runtime of the machine can start.
+	if _, err := store.Create(ctx, "runtime-a", "", "v1.2.3", "user-1", false); err != errUpdateInProgress {
+		t.Fatalf("fail-fast create on the runtime = %v, want errUpdateInProgress", err)
+	}
+	if _, err := store.Create(ctx, "runtime-b", "daemon:owner:m1", "v1.2.3", "user-1", true); err != errUpdateInProgress {
+		t.Fatalf("create on another runtime of the machine = %v, want errUpdateInProgress", err)
+	}
+}
+
 var (
 	_ UpdateStore = (*InMemoryUpdateStore)(nil)
 	_ UpdateStore = (*RedisUpdateStore)(nil)

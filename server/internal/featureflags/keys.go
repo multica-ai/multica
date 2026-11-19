@@ -35,6 +35,12 @@ const (
 	// makes those endpoints answer 404, so clients stop syncing and search
 	// through the server again without a client release.
 	LocalSearchIndex = "local_search_index"
+	// RuntimeUpdateQueue lets a busy machine queue a Runtimes-page CLI update
+	// instead of failing it (MUL-9633). Off by default for multi-node deploys:
+	// turn it on once no API replica of the earlier release is left, because
+	// those replicas fail a queued request on the daemon's busy report. A
+	// single-node server (in-memory update store) queues regardless.
+	RuntimeUpdateQueue = "runtime_update_queue"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -75,6 +81,10 @@ func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 
 func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, TriageV1, false)
+}
+
+func RuntimeUpdateQueueEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, RuntimeUpdateQueue, false)
 }
 
 func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bool {

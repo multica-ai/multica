@@ -330,7 +330,7 @@ func TestActiveUpdateIsFoundThroughAnyRuntimeOfTheMachine(t *testing.T) {
 		}
 	}
 
-	machineKey := "daemon:" + daemonID
+	machineKey := "daemon:" + machineOwner + ":" + daemonID
 	queued, err := store.Create(ctx, runtimeA, machineKey, "v1.2.3", machineOwner, true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -358,5 +358,61 @@ func TestActiveUpdateIsFoundThroughAnyRuntimeOfTheMachine(t *testing.T) {
 	testHandler.InitiateUpdate(initW, initReq)
 	if initW.Code != http.StatusConflict {
 		t.Fatalf("second update on the machine = %d, want 409: %s", initW.Code, initW.Body.String())
+	}
+}
+
+// The initiator exception does not reach past the runtime's own visibility:
+// once the initiator can no longer see the runtime the update was queued on,
+// the machine card through another runtime does not show it either.
+func TestActiveUpdateHidesARuntimeTheCallerCannotSee(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	store := withUpdateStore(t)
+	suffix := randomID()
+	daemonID := "mul-9633-hidden-" + suffix
+	var machineOwner string
+	if err := testPool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ('Hidden Owner', $1) RETURNING id`,
+		"hidden-owner-"+suffix+"@multica.test").Scan(&machineOwner); err != nil {
+		t.Fatalf("create machine owner: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE daemon_id = $1`, daemonID)
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id = $1`, machineOwner)
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, machineOwner)
+	})
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
+		testWorkspaceID, machineOwner); err != nil {
+		t.Fatalf("add machine owner: %v", err)
+	}
+	var privateA, publicB string
+	for i, dst := range []*string{&privateA, &publicB} {
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_runtime (
+				workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, visibility, last_seen_at
+			)
+			VALUES ($1, $2, 'Hidden Runtime', 'local', $3, 'online', 'hidden test', '{}'::jsonb, $4, $5, now())
+			RETURNING id
+		`, testWorkspaceID, daemonID, []string{"hidden_test_a", "hidden_test_b"}[i], machineOwner, []string{"private", "public"}[i]).Scan(dst); err != nil {
+			t.Fatalf("create runtime: %v", err)
+		}
+	}
+	// Queued by the caller back when it could still use runtime A.
+	if _, err := store.Create(ctx, privateA, "daemon:"+machineOwner+":"+daemonID, "v1.2.3", testUserID, true); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	req := withURLParam(newRequest(http.MethodGet, "/api/runtimes/"+publicB+"/update", nil), "runtimeId", publicB)
+	w := httptest.NewRecorder()
+	testHandler.GetActiveUpdate(w, req)
+	var body struct {
+		Update *UpdateRequest `json:"update"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode %d %s: %v", w.Code, w.Body.String(), err)
+	}
+	if body.Update != nil {
+		t.Fatalf("active = %+v; the caller cannot see runtime A any more", body.Update)
 	}
 }
