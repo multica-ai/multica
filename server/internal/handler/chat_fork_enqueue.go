@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -65,7 +66,7 @@ func (h *Handler) queueChatFork(ctx context.Context, source db.ChatSession, crea
 	}
 	task, err := q.CreateChatTask(ctx, db.CreateChatTaskParams{
 		ID: taskID, AgentID: current.AgentID, RuntimeID: current.RuntimeID,
-		Priority: 2, ChatSessionID: child.ID, InitiatorUserID: creatorID,
+		Priority: 2, Context: []byte(service.NativeChatForkTaskContext), ChatSessionID: child.ID, InitiatorUserID: creatorID,
 		OriginatorUserID: creatorID, AccountableUserID: creatorID,
 		OriginatorSource:     pgtype.Text{String: string(attribution.SourceDirectHuman), Valid: true},
 		TriggerEvidenceKind:  pgtype.Text{String: string(attribution.EvidenceChat), Valid: true},

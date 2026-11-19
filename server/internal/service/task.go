@@ -4948,6 +4948,9 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 			return err
 		}
 		task = t
+		if isNativeChatForkTask(t) {
+			return settleNativeChatFork(ctx, qtx, t, sessionID)
+		}
 		change, err = syncQoderIssue(ctx, qtx, t, true)
 		if err != nil {
 			return err
@@ -5115,7 +5118,7 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	// cursor (chat_session.last_read_at) vs the assistant messages after it — a
 	// no_response row has role='assistant' and a fresh created_at, so it counts
 	// as unread just like a text reply, no per-reply stamping needed.
-	if task.ChatSessionID.Valid {
+	if task.ChatSessionID.Valid && !isNativeChatForkTask(task) {
 		// The assistant outcome row (message / no_response) and any attachment
 		// binding were written inside the completion transaction above by
 		// writeChatCompletionOutcome. Broadcast chat:done AFTER commit.
@@ -5475,6 +5478,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			return err
 		}
 		task = t
+		if isNativeChatForkTask(t) {
+			return settleNativeChatFork(ctx, qtx, t, "")
+		}
 
 		// Keep resume-unsafe sessions on the task row for observability, but
 		// do not promote them to the chat-level resume pointer.
