@@ -214,7 +214,10 @@ export function InboxSection({
     <InboxRow
       key={item.id}
       item={item}
-      measure={measure}
+      // Two props rather than the object: a fresh object every render would
+      // defeat the row's memo (the measuring ref keeps one identity).
+      measureIndex={measure?.index}
+      measureRef={measure?.ref}
       href={inboxRowHref(p, item)}
       active={
         (!!item.issue_id && item.issue_id === activeIssueId) ||
@@ -532,7 +535,8 @@ interface InboxRowHandlers {
 
 const InboxRow = memo(function InboxRow({
   item,
-  measure,
+  measureIndex,
+  measureRef,
   href,
   active,
   compact,
@@ -543,8 +547,9 @@ const InboxRow = memo(function InboxRow({
   handlers,
 }: {
   item: InboxItem;
-  /** Set when the row is one of a virtualized list's window. */
-  measure?: RowMeasure;
+  /** Set when the row is one of a virtualized list's window (`RowMeasure`). */
+  measureIndex?: number;
+  measureRef?: Ref<HTMLLIElement>;
   href: string;
   active: boolean;
   /** One line (status, title, agents, dot or time) instead of the actor line under the title. */
@@ -641,8 +646,8 @@ const InboxRow = memo(function InboxRow({
 
   return (
     <li
-      ref={measure?.ref}
-      data-index={measure?.index}
+      ref={measureRef}
+      data-index={measureIndex}
       data-inbox-row
       data-read={unread ? "false" : "true"}
       className="group/inbox relative"
