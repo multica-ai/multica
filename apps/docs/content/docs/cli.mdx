@@ -563,7 +563,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | Manage follow-ups in the current chat run; see [Chat wakeups](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | [List your notifications](/inbox) without marking them read; `--archived` or `--snoozed` lists those instead | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` or `json`); `--archived` reads every page |
-| | `count` | Unread count in this workspace and in each of your workspaces | `--output` |
+| | `count` | Unread count in this workspace and in each of your workspaces; an agent run sees only its own workspace | `--output` |
 | | `read [<id>...]` | Mark notifications read, the whole issue for each; or every notification on one issue, or all | `--issue`, `--all` (needs `--yes`) |
 | | `unread <id>...` | Mark notifications unread | |
 | | `archive [<id>...]` | Archive notifications, the whole issue for each; or in bulk | `--all`, `--read`, `--completed` (each needs `--yes`) |

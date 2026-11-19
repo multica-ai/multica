@@ -528,7 +528,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | `chat` | `history`、`thread [id]` | エージェントが現在処理している外部チャットセッションを読み取り | `--limit`、`--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | 現在のチャット実行の予定を管理。[チャットのウェイクアップ](#chat-wakeups)を参照 | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | 既読にせずに[通知を一覧表示](/inbox)。`--archived` または `--snoozed` ではそれらを一覧表示 | `--unread`、`--issue`、`--since`、`--project`、`--type`、`--output`（`table` または `json`）；`--archived` は全ページを読む |
-| | `count` | このワークスペースと所属する各ワークスペースの未読件数 | `--output` |
+| | `count` | このワークスペースと所属する各ワークスペースの未読件数。エージェントの実行では自身のワークスペースのみ | `--output` |
 | | `read [<id>...]` | 通知を既読にする（各通知のタスク全体に適用）。または 1 つのタスクのすべての通知、またはすべて | `--issue`、`--all`（`--yes` が必要） |
 | | `unread <id>...` | 通知を未読に戻す | |
 | | `archive [<id>...]` | 通知をアーカイブする（各通知のタスク全体に適用）。または一括で | `--all`、`--read`、`--completed`（いずれも `--yes` が必要） |

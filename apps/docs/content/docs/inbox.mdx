@@ -56,7 +56,7 @@ The issue page marks such a subscription **Key updates only**. Its menu offers *
 
 ## Agents and the inbox
 
-Inbox notifications belong to workspace members. An agent may read and change the runtime owner's notifications only when the server verifies that the owner is the upstream human who triggered the run. This identity follows agent delegation chains. The rule covers every inbox action: the active, archived and snoozed lists, unread counts, and every change. Runs triggered by another person or without a verifiable human, and cloud-node credentials without a task binding, are refused. Only people can delete notifications. The server logs each change an agent makes, with the agent, the run and the person it acted for.
+Inbox notifications belong to workspace members. An agent may read and change the runtime owner's notifications only when the server verifies that the owner is the upstream human who triggered the run. This identity follows agent delegation chains. The rule covers every inbox action: the active, archived and snoozed lists, unread counts, and every change. Runs triggered by another person or without a verifiable human, and cloud-node credentials without a task binding, are refused. An agent's unread counts cover only the workspace its run belongs to, never the owner's other workspaces. Only people can delete notifications. The server logs each change an agent makes, with the agent, the run and the person it acted for.
 
 @-mentioning an agent in a comment, assigning an issue to it, or triggering an autopilot creates a run directly; no notification is left for the agent. `@all` notifies members only.
 

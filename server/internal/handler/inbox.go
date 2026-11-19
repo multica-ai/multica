@@ -616,9 +616,14 @@ type InboxWorkspaceUnreadResponse struct {
 // UnreadInboxSummary returns per-workspace unread inbox counts across every
 // workspace the user belongs to. The sidebar uses it to light a dot on the
 // workspace switcher when a workspace OTHER than the active one has unread
-// items, without fetching each workspace's full inbox list. It is
-// account-level by nature: it ignores the active workspace and keys only on
-// the authenticated user.
+// items, without fetching each workspace's full inbox list. For a human
+// credential it is account-level by nature: it ignores the active workspace
+// and keys only on the authenticated user.
+//
+// A task credential is bound to one workspace. Its access is verified there,
+// and the response is limited to that workspace's row, so an agent the owner
+// triggered in one workspace never learns the owner's other workspace IDs or
+// their unread counts.
 func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 	r, cancel := h.inboxReadRequest(r)
 	defer cancel()
@@ -626,13 +631,13 @@ func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The summary ignores the active workspace, but an agent's access is
-	// verified against the workspace its task runs in.
+	var boundWorkspace pgtype.UUID
 	if r.Header.Get("X-Actor-Source") != "" {
 		wsUUID, ok := parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
 		if !ok || !h.requireInboxOwnerAccess(w, r, userID, wsUUID) {
 			return
 		}
+		boundWorkspace = wsUUID
 	}
 
 	value, err := h.inboxReadGuard().Summary(r.Context(), userID, func(ctx context.Context) (any, error) {
@@ -645,13 +650,22 @@ func (h *Handler) UnreadInboxSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The guard coalesces concurrent summary requests per user, so the value
+	// here may come from a query another caller started: the owner's own
+	// client or a task bound to a different workspace. It is always the
+	// account-wide summary; a task credential takes only its bound
+	// workspace's row from it, into a new slice, so the shared value stays
+	// whole for every other caller of the same coalesced query.
 	rows := value.([]db.CountUnreadInboxByWorkspaceRow)
-	resp := make([]InboxWorkspaceUnreadResponse, len(rows))
-	for i, row := range rows {
-		resp[i] = InboxWorkspaceUnreadResponse{
+	resp := make([]InboxWorkspaceUnreadResponse, 0, len(rows))
+	for _, row := range rows {
+		if boundWorkspace.Valid && row.WorkspaceID != boundWorkspace {
+			continue
+		}
+		resp = append(resp, InboxWorkspaceUnreadResponse{
 			WorkspaceID: uuidToString(row.WorkspaceID),
 			Count:       row.Count,
-		}
+		})
 	}
 
 	writeJSON(w, http.StatusOK, resp)
