@@ -13,6 +13,10 @@ Dans l'application web ou de bureau, ouvrez **Documents** dans la barre latéral
 
 Pour réorganiser vos documents, faites glisser un document ou un dossier vers sa destination, ou choisissez **Déplacer vers...** dans son menu. Vous pouvez supprimer un dossier vide. La suppression d'un document efface aussi son historique.
 
+Les propriétaires et administrateurs de l’espace de travail peuvent supprimer tout document ou dossier vide. Les autres membres peuvent supprimer ce qu’eux-mêmes ou leurs agents ont créé.
+
+La recherche de l’espace de travail trouve des mots dans le titre ou le contenu d’un document.
+
 ## Récupérer les brouillons et les versions
 
 Si quelqu'un enregistre une version plus récente pendant votre modification, Multica conserve votre brouillon et vous invite à **Recharger la dernière version**. Votre brouillon reste accessible à côté du contenu actuel. Copiez les passages que vous souhaitez conserver.
@@ -21,4 +25,4 @@ Ouvrez **Historique** pour consulter une version précédente. Choisissez **Rest
 
 ## Travailler sur les documents avec un agent
 
-Demandez à un agent de lire ou de mettre à jour un document lié et précisez ce qu'il doit conserver. Dans le [CLI](/cli), utilisez `multica doc list` pour trouver un document et `multica doc get` pour lire son contenu Markdown et sa révision. Transmettez cette révision à `multica doc update` avec `--base-revision`. Si quelqu'un a enregistré une modification entre-temps, récupérez la version actuelle et fusionnez vos modifications avant de réessayer.
+Demandez à un agent de lire ou de mettre à jour un document lié et précisez ce qu'il doit conserver. Dans le [CLI](/cli), utilisez `multica doc search "<query>"` pour trouver un document et `multica doc get` pour lire son contenu Markdown et sa révision. Transmettez cette révision à `multica doc update` avec `--base-revision`. Si quelqu'un a enregistré une modification entre-temps, récupérez la version actuelle et fusionnez vos modifications avant de réessayer.

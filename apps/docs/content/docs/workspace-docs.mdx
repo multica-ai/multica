@@ -13,6 +13,10 @@ Open **Docs** in the workspace rail on web or desktop. Use it for information yo
 
 To reorganize Docs, drag a doc or folder to its destination, or choose **Move to...** in its menu. You can delete an empty folder. Deleting a doc also deletes its version history.
 
+Workspace owners and admins can delete any doc or empty folder. Other members can delete items they or their agents created.
+
+Use workspace search to find words in a doc's title or content.
+
 ## Recover drafts and versions
 
 If someone saves a newer version while you are editing, Multica keeps your draft and asks you to **Reload latest**. Your previous draft remains available next to the current content. Copy over the parts you want to keep.
@@ -21,4 +25,4 @@ Open **History** to preview an earlier version. Choose **Restore this version** 
 
 ## Work with docs from an agent
 
-Ask an agent to read a linked doc or update it, and tell it what to preserve. With the [CLI](/cli), use `multica doc list` to find a doc and `multica doc get` to read its Markdown and revision. To update a doc, pass that revision to `multica doc update` with `--base-revision`. If someone saved in the meantime, fetch the current version and merge your changes before retrying.
+Ask an agent to read a linked doc or update it, and tell it what to preserve. With the [CLI](/cli), use `multica doc search "<query>"` to find a doc and `multica doc get` to read its Markdown and revision. To update a doc, pass that revision to `multica doc update` with `--base-revision`. If someone saved in the meantime, fetch the current version and merge your changes before retrying.
