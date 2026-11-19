@@ -36,9 +36,7 @@ func writeFakeZcodeScript(t *testing.T, script string) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "zcode")
-	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake zcode: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	return bin
 }
 
