@@ -16,12 +16,14 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	dbfx "github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
 
 // A route parameter is keyed by the literal path segment before it and its
@@ -57,6 +59,9 @@ var projectScopedRouteParams = map[string]privateRouteResolver{
 	// The inbox is where a member route names an issue as {issueId}; the
 	// caller has a notification about it, so marking it read has an effect.
 	"issues/{issueId}": func(f *privateRouteFixture, caller string) string { f.inboxItem(caller); return f.issue() },
+	// The plugin bridge names issues and runs the way the Plugin API does.
+	"issues/{issue_ref}": func(f *privateRouteFixture, _ string) string { return f.issue() },
+	"tasks/{task_id}":    func(f *privateRouteFixture, _ string) string { return f.issueRun() },
 }
 
 // outsideProjectParam is a route parameter that cannot name an object inside a
@@ -128,6 +133,9 @@ var routeParamsOutsideProjects = map[string]outsideProjectParam{
 	"packages/{packageId}":           {why: "a plugin package"},
 	"mcp/{hookKey}":                  {why: "a plugin MCP hook"},
 	"surfaces/{surfaceKey}":          {why: "a plugin surface"},
+	"hooks/{key}":                    {why: "a plugin hook; the issue a call names is in its body, covered by TestPluginHookInvocationHidesPrivateProjects"},
+	"storage/{scope}":                {why: "a plugin storage scope, the workspace or the caller"},
+	"storage/{key}":                  {why: "a plugin storage key"},
 	"groups/{conversationId}":        {why: "a DingTalk group"},
 	"install/{sessionId}":            {why: "an integration install session"},
 	"logins/{loginId}":               {why: "a Weixin login session"},
@@ -136,10 +144,9 @@ var routeParamsOutsideProjects = map[string]outsideProjectParam{
 // routePrefixesNotProbed are route trees a member session cannot probe, each
 // with the reason.
 var routePrefixesNotProbed = map[string]string{
-	"/api/daemon/":           "daemon credentials: a runtime reaches the runs it executes, scoped by runtime ownership",
-	"/v1/":                   "Plugin API: plugin installation tokens only",
-	"/api/plugin-bridge/v1/": "plugin actions need an installed plugin, and the plugin API applies no project visibility yet (left as a decision in #10316)",
-	"/api/webhooks/":         "inbound webhooks, authenticated by their own token or signature",
+	"/api/daemon/":   "daemon credentials: a runtime reaches the runs it executes, scoped by runtime ownership",
+	"/v1/":           "Plugin API: plugin tokens only, which TestPluginTokensHidePrivateProjects covers; the same handlers are probed here through /api/plugin-bridge/v1/",
+	"/api/webhooks/": "inbound webhooks, authenticated by their own token or signature",
 }
 
 // privateProjectRoutesNotProbed lists routes ("METHOD pattern") declaring a
@@ -489,7 +496,18 @@ func TestEveryRouteByProjectObjectIDHidesPrivateProjects(t *testing.T) {
 	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
 	shared.uploadDir = t.TempDir()
 	t.Setenv("LOCAL_UPLOAD_DIR", shared.uploadDir)
-	router, _ := NewRouterWithOptions(testPool, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, RouterOptions{})
+
+	// The plugin bridge acts through an installation holding every scope its
+	// routes ask for, so only project visibility can refuse the outsider.
+	flags := featureflag.NewStaticProvider()
+	flags.Set(featureflags.PluginsV1, featureflag.Rule{Default: true})
+	pluginInstallationID := fx.Insert(t, "plugin_installation", dbfx.Cols{
+		"workspace_id": fx.WorkspaceID, "plugin_key": "route-probe", "package_version_id": uuid.NewString(),
+		"version": "1.0.0", "manifest": dbfx.Raw("'{}'::jsonb"),
+		"granted_scopes": dbfx.Raw(`'["issues:read","issues:write","comments:read","comments:write","tasks:read"]'::jsonb`),
+	})
+	router, _ := NewRouterWithOptions(testPool, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil,
+		RouterOptions{FeatureFlags: featureflag.NewService(flags)})
 	call := func(token, method, path, body string) routeAnswer {
 		var req *http.Request
 		switch method {
@@ -504,6 +522,11 @@ func TestEveryRouteByProjectObjectIDHidesPrivateProjects(t *testing.T) {
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+		if strings.HasPrefix(path, pluginBridgePrefix+"/") {
+			req.Header.Set("X-Multica-Plugin-Installation", pluginInstallationID)
+			// A plugin problem echoes the request id; pin it so two answers compare.
+			req.Header.Set("X-Request-ID", "route-probe")
+		}
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		return routeAnswer{rec.Code, rec.Body.String()}
