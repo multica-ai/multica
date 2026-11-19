@@ -104,7 +104,9 @@ For Oh-My-Pi, the inherited list and runtime copies follow the runtime command's
 
 ### Check skill delivery and tool calls [#skill-execution]
 
-In the issue’s execution log, open the run and select **Context received** to see which workspace skills Multica delivered. Tool rows describe the calls the runtime reported. If OpenCode runs a script from a runtime-local skill directly, the log can show only the shell command. A delivered skill in the receipt shows that its files reached the run. Review the tool output to see what actually executed.
+In the issue’s execution log, open the run and select the **Context received** icon. The receipt lists workspace skills for that run. A skill marked **Not verified** with a file path means Multica wrote the complete skill package to that location. Whether the runtime read or executed the skill is still unverified. **Not delivered** means delivery failed.
+
+Tool rows show the calls the runtime reported. If OpenCode runs a skill script directly, the log may show only the shell command. Check the tool output to see what ran.
 
 ## Edit permissions
 
