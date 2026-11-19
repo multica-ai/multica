@@ -101,9 +101,7 @@ func TestDetectVersionTimesOutOnHang(t *testing.T) {
 	// the exact case RunCollect must cover. The child records its PID so we
 	// can reap it in Cleanup instead of leaking a 60s `sleep` into CI.
 	body := fmt.Sprintf("#!/bin/sh\nsleep 60 &\necho $! > %q\nwait\n", pidFile)
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatalf("write hang script: %v", err)
-	}
+	writeTestExecutable(t, script, []byte(body))
 	t.Cleanup(func() {
 		data, err := os.ReadFile(pidFile)
 		if err != nil {

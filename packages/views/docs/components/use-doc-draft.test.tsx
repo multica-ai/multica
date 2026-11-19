@@ -360,3 +360,53 @@ it("keeps showing the saved content while the doc prop catches up", async () => 
     baseRevision: 2,
   });
 });
+
+it("keeps a space typed at the end of the title after the server saves it trimmed", async () => {
+  // The API trims titles. Pausing after a space must not drop it from the
+  // field, or the next word typed joins the previous one.
+  vi.mocked(api.updateDoc).mockImplementation(async (_id, data) => ({
+    ...doc,
+    ...data,
+    title: (data.title ?? doc.title).trim(),
+    revision: data.baseRevision + 1,
+    versionCount: data.baseRevision + 1,
+  }));
+  const view = mount();
+  act(() => view.result.current.change({ title: "Release " }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1600);
+  });
+  expect(api.updateDoc).toHaveBeenCalledTimes(1);
+  expect(view.result.current.draft.title).toBe("Release ");
+  expect(view.result.current.dirty).toBe(false);
+
+  // The trimmed title is saved: nothing is sent again while the field rests.
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5000);
+  });
+  expect(api.updateDoc).toHaveBeenCalledTimes(1);
+
+  // A body edit keeps the space too.
+  act(() => view.result.current.change({ content: "Body" }));
+  expect(view.result.current.draft.title).toBe("Release ");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1600);
+  });
+  expect(api.updateDoc).toHaveBeenLastCalledWith(doc.id, {
+    title: "Release",
+    content: "Body",
+    baseRevision: 2,
+  });
+  expect(view.result.current.draft.title).toBe("Release ");
+
+  act(() => view.result.current.change({ title: "Release notes" }));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1600);
+  });
+  expect(api.updateDoc).toHaveBeenLastCalledWith(doc.id, {
+    title: "Release notes",
+    content: "Body",
+    baseRevision: 3,
+  });
+  expect(view.result.current.draft.title).toBe("Release notes");
+});

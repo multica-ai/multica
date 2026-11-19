@@ -6,6 +6,7 @@
     "plan": {
       "free": "Gratis",
       "pro": "Pro",
+      "business": "Business",
       "unknown": "Plan desconocido"
     },
     "status": {
@@ -27,11 +28,13 @@
     "actions": {
       "retry": "Reintentar",
       "retry_autopilots": "Reintentar el uso de automatización",
-      "upgrade": "Actualizar a Pro",
+      "upgrade_to": "Actualizar a {{plan}}",
+      "switch_to": "Cambiar a {{plan}}",
       "manage": "Gestionar facturación",
       "add_seats": "Añadir puestos",
       "cancel": "Cancelar",
-      "continue_to_stripe": "Continuar a Stripe"
+      "continue_to_stripe": "Continuar a Stripe",
+      "check_status": "Comprobar estado"
     },
     "errors": {
       "action_title": "La acción de facturación falló",
@@ -52,13 +55,13 @@
       "syncing_title": "Activando tu suscripción",
       "syncing_description": "El pago se ha completado. Estamos esperando a que Stripe confirme el cambio de plan.",
       "timeout_description": "Se recibió el pago, pero la suscripción aún se está sincronizando. Actualiza esta página en un momento.",
-      "active_title": "Pro está activo",
-      "active_description": "Este espacio de trabajo ya tiene acceso a Pro."
+      "active_title": "{{plan}} está activo",
+      "active_description": "Este espacio de trabajo ya tiene acceso a {{plan}}."
     },
     "past_due": {
       "title": "El pago necesita atención",
       "description": "Actualiza tu método de pago en la gestión de facturación.",
-      "grace_description": "Actualiza tu método de pago antes del {{date}} para mantener el acceso a Pro."
+      "grace_description": "Actualiza tu método de pago antes del {{date}} para mantener tu plan de pago."
     },
     "subscription_notice": {
       "canceling_title": "La cancelación está programada",
@@ -67,7 +70,7 @@
       "incomplete_title": "La configuración de la suscripción está incompleta",
       "incomplete_description": "Abre la gestión de facturación para terminar o revisar la configuración del pago.",
       "incomplete_expired_title": "La configuración de la suscripción caducó",
-      "incomplete_expired_description": "La configuración de pago anterior caducó sin activar Pro. Inicia una nueva actualización cuando quieras.",
+      "incomplete_expired_description": "La configuración de pago anterior caducó antes de que empezara la suscripción. Inicia una nueva actualización cuando quieras.",
       "paused_title": "La suscripción está en pausa",
       "paused_description": "Abre la gestión de facturación para revisar la pausa y las opciones de recuperación disponibles.",
       "unpaid_title": "La suscripción está sin pagar",
@@ -82,19 +85,37 @@
       "member_count_one": "{{count}} miembro",
       "member_count_other": "{{count}} miembros",
       "billing_interval": "Intervalo de facturación",
-      "period_end": "El periodo actual termina"
+      "period_end": "El periodo actual termina",
+      "change_plan": "Cambiar de plan",
+      "business_adds": "Business añade proyectos privados, acceso por miembro, cuentas de apps del equipo y límites de automatización más altos.",
+      "plan_change_hold": "Cambio de plan",
+      "plan_change_confirming": "Cambiando a {{plan}}. Esperando la confirmación de Stripe; hasta entonces no se pueden cambiar los puestos ni el plan.",
+      "plan_change_unresolved": "No se ha podido confirmar el cambio a {{plan}}. Contacta con soporte para resolverlo; hasta entonces no se pueden cambiar los puestos ni el plan.",
+      "plan_change_state_confirming": "Confirmando",
+      "plan_change_state_unresolved": "Requiere soporte"
     },
     "upgrade": {
-      "title": "Actualizar a Pro",
-      "description": "Elige un intervalo de facturación y luego confirma los puestos actuales y el importe final en Stripe Checkout.",
+      "title": "Actualizar",
       "interval_label": "Intervalo de facturación",
       "monthly": "Mensual",
       "yearly": "Anual",
-      "pro_for_team_one": "Pro para {{count}} puesto humano",
-      "pro_for_team_other": "Pro para {{count}} puestos humanos",
       "price_loading": "Cargando precios de suscripción",
-      "unit_price": "{{price}} por puesto humano",
-      "price_at_checkout": "El servidor vuelve a contar los miembros humanos antes de la compra. Stripe Checkout muestra el precio por puesto y el total autorizados antes de que pagues."
+      "unit_price_month": "{{price}} por puesto humano / mes",
+      "unit_price_year_monthly": "{{price}} por puesto humano / mes, facturado anualmente",
+      "unit_price_year": "{{price}} por puesto humano / año",
+      "price_at_checkout": "El servidor vuelve a contar los miembros humanos antes de la compra. Stripe Checkout muestra el precio por puesto y el total autorizados antes de que pagues.",
+      "recommended": "Recomendado",
+      "features": {
+        "pro_members": "Miembros ilimitados",
+        "pro_autopilots": "1.000 ejecuciones de automatización por miembro al mes",
+        "pro_storage": "10 GB de almacenamiento de adjuntos por miembro",
+        "pro_dashboard": "90 días de historial en el panel",
+        "business_everything": "Todo lo incluido en Pro",
+        "business_access": "Proyectos privados y acceso por miembro",
+        "business_apps": "Cuentas de apps del equipo y reglas de aprobación",
+        "business_autopilots": "3.000 ejecuciones de automatización por miembro al mes",
+        "business_reports": "Informes de uso y coste por miembro"
+      }
     },
     "management": {
       "title": "Gestión de la suscripción",
@@ -153,6 +174,7 @@
       "preview_failed": "El cálculo no está disponible temporalmente. Reintenta en un momento.",
       "capacity_out_of_sync": "El número de puestos en Stripe no coincide con el registro de facturación. Contacta con soporte antes de reintentar esta compra.",
       "in_progress": "Se está procesando otra compra de puestos. Espera a que termine; contacta con soporte si sigue así.",
+      "plan_change_in_progress": "Todavía se está procesando un cambio de plan. Vuelve a intentarlo en unos minutos.",
       "purchase_unreadable": "No se ha podido leer la respuesta de la compra. Reintenta este presupuesto; se reutilizará la misma solicitud de compra.",
       "purchase_failed": "No se han podido añadir los puestos. Reintenta con el mismo presupuesto, o actualiza si ha caducado.",
       "payment_failed": "No se ha podido completar el pago. Actualiza el método de pago en Stripe y solicita un presupuesto nuevo.",
@@ -171,11 +193,36 @@
       "delayed_description_with_expiry": "La comprobación automática se ha detenido. Si el intento sigue pendiente después del {{date}}, recarga esta página antes de solicitar otro presupuesto; contacta con soporte si sigue pendiente.",
       "submitted_one": "Se ha enviado una compra de {{count}} puesto. La nueva capacidad aparecerá cuando Stripe la confirme.",
       "submitted_other": "Se ha enviado una compra de {{count}} puestos. La nueva capacidad aparecerá cuando Stripe la confirme.",
-      "error_title": "No se ha podido actualizar el cálculo"
+      "error_title": "No se ha podido actualizar el cálculo",
+      "plan_change_unresolved": "No se ha podido confirmar un cambio de plan. Contacta con soporte antes de añadir puestos."
+    },
+    "plan_change": {
+      "upgrade_description": "Se aplica de inmediato. La diferencia del resto de este periodo de facturación se cobra ahora.",
+      "downgrade_description": "Se aplica de inmediato. La diferencia no utilizada se abona en tu próxima factura. La configuración de Business que ya tienes sigue funcionando, pero pasa a ser de solo lectura.",
+      "seats": "Puestos",
+      "charge_today": "Cobro de hoy",
+      "credit": "Abono en la próxima factura",
+      "next_invoice": "Próxima renovación",
+      "tax_notice": "Stripe determina los impuestos, créditos y detalles finales de la factura.",
+      "preview_loading": "Cargando el presupuesto...",
+      "preview_failed": "El presupuesto no está disponible temporalmente. Vuelve a intentarlo en un momento.",
+      "rate_limited": "Demasiadas solicitudes de presupuesto. Espera un momento y vuelve a intentarlo.",
+      "in_progress": "Se está procesando una compra de puestos. Vuelve a intentarlo cuando termine.",
+      "change_in_progress": "Todavía se está procesando un cambio de plan. Vuelve a intentarlo en unos minutos.",
+      "not_active": "Esta suscripción no puede cambiar de plan ahora. Se ha actualizado el plan actual.",
+      "quote_changed": "La suscripción o el precio han cambiado. Revisa el presupuesto actualizado antes de confirmar de nuevo.",
+      "payment_failed": "No se ha podido completar el pago. Actualiza el método de pago en la gestión de facturación y vuelve a intentarlo.",
+      "failed": "No se ha podido cambiar el plan. Vuelve a intentarlo con el mismo presupuesto.",
+      "unreadable": "No se ha podido leer la respuesta. Vuelve a intentarlo; se reutilizará la misma solicitud.",
+      "error_title": "No se ha podido cambiar el plan",
+      "success_title": "Plan cambiado",
+      "success_description": "Este espacio de trabajo ahora usa {{plan}}.",
+      "unresolved": "No se ha podido confirmar el cambio de plan anterior. Contacta con soporte antes de cambiar de plan.",
+      "check_failed": "No se ha podido comprobar el cambio de plan. Vuelve a intentarlo."
     },
     "confirm": {
       "title": "¿Continuar a Stripe Checkout?",
-      "description": "Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago."
+      "description": "Plan: {{plan}}. Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago."
     }
   },
   "return_page": {

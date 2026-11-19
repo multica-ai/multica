@@ -82,7 +82,7 @@ Resolves MUL-123
 
 A bare mention in the body, such as `Related to MUL-123`, doesn't link the PR at all. Commit messages and PR comments don't trigger linking either.
 
-You can also link a PR by hand by pasting its URL. Before an issue has any PR, the **Pull requests** block is hidden: click **+** at the top of the issue sidebar and choose **Link pull request**. Once a PR is linked, use the **+** in the **Pull requests** block's header. To take a PR off an issue, open the **⋯** menu on its row and choose **Remove from issue**; Multica won't link it again from its title or branch.
+You can also link a PR by hand: in the issue's **Pull requests** block, click **+** and paste the PR URL. To take a PR off an issue, open the **⋯** menu on its row and choose **Remove from issue**; Multica won't link it again from its title or branch.
 
 ## View PRs on an issue
 
@@ -107,7 +107,7 @@ A merged PR doesn't necessarily mean the issue is finished, so the workspace dec
 An issue moves to the chosen status when all of the following hold:
 
 1. every linked PR is `Merged`: an `Open` or `Draft` PR keeps the issue waiting, and so does a PR closed without merging until you remove it from the issue;
-2. the issue isn't `done` or `cancelled`, isn't in Triage, doesn't already have the target status, and hasn't been switched off for this issue (**Keep status when PRs merge**: before the first PR, in the **+** menu at the top of the issue sidebar; after that, in the **⋯** menu of the **Pull requests** block). Set it before linking a PR that has already merged, since linking that PR can move the issue right away.
+2. the issue isn't `done` or `cancelled`, isn't in Triage, doesn't already have the target status, and hasn't been switched off for this issue (**Pull requests → ⋯ → Keep status when PRs merge**).
 
 <PrLinkDemo />
 

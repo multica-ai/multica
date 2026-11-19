@@ -57,7 +57,7 @@ const preview: Preview = {
   parameters: {
     layout: "centered",
     options: {
-      storySort: { order: ["Issue sidebar cards", ["Compare all", "Close-up 4×", "Try it"], "Comment box", ["Compare all", "*"], "Voice input", ["Composer (A + C)", "Waveform", ["Compare all", "*"], "Settings", "First use", "Edge cases", "Explored", ["All directions", "*"]]] },
+      storySort: { order: ["Comment box", ["Compare all", "*"], "Voice input", ["Composer (A + C)", "Waveform", ["Compare all", "*"], "Settings", "First use", "Edge cases", "Explored", ["All directions", "*"]]] },
     },
     controls: { disable: true },
     actions: { disable: true },

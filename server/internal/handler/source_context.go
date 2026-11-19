@@ -493,21 +493,23 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	// MUL-8472: a comment in a private project the caller cannot see reads as
-	// a missing one, here as on every other comment route.
-	if hiddenComment, err := h.commentInHiddenProject(r, workspaceID, anchorCommentID); err != nil || hiddenComment {
-		if err == nil {
-			err = service.ErrAnchorCommentDeleted
-		}
-		h.writeSourceContextError(w, err, service.SourceContextLimitUsage{})
-		return
-	}
 	wantDigest, tokenIssueID, validToken := service.ParseSourceContextToken(strings.TrimSpace(req.CaptureToken))
 	if !validToken {
 		writeJSON(w, http.StatusConflict, map[string]any{"code": "source_context_changed", "error": "source context preview is invalid; refresh and try again"})
 		return
 	}
-	build, err := service.BuildSourceContext(r.Context(), h.Queries, wsUUID, anchorCommentID)
+	// MUL-8472: a comment in a private project the caller cannot see reads as
+	// a missing one, here as on every other comment route, so it takes the
+	// deleted-anchor path below.
+	var build service.SourceContextBuild
+	hiddenComment, err := h.commentInHiddenProject(r, workspaceID, anchorCommentID)
+	if err == nil {
+		if hiddenComment {
+			err = service.ErrAnchorCommentDeleted
+		} else {
+			build, err = service.BuildSourceContext(r.Context(), h.Queries, wsUUID, anchorCommentID)
+		}
+	}
 	if errors.Is(err, service.ErrAnchorCommentDeleted) {
 		// The token's issue id comes from the client; one in a project the
 		// caller cannot see answers like a deleted one.

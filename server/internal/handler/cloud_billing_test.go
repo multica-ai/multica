@@ -379,6 +379,7 @@ func TestCreateCloudWorkspaceSubscriptionCheckoutInjectsAuthoritativeWorkspaceAn
 
 	req := newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", map[string]any{
 		"workspace_id":    "00000000-0000-0000-0000-000000000001",
+		"plan":            "business",
 		"interval":        "year",
 		"idempotency_key": "checkout-request-1",
 		"customer_email":  "attacker@example.com",
@@ -401,7 +402,7 @@ func TestCreateCloudWorkspaceSubscriptionCheckoutInjectsAuthoritativeWorkspaceAn
 	if body.WorkspaceID != testWorkspaceID {
 		t.Fatalf("upstream workspace_id = %q, want middleware workspace %q", body.WorkspaceID, testWorkspaceID)
 	}
-	if body.Interval != "year" || body.IdempotencyKey != "checkout-request-1" || body.CustomerEmail != handlerTestEmail {
+	if body.Plan != "business" || body.Interval != "year" || body.IdempotencyKey != "checkout-request-1" || body.CustomerEmail != handlerTestEmail {
 		t.Fatalf("upstream body = %+v", body)
 	}
 	if got := proxy.req.Headers.Get(idempotencyKeyHeader); got != "checkout-header-1" {
@@ -415,6 +416,7 @@ func TestCreateCloudWorkspaceSubscriptionCheckoutFailsWhenPayerCannotBeResolved(
 	useCloudRuntimeProxy(t, proxy)
 
 	req := newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", map[string]any{
+		"plan":            "pro",
 		"interval":        "month",
 		"idempotency_key": "checkout-request-missing-payer",
 	})
@@ -437,6 +439,7 @@ func TestCreateCloudWorkspaceSubscriptionCheckoutRejectsInvalidPayerID(t *testin
 	useCloudRuntimeProxy(t, proxy)
 
 	req := newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", map[string]any{
+		"plan":            "pro",
 		"interval":        "month",
 		"idempotency_key": "checkout-request-invalid-payer",
 	})
@@ -461,6 +464,7 @@ func TestCreateCloudWorkspaceSubscriptionCheckoutRejectsEmptyPayerEmail(t *testi
 	dbfx.Member(t, testWorkspaceID, emptyEmailUserID, "owner")
 
 	req := newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", map[string]any{
+		"plan":            "pro",
 		"interval":        "month",
 		"idempotency_key": "checkout-request-empty-email",
 	})
@@ -489,7 +493,7 @@ func TestCreateCloudWorkspaceSubscriptionCheckoutAcceptsHeaderIdempotencyKey(t *
 	useCloudRuntimeProxy(t, proxy)
 
 	req := withCloudSubscriptionWorkspace(
-		newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", map[string]any{"interval": "month"}),
+		newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", map[string]any{"plan": "pro", "interval": "month"}),
 		"admin",
 	)
 	req.Header.Set(idempotencyKeyHeader, "checkout-header-only")
@@ -597,6 +601,108 @@ func TestCloudWorkspaceSeatPurchaseRejectsInvalidRequests(t *testing.T) {
 	}
 }
 
+func TestCloudWorkspacePlanChangePreviewForwardsOnlyTargetPlan(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	proxy := &fakeCloudRuntimeProxy{enabled: true, resp: &cloudruntime.Response{StatusCode: http.StatusOK, Body: []byte(`{"target_plan":"business"}`)}}
+	useCloudRuntimeProxy(t, proxy)
+	req := withCloudSubscriptionWorkspace(newRequest(http.MethodPost, "/api/cloud-subscriptions/plan-changes/preview", map[string]any{
+		"plan": "business", "workspace_id": "00000000-0000-0000-0000-000000000002", "interval": "year",
+	}), "admin")
+	w := httptest.NewRecorder()
+	testHandler.PreviewCloudWorkspaceSubscriptionPlanChange(w, req)
+
+	if w.Code != http.StatusOK || proxy.req.Path != "/api/v1/subscriptions/"+testWorkspaceID+"/plan-changes/preview" {
+		t.Fatalf("status=%d path=%s body=%s", w.Code, proxy.req.Path, w.Body.String())
+	}
+	if string(proxy.req.Body) != `{"plan":"business"}` {
+		t.Fatalf("upstream body=%s", proxy.req.Body)
+	}
+}
+
+func TestCloudWorkspacePlanChangeForwardsOnlyConfirmedQuote(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	proxy := &fakeCloudRuntimeProxy{enabled: true, resp: &cloudruntime.Response{StatusCode: http.StatusOK, Body: []byte(`{"plan":"pro"}`)}}
+	useCloudRuntimeProxy(t, proxy)
+	req := withCloudSubscriptionWorkspace(newRequest(http.MethodPost, "/api/cloud-subscriptions/plan-changes", map[string]any{
+		"workspace_id":                  "00000000-0000-0000-0000-000000000002",
+		"interval":                      "year",
+		"plan":                          "pro",
+		"expected_subscription_version": 7,
+		"quoted_at":                     "2026-11-18T08:00:00Z",
+		// A downgrade's proration is a credit, so a negative amount is valid.
+		"accepted_proration_amount": -4500,
+		"currency":                  "USD",
+		"idempotency_key":           "plan-change-1",
+	}), "owner")
+	w := httptest.NewRecorder()
+	testHandler.ChangeCloudWorkspaceSubscriptionPlan(w, req)
+
+	if w.Code != http.StatusOK || proxy.req.Path != "/api/v1/subscriptions/"+testWorkspaceID+"/plan-changes" {
+		t.Fatalf("status=%d path=%s body=%s", w.Code, proxy.req.Path, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(proxy.req.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	for _, leaked := range []string{"workspace_id", "interval"} {
+		if _, ok := body[leaked]; ok {
+			t.Fatalf("%s leaked upstream: %v", leaked, body)
+		}
+	}
+	if body["plan"] != "pro" || body["expected_subscription_version"] != float64(7) ||
+		body["quoted_at"] != "2026-11-18T08:00:00Z" || body["accepted_proration_amount"] != float64(-4500) ||
+		body["currency"] != "usd" || body["idempotency_key"] != "plan-change-1" {
+		t.Fatalf("upstream body=%v", body)
+	}
+	if proxy.req.Headers.Get(idempotencyKeyHeader) != "plan-change-1" {
+		t.Fatalf("upstream idempotency=%q", proxy.req.Headers.Get(idempotencyKeyHeader))
+	}
+}
+
+func TestCloudWorkspacePlanChangeRejectsInvalidRequests(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	valid := func() map[string]any {
+		return map[string]any{
+			"plan": "business", "expected_subscription_version": 3, "quoted_at": "2026-11-18T08:00:00Z",
+			"accepted_proration_amount": 100, "currency": "usd", "idempotency_key": "key",
+		}
+	}
+	tests := []struct {
+		name   string
+		role   string
+		mutate func(map[string]any)
+		header string
+	}{
+		{name: "member", role: "member", mutate: func(map[string]any) {}},
+		{name: "free plan", role: "owner", mutate: func(b map[string]any) { b["plan"] = "free" }},
+		{name: "missing version", role: "owner", mutate: func(b map[string]any) { delete(b, "expected_subscription_version") }},
+		{name: "missing quote time", role: "owner", mutate: func(b map[string]any) { delete(b, "quoted_at") }},
+		{name: "bad currency", role: "owner", mutate: func(b map[string]any) { b["currency"] = "u$d" }},
+		{name: "missing key", role: "owner", mutate: func(b map[string]any) { delete(b, "idempotency_key") }},
+		{name: "long key", role: "owner", mutate: func(b map[string]any) { delete(b, "idempotency_key") }, header: strings.Repeat("a", 201)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			proxy := &fakeCloudRuntimeProxy{enabled: true}
+			useCloudRuntimeProxy(t, proxy)
+			body := valid()
+			tc.mutate(body)
+			req := withCloudSubscriptionWorkspace(newRequest(http.MethodPost, "/api/cloud-subscriptions/plan-changes", body), tc.role)
+			if tc.header != "" {
+				req.Header.Set(idempotencyKeyHeader, tc.header)
+			}
+			w := httptest.NewRecorder()
+			testHandler.ChangeCloudWorkspaceSubscriptionPlan(w, req)
+			if w.Code != http.StatusBadRequest && w.Code != http.StatusForbidden {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if proxy.called {
+				t.Fatal("invalid request reached upstream")
+			}
+		})
+	}
+}
+
 func TestCloudWorkspaceSubscriptionWritesRequireManagerRole(t *testing.T) {
 	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
 	proxy := &fakeCloudRuntimeProxy{enabled: true}
@@ -658,16 +764,37 @@ func TestCloudWorkspaceSubscriptionMutationsValidateLocally(t *testing.T) {
 		{
 			name:      "checkout missing idempotency key",
 			path:      "/api/cloud-subscriptions/checkout-sessions",
-			body:      map[string]any{"interval": "month"},
+			body:      map[string]any{"plan": "pro", "interval": "month"},
 			wantError: "Idempotency-Key or idempotency_key is required",
 			invoke:    testHandler.CreateCloudWorkspaceSubscriptionCheckout,
 		},
 		{
 			name:      "checkout invalid interval",
 			path:      "/api/cloud-subscriptions/checkout-sessions",
-			body:      map[string]any{"interval": "weekly", "idempotency_key": "checkout-request-1"},
+			body:      map[string]any{"plan": "pro", "interval": "weekly", "idempotency_key": "checkout-request-1"},
 			wantError: "interval must be month or year",
 			invoke:    testHandler.CreateCloudWorkspaceSubscriptionCheckout,
+		},
+		{
+			name:      "checkout missing plan",
+			path:      "/api/cloud-subscriptions/checkout-sessions",
+			body:      map[string]any{"interval": "month", "idempotency_key": "checkout-request-1"},
+			wantError: "plan must be pro or business",
+			invoke:    testHandler.CreateCloudWorkspaceSubscriptionCheckout,
+		},
+		{
+			name:      "checkout cannot buy free",
+			path:      "/api/cloud-subscriptions/checkout-sessions",
+			body:      map[string]any{"plan": "free", "interval": "month", "idempotency_key": "checkout-request-1"},
+			wantError: "plan must be pro or business",
+			invoke:    testHandler.CreateCloudWorkspaceSubscriptionCheckout,
+		},
+		{
+			name:      "plan change preview invalid plan",
+			path:      "/api/cloud-subscriptions/plan-changes/preview",
+			body:      map[string]any{"plan": "enterprise"},
+			wantError: "plan must be pro or business",
+			invoke:    testHandler.PreviewCloudWorkspaceSubscriptionPlanChange,
 		},
 		{
 			name:      "portal missing idempotency key",

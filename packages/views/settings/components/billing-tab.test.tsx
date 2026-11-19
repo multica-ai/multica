@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
@@ -7,6 +7,7 @@ import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flag
 import type {
   AutopilotQuotaUsage,
   WorkspaceSubscriptionEntitlements,
+  WorkspaceSubscriptionPrices,
   WorkspaceSubscriptionSummary,
 } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -17,26 +18,17 @@ const mocks = vi.hoisted(() => ({
   portal: vi.fn(),
   previewSeats: vi.fn(),
   purchaseSeats: vi.fn(),
+  previewPlanChange: vi.fn(),
+  changePlan: vi.fn(),
+  checkPlanChange: vi.fn(),
+  changePlanPending: false,
   refetch: vi.fn(),
   refetchSummary: vi.fn(),
   refetchUsage: vi.fn(),
   refetchPrices: vi.fn(),
   openExternal: vi.fn(),
   workspaceId: "workspace-1",
-  prices: null as {
-    month: {
-      currency: string;
-      unitAmount: number;
-      interval: "month";
-      intervalCount: number;
-    };
-    year: {
-      currency: string;
-      unitAmount: number;
-      interval: "year";
-      intervalCount: number;
-    };
-  } | null,
+  prices: null as WorkspaceSubscriptionPrices | null,
   pricesLoading: false,
   pricesFetching: false,
   pricesError: false,
@@ -87,7 +79,10 @@ const mocks = vi.hoisted(() => ({
       checkout: true,
       portal: false,
       purchaseSeats: false,
+      changePlan: false,
+      checkPlanChange: false,
     },
+    planChange: null as WorkspaceSubscriptionSummary["planChange"],
   } as WorkspaceSubscriptionSummary,
   usage: {
     action: "enforce" as "off" | "observe" | "enforce",
@@ -129,6 +124,18 @@ vi.mock("@multica/core/billing", () => ({
   usePurchaseWorkspaceSeats: () => ({
     mutateAsync: mocks.purchaseSeats,
     isPending: mocks.purchasePending,
+  }),
+  usePreviewWorkspacePlanChange: () => ({
+    mutateAsync: mocks.previewPlanChange,
+    isPending: false,
+  }),
+  useChangeWorkspacePlan: () => ({
+    mutateAsync: mocks.changePlan,
+    isPending: mocks.changePlanPending,
+  }),
+  useReconcileWorkspaceSubscriptionSeats: () => ({
+    mutateAsync: mocks.checkPlanChange,
+    isPending: false,
   }),
 }));
 
@@ -223,19 +230,36 @@ describe("BillingTab", () => {
     navigationState.search = "tab=billing";
     mocks.workspaceId = "workspace-1";
     mocks.prices = {
-      month: {
-        currency: "usd",
-        unitAmount: 1000,
-        interval: "month",
-        intervalCount: 1,
+      pro: {
+        month: {
+          currency: "usd",
+          unitAmount: 1500,
+          interval: "month",
+          intervalCount: 1,
+        },
+        year: {
+          currency: "usd",
+          unitAmount: 14400,
+          interval: "year",
+          intervalCount: 1,
+        },
       },
-      year: {
-        currency: "usd",
-        unitAmount: 9600,
-        interval: "year",
-        intervalCount: 1,
+      business: {
+        month: {
+          currency: "usd",
+          unitAmount: 3000,
+          interval: "month",
+          intervalCount: 1,
+        },
+        year: {
+          currency: "usd",
+          unitAmount: 28800,
+          interval: "year",
+          intervalCount: 1,
+        },
       },
     };
+    mocks.changePlanPending = false;
     mocks.pricesLoading = false;
     mocks.pricesFetching = false;
     mocks.pricesError = false;
@@ -272,7 +296,10 @@ describe("BillingTab", () => {
         checkout: true,
         portal: false,
         purchaseSeats: false,
+        changePlan: false,
+        checkPlanChange: false,
       },
+      planChange: null,
     });
     Object.assign(mocks.usage, {
       action: "enforce",
@@ -357,6 +384,27 @@ describe("BillingTab", () => {
       nextInvoiceAmount: 6000,
       status: "submitted",
     });
+    mocks.previewPlanChange.mockResolvedValue({
+      currentPlan: "pro",
+      targetPlan: "business",
+      interval: "month",
+      seats: 4,
+      subscriptionVersion: 7,
+      currency: "usd",
+      prorationAmount: 3000,
+      nextInvoiceAmount: 12000,
+      invoiceNow: true,
+      quotedAt: "2030-01-15T00:00:00Z",
+    });
+    mocks.changePlan.mockResolvedValue({
+      plan: "business",
+      previousPlan: "pro",
+      interval: "month",
+      seats: 4,
+      currency: "usd",
+      prorationAmount: 3000,
+      invoiceNow: true,
+    });
     configStore.getState().setFeatureFlags({
       [BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG]: true,
     });
@@ -378,7 +426,12 @@ describe("BillingTab", () => {
     expect(screen.getByRole("heading", { name: "Billing" })).toBeInTheDocument();
     expect(screen.getByText("5 / 7")).toBeInTheDocument();
     expect(screen.getByText("3 completed · 2 in progress")).toBeInTheDocument();
-    expect(screen.getByText("$10.00 per human seat")).toBeInTheDocument();
+    expect(
+      screen.getByText("$15.00 per human seat / month"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("$30.00 per human seat / month"),
+    ).toBeInTheDocument();
     expect(mocks.useQuery).toHaveBeenCalledWith(
       expect.objectContaining({
         queryKey: ["workspace-subscriptions", "workspace-1", "prices"],
@@ -387,7 +440,12 @@ describe("BillingTab", () => {
 
     await user.click(screen.getByRole("button", { name: "Yearly" }));
 
-    expect(screen.getByText("$96.00 per human seat")).toBeInTheDocument();
+    expect(
+      screen.getByText("$12.00 per human seat / month, billed yearly"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("$24.00 per human seat / month, billed yearly"),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Retry" }),
     ).not.toBeInTheDocument();
@@ -496,7 +554,9 @@ describe("BillingTab", () => {
 
     renderWithI18n(<BillingTab />);
 
-    expect(screen.getByText("$10.00 per human seat")).toBeInTheDocument();
+    expect(
+      screen.getByText("$15.00 per human seat / month"),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/Estimated monthly total/)).not.toBeInTheDocument();
     expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
   });
@@ -512,12 +572,18 @@ describe("BillingTab", () => {
       expect(mocks.checkout).toHaveBeenCalledTimes(1);
     });
     const request = mocks.checkout.mock.calls[0]?.[0] as {
+      plan: string;
       interval: string;
       idempotencyKey: string;
     };
+    expect(request.plan).toBe("pro");
     expect(request.interval).toBe("month");
     expect(request.idempotencyKey).toMatch(/^workspace-checkout-workspace-1-/);
-    expect(Object.keys(request).sort()).toEqual(["idempotencyKey", "interval"]);
+    expect(Object.keys(request).sort()).toEqual([
+      "idempotencyKey",
+      "interval",
+      "plan",
+    ]);
     expect(mocks.openExternal).toHaveBeenCalledWith(
       "https://checkout.stripe.com/test-session",
       { webTarget: "same-tab" },
@@ -729,7 +795,7 @@ describe("BillingTab", () => {
 
     expect(screen.getAllByText("3 members")).toHaveLength(1);
     expect(screen.queryByText("Purchased seats")).not.toBeInTheDocument();
-    expect(screen.queryByText("$10.00 per human seat")).not.toBeInTheDocument();
+    expect(screen.queryByText(/per human seat/)).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Upgrade to Pro" }),
     ).not.toBeInTheDocument();
@@ -1018,6 +1084,10 @@ describe("BillingTab", () => {
     [
       "seat_purchase_in_progress",
       "Another seat purchase is being processed. Wait for it to finish; contact support if it remains here.",
+    ],
+    [
+      "plan_change_in_progress",
+      "A plan change is still being processed. Try again in a few minutes.",
     ],
   ])("maps purchase conflict %s to actionable copy", async (code, copy) => {
     const user = userEvent.setup();
@@ -1489,5 +1559,461 @@ describe("BillingTab", () => {
     expect(
       screen.queryByRole("button", { name: "Upgrade to Pro" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("checks out Business for the selected interval", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(<BillingTab />);
+
+    await user.click(screen.getByRole("button", { name: "Yearly" }));
+    await user.click(
+      screen.getByRole("button", { name: "Upgrade to Business" }),
+    );
+    expect(screen.getByText(/^Plan: Business\./)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue to Stripe" }));
+
+    await waitFor(() => expect(mocks.checkout).toHaveBeenCalledOnce());
+    expect(mocks.checkout.mock.calls[0]?.[0]).toMatchObject({
+      plan: "business",
+      interval: "year",
+    });
+  });
+
+  it("starts a new Checkout intent when the plan changes", async () => {
+    const user = userEvent.setup();
+    mocks.checkout.mockRejectedValueOnce(new Error("network lost"));
+    renderWithI18n(<BillingTab />);
+
+    await user.click(screen.getByRole("button", { name: "Upgrade to Pro" }));
+    await user.click(screen.getByRole("button", { name: "Continue to Stripe" }));
+    await screen.findByText("Billing action failed");
+    await user.click(
+      screen.getByRole("button", { name: "Upgrade to Business" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Continue to Stripe" }));
+
+    await waitFor(() => expect(mocks.checkout).toHaveBeenCalledTimes(2));
+    expect(mocks.checkout.mock.calls[1]?.[0].plan).toBe("business");
+    expect(mocks.checkout.mock.calls[1]?.[0].idempotencyKey).not.toBe(
+      mocks.checkout.mock.calls[0]?.[0].idempotencyKey,
+    );
+  });
+
+  describe("plan switching", () => {
+    function setPaidPlan(plan: "pro" | "business") {
+      Object.assign(mocks.entitlements, {
+        plan,
+        status: "active",
+        limits: { autopilotRuns: { mode: "unlimited", limit: null } },
+        currentPeriodEnd: "2030-02-01T00:00:00Z",
+      });
+      setSeatCapacity({ humanMembers: 4, purchased: 4 });
+      mocks.summary.billingInterval = "month";
+      mocks.summary.availableActions.changePlan = true;
+    }
+
+    it("shows a confirming plan change and lets a manager check it now", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.summary.availableActions.changePlan = false;
+      mocks.summary.availableActions.checkPlanChange = true;
+      mocks.summary.planChange = {
+        targetPlan: "business",
+        state: "confirming",
+        since: "2030-01-15T00:00:00Z",
+      };
+      mocks.checkPlanChange.mockResolvedValue({
+        workspaceId: "workspace-1",
+        action: "none",
+        version: 8,
+      });
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Plan change")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Switching to Business. Waiting for Stripe to confirm; seats and the plan can't be changed until then.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Change plan")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Check status" }));
+
+      await waitFor(() => expect(mocks.checkPlanChange).toHaveBeenCalledOnce());
+      expect(mocks.refetchSummary).toHaveBeenCalled();
+    });
+
+    it("tells the user to contact support when a plan change is unresolved", () => {
+      setPaidPlan("pro");
+      mocks.summary.availableActions.changePlan = false;
+      mocks.summary.planChange = {
+        targetPlan: "business",
+        state: "unresolved",
+        since: "2030-01-15T00:00:00Z",
+      };
+      renderWithI18n(<BillingTab />);
+
+      expect(
+        screen.getByText(
+          "The switch to Business could not be confirmed. Contact support to settle it; seats and the plan can't be changed until then.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Needs support")).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Check status" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("explains a plan change refused by an unresolved one", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.changePlan.mockRejectedValueOnce(
+        new ApiError("request failed", 409, "Conflict", {
+          code: "plan_change_unresolved",
+        }),
+      );
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      await within(dialog).findByText("$30.00");
+      await user.click(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      );
+
+      expect(
+        await within(dialog).findByText(
+          "The previous plan change could not be confirmed. Contact support before changing plans.",
+        ),
+      ).toBeInTheDocument();
+      expect(mocks.refetchSummary).toHaveBeenCalled();
+    });
+
+    it("offers no switch unless Cloud allows it", () => {
+      setPaidPlan("pro");
+      mocks.summary.availableActions.changePlan = false;
+
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Pro")).toBeInTheDocument();
+      expect(screen.queryByText("Change plan")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Upgrade to Business" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("quotes and confirms an upgrade from Pro to Business", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      expect(mocks.previewPlanChange).toHaveBeenCalledWith({
+        plan: "business",
+      });
+      expect(await within(dialog).findByText("$30.00")).toBeInTheDocument();
+      expect(within(dialog).getByText("Charged today")).toBeInTheDocument();
+      expect(within(dialog).getByText("$120.00")).toBeInTheDocument();
+      expect(within(dialog).getByText("4 seats")).toBeInTheDocument();
+
+      await user.click(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      );
+
+      await waitFor(() => expect(mocks.changePlan).toHaveBeenCalledOnce());
+      const request = mocks.changePlan.mock.calls[0]?.[0];
+      expect(request).toMatchObject({
+        plan: "business",
+        expectedSubscriptionVersion: 7,
+        quotedAt: "2030-01-15T00:00:00Z",
+        acceptedProrationAmount: 3000,
+        currency: "usd",
+      });
+      expect(request.idempotencyKey).toMatch(
+        /^workspace-plan-change-workspace-1-/,
+      );
+      expect(
+        await screen.findByText("This workspace is now on Business."),
+      ).toBeInTheDocument();
+      expect(mocks.refetchSummary).toHaveBeenCalled();
+    });
+
+    it("shows a downgrade credit and warns that Business settings become read-only", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("business");
+      mocks.previewPlanChange.mockResolvedValue({
+        currentPlan: "business",
+        targetPlan: "pro",
+        interval: "month",
+        seats: 4,
+        subscriptionVersion: 8,
+        currency: "usd",
+        prorationAmount: -3000,
+        nextInvoiceAmount: 6000,
+        invoiceNow: false,
+        quotedAt: "2030-01-15T00:00:00Z",
+      });
+      mocks.changePlan.mockResolvedValue({
+        plan: "pro",
+        previousPlan: "business",
+        interval: "month",
+        seats: 4,
+        currency: "usd",
+        prorationAmount: -3000,
+        invoiceNow: false,
+      });
+      renderWithI18n(<BillingTab />);
+
+      await user.click(screen.getByRole("button", { name: "Switch to Pro" }));
+      const dialog = await screen.findByRole("dialog");
+      expect(
+        within(dialog).getByText(/become read-only/),
+      ).toBeInTheDocument();
+      expect(
+        await within(dialog).findByText("Credit on next invoice"),
+      ).toBeInTheDocument();
+      expect(within(dialog).getByText("$30.00")).toBeInTheDocument();
+
+      await user.click(
+        within(dialog).getByRole("button", { name: "Switch to Pro" }),
+      );
+
+      await waitFor(() => expect(mocks.changePlan).toHaveBeenCalledOnce());
+      expect(mocks.changePlan.mock.calls[0]?.[0]).toMatchObject({
+        plan: "pro",
+        acceptedProrationAmount: -3000,
+      });
+      expect(
+        await screen.findByText("This workspace is now on Pro."),
+      ).toBeInTheDocument();
+    });
+
+    it("requests a fresh quote when Cloud reports the quote changed", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.changePlan.mockRejectedValueOnce(
+        new ApiError("request failed", 409, "Conflict", {
+          code: "plan_change_quote_changed",
+        }),
+      );
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      await within(dialog).findByText("$30.00");
+      await user.click(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      );
+
+      expect(
+        await within(dialog).findByText(
+          "The subscription or price changed. Review the refreshed quote before confirming again.",
+        ),
+      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(mocks.previewPlanChange).toHaveBeenCalledTimes(2),
+      );
+      expect(mocks.refetchSummary).toHaveBeenCalled();
+    });
+
+    it("explains that another plan change holds the subscription", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.changePlan.mockRejectedValueOnce(
+        new ApiError("request failed", 409, "Conflict", {
+          code: "plan_change_in_progress",
+        }),
+      );
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      await within(dialog).findByText("$30.00");
+      await user.click(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      );
+
+      expect(
+        await within(dialog).findByText(
+          "A plan change is still being processed. Try again in a few minutes.",
+        ),
+      ).toBeInTheDocument();
+      expect(mocks.refetchSummary).toHaveBeenCalled();
+      // Not treated as a changed quote: no new preview is requested.
+      expect(mocks.previewPlanChange).toHaveBeenCalledTimes(1);
+    });
+
+    it("recovers after a lost confirmation once the dialog is reopened", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.changePlan.mockRejectedValueOnce(
+        new ApiError("request failed", 503, "Service Unavailable", {}),
+      );
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      let dialog = await screen.findByRole("dialog");
+      await within(dialog).findByText("$30.00");
+      await user.click(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      );
+      await waitFor(() => expect(mocks.changePlan).toHaveBeenCalledOnce());
+      const lostKey = mocks.changePlan.mock.calls[0]?.[0].idempotencyKey;
+      // Closing the dialog drops the retry key, as a reload would.
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+      );
+
+      // Right after the timeout Cloud still holds the change.
+      mocks.previewPlanChange.mockRejectedValueOnce(
+        new ApiError("request failed", 409, "Conflict", {
+          code: "plan_change_in_progress",
+        }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      dialog = await screen.findByRole("dialog");
+      expect(
+        await within(dialog).findByText(
+          "A plan change is still being processed. Try again in a few minutes.",
+        ),
+      ).toBeInTheDocument();
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+      );
+
+      // Once Cloud has settled it, a fresh quote goes through under a new key.
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      dialog = await screen.findByRole("dialog");
+      await within(dialog).findByText("$30.00");
+      await user.click(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      );
+      await waitFor(() => expect(mocks.changePlan).toHaveBeenCalledTimes(2));
+      expect(mocks.changePlan.mock.calls[1]?.[0].idempotencyKey).not.toBe(
+        lostKey,
+      );
+      expect(
+        await screen.findByText("This workspace is now on Business."),
+      ).toBeInTheDocument();
+    });
+
+    it("explains a quote refused while another plan change is in flight", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.previewPlanChange.mockRejectedValueOnce(
+        new ApiError("request failed", 409, "Conflict", {
+          code: "plan_change_in_progress",
+        }),
+      );
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      const dialog = await screen.findByRole("dialog");
+
+      expect(
+        await within(dialog).findByText(
+          "A plan change is still being processed. Try again in a few minutes.",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps the subscription unchanged and explains a declined upgrade payment", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.changePlan.mockRejectedValueOnce(
+        new ApiError("request failed", 402, "Payment Required", {
+          code: "plan_change_payment_failed",
+        }),
+      );
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      await within(dialog).findByText("$30.00");
+      await user.click(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      );
+
+      expect(
+        await within(dialog).findByText(
+          "Payment could not be completed. Update the payment method in billing management, then try again.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        within(dialog).getByRole("button", { name: "Upgrade to Business" }),
+      ).toBeDisabled();
+    });
+
+    it("reuses the idempotency key when retrying the same quote", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.changePlan.mockRejectedValueOnce(new Error("network lost"));
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+      const dialog = await screen.findByRole("dialog");
+      await within(dialog).findByText("$30.00");
+      const confirm = within(dialog).getByRole("button", {
+        name: "Upgrade to Business",
+      });
+      await user.click(confirm);
+      await within(dialog).findByText(
+        "The plan could not be changed. Retry with the same quote.",
+      );
+      await user.click(confirm);
+
+      await waitFor(() => expect(mocks.changePlan).toHaveBeenCalledTimes(2));
+      expect(mocks.changePlan.mock.calls[1]?.[0].idempotencyKey).toBe(
+        mocks.changePlan.mock.calls[0]?.[0].idempotencyKey,
+      );
+    });
+
+    it("closes the dialog and refreshes when the plan can no longer change", async () => {
+      const user = userEvent.setup();
+      setPaidPlan("pro");
+      mocks.previewPlanChange.mockRejectedValueOnce(
+        new ApiError("request failed", 409, "Conflict", {
+          code: "subscription_not_active",
+        }),
+      );
+      renderWithI18n(<BillingTab />);
+
+      await user.click(
+        screen.getByRole("button", { name: "Upgrade to Business" }),
+      );
+
+      expect(
+        await screen.findByText(
+          "This subscription can't change plans right now. The current plan has been refreshed.",
+        ),
+      ).toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+      );
+      expect(mocks.refetchSummary).toHaveBeenCalled();
+    });
   });
 });
