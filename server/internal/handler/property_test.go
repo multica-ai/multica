@@ -252,6 +252,35 @@ func TestListPropertiesUsageCount(t *testing.T) {
 	if _, ok := counts("?include_usage=false")[propB.ID]; ok {
 		t.Fatalf("archived property listed without include_archived")
 	}
+
+	// Both counting strategies must agree; catalogSize picks which one runs.
+	var defs []db.IssueProperty
+	for _, id := range []string{propA.ID, propB.ID, unused.ID} {
+		p, err := testHandler.Queries.GetIssueProperty(context.Background(), db.GetIssuePropertyParams{
+			ID: parseUUID(id), WorkspaceID: parseUUID(testWorkspaceID),
+		})
+		if err != nil {
+			t.Fatalf("GetIssueProperty: %v", err)
+		}
+		defs = append(defs, p)
+	}
+	for _, strategy := range []struct {
+		name        string
+		catalogSize int
+	}{
+		{"expand all keys", len(defs)},
+		{"check requested keys", len(defs) * propertyUsageKeyCheckRatio},
+	} {
+		got, err := testHandler.countPropertyUsage(context.Background(), parseUUID(testWorkspaceID), defs, strategy.catalogSize)
+		if err != nil {
+			t.Fatalf("%s: countPropertyUsage: %v", strategy.name, err)
+		}
+		for id, n := range want {
+			if got[id] != n {
+				t.Fatalf("%s: usage_count for %s: got %d, want %d", strategy.name, id, got[id], n)
+			}
+		}
+	}
 }
 
 func TestPropertyDefinitionValidation(t *testing.T) {

@@ -23,6 +23,93 @@ func (q *Queries) CountActiveIssueProperties(ctx context.Context, workspaceID pg
 	return count, err
 }
 
+const countIssuePropertyUsage = `-- name: CountIssuePropertyUsage :many
+
+SELECT k.key::text AS property_key, COUNT(*)::bigint AS usage_count
+FROM issue i
+CROSS JOIN LATERAL jsonb_object_keys(i.properties) AS k(key)
+WHERE i.workspace_id = $1::uuid
+  AND i.properties <> '{}'::jsonb
+GROUP BY k.key
+`
+
+type CountIssuePropertyUsageRow struct {
+	PropertyKey string `json:"property_key"`
+	UsageCount  int64  `json:"usage_count"`
+}
+
+// usage_count = number of issues in the workspace that currently carry a
+// value for a property. Both queries read only the workspace's non-empty
+// property bags (idx_issue_workspace_with_properties) in a single pass. Do not
+// go back to a per-definition `properties ? id` subquery:
+// idx_issue_properties_gin is jsonb_path_ops, which cannot serve `?`, so each
+// definition re-scanned every issue in the workspace. The handler picks one
+// of the two shapes below; see countPropertyUsage.
+// Counts every key stored on the workspace's issues, archived definitions
+// included. Cost scales with the total number of stored keys.
+func (q *Queries) CountIssuePropertyUsage(ctx context.Context, workspaceID pgtype.UUID) ([]CountIssuePropertyUsageRow, error) {
+	rows, err := q.db.Query(ctx, countIssuePropertyUsage, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountIssuePropertyUsageRow{}
+	for rows.Next() {
+		var i CountIssuePropertyUsageRow
+		if err := rows.Scan(&i.PropertyKey, &i.UsageCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countIssuePropertyUsageForKeys = `-- name: CountIssuePropertyUsageForKeys :many
+SELECT k.key::text AS property_key, COUNT(*)::bigint AS usage_count
+FROM issue i
+CROSS JOIN LATERAL unnest($1::text[]) AS k(key)
+WHERE i.workspace_id = $2::uuid
+  AND i.properties <> '{}'::jsonb
+  AND i.properties ? k.key
+GROUP BY k.key
+`
+
+type CountIssuePropertyUsageForKeysParams struct {
+	PropertyKeys []string    `json:"property_keys"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+}
+
+type CountIssuePropertyUsageForKeysRow struct {
+	PropertyKey string `json:"property_key"`
+	UsageCount  int64  `json:"usage_count"`
+}
+
+// Counts only the given keys with one existence check per key per issue.
+// Cost scales with the requested keys, not with whatever else (e.g.
+// archived definitions' values) the issues carry.
+func (q *Queries) CountIssuePropertyUsageForKeys(ctx context.Context, arg CountIssuePropertyUsageForKeysParams) ([]CountIssuePropertyUsageForKeysRow, error) {
+	rows, err := q.db.Query(ctx, countIssuePropertyUsageForKeys, arg.PropertyKeys, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountIssuePropertyUsageForKeysRow{}
+	for rows.Next() {
+		var i CountIssuePropertyUsageForKeysRow
+		if err := rows.Scan(&i.PropertyKey, &i.UsageCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countIssuesUsingPropertyOptions = `-- name: CountIssuesUsingPropertyOptions :many
 SELECT opt::text AS option_id, COUNT(i.id) AS usage_count
 FROM unnest($1::text[]) AS opt
@@ -238,82 +325,6 @@ func (q *Queries) ListIssueProperties(ctx context.Context, arg ListIssueProperti
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Icon,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listIssuePropertiesWithUsage = `-- name: ListIssuePropertiesWithUsage :many
-WITH usage AS (
-    SELECT k.key, COUNT(*) AS usage_count
-    FROM issue i
-    CROSS JOIN LATERAL jsonb_object_keys(i.properties) AS k(key)
-    WHERE i.workspace_id = $1::uuid
-      AND i.properties <> '{}'::jsonb
-    GROUP BY k.key
-)
-SELECT p.id, p.workspace_id, p.name, p.type, p.description, p.config, p.position, p.archived_at, p.created_at, p.updated_at, p.icon, COALESCE(u.usage_count, 0)::bigint AS usage_count
-FROM issue_property p
-LEFT JOIN usage u ON u.key = p.id::text
-WHERE p.workspace_id = $1::uuid
-  AND ($2::bool OR p.archived_at IS NULL)
-ORDER BY p.position ASC, LOWER(p.name) ASC
-`
-
-type ListIssuePropertiesWithUsageParams struct {
-	WorkspaceID     pgtype.UUID `json:"workspace_id"`
-	IncludeArchived bool        `json:"include_archived"`
-}
-
-type ListIssuePropertiesWithUsageRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Type        string             `json:"type"`
-	Description string             `json:"description"`
-	Config      []byte             `json:"config"`
-	Position    float64            `json:"position"`
-	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	Icon        string             `json:"icon"`
-	UsageCount  int64              `json:"usage_count"`
-}
-
-// usage_count = number of issues in the workspace that currently carry a
-// value for this property. One pass over the workspace's non-empty property
-// bags (idx_issue_workspace_with_properties), grouped by key. Do not go back
-// to a per-definition `properties ? id` subquery: idx_issue_properties_gin is
-// jsonb_path_ops, which cannot serve `?`, so each definition re-scanned every
-// issue in the workspace.
-func (q *Queries) ListIssuePropertiesWithUsage(ctx context.Context, arg ListIssuePropertiesWithUsageParams) ([]ListIssuePropertiesWithUsageRow, error) {
-	rows, err := q.db.Query(ctx, listIssuePropertiesWithUsage, arg.WorkspaceID, arg.IncludeArchived)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListIssuePropertiesWithUsageRow{}
-	for rows.Next() {
-		var i ListIssuePropertiesWithUsageRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Name,
-			&i.Type,
-			&i.Description,
-			&i.Config,
-			&i.Position,
-			&i.ArchivedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Icon,
-			&i.UsageCount,
 		); err != nil {
 			return nil, err
 		}
