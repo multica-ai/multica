@@ -4,7 +4,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { issueKeys, PAGINATED_CATEGORIES } from "@multica/core/issues/queries";
 import { projectKeys } from "@multica/core/projects/queries";
+import { configStore } from "@multica/core/config";
 import { docKeys } from "@multica/core/docs";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { statusCategoryOfKey } from "@multica/core/issues";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { IssueStatusCategory, ListIssuesCache } from "@multica/core/types";
@@ -216,6 +218,7 @@ describe("createMentionSuggestion", () => {
     searchProjectsMock.mockReset();
     searchProjectsMock.mockResolvedValue({ projects: [], total: 0 });
     Element.prototype.scrollIntoView = vi.fn();
+    configStore.getState().setFeatureFlags({ [DOCS_V1_FLAG]: true });
   });
 
   it("keeps the mention query active across spaces for multi-word search", () => {
@@ -528,6 +531,27 @@ describe("createMentionSuggestion", () => {
     expect(qc.prefetchQuery).toHaveBeenCalledWith(
       expect.objectContaining({ queryKey: docKeys.tree("ws-1") }),
     );
+  });
+
+  it("offers no docs and loads no doc tree while docs_v1 is off", () => {
+    configStore.getState().setFeatureFlags({});
+    const qc = fakeQc({});
+    const getQueryData = qc.getQueryData.bind(qc);
+    qc.getQueryData = ((key: readonly unknown[]) =>
+      JSON.stringify(key) === JSON.stringify(docKeys.tree("ws-1"))
+        ? undefined
+        : getQueryData(key)) as QueryClient["getQueryData"];
+
+    const items = createMentionSuggestion(qc).items!(itemArgs("")) as MentionItem[];
+
+    expect(items.filter((item) => item.type === "doc")).toEqual([]);
+    expect(qc.prefetchQuery).not.toHaveBeenCalled();
+
+    const cached = fakeQc({
+      docs: [{ id: "d-runbook", title: "Release runbook", updatedAt: "2026-11-01T00:00:00Z" }],
+    });
+    const offered = createMentionSuggestion(cached).items!(itemArgs("runbook")) as MentionItem[];
+    expect(offered.filter((item) => item.type === "doc")).toEqual([]);
   });
 
   it("shows docs in their own section", () => {

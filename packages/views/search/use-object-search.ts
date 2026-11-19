@@ -5,6 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import { autopilotListOptions } from "@multica/core/autopilots/queries";
 import { docTreeOptions } from "@multica/core/docs";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
+import { useFeatureEnabled } from "@multica/core/config";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { BUILTIN_VIEW_KEYS, type BuiltinViewKey } from "@multica/core/issue-views/sidebar-views";
@@ -107,7 +109,12 @@ export function useObjectSearch(
   const { data: autopilots = EMPTY_AUTOPILOTS } = useQuery({ ...autopilotListOptions(wsId), enabled: typing });
   const { data: chats = EMPTY_CHATS } = useQuery({ ...chatSessionsOptions(wsId), enabled: typing });
   const { data: skills = EMPTY_SKILLS } = useQuery({ ...skillListOptions(wsId), enabled: typing });
-  const { data: docTree = EMPTY_DOC_TREE } = useQuery({ ...docTreeOptions(wsId), enabled: typing && !!wsId });
+  const docsEnabled = useFeatureEnabled(DOCS_V1_FLAG, false);
+  const { data: cachedDocTree = EMPTY_DOC_TREE } = useQuery({
+    ...docTreeOptions(wsId),
+    enabled: typing && !!wsId && docsEnabled,
+  });
+  const docTree = docsEnabled ? cachedDocTree : EMPTY_DOC_TREE;
   const docFolders = useMemo(() => new Map(docTree.folders.map((f) => [f.id, f.title])), [docTree]);
   const docs = useMemo<PaletteDoc[]>(() => {
     const folders = docFolders;

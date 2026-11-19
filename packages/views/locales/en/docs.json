@@ -57,5 +57,9 @@
   },
   "edited": "Edited {{time}}",
   "outline": "Outline",
-  "link_copied": "Link copied"
+  "link_copied": "Link copied",
+  "unavailable": {
+    "title": "Docs isn't available here",
+    "description": "This workspace doesn't have Docs turned on."
+  }
 }

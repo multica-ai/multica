@@ -6,7 +6,9 @@ import { EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Suggestion } from "@tiptap/suggestion";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { configStore } from "@multica/core/config";
 import { docKeys } from "@multica/core/docs";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { createMentionSuggestion } from "./mention-suggestion";
 import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
 import enDocs from "../../locales/en/docs.json";
@@ -57,6 +59,7 @@ let qc: QueryClient;
 let editor: Editor | undefined;
 beforeEach(() => {
   vi.clearAllMocks();
+  configStore.getState().setFeatureFlags({ [DOCS_V1_FLAG]: true });
   qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   apiMock.listDocTree.mockResolvedValue(tree);
     apiMock.searchIssues.mockResolvedValue({ issues: [] });

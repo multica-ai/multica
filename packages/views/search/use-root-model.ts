@@ -2,6 +2,8 @@
 
 import { useMemo } from "react";
 import type { CommandBarContext } from "@multica/core/command-bar";
+import { useFeatureEnabled } from "@multica/core/config";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { WORKSPACE_PAGES, type WorkspacePageKey } from "@multica/core/paths";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import type { SearchDocResult, SearchIssueResult, SearchProjectResult } from "@multica/core/types";
@@ -183,18 +185,19 @@ export function useRootModel(
 
   const searching = active && scope !== "commands" && scope !== "people" ? text : "";
   const server = useServerSearch(searching, { projects: scope === "all" });
-  const docSearch = useDocSearch(searching, scope === "all");
+  const docsEnabled = useFeatureEnabled(DOCS_V1_FLAG, false);
+  const docSearch = useDocSearch(searching, scope === "all" && docsEnabled);
   const objects = useObjectSearch(scope === "issues" || scope === "commands" ? "" : q, active);
   const recent = useRecentItems(active && !rawQuery.trim());
 
   const navPages = useMemo<NavPage[]>(
     () =>
-      NAV_PAGE_KEYS.map((key) => ({
+      NAV_PAGE_KEYS.filter((key) => key !== "docs" || docsEnabled).map((key) => ({
         key,
         label: tNav(($) => $.nav[WORKSPACE_PAGES[key].navKey]),
         keywords: PAGE_KEYWORDS[key],
       })),
-    [tNav],
+    [docsEnabled, tNav],
   );
 
   return useMemo<RootModel>(() => {
