@@ -171,9 +171,20 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]WorkspaceResponse, len(workspaces))
-	for i, ws := range workspaces {
-		resp[i] = h.workspaceToResponse(db.Workspace{
+	// A task token is bound to one workspace, and Auth stamps that workspace
+	// into X-Workspace-ID. List only that one, so an agent the owner started
+	// in one workspace never sees the owner's other workspaces.
+	boundWorkspaceID := ""
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		boundWorkspaceID = r.Header.Get("X-Workspace-ID")
+	}
+
+	resp := make([]WorkspaceResponse, 0, len(workspaces))
+	for _, ws := range workspaces {
+		if boundWorkspaceID != "" && uuidToString(ws.ID) != boundWorkspaceID {
+			continue
+		}
+		item := h.workspaceToResponse(db.Workspace{
 			ID: ws.ID, Name: ws.Name, Slug: ws.Slug, Description: ws.Description,
 			Settings: ws.Settings, CreatedAt: ws.CreatedAt, UpdatedAt: ws.UpdatedAt,
 			Context: ws.Context, Repos: ws.Repos, IssuePrefix: ws.IssuePrefix,
@@ -182,8 +193,9 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		})
 		if ws.PinnedAt.Valid {
 			pinnedAt := timestampToString(ws.PinnedAt)
-			resp[i].PinnedAt = &pinnedAt
+			item.PinnedAt = &pinnedAt
 		}
+		resp = append(resp, item)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

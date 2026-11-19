@@ -522,7 +522,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `trigger <id>` | 手動觸發一次 | |
 | | `runs <id>` | 檢視執行歷史 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 管理定時和 webhook 觸發器 | `trigger-add`：`--kind`（`schedule` 或 `webhook`）、`--cron`、`--timezone`（預設 UTC）、`--label` |
-| `workspace` | `list/get/create/update/switch` | 管理工作區；`switch` 設定當前 profile 的預設工作區 | `create`：`--name`、`--slug`（均必填）、`--issue-prefix`、`--description`、`--context` / `--context-stdin`；`update` 可改除 slug 外的同類欄位 |
+| `workspace` | `list/get/create/update/switch` | 管理工作區；`switch` 設定當前 profile 的預設工作區；AI 代理執行時 `list` 只回傳所在工作區 | `create`：`--name`、`--slug`（均必填）、`--issue-prefix`、`--description`、`--context` / `--context-stdin`；`update` 可改除 slug 外的同類欄位 |
 | | `mcp list/add/update/remove` | 管理工作區的 MCP 服務庫 | 寫操作需要 owner/admin。這裡新增的服務不會分配給任何 agent——用 `multica agent mcp add` 分配給某個 agent。`list` 只列出名稱與 transport；儲存的條目是只寫的，任何角色都讀不回。`--server-config-file` / `--server-config-stdin` 避免 token 進入 shell 歷史 |
 | | `member list/invite <email>` | 檢視成員、發出邀請 | `invite`：`--role`（member 或 admin，預設 member） |
 | `repo` | `list/add/remove/checkout` | 管理工作區倉庫並檢出到本機 | `--url`（可重複）；`checkout`：`--ref` |
