@@ -672,6 +672,13 @@ type Daemon struct {
 	brewInstall    bool        // resolved once: was this binary installed via brew?
 	brewPrefix     string      // Homebrew prefix when brewInstall and it resolved; the stable path is derived per call by cli.StableExecutablePath
 	updating       atomic.Bool // prevents concurrent update attempts
+	// heldUpdate is a deferrable server-triggered update accepted while the
+	// daemon was busy; heldServerUpdateLoop starts it when the last task ends.
+	heldUpdateMu sync.Mutex
+	heldUpdate   *heldServerUpdate
+	// updateIdle is signalled (non-blocking, buffer 1) whenever activeTasks
+	// drops to zero.
+	updateIdle chan struct{}
 	// activeTasks is the ownership-safe count of tasks currently in handleTask.
 	// It deliberately includes preparation and local-directory waiters because
 	// restart/update barriers must not kill any claimed task.
@@ -794,6 +801,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d := &Daemon{
 		cfg:                         cfg,
 		client:                      client,
+		updateIdle:                  make(chan struct{}, 1),
 		repoCache:                   repocache.New(cacheRoot, logger),
 		skillCache:                  NewSkillBundleCache(skillCacheRoot),
 		logger:                      logger,
@@ -2198,6 +2206,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
 	go d.autoUpdateLoop(ctx)
+	go d.heldServerUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
 	go d.environments.run(ctx)
 
@@ -5176,6 +5185,12 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		return
 	}
 
+	if update.Deferrable {
+		d.holdServerUpdate(runtimeID, update)
+		d.tryHeldServerUpdate(ctx)
+		return
+	}
+
 	switch d.tryBeginServerUpdate(ctx) {
 	case serverUpdateAlreadyRunning:
 		d.logger.Warn("update deferred: another update is already in progress", "runtime_id", runtimeID, "update_id", update.ID)
@@ -5188,10 +5203,20 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		d.logger.Info("update deferred: task or claim in progress", "runtime_id", runtimeID, "update_id", update.ID)
 		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 			"status": "failed",
-			"error":  "runtime update deferred because agent work is starting or still active; retry when the machine is idle",
+			"error":  protocol.RuntimeUpdateBusyError,
 		})
 		return
 	}
+	d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+		"status": "running",
+	})
+	d.runAcquiredServerUpdate(ctx, runtimeID, update.ID, update.TargetVersion)
+}
+
+// runAcquiredServerUpdate installs targetVersion and restarts into it. The
+// caller must hold the update lock and claim barrier from
+// tryBeginServerUpdate; they are released here unless a restart is scheduled.
+func (d *Daemon) runAcquiredServerUpdate(ctx context.Context, runtimeID, updateID, targetVersion string) {
 	restarting := false
 	defer func() {
 		if !restarting {
@@ -5200,17 +5225,12 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		}
 	}()
 
-	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
+	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", updateID, "target_version", targetVersion)
 
-	// Report running status.
-	d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
-		"status": "running",
-	})
-
-	output, err := d.runUpdateFn(update.TargetVersion)
+	output, err := d.runUpdateFn(targetVersion)
 	if err != nil {
 		d.logger.Error("CLI update failed", "error", err, "output", output)
-		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+		d.reportUpdateResult(ctx, runtimeID, updateID, map[string]any{
 			"status": "failed",
 			"error":  err.Error(),
 		})
@@ -5218,9 +5238,9 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 	}
 
 	d.logger.Info("CLI update completed successfully", "output", output)
-	d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+	d.reportUpdateResult(ctx, runtimeID, updateID, map[string]any{
 		"status": "completed",
-		"output": fmt.Sprintf("Updated to %s", update.TargetVersion),
+		"output": fmt.Sprintf("Updated to %s", targetVersion),
 	})
 
 	// Trigger daemon restart with the new binary.
@@ -5313,12 +5333,18 @@ func (d *Daemon) runUpdate(targetVersion string) (string, error) {
 var updateReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
 
 func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) {
-	d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
+	_ = d.reportUpdateResultErr(ctx, runtimeID, updateID, payload)
+}
+
+// reportUpdateResultErr is reportUpdateResult for callers that act on the
+// outcome: nil once the server accepted the report, otherwise the last error.
+func (d *Daemon) reportUpdateResultErr(ctx context.Context, runtimeID, updateID string, payload map[string]any) error {
+	return d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
 		return d.client.ReportUpdateResult(ctx, runtimeID, updateID, payload)
 	})
 }
 
-func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, updateID string, fn func(context.Context) error) {
+func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, updateID string, fn func(context.Context) error) error {
 	var lastErr error
 	for attempt, wait := range updateReportBackoffs {
 		if wait > 0 {
@@ -5327,7 +5353,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 				d.logger.Error("CLI update report cancelled",
 					"runtime_id", runtimeID, "update_id", updateID,
 					"attempt", attempt, "error", ctx.Err())
-				return
+				return ctx.Err()
 			case <-time.After(wait):
 			}
 		}
@@ -5339,16 +5365,15 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 					"runtime_id", runtimeID, "update_id", updateID,
 					"attempt", attempt+1)
 			}
-			return
+			return nil
 		}
 		lastErr = err
 
-		var reqErr *requestError
-		if errors.As(err, &reqErr) && reqErr.StatusCode >= 400 && reqErr.StatusCode < 500 {
+		if isClientRequestError(err) {
 			d.logger.Error("CLI update report rejected — not retrying",
 				"runtime_id", runtimeID, "update_id", updateID,
-				"status", reqErr.StatusCode, "error", err)
-			return
+				"error", err)
+			return err
 		}
 
 		d.logger.Warn("CLI update report failed — will retry",
@@ -5357,6 +5382,13 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 	}
 	d.logger.Error("CLI update report exhausted retries",
 		"runtime_id", runtimeID, "update_id", updateID, "error", lastErr)
+	return lastErr
+}
+
+// isClientRequestError reports a 4xx answer: permanent, so not retried.
+func isClientRequestError(err error) bool {
+	var reqErr *requestError
+	return errors.As(err, &reqErr) && reqErr.StatusCode >= 400 && reqErr.StatusCode < 500
 }
 
 // tryEnterClaim records the intent to call ClaimTask. Returns true if the
@@ -5666,7 +5698,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			}
 			go func(t Task, slot int) {
 				defer taskWG.Done()
-				defer d.activeTasks.Add(-1)
+				defer d.finishActiveTask()
 				executionSlot := newTaskSlotLease(sem, slot, wakeup)
 				defer executionSlot.release()
 				d.handleTask(parentCtx, t, executionSlot)
