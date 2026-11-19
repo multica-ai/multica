@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -407,6 +408,65 @@ func TestCreateCloudWorkspaceSubscriptionCheckoutInjectsAuthoritativeWorkspaceAn
 	}
 	if got := proxy.req.Headers.Get(idempotencyKeyHeader); got != "checkout-header-1" {
 		t.Fatalf("upstream idempotency key = %q", got)
+	}
+}
+
+// An upgrade started from a full invite dialog buys a seat for the invitation
+// it holds back (MUL-9488). The count is forwarded within bounds; a plain
+// checkout sends none.
+func TestCreateCloudWorkspaceSubscriptionCheckoutForwardsAdditionalSeats(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	checkout := func(body map[string]any) (*httptest.ResponseRecorder, *fakeCloudRuntimeProxy) {
+		proxy := &fakeCloudRuntimeProxy{
+			enabled: true,
+			resp: &cloudruntime.Response{
+				StatusCode: http.StatusCreated,
+				Body:       []byte(`{"url":"https://checkout.stripe.test/session"}`),
+			},
+		}
+		useCloudRuntimeProxy(t, proxy)
+		req := withCloudSubscriptionWorkspace(newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", body), "owner")
+		w := httptest.NewRecorder()
+		testHandler.CreateCloudWorkspaceSubscriptionCheckout(w, req)
+		return w, proxy
+	}
+	base := func(extra map[string]any) map[string]any {
+		body := map[string]any{"plan": "pro", "interval": "year", "idempotency_key": "checkout-seats-" + uuid.NewString()}
+		for key, value := range extra {
+			body[key] = value
+		}
+		return body
+	}
+
+	w, proxy := checkout(base(map[string]any{"additional_seats": 1}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var upstream map[string]any
+	if err := json.Unmarshal(proxy.req.Body, &upstream); err != nil {
+		t.Fatalf("decode upstream body: %v", err)
+	}
+	if upstream["additional_seats"] != float64(1) {
+		t.Fatalf("upstream additional_seats = %v, want 1", upstream["additional_seats"])
+	}
+
+	w, proxy = checkout(base(nil))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("plain checkout status = %d", w.Code)
+	}
+	upstream = nil
+	if err := json.Unmarshal(proxy.req.Body, &upstream); err != nil {
+		t.Fatalf("decode upstream body: %v", err)
+	}
+	if _, ok := upstream["additional_seats"]; ok {
+		t.Fatalf("plain checkout forwarded additional_seats: %v", upstream)
+	}
+
+	for _, seats := range []int{-1, maxCheckoutAdditionalSeats + 1} {
+		w, proxy = checkout(base(map[string]any{"additional_seats": seats}))
+		if w.Code != http.StatusBadRequest || proxy.called {
+			t.Fatalf("additional_seats %d: status = %d, upstream = %q; want 400 without a Cloud call", seats, w.Code, proxy.req.Path)
+		}
 	}
 }
 
