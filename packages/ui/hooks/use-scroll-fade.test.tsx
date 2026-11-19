@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { render, act } from "@testing-library/react";
 import { type CSSProperties, useRef, useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { useScrollFade } from "./use-scroll-fade";
 
 /** jsdom reports every box as 0×0; these getters stand in for real layout. */
@@ -71,37 +71,6 @@ function Host({
 }
 
 describe("useScrollFade", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("skips mask and layout observation on coarse pointers", async () => {
-    let coarse = true;
-    vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: coarse && query === "(pointer: coarse)",
-    }));
-    const styles: (CSSProperties | undefined)[] = [];
-    const { container } = render(<Host box={{ client: 100, scroll: 400 }} onStyle={(s) => styles.push(s)} />);
-    const el = container.querySelector("div")!;
-    const measures = trackMeasures(el);
-
-    expect(styles.at(-1)).toBeUndefined();
-    expect(pendingRaf()).toBe(0);
-    await act(async () => {
-      triggerResizeObservers();
-      el.dispatchEvent(new Event("scroll"));
-      el.appendChild(document.createElement("span"));
-      await Promise.resolve();
-      flushRaf();
-    });
-    expect(measures()).toBe(0);
-
-    coarse = false;
-    render(<Host box={{ client: 100, scroll: 400 }} onStyle={(s) => styles.push(s)} />);
-    act(() => flushRaf());
-    expect(String(styles.at(-1)?.maskImage)).toContain("transparent 100%");
-  });
-
   it("returns no mask for a non-scrollable box", () => {
     const styles: (CSSProperties | undefined)[] = [];
     render(<Host box={{ client: 100, scroll: 100 }} onStyle={(s) => styles.push(s)} />);

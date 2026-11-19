@@ -18,9 +18,7 @@ export function useScrollFade(
 
   useEffect(() => {
     const el = ref.current;
-    // Some mobile browsers composite CSS mask gradients as an opaque black
-    // layer; touch scrolling already provides native overflow feedback.
-    if (!el || window.matchMedia?.("(pointer: coarse)").matches) return;
+    if (!el) return;
 
     // Resizes and child mutations funnel through one rAF-coalesced run
     // (scroll stays synchronous — see its listener below). Each run reads
