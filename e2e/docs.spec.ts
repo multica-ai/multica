@@ -1,4 +1,5 @@
 import { test, expect, type FileChooser } from "@playwright/test";
+// Docs sits behind the docs_v1 flag: run the server with FF_DOCS_V1=true.
 import { TestApiClient } from "./fixtures";
 
 let api: TestApiClient;
