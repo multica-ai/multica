@@ -109,7 +109,16 @@ import { settingsHref } from "./settings-navigation";
 export { formatStripeMinorAmount } from "./billing-format";
 
 const CHECKOUT_SYNC_TIMEOUT_MS = 30_000;
+const HELD_CHECKOUT_POLL_TIMEOUT_MS = 2 * 60_000;
 const UPGRADE_SECTION_ANCHOR = "billing-upgrade";
+
+function latestHeldCheckoutAt(invites: HeldInvite[]): number | null {
+  return invites.reduce<number | null>(
+    (latest, { checkout }) =>
+      checkout ? Math.max(latest ?? checkout.boundAt, checkout.boundAt) : latest,
+    null,
+  );
+}
 
 /** Brings the plan cards into view, as a settings deep link would. */
 function scrollToUpgrade() {
@@ -301,15 +310,32 @@ function BillingTabContent() {
   // start ("Upgrade and invite"). Only that checkout buys a seat for it.
   const workspaceSlug = workspace?.slug ?? "";
   const [heldInvite, setHeldInvite] = useState<HeldInvite | null>(null);
-  // Whether a held invitation's checkout is waiting for the plan change, so
-  // the summary is polled while this page is open and focused.
-  const [awaitingHeldUpgrade, setAwaitingHeldUpgrade] = useState(false);
+  const [awaitingHeldCheckoutAt, setAwaitingHeldCheckoutAt] = useState<number | null>(null);
+  const [heldCheckoutPollUntil, setHeldCheckoutPollUntil] = useState(0);
   useEffect(() => {
     setHeldInvite(null);
-    setAwaitingHeldUpgrade(
-      workspaceSlug ? listCheckoutHeldInvites(workspaceSlug).length > 0 : false,
+    setAwaitingHeldCheckoutAt(
+      workspaceSlug ? latestHeldCheckoutAt(listCheckoutHeldInvites(workspaceSlug)) : null,
     );
   }, [workspaceSlug]);
+
+  // Use the checkout timestamp so reopening Billing does not restart polling.
+  // The invitation can still be sent after this window.
+  useEffect(() => {
+    const deadline =
+      awaitingHeldCheckoutAt === null
+        ? 0
+        : awaitingHeldCheckoutAt + HELD_CHECKOUT_POLL_TIMEOUT_MS;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      setHeldCheckoutPollUntil(0);
+      return;
+    }
+    setHeldCheckoutPollUntil(deadline);
+    const timeout = window.setTimeout(() => setHeldCheckoutPollUntil(0), remaining);
+    return () => window.clearTimeout(timeout);
+  }, [awaitingHeldCheckoutAt]);
+
   // Held invitations the paid plan may have bought a seat for, offered for
   // the person to send or discard.
   const [heldInvitesToConfirm, setHeldInvitesToConfirm] = useState<HeldInvite[]>([]);
@@ -378,18 +404,29 @@ function BillingTabContent() {
 
   const summaryQuery = useQuery({
     ...workspaceSubscriptionSummaryOptions(wsId),
-    // Checkout activation and seat additions both finish asynchronously in a
-    // Stripe webhook. Seat polling is bounded so a lost webhook cannot keep a
-    // browser polling forever.
+    // Stripe webhooks may update the summary after the customer returns.
     refetchInterval: (query) =>
       isSyncingCheckout ||
       (query.state.data?.seatCapacity?.activePurchase &&
         !seatPurchasePollingTimedOut)
         ? 2_000
-        : awaitingHeldUpgrade
+        : heldCheckoutPollUntil > Date.now()
           ? 5_000
           : false,
   });
+  const refetchSummary = summaryQuery.refetch;
+  useEffect(() => {
+    if (awaitingHeldCheckoutAt === null) return;
+    // Electron can regain focus from the system browser without a visibility change.
+    const refresh = () => {
+      void refetchSummary({ cancelRefetch: false });
+    };
+    window.addEventListener("focus", refresh);
+    // Reopening Billing after the polling window may still hit a fresh cache.
+    if (Date.now() >= awaitingHeldCheckoutAt + HELD_CHECKOUT_POLL_TIMEOUT_MS) refresh();
+    return () => window.removeEventListener("focus", refresh);
+  }, [awaitingHeldCheckoutAt, refetchSummary]);
+
   const entitlements = summaryQuery.data?.entitlement;
   // Checkout is done once paid seats are in effect. Neither the plan nor
   // Checkout going away proves it: a trial already reports Business, and a
@@ -432,7 +469,6 @@ function BillingTabContent() {
   const previewPlanChangeMutation = usePreviewWorkspacePlanChange();
   const changePlanMutation = useChangeWorkspacePlan(wsId);
   const checkPlanChangeMutation = useReconcileWorkspaceSubscriptionSeats(wsId);
-  const refetchSummary = summaryQuery.refetch;
   const previewSeatPurchase = previewSeatPurchaseMutation.mutateAsync;
   const previewPlanChange = previewPlanChangeMutation.mutateAsync;
 
@@ -687,7 +723,7 @@ function BillingTabContent() {
     if (!summary || !workspaceSlug) return;
     const waiting = listCheckoutHeldInvites(workspaceSlug);
     const offers = heldInvitesToOffer(waiting, subscriptionForHeldInvites(summary));
-    setAwaitingHeldUpgrade(waiting.length > 0 && offers.length === 0);
+    setAwaitingHeldCheckoutAt(offers.length === 0 ? latestHeldCheckoutAt(waiting) : null);
     setHeldInvitesToConfirm(offers);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-check on each summary read
   }, [summaryQuery.dataUpdatedAt, workspaceSlug, heldInvitesRevision]);
@@ -821,7 +857,7 @@ function BillingTabContent() {
           requestId: response.requestId,
           baseVersion: summaryQuery.data?.entitlement.version ?? 0,
         });
-        setAwaitingHeldUpgrade(true);
+        setAwaitingHeldCheckoutAt(Date.now());
         // The invitation now belongs to that checkout. Any later checkout
         // from this page (Desktop returns here after closing the browser) is
         // a plain one and buys no seat for it.

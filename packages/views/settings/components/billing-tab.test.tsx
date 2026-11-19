@@ -805,16 +805,49 @@ describe("BillingTab", () => {
       expect(screen.queryByRole("button", { name: "Send invitation" })).not.toBeInTheDocument();
     });
 
-    it("waits for the plan change and polls while a held invitation's checkout is open", () => {
-      boundHeldInvite("sarah@acme.dev", "req-desktop");
-      renderWithI18n(<BillingTab />);
-
-      expect(navigationState.push).not.toHaveBeenCalled();
-      expect(screen.queryByRole("button", { name: "Send invitation" })).not.toBeInTheDocument();
+    const heldCheckoutPollInterval = () => {
       const summaryOptions = mocks.useQuery.mock.calls
         .map(([options]) => options)
         .findLast((options) => options.queryKey?.[options.queryKey.length - 1] === "summary");
-      expect(summaryOptions.refetchInterval({ state: { data: mocks.summary } })).toBe(5_000);
+      return summaryOptions.refetchInterval({ state: { data: mocks.summary } });
+    };
+
+    it("stops polling a held checkout after two minutes and offers the invitation after a focus refresh", () => {
+      vi.useFakeTimers();
+      try {
+        const token = boundHeldInvite("sarah@acme.dev", "req-desktop");
+        const view = renderWithI18n(<BillingTab />);
+        expect(heldCheckoutPollInterval()).toBe(5_000);
+        expect(screen.queryByRole("button", { name: "Send invitation" })).not.toBeInTheDocument();
+
+        act(() => vi.advanceTimersByTime(120_000));
+        expect(heldCheckoutPollInterval()).toBe(false);
+        expect(readUpgradeInvite("acme", token)).not.toBeNull();
+
+        act(() => window.dispatchEvent(new Event("focus")));
+        expect(mocks.refetchSummary).toHaveBeenCalledWith({ cancelRefetch: false });
+        upgraded();
+        view.rerender(<BillingTab />);
+        expect(screen.getByRole("button", { name: "Send invitation" })).toBeInTheDocument();
+        expect(navigationState.push).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not restart fast polling when Billing opens with an older held checkout", () => {
+      vi.useFakeTimers();
+      try {
+        const token = boundHeldInvite("sarah@acme.dev", "req-old");
+        vi.advanceTimersByTime(25 * 60 * 60_000);
+        renderWithI18n(<BillingTab />);
+
+        expect(heldCheckoutPollInterval()).toBe(false);
+        expect(mocks.refetchSummary).toHaveBeenCalledOnce();
+        expect(readUpgradeInvite("acme", token)).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("shows members and pending invitations against the plan's limit", () => {
