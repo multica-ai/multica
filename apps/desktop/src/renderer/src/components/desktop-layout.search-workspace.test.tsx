@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
 import { CoreProvider } from "@multica/core/platform";
 import { useSearchStore } from "@multica/core/command-bar";
 import { useAuthStore } from "@multica/core/auth";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { workspaceListOptions } from "@multica/core/workspace";
 import { RESOURCES } from "@multica/views/locales";
 import { useTabStore } from "@/stores/tab-store";
@@ -61,7 +62,9 @@ const NETWORK_WAIT = { timeout: 15_000 };
 const TEST_TIMEOUT = 60_000;
 
 function payloadFor(path: string, workspace: string): unknown {
-  if (path === "/api/config") return { feature_flags: {}, allow_signup: false };
+  if (path === "/api/config") {
+    return { feature_flags: { [DOCS_V1_FLAG]: true }, allow_signup: false };
+  }
   if (path === "/api/me") return {
     id: "synthetic-user", name: "Synthetic user", email: "synthetic@example.test",
     onboarded_at: stamp, onboarding_questionnaire: { source: "other" },
