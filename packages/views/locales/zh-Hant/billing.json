@@ -134,7 +134,9 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "已完成 {{used}} · 進行中 {{reserved}}",
       "resets_at": "{{date}} 重置",
-      "usage_unavailable": "用量暫時不可用"
+      "usage_unavailable": "用量暫時不可用",
+      "members": "成員",
+      "members_pending": "待接受的邀請：{{pending}}"
     },
     "seats": {
       "title": "席位",
@@ -216,7 +218,16 @@
     },
     "confirm": {
       "title": "前往 Stripe Checkout？",
-      "description": "套餐：{{plan}}。付款週期：{{interval}}。當前成員：{{count}}。Stripe 會重新統計席位，並在付款前顯示最終金額。"
+      "description": "套餐：{{plan}}。付款週期：{{interval}}。當前成員：{{count}}。Stripe 會重新統計席位，並在付款前顯示最終金額。",
+      "held_invite": "另含 1 個付費席位，留給發給 {{email}} 的邀請。付款完成後，在「帳單與套餐」裡發出這份邀請。"
+    },
+    "held_invite": {
+      "title": "工作區已升級到 {{plan}}",
+      "description": "你之前留下了一份邀請：以{{role}}身分邀請 {{email}}，等升級後再發。現在發出嗎？",
+      "role_admin": "管理員",
+      "role_member": "成員",
+      "send": "發送邀請",
+      "discard": "不發了"
     }
   },
   "return_page": {

@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -63,16 +64,25 @@ type cloudSubscriptionCheckoutRequest struct {
 	Plan           string `json:"plan"`
 	Interval       string `json:"interval"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	// AdditionalSeats buys seats beyond the current members and pending
+	// invitations, so an invitation the Free member limit held back fits
+	// right after checkout (MUL-9488).
+	AdditionalSeats int `json:"additional_seats,omitempty"`
 }
+
+// maxCheckoutAdditionalSeats bounds the extra seats one checkout may add. The
+// invite dialog sends one invitation at a time; Cloud enforces its own total.
+const maxCheckoutAdditionalSeats = 100
 
 // This is an intentional allowlist: additive cloud fields are not forwarded
 // until the main repository explicitly reviews and adds them here.
 type cloudSubscriptionCheckoutUpstreamRequest struct {
-	WorkspaceID    string `json:"workspace_id"`
-	Plan           string `json:"plan"`
-	Interval       string `json:"interval"`
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	CustomerEmail  string `json:"customer_email,omitempty"`
+	WorkspaceID     string `json:"workspace_id"`
+	Plan            string `json:"plan"`
+	Interval        string `json:"interval"`
+	IdempotencyKey  string `json:"idempotency_key,omitempty"`
+	CustomerEmail   string `json:"customer_email,omitempty"`
+	AdditionalSeats int    `json:"additional_seats,omitempty"`
 }
 
 type cloudSubscriptionPlanChangePreviewRequest struct {
@@ -240,6 +250,10 @@ func (h *Handler) CreateCloudWorkspaceSubscriptionCheckout(w http.ResponseWriter
 		writeError(w, http.StatusBadRequest, "interval must be month or year")
 		return
 	}
+	if in.AdditionalSeats < 0 || in.AdditionalSeats > maxCheckoutAdditionalSeats {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("additional_seats must be between 0 and %d", maxCheckoutAdditionalSeats))
+		return
+	}
 	idempotencyKey, ok := requireCloudSubscriptionIdempotencyKey(w, r, in.IdempotencyKey)
 	if !ok {
 		return
@@ -259,11 +273,12 @@ func (h *Handler) CreateCloudWorkspaceSubscriptionCheckout(w http.ResponseWriter
 		return
 	}
 	upstreamBody, err := json.Marshal(cloudSubscriptionCheckoutUpstreamRequest{
-		WorkspaceID:    workspaceID,
-		Plan:           in.Plan,
-		Interval:       in.Interval,
-		IdempotencyKey: idempotencyKey,
-		CustomerEmail:  customerEmail,
+		WorkspaceID:     workspaceID,
+		Plan:            in.Plan,
+		Interval:        in.Interval,
+		IdempotencyKey:  idempotencyKey,
+		CustomerEmail:   customerEmail,
+		AdditionalSeats: in.AdditionalSeats,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to build subscription request")
