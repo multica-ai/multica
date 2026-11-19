@@ -65,6 +65,32 @@ func (q *Queries) CompletePendingChatFork(ctx context.Context, arg CompletePendi
 	return i, err
 }
 
+const copyChatForkMessages = `-- name: CopyChatForkMessages :exec
+INSERT INTO chat_message (
+    id, chat_session_id, role, content, created_at, failure_reason, elapsed_ms, message_kind
+)
+SELECT gen_random_uuid(), $1, message.role, message.content, message.created_at,
+       message.failure_reason, message.elapsed_ms, message.message_kind
+FROM chat_message AS message
+WHERE message.chat_session_id = $2
+  AND message.created_at <= $3
+  AND message.message_kind != 'channel_command'
+ORDER BY message.created_at ASC, message.id ASC
+`
+
+type CopyChatForkMessagesParams struct {
+	DestinationChatID pgtype.UUID        `json:"destination_chat_id"`
+	SourceChatID      pgtype.UUID        `json:"source_chat_id"`
+	SnapshotAt        pgtype.Timestamptz `json:"snapshot_at"`
+}
+
+// Preserve the visible transcript at enqueue time. Message tasks, wakeups,
+// quick actions and channel delivery metadata still belong to the source.
+func (q *Queries) CopyChatForkMessages(ctx context.Context, arg CopyChatForkMessagesParams) error {
+	_, err := q.db.Exec(ctx, copyChatForkMessages, arg.DestinationChatID, arg.SourceChatID, arg.SnapshotAt)
+	return err
+}
+
 const createPendingChatFork = `-- name: CreatePendingChatFork :one
 INSERT INTO chat_session (
     id, workspace_id, agent_id, creator_id, title, runtime_id, project_id,

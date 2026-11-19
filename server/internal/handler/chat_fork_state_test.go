@@ -142,6 +142,11 @@ func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			dbfx.Exec(t, `INSERT INTO chat_message (chat_session_id, role, content, created_at) VALUES
+                ($1, 'user', 'original question', now() - interval '2 seconds'),
+                ($1, 'assistant', 'original reply', now() - interval '1 second')`, sourceID)
+			dbfx.Exec(t, `INSERT INTO chat_message (chat_session_id, role, content, message_kind) VALUES
+                ($1, 'user', 'internal channel command', 'channel_command')`, sourceID)
 			child, task, err := testHandler.queueChatFork(ctx, source, source.CreatorID)
 			if err != nil {
 				t.Fatal(err)
@@ -150,6 +155,8 @@ func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
 				dbfx.Exec(t, `DELETE FROM agent_task_queue WHERE id=$1`, task.ID)
 				dbfx.Exec(t, `DELETE FROM chat_session WHERE id=$1`, child.ID)
 			})
+			dbfx.Exec(t, `INSERT INTO chat_message (chat_session_id, role, content, created_at) VALUES
+                ($1, 'user', 'later source-only input', now() + interval '1 second')`, sourceID)
 			dbfx.Exec(t, `UPDATE agent_task_queue SET status='running', started_at=now() WHERE id=$1`, task.ID)
 			const childSession = "019fe3de-56a2-7792-8913-ee53664dfa0f"
 			switch name {
@@ -161,6 +168,11 @@ func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
 				stored, err := testHandler.Queries.GetChatSession(ctx, child.ID)
 				if err != nil || stored.ForkInitializationTaskID.Valid || stored.SessionID.String != childSession {
 					t.Fatalf("published=%+v error=%v", stored, err)
+				}
+				messages, err := testHandler.Queries.ListChatMessages(ctx, child.ID)
+				if err != nil || len(messages) != 2 || messages[0].Content != "original question" ||
+					messages[1].Content != "original reply" || messages[1].TaskID.Valid {
+					t.Fatalf("branch history=%+v error=%v", messages, err)
 				}
 				if _, err := testHandler.Queries.GetChatMessageByTaskAssistant(ctx, task.ID); !errors.Is(err, pgx.ErrNoRows) {
 					t.Fatalf("fork added an assistant outcome: %v", err)
