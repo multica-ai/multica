@@ -15,6 +15,7 @@ import { ShellRouteDataPrefetch } from "./route-data-prefetch";
 import { SpacePanel } from "./space-panel";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
+import { VoiceWorkspaceWords } from "../voice/workspace-words";
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -66,6 +67,7 @@ export function DashboardLayout({
             <ShellRouteDataPrefetch>
               <GlobalShortcuts />
               <WorkspacePresencePrefetch />
+              <VoiceWorkspaceWords />
               <AppRail className="hidden md:flex" />
               <CompactNavSheet />
               <div className="flex min-w-0 flex-1 flex-col">

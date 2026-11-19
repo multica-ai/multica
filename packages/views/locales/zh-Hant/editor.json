@@ -204,7 +204,8 @@
       "microphone_failed": "無法啟動麥克風。",
       "no_speech": "沒有聽到說話聲。靠近麥克風再試一次。",
       "unavailable": "這台電腦無法在本機轉寫語音。",
-      "transcription_failed": "轉寫失敗。錄音已保留，可以重試。"
+      "transcription_failed": "轉寫失敗。錄音已保留，可以重試。",
+      "stream_failed": "與語音服務的連線已中斷。重試以重新開始。"
     },
     "models": {
       "more_languages": "其他 {{more}} 種語言",
@@ -225,6 +226,7 @@
     "setup": {
       "title": "設定語音輸入",
       "description": "語音在這台電腦上轉寫，錄音不會離開本機。先下載一個語音模型即可開始。",
+      "description_server": "選擇一個語音模型即可開始。伺服器模型會將語音串流到你的 Multica 伺服器所設定的語音轉文字服務；其他模型只需下載一次，即可在本機執行。",
       "later": "稍後再說",
       "start": "開始口述"
     }

@@ -12,6 +12,7 @@ import {
 } from "@multica/ui/components/ui/select";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
+import { useConfigStore } from "@multica/core/config";
 import { useShortcut } from "@multica/core/shortcuts";
 import {
   MAX_VOCABULARY_WORDS,
@@ -25,7 +26,7 @@ import { SegmentedToggle } from "../../common/segmented-toggle";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { AppLink, useOptionalNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
-import { useVoiceModels, VoiceModelRows, voiceInputSupported } from "../../voice";
+import { useServerVoiceEngine, useVoiceModels, VoiceModelRows, voiceInputSupported } from "../../voice";
 import { settingsHref } from "./settings-navigation";
 import { VoiceHistorySection } from "./voice-history";
 import {
@@ -36,17 +37,34 @@ import {
 } from "./settings-layout";
 
 /**
- * Speech models and how dictation behaves on this computer. Desktop only:
- * transcription runs on the device, so the tab needs Desktop's engine.
+ * Speech models and how dictation behaves on this computer. Desktop
+ * transcribes on the device, and also lists the server's model when the
+ * server transcribes; the web app only streams to the server, and then has
+ * no models to manage.
  */
 export function VoiceInputTab() {
   const { t } = useT("settings");
-  const engineAvailable = useVoiceModels()?.engineAvailable;
+  const models = useVoiceModels();
+  const engineAvailable = models?.engineAvailable;
+  const serverEngine = useServerVoiceEngine();
+  const serverTranscription = useConfigStore((state) => state.voiceTranscriptionEnabled);
   const enabled = useVoiceSettingsStore((state) => state.enabled);
+  const modelId = useVoiceSettingsStore((state) => state.modelId);
+  const onDeviceModels = models?.models.filter((model) => !model.streams).length ?? 0;
+  const offersServer = (models?.models.length ?? 0) > onDeviceModels;
+  const active = pickVoiceModel(models, modelId);
+  // The on-device copy promises speech stays here, so it needs an on-device model in use.
+  // Until the list loads, the server may still be among the models.
+  const serverOffered = models ? offersServer : serverTranscription;
+  const onDeviceOnly = !serverEngine && (!serverOffered || (active !== null && !active.streams));
   return (
     <SettingsTab
       title={t(($) => $.page.tabs.voice_input)}
-      description={t(($) => $.voice_input.description)}
+      description={
+        onDeviceOnly
+          ? t(($) => $.voice_input.description)
+          : t(($) => $.voice_input.description_server)
+      }
       scope="device"
     >
       <SettingsSection>
@@ -56,12 +74,17 @@ export function VoiceInputTab() {
       </SettingsSection>
       {enabled && (
         <>
+          {!serverEngine && (
           <SettingsSection
             title={t(($) => $.voice_input.model_title)}
             description={
               engineAvailable === false
                 ? t(($) => $.voice_input.engine_unavailable)
-                : t(($) => $.voice_input.model_hint)
+                : !offersServer
+                  ? t(($) => $.voice_input.model_hint)
+                  : onDeviceModels > 0
+                    ? t(($) => $.voice_input.model_hint_server)
+                    : undefined
             }
             anchor="voice-model"
           >
@@ -71,6 +94,7 @@ export function VoiceInputTab() {
               </SettingsCard>
             )}
           </SettingsSection>
+          )}
           <SettingsSection title={t(($) => $.voice_input.input_title)} anchor="voice-input">
             <SettingsCard>
               <ShortcutRow />

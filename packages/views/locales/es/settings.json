@@ -1940,8 +1940,10 @@
   },
   "voice_input": {
     "description": "Dicta en el chat, los comentarios y las respuestas. La voz se transcribe en este ordenador y nunca sale de él.",
+    "description_server": "Dicta en el chat, los comentarios y las respuestas. La voz se transmite al servicio de voz a texto configurado en tu servidor de Multica.",
     "model_title": "Modelo de voz",
     "model_hint": "Los modelos se ejecutan en este ordenador. Descarga uno o cambia entre los que tienes.",
+    "model_hint_server": "El modelo del servidor envía la voz al servicio de voz a texto de tu servidor de Multica. Los demás se ejecutan en este equipo: descarga uno o cambia entre los que tienes.",
     "engine_unavailable": "La transcripción en el dispositivo no está disponible en este ordenador.",
     "enabled": {
       "title": "Entrada de voz",

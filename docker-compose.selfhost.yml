@@ -202,6 +202,10 @@ services:
       # Community theme store (Settings → Appearance → Manage). Always on; the
       # registry URL points it at another registry's index.json.
       MULTICA_THEME_REGISTRY_URL: ${MULTICA_THEME_REGISTRY_URL:-}
+      # Voice input in the web app. Unset = no mic on the web; Desktop
+      # transcribes on the device either way.
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:-}
+      DEEPGRAM_STT_MODEL: ${DEEPGRAM_STT_MODEL:-}
       # WeCom smart-bot integration. MULTICA_WECOM_SECRET_KEY is the
       # opt-in: unset = integration disabled. It encrypts each installation's
       # smart-bot secret at rest. The server needs it to unseal a bot's

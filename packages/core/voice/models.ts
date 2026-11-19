@@ -21,6 +21,11 @@ export interface VoiceModel {
   status: VoiceModelStatus;
   receivedBytes: number;
   error?: string;
+  /**
+   * Transcribed by the server's speech provider while the user talks, through
+   * the runtime's `stream`; nothing to download or delete on this device.
+   */
+  streams?: boolean;
 }
 
 export interface VoiceModels {
@@ -45,12 +50,34 @@ export const useVoiceModelsStore = create<VoiceModelsState>()((set) => ({
   setModels: (models) => set({ models }),
 }));
 
-/** The installed model to use: the chosen one, else the first installed. */
+/**
+ * The installed model to use: the chosen one, else the first installed. A
+ * chosen model that is gone never resolves to a streaming model: an on-device
+ * model stands in, or none, so losing a local choice does not send speech to
+ * the server.
+ */
 export function pickVoiceModel(models: VoiceModels | null, preferred: string | null): VoiceModel | null {
   const ready = models?.models.filter((model) => model.status === "ready") ?? [];
-  return ready.find((model) => model.id === preferred) ?? ready[0] ?? null;
+  const chosen = ready.find((model) => model.id === preferred);
+  if (chosen) return chosen;
+  if (preferred !== null) return ready.find((model) => !model.streams) ?? null;
+  return ready[0] ?? null;
 }
 
 export function activeVoiceModel(): VoiceModel | null {
   return pickVoiceModel(useVoiceModelsStore.getState().models, useVoiceSettingsStore.getState().modelId);
+}
+
+/**
+ * The model to transcribe a kept clip with: the chosen one, unless it only
+ * streams, then the first installed model that takes clips.
+ */
+export function pickClipVoiceModel(models: VoiceModels | null, preferred: string | null): VoiceModel | null {
+  const chosen = pickVoiceModel(models, preferred);
+  if (!chosen?.streams) return chosen;
+  return models?.models.find((model) => model.status === "ready" && !model.streams) ?? null;
+}
+
+export function clipVoiceModel(): VoiceModel | null {
+  return pickClipVoiceModel(useVoiceModelsStore.getState().models, useVoiceSettingsStore.getState().modelId);
 }

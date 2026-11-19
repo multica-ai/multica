@@ -204,7 +204,8 @@
       "microphone_failed": "无法启动麦克风。",
       "no_speech": "没有听到说话声。靠近麦克风再试一次。",
       "unavailable": "这台电脑无法在本地转写语音。",
-      "transcription_failed": "转写失败。录音已保留，可以重试。"
+      "transcription_failed": "转写失败。录音已保留，可以重试。",
+      "stream_failed": "与语音服务的连接已断开。重试以重新开始。"
     },
     "models": {
       "more_languages": "其他 {{more}} 种语言",
@@ -225,6 +226,7 @@
     "setup": {
       "title": "设置语音输入",
       "description": "语音在这台电脑上转写，录音不会离开本机。先下载一个语音模型即可开始。",
+      "description_server": "选择一个语音模型即可开始。服务器模型会将语音流式传输到你的 Multica 服务器所配置的语音转文字服务；其他模型只需下载一次，即可在本机运行。",
       "later": "以后再说",
       "start": "开始口述"
     }

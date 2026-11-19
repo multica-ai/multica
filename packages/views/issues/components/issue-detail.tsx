@@ -56,6 +56,7 @@ import {
 } from "./wakeup-activity";
 import { useWakeupText } from "./wakeup-presentation";
 import type { ImageSequenceBlock } from "@multica/core/attachments/image-sequence";
+import { useComposerVoice, VoiceErrorRow, VoiceHud, VoiceMicButton, VoiceStrip } from "../../voice";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -645,6 +646,7 @@ function JumpToLatestButton({
       variant="outline"
       size="sm"
       onClick={onClick}
+      data-jump-to-latest=""
       className="absolute bottom-full left-1/2 mb-6 -translate-x-1/2 bg-background shadow-md dark:bg-background dark:hover:bg-muted"
     >
       {hasNew ? (
@@ -2803,6 +2805,33 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
   }, [findReveal, items, scrollContainerEl]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Dictation into the description: typed where the caret is, saved like typing.
+  const descVoice = useComposerVoice({
+    insert: (text) => descEditorRef.current?.insertText(text) ?? false,
+    scope: id,
+  });
+  // The description's voice stack sticks to the bottom of the scroll area
+  // while a long description runs past it. The pinned comment box is there
+  // too, with "Jump to latest" floating above it, so the stack sticks above
+  // both. Measured only while the stack shows.
+  const descVoiceShowing = descVoice.showStrip || descVoice.showHud;
+  const [pinnedComposerHeight, setPinnedComposerHeight] = useState(0);
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!stickyComposer || !descVoiceShowing || !el) {
+      setPinnedComposerHeight(0);
+      return;
+    }
+    const measure = () => {
+      const box = el.getBoundingClientRect();
+      const jump = el.querySelector<HTMLElement>("[data-jump-to-latest]")?.getBoundingClientRect();
+      setPinnedComposerHeight(Math.round(box.bottom - Math.min(box.top, jump?.top ?? box.top)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [stickyComposer, descVoiceShowing, jumpToLatest.visible]);
   const descriptionEditingRef = useRef(false);
   const descriptionSaveInFlightRef = useRef(false);
   const descriptionSaveIssueIdRef = useRef(id);
@@ -4105,6 +4134,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             ref={descriptionAnnotations.cardRef}
             className="relative mt-5 rounded-lg"
             onFocusCapture={() => {
+              descVoice.onFocusCapture();
               if (!descriptionEditingRef.current) {
                 descriptionEditingRef.current = true;
               }
@@ -4161,19 +4191,31 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
               />
             </div>
 
-            <div className="flex items-center gap-1 mt-3">
-              <ReactionBar
-                reactions={issueReactions}
-                currentUserId={user?.id}
-                onToggle={handleToggleIssueReaction}
-                getActorName={getActorName}
-              />
-              <FileUploadButton
-                size="sm"
-                multiple
-                onSelect={(file) => descEditorRef.current?.uploadFile(file)}
-              />
+            <VoiceErrorRow voice={descVoice} className="mt-3" />
+            <div ref={descVoice.rootRef} className="relative flex min-h-6 items-center gap-1 mt-3">
+              {descVoice.showStrip ? (
+                <VoiceStrip voice={descVoice} />
+              ) : (
+                <>
+                  <ReactionBar
+                    reactions={issueReactions}
+                    currentUserId={user?.id}
+                    onToggle={handleToggleIssueReaction}
+                    getActorName={getActorName}
+                  />
+                  <FileUploadButton
+                    size="sm"
+                    multiple
+                    onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                  />
+                  <VoiceMicButton voice={descVoice} size="sm" />
+                </>
+              )}
             </div>
+            {/* Under the description's bottom row, never over its text; it sticks to the
+                bottom of the page, above the pinned comment box, while a long
+                description runs past it. */}
+            <VoiceHud voice={descVoice} placement="below" stickAbove={pinnedComposerHeight} />
             {descDragOver && <FileDropOverlay />}
           </div>
 

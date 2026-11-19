@@ -91,19 +91,25 @@ function ModelRow({
             </Badge>
           )}
         </div>
-        <div className="mt-0.5 text-caption leading-5 text-muted-foreground">
-          {languages} · <span className="whitespace-nowrap">{formatBytes(model.sizeBytes)}</span>
-        </div>
-        <div className="text-caption leading-5 text-muted-foreground">
-          {t(($) => $.voice.models.by, { author: model.author })} ·{" "}
-          <button
-            type="button"
-            className="underline underline-offset-3 hover:text-foreground"
-            onClick={() => openExternal(model.licenseUrl)}
-          >
-            {t(($) => $.voice.models.license)}
-          </button>
-        </div>
+        {model.streams ? (
+          <div className="mt-0.5 text-caption leading-5 text-muted-foreground">{languages}</div>
+        ) : (
+          <>
+            <div className="mt-0.5 text-caption leading-5 text-muted-foreground">
+              {languages} · <span className="whitespace-nowrap">{formatBytes(model.sizeBytes)}</span>
+            </div>
+            <div className="text-caption leading-5 text-muted-foreground">
+              {t(($) => $.voice.models.by, { author: model.author })} ·{" "}
+              <button
+                type="button"
+                className="underline underline-offset-3 hover:text-foreground"
+                onClick={() => openExternal(model.licenseUrl)}
+              >
+                {t(($) => $.voice.models.license)}
+              </button>
+            </div>
+          </>
+        )}
         {model.status === "downloading" && (
           <Progress value={percent} className="mt-2" aria-label={t(($) => $.voice.models.downloading, { percent })} />
         )}
@@ -128,19 +134,21 @@ function ModelRow({
             </Button>
           </>
         )}
-        {model.status === "ready" && manage && (
+        {model.status === "ready" && (
           <>
             {!active && (
               <Button size="xs" variant="outline" onClick={() => update({ modelId: model.id })}>
                 {t(($) => $.voice.models.use)}
               </Button>
             )}
-            <IconButton
-              label={t(($) => $.voice.models.delete, { name: model.name })}
-              onClick={() => void api?.deleteModel(model.id)}
-            >
-              <Trash2 />
-            </IconButton>
+            {manage && !model.streams && (
+              <IconButton
+                label={t(($) => $.voice.models.delete, { name: model.name })}
+                onClick={() => void api?.deleteModel(model.id)}
+              >
+                <Trash2 />
+              </IconButton>
+            )}
           </>
         )}
       </div>
@@ -149,8 +157,8 @@ function ModelRow({
 }
 
 /**
- * Desktop's speech models as rows, for a bordered list. `manage` adds
- * choosing between installed models and deleting them.
+ * Desktop's speech models as rows, for a bordered list. Any installed model
+ * can be chosen; `manage` adds deleting the downloaded ones.
  */
 export function VoiceModelRows({
   manage = false,
@@ -200,7 +208,11 @@ export function VoiceSetupDialog({ voice }: { voice: ComposerVoice }) {
       <DialogContent className="sm:max-w-lg" data-editor-overlay-owner={overlayOwner}>
         <DialogHeader>
           <DialogTitle>{t(($) => $.voice.setup.title)}</DialogTitle>
-          <DialogDescription>{t(($) => $.voice.setup.description)}</DialogDescription>
+          <DialogDescription>
+            {snapshot?.models.some((model) => model.streams)
+              ? t(($) => $.voice.setup.description_server)
+              : t(($) => $.voice.setup.description)}
+          </DialogDescription>
         </DialogHeader>
         <div className="divide-y divide-surface-border rounded-lg border border-surface-border">
           <VoiceModelRows onDownload={(id) => update({ modelId: id })} />

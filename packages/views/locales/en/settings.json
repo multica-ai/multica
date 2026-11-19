@@ -1940,8 +1940,10 @@
   },
   "voice_input": {
     "description": "Dictate into chat, comments and replies. Speech is transcribed on this computer and never leaves it.",
+    "description_server": "Dictate into chat, comments and replies. Speech is streamed to the speech-to-text service your Multica server is set up with.",
     "model_title": "Speech model",
     "model_hint": "Models run on this computer. Download one, or switch between the ones you have.",
+    "model_hint_server": "The server model streams speech to your Multica server's speech-to-text service. The others run on this computer: download one, or switch between the ones you have.",
     "engine_unavailable": "On-device transcription isn't available for this computer.",
     "enabled": {
       "title": "Voice input",

@@ -52,6 +52,9 @@ interface ConfigState {
   // servers and off when the operator turned it off: no Browse entry, no
   // store requests.
   themeStoreEnabled: boolean;
+  // Whether the server transcribes voice input. Absent on older servers and
+  // off unless the operator configured a speech provider: no mic on the web.
+  voiceTranscriptionEnabled: boolean;
   setCdnConfig: (config: { cdnDomain: string; cdnSigned?: boolean }) => void;
   setAttachmentPublicUrl: (url?: string) => void;
   setAuthConfig: (config: {
@@ -74,6 +77,7 @@ interface ConfigState {
   setIssueCreatePropertiesSupported: (supported?: boolean) => void;
   setCommentDeleteKeepRepliesSupported: (supported?: boolean) => void;
   setThemeStoreEnabled: (enabled?: boolean) => void;
+  setVoiceTranscriptionEnabled: (enabled?: boolean) => void;
 }
 
 export const configStore = createStore<ConfigState>((set) => ({
@@ -96,6 +100,7 @@ export const configStore = createStore<ConfigState>((set) => ({
   issueCreatePropertiesSupported: false,
   commentDeleteKeepRepliesSupported: false,
   themeStoreEnabled: false,
+  voiceTranscriptionEnabled: false,
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
   setAttachmentPublicUrl: (url = "") => set({ attachmentPublicUrl: url }),
   setAuthConfig: ({
@@ -128,6 +133,8 @@ export const configStore = createStore<ConfigState>((set) => ({
   setCommentDeleteKeepRepliesSupported: (supported = false) =>
     set({ commentDeleteKeepRepliesSupported: supported === true }),
   setThemeStoreEnabled: (enabled = false) => set({ themeStoreEnabled: enabled === true }),
+  setVoiceTranscriptionEnabled: (enabled = false) =>
+    set({ voiceTranscriptionEnabled: enabled === true }),
 }));
 
 export function useConfigStore(): ConfigState;

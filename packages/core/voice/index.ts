@@ -18,6 +18,8 @@ export {
 export { applyVocabulary, dictationSeparator, removeSpokenFillers } from "./text";
 export { MAX_VOICE_HOTWORDS, setVoiceContextWords, voiceHotwords } from "./hotwords";
 export {
+  clipVoiceModel,
+  pickClipVoiceModel,
   pickVoiceModel,
   useVoiceModelsStore,
   type VoiceModel,
@@ -37,6 +39,7 @@ export {
   stopVoice,
   toggleVoice,
   transcribeVoiceClip,
+  useVoiceInterim,
   useVoiceMeter,
   useVoiceState,
   type VoiceClip,
@@ -48,4 +51,6 @@ export {
   type VoiceRecorderFailure,
   type VoiceRuntime,
   type VoiceState,
+  type VoiceStream,
+  type VoiceStreamHandlers,
 } from "./session";

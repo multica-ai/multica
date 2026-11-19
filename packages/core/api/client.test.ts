@@ -3628,3 +3628,26 @@ describe("ApiClient request observer", () => {
     expect(events[1]).toMatchObject({ phase: "end", status: null, error: "TypeError: Failed to fetch" });
   });
 });
+
+describe("ApiClient voice sessions", () => {
+  it("asks the server for a stream token", async () => {
+    const body = { provider: "deepgram", url: "wss://stream.test/listen?model=m", token: "t", expires_in: 30 };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.createVoiceSession()).resolves.toEqual(body);
+    const [url, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(url)).toBe("https://api.example.test/api/voice/sessions");
+    expect(init?.method).toBe("POST");
+  });
+
+  it("tolerates a malformed response with empty fields the stream will refuse", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ token: 42 }), {
+      status: 200, headers: { "Content-Type": "application/json" },
+    })));
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.createVoiceSession()).resolves.toEqual({ provider: "", url: "", token: "", expires_in: 0 });
+  });
+});

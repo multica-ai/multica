@@ -26,7 +26,7 @@ import {
 import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import {
-  pickVoiceModel,
+  pickClipVoiceModel,
   transcribeVoiceClip,
   useVoiceSettingsStore,
   VOICE_HISTORY_RETENTIONS,
@@ -201,7 +201,7 @@ function HistoryList({ api, entries }: { api: LocalVoiceHistoryAPI; entries: Voi
   const [shown, setShown] = useState(PAGE);
   const player = usePlayer(api);
   const modelId = useVoiceSettingsStore((state) => state.modelId);
-  const canTranscribe = pickVoiceModel(useVoiceModels(), modelId) !== null;
+  const canTranscribe = pickClipVoiceModel(useVoiceModels(), modelId) !== null;
   const groups = useMemo(() => {
     const today = dayKey(Date.now());
     const yesterday = dayKey(Date.now() - 24 * 60 * 60 * 1000);

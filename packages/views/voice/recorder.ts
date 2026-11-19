@@ -29,7 +29,7 @@ export function voiceInputSupported(): boolean {
   );
 }
 
-function failureOf(err: unknown): VoiceRecorderFailure {
+export function failureOf(err: unknown): VoiceRecorderFailure {
   const name = err instanceof DOMException || err instanceof Error ? err.name : "";
   if (name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError") {
     return "permission-denied";
@@ -38,7 +38,7 @@ function failureOf(err: unknown): VoiceRecorderFailure {
   return "failed";
 }
 
-async function openMicrophone(deviceId: string | null): Promise<MediaStream> {
+export async function openMicrophone(deviceId: string | null): Promise<MediaStream> {
   // Noise suppression and gain control are tuned for calls; they smear
   // consonants and pump the level, which costs recognition accuracy.
   const base = { echoCancellation: true, noiseSuppression: false, autoGainControl: false };
@@ -54,6 +54,42 @@ async function openMicrophone(deviceId: string | null): Promise<MediaStream> {
   return navigator.mediaDevices.getUserMedia({ audio: base });
 }
 
+/**
+ * The level meter both recorders share: samples the input ~20 times a second
+ * and reports the level history and the time since it started.
+ */
+export class LevelMeter {
+  private timer: number | null = null;
+  private levels: number[] = [];
+  private readonly startedAt = performance.now();
+  /** The loudest level so far, to tell speech from silence. */
+  peak = 0;
+
+  constructor(audio: AudioContext, source: AudioNode, onTick: (meter: VoiceMeter) => void) {
+    const analyser = audio.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    const samples = new Uint8Array(analyser.fftSize);
+    this.timer = window.setInterval(() => {
+      analyser.getByteTimeDomainData(samples);
+      let sum = 0;
+      for (const sample of samples) {
+        const v = (sample - 128) / 128;
+        sum += v * v;
+      }
+      const level = Math.min(1, Math.sqrt(sum / samples.length) * 5);
+      this.peak = Math.max(this.peak, level);
+      this.levels = [...this.levels.slice(-(LEVEL_HISTORY - 1)), level];
+      onTick({ levels: this.levels, elapsedMs: performance.now() - this.startedAt });
+    }, METER_INTERVAL_MS);
+  }
+
+  stop() {
+    if (this.timer !== null) window.clearInterval(this.timer);
+    this.timer = null;
+  }
+}
+
 export class Recording implements VoiceRecorder {
   private stream: MediaStream | null = null;
   private recorder: MediaRecorder | null = null;
@@ -61,9 +97,8 @@ export class Recording implements VoiceRecorder {
   private chunks: Blob[] = [];
   private startedAt = 0;
   private peak = 0;
-  private timer: number | null = null;
+  private meter: LevelMeter | null = null;
   private closed = false;
-  private levels: number[] = [];
 
   constructor(
     private readonly onMeter: (meter: VoiceMeter) => void,
@@ -101,24 +136,11 @@ export class Recording implements VoiceRecorder {
   private startMeter(stream: MediaStream) {
     try {
       this.audio = new AudioContext();
-      const analyser = this.audio.createAnalyser();
-      analyser.fftSize = 512;
-      this.audio.createMediaStreamSource(stream).connect(analyser);
-      const samples = new Uint8Array(analyser.fftSize);
-      this.timer = window.setInterval(() => {
-        analyser.getByteTimeDomainData(samples);
-        let sum = 0;
-        for (const sample of samples) {
-          const v = (sample - 128) / 128;
-          sum += v * v;
-        }
-        const level = Math.min(1, Math.sqrt(sum / samples.length) * 5);
-        this.peak = Math.max(this.peak, level);
-        this.levels = [...this.levels.slice(-(LEVEL_HISTORY - 1)), level];
-        const elapsedMs = performance.now() - this.startedAt;
-        this.onMeter({ levels: this.levels, elapsedMs });
-        if (elapsedMs >= MAX_RECORDING_MS) this.onLimit();
-      }, METER_INTERVAL_MS);
+      this.meter = new LevelMeter(this.audio, this.audio.createMediaStreamSource(stream), (meter) => {
+        this.peak = this.meter?.peak ?? this.peak;
+        this.onMeter(meter);
+        if (meter.elapsedMs >= MAX_RECORDING_MS) this.onLimit();
+      });
     } catch {
       // Metering is cosmetic; record without it. Without a meter there is no
       // level to judge silence by, so treat the clip as speech.
@@ -160,8 +182,8 @@ export class Recording implements VoiceRecorder {
 
   private release() {
     this.closed = true;
-    if (this.timer !== null) window.clearInterval(this.timer);
-    this.timer = null;
+    this.meter?.stop();
+    this.meter = null;
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = null;
     void this.audio?.close().catch(() => {});

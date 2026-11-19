@@ -2558,3 +2558,17 @@ describe("Issue requester compatibility", () => {
     expect(IssueSchema.parse({ ...baseIssue, requester_id: 42 }).requester_id).toBeUndefined();
   });
 });
+
+describe("AppConfigSchema voice_transcription_enabled drift", () => {
+  it.each([
+    [undefined, false],
+    ["yes", false],
+    [true, true],
+  ])("%j parses as %s", (value, expected) => {
+    const parsed = AppConfigSchema.parse({
+      cdn_domain: "cdn.example.com",
+      voice_transcription_enabled: value,
+    });
+    expect(parsed.voice_transcription_enabled).toBe(expected);
+  });
+});

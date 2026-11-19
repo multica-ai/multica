@@ -208,7 +208,8 @@
       "microphone_failed": "No se pudo iniciar el micrófono.",
       "no_speech": "No se detectó voz. Vuelve a intentarlo un poco más cerca del micrófono.",
       "unavailable": "La entrada de voz no puede transcribir en este ordenador.",
-      "transcription_failed": "La transcripción falló. La grabación se conserva, así que puedes reintentarlo."
+      "transcription_failed": "La transcripción falló. La grabación se conserva, así que puedes reintentarlo.",
+      "stream_failed": "Se perdió la conexión con el servicio de voz. Reintenta para empezar de nuevo."
     },
     "models": {
       "more_languages": "{{more}} más",
@@ -229,6 +230,7 @@
     "setup": {
       "title": "Configurar la entrada de voz",
       "description": "La voz se transcribe en este ordenador, así que las grabaciones nunca salen de él. Descarga un modelo de voz una vez para empezar.",
+      "description_server": "Elige un modelo de voz para empezar. El modelo del servidor envía la voz al servicio de voz a texto de tu servidor de Multica; los demás se ejecutan en este equipo tras una única descarga.",
       "later": "Ahora no",
       "start": "Empezar a dictar"
     }
