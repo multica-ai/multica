@@ -55,10 +55,9 @@ export function isMemberLimitReachedError(error: unknown): boolean {
  * An invitation the member limit held back while its workspace upgrades.
  *
  * Members saves it under a token and opens Billing with that token. Billing
- * binds it to the checkout it creates for it, identified by the checkout's
- * request id, which Cloud puts on both Stripe returns, so a cancel drops
- * exactly that invitation. Once the plan is paid, Billing offers it for
- * sending (see heldInviteToOffer); Members consumes it only once it is sent.
+ * binds it to the checkout it creates for it. Once the plan is paid, Billing
+ * offers it for sending (see heldInvitesToOffer); Members consumes it only
+ * once it is sent.
  */
 export interface UpgradeInvite {
   email: string;
@@ -73,7 +72,7 @@ export interface HeldInvite extends UpgradeInvite {
 }
 
 export interface HeldInviteCheckout {
-  /** The checkout request id, named on both Stripe returns. */
+  /** The checkout request id Cloud returned. */
   requestId: string;
   /** The subscription version when the checkout started. */
   baseVersion: number;
@@ -84,9 +83,13 @@ interface StoredHeldInvites {
   invites: Record<string, HeldInvite>;
 }
 
-// Checkout plus the webhook that activates the plan take minutes; a held
-// invitation older than this belongs to an upgrade that was abandoned.
+// A held invitation whose checkout never started belongs to an abandoned
+// upgrade after this long.
 const UPGRADE_INVITE_TTL_MS = 2 * 60 * 60 * 1000;
+// Once its checkout started it lives as long as Stripe can still take the
+// payment (a Checkout session stays open 24 hours) plus a day to come back
+// and send it.
+const BOUND_UPGRADE_INVITE_TTL_MS = 48 * 60 * 60 * 1000;
 
 function upgradeInviteKey(slug: string): string {
   return `multica:upgrade_invite:${slug}`;
@@ -131,8 +134,7 @@ function readHeld(token: string, value: unknown, now: number): HeldInvite | null
     v.email.trim() === "" ||
     (v.role !== "admin" && v.role !== "member") ||
     typeof v.savedAt !== "number" ||
-    v.savedAt > now ||
-    now - v.savedAt > UPGRADE_INVITE_TTL_MS
+    v.savedAt > now
   ) {
     return null;
   }
@@ -145,6 +147,10 @@ function readHeld(token: string, value: unknown, now: number): HeldInvite | null
     typeof c.boundAt === "number"
       ? { requestId: c.requestId, baseVersion: c.baseVersion, boundAt: c.boundAt }
       : null;
+  const expired = checkout
+    ? now - checkout.boundAt > BOUND_UPGRADE_INVITE_TTL_MS
+    : now - v.savedAt > UPGRADE_INVITE_TTL_MS;
+  if (expired) return null;
   return { token, email: v.email, role: v.role, savedAt: v.savedAt, checkout };
 }
 
@@ -233,34 +239,23 @@ export function clearUpgradeInvitesFor(
 }
 
 /**
- * The held invitation to offer for sending now, if any: the newest whose
+ * The held invitations to offer for sending now, newest first: those whose
  * checkout started on this client, once the plan is paid (an incomplete first
- * payment still reads as Free) and the subscription has changed since that
+ * payment still reads as Free) and the subscription has changed since their
  * checkout started.
  *
- * It is only ever offered, never sent on its own. Nothing the client sees
- * proves which checkout a plan change came from: Desktop pays in the system
- * browser and never sees the Stripe return, another admin may have upgraded
- * elsewhere, and several checkouts can be open at once. The person who held
- * it sends or discards it.
+ * They are only ever offered, never sent on their own, and all of them are
+ * offered: nothing the client sees proves which checkout a plan change came
+ * from (Desktop pays in the system browser and never sees the Stripe return,
+ * another admin may have upgraded elsewhere, several checkouts can be open in
+ * different tabs), so the person who held them picks.
  */
-export function heldInviteToOffer(
+export function heldInvitesToOffer(
   held: HeldInvite[],
   subscription: { version: number; paid: boolean },
-): HeldInvite | null {
-  if (!subscription.paid) return null;
-  return (
-    held
-      .filter((h) => h.checkout !== null && subscription.version > h.checkout.baseVersion)
-      .sort((a, b) => b.savedAt - a.savedAt)[0] ?? null
-  );
-}
-
-/** The held invitation of a cancelled checkout: only the one it names. */
-export function heldInviteForCancelledCheckout(
-  held: HeldInvite[],
-  returnRequestId: string | null,
-): HeldInvite | null {
-  if (!returnRequestId) return null;
-  return held.find((h) => h.checkout?.requestId === returnRequestId) ?? null;
+): HeldInvite[] {
+  if (!subscription.paid) return [];
+  return held
+    .filter((h) => h.checkout !== null && subscription.version > h.checkout.baseVersion)
+    .sort((a, b) => b.savedAt - a.savedAt);
 }

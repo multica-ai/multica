@@ -7,8 +7,7 @@ import type { MemberLimit, StorageAdapter } from "../types";
 import {
   bindUpgradeInviteCheckout,
   clearUpgradeInvite,
-  heldInviteForCancelledCheckout,
-  heldInviteToOffer,
+  heldInvitesToOffer,
   isMemberLimitFull,
   isMemberLimitReachedError,
   listCheckoutHeldInvites,
@@ -122,6 +121,17 @@ describe("held upgrade invitations", () => {
     expect(readUpgradeInvite("acme", waiting, storage, now + 5)?.checkout).toBeNull();
   });
 
+  // Stripe keeps a Checkout session payable for 24 hours; a held invitation
+  // whose checkout started must outlive it, with time left to send it.
+  it("keeps a held invitation for as long as its checkout can still be paid", () => {
+    const storage = memoryStorage();
+    const token = saveUpgradeInvite("acme", { email: "sarah@acme.io", role: "member" }, storage, now);
+    bindUpgradeInviteCheckout("acme", token, { requestId: "req-1", baseVersion: 0 }, storage, now + 60_000);
+    const hour = 60 * 60 * 1000;
+    expect(readUpgradeInvite("acme", token, storage, now + 30 * hour)).not.toBeNull();
+    expect(readUpgradeInvite("acme", token, storage, now + 49 * hour)).toBeNull();
+  });
+
   it("drops abandoned or unreadable entries", () => {
     const storage = memoryStorage();
     const token = saveUpgradeInvite("acme", { email: "sarah@acme.io", role: "admin" }, storage, now);
@@ -139,7 +149,7 @@ describe("held upgrade invitations", () => {
   });
 });
 
-describe("heldInviteToOffer", () => {
+describe("heldInvitesToOffer", () => {
   const held = (token: string, requestId: string | null, { baseVersion = 0, savedAt = 1 } = {}): HeldInvite => ({
     token,
     email: `${token}@acme.io`,
@@ -151,35 +161,15 @@ describe("heldInviteToOffer", () => {
 
   it("waits until the plan is paid and changed after the invitation's checkout started", () => {
     // An incomplete first payment bumps the version but still reads as Free.
-    expect(heldInviteToOffer([held("a", "req-a")], { version: 1, paid: false })).toBeNull();
-    expect(heldInviteToOffer([held("a", "req-a", { baseVersion: 1 })], paid)).toBeNull();
-    expect(heldInviteToOffer([held("a", null)], paid)).toBeNull();
-    expect(heldInviteToOffer([held("a", "req-a")], paid)?.token).toBe("a");
+    expect(heldInvitesToOffer([held("a", "req-a")], { version: 1, paid: false })).toEqual([]);
+    expect(heldInvitesToOffer([held("a", "req-a", { baseVersion: 1 })], paid)).toEqual([]);
+    expect(heldInvitesToOffer([held("a", null)], paid)).toEqual([]);
   });
 
-  it("offers the newest, whichever checkout the plan change came from", () => {
-    // Nothing proves which open checkout was paid, so none is ever hidden.
+  it("offers every paid-for held invitation, newest first, for the person to pick", () => {
+    // Paying for A while a newer B waits in another tab must still offer A.
     const older = held("a", "req-a", { savedAt: 1 });
     const newer = held("b", "req-b", { savedAt: 2 });
-    expect(heldInviteToOffer([older, newer], paid)).toBe(newer);
-  });
-});
-
-describe("heldInviteForCancelledCheckout", () => {
-  const held = (token: string, requestId: string | null): HeldInvite => ({
-    token,
-    email: `${token}@acme.io`,
-    role: "member",
-    savedAt: 1,
-    checkout: requestId ? { requestId, baseVersion: 0, boundAt: 1 } : null,
-  });
-
-  it("drops only the invitation of the checkout the cancel names", () => {
-    expect(heldInviteForCancelledCheckout([held("a", "req-a"), held("b", "req-b")], "req-b")?.token).toBe("b");
-    expect(heldInviteForCancelledCheckout([held("a", "req-a")], "req-plain")).toBeNull();
-  });
-
-  it("drops nothing when the cancel names no checkout", () => {
-    expect(heldInviteForCancelledCheckout([held("a", "req-a")], null)).toBeNull();
+    expect(heldInvitesToOffer([older, newer], paid)).toEqual([newer, older]);
   });
 });

@@ -702,7 +702,7 @@ describe("BillingTab", () => {
 
     it("waits for the paid plan: an incomplete payment still reads as Free", () => {
       const token = boundHeldInvite("sarah@acme.dev", "req-held");
-      navigationState.search = "tab=billing&result=success&request_id=req-held";
+      navigationState.search = "tab=billing&result=success&session_id=cs_test_1";
       Object.assign(mocks.entitlements, { plan: "free", status: "incomplete", version: 1 });
       mocks.summary.availableActions.checkout = false;
       renderWithI18n(<BillingTab />);
@@ -729,21 +729,6 @@ describe("BillingTab", () => {
 
       await user.click(screen.getByRole("button", { name: "Send invitation" }));
       expect(navigationState.push).toHaveBeenCalledWith(membersResume(token));
-    });
-
-    it("offers, never sends on its own, after a Stripe return naming its checkout", async () => {
-      const token = boundHeldInvite("sarah@acme.dev", "req-held");
-      navigationState.search = "tab=billing&result=success&request_id=req-held";
-      upgraded();
-      const user = userEvent.setup();
-      renderWithI18n(<BillingTab />);
-
-      expect(navigationState.push).not.toHaveBeenCalled();
-      await user.click(screen.getByRole("button", { name: "Send invitation" }));
-      expect(navigationState.push).toHaveBeenCalledWith(membersResume(token));
-      expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-        queryKey: ["workspaces", "workspace-1", "members", "limit"],
-      });
     });
 
     // Desktop: held checkout A, then plain checkout B, then A is paid in the
@@ -791,6 +776,22 @@ describe("BillingTab", () => {
       expect(readUpgradeInvite("acme", token)).toMatchObject({ email: "sarah@acme.dev", role: "admin" });
     });
 
+    // Two tabs held A and B, B is newer; A's checkout is the one paid. Both
+    // are offered, so the seat just bought can go to A.
+    it("offers every paid-for held invitation so the person picks which to send", async () => {
+      const a = boundHeldInvite("sarah@acme.dev", "req-a");
+      boundHeldInvite("omar@acme.dev", "req-b");
+      navigationState.search = "tab=billing&result=success&session_id=cs_test_1";
+      upgraded();
+      const user = userEvent.setup();
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText(/invitation for omar@acme\.dev/)).toBeInTheDocument();
+      const sarah = screen.getByText(/invitation for sarah@acme\.dev/).closest("li")!;
+      await user.click(within(sarah).getByRole("button", { name: "Send invitation" }));
+      expect(navigationState.push).toHaveBeenCalledWith(membersResume(a));
+    });
+
     it("discards a held invitation the person no longer wants", async () => {
       const token = boundHeldInvite("sarah@acme.dev", "req-unverified");
       upgraded();
@@ -815,39 +816,6 @@ describe("BillingTab", () => {
         .findLast((options) => options.queryKey?.[options.queryKey.length - 1] === "summary");
       expect(summaryOptions.refetchInterval({ state: { data: mocks.summary } })).toBe(5_000);
     });
-
-    it("drops a cancelled checkout's invitation without waiting for the summary", () => {
-      const token = boundHeldInvite("sarah@acme.dev", "req-cancelled");
-      navigationState.search = "tab=billing&result=cancel&request_id=req-cancelled";
-      mocks.summaryError = true;
-      renderWithI18n(<BillingTab />);
-
-      expect(readUpgradeInvite("acme", token)).toBeNull();
-    });
-
-    it("drops only the held invitation of the checkout a cancel names", () => {
-      const cancelled = boundHeldInvite("sarah@acme.dev", "req-cancelled");
-      const other = boundHeldInvite("omar@acme.dev", "req-other");
-      navigationState.search = "tab=billing&result=cancel&request_id=req-cancelled";
-      renderWithI18n(<BillingTab />);
-
-      expect(readUpgradeInvite("acme", cancelled)).toBeNull();
-      expect(readUpgradeInvite("acme", other)).not.toBeNull();
-      expect(navigationState.push).not.toHaveBeenCalled();
-    });
-
-    // Another tab cancelled a plain upgrade: its return names that checkout,
-    // or (on an older Cloud) none. Either way this tab's held one stays.
-    it.each(["tab=billing&result=cancel&request_id=req-plain", "tab=billing&result=cancel"])(
-      "keeps a held invitation another checkout's cancel does not name (%s)",
-      (search) => {
-        const token = boundHeldInvite("sarah@acme.dev", "req-held");
-        navigationState.search = search;
-        renderWithI18n(<BillingTab />);
-
-        expect(readUpgradeInvite("acme", token)).not.toBeNull();
-      },
-    );
 
     it("shows members and pending invitations against the plan's limit", () => {
       mocks.memberLimit = { action: "observe", limit: 5, members: 4, pendingInvitations: 2 };

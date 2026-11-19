@@ -50,12 +50,6 @@ export function BillingReturnPage() {
     workspaceIdRaw && UUID_RE.test(workspaceIdRaw) ? workspaceIdRaw : null;
   const resultParam = navigation.searchParams.get("result");
   const result = resultParam && RESULT_VALUES.has(resultParam) ? resultParam : null;
-  // Cloud names the checkout attempt on both returns. Billing matches it to
-  // the checkout it started for a held invitation, so it is forwarded in-app.
-  // Like Stripe's session id it never joins the login detour below.
-  const requestIdRaw = navigation.searchParams.get("request_id");
-  const requestId =
-    result && requestIdRaw && UUID_RE.test(requestIdRaw) ? requestIdRaw : null;
 
   const {
     data: workspaces,
@@ -103,7 +97,7 @@ export function BillingReturnPage() {
 
     const destination = `${paths.workspace(match.slug).settings()}?tab=billing${
       result ? `&result=${result}` : ""
-    }${requestId ? `&request_id=${requestId}` : ""}`;
+    }`;
     // replace(), not push(): the Stripe hop should not sit in history where a
     // back navigation would re-run this redirect.
     navigation.replace(destination);
@@ -113,7 +107,6 @@ export function BillingReturnPage() {
     isWorkspacesPending,
     match,
     navigation,
-    requestId,
     result,
     user,
     workspaceIdParam,

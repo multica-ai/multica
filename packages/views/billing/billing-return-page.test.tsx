@@ -94,33 +94,21 @@ describe("BillingReturnPage", () => {
     mockRefetchWorkspaces.mockReset();
   });
 
-  const REQ = "33333333-3333-3333-3333-333333333333";
-
-  // Cloud names the checkout attempt on both returns; Billing matches it to
-  // the checkout it started for a held invitation. Stripe's session id is not
-  // needed and stays behind.
-  it("resolves the workspace id into its slug and keeps the checkout request, not the session", async () => {
-    renderReturn(`workspace_id=22222222-2222-2222-2222-222222222222&result=success&session_id=cs_test_123&request_id=${REQ}`);
+  it("resolves the workspace id cloud authorized into its slug", async () => {
+    renderReturn("workspace_id=22222222-2222-2222-2222-222222222222&result=success&session_id=cs_test_123");
 
     await waitFor(() =>
       expect(mockReplace).toHaveBeenCalledWith(
-        `/globex/settings?tab=billing&result=success&request_id=${REQ}`,
+        "/globex/settings?tab=billing&result=success",
       ),
     );
   });
 
-  it("drops a request id that is not a UUID", async () => {
-    renderReturn("workspace_id=22222222-2222-2222-2222-222222222222&result=success&request_id=../../evil");
-    await waitFor(() =>
-      expect(mockReplace).toHaveBeenCalledWith("/globex/settings?tab=billing&result=success"),
-    );
-  });
-
-  it("forwards cancel with its checkout request, and portal results", async () => {
-    renderReturn(`workspace_id=11111111-1111-1111-1111-111111111111&result=cancel&request_id=${REQ}`);
+  it("forwards cancel and portal results and drops the Stripe session id", async () => {
+    renderReturn("workspace_id=11111111-1111-1111-1111-111111111111&result=cancel&session_id=cs_test_9");
     await waitFor(() =>
       expect(mockReplace).toHaveBeenCalledWith(
-        `/acme/settings?tab=billing&result=cancel&request_id=${REQ}`,
+        "/acme/settings?tab=billing&result=cancel",
       ),
     );
 
@@ -317,7 +305,7 @@ describe("BillingReturnPage login continuation", () => {
   it("carries only workspace_id and result into the login continuation", async () => {
     renderReturn(
       "workspace_id=11111111-1111-1111-1111-111111111111&result=success" +
-        "&session_id=cs_test_secret&request_id=33333333-3333-3333-3333-333333333333&utm_source=stripe&anything=else",
+        "&session_id=cs_test_secret&utm_source=stripe&anything=else",
     );
 
     await waitFor(() => expect(mockReplace).toHaveBeenCalledOnce());
@@ -328,7 +316,6 @@ describe("BillingReturnPage login continuation", () => {
     );
     expect(next).not.toContain("session_id");
     expect(next).not.toContain("cs_test_secret");
-    expect(next).not.toContain("request_id");
     expect(next).not.toContain("utm_source");
     expect(next).not.toContain("anything");
   });

@@ -27,8 +27,7 @@ import {
   usePurchaseWorkspaceSeats,
   bindUpgradeInviteCheckout,
   clearUpgradeInvite,
-  heldInviteForCancelledCheckout,
-  heldInviteToOffer,
+  heldInvitesToOffer,
   listCheckoutHeldInvites,
   memberLimitKeys,
   memberLimitOptions,
@@ -215,24 +214,19 @@ function BillingTabContent() {
     navigation.searchParams.get("result"),
   );
   const returnSessionId = navigation.searchParams.get("session_id");
-  // Cloud names the checkout attempt on both Stripe returns; it is what ties
-  // a return to the checkout started for a held invitation.
-  const returnRequestId = navigation.searchParams.get("request_id");
   const callbackKey =
     navigation.searchParams.has("result") ||
     navigation.searchParams.has("session_id")
-      ? `${navigation.searchParams.get("result") ?? ""}:${returnSessionId ?? ""}:${returnRequestId ?? ""}`
+      ? `${navigation.searchParams.get("result") ?? ""}:${returnSessionId ?? ""}`
       : null;
   const [returnState, setReturnState] = useState<{
     workspaceId: string | null;
     result: WorkspaceBillingReturnResult | null;
     observedAt: number | null;
-    requestId: string | null;
   }>(() => ({
     workspaceId: wsId || null,
     result: returnResultParam,
     observedAt: returnResultParam === "success" ? Date.now() : null,
-    requestId: returnRequestId,
   }));
   const returnStateMatchesWorkspace =
     returnState.workspaceId === null || returnState.workspaceId === wsId;
@@ -316,9 +310,9 @@ function BillingTabContent() {
       workspaceSlug ? listCheckoutHeldInvites(workspaceSlug).length > 0 : false,
     );
   }, [workspaceSlug]);
-  // The plan changed but nothing ties it to the held invitation's checkout:
-  // ask before sending it.
-  const [heldInviteToConfirm, setHeldInviteToConfirm] = useState<HeldInvite | null>(null);
+  // Held invitations the paid plan may have bought a seat for, offered for
+  // the person to send or discard.
+  const [heldInvitesToConfirm, setHeldInvitesToConfirm] = useState<HeldInvite[]>([]);
   const memberLimitQuery = useQuery(memberLimitOptions(wsId));
 
   useEffect(() => {
@@ -355,19 +349,17 @@ function BillingTabContent() {
       workspaceId: wsId || null,
       result: returnResultParam,
       observedAt: returnResultParam === "success" ? Date.now() : null,
-      requestId: returnRequestId,
     });
     if (returnResultParam === "cancel") checkoutIntentRef.current = null;
 
     const params = new URLSearchParams(navigation.searchParams);
     params.delete("result");
     params.delete("session_id");
-    params.delete("request_id");
     const query = params.toString();
     navigation.replace(
       query ? `${navigation.pathname}?${query}` : navigation.pathname,
     );
-  }, [callbackKey, navigation, returnResultParam, returnRequestId, wsId]);
+  }, [callbackKey, navigation, returnResultParam, wsId]);
 
   useEffect(() => {
     if (returnResult !== "success") {
@@ -662,14 +654,13 @@ function BillingTabContent() {
   }, [isCheckoutConfirmed, isSyncingCheckout]);
 
   const sendHeldInvite = (held: HeldInvite) => {
-    setHeldInviteToConfirm(null);
+    setHeldInvitesToConfirm([]);
     void queryClient.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
     // The Stripe callback params are still in this render's URL; leaving
     // them on would replay the checkout banner the next time Billing opens.
     const params = new URLSearchParams(navigation.searchParams);
     params.delete("result");
     params.delete("session_id");
-    params.delete("request_id");
     navigation.push(
       `${settingsHref(navigation.pathname, params, "members")}&invite=resume&held_invite=${encodeURIComponent(held.token)}`,
     );
@@ -687,31 +678,17 @@ function BillingTabContent() {
   // Bumped whenever held invitations change in storage, to re-read them.
   const [heldInvitesRevision, setHeldInvitesRevision] = useState(0);
 
-  // A Stripe cancel return names the checkout it gave up on: drop exactly
-  // that held invitation. Storage alone decides this, so it does not wait for
-  // the summary (the callback params are gone from the URL by then).
-  useEffect(() => {
-    if (returnResult !== "cancel" || !returnState.requestId || !workspaceSlug) return;
-    const cancelled = heldInviteForCancelledCheckout(
-      listCheckoutHeldInvites(workspaceSlug),
-      returnState.requestId,
-    );
-    if (!cancelled) return;
-    clearUpgradeInvite(workspaceSlug, cancelled.token);
-    setHeldInvitesRevision((revision) => revision + 1);
-  }, [returnResult, returnState.requestId, workspaceSlug]);
-
-  // Once the plan is paid, offer the held invitation for sending. It is never
-  // sent on its own (see heldInviteToOffer); reading the plan change rather
-  // than the Stripe return is what lets Desktop, which pays in the system
-  // browser, get here too.
+  // Once the plan is paid, offer every held invitation it may have paid for,
+  // for the person to send or discard. None is sent on its own (see
+  // heldInvitesToOffer); reading the plan change rather than the Stripe return
+  // is what lets Desktop, which pays in the system browser, get here too.
   useEffect(() => {
     const summary = summaryQuery.data;
     if (!summary || !workspaceSlug) return;
     const waiting = listCheckoutHeldInvites(workspaceSlug);
-    const offer = heldInviteToOffer(waiting, subscriptionForHeldInvites(summary));
-    setAwaitingHeldUpgrade(waiting.length > 0 && offer === null);
-    setHeldInviteToConfirm(offer);
+    const offers = heldInvitesToOffer(waiting, subscriptionForHeldInvites(summary));
+    setAwaitingHeldUpgrade(waiting.length > 0 && offers.length === 0);
+    setHeldInvitesToConfirm(offers);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-check on each summary read
   }, [summaryQuery.dataUpdatedAt, workspaceSlug, heldInvitesRevision]);
 
@@ -1355,7 +1332,7 @@ function BillingTabContent() {
       title={t(($) => $.workspace.title)}
       scope="workspace"
     >
-      {heldInviteToConfirm ? (
+      {heldInvitesToConfirm.length > 0 ? (
         <Alert>
           <Info />
           <AlertTitle>
@@ -1363,27 +1340,38 @@ function BillingTabContent() {
               plan: planLabel(entitlements.plan),
             })}
           </AlertTitle>
-          <AlertDescription>
-            {t(($) => $.workspace.held_invite.description, {
-              email: heldInviteToConfirm.email,
-              role:
-                heldInviteToConfirm.role === "admin"
-                  ? t(($) => $.workspace.held_invite.role_admin)
-                  : t(($) => $.workspace.held_invite.role_member),
-            })}
-          </AlertDescription>
-          <div className="col-start-2 mt-2 flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => sendHeldInvite(heldInviteToConfirm)}>
-              {t(($) => $.workspace.held_invite.send)}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => discardHeldInvite(heldInviteToConfirm)}
-            >
-              {t(($) => $.workspace.held_invite.discard)}
-            </Button>
-          </div>
+          <ul className="col-start-2 mt-1 space-y-3">
+            {heldInvitesToConfirm.map((held) => (
+              <li key={held.token} className="space-y-2">
+                <AlertDescription id={`held-invite-${held.token}`}>
+                  {t(($) => $.workspace.held_invite.description, {
+                    email: held.email,
+                    role:
+                      held.role === "admin"
+                        ? t(($) => $.workspace.held_invite.role_admin)
+                        : t(($) => $.workspace.held_invite.role_member),
+                  })}
+                </AlertDescription>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    aria-describedby={`held-invite-${held.token}`}
+                    onClick={() => sendHeldInvite(held)}
+                  >
+                    {t(($) => $.workspace.held_invite.send)}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    aria-describedby={`held-invite-${held.token}`}
+                    onClick={() => discardHeldInvite(held)}
+                  >
+                    {t(($) => $.workspace.held_invite.discard)}
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
         </Alert>
       ) : null}
 
