@@ -368,6 +368,8 @@
       "equals": "等しい",
       "not_equals": "等しくない",
       "contains": "含む",
+      "not_contains": "含まない",
+      "not_regex": "一致しない",
       "in": "いずれか",
       "exists": "存在する"
     },

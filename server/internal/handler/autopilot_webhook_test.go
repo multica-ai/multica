@@ -414,14 +414,18 @@ func TestValidateWebhookEventFilters_Conditions(t *testing.T) {
 	}
 
 	invalid := map[string]string{
-		"empty path":        `{"path":"","op":"equals","value":"x"}`,
-		"empty segment":     `{"path":"sender..type","op":"equals","value":"x"}`,
-		"unknown op":        `{"path":"sender.type","op":"matches","value":"x"}`,
-		"missing value":     `{"path":"sender.type","op":"equals"}`,
-		"object value":      `{"path":"sender.type","op":"equals","value":{"a":1}}`,
-		"contains non-text": `{"path":"sender.type","op":"contains","value":1}`,
-		"empty in":          `{"path":"sender.type","op":"in","values":[]}`,
-		"exists with value": `{"path":"sender.type","op":"exists","value":"x"}`,
+		"empty path":              `{"path":"","op":"equals","value":"x"}`,
+		"empty segment":           `{"path":"sender..type","op":"equals","value":"x"}`,
+		"unknown op":              `{"path":"sender.type","op":"matches","value":"x"}`,
+		"missing value":           `{"path":"sender.type","op":"equals"}`,
+		"object value":            `{"path":"sender.type","op":"equals","value":{"a":1}}`,
+		"contains non-text":       `{"path":"sender.type","op":"contains","value":1}`,
+		"not_contains non-text":   `{"path":"sender.type","op":"not_contains","value":1}`,
+		"not_regex non-text":      `{"path":"sender.type","op":"not_regex","value":1}`,
+		"not_regex empty":         `{"path":"sender.type","op":"not_regex","value":""}`,
+		"not_regex invalid":       `{"path":"sender.type","op":"not_regex","value":"[invalid"}`,
+		"empty in":                `{"path":"sender.type","op":"in","values":[]}`,
+		"exists with value":       `{"path":"sender.type","op":"exists","value":"x"}`,
 	}
 	for name, cond := range invalid {
 		t.Run(name, func(t *testing.T) {

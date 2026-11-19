@@ -368,6 +368,8 @@
       "equals": "같음",
       "not_equals": "같지 않음",
       "contains": "포함",
+      "not_contains": "포함하지 않음",
+      "not_regex": "일치하지 않음",
       "in": "다음 중 하나",
       "exists": "존재"
     },
