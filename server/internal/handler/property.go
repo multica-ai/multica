@@ -421,61 +421,62 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"properties": resp, "total": len(resp)})
 }
 
-// propertyUsageKeyCheckLimit is the most definitions countPropertyUsage counts
-// with per-key existence checks. Those checks cost one `?` per requested key
-// per property-carrying issue, and each `?` re-reads the issue's property bag,
-// which is expensive once the bag is large enough to be TOASTed. The
-// expansion pass reads each bag once and emits one row per stored key,
-// archived definitions' values included. Measured on PG17 (90k issues with
-// values): up to this many keys the checks are no slower than the expansion
-// even when every issue stores a single key, the expansion's best case, and
-// they win clearly when issues also carry archived values. With issues
-// carrying ~40 values each, the two meet around this limit. Above it, sparse
-// values make most checks miss, and the expansion wins.
-const propertyUsageKeyCheckLimit = 8
-
-// propertyUsageUsesKeyCheck reports whether counting usage for this many
-// definitions should use per-key existence checks rather than one expansion
-// pass over every stored key.
-func propertyUsageUsesKeyCheck(definitions int) bool {
-	return definitions <= propertyUsageKeyCheckLimit
-}
+// propertyUsageKeysPerScan caps how many definitions one usage scan counts:
+// each becomes an output column, and PostgreSQL allows at most 1664.
+const propertyUsageKeysPerScan = 1000
 
 // countPropertyUsage returns, keyed by property id, how many of the
 // workspace's issues carry a value for each of the given definitions.
 func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUID, props []db.IssueProperty) (map[string]int64, error) {
 	usage := make(map[string]int64, len(props))
-	if len(props) == 0 {
-		return usage, nil
-	}
-	keys := make([]string, len(props))
-	for i, p := range props {
-		keys[i] = uuidToString(p.ID)
-	}
-	if propertyUsageUsesKeyCheck(len(keys)) {
-		rows, err := h.Queries.CountIssuePropertyUsageForKeys(ctx, db.CountIssuePropertyUsageForKeysParams{
-			WorkspaceID:  workspaceID,
-			PropertyKeys: keys,
-		})
-		if err != nil {
+	for start := 0; start < len(props); start += propertyUsageKeysPerScan {
+		chunk := props[start:min(start+propertyUsageKeysPerScan, len(props))]
+		query, args := propertyUsageQuery(workspaceID, chunk)
+		counts := make([]int64, len(chunk))
+		dest := make([]any, len(chunk))
+		for i := range counts {
+			dest[i] = &counts[i]
+		}
+		if err := h.DB.QueryRow(ctx, query, args...).Scan(dest...); err != nil {
 			return nil, err
 		}
-		for _, row := range rows {
-			usage[row.PropertyKey] = row.UsageCount
+		for i, p := range chunk {
+			usage[uuidToString(p.ID)] = counts[i]
 		}
-		return usage, nil
-	}
-	rows, err := h.Queries.CountIssuePropertyUsage(ctx, db.CountIssuePropertyUsageParams{
-		WorkspaceID:  workspaceID,
-		PropertyKeys: keys,
-	})
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range rows {
-		usage[row.PropertyKey] = row.UsageCount
 	}
 	return usage, nil
+}
+
+// propertyUsageQuery counts, in one pass over the workspace's non-empty
+// property bags (idx_issue_workspace_with_properties), how many carry each
+// definition's key: one COUNT(*) FILTER column per definition, in order.
+//
+// The shape is deliberate:
+//   - Not a per-definition `properties ? id` subquery: idx_issue_properties_gin
+//     is jsonb_path_ops, which cannot serve `?`, so each definition re-read
+//     every issue in the workspace.
+//   - No row per (issue, key), as jsonb_object_keys or an unnest join would
+//     produce: when most issues carry the counted keys, building and grouping
+//     those rows costs more than the per-definition scans did.
+//   - `properties || '{}'` in an OFFSET 0 subquery detoasts each bag once.
+//     Bags past the TOAST threshold would otherwise be fetched and
+//     decompressed again for every `?`.
+func propertyUsageQuery(workspaceID pgtype.UUID, props []db.IssueProperty) (string, []any) {
+	args := make([]any, 0, len(props)+1)
+	args = append(args, workspaceID)
+	columns := make([]string, len(props))
+	for i, p := range props {
+		args = append(args, uuidToString(p.ID))
+		columns[i] = fmt.Sprintf("COUNT(*) FILTER (WHERE s.properties ? $%d::text)", len(args))
+	}
+	return fmt.Sprintf(`SELECT %s
+FROM (
+	SELECT i.properties || '{}'::jsonb AS properties
+	FROM issue i
+	WHERE i.workspace_id = $1::uuid
+	  AND i.properties <> '{}'::jsonb
+	OFFSET 0
+) s`, strings.Join(columns, ", ")), args
 }
 
 func (h *Handler) GetProperty(w http.ResponseWriter, r *http.Request) {

@@ -23,99 +23,6 @@ func (q *Queries) CountActiveIssueProperties(ctx context.Context, workspaceID pg
 	return count, err
 }
 
-const countIssuePropertyUsage = `-- name: CountIssuePropertyUsage :many
-
-SELECT k.key::text AS property_key, COUNT(*)::bigint AS usage_count
-FROM issue i
-CROSS JOIN LATERAL jsonb_object_keys(i.properties) AS k(key)
-WHERE i.workspace_id = $1::uuid
-  AND i.properties <> '{}'::jsonb
-  AND k.key = ANY($2::text[])
-GROUP BY k.key
-`
-
-type CountIssuePropertyUsageParams struct {
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	PropertyKeys []string    `json:"property_keys"`
-}
-
-type CountIssuePropertyUsageRow struct {
-	PropertyKey string `json:"property_key"`
-	UsageCount  int64  `json:"usage_count"`
-}
-
-// usage_count = number of issues in the workspace that currently carry a
-// value for a property. Both queries read only the workspace's non-empty
-// property bags (idx_issue_workspace_with_properties) in a single pass. Do not
-// go back to a per-definition `properties ? id` subquery:
-// idx_issue_properties_gin is jsonb_path_ops, which cannot serve `?`, so each
-// definition re-scanned every issue in the workspace. The handler picks one
-// of the two shapes below by how many keys it counts; see countPropertyUsage.
-// Expands every key stored on each issue once and keeps the requested ones.
-// Cost scales with the number of stored keys, whatever is requested.
-func (q *Queries) CountIssuePropertyUsage(ctx context.Context, arg CountIssuePropertyUsageParams) ([]CountIssuePropertyUsageRow, error) {
-	rows, err := q.db.Query(ctx, countIssuePropertyUsage, arg.WorkspaceID, arg.PropertyKeys)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []CountIssuePropertyUsageRow{}
-	for rows.Next() {
-		var i CountIssuePropertyUsageRow
-		if err := rows.Scan(&i.PropertyKey, &i.UsageCount); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const countIssuePropertyUsageForKeys = `-- name: CountIssuePropertyUsageForKeys :many
-SELECT k.key::text AS property_key, COUNT(*)::bigint AS usage_count
-FROM issue i
-CROSS JOIN LATERAL unnest($1::text[]) AS k(key)
-WHERE i.workspace_id = $2::uuid
-  AND i.properties <> '{}'::jsonb
-  AND i.properties ? k.key
-GROUP BY k.key
-`
-
-type CountIssuePropertyUsageForKeysParams struct {
-	PropertyKeys []string    `json:"property_keys"`
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-}
-
-type CountIssuePropertyUsageForKeysRow struct {
-	PropertyKey string `json:"property_key"`
-	UsageCount  int64  `json:"usage_count"`
-}
-
-// One existence check per requested key per issue. Cost scales with the
-// requested keys, not with whatever else (e.g. archived definitions' values)
-// the issues carry, but every check re-reads the issue's property bag.
-func (q *Queries) CountIssuePropertyUsageForKeys(ctx context.Context, arg CountIssuePropertyUsageForKeysParams) ([]CountIssuePropertyUsageForKeysRow, error) {
-	rows, err := q.db.Query(ctx, countIssuePropertyUsageForKeys, arg.PropertyKeys, arg.WorkspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []CountIssuePropertyUsageForKeysRow{}
-	for rows.Next() {
-		var i CountIssuePropertyUsageForKeysRow
-		if err := rows.Scan(&i.PropertyKey, &i.UsageCount); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const countIssuesUsingPropertyOptions = `-- name: CountIssuesUsingPropertyOptions :many
 SELECT opt::text AS option_id, COUNT(i.id) AS usage_count
 FROM unnest($1::text[]) AS opt
@@ -268,6 +175,7 @@ func (q *Queries) DeleteIssuePropertyValue(ctx context.Context, arg DeleteIssueP
 }
 
 const getIssueProperty = `-- name: GetIssueProperty :one
+
 SELECT id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon FROM issue_property
 WHERE id = $1 AND workspace_id = $2
 `
@@ -277,6 +185,8 @@ type GetIssuePropertyParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+// usage_count is computed in Go (propertyUsageQuery in
+// internal/handler/property.go): it needs one output column per definition.
 func (q *Queries) GetIssueProperty(ctx context.Context, arg GetIssuePropertyParams) (IssueProperty, error) {
 	row := q.db.QueryRow(ctx, getIssueProperty, arg.ID, arg.WorkspaceID)
 	var i IssueProperty
