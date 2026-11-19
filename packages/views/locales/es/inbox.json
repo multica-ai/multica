@@ -156,6 +156,7 @@
     "archive_completed_failed": "No se ha podido archivar lo completado",
     "unarchive_failed": "No se ha podido desarchivar",
     "archived_load_failed": "No se han podido cargar las notificaciones archivadas",
+    "load_failed": "No se han podido cargar las notificaciones",
     "filters_load_failed": "No se han podido cargar los filtros",
     "delete_failed": "No se pudo eliminar la notificación. Inténtalo de nuevo.",
     "unsubscribe_archive_failed": "No se pudo dar de baja",
