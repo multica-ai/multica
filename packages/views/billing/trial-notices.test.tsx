@@ -20,6 +20,8 @@ const h = vi.hoisted(() => {
     role: "owner" as "owner" | "admin" | "member" | null,
     features: { private_projects: "available" } as Record<string, string>,
     usage: null as AutopilotQuotaUsage | null,
+    /** The feature read failed after its retries. */
+    featuresFailed: false,
     /** When the mocked feature and usage answers were received. */
     dataUpdatedAt: Date.now(),
     push: vi.fn(),
@@ -51,6 +53,9 @@ vi.mock("@tanstack/react-query", async () => {
     useQuery: (options: { queryKey: readonly unknown[] }) => {
       const key = options.queryKey;
       if (key[0] === "workspace-features") {
+        if (h.featuresFailed) {
+          return { data: undefined, isPending: false, isError: true, isFetching: false, dataUpdatedAt: 0 };
+        }
         return { data: { features: h.features }, isPending: false, dataUpdatedAt: h.dataUpdatedAt };
       }
       if (key[key.length - 1] === "usage") {
@@ -97,6 +102,7 @@ beforeEach(() => {
   h.features = { private_projects: "available" };
   h.usage = null;
   h.dataUpdatedAt = Date.now();
+  h.featuresFailed = false;
   h.push.mockReset();
   h.toast.mockReset();
   h.chat.setState({ isOpen: false, floatingChatEnabled: true });
@@ -234,6 +240,28 @@ describe("WorkspaceTrialNotices", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Continue on Free" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("opens on Cloud's confirmation even when a detail read failed", () => {
+    h.trial = ended;
+    h.featuresFailed = true;
+    h.usage = {
+      action: "enforce",
+      used: 12,
+      reserved: 0,
+      total: 12,
+      limit: 200,
+      reached: false,
+      period_start: null,
+      period_end: null,
+      reset_at: null,
+      blocked_counts: null,
+    };
+    renderWithI18n(<WorkspaceTrialNotices />);
+
+    const dialog = screen.getByRole("dialog", { name: "Your Business trial has ended" });
+    expect(dialog).toHaveTextContent("Automations get 200 runs a month; 12 used this month.");
+    expect(dialog).not.toHaveTextContent("Private projects");
   });
 
   it("claims no restriction while limits are only observed", () => {

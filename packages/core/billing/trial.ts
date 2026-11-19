@@ -203,33 +203,37 @@ export function useWorkspaceTrial(
   // when the summary stops carrying the trial (it converted to a paid plan on
   // another device): reads made just before the end may still hold the
   // trial's Business features.
-  const [lastEnd, setLastEnd] = useState<{ wsId: string; endsAt: string } | null>(null);
+  //
+  // This and the two records below are kept per workspace: a desktop window
+  // switches workspaces without remounting, and switching back must pick up
+  // the refetches the other workspace's trial would otherwise have replaced.
+  const [lastEnds, setLastEnds] = useState<Record<string, string>>({});
   useEffect(() => {
-    if (!endsAtRaw) return;
-    setLastEnd((current) =>
-      current?.wsId === wsId && current.endsAt === endsAtRaw ? current : { wsId, endsAt: endsAtRaw },
+    if (!endsAtRaw || !wsId) return;
+    setLastEnds((current) =>
+      current[wsId] === endsAtRaw ? current : { ...current, [wsId]: endsAtRaw },
     );
   }, [endsAtRaw, wsId]);
-  const boundaryEndRaw = endsAtRaw ?? (lastEnd?.wsId === wsId ? lastEnd.endsAt : null);
+  const lastEnd = lastEnds[wsId] ?? null;
+  const boundaryEndRaw = endsAtRaw ?? lastEnd;
 
   // When this client first saw the trial replaced by a paid plan (subscribed
   // mid-trial, possibly on another device). Business-only features then lock
   // for Pro, but the server may serve its cached trial policy for up to a
   // minute, so paid-feature reads are refreshed once that has passed.
-  const lastEndKey = lastEnd?.wsId === wsId ? `${wsId}:${lastEnd.endsAt}` : null;
+  const lastEndKey = lastEnd ? `${wsId}:${lastEnd}` : null;
   const convertedToPaid =
     !!summary &&
     summary.entitlement.plan !== "free" &&
     (!summary.trial || summary.trial.state === "converted");
-  const [conversion, setConversion] = useState<{ key: string; at: number } | null>(null);
-  const convertedAt =
-    conversion && conversion.key === lastEndKey ? conversion.at : undefined;
+  const [conversions, setConversions] = useState<Record<string, number>>({});
+  const convertedAt = lastEndKey ? conversions[lastEndKey] : undefined;
   useEffect(() => {
     if (!convertedToPaid || !lastEndKey) return;
-    setConversion((current) =>
-      current?.key === lastEndKey
+    setConversions((current) =>
+      lastEndKey in current
         ? current
-        : { key: lastEndKey, at: summaryQuery.dataUpdatedAt || Date.now() },
+        : { ...current, [lastEndKey]: summaryQuery.dataUpdatedAt || Date.now() },
     );
   }, [convertedToPaid, lastEndKey, summaryQuery.dataUpdatedAt]);
   const cloudSaysActive = summary?.trial?.state === "active";
@@ -237,15 +241,14 @@ export function useWorkspaceTrial(
     summary?.trial?.state === "expired" && summary.entitlement.plan === "free";
 
   // When this client first received Cloud's confirmation, per trial.
-  const [confirmation, setConfirmation] = useState<{ key: string; at: number } | null>(null);
-  const confirmedAt =
-    confirmation && confirmation.key === trialKey ? confirmation.at : undefined;
+  const [confirmations, setConfirmations] = useState<Record<string, number>>({});
+  const confirmedAt = trialKey ? confirmations[trialKey] : undefined;
   useEffect(() => {
     if (!cloudConfirmsEnd || !trialKey) return;
-    setConfirmation((current) =>
-      current?.key === trialKey
+    setConfirmations((current) =>
+      trialKey in current
         ? current
-        : { key: trialKey, at: summaryQuery.dataUpdatedAt || Date.now() },
+        : { ...current, [trialKey]: summaryQuery.dataUpdatedAt || Date.now() },
     );
   }, [cloudConfirmsEnd, summaryQuery.dataUpdatedAt, trialKey]);
 

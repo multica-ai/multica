@@ -137,3 +137,54 @@ it("refreshes Business-only feature access after a trial converts to Pro on anot
     qc.clear();
   }
 });
+
+// A desktop window switches workspaces without remounting. Switching to
+// another workspace's trial and back must not drop the refresh a mid-trial
+// conversion scheduled for this one.
+it("keeps a converted workspace's feature refresh across a workspace switch", async () => {
+  vi.useFakeTimers();
+  const t0 = endsAt - 7 * 24 * 60 * 60 * 1000;
+  vi.setSystemTime(t0);
+  const other = "ws-trial-other";
+  setApiInstance({
+    getWorkspaceSubscriptionSummary: async () => paid,
+    getWorkspaceFeatures: async () => ({
+      features: { private_projects: Date.now() < t0 + 60_000 ? "available" : "locked" },
+    }),
+  } as unknown as ApiClient);
+  const qc = createQueryClient();
+  qc.setQueryData(workspaceSubscriptionKeys.summary(ws), active);
+  qc.setQueryData(workspaceSubscriptionKeys.summary(other), active);
+  qc.setQueryData(workspaceFeatureKeys.all(ws), { features: { private_projects: "available" } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  const { result, rerender, unmount } = renderHook(
+    ({ wsId }) => ({
+      trial: useWorkspaceTrial(wsId, true),
+      access: usePaidFeatureAccess(wsId, "private_projects", { hasExistingConfig: true }),
+    }),
+    { wrapper, initialProps: { wsId: ws } },
+  );
+  try {
+    // This workspace's summary now reports Pro; the server still serves the
+    // trial's Business policy for another minute.
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: workspaceSubscriptionKeys.all(ws) });
+    });
+    await advance(10);
+    expect(result.current.trial.kind).toBe("none");
+
+    rerender({ wsId: other });
+    await advance(1_000);
+    rerender({ wsId: ws });
+    await advance(10_000);
+    expect(result.current.access.state).toBe("available");
+
+    await advance(80_000);
+    expect(result.current.access.state).toBe("read_only");
+  } finally {
+    unmount();
+    qc.clear();
+  }
+});

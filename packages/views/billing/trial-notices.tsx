@@ -238,11 +238,21 @@ function TrialEndedDialog({ wsId, trial }: { wsId: string; trial: EndedTrial }) 
   });
   const current = (query: { isPending: boolean; dataUpdatedAt: number }) =>
     !query.isPending && query.dataUpdatedAt >= settledAt;
-  if (seen || !current(featuresQuery) || !current(usageQuery)) return null;
+  // Cloud has confirmed the downgrade; the details only add to it. A detail
+  // read that failed does not hold the dialog back: it opens without that
+  // line, which appears if a later read succeeds while it is open.
+  const answered = (query: {
+    isPending: boolean;
+    isError: boolean;
+    isFetching: boolean;
+    dataUpdatedAt: number;
+  }) => current(query) || (query.isError && !query.isFetching);
+  if (seen || !answered(featuresQuery) || !answered(usageQuery)) return null;
 
   const count = new Intl.NumberFormat(locale);
-  const privateProjectsLocked = featuresQuery.data?.features?.private_projects === "locked";
-  const usage = usageQuery.data;
+  const privateProjectsLocked =
+    current(featuresQuery) && featuresQuery.data?.features?.private_projects === "locked";
+  const usage = current(usageQuery) ? usageQuery.data : undefined;
   const autopilotEnforced =
     usage?.action === "enforce" && usage.limit !== null && usage.used !== null;
 
