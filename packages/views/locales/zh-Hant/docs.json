@@ -88,7 +88,8 @@
     "empty_resolved": "沒有已解決的評論。",
     "errors": {
       "save": "評論送出失敗",
-      "delete": "評論刪除失敗"
+      "delete": "評論刪除失敗",
+      "resolve": "無法更新討論"
     }
   }
 }

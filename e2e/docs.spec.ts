@@ -328,7 +328,7 @@ test("Cmd+K finds a doc by words that only appear in its content", async ({ page
   await expect(page).toHaveURL(new RegExp(`/docs/${doc.id}$`));
 });
 
-test("comment on selected text, reply, find it again after reload, and resolve", async ({ page }, info) => {
+test("comment on selected text, reply, find it again after reload, resolve and reopen", async ({ page }, info) => {
   const doc = await api.createDoc(
     "Release runbook",
     "# Before release\n\nMigrations must rehearse a day ahead in staging.\n\nConfirm the rollback owner.",
@@ -373,7 +373,21 @@ test("comment on selected text, reply, find it again after reload, and resolve",
   await editor.getByText("Migrations must rehearse", { exact: false }).click({ position: { x: 150, y: 8 } });
   await expect(panel.getByRole("group", { name: selected! }).getByText("Yes, with CONCURRENTLY.", { exact: true })).toBeVisible();
 
+  // Clicking into the open discussion's reply box leaves the doc where it is.
+  await panel.getByRole("group", { name: selected! }).locator('.ProseMirror[contenteditable="true"]').click();
+  await expect(panel.getByRole("group", { name: selected! }).locator('.ProseMirror[contenteditable="true"]')).toBeFocused();
+
+  // Resolving keeps the open list in view and clears the highlight.
   await panel.getByRole("button", { name: "Resolve", exact: true }).click();
-  await expect(panel.getByRole("tab", { name: "Resolved 1" })).toHaveAttribute("aria-selected", "true");
-  await expect(panel.getByRole("tab", { name: "Open 0" })).toBeVisible();
+  await expect(panel.getByRole("tab", { name: "Open 0" })).toHaveAttribute("aria-selected", "true");
+  await expect(panel.getByRole("tab", { name: "Resolved 1" })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => (CSS.highlights.get("doc-comment")?.size ?? 0) + (CSS.highlights.get("doc-comment-active")?.size ?? 0)))
+    .toBe(0);
+
+  // Reopening brings it back to the open list.
+  await panel.getByRole("tab", { name: "Resolved 1" }).click();
+  await panel.getByRole("button", { name: "Reopen", exact: true }).click();
+  await expect(panel.getByRole("tab", { name: "Open 1" })).toHaveAttribute("aria-selected", "true");
+  await expect(panel.getByRole("group", { name: selected! })).toBeVisible();
 });

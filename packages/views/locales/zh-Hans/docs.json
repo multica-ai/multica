@@ -88,7 +88,8 @@
     "empty_resolved": "没有已解决的评论。",
     "errors": {
       "save": "评论发送失败",
-      "delete": "评论删除失败"
+      "delete": "评论删除失败",
+      "resolve": "无法更新讨论"
     }
   }
 }

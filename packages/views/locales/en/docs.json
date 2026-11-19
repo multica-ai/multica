@@ -89,7 +89,8 @@
     "empty_resolved": "No resolved comments.",
     "errors": {
       "save": "Could not post the comment",
-      "delete": "Could not delete the comment"
+      "delete": "Could not delete the comment",
+      "resolve": "Could not update the discussion"
     }
   }
 }

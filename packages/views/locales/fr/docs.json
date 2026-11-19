@@ -89,7 +89,8 @@
     "empty_resolved": "Aucun commentaire résolu.",
     "errors": {
       "save": "Impossible de publier le commentaire",
-      "delete": "Impossible de supprimer le commentaire"
+      "delete": "Impossible de supprimer le commentaire",
+      "resolve": "Impossible de mettre à jour la discussion"
     }
   }
 }

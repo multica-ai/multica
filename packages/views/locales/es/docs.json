@@ -89,7 +89,8 @@
     "empty_resolved": "No hay comentarios resueltos.",
     "errors": {
       "save": "No se pudo publicar el comentario",
-      "delete": "No se pudo eliminar el comentario"
+      "delete": "No se pudo eliminar el comentario",
+      "resolve": "No se pudo actualizar la conversación"
     }
   }
 }

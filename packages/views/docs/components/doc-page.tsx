@@ -343,6 +343,7 @@ function DocEditor({ doc }: { doc: Doc }) {
           activeId={activeThread}
           draft={newAnchor}
           onActivate={activateThread}
+          onDeactivate={() => setActiveThread(null)}
           onDraftDone={(id) => {
             setNewAnchor(null);
             if (id) setActiveThread(id);
