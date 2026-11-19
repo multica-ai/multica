@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -231,6 +232,9 @@ type LocalWorktree struct {
 	// Set by the daemon when a pre-commit step failed in a way that would make
 	// the committed branch wrong (see AbortWithReason).
 	aborted error
+	// Only the preparation process calls Discard. Checkout hooks may have
+	// put edits in a submodule before the agent or provider setup runs.
+	preserveOnDiscard bool
 }
 
 // MarshalJSON / UnmarshalJSON carry this struct's unexported state across the
@@ -436,18 +440,22 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		tracksState: plan.tracksState && actualBranch == plan.name,
 	}
 
-	// Tear the worktree back down on every failure below. A half-replayed tree
-	// is the worst outcome available: it looks like a working checkout, so
-	// nothing downstream questions it, while the agent silently reads different
-	// code than the user has. The branch goes with it only when this prepare
-	// created it — a continued branch carries earlier turns' work, and dropping
-	// it because THIS turn could not start would destroy the very thing the
-	// task was meant to build on.
-	rollback := func() {
+	// A checkout hook may have populated a submodule before replay. Keep
+	// that work if the remainder of preparation cannot finish.
+	rollback := func(reason error) error {
+		if wt.preserveOnDiscard {
+			return fmt.Errorf("%w; the task worktree is preserved at %s", reason, worktreePath)
+		}
 		removeLocalWorktreeDir(gitRoot, worktreePath, logger)
 		if createdBranch {
 			dropBranch(gitRoot, actualBranch, logger)
 		}
+		return reason
+	}
+	populated, err := hasPopulatedSubmodule(worktreePath)
+	wt.preserveOnDiscard = populated || err != nil
+	if err != nil {
+		return nil, rollback(fmt.Errorf("inspect existing submodule checkouts: %w", err))
 	}
 
 	// Replay the user's directory into the worktree.
@@ -458,8 +466,25 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	// changed after that is new information there.
 	replay, replayErr := replayUserState(worktreePath, plan, userState, logger)
 	if replayErr != nil {
-		rollback()
-		return nil, replayErr
+		return nil, rollback(replayErr)
+	}
+	// A conflicted .gitmodules belongs to the agent along with the other
+	// replay conflicts. Its working file cannot be parsed until resolved.
+	if _, err := os.Lstat(filepath.Join(worktreePath, ".gitmodules")); !slices.Contains(replay.conflicts, ".gitmodules") && !errors.Is(err, os.ErrNotExist) {
+		sourceGitDir, err := runGitTrimmed(gitRoot, "rev-parse", "--absolute-git-dir")
+		if err != nil {
+			return nil, rollback(err)
+		}
+		taskGitDir, err := runGitTrimmed(worktreePath, "rev-parse", "--absolute-git-dir")
+		if err != nil {
+			return nil, rollback(err)
+		}
+		submodules := taskSubmodules{taskRoot: worktreePath, taskGitDir: taskGitDir}
+		err = submodules.prepare(worktreePath, gitRoot, sourceGitDir, plan.base)
+		wt.preserveOnDiscard = wt.preserveOnDiscard || submodules.existingCheckout
+		if err != nil {
+			return nil, rollback(err)
+		}
 	}
 	wt.ReplayConflicts = replay.conflicts
 	// An unresolved merge means the branch does not carry this turn's snapshot
@@ -482,10 +507,11 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	// entries cannot be committed without committing conflict markers, and the
 	// agent has not had its turn at them yet.
 	if len(replay.conflicts) == 0 {
-		dirty, dirtyErr := worktreeIsDirty(worktreePath)
+		// The parent baseline can record gitlink changes. Edits inside a
+		// reused submodule stay in place for the agent and finalization.
+		dirty, dirtyErr := worktreeStatusIsDirty(worktreePath, "dirty")
 		if dirtyErr != nil {
-			rollback()
-			return nil, fmt.Errorf("execenv: could not inspect the prepared worktree for %q: %w", gitRoot, dirtyErr)
+			return nil, rollback(fmt.Errorf("execenv: could not inspect the prepared worktree for %q: %w", gitRoot, dirtyErr))
 		}
 		// A branch this prepare created gets its baseline even when there was
 		// nothing to replay. Two things need it. The empty case is the one that
@@ -500,8 +526,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 				// Without a baseline the task cannot tell the user's work from the
 				// agent's, so it would later commit the user's files as if the agent
 				// had produced them. Refuse rather than deliver a misleading branch.
-				rollback()
-				return nil, fmt.Errorf("execenv: could not record a baseline commit for the replayed state of %q: %w", gitRoot, baseErr)
+				return nil, rollback(fmt.Errorf("execenv: could not record a baseline commit for the replayed state of %q: %w", gitRoot, baseErr))
 			}
 			// The branch now stands on a commit that carries this turn's snapshot,
 			// and everything downstream measures the delivery against it.
@@ -635,6 +660,13 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 				"the worktree is preserved at %s (listed by `git worktree list` in %s) — resolve the conflict there, "+
 				"or re-run the task and let the agent finish the merge",
 			w.Branch, quotedPaths(unmerged), w.Path, w.GitRoot)
+	}
+
+	// Persist submodule commits before the parent stages their gitlinks.
+	if err := w.saveSubmodules(); err != nil {
+		outcome.Branch = ""
+		outcome.PreservedPath = w.Path
+		return outcome, fmt.Errorf("%w; the work is preserved in the worktree at %s", err, w.Path)
 	}
 
 	// Treat "can't tell" like "dirty": committing costs an empty commit at
@@ -791,6 +823,12 @@ func (w *LocalWorktree) Discard(logger *slog.Logger) {
 	if err := w.RestoreRuntimeConfigTracking(); err != nil {
 		if logger != nil {
 			logger.Warn("execenv: could not restore runtime config tracking before discarding worktree", "error", err)
+		}
+		return
+	}
+	if w.preserveOnDiscard {
+		if logger != nil {
+			logger.Warn("execenv: kept task worktree containing pre-existing submodule work", "path", w.Path, "branch", w.Branch)
 		}
 		return
 	}
@@ -1062,7 +1100,11 @@ func commitIdentityArgs(dir string) []string {
 }
 
 func worktreeIsDirty(worktreePath string) (bool, error) {
-	out, err := runGit(worktreePath, "status", "--porcelain")
+	return worktreeStatusIsDirty(worktreePath, "none")
+}
+
+func worktreeStatusIsDirty(worktreePath, ignoreSubmodules string) (bool, error) {
+	out, err := runGit(worktreePath, "status", "--porcelain", "--ignore-submodules="+ignoreSubmodules)
 	if err != nil {
 		return false, fmt.Errorf("git status: %s: %w", strings.TrimSpace(out), err)
 	}
