@@ -609,3 +609,36 @@ func TestValidateLoginTokenPrefix(t *testing.T) {
 		}
 	}
 }
+
+func TestRunAuthStatusDistinguishesVerificationFailure(t *testing.T) {
+	t.Setenv("MULTICA_TOKEN", "mul_test_auth_status")
+	for _, tc := range []struct {
+		name    string
+		status  int
+		message string
+		relogin bool
+	}{
+		{"unauthorized", http.StatusUnauthorized, "Token is invalid or expired", true},
+		{"unavailable", http.StatusServiceUnavailable, "Could not verify the token", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/me" {
+					t.Errorf("unexpected request path %q", r.URL.Path)
+				}
+				w.WriteHeader(tc.status)
+			}))
+			defer srv.Close()
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			stderr := captureStderr(t)
+			defer stderr.restore()
+			if err := runAuthStatus(testCmd(), nil); err != nil {
+				t.Fatal(err)
+			}
+			out := stderr.read()
+			if !strings.Contains(out, tc.message) || strings.Contains(out, "multica login") != tc.relogin {
+				t.Fatalf("unexpected auth status output: %q", out)
+			}
+		})
+	}
+}
