@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Archive, ArchiveRestore, MoreHorizontal, Pencil, Settings2, Trash2 } from "@multica/ui/icons";
+import { Archive, ArchiveRestore, GitBranch, MoreHorizontal, Pencil, Settings2, Trash2 } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import {
   DropdownMenu,
@@ -45,6 +45,9 @@ export function ChatSessionHeader({
   session,
   agent,
   onArchive,
+  onFork,
+  forkPending,
+  forkDisabled,
   leading,
 }: {
   session: ChatSession;
@@ -53,6 +56,9 @@ export function ChatSessionHeader({
   // next chat on desktop, back to the list on mobile), so the parent owns it —
   // see ChatPage.handleArchive. Falls back to a plain status flip if unwired.
   onArchive?: (session: ChatSession) => void;
+  onFork?: () => void;
+  forkPending?: boolean;
+  forkDisabled?: boolean;
   /**
    * Far-left control: the nav toggle while the list is collapsed, or the way
    * back to the list at compact widths. Nothing renders there without one.
@@ -266,6 +272,12 @@ export function ChatSessionHeader({
                 >
                   <Settings2 className="h-4 w-4" />
                   {t(($) => $.header.agent_settings)}
+                </DropdownMenuItem>
+              )}
+              {onFork && !isArchived && (
+                <DropdownMenuItem disabled={forkPending || forkDisabled} onClick={onFork}>
+                  <GitBranch className="h-4 w-4" />
+                  {forkPending ? t(($) => $.header.fork_pending) : t(($) => $.header.fork)}
                 </DropdownMenuItem>
               )}
               <DropdownMenuSeparator />

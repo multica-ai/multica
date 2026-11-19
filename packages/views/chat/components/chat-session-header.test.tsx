@@ -92,6 +92,28 @@ describe("ChatSessionHeader breadcrumb", () => {
     expect(pushMock).toHaveBeenCalledWith("/agents/agent-1?view=general");
   });
 
+  it("starts a fork from the actions menu", () => {
+    const onFork = vi.fn();
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatSessionHeader session={session} agent={null} onFork={onFork} />
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Fork chat" }));
+    expect(onFork).toHaveBeenCalledOnce();
+  });
+
+  it("shows a disabled fork action while the branch is being created", () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatSessionHeader session={session} agent={null} onFork={vi.fn()} forkPending />
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.getByRole("menuitem", { name: enChat.header.fork_pending })).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("offers no agent settings when the chat's agent is unavailable", () => {
     render(
       <I18nProvider locale="en" resources={TEST_RESOURCES}>

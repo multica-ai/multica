@@ -2723,6 +2723,8 @@ export const ChatForkSchema = z.object({
   chat_id: z.string().optional(),
 });
 
+export type ChatFork = z.infer<typeof ChatForkSchema>;
+
 export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),

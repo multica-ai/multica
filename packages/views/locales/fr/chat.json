@@ -267,6 +267,11 @@
     "wakeup_active": "Attend pour faire le point"
   },
   "header": {
+    "fork": "Créer une branche",
+    "fork_pending": "Création de la branche…",
+    "fork_failed": "Impossible de créer la branche. Vérifiez qu’aucune exécution n’est en cours et que le runtime Codex est disponible.",
+    "fork_ready": "La branche est prête",
+    "open_fork": "Ouvrir la branche",
     "agent_settings": "Paramètres de l'agent",
     "rename": "Renommer la discussion",
     "archive": "Archiver la discussion",
