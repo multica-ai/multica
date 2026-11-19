@@ -117,7 +117,13 @@ function summarizeToggles(toggles: Toggle[]) {
 const detailSelector = '[data-mc="issue-detail"][data-view="page"]';
 
 /** Resolves with page-clock marks once the issue's title and the target comment are on screen. */
-async function waitForIssue(page: Page, title: string, commentId: string, mode: "mounted" | "in-view" | "title") {
+/**
+ * `first-screen`: the first comment is mounted, or the history starts below
+ * the first screen (a long description or sub-issue list above it). Virtuoso
+ * renders no rows out of view, so a comment below the fold mounts only when
+ * the reader scrolls to it — that is the scroll step's job, not the open's.
+ */
+async function waitForIssue(page: Page, title: string, commentId: string, mode: "first-screen" | "in-view" | "title") {
   const handle = await page.waitForFunction(({ title, commentId, mode, detailSelector }) => {
     const marks = window.__corePerf.marks;
     const details = [...document.querySelectorAll(detailSelector)];
@@ -127,6 +133,13 @@ async function waitForIssue(page: Page, title: string, commentId: string, mode: 
     if (mode === "title") return { title: marks.title, content: marks.title };
     const root = detail.querySelector<HTMLElement>("[data-tab-scroll-root]");
     const target = root?.querySelector<HTMLElement>(`[data-comment-content="${commentId}"]`);
+    if (mode === "first-screen" && root && !target) {
+      const activity = detail.querySelector<HTMLElement>('[data-mc="issue-activity"]');
+      if (activity && activity.getBoundingClientRect().top >= root.getBoundingClientRect().bottom) {
+        marks.content ??= performance.now();
+        return { title: marks.title, content: marks.content };
+      }
+    }
     if (!root || !target || !target.textContent?.trim()) return false;
     const row = target.closest("[data-virtual-thread-mounted]");
     if (row?.getAttribute("data-virtual-thread-mounted") === "false") return false;
@@ -156,7 +169,7 @@ test("open, scroll and toggle the sidebar on a big issue", async ({ browser }) =
         page.on("request", (request) => { if (new URL(request.url()).pathname.startsWith("/api/")) apiRequests++; });
         page.on("requestfinished", (request) => { if (/\/api\/attachments\/[^/]+\/download/.test(request.url())) imagesFetched++; });
         await page.goto(`/${manifest.workspace.slug}/issues/${issue.id}`, { waitUntil: "commit" });
-        const marks = await waitForIssue(page, issue.title, issue.firstCommentId, "mounted");
+        const marks = await waitForIssue(page, issue.title, issue.firstCommentId, "first-screen");
         await settle(page, LOAD_TAIL_MS);
         const load = await stallsBetween(page, 0, await pageNow(page));
         const requestsAtLoad = apiRequests;
