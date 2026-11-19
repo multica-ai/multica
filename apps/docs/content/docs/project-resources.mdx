@@ -77,6 +77,8 @@ The directory must be an absolute path, must already exist, and must be readable
 
 Each project can link at most one local directory per daemon. Different computers on a team can each link their own directory for the same project.
 
+On Multica Desktop, Markdown links in an issue's description or comments preview `.md`, `.markdown`, and `.txt` files inside Multica. The file must be no larger than 2 MiB and inside the project's linked folder, with that folder's runtime online on this computer. Local file preview is unavailable in the browser.
+
 <Callout type="warning">
 In the default `in_place` mode a local directory is not an isolated environment: the agent directly sees and modifies your current branch and uncommitted files, and Multica does not automatically switch branches, stash, commit, push, or open PRs. Worktree mode is different — see [How runs share the directory](#how-runs-share-the-directory) below.
 </Callout>

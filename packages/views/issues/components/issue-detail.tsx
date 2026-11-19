@@ -3026,16 +3026,21 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
     overrideTop: restoredScrollTop,
   });
 
-  // Keep the identity value stable across unrelated issue-detail updates so
-  // context consumers only re-render when the owning issue changes identity.
+  // Keep the owning issue and project stable across unrelated detail updates.
   const resolvedIssueId = issue?.id;
   const resolvedIssueIdentifier = issue?.identifier;
+  const resolvedProjectId = issue?.project_id;
   const currentIssueRenderContext = useMemo(
     () =>
       resolvedIssueId && resolvedIssueIdentifier
-        ? { id: resolvedIssueId, identifier: resolvedIssueIdentifier }
+        ? {
+            id: resolvedIssueId,
+            identifier: resolvedIssueIdentifier,
+            workspaceId: wsId,
+            projectId: resolvedProjectId,
+          }
         : null,
-    [resolvedIssueId, resolvedIssueIdentifier],
+    [resolvedIssueId, resolvedIssueIdentifier, resolvedProjectId, wsId],
   );
 
   if (issueReadState.loadFailed) {

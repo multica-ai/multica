@@ -11,6 +11,7 @@ import {
   workspaceSlugForPath,
 } from "@multica/core/paths";
 import { isIssueIdentifier } from "@multica/ui/markdown";
+import { isLocalFileHref } from "@multica/core/paths/local-file-link";
 import type { LinkClickIntent } from "../../navigation/click-intent";
 
 /**
@@ -239,6 +240,9 @@ export function openLink(
   appOrigin?: string | null,
   intent: LinkClickIntent = "push",
 ): void {
+  // Local document links need the owning project and the native permission
+  // checks. They must never become a workspace route or a browser URL.
+  if (isLocalFileHref(href) && !isGlobalPath(href) && !isKnownWorkspacePath(href)) return;
   const internalPath = href.startsWith("/")
     ? href
     : toInternalAppPath(href, appOrigin);

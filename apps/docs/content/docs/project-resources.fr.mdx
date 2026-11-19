@@ -77,6 +77,8 @@ Le répertoire doit être un chemin absolu, doit déjà exister et doit être ac
 
 Chaque projet peut rattacher au plus un répertoire local par daemon. Les différents ordinateurs d'une équipe peuvent chacun rattacher leur propre répertoire pour le même projet.
 
+Dans Multica Desktop, les liens Markdown dans la description ou les commentaires d'une tâche affichent un aperçu des fichiers `.md`, `.markdown` et `.txt` directement dans Multica. Le fichier ne doit pas dépasser 2 MiB et doit se trouver dans le dossier rattaché au projet, avec le runtime de ce dossier en ligne sur cet ordinateur. L'aperçu des fichiers locaux n'est pas disponible dans le navigateur.
+
 <Callout type="warning">
 En mode `in_place` (par défaut), un répertoire local n'est pas un environnement isolé : l'agent voit et modifie directement votre branche actuelle et vos fichiers non commités, et Multica ne change pas automatiquement de branche, ne fait ni stash, ni commit, ni push, et n'ouvre pas de PR. Le mode worktree fonctionne autrement, voir [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire) ci-dessous.
 </Callout>

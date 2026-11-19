@@ -21,6 +21,8 @@ import { RichContent } from "../rich-content";
 interface ReadonlyContentProps {
   content: string;
   className?: string;
+  /** Disable automatic remote resources and interactive fences for private local text. */
+  allowRemoteContent?: boolean;
   /**
    * Attachments associated with the surrounding entity (comment / issue body).
    * Callers SHOULD pass a stable reference; a fresh array on every parent
@@ -33,6 +35,7 @@ export const ReadonlyContent = memo(function ReadonlyContent({
   content,
   className,
   attachments,
+  allowRemoteContent,
 }: ReadonlyContentProps) {
   return (
     <RichContent
@@ -41,6 +44,7 @@ export const ReadonlyContent = memo(function ReadonlyContent({
       density="document"
       phase="settled"
       className={className}
+      allowRemoteContent={allowRemoteContent}
     />
   );
 });

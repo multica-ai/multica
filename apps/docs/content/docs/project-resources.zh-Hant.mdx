@@ -77,6 +77,8 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 每個專案在同一臺守護程序上最多關聯一個本地目錄。團隊中的不同電腦可以分別為同一個專案關聯各自的目錄。
 
+在 Multica Desktop 中，點選任務描述或評論中的 Markdown 連結，可在 Multica 內預覽 `.md`、`.markdown` 和 `.txt` 檔案。檔案大小不得超過 2 MiB，且必須位於專案已關聯的資料夾內，該資料夾的執行時須在這台電腦上保持線上。瀏覽器不支援預覽本地檔案。
+
 <Callout type="warning">
 在預設的 `in_place` 模式下，本地目錄不是隔離環境：AI 代理會直接看到並修改當前分支和未提交的檔案，Multica 也不會自動切換分支、stash、commit、push 或建立 PR。worktree 模式不一樣，見下面的[執行如何共享這個目錄](#執行如何共享這個目錄)。
 </Callout>
