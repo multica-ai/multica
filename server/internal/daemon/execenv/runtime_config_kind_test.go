@@ -318,7 +318,7 @@ func TestAntigravityBackgroundTaskSafetyAllKinds(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			agy := buildMetaSkillContent("antigravity", ctx)
-			if !strings.Contains(agy, "yield the model subturn silently") ||
+			if !strings.Contains(agy, "yield the model subturn while waiting") ||
 				strings.Contains(agy, "whatever a tool response promises") || strings.Contains(agy, "Never background-and-yield") {
 				t.Fatal("Antigravity model-subturn contract missing or contradicted")
 			}

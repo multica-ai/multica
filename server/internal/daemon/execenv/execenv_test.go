@@ -1359,8 +1359,8 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				// Detached processes and the shared CI contract stay restricted.
 				providerPins = []string{
 					"completion notifications in the same process",
-					"yield the model subturn silently, without a placeholder reply",
-					"polling `manage_task` or task logs",
+					"yield the model subturn while waiting",
+					"without polling `manage_task` or task logs",
 					"have no such wakeup",
 				}
 			}
