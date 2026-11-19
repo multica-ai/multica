@@ -1036,6 +1036,7 @@ type InboxItem struct {
 	Section       pgtype.Text        `json:"section"`
 	SnoozedUntil  pgtype.Timestamptz `json:"snoozed_until"`
 	SnoozedAt     pgtype.Timestamptz `json:"snoozed_at"`
+	RestoredAt    pgtype.Timestamptz `json:"restored_at"`
 }
 
 type InstanceTelemetryState struct {

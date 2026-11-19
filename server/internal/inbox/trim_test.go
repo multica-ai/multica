@@ -3,35 +3,28 @@ package inbox
 import (
 	"context"
 	"testing"
-	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// fakeTrimQueries models an inbox of `rows` shown rows, newest first, where
-// every row strictly older than the cutoff can be archived.
+// fakeTrimQueries models an inbox of `rows` shown rows of which `locked` of
+// the overflow are held by another write and skipped.
 type fakeTrimQueries struct {
 	rows       int
-	cutoffs    []int32
+	locked     int
 	archiveRun int
 }
 
-func (f *fakeTrimQueries) GetInboxActiveCutoff(_ context.Context, arg db.GetInboxActiveCutoffParams) (pgtype.Timestamptz, error) {
-	f.cutoffs = append(f.cutoffs, arg.RowOffset)
-	if int(arg.RowOffset) >= f.rows {
-		return pgtype.Timestamptz{}, pgx.ErrNoRows
-	}
-	return pgtype.Timestamptz{Time: time.Unix(int64(f.rows-int(arg.RowOffset)), 0), Valid: true}, nil
+func (f *fakeTrimQueries) InboxOverflows(_ context.Context, arg db.InboxOverflowsParams) (bool, error) {
+	return f.rows > int(arg.Keep), nil
 }
 
-func (f *fakeTrimQueries) ArchiveInboxOlderThan(_ context.Context, arg db.ArchiveInboxOlderThanParams) (int64, error) {
+func (f *fakeTrimQueries) ArchiveInboxOverflow(_ context.Context, arg db.ArchiveInboxOverflowParams) (int64, error) {
 	f.archiveRun++
-	n := min(f.rows-ActiveLimit, int(arg.BatchSize))
+	n := min(max(f.rows-int(arg.Keep)-f.locked, 0), int(arg.BatchSize))
 	f.rows -= n
 	return int64(n), nil
 }
@@ -48,10 +41,8 @@ func batchArchivedEvents(bus *events.Bus) *[]events.Event {
 	return &got
 }
 
-// An inbox within the slack is left alone, so a busy inbox is not trimmed and
-// refreshed on every notification.
-func TestTrimmerLeavesInboxWithinSlack(t *testing.T) {
-	q := &fakeTrimQueries{rows: ActiveLimit + trimSlack}
+func TestTrimmerLeavesInboxAtTheLimit(t *testing.T) {
+	q := &fakeTrimQueries{rows: ActiveLimit}
 	bus := events.New()
 	got := batchArchivedEvents(bus)
 	tr := NewTrimmer(q, bus)
@@ -59,7 +50,7 @@ func TestTrimmerLeavesInboxWithinSlack(t *testing.T) {
 	tr.Mark(trimRecipient)
 	tr.Flush(context.Background())
 
-	if q.rows != ActiveLimit+trimSlack || q.archiveRun != 0 || len(*got) != 0 {
+	if q.rows != ActiveLimit || q.archiveRun != 0 || len(*got) != 0 {
 		t.Fatalf("rows=%d archive runs=%d events=%d; want the inbox untouched", q.rows, q.archiveRun, len(*got))
 	}
 	if len(tr.pending) != 0 {
@@ -67,8 +58,10 @@ func TestTrimmerLeavesInboxWithinSlack(t *testing.T) {
 	}
 }
 
-func TestTrimmerArchivesBackToLimitAndAnnounces(t *testing.T) {
-	q := &fakeTrimQueries{rows: ActiveLimit + trimSlack + 1}
+// One row past the limit is trimmed: the list shows only ActiveLimit rows, so
+// an extra row would otherwise sit out of sight in neither list.
+func TestTrimmerArchivesOneRowPastTheLimitAndAnnounces(t *testing.T) {
+	q := &fakeTrimQueries{rows: ActiveLimit + 1}
 	bus := events.New()
 	got := batchArchivedEvents(bus)
 	tr := NewTrimmer(q, bus)
@@ -76,20 +69,38 @@ func TestTrimmerArchivesBackToLimitAndAnnounces(t *testing.T) {
 	tr.Mark(trimRecipient)
 	tr.Flush(context.Background())
 
-	if q.rows != ActiveLimit {
-		t.Fatalf("rows = %d, want %d", q.rows, ActiveLimit)
-	}
-	if len(q.cutoffs) != 2 || q.cutoffs[0] != ActiveLimit+trimSlack || q.cutoffs[1] != ActiveLimit-1 {
-		t.Fatalf("cutoff offsets = %v, want trigger then boundary", q.cutoffs)
+	if q.rows != ActiveLimit || len(tr.pending) != 0 {
+		t.Fatalf("rows=%d pending=%v; want trimmed to %d and settled", q.rows, tr.pending, ActiveLimit)
 	}
 	if len(*got) != 1 {
 		t.Fatalf("batch-archived events = %d, want 1", len(*got))
 	}
 	payload := (*got)[0].Payload.(map[string]any)
 	if payload["recipient_id"] != util.UUIDToString(trimRecipient.RecipientID) ||
-		payload["count"] != int64(trimSlack+1) || payload["reason"] != "inbox_limit" ||
+		payload["count"] != int64(1) || payload["reason"] != "inbox_limit" ||
 		(*got)[0].WorkspaceID != util.UUIDToString(trimRecipient.WorkspaceID) {
 		t.Fatalf("event = %+v", (*got)[0])
+	}
+}
+
+// Rows skipped because another write held them keep the inbox queued.
+func TestTrimmerRequeuesInboxWithSkippedRows(t *testing.T) {
+	q := &fakeTrimQueries{rows: ActiveLimit + 10, locked: 3}
+	tr := NewTrimmer(q, nil)
+
+	tr.Mark(trimRecipient)
+	tr.Flush(context.Background())
+	if q.rows != ActiveLimit+3 {
+		t.Fatalf("rows = %d, want the unlocked overflow archived", q.rows)
+	}
+	if _, ok := tr.pending[trimRecipient]; !ok {
+		t.Fatal("inbox with skipped rows was not queued for the next round")
+	}
+
+	q.locked = 0
+	tr.Flush(context.Background())
+	if q.rows != ActiveLimit || len(tr.pending) != 0 {
+		t.Fatalf("rows=%d pending=%v after the lock cleared", q.rows, tr.pending)
 	}
 }
 
@@ -110,7 +121,7 @@ func TestTrimmerCarriesLargeBacklogToNextRound(t *testing.T) {
 }
 
 func TestTrimmerDoesNotAnnounceForAgents(t *testing.T) {
-	q := &fakeTrimQueries{rows: ActiveLimit + trimSlack + 5}
+	q := &fakeTrimQueries{rows: ActiveLimit + 5}
 	bus := events.New()
 	got := batchArchivedEvents(bus)
 	tr := NewTrimmer(q, bus)
@@ -125,7 +136,7 @@ func TestTrimmerDoesNotAnnounceForAgents(t *testing.T) {
 	}
 }
 
-func TestTrimmerMarksRecipientOfNewItem(t *testing.T) {
+func TestTrimmerMarksInboxesThatMayHaveGrown(t *testing.T) {
 	bus := events.New()
 	tr := NewTrimmer(&fakeTrimQueries{}, bus)
 	tr.Subscribe(bus)
@@ -139,12 +150,23 @@ func TestTrimmerMarksRecipientOfNewItem(t *testing.T) {
 	}
 	bus.Publish(newEvent(item, nil))
 	bus.Publish(events.Event{Type: protocol.EventInboxNew, Payload: map[string]any{"item": "malformed"}})
-
 	if len(tr.pending) != 1 {
 		t.Fatalf("pending = %v, want only the new item's recipient", tr.pending)
 	}
 	if _, ok := tr.pending[trimRecipient]; !ok {
 		t.Fatalf("pending = %v, want %v", tr.pending, trimRecipient)
+	}
+
+	for _, eventType := range []string{protocol.EventInboxUnarchived, protocol.EventInboxUnsnoozed} {
+		tr.pending = map[Recipient]struct{}{}
+		bus.Publish(events.Event{
+			Type:        eventType,
+			WorkspaceID: util.UUIDToString(trimRecipient.WorkspaceID),
+			Payload:     map[string]any{"recipient_id": util.UUIDToString(trimRecipient.RecipientID)},
+		})
+		if _, ok := tr.pending[trimRecipient]; !ok || len(tr.pending) != 1 {
+			t.Fatalf("%s: pending = %v, want %v", eventType, tr.pending, trimRecipient)
+		}
 	}
 }
 

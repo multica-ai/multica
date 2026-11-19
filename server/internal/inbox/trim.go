@@ -2,12 +2,10 @@ package inbox
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -16,29 +14,29 @@ import (
 )
 
 // ActiveLimit is how many rows a recipient's inbox keeps in one workspace,
-// newest first. Snoozed rows do not count. Older rows are archived, so every
-// inbox read stays bounded however many notifications a recipient collects.
+// newest first by when each arrived or came back (a snooze ran out, or it was
+// restored from the archive). Snoozed rows do not count. Older rows are
+// archived, so every inbox read stays bounded however many notifications a
+// recipient collects.
 const ActiveLimit = 2000
 
 const (
-	// trimSlack lets an inbox grow this far past ActiveLimit before it is
-	// trimmed back, so a busy recipient is trimmed (and their clients
-	// refreshed) once per trimSlack notifications rather than on every one.
-	trimSlack = 100
 	// trimBatchSize bounds the rows one archive statement locks and writes.
 	trimBatchSize = 500
 	// trimMaxBatches bounds the work one recipient gets per round. A
 	// recipient with more left over is trimmed further in the next round.
 	trimMaxBatches = 20
 
+	// trimInterval also coalesces a burst of notifications for one recipient
+	// into one trim, and one inbox:batch-archived, per round.
 	trimInterval    = 30 * time.Second
 	trimRoundBudget = 25 * time.Second
 )
 
 // TrimQueries is the slice of db.Queries a Trimmer uses.
 type TrimQueries interface {
-	GetInboxActiveCutoff(ctx context.Context, arg db.GetInboxActiveCutoffParams) (pgtype.Timestamptz, error)
-	ArchiveInboxOlderThan(ctx context.Context, arg db.ArchiveInboxOlderThanParams) (int64, error)
+	InboxOverflows(ctx context.Context, arg db.InboxOverflowsParams) (bool, error)
+	ArchiveInboxOverflow(ctx context.Context, arg db.ArchiveInboxOverflowParams) (int64, error)
 }
 
 // Recipient identifies one inbox: a recipient in a workspace.
@@ -49,8 +47,8 @@ type Recipient struct {
 }
 
 // Trimmer keeps inboxes within ActiveLimit. Inboxes that may have outgrown it
-// are marked (a new notification, or a list read that hit the limit) and
-// trimmed in the background, so no notification write or inbox read waits on
+// are marked (see Subscribe, plus a list read that hit the limit) and trimmed
+// in the background, so no notification write or inbox read waits on
 // the archive.
 type Trimmer struct {
 	queries TrimQueries
@@ -76,14 +74,41 @@ func (t *Trimmer) Mark(r Recipient) {
 	t.mu.Unlock()
 }
 
-// Subscribe marks the recipient of every new inbox row. A row written into a
-// snooze is announced as inbox:snoozed and does not count, so it is skipped.
+// Subscribe marks the inboxes that may have grown: a new row, a row restored
+// from the archive, or an issue taken out of a snooze early. A row written
+// into a snooze is announced as inbox:snoozed and does not count yet.
 func (t *Trimmer) Subscribe(bus *events.Bus) {
 	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
 		if r, ok := recipientOfNewItem(e); ok {
 			t.Mark(r)
 		}
 	})
+	for _, eventType := range []string{protocol.EventInboxUnarchived, protocol.EventInboxUnsnoozed} {
+		bus.Subscribe(eventType, func(e events.Event) {
+			if r, ok := memberRecipient(e); ok {
+				t.Mark(r)
+			}
+		})
+	}
+}
+
+// memberRecipient reads the member a personal inbox event names at the top
+// of its payload.
+func memberRecipient(e events.Event) (Recipient, bool) {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return Recipient{}, false
+	}
+	recipientID, _ := payload["recipient_id"].(string)
+	ws, err := util.ParseUUID(e.WorkspaceID)
+	if err != nil {
+		return Recipient{}, false
+	}
+	rid, err := util.ParseUUID(recipientID)
+	if err != nil {
+		return Recipient{}, false
+	}
+	return Recipient{WorkspaceID: ws, RecipientType: "member", RecipientID: rid}, true
 }
 
 func recipientOfNewItem(e events.Event) (Recipient, bool) {
@@ -161,44 +186,38 @@ func (t *Trimmer) Flush(ctx context.Context) {
 	}
 }
 
-// trim archives r's shown rows beyond its newest ActiveLimit once the inbox
-// holds more than ActiveLimit+trimSlack. Rows sharing the boundary row's
-// created_at stay, so an inbox may keep slightly more than ActiveLimit. done
-// is false when rows may remain for a later round.
+// trim archives r's shown rows beyond its newest ActiveLimit. done is false
+// while rows beyond the limit remain: rows another write held locked, or more
+// than one round archives.
 func (t *Trimmer) trim(ctx context.Context, r Recipient) (archived int64, done bool, err error) {
-	if _, err := t.queries.GetInboxActiveCutoff(ctx, db.GetInboxActiveCutoffParams{
-		WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
-		RowOffset: ActiveLimit + trimSlack,
-	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, true, nil
-		}
-		return 0, false, err
+	overflows := func() (bool, error) {
+		return t.queries.InboxOverflows(ctx, db.InboxOverflowsParams{
+			WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
+			Keep: ActiveLimit,
+		})
 	}
-	cutoff, err := t.queries.GetInboxActiveCutoff(ctx, db.GetInboxActiveCutoffParams{
-		WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
-		RowOffset: ActiveLimit - 1,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return 0, true, nil
-		}
-		return 0, false, err
+	over, err := overflows()
+	if err != nil || !over {
+		return 0, err == nil, err
 	}
 	for range trimMaxBatches {
-		n, err := t.queries.ArchiveInboxOlderThan(ctx, db.ArchiveInboxOlderThanParams{
+		n, err := t.queries.ArchiveInboxOverflow(ctx, db.ArchiveInboxOverflowParams{
 			WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
-			Cutoff: cutoff, BatchSize: trimBatchSize,
+			Keep: ActiveLimit, BatchSize: trimBatchSize,
 		})
 		archived += n
 		if err != nil {
 			return archived, false, err
 		}
 		if n < trimBatchSize {
-			return archived, true, nil
+			break
 		}
 	}
-	return archived, false, nil
+	over, err = overflows()
+	if err != nil {
+		return archived, false, err
+	}
+	return archived, !over, nil
 }
 
 // announce tells a member's clients to drop the archived rows, as the bulk
