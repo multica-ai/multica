@@ -310,11 +310,12 @@ func (h *Handler) authorizeEnvironmentProxy(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusForbidden, "task token is bound to a different workspace")
 		return claims, false
 	}
-	if _, err := h.getWorkspaceMember(ctx, userID, wsID); err != nil {
-		writeError(w, http.StatusForbidden, "forbidden")
+	// A hidden object must be indistinguishable from one that does not exist,
+	// so a non-member and a private project both answer like the 404 above.
+	if _, ok := h.requireWorkspaceMember(w, r, wsID, "environment not found"); !ok {
 		return claims, false
 	}
-	if !h.requireIssueIDVisible(w, r, wsID, row.IssueID, http.StatusForbidden, "forbidden") {
+	if !h.requireIssueIDVisible(w, r, wsID, row.IssueID, http.StatusNotFound, "environment not found") {
 		return claims, false
 	}
 	if status := environmentProxyStatus(row, time.Now()); status != 0 {
