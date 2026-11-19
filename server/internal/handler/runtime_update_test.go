@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -517,20 +516,5 @@ func TestUpdateMachineKeyIsScopedByOwner(t *testing.T) {
 	}
 	if updateMachineKey(a) != updateMachineKey(sameMachine) {
 		t.Fatal("two runtimes of one owner's daemon got different machine slots")
-	}
-}
-
-func TestRuntimeUpdateQueueNeedsTheFlagOnASharedStore(t *testing.T) {
-	h := &Handler{UpdateStore: &failingUpdateStore{}}
-	ctx := context.Background()
-	if h.runtimeUpdateQueueEnabled(ctx) {
-		t.Fatal("queueing enabled on a shared store without the flag")
-	}
-	withFeatureFlag(t, h, featureflags.RuntimeUpdateQueue, true)
-	if !h.runtimeUpdateQueueEnabled(ctx) {
-		t.Fatal("queueing still off with the flag on")
-	}
-	if !(&Handler{UpdateStore: NewInMemoryUpdateStore()}).runtimeUpdateQueueEnabled(ctx) {
-		t.Fatal("a single-node server must queue without the flag")
 	}
 }

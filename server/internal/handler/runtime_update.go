@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -60,6 +59,10 @@ type UpdateRequest struct {
 	// MachineKey names the machine the update is for (see updateMachineKey).
 	// One machine has at most one unfinished request.
 	MachineKey string `json:"-"`
+	// MachineRuntimeIDs are the runtimes the machine served when the request
+	// was created; the Redis store holds each one's slot (see
+	// RedisUpdateStore).
+	MachineRuntimeIDs []string `json:"-"`
 	// QueueWhenBusy is set when the client that started the update renders a
 	// queued update. Requests from older clients (installed CLIs, Desktop
 	// builds) keep failing fast when the machine is busy, and are never
@@ -119,10 +122,12 @@ type updateError struct{ msg string }
 func (e *updateError) Error() string { return e.msg }
 
 type UpdateStore interface {
-	Create(ctx context.Context, runtimeID, machineKey, targetVersion, initiatorUserID string, queueWhenBusy bool) (*UpdateRequest, error)
+	// Create starts a request for runtimeID unless its machine already has an
+	// unfinished one. machineRuntimeIDs lists the machine's runtimes.
+	Create(ctx context.Context, runtimeID, machineKey, targetVersion, initiatorUserID string, queueWhenBusy bool, machineRuntimeIDs ...string) (*UpdateRequest, error)
 	Get(ctx context.Context, id string) (*UpdateRequest, error)
 	// GetActive returns the machine's unfinished request, or nil.
-	GetActive(ctx context.Context, machineKey string) (*UpdateRequest, error)
+	GetActive(ctx context.Context, machineKey string, machineRuntimeIDs ...string) (*UpdateRequest, error)
 	// HasPending reports whether a request is due to be offered to the daemon.
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	// PopPending claims the oldest due request for delivery to a daemon that
@@ -339,7 +344,9 @@ func NewInMemoryUpdateStore() *InMemoryUpdateStore {
 	}
 }
 
-func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, machineKey, targetVersion, initiatorUserID string, queueWhenBusy bool) (*UpdateRequest, error) {
+// A single node has no replicas of another release, so the machine key alone
+// decides which requests share a machine.
+func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, machineKey, targetVersion, initiatorUserID string, queueWhenBusy bool, _ ...string) (*UpdateRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -392,7 +399,7 @@ func (s *InMemoryUpdateStore) Get(_ context.Context, id string) (*UpdateRequest,
 	return cloneUpdateRequest(req), nil
 }
 
-func (s *InMemoryUpdateStore) GetActive(_ context.Context, machineKey string) (*UpdateRequest, error) {
+func (s *InMemoryUpdateStore) GetActive(_ context.Context, machineKey string, _ ...string) (*UpdateRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -544,20 +551,20 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Until every replica runs this release, requests keep the previous
-	// release's fail-fast shape (no queueing, no machine slot), so replicas of
-	// both releases can serve them during the rollout.
-	queueWhenBusy, machineKey := false, ""
-	if h.runtimeUpdateQueueEnabled(r.Context()) {
-		queueWhenBusy, machineKey = req.QueueWhenBusy, updateMachineKey(rt)
+	machineRuntimeIDs, err := h.machineRuntimeIDs(r.Context(), rt)
+	if err != nil {
+		slog.Error("list machine runtimes failed", "error", err, "runtime_id", uuidToString(rt.ID))
+		writeError(w, http.StatusInternalServerError, "failed to start the update")
+		return
 	}
 	update, err := h.UpdateStore.Create(
 		r.Context(),
 		uuidToString(rt.ID),
-		machineKey,
+		updateMachineKey(rt),
 		req.TargetVersion,
 		uuidToString(member.UserID),
-		queueWhenBusy,
+		req.QueueWhenBusy,
+		machineRuntimeIDs...,
 	)
 	if err != nil {
 		// Only the in-progress rejection is a conflict the caller can act on.
@@ -579,16 +586,26 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 	writeUpdate(w, update)
 }
 
-// runtimeUpdateQueueEnabled reports whether updates may be queued. A single
-// node (the in-memory store) always may. With a shared store the
-// runtime_update_queue flag turns it on once no replica of the previous
-// release is left: those replicas fail a queued request on a busy report and
-// keep their own slots and queues.
-func (h *Handler) runtimeUpdateQueueEnabled(ctx context.Context) bool {
-	if _, singleNode := h.UpdateStore.(*InMemoryUpdateStore); singleNode {
-		return true
+// machineRuntimeIDs lists the runtimes on rt's machine (see updateMachineKey),
+// rt included, across the owner's workspaces.
+func (h *Handler) machineRuntimeIDs(ctx context.Context, rt db.AgentRuntime) ([]string, error) {
+	ids := []string{uuidToString(rt.ID)}
+	if !rt.DaemonID.Valid || rt.DaemonID.String == "" || !rt.OwnerID.Valid {
+		return ids, nil
 	}
-	return featureflags.RuntimeUpdateQueueEnabled(ctx, h.FeatureFlags)
+	rows, err := h.Queries.ListMachineRuntimeIDs(ctx, db.ListMachineRuntimeIDsParams{
+		OwnerID:  rt.OwnerID,
+		DaemonID: rt.DaemonID.String,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if id := uuidToString(row); id != ids[0] {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 // writeUpdate answers with an update request and whether it can be cancelled.
@@ -638,7 +655,13 @@ func (h *Handler) GetActiveUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	update, err := h.UpdateStore.GetActive(r.Context(), updateMachineKey(rt))
+	machineRuntimeIDs, err := h.machineRuntimeIDs(r.Context(), rt)
+	if err != nil {
+		slog.Warn("list machine runtimes failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load update")
+		return
+	}
+	update, err := h.UpdateStore.GetActive(r.Context(), updateMachineKey(rt), machineRuntimeIDs...)
 	if err != nil {
 		slog.Warn("load active update failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to load update")
@@ -665,6 +688,8 @@ func (h *Handler) GetActiveUpdate(w http.ResponseWriter, r *http.Request) {
 // canSeeUpdate applies the same rule as polling the update through the runtime
 // it was queued on: its initiator, or someone who can see and manage that
 // runtime. rt is the runtime the caller asked through, already authorized.
+// That runtime may be in another of the machine's workspaces; the caller's
+// membership there decides.
 func (h *Handler) canSeeUpdate(ctx context.Context, update *UpdateRequest, rt db.AgentRuntime, member db.Member) (bool, error) {
 	target := rt
 	if update.RuntimeID != uuidToString(rt.ID) {
@@ -679,8 +704,16 @@ func (h *Handler) canSeeUpdate(ctx context.Context, update *UpdateRequest, rt db
 			}
 			return false, err
 		}
-		// The machine may serve other workspaces; only this one's runtimes count.
-		if uuidToString(other.WorkspaceID) != uuidToString(member.WorkspaceID) || !canUseRuntimeForAgent(member, other) {
+		if uuidToString(other.WorkspaceID) != uuidToString(member.WorkspaceID) {
+			member, err = h.getWorkspaceMember(ctx, uuidToString(member.UserID), uuidToString(other.WorkspaceID))
+			if err != nil {
+				if isNotFound(err) {
+					return false, nil
+				}
+				return false, err
+			}
+		}
+		if !canUseRuntimeForAgent(member, other) {
 			return false, nil
 		}
 		target = other

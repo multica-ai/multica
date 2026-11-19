@@ -752,3 +752,15 @@ SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg('runtime_id')::uuid::text
 -- idx_agent_task_queue_runtime_active (migration 606).
 SELECT count(*) FROM agent_task_queue
 WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');
+
+-- name: ListMachineRuntimeIDs :many
+-- Lists every runtime one daemon serves for its owner, across the owner's
+-- workspaces (MUL-9633): the runtimes a CLI update of that machine covers.
+-- Driven by member(user_id, workspace_id) and the
+-- (workspace_id, daemon_id, provider) unique index; a daemon hosts a handful
+-- of runtimes per workspace.
+SELECT ar.id FROM agent_runtime ar
+JOIN member m ON m.workspace_id = ar.workspace_id AND m.user_id = @owner_id::uuid
+WHERE ar.daemon_id = @daemon_id::text
+  AND ar.owner_id = @owner_id::uuid
+ORDER BY ar.id;

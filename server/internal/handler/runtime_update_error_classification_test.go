@@ -17,11 +17,11 @@ type failingUpdateStore struct {
 	createErr error
 }
 
-func (s *failingUpdateStore) GetActive(context.Context, string) (*UpdateRequest, error) {
+func (s *failingUpdateStore) GetActive(context.Context, string, ...string) (*UpdateRequest, error) {
 	return nil, nil
 }
 
-func (s *failingUpdateStore) Create(context.Context, string, string, string, string, bool) (*UpdateRequest, error) {
+func (s *failingUpdateStore) Create(context.Context, string, string, string, string, bool, ...string) (*UpdateRequest, error) {
 	return nil, s.createErr
 }
 

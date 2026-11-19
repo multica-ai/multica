@@ -21,16 +21,22 @@ import (
 //
 // Two request shapes share the request keys:
 //
-//   - A fail-fast request (QueueWhenBusy false) is stored exactly as the
-//     release before queued updates stores every request: the runtime's
-//     "pending" queue (delivery marks it running and removes it) and the
-//     runtime's "active" slot. Until the runtime_update_queue flag is on, every
-//     request is fail-fast, so replicas of both releases can serve each other's
-//     requests during a rolling deploy.
-//   - A queued request (QueueWhenBusy true, only created while the flag is on,
-//     i.e. once every replica runs this release) lives in the runtime's
-//     "offers" queue, scored by the earliest time (UnixNano) it may be offered
-//     again, and keeps the runtime's "active" slot and the machine's slot.
+//   - A fail-fast request (QueueWhenBusy false) is stored as the release
+//     before queued updates stores every request: the runtime's "pending" queue
+//     (delivery marks it running and removes it), so replicas of both releases
+//     deliver it once.
+//   - A queued request (QueueWhenBusy true) lives in the runtime's "offers"
+//     queue, scored by the earliest time (UnixNano) it may be offered again.
+//     The previous release never reads that queue, so only this release offers
+//     it.
+//
+// One machine has at most one unfinished request, and that must also hold
+// while replicas of the previous release still serve traffic during a rolling
+// deploy. That release only takes a per-runtime "active" slot (SET NX, before
+// it writes the request). So every request here takes the machine's slot plus
+// the "active" slot of every runtime the machine serves: a previous-release
+// replica asked to update any of them sees the slot taken, and this release
+// sees a request the previous one started on any of them.
 //
 // Every status change is a compare-and-set on the stored request bytes, so a
 // cancel and a daemon starting the update cannot both win.
@@ -123,11 +129,15 @@ func NewRedisUpdateStore(rdb redis.UniversalClient) *RedisUpdateStore {
 	return &RedisUpdateStore{rdb: rdb}
 }
 
-// requestSlots lists the slot keys a request holds. A fail-fast request holds
-// only its runtime's slot, as in the previous release; one created with a
-// machine key also holds the machine's.
+// requestSlots lists the slot keys a request holds: the "active" slot of its
+// runtime and of the machine's other runtimes, and the machine's slot.
 func requestSlots(req *UpdateRequest) []string {
 	slots := []string{updateActiveKey(req.RuntimeID)}
+	for _, id := range req.MachineRuntimeIDs {
+		if id != req.RuntimeID {
+			slots = append(slots, updateActiveKey(id))
+		}
+	}
 	if req.MachineKey != "" {
 		slots = append(slots, updateMachineSlotKey(req.MachineKey))
 	}
@@ -141,18 +151,19 @@ func requestQueueKey(req *UpdateRequest) string {
 	return updatePendingKey(req.RuntimeID)
 }
 
-func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, machineKey, targetVersion, initiatorUserID string, queueWhenBusy bool) (*UpdateRequest, error) {
+func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, machineKey, targetVersion, initiatorUserID string, queueWhenBusy bool, machineRuntimeIDs ...string) (*UpdateRequest, error) {
 	now := time.Now()
 	req := &UpdateRequest{
-		ID:              randomID(),
-		RuntimeID:       runtimeID,
-		MachineKey:      machineKey,
-		InitiatorUserID: initiatorUserID,
-		Status:          UpdatePending,
-		TargetVersion:   targetVersion,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-		QueueWhenBusy:   queueWhenBusy,
+		ID:                randomID(),
+		RuntimeID:         runtimeID,
+		MachineKey:        machineKey,
+		MachineRuntimeIDs: machineRuntimeIDs,
+		InitiatorUserID:   initiatorUserID,
+		Status:            UpdatePending,
+		TargetVersion:     targetVersion,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+		QueueWhenBusy:     queueWhenBusy,
 	}
 	data, err := s.marshalRequest(req)
 	if err != nil {
@@ -191,6 +202,12 @@ func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, machineKey, ta
 
 // releaseStaleSlot clears slot when its request ended or is gone, and reports
 // whether it still holds an unfinished one.
+//
+// A slot whose request is missing may belong to a previous-release replica
+// that took the slot and has not written the request yet. That release gives
+// the slot the request's own short lifetime (updateStoreRetention), so such a
+// slot is left to expire. A longer-lived one was written by this release
+// together with its request, and the request is really gone.
 func (s *RedisUpdateStore) releaseStaleSlot(ctx context.Context, slot string) (bool, error) {
 	id, err := s.rdb.Get(ctx, slot).Result()
 	if errors.Is(err, redis.Nil) {
@@ -206,6 +223,17 @@ func (s *RedisUpdateStore) releaseStaleSlot(ctx context.Context, slot string) (b
 	if req != nil && !updateRequestTerminal(req.Status) {
 		return true, nil
 	}
+	if req == nil {
+		ttl, err := s.rdb.PTTL(ctx, slot).Result()
+		if err != nil {
+			return false, fmt.Errorf("get update slot ttl: %w", err)
+		}
+		// -2: the slot expired meanwhile. -1 (no TTL) is not a slot any
+		// release writes.
+		if ttl >= 0 && ttl <= updateStoreRetention {
+			return true, nil
+		}
+	}
 	if err := s.deleteIfValue(ctx, slot, id); err != nil {
 		return false, err
 	}
@@ -216,26 +244,44 @@ func (s *RedisUpdateStore) Get(ctx context.Context, id string) (*UpdateRequest, 
 	return s.loadRequest(ctx, id)
 }
 
-func (s *RedisUpdateStore) GetActive(ctx context.Context, machineKey string) (*UpdateRequest, error) {
+func (s *RedisUpdateStore) GetActive(ctx context.Context, machineKey string, machineRuntimeIDs ...string) (*UpdateRequest, error) {
 	slot := updateMachineSlotKey(machineKey)
 	id, err := s.rdb.Get(ctx, slot).Result()
-	if errors.Is(err, redis.Nil) {
-		return nil, nil
-	}
-	if err != nil {
+	switch {
+	case errors.Is(err, redis.Nil):
+	case err != nil:
 		return nil, fmt.Errorf("get active update: %w", err)
-	}
-	req, err := s.loadRequest(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if req == nil || req.MachineKey != machineKey || updateRequestTerminal(req.Status) {
+	default:
+		req, err := s.loadRequest(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if req != nil && req.MachineKey == machineKey && !updateRequestTerminal(req.Status) {
+			return req, nil
+		}
 		if err := s.deleteIfValue(ctx, slot, id); err != nil {
 			return nil, err
 		}
-		return nil, nil
 	}
-	return req, nil
+	// A request a previous-release replica created holds only its runtime's
+	// slot.
+	for _, runtimeID := range machineRuntimeIDs {
+		id, err := s.rdb.Get(ctx, updateActiveKey(runtimeID)).Result()
+		if errors.Is(err, redis.Nil) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get active update: %w", err)
+		}
+		req, err := s.loadRequest(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if req != nil && req.RuntimeID == runtimeID && !updateRequestTerminal(req.Status) {
+			return req, nil
+		}
+	}
+	return nil, nil
 }
 
 // loadRequest reads a request, persisting a timeout that has come due.
@@ -343,6 +389,7 @@ type redisUpdateEnvelope struct {
 	MachineKey       string         `json:"m,omitempty"`
 	LegacyOfferAt    *time.Time     `json:"lo,omitempty"`
 	LegacyQuietUntil *time.Time     `json:"lq,omitempty"`
+	MachineRuntimes  []string       `json:"mr,omitempty"`
 }
 
 func (s *RedisUpdateStore) marshalRequest(req *UpdateRequest) ([]byte, error) {
@@ -354,6 +401,7 @@ func (s *RedisUpdateStore) marshalRequest(req *UpdateRequest) ([]byte, error) {
 		MachineKey:       req.MachineKey,
 		LegacyOfferAt:    req.LegacyOfferAt,
 		LegacyQuietUntil: req.LegacyQuietUntil,
+		MachineRuntimes:  req.MachineRuntimeIDs,
 	}
 	data, err := json.Marshal(env)
 	if err != nil {
@@ -378,6 +426,7 @@ func (s *RedisUpdateStore) unmarshalRequest(raw []byte) (*UpdateRequest, error) 
 	env.Public.MachineKey = env.MachineKey
 	env.Public.LegacyOfferAt = env.LegacyOfferAt
 	env.Public.LegacyQuietUntil = env.LegacyQuietUntil
+	env.Public.MachineRuntimeIDs = env.MachineRuntimes
 	env.Public.Cancellable = false
 	return env.Public, nil
 }
