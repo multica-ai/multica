@@ -260,13 +260,15 @@ func readFacts(ctx context.Context, tx pgx.Tx, c *Contract) (facts, error) {
 		if err != nil {
 			return f, err
 		}
-		if revision != c.WakeupRevision || disabledAt != nil || (!enabled && receiver == nil && !pending) {
+		// Explicit disable invalidates pending inputs, not an issued task:
+		// that receiver can still be running or provide the coverage result.
+		if revision != c.WakeupRevision || (receiver == nil && (disabledAt != nil || (!enabled && !pending))) {
 			f.handoffChanged = true
 			return f, nil
 		}
 		// Once rules disable themselves before dispatch. A current pending
 		// receipt still owns the handoff, including a reserved waiting run.
-		if reserved != nil {
+		if reserved != nil && disabledAt == nil {
 			rootReceiver = *reserved
 		} else if receiver != nil {
 			rootReceiver = *receiver

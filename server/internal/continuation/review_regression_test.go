@@ -92,15 +92,23 @@ func TestOncePendingReceiptEnrollmentAndReservedReceiver(t *testing.T) {
 }
 
 func TestOncePendingReceiptDoesNotHideInvalidationOrDeadline(t *testing.T) {
-	for _, tc := range []struct{ name, update, reason string }{
-		{"explicit disable", "UPDATE issue_wakeup SET disabled_at=now() WHERE id=$1", "handoff_changed"},
-		{"revision changed", "UPDATE issue_wakeup SET revision=revision+1 WHERE id=$1", "handoff_changed"},
-		{"no pending receipt", "UPDATE issue_wakeup_receipt SET processed_at=now() WHERE wakeup_id=$1", "handoff_changed"},
-		{"expired deadline", "", "deadline"},
+	for _, tc := range []struct {
+		name, update, reason string
+		reserved             bool
+	}{
+		{"explicit disable", "UPDATE issue_wakeup SET disabled_at=now() WHERE id=$1", "handoff_changed", false},
+		{"explicit disable reserved", "UPDATE issue_wakeup SET disabled_at=now() WHERE id=$1", "handoff_changed", true},
+		{"revision changed", "UPDATE issue_wakeup SET revision=revision+1 WHERE id=$1", "handoff_changed", false},
+		{"no pending receipt", "UPDATE issue_wakeup_receipt SET processed_at=now() WHERE wakeup_id=$1", "handoff_changed", false},
+		{"expired deadline", "", "deadline", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f, m, c, agent, _ := fixture(t)
-			pendingOnce(t, f, &c, agent)
+			f, m, c, agent, runtime := fixture(t)
+			receipt := pendingOnce(t, f, &c, agent)
+			if tc.reserved {
+				receiver := f.Task(t, agent, testutil.Cols{"issue_id": c.IssueID, "runtime_id": runtime, "status": "running"})
+				f.Exec(t, "UPDATE issue_wakeup_receipt SET task_id=$2 WHERE id=$1", receipt, receiver)
+			}
 			c.DueAt = time.Now().Add(-time.Minute)
 			put(t, m, c, 0)
 			if tc.update != "" {
@@ -115,6 +123,84 @@ func TestOncePendingReceiptDoesNotHideInvalidationOrDeadline(t *testing.T) {
 				t.Fatalf("pending receipt hid %s", tc.reason)
 			}
 		})
+	}
+}
+
+func TestDisabledIssuedWakeupTracksReceiver(t *testing.T) {
+	for _, tc := range []struct {
+		name, status, reservedStatus, want string
+		retry                              bool
+	}{
+		{name: "running", status: "running", reservedStatus: "cancelled", want: "receiver_running"},
+		{name: "cancelled", status: "cancelled", reservedStatus: "running", want: "needs_reconcile"},
+		{name: "running retry", status: "failed", retry: true, want: "receiver_running"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, m, c, agent, runtime := fixture(t)
+			ctx := context.Background()
+			receiver := c.ReceiverTaskID
+			f.Exec(t, "UPDATE agent_task_queue SET status=$2 WHERE id=$1", receiver, tc.status)
+			pendingOnce(t, f, &c, agent)
+			f.Exec(t, "UPDATE issue_wakeup SET last_task_id=$2 WHERE id=$1", c.WakeupID, receiver)
+			if tc.retry {
+				receiver = f.Task(t, agent, testutil.Cols{"issue_id": c.IssueID, "runtime_id": runtime, "status": "running", "retry_of_task_id": receiver, "attempt": 2})
+			}
+			put(t, m, c, 0)
+			if tc.reservedStatus != "" {
+				reserved := f.Task(t, agent, testutil.Cols{"issue_id": c.IssueID, "runtime_id": runtime, "status": tc.reservedStatus})
+				f.Exec(t, "UPDATE issue_wakeup_receipt SET task_id=$2 WHERE wakeup_id=$1", c.WakeupID, reserved)
+			}
+			// Use the production close query: it also disables an already
+			// consumed once rule, without stopping its running receiver.
+			f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", c.IssueID)
+			var issue pgtype.UUID
+			must(t, issue.Scan(c.IssueID))
+			must(t, db.New(f.Pool).DisableIssueWakeups(ctx, issue))
+			m.Notify = true
+			must(t, m.Deliver(ctx, c.Key))
+			if r := current(t, m, c.Key); r.State != tc.want || r.ReceiverTaskID != receiver {
+				t.Fatalf("disabled issued wakeup: state=%s receiver=%s, want %s/%s", r.State, r.ReceiverTaskID, tc.want, receiver)
+			}
+			if tc.status == "cancelled" {
+				if got := f.Count(t, "SELECT count(*) FROM issue_continuation_incident WHERE issue_id=$1 AND reason='receiver_cancelled' AND outbox_state='delivered'", c.IssueID); got != 1 {
+					t.Fatal("cancelled receiver was hidden or reported as handoff_changed")
+				}
+			} else if got := f.Count(t, "SELECT count(*) FROM inbox_item WHERE issue_id=$1", c.IssueID); got != 0 {
+				t.Fatal("closing the wakeup notified despite its live receiver")
+			}
+		})
+	}
+}
+
+func TestDisabledIssuedWakeupAllowsCoverage(t *testing.T) {
+	f, m, c, agent, _ := fixture(t)
+	ctx := context.Background()
+	receiver := c.ReceiverTaskID
+	f.Exec(t, "UPDATE agent_task_queue SET status='completed' WHERE id=$1", receiver)
+	pendingOnce(t, f, &c, agent)
+	f.Exec(t, "UPDATE issue_wakeup SET last_task_id=$2 WHERE id=$1", c.WakeupID, receiver)
+	r := put(t, m, c, 0)
+	f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", c.IssueID)
+	var issue pgtype.UUID
+	must(t, issue.Scan(c.IssueID))
+	must(t, db.New(f.Pool).DisableIssueWakeups(ctx, issue))
+	c = r.Contract
+	c.CoverageConfirmed = true
+	c.ResultCommentID = f.Comment(t, c.IssueID, "Verified result covers the remainder", testutil.Cols{
+		"author_type": "agent", "author_id": agent, "source_task_id": receiver,
+	})
+	r = put(t, m, c, r.Version)
+	if r.State != "resolved" || r.WakeupID != c.WakeupID {
+		t.Fatalf("could not resolve the closed issue with its original binding: %+v", r)
+	}
+	m.Notify = true
+	must(t, m.Deliver(ctx, c.Key))
+	if got := f.Count(t, "SELECT count(*) FROM inbox_item WHERE issue_id=$1", c.IssueID); got != 0 {
+		t.Fatal("resolved disabled handoff produced an inbox incident")
+	}
+	f.Exec(t, "UPDATE issue_wakeup SET revision=revision+1 WHERE id=$1", c.WakeupID)
+	if _, err := m.Put(ctx, Change{Contract: c, ExpectedVersion: r.Version}); err == nil {
+		t.Fatal("issued receiver bypassed the wakeup revision guard")
 	}
 }
 

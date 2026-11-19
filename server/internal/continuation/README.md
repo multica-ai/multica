@@ -48,9 +48,12 @@ remainder. The source run's result and a non-empty output are not receipts.
 
 A once-wakeup can be disabled while its current-revision receipt is still
 pending. With no explicit `disabled_at`, that receipt remains a valid event
-wait, or identifies its reserved receiver. Explicit disable and revision
-changes still invalidate the binding; a pending receipt does not extend the
-contract's deadline or hide a reserved receiver's terminal outcome.
+wait, or identifies its reserved receiver. Explicit disable invalidates pending
+inputs before a task is issued. Once `last_task_id` is set, continue tracking
+that task and its retry descendants after disable, including accepting its
+verified coverage result. Disabled pending/reserved inputs cannot replace it.
+Revision changes still invalidate the binding; a pending receipt does not
+extend the contract's deadline or hide a reserved receiver's terminal outcome.
 
 A confirmed `ci`, `owner`, or `quota` wait has its own deadline and covers only
 this key. Dispatch consumes the previous event wait. Resolution requires a
