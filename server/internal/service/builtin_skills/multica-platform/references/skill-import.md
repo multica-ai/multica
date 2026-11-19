@@ -9,7 +9,7 @@ once a URL or concrete target exists.
 
 - [The invariant](#the-invariant)
 - [Supported URL source families](#supported-url-source-families)
-- [Local archive import](#local-archive-import)
+- [Local archive and folder import](#local-archive-and-folder-import)
 - [Direct URL flow](#direct-url-flow)
 - [Additive add vs replace-all set](#additive-add-vs-replace-all-set)
 - [Reserved SKILL.md supporting file](#reserved-skillmd-supporting-file)
@@ -24,11 +24,13 @@ once a URL or concrete target exists.
 A skill is installed for Multica only when it exists in the current workspace's
 skill database. The single supported path that puts it there is the workspace
 import endpoint. It accepts either a hosted URL or an uploaded local archive
-(`.skill` / `.zip`), driven by this CLI:
+(`.skill` / `.zip`, which the CLI can also pack from a local folder), driven by
+this CLI:
 
 ```bash
 multica skill import --url <url> --output json              # hosted source
 multica skill import --file <path-to.skill> --output json   # local archive
+multica skill import --dir <skill-folder> --output json     # local folder
 ```
 
 The CLI defaults to `--on-conflict fail`. A URL import sends:
@@ -39,9 +41,10 @@ Content-Type: application/json
 body: { "url": "<url>", "on_conflict": "fail" }
 ```
 
-A `--file` import hits the same route as `multipart/form-data` with a `file`
-part (the `.skill` / `.zip` bytes) and an `on_conflict` field. `--url` and
-`--file` are mutually exclusive; exactly one is required.
+A `--file` or `--dir` import hits the same route as `multipart/form-data` with a
+`file` part (the `.skill` / `.zip` bytes, or the archive the CLI packed from the
+folder) and an `on_conflict` field. `--url`, `--file`, and `--dir` are mutually
+exclusive; exactly one is required.
 
 Do not finish with `npx skills add`. That installs into an external/local skill
 environment, not the Multica workspace DB, so Multica cannot manage or bind it.
@@ -70,7 +73,7 @@ supporting-file download to succeed before saving the bundle. A failed refresh
 leaves the existing content, supporting files, and agent-skill bindings unchanged;
 a failed listing is not treated as an empty directory.
 
-## Local archive import
+## Local archive and folder import
 
 `multica skill import --file <path> --output json` imports a skill from a local
 archive instead of a hosted URL. A `.skill` file is a standard zip — the format
@@ -90,8 +93,20 @@ skill folder works too. The server:
 - returns the same structured result envelope and honors the same
   `--on-conflict` strategies as URL imports.
 
-The upload itself is capped at 16 MiB (compressed). Any source that is not a
-local archive still goes through `--url`.
+The upload itself is capped at 16 MiB (compressed).
+
+`multica skill import --dir <skill-folder> --output json` imports a skill folder
+without packing it by hand. The folder must have `SKILL.md` at its top. The CLI
+packs it in memory into the wrapper layout above, named after the folder, so the
+folder name is the fallback skill name, and uploads it like `--file`. Before
+uploading it applies the same selection rules as the server: dotfiles and
+dot-directories (such as `.git/`), `__MACOSX`, license files, and nested
+`SKILL.md` files are left out; binary or over-1 MiB supporting files are skipped
+with a note on stderr; exceeding the file-count or 8 MiB cap fails without
+uploading anything. A symlink is followed only while its target stays inside the
+folder; a link that points outside it, or to a directory, fails the import.
+
+Any source that is not a local archive or folder still goes through `--url`.
 
 ## Direct URL flow
 
@@ -265,7 +280,7 @@ The success response is the plain skill-with-files shape (same as
 modes to report instead of retrying in a loop:
 
 - `422`: the skill has no refreshable provenance (created manually, imported
-  from a local archive, or copied from a local runtime). Re-import instead.
+  from a local archive or folder, or copied from a local runtime). Re-import instead.
 - `409`: the upstream renamed the skill and another workspace skill already
   uses that name; nothing was changed.
 - `403`: caller is neither the creator nor a workspace admin.

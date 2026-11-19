@@ -31,10 +31,11 @@ Skill 是工作區中可以重複使用的一組工作方法。它以 `SKILL.md`
 
 從執行時複製的是當時的檔案快照。之後本地檔案發生變化，不會自動更新工作區中的版本；需要重新匯入或在 Multica 中編輯。
 
-同一套壓縮包格式也可以用 CLI 匯入：
+在 CLI 中，可以匯入壓縮包，也可以直接匯入頂層含 `SKILL.md` 的資料夾：
 
 ```bash
 multica skill import --file ./review-helper.skill
+multica skill import --dir ./review-helper
 ```
 
 匯入時如果工作區已經存在同名 skill，可以停止匯入、覆蓋原內容、使用新名稱儲存，或跳過。透過匯入覆蓋僅限該 skill 的建立者本人；工作區 `admin` 即使可以在應用內編輯它，也不能用匯入的方式覆蓋。要為已在工作區裡的 skill 拉取新版本，請改用[更新已匯入的 skill](#更新已匯入的-skill)。

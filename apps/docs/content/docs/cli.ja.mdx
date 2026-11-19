@@ -542,7 +542,7 @@ CSV 形式からの移行: 2 つのファイルを添付する場合は `--attac
 | | `member list/invite <email>` | メンバーの表示と招待 | `invite`: `--role`（member または admin。デフォルトは member） |
 | `repo` | `list/add/remove/checkout` | ワークスペースのリポジトリを管理し、ローカルにチェックアウト | `--url`（繰り返し可）；`checkout`: `--ref` |
 | `skill` | `list/get/create/update/delete` | スキルを管理 | `get`: `--with-content`（既定はメタデータと `revision` のみ）；`update`: `--base-revision`（`skill get` の値；更新済みなら HTTP 409 で上書きを拒否） |
-| | `import` | URL またはローカルファイルからスキルをインポート | `--url` / `--file`、`--on-conflict`（`fail`、`overwrite`、`rename`、`skip`。デフォルトは `fail`） |
+| | `import` | URL、ローカルのアーカイブ、またはローカルのフォルダからスキルをインポート | `--url` / `--file` / `--dir`、`--on-conflict`（`fail`、`overwrite`、`rename`、`skip`。デフォルトは `fail`） |
 | | `search <query>` | スキルを検索 | |
 | | `files list/upsert/delete <skill-id>` | スキル内のファイルを管理 | `list`: `--with-content`；`upsert` / `delete`: `--base-revision`（更新済みなら HTTP 409 で上書きを拒否） |
 | | `label list/add/remove <skill-id>` | スキルのラベルを管理 | `add` / `remove`: `<label-id>` は完全な UUID または短いプレフィックス |

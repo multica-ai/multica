@@ -31,10 +31,11 @@ On the workspace **Skills** page, choose "New skill". Four options are available
 
 Copying from a runtime takes a snapshot of the files at that moment. Later changes to the local files do not update the workspace version automatically; re-import or edit in Multica.
 
-The same archive format works from the CLI:
+From the CLI, import an archive, or a folder with `SKILL.md` at its top:
 
 ```bash
 multica skill import --file ./review-helper.skill
+multica skill import --dir ./review-helper
 ```
 
 If a skill with the same name already exists in the workspace, the import can stop, overwrite the existing content, save under a new name, or skip. Overwriting through import is limited to the skill's creator; a workspace `admin` who can edit the skill in the app still cannot overwrite it via import. To pull a newer version of a skill that is already in the workspace, use [Updating an imported skill](#updating-an-imported-skill) instead.

@@ -559,7 +559,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `member list/invite <email>` | View members, send invites | `invite`: `--role` (member or admin, default member) |
 | `repo` | `list/add/remove/checkout` | Manage workspace repositories and check them out locally | `--url` (repeatable); `checkout`: `--ref` |
 | `skill` | `list/get/create/update/delete` | Manage skills | `get`: `--with-content` (returns metadata and `revision` by default); `update`: `--base-revision` (from `skill get`; rejects stale overwrites with HTTP 409) |
-| | `import` | Import a skill from a URL or local file | `--url` / `--file`, `--on-conflict` (`fail`, `overwrite`, `rename`, `skip`; default `fail`) |
+| | `import` | Import a skill from a URL, local archive, or local folder | `--url` / `--file` / `--dir`, `--on-conflict` (`fail`, `overwrite`, `rename`, `skip`; default `fail`) |
 | | `search <query>` | Search skills | |
 | | `files list/upsert/delete <skill-id>` | Manage the files inside a skill | `list`: `--with-content`; `upsert` / `delete`: `--base-revision` (rejects stale overwrites with HTTP 409) |
 | | `label list/add/remove <skill-id>` | Manage labels on a skill | `add` / `remove`: `<label-id>` accepts a full UUID or short prefix |
