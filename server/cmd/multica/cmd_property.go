@@ -211,7 +211,7 @@ func fetchProperties(ctx context.Context, client *cli.APIClient) ([]propertyDTO,
 	var result struct {
 		Properties []propertyDTO `json:"properties"`
 	}
-	if err := client.GetJSON(ctx, "/api/properties?include_archived=true", &result); err != nil {
+	if err := client.GetJSON(ctx, "/api/properties?include_archived=true&include_usage=false", &result); err != nil {
 		return nil, fmt.Errorf("list properties: %w", err)
 	}
 	return result.Properties, nil

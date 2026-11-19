@@ -204,16 +204,10 @@ func (q *Queries) GetIssueProperty(ctx context.Context, arg GetIssuePropertyPara
 }
 
 const listIssueProperties = `-- name: ListIssueProperties :many
-SELECT p.id, p.workspace_id, p.name, p.type, p.description, p.config, p.position, p.archived_at, p.created_at, p.updated_at, p.icon,
-    (
-        SELECT COUNT(*) FROM issue i
-        WHERE i.workspace_id = p.workspace_id
-          AND i.properties ? p.id::text
-    )::bigint AS usage_count
-FROM issue_property p
-WHERE p.workspace_id = $1::uuid
-  AND ($2::bool OR p.archived_at IS NULL)
-ORDER BY p.position ASC, LOWER(p.name) ASC
+SELECT id, workspace_id, name, type, description, config, position, archived_at, created_at, updated_at, icon FROM issue_property
+WHERE workspace_id = $1::uuid
+  AND ($2::bool OR archived_at IS NULL)
+ORDER BY position ASC, LOWER(name) ASC
 `
 
 type ListIssuePropertiesParams struct {
@@ -221,7 +215,63 @@ type ListIssuePropertiesParams struct {
 	IncludeArchived bool        `json:"include_archived"`
 }
 
-type ListIssuePropertiesRow struct {
+// Definition catalog without usage counts — the hot path every issue surface,
+// the CLI's name resolution, and every realtime refetch hit.
+func (q *Queries) ListIssueProperties(ctx context.Context, arg ListIssuePropertiesParams) ([]IssueProperty, error) {
+	rows, err := q.db.Query(ctx, listIssueProperties, arg.WorkspaceID, arg.IncludeArchived)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueProperty{}
+	for rows.Next() {
+		var i IssueProperty
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Type,
+			&i.Description,
+			&i.Config,
+			&i.Position,
+			&i.ArchivedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Icon,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssuePropertiesWithUsage = `-- name: ListIssuePropertiesWithUsage :many
+WITH usage AS (
+    SELECT k.key, COUNT(*) AS usage_count
+    FROM issue i
+    CROSS JOIN LATERAL jsonb_object_keys(i.properties) AS k(key)
+    WHERE i.workspace_id = $1::uuid
+      AND i.properties <> '{}'::jsonb
+    GROUP BY k.key
+)
+SELECT p.id, p.workspace_id, p.name, p.type, p.description, p.config, p.position, p.archived_at, p.created_at, p.updated_at, p.icon, COALESCE(u.usage_count, 0)::bigint AS usage_count
+FROM issue_property p
+LEFT JOIN usage u ON u.key = p.id::text
+WHERE p.workspace_id = $1::uuid
+  AND ($2::bool OR p.archived_at IS NULL)
+ORDER BY p.position ASC, LOWER(p.name) ASC
+`
+
+type ListIssuePropertiesWithUsageParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	IncludeArchived bool        `json:"include_archived"`
+}
+
+type ListIssuePropertiesWithUsageRow struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Name        string             `json:"name"`
@@ -237,17 +287,20 @@ type ListIssuePropertiesRow struct {
 }
 
 // usage_count = number of issues in the workspace that currently carry a
-// value for this property. `properties ? id` is a seq scan today; fine at
-// the 20-definition / small-workspace scale this feature targets.
-func (q *Queries) ListIssueProperties(ctx context.Context, arg ListIssuePropertiesParams) ([]ListIssuePropertiesRow, error) {
-	rows, err := q.db.Query(ctx, listIssueProperties, arg.WorkspaceID, arg.IncludeArchived)
+// value for this property. One pass over the workspace's non-empty property
+// bags (idx_issue_workspace_with_properties), grouped by key. Do not go back
+// to a per-definition `properties ? id` subquery: idx_issue_properties_gin is
+// jsonb_path_ops, which cannot serve `?`, so each definition re-scanned every
+// issue in the workspace.
+func (q *Queries) ListIssuePropertiesWithUsage(ctx context.Context, arg ListIssuePropertiesWithUsageParams) ([]ListIssuePropertiesWithUsageRow, error) {
+	rows, err := q.db.Query(ctx, listIssuePropertiesWithUsage, arg.WorkspaceID, arg.IncludeArchived)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListIssuePropertiesRow{}
+	items := []ListIssuePropertiesWithUsageRow{}
 	for rows.Next() {
-		var i ListIssuePropertiesRow
+		var i ListIssuePropertiesWithUsageRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,

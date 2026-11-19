@@ -144,7 +144,7 @@ func propertyToResponse(p db.IssueProperty, usageCount int64) PropertyResponse {
 	return resp
 }
 
-func propertyListRowToResponse(row db.ListIssuePropertiesRow) PropertyResponse {
+func propertyListRowToResponse(row db.ListIssuePropertiesWithUsageRow) PropertyResponse {
 	return propertyToResponse(db.IssueProperty{
 		ID:          row.ID,
 		WorkspaceID: row.WorkspaceID,
@@ -408,18 +408,39 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeArchived := r.URL.Query().Get("include_archived") == "true"
-	rows, err := h.Queries.ListIssueProperties(r.Context(), db.ListIssuePropertiesParams{
-		WorkspaceID:     wsUUID,
-		IncludeArchived: includeArchived,
-	})
-	if err != nil {
-		slog.Warn("ListIssueProperties failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to list properties")
-		return
-	}
-	resp := make([]PropertyResponse, len(rows))
-	for i, row := range rows {
-		resp[i] = propertyListRowToResponse(row)
+	// usage_count costs a pass over the workspace's property-carrying issues,
+	// so callers that only need the catalog (issue surfaces, CLI name
+	// resolution, realtime refetches) send include_usage=false and get 0.
+	// Anything else keeps the counts, which is what older clients expect.
+	var resp []PropertyResponse
+	if r.URL.Query().Get("include_usage") == "false" {
+		rows, err := h.Queries.ListIssueProperties(r.Context(), db.ListIssuePropertiesParams{
+			WorkspaceID:     wsUUID,
+			IncludeArchived: includeArchived,
+		})
+		if err != nil {
+			slog.Warn("ListIssueProperties failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to list properties")
+			return
+		}
+		resp = make([]PropertyResponse, len(rows))
+		for i, row := range rows {
+			resp[i] = propertyToResponse(row, 0)
+		}
+	} else {
+		rows, err := h.Queries.ListIssuePropertiesWithUsage(r.Context(), db.ListIssuePropertiesWithUsageParams{
+			WorkspaceID:     wsUUID,
+			IncludeArchived: includeArchived,
+		})
+		if err != nil {
+			slog.Warn("ListIssuePropertiesWithUsage failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to list properties")
+			return
+		}
+		resp = make([]PropertyResponse, len(rows))
+		for i, row := range rows {
+			resp[i] = propertyListRowToResponse(row)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"properties": resp, "total": len(resp)})
 }

@@ -190,6 +190,70 @@ func TestPropertyDefinitionCRUD(t *testing.T) {
 	}
 }
 
+// usage_count is a per-definition census of issues carrying a value; the
+// include_usage=false catalog skips it but must list the same definitions.
+func TestListPropertiesUsageCount(t *testing.T) {
+	suffix := uuid.NewString()[:8]
+	propA := createTestProperty(t, map[string]any{"name": "Usage A " + suffix, "type": "text"})
+	propB := createTestProperty(t, map[string]any{"name": "Usage B " + suffix, "type": "text"})
+	unused := createTestProperty(t, map[string]any{"name": "Usage C " + suffix, "type": "text"})
+
+	both := createPropertyTestIssue(t, "usage both "+suffix)
+	onlyA := createPropertyTestIssue(t, "usage only A "+suffix)
+	createPropertyTestIssue(t, "usage none "+suffix)
+	for _, set := range []struct{ issue, prop string }{{both, propA.ID}, {both, propB.ID}, {onlyA, propA.ID}} {
+		if w := setIssuePropertyRaw(t, set.issue, set.prop, "v"); w.Code != http.StatusOK {
+			t.Fatalf("SetIssueProperty: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// Archived definitions keep their count in the include_archived list.
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest("PATCH", "/api/properties/"+propB.ID, map[string]any{"archived": true}), "id", propB.ID)
+	testHandler.UpdateProperty(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("archive: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	counts := func(query string) map[string]int64 {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.ListProperties(w, newRequest("GET", "/api/properties"+query, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListProperties%s: expected 200, got %d: %s", query, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Properties []PropertyResponse `json:"properties"`
+		}
+		json.NewDecoder(w.Body).Decode(&resp)
+		out := make(map[string]int64)
+		for _, p := range resp.Properties {
+			out[p.ID] = p.UsageCount
+		}
+		return out
+	}
+
+	withUsage := counts("?include_archived=true")
+	want := map[string]int64{propA.ID: 2, propB.ID: 1, unused.ID: 0}
+	for id, n := range want {
+		got, ok := withUsage[id]
+		if !ok || got != n {
+			t.Fatalf("usage_count for %s: got %d (present=%v), want %d", id, got, ok, n)
+		}
+	}
+
+	catalog := counts("?include_archived=true&include_usage=false")
+	for id := range want {
+		got, ok := catalog[id]
+		if !ok || got != 0 {
+			t.Fatalf("include_usage=false for %s: got %d (present=%v), want listed with 0", id, got, ok)
+		}
+	}
+	if _, ok := counts("?include_usage=false")[propB.ID]; ok {
+		t.Fatalf("archived property listed without include_archived")
+	}
+}
+
 func TestPropertyDefinitionValidation(t *testing.T) {
 	cases := []struct {
 		name string
