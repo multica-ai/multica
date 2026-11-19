@@ -92,8 +92,6 @@ Le responsable d'un projet privé peut être un membre, un agent ou personne, co
 
 ### Créer un projet privé ou rendre un projet privé
 
-Si l’offre de votre espace de travail limite les projets privés, les projets déjà privés le restent et leurs membres y gardent accès. Vous ne pouvez alors ni créer de projet privé, ni rendre un projet privé, ni y ajouter de membre, même en nommant responsable une personne extérieure au projet. Les membres habilités peuvent toujours modifier les détails du projet, retirer des membres ou ouvrir l’accès à tout l’espace de travail. Le propriétaire de l’espace peut toujours rejoindre le projet depuis les paramètres.
-
 - **Nouveau projet** : dans la boîte de dialogue de création, ouvrez **Accès**, choisissez **Membres du projet uniquement** et ajoutez des membres. Vous êtes toujours sur la liste, tout comme la personne que vous désignez comme responsable.
 - **Projet existant** : cliquez sur **Accès** dans les propriétés du projet et choisissez **Membres du projet uniquement**. Rendre privé un projet visible de tout l'espace de travail demande d'être `owner` ou `admin` ; la personne qui le fait est ajoutée à la liste, ainsi que le responsable si c'est une personne.
 - **CLI** : ajoutez `--visibility private` à `project create` ou `project update`, avec `--member` (un nom, un e-mail ou un ID utilisateur ; répétable) pour la liste initiale. Gérez ensuite la liste avec `project member list|add|remove`.
@@ -105,6 +103,8 @@ multica project member add <project-id> carol@example.com
 ```
 
 Rendre un projet privé à **Tout l’espace de travail** permet à tous les membres de l'espace de travail de voir le projet, ses tâches, ses commentaires et ses pièces jointes. L'application demande une confirmation avant d'enregistrer ; `multica project update --visibility workspace` applique le changement immédiatement.
+
+Si l’offre de votre espace de travail limite les projets privés, les projets déjà privés le restent et leurs membres y gardent accès. Vous ne pouvez alors ni créer de projet privé, ni rendre un projet privé, ni y ajouter de membre, même en nommant responsable une personne extérieure au projet. Les membres habilités peuvent toujours modifier les détails du projet, retirer des membres, ouvrir l’accès à tout l’espace de travail, et archiver ou supprimer le projet. Le propriétaire de l’espace peut toujours rejoindre le projet (voir [Reprise par le propriétaire de l'espace de travail](#workspace-owner-recovery)).
 
 ### Reprise par le propriétaire de l'espace de travail [#workspace-owner-recovery]
 

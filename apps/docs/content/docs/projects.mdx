@@ -92,8 +92,6 @@ The lead of a private project can be a member, an agent, or nobody, as on any pr
 
 ### Create a private project or make a project private
 
-If your workspace plan restricts private projects, existing private projects keep their visibility and member lists. The restriction blocks creating a private project, making a project private, and adding people to a private project, including by naming a new member as lead. Members with permission can still edit project details, remove members, or switch access to **Entire workspace**. The workspace owner can still join through settings.
-
 - **New project**: in the create dialog, open **Access**, choose **Project members only**, and add members. You are always on the list, and so is a person you name as lead.
 - **Existing project**: click **Access** in the project's properties and choose **Project members only**. Making a workspace-visible project private takes an `owner` or `admin`; they are added to the list, along with the lead if the lead is a person.
 - **CLI**: pass `--visibility private` to `project create` or `project update`, with `--member` (a name, email, or user ID; repeatable) for the initial list. Manage the list afterwards with `project member list|add|remove`.
@@ -105,6 +103,8 @@ multica project member add <project-id> carol@example.com
 ```
 
 Switching a private project back to **Entire workspace** makes the project and its issues, comments, and attachments visible to every workspace member. The app asks for confirmation first; `multica project update --visibility workspace` applies the change immediately.
+
+If your workspace plan restricts private projects, existing private projects keep their visibility and member lists. The restriction blocks creating a private project, making a project private, and adding people to a private project, including by naming a new member as lead. Members with permission can still edit project details, remove members, switch access to **Entire workspace**, and archive or delete the project. The workspace owner can still join through [Workspace owner recovery](#workspace-owner-recovery).
 
 ### Workspace owner recovery
 
