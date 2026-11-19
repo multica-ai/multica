@@ -133,11 +133,7 @@ func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
 	agentID, runtimeID, _ := createRuntimeGuardAgent(t, ctx)
 	dbfx.Exec(t, `UPDATE agent_runtime SET provider='codex', metadata=$1 WHERE id=$2`,
 		[]byte(`{"capabilities":["codex-chat-fork-v1"]}`), runtimeID)
-	for _, completed := range []bool{true, false} {
-		name := "failed"
-		if completed {
-			name = "completed"
-		}
+	for _, name := range []string{"completed", "failed", "cancelled"} {
 		t.Run(name, func(t *testing.T) {
 			sourceID := parseUUID(dbfx.ChatSession(t, agentID, testutil.Cols{
 				"runtime_id": runtimeID, "session_id": "source-session",
@@ -156,7 +152,8 @@ func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
 			})
 			dbfx.Exec(t, `UPDATE agent_task_queue SET status='running', started_at=now() WHERE id=$1`, task.ID)
 			const childSession = "019fe3de-56a2-7792-8913-ee53664dfa0f"
-			if completed {
+			switch name {
+			case "completed":
 				_, transitioned, err := testHandler.TaskService.CompleteTaskWithTransition(ctx, task.ID, nil, childSession, "", "", false, "", "")
 				if err != nil || !transitioned {
 					t.Fatalf("complete transitioned=%v error=%v", transitioned, err)
@@ -168,7 +165,7 @@ func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
 				if _, err := testHandler.Queries.GetChatMessageByTaskAssistant(ctx, task.ID); !errors.Is(err, pgx.ErrNoRows) {
 					t.Fatalf("fork added an assistant outcome: %v", err)
 				}
-			} else {
+			case "failed":
 				_, transitioned, err := testHandler.TaskService.FailTaskWithTransition(ctx, task.ID, "fork failed", "", "", "", "", false, "", "")
 				if err != nil || !transitioned {
 					t.Fatalf("fail transitioned=%v error=%v", transitioned, err)
@@ -176,6 +173,19 @@ func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
 				if _, err := testHandler.Queries.GetChatSession(ctx, child.ID); !errors.Is(err, pgx.ErrNoRows) {
 					t.Fatalf("failed destination is still present: %v", err)
 				}
+			case "cancelled":
+				result, err := testHandler.TaskService.CancelTaskWithResult(ctx, task.ID, service.CancelTaskOptions{})
+				if err != nil || result.Task.Status != "cancelled" {
+					t.Fatalf("cancel result=%+v error=%v", result, err)
+				}
+				if _, err := testHandler.Queries.GetChatSession(ctx, child.ID); !errors.Is(err, pgx.ErrNoRows) {
+					t.Fatalf("cancelled destination is still present: %v", err)
+				}
+				_, transitioned, err := testHandler.TaskService.CompleteTaskWithTransition(ctx, task.ID, nil, childSession, "", "", false, "", "")
+				if err != nil || transitioned {
+					t.Fatalf("late completion transitioned=%v error=%v", transitioned, err)
+				}
+
 			}
 			original, err := testHandler.Queries.GetChatSession(ctx, sourceID)
 			if err != nil || original.ForkSnapshotTaskID.Valid || original.SessionID.String != "source-session" {
