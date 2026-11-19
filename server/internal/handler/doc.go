@@ -315,7 +315,10 @@ func (h *Handler) CreateDoc(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	req.Title = strings.TrimSpace(req.Title)
+	// PostgreSQL TEXT rejects NUL, which survives a JSON round trip.
+	req.Title = strings.TrimSpace(sanitizeNullBytes(req.Title))
+	req.Content = sanitizeNullBytes(req.Content)
+	req.Message = sanitizeNullBytes(req.Message)
 	if !validateDocTitle(w, req.Title) || !validateDocContent(w, req.Content) || !validateDocMessage(w, req.Message) {
 		return
 	}
@@ -417,15 +420,20 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Title != nil {
-		trimmed := strings.TrimSpace(*req.Title)
+		trimmed := strings.TrimSpace(sanitizeNullBytes(*req.Title))
 		req.Title = &trimmed
 		if !validateDocTitle(w, trimmed) {
 			return
 		}
 	}
-	if req.Content != nil && !validateDocContent(w, *req.Content) {
-		return
+	if req.Content != nil {
+		content := sanitizeNullBytes(*req.Content)
+		req.Content = &content
+		if !validateDocContent(w, content) {
+			return
+		}
 	}
+	req.Message = sanitizeNullBytes(req.Message)
 	if !validateDocMessage(w, req.Message) {
 		return
 	}
@@ -704,7 +712,7 @@ func (h *Handler) CreateDocFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	req.Title = strings.TrimSpace(req.Title)
+	req.Title = strings.TrimSpace(sanitizeNullBytes(req.Title))
 	if !validateDocFolderTitle(w, req.Title) {
 		return
 	}
@@ -765,7 +773,7 @@ func (h *Handler) UpdateDocFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	req.Title = strings.TrimSpace(req.Title)
+	req.Title = strings.TrimSpace(sanitizeNullBytes(req.Title))
 	if !validateDocFolderTitle(w, req.Title) {
 		return
 	}

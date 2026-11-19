@@ -146,3 +146,46 @@ func TestDocEditsMergeIntoOneVersionPerEditingStretch(t *testing.T) {
 		t.Fatalf("edit after a restore must append: %+v", got)
 	}
 }
+
+// A NUL survives the JSON round trip but PostgreSQL TEXT rejects it, so an
+// agent saving tool output that carries one got a 500 and wrote nothing.
+func TestDocTextDropsNULBytes(t *testing.T) {
+	var doc DocResponse
+	testutil.Call(t, testHandler.CreateDoc, newRequest("POST", "/api/docs", map[string]any{
+		"title": "Run\x00book", "content": "Step\x00 one", "message": "Im\x00port",
+	})).Want(http.StatusCreated).JSON(&doc)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), "DELETE FROM doc_version WHERE doc_id = $1", doc.ID)
+		testPool.Exec(context.Background(), "DELETE FROM doc WHERE id = $1", doc.ID)
+	})
+	if doc.Title != "Runbook" || doc.Content != "Step one" {
+		t.Fatalf("create must drop NUL bytes: %+v", doc)
+	}
+
+	var updated DocResponse
+	req := withURLParam(newRequest("PATCH", "/api/docs/"+doc.ID, map[string]any{
+		"base_revision": 1, "title": "Run\x00book 2", "content": "Step\x00 two", "message": "Re\x00vise",
+	}), "id", doc.ID)
+	testutil.Call(t, testHandler.UpdateDoc, req).Want(http.StatusOK).JSON(&updated)
+	if updated.Title != "Runbook 2" || updated.Content != "Step two" {
+		t.Fatalf("update must drop NUL bytes: %+v", updated)
+	}
+	var history struct {
+		Versions []DocVersionResponse `json:"versions"`
+	}
+	testutil.Call(t, testHandler.ListDocVersions, withURLParam(newRequest("GET", "/api/docs/versions", nil), "id", doc.ID)).Want(http.StatusOK).JSON(&history)
+	if len(history.Versions) != 2 || history.Versions[0].Message != "Revise" || history.Versions[1].Message != "Import" {
+		t.Fatalf("history messages must drop NUL bytes: %+v", history.Versions)
+	}
+
+	var folder DocFolderResponse
+	testutil.Call(t, testHandler.CreateDocFolder, newRequest("POST", "/api/doc-folders", map[string]any{"title": "Gui\x00des"})).Want(http.StatusCreated).JSON(&folder)
+	t.Cleanup(func() { testPool.Exec(context.Background(), "DELETE FROM doc_folder WHERE id = $1", folder.ID) })
+	if folder.Title != "Guides" {
+		t.Fatalf("folder create must drop NUL bytes: %+v", folder)
+	}
+	testutil.Call(t, testHandler.UpdateDocFolder, withURLParam(newRequest("PATCH", "/api/doc-folders/"+folder.ID, map[string]any{"title": "Ref\x00s"}), "id", folder.ID)).Want(http.StatusOK).JSON(&folder)
+	if folder.Title != "Refs" {
+		t.Fatalf("folder rename must drop NUL bytes: %+v", folder)
+	}
+}
