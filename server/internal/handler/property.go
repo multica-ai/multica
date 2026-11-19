@@ -447,9 +447,9 @@ func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUI
 	return usage, nil
 }
 
-// propertyUsageQuery counts, in one pass over the workspace's non-empty
-// property bags (idx_issue_workspace_with_properties), how many carry each
-// definition's key: one COUNT(*) FILTER column per definition, in order.
+// propertyUsageQuery counts, in one pass over the workspace's issues, how
+// many carry each definition's key: one COUNT(*) FILTER column per
+// definition, in order.
 //
 // The shape is deliberate:
 //   - Not a per-definition `properties ? id` subquery: idx_issue_properties_gin
@@ -458,23 +458,25 @@ func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUI
 //   - No row per (issue, key), as jsonb_object_keys or an unnest join would
 //     produce: when most issues carry the counted keys, building and grouping
 //     those rows costs more than the per-definition scans did.
-//   - `properties || '{}'` in an OFFSET 0 subquery detoasts each bag once.
+//   - The scan filters on workspace_id alone, inside an OFFSET 0 subquery,
+//     and every JSON check runs above it. A JSON condition in the same scan
+//     can be checked before workspace_id (PostgreSQL appends the equality it
+//     derives for workspace_id after the other filters). A sequential scan
+//     then reads every other workspace's bags too, which costs most when
+//     other workspaces store large ones.
+//   - `properties || '{}'` detoasts each bag once for all the `?` checks.
 //     Bags past the TOAST threshold would otherwise be fetched and
-//     decompressed again for every `?`.
-//   - A single definition is the per-definition query itself, one `?` per
-//     issue. Any `<> '{}'` filter, which the partial index needs, reads a
-//     bag again whenever the planner evaluates it instead of the index:
-//     every bag after a sequential scan's `?` match, or every bag before the
-//     detoast above. With large bags that most issues carry, either makes
-//     one definition slower than the query it replaces. The two-read cost
-//     only pays off from two definitions up, where the per-definition
-//     queries read each bag once per definition.
+//     decompressed again for every `?`. A single definition skips it: its
+//     one `?` reads the bag once already.
 func propertyUsageQuery(workspaceID pgtype.UUID, props []db.IssueProperty) (string, []any) {
 	if len(props) == 1 {
-		return `SELECT COUNT(*)
-FROM issue i
-WHERE i.workspace_id = $1::uuid
-  AND i.properties ? $2::text`, []any{workspaceID, uuidToString(props[0].ID)}
+		return `SELECT COUNT(*) FILTER (WHERE s.properties ? $2::text)
+FROM (
+	SELECT i.properties
+	FROM issue i
+	WHERE i.workspace_id = $1::uuid
+	OFFSET 0
+) s`, []any{workspaceID, uuidToString(props[0].ID)}
 	}
 	args := make([]any, 0, len(props)+1)
 	args = append(args, workspaceID)
@@ -488,9 +490,9 @@ FROM (
 	SELECT i.properties || '{}'::jsonb AS properties
 	FROM issue i
 	WHERE i.workspace_id = $1::uuid
-	  AND i.properties <> '{}'::jsonb
 	OFFSET 0
-) s`, strings.Join(columns, ", ")), args
+) s
+WHERE s.properties <> '{}'::jsonb`, strings.Join(columns, ", ")), args
 }
 
 func (h *Handler) GetProperty(w http.ResponseWriter, r *http.Request) {

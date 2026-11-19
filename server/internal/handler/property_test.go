@@ -350,7 +350,7 @@ func (o *propertyQueryObserver) QueryRow(ctx context.Context, sql string, args .
 	return o.dbExecutor.QueryRow(ctx, sql, args...)
 }
 
-// Counting usage must read each property-carrying issue once, never build a
+// Counting usage must read each of the workspace's issues once, never build a
 // row per (issue, key): with most issues carrying the counted keys, those rows
 // made the count slower than the per-definition scans it replaced. A
 // catalog-only request reads only the definitions it returns.
@@ -390,7 +390,7 @@ func TestListPropertiesUsageSingleScan(t *testing.T) {
 	}
 	addIssue(archived[1])
 	addIssue()
-	const issuesWithValues = 4
+	const issuesInWorkspace = 5
 
 	list := func(query string) (*propertyQueryObserver, map[string]int64) {
 		t.Helper()
@@ -433,9 +433,9 @@ func TestListPropertiesUsageSingleScan(t *testing.T) {
 		if len(observer.usageScans) != 1 {
 			t.Fatalf("ListProperties%s: %d usage queries, want one scan", tc.query, len(observer.usageScans))
 		}
-		if rows := observer.usageScans[0]; rows > issuesWithValues {
-			t.Fatalf("ListProperties%s: a usage plan node produced %d rows for %d property-carrying issues; want no row per (issue, key)",
-				tc.query, rows, issuesWithValues)
+		if rows := observer.usageScans[0]; rows > issuesInWorkspace {
+			t.Fatalf("ListProperties%s: a usage plan node produced %d rows for %d issues in the workspace; want no row per (issue, key)",
+				tc.query, rows, issuesInWorkspace)
 		}
 	}
 
@@ -454,12 +454,12 @@ func TestListPropertiesUsageSingleScan(t *testing.T) {
 	}
 }
 
-// Counting usage must not read the workspace's property bags more often than
-// the per-definition `properties ? id` queries it replaced. Under a
-// sequential scan, bags past the TOAST threshold are fetched from the TOAST
-// table on every read, so extra reads show up as buffer accesses. Large bags
-// both carry and miss the counted keys: a filter that re-reads only the
-// matching bags must still fail.
+// Counting usage must not read property bags more often than the
+// per-definition `properties ? id` queries it replaced, nor read other
+// workspaces' bags at all. Under a sequential scan, bags past the TOAST
+// threshold are fetched from the TOAST table on every read, so extra reads
+// show up as buffer accesses. Large bags both carry and miss the counted
+// keys, and another workspace stores large bags too.
 func TestPropertyUsageReadsBagsNoMoreThanPerDefinitionScans(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -490,6 +490,15 @@ func TestPropertyUsageReadsBagsNoMoreThanPerDefinitionScans(t *testing.T) {
 		addLargeIssue()
 		addLargeIssue(activeA, activeB)
 	}
+	other := dbfx.Workspace(t, "Property usage TOAST other "+suffix, "prop-toast-other-"+suffix)
+	for i := 0; i < 3; i++ {
+		noise := make([]byte, 4096)
+		if _, err := rand.Read(noise); err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(map[string]string{uuid.NewString(): hex.EncodeToString(noise)})
+		dbfx.Issue(t, "other workspace bag", testutil.Cols{"workspace_id": other, "properties": string(raw)})
+	}
 
 	tx, err := testPool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -504,22 +513,30 @@ func TestPropertyUsageReadsBagsNoMoreThanPerDefinitionScans(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SET LOCAL max_parallel_workers_per_gather = 0"); err != nil {
 		t.Fatal(err)
 	}
-	buffers := func(sql string, args ...any) int64 {
+	explain := func(sql string, args ...any) json.RawMessage {
 		t.Helper()
 		var raw []byte
 		if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+sql, args...).Scan(&raw); err != nil {
 			t.Fatalf("explain: %v", err)
 		}
 		var plan []struct {
-			Plan struct {
-				Hit  int64 `json:"Shared Hit Blocks"`
-				Read int64 `json:"Shared Read Blocks"`
-			} `json:"Plan"`
+			Plan json.RawMessage `json:"Plan"`
 		}
 		if err := json.Unmarshal(raw, &plan); err != nil || len(plan) != 1 {
 			t.Fatalf("decode plan: %v", err)
 		}
-		return plan[0].Plan.Hit + plan[0].Plan.Read
+		return plan[0].Plan
+	}
+	buffers := func(sql string, args ...any) int64 {
+		t.Helper()
+		var root struct {
+			Hit  int64 `json:"Shared Hit Blocks"`
+			Read int64 `json:"Shared Read Blocks"`
+		}
+		if err := json.Unmarshal(explain(sql, args...), &root); err != nil {
+			t.Fatalf("decode plan root: %v", err)
+		}
+		return root.Hit + root.Read
 	}
 	usageBuffers := func(keys ...string) int64 {
 		t.Helper()
@@ -541,6 +558,13 @@ func TestPropertyUsageReadsBagsNoMoreThanPerDefinitionScans(t *testing.T) {
 				t.Fatalf("usage query for %d definitions: count %d = %d, want 3", len(keys), i, n)
 			}
 		}
+		// The scan of issue must filter on workspace_id alone, so no other
+		// workspace's bag is ever read; JSON checks belong above it.
+		for _, cond := range issueScanConditions(t, explain(query, args...)) {
+			if strings.Contains(cond, "properties") {
+				t.Fatalf("usage query for %d definitions checks JSON while scanning issue: %s", len(keys), cond)
+			}
+		}
 		return buffers(query, args...)
 	}
 	perDefinitionBuffers := func(key string) int64 {
@@ -559,6 +583,34 @@ func TestPropertyUsageReadsBagsNoMoreThanPerDefinitionScans(t *testing.T) {
 	if two > scanA+scanB {
 		t.Fatalf("two definitions: usage count read %d buffers under a sequential scan, more than the %d of two `properties ? id` scans", two, scanA+scanB)
 	}
+}
+
+// issueScanConditions returns the filter and index conditions of every plan
+// node that scans the issue table.
+func issueScanConditions(t *testing.T, raw json.RawMessage) []string {
+	t.Helper()
+	var node struct {
+		Relation    string            `json:"Relation Name"`
+		Filter      string            `json:"Filter"`
+		IndexCond   string            `json:"Index Cond"`
+		RecheckCond string            `json:"Recheck Cond"`
+		Plans       []json.RawMessage `json:"Plans"`
+	}
+	if err := json.Unmarshal(raw, &node); err != nil {
+		t.Fatalf("decode plan node: %v", err)
+	}
+	var conds []string
+	if node.Relation == "issue" {
+		for _, c := range []string{node.Filter, node.IndexCond, node.RecheckCond} {
+			if c != "" {
+				conds = append(conds, c)
+			}
+		}
+	}
+	for _, child := range node.Plans {
+		conds = append(conds, issueScanConditions(t, child)...)
+	}
+	return conds
 }
 
 func TestPropertyDefinitionValidation(t *testing.T) {
