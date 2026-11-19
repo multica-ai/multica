@@ -78,7 +78,7 @@ func TestDocCommentsDiscussNotifyAndResolve(t *testing.T) {
 
 	// Anyone can resolve and reopen; replies cannot be resolved.
 	resolve := func(id, action string, as string) *http.Request {
-		req := withURLParams(newRequest("POST", "/"+action, nil), "id", doc.ID, "commentId", id)
+		req := withURLParams(newRequest("POST", "/"+action, nil), "id", doc.ID, "docCommentId", id)
 		if as != "" {
 			req.Header.Set("X-User-ID", as)
 		}
@@ -96,13 +96,13 @@ func TestDocCommentsDiscussNotifyAndResolve(t *testing.T) {
 	}
 
 	// Only the author deletes; deleting the root removes the discussion.
-	testutil.Call(t, testHandler.DeleteDocComment, withURLParams(newRequest("DELETE", "/", nil), "id", doc.ID, "commentId", root.ID)).Want(http.StatusNoContent)
+	testutil.Call(t, testHandler.DeleteDocComment, withURLParams(newRequest("DELETE", "/", nil), "id", doc.ID, "docCommentId", root.ID)).Want(http.StatusNoContent)
 	if got := comments(); len(got) != 0 {
 		t.Fatalf("deleting the root must remove replies: %+v", got)
 	}
 	var again DocCommentResponse
 	testutil.Call(t, testHandler.CreateDocComment, post(map[string]any{"content": "x", "anchor_quote": "Original"}, other)).Want(http.StatusCreated).JSON(&again)
-	testutil.Call(t, testHandler.DeleteDocComment, withURLParams(newRequest("DELETE", "/", nil), "id", doc.ID, "commentId", again.ID)).Want(http.StatusForbidden)
+	testutil.Call(t, testHandler.DeleteDocComment, withURLParams(newRequest("DELETE", "/", nil), "id", doc.ID, "docCommentId", again.ID)).Want(http.StatusForbidden)
 
 	// Deleting the doc removes its discussions.
 	testutil.Call(t, testHandler.DeleteDoc, withURLParam(newRequest("DELETE", "/api/docs", nil), "id", doc.ID)).Want(http.StatusNoContent)

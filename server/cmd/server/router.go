@@ -2353,9 +2353,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						r.Group(func(r chi.Router) {
 							r.Use(handler.RequireHumanActor)
 							r.Post("/", h.CreateDocComment)
-							r.Post("/{commentId}/resolve", h.ResolveDocComment)
-							r.Post("/{commentId}/reopen", h.ReopenDocComment)
-							r.Delete("/{commentId}", h.DeleteDocComment)
+							r.Post("/{docCommentId}/resolve", h.ResolveDocComment)
+							r.Post("/{docCommentId}/reopen", h.ReopenDocComment)
+							r.Delete("/{docCommentId}", h.DeleteDocComment)
 						})
 					})
 				})

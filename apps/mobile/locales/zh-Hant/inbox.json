@@ -55,6 +55,8 @@
     "due_date_changed": "截止日期已更改",
     "new_comment": "新評論",
     "mentioned": "提到了你",
+    "doc_comment": "文件有新評論",
+    "doc_mentioned": "在文件中提到了你",
     "review_requested": "請求審查",
     "task_completed": "執行完成",
     "task_failed": "執行失敗",

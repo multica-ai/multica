@@ -235,7 +235,7 @@ func (h *Handler) notifyDocComment(ctx context.Context, doc db.Doc, root, commen
 }
 
 func (h *Handler) loadDocComment(w http.ResponseWriter, r *http.Request, doc db.Doc) (db.DocComment, bool) {
-	commentUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "commentId"), "comment id")
+	commentUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "docCommentId"), "comment id")
 	if !ok {
 		return db.DocComment{}, false
 	}
