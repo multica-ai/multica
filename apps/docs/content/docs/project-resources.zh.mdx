@@ -30,13 +30,15 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 打开项目，在 **资源 → 仓库** 中点击 **添加仓库**。搜索已关联到工作区的仓库，或粘贴 Git URL。工作区仓库在 **设置 → 代码** 中维护；连接 GitHub 后，可在同一页面通过 **从 GitHub 选择** 导入 App 已授权的仓库。
 
-粘贴 GitHub 分支页面的 URL（`https://github.com/owner/repo/tree/branch`）时，仓库地址和起始分支会分别填入。经过 URL 编码的分支名会还原，查询参数和页面锚点不会算入分支名。添加仓库前请检查起始分支。
+粘贴 GitHub 分支页面的 URL（`https://github.com/owner/repo/tree/branch`）时，仓库地址和起始分支会分别填入。经过 URL 编码的分支名会还原，查询参数和页面锚点不会算入分支名。添加仓库前请检查起始分支。修改仓库地址时，原来的起始分支会清空；如果新地址包含分支，则改用该分支。
 
 仓库不限于 GitHub：任何运行时能访问的 Git URL 都可以作为仓库资源。自部署的 Multica 还可以在 **设置 → 代码** 连接自托管的 Forgejo、Gitea 或 GitLab，见[自托管 Git 代码托管](/vcs-integration)。
 
 创建项目时，也可以直接在 **Repos** 中选择仓库。一个项目可以关联多个 GitHub 仓库。
 
 资源中的 `ref` 可以指定后续 checkout 默认使用的分支、tag 或 commit。`default_branch_hint` 只向智能体提供默认分支提示，不会强制切换分支。
+
+对于托管仓库，智能体从任务工作目录启动。`multica repo checkout` 通常会为仓库创建子目录并输出其路径。需要仓库根目录的命令应在该路径下运行。如果智能体进程本身必须从根目录启动，且你能管理运行时所在的计算机，请将已有的 checkout 添加为本地目录。`in_place` 和 `worktree` 模式都从仓库根目录启动智能体；git 仓库建议使用 `worktree`，让各次运行相互隔离并可并行。详见[运行如何共享这个目录](#运行如何共享这个目录)。
 
 ## 添加本地目录
 

@@ -177,6 +177,17 @@ Pour rétablir l'accès :
 Répétez ces étapes après chaque mise à jour du CLI. La mise à jour automatique n'est activée par défaut que pour les daemons connectés à Multica Cloud ; démarrez le daemon avec `--no-auto-update` pour que les mises à jour n'aient lieu que lorsque vous les lancez. Le CLI intégré à [Multica Desktop](/desktop-app) est signé avec un Developer ID, ses autorisations survivent donc aux mises à jour.
 
 </Accordion>
+<Accordion title="Hermes réinstalle ses dépendances après l’utilisation de la CLI" id="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli" value="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli">
+
+Si vous alternez entre la CLI ou l’application de bureau Hermes et les exécutions Hermes dans Multica, chaque changement peut ajouter 30 à 60 secondes au démarrage. Hermes reconstruit alors son environnement Python partagé. Chaque reconstruction laisse une nouvelle génération de l’environnement sur le disque jusqu’à ce que Hermes la nettoie.
+
+Cela se produit lorsque `memory.provider` désigne dans votre répertoire Hermes un plugin qui a des dépendances Python. Chaque exécution Multica utilise son propre répertoire Hermes, partage les dépendances installées et désactive le fournisseur de mémoire externe pour éviter que les exécutions partagent leur mémoire. Hermes détermine les dépendances à partir des plugins du répertoire actif. Les deux répertoires ont des besoins différents et chacun considère l’installation de l’autre comme obsolète. Le problème est suivi dans [NousResearch/hermes-agent#137726](https://github.com/NousResearch/hermes-agent/issues/137726).
+
+Pour confirmer le diagnostic, cherchez `hermes is reinstalling its dependency environment before this task starts` dans le [journal du daemon](#emplacement-des-journaux). L’entrée suivante, `hermes dependency reinstall finished`, indique dans `startup_delay_ms` le temps écoulé entre le lancement et le moment où Hermes est prêt, réinstallation comprise.
+
+En attendant une correction dans Hermes, définissez `memory.provider: ""` dans votre fichier `config.yaml` Hermes pour éviter les reconstructions. Cette modification désactive aussi le plugin de mémoire pour la CLI. Si vous gardez le plugin actif, le démarrage peut prendre plus de temps après chaque changement.
+
+</Accordion>
 </Accordions>
 
 ## Application web et service auto-hébergé

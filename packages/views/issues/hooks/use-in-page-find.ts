@@ -16,6 +16,10 @@ import { isImeComposing } from "@multica/core/utils";
 // contenteditable title/description editors without fighting ProseMirror.
 
 const HIGHLIGHT_NAME = "multica-find";
+// While the query is being typed, the first match moves with every keystroke.
+// Mounting each one's comment would mount and drop timeline rows per
+// keystroke, so an unmounted match is brought in once typing pauses.
+const TYPING_REVEAL_DELAY_MS = 150;
 const ACTIVE_HIGHLIGHT_NAME = "multica-find-active";
 
 /** Marks the root of a searchable body inside the virtual region. */
@@ -197,6 +201,8 @@ export function useInPageFind<U extends InPageFindUnit = InPageFindUnit>(options
   // DOM ranges of the units that are mounted, by unit index.
   const mountedRef = useRef(new Map<number, Range[]>());
   const cancelRevealRef = useRef<(() => void) | null>(null);
+  // The next activation follows a query change rather than prev/next.
+  const restartedByQueryRef = useRef(false);
   const activeIndexRef = useRef(activeIndex);
   activeIndexRef.current = activeIndex;
   const supported = highlightApiSupported();
@@ -244,7 +250,7 @@ export function useInPageFind<U extends InPageFindUnit = InPageFindUnit>(options
   // is not in the DOM. Called both when the user navigates and after a
   // recompute, so the active tint always tracks live ranges.
   const activate = useCallback(
-    (index: number, scroll: boolean) => {
+    (index: number, scroll: boolean, { deferReveal = false } = {}) => {
       const match = index >= 0 ? matchesRef.current[index] : undefined;
       let range: Range | undefined;
       let unitElement: HTMLElement | null = null;
@@ -280,17 +286,25 @@ export function useInPageFind<U extends InPageFindUnit = InPageFindUnit>(options
       const unit = unitsRef.current[match.unit];
       const reveal = virtualRef.current?.reveal;
       if (!unit || !reveal) return;
-      const pending = { cancel: () => {}, settled: false };
-      pending.cancel = reveal(unit, () => {
-        pending.settled = true;
-        if (cancelRevealRef.current === pending.cancel) cancelRevealRef.current = null;
-        if (activeIndexRef.current !== index) return;
-        recomputeRef.current({ resetActive: false });
-        const ranges = mountedRef.current.get(match.unit);
-        const landed = ranges?.[Math.min(match.occurrence, ranges.length - 1)];
-        if (landed) scrollRectIntoView(containerRef.current, rangeRect(landed));
-      });
-      if (!pending.settled) cancelRevealRef.current = pending.cancel;
+      const start = () => {
+        const pending = { cancel: () => {}, settled: false };
+        pending.cancel = reveal(unit, () => {
+          pending.settled = true;
+          if (cancelRevealRef.current === pending.cancel) cancelRevealRef.current = null;
+          if (activeIndexRef.current !== index) return;
+          recomputeRef.current({ resetActive: false });
+          const ranges = mountedRef.current.get(match.unit);
+          const landed = ranges?.[Math.min(match.occurrence, ranges.length - 1)];
+          if (landed) scrollRectIntoView(containerRef.current, rangeRect(landed));
+        });
+        cancelRevealRef.current = pending.settled ? null : pending.cancel;
+      };
+      if (!deferReveal) {
+        start();
+        return;
+      }
+      const timer = window.setTimeout(start, TYPING_REVEAL_DELAY_MS);
+      cancelRevealRef.current = () => window.clearTimeout(timer);
     },
     [supported, cancelReveal],
   );
@@ -339,6 +353,7 @@ export function useInPageFind<U extends InPageFindUnit = InPageFindUnit>(options
       }
       if (resetActive) {
         // The activation effect scrolls to it.
+        restartedByQueryRef.current = true;
         setActiveIndex(0);
         setRestart((n) => n + 1);
         return;
@@ -397,7 +412,9 @@ export function useInPageFind<U extends InPageFindUnit = InPageFindUnit>(options
   // for content-driven changes.)
   useEffect(() => {
     if (!open) return;
-    activate(activeIndex, true);
+    const deferReveal = restartedByQueryRef.current;
+    restartedByQueryRef.current = false;
+    activate(activeIndex, true, { deferReveal });
   }, [activeIndex, restart, open, activate]);
 
   // Global Cmd/Ctrl+F. The listener is scoped to the mounted issue detail; on

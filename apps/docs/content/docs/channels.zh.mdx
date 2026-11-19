@@ -18,6 +18,7 @@ import { ChannelChatDemo } from "@/components/demos/channel-chat-demo";
 | 私聊智能体 | 支持 | 支持 | 支持 | 支持 | 支持 | 仅限扫码连接的账号 |
 | 群聊或频道 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 或回复 Bot 后触发 | 不支持 |
 | 创建任务 | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 |
+| 查看命令 | `/help` | `@Multica /help` | `/help` | `/help` | `/help` | `/help` |
 | 新建 Chat | `/new [消息]` | 私聊：`/new [消息]`；频道/thread：`@Multica /new [消息]` | `/new [消息]` | `/new [消息]` | `/new [消息]` | `/new [消息]` |
 | 清空当前 Chat 上下文 | `/clear [消息]` | 私聊：`/clear [消息]`；频道/thread：`@Multica /clear [消息]` | `/clear [消息]` | `/clear [消息]` | `/clear [消息]` | `/clear [消息]` |
 | 连接方式 | 平台长连接 | Socket Mode | Stream 模式 | 平台长连接 | `getUpdates` 长轮询 | iLink 长轮询 |
@@ -55,6 +56,8 @@ Telegram 会把图片、文件、视频和音频作为附件转交给智能体�
 <ChannelChatDemo />
 
 ## 控制对话上下文
+
+在私聊中发送 `/help`（Slack 使用 `@Multica /help`），或在群聊、频道中 @ Bot 并发送 `/help`，即可查看可用命令：`/help`、`/new [消息]`、`/clear [消息]` 和 `/issue <标题>`（后续行作为描述）。企业微信和微信（仅私聊）同样支持。Multica 会直接回复，不创建 Chat 或运行，也不改变当前 Chat。在 Slack 中，`@Multica /help` 列出消息命令。原生 `/issue <描述>` 走独立流程，由智能体根据描述创建任务。
 
 `/new` 会创建一个新的 Multica Chat，并把这条外部会话的后续消息路由到新 Chat。`/new <消息>` 会同时把消息作为第一轮。旧 Chat 仍保存在 Multica 中，可以继续使用。
 

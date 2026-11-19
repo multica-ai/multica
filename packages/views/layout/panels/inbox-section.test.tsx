@@ -14,6 +14,7 @@ import { agentListOptions } from "@multica/core/workspace/queries";
 import { snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
+import { PanelBody } from "../panel-nav";
 import { InboxSection, useInboxSectionRows } from "./inbox-section";
 
 const state = vi.hoisted(() => ({
@@ -619,5 +620,95 @@ describe("InboxSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
     fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "View archived" }));
     expect(nav.push).toHaveBeenCalledWith("/acme/inbox?view=archived");
+  });
+});
+
+describe("InboxSection with every row shown", () => {
+  const ROW_HEIGHT = 50;
+  const VIEWPORT_HEIGHT = 600;
+
+  /**
+   * jsdom has no layout: the virtualizer reads the panel's and each row's
+   * height from `offsetHeight`, and the list's offset from `getBoundingClientRect`.
+   */
+  function installLayout() {
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")!;
+    const offsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth")!;
+    const rect = Element.prototype.getBoundingClientRect;
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.matches("[data-inbox-row]") ? ROW_HEIGHT : VIEWPORT_HEIGHT;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get: () => 280 });
+    Element.prototype.getBoundingClientRect = () =>
+      ({ width: 280, height: ROW_HEIGHT, top: 0, left: 0, right: 280, bottom: ROW_HEIGHT, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    return () => {
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+      Object.defineProperty(HTMLElement.prototype, "offsetWidth", offsetWidth);
+      Element.prototype.getBoundingClientRect = rect;
+    };
+  }
+
+  function renderInPanel(count: number, activeIssueId: string | null = null) {
+    const items = Array.from({ length: count }, (_, i) =>
+      item({
+        id: `n${i}`,
+        issue_id: `issue-${i}`,
+        title: `Issue ${i}`,
+        created_at: new Date(Date.UTC(2026, 10, 10) - i * 60_000).toISOString(),
+      }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    client.setQueryData(["inbox", "ws-1", "list"], items);
+    client.setQueryData(snoozedInboxOptions("ws-1").queryKey, []);
+    client.setQueryData(agentListOptions("ws-1").queryKey, []);
+    client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
+    return renderWithI18n(
+      <QueryClientProvider client={client}>
+        <NavigationProvider value={adapter("/acme/issues")}>
+          <PanelBody>
+            <Harness activeIssueId={activeIssueId} pathname="/acme/issues" openKey={activeIssueId} />
+          </PanelBody>
+        </NavigationProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("mounts only the rows near the panel's viewport, and the rest as the panel scrolls", async () => {
+    const restore = installLayout();
+    try {
+      const { container } = renderInPanel(300, "issue-3");
+      fireEvent.click(screen.getByRole("button", { name: /^Show \d+ more/ }));
+
+      await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+      expect(rows().length).toBeLessThan(40);
+      expect(screen.getByRole("link", { name: /^Issue 0/ })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /^Issue 3/ })).toHaveAttribute("aria-current", "page");
+      expect(screen.queryByRole("link", { name: /^Issue 299/ })).toBeNull();
+      // The rows not mounted still take their room, so the panel scrolls as far.
+      const list = container.querySelector<HTMLElement>("[data-sidebar-list]")!;
+      expect(parseFloat(list.style.paddingBottom)).toBeGreaterThan((300 - 40) * ROW_HEIGHT);
+
+      const scroller = container.firstElementChild as HTMLElement;
+      act(() => {
+        // jsdom keeps scrollTop at 0 unless it is defined.
+        Object.defineProperty(scroller, "scrollTop", { configurable: true, value: 300 * (ROW_HEIGHT + 2) });
+        fireEvent.scroll(scroller);
+      });
+      await waitFor(() => expect(screen.getByRole("link", { name: /^Issue 299/ })).toBeInTheDocument());
+      expect(screen.queryByRole("link", { name: /^Issue 0/ })).toBeNull();
+      expect(rows().length).toBeLessThan(40);
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps a short list fully mounted", () => {
+    useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, limit: 5 } });
+    renderInPanel(30);
+    fireEvent.click(screen.getByRole("button", { name: "Show 25 more…" }));
+    expect(rows()).toHaveLength(30);
   });
 });

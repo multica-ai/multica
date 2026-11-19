@@ -1,5 +1,23 @@
 import type { ListWeixinInstallationsResponse, WeixinLogin } from "../types/weixin";
 import { ListWeixinInstallationsSchema, WeixinLoginSchema, EMPTY_WEIXIN_INSTALLATIONS, INVALID_WEIXIN_LOGIN } from "../weixin/schema";
+import {
+  DocSchema,
+  DocSummarySchema,
+  DocFolderSchema,
+  DocTreeSchema,
+  DocVersionSchema,
+  DocVersionListSchema,
+} from "../docs/schemas";
+import type {
+  Doc,
+  DocSummary,
+  DocFolder,
+  DocTree,
+  DocVersion,
+  CreateDocRequest,
+  UpdateDocRequest,
+  CreateDocFolderRequest,
+} from "../types/doc";
 import type { ZodType } from "zod";
 import { AgentRuntimeSchema, EMPTY_RUNTIME } from "../runtimes/schema";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
@@ -893,6 +911,116 @@ function isReplayableBody(body: BodyInit | null | undefined): boolean {
 }
 
 export class ApiClient {
+  private parseDoc(raw: unknown, endpoint: string): Doc {
+    const doc = parseWithFallback<Doc | null>(raw, DocSchema, null, {
+      endpoint,
+    });
+    if (!doc) throw new Error(`Malformed response from ${endpoint}`);
+    return doc;
+  }
+  async listDocTree(): Promise<DocTree> {
+    return parseWithFallback(
+      await this.fetch<unknown>("/api/docs"),
+      DocTreeSchema,
+      { folders: [], docs: [] },
+      { endpoint: "GET /api/docs" },
+    );
+  }
+  async getDoc(id: string): Promise<Doc> {
+    return this.parseDoc(
+      await this.fetch<unknown>(`/api/docs/${id}`),
+      "GET /api/docs/{id}",
+    );
+  }
+  async createDoc({ folderId, ...data }: CreateDocRequest): Promise<Doc> {
+    return this.parseDoc(
+      await this.fetch<unknown>("/api/docs", {
+        method: "POST",
+        body: JSON.stringify({ ...data, folder_id: folderId }),
+      }),
+      "POST /api/docs",
+    );
+  }
+  async updateDoc(
+    id: string,
+    { baseRevision, actionRef, ...data }: UpdateDocRequest,
+  ): Promise<Doc> {
+    return this.parseDoc(
+      await this.fetch<unknown>(`/api/docs/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          ...data,
+          base_revision: baseRevision,
+          action_ref: actionRef,
+        }),
+      }),
+      "PATCH /api/docs/{id}",
+    );
+  }
+  async moveDoc(id: string, folderId: string | null): Promise<DocSummary> {
+    const raw = await this.fetch<unknown>(`/api/docs/${id}/move`, {
+      method: "POST",
+      body: JSON.stringify({ folder_id: folderId }),
+    });
+    const doc = parseWithFallback<DocSummary | null>(
+      raw,
+      DocSummarySchema,
+      null,
+      { endpoint: "POST /api/docs/{id}/move" },
+    );
+    if (!doc) throw new Error("Malformed document response");
+    return doc;
+  }
+  async deleteDoc(id: string): Promise<void> {
+    await this.fetch(`/api/docs/${id}`, { method: "DELETE" });
+  }
+  async listDocVersions(id: string): Promise<DocVersion[]> {
+    return parseWithFallback(
+      await this.fetch<unknown>(`/api/docs/${id}/versions`),
+      DocVersionListSchema,
+      { versions: [] },
+      { endpoint: "GET /api/docs/{id}/versions" },
+    ).versions;
+  }
+  async getDocVersion(id: string, number: number): Promise<DocVersion | null> {
+    return parseWithFallback<DocVersion | null>(
+      await this.fetch<unknown>(`/api/docs/${id}/versions/${number}`),
+      DocVersionSchema,
+      null,
+      { endpoint: "GET /api/docs/{id}/versions/{number}" },
+    );
+  }
+  private async writeDocFolder(
+    path: string,
+    method: string,
+    data: unknown,
+  ): Promise<DocFolder> {
+    const folder = parseWithFallback<DocFolder | null>(
+      await this.fetch<unknown>(path, { method, body: JSON.stringify(data) }),
+      DocFolderSchema,
+      null,
+      { endpoint: `${method} ${path}` },
+    );
+    if (!folder) throw new Error("Malformed folder response");
+    return folder;
+  }
+  createDocFolder({ parentId, title }: CreateDocFolderRequest) {
+    return this.writeDocFolder("/api/doc-folders", "POST", {
+      parent_id: parentId,
+      title,
+    });
+  }
+  renameDocFolder(id: string, title: string) {
+    return this.writeDocFolder(`/api/doc-folders/${id}`, "PATCH", { title });
+  }
+  moveDocFolder(id: string, parentId: string | null) {
+    return this.writeDocFolder(`/api/doc-folders/${id}/move`, "POST", {
+      parent_id: parentId,
+    });
+  }
+  async deleteDocFolder(id: string): Promise<void> {
+    await this.fetch(`/api/doc-folders/${id}`, { method: "DELETE" });
+  }
   private baseUrl: string;
   private token: string | null = null;
   private logger: Logger;
@@ -4528,6 +4656,21 @@ export class ApiClient {
   // where CORS is not configured for a JS fetch.
   async getAttachmentBlob(id: string, signal?: AbortSignal): Promise<Blob> {
     const res = await this.fetchRaw(`/api/attachments/${id}/download`, { signal });
+    return res.blob();
+  }
+
+  // Thumbnail bytes for clients that cannot load the auth-gated thumbnail
+  // path as a native <img> src (see getAttachmentBlob). Always proxied by the
+  // API, so unlike /download there is no storage redirect to worry about.
+  async getAttachmentThumbnailBlob(id: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.fetchRaw(`/api/attachments/${id}/thumbnail`, { signal });
+    return res.blob();
+  }
+
+  // The original bytes of an image that has a thumbnail, for copying it from
+  // a tile. Proxied by the API in every storage mode, so script can read it.
+  async getAttachmentOriginalBlob(id: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.fetchRaw(`/api/attachments/${id}/original`, { signal });
     return res.blob();
   }
 

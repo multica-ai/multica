@@ -4,15 +4,16 @@ import { focusManager, onlineManager, QueryClient, QueryClientProvider } from "@
 import { ApiError } from "@multica/core/api/client";
 import type { ReactNode } from "react";
 import {
+  useAttachmentThumbnailURL,
   useFreshStreamedMediaURL,
   useResignedInlineMedia,
   __resetInlineMediaBlobCacheForTests,
 } from "./use-inline-media-url";
 
-const { getAttachment, getAttachmentForDownload, getAttachmentBlob, getBaseUrl } = vi.hoisted(() => ({
-  getAttachment: vi.fn(), getAttachmentForDownload: vi.fn(), getAttachmentBlob: vi.fn(), getBaseUrl: vi.fn(() => "https://api.example.test"),
+const { getAttachment, getAttachmentForDownload, getAttachmentBlob, getAttachmentThumbnailBlob, getBaseUrl } = vi.hoisted(() => ({
+  getAttachment: vi.fn(), getAttachmentForDownload: vi.fn(), getAttachmentBlob: vi.fn(), getAttachmentThumbnailBlob: vi.fn(), getBaseUrl: vi.fn(() => "https://api.example.test"),
 }));
-vi.mock("@multica/core/api", () => ({ api: { getAttachment, getAttachmentForDownload, getAttachmentBlob, getBaseUrl } }));
+vi.mock("@multica/core/api", () => ({ api: { getAttachment, getAttachmentForDownload, getAttachmentBlob, getAttachmentThumbnailBlob, getBaseUrl } }));
 const id = "11111111-2222-3333-4444-555555555555";
 const stable = `/api/attachments/${id}/download`;
 const capability = (exp: number, sig = "fresh") => `/api/attachments/${id}/signed-download?exp=${exp}&sig=${sig}`;
@@ -474,4 +475,42 @@ it("uses a new signed URL despite an earlier failure of the inactive byte path",
   );
   expect(hook.result.current.failed).toBe(false);
   expect(getAttachmentBlob).not.toHaveBeenCalled();
+});
+
+describe("attachment thumbnails", () => {
+  const thumbnail = `/api/attachments/${id}/thumbnail`;
+
+  it("loads the path natively on same-origin web", () => {
+    getBaseUrl.mockReturnValue("");
+    const { wrapper } = setup();
+    const h = renderHook(() => useAttachmentThumbnailURL(id, thumbnail), { wrapper });
+    expect(h.result.current).toEqual({ url: thumbnail, pending: false, failed: false });
+    expect(getAttachmentThumbnailBlob).not.toHaveBeenCalled();
+  });
+
+  it("fetches authenticated bytes where a native load carries no credentials", async () => {
+    getAttachmentThumbnailBlob.mockResolvedValue(new Blob(["jpg"], { type: "image/jpeg" }));
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static createObjectURL = vi.fn(() => "blob:thumbnail");
+        static revokeObjectURL = vi.fn();
+      },
+    );
+    const { wrapper } = setup();
+    const h = renderHook(() => useAttachmentThumbnailURL(id, thumbnail), { wrapper });
+    expect(h.result.current.pending).toBe(true);
+    await waitFor(() => expect(h.result.current.url).toBe("blob:thumbnail"));
+    expect(h.result.current.failed).toBe(false);
+    expect(getAttachmentThumbnailBlob).toHaveBeenCalledWith(id, expect.anything());
+    expect(getAttachmentBlob).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed fetch so the tile can fall back to the original", async () => {
+    getAttachmentThumbnailBlob.mockRejectedValue(new ApiError("not available", 404, "Not Found"));
+    const { wrapper } = setup();
+    const h = renderHook(() => useAttachmentThumbnailURL(id, thumbnail), { wrapper });
+    await waitFor(() => expect(h.result.current.failed).toBe(true));
+    expect(h.result.current.url).toBe("");
+  });
 });

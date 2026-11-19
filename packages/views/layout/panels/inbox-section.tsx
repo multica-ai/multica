@@ -1,6 +1,7 @@
 "use client";
 
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, type Ref, useLayoutEffect, useMemo, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlarmClock, Archive, BellOff, BookCheck, CheckCheck, History, ListChecks, MoreHorizontal } from "@multica/ui/icons";
@@ -49,6 +50,7 @@ import { InboxSnoozeMenu } from "../../inbox/components/inbox-snooze-menu";
 import { useInboxSnooze } from "../../inbox/components/use-inbox-snooze";
 import { useBuiltinViewNavigation } from "../../issue-views/builtin-views";
 import { useFilteredInboxRows } from "../../inbox/components/use-filtered-inbox-rows";
+import { useInboxIssuePrefetch } from "../../inbox/components/use-inbox-issue-prefetch";
 import { useTimeAgo } from "../../inbox/components/inbox-list-item";
 import { useInboxUnsubscribable, useUnsubscribeArchive } from "../../inbox/components/use-unsubscribe-archive";
 import {
@@ -67,6 +69,7 @@ import {
   PanelSection,
   panelRowAnchor,
   panelRowStateClass,
+  usePanelScrollRef,
 } from "../panel-nav";
 import { InboxSectionSettings, SECTION_SETTINGS_REVEAL_CLASS } from "./sidebar-settings";
 import {
@@ -166,6 +169,7 @@ export function InboxSection({
     const key = inboxRowKey(item);
     if (key === openRowKey) leave(key, nextInboxRow(all, key));
   };
+  const prefetchRow = useInboxIssuePrefetch(wsId, collapsed ? [] : displayed, (item) => inboxRowHref(p, item));
   // What arrived on each issue while it was snoozed, for the rows back from one.
   const updatesWhileSnoozed = useMemo(() => {
     const counts = new Map<string, number>();
@@ -176,6 +180,41 @@ export function InboxSection({
     }
     return counts;
   }, [list.notifications]);
+
+  const scrollRef = usePanelScrollRef();
+  const renderRow = (item: InboxItem, measure?: RowMeasure) => (
+    <InboxRow
+      key={item.id}
+      item={item}
+      measure={measure}
+      href={inboxRowHref(p, item)}
+      onPrefetch={() => void prefetchRow(item)}
+      active={
+        (!!item.issue_id && item.issue_id === activeIssueId) ||
+        (!!openKey && (item.issue_id ?? item.id) === openKey)
+      }
+      compact={compact}
+      kept={list.kept?.item.id === item.id ? keptText.line(list.kept) : null}
+      settled={list.kept?.item.id === item.id && list.kept.reason !== "filtered"}
+      updatesWhileSnoozed={item.issue_id ? (updatesWhileSnoozed.get(item.issue_id) ?? 0) : 0}
+      onArchive={() => {
+        archive(item.id, inboxRowKey(item));
+        leaveIfOpen(item);
+      }}
+      onUnsubscribe={
+        item.issue_id && unsubscribable(item)
+          ? () => {
+              unsubscribeArchive({ id: item.id, issueId: item.issue_id! });
+              leaveIfOpen(item);
+            }
+          : undefined
+      }
+      onSnooze={(until) => {
+        snooze(item, until);
+        leaveIfOpen(item);
+      }}
+    />
+  );
 
   return (
     <PanelSection
@@ -208,39 +247,13 @@ export function InboxSection({
       }
     >
       {displayed.length > 0 ? (
-        <PanelList data-sidebar-list={INBOX_LIST} className={compact ? undefined : "space-y-0.5"}>
-          {displayed.map((item) => (
-            <InboxRow
-              key={item.id}
-              item={item}
-              href={inboxRowHref(p, item)}
-              active={
-                (!!item.issue_id && item.issue_id === activeIssueId) ||
-                (!!openKey && (item.issue_id ?? item.id) === openKey)
-              }
-              compact={compact}
-              kept={list.kept?.item.id === item.id ? keptText.line(list.kept) : null}
-              settled={list.kept?.item.id === item.id && list.kept.reason !== "filtered"}
-              updatesWhileSnoozed={item.issue_id ? (updatesWhileSnoozed.get(item.issue_id) ?? 0) : 0}
-              onArchive={() => {
-                archive(item.id, inboxRowKey(item));
-                leaveIfOpen(item);
-              }}
-              onUnsubscribe={
-                item.issue_id && unsubscribable(item)
-                  ? () => {
-                      unsubscribeArchive({ id: item.id, issueId: item.issue_id! });
-                      leaveIfOpen(item);
-                    }
-                  : undefined
-              }
-              onSnooze={(until) => {
-                snooze(item, until);
-                leaveIfOpen(item);
-              }}
-            />
-          ))}
-        </PanelList>
+        displayed.length > VIRTUALIZE_AFTER && scrollRef ? (
+          <VirtualInboxList items={displayed} compact={compact} renderRow={renderRow} />
+        ) : (
+          <PanelList data-sidebar-list={INBOX_LIST} className={compact ? undefined : "space-y-0.5"}>
+            {displayed.map((item) => renderRow(item))}
+          </PanelList>
+        )
       ) : list.filtered ? (
         <div className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
           <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.filters.empty)}</span>
@@ -284,6 +297,81 @@ export function InboxSection({
         </PanelList>
       )}
     </PanelSection>
+  );
+}
+
+/**
+ * Past this many rows (only reachable through "Show N more") the section
+ * mounts just the rows near the panel's viewport. Every mounted row
+ * re-renders whenever the open issue changes, so a fully mounted list of
+ * ~1,000 notifications made each switch cost seconds.
+ */
+const VIRTUALIZE_AFTER = 50;
+
+/** Estimated row heights and the gaps `space-y-px` / `space-y-0.5` put between rows. */
+const ROW_ESTIMATE = { compact: 32, full: 50 } as const;
+const ROW_GAP = { compact: 1, full: 2 } as const;
+
+/** What a virtualized row hands its `<li>` so the list can measure it. */
+interface RowMeasure {
+  index: number;
+  ref: Ref<HTMLLIElement>;
+}
+
+/**
+ * The Inbox rows, windowed inside the Work panel's own scroll container. The
+ * list stays in normal flow: padding stands in for the rows above and below
+ * the window, so the sections after it keep their place.
+ */
+function VirtualInboxList({
+  items,
+  compact,
+  renderRow,
+}: {
+  items: readonly InboxItem[];
+  compact: boolean;
+  renderRow: (item: InboxItem, measure: RowMeasure) => ReactNode;
+}) {
+  const scrollRef = usePanelScrollRef()!;
+  const [list, setList] = useState<HTMLUListElement | null>(null);
+  // Where the list starts within the scroll container's content.
+  const [scrollMargin, setScrollMargin] = useState(0);
+  useLayoutEffect(() => {
+    const scroller = scrollRef.current;
+    if (!list || !scroller) return;
+    const measure = () =>
+      setScrollMargin(list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, [list, scrollRef]);
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => (compact ? ROW_ESTIMATE.compact : ROW_ESTIMATE.full),
+    gap: compact ? ROW_GAP.compact : ROW_GAP.full,
+    getItemKey: (index) => items[index]!.id,
+    scrollMargin,
+    // Rows past the viewport stay mounted, so Tab can always reach the next one.
+    overscan: 10,
+  });
+  const virtualRows = virtualizer.getVirtualItems();
+  const first = virtualRows[0];
+  const last = virtualRows[virtualRows.length - 1];
+  const paddingTop = first ? first.start - scrollMargin : 0;
+  const paddingBottom = last ? virtualizer.getTotalSize() - (last.end - scrollMargin) : 0;
+
+  return (
+    <PanelList
+      ref={setList}
+      data-sidebar-list={INBOX_LIST}
+      className={compact ? undefined : "space-y-0.5"}
+      style={{ paddingTop, paddingBottom }}
+    >
+      {virtualRows.map((row) => renderRow(items[row.index]!, { index: row.index, ref: virtualizer.measureElement }))}
+    </PanelList>
   );
 }
 
@@ -421,7 +509,9 @@ function InboxSectionActions({
 
 function InboxRow({
   item,
+  measure,
   href,
+  onPrefetch,
   active,
   compact,
   kept,
@@ -432,7 +522,11 @@ function InboxRow({
   onSnooze,
 }: {
   item: InboxItem;
+  /** Set when the row is one of a virtualized list's window. */
+  measure?: RowMeasure;
   href: string;
+  /** Warms the issue this row opens, so the click renders from cache. */
+  onPrefetch: () => void;
   active: boolean;
   /** One line (status, title, agents, dot or time) instead of the actor line under the title. */
   compact: boolean;
@@ -524,7 +618,15 @@ function InboxRow({
   );
 
   return (
-    <li data-inbox-row data-read={unread ? "false" : "true"} className="group/inbox relative">
+    <li
+      ref={measure?.ref}
+      data-index={measure?.index}
+      data-inbox-row
+      data-read={unread ? "false" : "true"}
+      className="group/inbox relative"
+      onPointerEnter={onPrefetch}
+      onFocus={onPrefetch}
+    >
       <HoverCard
         open={cardOpen && !snoozeOpen}
         onOpenChange={(open) => {
@@ -559,6 +661,7 @@ function InboxRow({
           <AppLink
             href={href}
             newTabTitle={title}
+            data-issue-id={item.issue_id ?? undefined}
             draggable={false}
             aria-current={active ? "page" : undefined}
             onNavigateInPlace={land}
@@ -807,7 +910,12 @@ function InboxRowCard({
         </div>
       )}
       <div className="-mx-1 mt-1 flex items-center gap-1 border-t border-border pt-2">
-        <AppLink href={href} onNavigateInPlace={onOpen} className={buttonVariants({ size: "sm", variant: "secondary" })}>
+        <AppLink
+          href={href}
+          data-issue-id={item.issue_id ?? undefined}
+          onNavigateInPlace={onOpen}
+          className={buttonVariants({ size: "sm", variant: "secondary" })}
+        >
           {t(($) => $.panels.work.inbox_open)}
         </AppLink>
         {unread && (

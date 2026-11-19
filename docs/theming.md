@@ -682,6 +682,7 @@ and dark differ, both defaults are given.
 | --- | --- | --- |
 | `--radius` | `0.5rem` | Base corner radius. Every `rounded-*` step and component radius below derives from it. |
 | `--surface-shadow` | `0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03)` / `0 1px 2px rgb(0 0 0 / 0.2), 0 1px 1px rgb(0 0 0 / 0.16)` | Resting shadow of cards and the page. |
+| `--surface-card-shadow` | `0 0 0 1px rgb(0 0 0 / 0.03), 0 1px 2px rgb(0 0 0 / 0.05), 0 3px 6px -1px rgb(0 0 0 / 0.06)` / `0 0 0 1px rgb(255 255 255 / 0.07), 0 1px 2px rgb(0 0 0 / 0.3), 0 3px 6px -1px rgb(0 0 0 / 0.3)` | Outline and shadow of borderless cards on the page canvas, like the issue sidebar's. |
 | `--floating-shadow` | `0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08)` / `0 20px 48px rgb(0 0 0 / 0.46), 0 4px 12px rgb(0 0 0 / 0.28)` | Dialogs and sheets. |
 | `--menu-shadow` | `0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05)` / `0 10px 28px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.18)` | Menus, selects and popovers. |
 | `--tooltip` | `oklch(0.21 0.006 285.885)` / `oklch(0.3 0.006 286.033)` | Tooltip fill (dark in both modes). |

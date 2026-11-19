@@ -261,8 +261,13 @@ test("switch between Inbox rows in the Work panel", async ({ browser }) => {
       const firstTitle = manifest.issues[manifest.inbox[0]!.key]!.title;
       await expect(rows.filter({ hasText: firstTitle })).toHaveCount(1);
       if (INBOX_ROWS === "all") {
-        await page.getByRole("button", { name: /^Show \d+ more/ }).first().click();
-        await expect.poll(() => rows.count()).toBeGreaterThan(500);
+        const showMore = page.getByRole("button", { name: /^Show \d+ more/ }).first();
+        const hidden = Number((await showMore.textContent())?.match(/\d+/)?.[0] ?? 0);
+        expect(hidden, "the Inbox section hides hundreds of rows").toBeGreaterThan(500);
+        await showMore.click();
+        // A virtualized list mounts only the rows near the viewport, so the
+        // expansion is read from the toggle rather than from the row count.
+        await expect(page.getByRole("button", { name: "Show fewer" }).first()).toHaveAttribute("aria-expanded", "true");
       }
       await expect.poll(() => rows.count(), "the Inbox section shows the twenty measured rows").toBeGreaterThanOrEqual(20);
       await settle(page, 2000);

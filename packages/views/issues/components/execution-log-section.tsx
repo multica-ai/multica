@@ -794,16 +794,16 @@ function RowShell({
         multiline ? "items-start" : "items-center",
       )}
     >
-      <span className={cn("flex shrink-0", multiline && "mt-0.5")}>
+      <span className={cn("-mr-0.5 flex shrink-0", multiline && "mt-0.5")}>
         {task.agent_id ? (
           <ActorAvatar
             actorType="agent"
             actorId={task.agent_id}
-            size="sm"
+            size="xs"
             enableHoverCard
           />
         ) : (
-          <span className="inline-block h-5 w-5 rounded-full bg-muted" />
+          <span className="inline-block size-4 rounded-full bg-muted" />
         )}
       </span>
       {showIssue && (

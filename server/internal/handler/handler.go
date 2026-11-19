@@ -1300,6 +1300,9 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 	if !ok {
 		return db.InboxItem{}, false
 	}
+	if !h.requireInboxOwnerAccess(w, r, userID, wsUUID) {
+		return db.InboxItem{}, false
+	}
 
 	item, err := h.Queries.GetInboxItemInWorkspace(r.Context(), db.GetInboxItemInWorkspaceParams{
 		ID:          itemUUID,
