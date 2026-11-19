@@ -47,13 +47,18 @@
     "retry": "Réessayer",
     "conflict": "{{name}} a modifié le document. Votre brouillon est conservé. Rechargez pour continuer.",
     "reload": "Recharger la dernière version",
-    "draft": "Votre brouillon conservé"
+    "draft": "Votre brouillon conservé",
+    "unsaved_changes": "Modifications non enregistrées"
   },
   "history": {
     "title": "Historique",
     "current": "Actuelle",
     "restore": "Restaurer cette version",
     "loading": "Chargement..."
+  },
+  "not_found": {
+    "title": "Document introuvable",
+    "description": "Il a peut-être été supprimé."
   },
   "edited": "Modifié {{time}}",
   "outline": "Plan",

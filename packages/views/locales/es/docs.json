@@ -47,13 +47,18 @@
     "retry": "Reintentar",
     "conflict": "{{name}} actualizó el documento. Tu borrador se conserva. Recarga para continuar.",
     "reload": "Cargar última versión",
-    "draft": "Tu borrador guardado"
+    "draft": "Tu borrador guardado",
+    "unsaved_changes": "Cambios sin guardar"
   },
   "history": {
     "title": "Historial",
     "current": "Actual",
     "restore": "Restaurar esta versión",
     "loading": "Cargando..."
+  },
+  "not_found": {
+    "title": "Documento no encontrado",
+    "description": "Puede haberse eliminado."
   },
   "edited": "Editado {{time}}",
   "outline": "Esquema",

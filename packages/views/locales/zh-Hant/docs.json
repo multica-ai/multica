@@ -47,13 +47,18 @@
     "retry": "重試",
     "conflict": "{{name}} 已更新文件。草稿已保留，重新載入後繼續編輯。",
     "reload": "載入最新版本",
-    "draft": "保留的草稿"
+    "draft": "保留的草稿",
+    "unsaved_changes": "未儲存的修改"
   },
   "history": {
     "title": "歷史",
     "current": "目前",
     "restore": "還原此版本",
     "loading": "載入中..."
+  },
+  "not_found": {
+    "title": "未找到該文件",
+    "description": "它可能已被刪除。"
   },
   "edited": "{{time}}編輯",
   "outline": "大綱",
