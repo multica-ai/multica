@@ -146,6 +146,76 @@ func TestChildDoneDoesNotWakeTheRunThatClosedTheStage(t *testing.T) {
 	}
 }
 
+// #10960: every sub-issue is closed, the parent's agent is woken, and that run
+// sets up the next stage by adding a sub-issue to it or reopening one. The
+// rule now reads "stage 1 closed, stage 2 waits", which the run brought about
+// itself, so it records the stage without queuing a second run. Once that run
+// has ended, or when someone else sets up the stage, the agent is woken.
+func TestChildDoneDoesNotWakeTheRunThatSetUpTheNextStage(t *testing.T) {
+	cases := []struct {
+		name      string
+		reopen    bool
+		runStatus string
+		byAgent   bool
+		wantRuns  int
+		wantEntry string
+	}{
+		{"own run adds the next stage", false, "running", true, 1, "acknowledged"},
+		{"own run reopens the next stage", true, "running", true, 1, "acknowledged"},
+		{"own run already ended", false, "completed", true, 2, "woke"},
+		{"someone else adds the next stage", false, "running", false, 2, "woke"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newChildDoneFixture(t, "in_progress")
+			agentID := handlerTestAgentID(t)
+			setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+			dbfx.Exec(t, `UPDATE issue SET stage = 1 WHERE id = $1`, fx.child.ID)
+			var next IssueResponse
+			if tc.reopen {
+				next = createStagedChild(t, fx.parent.ID, 2, "done")
+			}
+			updateChildStatus(t, fx.child.ID, "done")
+			runs := childDoneRuns(t, fx.parent.ID)
+			if len(runs) != 1 {
+				t.Fatalf("every sub-issue closed: runs = %+v, want 1", runs)
+			}
+			run := runs[0].ID
+			dbfx.Exec(t, `UPDATE agent_task_queue SET status = $2, started_at = clock_timestamp() WHERE id = $1`, run, tc.runStatus)
+
+			switch {
+			case tc.reopen:
+				setStatusAsRun(t, next.ID, "todo", agentID, run)
+			default:
+				w := httptest.NewRecorder()
+				req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+					"title": "next stage", "status": "todo", "parent_issue_id": fx.parent.ID, "stage": 2,
+				})
+				if tc.byAgent {
+					req = actAsRun(req, agentID, run)
+				}
+				testHandler.CreateIssue(w, req)
+				if w.Code != http.StatusCreated {
+					t.Fatalf("create the next stage: %d %s", w.Code, w.Body.String())
+				}
+				var created IssueResponse
+				if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { cleanupChildDoneIssue(created.ID) })
+			}
+
+			if runs := childDoneRuns(t, fx.parent.ID); len(runs) != tc.wantRuns {
+				t.Fatalf("runs = %+v, want %d", runs, tc.wantRuns)
+			}
+			entries := childDoneEntries(t, fx.parent.ID)
+			if len(entries) != 2 || entries[1].Stage == nil || *entries[1].Stage != 1 || entries[1].Outcome != tc.wantEntry {
+				t.Fatalf("entries = %+v, want a stage 1 entry with outcome %s", entries, tc.wantEntry)
+			}
+		})
+	}
+}
+
 // A comment from the agent itself never wakes it; a member's comment does.
 func TestWakeupSkipsTheAgentsOwnComment(t *testing.T) {
 	issue := dbfx.Issue(t, "own comment")

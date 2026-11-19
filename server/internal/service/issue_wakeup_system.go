@@ -171,18 +171,15 @@ func (s *IssueWakeupService) processChildEvents(ctx context.Context, parentID pg
 	}
 	ids := make([]pgtype.UUID, 0, len(events))
 	kinds := map[string]bool{}
-	// The agent runs that made the changes that can satisfy a sub-issue
-	// condition (a sub-issue closing, leaving, or changing stage), when every
-	// such change came from one. Adding or reopening a sub-issue satisfies
-	// nothing, so it does not count.
+	// The agent runs that made these changes, when every change came from
+	// one. Any kind can satisfy a sub-issue condition: a sub-issue added to or
+	// reopened in a later stage turns "every sub-issue closed" into "a stage
+	// closed while a later one waits" (#10960).
 	var sources []string
 	allSourced := true
 	for _, e := range events {
 		ids = append(ids, e.ID)
 		kinds[e.Kind] = true
-		if e.Kind == "attached" || e.Kind == "reopened" {
-			continue
-		}
 		if e.SourceTaskID.Valid {
 			sources = append(sources, util.UUIDToString(e.SourceTaskID))
 		} else {

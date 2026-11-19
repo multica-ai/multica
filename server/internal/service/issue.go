@@ -136,6 +136,11 @@ type IssueCreateOpts struct {
 	// still resolving, then promotes the returned task after attachment binding.
 	// Zero preserves the ordinary immediate enqueue path.
 	AssignedAgentRunFireAt time.Time
+
+	// SourceTaskID is the agent run that makes the create, when one does. A
+	// new sub-issue is recorded on its parent with it, so the parent's
+	// sub-issue rules do not wake that run's agent for what it just did.
+	SourceTaskID pgtype.UUID
 }
 
 // ErrActiveDuplicate signals that the duplicate guard found an active
@@ -288,6 +293,11 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+	if opts.SourceTaskID.Valid {
+		if _, err := tx.Exec(ctx, `SELECT set_config('multica.source_task_id',$1,true)`, util.UUIDToString(opts.SourceTaskID)); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("record source run: %w", err)
+		}
+	}
 
 	properties, err := validateIssueCreateProperties(ctx, tx, qtx, p.WorkspaceID, p.Properties)
 	if err != nil {

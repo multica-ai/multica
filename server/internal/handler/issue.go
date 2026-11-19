@@ -3680,6 +3680,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
 		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
+		SourceTaskID:     h.wakeupSourceTaskID(r),
 		BroadcastPayload: func(issue db.Issue, atts []db.Attachment, labels []db.IssueLabel) map[string]any {
 			payload := issueToResponse(issue, prefix)
 			// The event other tabs receive must carry the category too — filling
@@ -3745,6 +3746,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	issue := res.Issue
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
+
+	// A new sub-issue changes what the parent's sub-issue rules read, as a
+	// status or stage change does (see UpdateIssue): process it now, while the
+	// run that added it is still the one the rules can recognize. A failure is
+	// retried by the scheduler sweep.
+	if issue.ParentIssueID.Valid {
+		h.processChildEvents(r.Context(), issue.ParentIssueID)
+	}
 
 	resp := issueToResponse(issue, prefix)
 	fillCreated(&resp)
