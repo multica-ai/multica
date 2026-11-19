@@ -299,7 +299,7 @@ func (h *Handler) loadChatSessionForUser(w http.ResponseWriter, r *http.Request,
 		ID:          sessionUUID,
 		WorkspaceID: workspaceUUID,
 	})
-	if err != nil {
+	if err != nil || session.ForkInitializationTaskID.Valid {
 		writeError(w, http.StatusNotFound, "chat session not found")
 		return db.ChatSession{}, false
 	}
@@ -611,6 +611,16 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
+	current, err := qtx.LockChatSessionForEnqueue(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock chat session")
+		return
+	}
+	if current.ForkSnapshotTaskID.Valid || current.ForkInitializationTaskID.Valid {
+		writeError(w, http.StatusConflict, "chat fork is pending")
+		return
+	}
+
 	updated, err := qtx.SetChatSessionArchived(r.Context(), db.SetChatSessionArchivedParams{
 		ID:       session.ID,
 		Archived: req.Archived,
@@ -757,6 +767,16 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to lock chat session")
+		return
+	}
+
+	current, err := qtx.GetChatSession(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load locked chat session")
+		return
+	}
+	if current.ForkSnapshotTaskID.Valid || current.ForkInitializationTaskID.Valid {
+		writeError(w, http.StatusConflict, "chat fork is pending")
 		return
 	}
 

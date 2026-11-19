@@ -352,6 +352,7 @@ import {
   ChatMessagesPageSchema,
   ChatPendingTaskSchema,
   ChatSessionListSchema,
+  ChatForkSchema,
   ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
   SendChatMessageResponseSchema,
@@ -4541,6 +4542,20 @@ export class ApiClient {
       method: "POST",
       headers: workspaceHeader(workspaceSlug),
       body: JSON.stringify(data),
+    });
+  }
+
+  async createChatFork(sessionId: string) {
+    const raw: unknown = await this.fetch(`/api/chat/sessions/${sessionId}/forks`, { method: "POST" });
+    return parseWithFallback(raw, ChatForkSchema.nullable(), null, {
+      endpoint: "POST /api/chat/sessions/:id/forks",
+    });
+  }
+
+  async getChatFork(sessionId: string, taskId: string) {
+    const raw: unknown = await this.fetch(`/api/chat/sessions/${sessionId}/forks/${taskId}`);
+    return parseWithFallback(raw, ChatForkSchema.nullable(), null, {
+      endpoint: "GET /api/chat/sessions/:id/forks/:taskId",
     });
   }
 
