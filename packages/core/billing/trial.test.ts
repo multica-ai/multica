@@ -86,8 +86,13 @@ describe("resolveWorkspaceTrial", () => {
       plan: "business",
       endsAt,
       recent: true,
+      // Only this clock says so; Cloud has not confirmed the downgrade.
+      confirmed: false,
       settled: false,
     });
+    expect(
+      resolveWorkspaceTrial(summary({ state: "expired" }), endsAt),
+    ).toMatchObject({ kind: "ended", confirmed: true });
   });
 
   it("offers the upgrade for a week after the end, then only on Billing", () => {

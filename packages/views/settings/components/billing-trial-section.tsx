@@ -5,11 +5,10 @@ import { resolveWorkspaceTrial } from "@multica/core/billing/trial";
 import type { PaidFeature, WorkspaceSubscriptionSummary } from "@multica/core/types";
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import { Badge } from "@multica/ui/components/ui/badge";
-import { Button, buttonVariants } from "@multica/ui/components/ui/button";
+import { Button } from "@multica/ui/components/ui/button";
 import { Progress } from "@multica/ui/components/ui/progress";
 import type { IconComponent } from "@multica/ui/icons";
 import { useLocale, useT } from "../../i18n";
-import { PRICING_URL } from "../../layout/help-links";
 import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
 
 const TRIAL_FEATURE_ICONS: Record<PaidFeature, IconComponent> = {
@@ -74,21 +73,13 @@ export function BillingTrialSection({
                   {t(($) => $.trial.card.description, { date: endsOn })}
                 </p>
               </div>
-              <div className="flex shrink-0 flex-wrap gap-2">
-                <a
-                  href={PRICING_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                >
-                  {t(($) => $.trial.card.compare_plans)}
-                </a>
-                {onChoosePlan ? (
-                  <Button size="sm" onClick={onChoosePlan}>
-                    {t(($) => $.trial.card.choose_plan)}
-                  </Button>
-                ) : null}
-              </div>
+              {/* The public pricing page is not released yet, so the plan
+                  cards below are where plans are compared and chosen. */}
+              {onChoosePlan ? (
+                <Button size="sm" className="shrink-0" onClick={onChoosePlan}>
+                  {t(($) => $.trial.card.choose_plan)}
+                </Button>
+              ) : null}
             </div>
             <Progress
               value={(trial.day / trial.totalDays) * 100}

@@ -2097,10 +2097,6 @@ describe("BillingTab", () => {
       ).toBeInTheDocument();
       // A trialling manager subscribes through the same plan cards.
       expect(screen.getByRole("button", { name: "Upgrade to Business" })).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Compare plans" })).toHaveAttribute(
-        "href",
-        "https://multica.ai/pricing",
-      );
     });
 
     it("takes a manager from the trial card to the plan cards", async () => {
@@ -2125,7 +2121,6 @@ describe("BillingTab", () => {
       renderWithI18n(<BillingTab />);
 
       expect(screen.queryByRole("button", { name: "Choose a plan" })).not.toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Compare plans" })).toBeInTheDocument();
     });
 
     it("points an ended trial at the plans below", () => {

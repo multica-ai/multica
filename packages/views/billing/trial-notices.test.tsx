@@ -85,6 +85,7 @@ const ended: WorkspaceTrialView = {
   plan: "business",
   endsAt: ENDS_AT,
   recent: true,
+  confirmed: true,
   settled: true,
 };
 
@@ -271,6 +272,17 @@ describe("WorkspaceTrialNotices", () => {
     h.workspace = { id: "ws-2", name: "Pixel Forge" };
     rerender(<WorkspaceTrialNotices />);
     expect(h.toast).toHaveBeenCalledTimes(2);
+  });
+
+  it("announces nothing while only this clock says the trial ended", () => {
+    h.trial = { ...ended, confirmed: false } as WorkspaceTrialView;
+    renderWithI18n(<WorkspaceTrialNotices />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    h.role = "member";
+    renderWithI18n(<WorkspaceTrialNotices />);
+    expect(h.toast).not.toHaveBeenCalled();
+    expect(useTrialNoticeStore.getState().seen).toEqual([]);
   });
 
   it("stays quiet once the week after the end has passed", () => {

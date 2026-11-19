@@ -1,6 +1,5 @@
 export const DOCS_URL = "https://multica.ai/docs";
 export const CHANGELOG_URL = "https://multica.ai/changelog";
-export const PRICING_URL = "https://multica.ai/pricing";
 // Absolute, including on self-hosted deployments: the installers we ship are
 // the same binaries either way, and the desktop client can point at a
 // self-hosted backend once installed. A self-host-relative /download would

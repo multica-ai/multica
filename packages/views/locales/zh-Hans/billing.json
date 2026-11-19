@@ -279,7 +279,6 @@
       "ends": "{{date}} 结束",
       "ended_title": "Business 试用已结束",
       "ended_description": "试用已于 {{date}} 结束。在下方选择套餐即可恢复 Business 功能。",
-      "compare_plans": "对比套餐",
       "choose_plan": "选择套餐"
     },
     "features": {

@@ -63,6 +63,12 @@ export type WorkspaceTrialView =
       /** Within the week after the end, while the status bar still shows it. */
       recent: boolean;
       /**
+       * Cloud has said the trial expired and the workspace is on Free. Until
+       * then the end is only this clock's: the workspace may have subscribed
+       * elsewhere, so nothing may announce a downgrade yet.
+       */
+      confirmed: boolean;
+      /**
        * Past TRIAL_END_SETTLE_MS after the end: paid-feature states and limits
        * read from now on are Free's.
        */
@@ -118,6 +124,7 @@ export function resolveWorkspaceTrial(
     plan: trial.plan,
     endsAt,
     recent: now - endsAt < TRIAL_ENDED_VISIBLE_DAYS * DAY_MS,
+    confirmed: trial.state === "expired" && summary.entitlement.plan === "free",
     settled: now - endsAt >= TRIAL_END_SETTLE_MS,
   };
 }

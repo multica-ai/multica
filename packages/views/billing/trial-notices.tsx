@@ -56,7 +56,8 @@ function formatDate(value: number, locale: string): string {
  * - day 1: a welcome card in the corner, for everyone;
  * - halfway, three days left and the last day: a dismissible banner for
  *   owners and admins;
- * - after the end: a dialog for owners and admins, a toast for members.
+ * - after Cloud confirms the end: a dialog for owners and admins, a toast for
+ *   members.
  *
  * Each shows once per device. Nothing here decides access; the server does.
  */
@@ -78,7 +79,9 @@ export function WorkspaceTrialNotices() {
       </>
     );
   }
-  if (!trial.recent) return null;
+  // Announce the downgrade only once Cloud confirms it: when this clock
+  // passes the end, the workspace may already have subscribed elsewhere.
+  if (!trial.recent || !trial.confirmed) return null;
   if (!isManager) return <TrialEndedToast wsId={wsId} trial={trial} />;
   // The dialog lists what is restricted now; until the end has settled, the
   // server may still answer with the trial's Business policy.

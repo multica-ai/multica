@@ -79,12 +79,12 @@ describe("TrialStatus", () => {
   });
 
   it("offers an upgrade for a week after the trial, then disappears", () => {
-    h.trial = { kind: "ended", plan: "business", endsAt: 0, recent: true, settled: true };
+    h.trial = { kind: "ended", plan: "business", endsAt: 0, recent: true, confirmed: true, settled: true };
     const { unmount } = renderStatus();
     expect(screen.getByRole("link")).toHaveTextContent("FreeUpgrade");
     unmount();
 
-    h.trial = { kind: "ended", plan: "business", endsAt: 0, recent: false, settled: true };
+    h.trial = { kind: "ended", plan: "business", endsAt: 0, recent: false, confirmed: true, settled: true };
     renderStatus();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
