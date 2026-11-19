@@ -121,8 +121,14 @@ func TestReportUpdateResult_RunningStartsInstallation(t *testing.T) {
 	store := withUpdateStore(t)
 	req := mustCreateUpdate(t, store, testRuntimeID)
 
-	if w := reportUpdate(t, req.ID, map[string]any{"status": "running"}); w.Code != http.StatusOK {
+	w := reportUpdate(t, req.ID, map[string]any{"status": "running"})
+	if w.Code != http.StatusOK {
 		t.Fatalf("running report = %d: %s", w.Code, w.Body.String())
+	}
+	// The daemon installs only on this explicit acceptance.
+	var answer map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &answer); err != nil || answer["accepted"] != "running" {
+		t.Fatalf("answer = %s, want accepted=running", w.Body.String())
 	}
 	got := mustGetUpdate(t, store, req.ID)
 	if got.Status != UpdateRunning || got.RunStartedAt == nil {
@@ -230,7 +236,7 @@ func TestHeartbeatOffersDeferrableOnlyWhenBothSidesQueue(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			store := withUpdateStore(t)
-			req, err := store.Create(context.Background(), testRuntimeID, "v1.2.3", "user-1", tc.queueWhenBusy)
+			req, err := store.Create(context.Background(), testRuntimeID, "runtime:"+testRuntimeID, "v1.2.3", "user-1", tc.queueWhenBusy)
 			if err != nil {
 				t.Fatalf("create: %v", err)
 			}
@@ -251,11 +257,19 @@ func TestHeartbeatOffersDeferrableOnlyWhenBothSidesQueue(t *testing.T) {
 			// report is refused, so the request must not be cancellable while
 			// that offer is out.
 			_, err = store.Cancel(context.Background(), req.ID)
-			if tc.wantDeferrable && err != nil {
-				t.Fatalf("cancel after a deferrable offer: %v", err)
-			}
-			if !tc.wantDeferrable && !errors.Is(err, errUpdateBeingDelivered) {
-				t.Fatalf("cancel during a fail-fast offer = %v, want errUpdateBeingDelivered", err)
+			switch {
+			case !tc.queueWhenBusy:
+				if !errors.Is(err, errUpdateNotCancellable) {
+					t.Fatalf("cancel of an older client's request = %v, want errUpdateNotCancellable", err)
+				}
+			case tc.wantDeferrable:
+				if err != nil {
+					t.Fatalf("cancel after a deferrable offer: %v", err)
+				}
+			default:
+				if !errors.Is(err, errUpdateBeingDelivered) {
+					t.Fatalf("cancel during a fail-fast offer = %v, want errUpdateBeingDelivered", err)
+				}
 			}
 		})
 	}
@@ -266,7 +280,7 @@ func TestReportUpdateResult_BusyFailureFailsForClientsThatCannotQueue(t *testing
 		t.Skip("database not available")
 	}
 	store := withUpdateStore(t)
-	req, err := store.Create(context.Background(), testRuntimeID, "v1.2.3", "user-1", false)
+	req, err := store.Create(context.Background(), testRuntimeID, "runtime:"+testRuntimeID, "v1.2.3", "user-1", false)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -279,35 +293,49 @@ func TestReportUpdateResult_BusyFailureFailsForClientsThatCannotQueue(t *testing
 	}
 }
 
+// A workspace owner manages two public runtimes of someone else's machine. The
+// update was queued through A; the machine card now uses B (A went offline).
 func TestActiveUpdateIsFoundThroughAnyRuntimeOfTheMachine(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
 	store := withUpdateStore(t)
-	daemonID := "mul-9633-machine-" + randomID()
+	suffix := randomID()
+	daemonID := "mul-9633-machine-" + suffix
+	var machineOwner string
+	if err := testPool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ('Machine Owner', $1) RETURNING id`,
+		"machine-owner-"+suffix+"@multica.test").Scan(&machineOwner); err != nil {
+		t.Fatalf("create machine owner: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE daemon_id = $1`, daemonID)
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id = $1`, machineOwner)
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, machineOwner)
+	})
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
+		testWorkspaceID, machineOwner); err != nil {
+		t.Fatalf("add machine owner: %v", err)
+	}
 	var runtimeA, runtimeB string
 	for i, dst := range []*string{&runtimeA, &runtimeB} {
 		if err := testPool.QueryRow(ctx, `
 			INSERT INTO agent_runtime (
-				workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
+				workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, visibility, last_seen_at
 			)
-			VALUES ($1, $2, $3, 'local', $4, 'online', 'machine test', '{}'::jsonb, $5, now())
+			VALUES ($1, $2, $3, 'local', $4, 'online', 'machine test', '{}'::jsonb, $5, 'public', now())
 			RETURNING id
-		`, testWorkspaceID, daemonID, "Machine Runtime", []string{"machine_test_a", "machine_test_b"}[i], testUserID).Scan(dst); err != nil {
+		`, testWorkspaceID, daemonID, "Machine Runtime", []string{"machine_test_a", "machine_test_b"}[i], machineOwner).Scan(dst); err != nil {
 			t.Fatalf("create runtime: %v", err)
 		}
 	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE daemon_id = $1`, daemonID)
-	})
 
-	queued, err := store.Create(ctx, runtimeA, "v1.2.3", testUserID, true)
+	machineKey := "daemon:" + daemonID
+	queued, err := store.Create(ctx, runtimeA, machineKey, "v1.2.3", machineOwner, true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
-	// The machine card now uses runtime B (A went offline); it still finds A's update.
 	req := withURLParam(newRequest(http.MethodGet, "/api/runtimes/"+runtimeB+"/update", nil), "runtimeId", runtimeB)
 	w := httptest.NewRecorder()
 	testHandler.GetActiveUpdate(w, req)
@@ -321,7 +349,7 @@ func TestActiveUpdateIsFoundThroughAnyRuntimeOfTheMachine(t *testing.T) {
 		t.Fatalf("active = %+v, want the update queued through runtime A", body.Update)
 	}
 
-	// And a second update for the same machine is refused.
+	// A second update for the same machine is refused, whichever runtime asks.
 	initReq := withURLParam(newRequest(http.MethodPost, "/api/runtimes/"+runtimeB+"/update", map[string]any{
 		"target_version":  "v1.2.3",
 		"queue_when_busy": true,

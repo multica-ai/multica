@@ -55,7 +55,7 @@ func updateStoreHarnesses(t *testing.T) []updateStoreHarness {
 			if err != nil {
 				t.Fatalf("edit: encode %s: %v", id, err)
 			}
-			if err := rs.rdb.Set(ctx, updateKey(id), data, updateRequestTTL(req.Status)).Err(); err != nil {
+			if err := rs.rdb.Set(ctx, updateKey(id), data, updateRequestTTL(req)).Err(); err != nil {
 				t.Fatalf("edit: store %s: %v", id, err)
 			}
 		},
@@ -83,7 +83,7 @@ func mustHasPending(t *testing.T, store UpdateStore, runtimeID string, want bool
 
 func mustCreateUpdate(t *testing.T, store UpdateStore, runtimeID string) *UpdateRequest {
 	t.Helper()
-	req, err := store.Create(context.Background(), runtimeID, "v1.2.3", "user-1", true)
+	req, err := store.Create(context.Background(), runtimeID, "runtime:"+runtimeID, "v1.2.3", "user-1", true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -164,34 +164,47 @@ func TestUpdateStore_OfferedAgainUntilTheDaemonStartsIt(t *testing.T) {
 	}
 }
 
-func TestUpdateStore_FailFastOfferBlocksCancelUntilTheDaemonAnswers(t *testing.T) {
+func TestUpdateStore_FailFastOfferStaysOutUntilAnswered(t *testing.T) {
+	withUpdateReofferInterval(t, 0)
 	for _, h := range updateStoreHarnesses(t) {
 		t.Run(h.name, func(t *testing.T) {
 			ctx := context.Background()
-			req := mustCreateUpdate(t, h.store, "rt-lease")
-			if got, err := h.store.PopPending(ctx, "rt-lease", false); err != nil || got == nil {
+			req := mustCreateUpdate(t, h.store, "rt-legacy")
+			if got, err := h.store.PopPending(ctx, "rt-legacy", false); err != nil || got == nil {
 				t.Fatalf("pop = %+v, %v", got, err)
+			}
+			// One unanswered fail-fast offer at a time: no second one, no cancel,
+			// and no expiry, however often the daemon heartbeats.
+			for i := 0; i < 3; i++ {
+				if got, err := h.store.PopPending(ctx, "rt-legacy", false); err != nil || got != nil {
+					t.Fatalf("second offer while the first is unanswered = %+v, %v", got, err)
+				}
 			}
 			if _, err := h.store.Cancel(ctx, req.ID); !errors.Is(err, errUpdateBeingDelivered) {
 				t.Fatalf("cancel while the offer is out = %v, want errUpdateBeingDelivered", err)
 			}
-			// Even a queue past its 24 hours does not expire under that daemon.
-			h.edit(t, req.ID, func(r *UpdateRequest) {
-				aged := time.Now().Add(-(updateScheduledTimeout + time.Second))
-				r.Status = UpdateScheduled
-				r.ScheduledAt = &aged
-			})
-			if got := mustGetUpdate(t, h.store, req.ID); got.Status != UpdateScheduled {
-				t.Fatalf("status = %s; must not expire while a daemon may be starting it", got.Status)
+			if got := mustGetUpdate(t, h.store, req.ID); got.Status != UpdatePending {
+				t.Fatalf("status = %s; must not end while the daemon may be starting it", got.Status)
 			}
-			// The busy answer releases the lease.
+
+			// The busy answer ends the offer: cancellable again, and the next
+			// offer waits out the quiet period for late retries of that answer.
 			if _, err := h.store.Schedule(ctx, req.ID, nil); err != nil {
 				t.Fatalf("schedule: %v", err)
 			}
+			if got, err := h.store.PopPending(ctx, "rt-legacy", false); err != nil || got != nil {
+				t.Fatalf("offer during the quiet period = %+v, %v", got, err)
+			}
 			h.edit(t, req.ID, func(r *UpdateRequest) {
-				recent := time.Now()
-				r.ScheduledAt = &recent
+				past := time.Now().Add(-time.Second)
+				r.LegacyQuietUntil = &past
 			})
+			if got, err := h.store.PopPending(ctx, "rt-legacy", false); err != nil || got == nil {
+				t.Fatalf("offer after the quiet period = %+v, %v", got, err)
+			}
+			if _, err := h.store.Schedule(ctx, req.ID, nil); err != nil {
+				t.Fatalf("schedule: %v", err)
+			}
 			if got, err := h.store.Cancel(ctx, req.ID); err != nil || got.Status != UpdateCancelled {
 				t.Fatalf("cancel after the busy answer = %+v, %v", got, err)
 			}
@@ -199,20 +212,59 @@ func TestUpdateStore_FailFastOfferBlocksCancelUntilTheDaemonAnswers(t *testing.T
 	}
 }
 
-func TestUpdateStore_LeaseRunsOut(t *testing.T) {
+func TestUpdateStore_UnansweredFailFastOfferEndsAsUnknown(t *testing.T) {
 	for _, h := range updateStoreHarnesses(t) {
 		t.Run(h.name, func(t *testing.T) {
 			ctx := context.Background()
-			req := mustCreateUpdate(t, h.store, "rt-lease-out")
-			if got, err := h.store.PopPending(ctx, "rt-lease-out", false); err != nil || got == nil {
+			req := mustCreateUpdate(t, h.store, "rt-unknown")
+			if got, err := h.store.PopPending(ctx, "rt-unknown", false); err != nil || got == nil {
 				t.Fatalf("pop = %+v, %v", got, err)
 			}
 			h.edit(t, req.ID, func(r *UpdateRequest) {
-				past := time.Now().Add(-time.Second)
-				r.OfferLeaseUntil = &past
+				old := time.Now().Add(-(updateLegacyOfferTimeout + time.Second))
+				r.LegacyOfferAt = &old
 			})
-			if _, err := h.store.Cancel(ctx, req.ID); err != nil {
-				t.Fatalf("cancel after an unanswered offer's lease ran out: %v", err)
+			got := mustGetUpdate(t, h.store, req.ID)
+			if got.Status != UpdateTimeout || got.Error == "" {
+				t.Fatalf("unanswered offer = %+v, want a timeout saying the outcome is unknown", got)
+			}
+			if _, err := h.store.Cancel(ctx, req.ID); err == nil {
+				t.Fatal("cancelled an update that may have been installed")
+			}
+		})
+	}
+}
+
+func TestUpdateStore_OlderClientsRequestIsNeverCancelled(t *testing.T) {
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			req, err := h.store.Create(context.Background(), "rt-old-client", "runtime:rt-old-client", "v1.2.3", "user-1", false)
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if updateCancellable(req) {
+				t.Fatal("an older client's request reported as cancellable")
+			}
+			if _, err := h.store.Cancel(context.Background(), req.ID); !errors.Is(err, errUpdateNotCancellable) {
+				t.Fatalf("cancel = %v, want errUpdateNotCancellable; that client cannot show a cancelled update", err)
+			}
+		})
+	}
+}
+
+func TestUpdateStore_OneUpdatePerMachine(t *testing.T) {
+	for _, h := range updateStoreHarnesses(t) {
+		t.Run(h.name, func(t *testing.T) {
+			ctx := context.Background()
+			if _, err := h.store.Create(ctx, "rt-machine-a", "daemon:machine", "v1.2.3", "user-1", true); err != nil {
+				t.Fatalf("create through runtime A: %v", err)
+			}
+			if _, err := h.store.Create(ctx, "rt-machine-b", "daemon:machine", "v1.2.3", "user-2", true); !errors.Is(err, errUpdateInProgress) {
+				t.Fatalf("create through runtime B = %v, want errUpdateInProgress", err)
+			}
+			active, err := h.store.GetActive(ctx, "daemon:machine")
+			if err != nil || active == nil || active.RuntimeID != "rt-machine-a" {
+				t.Fatalf("active = %+v, %v; want runtime A's request", active, err)
 			}
 		})
 	}
@@ -249,11 +301,11 @@ func TestUpdateStore_ScheduledUpdateStaysQueuedUntilCancelled(t *testing.T) {
 				t.Fatalf("reschedule = %+v, %v; want scheduled_at kept", again, err)
 			}
 
-			active, err := h.store.GetActive(ctx, "rt-queue")
+			active, err := h.store.GetActive(ctx, "runtime:"+"rt-queue")
 			if err != nil || active == nil || active.ID != req.ID {
 				t.Fatalf("active = %+v, %v; want the queued request", active, err)
 			}
-			if _, err := h.store.Create(ctx, "rt-queue", "v1.2.4", "user-1", true); !errors.Is(err, errUpdateInProgress) {
+			if _, err := h.store.Create(ctx, "rt-queue", "runtime:"+"rt-queue", "v1.2.4", "user-1", true); !errors.Is(err, errUpdateInProgress) {
 				t.Fatalf("second create = %v, want errUpdateInProgress", err)
 			}
 
@@ -270,7 +322,7 @@ func TestUpdateStore_ScheduledUpdateStaysQueuedUntilCancelled(t *testing.T) {
 			if _, err := h.store.Schedule(ctx, req.ID, nil); !errors.Is(err, errUpdateNotRunnable) {
 				t.Fatalf("schedule after cancel = %v, want errUpdateNotRunnable", err)
 			}
-			if active, err := h.store.GetActive(ctx, "rt-queue"); err != nil || active != nil {
+			if active, err := h.store.GetActive(ctx, "runtime:"+"rt-queue"); err != nil || active != nil {
 				t.Fatalf("active after cancel = %+v, %v; want none", active, err)
 			}
 			time.Sleep(60 * time.Millisecond)
@@ -317,7 +369,7 @@ func TestUpdateStore_ScheduledUpdateExpiresAfter24Hours(t *testing.T) {
 			if _, err := h.store.MarkRunning(ctx, req.ID); !errors.Is(err, errUpdateNotRunnable) {
 				t.Fatalf("start after expiry = %v, want errUpdateNotRunnable", err)
 			}
-			if active, err := h.store.GetActive(ctx, "rt-expire"); err != nil || active != nil {
+			if active, err := h.store.GetActive(ctx, "runtime:"+"rt-expire"); err != nil || active != nil {
 				t.Fatalf("active after expiry = %+v, %v; want none", active, err)
 			}
 			mustCreateUpdate(t, h.store, "rt-expire")
@@ -398,7 +450,7 @@ func TestInMemoryUpdateStore_KeepsQueuedRequestsPastRetention(t *testing.T) {
 	store.mu.Unlock()
 
 	// Create sweeps old requests; a queued one must survive the sweep.
-	if _, err := store.Create(ctx, "rt-unrelated", "v1.2.3", "user-1", true); err != nil {
+	if _, err := store.Create(ctx, "rt-unrelated", "runtime:"+"rt-unrelated", "v1.2.3", "user-1", true); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if got := mustGetUpdate(t, store, req.ID); got.Status != UpdateScheduled {

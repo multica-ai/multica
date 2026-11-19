@@ -21,7 +21,7 @@ func (s *failingUpdateStore) GetActive(context.Context, string) (*UpdateRequest,
 	return nil, nil
 }
 
-func (s *failingUpdateStore) Create(context.Context, string, string, string, bool) (*UpdateRequest, error) {
+func (s *failingUpdateStore) Create(context.Context, string, string, string, string, bool) (*UpdateRequest, error) {
 	return nil, s.createErr
 }
 

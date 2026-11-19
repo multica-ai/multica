@@ -48,7 +48,7 @@ func TestRedisUpdateStore_CreateGetComplete(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-1", "v1.2.3", "user-1", true)
+	req, err := store.Create(ctx, "runtime-1", "runtime:"+"runtime-1", "v1.2.3", "user-1", true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestRedisUpdateStore_CreateGetComplete(t *testing.T) {
 		t.Fatalf("completed request mismatch: %+v", got)
 	}
 
-	if _, err := store.Create(ctx, "runtime-1", "v1.2.4", "user-1", true); err != nil {
+	if _, err := store.Create(ctx, "runtime-1", "runtime:"+"runtime-1", "v1.2.4", "user-1", true); err != nil {
 		t.Fatalf("create after complete should be allowed: %v", err)
 	}
 }
@@ -84,7 +84,7 @@ func TestRedisUpdateStore_CreateWithoutMultiPermission(t *testing.T) {
 	rdb := newRedisTestClientWithoutMulti(t)
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
-	req, err := store.Create(ctx, "runtime-no-multi", "v1.2.3", "user-1", true)
+	req, err := store.Create(ctx, "runtime-no-multi", "runtime:"+"runtime-no-multi", "v1.2.3", "user-1", true)
 	if err != nil {
 		t.Fatalf("create without MULTI permission: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestRedisUpdateStore_PopPendingAcrossInstances(t *testing.T) {
 	nodeA := NewRedisUpdateStore(rdb)
 	nodeB := NewRedisUpdateStore(rdb)
 
-	req, err := nodeA.Create(ctx, "runtime-cross", "v1.2.3", "user-1", true)
+	req, err := nodeA.Create(ctx, "runtime-cross", "runtime:"+"runtime-cross", "v1.2.3", "user-1", true)
 	if err != nil {
 		t.Fatalf("node A create: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestRedisUpdateStore_ReportAndPollAcrossInstances(t *testing.T) {
 	nodeC := NewRedisUpdateStore(rdb)
 	nodeD := NewRedisUpdateStore(rdb)
 
-	req, err := nodeA.Create(ctx, "runtime-report", "v1.2.3", "user-1", true)
+	req, err := nodeA.Create(ctx, "runtime-report", "runtime:"+"runtime-report", "v1.2.3", "user-1", true)
 	if err != nil {
 		t.Fatalf("node A create: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestRedisUpdateStore_FailAcrossInstances(t *testing.T) {
 	nodeB := NewRedisUpdateStore(rdb)
 	nodeC := NewRedisUpdateStore(rdb)
 
-	req, err := nodeA.Create(ctx, "runtime-fail", "v1.2.3", "user-1", true)
+	req, err := nodeA.Create(ctx, "runtime-fail", "runtime:"+"runtime-fail", "v1.2.3", "user-1", true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -204,17 +204,17 @@ func TestRedisUpdateStore_RejectsConcurrentActive(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-active", "v1.2.3", "user-1", true)
+	req, err := store.Create(ctx, "runtime-active", "runtime:"+"runtime-active", "v1.2.3", "user-1", true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := store.Create(ctx, "runtime-active", "v1.2.4", "user-1", true); err != errUpdateInProgress {
+	if _, err := store.Create(ctx, "runtime-active", "runtime:"+"runtime-active", "v1.2.4", "user-1", true); err != errUpdateInProgress {
 		t.Fatalf("second create error = %v, want errUpdateInProgress", err)
 	}
 	if err := store.Complete(ctx, req.ID, "done"); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
-	if _, err := store.Create(ctx, "runtime-active", "v1.2.4", "user-1", true); err != nil {
+	if _, err := store.Create(ctx, "runtime-active", "runtime:"+"runtime-active", "v1.2.4", "user-1", true); err != nil {
 		t.Fatalf("create after terminal should succeed: %v", err)
 	}
 }
@@ -224,7 +224,7 @@ func TestRedisUpdateStore_PopPendingConcurrent(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-race", "v1.2.3", "user-1", true)
+	req, err := store.Create(ctx, "runtime-race", "runtime:"+"runtime-race", "v1.2.3", "user-1", true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestRedisUpdateStore_StaleActiveSlotDoesNotBlockCreate(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-stale", "v1.2.3", "user-1", true)
+	req, err := store.Create(ctx, "runtime-stale", "runtime:"+"runtime-stale", "v1.2.3", "user-1", true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -293,11 +293,11 @@ func TestRedisUpdateStore_StaleActiveSlotDoesNotBlockCreate(t *testing.T) {
 		t.Fatalf("complete: %v", err)
 	}
 	// A cleanup write that failed leaves the slot pointing at a finished request.
-	if err := rdb.Set(ctx, updateActiveKey("runtime-stale"), req.ID, time.Hour).Err(); err != nil {
+	if err := rdb.Set(ctx, updateMachineSlotKey("runtime:"+"runtime-stale"), req.ID, time.Hour).Err(); err != nil {
 		t.Fatalf("restore stale slot: %v", err)
 	}
 
-	if _, err := store.Create(ctx, "runtime-stale", "v1.2.4", "user-1", true); err != nil {
+	if _, err := store.Create(ctx, "runtime-stale", "runtime:"+"runtime-stale", "v1.2.4", "user-1", true); err != nil {
 		t.Fatalf("create behind a stale slot: %v", err)
 	}
 }
@@ -315,7 +315,7 @@ func TestRedisUpdateStore_ConcurrentCreatesKeepOneRequest(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := store.Create(ctx, "runtime-concurrent", "v1.2.3", "user-1", true)
+			_, err := store.Create(ctx, "runtime-concurrent", "runtime:"+"runtime-concurrent", "v1.2.3", "user-1", true)
 			switch {
 			case err == nil:
 				mu.Lock()
@@ -325,14 +325,14 @@ func TestRedisUpdateStore_ConcurrentCreatesKeepOneRequest(t *testing.T) {
 				t.Errorf("create: %v", err)
 			}
 			// Readers polling the slot meanwhile must not clear it.
-			_, _ = store.GetActive(ctx, "runtime-concurrent")
+			_, _ = store.GetActive(ctx, "runtime:"+"runtime-concurrent")
 		}()
 	}
 	wg.Wait()
 	if created != 1 {
 		t.Fatalf("created %d requests for one runtime, want 1", created)
 	}
-	queued, err := rdb.ZCard(ctx, updatePendingKey("runtime-concurrent")).Result()
+	queued, err := rdb.ZCard(ctx, updateOffersKey("runtime-concurrent")).Result()
 	if err != nil || queued != 1 {
 		t.Fatalf("offer entries = %d, %v; want 1", queued, err)
 	}
@@ -344,7 +344,7 @@ func TestRedisUpdateStore_RestoresDroppedOfferEntry(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-rolling", "v1.2.3", "user-1", true)
+	req, err := store.Create(ctx, "runtime-rolling", "runtime:"+"runtime-rolling", "v1.2.3", "user-1", true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestRedisUpdateStore_RestoresDroppedOfferEntry(t *testing.T) {
 		t.Fatalf("schedule: %v", err)
 	}
 	// Lose the offer entry, as a failed index write would.
-	if err := rdb.ZRem(ctx, updatePendingKey("runtime-rolling"), req.ID).Err(); err != nil {
+	if err := rdb.ZRem(ctx, updateOffersKey("runtime-rolling"), req.ID).Err(); err != nil {
 		t.Fatalf("drop offer entry: %v", err)
 	}
 	mustHasPending(t, store, "runtime-rolling", false)
@@ -369,14 +369,14 @@ func TestRedisUpdateStore_ScheduledRequestOutlivesRetention(t *testing.T) {
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
 
-	req, err := store.Create(ctx, "runtime-ttl", "v1.2.3", "user-1", true)
+	req, err := store.Create(ctx, "runtime-ttl", "runtime:"+"runtime-ttl", "v1.2.3", "user-1", true)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	if _, err := store.Schedule(ctx, req.ID, nil); err != nil {
 		t.Fatalf("schedule: %v", err)
 	}
-	for _, key := range []string{updateKey(req.ID), updateActiveKey("runtime-ttl"), updatePendingKey("runtime-ttl")} {
+	for _, key := range []string{updateKey(req.ID), updateMachineSlotKey("runtime:" + "runtime-ttl"), updateOffersKey("runtime-ttl")} {
 		ttl, err := rdb.TTL(ctx, key).Result()
 		if err != nil {
 			t.Fatalf("ttl %s: %v", key, err)
