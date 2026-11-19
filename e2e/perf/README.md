@@ -264,6 +264,69 @@ checkout's `apps/desktop/out`); `PERF_REPEATS`, `PERF_WARMUP` and
 writes a Chrome trace and CPU profile of the last round's last tab cycle.
 The renderer bundle is not minified, so profiles carry real function names.
 
+## Core paths on Desktop, idle CPU and memory growth
+
+The same core paths run in the Electron app, plus two scenarios only Desktop
+has (MUL-9612). `scripts/perf-desktop.mjs` builds Desktop for production
+against the environment's API, starts that build with a DevTools port, runs
+the specs over CDP with `PERF_PLATFORM=desktop`, and stops the app:
+
+```bash
+make up C=api ARGS="--ephemeral"
+make env-exec ARGS="-- node scripts/perf-desktop.mjs --out $PWD/perf/desktop"
+node scripts/perf-core-report.mjs web=perf/main.json \
+  desktop=perf/desktop/core-paths.json desktop=perf/desktop/desktop-resources.json
+```
+
+It writes `core-paths.json`, `desktop-resources.json`, `desktop.log` (the
+app's output) and `report.md`. `--scenarios` picks a subset (`core-issue`,
+`core-inbox`, `desktop-idle`, `desktop-memory`); `--skip-build` reuses
+`apps/desktop/out`, which must have been built against the same API port.
+`PERF_*` variables pass through. A full run takes about 35 minutes.
+
+- **Core paths** are the steps above, on the same dataset, with the same
+  clock and the same report. Each sample clears the renderer's storage and
+  HTTP cache, writes a tab layout holding only the measured route and
+  reloads: the app boots onto that tab as it does on launch. That is the
+  Desktop counterpart of opening a URL in a fresh browser context.
+  Every boot also writes English as the language choice, as the web
+  context's `locale: "en-US"` does; the specs match English labels, and
+  Desktop would otherwise follow the OS language.
+- **`desktop-idle`** opens the big issue (300 comments, 70 runs), waits 15 s,
+  then touches nothing for `PERF_IDLE_SECONDS` (300). CPU is sampled every
+  second per process role: main, renderer, GPU, utility (network, storage).
+  100% is one core. The renderer's own main-thread busy time and any stalls
+  are reported beside it.
+- **`desktop-memory`** clicks through the Work panel's twenty Inbox rows,
+  round and round, for `PERF_MEMORY_SECONDS` (600), sampling resident memory
+  every 5 s. It reports the growth slope over the whole window and over its
+  second half (the first minutes include caches filling), the first and last
+  minute, the JS heap at the end before and after GC, and whether switches
+  got slower.
+
+CPU and memory come from `ps` (`lib/process-tree.ts`): cumulative CPU time
+and RSS of the Electron main process and its descendants, read from outside
+the app. Processes without an Electron `--type` under it (the local daemon
+Desktop starts, and its agents) are reported as `other` and left out of the
+app total. Memory is RSS, not macOS's "memory footprint" in Activity Monitor;
+compare it run to run, not with that number.
+
+The app runs unpackaged from `apps/desktop/out` with a production renderer
+bundle; packaging, signing and auto-update are not part of it. It gets its own
+userData directory (`Multica Canary Perf <env>`) and starts signed out; the
+specs sign in as the dataset's user. Keep its window visible: Chromium
+throttles a hidden window, so `desktop-idle` fails rather than report one.
+
+`--attach` measures the development Desktop of `make up C=desktop
+ARGS="--cdp"` instead and leaves it running. Its React is the development
+build: slower, and it records profiling data, so use it only for problems
+that exist only there, such as the User Timing leak of MUL-8781:
+
+```bash
+make up C=api,desktop ARGS="--ephemeral --cdp"
+make env-exec ARGS="-- node scripts/perf-desktop.mjs --attach --scenarios desktop-memory --out $PWD/perf/dev"
+```
+
 ## Inbox jump
 
 `inbox-jump.spec.ts` opens a notification about a reply deep in a long issue
