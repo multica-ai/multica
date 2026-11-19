@@ -12,14 +12,6 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
-// CodexChatForkTask is only sent after the server reserves an idle source chat.
-type CodexChatForkTask struct {
-	SourceChatID               string `json:"source_chat_id"`
-	SourceSessionID            string `json:"source_session_id"`
-	SourceWorkDir              string `json:"source_work_dir,omitempty"`
-	SourceRequiresNativeResume bool   `json:"source_requires_native_resume,omitempty"`
-}
-
 func (d *Daemon) runCodexChatForkTask(ctx context.Context, task Task, provider string, cfg agent.Config) (TaskResult, error) {
 	if provider != "codex" {
 		return TaskResult{}, errors.New("native chat fork requires a Codex runtime")

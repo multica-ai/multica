@@ -2,12 +2,15 @@ package handler
 
 import (
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestChatForkReservationAndPublication(t *testing.T) {
@@ -49,10 +52,27 @@ func TestChatForkReservationAndPublication(t *testing.T) {
 	if _, err := q.GetPendingChatForkSource(ctx, db.GetPendingChatForkSourceParams{DestinationChatID: destinationID, TaskID: taskID}); err != nil {
 		t.Fatal(err)
 	}
+	handler := Handler{Queries: q}
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	runtime := db.AgentRuntime{ID: parseUUID(runtimeID), Provider: "codex", RuntimeMode: "local"}
+	claimed := db.AgentTaskQueue{ID: taskID, RuntimeID: runtime.ID, AgentID: parseUUID(agentID)}
+	var wire AgentTaskResponse
+	if _, failure := handler.applyChatForkClaim(req, &claimed, runtime, child, &wire); failure == nil {
+		t.Fatal("legacy daemon was given the pending fork")
+	}
+	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityCodexChatForkV1)
+	if handled, failure := handler.applyChatForkClaim(req, &claimed, runtime, child, &wire); !handled || failure != nil ||
+		wire.CodexChatFork == nil || wire.CodexChatFork.SourceSessionID != "source-session" {
+		t.Fatalf("fork claim handled=%v failure=%v descriptor=%+v", handled, failure, wire.CodexChatFork)
+	}
 	ready, err := q.CompletePendingChatFork(ctx, db.CompletePendingChatForkParams{DestinationChatID: destinationID, TaskID: taskID,
 		SessionID: pgtype.Text{String: "child-session", Valid: true}})
 	if err != nil || ready.ForkInitializationTaskID.Valid || ready.SessionID.String != "child-session" {
 		t.Fatalf("published chat=%+v error=%v", ready, err)
+	}
+	wire = AgentTaskResponse{}
+	if handled, failure := handler.applyChatForkClaim(req, &claimed, runtime, ready, &wire); handled || failure != nil || !wire.RequireNativeResume {
+		t.Fatalf("published continuation handled=%v failure=%v strict=%v", handled, failure, wire.RequireNativeResume)
 	}
 	if _, err := q.GetPublicChatSessionInWorkspace(ctx, public); err != nil {
 		t.Fatal(err)
