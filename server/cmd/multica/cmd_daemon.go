@@ -1632,10 +1632,11 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 		rows = append(rows, row{"Agents", strings.Join(parts, ", ")})
 	}
 	if skipped, ok := health["skipped_agents"].(map[string]any); ok {
+		lineBreaks := strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
 		parts := make([]string, 0, len(skipped))
 		for name, value := range skipped {
 			if reason, ok := value.(string); ok && reason != "" {
-				parts = append(parts, name+": "+reason)
+				parts = append(parts, name+": "+lineBreaks.Replace(reason))
 			}
 		}
 		if len(parts) > 0 {
