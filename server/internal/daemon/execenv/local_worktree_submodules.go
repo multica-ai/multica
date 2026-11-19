@@ -471,8 +471,10 @@ func (s taskSubmodules) retainModule(parent submoduleLocations, module localSubm
 		return err
 	}
 	if from == "" {
-		if unchanged {
-			return nil // A preexisting gitlink may be unavailable locally.
+		if unchanged || repo.taskGitDir == "" {
+			// An existing pin or an upstream pin for a submodule that
+			// was never initialized in the task may be unavailable locally.
+			return nil
 		}
 		return errors.New("referenced commit is missing from both local submodule repositories")
 	}

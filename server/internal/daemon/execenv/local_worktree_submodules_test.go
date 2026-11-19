@@ -208,6 +208,43 @@ func TestLocalWorktreeRetainsNestedGitlinksFromDeliveredCommit(t *testing.T) {
 	}
 }
 
+func TestLocalWorktreeDeliversUpstreamNestedGitlinkWithoutCheckout(t *testing.T) {
+	t.Parallel()
+	leafSource := newTestRepo(t)
+	childSource := newTestRepo(t)
+	addLocalTestSubmodule(t, childSource, leafSource, "leaf", "leaf")
+	repo := newTestRepo(t)
+	addLocalTestSubmodule(t, repo, childSource, "child", "child")
+	task := prepareForTest(t, repo)
+	child := filepath.Join(task.Path, "child")
+
+	writeTestSubmoduleFile(t, leafSource, "tracked.txt", "upstream leaf change\n")
+	gitRun(t, leafSource, "add", "tracked.txt")
+	gitRun(t, leafSource, "commit", "-m", "advance the leaf")
+	upstreamLeaf := gitRun(t, leafSource, "rev-parse", "HEAD")
+	gitRun(t, childSource, "-c", "protocol.file.allow=always", "submodule", "update", "--remote", "--", "leaf")
+	gitRun(t, childSource, "add", "leaf")
+	gitRun(t, childSource, "commit", "-m", "update the upstream leaf pin")
+	upstreamChild := gitRun(t, childSource, "rev-parse", "HEAD")
+
+	gitRun(t, child, "fetch", "--no-recurse-submodules", "origin", "HEAD")
+	gitRun(t, child, "checkout", "--no-recurse-submodules", "--detach", "FETCH_HEAD")
+	if _, err := os.Stat(filepath.Join(child, "leaf", ".git")); !os.IsNotExist(err) {
+		t.Fatalf("expected the nested submodule to remain uninitialized: %v", err)
+	}
+
+	outcome, err := task.Finalize(worktreeTestLogger())
+	if err != nil || !outcome.AutoCommitted || outcome.Branch != task.Branch {
+		t.Fatalf("Finalize = %+v, %v", outcome, err)
+	}
+	if got := gitRun(t, repo, "rev-parse", outcome.Branch+":child"); got != upstreamChild {
+		t.Fatalf("delivered child points to %s, want %s", got, upstreamChild)
+	}
+	if got := gitRun(t, filepath.Join(repo, "child"), "rev-parse", upstreamChild+":leaf"); got != upstreamLeaf {
+		t.Fatalf("delivered child references leaf %s, want %s", got, upstreamLeaf)
+	}
+}
+
 func TestLocalWorktreeRetainsGitlinkAfterDeinit(t *testing.T) {
 	t.Parallel()
 	repo := newTestRepo(t)
