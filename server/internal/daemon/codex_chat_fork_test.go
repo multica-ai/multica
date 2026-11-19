@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,7 +20,7 @@ func TestRunCodexChatForkRejectsUnscopedTask(t *testing.T) {
 		ID:            "fork-request",
 		AgentID:       "agent",
 		ChatSessionID: "same-chat",
-		CodexChatFork: &CodexChatForkTask{SourceChatID: "same-chat", SourceSessionID: "source-thread"},
+		CodexChatFork: &protocol.CodexChatForkTask{SourceChatID: "same-chat", SourceSessionID: "source-thread"},
 	}
 	_, err := d.runCodexChatForkTask(t.Context(), task, "codex", agent.Config{})
 	if err == nil || !strings.Contains(err.Error(), "distinct source and destination chats") {
@@ -45,7 +46,7 @@ func TestRunCodexChatForkReplaysAfterSourceIsGone(t *testing.T) {
 	defer server.Close()
 	d := &Daemon{client: NewClient(server.URL), activeStores: make(map[string]int)}
 	task := Task{ID: "fork-request", AgentID: "agent", ChatSessionID: "child",
-		CodexChatFork: &CodexChatForkTask{
+		CodexChatFork: &protocol.CodexChatForkTask{
 			SourceChatID:    "source",
 			SourceSessionID: "019fe3de-56a2-7792-8913-ee53664dfa0e",
 		}}
