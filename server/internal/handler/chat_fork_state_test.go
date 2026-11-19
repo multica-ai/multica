@@ -124,3 +124,63 @@ func TestQueueChatForkReservesSourceAndQueuesOriginalRuntime(t *testing.T) {
 		t.Fatalf("source task enqueue during snapshot returned %v", err)
 	}
 }
+
+func TestNativeChatForkTerminalReportsSettleReservation(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := t.Context()
+	agentID, runtimeID, _ := createRuntimeGuardAgent(t, ctx)
+	dbfx.Exec(t, `UPDATE agent_runtime SET provider='codex', metadata=$1 WHERE id=$2`,
+		[]byte(`{"capabilities":["codex-chat-fork-v1"]}`), runtimeID)
+	for _, completed := range []bool{true, false} {
+		name := "failed"
+		if completed {
+			name = "completed"
+		}
+		t.Run(name, func(t *testing.T) {
+			sourceID := parseUUID(dbfx.ChatSession(t, agentID, testutil.Cols{
+				"runtime_id": runtimeID, "session_id": "source-session",
+			}))
+			source, err := testHandler.Queries.GetChatSession(ctx, sourceID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			child, task, err := testHandler.queueChatFork(ctx, source, source.CreatorID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				dbfx.Exec(t, `DELETE FROM agent_task_queue WHERE id=$1`, task.ID)
+				dbfx.Exec(t, `DELETE FROM chat_session WHERE id=$1`, child.ID)
+			})
+			dbfx.Exec(t, `UPDATE agent_task_queue SET status='running', started_at=now() WHERE id=$1`, task.ID)
+			const childSession = "019fe3de-56a2-7792-8913-ee53664dfa0f"
+			if completed {
+				_, transitioned, err := testHandler.TaskService.CompleteTaskWithTransition(ctx, task.ID, nil, childSession, "", "", false, "", "")
+				if err != nil || !transitioned {
+					t.Fatalf("complete transitioned=%v error=%v", transitioned, err)
+				}
+				stored, err := testHandler.Queries.GetChatSession(ctx, child.ID)
+				if err != nil || stored.ForkInitializationTaskID.Valid || stored.SessionID.String != childSession {
+					t.Fatalf("published=%+v error=%v", stored, err)
+				}
+				if _, err := testHandler.Queries.GetChatMessageByTaskAssistant(ctx, task.ID); !errors.Is(err, pgx.ErrNoRows) {
+					t.Fatalf("fork added an assistant outcome: %v", err)
+				}
+			} else {
+				_, transitioned, err := testHandler.TaskService.FailTaskWithTransition(ctx, task.ID, "fork failed", "", "", "", "", false, "", "")
+				if err != nil || !transitioned {
+					t.Fatalf("fail transitioned=%v error=%v", transitioned, err)
+				}
+				if _, err := testHandler.Queries.GetChatSession(ctx, child.ID); !errors.Is(err, pgx.ErrNoRows) {
+					t.Fatalf("failed destination is still present: %v", err)
+				}
+			}
+			original, err := testHandler.Queries.GetChatSession(ctx, sourceID)
+			if err != nil || original.ForkSnapshotTaskID.Valid || original.SessionID.String != "source-session" {
+				t.Fatalf("original=%+v error=%v", original, err)
+			}
+		})
+	}
+}
