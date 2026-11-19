@@ -55,6 +55,10 @@
     "restore": "還原此版本",
     "loading": "載入中..."
   },
+  "not_found": {
+    "title": "未找到該文件",
+    "description": "它可能已被刪除。"
+  },
   "edited": "{{time}}編輯",
   "outline": "大綱",
   "link_copied": "連結已複製"

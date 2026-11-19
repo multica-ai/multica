@@ -55,6 +55,10 @@
     "restore": "Restaurar esta versión",
     "loading": "Cargando..."
   },
+  "not_found": {
+    "title": "Documento no encontrado",
+    "description": "Puede haberse eliminado."
+  },
   "edited": "Editado {{time}}",
   "outline": "Esquema",
   "link_copied": "Enlace copiado"

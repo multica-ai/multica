@@ -55,6 +55,10 @@
     "restore": "Restaurer cette version",
     "loading": "Chargement..."
   },
+  "not_found": {
+    "title": "Document introuvable",
+    "description": "Il a peut-être été supprimé."
+  },
   "edited": "Modifié {{time}}",
   "outline": "Plan",
   "link_copied": "Lien copié"

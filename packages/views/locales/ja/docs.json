@@ -55,6 +55,10 @@
     "restore": "このバージョンを復元",
     "loading": "読み込み中..."
   },
+  "not_found": {
+    "title": "ドキュメントが見つかりません",
+    "description": "削除された可能性があります。"
+  },
   "edited": "最終編集 {{time}}",
   "outline": "目次",
   "link_copied": "リンクをコピーしました"

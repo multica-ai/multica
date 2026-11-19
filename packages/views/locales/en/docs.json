@@ -55,6 +55,10 @@
     "restore": "Restore this version",
     "loading": "Loading..."
   },
+  "not_found": {
+    "title": "Doc not found",
+    "description": "It may have been deleted."
+  },
   "edited": "Edited {{time}}",
   "outline": "Outline",
   "link_copied": "Link copied"
