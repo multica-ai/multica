@@ -706,6 +706,18 @@ func (h *Handler) MarkIssueInboxRead(w http.ResponseWriter, r *http.Request) {
 	if !h.requireInboxOwnerAccess(w, r, userID, wsUUID) {
 		return
 	}
+	// Notifications about an issue in a private project the caller can no
+	// longer see stay hidden (MUL-8472): the issue answers like a missing one,
+	// which has nothing to mark.
+	hidden, err := h.issueInHiddenProject(r, workspaceID, issueUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve project access")
+		return
+	}
+	if hidden {
+		writeJSON(w, http.StatusOK, map[string]any{"count": 0})
+		return
+	}
 
 	count, err := h.Queries.MarkInboxReadByIssue(r.Context(), db.MarkInboxReadByIssueParams{
 		WorkspaceID: wsUUID,
