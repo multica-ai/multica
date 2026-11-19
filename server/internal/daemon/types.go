@@ -79,6 +79,8 @@ type ProjectWorkflowData struct {
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
+	CodexChatFork *CodexChatForkTask `json:"codex_chat_fork,omitempty"`
+
 	// A forked chat requires its published native session.
 	RequireNativeResume bool `json:"require_native_resume,omitempty"`
 
