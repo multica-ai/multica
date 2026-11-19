@@ -188,3 +188,74 @@ it("keeps a converted workspace's feature refresh across a workspace switch", as
     qc.clear();
   }
 });
+
+// Subscribed on another device while this tab was in the background: coming
+// back re-reads the plan (the summary is stale after 30 seconds), and the
+// paid-feature read made alongside it is refreshed once the server's cached
+// trial policy has expired.
+it("converges an open tab to Pro's access after a refocus shortly after conversion", async () => {
+  vi.useFakeTimers();
+  const t0 = endsAt - 7 * 24 * 60 * 60 * 1000;
+  vi.setSystemTime(t0);
+  const convertedAt = t0 + 30_000;
+  setApiInstance({
+    getWorkspaceSubscriptionSummary: async () => (Date.now() < convertedAt ? active : paid),
+    getWorkspaceFeatures: async () => ({
+      features: { private_projects: Date.now() < convertedAt + 60_000 ? "available" : "locked" },
+    }),
+  } as unknown as ApiClient);
+  const qc = createQueryClient();
+  qc.setQueryData(workspaceSubscriptionKeys.summary(ws), active);
+  qc.setQueryData(workspaceFeatureKeys.all(ws), { features: { private_projects: "available" } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  const { result, unmount } = renderHook(() => ({
+    trial: useWorkspaceTrial(ws, true),
+    access: usePaidFeatureAccess(ws, "private_projects", { hasExistingConfig: true }),
+  }), { wrapper });
+  try {
+    focusManager.setFocused(false);
+    await advance(60_000);
+    await act(async () => { focusManager.setFocused(true); });
+    await advance(10);
+    expect(result.current.trial.kind).toBe("none");
+    await advance(10 * 60 * 1000);
+    expect(result.current.access.state).toBe("read_only");
+  } finally {
+    unmount();
+    qc.clear();
+  }
+});
+
+// Opening the app just after the workspace converted: the summary already
+// says Pro, but the first paid-feature read may come from the server's cached
+// trial policy. The first read of the plan schedules one refresh too.
+it("converges a freshly opened app to Pro's access", async () => {
+  vi.useFakeTimers();
+  const t0 = endsAt - 7 * 24 * 60 * 60 * 1000;
+  vi.setSystemTime(t0);
+  setApiInstance({
+    getWorkspaceSubscriptionSummary: async () => paid,
+    getWorkspaceFeatures: async () => ({
+      features: { private_projects: Date.now() < t0 + 50_000 ? "available" : "locked" },
+    }),
+  } as unknown as ApiClient);
+  const qc = createQueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  const { result, unmount } = renderHook(() => ({
+    trial: useWorkspaceTrial(ws, true),
+    access: usePaidFeatureAccess(ws, "private_projects", { hasExistingConfig: true }),
+  }), { wrapper });
+  try {
+    await advance(10);
+    expect(result.current.access.state).toBe("available");
+    await advance(10 * 60 * 1000);
+    expect(result.current.access.state).toBe("read_only");
+  } finally {
+    unmount();
+    qc.clear();
+  }
+});

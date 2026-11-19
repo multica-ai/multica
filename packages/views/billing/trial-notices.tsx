@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Bot, Hourglass, Lock, Sparkles, Users, X } from "@multica/ui/icons";
@@ -247,7 +247,14 @@ function TrialEndedDialog({ wsId, trial }: { wsId: string; trial: EndedTrial }) 
     isFetching: boolean;
     dataUpdatedAt: number;
   }) => current(query) || (query.isError && !query.isFetching);
-  if (seen || !answered(featuresQuery) || !answered(usageQuery)) return null;
+  const ready = answered(featuresQuery) && answered(usageQuery);
+  // Once open, it stays open while a detail read retries (on refocus, say);
+  // the retry only fills in its line.
+  const [opened, setOpened] = useState(false);
+  useEffect(() => {
+    if (ready) setOpened(true);
+  }, [ready]);
+  if (seen || !(opened || ready)) return null;
 
   const count = new Intl.NumberFormat(locale);
   const privateProjectsLocked =

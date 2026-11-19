@@ -183,12 +183,11 @@ export function useWorkspaceTrial(
   enabled: boolean,
 ): WorkspaceTrialView {
   const qc = useQueryClient();
+  // The summary's own short stale time and refetch on focus: a plan changed
+  // on another device shows up when this tab comes back.
   const summaryQuery = useQuery({
     ...workspaceSubscriptionSummaryOptions(wsId),
     enabled: enabled && wsId.length > 0,
-    // The shell reads this on every page; the Billing page keeps its own
-    // shorter refresh.
-    staleTime: 5 * 60 * 1000,
   });
   const [now, setNow] = useState(() => Date.now());
   const summary = enabled ? summaryQuery.data : null;
@@ -204,7 +203,7 @@ export function useWorkspaceTrial(
   // another device): reads made just before the end may still hold the
   // trial's Business features.
   //
-  // This and the two records below are kept per workspace: a desktop window
+  // This and the records below are kept per workspace: a desktop window
   // switches workspaces without remounting, and switching back must pick up
   // the refetches the other workspace's trial would otherwise have replaced.
   const [lastEnds, setLastEnds] = useState<Record<string, string>>({});
@@ -217,25 +216,45 @@ export function useWorkspaceTrial(
   const lastEnd = lastEnds[wsId] ?? null;
   const boundaryEndRaw = endsAtRaw ?? lastEnd;
 
-  // When this client first saw the trial replaced by a paid plan (subscribed
-  // mid-trial, possibly on another device). Business-only features then lock
-  // for Pro, but the server may serve its cached trial policy for up to a
-  // minute, so paid-feature reads are refreshed once that has passed.
-  const lastEndKey = lastEnd ? `${wsId}:${lastEnd}` : null;
-  const convertedToPaid =
-    !!summary &&
-    summary.entitlement.plan !== "free" &&
-    (!summary.trial || summary.trial.state === "converted");
-  const [conversions, setConversions] = useState<Record<string, number>>({});
-  const convertedAt = lastEndKey ? conversions[lastEndKey] : undefined;
+  // When this client first saw the workspace's current plan, per workspace.
+  // Any plan change (subscribing mid-trial, possibly on another device) and a
+  // first read of the plan (opening the app just after one) may be followed
+  // by paid-feature reads the server answered from its cached previous policy
+  // for up to a minute, so those reads are refreshed once that has passed.
+  const planKey = summary
+    ? `${summary.entitlement.plan}|${summary.entitlement.status}|${summary.trial?.state ?? "-"}`
+    : null;
+  const [planSeen, setPlanSeen] = useState<Record<string, { plan: string; at: number }>>({});
+  const planSeenAt = planKey && planSeen[wsId]?.plan === planKey ? planSeen[wsId].at : undefined;
   useEffect(() => {
-    if (!convertedToPaid || !lastEndKey) return;
-    setConversions((current) =>
-      lastEndKey in current
+    if (!planKey || !wsId) return;
+    setPlanSeen((current) =>
+      current[wsId]?.plan === planKey
         ? current
-        : { ...current, [lastEndKey]: summaryQuery.dataUpdatedAt || Date.now() },
+        : { ...current, [wsId]: { plan: planKey, at: summaryQuery.dataUpdatedAt || Date.now() } },
     );
-  }, [convertedToPaid, lastEndKey, summaryQuery.dataUpdatedAt]);
+  }, [planKey, summaryQuery.dataUpdatedAt, wsId]);
+  useEffect(() => {
+    if (planSeenAt === undefined || !wsId) return;
+    const boundary = planSeenAt + TRIAL_END_SETTLE_MS;
+    const refresh = () => {
+      for (const queryKey of [workspaceFeatureKeys.all(wsId), autopilotKeys.usage(wsId)]) {
+        void qc.invalidateQueries({
+          queryKey,
+          predicate: (query) =>
+            query.state.dataUpdatedAt > 0 && query.state.dataUpdatedAt < boundary,
+        });
+      }
+    };
+    const delay = boundary - Date.now();
+    if (delay <= 0) {
+      // Passed while this workspace was not showing: catch up now.
+      refresh();
+      return;
+    }
+    const id = window.setTimeout(refresh, delay);
+    return () => window.clearTimeout(id);
+  }, [planSeenAt, qc, wsId]);
   const cloudSaysActive = summary?.trial?.state === "active";
   const cloudConfirmsEnd =
     summary?.trial?.state === "expired" && summary.entitlement.plan === "free";
@@ -288,9 +307,6 @@ export function useWorkspaceTrial(
       // The summary is already Cloud's answer; only policy-backed reads lag.
       boundaries.push({ at: confirmedAt + TRIAL_CONFIRM_SETTLE_MS, keys: keys.slice(1) });
     }
-    if (convertedAt !== undefined) {
-      boundaries.push({ at: convertedAt + TRIAL_END_SETTLE_MS, keys: keys.slice(1) });
-    }
     const timers: number[] = [];
     for (const boundary of boundaries) {
       const delay = boundary.at - Date.now();
@@ -305,7 +321,7 @@ export function useWorkspaceTrial(
       }
     }
     return () => timers.forEach((id) => window.clearTimeout(id));
-  }, [boundaryEndRaw, confirmedAt, convertedAt, qc, wsId]);
+  }, [boundaryEndRaw, confirmedAt, qc, wsId]);
 
   // This clock is past the end and its follow-up, yet Cloud still says
   // active: ask again with backoff until Cloud answers otherwise.

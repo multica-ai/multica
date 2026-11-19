@@ -22,6 +22,8 @@ const h = vi.hoisted(() => {
     usage: null as AutopilotQuotaUsage | null,
     /** The feature read failed after its retries. */
     featuresFailed: false,
+    /** A failed feature read is being retried. */
+    featuresRetrying: false,
     /** When the mocked feature and usage answers were received. */
     dataUpdatedAt: Date.now(),
     push: vi.fn(),
@@ -54,7 +56,7 @@ vi.mock("@tanstack/react-query", async () => {
       const key = options.queryKey;
       if (key[0] === "workspace-features") {
         if (h.featuresFailed) {
-          return { data: undefined, isPending: false, isError: true, isFetching: false, dataUpdatedAt: 0 };
+          return { data: undefined, isPending: false, isError: true, isFetching: h.featuresRetrying, dataUpdatedAt: 0 };
         }
         return { data: { features: h.features }, isPending: false, dataUpdatedAt: h.dataUpdatedAt };
       }
@@ -103,6 +105,7 @@ beforeEach(() => {
   h.usage = null;
   h.dataUpdatedAt = Date.now();
   h.featuresFailed = false;
+  h.featuresRetrying = false;
   h.push.mockReset();
   h.toast.mockReset();
   h.chat.setState({ isOpen: false, floatingChatEnabled: true });
@@ -262,6 +265,22 @@ describe("WorkspaceTrialNotices", () => {
     const dialog = screen.getByRole("dialog", { name: "Your Business trial has ended" });
     expect(dialog).toHaveTextContent("Automations get 200 runs a month; 12 used this month.");
     expect(dialog).not.toHaveTextContent("Private projects");
+  });
+
+  it("stays open while a failed detail read is retried", () => {
+    h.trial = ended;
+    h.featuresFailed = true;
+    const { rerender } = renderWithI18n(<WorkspaceTrialNotices />);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    h.featuresRetrying = true;
+    rerender(<WorkspaceTrialNotices />);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    h.featuresFailed = false;
+    h.features = { private_projects: "locked" };
+    rerender(<WorkspaceTrialNotices />);
+    expect(screen.getByRole("dialog")).toHaveTextContent("Private projects stay private.");
   });
 
   it("claims no restriction while limits are only observed", () => {
