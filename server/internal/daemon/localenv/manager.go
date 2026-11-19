@@ -259,7 +259,7 @@ func (m *Manager) Start(task Task, dir, name, pathEnv string) (Environment, erro
 	rec := record{
 		ID: id, TaskID: task.TaskID, IssueID: task.IssueID, WorkspaceID: task.WorkspaceID,
 		Name: name, Label: def.Label, RepoRoot: cfg.RepoRoot,
-		URL: expandPort(def.URL, port), Ready: expandPort(def.Ready, port), Stop: def.Stop,
+		URL: expandEnvURL(def.URL, port, publicHostFromEnv()), Ready: expandReadyURL(def, port, publicHostFromEnv()), Stop: def.Stop,
 		Port: port, Path: pathEnv, State: StateStarting,
 		StartedAt: now, ExpiresAt: now.Add(def.TTL),
 	}
@@ -687,7 +687,7 @@ func childEnv(pathEnv string, port int, name string) []string {
 	if pathEnv != "" {
 		env = append(env, "PATH="+pathEnv)
 	}
-	return append(env, fmt.Sprintf("MULTICA_PORT=%d", port), "MULTICA_ENVIRONMENT="+name)
+	return append(env, fmt.Sprintf("MULTICA_PORT=%d", port), "MULTICA_ENVIRONMENT="+name, "MULTICA_HOST="+publicHostFromEnv())
 }
 
 // exitDetail says how the start command ended and nothing it printed: the

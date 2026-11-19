@@ -165,7 +165,7 @@ func (d *Detector) Detect(ctx context.Context, resolve func(cwd string) (Task, b
 		}
 		found[key] = Environment{
 			Key: key, TaskID: c.task.TaskID, IssueID: c.task.IssueID, Source: SourceDetected, Kind: KindServer,
-			Name: truncateName(c.Command), URL: fmt.Sprintf("http://localhost:%d", c.Port), Port: c.Port, State: StateRunning,
+			Name: truncateName(c.Command), URL: detectedServerURL(c.Port), Port: c.Port, State: StateRunning,
 			Dir: c.task.RootDir, pid: c.PID,
 		}
 	}

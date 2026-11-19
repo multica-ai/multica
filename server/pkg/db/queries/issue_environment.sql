@@ -148,3 +148,6 @@ ORDER BY runtime_id, reported_at DESC;
 -- name: GetIssueEnvironmentConfig :one
 SELECT * FROM issue_environment_config
 WHERE task_id = @task_id AND issue_id = @issue_id AND workspace_id = @workspace_id;
+
+-- name: GetIssueEnvironmentByID :one
+SELECT * FROM issue_environment WHERE id = @id;

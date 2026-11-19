@@ -16,11 +16,15 @@ const (
 	// GateMembers caps a workspace's members. Guests take no slot. It has no
 	// period: the limit is a ceiling on headcount, not a budget that resets.
 	GateMembers GateName = "members"
+	// GateEnvironmentProxy caps concurrent remote environment preview leases for
+	// a workspace. A limit of 0 disables remote preview; positive limits cap
+	// concurrent active environment leases without requiring period fields.
+	GateEnvironmentProxy GateName = "environment_proxy"
 )
 
 func (n GateName) valid() bool {
 	switch n {
-	case GateAutopilotRuns, GateMembers:
+	case GateAutopilotRuns, GateMembers, GateEnvironmentProxy:
 		return true
 	default:
 		return false
@@ -87,8 +91,8 @@ type Decision struct {
 	CloudValidUntil     time.Time
 }
 
-// Provider is the only interface the autopilot consumer
-// needs. It deliberately has no error return: every failure is represented by a
+// Provider is the only interface enforcement consumers
+// need. It deliberately has no error return: every failure is represented by a
 // fail-open Decision with ActionOff (or ActionObserve for a bounded stale
 // snapshot that can no longer enforce).
 //
