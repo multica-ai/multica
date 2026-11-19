@@ -59,6 +59,22 @@ func TestAutopilotQuotaManualAndWebhookEnforcement(t *testing.T) {
 	if reservationID.Valid {
 		t.Fatal("member run now reserved quota, want an unmetered run")
 	}
+	// Retrying the same request reuses the run instead of executing twice.
+	retryReq := newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger", nil)
+	retryReq.Header.Set("Idempotency-Key", "member-over-limit")
+	retryReq = withURLParam(retryReq, "id", autopilotID)
+	var retriedRun AutopilotRunResponse
+	testutil.Call(t, testHandler.TriggerAutopilot, retryReq).Want(http.StatusOK).JSON(&retriedRun)
+	if retriedRun.ID != memberRun.ID {
+		t.Fatalf("retried run now = %s, want the original run %s", retriedRun.ID, memberRun.ID)
+	}
+	var taskCount int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM agent_task_queue WHERE autopilot_run_id = $1`, memberRun.ID).Scan(&taskCount); err != nil {
+		t.Fatalf("count member run tasks: %v", err)
+	}
+	if taskCount != 1 {
+		t.Fatalf("member run has %d tasks after a retry, want 1", taskCount)
+	}
 
 	agentResp := triggerAsAgent(t, autopilotID, agentID, callerTask(t, agentID, testUserID))
 	agentResp.Want(http.StatusTooManyRequests)

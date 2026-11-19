@@ -329,15 +329,25 @@ RETURNING *;
 -- index uq_autopilot_run_trigger_planned, this gives dispatch-layer
 -- idempotency: a stale-steal retry at the same plan_time cannot create
 -- a second run for the same (trigger_id, planned_at) pair (MUL-3551).
+--
+-- idempotency_key is set only for a run that is not metered against the
+-- autopilot run quota; uq_autopilot_run_idempotency_key makes a retried
+-- request reuse its run.
 INSERT INTO autopilot_run (
     autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at,
-    webhook_delivery_id, quota_reservation_id, reason_code, id
+    webhook_delivery_id, quota_reservation_id, reason_code, idempotency_key, id
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
     sqlc.narg('squad_id'), sqlc.narg('planned_at'),
     sqlc.narg('webhook_delivery_id'), sqlc.narg('quota_reservation_id'),
-    sqlc.narg('reason_code'), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    sqlc.narg('reason_code'), sqlc.narg('idempotency_key'),
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 ) RETURNING *;
+
+-- name: GetAutopilotRunByIdempotencyKey :one
+SELECT * FROM autopilot_run
+WHERE autopilot_id = $1
+  AND idempotency_key = $2;
 
 -- name: GetAutopilotRunByTriggerAndPlanned :one
 -- Idempotent lookup used by DispatchAutopilotForPlan to detect a

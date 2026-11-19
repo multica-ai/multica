@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -115,19 +116,43 @@ const (
 )
 
 // createUnmeteredAutopilotRun inserts a run that never counts toward the quota,
-// whatever the policy: no reservation, no quota-table access, so the
-// idempotency key is unused, exactly as under an off policy. It shares
-// createAutopilotRunWithQuota's signature so dispatch can pick either one.
+// whatever the policy, and never touches the quota tables. Request dedupe stays:
+// the idempotency key is stored on the run, so a retried request reuses its run
+// instead of executing twice. It shares createAutopilotRunWithQuota's signature
+// so dispatch can pick either one.
 func (s *AutopilotService) createUnmeteredAutopilotRun(
 	ctx context.Context,
 	workspaceID pgtype.UUID,
-	source, _ string,
+	source, idempotencyKey string,
 	params db.CreateAutopilotRunParams,
 ) (db.AutopilotRun, bool, error) {
 	if !validAutopilotExecutionSource(source) {
 		return db.AutopilotRun{}, false, fmt.Errorf("invalid autopilot execution source %q", source)
 	}
+	key := db.GetAutopilotRunByIdempotencyKeyParams{
+		AutopilotID:    params.AutopilotID,
+		IdempotencyKey: pgtype.Text{String: idempotencyKey, Valid: idempotencyKey != ""},
+	}
+	if key.IdempotencyKey.Valid {
+		existing, err := s.Queries.GetAutopilotRunByIdempotencyKey(ctx, key)
+		if err == nil {
+			return existing, true, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return db.AutopilotRun{}, false, fmt.Errorf("lookup idempotent run: %w", err)
+		}
+	}
+	params.IdempotencyKey = key.IdempotencyKey
 	run, err := s.Queries.CreateAutopilotRun(ctx, params)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "uq_autopilot_run_idempotency_key" {
+		// A concurrent request with the same key inserted first.
+		existing, lookupErr := s.Queries.GetAutopilotRunByIdempotencyKey(ctx, key)
+		if lookupErr != nil {
+			return db.AutopilotRun{}, false, fmt.Errorf("load concurrent idempotent run: %w", lookupErr)
+		}
+		return existing, true, nil
+	}
 	if err != nil {
 		return db.AutopilotRun{}, false, err
 	}
@@ -355,6 +380,7 @@ func autopilotRunFromTerminalRow(row db.UpdateAutopilotRunTerminalWithQuotaRow) 
 		Result: row.Result, CreatedAt: row.CreatedAt, SquadID: row.SquadID,
 		PlannedAt: row.PlannedAt, WebhookDeliveryID: row.WebhookDeliveryID,
 		QuotaReservationID: row.QuotaReservationID, ReasonCode: row.ReasonCode,
+		IdempotencyKey: row.IdempotencyKey,
 	}
 }
 

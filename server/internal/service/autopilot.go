@@ -174,9 +174,8 @@ const (
 )
 
 // DispatchAutopilotManualWithKey preserves a caller-supplied request key so
-// retrying the same HTTP request cannot reserve or execute twice. Only metered
-// runs are deduplicated by that key; an unmetered run never touches the quota
-// tables that hold it.
+// retrying the same HTTP request cannot reserve or execute twice, whether or not
+// the run is metered.
 func (s *AutopilotService) DispatchAutopilotManualWithKey(
 	ctx context.Context,
 	autopilot db.Autopilot,
