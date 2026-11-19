@@ -126,6 +126,9 @@ func (m *Monitor) Put(ctx context.Context, change Change) (Record, error) {
 			if !change.NewGeneration || change.Generation != old.Generation+1 || old.State != "resolved" {
 				return Record{}, errors.New("a new generation requires a resolved previous remainder and explicit increment")
 			}
+			if change.CoverageConfirmed {
+				return Record{}, errors.New("enroll the new remainder without a previous resolution receipt")
+			}
 		} else if change.NewGeneration || (old.State == "resolved" && !change.CoverageConfirmed) {
 			return Record{}, errors.New("a resolved generation cannot be reopened or used as a retry budget")
 		}

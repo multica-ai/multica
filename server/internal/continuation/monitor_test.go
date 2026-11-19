@@ -276,6 +276,11 @@ func TestCASResolutionAndGeneration(t *testing.T) {
 	if r.State != "resolved" {
 		t.Fatalf("resolution state %s", r.State)
 	}
+	c.Generation++
+	if _, err := m.Put(ctx, Change{Contract: c, ExpectedVersion: r.Version, NewGeneration: true}); err == nil {
+		t.Fatal("new remainder inherited the previous resolution")
+	}
+	c.Generation--
 	c.CoverageConfirmed = false
 	c.ResultCommentID = ""
 	if _, err := m.Put(ctx, Change{Contract: c, ExpectedVersion: r.Version}); err == nil {
@@ -350,6 +355,83 @@ func TestDisabledMonitorDoesNotQueryDatabase(t *testing.T) {
 	must(t, m.Deliver(context.Background(), Key{}))
 }
 
+func TestResolutionRequiresTheExactReceiverRun(t *testing.T) {
+	f, m, c, agent, runtime := fixture(t)
+	r := put(t, m, c, 0)
+	other := f.Task(t, agent, testutil.Cols{"issue_id": c.IssueID, "runtime_id": runtime})
+	c.CoverageConfirmed = true
+	c.ResultCommentID = f.Comment(t, c.IssueID, "Result from the same agent's unrelated run", testutil.Cols{
+		"author_type": "agent", "author_id": agent, "source_task_id": other,
+	})
+	if _, err := m.Put(context.Background(), Change{Contract: c, ExpectedVersion: r.Version}); err == nil {
+		t.Fatal("accepted a different run's result")
+	}
+	c.ResultCommentID = f.Comment(t, c.IssueID, "Verified receiver result covers the remainder", testutil.Cols{
+		"author_type": "agent", "author_id": agent, "source_task_id": c.ReceiverTaskID,
+	})
+	if got := put(t, m, c, r.Version).State; got != "resolved" {
+		t.Fatalf("exact receiver result: %s", got)
+	}
+}
+
+func TestGuestRecipientNeedsProjectMembership(t *testing.T) {
+	f, m, c, _, _ := fixture(t)
+	put(t, m, c, 0)
+	f.Exec(t, "UPDATE member SET role='guest' WHERE workspace_id=$1 AND user_id=$2", c.WorkspaceID, c.OwnerID)
+	m.Notify = true
+	if err := m.Deliver(context.Background(), c.Key); err == nil {
+		t.Fatal("guest without project membership received a signal")
+	}
+	if got := f.Count(t, "SELECT count(*) FROM inbox_item WHERE issue_id=$1", c.IssueID); got != 0 {
+		t.Fatal("guest access leaked private metadata")
+	}
+}
+
+func TestUncommittedSuccessorBlocksDeliveryUntilVisible(t *testing.T) {
+	f, m, c, agent, runtime := fixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	put(t, m, c, 0)
+	must(t, m.Reconcile(ctx, c.Key))
+	tx, err := f.Pool.Begin(ctx)
+	must(t, err)
+	defer tx.Rollback(context.Background())
+	// Use the production enqueue fence; its issue KEY SHARE must conflict
+	// with delivery's final decision, even before this child is visible.
+	child := uuid.NewString()
+	_, err = tx.Exec(ctx, `INSERT INTO agent_task_queue(id,agent_id,issue_id,runtime_id,status,priority,retry_of_task_id,attempt)
+	    SELECT $1,$2,$3,$4,'queued',0,$5,2 WHERE lock_task_owner_rows($2,$3,$4)`, child, agent, c.IssueID, runtime, c.ReceiverTaskID)
+	must(t, err)
+	f.Cleanup(t, "DELETE FROM agent_task_queue WHERE id=$1", child)
+	var writerPID int32
+	must(t, tx.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&writerPID))
+	m.Notify = true
+	done := make(chan error, 1)
+	go func() { done <- m.Deliver(ctx, c.Key) }()
+	for {
+		var blocked bool
+		must(t, f.Pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)))", writerPID).Scan(&blocked))
+		if blocked {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("delivery did not wait for the successor: %v", err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	must(t, tx.Commit(ctx))
+	must(t, <-done)
+	if got := current(t, m, c.Key); got.ReceiverTaskID != child || got.State != "receiver_queued" {
+		t.Fatalf("delivery missed the committed successor: %+v", got)
+	}
+	if got := f.Count(t, "SELECT count(*) FROM inbox_item WHERE issue_id=$1", c.IssueID); got != 0 {
+		t.Fatal("notified while successor enqueue was committing")
+	}
+}
+
 func TestExistingPlatformRetryIsAnActiveSuccessor(t *testing.T) {
 	f, m, c, agent, runtime := fixture(t)
 	ctx := context.Background()
@@ -373,12 +455,21 @@ func TestExistingPlatformRetryIsAnActiveSuccessor(t *testing.T) {
 }
 
 func TestTickScopeAndExpiredDeadline(t *testing.T) {
-	f,m,c,_,_:=fixture(t);ctx:=context.Background()
-	c.ReceiverTaskID="";c.DueAt=time.Now().Add(-time.Second)
-	put(t,m,c,0)
-	other:=*m;other.ProjectID=uuid.NewString();other.Notify=true
-	must(t,other.Tick(ctx))
-	if got:=f.Count(t,"SELECT count(*) FROM issue_continuation_incident WHERE issue_id=$1",c.IssueID);got!=0 {t.Fatal("tick crossed project scope")}
-	m.Notify=true;must(t,m.Tick(ctx))
-	if got:=f.Count(t,"SELECT count(*) FROM inbox_item WHERE issue_id=$1",c.IssueID);got!=1 {t.Fatalf("deadline tick delivered %d rows",got)}
+	f, m, c, _, _ := fixture(t)
+	ctx := context.Background()
+	c.ReceiverTaskID = ""
+	c.DueAt = time.Now().Add(-time.Second)
+	put(t, m, c, 0)
+	other := *m
+	other.ProjectID = uuid.NewString()
+	other.Notify = true
+	must(t, other.Tick(ctx))
+	if got := f.Count(t, "SELECT count(*) FROM issue_continuation_incident WHERE issue_id=$1", c.IssueID); got != 0 {
+		t.Fatal("tick crossed project scope")
+	}
+	m.Notify = true
+	must(t, m.Tick(ctx))
+	if got := f.Count(t, "SELECT count(*) FROM inbox_item WHERE issue_id=$1", c.IssueID); got != 1 {
+		t.Fatalf("deadline tick delivered %d rows", got)
+	}
 }
