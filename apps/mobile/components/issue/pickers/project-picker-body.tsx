@@ -42,6 +42,7 @@ export function ProjectPickerBody({ value, query, onChange }: Props) {
     const q = query.trim().toLowerCase();
     const matchName = (n: string) => !q || n.toLowerCase().includes(q);
     const projectRows: Row[] = [...projects]
+      .filter((p) => !p.archived_at || p.id === value?.id)
       .filter((p) => matchName(p.title))
       .sort((a, b) => a.title.localeCompare(b.title))
       .map((p) => ({ kind: "project" as const, project: p }));

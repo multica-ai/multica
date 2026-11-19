@@ -140,6 +140,8 @@ Une tâche appartient à un [projet](/projects) au plus ; le projet fournit des 
 
 Un travail plus important peut être découpé en sous-tâches : la tâche parente conserve l'objectif global tandis que les sous-tâches avancent indépendamment. Les statuts de la tâche parente et des sous-tâches ne s'influencent pas.
 
+Ouvrez une sous-tâche directe depuis **Sous-tâches** dans la barre latérale droite de la tâche. Jusqu'à 10 sous-tâches, l'ordre correspond à la liste principale. Au-delà, les 10 premières s'affichent en donnant la priorité aux sous-tâches non terminées, tout en conservant l'ordre des étapes dans chaque groupe. **Afficher N de plus** déplie toute la liste dans la barre latérale ; **Réduire** revient aux 10 premières. Votre position de lecture est conservée et la barre latérale reste ouverte sur écran étroit. La progression compte toutes les sous-tâches. **Personnaliser la barre latérale** permet de masquer cette section.
+
 Les sous-tâches peuvent recevoir une **Étape** pour avancer par lots — 1, 2, 3. Lorsque toutes les sous-tâches de la première étape non terminée atteignent `done` ou `cancelled`, la tâche parente reçoit une notification « sous-tâches terminées » ; si l'assigné de la tâche parente est un agent, celui-ci se réveille et décide s'il lance l'étape suivante. Les sous-tâches sans étape forment un seul lot et ne déclenchent qu'une notification, lorsqu'elles sont toutes terminées. Ce réveil est déclenché par le système ; ses règles et les autres types de réveil sont décrits dans [Réveils de tâches](/issue-wakeups).
 
 ## Vues et affichage [#changer-de-vue]
@@ -157,9 +159,11 @@ Une combinaison de filtres et d'affichage que vous utilisez souvent peut devenir
 | **Visible par moi seul** | Vous seul | Vous |
 | **Visible par les membres de l'espace de travail** | Tous les membres | Vous, ainsi que les `owner` et `admin` de l'espace de travail |
 
-Les réglages d'affichage enregistrés dans une vue sont son **Affichage par défaut** : les membres la voient ainsi à la première ouverture, puis l'ajustent chacun pour soi sans gêner les autres. Une vue appartient à la page où elle a été créée : celle créée dans un projet reste dans ce projet, et celles créées dans **Mes tâches** sont toujours privées.
+Les réglages d'affichage enregistrés dans une vue sont son **Affichage par défaut** : les membres la voient ainsi à la première ouverture, puis l'ajustent chacun pour soi sans gêner les autres. Une vue appartient à la page où elle a été créée : celle créée dans un projet reste dans ce projet, et celles créées sur la page **Mes tâches** sont toujours privées.
 
-Faites glisser les vues dans la barre pour les réordonner ; l'ordre et la visibilité réglés dans **Gérer les vues** ne concernent que vous. Un clic droit sur une vue permet de la modifier, de la supprimer ou de l'**Épingler à la barre latérale**.
+Faites glisser les vues dans la barre pour les réordonner ; l'ordre et la visibilité réglés dans **Gérer les vues** ne concernent que vous. Un clic droit sur une vue permet de la modifier, de la supprimer ou de l'**Ajouter à la barre latérale**, ce qui la place dans la section **Vues** du panneau Travail.
+
+La section Vues propose aussi cinq vues intégrées : **Toutes les tâches** ; **Mon travail**, les tâches assignées à vous ou à vos agents ; **En cours d'exécution**, les tâches sur lesquelles un agent travaille ; et **Abonnements**, toutes les tâches que vous suivez. **Reportés** affiche les tâches que vous avez [reportées dans la boîte de réception](/inbox#reporter-une-tâche). Mon travail, En cours d'exécution et Abonnements sont Toutes les tâches sous une condition fixe : d'autres filtres peuvent les restreindre, mais cette condition ne peut être ni retirée ni élargie. Le bouton de réglages dans l'en-tête de la section Vues active ou désactive chaque vue intégrée.
 
 ### Aperçu latéral
 
@@ -169,7 +173,11 @@ Quand l'aperçu est ouvert, `J` / `K` passent à la tâche suivante ou précéde
 
 ## Modifications groupées
 
-Sélectionnez plusieurs tâches dans une liste, une grille ou une liste de sous-tâches : une barre d'outils apparaît en bas de l'écran pour changer d'un coup le statut, la priorité ou l'assigné, ou pour les supprimer. Dans une grille, Maj+clic sélectionne une plage.
+Sélectionnez plusieurs tâches dans une liste, une grille ou une liste de sous-tâches pour afficher la barre d'actions groupées. Dans une grille, Maj+clic sélectionne une plage. La barre permet de modifier le statut, la priorité, l'assigné, les étiquettes, le projet et l'échéance. **Plus d'actions** propose la date de début, la tâche parente, l'étape des sous-tâches, les propriétés personnalisées, la copie des liens et la suppression. Le menu contextuel de la sélection offre les mêmes actions.
+
+Les étiquettes indiquent si elles sont présentes sur toutes les tâches sélectionnées, certaines ou aucune. Ajoutez ou retirez une étiquette sans toucher aux autres, ou effacez-les toutes. Les propriétés personnalisées peuvent être définies ou effacées ; une propriété à plusieurs valeurs est remplacée en entier.
+
+Si certaines tâches refusent une modification, les autres sont quand même mises à jour. Le résultat indique les tâches ignorées et pourquoi, avec une action pour ne sélectionner que celles-ci afin de les corriger et de réessayer.
 
 - Si la sélection couvre plusieurs projets, le menu des statuts ne propose que ceux que tous les workflows concernés autorisent. Une tâche qui n'accepte pas la modification garde sa valeur, les autres sont mises à jour.
 - Un changement de statut groupé s'applique directement. Les tâches assignées à un agent qui quittent `backlog` démarrent normalement une exécution.

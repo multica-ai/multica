@@ -1,71 +1,4 @@
 {
-  "title": "Billing (test page)",
-  "subtitle": "Direct passthrough to multica-cloud's /api/v1/billing/*. Not a finished UI — just every endpoint stuffed onto one page so we can verify the proxy + Stripe flow.",
-  "endpoints": {
-    "balance": "GET /api/cloud-billing/balance",
-    "transactions": "GET /api/cloud-billing/transactions",
-    "batches": "GET /api/cloud-billing/batches",
-    "topups": "GET /api/cloud-billing/topups",
-    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
-  },
-  "balance": {
-    "title": "Balance",
-    "credits_suffix": "credits",
-    "meta": "raw micro: {{micro}} · owner: {{owner}}… · updated {{updated}}"
-  },
-  "buy": {
-    "title": "Buy credits / Manage billing",
-    "no_tiers": "No price tiers configured. Cloud probably has no Stripe key set — checkout will return 503.",
-    "tier_money_to_credits": "{{money}} → {{credits}} credits",
-    "tier_bonus": " + {{credits}} bonus",
-    "tier_bonus_with_expiry": " + {{credits}} bonus ({{expiry}})",
-    "tier_id": "id: {{id}}",
-    "open_portal": "Open Stripe Billing Portal",
-    "portal_hint": "400 is expected for users who haven't paid yet (no Stripe customer record exists).",
-    "toast_no_url": "Cloud returned no checkout URL",
-    "toast_checkout_failed": "Checkout failed",
-    "toast_no_portal_url": "No portal URL returned",
-    "toast_portal_failed": "Portal failed"
-  },
-  "checkout": {
-    "session_label": "Checkout session {{prefix}}…",
-    "loading": "Loading order status…",
-    "fetch_failed": "Failed to fetch status: {{error}}",
-    "fetch_failed_unknown": "unknown error",
-    "final_status": "Final status: {{status}}",
-    "polling_status": "Polling status… current: {{status}}",
-    "status_unknown": "unknown",
-    "label_order": "Order",
-    "label_tier": "Tier",
-    "label_charged": "Charged",
-    "charged_value": "{{money}} · {{credits}} credits",
-    "charged_with_bonus": "{{money}} · {{credits}} credits + {{bonus}} bonus",
-    "clear_url": "Clear from URL"
-  },
-  "transactions": {
-    "title": "Transactions",
-    "empty": "No transactions yet.",
-    "credits_value": "{{value}} credits",
-    "row_meta": "{{date}} · balance after: {{balance}} credits · ref: {{ref}}",
-    "ref_empty": "—"
-  },
-  "batches": {
-    "title": "Credit batches",
-    "empty": "No batches yet.",
-    "remaining_over_total": "{{remaining}} / {{total}} credits",
-    "id_suffix": "{{id}}…",
-    "consumed": "Consumed: {{value}} credits",
-    "expires_suffix": " · expires {{value}}",
-    "never_expires_suffix": " · never expires"
-  },
-  "topups": {
-    "title": "Topup orders",
-    "empty": "No topup orders yet.",
-    "amount_to_credits": "{{money}} → {{credits}} credits",
-    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credits + {{bonus}} bonus",
-    "row_meta": "{{date}} · stripe: {{checkout}}",
-    "stripe_empty": "—"
-  },
   "workspace": {
     "title": "Billing",
     "description": "Manage this workspace's plan, limits, human seats, and Stripe billing.",
@@ -73,6 +6,7 @@
     "plan": {
       "free": "Free",
       "pro": "Pro",
+      "business": "Business",
       "unknown": "Unknown plan"
     },
     "status": {
@@ -94,11 +28,13 @@
     "actions": {
       "retry": "Retry",
       "retry_autopilots": "Retry automation usage",
-      "upgrade": "Upgrade to Pro",
+      "upgrade_to": "Upgrade to {{plan}}",
+      "switch_to": "Switch to {{plan}}",
       "manage": "Manage billing",
       "add_seats": "Add seats",
       "cancel": "Cancel",
-      "continue_to_stripe": "Continue to Stripe"
+      "continue_to_stripe": "Continue to Stripe",
+      "check_status": "Check status"
     },
     "errors": {
       "action_title": "Billing action failed",
@@ -119,13 +55,13 @@
       "syncing_title": "Activating your subscription",
       "syncing_description": "Payment is complete. We're waiting for Stripe to confirm the plan change.",
       "timeout_description": "Payment was received, but the subscription is still syncing. Refresh this page in a moment.",
-      "active_title": "Pro is active",
-      "active_description": "This workspace now has Pro access."
+      "active_title": "{{plan}} is active",
+      "active_description": "This workspace now has {{plan}} access."
     },
     "past_due": {
       "title": "Payment needs attention",
       "description": "Update your payment method in billing management.",
-      "grace_description": "Update your payment method by {{date}} to keep Pro access."
+      "grace_description": "Update your payment method by {{date}} to keep your paid plan."
     },
     "subscription_notice": {
       "canceling_title": "Cancellation is scheduled",
@@ -134,7 +70,7 @@
       "incomplete_title": "Subscription setup is incomplete",
       "incomplete_description": "Open billing management to finish or review the payment setup.",
       "incomplete_expired_title": "Subscription setup expired",
-      "incomplete_expired_description": "The previous payment setup expired without activating Pro. Start a new upgrade when ready.",
+      "incomplete_expired_description": "The previous payment setup expired before the subscription started. Start a new upgrade when ready.",
       "paused_title": "Subscription is paused",
       "paused_description": "Open billing management to review the pause and available recovery options.",
       "unpaid_title": "Subscription is unpaid",
@@ -149,19 +85,37 @@
       "member_count_one": "{{count}} member",
       "member_count_other": "{{count}} members",
       "billing_interval": "Billing interval",
-      "period_end": "Current period ends"
+      "period_end": "Current period ends",
+      "change_plan": "Change plan",
+      "business_adds": "Business adds private projects, member-level access, team app accounts, and higher automation limits.",
+      "plan_change_hold": "Plan change",
+      "plan_change_confirming": "Switching to {{plan}}. Waiting for Stripe to confirm; seats and the plan can't be changed until then.",
+      "plan_change_unresolved": "The switch to {{plan}} could not be confirmed. Contact support to settle it; seats and the plan can't be changed until then.",
+      "plan_change_state_confirming": "Confirming",
+      "plan_change_state_unresolved": "Needs support"
     },
     "upgrade": {
-      "title": "Upgrade to Pro",
-      "description": "Choose a billing interval, then confirm the current seats and final amount in Stripe Checkout.",
+      "title": "Upgrade",
       "interval_label": "Billing interval",
       "monthly": "Monthly",
       "yearly": "Yearly",
-      "pro_for_team_one": "Pro for {{count}} human seat",
-      "pro_for_team_other": "Pro for {{count}} human seats",
       "price_loading": "Loading subscription prices",
-      "unit_price": "{{price}} per human seat",
-      "price_at_checkout": "The server re-counts human members before purchase. Stripe Checkout shows the authoritative per-seat price and total before you pay."
+      "unit_price_month": "{{price}} per human seat / month",
+      "unit_price_year_monthly": "{{price}} per human seat / month, billed yearly",
+      "unit_price_year": "{{price}} per human seat / year",
+      "price_at_checkout": "The server re-counts human members before purchase. Stripe Checkout shows the authoritative per-seat price and total before you pay.",
+      "recommended": "Recommended",
+      "features": {
+        "pro_members": "Unlimited members",
+        "pro_autopilots": "1,000 automation runs per member each month",
+        "pro_storage": "10 GB of attachment storage per member",
+        "pro_dashboard": "90 days of dashboard history",
+        "business_everything": "Everything in Pro",
+        "business_access": "Private projects and member-level access",
+        "business_apps": "Team app accounts and approval rules",
+        "business_autopilots": "3,000 automation runs per member each month",
+        "business_reports": "Usage and cost reports by member"
+      }
     },
     "management": {
       "title": "Subscription management",
@@ -171,7 +125,6 @@
     },
     "limits": {
       "title": "Usage and limits",
-      "issues": "Issues",
       "autopilots": "Automation runs",
       "unlimited": "Unlimited",
       "per_month": "{{count}} / month",
@@ -221,6 +174,7 @@
       "preview_failed": "The estimate is temporarily unavailable. Retry in a moment.",
       "capacity_out_of_sync": "The seat count in Stripe does not match the billing record. Contact support before retrying this purchase.",
       "in_progress": "Another seat purchase is being processed. Wait for it to finish; contact support if it remains here.",
+      "plan_change_in_progress": "A plan change is still being processed. Try again in a few minutes.",
       "purchase_unreadable": "The purchase response could not be read. Retry this quote; the same purchase request will be reused.",
       "purchase_failed": "Seats could not be added. Retry with the same quote, or refresh if it has expired.",
       "payment_failed": "Payment could not be completed. Update the payment method in Stripe, then request a new quote.",
@@ -239,18 +193,37 @@
       "delayed_description_with_expiry": "Automatic checking has stopped. If the attempt is still pending after {{date}}, reload this page before requesting another quote; contact support if it remains pending.",
       "submitted_one": "A purchase for {{count}} seat was submitted. The new capacity appears after Stripe confirms it.",
       "submitted_other": "A purchase for {{count}} seats was submitted. The new capacity appears after Stripe confirms it.",
-      "error_title": "Could not update the estimate"
+      "error_title": "Could not update the estimate",
+      "plan_change_unresolved": "A plan change could not be confirmed. Contact support before adding seats."
+    },
+    "plan_change": {
+      "upgrade_description": "Takes effect immediately. The difference for the rest of this billing period is charged now.",
+      "downgrade_description": "Takes effect immediately. The unused difference is credited to your next invoice. Business settings you already configured keep working but become read-only.",
+      "seats": "Seats",
+      "charge_today": "Charged today",
+      "credit": "Credit on next invoice",
+      "next_invoice": "Next renewal",
+      "tax_notice": "Stripe determines taxes, credits, and final invoice details.",
+      "preview_loading": "Loading quote...",
+      "preview_failed": "The quote is temporarily unavailable. Retry in a moment.",
+      "rate_limited": "Too many quote requests. Wait a moment, then retry.",
+      "in_progress": "A seat purchase is being processed. Try again after it finishes.",
+      "change_in_progress": "A plan change is still being processed. Try again in a few minutes.",
+      "not_active": "This subscription can't change plans right now. The current plan has been refreshed.",
+      "quote_changed": "The subscription or price changed. Review the refreshed quote before confirming again.",
+      "payment_failed": "Payment could not be completed. Update the payment method in billing management, then try again.",
+      "failed": "The plan could not be changed. Retry with the same quote.",
+      "unreadable": "The response could not be read. Retry; the same request will be reused.",
+      "error_title": "Could not change the plan",
+      "success_title": "Plan changed",
+      "success_description": "This workspace is now on {{plan}}.",
+      "unresolved": "The previous plan change could not be confirmed. Contact support before changing plans.",
+      "check_failed": "Could not check the plan change. Try again."
     },
     "confirm": {
       "title": "Continue to Stripe Checkout?",
-      "description": "Billing interval: {{interval}}. Current human members: {{count}}. Stripe will re-count seats and show the final amount before payment."
+      "description": "Plan: {{plan}}. Billing interval: {{interval}}. Current human members: {{count}}. Stripe will re-count seats and show the final amount before payment."
     }
-  },
-  "shared": {
-    "request_failed": "Request failed",
-    "refresh": "Refresh",
-    "paging": "page {{page}} / {{totalPages}} · {{total}} total",
-    "date_dash": "—"
   },
   "return_page": {
     "redirecting": "Returning you to workspace billing…",
@@ -260,5 +233,76 @@
     "workspace_missing_description": "You came back from Stripe, but this workspace is no longer available to you — it may have been removed, or your access changed. Open Billing in the workspace you expected to check the current state.",
     "retry": "Try again",
     "go_to_app": "Go to Multica"
+  },
+  "paid_feature": {
+    "read_only": "Read-only. Upgrade to edit.",
+    "unavailable": "Not included in this workspace's plan.",
+    "view_plans": "View plans",
+    "locked_error": "This isn't included in the workspace's plan. Existing settings keep working; upgrade to add more."
+  },
+  "trial": {
+    "status": {
+      "active": "Business trial",
+      "days_left_one": "{{count}} day left",
+      "days_left_other": "{{count}} days left",
+      "active_label_one": "Business trial, {{count}} day left. Open Billing.",
+      "active_label_other": "Business trial, {{count}} days left. Open Billing.",
+      "free": "Free",
+      "upgrade": "Upgrade",
+      "ended_label": "The Business trial has ended and this workspace is on Free. Open Billing to upgrade.",
+      "ending": "ending",
+      "ending_label": "Business trial ending. Open Billing."
+    },
+    "reminder": {
+      "halfway_title_one": "Your Business trial is halfway through: {{count}} day left.",
+      "halfway_title_other": "Your Business trial is halfway through: {{count}} days left.",
+      "days_left_title_one": "{{count}} day left in your Business trial.",
+      "days_left_title_other": "{{count}} days left in your Business trial.",
+      "last_day_title": "Your Business trial ends within a day.",
+      "body": "On {{date}} this workspace moves to Free. Choose a plan to keep Business.",
+      "later": "Later",
+      "choose_plan": "Choose a plan"
+    },
+    "welcome": {
+      "title_one": "Welcome! This workspace has a free {{count}}-day Business trial",
+      "title_other": "Welcome! This workspace has a free {{count}}-day Business trial",
+      "body": "Private projects and the other Business features are on. No card needed; the workspace moves to Free when the trial ends.",
+      "action": "See what's included",
+      "close": "Dismiss"
+    },
+    "ended": {
+      "title": "Your Business trial has ended",
+      "description": "{{workspace}} is now on Free. Nothing was deleted.",
+      "description_without_name": "This workspace is now on Free. Nothing was deleted.",
+      "kept": "Members, projects, and settings you already have stay as they are.",
+      "private_projects": "Private projects stay private. Their access lists are read-only until you upgrade.",
+      "autopilot": "Automations get {{limit}} runs a month; {{used}} used this month.",
+      "autopilot_paused": "Automations get {{limit}} runs a month and {{used}} were used this month, so they are paused until {{date}}.",
+      "keep_free": "Continue on Free",
+      "upgrade": "Upgrade to Business",
+      "member_title": "This workspace is now on Free",
+      "member_description": "Existing settings keep working. Ask a workspace admin if you need more."
+    },
+    "card": {
+      "title": "Business trial",
+      "badge_one": "Trial · {{count}} day left",
+      "badge_other": "Trial · {{count}} days left",
+      "description": "Trial until {{date}}. No payment method is on file, so the workspace moves to Free afterwards and is not charged.",
+      "started": "Started {{date}}",
+      "progress": "Day {{day}} of {{total}}",
+      "ends": "Ends {{date}}",
+      "ended_title": "Business trial ended",
+      "ended_description": "The trial ended on {{date}}. Choose a plan below to get Business features back.",
+      "choose_plan": "Choose a plan",
+      "ended_description_member": "The trial ended on {{date}}. Ask a workspace admin to upgrade to get Business features back."
+    },
+    "features": {
+      "title": "Business features in your trial",
+      "description": "When the trial ends nothing is deleted or turned off; you just can't add more.",
+      "private_projects": {
+        "name": "Private projects",
+        "after": "Stay private after the trial. Their access lists become read-only."
+      }
+    }
   }
 }

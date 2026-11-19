@@ -194,6 +194,13 @@ export interface CreateBillingPortalSessionResponse {
 
 export type WorkspaceSubscriptionInterval = "month" | "year";
 
+/**
+ * A plan a workspace can buy or switch to. Free is not purchasable: it is what
+ * a workspace has without an active subscription. `entitlement.plan` stays an
+ * open string because Cloud may report plans this client does not know.
+ */
+export type WorkspaceSubscriptionPaidPlan = "pro" | "business";
+
 export type WorkspaceEntitlementLimit =
   | { mode: "limited"; limit: number }
   | { mode: "unlimited"; limit: null };
@@ -209,7 +216,6 @@ export interface WorkspaceSubscriptionEntitlements {
   status: string;
   seats: number;
   limits: {
-    issueCount: WorkspaceEntitlementLimit;
     autopilotRuns: WorkspaceEntitlementLimit;
   };
   currentPeriodEnd: string | null;
@@ -238,12 +244,46 @@ export interface WorkspaceSubscriptionSummary {
     checkout: boolean;
     portal: boolean;
     purchaseSeats: boolean;
+    /** Switch the active subscription between Pro and Business. */
+    changePlan: boolean;
+    /** Ask Cloud to settle a plan change that is still confirming. */
+    checkPlanChange: boolean;
   };
+  /**
+   * A plan change that still holds the subscription. While present, seat
+   * purchases and other plan changes are unavailable.
+   */
+  planChange: WorkspacePlanChangeHold | null;
+  /**
+   * The workspace's no-card trial. Null when it never had one, while a paid
+   * subscription is in effect, and on a cloud that predates trials.
+   */
+  trial: WorkspaceTrial | null;
 }
 
-export interface IssueLimitUsage {
-  used: number;
-  limit: number;
+/**
+ * A no-card trial of a paid plan. Only `active` grants the plan; the
+ * entitlement, not this object, decides access. Clients count days from
+ * `endsAt` and refresh when it passes.
+ */
+export interface WorkspaceTrial {
+  plan: string;
+  state: WorkspaceTrialState;
+  startedAt: string;
+  endsAt: string;
+}
+
+/** `converted`: the trial ended because the workspace subscribed. */
+export type WorkspaceTrialState = "active" | "expired" | "converted";
+
+export interface WorkspacePlanChangeHold {
+  targetPlan: string;
+  /**
+   * "confirming": Cloud is establishing Stripe's outcome. "unresolved": Cloud
+   * could not, and support has to settle it.
+   */
+  state: "confirming" | "unresolved";
+  since: string;
 }
 
 export interface WorkspaceSeatCapacity {
@@ -276,12 +316,18 @@ export interface WorkspaceSubscriptionPrice {
   intervalCount: number;
 }
 
-export interface WorkspaceSubscriptionPrices {
+export interface WorkspaceSubscriptionPlanPrices {
   month: WorkspaceSubscriptionPrice;
   year: WorkspaceSubscriptionPrice;
 }
 
+export type WorkspaceSubscriptionPrices = Record<
+  WorkspaceSubscriptionPaidPlan,
+  WorkspaceSubscriptionPlanPrices
+>;
+
 export interface CreateWorkspaceSubscriptionCheckoutRequest {
+  plan: WorkspaceSubscriptionPaidPlan;
   interval: WorkspaceSubscriptionInterval;
   idempotencyKey: string;
 }
@@ -329,6 +375,52 @@ export interface PurchaseWorkspaceSeatsResponse {
   status: "pending" | "submitted" | "confirmed";
 }
 
+export interface PreviewWorkspacePlanChangeRequest {
+  plan: WorkspaceSubscriptionPaidPlan;
+}
+
+/**
+ * Cloud's quote for switching the active subscription to another plan. Seats
+ * and the billing interval stay the same.
+ */
+export interface WorkspacePlanChangePreview {
+  currentPlan: WorkspaceSubscriptionPaidPlan;
+  targetPlan: WorkspaceSubscriptionPaidPlan;
+  interval: WorkspaceSubscriptionInterval;
+  seats: number;
+  subscriptionVersion: number;
+  currency: string;
+  /**
+   * Proration in minor currency units. Positive for an upgrade, charged now;
+   * negative for a downgrade, credited against the next invoice.
+   */
+  prorationAmount: number;
+  /** Next full recurring invoice on the target plan, in minor units. */
+  nextInvoiceAmount: number;
+  /** True when the proration is invoiced immediately (upgrades). */
+  invoiceNow: boolean;
+  quotedAt: string;
+}
+
+export interface ChangeWorkspacePlanRequest {
+  plan: WorkspaceSubscriptionPaidPlan;
+  expectedSubscriptionVersion: number;
+  quotedAt: string;
+  acceptedProrationAmount: number;
+  currency: string;
+  idempotencyKey: string;
+}
+
+export interface ChangeWorkspacePlanResponse {
+  plan: WorkspaceSubscriptionPaidPlan;
+  previousPlan: WorkspaceSubscriptionPaidPlan;
+  interval: WorkspaceSubscriptionInterval;
+  seats: number;
+  currency: string;
+  prorationAmount: number;
+  invoiceNow: boolean;
+}
+
 export interface WorkspaceSubscriptionSeatReconcileResult {
   workspaceId: string;
   action: string;
@@ -337,4 +429,19 @@ export interface WorkspaceSubscriptionSeatReconcileResult {
 
 export interface CreateWorkspaceSubscriptionPortalResponse {
   url: string;
+}
+
+/**
+ * Paid features (MUL-9482). The server evaluates each feature for the
+ * workspace: `available` means it can be used and extended, `locked` means
+ * the plan does not include it, so existing configuration keeps working and
+ * can be reduced, but nothing can be added. The server enforces on every
+ * write; this is only for rendering.
+ */
+export type PaidFeature = "private_projects";
+
+export type WorkspaceFeatureState = "available" | "locked";
+
+export interface WorkspaceFeatures {
+  features: Partial<Record<PaidFeature, WorkspaceFeatureState>>;
 }

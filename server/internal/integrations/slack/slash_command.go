@@ -12,11 +12,10 @@ import (
 	"github.com/slack-go/slack"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
-	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// This file implements the Slack `/issue`, `/new`, and `/clear` SLASH COMMANDS. They are
+// This file implements the Slack `/issue`, `/new`, `/clear`, and `/help` SLASH COMMANDS. They are
 // deliberately separate from message-prefix commands: on Slack
 // a message whose first character is `/` is intercepted by the client as a
 // slash command and never delivered to the app, so the message-prefix form of
@@ -44,6 +43,7 @@ import (
 const issueSlashCommand = "/issue"
 const newSlashCommand = "/new"
 const clearSlashCommand = "/clear"
+const helpSlashCommand = "/help"
 
 // User-facing ephemeral replies. Kept terse; only the invoker sees them.
 const (
@@ -51,7 +51,6 @@ const (
 	slashQueuedText           = "✅ On it — I'm turning that into an issue. You'll get a Multica notification when it's ready."
 	slashNotMemberText        = "You're not a member of this Multica workspace, so I can't file an issue for you."
 	slashLinkAccountFallback  = "Link your Slack account to Multica first, then try `/issue` again."
-	slashIssueLimitText       = "⚠️ This workspace has reached its issue limit. Open Multica to view the available recovery options."
 	slashInternalErrorText    = "⚠️ Something went wrong creating the issue. Please try again."
 	slashDisabledText         = "This Slack app isn't connected to Multica (or was disconnected). Ask a workspace admin to reconnect it."
 	slashNewStartedText       = "✅ Started a new Multica chat."
@@ -82,7 +81,7 @@ type slashControlStarter interface {
 	ClearSlackDMContext(ctx context.Context, inst engine.ResolvedInstallation, userID pgtype.UUID, cmd slack.SlashCommand, envelopeID string) error
 }
 
-// SlashCommandProcessor handles Slack `/issue`, `/new`, and `/clear` commands end to end.
+// SlashCommandProcessor handles Slack `/issue`, `/new`, `/clear`, and `/help` commands end to end.
 type SlashCommandProcessor struct {
 	q           slashQueries
 	tasks       quickCreateEnqueuer
@@ -153,11 +152,12 @@ func (p *SlashCommandProcessor) Handle(ctx context.Context, cmd slack.SlashComma
 // HandleEnvelope preserves Socket Mode's durable envelope id for control-command dedup.
 func (p *SlashCommandProcessor) HandleEnvelope(ctx context.Context, cmd slack.SlashCommand, envelopeID string) {
 	command := strings.TrimSpace(cmd.Command)
-	if !strings.EqualFold(command, issueSlashCommand) && command != newSlashCommand && command != clearSlashCommand {
+	if !strings.EqualFold(command, issueSlashCommand) && command != newSlashCommand && command != clearSlashCommand && command != helpSlashCommand {
 		return
 	}
+	cmd.Command = command
 	var text string
-	if command == newSlashCommand || command == clearSlashCommand {
+	if command == newSlashCommand || command == clearSlashCommand || command == helpSlashCommand {
 		text = p.processControl(ctx, cmd, envelopeID)
 	} else {
 		text = p.process(ctx, cmd)
@@ -192,6 +192,9 @@ func (p *SlashCommandProcessor) processControl(ctx context.Context, cmd slack.Sl
 		default:
 			return slashInternalErrorText
 		}
+	}
+	if cmd.Command == helpSlashCommand {
+		return engine.SlackHelpText
 	}
 	// Keep command availability and channel-routing guidance behind the same
 	// installation, account-binding, and workspace-membership checks as every
@@ -284,10 +287,6 @@ func (p *SlashCommandProcessor) process(ctx context.Context, cmd slack.SlashComm
 		pgtype.UUID{}, // no parent issue
 		nil,           // no attachments
 	); err != nil {
-		var limitErr *service.IssueLimitReachedError
-		if errors.As(err, &limitErr) {
-			return slashIssueLimitText
-		}
 		p.logger.WarnContext(ctx, "slack slash command: enqueue quick-create failed",
 			"app_id", cmd.APIAppID, "error", err)
 		return slashInternalErrorText

@@ -11,6 +11,7 @@ const NOTIFICATION_GROUPS = [
   "status_changes",
   "comments",
   "mentions",
+  "reactions",
   "updates",
   "new_issues",
   "agent_activity",
@@ -183,6 +184,24 @@ export function useSettingsSearchIndex(
       })),
       {
         tab: "notifications",
+        anchor: "others_issues",
+        title: t(($) => $.notifications.others_issues.label),
+        description: t(($) => $.notifications.others_issues.description),
+      },
+      {
+        tab: "notifications",
+        anchor: "auto_archive_completed",
+        title: t(($) => $.notifications.leaving.done_label),
+        description: t(($) => $.notifications.leaving.done_description),
+      },
+      {
+        tab: "notifications",
+        anchor: "archived",
+        title: t(($) => $.notifications.leaving.archived_label),
+        description: t(($) => $.notifications.leaving.archived_description),
+      },
+      {
+        tab: "notifications",
         anchor: "chat_replies",
         title: t(($) => $.notifications.groups.chat_replies.label),
       },
@@ -215,6 +234,12 @@ export function useSettingsSearchIndex(
         tab: "voice-input",
         title: t(($) => $.page.tabs.voice_input),
         description: t(($) => $.voice_input.description),
+      },
+      {
+        tab: "voice-input",
+        anchor: "voice-enabled",
+        title: t(($) => $.voice_input.enabled.title),
+        description: t(($) => $.voice_input.enabled.hint),
       },
       {
         tab: "voice-input",
@@ -285,6 +310,11 @@ export function useSettingsSearchIndex(
         tab: "workspace",
         anchor: "issue-prefix",
         title: t(($) => $.workspace.issue_prefix_label),
+      },
+      {
+        tab: "workspace",
+        anchor: "private-projects",
+        title: t(($) => $.private_projects.title),
       },
       { tab: "workspace", anchor: "leave", title: t(($) => $.workspace.leave_title) },
       { tab: "workspace", anchor: "delete", title: t(($) => $.workspace.delete_title) },

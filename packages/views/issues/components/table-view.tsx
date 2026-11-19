@@ -129,6 +129,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { LabelChip } from "../../labels/label-chip";
 import { resolveClickIntent, useIntentNavigate } from "../../navigation";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { useT } from "../../i18n";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
@@ -1332,11 +1333,14 @@ function PullRequestsCell({ issueId }: { issueId: string }) {
   const { t } = useT("issues");
   const pullRequests = useIssuePullRequestSummaries(issueId, true);
   return pullRequests.length > 0 ? (
-    <IssuePullRequestChips pullRequests={pullRequests} max={3} linked />
+    <IssuePullRequestChips pullRequests={pullRequests} max={3} />
   ) : (
     <span className="text-muted-foreground">{t(($) => $.table.empty_value)}</span>
   );
 }
+
+const TABLE_SCROLL_KEY = "table";
+const TABLE_SCROLL_ROOT = { "data-tab-scroll-root": TABLE_SCROLL_KEY };
 
 export function TableView({
   serverQuery,
@@ -1404,6 +1408,10 @@ export function TableView({
   // The one cell whose editor (picker popup / rename input) is open — see
   // TableViewMeta.editingCellKey.
   const [editingCellKey, setEditingCellKey] = useState<string | null>(null);
+  // Pull-based scroll restoration (MUL-4741): the table's two-axis scroller
+  // gets its saved offsets back when it attaches.
+  const restoredScrollTop = useRestoredScrollOffset(TABLE_SCROLL_KEY);
+  const restoreScrollRef = useRestoredScrollRef(TABLE_SCROLL_KEY);
 
   const groupingPropertyId = propertyIdFromViewKey(tableGrouping);
   const effectiveTableGrouping =
@@ -2552,6 +2560,9 @@ export function TableView({
           <DataTable
             table={table}
             virtualizeRows
+            scrollContainerRef={restoreScrollRef}
+            initialScrollTop={restoredScrollTop}
+            scrollContainerAttributes={TABLE_SCROLL_ROOT}
             emptyMessage={t(($) => $.table.empty)}
             onRowClick={(row, event) => {
               if (row.original.kind === "issue") {

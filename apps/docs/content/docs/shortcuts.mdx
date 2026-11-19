@@ -10,11 +10,12 @@ Keys below are written for macOS. On Windows and Linux, `⌘` becomes `Ctrl`; th
 
 ## Search
 
-Press `⌘K`, or click **Search...** at the top of the sidebar. With nothing typed, the search box offers **New Issue** and the issues you opened recently. Once you type, results are grouped:
+Press `⌘K`, or click **Search...** in the app rail. With nothing typed, the search box offers **New Issue** and the issues you opened recently. Once you type, results are grouped:
 
 | Group | What it finds |
 |---|---|
 | **Pages** | Workspace pages such as Inbox, Chat, Issues, Projects, Agents, and Settings. |
+| **Views** | Built-in issue views and saved views you can access, matched by name. |
 | **Commands** | New Issue, New Project, and switching to the light, dark, or system theme. On an issue page you also get Copy Issue Link, Copy Identifier, Fold All Comments, and Unfold All Comments. |
 | **Members** | Matches by name or email. |
 | **Workspaces** | Other workspaces you belong to; selecting one switches to it. |
@@ -35,14 +36,16 @@ Selecting a result opens it. Hold `⌘` (`Ctrl` on Windows and Linux) while clic
 | Toggle chat window | `⌘J` | `Ctrl+J` | Opening it puts the cursor in the message input. See [Chat from any page](/chat#chat-from-any-page). |
 | Ask Multica | `⇧⌘J` | `Ctrl+Shift+J` | Starts a new chat in the floating window. |
 | Find in issue | `⌘F` | `Ctrl+F` | See below. |
-| Archive notification | `E` | `E` | Archives the open inbox notification, or restores it while you're reading the archive. |
+| Archive notification | `E` | `E` | On an issue opened from the inbox, archives its notification and opens the next one. In archived notifications, restores the open one. See [Inbox](/inbox#handle-notifications). |
+| Snooze notification | `H` | `H` | On an issue opened from the inbox, snoozes it and opens the next one. On a snoozed issue, brings it back now. See [Inbox](/inbox#snooze-an-issue). |
 | Send | `⌘↵` | `Ctrl+Enter` | Sends comments and chat messages, and also submits new issues. |
+| Voice input | Unassigned | Unassigned | Desktop only; turn it on first under Settings → Voice input. See [Voice input](/desktop-app#voice-input). |
 | Go back | `⌘[` | `Ctrl+[` | |
 | Go forward | `⌘]` | `Ctrl+]` | |
 
-Single-key shortcuts (`C`, `E`) and Go back / Go forward don't fire while you're typing in an input.
+Single-key shortcuts (`C`, `E`, `H`) and Go back / Go forward don't fire while you're typing in an input.
 
-The **Navigation** group also has Go to Inbox, Chat, My Issues, Issues, Projects, Autopilot, Agents, Squads, Usage, Runtimes, Skills, and Settings. None of them has a key by default; bind the ones you use.
+The **Navigation** group also has Go to Inbox, Chat, My Issues, Issues, Projects, Autopilot, Agents, Squads, Usage, Runtimes, Skills, and Settings. None of them has a key by default; bind the ones you use. Go to Inbox opens the Inbox page; the notification list itself is the first section of the Work panel. Go to My Issues opens the My Issues page, which is not the same as the **My work** view in the Work panel.
 
 ### Fixed system shortcuts
 
@@ -83,7 +86,7 @@ Recording rejects a few kinds of combinations and says why under the keys:
 
 - A combination already assigned to another action.
 - Combinations the browser, the desktop window, or the operating system owns, such as `⌘W`, `⌘R`, `⌘Q`, `⌘,`, editing keys like copy and paste, `⌘0`–`⌘9`, and the zoom keys. In a browser, `⌘P`, `⌘L`, `⌘T`, `⌘N`, `⌘D`, and `⌘U` are off-limits too; the desktop app allows them. On Windows and Linux, any combination with the Win / Super key is rejected.
-- Actions that also work inside an input, such as Open search, Toggle chat window, and Find in issue, need `⌘`, `Ctrl`, or `Control`, so they never fire while you type.
+- Actions that also work inside an input, such as Open search, Toggle chat window, and Find in issue, need `⌘`, `Ctrl`, or `Control`, so they never fire while you type. Voice input also accepts `Option` / `Alt` with a non-printing key, such as `Space`, unless the combination is reserved.
 - **Send** can only be `↵` or `⌘↵`.
 
 <Callout>

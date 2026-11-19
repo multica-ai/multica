@@ -172,6 +172,7 @@ describe("AttachmentPreviewPage", () => {
     renderPage(<AttachmentPreviewPage attachmentId="att-1" />);
     const img = await screen.findByAltText("shot.png");
     expect(img.getAttribute("src")).toBe("https://cdn.example.test/att-1?Signature=s");
+    expect(getAttachmentMock).toHaveBeenCalledTimes(1);
   });
 
   it("shows a CSV as a table", async () => {
@@ -203,4 +204,48 @@ describe("AttachmentPreviewPage", () => {
       ),
     );
   });
+});
+
+
+it("refreshes an image once when reopening the actual page from cache", async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const image = makeAttachment({
+    filename: "shot.png",
+    content_type: "image/png",
+  });
+  getAttachmentMock.mockResolvedValueOnce(image);
+  const first = renderWithI18n(
+    <QueryClientProvider client={client}>
+      <AttachmentPreviewPage attachmentId="att-1" />
+    </QueryClientProvider>,
+  );
+  await screen.findByAltText("shot.png");
+  first.unmount();
+  getAttachmentMock.mockReset();
+  let finish!: (value: Attachment) => void;
+  getAttachmentMock.mockImplementationOnce(
+    () =>
+      new Promise<Attachment>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  renderWithI18n(
+    <QueryClientProvider client={client}>
+      <AttachmentPreviewPage attachmentId="att-1" />
+    </QueryClientProvider>,
+  );
+  expect(screen.queryByAltText("shot.png")).toBeNull();
+  await waitFor(() => expect(getAttachmentMock).toHaveBeenCalledTimes(1));
+  finish({
+    ...image,
+    download_url: "https://cdn.example.test/new.png?Signature=current",
+  });
+  await waitFor(() =>
+    expect(screen.getByAltText("shot.png").getAttribute("src")).toContain(
+      "new.png",
+    ),
+  );
+  expect(getAttachmentMock).toHaveBeenCalledTimes(1);
 });

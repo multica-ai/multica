@@ -74,6 +74,7 @@ make up               # Démarre l'environnement de ce checkout (C=api,web,daemo
 make status           # Affiche ce qui tourne et prouve qu'il s'agit de cet environnement
 make list             # Liste tous les environnements de cette machine
 make down             # Arrête les processus, conserve la base de données
+make down C=daemon    # Arrête uniquement les composants indiqués
 make destroy          # Arrête, puis supprime la base de données et libère l'emplacement
 make gc               # Nettoie les environnements expirés ou dont le répertoire n'existe plus
 make dev              # Prépare et démarre le checkout courant au premier plan
@@ -115,6 +116,14 @@ make migrate-up
 make migrate-down
 make sqlc
 ```
+
+`make test` prépare la base de données et applique les migrations avant les tests Go. Dans un worktree sans `.env`, `make` sélectionne automatiquement `.env.worktree` ; vous pouvez aussi le sélectionner explicitement avec `make test ENV_FILE=.env.worktree`.
+
+Avant `make test`, `make check` ou `make check-worktree`, arrêtez toute API de développement utilisant la même base pour que ses tâches de fond ne traitent pas les travaux de test. Utilisez la commande d’arrêt correspondant à la commande de démarrage :
+
+- `make up` → `make down C=api`.
+- `make start` / `make dev` → `make stop` ; `make start-worktree` → `make stop-worktree`.
+- `make server` → appuyez sur Ctrl-C dans son terminal.
 
 Pour exécuter une commande CLI depuis les sources :
 

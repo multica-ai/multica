@@ -227,6 +227,25 @@ func (s *AutopilotService) AdmitAutopilotWebhookDelivery(
 		return run, nil
 	}
 
+	if autopilot.ExecutionMode == "create_issue" {
+		run, err := s.Queries.ResumeFailedWebhookIssueDelivery(ctx, deliveryID)
+		if err == nil {
+			return &run, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("resume failed webhook delivery: %w", err)
+		}
+		// A concurrent admission may have moved the original run onto this
+		// delivery while we were looking it up. Reuse it before reserving quota.
+		existing, err := s.Queries.GetAutopilotRunByWebhookDelivery(ctx, deliveryID)
+		if err == nil {
+			return &existing, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("reload resumed webhook run: %w", err)
+		}
+	}
+
 	initialStatus := "issue_created"
 	if autopilot.ExecutionMode == "run_only" {
 		initialStatus = "running"
@@ -290,10 +309,8 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 		return nil, err
 	}
 	if isAutopilotRunComplete(*run) {
-		if autopilot.ExecutionMode == "create_issue" && run.IssueID.Valid {
-			if repairErr := s.ensureWebhookCreateIssueTask(ctx, autopilot, *run); repairErr != nil {
-				return run, repairErr
-			}
+		if autopilot.ExecutionMode == "create_issue" {
+			return run, s.ensureWebhookCreateIssueTask(ctx, autopilot, *run)
 		}
 		return run, nil
 	}
@@ -322,6 +339,9 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 // moved downstream; otherwise enqueue exactly the same assignee path used by
 // the original dispatch.
 func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, autopilot db.Autopilot, run db.AutopilotRun) error {
+	if !run.IssueID.Valid {
+		return nil
+	}
 	hasTasks, err := s.Queries.HasTaskForIssue(ctx, run.IssueID)
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: inspect issue tasks: %w", err)
@@ -362,19 +382,22 @@ func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, aut
 	if !runnable {
 		return nil
 	}
+	var task db.AgentTaskQueue
 	if autopilot.AssigneeType == "squad" {
-		leader, _, err := s.resolveAutopilotLeader(ctx, autopilot)
-		if err != nil {
-			return fmt.Errorf("dispatch for webhook delivery: resolve squad leader: %w", err)
+		leader, _, resolveErr := s.resolveAutopilotLeader(ctx, autopilot)
+		if resolveErr != nil {
+			return fmt.Errorf("dispatch for webhook delivery: resolve squad leader: %w", resolveErr)
 		}
-		task, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, autopilot.AssigneeID, pgtype.UUID{}, OriginDerived)
-		if err != nil {
-			return fmt.Errorf("dispatch for webhook delivery: repair squad task: %w", err)
+		if !s.autopilotAdmitInvoke(ctx, autopilot, leader, pgtype.UUID{}, run.TriggerID) {
+			return fmt.Errorf("not allowed to invoke private squad leader")
 		}
-		s.linkDispatchTask(ctx, &run, task)
+		task, err = s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, autopilot.AssigneeID, pgtype.UUID{}, OriginDerived)
+	} else {
+		task, err = s.TaskSvc.EnqueueTaskForIssue(ctx, issue)
+	}
+	if errors.Is(err, ErrDuplicatePendingTask) {
 		return nil
 	}
-	task, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue)
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: repair issue task: %w", err)
 	}
@@ -636,6 +659,12 @@ func (s *AutopilotService) dispatchAutopilotRun(
 		if err != nil && healIssueCounterAfterCollision(ctx, s.Queries, autopilot.WorkspaceID, err) {
 			err = s.dispatchCreateIssue(ctx, autopilot, run, triggerTimezone, actorUserID)
 		}
+		if errors.Is(err, errWebhookRunAlreadyDispatched) {
+			return run, "", s.ensureWebhookCreateIssueTask(ctx, autopilot, *run)
+		}
+		if run.WebhookDeliveryID.Valid && errors.Is(err, ErrDuplicatePendingTask) {
+			err = nil // The recovery worker already enqueued this issue's task.
+		}
 		if err != nil {
 			if skipped, code := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
 				return skipped, code, nil
@@ -743,8 +772,6 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	if err != nil {
 		return fmt.Errorf("resolve leader: %w", err)
 	}
-	issueCountPolicy := ResolveIssueCountPolicy(ctx, s.Entitlements, ap.WorkspaceID)
-
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -767,7 +794,21 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	}
 	projectID := currentAutopilot.ProjectID
 
-	if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
+	if run.WebhookDeliveryID.Valid {
+		// A reclaimed delivery can overlap its previous worker. Serialize on
+		// the run so both workers observe the same committed issue link.
+		if err := qtx.LockIssueDuplicateKey(ctx, util.UUIDToString(run.ID)); err != nil {
+			return fmt.Errorf("lock webhook run: %w", err)
+		}
+		current, err := qtx.GetAutopilotRun(ctx, run.ID)
+		if err != nil {
+			return fmt.Errorf("reload webhook run: %w", err)
+		}
+		if isAutopilotRunComplete(current) {
+			*run = current
+			return errWebhookRunAlreadyDispatched
+		}
+	} else if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
 		ctx, qtx, ap.WorkspaceID, ap.ID, projectID, title, autopilotRecentDuplicateWindow,
 	); err != nil {
 		return fmt.Errorf("recent duplicate guard: %w", err)
@@ -775,16 +816,9 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID), code: dispatch.ReasonAlreadyActive}
 	}
 
-	issueNumber, err := AllocateIssueNumber(ctx, qtx, ap.WorkspaceID, issueCountPolicy)
+	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
 	if err != nil {
-		var limitErr *IssueLimitReachedError
-		if errors.As(err, &limitErr) {
-			return &errDispatchSkipped{
-				reason: "workspace has reached its issue limit",
-				code:   dispatch.ReasonIssueLimitReached,
-			}
-		}
-		return fmt.Errorf("allocate issue number: %w", err)
+		return fmt.Errorf("increment issue counter: %w", err)
 	}
 
 	newPosition, err := issueposition.NextTopPosition(ctx, tx, ap.WorkspaceID, "todo")
@@ -932,11 +966,9 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	return nil
 }
 
-// notifyAutopilotSubscribersOnCreate writes an inbox_item for each template
-// subscriber of an autopilot-created issue and broadcasts an inbox:new event
-// so the recipient's inbox updates in real time. Mirrors the inbox payload
-// shape from notification_listeners.go so the WS consumer sees the same fields
-// the listener-driven path produces. Failures are logged, not propagated:
+// notifyAutopilotSubscribersOnCreate delivers an inbox_item to each template
+// subscriber of an autopilot-created issue, so the recipient's inbox updates
+// in real time. Failures are logged, not propagated:
 // the issue and its subscriber rows are already committed, and an inbox-write
 // hiccup must not bubble up as a dispatch failure.
 func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
@@ -960,19 +992,22 @@ func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
 		if sub.UserType != "member" {
 			continue
 		}
-		item, inserted, err := inbox.CreateIfEligible(ctx, s.Queries, db.CreateInboxItemParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   ap.WorkspaceID,
-			RecipientType: "member",
-			RecipientID:   sub.UserID,
-			Type:          "issue_subscribed",
-			Severity:      "info",
-			IssueID:       issue.ID,
-			Title:         issue.Title,
-			Body:          pgtype.Text{},
-			ActorType:     pgtype.Text{String: "agent", Valid: true},
-			ActorID:       leaderID,
-			Details:       details,
+		_, _, err := inbox.Deliver(ctx, s.Queries, s.Bus, inbox.Notification{
+			Params: db.CreateInboxItemParams{
+				ID:            dbid.NewV7(),
+				WorkspaceID:   ap.WorkspaceID,
+				RecipientType: "member",
+				RecipientID:   sub.UserID,
+				Type:          "issue_subscribed",
+				Severity:      "info",
+				IssueID:       issue.ID,
+				Title:         issue.Title,
+				Body:          pgtype.Text{},
+				ActorType:     pgtype.Text{String: "agent", Valid: true},
+				ActorID:       leaderID,
+				Details:       details,
+			},
+			IssueStatus: &issue.Status,
 		})
 		if err != nil {
 			slog.Error("autopilot subscriber inbox write failed",
@@ -981,39 +1016,11 @@ func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
 				"recipient_id", util.UUIDToString(sub.UserID),
 				"error", err,
 			)
-			continue
 		}
-		if !inserted {
-			continue
-		}
-		s.Bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
-			WorkspaceID: util.UUIDToString(ap.WorkspaceID),
-			ActorType:   "agent",
-			ActorID:     util.UUIDToString(leaderID),
-			Payload: map[string]any{
-				"item": map[string]any{
-					"id":             util.UUIDToString(item.ID),
-					"workspace_id":   util.UUIDToString(item.WorkspaceID),
-					"recipient_type": item.RecipientType,
-					"recipient_id":   util.UUIDToString(item.RecipientID),
-					"type":           item.Type,
-					"severity":       item.Severity,
-					"issue_id":       util.UUIDToPtr(item.IssueID),
-					"issue_status":   issue.Status,
-					"title":          item.Title,
-					"body":           util.TextToPtr(item.Body),
-					"read":           item.Read,
-					"archived":       item.Archived,
-					"created_at":     util.TimestampToString(item.CreatedAt),
-					"actor_type":     util.TextToPtr(item.ActorType),
-					"actor_id":       util.UUIDToPtr(item.ActorID),
-					"details":        json.RawMessage(item.Details),
-				},
-			},
-		})
 	}
 }
+
+var errWebhookRunAlreadyDispatched = errors.New("webhook run already dispatched")
 
 // errDispatchSkipped wraps a readiness failure encountered after the
 // admission gate has already passed. dispatchRunOnly returns this when a

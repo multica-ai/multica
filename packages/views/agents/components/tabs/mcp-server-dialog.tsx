@@ -375,7 +375,7 @@ export function McpServerDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => !saving && onOpenChange(next)}>
-      <DialogContent className="flex max-h-[88vh] flex-col gap-0 overscroll-contain p-0 sm:max-w-2xl [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:right-5">
+      <DialogContent className="flex max-h-[88%] flex-col gap-0 overscroll-contain p-0 sm:max-w-2xl [&_[data-slot=dialog-close]]:top-5 [&_[data-slot=dialog-close]]:right-5">
             <DialogHeader className="shrink-0 border-b border-surface-border px-6 py-6 pr-14 sm:px-8 sm:pr-16">
               <DialogTitle>
                 {replacementMode

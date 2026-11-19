@@ -42,53 +42,84 @@ import {
 export function VoiceInputTab() {
   const { t } = useT("settings");
   const engineAvailable = useVoiceModels()?.engineAvailable;
+  const enabled = useVoiceSettingsStore((state) => state.enabled);
   return (
     <SettingsTab
       title={t(($) => $.page.tabs.voice_input)}
       description={t(($) => $.voice_input.description)}
       scope="device"
     >
-      <SettingsSection
-        title={t(($) => $.voice_input.model_title)}
-        description={
-          engineAvailable === false
-            ? t(($) => $.voice_input.engine_unavailable)
-            : t(($) => $.voice_input.model_hint)
-        }
-        anchor="voice-model"
-      >
-        {engineAvailable && (
-          <SettingsCard>
-            <VoiceModelRows manage />
-          </SettingsCard>
-        )}
-      </SettingsSection>
-      <SettingsSection title={t(($) => $.voice_input.input_title)} anchor="voice-input">
+      <SettingsSection>
         <SettingsCard>
-          <ShortcutRow />
-          <ActivationRow />
+          <EnabledRow />
         </SettingsCard>
       </SettingsSection>
-      <SettingsSection
-        title={t(($) => $.voice_input.recognition_title)}
-        anchor="voice-recognition"
-      >
-        <SettingsCard>
-          <LanguageRow />
-          <FillersRow />
-          <VocabularyRow />
-        </SettingsCard>
-      </SettingsSection>
-      <SettingsSection
-        title={t(($) => $.voice_input.microphone_title)}
-        anchor="voice-microphone"
-      >
-        <SettingsCard>
-          <MicrophoneRows />
-        </SettingsCard>
-      </SettingsSection>
+      {enabled && (
+        <>
+          <SettingsSection
+            title={t(($) => $.voice_input.model_title)}
+            description={
+              engineAvailable === false
+                ? t(($) => $.voice_input.engine_unavailable)
+                : t(($) => $.voice_input.model_hint)
+            }
+            anchor="voice-model"
+          >
+            {engineAvailable && (
+              <SettingsCard>
+                <VoiceModelRows manage />
+              </SettingsCard>
+            )}
+          </SettingsSection>
+          <SettingsSection title={t(($) => $.voice_input.input_title)} anchor="voice-input">
+            <SettingsCard>
+              <ShortcutRow />
+              <ActivationRow />
+            </SettingsCard>
+          </SettingsSection>
+          <SettingsSection
+            title={t(($) => $.voice_input.recognition_title)}
+            anchor="voice-recognition"
+          >
+            <SettingsCard>
+              <LanguageRow />
+              <FillersRow />
+              <VocabularyRow />
+            </SettingsCard>
+          </SettingsSection>
+          <SettingsSection
+            title={t(($) => $.voice_input.microphone_title)}
+            anchor="voice-microphone"
+          >
+            <SettingsCard>
+              <MicrophoneRows />
+            </SettingsCard>
+          </SettingsSection>
+        </>
+      )}
+      {/* Recordings already on this computer stay reachable while voice input is off. */}
       <VoiceHistorySection />
     </SettingsTab>
+  );
+}
+
+function EnabledRow() {
+  const { t } = useT("settings");
+  const enabled = useVoiceSettingsStore((state) => state.enabled);
+  const update = useVoiceSettingsStore((state) => state.update);
+  const label = t(($) => $.voice_input.enabled.title);
+  return (
+    <SettingsRow
+      anchor="voice-enabled"
+      label={label}
+      description={t(($) => $.voice_input.enabled.hint)}
+    >
+      <Switch
+        checked={enabled}
+        onCheckedChange={(checked) => update({ enabled: checked })}
+        aria-label={label}
+      />
+    </SettingsRow>
   );
 }
 

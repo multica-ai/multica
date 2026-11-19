@@ -6,6 +6,7 @@
   "breadcrumb_aria": "Current menu",
   "groups": {
     "pages": "Pages",
+    "views": "Views",
     "commands": "Commands",
     "members": "Members",
     "agents": "Agents",
@@ -15,6 +16,7 @@
     "autopilots": "Autopilots",
     "chats": "Chats",
     "skills": "Skills",
+    "docs": "Docs",
     "cancelled": "Cancelled",
     "recent": "Recent",
     "workspaces": "Workspaces",
@@ -125,7 +127,6 @@
     "unsubscribed": "Unsubscribed",
     "label_added": "Added label {{name}}",
     "label_removed": "Removed label {{name}}",
-    "label_failed": "Couldn't add label {{name}} to every issue",
     "update_failed": "Update failed",
     "assigned": "Assigned {{identifier}} to {{name}}"
   },
@@ -163,5 +164,6 @@
   },
   "trigger": {
     "label": "Search..."
-  }
+  },
+  "untitled_doc": "Untitled"
 }

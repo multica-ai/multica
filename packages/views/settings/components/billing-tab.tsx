@@ -4,6 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUpCircle,
+  Check,
   CheckCircle2,
   CreditCard,
   ExternalLink,
@@ -15,11 +18,13 @@ import {
 import { ApiError, errorCode } from "@multica/core/api";
 import { autopilotQuotaUsageOptions } from "@multica/core/autopilots";
 import {
+  useChangeWorkspacePlan,
   useCreateWorkspaceSubscriptionCheckout,
   useCreateWorkspaceSubscriptionPortal,
+  usePreviewWorkspacePlanChange,
+  useReconcileWorkspaceSubscriptionSeats,
   usePreviewWorkspaceSeatPurchase,
   usePurchaseWorkspaceSeats,
-  issueLimitUsageOptions,
   workspaceSubscriptionPricesOptions,
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
@@ -28,8 +33,10 @@ import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flag
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type {
   PurchaseWorkspaceSeatsRequest,
+  WorkspacePlanChangePreview,
   WorkspaceSeatPurchasePreview,
   WorkspaceSubscriptionInterval,
+  WorkspaceSubscriptionPaidPlan,
 } from "@multica/core/types";
 import {
   Alert,
@@ -74,6 +81,7 @@ import { useLocale, useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
 import { openExternal } from "../../platform";
 import {
+  SETTINGS_ANCHOR_ATTR,
   SettingsCard,
   SettingsRow,
   SettingsSection,
@@ -82,14 +90,30 @@ import {
 import {
   hasActiveWorkspaceSeatCapacity,
   resolveAutopilotUsage,
+  resolvePlanChangeTarget,
+  yearlyPriceMonthlyEquivalent,
 } from "./billing-state";
 import { formatStripeMinorAmount } from "./billing-format";
+import { BillingTrialSection } from "./billing-trial-section";
 
 export { formatStripeMinorAmount } from "./billing-format";
 
 const CHECKOUT_SYNC_TIMEOUT_MS = 30_000;
+const UPGRADE_SECTION_ANCHOR = "billing-upgrade";
+
+/** Brings the plan cards into view, as a settings deep link would. */
+function scrollToUpgrade() {
+  const target = document.querySelector<HTMLElement>(
+    `[${SETTINGS_ANCHOR_ATTR}="${UPGRADE_SECTION_ANCHOR}"]`,
+  );
+  const reduceMotion =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  target?.scrollIntoView?.({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
+}
 const SEAT_PURCHASE_POLL_TIMEOUT_MS = 2 * 60_000;
 const SEAT_PURCHASE_PREVIEW_DEBOUNCE_MS = 800;
+const PAID_PLANS = ["pro", "business"] as const;
 
 type WorkspaceBillingReturnResult = "success" | "cancel" | "portal";
 
@@ -131,7 +155,7 @@ function formatDateTime(value: string | null, locale: string): string | null {
 }
 
 function planBadgeVariant(plan: string): "default" | "secondary" | "outline" {
-  if (plan === "pro") return "default";
+  if (plan === "pro" || plan === "business") return "default";
   if (plan === "free") return "secondary";
   return "outline";
 }
@@ -202,7 +226,20 @@ function BillingTabContent() {
     : null;
   const [interval, setInterval] =
     useState<WorkspaceSubscriptionInterval>("month");
+  const [checkoutPlan, setCheckoutPlan] =
+    useState<WorkspaceSubscriptionPaidPlan>("pro");
   const [checkoutConfirmOpen, setCheckoutConfirmOpen] = useState(false);
+  const [planChangeTarget, setPlanChangeTarget] =
+    useState<WorkspaceSubscriptionPaidPlan | null>(null);
+  const [planChangePreview, setPlanChangePreview] =
+    useState<WorkspacePlanChangePreview | null>(null);
+  const [planChangePreviewRevision, setPlanChangePreviewRevision] =
+    useState(0);
+  const [planChangeError, setPlanChangeError] = useState<string | null>(null);
+  const [planChangeQuoteChanged, setPlanChangeQuoteChanged] = useState(false);
+  const [planChangeMessage, setPlanChangeMessage] = useState<string | null>(
+    null,
+  );
   const [seatPurchaseOpen, setSeatPurchaseOpen] = useState(false);
   const [additionalSeatsInput, setAdditionalSeatsInput] = useState("1");
   const [seatPreview, setSeatPreview] =
@@ -225,9 +262,16 @@ function BillingTabContent() {
   const [syncTimedOut, setSyncTimedOut] = useState(false);
   const checkoutIntentRef = useRef<{
     wsId: string;
+    plan: WorkspaceSubscriptionPaidPlan;
     interval: WorkspaceSubscriptionInterval;
     key: string;
   } | null>(null);
+  const planChangeIntentRef = useRef<{
+    wsId: string;
+    key: string;
+    preview: WorkspacePlanChangePreview;
+  } | null>(null);
+  const planChangePreviewKeyRef = useRef("");
   const portalIntentKeyRef = useRef<string | null>(null);
   const seatPurchaseIntentRef = useRef<{
     wsId: string;
@@ -248,6 +292,13 @@ function BillingTabContent() {
     seatPurchaseIntentRef.current = null;
     seatPreviewInputRef.current = "";
     seatPreviewCapacityRetryRef.current = null;
+    planChangeIntentRef.current = null;
+    planChangePreviewKeyRef.current = "";
+    setPlanChangeTarget(null);
+    setPlanChangePreview(null);
+    setPlanChangeError(null);
+    setPlanChangeQuoteChanged(false);
+    setPlanChangeMessage(null);
     setSeatPurchaseOpen(false);
     setSeatPreview(null);
     setSeatPreviewRevision(0);
@@ -309,10 +360,13 @@ function BillingTabContent() {
         : false,
   });
   const entitlements = summaryQuery.data?.entitlement;
+  // Checkout is done once paid seats are in effect. Neither the plan nor
+  // Checkout going away proves it: a trial already reports Business, and a
+  // first payment still incomplete also takes Checkout away.
   const isCheckoutConfirmed =
     returnResult === "success" &&
     returnObservedAt !== null &&
-    summaryQuery.data?.availableActions.checkout === false &&
+    hasActiveWorkspaceSeatCapacity(summaryQuery.data) &&
     summaryQuery.isFetchedAfterMount &&
     summaryQuery.dataUpdatedAt >= returnObservedAt;
   const activeSeatPurchaseRequestId =
@@ -334,12 +388,6 @@ function BillingTabContent() {
     summaryQuery.isError ||
     (!summaryQuery.isPending && summaryQuery.data == null);
   const quotaUsageQuery = useQuery(autopilotQuotaUsageOptions(wsId));
-  const issueLimitUsageQuery = useQuery({
-    ...issueLimitUsageOptions(wsId),
-    enabled:
-      wsId.length > 0 &&
-      entitlements?.limits.issueCount.mode === "limited",
-  });
   const hasSeatCapacity = hasActiveWorkspaceSeatCapacity(summaryQuery.data);
   const canUpgrade = summaryQuery.data?.availableActions.checkout === true;
   const pricesQuery = useQuery({
@@ -350,8 +398,73 @@ function BillingTabContent() {
   const portalMutation = useCreateWorkspaceSubscriptionPortal(wsId);
   const previewSeatPurchaseMutation = usePreviewWorkspaceSeatPurchase();
   const purchaseSeatsMutation = usePurchaseWorkspaceSeats(wsId);
+  const previewPlanChangeMutation = usePreviewWorkspacePlanChange();
+  const changePlanMutation = useChangeWorkspacePlan(wsId);
+  const checkPlanChangeMutation = useReconcileWorkspaceSubscriptionSeats(wsId);
   const refetchSummary = summaryQuery.refetch;
   const previewSeatPurchase = previewSeatPurchaseMutation.mutateAsync;
+  const previewPlanChange = previewPlanChangeMutation.mutateAsync;
+
+  // Each open of the plan change dialog, and each explicit refresh, asks Cloud
+  // for a new quote. A response for an older request is ignored so a slow
+  // quote can never replace the one the user is looking at.
+  useEffect(() => {
+    if (!planChangeTarget) return;
+    const requestKey = `${wsId}:${planChangeTarget}:${planChangePreviewRevision}`;
+    planChangePreviewKeyRef.current = requestKey;
+    planChangeIntentRef.current = null;
+    setPlanChangePreview(null);
+    setPlanChangeError(null);
+    void previewPlanChange({ plan: planChangeTarget })
+      .then((preview) => {
+        if (planChangePreviewKeyRef.current !== requestKey) return;
+        if (!preview || preview.targetPlan !== planChangeTarget) {
+          setPlanChangeError(t(($) => $.workspace.plan_change.preview_failed));
+          return;
+        }
+        setPlanChangePreview(preview);
+      })
+      .catch((error: unknown) => {
+        if (planChangePreviewKeyRef.current !== requestKey) return;
+        const status = error instanceof ApiError ? error.status : null;
+        const code = errorCode(error);
+        if (
+          status === 400 ||
+          status === 403 ||
+          code === "subscription_not_active"
+        ) {
+          // The plan this dialog was opened for is no longer a valid switch,
+          // for example because it already changed in another tab.
+          planChangePreviewKeyRef.current = "";
+          setPlanChangeTarget(null);
+          setActionError(
+            status === 403
+              ? t(($) => $.workspace.errors.permission_changed)
+              : t(($) => $.workspace.plan_change.not_active),
+          );
+          void refetchSummary();
+          return;
+        }
+        setPlanChangeError(
+          code === "plan_change_rate_limited"
+            ? t(($) => $.workspace.plan_change.rate_limited)
+            : code === "seat_purchase_in_progress"
+              ? t(($) => $.workspace.plan_change.in_progress)
+              : code === "plan_change_in_progress"
+                ? t(($) => $.workspace.plan_change.change_in_progress)
+                : code === "plan_change_unresolved"
+                  ? t(($) => $.workspace.plan_change.unresolved)
+                  : t(($) => $.workspace.plan_change.preview_failed),
+        );
+      });
+  }, [
+    planChangeTarget,
+    planChangePreviewRevision,
+    previewPlanChange,
+    refetchSummary,
+    t,
+    wsId,
+  ]);
 
   useEffect(() => {
     if (!seatPurchaseOpen) return;
@@ -480,7 +593,11 @@ function BillingTabContent() {
           setSeatPurchaseError(
             previewErrorCode === "seat_purchase_in_progress"
               ? t(($) => $.workspace.seat_purchase.in_progress)
-              : t(($) => $.workspace.seat_purchase.preview_failed),
+              : previewErrorCode === "plan_change_in_progress"
+                ? t(($) => $.workspace.seat_purchase.plan_change_in_progress)
+                : previewErrorCode === "plan_change_unresolved"
+                  ? t(($) => $.workspace.seat_purchase.plan_change_unresolved)
+                  : t(($) => $.workspace.seat_purchase.preview_failed),
           );
         });
     }, SEAT_PURCHASE_PREVIEW_DEBOUNCE_MS);
@@ -511,6 +628,8 @@ function BillingTabContent() {
         return t(($) => $.workspace.plan.free);
       case "pro":
         return t(($) => $.workspace.plan.pro);
+      case "business":
+        return t(($) => $.workspace.plan.business);
       default:
         return t(($) => $.workspace.plan.unknown);
     }
@@ -565,17 +684,21 @@ function BillingTabContent() {
     setActionError(null);
     const existing = checkoutIntentRef.current;
     const intent =
-      existing?.wsId === wsId && existing.interval === interval
+      existing?.wsId === wsId &&
+      existing.plan === checkoutPlan &&
+      existing.interval === interval
         ? existing
         : {
             wsId,
+            plan: checkoutPlan,
             interval,
             key: createIdempotencyKey("workspace-checkout", wsId),
           };
     checkoutIntentRef.current = intent;
     try {
       const response = await checkoutMutation.mutateAsync({
-        interval,
+        plan: intent.plan,
+        interval: intent.interval,
         idempotencyKey: intent.key,
       });
       if (!response?.url) {
@@ -600,6 +723,134 @@ function BillingTabContent() {
   const handleCheckoutConfirmOpenChange = (open: boolean) => {
     setCheckoutConfirmOpen(open);
     if (!open) checkoutIntentRef.current = null;
+  };
+
+  const openCheckoutConfirm = (plan: WorkspaceSubscriptionPaidPlan) => {
+    if (checkoutIntentRef.current?.plan !== plan) {
+      checkoutIntentRef.current = null;
+    }
+    setCheckoutPlan(plan);
+    setCheckoutConfirmOpen(true);
+  };
+
+  const handlePlanChangeOpenChange = (
+    open: boolean,
+    target: WorkspaceSubscriptionPaidPlan | null = null,
+  ) => {
+    if (!open && changePlanMutation.isPending) return;
+    planChangeIntentRef.current = null;
+    setPlanChangeError(null);
+    setPlanChangeQuoteChanged(false);
+    setPlanChangePreview(null);
+    if (!open) {
+      planChangePreviewKeyRef.current = "";
+      setPlanChangeTarget(null);
+      return;
+    }
+    setActionError(null);
+    setPlanChangeMessage(null);
+    setPlanChangePreviewRevision((revision) => revision + 1);
+    setPlanChangeTarget(target);
+  };
+
+  const handlePlanChange = async () => {
+    const preview = planChangePreview;
+    if (!preview) return;
+    setPlanChangeError(null);
+    const existing = planChangeIntentRef.current;
+    // A retry of the same quote reuses its key, so an ambiguous failure can
+    // never become a second Stripe change.
+    const key =
+      existing?.wsId === wsId && existing.preview === preview
+        ? existing.key
+        : createIdempotencyKey("workspace-plan-change", wsId).slice(0, 200);
+    planChangeIntentRef.current = { wsId, key, preview };
+    try {
+      const response = await changePlanMutation.mutateAsync({
+        plan: preview.targetPlan,
+        expectedSubscriptionVersion: preview.subscriptionVersion,
+        quotedAt: preview.quotedAt,
+        acceptedProrationAmount: preview.prorationAmount,
+        currency: preview.currency,
+        idempotencyKey: key,
+      });
+      if (!response || response.plan !== preview.targetPlan) {
+        setPlanChangeError(t(($) => $.workspace.plan_change.unreadable));
+        return;
+      }
+      planChangeIntentRef.current = null;
+      planChangePreviewKeyRef.current = "";
+      setPlanChangeTarget(null);
+      setPlanChangePreview(null);
+      setPlanChangeQuoteChanged(false);
+      setPlanChangeMessage(
+        t(($) => $.workspace.plan_change.success_description, {
+          plan: planLabel(response.plan),
+        }),
+      );
+      await summaryQuery.refetch();
+    } catch (error) {
+      const status = error instanceof ApiError ? error.status : null;
+      const code = errorCode(error);
+      if (status === 409) {
+        planChangeIntentRef.current = null;
+        if (code === "subscription_not_active") {
+          planChangePreviewKeyRef.current = "";
+          setPlanChangeTarget(null);
+          setActionError(t(($) => $.workspace.plan_change.not_active));
+          await summaryQuery.refetch();
+          return;
+        }
+        if (code === "seat_purchase_in_progress") {
+          setPlanChangePreview(null);
+          setPlanChangeError(t(($) => $.workspace.plan_change.in_progress));
+          return;
+        }
+        if (
+          code === "plan_change_in_progress" ||
+          code === "plan_change_unresolved"
+        ) {
+          setPlanChangePreview(null);
+          setPlanChangeError(
+            code === "plan_change_unresolved"
+              ? t(($) => $.workspace.plan_change.unresolved)
+              : t(($) => $.workspace.plan_change.change_in_progress),
+          );
+          await summaryQuery.refetch();
+          return;
+        }
+        setPlanChangeQuoteChanged(true);
+        await summaryQuery.refetch();
+        setPlanChangePreviewRevision((revision) => revision + 1);
+        return;
+      }
+      if (status === 402) {
+        planChangeIntentRef.current = null;
+        setPlanChangePreview(null);
+        setPlanChangeError(t(($) => $.workspace.plan_change.payment_failed));
+        return;
+      }
+      if (status === 403) {
+        planChangeIntentRef.current = null;
+        planChangePreviewKeyRef.current = "";
+        setPlanChangeTarget(null);
+        reportActionError(error, t(($) => $.workspace.plan_change.failed));
+        return;
+      }
+      setPlanChangeError(t(($) => $.workspace.plan_change.failed));
+    }
+  };
+
+  // Asks Cloud to settle a plan change that is still being confirmed now,
+  // rather than at its next reconcile pass, then shows the result.
+  const handleCheckPlanChange = async () => {
+    setActionError(null);
+    try {
+      await checkPlanChangeMutation.mutateAsync();
+    } catch (error) {
+      reportActionError(error, t(($) => $.workspace.plan_change.check_failed));
+    }
+    await summaryQuery.refetch();
   };
 
   const handlePortal = async () => {
@@ -693,6 +944,18 @@ function BillingTabContent() {
         if (purchaseErrorCode === "seat_purchase_in_progress") {
           setSeatPurchaseError(
             t(($) => $.workspace.seat_purchase.in_progress),
+          );
+          await summaryQuery.refetch();
+          return;
+        }
+        if (
+          purchaseErrorCode === "plan_change_in_progress" ||
+          purchaseErrorCode === "plan_change_unresolved"
+        ) {
+          setSeatPurchaseError(
+            purchaseErrorCode === "plan_change_unresolved"
+              ? t(($) => $.workspace.seat_purchase.plan_change_unresolved)
+              : t(($) => $.workspace.seat_purchase.plan_change_in_progress),
           );
           await summaryQuery.refetch();
           return;
@@ -820,29 +1083,80 @@ function BillingTabContent() {
       ? formatDateTime(quotaUsage.resetAt, locale)
       : null;
   const numberFormatter = new Intl.NumberFormat(locale);
-  const issueCountLimit = entitlements.limits.issueCount;
-  const issueLimitUsage = issueLimitUsageQuery.data;
-  const issueLimitValue =
-    issueCountLimit.mode === "unlimited"
-      ? t(($) => $.workspace.limits.unlimited)
-      : issueLimitUsage?.limit === issueCountLimit.limit
-        ? `${numberFormatter.format(issueLimitUsage.used)} / ${numberFormatter.format(issueLimitUsage.limit)}`
-        : numberFormatter.format(issueCountLimit.limit);
   const isMutating =
     checkoutMutation.isPending ||
     portalMutation.isPending ||
-    purchaseSeatsMutation.isPending;
-  const selectedPrice = pricesQuery.data?.[interval] ?? null;
-  const formattedUnitPrice = selectedPrice
+    purchaseSeatsMutation.isPending ||
+    changePlanMutation.isPending;
+  const planUnitPrice = (plan: WorkspaceSubscriptionPaidPlan) => {
+    const price = pricesQuery.data?.[plan][interval] ?? null;
+    if (!price || price.intervalCount !== 1) return null;
+    if (price.interval === "year") {
+      const monthly = yearlyPriceMonthlyEquivalent(price);
+      if (monthly !== null) {
+        const formatted = formatStripeMinorAmount(
+          monthly,
+          price.currency,
+          locale,
+        );
+        if (formatted !== null) {
+          return t(($) => $.workspace.upgrade.unit_price_year_monthly, {
+            price: formatted,
+          });
+        }
+      }
+      const formatted = formatStripeMinorAmount(
+        price.unitAmount,
+        price.currency,
+        locale,
+      );
+      return formatted === null
+        ? null
+        : t(($) => $.workspace.upgrade.unit_price_year, { price: formatted });
+    }
+    const formatted = formatStripeMinorAmount(
+      price.unitAmount,
+      price.currency,
+      locale,
+    );
+    return formatted === null
+      ? null
+      : t(($) => $.workspace.upgrade.unit_price_month, { price: formatted });
+  };
+  const canRetryPrice =
+    !pricesQuery.isLoading && (pricesQuery.data ?? null) === null;
+  const planFeatures: Record<WorkspaceSubscriptionPaidPlan, string[]> = {
+    pro: [
+      t(($) => $.workspace.upgrade.features.pro_members),
+      t(($) => $.workspace.upgrade.features.pro_autopilots),
+      t(($) => $.workspace.upgrade.features.pro_storage),
+      t(($) => $.workspace.upgrade.features.pro_dashboard),
+    ],
+    business: [
+      t(($) => $.workspace.upgrade.features.business_everything),
+      t(($) => $.workspace.upgrade.features.business_access),
+      t(($) => $.workspace.upgrade.features.business_apps),
+      t(($) => $.workspace.upgrade.features.business_autopilots),
+      t(($) => $.workspace.upgrade.features.business_reports),
+    ],
+  };
+  const availablePlanChange = resolvePlanChangeTarget(summaryQuery.data);
+  const planChangeHold = summaryQuery.data?.planChange ?? null;
+  const planChangeIsUpgrade = planChangeTarget === "business";
+  const formattedPlanChangeProration = planChangePreview
     ? formatStripeMinorAmount(
-        selectedPrice.unitAmount,
-        selectedPrice.currency,
+        Math.abs(planChangePreview.prorationAmount),
+        planChangePreview.currency,
         locale,
       )
     : null;
-  const hasDisplayableUnitPrice =
-    selectedPrice?.intervalCount === 1 && formattedUnitPrice !== null;
-  const canRetryPrice = !pricesQuery.isLoading && selectedPrice === null;
+  const formattedPlanChangeNextInvoice = planChangePreview
+    ? formatStripeMinorAmount(
+        planChangePreview.nextInvoiceAmount,
+        planChangePreview.currency,
+        locale,
+      )
+    : null;
   const formattedSeatProration = seatPreview
     ? formatStripeMinorAmount(
         seatPreview.prorationAmount,
@@ -895,12 +1209,16 @@ function BillingTabContent() {
           )}
           <AlertTitle>
             {isCheckoutConfirmed
-              ? t(($) => $.workspace.return.active_title)
+              ? t(($) => $.workspace.return.active_title, {
+                  plan: planLabel(entitlements.plan),
+                })
               : t(($) => $.workspace.return.syncing_title)}
           </AlertTitle>
           <AlertDescription>
             {isCheckoutConfirmed
-              ? t(($) => $.workspace.return.active_description)
+              ? t(($) => $.workspace.return.active_description, {
+                  plan: planLabel(entitlements.plan),
+                })
               : syncTimedOut
                 ? t(($) => $.workspace.return.timeout_description)
                 : t(($) => $.workspace.return.syncing_description)}
@@ -1015,6 +1333,21 @@ function BillingTabContent() {
         </Alert>
       ) : null}
 
+      {planChangeMessage ? (
+        <Alert>
+          <CheckCircle2 />
+          <AlertTitle>
+            {t(($) => $.workspace.plan_change.success_title)}
+          </AlertTitle>
+          <AlertDescription>{planChangeMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <BillingTrialSection
+        summary={summaryQuery.data}
+        onChoosePlan={canUpgrade ? scrollToUpgrade : undefined}
+      />
+
       <SettingsSection title={t(($) => $.workspace.current.title)}>
         <SettingsCard>
           <SettingsRow
@@ -1057,13 +1390,91 @@ function BillingTabContent() {
               <span className="tabular-nums">{summaryPeriodEnd}</span>
             </SettingsRow>
           ) : null}
+          {availablePlanChange ? (
+            <SettingsRow
+              label={t(($) => $.workspace.current.change_plan)}
+              description={
+                availablePlanChange === "business"
+                  ? t(($) => $.workspace.current.business_adds)
+                  : undefined
+              }
+            >
+              <Button
+                className="h-11 w-full sm:w-auto"
+                variant={
+                  availablePlanChange === "business" ? "default" : "outline"
+                }
+                disabled={isMutating}
+                onClick={() =>
+                  handlePlanChangeOpenChange(true, availablePlanChange)
+                }
+              >
+                {availablePlanChange === "business" ? (
+                  <ArrowUpCircle />
+                ) : (
+                  <ArrowDown />
+                )}
+                {availablePlanChange === "business"
+                  ? t(($) => $.workspace.actions.upgrade_to, {
+                      plan: planLabel("business"),
+                    })
+                  : t(($) => $.workspace.actions.switch_to, {
+                      plan: planLabel("pro"),
+                    })}
+              </Button>
+            </SettingsRow>
+          ) : null}
+          {planChangeHold ? (
+            <SettingsRow
+              label={t(($) => $.workspace.current.plan_change_hold)}
+              description={
+                planChangeHold.state === "unresolved"
+                  ? t(($) => $.workspace.current.plan_change_unresolved, {
+                      plan: planLabel(planChangeHold.targetPlan),
+                    })
+                  : t(($) => $.workspace.current.plan_change_confirming, {
+                      plan: planLabel(planChangeHold.targetPlan),
+                    })
+              }
+            >
+              {planChangeHold.state === "confirming" &&
+              summaryQuery.data?.availableActions.checkPlanChange === true ? (
+                <Button
+                  className="h-11 w-full sm:w-auto"
+                  variant="outline"
+                  aria-busy={checkPlanChangeMutation.isPending}
+                  disabled={checkPlanChangeMutation.isPending || isMutating}
+                  onClick={() => void handleCheckPlanChange()}
+                >
+                  {checkPlanChangeMutation.isPending ? (
+                    <Loader2 className="animate-spin" />
+                  ) : (
+                    <RefreshCw />
+                  )}
+                  {t(($) => $.workspace.actions.check_status)}
+                </Button>
+              ) : (
+                <Badge
+                  variant={
+                    planChangeHold.state === "unresolved"
+                      ? "destructive"
+                      : "secondary"
+                  }
+                >
+                  {planChangeHold.state === "unresolved"
+                    ? t(($) => $.workspace.current.plan_change_state_unresolved)
+                    : t(($) => $.workspace.current.plan_change_state_confirming)}
+                </Badge>
+              )}
+            </SettingsRow>
+          ) : null}
         </SettingsCard>
       </SettingsSection>
 
       {canUpgrade ? (
         <SettingsSection
           title={t(($) => $.workspace.upgrade.title)}
-          description={t(($) => $.workspace.upgrade.description)}
+          anchor={UPGRADE_SECTION_ANCHOR}
         >
           <SettingsCard>
             <div className="space-y-5 p-4 sm:p-5">
@@ -1089,29 +1500,79 @@ function BillingTabContent() {
                   </button>
                 ))}
               </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                {PAID_PLANS.map((plan) => {
+                  const recommended = plan === "business";
+                  const unitPrice = planUnitPrice(plan);
+                  return (
+                    <div
+                      key={plan}
+                      className={
+                        recommended
+                          ? "flex flex-col gap-4 rounded-lg border border-foreground p-4"
+                          : "flex flex-col gap-4 rounded-lg border border-surface-border p-4"
+                      }
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-title-sm font-semibold">
+                            {planLabel(plan)}
+                          </h3>
+                          {recommended ? (
+                            <Badge>
+                              {t(($) => $.workspace.upgrade.recommended)}
+                            </Badge>
+                          ) : null}
+                        </div>
+                        {pricesQuery.isLoading ? (
+                          <Skeleton
+                            aria-hidden="true"
+                            className="h-5 w-48 max-w-full motion-reduce:animate-none"
+                          />
+                        ) : unitPrice ? (
+                          <p className="text-body font-semibold tabular-nums">
+                            {unitPrice}
+                          </p>
+                        ) : null}
+                      </div>
+                      <ul className="flex-1 space-y-2">
+                        {planFeatures[plan].map((feature) => (
+                          <li
+                            key={feature}
+                            className="flex items-start gap-2 text-body"
+                          >
+                            <Check
+                              aria-hidden="true"
+                              className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                            />
+                            <span>{feature}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <Button
+                        className="h-11 w-full"
+                        variant={recommended ? "default" : "outline"}
+                        disabled={isMutating}
+                        onClick={() => openCheckoutConfirm(plan)}
+                      >
+                        <CreditCard />
+                        {t(($) => $.workspace.actions.upgrade_to, {
+                          plan: planLabel(plan),
+                        })}
+                      </Button>
+                    </div>
+                  );
+                })}
+              </div>
               <div className="space-y-2">
-                <p className="text-body font-medium">
-                  {t(($) => $.workspace.upgrade.pro_for_team, {
-                    count: actualSeats,
-                  })}
-                </p>
                 {pricesQuery.isLoading ? (
-                  <div
-                    className="space-y-2 motion-reduce:[&_[data-slot=skeleton]]:animate-none"
+                  <span
+                    className="sr-only"
                     role="status"
                     aria-label={t(($) => $.workspace.upgrade.price_loading)}
                   >
-                    <Skeleton className="h-5 w-48" />
-                    <Skeleton className="h-4 w-64 max-w-full" />
-                  </div>
-                ) : hasDisplayableUnitPrice ? (
-                  <div className="space-y-1">
-                    <p className="text-body font-semibold tabular-nums">
-                      {t(($) => $.workspace.upgrade.unit_price, {
-                        price: formattedUnitPrice,
-                      })}
-                    </p>
-                  </div>
+                    {t(($) => $.workspace.upgrade.price_loading)}
+                  </span>
                 ) : null}
                 <p className="max-w-[65ch] text-caption leading-5 text-muted-foreground">
                   {t(($) => $.workspace.upgrade.price_at_checkout)}
@@ -1147,14 +1608,6 @@ function BillingTabContent() {
                   </>
                 ) : null}
               </div>
-              <Button
-                className="h-11 w-full sm:w-auto"
-                disabled={isMutating}
-                onClick={() => setCheckoutConfirmOpen(true)}
-              >
-                <CreditCard />
-                {t(($) => $.workspace.actions.upgrade)}
-              </Button>
             </div>
           </SettingsCard>
         </SettingsSection>
@@ -1197,11 +1650,6 @@ function BillingTabContent() {
         title={t(($) => $.workspace.limits.title)}
       >
         <SettingsCard>
-          <SettingsRow
-            label={t(($) => $.workspace.limits.issues)}
-          >
-            <span className="tabular-nums">{issueLimitValue}</span>
-          </SettingsRow>
           <SettingsRow
             label={t(($) => $.workspace.limits.autopilots)}
           >
@@ -1667,6 +2115,152 @@ function BillingTabContent() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={planChangeTarget !== null}
+        onOpenChange={(open) => handlePlanChangeOpenChange(open)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {planChangeTarget === null
+                ? null
+                : planChangeIsUpgrade
+                  ? t(($) => $.workspace.actions.upgrade_to, {
+                      plan: planLabel(planChangeTarget),
+                    })
+                  : t(($) => $.workspace.actions.switch_to, {
+                      plan: planLabel(planChangeTarget),
+                    })}
+            </DialogTitle>
+            <DialogDescription>
+              {planChangeIsUpgrade
+                ? t(($) => $.workspace.plan_change.upgrade_description)
+                : t(($) => $.workspace.plan_change.downgrade_description)}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {planChangeQuoteChanged ? (
+              <Alert>
+                <AlertCircle />
+                <AlertDescription>
+                  {t(($) => $.workspace.plan_change.quote_changed)}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {previewPlanChangeMutation.isPending ? (
+              <div
+                className="flex items-center gap-2 text-body text-muted-foreground"
+                role="status"
+              >
+                <Loader2 className="animate-spin motion-reduce:animate-none" />
+                {t(($) => $.workspace.plan_change.preview_loading)}
+              </div>
+            ) : null}
+            {planChangeError ? (
+              <Alert variant="destructive">
+                <AlertCircle />
+                <AlertTitle>
+                  {t(($) => $.workspace.plan_change.error_title)}
+                </AlertTitle>
+                <AlertDescription>
+                  <p>{planChangeError}</p>
+                  {!planChangePreview ? (
+                    <Button
+                      className="mt-3"
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={previewPlanChangeMutation.isPending}
+                      onClick={() =>
+                        setPlanChangePreviewRevision(
+                          (revision) => revision + 1,
+                        )
+                      }
+                    >
+                      <RefreshCw />
+                      {t(($) => $.workspace.actions.retry)}
+                    </Button>
+                  ) : null}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            {planChangePreview &&
+            formattedPlanChangeProration !== null &&
+            formattedPlanChangeNextInvoice !== null ? (
+              <div className="space-y-3 rounded-lg border border-surface-border p-4">
+                <div className="flex items-center justify-between gap-4 text-body">
+                  <span className="text-muted-foreground">
+                    {t(($) => $.workspace.plan_change.seats)}
+                  </span>
+                  <span className="font-medium tabular-nums">
+                    {t(($) => $.workspace.seats.seat_count, {
+                      count: planChangePreview.seats,
+                    })}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4 text-body">
+                  <span className="text-muted-foreground">
+                    {planChangePreview.prorationAmount < 0
+                      ? t(($) => $.workspace.plan_change.credit)
+                      : t(($) => $.workspace.plan_change.charge_today)}
+                  </span>
+                  <span className="font-medium tabular-nums">
+                    {formattedPlanChangeProration}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-4 text-body">
+                  <span className="text-muted-foreground">
+                    {t(($) => $.workspace.plan_change.next_invoice)}
+                  </span>
+                  <span className="font-medium tabular-nums">
+                    {formattedPlanChangeNextInvoice}
+                  </span>
+                </div>
+                <p className="text-caption leading-5 text-muted-foreground">
+                  {t(($) => $.workspace.plan_change.tax_notice)}
+                </p>
+              </div>
+            ) : null}
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11"
+              disabled={changePlanMutation.isPending}
+              onClick={() => handlePlanChangeOpenChange(false)}
+            >
+              {t(($) => $.workspace.actions.cancel)}
+            </Button>
+            <Button
+              type="button"
+              className="h-11"
+              disabled={
+                !planChangePreview ||
+                formattedPlanChangeProration === null ||
+                formattedPlanChangeNextInvoice === null ||
+                previewPlanChangeMutation.isPending ||
+                changePlanMutation.isPending
+              }
+              onClick={() => void handlePlanChange()}
+            >
+              {changePlanMutation.isPending ? (
+                <Loader2 className="animate-spin motion-reduce:animate-none" />
+              ) : null}
+              {planChangeTarget === null
+                ? null
+                : planChangeIsUpgrade
+                  ? t(($) => $.workspace.actions.upgrade_to, {
+                      plan: planLabel(planChangeTarget),
+                    })
+                  : t(($) => $.workspace.actions.switch_to, {
+                      plan: planLabel(planChangeTarget),
+                    })}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <AlertDialog
         open={checkoutConfirmOpen}
         onOpenChange={handleCheckoutConfirmOpenChange}
@@ -1678,6 +2272,7 @@ function BillingTabContent() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t(($) => $.workspace.confirm.description, {
+                plan: planLabel(checkoutPlan),
                 interval:
                   interval === "month"
                     ? t(($) => $.workspace.upgrade.monthly)

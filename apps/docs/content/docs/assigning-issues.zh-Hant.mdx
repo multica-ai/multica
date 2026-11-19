@@ -97,6 +97,8 @@ multica issue assign MUL-42 --unassign
 
 如果指派只用於記錄負責人、不應建立新執行（例如同一 AI 代理已在另一次執行中處理該任務），請使用 `--no-start`。`issue update` 和 `issue status` 同樣支援這個 flag。如果只記錄歸屬的流程同時修改負責人和狀態，兩條命令都要傳入該 flag；抑制指派不會自動抑制後續狀態變更觸發的執行。
 
+如果指派或狀態變更沒有啟動執行（例如任務仍在 Triage 中，或 AI 代理沒有綁定執行時），命令會在 stderr 中說明原因。`issue batch update` 會在原因欄位顯示同樣的說明。
+
 ## 接下來
 
 - [在評論中 @ AI 代理](/mentioning-agents) — 不改變負責人，處理新的問題。

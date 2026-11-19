@@ -27,6 +27,8 @@ import { isIssueUuid } from "@multica/core/issues/canonical-id";
 export interface ScrollMementoEntry {
   top: number;
   height: number;
+  /** Horizontal offset, present only when > 0. */
+  left?: number;
   contentKey?: string;
 }
 
@@ -62,9 +64,8 @@ export function scrollMementoKey(routeKey: string, containerKey: string): string
 }
 
 /**
- * Upper bound on a tab's view-state entries. Scroll entries are bounded by
- * REPLACE-per-route, but view entries are only cleared by the views that own
- * them — a long-lived (persisted) tab would otherwise accumulate one entry
+ * Upper bound on a tab's view-state entries. View entries are only cleared by
+ * the views that own them — a long-lived (persisted) tab could accumulate one entry
  * per notification ever opened in it. Oldest-written entries evict first;
  * losing one merely re-runs a deep-link landing that old. Same bound as the
  * in-session scroll cache (use-issue-detail-scroll-restore).
@@ -243,14 +244,10 @@ interface TabStore {
   /** Jump directly to one entry in the active session's virtual history. */
   goToHistoryIndex: (historyIndex: number) => void;
   /**
-   * Persist captured scroll offsets for one route of a tab (Coordinator, on
-   * deactivate / before in-tab navigation). REPLACE semantics per route: all
-   * of the route's previous entries are dropped and the given ones written —
-   * so a container scrolled back to 0 (captured as "no entry") clears its
-   * stale offset instead of resurrecting it on the next visit. External
-   * sources (iframe documents) always write an entry, including top:0, so a
-   * contentKey change can replace a stale positive offset rather than leave
-   * it behind.
+   * Update captured containers for one route of a tab, preserving entries for
+   * unmounted views. A plain container captured at zero on both axes clears
+   * its stale offset. External sources retain zero entries with a contentKey
+   * so a content change can invalidate a stale positive offset.
    */
   commitScrollMemento: (
     tabId: string,
@@ -1223,17 +1220,18 @@ export const useTabStore = create<TabStore>()(
         const { slug, group, index } = hit;
         const current = group.tabs[index];
 
-        const prefix = `${routeKey}::`;
-        const nextScroll: TabMemento["scroll"] = {};
-        for (const [key, value] of Object.entries(current.memento.scroll)) {
-          if (!key.startsWith(prefix)) nextScroll[key] = value;
-        }
+        const nextScroll = { ...current.memento.scroll };
         for (const [containerKey, value] of Object.entries(entries)) {
-          nextScroll[scrollMementoKey(routeKey, containerKey)] = value;
+          const key = scrollMementoKey(routeKey, containerKey);
+          if (value.top <= 0 && (value.left ?? 0) <= 0 && value.contentKey === undefined) {
+            delete nextScroll[key];
+          } else {
+            nextScroll[key] = value;
+          }
         }
 
-        // Skip the write when nothing changed (common: an unscrolled route
-        // captured as empty over an already-empty route scope) — avoids a
+        // Skip the write when nothing changed (common: a zero-offset capture
+        // for a container with no saved entry) — avoids a
         // re-entrant store tick from inside the Coordinator's subscription.
         const prevKeys = Object.keys(current.memento.scroll);
         const nextKeys = Object.keys(nextScroll);
@@ -1246,6 +1244,7 @@ export const useTabStore = create<TabStore>()(
               prev !== undefined &&
               prev.top === next.top &&
               prev.height === next.height &&
+              prev.left === next.left &&
               prev.contentKey === next.contentKey
             );
           });

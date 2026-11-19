@@ -493,21 +493,23 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	// MUL-8472: a comment in a private project the caller cannot see reads as
-	// a missing one, here as on every other comment route.
-	if hiddenComment, err := h.commentInHiddenProject(r, workspaceID, anchorCommentID); err != nil || hiddenComment {
-		if err == nil {
-			err = service.ErrAnchorCommentDeleted
-		}
-		h.writeSourceContextError(w, err, service.SourceContextLimitUsage{})
-		return
-	}
 	wantDigest, tokenIssueID, validToken := service.ParseSourceContextToken(strings.TrimSpace(req.CaptureToken))
 	if !validToken {
 		writeJSON(w, http.StatusConflict, map[string]any{"code": "source_context_changed", "error": "source context preview is invalid; refresh and try again"})
 		return
 	}
-	build, err := service.BuildSourceContext(r.Context(), h.Queries, wsUUID, anchorCommentID)
+	// MUL-8472: a comment in a private project the caller cannot see reads as
+	// a missing one, here as on every other comment route, so it takes the
+	// deleted-anchor path below.
+	var build service.SourceContextBuild
+	hiddenComment, err := h.commentInHiddenProject(r, workspaceID, anchorCommentID)
+	if err == nil {
+		if hiddenComment {
+			err = service.ErrAnchorCommentDeleted
+		} else {
+			build, err = service.BuildSourceContext(r.Context(), h.Queries, wsUUID, anchorCommentID)
+		}
+	}
 	if errors.Is(err, service.ErrAnchorCommentDeleted) {
 		// The token's issue id comes from the client; one in a project the
 		// caller cannot see answers like a deleted one.
@@ -538,6 +540,7 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "issue is required for manual mode")
 			return
 		}
+		req.Issue.Title = sanitizeNullBytes(req.Issue.Title)
 		if strings.TrimSpace(req.Issue.Title) == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"code": "invalid_request", "error": "title is required"})
 			return
@@ -562,18 +565,6 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "mode must be manual or agent")
 		return
 	}
-	// Reject a full workspace before cloning source attachments. This early
-	// check avoids expensive work; the TaskService enqueue preflight and final
-	// transactional issue admission remain necessary because this is not a
-	// capacity reservation.
-	if err := service.CheckIssueCreateCapacity(r.Context(), h.Queries, h.Entitlements, wsUUID); err != nil {
-		if !writeIssueLimitReached(w, err) {
-			slog.Warn("source context issue-capacity preflight failed", append(logger.RequestAttrs(r), "error", err)...)
-			writeError(w, http.StatusInternalServerError, "failed to check issue capacity")
-		}
-		return
-	}
-
 	contextID := dbid.NewV7()
 	capture, objectKeys, err := h.cloneSourceContext(r.Context(), wsUUID, userUUID, contextID, build)
 	if err != nil {
@@ -690,7 +681,7 @@ func (h *Handler) cloneSourceContext(ctx context.Context, workspaceID, userID, c
 }
 
 func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Request, workspaceID, userID pgtype.UUID, input CreateIssueRequest, capture service.SourceContextCapture, limits service.SourceContextLimitUsage) error {
-	title := strings.TrimSpace(input.Title)
+	title := strings.TrimSpace(sanitizeNullBytes(input.Title))
 	if title == "" {
 		return sourceContextBadRequest("title is required")
 	}
@@ -936,9 +927,6 @@ func (h *Handler) createAgentCommentSubIssue(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handler) writeSourceContextError(w http.ResponseWriter, err error, limits service.SourceContextLimitUsage) {
-	if writeIssueLimitReached(w, err) {
-		return
-	}
 	status := http.StatusInternalServerError
 	code := "source_context_capture_failed"
 	message := "failed to capture source context"
@@ -967,6 +955,9 @@ func (h *Handler) writeSourceContextError(w http.ResponseWriter, err error, limi
 		message = err.Error()
 	case errors.Is(err, service.ErrParentIssueNotFound), errors.Is(err, service.ErrProjectNotFound):
 		status = http.StatusBadRequest
+		message = err.Error()
+	case errors.Is(err, service.ErrProjectArchived):
+		status, code = http.StatusConflict, projectArchivedCode
 		message = err.Error()
 	case errors.As(err, &propertyErr):
 		status, code = http.StatusBadRequest, "invalid_issue_property"

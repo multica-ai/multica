@@ -25,19 +25,21 @@ export function useArchivedInboxItemId(issueId: string, enabled: boolean): strin
 export function InboxRestoreMenuItem({ itemId, Item }: { itemId: string; Item: MenuPrimitives["Item"] }) {
   const { t } = useT("issues");
   const { t: tInbox } = useT("inbox");
-  const unarchive = useUnarchiveInbox();
+  const { mutateAsync: unarchive } = useUnarchiveInbox();
   return (
     <Item
+      // The menu closes on click and unmounts this item, so the toasts follow
+      // the request's promise rather than per-call mutation callbacks.
       onClick={() =>
-        unarchive.mutate(itemId, {
-          onSuccess: () => toast.success(tInbox(($) => $.toasts.unarchived)),
-          onError: (err) =>
+        unarchive(itemId).then(
+          () => toast.success(tInbox(($) => $.toasts.unarchived)),
+          (err) =>
             toast.error(
               err instanceof Error && err.message
                 ? err.message
                 : tInbox(($) => $.errors.unarchive_failed),
             ),
-        })
+        )
       }
     >
       <ArchiveRestore className="h-3.5 w-3.5" />

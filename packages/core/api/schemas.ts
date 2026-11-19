@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { normalizeIssueStatusCategory } from "../issues/config/status";
 import type {
+  BatchIssueOutcome,
+  BatchIssueResult,
+  BatchUpdateIssuesResponse,
   AppCatalogResponse,
   AppsOverview,
   TeamAppImpact,
@@ -25,6 +28,7 @@ import type {
   ChatDraftRestoresResponse,
   ChatPendingTask,
   ChatSession,
+  ChatWakeup,
   PrioritizeQueuedChatTaskResponse,
   SendChatMessageResponse,
   StartMikaOnboardingResponse,
@@ -32,11 +36,15 @@ import type {
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
   WorkspaceSubscriptionEntitlements,
+  WorkspaceFeatureState,
+  WorkspaceFeatures,
   WorkspaceSubscriptionSummary,
-  IssueLimitUsage,
   WorkspaceSubscriptionPrice,
+  WorkspaceSubscriptionPlanPrices,
   WorkspaceSubscriptionPrices,
   CreateWorkspaceSubscriptionCheckoutResponse,
+  WorkspacePlanChangePreview,
+  ChangeWorkspacePlanResponse,
   WorkspaceSubscriptionSeatReconcileResult,
   WorkspaceSeatPurchasePreview,
   PurchaseWorkspaceSeatsResponse,
@@ -61,6 +69,7 @@ import type {
   IssueEnvironmentsResponse,
   IssuePullRequestSummariesResponse,
   InboxItem,
+  SnoozedInboxIssue,
   InboxWorkspaceUnread,
   IssueUnread,
   Label,
@@ -867,6 +876,8 @@ export const SidebarProjectPrefsDocSchema = z.object({
     statuses: z.array(z.string()).optional().catch(undefined),
     onlyMine: z.boolean().optional().catch(undefined),
     showCount: z.boolean().optional().catch(undefined),
+    showNoProject: z.boolean().optional().catch(undefined),
+    minimalIcons: z.boolean().optional().catch(undefined),
   }).catch({}),
   issues: z.object({
     sortBy: z.enum(["updated_at", "created_at", "priority", "status", "title", "due_date"]).optional().catch(undefined),
@@ -1061,6 +1072,7 @@ export interface AppConfigResponse {
   /** Whether agent create/update persists `conversation_starters`. Older servers
    * silently ignored the unknown field, so absent must be treated as false. */
   agent_conversation_starters_supported?: boolean;
+  webhook_payload_conditions_supported?: boolean;
   /** Whether issue create atomically validates and persists `properties`.
    * Older servers silently ignore the field, so absent means unsupported. */
   issue_create_properties_supported?: boolean;
@@ -1116,6 +1128,7 @@ const ReactionSchema = z.object({
 const AttachmentImageFields = {
   width: z.number().int().positive().optional().catch(undefined),
   height: z.number().int().positive().optional().catch(undefined),
+  thumbnail_url: z.string().min(1).optional().catch(undefined),
 };
 
 const AttachmentSchema = z.object({
@@ -1140,12 +1153,13 @@ export const ChatMessageSchema = z.object({
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
   message_kind: z
-    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening"])
+    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening", "wakeup"])
     .catch("message")
     .optional(),
   // Optional additive data degrades independently: a malformed suggestion
   // must not hide the assistant reply that contains it.
   quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),
+  wakeup_id: z.string().nullish().catch(undefined),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
@@ -1358,6 +1372,7 @@ export const AppConfigSchema = z.object({
   feature_flags: FeatureFlagsSchema,
   local_worktree_supported: BooleanWithDefaultSchema(false),
   agent_conversation_starters_supported: BooleanWithDefaultSchema(false),
+  webhook_payload_conditions_supported: BooleanWithDefaultSchema(false),
   issue_create_properties_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
   theme_store_enabled: BooleanWithDefaultSchema(false),
@@ -1380,6 +1395,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   local_worktree_supported: false,
   // Fail closed: old servers returned success while dropping the field.
   agent_conversation_starters_supported: false,
+  webhook_payload_conditions_supported: false,
   // Fail closed: old servers returned success while dropping create properties.
   issue_create_properties_supported: false,
   // Fail closed: old servers delete a comment's replies with it.
@@ -1806,11 +1822,19 @@ export const ProjectSchema = z.object({
   due_date: z.string().nullable().default(null),
   created_at: z.string(),
   updated_at: z.string(),
+  last_activity_at: z.string().optional().catch(undefined),
   issue_count: z.number().default(0),
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
   workflow_id: z.string().nullable().default(null),
+  archived_at: z.string().nullable().default(null).catch(null),
+  archived_by_type: z.enum(["member", "agent"]).nullable().default(null).catch(null),
+  archived_by_id: z.string().nullable().default(null).catch(null),
 }).loose();
+
+export const ArchiveProjectResponseSchema = ProjectSchema.extend({
+  paused_autopilot_ids: z.array(z.string()).default([]).catch([]),
+});
 
 export const EMPTY_PROJECT: Project = {
   id: "", workspace_id: "", title: "", description: null, icon: null,
@@ -1837,6 +1861,33 @@ export const ProjectMemberSchema = z.object({
 export const ListProjectMembersResponseSchema = z.object({
   members: z.array(ProjectMemberSchema),
   total: z.number(),
+  // Absent from a server that predates it; see canManageProjectAccess.
+  manager_id: z.string().nullable().default(null).catch(null),
+}).loose();
+
+// The workspace owner's overview of private projects (`/api/projects/private`).
+// A row whose id is missing is dropped rather than failing the whole list: the
+// overview is how an owner gets back into a project nobody else can open.
+const PrivateProjectOverviewSchema = z.object({
+  id: z.string(),
+  title: z.string().catch(""),
+  icon: z.string().nullable().default(null).catch(null),
+  lead_type: z.enum(["member", "agent"]).nullable().default(null).catch(null),
+  lead_id: z.string().nullable().default(null).catch(null),
+  created_at: z.string().catch(""),
+  archived_at: z.string().nullable().default(null).catch(null),
+  is_member: z.boolean().catch(false),
+  members: z.array(ProjectMemberSchema.omit({ project_id: true })).default([]).catch([]),
+}).loose();
+
+export const ListPrivateProjectsResponseSchema = z.object({
+  projects: z.array(z.unknown()).default([]).catch([]).transform((rows) =>
+    rows.flatMap((row) => {
+      const parsed = PrivateProjectOverviewSchema.safeParse(row);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  ),
+  total: z.number().default(0).catch(0),
 }).loose();
 
 // The viewer's own project subscription (`/api/projects/:id/subscription`).
@@ -2040,6 +2091,9 @@ const SubscriberSchema = z.object({
   user_id: z.string(),
   reason: z.string(),
   created_at: z.string(),
+  // An unknown or malformed tier shows no badge; it must not drop the row,
+  // which would read as "not subscribed".
+  delivery: z.enum(["all", "key_updates", "delegated"]).optional().catch(undefined),
 }).loose();
 
 export const SubscribersListSchema = z.array(SubscriberSchema);
@@ -2262,6 +2316,52 @@ const RuntimeUsageByHourSchema = z.object({
 }).loose();
 
 export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
+
+// Runtime rate limits (`GET /api/runtimes/:id/rate-limits`). Unknown window
+// kinds and statuses from a newer server degrade to "other" / "" instead of
+// failing the whole response, and a malformed window is dropped on its own.
+const RuntimeRateLimitStatusSchema = z
+  .enum(["allowed", "warning", "rejected", ""])
+  .catch("");
+
+const RuntimeRateLimitWindowSchema = z.object({
+  kind: z
+    .enum(["session", "weekly", "weekly_opus", "weekly_sonnet", "other"])
+    .catch("other"),
+  used_percent: z.number().optional().catch(undefined),
+  window_minutes: z.number().default(0).catch(0),
+  resets_at: z.string().optional().catch(undefined),
+  status: RuntimeRateLimitStatusSchema.default(""),
+}).loose();
+
+const RuntimeRateLimitsSchema = z.object({
+  plan_type: z.string().default("").catch(""),
+  status: RuntimeRateLimitStatusSchema.default(""),
+  windows: z
+    .array(z.unknown())
+    .catch([])
+    .default([])
+    .transform((rows) =>
+      rows.flatMap((row) => {
+        const parsed = RuntimeRateLimitWindowSchema.safeParse(row);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    ),
+  credits: z
+    .object({
+      has_credits: z.boolean().default(false),
+      unlimited: z.boolean().default(false),
+      balance: z.string().default(""),
+    })
+    .loose()
+    .optional()
+    .catch(undefined),
+  observed_at: z.string(),
+}).loose();
+
+export const RuntimeRateLimitsResponseSchema = z.object({
+  rate_limits: RuntimeRateLimitsSchema.nullable().catch(null),
+}).loose();
 
 // Agent task responses. The base object stays loose so daemon/runtime fields
 // can drift while task-list consumers still validate the fields they render.
@@ -2489,6 +2589,7 @@ const ChatLastMessageSchema = z.object({
     "no_response",
     "onboarding_kickoff",
     "onboarding_opening",
+    "wakeup",
   ]).optional().catch(undefined),
 }).loose();
 
@@ -2558,6 +2659,7 @@ const ChatQueuedTaskSchema = z.object({
   created_at: z.string().default(""),
   message_id: z.string().optional(),
   content: z.string().optional(),
+  wakeup_id: z.string().optional().catch(undefined),
 }).loose();
 
 const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
@@ -2575,12 +2677,55 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
   status: z.string().optional(),
   created_at: z.string().optional(),
   supports_queue: z.boolean().optional(),
+  can_supplement: z.boolean().optional().catch(undefined),
   queued_tasks: ChatQueuedTasksSchema.optional(),
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 
+// A malformed wakeup row is dropped rather than failing the list: the strip
+// and panel are status surfaces next to the conversation, not its content.
+const ChatWakeupSchema: z.ZodType<ChatWakeup> = z.object({
+  id: z.string().min(1),
+  chat_session_id: z.string().min(1),
+  chat_session_title: z.string().optional().catch(undefined),
+  agent_id: z.string().default(""),
+  title: z.string().default(""),
+  instruction: z.string().default(""),
+  kind: z.enum(["condition", "at", "check"]),
+  condition: z.record(z.string(), z.unknown()).nullish().catch(undefined),
+  interval_seconds: z.number().nullable().default(null),
+  fire_at: z.string().nullable().default(null),
+  next_eval_at: z.string().default(""),
+  expires_at: z.string().default(""),
+  status: z.enum(["active", "fired", "expired", "cancelled", "failed"]),
+  end_reason: z.string().nullable().default(null),
+  ended_at: z.string().nullable().default(null),
+  check_count: z.number().default(0),
+  last_check_note: z.string().nullable().default(null),
+  last_checked_at: z.string().nullable().default(null),
+  last_task_id: z.string().nullable().default(null),
+  last_task_status: z.string().optional().catch(undefined),
+  last_fired_at: z.string().nullable().default(null),
+  last_error: z.string().nullable().default(null),
+  source_message_id: z.string().nullable().default(null),
+  source_task_id: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ChatWakeupListSchema = z.array(z.unknown()).transform((rows) =>
+  rows.flatMap((row) => {
+    const parsed = ChatWakeupSchema.safeParse(row);
+    return parsed.success ? [parsed.data] : [];
+  }),
+);
+export const EMPTY_CHAT_WAKEUP_LIST: ChatWakeup[] = [];
+
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
+  steered: z.boolean().optional().catch(undefined),
+  message_created_at: z.string().optional().catch(undefined),
+  message_task_id: z.string().optional().catch(undefined),
   message_id: z.string().min(1),
   task_id: z.string().min(1),
   supports_queue: z.boolean().optional(),
@@ -2842,6 +2987,21 @@ export interface DuplicateIssueErrorBody {
 // the empty array. `.loose()` lets unknown fields pass through, matching
 // the rule used by every other endpoint here.
 
+const WebhookPayloadConditionFailureSchema = z.object({
+  filter_index: z.number().int().nonnegative(),
+  condition_index: z.number().int().nonnegative(),
+  condition: z.object({
+    path: z.string(),
+    op: z.enum(["equals", "not_equals", "contains", "in", "exists"]),
+    value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    values: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
+    ignore_case: z.boolean().optional(),
+  }).loose(),
+  actual_values: z.array(z.string()),
+  missing: z.boolean(),
+  truncated: z.boolean(),
+}).loose();
+
 const WebhookDeliverySchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -2864,6 +3024,7 @@ const WebhookDeliverySchema = z.object({
   replayed_from_delivery_id: z.string().nullable(),
   error: z.string().nullable(),
   reason_code: z.string().nullable().default(null),
+  payload_condition_failure: WebhookPayloadConditionFailureSchema.nullish().catch(null),
   replay_idempotency_key: z.string().nullable().default(null),
   received_at: z.string(),
   last_attempt_at: z.string(),
@@ -3166,6 +3327,9 @@ export const InboxItemListSchema = z.array(
       type: z.string(),
       severity: z.string(),
       issue_id: z.string().nullish(),
+      // Only picks the link; a bad value falls back to the issue_id link
+      // instead of failing the whole list.
+      issue_identifier: z.string().min(1).nullish().catch(null),
       title: z.string(),
       body: z.string().nullish(),
       issue_status: z.string().nullish(),
@@ -3178,6 +3342,22 @@ export const InboxItemListSchema = z.array(
       read: z.boolean(),
       archived: z.boolean(),
       created_at: z.string(),
+      snoozed_until: z.string().nullish(),
+      snoozed_at: z.string().nullish(),
+    })
+    .loose(),
+);
+
+// The viewer's snoozed issues (`/api/inbox/snoozed` GET). A malformed body
+// reads as nothing snoozed.
+export const SnoozedInboxListSchema = z.array(
+  z
+    .object({
+      issue_id: z.string(),
+      item_id: z.string(),
+      snoozed_until: z.string(),
+      snoozed_at: z.string(),
+      updates: z.number().int().nonnegative(),
     })
     .loose(),
 );
@@ -3211,6 +3391,7 @@ export const ArchivedInboxFacetsSchema = z.object({
 }));
 
 export const EMPTY_INBOX_ITEMS: InboxItem[] = [];
+export const EMPTY_SNOOZED_INBOX: SnoozedInboxIssue[] = [];
 
 // Billing schemas (cloud-billing proxy surface)
 //
@@ -3396,6 +3577,7 @@ export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSe
 //     surface as unknown rather than be coerced into a known one.
 
 const WorkspaceSubscriptionIntervalSchema = z.enum(["month", "year"]);
+const WorkspaceSubscriptionPaidPlanSchema = z.enum(["pro", "business"]);
 
 // Stripe hosts Checkout and Portal, so those URLs leave the app. `z.string()
 // .url()` is not enough on its own — `new URL("javascript:...")` parses — and
@@ -3416,7 +3598,7 @@ const WorkspaceEntitlementLimitSchema = z
     z.object({ mode: z.literal("unlimited") }).loose(),
   ])
   .transform(
-    (value): WorkspaceSubscriptionEntitlements["limits"]["issueCount"] =>
+    (value): WorkspaceSubscriptionEntitlements["limits"]["autopilotRuns"] =>
       value.mode === "limited"
         ? { mode: "limited", limit: value.limit }
         : { mode: "unlimited", limit: null },
@@ -3433,7 +3615,6 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
     seats: z.number().int().nonnegative(),
     limits: z
       .object({
-        issue_count: WorkspaceEntitlementLimitSchema,
         autopilot_runs: WorkspaceEntitlementLimitSchema,
       })
       .loose(),
@@ -3449,7 +3630,6 @@ export const WorkspaceSubscriptionEntitlementsSchema = z
       status: value.status,
       seats: value.seats,
       limits: {
-        issueCount: value.limits.issue_count,
         autopilotRuns: value.limits.autopilot_runs,
       },
       currentPeriodEnd: value.current_period_end ?? null,
@@ -3491,7 +3671,42 @@ export const WorkspaceSubscriptionSummarySchema = z
       checkout: z.boolean(),
       portal: z.boolean(),
       purchase_seats: z.boolean(),
+      // Absent on a cloud that predates plan switching: no switch is offered.
+      change_plan: z.boolean().optional(),
+      check_plan_change: z.boolean().optional(),
     }).loose(),
+    // Absent on an older cloud, and a malformed value reads as no hold: the
+    // server still refuses the operations a hold blocks.
+    plan_change: z
+      .object({
+        target_plan: z.string().min(1),
+        // An unknown state from a newer cloud is shown as still confirming,
+        // the state that asks the user to wait rather than act.
+        state: z.enum(["confirming", "unresolved"]).catch("confirming"),
+        since: z.string().min(1),
+      })
+      .loose()
+      .nullable()
+      .optional()
+      .catch(null),
+    // Absent on a cloud that predates trials. A malformed value reads as no
+    // trial: the entitlement still carries the plan the workspace has.
+    trial: z
+      .object({
+        plan: z.string().min(1),
+        state: z.enum(["active", "expired", "converted"]),
+        started_at: z.string().min(1),
+        ends_at: z.string().min(1),
+      })
+      .loose()
+      .refine(
+        (value) =>
+          !Number.isNaN(Date.parse(value.started_at)) &&
+          !Number.isNaN(Date.parse(value.ends_at)),
+      )
+      .nullable()
+      .optional()
+      .catch(null),
   })
   .loose()
   .transform(
@@ -3528,22 +3743,75 @@ export const WorkspaceSubscriptionSummarySchema = z
         checkout: value.available_actions.checkout,
         portal: value.available_actions.portal,
         purchaseSeats: value.available_actions.purchase_seats,
+        changePlan: value.available_actions.change_plan ?? false,
+        checkPlanChange: value.available_actions.check_plan_change ?? false,
       },
+      planChange: value.plan_change
+        ? {
+            targetPlan: value.plan_change.target_plan,
+            state: value.plan_change.state,
+            since: value.plan_change.since,
+          }
+        : null,
+      trial: value.trial
+        ? {
+            plan: value.trial.plan,
+            state: value.trial.state,
+            startedAt: value.trial.started_at,
+            endsAt: value.trial.ends_at,
+          }
+        : null,
     }),
   );
 
-export const IssueLimitUsageSchema = z
+const BATCH_ISSUE_OUTCOMES: readonly string[] = [
+  "updated",
+  "unchanged",
+  "skipped",
+  "would_update",
+  "deleted",
+  "would_delete",
+] satisfies BatchIssueOutcome[];
+
+// An outcome this client does not know is not a confirmed write: it reads as
+// skipped, never as success.
+const BatchIssueResultSchema = z
   .object({
-    used: z.number().int().nonnegative(),
-    limit: z.number().int().positive(),
+    issue_id: z.string().min(1),
+    identifier: z.string().optional().catch(undefined),
+    outcome: z.string(),
+    code: z.string().optional().catch(undefined),
+    message: z.string().optional().catch(undefined),
   })
   .loose()
   .transform(
-    (value): IssueLimitUsage => ({
-      used: value.used,
-      limit: value.limit,
+    (value): BatchIssueResult => ({
+      issue_id: value.issue_id,
+      identifier: value.identifier,
+      outcome: BATCH_ISSUE_OUTCOMES.includes(value.outcome) ? (value.outcome as BatchIssueOutcome) : "skipped",
+      code: value.code,
+      message: value.message,
     }),
   );
+
+/** `results` is absent on servers that predate per-issue batch results. */
+export const BatchUpdateIssuesResponseSchema = z
+  .object({
+    updated: z.number().int().nonnegative(),
+    results: z.array(BatchIssueResultSchema).optional(),
+    dry_run: z.boolean().optional().catch(undefined),
+  })
+  .loose()
+  .transform(
+    (value): BatchUpdateIssuesResponse => ({
+      updated: value.updated,
+      ...(value.results ? { results: value.results } : {}),
+      ...(value.dry_run !== undefined ? { dry_run: value.dry_run } : {}),
+    }),
+  );
+
+/** A batch response that failed validation: whatever was written is unknown. */
+export const UNCONFIRMED_BATCH_UPDATE: BatchUpdateIssuesResponse = { updated: 0, unconfirmed: true };
 
 const WorkspaceSubscriptionPriceSchema = (
   expected: "month" | "year",
@@ -3572,16 +3840,51 @@ const WorkspaceSubscriptionPriceSchema = (
       }),
     );
 
-export const WorkspaceSubscriptionPricesSchema = z
+const WorkspaceSubscriptionPlanPricesSchema = z
   .object({
     month: WorkspaceSubscriptionPriceSchema("month"),
     year: WorkspaceSubscriptionPriceSchema("year"),
   })
   .loose()
   .transform(
-    (value): WorkspaceSubscriptionPrices => ({
+    (value): WorkspaceSubscriptionPlanPrices => ({
       month: value.month,
       year: value.year,
+    }),
+  );
+
+// Every paid plan must be priced: a response missing one plan reads as "prices
+// unavailable" as a whole rather than offering one plan without the other.
+export const WorkspaceSubscriptionPricesSchema = z
+  .object({
+    pro: WorkspaceSubscriptionPlanPricesSchema,
+    business: WorkspaceSubscriptionPlanPricesSchema,
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSubscriptionPrices => ({
+      pro: value.pro,
+      business: value.business,
+    }),
+  );
+
+// An unknown state from a newer server reads as available: the server still
+// enforces on write, so the worst case is an upgrade prompt after the attempt
+// instead of before it. A malformed entry is dropped the same way.
+const WorkspaceFeatureStateSchema = z
+  .object({ state: z.enum(["available", "locked"]).catch("available") })
+  .loose()
+  .transform((value): WorkspaceFeatureState => value.state)
+  .catch("available" as const);
+
+export const WorkspaceFeaturesSchema = z
+  .object({
+    features: z.record(z.string(), WorkspaceFeatureStateSchema).catch({}),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceFeatures => ({
+      features: value.features as WorkspaceFeatures["features"],
     }),
   );
 
@@ -3662,6 +3965,62 @@ export const PurchaseWorkspaceSeatsResponseSchema = z
       prorationAmount: value.proration_amount,
       nextInvoiceAmount: value.next_invoice_amount,
       status: value.status,
+    }),
+  );
+
+export const WorkspacePlanChangePreviewSchema = z
+  .object({
+    current_plan: WorkspaceSubscriptionPaidPlanSchema,
+    target_plan: WorkspaceSubscriptionPaidPlanSchema,
+    interval: WorkspaceSubscriptionIntervalSchema,
+    seats: z.number().int().positive(),
+    subscription_version: z.number().int().positive(),
+    currency: z.string().regex(/^[a-z]{3}$/),
+    // Negative for a downgrade: the unused difference is a credit.
+    proration_amount: z.number().int(),
+    next_invoice_amount: z.number().int().nonnegative(),
+    invoice_now: z.boolean(),
+    quoted_at: z.string().min(1),
+  })
+  .loose()
+  .refine((value) => value.current_plan !== value.target_plan, {
+    message: "plan change preview must name two different plans",
+  })
+  .transform(
+    (value): WorkspacePlanChangePreview => ({
+      currentPlan: value.current_plan,
+      targetPlan: value.target_plan,
+      interval: value.interval,
+      seats: value.seats,
+      subscriptionVersion: value.subscription_version,
+      currency: value.currency,
+      prorationAmount: value.proration_amount,
+      nextInvoiceAmount: value.next_invoice_amount,
+      invoiceNow: value.invoice_now,
+      quotedAt: value.quoted_at,
+    }),
+  );
+
+export const ChangeWorkspacePlanResponseSchema = z
+  .object({
+    plan: WorkspaceSubscriptionPaidPlanSchema,
+    previous_plan: WorkspaceSubscriptionPaidPlanSchema,
+    interval: WorkspaceSubscriptionIntervalSchema,
+    seats: z.number().int().positive(),
+    currency: z.string().regex(/^[a-z]{3}$/),
+    proration_amount: z.number().int(),
+    invoice_now: z.boolean(),
+  })
+  .loose()
+  .transform(
+    (value): ChangeWorkspacePlanResponse => ({
+      plan: value.plan,
+      previousPlan: value.previous_plan,
+      interval: value.interval,
+      seats: value.seats,
+      currency: value.currency,
+      prorationAmount: value.proration_amount,
+      invoiceNow: value.invoice_now,
     }),
   );
 
@@ -4325,6 +4684,7 @@ export const RuntimeProfileSchema = z
   .object({
     id: z.string(),
     workspace_id: z.string(),
+    daemon_id: z.string().nullable().catch(null),
     display_name: z.string(),
     protocol_family: z.string(),
     runtime_type: z.string().nullish().catch(undefined),

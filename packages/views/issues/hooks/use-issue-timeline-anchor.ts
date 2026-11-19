@@ -32,9 +32,11 @@ export function useIssueTimelineAnchor({
   const snapshot = snapshotRef.current;
   // A fresh notification selection owns the landing, even after it marks its
   // highlight consumed. It must not revive the previous reading position.
-  if (skipRestore) snapshot.anchor = null;
+  // Dropped only once the timeline is ready: until then a landing can still
+  // turn out to have no target, and the reader's place is the fallback.
+  if (skipRestore && ready) snapshot.anchor = null;
   const [completed, setCompleted] = useState<AnchorSnapshot | null>(null);
-  const pending = completed !== snapshot ? snapshot.anchor : null;
+  const pending = !skipRestore && completed !== snapshot ? snapshot.anchor : null;
   const complete = useCallback(() => setCompleted(snapshot), [snapshot]);
 
   useEffect(() => {

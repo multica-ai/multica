@@ -4,20 +4,26 @@ import {
   workspaceSubscriptionPricesStaleTime,
 } from "./workspace-subscription-queries";
 
+const planPrices = (monthAmount: number, yearAmount: number) =>
+  ({
+    month: {
+      currency: "usd",
+      unitAmount: monthAmount,
+      interval: "month",
+      intervalCount: 1,
+    },
+    year: {
+      currency: "usd",
+      unitAmount: yearAmount,
+      interval: "year",
+      intervalCount: 1,
+    },
+  }) as const;
+
 const validPrices = {
-  month: {
-    currency: "usd",
-    unitAmount: 1_000,
-    interval: "month",
-    intervalCount: 1,
-  },
-  year: {
-    currency: "usd",
-    unitAmount: 9_600,
-    interval: "year",
-    intervalCount: 1,
-  },
-} as const;
+  pro: planPrices(1_500, 14_400),
+  business: planPrices(3_000, 28_800),
+};
 
 describe("workspace subscription price query", () => {
   it("keeps missing price responses stale so the UI can recover", () => {

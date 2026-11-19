@@ -1,71 +1,4 @@
 {
-  "title": "請求（テストページ）",
-  "subtitle": "multica-cloud の /api/v1/billing/* に直接パススルーします。完成した UI ではなく、proxy と Stripe フローを検証するためにすべての endpoint を 1 つのページにまとめたものです。",
-  "endpoints": {
-    "balance": "GET /api/cloud-billing/balance",
-    "transactions": "GET /api/cloud-billing/transactions",
-    "batches": "GET /api/cloud-billing/batches",
-    "topups": "GET /api/cloud-billing/topups",
-    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
-  },
-  "balance": {
-    "title": "残高",
-    "credits_suffix": "credits",
-    "meta": "raw micro: {{micro}} · owner: {{owner}}… · updated {{updated}}"
-  },
-  "buy": {
-    "title": "クレジット購入 / 請求の管理",
-    "no_tiers": "設定された価格 tier がありません。Cloud に Stripe key が設定されていない可能性があり、checkout は 503 を返します。",
-    "tier_money_to_credits": "{{money}} → {{credits}} credits",
-    "tier_bonus": " + ボーナス {{credits}}",
-    "tier_bonus_with_expiry": " + ボーナス {{credits}}（{{expiry}}）",
-    "tier_id": "id: {{id}}",
-    "open_portal": "Stripe Billing Portal を開く",
-    "portal_hint": "まだ支払いをしていないユーザーには 400 が想定されます（Stripe customer record がまだ存在しません）。",
-    "toast_no_url": "Cloud が checkout URL を返しませんでした",
-    "toast_checkout_failed": "Checkout に失敗しました",
-    "toast_no_portal_url": "Portal URL が返されませんでした",
-    "toast_portal_failed": "Portal を開けませんでした"
-  },
-  "checkout": {
-    "session_label": "Checkout session {{prefix}}…",
-    "loading": "注文ステータスを読み込み中…",
-    "fetch_failed": "ステータスの取得に失敗しました: {{error}}",
-    "fetch_failed_unknown": "不明なエラー",
-    "final_status": "最終ステータス: {{status}}",
-    "polling_status": "ステータスを確認中… 現在: {{status}}",
-    "status_unknown": "unknown",
-    "label_order": "注文",
-    "label_tier": "Tier",
-    "label_charged": "請求済み",
-    "charged_value": "{{money}} · {{credits}} credits",
-    "charged_with_bonus": "{{money}} · {{credits}} credits + ボーナス {{bonus}}",
-    "clear_url": "URL から消去"
-  },
-  "transactions": {
-    "title": "取引履歴",
-    "empty": "取引履歴はまだありません。",
-    "credits_value": "{{value}} credits",
-    "row_meta": "{{date}} · balance after: {{balance}} credits · ref: {{ref}}",
-    "ref_empty": "—"
-  },
-  "batches": {
-    "title": "クレジット batch",
-    "empty": "batch はまだありません。",
-    "remaining_over_total": "{{remaining}} / {{total}} credits",
-    "id_suffix": "{{id}}…",
-    "consumed": "使用済み: {{value}} credits",
-    "expires_suffix": " · 有効期限 {{value}}",
-    "never_expires_suffix": " · 有効期限なし"
-  },
-  "topups": {
-    "title": "Topup 注文",
-    "empty": "topup 注文はまだありません。",
-    "amount_to_credits": "{{money}} → {{credits}} credits",
-    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credits + ボーナス {{bonus}}",
-    "row_meta": "{{date}} · stripe: {{checkout}}",
-    "stripe_empty": "—"
-  },
   "workspace": {
     "title": "請求とプラン",
     "description": "このワークスペースのプラン、上限、ユーザー席、Stripe 請求を管理します。",
@@ -73,6 +6,7 @@
     "plan": {
       "free": "Free",
       "pro": "Pro",
+      "business": "Business",
       "unknown": "不明なプラン"
     },
     "status": {
@@ -94,11 +28,13 @@
     "actions": {
       "retry": "再試行",
       "retry_autopilots": "自動化の使用量を再取得",
-      "upgrade": "Pro にアップグレード",
+      "upgrade_to": "{{plan}} にアップグレード",
+      "switch_to": "{{plan}} に切り替え",
       "manage": "請求を管理",
       "add_seats": "席を追加",
       "cancel": "キャンセル",
-      "continue_to_stripe": "Stripe に進む"
+      "continue_to_stripe": "Stripe に進む",
+      "check_status": "状態を確認"
     },
     "errors": {
       "action_title": "請求操作に失敗しました",
@@ -119,13 +55,13 @@
       "syncing_title": "サブスクリプションを有効化しています",
       "syncing_description": "支払いが完了しました。Stripe によるプラン変更の確認を待っています。",
       "timeout_description": "支払いは受領済みですが、サブスクリプションは同期中です。しばらくしてからページを更新してください。",
-      "active_title": "Pro が有効になりました",
-      "active_description": "このワークスペースで Pro を利用できます。"
+      "active_title": "{{plan}} が有効になりました",
+      "active_description": "このワークスペースで {{plan}} を利用できます。"
     },
     "past_due": {
       "title": "お支払い方法の確認が必要です",
       "description": "請求管理で支払い方法を更新してください。",
-      "grace_description": "Pro を継続するには {{date}} までにお支払い方法を更新してください。"
+      "grace_description": "有料プランを継続するには {{date}} までにお支払い方法を更新してください。"
     },
     "subscription_notice": {
       "canceling_title": "キャンセルが予定されています",
@@ -134,7 +70,7 @@
       "incomplete_title": "サブスクリプション設定が未完了です",
       "incomplete_description": "請求管理を開き、お支払い設定を完了または確認してください。",
       "incomplete_expired_title": "サブスクリプション設定の期限が切れました",
-      "incomplete_expired_description": "以前のお支払い設定は Pro を有効化せず期限切れになりました。必要なときに再度アップグレードしてください。",
+      "incomplete_expired_description": "以前のお支払い設定はサブスクリプション開始前に期限切れになりました。必要なときに再度アップグレードしてください。",
       "paused_title": "サブスクリプションは一時停止中です",
       "paused_description": "請求管理を開き、一時停止と再開方法を確認してください。",
       "unpaid_title": "サブスクリプションは未払いです",
@@ -148,18 +84,37 @@
       "members_description": "エージェントと保留中の招待は席数に含まれません。",
       "member_count_other": "{{count}}名",
       "billing_interval": "請求期間",
-      "period_end": "現在の期間終了日"
+      "period_end": "現在の期間終了日",
+      "change_plan": "プランを変更",
+      "business_adds": "Business では、非公開プロジェクト、メンバー単位のアクセス設定、チームのアプリアカウント、より多い自動化の上限を利用できます。",
+      "plan_change_hold": "プラン変更",
+      "plan_change_confirming": "{{plan}} に切り替えています。Stripe の確認を待っています。確認されるまで席数とプランは変更できません。",
+      "plan_change_unresolved": "{{plan}} への切り替えを確認できませんでした。サポートにお問い合わせください。解決するまで席数とプランは変更できません。",
+      "plan_change_state_confirming": "確認中",
+      "plan_change_state_unresolved": "サポートが必要"
     },
     "upgrade": {
-      "title": "Pro にアップグレード",
-      "description": "請求期間を選び、Stripe Checkout で現在の席数と最終金額を確認します。",
+      "title": "アップグレード",
       "interval_label": "請求期間",
       "monthly": "月払い",
       "yearly": "年払い",
-      "pro_for_team_other": "{{count}}席で Pro を利用",
       "price_loading": "サブスクリプション価格を読み込んでいます",
-      "unit_price": "1席あたり {{price}}",
-      "price_at_checkout": "購入前にサーバーがユーザーメンバーを再集計します。お支払い前に Stripe Checkout で正式な席単価と合計金額を確認できます。"
+      "unit_price_month": "ユーザー席 1 席あたり月 {{price}}",
+      "unit_price_year_monthly": "ユーザー席 1 席あたり月 {{price}}（年払い）",
+      "unit_price_year": "ユーザー席 1 席あたり年 {{price}}",
+      "price_at_checkout": "購入前にサーバーがユーザーメンバーを再集計します。お支払い前に Stripe Checkout で正式な席単価と合計金額を確認できます。",
+      "recommended": "おすすめ",
+      "features": {
+        "pro_members": "メンバー数無制限",
+        "pro_autopilots": "メンバー 1 人あたり毎月 1,000 回の自動化実行",
+        "pro_storage": "メンバー 1 人あたり 10 GB の添付ファイル容量",
+        "pro_dashboard": "ダッシュボードで過去 90 日間を表示",
+        "business_everything": "Pro のすべての機能",
+        "business_access": "非公開プロジェクトとメンバー単位のアクセス設定",
+        "business_apps": "チームのアプリアカウントと承認ルール",
+        "business_autopilots": "メンバー 1 人あたり毎月 3,000 回の自動化実行",
+        "business_reports": "メンバー別の使用量とコストのレポート"
+      }
     },
     "management": {
       "title": "サブスクリプション管理",
@@ -169,7 +124,6 @@
     },
     "limits": {
       "title": "使用量と上限",
-      "issues": "タスク数",
       "autopilots": "自動化の実行",
       "unlimited": "無制限",
       "per_month": "月 {{count}} 回",
@@ -217,6 +171,7 @@
       "preview_failed": "見積もりは一時的に利用できません。しばらくしてから再試行してください。",
       "capacity_out_of_sync": "Stripe の席数が請求記録と一致していません。再度購入する前にサポートへお問い合わせください。",
       "in_progress": "別の席購入を処理中です。完了をお待ちください。長時間完了しない場合はサポートにお問い合わせください。",
+      "plan_change_in_progress": "プラン変更をまだ処理中です。数分後に再度お試しください。",
       "purchase_unreadable": "購入レスポンスを読み取れませんでした。この見積もりを再試行すると、同じ購入リクエストが再利用されます。",
       "purchase_failed": "席を追加できませんでした。同じ見積もりで再試行するか、期限切れの場合は更新してください。",
       "payment_failed": "支払いを完了できませんでした。Stripe で支払い方法を更新してから、新しい見積もりを取得してください。",
@@ -232,18 +187,37 @@
       "delayed_description": "自動確認を停止しました。購入はまだ完了する可能性があります。別の購入を始める前に、後でもう一度確認するかサポートへお問い合わせください。",
       "delayed_description_with_expiry": "自動確認を停止しました。{{date}} を過ぎても保留中の場合は、ページを再読み込みしてから新しい見積もりを取得してください。保留状態が続く場合はサポートへお問い合わせください。",
       "submitted_other": "{{count}}席の購入を送信しました。Stripe の確認後に新しい容量が表示されます。",
-      "error_title": "見積もりを更新できません"
+      "error_title": "見積もりを更新できません",
+      "plan_change_unresolved": "プラン変更を確認できませんでした。席を追加する前にサポートにお問い合わせください。"
+    },
+    "plan_change": {
+      "upgrade_description": "すぐに反映されます。現在の請求期間の残り分の差額を今すぐ請求します。",
+      "downgrade_description": "すぐに反映されます。未使用分の差額は次回の請求から差し引かれます。設定済みの Business の設定は引き続き有効ですが、読み取り専用になります。",
+      "seats": "席数",
+      "charge_today": "本日の請求額",
+      "credit": "次回の請求から差し引く額",
+      "next_invoice": "次回更新時の金額",
+      "tax_notice": "税金、クレジット、最終請求内容は Stripe が決定します。",
+      "preview_loading": "見積もりを取得中...",
+      "preview_failed": "見積もりは一時的に利用できません。しばらくしてから再試行してください。",
+      "rate_limited": "見積もりのリクエストが多すぎます。しばらく待ってから再試行してください。",
+      "in_progress": "席の購入を処理中です。完了してから再度お試しください。",
+      "change_in_progress": "プラン変更をまだ処理中です。数分後に再度お試しください。",
+      "not_active": "このサブスクリプションは現在プランを変更できません。現在のプランを更新しました。",
+      "quote_changed": "サブスクリプションまたは価格が変更されました。更新後の見積もりを確認してから確定してください。",
+      "payment_failed": "支払いを完了できませんでした。請求管理で支払い方法を更新してから、もう一度お試しください。",
+      "failed": "プランを変更できませんでした。同じ見積もりで再試行してください。",
+      "unreadable": "レスポンスを読み取れませんでした。再試行すると、同じリクエストが再利用されます。",
+      "error_title": "プランを変更できませんでした",
+      "success_title": "プランを変更しました",
+      "success_description": "このワークスペースは {{plan}} になりました。",
+      "unresolved": "前回のプラン変更を確認できませんでした。プランを変更する前にサポートにお問い合わせください。",
+      "check_failed": "プラン変更を確認できませんでした。再度お試しください。"
     },
     "confirm": {
       "title": "Stripe Checkout に進みますか？",
-      "description": "請求期間: {{interval}}。現在のユーザーメンバー: {{count}}。Stripe が席数を再集計し、お支払い前に最終金額を表示します。"
+      "description": "プラン: {{plan}}。請求期間: {{interval}}。現在のユーザーメンバー: {{count}}。Stripe が席数を再集計し、お支払い前に最終金額を表示します。"
     }
-  },
-  "shared": {
-    "request_failed": "リクエストに失敗しました",
-    "refresh": "更新",
-    "paging": "{{page}} / {{totalPages}} ページ · 合計 {{total}}件",
-    "date_dash": "—"
   },
   "return_page": {
     "redirecting": "ワークスペースの請求ページに戻ります…",
@@ -253,5 +227,70 @@
     "workspace_missing_description": "Stripe から戻りましたが、このワークスペースは利用できません。削除されたか、アクセス権が変更された可能性があります。対象のワークスペースの請求ページで現在の状態を確認してください。",
     "retry": "再試行",
     "go_to_app": "Multica を開く"
+  },
+  "paid_feature": {
+    "read_only": "読み取り専用です。編集するにはアップグレードしてください。",
+    "unavailable": "このワークスペースのプランには含まれていません。",
+    "view_plans": "プランを見る",
+    "locked_error": "このワークスペースのプランには含まれていません。既存の設定はそのまま有効です。追加するにはアップグレードしてください。"
+  },
+  "trial": {
+    "status": {
+      "active": "Business トライアル",
+      "days_left_other": "残り {{count}} 日",
+      "active_label_other": "Business トライアル、残り {{count}} 日。請求を開きます。",
+      "free": "Free",
+      "upgrade": "アップグレード",
+      "ended_label": "Business トライアルが終了し、このワークスペースは Free になりました。請求を開いてアップグレードします。",
+      "ending": "まもなく終了",
+      "ending_label": "Business トライアルはまもなく終了します。請求を開きます。"
+    },
+    "reminder": {
+      "halfway_title_other": "Business トライアルは折り返しを過ぎました。残り {{count}} 日です。",
+      "days_left_title_other": "Business トライアルは残り {{count}} 日です。",
+      "last_day_title": "Business トライアルは 1 日以内に終了します。",
+      "body": "{{date}} にこのワークスペースは Free に切り替わります。Business を続けるにはプランを選択してください。",
+      "later": "後で",
+      "choose_plan": "プランを選択"
+    },
+    "welcome": {
+      "title_other": "ようこそ！このワークスペースは Business を {{count}} 日間無料でお試しいただけます",
+      "body": "プライベートプロジェクトなどの Business 機能を利用できます。カード登録は不要で、終了後は自動的に Free に切り替わります。",
+      "action": "含まれる機能を見る",
+      "close": "閉じる"
+    },
+    "ended": {
+      "title": "Business トライアルが終了しました",
+      "description": "{{workspace}} は Free に切り替わりました。データは削除されていません。",
+      "description_without_name": "このワークスペースは Free に切り替わりました。データは削除されていません。",
+      "kept": "既存のメンバー、プロジェクト、設定はそのまま残ります。",
+      "private_projects": "プライベートプロジェクトは非公開のままです。アクセスリストはアップグレードするまで読み取り専用です。",
+      "autopilot": "自動化は月 {{limit}} 回まで。今月は {{used}} 回使用しました。",
+      "autopilot_paused": "自動化は月 {{limit}} 回までで、今月は {{used}} 回使用したため、{{date}} まで一時停止しています。",
+      "keep_free": "Free のまま使う",
+      "upgrade": "Business にアップグレード",
+      "member_title": "このワークスペースは Free になりました",
+      "member_description": "既存の設定はそのまま使えます。さらに機能が必要な場合はワークスペースの管理者に相談してください。"
+    },
+    "card": {
+      "title": "Business トライアル",
+      "badge_other": "トライアル中 · 残り {{count}} 日",
+      "description": "{{date}} までトライアル中です。支払い方法が登録されていないため、終了後は Free に切り替わり、請求は発生しません。",
+      "started": "{{date}} 開始",
+      "progress": "{{total}} 日中 {{day}} 日目",
+      "ends": "{{date}} 終了",
+      "ended_title": "Business トライアルが終了しました",
+      "ended_description": "トライアルは {{date}} に終了しました。下でプランを選択すると Business の機能が戻ります。",
+      "choose_plan": "プランを選択",
+      "ended_description_member": "トライアルは {{date}} に終了しました。Business の機能を戻すには、ワークスペースの管理者にアップグレードを依頼してください。"
+    },
+    "features": {
+      "title": "トライアル中の Business 機能",
+      "description": "トライアル終了後も削除や無効化はされません。新規作成や追加ができなくなるだけです。",
+      "private_projects": {
+        "name": "プライベートプロジェクト",
+        "after": "終了後も非公開のまま。アクセスリストは読み取り専用になります。"
+      }
+    }
   }
 }

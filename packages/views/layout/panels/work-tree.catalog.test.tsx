@@ -16,6 +16,8 @@ vi.mock("@dnd-kit/core", () => ({
   DndContext: ({ children }: { children: ReactNode }) => <>{children}</>,
   PointerSensor: vi.fn(),
   closestCenter: vi.fn(),
+  pointerWithin: vi.fn(),
+  useDroppable: () => ({ setNodeRef: vi.fn(), isOver: false }),
   useSensor: vi.fn(),
   useSensors: vi.fn(),
 }));
@@ -71,7 +73,7 @@ function renderSection() {
           plainRowsLit
           activeIssueId={null}
           litSource={null}
-          locatedProjectId={null}
+          locatedSource={null}
         />
       </NavigationProvider>
     </QueryClientProvider>,

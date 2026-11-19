@@ -150,16 +150,16 @@ describe("useRealtimeSync — ws instance change", () => {
     rerender({ ws: ws2 });
 
     // Should have called invalidateQueries for all workspace-scoped keys
-    // (19 workspace-scoped [incl. property definitions, workflows, saved views
-    // and view preferences] + 6 per-issue prefixes + the workspace
-    // working-agents projection + 5 per-chat prefixes + 1 workspaceKeys.list()
+    // (20 workspace-scoped [incl. property definitions, workflows, saved views
+    // view preferences, and docs] + 6 per-issue prefixes + the workspace
+    // working-agents projection + 6 per-chat prefixes + 1 workspaceKeys.list()
     // + 1 cross-workspace inbox unread summary + 1 issue unread marks + 1
-    // subscribed issue ids + 1 account invitation list = 37 calls).
+    // subscribed issue ids + 1 account invitation list = 39 calls).
     //
     // Awaited rather than counted synchronously: the inbox unread summary
     // refresh cancels any in-flight request before invalidating (see
     // onInboxSummaryInvalidate), so that one lands after the synchronous ones.
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(37));
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(39));
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -377,6 +377,17 @@ describe("useRealtimeSync — ws instance change", () => {
     emit("issue:updated", payload);
     expect(qc.getQueryState(issueKeys.subtreeTasks("parent"))?.isInvalidated).toBe(false);
     expect(qc.getQueryState(issueKeys.tasks("parent"))?.isInvalidated).toBe(false);
+  });
+
+  it("refetches the issue's subscribers on a reassignment, which can change their delivery tier", () => {
+    const emit = subtreeEvents();
+    qc.setQueryData(issueKeys.subscribers("child"), []);
+    qc.setQueryData(issueKeys.subscribers("other"), []);
+    emit("issue:updated", { priority_changed: true, issue: { id: "child" } });
+    expect(qc.getQueryState(issueKeys.subscribers("child"))?.isInvalidated).toBe(false);
+    emit("issue:updated", { assignee_changed: true, issue: { id: "child" } });
+    expect(qc.getQueryState(issueKeys.subscribers("child"))?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(issueKeys.subscribers("other"))?.isInvalidated).toBe(false);
   });
 
   it("patches matching owning-issue titles across subtree caches without refetching", () => {

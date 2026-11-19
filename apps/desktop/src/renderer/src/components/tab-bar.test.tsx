@@ -233,6 +233,19 @@ describe("TabBar hover action buttons", () => {
     expect(queryAllByLabelText("Close tab")).toHaveLength(1);
   });
 
+  it("keeps Pin and Close shown while the tab is pressed, not only on hover", () => {
+    // In full screen on a secondary display, Electron fires an offset
+    // pointermove right after pointerdown (electron/electron#55100), which
+    // drops :hover before mouseup. :active survives it.
+    const { getAllByLabelText } = render(<TabBar />);
+    for (const button of [
+      ...getAllByLabelText("Pin tab"),
+      ...getAllByLabelText("Close tab"),
+    ]) {
+      expect(button).toHaveClass("hidden", "group-hover:flex", "group-active:flex");
+    }
+  });
+
   it("keeps the full title visible on a pinned tab (no icon-only collapse)", () => {
     state.byWorkspace.acme.tabs = [
       { id: "tA", url: "/acme/issues", title: "Issues", pinned: true },

@@ -26,13 +26,13 @@ import {
 } from "@multica/ui/components/ui/tooltip"
 import { PanelLeftIcon } from "@multica/ui/icons"
 
-const SIDEBAR_WIDTH_DEFAULT = 240
+const SIDEBAR_WIDTH_DEFAULT = 280
 const SIDEBAR_WIDTH_MIN = 200
 const SIDEBAR_WIDTH_MAX = 320
 const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar_width"
 // Until the person drags the edge, a theme picks the width (docs/theming.md).
 // Keep the bounds and default in step with the three constants above.
-const SIDEBAR_WIDTH_THEMED = "clamp(200px, var(--sidebar-panel-width, 240px), 320px)"
+const SIDEBAR_WIDTH_THEMED = "clamp(200px, var(--sidebar-panel-width, 280px), 320px)"
 // List columns (Inbox, Chat) hold two-line rows with an avatar, so they get
 // their own width instead of the nav's: one shared value is either too narrow
 // for the rows or too wide for the nav's short labels.
@@ -451,7 +451,6 @@ function SidebarTrigger({
   return (
     <IconButton
       data-sidebar="trigger"
-      data-slot="sidebar-trigger"
       label={t(($) => $.toggle_sidebar)}
       shortcut={shortcut}
       tooltipSide="bottom"

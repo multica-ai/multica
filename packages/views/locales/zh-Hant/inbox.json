@@ -40,7 +40,8 @@
     "archive": "歸檔",
     "unarchive": "取消歸檔",
     "open_in_new_tab": "在新標籤頁開啟",
-    "delete": "刪除"
+    "delete": "刪除",
+    "unsubscribe_archive": "取消訂閱並歸檔"
   },
   "list": {
     "loading_selection": "正在載入通知…",
@@ -68,6 +69,8 @@
     "retry_with_context": "保留上下文重試",
     "edit_advanced": "在完整表單中編輯",
     "autopilot_quota_exceeded_body": "當前週期的 {{limit}} 次自動化執行額度已用完。在 {{resetAt}} 重置前，後續自動化執行將不會啟動。",
+    "project_owner_joined_body": "{{name}} 是工作區所有者，已把自己加入這個私有專案，現在可以看到其中的任務、評論和附件。",
+    "open_project": "開啟專案",
     "autopilot_quota_upgrade": "檢視升級方案",
     "archive": "歸檔",
     "unarchive": "取消歸檔"
@@ -95,6 +98,7 @@
     "quick_create_unconfirmed": "透過 AI 代理建立結果未確認",
     "autopilot_paused": "自動化已暫停",
     "children_done": "子任務已全部結束",
+    "project_owner_joined": "所有者加入了專案",
     "autopilot_quota_exceeded": "自動化執行次數已用完",
     "app_action_requested": "等待你確認",
     "app_action_reminder": "確認即將過期",
@@ -119,8 +123,21 @@
   "toasts": {
     "source_context_retry_started": "已使用原始上下文開始重試",
     "archived": "已歸檔通知",
+    "archived_many_other": "已歸檔 {{count}} 條通知",
     "unarchived": "已恢復通知",
-    "deleted": "通知已刪除"
+    "deleted": "通知已刪除",
+    "unsubscribed_archived": "已取消訂閱並歸檔",
+    "unsubscribed_archived_subtree": "已取消訂閱此任務及其子任務",
+    "unsubscribed_hint": "之後的一般動態不會再進收件匣，@你時仍會通知",
+    "undo": "復原"
+  },
+  "kept": {
+    "archived": "已歸檔",
+    "leaves": "離開後移出收件箱",
+    "filtered": "不再符合篩選",
+    "notification_archived": "通知已歸檔",
+    "next": "下一條",
+    "next_tooltip": "開啟下一條：{{title}}"
   },
   "errors": {
     "archived_lookup_failed": "無法載入連結指向的通知",
@@ -136,8 +153,11 @@
     "archive_completed_failed": "歸檔已完成失敗",
     "unarchive_failed": "取消歸檔失敗",
     "archived_load_failed": "無法載入已歸檔通知",
+    "load_failed": "無法載入通知",
     "filters_load_failed": "無法載入篩選項",
-    "delete_failed": "無法刪除通知，請重試。"
+    "delete_failed": "無法刪除通知，請重試。",
+    "unsubscribe_archive_failed": "取消訂閱失敗",
+    "undo_unsubscribe_failed": "復原失敗"
   },
   "delete_dialog": {
     "title": "刪除通知？",
@@ -145,5 +165,43 @@
     "issue_description": "目前檢視中此任務的通知將被永久刪除，任務和執行記錄不受影響。",
     "cancel": "取消",
     "active_issue_description": "此任務在收件箱中的通知將被永久刪除。先前歸檔的通知會保留，並重新顯示在已歸檔檢視中。任務和執行記錄不受影響。"
+  },
+  "unsubscribe": {
+    "title": "取消訂閱並歸檔：不再收到它的訂閱通知，@你時仍會通知",
+    "this_issue": "僅此任務",
+    "subtree_other": "此任務及其 {{count}} 個子任務",
+    "subtree_unknown": "此任務及其子任務"
+  },
+  "snooze": {
+    "action": "延後",
+    "menu_title": "延後到…",
+    "unsnooze": "現在回來",
+    "change_time": "修改時間",
+    "hours_1": "1 小時",
+    "hours_3": "3 小時",
+    "days_1": "1 天",
+    "days_3": "3 天",
+    "weeks_1": "1 週",
+    "pick_time": "選擇日期和時間…",
+    "picker_title": "選擇日期和時間",
+    "picker_back": "返回",
+    "picker_time": "時間",
+    "picker_hour": "時",
+    "picker_minute": "分",
+    "picker_submit": "延後到 {{time}}",
+    "hint": "被點名 @、被指派或執行失敗時會提前回來。",
+    "custom_invalid": "請選擇一年內的未來時間。",
+    "back_at": "{{time}} 回來",
+    "returned": "延後到期",
+    "updates_other": "期間 {{count}} 則動態",
+    "toast_snoozed": "已延後到 {{time}}",
+    "toast_unsnoozed": "已回到收件箱",
+    "undo": "復原",
+    "failed": "延後失敗",
+    "unsnooze_failed": "恢復失敗",
+    "view_empty": "沒有延後的項目",
+    "view_empty_description": "在收件箱裡延後一個任務，它會在這裡等到時間再回來。",
+    "col_updates": "延後期間",
+    "col_back": "回來時間"
   }
 }

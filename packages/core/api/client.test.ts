@@ -1838,6 +1838,24 @@ describe("ApiClient", () => {
       expect(att.id).toBe("att-1");
       expect([att.width, att.height]).toEqual(expected);
     });
+
+    it.each([
+      [{ thumbnail_url: "/api/attachments/att-1/thumbnail" }, "/api/attachments/att-1/thumbnail"],
+      [{ thumbnail_url: 42 }, undefined],
+      [{ thumbnail_url: "" }, undefined],
+      [{}, undefined],
+    ])("keeps the attachment and drops an unusable thumbnail %j", async (metadata, expected) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          id: "att-1", filename: "shot.png", url: "/uploads/shot.png",
+          download_url: "/uploads/shot.png", ...metadata,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )));
+      const att = await new ApiClient("https://api.example.test").getAttachment("att-1");
+      expect(att.id).toBe("att-1");
+      expect(att.thumbnail_url).toBe(expected);
+    });
   });
 
   describe("getAttachmentTextContent", () => {
@@ -2286,6 +2304,7 @@ describe("ApiClient", () => {
       const [, init] = fetchMock.mock.calls[0]!;
       expect(JSON.parse(init?.body as string)).toEqual({
         content: "hello",
+        steer: true,
         attachment_ids: ["att-1", "att-2"],
       });
     });
@@ -2305,8 +2324,17 @@ describe("ApiClient", () => {
       await client.sendChatMessage("session-1", "hello");
       await client.sendChatMessage("session-1", "again", []);
 
-      expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toEqual({ content: "hello" });
-      expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again" });
+      expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toEqual({ content: "hello", steer: true });
+      expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again", steer: true });
+    });
+
+    it("sendChatMessage explicitly opts out of steering for Queue message", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+        message_id: "m1", task_id: "t1", created_at: "2026-08-01T00:00:00Z",
+      }), { status: 201 }));
+      vi.stubGlobal("fetch", fetchMock);
+      await new ApiClient("https://api.example.test").sendChatMessage("session-1", "next turn", undefined, { queue: true });
+      expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toEqual({ content: "next turn", steer: false });
     });
 
     it("sendChatMessage accepts the server's null attachment_ids for text-only sends", async () => {

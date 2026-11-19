@@ -200,8 +200,7 @@ function RailButton({ icon: Icon, active }: { icon: IconComponent; active?: bool
 /**
  * The app rail on the grey shell: the workspace, New issue and search, the
  * five spaces with their labels, then help, settings and the account. Desktop
- * moves New issue and search to its title bar and leaves room for the window
- * controls at the top.
+ * leaves room for the window controls at the top.
  */
 export function AppRail({ active, inbox = 3, desktop }: { active: Space; inbox?: number; desktop?: boolean }) {
   const labels = useDemoCopy().app.spaces;
@@ -210,14 +209,10 @@ export function AppRail({ active, inbox = 3, desktop }: { active: Space; inbox?:
       <span className="flex size-[34px] shrink-0 items-center justify-center rounded-lg border border-surface-border bg-surface-raised text-body font-semibold shadow-[var(--surface-shadow)]">
         A
       </span>
-      {desktop ? (
-        <span className="h-2 shrink-0" />
-      ) : (
-        <span className="my-2 flex flex-col items-center gap-1">
-          <RailButton icon={SquarePen} />
-          <RailButton icon={Search} />
-        </span>
-      )}
+      <span className="my-2 flex flex-col items-center gap-1">
+        <RailButton icon={SquarePen} />
+        <RailButton icon={Search} />
+      </span>
       <span className="flex flex-col items-center gap-0.5">
         {RAIL_SPACES.map((space) => {
           const current = space.key === active;

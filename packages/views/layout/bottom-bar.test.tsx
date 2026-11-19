@@ -31,6 +31,7 @@ vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsMobile: () => h.isMobile }
 vi.mock("./panels/team-status", () => ({ useTeamAgentStatus: () => h.team }));
 vi.mock("./app-shell-context", () => ({ useAppShell: () => null }));
 vi.mock("../chat/components/chat-bar", () => ({ ChatBar: () => <div data-testid="chat-bar" /> }));
+vi.mock("../billing/trial-status", () => ({ TrialStatus: () => null }));
 
 function renderBar(pathname = "/acme/issues") {
   const adapter: NavigationAdapter = {

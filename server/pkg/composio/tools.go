@@ -16,7 +16,8 @@ import (
 // The SDK leaves provider-specific identity validation to the upstream.
 type ExecuteToolRequest struct {
 	// Arguments is the structured input to the tool. Shape varies per tool.
-	Arguments map[string]any `json:"arguments,omitempty"`
+	// ExecuteTool sends nil as an empty object.
+	Arguments map[string]any `json:"arguments"`
 
 	// ConnectedAccountID pins execution to a specific connected account.
 	ConnectedAccountID string `json:"connected_account_id,omitempty"`
@@ -134,6 +135,9 @@ func (c *Client) ExecuteTool(ctx context.Context, toolSlug string, req ExecuteTo
 	}
 	if req.ConnectedAccountID == "" && req.UserID == "" {
 		return nil, errors.New("composio: ExecuteTool: either ConnectedAccountID or UserID must be set")
+	}
+	if req.Arguments == nil {
+		req.Arguments = map[string]any{}
 	}
 	var out ExecuteToolResponse
 	if err := c.do(c.newRequest(ctx).SetBody(req),

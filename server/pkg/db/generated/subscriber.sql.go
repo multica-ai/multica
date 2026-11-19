@@ -523,6 +523,68 @@ func (q *Queries) SubscribeToIssueExplicitly(ctx context.Context, arg SubscribeT
 	return err
 }
 
+const undoIssueUnsubscribe = `-- name: UndoIssueUnsubscribe :one
+WITH target AS (
+    SELECT s.issue_id, s.user_type, s.user_id, s.created_at = s.unsubscribed_at AS synthetic
+    FROM issue_subscriber s
+    WHERE s.issue_id = $1
+      AND s.user_type = $2
+      AND s.user_id = $3
+      AND s.unsubscribed_at IS NOT NULL
+      AND s.opt_out_scope = 'issue'
+),
+dropped AS (
+    DELETE FROM issue_subscriber s
+    USING target t
+    WHERE t.synthetic
+      AND s.issue_id = t.issue_id AND s.user_type = t.user_type AND s.user_id = t.user_id
+    RETURNING s.issue_id
+),
+revived AS (
+    UPDATE issue_subscriber s
+    SET unsubscribed_at = NULL, opt_out_scope = NULL
+    FROM target t
+    WHERE NOT t.synthetic
+      AND s.issue_id = t.issue_id AND s.user_type = t.user_type AND s.user_id = t.user_id
+    RETURNING s.reason
+)
+SELECT
+    COALESCE((SELECT reason FROM revived), '')::text AS revived_reason,
+    EXISTS (SELECT 1 FROM dropped) AS dropped_opt_out
+`
+
+type UndoIssueUnsubscribeParams struct {
+	IssueID  pgtype.UUID `json:"issue_id"`
+	UserType string      `json:"user_type"`
+	UserID   pgtype.UUID `json:"user_id"`
+}
+
+type UndoIssueUnsubscribeRow struct {
+	RevivedReason string `json:"revived_reason"`
+	DroppedOptOut bool   `json:"dropped_opt_out"`
+}
+
+// Reverse an issue-scope opt-out, putting the subscription back exactly as it
+// was instead of subscribing again (which would rewrite the reason to manual
+// and lift the member out of the delegated and bystander tiers):
+//
+//   - a retired row keeps its reason (creator, commenter, delegated, ...), so
+//     it is reactivated as it stands;
+//   - a tombstone the opt-out itself inserted for a project watcher has no
+//     subscription behind it, so it is deleted and the project covers the
+//     issue again. RemoveIssueSubscriber writes such a row in one statement,
+//     which is why its created_at equals its unsubscribed_at; a retired row
+//     was created before it was retired.
+//
+// Subtree opt-outs are not undone here: they cover descendants and future
+// children, which one issue's row cannot restore.
+func (q *Queries) UndoIssueUnsubscribe(ctx context.Context, arg UndoIssueUnsubscribeParams) (UndoIssueUnsubscribeRow, error) {
+	row := q.db.QueryRow(ctx, undoIssueUnsubscribe, arg.IssueID, arg.UserType, arg.UserID)
+	var i UndoIssueUnsubscribeRow
+	err := row.Scan(&i.RevivedReason, &i.DroppedOptOut)
+	return i, err
+}
+
 const unsubscribeFromIssueSubtree = `-- name: UnsubscribeFromIssueSubtree :many
 WITH RECURSIVE subtree(node_id) AS (
     SELECT root.id FROM issue root WHERE root.id = $1

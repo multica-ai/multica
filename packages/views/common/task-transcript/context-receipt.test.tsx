@@ -13,6 +13,7 @@ import {
   ContextReceiptView,
   loadTone,
   receiptWarnings,
+  receiptDeliveryBytes,
   topLevelSources,
 } from "./context-receipt";
 
@@ -89,13 +90,39 @@ describe("receipt helpers", () => {
   });
 });
 
+describe("delivery byte categories", () => {
+  it("separates direct input and files without counting embedded or unavailable channels", () => {
+    expect(receiptDeliveryBytes({ ...receipt, sources: [
+      { kind: "runtime_brief", bytes: 100, delivery: "inline", load: "delivered" },
+      { kind: "agent_instructions", bytes: 70, delivery: "embedded", parent: "runtime_brief", load: "delivered" },
+      { kind: "task_prompt", bytes: 10, delivery: "prompt", load: "delivered" },
+      { kind: "skill", bytes: 1500, delivery: "file", load: "verified" },
+      { kind: "skill", bytes: 2500, delivery: "file", load: "unverified" },
+      { kind: "runtime_brief", bytes: 200, delivery: "file", path: "AGENTS.md", load: "unverified" },
+      { kind: "existing_instructions", bytes: 300, delivery: "file", path: "AGENTS.md", load: "verified" },
+      { kind: "skill", bytes: 20, delivery: "inline", load: "delivered" },
+      { kind: "future", bytes: 40, delivery: "file", load: "unknown" },
+      { kind: "skill", bytes: 9999, delivery: "none", load: "not_delivered" },
+      { kind: "future", bytes: 9999, delivery: "new_channel", load: "unknown" },
+    ] })).toEqual({ direct: 130, files: 4540, instructionFiles: 500, skillPackages: 4000, otherFiles: 40 });
+    expect(receiptDeliveryBytes({ ...receipt, sources: [] })).toEqual({
+      direct: 0, files: 0, instructionFiles: 0, skillPackages: 0, otherFiles: 0,
+    });
+  });
+});
+
 describe("ContextReceiptView", () => {
   it("lists every source with its size, delivery and load state", () => {
     renderWithI18n(<ContextReceiptView receipt={receipt} />);
     const view = screen.getByTestId("context-receipt");
 
     // Embedded rows are not counted again in the total.
-    expect(within(view).getByText("3 sources · 41 KB")).toBeTruthy();
+    expect(within(view).getByText("3 sources")).toBeTruthy();
+    expect(within(view).getByText("Direct input: 3 KB")).toBeTruthy();
+    expect(within(view).getByText("Files on disk: 38 KB")).toBeTruthy();
+    expect(within(view).getByText("Instruction files: 19 KB")).toBeTruthy();
+    expect(within(view).getByText("Skill packages: 19 KB")).toBeTruthy();
+    expect(within(view).queryByText(/Other files:/)).toBeNull();
     expect(within(view).getByText("Kiro 2.34.0")).toBeTruthy();
     expect(within(view).getByText(/Resumed a prior session/)).toBeTruthy();
     expect(within(view).getByText("None")).toBeTruthy();
@@ -115,6 +142,66 @@ describe("ContextReceiptView", () => {
     // The warning box names exactly the sources we cannot vouch for.
     expect(within(view).getByText("Runtime brief: Verified on 2.13.0 only")).toBeTruthy();
     expect(within(view).getByText("Skill: pr-review: Not verified")).toBeTruthy();
+  });
+
+  it("names a complete skill package rather than implying its entry file has the package size", () => {
+    const multifile: ContextReceipt = { ...receipt, sources: [
+      { kind: "runtime_brief", bytes: 28672, delivery: "file", path: "AGENTS.md", load: "unverified" },
+      { kind: "agent_instructions", bytes: 8192, delivery: "embedded", parent: "runtime_brief", load: "unverified" },
+      { kind: "task_prompt", bytes: 5120, delivery: "prompt", load: "delivered" },
+      { kind: "skill", name: "short", bytes: 23552, delivery: "file", path: ".agents/skills/short/SKILL.md", load: "unverified" },
+      { kind: "skill", name: "multica-platform", bytes: 155524, sha256: "cb8cc2a583f2", delivery: "file", path: ".agents/skills/multica-platform/SKILL.md", load: "unverified" },
+    ] };
+    renderWithI18n(<ContextReceiptView receipt={multifile} />);
+    expect(screen.getByText("4 sources")).toBeTruthy();
+    expect(screen.getByText("Direct input: 5 KB")).toBeTruthy();
+    expect(screen.getByText("Files on disk: 203 KB")).toBeTruthy();
+    expect(screen.getByText("Instruction files: 28 KB")).toBeTruthy();
+    expect(screen.getByText("Skill packages: 175 KB")).toBeTruthy();
+    const row = screen.getByText("Skill: multica-platform").closest("tr")!;
+    expect(within(row).getByText("152 KB")).toBeTruthy();
+    expect(within(row).getByText("Package")).toBeTruthy();
+    expect(within(row).getByText(".agents/skills/multica-platform/")).toBeTruthy();
+    expect(within(row).queryByText(/SKILL\.md/)).toBeNull();
+    expect(within(row).getByText("cb8cc2a583f2")).toBeTruthy();
+    expect(within(row).getByText("Not verified")).toBeTruthy();
+  });
+
+  it.each([
+    [String.raw`C:\DSH\skills\review\SKILL.md`, String.raw`C:\DSH\skills\review` + "\\"],
+    ["$CODEX_HOME/skills/review/SKILL.md", "$CODEX_HOME/skills/review/"],
+    ["<QwenPaw workspace>/skills/review/SKILL.md", "<QwenPaw workspace>/skills/review/"],
+    ["SKILL.md", "."],
+    ["native://custom-skill", "native://custom-skill"],
+    ["native://SKILL.md", "native://SKILL.md"],
+    ["native://record?id=/SKILL.md", "native://record?id=/SKILL.md"],
+  ])("preserves the path representation for %s", (path, expected) => {
+    renderWithI18n(<ContextReceiptView receipt={{ ...receipt, sources: [
+      { kind: "skill", name: "review", bytes: 5120, delivery: "file", path, load: "unverified" },
+    ] }} />);
+    const row = screen.getByText("Skill: review").closest("tr")!;
+    const delivery = within(row).getByText(expected);
+    expect(delivery.textContent).toBe(expected);
+    expect(delivery).toHaveAttribute("title", expected);
+    if (/[/\\]/.test(expected)) {
+      const breaks = delivery.querySelectorAll("wbr");
+      expect(breaks.length).toBeGreaterThan(0);
+      for (const br of breaks) {
+        const prefix = document.createRange();
+        prefix.selectNodeContents(delivery);
+        prefix.setEndBefore(br);
+        expect(prefix.toString()).toMatch(/[/\\]$/);
+      }
+    }
+    expect(within(row).getByText("Package")).toBeTruthy();
+  });
+
+  it("keeps unfamiliar file kinds in the disk total and labels their own subtotal", () => {
+    renderWithI18n(<ContextReceiptView receipt={{ ...receipt, sources: [
+      { kind: "future", bytes: 2048, delivery: "file", load: "unknown" },
+    ] }} />);
+    expect(screen.getByText("Files on disk: 2 KB")).toBeTruthy();
+    expect(screen.getByText("Other files: 2 KB")).toBeTruthy();
   });
 
   it("shows no warning box when every source is confirmed", () => {
@@ -138,6 +225,11 @@ describe("ContextReceiptView", () => {
     renderWithI18n(<ContextReceiptView receipt={receipt} />, { locale: "zh-Hans" });
     expect(screen.getByText("上下文回执")).toBeTruthy();
     expect(screen.getByText("技能：pr-review")).toBeTruthy();
+    expect(screen.getByText("直接输入：3 KB")).toBeTruthy();
+    expect(screen.getByText("磁盘文件：38 KB")).toBeTruthy();
+    expect(screen.getByText("运行说明文件：19 KB")).toBeTruthy();
+    expect(screen.getByText("skill 包：19 KB")).toBeTruthy();
+    expect(screen.getByText("包总量")).toBeTruthy();
     expect(screen.getAllByText("仅在 2.13.0 验证过").length).toBeGreaterThan(0);
   });
 });

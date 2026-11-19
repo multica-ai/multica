@@ -435,7 +435,7 @@ function SkillDetailDialog({
 
   return (
     <Dialog open={selected !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[80%] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <div className="flex items-center gap-2 pr-8">
             <DialogTitle>{title}</DialogTitle>

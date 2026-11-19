@@ -1,71 +1,4 @@
 {
-  "title": "账单（测试页）",
-  "subtitle": "直接透传 multica-cloud 的 /api/v1/billing/*。不是正式 UI——只是把所有端点塞到一个页面方便验证 Stripe 流程。",
-  "endpoints": {
-    "balance": "GET /api/cloud-billing/balance",
-    "transactions": "GET /api/cloud-billing/transactions",
-    "batches": "GET /api/cloud-billing/batches",
-    "topups": "GET /api/cloud-billing/topups",
-    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
-  },
-  "balance": {
-    "title": "余额",
-    "credits_suffix": "credits",
-    "meta": "raw micro: {{micro}} · owner: {{owner}}… · updated {{updated}}"
-  },
-  "buy": {
-    "title": "购买 credits / 管理账单",
-    "no_tiers": "未配置任何价格档位。Cloud 那边应该没有配 Stripe key——checkout 会返回 503。",
-    "tier_money_to_credits": "{{money}} → {{credits}} credits",
-    "tier_bonus": " + 赠送 {{credits}}",
-    "tier_bonus_with_expiry": " + 赠送 {{credits}}（{{expiry}}）",
-    "tier_id": "id: {{id}}",
-    "open_portal": "打开 Stripe Billing Portal",
-    "portal_hint": "对于尚未付款的用户预期返回 400（Stripe 还没建 customer 记录）。",
-    "toast_no_url": "Cloud 没有返回 checkout URL",
-    "toast_checkout_failed": "Checkout 失败",
-    "toast_no_portal_url": "没拿到 portal URL",
-    "toast_portal_failed": "打开 Portal 失败"
-  },
-  "checkout": {
-    "session_label": "Checkout session {{prefix}}…",
-    "loading": "正在加载订单状态…",
-    "fetch_failed": "拉取订单状态失败：{{error}}",
-    "fetch_failed_unknown": "未知错误",
-    "final_status": "最终状态：{{status}}",
-    "polling_status": "正在轮询订单状态…当前：{{status}}",
-    "status_unknown": "unknown",
-    "label_order": "订单",
-    "label_tier": "档位",
-    "label_charged": "已收款",
-    "charged_value": "{{money}} · {{credits}} credits",
-    "charged_with_bonus": "{{money}} · {{credits}} credits + {{bonus}} 赠送",
-    "clear_url": "从 URL 清除"
-  },
-  "transactions": {
-    "title": "流水",
-    "empty": "暂无流水。",
-    "credits_value": "{{value}} credits",
-    "row_meta": "{{date}} · balance after: {{balance}} credits · ref: {{ref}}",
-    "ref_empty": "—"
-  },
-  "batches": {
-    "title": "Credit 批次",
-    "empty": "暂无批次。",
-    "remaining_over_total": "{{remaining}} / {{total}} credits",
-    "id_suffix": "{{id}}…",
-    "consumed": "已消耗：{{value}} credits",
-    "expires_suffix": " · 过期时间 {{value}}",
-    "never_expires_suffix": " · 永不过期"
-  },
-  "topups": {
-    "title": "充值订单",
-    "empty": "暂无充值订单。",
-    "amount_to_credits": "{{money}} → {{credits}} credits",
-    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credits + {{bonus}} 赠送",
-    "row_meta": "{{date}} · stripe: {{checkout}}",
-    "stripe_empty": "—"
-  },
   "workspace": {
     "title": "账单与套餐",
     "description": "管理这个工作区的套餐、限额、成员席位和 Stripe 账单。",
@@ -73,6 +6,7 @@
     "plan": {
       "free": "Free",
       "pro": "Pro",
+      "business": "Business",
       "unknown": "未知套餐"
     },
     "status": {
@@ -94,11 +28,13 @@
     "actions": {
       "retry": "重试",
       "retry_autopilots": "重试加载自动化用量",
-      "upgrade": "升级到 Pro",
+      "upgrade_to": "升级到 {{plan}}",
+      "switch_to": "切换到 {{plan}}",
       "manage": "管理账单",
       "add_seats": "添加席位",
       "cancel": "取消",
-      "continue_to_stripe": "前往 Stripe"
+      "continue_to_stripe": "前往 Stripe",
+      "check_status": "检查状态"
     },
     "errors": {
       "action_title": "账单操作失败",
@@ -119,13 +55,13 @@
       "syncing_title": "正在启用订阅",
       "syncing_description": "付款已完成，正在等待 Stripe 确认套餐变化。",
       "timeout_description": "付款已收到，但订阅仍在同步。请稍后刷新页面。",
-      "active_title": "Pro 已启用",
-      "active_description": "这个工作区现在可以使用 Pro。"
+      "active_title": "{{plan}} 已启用",
+      "active_description": "这个工作区现在可以使用 {{plan}}。"
     },
     "past_due": {
       "title": "付款信息需要处理",
       "description": "请前往账单管理更新付款方式。",
-      "grace_description": "请在 {{date}} 前更新付款方式，以继续使用 Pro。"
+      "grace_description": "请在 {{date}} 前更新付款方式，以继续使用付费套餐。"
     },
     "subscription_notice": {
       "canceling_title": "订阅已安排取消",
@@ -134,7 +70,7 @@
       "incomplete_title": "订阅开通尚未完成",
       "incomplete_description": "打开账单管理，完成或检查付款设置。",
       "incomplete_expired_title": "订阅开通已过期",
-      "incomplete_expired_description": "上一次付款设置未能启用 Pro 且已过期，需要时请重新发起升级。",
+      "incomplete_expired_description": "上一次付款设置在订阅生效前已过期，需要时请重新发起升级。",
       "paused_title": "订阅已暂停",
       "paused_description": "打开账单管理，查看暂停原因和可用的恢复方式。",
       "unpaid_title": "订阅款项尚未支付",
@@ -148,18 +84,37 @@
       "members_description": "智能体和待接受的邀请不计入席位。",
       "member_count_other": "{{count}} 位成员",
       "billing_interval": "付款周期",
-      "period_end": "当前周期结束时间"
+      "period_end": "当前周期结束时间",
+      "change_plan": "更换套餐",
+      "business_adds": "Business 增加私有项目、按成员授权、团队应用账号，以及更高的自动化额度。",
+      "plan_change_hold": "套餐变更",
+      "plan_change_confirming": "正在切换到 {{plan}}，等待 Stripe 确认。确认之前不能更换套餐或增加席位。",
+      "plan_change_unresolved": "切换到 {{plan}} 的结果没有确认。请联系支持处理；处理完成之前不能更换套餐或增加席位。",
+      "plan_change_state_confirming": "确认中",
+      "plan_change_state_unresolved": "需要支持处理"
     },
     "upgrade": {
-      "title": "升级到 Pro",
-      "description": "选择付款周期，然后在 Stripe Checkout 确认当前席位和最终金额。",
+      "title": "升级",
       "interval_label": "付款周期",
       "monthly": "月付",
       "yearly": "年付",
-      "pro_for_team_other": "为 {{count}} 个成员席位升级 Pro",
       "price_loading": "正在加载订阅价格",
-      "unit_price": "每个成员席位 {{price}}",
-      "price_at_checkout": "购买前，服务端会重新统计成员。付款前，Stripe Checkout 会显示权威的单席位价格和总额。"
+      "unit_price_month": "每个成员席位每月 {{price}}",
+      "unit_price_year_monthly": "每个成员席位每月 {{price}}，按年付费",
+      "unit_price_year": "每个成员席位每年 {{price}}",
+      "price_at_checkout": "购买前，服务端会重新统计成员。付款前，Stripe Checkout 会显示权威的单席位价格和总额。",
+      "recommended": "推荐",
+      "features": {
+        "pro_members": "成员不限",
+        "pro_autopilots": "自动化每人每月 1,000 次",
+        "pro_storage": "每人 10 GB 附件存储",
+        "pro_dashboard": "统计查看最近 90 天",
+        "business_everything": "Pro 的全部功能",
+        "business_access": "私有项目和按成员授权",
+        "business_apps": "团队应用账号和审批规则",
+        "business_autopilots": "自动化每人每月 3,000 次",
+        "business_reports": "按成员的用量和成本报表"
+      }
     },
     "management": {
       "title": "订阅管理",
@@ -169,7 +124,6 @@
     },
     "limits": {
       "title": "用量与限额",
-      "issues": "任务数量",
       "autopilots": "自动化执行",
       "unlimited": "不限",
       "per_month": "每月 {{count}} 次",
@@ -217,6 +171,7 @@
       "preview_failed": "暂时无法获取估算金额，请稍后重试。",
       "capacity_out_of_sync": "Stripe 席位数与计费记录不一致。再次购买前，请联系支持人员。",
       "in_progress": "另一笔席位购买正在处理中。请等待其完成；若长时间未完成，请联系支持人员。",
+      "plan_change_in_progress": "套餐变更还在处理中，请几分钟后再试。",
       "purchase_unreadable": "无法读取购买响应。请重试当前报价；系统会复用同一购买请求。",
       "purchase_failed": "无法添加席位。可使用同一报价重试；报价过期时请刷新。",
       "payment_failed": "付款未能完成。请在 Stripe 更新付款方式，然后重新获取报价。",
@@ -232,18 +187,37 @@
       "delayed_description": "自动检查已停止，购买仍可能完成。开始另一笔购买前，请稍后再查看或联系支持人员。",
       "delayed_description_with_expiry": "自动检查已停止。若到 {{date}} 仍在等待，请重新加载页面后再获取报价；若状态仍未更新，请联系支持人员。",
       "submitted_other": "购买 {{count}} 个席位的请求已提交。Stripe 确认后会显示新容量。",
-      "error_title": "无法更新估算金额"
+      "error_title": "无法更新估算金额",
+      "plan_change_unresolved": "有一次套餐变更的结果没有确认。请先联系支持，再增加席位。"
+    },
+    "plan_change": {
+      "upgrade_description": "立即生效。本计费周期剩余时间的差价现在扣款。",
+      "downgrade_description": "立即生效。未用完的差价会抵扣下一期账单。已经配置好的 Business 设置继续生效，但变为只读。",
+      "seats": "席位",
+      "charge_today": "今天扣款",
+      "credit": "抵扣下期账单",
+      "next_invoice": "下次续费",
+      "tax_notice": "税费、抵扣和最终账单明细由 Stripe 确定。",
+      "preview_loading": "正在获取报价...",
+      "preview_failed": "暂时无法获取报价，请稍后重试。",
+      "rate_limited": "报价请求过于频繁，请稍等后重试。",
+      "in_progress": "有一笔席位购买正在处理中，请等它完成后再试。",
+      "change_in_progress": "套餐变更还在处理中，请几分钟后再试。",
+      "not_active": "这个订阅现在无法更换套餐。当前套餐已刷新。",
+      "quote_changed": "订阅或价格已变化，请查看刷新后的报价再确认。",
+      "payment_failed": "付款未能完成。请在账单管理中更新付款方式后重试。",
+      "failed": "无法更换套餐。可使用同一报价重试。",
+      "unreadable": "无法读取响应。请重试；系统会复用同一请求。",
+      "error_title": "无法更换套餐",
+      "success_title": "套餐已更换",
+      "success_description": "这个工作区现在使用 {{plan}}。",
+      "unresolved": "上一次套餐变更的结果没有确认。请先联系支持，再更换套餐。",
+      "check_failed": "无法检查套餐变更，请重试。"
     },
     "confirm": {
       "title": "前往 Stripe Checkout？",
-      "description": "付款周期：{{interval}}。当前成员：{{count}}。Stripe 会重新统计席位，并在付款前显示最终金额。"
+      "description": "套餐：{{plan}}。付款周期：{{interval}}。当前成员：{{count}}。Stripe 会重新统计席位，并在付款前显示最终金额。"
     }
-  },
-  "shared": {
-    "request_failed": "请求失败",
-    "refresh": "刷新",
-    "paging": "第 {{page}} / {{totalPages}} 页 · 共 {{total}} 条",
-    "date_dash": "—"
   },
   "return_page": {
     "redirecting": "正在返回工作区账单页…",
@@ -253,5 +227,70 @@
     "workspace_missing_description": "你已从 Stripe 返回，但该工作区对你已不可用——可能已被删除，或你的访问权限发生了变化。请到你预期的那个工作区的账单页确认当前状态。",
     "retry": "重试",
     "go_to_app": "前往 Multica"
+  },
+  "paid_feature": {
+    "read_only": "只读，升级后可编辑",
+    "unavailable": "当前工作区的套餐不包含此功能。",
+    "view_plans": "查看套餐",
+    "locked_error": "当前工作区的套餐不包含此功能。已有设置继续生效，升级后可以新增。"
+  },
+  "trial": {
+    "status": {
+      "active": "Business 试用",
+      "days_left_other": "还剩 {{count}} 天",
+      "active_label_other": "Business 试用，还剩 {{count}} 天。打开账单。",
+      "free": "Free",
+      "upgrade": "升级",
+      "ended_label": "Business 试用已结束，工作区已切换到 Free。打开账单升级。",
+      "ending": "即将结束",
+      "ending_label": "Business 试用即将结束。打开账单。"
+    },
+    "reminder": {
+      "halfway_title_other": "Business 试用已过半，还剩 {{count}} 天。",
+      "days_left_title_other": "Business 试用还剩 {{count}} 天。",
+      "last_day_title": "Business 试用将在一天内结束。",
+      "body": "{{date}} 后工作区切换到 Free。选择套餐可以继续使用 Business。",
+      "later": "稍后",
+      "choose_plan": "选择套餐"
+    },
+    "welcome": {
+      "title_other": "欢迎！你的工作区可以免费试用 {{count}} 天 Business",
+      "body": "私有项目等 Business 功能都可以用。不需要绑卡，到期自动切换到 Free。",
+      "action": "看看有什么",
+      "close": "关闭"
+    },
+    "ended": {
+      "title": "Business 试用已结束",
+      "description": "{{workspace}} 已切换到 Free。没有任何数据被删除。",
+      "description_without_name": "工作区已切换到 Free。没有任何数据被删除。",
+      "kept": "已有的成员、项目和设置都保留。",
+      "private_projects": "私有项目保持私有，访问名单在升级前只读。",
+      "autopilot": "自动化每月 {{limit}} 次，本月已用 {{used}} 次。",
+      "autopilot_paused": "自动化每月 {{limit}} 次，本月已用 {{used}} 次，自动化已暂停到 {{date}}。",
+      "keep_free": "继续使用 Free",
+      "upgrade": "升级到 Business",
+      "member_title": "工作区已切换到 Free",
+      "member_description": "已有的设置照常生效。如需更多功能，请联系工作区管理员。"
+    },
+    "card": {
+      "title": "Business 试用",
+      "badge_other": "试用中 · 还剩 {{count}} 天",
+      "description": "试用到 {{date}}。没有绑定付款方式，到期后自动切换到 Free，不会扣款。",
+      "started": "{{date}} 开始",
+      "progress": "第 {{day}} / {{total}} 天",
+      "ends": "{{date}} 结束",
+      "ended_title": "Business 试用已结束",
+      "ended_description": "试用已于 {{date}} 结束。在下方选择套餐即可恢复 Business 功能。",
+      "choose_plan": "选择套餐",
+      "ended_description_member": "试用已于 {{date}} 结束。如需恢复 Business 功能，请联系工作区管理员升级。"
+    },
+    "features": {
+      "title": "试用中的 Business 功能",
+      "description": "试用结束后不会被删除或关闭，只是不能新建和修改。",
+      "private_projects": {
+        "name": "私有项目",
+        "after": "到期后保持私有，访问名单只读。"
+      }
+    }
   }
 }

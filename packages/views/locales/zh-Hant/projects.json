@@ -9,13 +9,20 @@
     "view_comfortable": "舒適檢視",
     "no_search_results": "未找到匹配的專案",
     "view_table": "表格",
-    "view_cards": "卡片",
+    "view_board": "看板",
     "row_menu": "專案操作",
     "rename": "重新命名",
     "pin": "固定到側邊欄",
     "unpin": "取消釘選",
     "delete": "刪除",
-    "no_matches": "沒有匹配的專案"
+    "no_matches": "沒有匹配的專案",
+    "scope_archived": "已歸檔的專案",
+    "archive": "歸檔",
+    "restore": "還原",
+    "no_archived": "沒有已歸檔的專案",
+    "search": "搜尋專案",
+    "group_none": "不分組",
+    "board_column_empty": "暫無專案"
   },
   "table": {
     "name": "名稱",
@@ -23,8 +30,12 @@
     "status": "狀態",
     "progress": "進度",
     "lead": "負責人",
+    "start_date": "開始日期",
+    "due_date": "截止日期",
+    "last_activity": "最近活動",
     "created": "建立時間",
-    "issues": "任務數"
+    "issues": "任務數",
+    "archived": "歸檔於"
   },
   "status": {
     "planned": "計劃中",
@@ -69,6 +80,7 @@
     "sidebar_tooltip": "切換右側邊欄",
     "rename_action": "重新命名專案",
     "copy_link": "複製連結",
+    "copy_title_as_link": "複製帶標題的連結",
     "delete_action": "刪除專案",
     "section_properties": "屬性",
     "section_progress": "進度",
@@ -85,8 +97,12 @@
     "empty_issues_add_existing": "加入既有任務",
     "no_issues_yet": "目前還沒有任務",
     "toast_link_copied": "已複製連結",
+    "toast_title_link_copied": "已複製帶標題的連結",
+    "toast_title_link_copy_failed": "複製連結失敗",
     "toast_project_deleted": "已刪除專案",
-    "toast_move_issue_failed": "移動任務失敗"
+    "toast_move_issue_failed": "移動任務失敗",
+    "archive_action": "歸檔專案",
+    "restore_action": "還原專案"
   },
   "resources": {
     "section_header": "資源",
@@ -155,7 +171,9 @@
     "title": "刪除專案",
     "description": "將刪除這個專案。任務不會被刪除，只會從專案中解除關聯。",
     "confirm": "刪除",
-    "cancel": "取消"
+    "cancel": "取消",
+    "archive_instead": "改為歸檔",
+    "archive_hint": "歸檔會隱藏專案，但保留它的任務、歷史和設定，隨時可以還原。"
   },
   "picker": {
     "no_project": "無專案",
@@ -215,7 +233,8 @@
     "search": "搜尋姓名或電子郵件...",
     "no_members": "沒有相符的成員",
     "no_selected": "尚無專案成員",
-    "admin_notice": "工作區 owner 和 admin 一律可以存取。",
+    "members_only_notice": "只有名單裡的成員可以存取，工作區 owner 和 admin 也需要加入名單。",
+    "manager": "管理存取權限",
     "you": "你",
     "remove": "移除{{name}}",
     "failed": "無法儲存存取權限。",
@@ -224,5 +243,24 @@
     "publish_description": "工作區所有成員都將能查看這個專案及其中的任務、評論和附件。",
     "done": "完成",
     "retry": "重試"
+  },
+  "archive": {
+    "badge": "已歸檔",
+    "dialog_title": "歸檔「{{name}}」？",
+    "dialog_title_count_other": "歸檔 {{count}} 個專案？",
+    "dialog_description": "歸檔後，專案會從專案列表和選擇器中隱藏，也不能再新增任務。不會刪除任何內容。",
+    "dialog_open_issues_other": "{{count}} 個未完成的任務保持原樣，仍可檢視和編輯。",
+    "dialog_autopilots_other": "{{count}} 個向它建立任務的自動化會被暫停。",
+    "dialog_restore_hint": "之後可以在「已歸檔的專案」裡隨時還原。",
+    "cancel": "取消",
+    "confirm": "歸檔",
+    "toast_archived": "已歸檔「{{name}}」",
+    "toast_archived_count_other": "已歸檔 {{count}} 個專案",
+    "toast_paused_other": "已暫停 {{count}} 個向它建立任務的自動化",
+    "undo": "復原",
+    "toast_restored": "已還原「{{name}}」",
+    "toast_completed": "「{{name}}」已完成",
+    "notice": "此專案已歸檔：不會出現在專案列表和選擇器中，也不能新增任務；既有任務仍可檢視和編輯。",
+    "prop_label": "歸檔"
   }
 }

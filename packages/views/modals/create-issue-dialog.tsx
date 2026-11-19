@@ -172,7 +172,7 @@ function CreateIssueDialogBody({
               ? sourceContextExpanded
                 ? "!h-5/6 sm:!max-w-2xl"
                 : "!h-96 sm:!max-w-xl"
-              : "!max-h-[80dvh] sm:!max-w-xl",
+              : "!max-h-[80%] sm:!max-w-xl",
         )
       : cn(
           manualDialogContentClass(isExpanded),
