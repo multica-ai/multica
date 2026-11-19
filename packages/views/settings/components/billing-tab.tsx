@@ -93,6 +93,7 @@ import {
   yearlyPriceMonthlyEquivalent,
 } from "./billing-state";
 import { formatStripeMinorAmount } from "./billing-format";
+import { BillingTrialSection } from "./billing-trial-section";
 
 export { formatStripeMinorAmount } from "./billing-format";
 
@@ -1325,6 +1326,8 @@ function BillingTabContent() {
           <AlertDescription>{planChangeMessage}</AlertDescription>
         </Alert>
       ) : null}
+
+      <BillingTrialSection summary={summaryQuery.data} />
 
       <SettingsSection title={t(($) => $.workspace.current.title)}>
         <SettingsCard>

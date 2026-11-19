@@ -83,6 +83,7 @@ const mocks = vi.hoisted(() => ({
       checkPlanChange: false,
     },
     planChange: null as WorkspaceSubscriptionSummary["planChange"],
+    trial: null as WorkspaceSubscriptionSummary["trial"],
   } as WorkspaceSubscriptionSummary,
   usage: {
     action: "enforce" as "off" | "observe" | "enforce",
@@ -300,6 +301,7 @@ describe("BillingTab", () => {
         checkPlanChange: false,
       },
       planChange: null,
+      trial: null,
     });
     Object.assign(mocks.usage, {
       action: "enforce",
@@ -2014,6 +2016,61 @@ describe("BillingTab", () => {
         expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
       );
       expect(mocks.refetchSummary).toHaveBeenCalled();
+    });
+  });
+  describe("no-card trial", () => {
+    const DAY = 24 * 60 * 60 * 1000;
+
+    function setTrial(state: "active" | "expired", startedAt: number, days = 14) {
+      const endsAt = startedAt + days * DAY;
+      mocks.summary.trial = {
+        plan: "business",
+        state,
+        startedAt: new Date(startedAt).toISOString(),
+        endsAt: new Date(endsAt).toISOString(),
+      };
+      if (state === "active") {
+        Object.assign(mocks.entitlements, {
+          plan: "business",
+          status: "trialing",
+          limits: { autopilotRuns: { mode: "unlimited", limit: null } },
+          currentPeriodEnd: new Date(endsAt).toISOString(),
+        });
+      }
+      return endsAt;
+    }
+
+    it("shows where the trial stands and what each Business feature keeps", () => {
+      const endsAt = setTrial("active", Date.now() - 4.5 * DAY);
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByRole("heading", { name: "Business trial" })).toBeInTheDocument();
+      expect(screen.getByText("Trial · 10 days left")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          `Trial until ${new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(endsAt))}. No payment method is on file, so the workspace moves to Free afterwards and is not charged.`,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getAllByText("Day 5 of 14").length).toBeGreaterThan(0);
+      expect(screen.getByText("Private projects")).toBeInTheDocument();
+      expect(
+        screen.getByText("Stay private after the trial. Their access lists become read-only."),
+      ).toBeInTheDocument();
+      // A trialling manager subscribes through the same plan cards.
+      expect(screen.getByRole("button", { name: "Upgrade to Business" })).toBeInTheDocument();
+    });
+
+    it("points an ended trial at the plans below", () => {
+      const endsAt = setTrial("expired", Date.now() - 20 * DAY);
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Business trial ended")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          `The trial ended on ${new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(endsAt))}. Choose a plan below to get Business features back.`,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/days? left/)).not.toBeInTheDocument();
     });
   });
 });

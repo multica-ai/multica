@@ -239,5 +239,66 @@
     "unavailable": "No está incluido en el plan de este espacio de trabajo.",
     "view_plans": "Ver planes",
     "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más."
+  },
+  "trial": {
+    "status": {
+      "active": "Prueba de Business",
+      "days_left_one": "queda {{count}} día",
+      "days_left_other": "quedan {{count}} días",
+      "active_label_one": "Prueba de Business, queda {{count}} día. Abrir Facturación.",
+      "active_label_other": "Prueba de Business, quedan {{count}} días. Abrir Facturación.",
+      "free": "Free",
+      "upgrade": "Actualizar",
+      "ended_label": "La prueba de Business terminó y este espacio de trabajo está en Free. Abre Facturación para actualizar."
+    },
+    "reminder": {
+      "halfway_title_one": "Tu prueba de Business va por la mitad: queda {{count}} día.",
+      "halfway_title_other": "Tu prueba de Business va por la mitad: quedan {{count}} días.",
+      "days_left_title_one": "Queda {{count}} día de tu prueba de Business.",
+      "days_left_title_other": "Quedan {{count}} días de tu prueba de Business.",
+      "last_day_title": "Tu prueba de Business termina en menos de un día.",
+      "body": "El {{date}} este espacio de trabajo pasa a Free. Elige un plan para seguir con Business.",
+      "later": "Más tarde",
+      "choose_plan": "Elegir un plan"
+    },
+    "welcome": {
+      "title_one": "¡Bienvenido! Este espacio de trabajo tiene una prueba gratuita de Business de {{count}} día",
+      "title_other": "¡Bienvenido! Este espacio de trabajo tiene una prueba gratuita de Business de {{count}} días",
+      "body": "Los proyectos privados y las demás funciones de Business están activos. No hace falta tarjeta; al terminar la prueba, el espacio de trabajo pasa a Free.",
+      "action": "Ver qué incluye",
+      "close": "Cerrar"
+    },
+    "ended": {
+      "title": "Tu prueba de Business ha terminado",
+      "description": "{{workspace}} ahora está en Free. No se eliminó nada.",
+      "description_without_name": "Este espacio de trabajo ahora está en Free. No se eliminó nada.",
+      "kept": "Los miembros, proyectos y ajustes que ya tienes se mantienen igual.",
+      "private_projects": "Los proyectos privados siguen siendo privados. Sus listas de acceso son de solo lectura hasta que actualices.",
+      "autopilot": "Las automatizaciones tienen {{limit}} ejecuciones al mes; este mes se usaron {{used}}.",
+      "autopilot_paused": "Las automatizaciones tienen {{limit}} ejecuciones al mes y este mes se usaron {{used}}, así que están en pausa hasta el {{date}}.",
+      "keep_free": "Seguir en Free",
+      "upgrade": "Actualizar a Business",
+      "member_title": "Este espacio de trabajo ahora está en Free",
+      "member_description": "Los ajustes existentes siguen funcionando. Si necesitas más, pregunta a un administrador del espacio de trabajo."
+    },
+    "card": {
+      "title": "Prueba de Business",
+      "badge_one": "Prueba · queda {{count}} día",
+      "badge_other": "Prueba · quedan {{count}} días",
+      "description": "Prueba hasta el {{date}}. No hay método de pago registrado, así que después el espacio de trabajo pasa a Free y no se cobra nada.",
+      "started": "Empezó el {{date}}",
+      "progress": "Día {{day}} de {{total}}",
+      "ends": "Termina el {{date}}",
+      "ended_title": "La prueba de Business terminó",
+      "ended_description": "La prueba terminó el {{date}}. Elige un plan abajo para recuperar las funciones de Business."
+    },
+    "features": {
+      "title": "Funciones de Business en tu prueba",
+      "description": "Al terminar la prueba no se elimina ni se desactiva nada; solo no podrás añadir más.",
+      "private_projects": {
+        "name": "Proyectos privados",
+        "after": "Siguen siendo privados después de la prueba. Sus listas de acceso pasan a solo lectura."
+      }
+    }
   }
 }

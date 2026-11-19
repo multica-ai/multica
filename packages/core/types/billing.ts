@@ -254,7 +254,27 @@ export interface WorkspaceSubscriptionSummary {
    * purchases and other plan changes are unavailable.
    */
   planChange: WorkspacePlanChangeHold | null;
+  /**
+   * The workspace's no-card trial. Null when it never had one, while a paid
+   * subscription is in effect, and on a cloud that predates trials.
+   */
+  trial: WorkspaceTrial | null;
 }
+
+/**
+ * A no-card trial of a paid plan. Only `active` grants the plan; the
+ * entitlement, not this object, decides access. Clients count days from
+ * `endsAt` and refresh when it passes.
+ */
+export interface WorkspaceTrial {
+  plan: string;
+  state: WorkspaceTrialState;
+  startedAt: string;
+  endsAt: string;
+}
+
+/** `converted`: the trial ended because the workspace subscribed. */
+export type WorkspaceTrialState = "active" | "expired" | "converted";
 
 export interface WorkspacePlanChangeHold {
   targetPlan: string;

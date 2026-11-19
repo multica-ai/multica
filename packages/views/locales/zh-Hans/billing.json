@@ -233,5 +233,60 @@
     "unavailable": "当前工作区的套餐不包含此功能。",
     "view_plans": "查看套餐",
     "locked_error": "当前工作区的套餐不包含此功能。已有设置继续生效，升级后可以新增。"
+  },
+  "trial": {
+    "status": {
+      "active": "Business 试用",
+      "days_left_other": "还剩 {{count}} 天",
+      "active_label_other": "Business 试用，还剩 {{count}} 天。打开账单。",
+      "free": "Free",
+      "upgrade": "升级",
+      "ended_label": "Business 试用已结束，工作区已切换到 Free。打开账单升级。"
+    },
+    "reminder": {
+      "halfway_title_other": "Business 试用已过半，还剩 {{count}} 天。",
+      "days_left_title_other": "Business 试用还剩 {{count}} 天。",
+      "last_day_title": "Business 试用将在一天内结束。",
+      "body": "{{date}} 后工作区切换到 Free。选择套餐可以继续使用 Business。",
+      "later": "稍后",
+      "choose_plan": "选择套餐"
+    },
+    "welcome": {
+      "title_other": "欢迎！你的工作区可以免费试用 {{count}} 天 Business",
+      "body": "私有项目等 Business 功能都可以用。不需要绑卡，到期自动切换到 Free。",
+      "action": "看看有什么",
+      "close": "关闭"
+    },
+    "ended": {
+      "title": "Business 试用已结束",
+      "description": "{{workspace}} 已切换到 Free。没有任何数据被删除。",
+      "description_without_name": "工作区已切换到 Free。没有任何数据被删除。",
+      "kept": "已有的成员、项目和设置都保留。",
+      "private_projects": "私有项目保持私有，访问名单在升级前只读。",
+      "autopilot": "自动化每月 {{limit}} 次，本月已用 {{used}} 次。",
+      "autopilot_paused": "自动化每月 {{limit}} 次，本月已用 {{used}} 次，自动化已暂停到 {{date}}。",
+      "keep_free": "继续使用 Free",
+      "upgrade": "升级到 Business",
+      "member_title": "工作区已切换到 Free",
+      "member_description": "已有的设置照常生效。如需更多功能，请联系工作区管理员。"
+    },
+    "card": {
+      "title": "Business 试用",
+      "badge_other": "试用中 · 还剩 {{count}} 天",
+      "description": "试用到 {{date}}。没有绑定付款方式，到期后自动切换到 Free，不会扣款。",
+      "started": "{{date}} 开始",
+      "progress": "第 {{day}} / {{total}} 天",
+      "ends": "{{date}} 结束",
+      "ended_title": "Business 试用已结束",
+      "ended_description": "试用已于 {{date}} 结束。在下方选择套餐即可恢复 Business 功能。"
+    },
+    "features": {
+      "title": "试用中的 Business 功能",
+      "description": "试用结束后不会被删除或关闭，只是不能新建和修改。",
+      "private_projects": {
+        "name": "私有项目",
+        "after": "到期后保持私有，访问名单只读。"
+      }
+    }
   }
 }
