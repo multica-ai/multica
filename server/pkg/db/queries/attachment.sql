@@ -94,6 +94,9 @@ WHERE comment_id = @comment_id AND workspace_id = @workspace_id
 RETURNING url;
 
 -- name: LinkAttachmentsToComment :exec
+-- An unbound upload is a draft and joins only its own uploader's comment
+-- (MUL-9420): a guest's file taken off its comment must not be adoptable by
+-- anyone else who learns its id.
 UPDATE attachment
 SET comment_id = sqlc.arg(comment_id),
     issue_id = sqlc.arg(issue_id)
@@ -103,6 +106,8 @@ WHERE workspace_id = sqlc.arg(workspace_id)
     AND chat_session_id IS NULL
     AND chat_message_id IS NULL
     AND task_id IS NULL
+    AND uploader_type = sqlc.arg(uploader_type)
+    AND uploader_id = sqlc.arg(uploader_id)
   ))
   AND comment_id IS NULL
   AND source_context_id IS NULL
@@ -239,6 +244,7 @@ FOR UPDATE;
 -- Like issue updates, comment creation locks ownerless uploads before the
 -- issue row. Once it takes the issue, it locks existing issue children below.
 -- This keeps both upload adoption and owner-first deletion in the same order.
+-- Only the comment author's own uploads qualify (see LinkAttachmentsToComment).
 SELECT id FROM attachment
 WHERE workspace_id = sqlc.arg(workspace_id)
   AND issue_id IS NULL
@@ -247,9 +253,19 @@ WHERE workspace_id = sqlc.arg(workspace_id)
   AND chat_message_id IS NULL
   AND task_id IS NULL
   AND source_context_id IS NULL
+  AND uploader_type = sqlc.arg(uploader_type)
+  AND uploader_id = sqlc.arg(uploader_id)
   AND id = ANY(sqlc.arg(attachment_ids)::uuid[])
 ORDER BY id
 FOR UPDATE;
+
+-- name: ListCommentAttachmentIDsAmong :many
+-- Which of attachment_ids are attached to the comment: an edit checks that
+-- it got every file it asked for before committing.
+SELECT id FROM attachment
+WHERE comment_id = sqlc.arg(comment_id)
+  AND workspace_id = sqlc.arg(workspace_id)
+  AND id = ANY(sqlc.arg(attachment_ids)::uuid[]);
 
 -- name: LockAttachmentsForCommentLink :many
 -- CreateComment binds attachments in the transaction that created the comment,

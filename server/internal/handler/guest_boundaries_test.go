@@ -726,3 +726,115 @@ func TestRoleChangeDecidedOnStaleRoleIsRefused(t *testing.T) {
 		t.Fatalf("member projects = %v, want untouched", got)
 	}
 }
+
+// An unbound draft joins only its uploader's comment. A guest's file taken
+// off its comment cannot be adopted by another guest (or a member) who
+// learned its id, on create or on edit.
+func TestDraftAttachmentJoinsOnlyItsUploadersComment(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	t.Cleanup(func() { testHandler.Storage = origStorage })
+	f := newGuestFixture(t)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE uploader_id = $1`, f.guest)
+	})
+	other := createPlainMember(t, f.marker+"-other-guest@multica.test")
+	dbfx.Exec(t, `UPDATE member SET role = 'guest' WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, other)
+	addProjectMemberRow(t, f.other, other)
+
+	// The guest attaches a file and takes it off again: an unbound draft.
+	draft := uploadDraftToIssue(t, f.guest, f.sharedIssue)
+	var own CommentResponse
+	guestRequest(t, testHandler.CreateComment, f.guest, http.MethodPost, "/api/issues/"+f.sharedIssue+"/comments",
+		CreateCommentRequest{Content: "with a file", AttachmentIDs: []string{draft.ID}}, "id", f.sharedIssue).
+		Want(http.StatusCreated).JSON(&own)
+	guestRequest(t, testHandler.UpdateComment, f.guest, http.MethodPut, "/api/comments/"+own.ID,
+		map[string]any{"content": "file removed", "attachment_ids": []string{}}, "commentId", own.ID).Want(http.StatusOK)
+
+	wantUnbound := func(label string) {
+		t.Helper()
+		if issueID, commentID := attachmentBinding(t, draft.ID); issueID != nil || commentID != nil {
+			t.Fatalf("%s: draft bound to issue %v comment %v, want still unbound", label, issueID, commentID)
+		}
+	}
+	for _, adopter := range []string{other, testUserID} {
+		issue := f.otherIssue
+		guestRequest(t, testHandler.CreateComment, adopter, http.MethodPost, "/api/issues/"+issue+"/comments",
+			CreateCommentRequest{Content: "adopting", AttachmentIDs: []string{draft.ID}}, "id", issue).
+			Want(http.StatusConflict)
+		wantUnbound("create by another user")
+
+		var theirs CommentResponse
+		guestRequest(t, testHandler.CreateComment, adopter, http.MethodPost, "/api/issues/"+issue+"/comments",
+			CreateCommentRequest{Content: "plain"}, "id", issue).Want(http.StatusCreated).JSON(&theirs)
+		guestRequest(t, testHandler.UpdateComment, adopter, http.MethodPut, "/api/comments/"+theirs.ID,
+			map[string]any{"content": "adopting on edit", "attachment_ids": []string{draft.ID}}, "commentId", theirs.ID).
+			Want(http.StatusConflict)
+		wantUnbound("edit by another user")
+	}
+
+	// Its uploader can still use it.
+	guestRequest(t, testHandler.UpdateComment, f.guest, http.MethodPut, "/api/comments/"+own.ID,
+		map[string]any{"content": "file back", "attachment_ids": []string{draft.ID}}, "commentId", own.ID).Want(http.StatusOK)
+	if _, commentID := attachmentBinding(t, draft.ID); commentID == nil || *commentID != own.ID {
+		t.Fatalf("draft comment = %v, want back on its uploader's comment", commentID)
+	}
+}
+
+// When a comment published with a draft wins the race, an edit asking for
+// the same draft is refused and rolled back, not saved without the file.
+func TestCommentEditLosingDraftToPublishIsRefused(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	t.Cleanup(func() { testHandler.Storage = origStorage })
+	f := newGuestFixture(t)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE uploader_id = $1`, f.guest)
+	})
+	var existing CommentResponse
+	guestRequest(t, testHandler.CreateComment, f.guest, http.MethodPost, "/api/issues/"+f.sharedIssue+"/comments",
+		CreateCommentRequest{Content: "before the edit"}, "id", f.sharedIssue).Want(http.StatusCreated).JSON(&existing)
+	draft := uploadDraftToIssue(t, f.guest, f.sharedIssue)
+
+	ctx := context.Background()
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM issue WHERE id = $1 FOR UPDATE`, f.sharedIssue); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	var create, edit *testutil.Response
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		create = guestRequest(t, testHandler.CreateComment, f.guest, http.MethodPost, "/api/issues/"+f.sharedIssue+"/comments",
+			CreateCommentRequest{Content: "published with the draft", AttachmentIDs: []string{draft.ID}}, "id", f.sharedIssue)
+	}()
+	waitForLockWaiters(t, 1) // the publish holds the draft and waits for the issue
+	go func() {
+		defer wg.Done()
+		edit = guestRequest(t, testHandler.UpdateComment, f.guest, http.MethodPut, "/api/comments/"+existing.ID,
+			map[string]any{"content": "edited with the draft", "attachment_ids": []string{draft.ID}}, "commentId", existing.ID)
+	}()
+	waitForLockWaiters(t, 2) // the edit waits for the draft
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create = %d %s, want 201: it queued first", create.Code, create.Body.String())
+	}
+	if edit.Code != http.StatusConflict {
+		t.Fatalf("edit = %d %s, want 409 for a draft the publish already took", edit.Code, edit.Body.String())
+	}
+	var content string
+	dbfx.QueryRow(t, `SELECT content FROM comment WHERE id = $1`, existing.ID).Scan(&content)
+	if content != "before the edit" {
+		t.Fatalf("edited comment content = %q, want the refused edit rolled back", content)
+	}
+}

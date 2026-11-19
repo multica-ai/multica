@@ -1890,6 +1890,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		unboundIDs, err = qtx.LockUnboundAttachmentsForCommentLink(r.Context(), db.LockUnboundAttachmentsForCommentLinkParams{
 			WorkspaceID:   issue.WorkspaceID,
 			AttachmentIds: attachmentIDs,
+			UploaderType:  authorType,
+			UploaderID:    parseUUID(authorID),
 		})
 		if err == nil {
 			created, err = qtx.CreateComment(r.Context(), createParams)
@@ -1908,6 +1910,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				IssueID:       issue.ID,
 				WorkspaceID:   issue.WorkspaceID,
 				AttachmentIds: attachmentIDs,
+				UploaderType:  authorType,
+				UploaderID:    parseUUID(authorID),
 			})
 		}
 		if err == nil {
@@ -3591,6 +3595,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			_, err = qtx.LockUnboundAttachmentsForCommentLink(r.Context(), db.LockUnboundAttachmentsForCommentLinkParams{
 				WorkspaceID:   existing.WorkspaceID,
 				AttachmentIds: attachmentIDs,
+				UploaderType:  actorType,
+				UploaderID:    parseUUID(actorID),
 			})
 		}
 		var updated db.UpdateCommentRow
@@ -3623,6 +3629,23 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				IssueID:       existing.IssueID,
 				AttachmentIds: attachmentIDs,
 			})
+			// Every requested file must have ended up on the comment. One a
+			// concurrent request took first (a comment published with the
+			// same draft) refuses the whole edit instead of saving the text
+			// without it.
+			if err == nil && len(attachmentIDs) > 0 {
+				var got []pgtype.UUID
+				got, err = qtx.ListCommentAttachmentIDsAmong(r.Context(), db.ListCommentAttachmentIDsAmongParams{
+					CommentID:     comment.ID,
+					WorkspaceID:   existing.WorkspaceID,
+					AttachmentIds: attachmentIDs,
+				})
+				if err == nil {
+					if missing := firstMissingID(attachmentIDs, got); missing.Valid {
+						err = commentAttachmentUnavailableError{id: missing}
+					}
+				}
+			}
 			if err == nil && changed > 0 && oldContent == req.Content {
 				comment, err = qtx.BumpCommentRevision(r.Context(), db.BumpCommentRevisionParams{
 					ID:          comment.ID,
@@ -3652,6 +3675,11 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			// Cancellation committed but the edit did not. Restore the complete
 			// original batch, including the still-valid unchanged comment.
 			h.retriggerCancelledTaskSurvivors(r.Context(), *triggerIssue, cancelled, pgtype.UUID{})
+		}
+		var unavailable commentAttachmentUnavailableError
+		if errors.As(err, &unavailable) {
+			writeError(w, http.StatusConflict, "attachment "+uuidToString(unavailable.id)+" is no longer available")
+			return
 		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			current, reloadErr := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{ID: commentUUID, WorkspaceID: wsUUID})
@@ -3851,6 +3879,28 @@ type commentDeletion struct {
 // lockCommentAttachments validates and pins the full requested set, including
 // existing issue attachments. The caller must already hold the issue's row
 // lock and have locked ownerless uploads before it; see CreateComment.
+// commentAttachmentUnavailableError reports a requested attachment that a
+// comment edit could not take, so the edit is rolled back.
+type commentAttachmentUnavailableError struct{ id pgtype.UUID }
+
+func (e commentAttachmentUnavailableError) Error() string {
+	return "attachment " + uuidToString(e.id) + " is no longer available"
+}
+
+// firstMissingID returns the first id in want that is not in have.
+func firstMissingID(want, have []pgtype.UUID) pgtype.UUID {
+	seen := make(map[pgtype.UUID]struct{}, len(have))
+	for _, id := range have {
+		seen[id] = struct{}{}
+	}
+	for _, id := range want {
+		if _, ok := seen[id]; !ok {
+			return id
+		}
+	}
+	return pgtype.UUID{}
+}
+
 func lockCommentAttachments(ctx context.Context, qtx *db.Queries, workspaceID, issueID pgtype.UUID, ids, unboundIDs []pgtype.UUID) (missing pgtype.UUID, err error) {
 	locked, err := qtx.LockAttachmentsForCommentLink(ctx, db.LockAttachmentsForCommentLinkParams{
 		WorkspaceID:   workspaceID,

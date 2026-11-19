@@ -613,24 +613,33 @@ WHERE workspace_id = $3
     AND chat_session_id IS NULL
     AND chat_message_id IS NULL
     AND task_id IS NULL
+    AND uploader_type = $4
+    AND uploader_id = $5
   ))
   AND comment_id IS NULL
   AND source_context_id IS NULL
-  AND id = ANY($4::uuid[])
+  AND id = ANY($6::uuid[])
 `
 
 type LinkAttachmentsToCommentParams struct {
 	CommentID     pgtype.UUID   `json:"comment_id"`
 	IssueID       pgtype.UUID   `json:"issue_id"`
 	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	UploaderType  string        `json:"uploader_type"`
+	UploaderID    pgtype.UUID   `json:"uploader_id"`
 	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
 }
 
+// An unbound upload is a draft and joins only its own uploader's comment
+// (MUL-9420): a guest's file taken off its comment must not be adoptable by
+// anyone else who learns its id.
 func (q *Queries) LinkAttachmentsToComment(ctx context.Context, arg LinkAttachmentsToCommentParams) error {
 	_, err := q.db.Exec(ctx, linkAttachmentsToComment,
 		arg.CommentID,
 		arg.IssueID,
 		arg.WorkspaceID,
+		arg.UploaderType,
+		arg.UploaderID,
 		arg.AttachmentIds,
 	)
 	return err
@@ -1078,6 +1087,41 @@ func (q *Queries) ListAttachmentsBySourceContext(ctx context.Context, arg ListAt
 	return items, nil
 }
 
+const listCommentAttachmentIDsAmong = `-- name: ListCommentAttachmentIDsAmong :many
+SELECT id FROM attachment
+WHERE comment_id = $1
+  AND workspace_id = $2
+  AND id = ANY($3::uuid[])
+`
+
+type ListCommentAttachmentIDsAmongParams struct {
+	CommentID     pgtype.UUID   `json:"comment_id"`
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
+}
+
+// Which of attachment_ids are attached to the comment: an edit checks that
+// it got every file it asked for before committing.
+func (q *Queries) ListCommentAttachmentIDsAmong(ctx context.Context, arg ListCommentAttachmentIDsAmongParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listCommentAttachmentIDsAmong, arg.CommentID, arg.WorkspaceID, arg.AttachmentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSourceContextAttachmentURLsByWorkspace = `-- name: ListSourceContextAttachmentURLsByWorkspace :many
 SELECT url FROM attachment
 WHERE workspace_id = $1
@@ -1349,21 +1393,31 @@ WHERE workspace_id = $1
   AND chat_message_id IS NULL
   AND task_id IS NULL
   AND source_context_id IS NULL
-  AND id = ANY($2::uuid[])
+  AND uploader_type = $2
+  AND uploader_id = $3
+  AND id = ANY($4::uuid[])
 ORDER BY id
 FOR UPDATE
 `
 
 type LockUnboundAttachmentsForCommentLinkParams struct {
 	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	UploaderType  string        `json:"uploader_type"`
+	UploaderID    pgtype.UUID   `json:"uploader_id"`
 	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
 }
 
 // Like issue updates, comment creation locks ownerless uploads before the
 // issue row. Once it takes the issue, it locks existing issue children below.
 // This keeps both upload adoption and owner-first deletion in the same order.
+// Only the comment author's own uploads qualify (see LinkAttachmentsToComment).
 func (q *Queries) LockUnboundAttachmentsForCommentLink(ctx context.Context, arg LockUnboundAttachmentsForCommentLinkParams) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, lockUnboundAttachmentsForCommentLink, arg.WorkspaceID, arg.AttachmentIds)
+	rows, err := q.db.Query(ctx, lockUnboundAttachmentsForCommentLink,
+		arg.WorkspaceID,
+		arg.UploaderType,
+		arg.UploaderID,
+		arg.AttachmentIds,
+	)
 	if err != nil {
 		return nil, err
 	}
