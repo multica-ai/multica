@@ -43,6 +43,9 @@ func (s *TaskService) enqueueChatWakeupTaskTx(
 	if session.Status != "active" {
 		return db.AgentTaskQueue{}, ErrChatSessionArchived
 	}
+	if session.ForkSnapshotTaskID.Valid || session.ForkInitializationTaskID.Valid {
+		return db.AgentTaskQueue{}, ErrChatSessionForkPending
+	}
 	agent, err := qtx.GetAgentForClaimUpdate(ctx, session.AgentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("reload chat agent: %w", err)

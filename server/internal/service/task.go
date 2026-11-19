@@ -1967,6 +1967,8 @@ var ErrChatQuickActionsBusy = errors.New("chat quick actions: session busy")
 // a race with archiving the session and therefore must not persist a new turn.
 var ErrChatSessionArchived = errors.New("chat task: session archived")
 
+var ErrChatSessionForkPending = errors.New("chat task: session fork is pending")
+
 // PreparedChatTaskEnqueue is an opaque, side-effect-free input snapshot built
 // before a caller opens a task-enqueue transaction.
 type PreparedChatTaskEnqueue struct {
@@ -2146,6 +2148,9 @@ func (s *TaskService) enqueueChatTaskTx(
 	}
 	if currentSession.Status != "active" {
 		return db.AgentTaskQueue{}, ErrChatSessionArchived
+	}
+	if currentSession.ForkSnapshotTaskID.Valid || currentSession.ForkInitializationTaskID.Valid {
+		return db.AgentTaskQueue{}, ErrChatSessionForkPending
 	}
 
 	agent, err := qtx.GetAgentForClaimUpdate(ctx, chatSession.AgentID)
@@ -2537,6 +2542,9 @@ func (s *TaskService) sendDirectChatMessage(
 		if currentSession.Status != "active" {
 			return ErrChatSessionArchived
 		}
+		if currentSession.ForkSnapshotTaskID.Valid || currentSession.ForkInitializationTaskID.Valid {
+			return ErrChatSessionForkPending
+		}
 		carrier, err := qtx.GetAgentForClaimUpdate(ctx, session.AgentID)
 		if err != nil {
 			return fmt.Errorf("reload chat agent: %w", err)
@@ -2766,6 +2774,9 @@ func (s *TaskService) OpenMikaOnboardingChat(ctx context.Context, session db.Cha
 		}
 		if current.Status != "active" {
 			return ErrChatSessionArchived
+		}
+		if current.ForkSnapshotTaskID.Valid || current.ForkInitializationTaskID.Valid {
+			return ErrChatSessionForkPending
 		}
 		hasUserMessage, err := qtx.ChatSessionHasUserMessage(ctx, session.ID)
 		if err != nil {
