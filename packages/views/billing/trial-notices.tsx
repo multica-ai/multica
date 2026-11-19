@@ -65,7 +65,9 @@ export function WorkspaceTrialNotices() {
   const enabled = useFeatureEnabled(BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG, false);
   const trial = useWorkspaceTrial(wsId, enabled);
   const { role, isLoading } = useCurrentMember(wsId);
-  if (!wsId || isLoading || trial.kind === "none") return null;
+  // Who sees what depends on the role, and the notices are recorded as seen
+  // per device: wait until the role is known rather than guess "member".
+  if (!wsId || isLoading || role === null || trial.kind === "none") return null;
   const isManager = role === "owner" || role === "admin";
 
   if (trial.kind === "active") {

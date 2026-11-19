@@ -211,6 +211,27 @@ export function useWorkspaceTrial(
     );
   }, [endsAtRaw, wsId]);
   const boundaryEndRaw = endsAtRaw ?? (lastEnd?.wsId === wsId ? lastEnd.endsAt : null);
+
+  // When this client first saw the trial replaced by a paid plan (subscribed
+  // mid-trial, possibly on another device). Business-only features then lock
+  // for Pro, but the server may serve its cached trial policy for up to a
+  // minute, so paid-feature reads are refreshed once that has passed.
+  const lastEndKey = lastEnd?.wsId === wsId ? `${wsId}:${lastEnd.endsAt}` : null;
+  const convertedToPaid =
+    !!summary &&
+    summary.entitlement.plan !== "free" &&
+    (!summary.trial || summary.trial.state === "converted");
+  const [conversion, setConversion] = useState<{ key: string; at: number } | null>(null);
+  const convertedAt =
+    conversion && conversion.key === lastEndKey ? conversion.at : undefined;
+  useEffect(() => {
+    if (!convertedToPaid || !lastEndKey) return;
+    setConversion((current) =>
+      current?.key === lastEndKey
+        ? current
+        : { key: lastEndKey, at: summaryQuery.dataUpdatedAt || Date.now() },
+    );
+  }, [convertedToPaid, lastEndKey, summaryQuery.dataUpdatedAt]);
   const cloudSaysActive = summary?.trial?.state === "active";
   const cloudConfirmsEnd =
     summary?.trial?.state === "expired" && summary.entitlement.plan === "free";
@@ -264,6 +285,9 @@ export function useWorkspaceTrial(
       // The summary is already Cloud's answer; only policy-backed reads lag.
       boundaries.push({ at: confirmedAt + TRIAL_CONFIRM_SETTLE_MS, keys: keys.slice(1) });
     }
+    if (convertedAt !== undefined) {
+      boundaries.push({ at: convertedAt + TRIAL_END_SETTLE_MS, keys: keys.slice(1) });
+    }
     const timers: number[] = [];
     for (const boundary of boundaries) {
       const delay = boundary.at - Date.now();
@@ -278,7 +302,7 @@ export function useWorkspaceTrial(
       }
     }
     return () => timers.forEach((id) => window.clearTimeout(id));
-  }, [boundaryEndRaw, confirmedAt, qc, wsId]);
+  }, [boundaryEndRaw, confirmedAt, convertedAt, qc, wsId]);
 
   // This clock is past the end and its follow-up, yet Cloud still says
   // active: ask again with backoff until Cloud answers otherwise.

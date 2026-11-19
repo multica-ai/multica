@@ -17,7 +17,7 @@ const h = vi.hoisted(() => {
   return {
     trial: { kind: "none" } as WorkspaceTrialView,
     workspace: { id: "ws-1", name: "Acme Labs" },
-    role: "owner" as "owner" | "admin" | "member",
+    role: "owner" as "owner" | "admin" | "member" | null,
     features: { private_projects: "available" } as Record<string, string>,
     usage: null as AutopilotQuotaUsage | null,
     /** When the mocked feature and usage answers were received. */
@@ -105,6 +105,16 @@ beforeEach(() => {
 });
 
 describe("WorkspaceTrialNotices", () => {
+  it("preserves the owner's end notice until membership is known", () => {
+    h.role = null;
+    h.trial = ended;
+    const { rerender } = renderWithI18n(<WorkspaceTrialNotices />);
+    h.role = "owner";
+    rerender(<WorkspaceTrialNotices />);
+    expect.soft(h.toast).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeInTheDocument();
+  });
+
   it("shows nothing outside a trial or between reminders", () => {
     renderWithI18n(<WorkspaceTrialNotices />);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();

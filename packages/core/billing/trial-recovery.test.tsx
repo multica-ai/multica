@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
@@ -12,6 +12,7 @@ import { workspaceSubscriptionKeys } from "./workspace-subscription-queries";
 
 afterEach(() => {
   cleanup();
+  focusManager.setFocused(undefined);
   vi.useRealTimers();
 });
 
@@ -29,6 +30,46 @@ const ws = "ws-trial-recovery";
 async function advance(ms: number) {
   await act(async () => { await vi.advanceTimersByTimeAsync(ms); });
 }
+
+it("updates an open project's access when a refocus discovers a mid-trial Pro conversion", async () => {
+  vi.useFakeTimers();
+  const daySeven = endsAt - 7 * 24 * 60 * 60 * 1000;
+  const returnAt = daySeven + 6 * 60 * 1000;
+  vi.setSystemTime(daySeven);
+  const getWorkspaceFeatures = vi.fn(async () => ({
+    features: { private_projects: Date.now() < returnAt + 30_000 ? "available" : "locked" },
+  }));
+  setApiInstance({
+    getWorkspaceSubscriptionSummary: async () => paid,
+    getWorkspaceFeatures,
+  } as unknown as ApiClient);
+  const qc = createQueryClient();
+  qc.setQueryData(workspaceSubscriptionKeys.summary(ws), active);
+  qc.setQueryData(workspaceFeatureKeys.all(ws), { features: { private_projects: "available" } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  const { result, unmount } = renderHook(() => ({
+    trial: useWorkspaceTrial(ws, true),
+    access: usePaidFeatureAccess(ws, "private_projects", { hasExistingConfig: true }),
+  }), { wrapper });
+  try {
+    expect(result.current.trial.kind).toBe("active");
+    // While this tab is in the background, an admin subscribes to Pro.
+    // On return both reads refresh. The product policy cache still has 30s left.
+    focusManager.setFocused(false);
+    await advance(returnAt - daySeven);
+    await act(async () => { focusManager.setFocused(true); });
+    await advance(10);
+    expect(result.current.trial.kind).toBe("none");
+    expect(getWorkspaceFeatures).toHaveBeenCalled();
+    await advance(60 * 60 * 1000);
+    expect(result.current.access.state).toBe("read_only");
+  } finally {
+    unmount();
+    qc.clear();
+  }
+});
 
 // The backoff recheck keeps going through failed attempts, not only through
 // answers that are still active.
