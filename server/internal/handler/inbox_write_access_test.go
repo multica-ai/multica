@@ -202,3 +202,39 @@ func TestDeleteInboxItemIsHumanOnly(t *testing.T) {
 		t.Fatal("human delete left the notification in place")
 	}
 }
+
+// A task credential is bound to one workspace. When the owner triggered it
+// and belongs to other workspaces too, the cross-workspace summary must not
+// carry those workspaces' IDs or unread counts back to the agent, while the
+// owner's own credential still sees every workspace.
+func TestUnreadInboxSummaryTaskCredentialStaysInBoundWorkspace(t *testing.T) {
+	f := newInboxWriteFixture(t)
+	other := newInboxWriteFixture(t)
+	f.item(t)
+	other.item(t)
+	token := f.taskToken(t, testUserID)
+	summary := (*Handler).UnreadInboxSummary
+
+	var agentView []InboxWorkspaceUnreadResponse
+	testutil.Call(t, serveInboxEndpoint(summary),
+		testutil.WithHeaders(testutil.JSONRequest(http.MethodGet, "/api/inbox/unread-summary", nil),
+			"Authorization", "Bearer "+token, "X-Workspace-ID", f.workspaceID)).
+		Want(http.StatusOK).JSON(&agentView)
+	if len(agentView) != 1 || agentView[0].WorkspaceID != f.workspaceID || agentView[0].Count != 1 {
+		t.Fatalf("task credential summary = %+v; want only bound workspace %s with 1 unread", agentView, f.workspaceID)
+	}
+
+	// The owner's own request, served after the agent's from the same
+	// per-user cache, still lists both workspaces.
+	var ownerView []InboxWorkspaceUnreadResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.UnreadInboxSummary),
+		inboxRequest(http.MethodGet, "/api/inbox/unread-summary", f.workspaceID)).
+		Want(http.StatusOK).JSON(&ownerView)
+	counts := map[string]int64{}
+	for _, row := range ownerView {
+		counts[row.WorkspaceID] = row.Count
+	}
+	if counts[f.workspaceID] != 1 || counts[other.workspaceID] != 1 {
+		t.Fatalf("owner summary = %+v; want both workspaces", ownerView)
+	}
+}
