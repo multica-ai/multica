@@ -269,6 +269,42 @@ func (q *Queries) GetIssueEnvironment(ctx context.Context, arg GetIssueEnvironme
 	return i, err
 }
 
+const getIssueEnvironmentByID = `-- name: GetIssueEnvironmentByID :one
+SELECT id, workspace_id, issue_id, task_id, runtime_id, agent_id, local_key, source, name, label, url, port, state, detail, started_at, expires_at, last_seen_at, ended_at, created_at, updated_at, kind, repo, excerpt, controllable FROM issue_environment WHERE id = $1
+`
+
+func (q *Queries) GetIssueEnvironmentByID(ctx context.Context, id pgtype.UUID) (IssueEnvironment, error) {
+	row := q.db.QueryRow(ctx, getIssueEnvironmentByID, id)
+	var i IssueEnvironment
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.TaskID,
+		&i.RuntimeID,
+		&i.AgentID,
+		&i.LocalKey,
+		&i.Source,
+		&i.Name,
+		&i.Label,
+		&i.Url,
+		&i.Port,
+		&i.State,
+		&i.Detail,
+		&i.StartedAt,
+		&i.ExpiresAt,
+		&i.LastSeenAt,
+		&i.EndedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Kind,
+		&i.Repo,
+		&i.Excerpt,
+		&i.Controllable,
+	)
+	return i, err
+}
+
 const getIssueEnvironmentCommand = `-- name: GetIssueEnvironmentCommand :one
 SELECT id, workspace_id, issue_id, runtime_id, environment_id, task_id, action, local_key, repo, name, actor_type, actor_id, status, error, output, result_key, created_at, claimed_at, completed_at FROM issue_environment_command
 WHERE id = $1 AND issue_id = $2 AND workspace_id = $3

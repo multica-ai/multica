@@ -42,7 +42,8 @@ type Definition struct {
 	// (a worker, say).
 	URL string
 	// Ready is polled until it answers; it defaults to URL.
-	Ready string
+	Ready         string
+	ReadyExplicit bool
 	// Stop, when set, is run instead of signalling the start command's process
 	// group. The group is still signalled afterwards if anything is left.
 	Stop string
@@ -128,13 +129,14 @@ func ParseConfig(data []byte) (Config, error) {
 			return Config{}, fmt.Errorf("environment name %q must be lowercase letters, digits, - or _ (at most 40)", name)
 		}
 		def := Definition{
-			Name:  name,
-			Label: strings.TrimSpace(raw.Label),
-			Start: strings.TrimSpace(raw.Start),
-			URL:   "http://localhost:$MULTICA_PORT",
-			Ready: strings.TrimSpace(raw.Ready),
-			Stop:  strings.TrimSpace(raw.Stop),
-			TTL:   DefaultTTL,
+			Name:          name,
+			Label:         strings.TrimSpace(raw.Label),
+			Start:         strings.TrimSpace(raw.Start),
+			URL:           "http://localhost:$MULTICA_PORT",
+			Ready:         strings.TrimSpace(raw.Ready),
+			ReadyExplicit: strings.TrimSpace(raw.Ready) != "",
+			Stop:          strings.TrimSpace(raw.Stop),
+			TTL:           DefaultTTL,
 		}
 		if def.Start == "" {
 			return Config{}, fmt.Errorf("environment %q has no start command", name)

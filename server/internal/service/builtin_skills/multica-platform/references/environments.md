@@ -11,8 +11,17 @@ the issue sidebar's **Environments** section. It comes from one of two places:
   inside an issue run's directory, seen on two scans about 30 seconds apart.
   Members can only stop it; there is no log and no restart.
 
-Both work on macOS and Linux only. A `localhost` URL opens only on the machine
-running it.
+Both work on macOS and Linux. A `localhost` URL opens on the machine running
+the environment. For direct LAN/VPN links, set the daemon's
+`MULTICA_ENV_PUBLIC_HOST` to a reachable hostname or IP. Declared URLs can use
+`$MULTICA_HOST`. With a host override, implicit readiness probes use
+`127.0.0.1`. Explicit `ready` addresses keep their configured values.
+
+The server can relay loopback links when `MULTICA_ENV_PROXY_BASE_URL` is a
+dedicated wildcard origin and the daemon supports environment tunnels. The
+relay requires a single API replica. The browser exchanges a one-time ticket
+for a host-only preview cookie while `COOKIE_DOMAIN` stays unset. Direct
+LAN/VPN links remain available when Cloud disables the relay.
 
 ## CLI
 
@@ -64,7 +73,7 @@ ttl = "24h"                         # 1m to 168h, default 24h
 | Field | Contract |
 |---|---|
 | `start` | Run with `/bin/sh -c` from the directory that holds `.multica/`, as the leader of a new process group. The environment lives as long as any process in that group does, and stopping it signals that group. A command that hands its work to something outside the group, such as `docker compose up -d`, a system service, or `setsid`, ends the environment as `exited` at once, and stopping it would not reach that work. |
-| `url` | Where a member opens it. `$MULTICA_PORT` or `${MULTICA_PORT}` is substituted; no other variable or arithmetic is. Set `url = ""` for a worker or a desktop app. |
+| `url` | Where a member opens it. `$MULTICA_PORT` and `$MULTICA_HOST` (also `${...}` forms) are substituted; other variables and arithmetic are not. Set `url = ""` for a worker or a desktop app. |
 | `ready` | Polled once a second until it answers with any status below 500 (a 404 counts). With no `ready` and no `url`, the environment is running as soon as `start` launches. |
 | `stop` | Run with the same directory and variables, with a one-minute limit. Afterwards the process group gets `SIGTERM`, then `SIGKILL` 10 seconds later. Needed whenever `start` creates something the process group does not own, such as containers. |
 | `ttl` | A Go duration: `30m`, `8h`, `168h`. `7d` is rejected. |
@@ -76,6 +85,7 @@ The start and stop commands receive:
   runs on one machine must not collide. Derive extra ports in the shell, for
   example `API_PORT=$((MULTICA_PORT + 1))`.
 - `MULTICA_ENVIRONMENT`: the environment's name.
+- `MULTICA_HOST`: the daemon's `MULTICA_ENV_PUBLIC_HOST`, or `localhost`.
 - The caller's `PATH`, and the daemon's other variables. No other
   `MULTICA_*` variable is passed, credentials included, so the environment
   cannot act as the run.

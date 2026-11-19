@@ -142,6 +142,10 @@ type Config struct {
 	// routes /plugin-surfaces/* back to this server. It must not be the app/API
 	// origin: the route serves stored third-party JavaScript as HTML.
 	PluginSurfaceOrigin string
+	EnvProxyBaseURL     string
+	BackendReplicas     int
+	// EnvProxyMaxBodyBytes caps a relayed preview request body; zero selects 32 MiB.
+	EnvProxyMaxBodyBytes int64
 	// LLM* configure the basic LLM API layer (MUL-4238). They back the
 	// server-internal LLM helpers in pkg/llm (e.g. chat title generation).
 	// The generic OpenAI-compatible passthrough endpoints were removed in
@@ -223,6 +227,7 @@ type RuntimeRecoveryNotifier interface {
 }
 
 type Handler struct {
+	envProxy               *environmentProxy
 	InboxReads             *inboxread.Guard
 	InboxTrimmer           *inbox.Trimmer // nil leaves inboxes untrimmed
 	Queries                *db.Queries
@@ -273,6 +278,7 @@ type Handler struct {
 	HeartbeatScheduler HeartbeatScheduler
 	Storage            storage.Storage
 	CFSigner           *auth.CloudFrontSigner
+	CloudPAT           *auth.CloudPATVerifier
 	Analytics          analytics.Client
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
@@ -532,6 +538,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	// a disabled client, which turns the feature off rather than failing.
 	taskSvc.QuickActions = llmClient
 	h := &Handler{
+		envProxy:                     newEnvironmentProxy(cfg),
 		Queries:                      queries,
 		ReadSelector:                 dbreader.NewPrimaryOnly(queries),
 		DB:                           executor,
@@ -589,6 +596,16 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	h.PRRefresh = ghsnapshot.NewManager(ghClient, queries, txStarter, h.broadcastPRSnapshotApplied)
 	taskSvc.PRSnapshotsEnabled = h.PRRefresh.Enabled()
 
+	if h.envProxy != nil {
+		h.envProxy.initProxy(h.dialEnvironmentTunnel)
+		h.envProxy.notifyTunnel = func(runtimeID, kind string) bool {
+			if h.DaemonHub == nil || h.DaemonHub.RuntimeConnectionCount(runtimeID) == 0 {
+				return false
+			}
+			h.DaemonHub.NotifyPendingWork(runtimeID, kind)
+			return true
+		}
+	}
 	return h
 }
 
@@ -835,10 +852,15 @@ func (h *Handler) notifyDaemonWorkspacesChanged(userIDs ...string) {
 // NotifyRuntimeGone emits the post-commit runtime invalidation signal. It is
 // exported so the runtime GC can use the same publisher as request handlers.
 func (h *Handler) NotifyRuntimeGone(runtimeID string) {
-	if h == nil || h.DaemonRuntimeGone == nil || runtimeID == "" {
+	if h == nil || runtimeID == "" {
 		return
 	}
-	h.DaemonRuntimeGone.NotifyRuntimeGone(runtimeID)
+	if h.envProxy != nil {
+		h.envProxy.state.revoke(environmentRevocationKey{runtimeID: runtimeID})
+	}
+	if h.DaemonRuntimeGone != nil {
+		h.DaemonRuntimeGone.NotifyRuntimeGone(runtimeID)
+	}
 }
 
 // NotifyRuntimeRecovered republishes the workspace-scoped daemon:register

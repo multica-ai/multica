@@ -79,9 +79,10 @@ multica env start web
 |---|---|
 | `MULTICA_PORT` | 포트 범위의 첫 번째 포트. 예: `41000` |
 | `MULTICA_ENVIRONMENT` | 환경 이름 |
+| `MULTICA_HOST` | URL 호스트: `MULTICA_ENV_PUBLIC_HOST`, 기본값은 `localhost` |
 | `PATH` | `multica env start`를 실행한 에이전트의 `PATH`. 저장소의 도구 체인을 찾을 수 있게 합니다. 사이드바에서 시작하면 이 태스크에서 에이전트가 그 환경에 마지막으로 쓴 `PATH`를 다시 씁니다. |
 
-데몬의 환경 변수도 물려받지만 `MULTICA_*` 변수(자격 증명 포함)는 빠집니다. 환경은 실행의 권한으로 동작할 수 없습니다. `url`과 `ready`에서는 `$MULTICA_PORT`(또는 `${MULTICA_PORT}`)만 치환됩니다. 두 번째 포트가 필요하면 `API_PORT=$((MULTICA_PORT + 1))`처럼 셸에서 계산하세요.
+데몬의 환경 변수도 물려받지만 `MULTICA_*` 변수(자격 증명 포함)는 빠집니다. 환경은 실행의 권한으로 동작할 수 없습니다. `url`과 `ready`에서는 `$MULTICA_PORT`와 `$MULTICA_HOST`를 치환합니다(`${...}` 형식도 지원). 두 번째 포트가 필요하면 `API_PORT=$((MULTICA_PORT + 1))`처럼 셸에서 계산하세요.
 
 ### `start`는 포그라운드에 두기 [#foreground]
 
@@ -90,6 +91,14 @@ multica env start web
 - 메인 서버는 포그라운드에 둡니다. `&`로 백그라운드에 띄운 보조 프로세스는 괜찮습니다. 같은 그룹에 남습니다.
 - `docker compose up -d`, 시스템 서비스, `setsid`처럼 작업을 그룹 밖으로 넘기지 마세요. 환경은 바로 **종료됨**이 되고, 중지해도 그 작업에 닿지 않습니다. 이런 도구는 포그라운드로 실행하고 `stop` 명령을 추가하세요.
 - 실행의 체크아웃에는 의존성이 설치되어 있지 않습니다. `start` 안에서 설치하세요. 데몬이 준비를 기다리는 10분에 그 시간도 포함됩니다.
+
+### 원격 미리보기 및 직접 접속 [#remote-access]
+
+LAN 또는 VPN으로 직접 접속하려면 데몬의 `MULTICA_ENV_PUBLIC_HOST`를 워크스페이스 멤버가 접근할 수 있는 호스트 이름 또는 IP로 설정하세요. 선언된 서버와 자동 감지된 서버 URL의 기본값인 `localhost`가 이 값으로 바뀝니다. 프록시가 켜져 있거나 Cloud에서 릴레이를 비활성화한 경우에도 직접 링크는 유지됩니다. 호스트를 지정하면 암시적 준비 확인은 `127.0.0.1`을 사용하고, 명시적인 `ready`는 설정된 주소를 사용합니다.
+
+루프백 URL을 릴레이하려면 서버의 `MULTICA_ENV_PROXY_BASE_URL`에 `https://*.preview.example.com` 또는 `https://env-*.preview.example.com` 같은 전용 와일드카드 오리진을 설정하세요. 멀티테넌트 공개 배포에서는 미리보기 서비스에 메인 사이트와 다른 등록 도메인(고유 eTLD+1, 예: `https://*.multica-preview.com`)을 사용해 미리보기 페이지가 설정한 쿠키가 메인 사이트 요청에 함께 전송되지 않도록 하세요. 와일드카드 DNS와 TLS를 API 인그레스에 연결하고 Host 및 WebSocket Upgrade 헤더를 유지합니다. 앱 오리진(`MULTICA_APP_URL`, 비어 있으면 `MULTICA_PUBLIC_URL`)은 `/api/*`를 API로 전달해야 합니다. 데몬은 환경 터널을 지원하고 이 API에 WebSocket으로 연결할 수 있어야 합니다. 프록시는 단일 API 복제본에서 실행하세요(`MULTICA_BACKEND_REPLICAS=1`). 오리진이 잘못되었거나 플랫폼 오리진과 겹치거나 복제본이 여러 개면 오류를 기록하고 프록시를 비활성화합니다.
+
+일회용 시작 티켓을 발급할 때 로그인 상태, 워크스페이스 멤버십, 비공개 프로젝트 접근 권한, 현재 Cloud 정책을 확인합니다. 브라우저는 티켓을 해당 미리보기 호스트 전용 단기 쿠키로 교환합니다. `COOKIE_DOMAIN`은 설정하지 않아도 됩니다. Cloud는 릴레이를 끄거나 워크스페이스당 활성 환경 수를 제한할 수 있습니다. 릴레이 요청 본문의 기본 제한은 32 MiB이며 `MULTICA_ENV_PROXY_MAX_BODY_BYTES`로 조정할 수 있습니다.
 
 ## 예시 [#examples]
 
@@ -237,7 +246,7 @@ services:
 ## 알려진 제한 [#limitations]
 
 - **macOS와 Linux만 지원합니다.** Windows에서는 서버가 감지되지 않고, `multica env start`는 아직 지원하지 않는다고 알립니다.
-- **localhost URL은 실행 중인 기기에서만 열립니다.** 빌드 서버나 동료의 컴퓨터처럼 다른 기기에서 실행 중이면 사이드바가 그렇게 표시합니다. 그 기기에서 열거나 직접 포트를 포워딩하세요.
+- **localhost URL은 실행 중인 기기에서만 열립니다.** 빌드 서버나 동료의 컴퓨터처럼 다른 기기에서 실행 중이면 사이드바가 그렇게 표시합니다. 그 기기에서 열거나, [원격 미리보기 또는 직접 접속](#remote-access)을 설정하거나, 직접 포트를 포워딩하세요.
 - **systemd에서의 데몬 재시작.** Linux에서 [로그인 시 자동 시작](/daemon-runtimes#autostart)을 쓰면, 데몬을 재시작하거나 업데이트할 때 선언된 환경도 함께 멈춥니다. 그 뒤 다시 시작하세요.
 - **환경은 한 기기에서만 실행됩니다.** 환경은 그것을 시작한 실행의 기기에서 실행되며 태스크를 따라 옮겨 가지 않습니다.
 

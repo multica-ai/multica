@@ -26,6 +26,10 @@ const (
 	// provider in a period. Like autopilot_runs it is a budget with a
 	// Cloud-defined period that resets.
 	GateAppToolCalls GateName = "app_tool_calls"
+	// GateEnvironmentProxy caps concurrent remote environment preview leases for
+	// a workspace. A limit of 0 disables remote preview; positive limits cap
+	// concurrent active environment leases without requiring period fields.
+	GateEnvironmentProxy GateName = "environment_proxy"
 )
 
 // MaxDashboardHistoryDays is the largest dashboard_history_days limit Cloud
@@ -34,7 +38,7 @@ const MaxDashboardHistoryDays = 365
 
 func (n GateName) valid() bool {
 	switch n {
-	case GateAutopilotRuns, GateMembers, GateStorageBytes, GateDashboardHistoryDays, GateAppToolCalls:
+	case GateAutopilotRuns, GateMembers, GateStorageBytes, GateDashboardHistoryDays, GateAppToolCalls, GateEnvironmentProxy:
 		return true
 	default:
 		return false

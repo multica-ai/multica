@@ -4821,6 +4821,10 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 	}
 	// Environment commands have their own claim, and are answered by a member
 	// waiting in the sidebar, so they skip the heartbeat and its rate limit.
+	if strings.HasPrefix(kind, protocol.PendingWorkKindEnvironmentTunnelPrefix) {
+		go d.openEnvironmentTunnel(d.recoveryContext(), runtimeID, strings.TrimPrefix(kind, protocol.PendingWorkKindEnvironmentTunnelPrefix))
+		return
+	}
 	if kind == protocol.PendingWorkKindEnvironmentCommand {
 		if ctx := d.recoveryContext(); ctx.Err() == nil {
 			d.environments.claimCommands(ctx, runtimeID)
