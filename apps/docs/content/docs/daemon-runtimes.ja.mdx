@@ -61,6 +61,18 @@ multica daemon start
 
 デーモンは、組み込みで対応している AI コーディングツールを少なくとも 1 つ検出できないと起動しません。インストール方法と実行コマンド名は [AI コーディングツールのインストール](/install-agent-runtime)を参照してください。
 
+### Linux コンテナで実行する [#linux-container]
+
+イメージに Multica CLI と対応するコーディングツールを 1 つ以上インストールし、コンテナを非 root ユーザーで実行します。`MULTICA_SERVER_URL` にはコンテナ内からアクセスできる API URL を設定します。個人アクセストークンをシークレットとしてマウントし、標準入力でログインコマンドに渡します。`my-workspace` はワークスペースのスラッグに置き換えてください。
+
+```bash
+multica --profile container login --token < /run/secrets/multica-pat
+multica --profile container workspace switch my-workspace
+exec multica --profile container daemon start --foreground --no-auto-update
+```
+
+プロファイルの初期設定時にログインとワークスペース選択を行います。コンテナを置き換えてもデータを保持する場合は、コンテナユーザーの `~/.multica` と作業ディレクトリのルートを書き込み可能な永続ストレージに置きます。コーディングツールの認証は別途設定します。フォアグラウンドのデーモンの再起動はコンテナ管理側に任せ、CLI の更新はイメージの置き換えで行います。
+
 ### ログイン時の自動起動 [#autostart]
 
 CLI で起動したデーモンは、コンピューターを再起動すると自動では戻りません。自動で起動させるには、現在のプロファイルを登録します。

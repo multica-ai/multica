@@ -61,6 +61,18 @@ Au démarrage, le daemon détecte les outils de codage IA pris en charge présen
 
 Pour démarrer, le daemon a besoin de détecter au moins un outil de codage IA intégré pris en charge. Les méthodes d'installation et les noms des exécutables figurent dans [Installer les outils de codage IA](/install-agent-runtime).
 
+### Exécuter dans un conteneur Linux [#linux-container]
+
+Installez le CLI Multica et au moins un outil de développement pris en charge dans l’image. Exécutez le conteneur avec un utilisateur non root. Définissez `MULTICA_SERVER_URL` sur l’URL de l’API accessible depuis le conteneur. Montez un jeton d’accès personnel comme secret et transmettez-le à la commande de connexion par l’entrée standard. Remplacez `my-workspace` par le slug de votre espace de travail.
+
+```bash
+multica --profile container login --token < /run/secrets/multica-pat
+multica --profile container workspace switch my-workspace
+exec multica --profile container daemon start --foreground --no-auto-update
+```
+
+Connectez-vous et sélectionnez l’espace de travail lors de l’initialisation du profil. Si les données doivent survivre au remplacement du conteneur, placez le répertoire `~/.multica` de l’utilisateur du conteneur et la racine des répertoires de travail sur un stockage persistant accessible en écriture. Configurez séparément l’authentification de l’outil de développement. Laissez le gestionnaire du conteneur redémarrer le daemon au premier plan et remplacez l’image pour mettre à jour le CLI.
+
 ### Démarrage à l'ouverture de session [#autostart]
 
 Un daemon lancé depuis la CLI ne revient pas de lui-même après un redémarrage. Pour qu'il démarre automatiquement, enregistrez le profil courant :
