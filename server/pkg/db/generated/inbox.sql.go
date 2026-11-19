@@ -199,7 +199,7 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 }
 
 const archiveInboxOverflow = `-- name: ArchiveInboxOverflow :execrows
-WITH boundary AS (
+WITH boundary AS MATERIALIZED (
     SELECT GREATEST(b.created_at, b.returned_at) AS shown_at, b.id
     FROM inbox_item b
     LEFT JOIN issue b_iss ON b_iss.id = b.issue_id
@@ -223,6 +223,18 @@ WITH boundary AS (
       AND ($4::uuid[] IS NULL OR o_iss.project_id IS NULL
            OR NOT (o_iss.project_id = ANY($4::uuid[])))
       AND (GREATEST(o.created_at, o.returned_at), o.id) < (boundary.shown_at, boundary.id)
+      -- An issue back from a snooze whose newest row does not carry the
+      -- return yet (written by an older server, or not normalized) ranks too
+      -- low here; never archive that row on its stale rank.
+      AND NOT (o.issue_id IS NOT NULL AND o.snoozed_until IS NOT NULL
+               AND (o.returned_at IS NULL OR o.returned_at < o.snoozed_until)
+               AND NOT EXISTS (
+                   SELECT 1 FROM inbox_item newer
+                   WHERE newer.workspace_id = o.workspace_id AND newer.recipient_type = o.recipient_type
+                     AND newer.recipient_id = o.recipient_id AND newer.issue_id = o.issue_id
+                     AND newer.archived = false
+                     AND (newer.created_at, newer.id) > (o.created_at, o.id)
+               ))
     ORDER BY GREATEST(o.created_at, o.returned_at), o.id
     LIMIT $6::int
     FOR UPDATE OF o SKIP LOCKED
@@ -249,6 +261,7 @@ type ArchiveInboxOverflowParams struct {
 // behind the user's back, and hidden rows never push out visible ones. SKIP LOCKED keeps a trim from waiting on, or
 // deadlocking with, the user's own inbox writes; InboxOverflows tells the
 // caller whether skipped rows remain.
+// MATERIALIZED: the boundary is read once per statement, not once per row.
 // ANY(ARRAY(...)) keeps the update on primary-key lookups; a join against the
 // CTE lets the planner pick a scan of the whole table.
 func (q *Queries) ArchiveInboxOverflow(ctx context.Context, arg ArchiveInboxOverflowParams) (int64, error) {
@@ -260,6 +273,46 @@ func (q *Queries) ArchiveInboxOverflow(ctx context.Context, arg ArchiveInboxOver
 		arg.Keep,
 		arg.BatchSize,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const backfillInboxSnoozeReturns = `-- name: BackfillInboxSnoozeReturns :execrows
+WITH candidates AS (
+    SELECT s.id
+    FROM inbox_item s
+    WHERE ($1::uuid IS NULL OR s.workspace_id = $1::uuid)
+      AND s.archived = false AND s.issue_id IS NOT NULL
+      AND s.snoozed_until IS NOT NULL AND s.returned_at IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM inbox_item newer
+          WHERE newer.workspace_id = s.workspace_id AND newer.recipient_type = s.recipient_type
+            AND newer.recipient_id = s.recipient_id AND newer.issue_id = s.issue_id
+            AND newer.archived = false
+            AND (newer.created_at, newer.id) > (s.created_at, s.id)
+      )
+    LIMIT $2::int
+    FOR UPDATE OF s SKIP LOCKED
+)
+UPDATE inbox_item AS item SET returned_at = item.snoozed_until
+WHERE item.id = ANY (ARRAY(SELECT candidates.id FROM candidates))
+`
+
+type BackfillInboxSnoozeReturnsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	BatchSize   int32       `json:"batch_size"`
+}
+
+// Gives up to batch_size snoozed issues their return rank where a writer that
+// predates returned_at left it out: the issue's newest active row ranks by
+// when the snooze ends. Snoozes set before the column existed, and by an
+// older server during the rollout. Skips rows another write holds and
+// touches only rows still without a rank, so it can run again at any time.
+// workspace_id narrows it for tests; production passes NULL.
+func (q *Queries) BackfillInboxSnoozeReturns(ctx context.Context, arg BackfillInboxSnoozeReturnsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, backfillInboxSnoozeReturns, arg.WorkspaceID, arg.BatchSize)
 	if err != nil {
 		return 0, err
 	}
@@ -372,10 +425,10 @@ INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
     actor_type, actor_id, details, id,
-    snoozed_until, snoozed_at
+    snoozed_until, snoozed_at, returned_at
 )
 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, gen_random_uuid()),
-       snoozed.snoozed_until, snoozed.snoozed_at
+       snoozed.snoozed_until, snoozed.snoozed_at, snoozed.snoozed_until
 FROM (SELECT 1) AS one
 LEFT JOIN LATERAL (
     SELECT s.snoozed_until, s.snoozed_at
@@ -424,7 +477,9 @@ type CreateInboxItemParams struct {
 // MUL-9333: a row written on an issue the recipient has snoozed joins the
 // snooze, so it stays out of the inbox with the rest of the issue.
 // inbox.Deliver ends the snooze instead when the row is one that
-// wakes it.
+// wakes it. A joining row is the issue's newest, so it carries the issue's
+// return rank (returned_at, the snooze end); inbox.Deliver clears it from the
+// row that held it (HandInboxReturnToRow).
 // MUL-8472: a member outside a private project gets no notification about its
 // issues, whatever their workspace role. Only project members do.
 func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams) (InboxItem, error) {
@@ -535,6 +590,37 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 	return i, err
 }
 
+const handInboxReturnToRow = `-- name: HandInboxReturnToRow :exec
+UPDATE inbox_item AS item SET returned_at = NULL
+FROM inbox_item AS kept
+WHERE kept.id = $5
+  AND item.workspace_id = $1 AND item.recipient_type = $2 AND item.recipient_id = $3 AND item.issue_id = $4
+  AND item.archived = false AND item.returned_at IS NOT NULL
+  AND (item.created_at, item.id) < (kept.created_at, kept.id)
+`
+
+type HandInboxReturnToRowParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	KeepID        pgtype.UUID `json:"keep_id"`
+}
+
+// Clears the issue's return rank from the active rows older than keep_id, the
+// row that now carries it (see CreateInboxItem). Only older rows: two joining
+// rows handing over concurrently, in either order, leave the rank on the newer.
+func (q *Queries) HandInboxReturnToRow(ctx context.Context, arg HandInboxReturnToRowParams) error {
+	_, err := q.db.Exec(ctx, handInboxReturnToRow,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.IssueID,
+		arg.KeepID,
+	)
+	return err
+}
+
 const inboxOverflows = `-- name: InboxOverflows :one
 SELECT count(*) > 0 FROM (
     SELECT 1 FROM inbox_item i
@@ -570,6 +656,49 @@ func (q *Queries) InboxOverflows(ctx context.Context, arg InboxOverflowsParams) 
 		arg.HiddenProjectIds,
 		arg.Keep,
 	)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const inboxReturnsSettled = `-- name: InboxReturnsSettled :one
+WITH marked AS MATERIALIZED (
+    SELECT g.issue_id, max(g.returned_at) AS returned_at
+    FROM inbox_item g
+    WHERE g.workspace_id = $1 AND g.recipient_type = $2 AND g.recipient_id = $3
+      AND g.archived = false AND g.issue_id IS NOT NULL
+      AND (g.returned_at IS NOT NULL OR g.snoozed_until IS NOT NULL)
+    GROUP BY g.issue_id
+), wanted AS MATERIALIZED (
+    SELECT DISTINCT ON (r.issue_id) r.issue_id, r.id,
+           GREATEST(marked.returned_at, r.snoozed_until) AS returned_at
+    FROM inbox_item r
+    JOIN marked ON marked.issue_id = r.issue_id
+    WHERE r.workspace_id = $1 AND r.recipient_type = $2 AND r.recipient_id = $3
+      AND r.archived = false
+    ORDER BY r.issue_id, r.created_at DESC, r.id DESC
+)
+SELECT count(*) = 0 FROM (
+    SELECT 1 FROM inbox_item item
+    JOIN wanted ON wanted.issue_id = item.issue_id
+    WHERE item.workspace_id = $1 AND item.recipient_type = $2 AND item.recipient_id = $3
+      AND item.archived = false
+      AND item.returned_at IS DISTINCT FROM (CASE WHEN item.id = wanted.id THEN wanted.returned_at END)
+    LIMIT 1
+) unsettled
+`
+
+type InboxReturnsSettledParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+// Whether NormalizeInboxReturns has nothing left to fix for the recipient,
+// rows another write holds included. The inbox limit archives only then, so
+// an unsettled duplicate rank never widens the set of rows it keeps.
+func (q *Queries) InboxReturnsSettled(ctx context.Context, arg InboxReturnsSettledParams) (bool, error) {
+	row := q.db.QueryRow(ctx, inboxReturnsSettled, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -1116,50 +1245,62 @@ func (q *Queries) MarkInboxUnread(ctx context.Context, id pgtype.UUID) (InboxIte
 }
 
 const normalizeInboxReturns = `-- name: NormalizeInboxReturns :execrows
-WITH ranked_groups AS (
-    SELECT g.issue_id,
-           max(g.returned_at) AS returned_at
+WITH marked AS MATERIALIZED (
+    SELECT g.issue_id, max(g.returned_at) AS returned_at
     FROM inbox_item g
     WHERE g.workspace_id = $1 AND g.recipient_type = $2
       AND g.recipient_id = $3
       AND g.archived = false AND g.issue_id IS NOT NULL
       AND (g.returned_at IS NOT NULL OR g.snoozed_until IS NOT NULL)
     GROUP BY g.issue_id
-), representative AS (
+), wanted AS MATERIALIZED (
     SELECT DISTINCT ON (r.issue_id) r.issue_id, r.id,
-           GREATEST(ranked_groups.returned_at, r.snoozed_until) AS returned_at
+           GREATEST(marked.returned_at, r.snoozed_until) AS returned_at
     FROM inbox_item r
-    JOIN ranked_groups ON ranked_groups.issue_id = r.issue_id
+    JOIN marked ON marked.issue_id = r.issue_id
     WHERE r.workspace_id = $1 AND r.recipient_type = $2
       AND r.recipient_id = $3
       AND r.archived = false
     ORDER BY r.issue_id, r.created_at DESC, r.id DESC
+), stale AS (
+    SELECT item.id, CASE WHEN item.id = wanted.id THEN wanted.returned_at END AS returned_at
+    FROM inbox_item item
+    JOIN wanted ON wanted.issue_id = item.issue_id
+    WHERE item.workspace_id = $1 AND item.recipient_type = $2
+      AND item.recipient_id = $3
+      AND item.archived = false
+      AND item.returned_at IS DISTINCT FROM (CASE WHEN item.id = wanted.id THEN wanted.returned_at END)
+    ORDER BY item.issue_id, item.id
+    LIMIT $4::int
+    FOR UPDATE OF item SKIP LOCKED
 )
-UPDATE inbox_item AS item
-SET returned_at = CASE WHEN item.id = representative.id THEN representative.returned_at END
-FROM representative
-WHERE item.workspace_id = $1 AND item.recipient_type = $2
-  AND item.recipient_id = $3
-  AND item.archived = false
-  AND item.issue_id = representative.issue_id
-  AND item.returned_at IS DISTINCT FROM (CASE WHEN item.id = representative.id THEN representative.returned_at END)
+UPDATE inbox_item AS fixed
+SET returned_at = (SELECT stale.returned_at FROM stale WHERE stale.id = fixed.id)
+WHERE fixed.id = ANY (ARRAY(SELECT stale.id FROM stale))
 `
 
 type NormalizeInboxReturnsParams struct {
 	WorkspaceID   pgtype.UUID `json:"workspace_id"`
 	RecipientType string      `json:"recipient_type"`
 	RecipientID   pgtype.UUID `json:"recipient_id"`
+	BatchSize     int32       `json:"batch_size"`
 }
 
 // Leaves at most one row per issue ranked by its return (returned_at): the
 // issue's newest active row, carrying the latest return any of its rows had,
-// or its snooze time. Rows that joined a snooze after it started (a comment
-// that arrived meanwhile) thereby take over the issue's rank from the row that
-// was newest when it was snoozed, and snoozes written without returned_at (by
-// an older server, before the column existed) get one. The inbox limit runs
-// this before it archives anything, so a ranking gap never costs a row.
+// or its snooze time. Writes keep this true; this repairs what they could not,
+// such as rows an older server wrote during a rollout. Fixes up to batch_size
+// rows, skipping rows another write holds, so it never waits on a lock; the
+// caller runs it again while it returns a full batch.
+// MATERIALIZED: each step runs once; inlined, a planner without statistics
+// re-ran them for every row.
 func (q *Queries) NormalizeInboxReturns(ctx context.Context, arg NormalizeInboxReturnsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, normalizeInboxReturns, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
+	result, err := q.db.Exec(ctx, normalizeInboxReturns,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.BatchSize,
+	)
 	if err != nil {
 		return 0, err
 	}

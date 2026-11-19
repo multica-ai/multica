@@ -31,13 +31,23 @@ const (
 	// into one trim, and one inbox:batch-archived, per round.
 	trimInterval    = 30 * time.Second
 	trimRoundBudget = 25 * time.Second
+
+	// backfillReruns are when, after start, Run gives snoozes written without
+	// a return rank their rank (BackfillInboxSnoozeReturns): at once for
+	// snoozes that predate the column, and again once a rolling deploy's
+	// older servers, which still write them without one, are gone.
+	backfillBudget = 2 * time.Minute
 )
+
+var backfillReruns = []time.Duration{0, 15 * time.Minute}
 
 // TrimQueries is the slice of db.Queries a Trimmer uses.
 type TrimQueries interface {
 	InboxOverflows(ctx context.Context, arg db.InboxOverflowsParams) (bool, error)
 	ArchiveInboxOverflow(ctx context.Context, arg db.ArchiveInboxOverflowParams) (int64, error)
 	NormalizeInboxReturns(ctx context.Context, arg db.NormalizeInboxReturnsParams) (int64, error)
+	InboxReturnsSettled(ctx context.Context, arg db.InboxReturnsSettledParams) (bool, error)
+	BackfillInboxSnoozeReturns(ctx context.Context, arg db.BackfillInboxSnoozeReturnsParams) (int64, error)
 	ListHiddenProjectIDsForUser(ctx context.Context, arg db.ListHiddenProjectIDsForUserParams) ([]pgtype.UUID, error)
 }
 
@@ -138,6 +148,7 @@ func recipientOfNewItem(e events.Event) (Recipient, bool) {
 
 // Run trims the marked inboxes every trimInterval until ctx ends.
 func (t *Trimmer) Run(ctx context.Context) {
+	go t.runBackfill(ctx)
 	ticker := time.NewTicker(trimInterval)
 	defer ticker.Stop()
 	for {
@@ -148,6 +159,41 @@ func (t *Trimmer) Run(ctx context.Context) {
 			roundCtx, cancel := context.WithTimeout(ctx, trimRoundBudget)
 			t.Flush(roundCtx)
 			cancel()
+		}
+	}
+}
+
+func (t *Trimmer) runBackfill(ctx context.Context) {
+	start := time.Now()
+	for _, at := range backfillReruns {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(time.Until(start.Add(at))):
+		}
+		runCtx, cancel := context.WithTimeout(ctx, backfillBudget)
+		n, err := t.Backfill(runCtx, pgtype.UUID{})
+		cancel()
+		if err != nil {
+			slog.Warn("inbox snooze return backfill failed", "count", n, "error", err)
+		} else if n > 0 {
+			slog.Info("inbox snooze return backfill ranked snoozed issues", "count", n)
+		}
+	}
+}
+
+// Backfill gives every snoozed issue written without a return rank its rank,
+// in batches that skip rows another write holds. workspaceID narrows it (for
+// tests); the zero value covers every workspace.
+func (t *Trimmer) Backfill(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	var total int64
+	for {
+		n, err := t.queries.BackfillInboxSnoozeReturns(ctx, db.BackfillInboxSnoozeReturnsParams{
+			WorkspaceID: workspaceID, BatchSize: trimBatchSize,
+		})
+		total += n
+		if err != nil || n < trimBatchSize {
+			return total, err
 		}
 	}
 }
@@ -207,10 +253,12 @@ func (t *Trimmer) trim(ctx context.Context, r Recipient) (archived int64, done b
 		return 0, err == nil, err
 	}
 	// Settle which row ranks each issue by its return before ranking decides
-	// what to archive (see NormalizeInboxReturns).
-	if _, err := t.queries.NormalizeInboxReturns(ctx, db.NormalizeInboxReturnsParams{
-		WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
-	}); err != nil {
+	// what to archive (see NormalizeInboxReturns). Until every rank is
+	// settled, rows another write holds included, archive nothing: an
+	// unsettled duplicate rank would keep a row that is not the issue's and
+	// push a real one out. The inbox stays queued for the next round.
+	settled, err := t.normalize(ctx, r)
+	if err != nil || !settled {
 		return 0, false, err
 	}
 	for range trimMaxBatches {
@@ -231,6 +279,27 @@ func (t *Trimmer) trim(ctx context.Context, r Recipient) (archived int64, done b
 		return archived, false, err
 	}
 	return archived, !over, nil
+}
+
+// normalize runs NormalizeInboxReturns until it returns a partial batch, at
+// most trimMaxBatches times, then reports whether anything is left: a
+// partial batch can also mean rows it skipped because another write held them.
+func (t *Trimmer) normalize(ctx context.Context, r Recipient) (settled bool, err error) {
+	for range trimMaxBatches {
+		n, err := t.queries.NormalizeInboxReturns(ctx, db.NormalizeInboxReturnsParams{
+			WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
+			BatchSize: trimBatchSize,
+		})
+		if err != nil {
+			return false, err
+		}
+		if n < trimBatchSize {
+			break
+		}
+	}
+	return t.queries.InboxReturnsSettled(ctx, db.InboxReturnsSettledParams{
+		WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
+	})
 }
 
 // hiddenProjects returns the private projects a member recipient cannot see,

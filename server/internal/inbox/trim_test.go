@@ -18,6 +18,16 @@ type fakeTrimQueries struct {
 	locked     int
 	archiveRun int
 	normalized int
+	unsettled  int // rows NormalizeInboxReturns still has to fix
+	held       int // unsettled rows another write holds, which it skips
+}
+
+func (f *fakeTrimQueries) InboxReturnsSettled(context.Context, db.InboxReturnsSettledParams) (bool, error) {
+	return f.unsettled == 0 && f.held == 0, nil
+}
+
+func (f *fakeTrimQueries) BackfillInboxSnoozeReturns(context.Context, db.BackfillInboxSnoozeReturnsParams) (int64, error) {
+	return 0, nil
 }
 
 func (f *fakeTrimQueries) InboxOverflows(_ context.Context, arg db.InboxOverflowsParams) (bool, error) {
@@ -28,9 +38,11 @@ func (f *fakeTrimQueries) ListHiddenProjectIDsForUser(context.Context, db.ListHi
 	return nil, nil
 }
 
-func (f *fakeTrimQueries) NormalizeInboxReturns(context.Context, db.NormalizeInboxReturnsParams) (int64, error) {
+func (f *fakeTrimQueries) NormalizeInboxReturns(_ context.Context, arg db.NormalizeInboxReturnsParams) (int64, error) {
 	f.normalized++
-	return 0, nil
+	n := min(f.unsettled, int(arg.BatchSize))
+	f.unsettled -= n
+	return int64(n), nil
 }
 
 func (f *fakeTrimQueries) ArchiveInboxOverflow(_ context.Context, arg db.ArchiveInboxOverflowParams) (int64, error) {
@@ -184,4 +196,46 @@ func TestTrimmerMarksInboxesThatMayHaveGrown(t *testing.T) {
 func TestNilTrimmerMarkIsNoop(t *testing.T) {
 	var tr *Trimmer
 	tr.Mark(trimRecipient)
+}
+
+// Return ranks left unsettled after a round's normalize budget keep the inbox
+// queued, so the next round finishes them.
+func TestTrimmerRequeuesInboxWithUnsettledReturns(t *testing.T) {
+	q := &fakeTrimQueries{rows: ActiveLimit + 1, unsettled: trimMaxBatches*trimBatchSize + 1}
+	tr := NewTrimmer(q, nil)
+
+	tr.Mark(trimRecipient)
+	tr.Flush(context.Background())
+	if _, ok := tr.pending[trimRecipient]; !ok || q.normalized != trimMaxBatches {
+		t.Fatalf("pending=%v normalize calls=%d; want queued after %d calls", tr.pending, q.normalized, trimMaxBatches)
+	}
+
+	// Ranks only matter while the inbox is over the limit.
+	q.rows = ActiveLimit + 1
+	tr.Flush(context.Background())
+	if len(tr.pending) != 0 || q.unsettled != 0 {
+		t.Fatalf("pending=%v unsettled=%d after the next round", tr.pending, q.unsettled)
+	}
+}
+
+// Unsettled ranks normalize skipped because another write held them block
+// this round's archive: a duplicate rank would keep the wrong row.
+func TestTrimmerArchivesNothingWhileRanksAreHeld(t *testing.T) {
+	q := &fakeTrimQueries{rows: ActiveLimit + 2, held: 1}
+	tr := NewTrimmer(q, nil)
+
+	tr.Mark(trimRecipient)
+	tr.Flush(context.Background())
+	if q.archiveRun != 0 || q.rows != ActiveLimit+2 {
+		t.Fatalf("archive runs=%d rows=%d; want nothing archived while a rank is held", q.archiveRun, q.rows)
+	}
+	if _, ok := tr.pending[trimRecipient]; !ok {
+		t.Fatal("inbox with a held rank was not queued for the next round")
+	}
+
+	q.held = 0
+	tr.Flush(context.Background())
+	if q.rows != ActiveLimit || len(tr.pending) != 0 {
+		t.Fatalf("rows=%d pending=%v once the lock cleared", q.rows, tr.pending)
+	}
 }
