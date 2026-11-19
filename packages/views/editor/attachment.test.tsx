@@ -1287,13 +1287,14 @@ describe("image download feedback", () => {
     downloadMock.mockReturnValueOnce(pending.promise);
     renderWithQuery(<Attachment attachment={{ kind: "record", attachment: makeRecord() }} />);
     const button = screen.getByRole("button", { name: "Download" });
+    const toolbar = button.closest(".image-toolbar");
 
     fireEvent.click(button);
 
     expect(button).toBeDisabled();
     expect(button).toHaveAttribute("aria-busy", "true");
     expect(button.querySelector(".animate-spin")).toBeInTheDocument();
-    expect(button.closest(".image-toolbar")).toHaveStyle({ opacity: "1" });
+    expect(toolbar).toHaveAttribute("data-placement");
     fireEvent.click(button);
     expect(downloadMock).toHaveBeenCalledExactlyOnceWith("att-1");
 
@@ -1302,6 +1303,7 @@ describe("image download feedback", () => {
     expect(button).toBeEnabled();
     expect(button).toHaveAttribute("aria-busy", "false");
     expect(button.querySelector(".animate-spin")).toBeNull();
+    expect(toolbar).not.toHaveAttribute("data-placement");
   });
 
   it("keeps sibling images available while preparing a download", async () => {
