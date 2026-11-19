@@ -3688,7 +3688,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             issueId: id, replyScrollParent: scrollContainerEl, entry: reply, replies: timelineView.threadReplies.get(reply.id) ?? EMPTY_REPLIES,
             currentUserId: user?.id, canModerate: canModerateComments, onReply: submitReply,
             onReplyAccepted: scrollToTimelineBottom, onEdit: editComment, onDelete: deleteComment,
-            onToggleReaction: handleToggleReaction, onCreateSubIssue: openCommentSubIssue,
+            onToggleReaction: handleToggleReaction, onCreateSubIssue: guest ? undefined : openCommentSubIssue,
             onResolveToggle: handleResolveToggle,
             onCopyLink: actions.copyCommentLink, onJumpToComment: jumpToComment,
             onCollapseResolved: reply.resolved_at ? () => toggleResolvedExpand(reply.id, false) : undefined,
@@ -3727,7 +3727,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnsubscribeArchive, d
             onEdit={editComment}
             onDelete={deleteComment}
             onToggleReaction={handleToggleReaction}
-            onCreateSubIssue={openCommentSubIssue}
+            onCreateSubIssue={guest ? undefined : openCommentSubIssue}
             onResolveToggle={handleResolveToggle}
             onCopyLink={actions.copyCommentLink}
             onJumpToComment={jumpToComment}
