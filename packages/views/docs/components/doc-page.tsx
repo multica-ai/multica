@@ -41,7 +41,16 @@ import { DocOutline, MIN_OUTLINE_HEADINGS, useDocOutline } from "./doc-outline";
 import { MoveDialog } from "./move-dialog";
 import { DeleteDocDialog } from "./doc-tree";
 import { useCanDeleteDoc } from "./use-can-delete-doc";
+import { DocsGate } from "./docs-gate";
 export function DocPage({ docId }: { docId: string }) {
+  return (
+    <DocsGate>
+      <DocPageContent docId={docId} />
+    </DocsGate>
+  );
+}
+
+function DocPageContent({ docId }: { docId: string }) {
   const wsId = useWorkspaceId();
   const { t } = useT("docs");
   const query = useQuery(docDetailOptions(wsId, docId));

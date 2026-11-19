@@ -13,7 +13,9 @@ import { inboxUnreadSummaryOptions } from "@multica/core/inbox/queries";
 import { useActiveIssueViewStore } from "@multica/core/issue-views/active-view-store";
 import { issueViewEverywhereOptions } from "@multica/core/issue-views/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { configStore } from "@multica/core/config";
 import { docTreeOptions } from "@multica/core/docs";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { WORKSPACE_PAGES } from "@multica/core/paths";
@@ -372,6 +374,7 @@ describe("SearchCommand", () => {
     apiFns.set("searchIssues", vi.fn(() => Promise.resolve({ issues: [], total: 0 })));
     apiFns.set("searchProjects", vi.fn(() => Promise.resolve({ projects: [], total: 0 })));
     apiFns.set("searchDocs", vi.fn(() => Promise.resolve({ docs: [] })));
+    configStore.getState().setFeatureFlags({ [DOCS_V1_FLAG]: true });
     mockPush.mockReset();
     mockPathname.current = "/ws-test/issues";
     mockGetShareableUrl.mockReset().mockImplementation((p: string) => `https://app.multica/${p}`);
@@ -712,6 +715,23 @@ describe("SearchCommand", () => {
       expect(rows[0]).toHaveTextContent("Release runbookEngineering");
       fireEvent.click(rows[0]!);
       expect(mockPush).toHaveBeenCalledWith("/ws-test/docs/doc-runbook");
+    });
+
+    it("offers no Docs page or doc rows while docs_v1 is off", async () => {
+      configStore.getState().setFeatureFlags({});
+      seed(docTreeOptions("ws-test"), {
+        folders: [],
+        docs: [{ id: "doc-runbook", title: "Docs runbook", folderId: null }],
+      });
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "docs");
+
+      // Past the doc search debounce, so a request would have gone out.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+      expect(renderedValues()).not.toContain("page:docs");
+      expect(screen.queryByRole("group", { name: "Docs" })).not.toBeInTheDocument();
+      expect(api("searchDocs")).not.toHaveBeenCalled();
     });
 
     it("adds server content hits under Docs with an excerpt, without repeating title hits", async () => {

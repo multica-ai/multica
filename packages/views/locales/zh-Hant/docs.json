@@ -57,5 +57,9 @@
   },
   "edited": "{{time}}編輯",
   "outline": "大綱",
-  "link_copied": "連結已複製"
+  "link_copied": "連結已複製",
+  "unavailable": {
+    "title": "知識庫暫未開放",
+    "description": "目前工作區尚未開啟知識庫。"
+  }
 }

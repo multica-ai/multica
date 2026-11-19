@@ -57,5 +57,9 @@
   },
   "edited": "{{time}} 편집",
   "outline": "개요",
-  "link_copied": "링크를 복사했습니다"
+  "link_copied": "링크를 복사했습니다",
+  "unavailable": {
+    "title": "문서를 아직 사용할 수 없습니다",
+    "description": "이 워크스페이스에서는 문서가 켜져 있지 않습니다."
+  }
 }

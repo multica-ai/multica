@@ -2329,8 +2329,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Commercial (server/ee) workspace routes; none in an open-source build.
 			extension.MountWorkspaceRoutes(r, h)
 
-			// Projects
+			// Docs, behind the docs_v1 flag until launch.
 			r.Route("/api/docs", func(r chi.Router) {
+				r.Use(h.RequireDocsV1)
 				r.Get("/", h.ListDocTree)
 				r.Post("/", h.CreateDoc)
 				r.Get("/search", h.SearchDocs)
@@ -2344,6 +2345,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 			r.Route("/api/doc-folders", func(r chi.Router) {
+				r.Use(h.RequireDocsV1)
 				r.Post("/", h.CreateDocFolder)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Patch("/", h.UpdateDocFolder)
@@ -2352,6 +2354,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
 				// Workspace owner only: every private project, joined or not.

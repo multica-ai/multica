@@ -195,6 +195,10 @@ type TaskContextForEnv struct {
 	// TestBriefByteIdenticalAcrossRunsForEveryKind is what keeps this field out
 	// of the brief.
 	ChatChannelDeliversFiles bool
+	// DocsEnabled is the server's docs_v1 flag from the claim. The brief lists
+	// `multica doc` and mention://doc only when it is true, so agents are not
+	// sent to an API that answers 403 docs_disabled.
+	DocsEnabled bool
 
 	AutopilotRunID          string // non-empty for autopilot run_only tasks
 	AutopilotID             string
