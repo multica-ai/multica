@@ -104,6 +104,9 @@ it("reads a workspace switched to at the current time and catches up its missed 
   vi.setSystemTime(start + 30 * 60 * 1000);
   rerender({ wsId: "ws-b" });
   await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+  expect(result.current.trial).toMatchObject({ kind: "ended", confirmed: true, settled: false });
+  // Paid-feature reads settle a moment after Cloud's confirmation arrives.
+  await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
 
   expect(result.current.trial).toMatchObject({ kind: "ended", settled: true });
   expect(getWorkspaceSubscriptionSummary).toHaveBeenCalled();
@@ -124,7 +127,7 @@ it("does not refetch reads made after the end when a settled workspace shows aga
     <QueryClientProvider client={qc}>{children}</QueryClientProvider>
   );
   const { result } = renderHook(() => useWorkspaceTrial("ws-c", true), { wrapper });
-  await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+  await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
 
   expect(result.current).toMatchObject({ kind: "ended", settled: true });
   expect(getWorkspaceSubscriptionSummary).not.toHaveBeenCalled();

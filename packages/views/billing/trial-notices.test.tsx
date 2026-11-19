@@ -86,6 +86,7 @@ const ended: WorkspaceTrialView = {
   endsAt: ENDS_AT,
   recent: true,
   confirmed: true,
+  settledAt: ENDS_AT + 70_000,
   settled: true,
 };
 

@@ -1,7 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { WorkspaceSubscriptionSummary, WorkspaceTrial } from "../types";
-import { DAY_MS, TRIAL_END_SETTLE_MS, resolveWorkspaceTrial } from "./trial";
+import {
+  DAY_MS,
+  TRIAL_CONFIRM_SETTLE_MS,
+  TRIAL_END_SETTLE_MS,
+  resolveWorkspaceTrial,
+} from "./trial";
 
 const startedAt = Date.parse("2026-12-05T08:00:00Z");
 const endsAt = startedAt + 14 * DAY_MS;
@@ -88,6 +93,7 @@ describe("resolveWorkspaceTrial", () => {
       recent: true,
       // Only this clock says so; Cloud has not confirmed the downgrade.
       confirmed: false,
+      settledAt: null,
       settled: false,
     });
     expect(
@@ -104,6 +110,23 @@ describe("resolveWorkspaceTrial", () => {
     expect(resolveWorkspaceTrial(expired, endsAt + 7 * DAY_MS)).toMatchObject({
       kind: "ended",
       recent: false,
+    });
+  });
+
+  it("settles after Cloud's confirmation, never before the end's own settle point", () => {
+    const expired = summary({ state: "expired" });
+    // Confirmed late (this clock behind Cloud's): settles shortly after.
+    const late = endsAt + 10 * 60 * 1000;
+    expect(resolveWorkspaceTrial(expired, late, late)).toMatchObject({
+      settledAt: late + TRIAL_CONFIRM_SETTLE_MS,
+      settled: false,
+    });
+    expect(
+      resolveWorkspaceTrial(expired, late + TRIAL_CONFIRM_SETTLE_MS, late),
+    ).toMatchObject({ settled: true });
+    // Confirmed right at the end: the end's settle point still applies.
+    expect(resolveWorkspaceTrial(expired, endsAt, endsAt)).toMatchObject({
+      settledAt: endsAt + TRIAL_END_SETTLE_MS,
     });
   });
 

@@ -22,8 +22,9 @@ function formatDate(value: number, locale: string): string {
 
 /**
  * The Billing page's view of the no-card trial (MUL-9485): where the trial
- * stands and what happens to each Business feature when it ends, or, once it
- * has ended, a pointer to the plans below.
+ * stands and what happens to each Business feature when it ends, or, once
+ * Cloud confirms it ended, a pointer to the plans below (or to an admin, for
+ * someone who cannot subscribe).
  */
 export function BillingTrialSection({
   summary,
@@ -40,12 +41,17 @@ export function BillingTrialSection({
   const trial = resolveWorkspaceTrial(summary, Date.now());
 
   if (trial.kind === "ended") {
+    // Only Cloud's word ends the trial here; this clock alone does not.
+    if (!trial.confirmed) return null;
+    const date = formatDate(trial.endsAt, locale);
     return (
       <Alert data-slot="billing-trial-ended">
         <Sparkles />
         <AlertTitle>{t(($) => $.trial.card.ended_title)}</AlertTitle>
         <AlertDescription>
-          {t(($) => $.trial.card.ended_description, { date: formatDate(trial.endsAt, locale) })}
+          {onChoosePlan
+            ? t(($) => $.trial.card.ended_description, { date })
+            : t(($) => $.trial.card.ended_description_member, { date })}
         </AlertDescription>
       </Alert>
     );

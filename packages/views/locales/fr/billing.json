@@ -249,7 +249,9 @@
       "active_label_other": "Essai Business, {{count}} jours restants. Ouvrir la facturation.",
       "free": "Free",
       "upgrade": "Mettre à niveau",
-      "ended_label": "L'essai Business est terminé et cet espace de travail est sur Free. Ouvrez la facturation pour mettre à niveau."
+      "ended_label": "L'essai Business est terminé et cet espace de travail est sur Free. Ouvrez la facturation pour mettre à niveau.",
+      "ending": "se termine",
+      "ending_label": "L'essai Business se termine. Ouvrir la facturation."
     },
     "reminder": {
       "halfway_title_one": "Votre essai Business est à mi-parcours : {{count}} jour restant.",
@@ -291,7 +293,8 @@
       "ends": "Se termine le {{date}}",
       "ended_title": "L'essai Business est terminé",
       "ended_description": "L'essai s'est terminé le {{date}}. Choisissez un forfait ci-dessous pour retrouver les fonctionnalités Business.",
-      "choose_plan": "Choisir un forfait"
+      "choose_plan": "Choisir un forfait",
+      "ended_description_member": "L'essai s'est terminé le {{date}}. Demandez à un administrateur de l'espace de travail de mettre à niveau pour retrouver les fonctionnalités Business."
     },
     "features": {
       "title": "Fonctionnalités Business de votre essai",

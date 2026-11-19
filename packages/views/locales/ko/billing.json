@@ -241,7 +241,9 @@
       "active_label_other": "Business 체험, {{count}}일 남음. 결제 화면을 엽니다.",
       "free": "Free",
       "upgrade": "업그레이드",
-      "ended_label": "Business 체험이 끝나 이 워크스페이스는 Free로 전환되었습니다. 결제 화면을 열어 업그레이드하세요."
+      "ended_label": "Business 체험이 끝나 이 워크스페이스는 Free로 전환되었습니다. 결제 화면을 열어 업그레이드하세요.",
+      "ending": "곧 종료",
+      "ending_label": "Business 체험이 곧 끝납니다. 결제 화면을 엽니다."
     },
     "reminder": {
       "halfway_title_other": "Business 체험이 절반 지났습니다. {{count}}일 남았습니다.",
@@ -279,7 +281,8 @@
       "ends": "{{date}} 종료",
       "ended_title": "Business 체험이 끝났습니다",
       "ended_description": "체험이 {{date}}에 끝났습니다. 아래에서 요금제를 선택하면 Business 기능을 다시 사용할 수 있습니다.",
-      "choose_plan": "요금제 선택"
+      "choose_plan": "요금제 선택",
+      "ended_description_member": "체험이 {{date}}에 끝났습니다. Business 기능을 다시 사용하려면 워크스페이스 관리자에게 업그레이드를 요청하세요."
     },
     "features": {
       "title": "체험 중인 Business 기능",

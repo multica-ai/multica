@@ -79,14 +79,31 @@ describe("TrialStatus", () => {
   });
 
   it("offers an upgrade for a week after the trial, then disappears", () => {
-    h.trial = { kind: "ended", plan: "business", endsAt: 0, recent: true, confirmed: true, settled: true };
+    h.trial = { kind: "ended", plan: "business", endsAt: 0, recent: true, confirmed: true, settledAt: 70_000, settled: true };
     const { unmount } = renderStatus();
     expect(screen.getByRole("link")).toHaveTextContent("FreeUpgrade");
     unmount();
 
-    h.trial = { kind: "ended", plan: "business", endsAt: 0, recent: false, confirmed: true, settled: true };
+    h.trial = { kind: "ended", plan: "business", endsAt: 0, recent: false, confirmed: true, settledAt: 70_000, settled: true };
     renderStatus();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("says the trial is ending, not that the workspace is on Free, until Cloud confirms", () => {
+    h.trial = {
+      kind: "ended",
+      plan: "business",
+      endsAt: 0,
+      recent: true,
+      confirmed: false,
+      settledAt: null,
+      settled: false,
+    };
+    renderStatus();
+
+    const link = screen.getByRole("link", { name: "Business trial ending. Open Billing." });
+    expect(link).toHaveTextContent("Business trialending");
+    expect(link).not.toHaveTextContent("Free");
   });
 
   it("does not read billing where workspace subscriptions are off", () => {

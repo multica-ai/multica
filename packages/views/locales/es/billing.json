@@ -249,7 +249,9 @@
       "active_label_other": "Prueba de Business, quedan {{count}} días. Abrir Facturación.",
       "free": "Free",
       "upgrade": "Actualizar",
-      "ended_label": "La prueba de Business terminó y este espacio de trabajo está en Free. Abre Facturación para actualizar."
+      "ended_label": "La prueba de Business terminó y este espacio de trabajo está en Free. Abre Facturación para actualizar.",
+      "ending": "termina ya",
+      "ending_label": "La prueba de Business está terminando. Abrir Facturación."
     },
     "reminder": {
       "halfway_title_one": "Tu prueba de Business va por la mitad: queda {{count}} día.",
@@ -291,7 +293,8 @@
       "ends": "Termina el {{date}}",
       "ended_title": "La prueba de Business terminó",
       "ended_description": "La prueba terminó el {{date}}. Elige un plan abajo para recuperar las funciones de Business.",
-      "choose_plan": "Elegir un plan"
+      "choose_plan": "Elegir un plan",
+      "ended_description_member": "La prueba terminó el {{date}}. Pide a un administrador del espacio de trabajo que actualice el plan para recuperar las funciones de Business."
     },
     "features": {
       "title": "Funciones de Business en tu prueba",

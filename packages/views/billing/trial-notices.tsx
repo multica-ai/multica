@@ -6,7 +6,6 @@ import { toast } from "sonner";
 import { Bot, Hourglass, Lock, Sparkles, Users, X } from "@multica/ui/icons";
 import { autopilotQuotaUsageOptions } from "@multica/core/autopilots";
 import {
-  TRIAL_END_SETTLE_MS,
   trialNoticeKey,
   useTrialNoticeStore,
   useWorkspaceTrial,
@@ -222,8 +221,9 @@ function TrialEndedDialog({ wsId, trial }: { wsId: string; trial: EndedTrial }) 
   const [seen, markSeen] = useNoticeSeen(wsId, trial.endsAt, "ended");
   const openBilling = useOpenBilling();
   // Read both again on mount and use only answers received after the end
-  // settled, so a cached Business answer never leaves a restriction out.
-  const settledAt = trial.endsAt + TRIAL_END_SETTLE_MS;
+  // settled, so a cached Business answer never leaves a restriction out. The
+  // host renders this only once settled, so settledAt is set.
+  const settledAt = trial.settledAt ?? Number.POSITIVE_INFINITY;
   const featuresQuery = useQuery({
     ...workspaceFeaturesOptions(wsId),
     enabled: !seen,

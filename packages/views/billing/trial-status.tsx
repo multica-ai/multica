@@ -46,6 +46,27 @@ export function TrialStatus({ wsId }: { wsId: string }) {
     );
   }
 
+  // Past the end on this clock, but Cloud has not confirmed it: the workspace
+  // may have subscribed, so say it is ending rather than that it is on Free.
+  if (trial.kind === "ended" && !trial.confirmed) {
+    return (
+      <AppLink
+        href={href}
+        data-slot="trial-status"
+        data-warning=""
+        aria-label={t(($) => $.trial.status.ending_label)}
+        className={cn(
+          BOTTOM_BAR_ITEM_CLASS,
+          "bg-warning/10 text-warning hover:bg-warning/15 hover:text-warning",
+        )}
+      >
+        <Hourglass aria-hidden="true" />
+        <span className="font-medium text-foreground">{t(($) => $.trial.status.active)}</span>
+        <span className="truncate">{t(($) => $.trial.status.ending)}</span>
+      </AppLink>
+    );
+  }
+
   if (trial.kind === "ended" && trial.recent) {
     return (
       <AppLink

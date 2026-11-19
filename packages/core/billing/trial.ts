@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { WorkspaceSubscriptionSummary } from "../types";
 import { autopilotKeys } from "../autopilots/queries";
@@ -26,12 +26,25 @@ export const TRIAL_WARNING_DAYS = 3;
 export const TRIAL_ENDED_VISIBLE_DAYS = 7;
 
 /**
- * How long after the end the app refetches once more. The server caches
- * Cloud's enforcement policy for up to a minute and the viewer's clock can be
- * off from Cloud's, so a refetch exactly at the end can still read the trial's
- * Business policy.
+ * How long after the end the app refetches once more. The server may cache
+ * Cloud's enforcement policy for up to a minute, so a refetch exactly at the
+ * end can still read the trial's Business policy.
  */
 export const TRIAL_END_SETTLE_MS = 70 * 1000;
+
+/**
+ * How long after Cloud first confirms the end paid-feature states are read
+ * again. Cloud stops serving the trial's policy at the end, give or take a
+ * second; this covers that and the viewer's clock being behind Cloud's.
+ */
+export const TRIAL_CONFIRM_SETTLE_MS = 5 * 1000;
+
+/**
+ * While this clock says the trial has ended but Cloud still reports it
+ * active (this clock runs ahead), the summary is asked again after these
+ * delays, the last one repeating.
+ */
+export const TRIAL_END_RECHECK_MS = [30_000, 60_000, 120_000, 300_000] as const;
 
 /**
  * Owners and admins get one dismissible reminder at each of these points:
@@ -69,9 +82,12 @@ export type WorkspaceTrialView =
        */
       confirmed: boolean;
       /**
-       * Past TRIAL_END_SETTLE_MS after the end: paid-feature states and limits
-       * read from now on are Free's.
+       * From when paid-feature states and limits read are Free's: the later of
+       * TRIAL_END_SETTLE_MS after the end and TRIAL_CONFIRM_SETTLE_MS after
+       * Cloud's confirmation was received. Null until confirmed.
        */
+      settledAt: number | null;
+      /** Confirmed, and past `settledAt`. */
       settled: boolean;
     };
 
@@ -83,6 +99,8 @@ export type WorkspaceTrialView =
 export function resolveWorkspaceTrial(
   summary: WorkspaceSubscriptionSummary | null | undefined,
   now: number,
+  /** When this client received Cloud's confirmation of the end, if known. */
+  confirmedAt?: number,
 ): WorkspaceTrialView {
   const trial = summary?.trial;
   if (!trial || trial.state === "converted") return { kind: "none" };
@@ -119,13 +137,21 @@ export function resolveWorkspaceTrial(
   if (summary.entitlement.plan !== "free" && trial.state !== "active") {
     return { kind: "none" };
   }
+  const confirmed = trial.state === "expired" && summary.entitlement.plan === "free";
+  const settledAt = confirmed
+    ? Math.max(
+        endsAt + TRIAL_END_SETTLE_MS,
+        (confirmedAt ?? endsAt) + TRIAL_CONFIRM_SETTLE_MS,
+      )
+    : null;
   return {
     kind: "ended",
     plan: trial.plan,
     endsAt,
     recent: now - endsAt < TRIAL_ENDED_VISIBLE_DAYS * DAY_MS,
-    confirmed: trial.state === "expired" && summary.entitlement.plan === "free",
-    settled: now - endsAt >= TRIAL_END_SETTLE_MS,
+    confirmed,
+    settledAt,
+    settled: settledAt !== null && now >= settledAt,
   };
 }
 
@@ -135,11 +161,18 @@ export function resolveWorkspaceTrial(
 const TRIAL_CLOCK_TICK_MS = 60 * 60 * 1000;
 
 /**
- * The trial view for a workspace, kept current: it re-renders hourly for the
- * day count and, when the trial ends, refetches everything the end changes
- * (plan, paid-feature states, autopilot limit) instead of waiting for their
- * stale times: once at the end, and once more TRIAL_END_SETTLE_MS later. A
- * boundary that passed while the workspace was not showing (another desktop
+ * The trial view for a workspace, kept current. It re-renders hourly for the
+ * day count and, around the end, refetches everything the end changes (plan,
+ * paid-feature states, autopilot limit) instead of waiting for their stale
+ * times:
+ *
+ * - at the end on this clock, and TRIAL_END_SETTLE_MS later;
+ * - while Cloud still reports the trial active past that point (this clock
+ *   runs ahead of Cloud's), the summary again with backoff until Cloud
+ *   answers;
+ * - once Cloud confirms the end, at the view's `settledAt`.
+ *
+ * A boundary that passed while the workspace was not showing (another desktop
  * tab's workspace, a closed window) is caught up when it shows again.
  *
  * `enabled` is the caller's billing gate; a self-hosted deployment never
@@ -165,6 +198,23 @@ export function useWorkspaceTrial(
     summary?.trial && summary.trial.state !== "converted"
       ? summary.trial.endsAt
       : null;
+  const trialKey = endsAtRaw ? `${wsId}:${endsAtRaw}` : null;
+  const cloudSaysActive = summary?.trial?.state === "active";
+  const cloudConfirmsEnd =
+    summary?.trial?.state === "expired" && summary.entitlement.plan === "free";
+
+  // When this client first received Cloud's confirmation, per trial.
+  const [confirmation, setConfirmation] = useState<{ key: string; at: number } | null>(null);
+  const confirmedAt =
+    confirmation && confirmation.key === trialKey ? confirmation.at : undefined;
+  useEffect(() => {
+    if (!cloudConfirmsEnd || !trialKey) return;
+    setConfirmation((current) =>
+      current?.key === trialKey
+        ? current
+        : { key: trialKey, at: summaryQuery.dataUpdatedAt || Date.now() },
+    );
+  }, [cloudConfirmsEnd, summaryQuery.dataUpdatedAt, trialKey]);
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), TRIAL_CLOCK_TICK_MS);
@@ -184,9 +234,9 @@ export function useWorkspaceTrial(
       autopilotKeys.usage(wsId),
     ];
     // Refetch what was read before `boundary`; reads made after it are current.
-    const refreshReadsBefore = (boundary: number) => {
+    const refreshReadsBefore = (boundary: number, queryKeys = keys) => {
       setNow(Date.now());
-      for (const queryKey of keys) {
+      for (const queryKey of queryKeys) {
         void qc.invalidateQueries({
           queryKey,
           predicate: (query) =>
@@ -194,19 +244,53 @@ export function useWorkspaceTrial(
         });
       }
     };
+    const boundaries: Array<{ at: number; keys: typeof keys }> = [
+      { at: endsAt, keys },
+      { at: endsAt + TRIAL_END_SETTLE_MS, keys },
+    ];
+    if (confirmedAt !== undefined) {
+      // The summary is already Cloud's answer; only policy-backed reads lag.
+      boundaries.push({ at: confirmedAt + TRIAL_CONFIRM_SETTLE_MS, keys: keys.slice(1) });
+    }
     const timers: number[] = [];
-    for (const at of [endsAt, endsAt + TRIAL_END_SETTLE_MS]) {
-      const delay = at - Date.now();
+    for (const boundary of boundaries) {
+      const delay = boundary.at - Date.now();
       if (delay <= 0) {
         // Passed while this workspace was not showing: catch up now.
-        refreshReadsBefore(at);
+        refreshReadsBefore(boundary.at, boundary.keys);
       } else if (delay <= 2 ** 31 - 1) {
         // setTimeout overflows past ~24.8 days, far beyond a trial.
-        timers.push(window.setTimeout(() => refreshReadsBefore(at), delay));
+        timers.push(
+          window.setTimeout(() => refreshReadsBefore(boundary.at, boundary.keys), delay),
+        );
       }
     }
     return () => timers.forEach((id) => window.clearTimeout(id));
-  }, [endsAtRaw, qc, wsId]);
+  }, [confirmedAt, endsAtRaw, qc, wsId]);
 
-  return resolveWorkspaceTrial(summary, now);
+  // This clock is past the end and its follow-up, yet Cloud still says
+  // active: ask again with backoff until Cloud answers otherwise.
+  const recheckAttempt = useRef<{ key: string; attempt: number } | null>(null);
+  useEffect(() => {
+    if (!cloudSaysActive || !endsAtRaw || !trialKey) {
+      recheckAttempt.current = null;
+      return;
+    }
+    const endsAt = Date.parse(endsAtRaw);
+    if (Number.isNaN(endsAt)) return;
+    const recheckFrom = endsAt + TRIAL_END_SETTLE_MS;
+    if (Date.now() < recheckFrom) return;
+    const attempt =
+      recheckAttempt.current?.key === trialKey ? recheckAttempt.current.attempt : 0;
+    recheckAttempt.current = { key: trialKey, attempt: attempt + 1 };
+    const delay =
+      TRIAL_END_RECHECK_MS[Math.min(attempt, TRIAL_END_RECHECK_MS.length - 1)]!;
+    const id = window.setTimeout(() => {
+      void qc.invalidateQueries({ queryKey: workspaceSubscriptionKeys.all(wsId) });
+    }, delay);
+    return () => window.clearTimeout(id);
+    // Each answer that is still active (a new dataUpdatedAt) re-arms it.
+  }, [cloudSaysActive, endsAtRaw, qc, summaryQuery.dataUpdatedAt, trialKey, wsId]);
+
+  return resolveWorkspaceTrial(summary, now, confirmedAt);
 }

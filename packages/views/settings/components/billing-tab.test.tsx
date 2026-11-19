@@ -2135,5 +2135,22 @@ describe("BillingTab", () => {
       ).toBeInTheDocument();
       expect(screen.queryByText(/days? left/)).not.toBeInTheDocument();
     });
+
+    it("does not send a member to plan cards that are hidden after trial expiry", () => {
+      setTrial("expired", Date.now() - 15 * DAY);
+      mocks.summary.availableActions.checkout = false;
+      renderWithI18n(<BillingTab />);
+      expect(screen.getByText("Business trial ended")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Upgrade to Pro" })).not.toBeInTheDocument();
+      expect(screen.queryByText(/Choose a plan below/)).not.toBeInTheDocument();
+      expect(screen.getByText(/Ask a workspace admin to upgrade/)).toBeInTheDocument();
+    });
+
+    it("says nothing about an end that only this clock has seen", () => {
+      // Cloud still reports the trial active, a moment past its end here.
+      setTrial("active", Date.now() - 14 * DAY - 1000);
+      renderWithI18n(<BillingTab />);
+      expect(screen.queryByText("Business trial ended")).not.toBeInTheDocument();
+    });
   });
 });

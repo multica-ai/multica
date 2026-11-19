@@ -241,7 +241,9 @@
       "active_label_other": "Business トライアル、残り {{count}} 日。請求を開きます。",
       "free": "Free",
       "upgrade": "アップグレード",
-      "ended_label": "Business トライアルが終了し、このワークスペースは Free になりました。請求を開いてアップグレードします。"
+      "ended_label": "Business トライアルが終了し、このワークスペースは Free になりました。請求を開いてアップグレードします。",
+      "ending": "まもなく終了",
+      "ending_label": "Business トライアルはまもなく終了します。請求を開きます。"
     },
     "reminder": {
       "halfway_title_other": "Business トライアルは折り返しを過ぎました。残り {{count}} 日です。",
@@ -279,7 +281,8 @@
       "ends": "{{date}} 終了",
       "ended_title": "Business トライアルが終了しました",
       "ended_description": "トライアルは {{date}} に終了しました。下でプランを選択すると Business の機能が戻ります。",
-      "choose_plan": "プランを選択"
+      "choose_plan": "プランを選択",
+      "ended_description_member": "トライアルは {{date}} に終了しました。Business の機能を戻すには、ワークスペースの管理者にアップグレードを依頼してください。"
     },
     "features": {
       "title": "トライアル中の Business 機能",

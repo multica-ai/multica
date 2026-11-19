@@ -249,7 +249,9 @@
       "active_label_other": "Business trial, {{count}} days left. Open Billing.",
       "free": "Free",
       "upgrade": "Upgrade",
-      "ended_label": "The Business trial has ended and this workspace is on Free. Open Billing to upgrade."
+      "ended_label": "The Business trial has ended and this workspace is on Free. Open Billing to upgrade.",
+      "ending": "ending",
+      "ending_label": "Business trial ending. Open Billing."
     },
     "reminder": {
       "halfway_title_one": "Your Business trial is halfway through: {{count}} day left.",
@@ -291,7 +293,8 @@
       "ends": "Ends {{date}}",
       "ended_title": "Business trial ended",
       "ended_description": "The trial ended on {{date}}. Choose a plan below to get Business features back.",
-      "choose_plan": "Choose a plan"
+      "choose_plan": "Choose a plan",
+      "ended_description_member": "The trial ended on {{date}}. Ask a workspace admin to upgrade to get Business features back."
     },
     "features": {
       "title": "Business features in your trial",
