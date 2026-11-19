@@ -16,6 +16,7 @@ import {
   retryVoice,
   stopVoice,
   toggleVoice,
+  useVoiceInterim,
   useVoiceMeter,
   useVoiceSettingsStore,
   type VoiceErrorKind,
@@ -160,10 +161,36 @@ function RecDot({ className }: { className?: string }) {
 }
 
 /**
+ * The sentence a stream is still hearing, faded until it is typed, across
+ * the full width of the composer and above it, so it never sits on the text
+ * being written. Long sentences keep their newest words in view.
+ */
+function Interim({ text }: { text: string }) {
+  return (
+    <div
+      aria-live="off"
+      data-voice-interim=""
+      className="flex max-h-24 w-full flex-col justify-end overflow-hidden rounded-md border bg-background px-3 py-2 text-body text-faint-foreground shadow-[var(--floating-shadow)] animate-in fade-in"
+    >
+      <p className="whitespace-pre-wrap break-words">{text}</p>
+    </div>
+  );
+}
+
+/**
  * The mic every composer carries. Tap to dictate into the toolbar strip;
  * press and hold to talk, release to insert.
  */
-export function VoiceMicButton({ voice, className }: { voice: ComposerVoice; className?: string }) {
+export function VoiceMicButton({
+  voice,
+  size = "default",
+  className,
+}: {
+  voice: ComposerVoice;
+  /** `sm` matches the small attach button under an issue description. */
+  size?: "sm" | "default";
+  className?: string;
+}) {
   const { t } = useT("editor");
   const activation = useVoiceSettingsStore((state) => state.activation);
   if (!voice.available) return null;
@@ -199,13 +226,14 @@ export function VoiceMicButton({ voice, className }: { voice: ComposerVoice; cla
         // pointer phase and cannot be held.
         if (event.detail === 0) toggleVoice(voice.id);
       }}
+      size={size === "sm" ? "icon-xs" : undefined}
       className={cn(
         "touch-none text-muted-foreground",
         live && "bg-brand/10 text-brand hover:bg-brand/15 hover:text-brand",
         className,
       )}
     >
-      {live && session.phase === "recording" ? <LevelBars /> : <Mic />}
+      {live && session.phase === "recording" ? <LevelBars /> : <Mic className={size === "sm" ? "size-3.5" : undefined} />}
     </IconButton>
   );
 }
@@ -281,16 +309,49 @@ export function VoiceStrip({ voice }: { voice: ComposerVoice }) {
 }
 
 /**
- * The push-to-talk pill, anchored above the composer that receives the text.
- * Always dark ink, like a system indicator, so it reads over any page. The
- * composer root must be `relative`.
+ * The push-to-talk pill while a hold records, and a stream's sentence in
+ * progress. The pill is always dark ink, like a system indicator, so it reads
+ * over any page.
+ *
+ * `placement="above"` floats it above the composer; the composer root must be
+ * `relative`. `placement="below"` is for a composer that can be taller than
+ * the page, such as an issue's description: it sits in the flow under the
+ * composer's bottom row and sticks to the bottom of the scroll area while the
+ * composer runs past it. DO NOT float it above such a composer: its top edge
+ * can be scrolled out of view, and the pill and the words go with it.
  */
-export function VoiceHud({ voice }: { voice: ComposerVoice }) {
+export function VoiceHud({
+  voice,
+  placement = "above",
+  stickAbove = 0,
+}: {
+  voice: ComposerVoice;
+  placement?: "above" | "below";
+  /** For `below`: the height in px of anything pinned to the bottom of the scroll area, to stick above it. */
+  stickAbove?: number;
+}) {
+  const interim = useVoiceInterim();
+  const showInterim = interim !== "" && (voice.showStrip || voice.showHud);
+  if (!voice.showHud && !showInterim) return null;
+  return (
+    <div
+      className={cn(
+        "pointer-events-none z-30 flex flex-col items-center gap-2",
+        placement === "above" ? "absolute inset-x-0 bottom-full mb-2" : "sticky mt-2",
+      )}
+      style={placement === "below" ? { bottom: `calc(${stickAbove}px + 0.75rem)` } : undefined}
+    >
+      {voice.showHud && <HudPill voice={voice} />}
+      {showInterim && <Interim text={interim} />}
+    </div>
+  );
+}
+
+function HudPill({ voice }: { voice: ComposerVoice }) {
   const { t } = useT("editor");
   const phase = voice.session?.phase;
-  if (!voice.showHud) return null;
   return (
-    <div className="pointer-events-none absolute bottom-full left-1/2 z-30 mb-3 -translate-x-1/2">
+    <div>
       <div
         role="status"
         className="flex h-10 items-center gap-2.5 whitespace-nowrap rounded-full bg-multica-ink pl-3.5 pr-4 text-multica-paper shadow-[var(--floating-shadow)] animate-in fade-in zoom-in-95 slide-in-from-bottom-2"
@@ -329,6 +390,8 @@ function useErrorMessage(error: VoiceErrorKind): string {
       return t(($) => $.voice.errors.unavailable);
     case "transcription-failed":
       return t(($) => $.voice.errors.transcription_failed);
+    case "stream-failed":
+      return t(($) => $.voice.errors.stream_failed);
     case "failed":
       return t(($) => $.voice.errors.microphone_failed);
   }

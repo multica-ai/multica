@@ -384,6 +384,9 @@ import {
   type AppConfigResponse,
   StoreThemeListSchema,
   EMPTY_STORE_THEME_LIST,
+  VoiceSessionSchema,
+  EMPTY_VOICE_SESSION,
+  type VoiceSession,
   type StoreTheme,
   type StoreThemeMode,
   type RefreshSessionResponse,
@@ -3586,6 +3589,17 @@ export class ApiClient {
     return parseWithFallback(raw, StoreThemeListSchema, EMPTY_STORE_THEME_LIST, {
       endpoint: "GET /api/theme-store/themes",
     }).themes as StoreTheme[];
+  }
+
+  /**
+   * A short-lived token for one voice-input stream, and where to open it.
+   * Only servers whose config reports voice_transcription_enabled serve this.
+   */
+  async createVoiceSession(signal?: AbortSignal): Promise<VoiceSession> {
+    const raw = await this.fetch<unknown>("/api/voice/sessions", { method: "POST", signal });
+    return parseWithFallback(raw, VoiceSessionSchema, EMPTY_VOICE_SESSION, {
+      endpoint: "POST /api/voice/sessions",
+    });
   }
 
   /** The theme's checked theme.zip, for the same reader as an imported theme. */

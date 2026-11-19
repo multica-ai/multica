@@ -204,7 +204,8 @@
       "microphone_failed": "无法启动麦克风。",
       "no_speech": "没有听到说话声。靠近麦克风再试一次。",
       "unavailable": "这台电脑无法在本地转写语音。",
-      "transcription_failed": "转写失败。录音已保留，可以重试。"
+      "transcription_failed": "转写失败。录音已保留，可以重试。",
+      "stream_failed": "与语音服务的连接已断开。重试以重新开始。"
     },
     "models": {
       "more_languages": "其他 {{more}} 种语言",

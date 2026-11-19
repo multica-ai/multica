@@ -707,3 +707,28 @@ func TestGetConfigReportsTheThemeStore(t *testing.T) {
 		t.Fatalf("theme_store_enabled: want true, got %s", raw)
 	}
 }
+
+func TestGetConfigReportsVoiceTranscription(t *testing.T) {
+	orig := testHandler.Speech
+	t.Cleanup(func() { testHandler.Speech = orig })
+
+	fetch := func() map[string]json.RawMessage {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.GetConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+		var cfg map[string]json.RawMessage
+		if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+			t.Fatalf("decode config: %v", err)
+		}
+		return cfg
+	}
+
+	testHandler.Speech = nil
+	if _, ok := fetch()["voice_transcription_enabled"]; ok {
+		t.Fatal("voice_transcription_enabled must be omitted without a speech provider")
+	}
+	testHandler.Speech = fakeVoiceSessions{}
+	if raw := fetch()["voice_transcription_enabled"]; string(raw) != "true" {
+		t.Fatalf("voice_transcription_enabled: want true, got %s", raw)
+	}
+}

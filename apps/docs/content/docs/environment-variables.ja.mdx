@@ -204,6 +204,8 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | Plugins | `MULTICA_PLUGIN_API_URL` | バージョンを含む Plugin Public API の完全な Base URL（例: `https://plugin-api.example.com/v1`）。未設定時は `MULTICA_PUBLIC_URL` + `/v1` |
 | Plugins | `MULTICA_PLUGIN_DIR` | 開発時にローカル plugin bundle を公開するための任意の絶対ディレクトリ |
 | テーマストア | `MULTICA_THEME_REGISTRY_URL` | 公式レジストリの fork など、別のレジストリの `index.json`。[テーマと外観](/themes#セルフホスト)を参照 |
+| 音声入力 | `DEEPGRAM_API_KEY` | Web アプリの音声入力を有効にします（Desktop はデバイス上で文字起こしします）。ブラウザは、サーバーが音声入力ごとに発行する 30 秒のトークンで音声を Deepgram にストリーミングし、キーはサーバーの外に出ません。トークンはストリームを開くときだけ使われ、開いたストリームは停止するまで続きます。未設定の場合、Web アプリにマイクは表示されません |
+| 音声入力 | `DEEPGRAM_STT_MODEL` | Web 音声入力のストリーミングモデル。既定は `flux-general-en` で、話し手が文を言い終えるたびにその文を入力します |
 
 `GITHUB_APP_ID` と秘密鍵を設定しなくても、PR の関連付け・ミラー・マージ時のステータス変更は通常どおり動きますが、カードに CI とマージ可否のステータスが表示されず、「GitHub から選択」のリポジトリ入口も無効になります。
 

@@ -1084,6 +1084,10 @@ export interface AppConfigResponse {
    * /api/theme-store. Off when the operator turned it off, and absent on older
    * servers, so the app shows no Browse entry and makes no store requests. */
   theme_store_enabled?: boolean;
+  /** Whether this server mints voice-input streams at POST /api/voice/sessions.
+   * Absent unless the operator configured a speech provider, and on older
+   * servers, so the web app shows no mic. */
+  voice_transcription_enabled?: boolean;
   server_version?: string;
 }
 
@@ -1376,6 +1380,7 @@ export const AppConfigSchema = z.object({
   issue_create_properties_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
   theme_store_enabled: BooleanWithDefaultSchema(false),
+  voice_transcription_enabled: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
 }).loose();
 
@@ -1401,6 +1406,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   // Fail closed: old servers delete a comment's replies with it.
   comment_delete_keep_replies_supported: false,
   theme_store_enabled: false,
+  voice_transcription_enabled: false,
   feature_flags: {},
 };
 
@@ -1464,6 +1470,23 @@ export const StoreThemeListSchema = z.object({
 });
 
 export const EMPTY_STORE_THEME_LIST: { themes: StoreTheme[] } = { themes: [] };
+
+/**
+ * One voice-input stream: the provider's protocol, its endpoint, and a token
+ * that is only checked when the stream opens.
+ */
+export const VoiceSessionSchema = z
+  .object({
+    provider: z.string().catch(""),
+    url: z.string().catch(""),
+    token: z.string().catch(""),
+    expires_in: z.number().catch(0),
+  })
+  .loose();
+
+export type VoiceSession = z.infer<typeof VoiceSessionSchema>;
+
+export const EMPTY_VOICE_SESSION: VoiceSession = { provider: "", url: "", token: "", expires_in: 0 };
 
 // Preference keys may grow over time, so keep both the key and value spaces
 // forward-compatible while still rejecting non-string persisted data.

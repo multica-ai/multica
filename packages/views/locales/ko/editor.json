@@ -204,7 +204,8 @@
       "microphone_failed": "마이크를 시작할 수 없습니다.",
       "no_speech": "말소리를 듣지 못했습니다. 마이크에 조금 더 가까이에서 다시 시도하세요.",
       "unavailable": "이 컴퓨터에서는 음성을 받아쓸 수 없습니다.",
-      "transcription_failed": "받아쓰기에 실패했습니다. 녹음은 보관되어 있으니 다시 시도할 수 있습니다."
+      "transcription_failed": "받아쓰기에 실패했습니다. 녹음은 보관되어 있으니 다시 시도할 수 있습니다.",
+      "stream_failed": "음성 서비스와의 연결이 끊겼습니다. 다시 시도해 새로 시작하세요."
     },
     "models": {
       "more_languages": "그 외 {{more}}개 언어",
