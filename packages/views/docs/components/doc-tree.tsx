@@ -53,6 +53,7 @@ import type { DocSummary, DocFolder } from "@multica/core/types";
 import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { MoveDialog, type MoveTarget } from "./move-dialog";
+import { useCanDeleteDoc } from "./use-can-delete-doc";
 
 type Item =
   | { kind: "doc"; item: DocSummary }
@@ -183,6 +184,7 @@ export function DocTree() {
   const [name, setName] = useState("");
   const [moving, setMoving] = useState<MoveTarget | null>(null);
   const [deleting, setDeleting] = useState<Item | null>(null);
+  const canDelete = useCanDeleteDoc();
   const pending =
     createDoc.isPending ||
     createFolder.isPending ||
@@ -336,13 +338,15 @@ export function DocTree() {
           <FolderInput />
           {t(($) => $.actions.move)}
         </DropdownMenuItem>
-        <DropdownMenuItem
-          variant="destructive"
-          onClick={() => setDeleting(target)}
-        >
-          <Trash2 />
-          {t(($) => $.actions.delete)}
-        </DropdownMenuItem>
+        {canDelete(target.item) && (
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => setDeleting(target)}
+          >
+            <Trash2 />
+            {t(($) => $.actions.delete)}
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

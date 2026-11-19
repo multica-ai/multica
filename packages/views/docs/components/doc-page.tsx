@@ -40,6 +40,7 @@ import { useDocDraft } from "./use-doc-draft";
 import { DocOutline, MIN_OUTLINE_HEADINGS, useDocOutline } from "./doc-outline";
 import { MoveDialog } from "./move-dialog";
 import { DeleteDocDialog } from "./doc-tree";
+import { useCanDeleteDoc } from "./use-can-delete-doc";
 export function DocPage({ docId }: { docId: string }) {
   const wsId = useWorkspaceId();
   const { t } = useT("docs");
@@ -68,6 +69,7 @@ function DocEditor({ doc }: { doc: Doc }) {
   const { draft, status, dirty, change, retry, reload } = useDocDraft(doc);
   const [moving, setMoving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const canDelete = useCanDeleteDoc()(doc);
   const ancestors = folderAncestry(tree?.folders ?? [], doc.folderId);
   const author = getActorName(doc.updatedByType, doc.updatedById);
   const { getShareableUrl } = useNavigation();
@@ -141,13 +143,15 @@ function DocEditor({ doc }: { doc: Doc }) {
                   <FolderInput />
                   {t(($) => $.actions.move)}
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => setDeleting(true)}
-                >
-                  <Trash2 />
-                  {t(($) => $.actions.delete)}
-                </DropdownMenuItem>
+                {canDelete && (
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => setDeleting(true)}
+                  >
+                    <Trash2 />
+                    {t(($) => $.actions.delete)}
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </>
