@@ -16,7 +16,10 @@ type policySnapshot struct {
 	subscriptionVersion int64
 	cloudValidUntil     time.Time
 	gates               map[GateName]Gate
-	features            map[FeatureName]featureEntry
+	// gateReasons holds why an optional gate fell back to off (missing or
+	// malformed); a gate Cloud sent correctly has no entry.
+	gateReasons map[GateName]Reason
+	features    map[FeatureName]featureEntry
 }
 
 // featureEntry is one normalized paid feature. A feature Cloud did not send,
@@ -27,8 +30,11 @@ type featureEntry struct {
 }
 
 type cacheEntry struct {
-	hasPolicy  bool
-	policy     policySnapshot
+	hasPolicy bool
+	policy    policySnapshot
+	// receivedAt is when the policy arrived; a forced refresh reuses a policy
+	// younger than minForcedRefreshAge instead of fetching again.
+	receivedAt time.Time
 	freshUntil time.Time
 	staleUntil time.Time
 	retryAfter time.Time
