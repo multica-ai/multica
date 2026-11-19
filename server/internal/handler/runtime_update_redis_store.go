@@ -23,14 +23,20 @@ import (
 //   - req:<id>        the request envelope; every status change is a
 //     compare-and-set on the stored bytes, so a cancel and a daemon starting
 //     the update cannot both win.
-//   - pending:<rt>    sorted set of the runtime's unstarted requests, scored by
-//     the earliest time (UnixNano) they may be offered to the daemon again.
+//   - pending:<rt>    sorted set of the runtime's unfinished requests, scored
+//     by the earliest time (UnixNano) they may be offered to the daemon again.
 //   - active:<rt>     the runtime's one unfinished request.
+//
+// The keys live under "update2", apart from the "update" keys of releases
+// before queued updates. A replica of such a release, during a rolling deploy
+// or after a rollback, cannot see these requests: it neither drops a queued
+// one from the offer queue nor accepts a "running" report for one it cannot
+// check for cancellation. Requests it creates stay on its own keys.
 
 const (
-	updateKeyPrefix          = "mul:" + runtimePendingRedisHashTag + ":update:req:"
-	updatePendingPrefix      = "mul:" + runtimePendingRedisHashTag + ":update:pending:"
-	updateActivePrefix       = "mul:" + runtimePendingRedisHashTag + ":update:active:"
+	updateKeyPrefix          = "mul:" + runtimePendingRedisHashTag + ":update2:req:"
+	updatePendingPrefix      = "mul:" + runtimePendingRedisHashTag + ":update2:pending:"
+	updateActivePrefix       = "mul:" + runtimePendingRedisHashTag + ":update2:active:"
 	updateRedisPopMaxRetries = 5
 	updateRedisCASMaxRetries = 8
 )
@@ -66,6 +72,23 @@ redis.call('SET', KEYS[1], ARGV[2], 'PX', tonumber(ARGV[3]))
 return 1
 `)
 
+// createUpdateScript reserves the runtime's active slot and writes the request
+// and its offer entry in one step, so no reader ever sees a slot whose request
+// is not written yet (and mistakes it for a leftover). A script rather than
+// MULTI, which some managed Redis deployments deny.
+//
+// KEYS: active, req, pending. ARGV: id, data, req TTL ms, offer score,
+// pending TTL ms. Returns 0 when the slot is taken.
+var createUpdateScript = redis.NewScript(`
+if not redis.call('SET', KEYS[1], ARGV[1], 'NX', 'PX', tonumber(ARGV[3])) then
+    return 0
+end
+redis.call('SET', KEYS[2], ARGV[2], 'PX', tonumber(ARGV[3]))
+redis.call('ZADD', KEYS[3], ARGV[4], ARGV[1])
+redis.call('PEXPIRE', KEYS[3], tonumber(ARGV[5]))
+return 1
+`)
+
 // claimOfferScript claims a due request for one delivery by pushing its next
 // offer time forward. Returns 0 when another replica claimed it first.
 var claimOfferScript = redis.NewScript(`
@@ -85,7 +108,7 @@ func NewRedisUpdateStore(rdb redis.UniversalClient) *RedisUpdateStore {
 	return &RedisUpdateStore{rdb: rdb}
 }
 
-func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion, initiatorUserID string) (*UpdateRequest, error) {
+func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion, initiatorUserID string, queueWhenBusy bool) (*UpdateRequest, error) {
 	now := time.Now()
 	req := &UpdateRequest{
 		ID:              randomID(),
@@ -95,59 +118,39 @@ func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion,
 		TargetVersion:   targetVersion,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+		QueueWhenBusy:   queueWhenBusy,
 	}
 	data, err := s.marshalRequest(req)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.reserveActive(ctx, runtimeID, req.ID); err != nil {
-		return nil, err
-	}
-
-	// The active reservation above provides the concurrency guarantee this
-	// write needs. Use a plain pipeline so managed Redis deployments that allow
-	// SET/ZADD but deny MULTI can still create update requests. Exec failures
-	// remain safe because the compensation below removes every partially
-	// written key and releases the reservation.
-	pipe := s.rdb.Pipeline()
-	pipe.Set(ctx, updateKey(req.ID), data, updateRequestTTL(req.Status))
-	pipe.ZAdd(ctx, updatePendingKey(runtimeID), redis.Z{
-		Score:  float64(now.UnixNano()),
-		Member: req.ID,
-	})
-	pipe.Expire(ctx, updatePendingKey(runtimeID), updateStoreRetention*2)
-	if _, err := pipe.Exec(ctx); err != nil {
-		_ = s.clearActiveIfMatches(ctx, runtimeID, req.ID)
-		_ = s.rdb.Del(ctx, updateKey(req.ID)).Err()
-		_ = s.rdb.ZRem(ctx, updatePendingKey(runtimeID), req.ID).Err()
-		return nil, fmt.Errorf("persist update request: %w", err)
-	}
-	return req, nil
-}
-
-// reserveActive claims the runtime's single active slot. A slot still
-// pointing at a request that already ended (a cleanup write that failed) is
-// released and claimed again rather than blocking updates until it expires.
-func (s *RedisUpdateStore) reserveActive(ctx context.Context, runtimeID, id string) error {
-	activeKey := updateActiveKey(runtimeID)
+	keys := []string{updateActiveKey(runtimeID), updateKey(req.ID), updatePendingKey(runtimeID)}
 	for attempt := 0; attempt < 2; attempt++ {
-		ok, err := s.rdb.SetNX(ctx, activeKey, id, updateStoreRetention).Result()
+		created, err := createUpdateScript.Run(
+			ctx, s.rdb, keys,
+			req.ID, data,
+			updateRequestTTL(req.Status).Milliseconds(),
+			strconv.FormatInt(now.UnixNano(), 10),
+			(updateStoreRetention * 2).Milliseconds(),
+		).Int64()
 		if err != nil {
-			return fmt.Errorf("reserve active update: %w", err)
+			return nil, fmt.Errorf("persist update request: %w", err)
 		}
-		if ok {
-			return nil
+		if created == 1 {
+			return req, nil
 		}
+		// The slot is taken. GetActive releases it when it points at a request
+		// that already ended or expired; then one more try.
 		active, err := s.GetActive(ctx, runtimeID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if active != nil {
-			return errUpdateInProgress
+			return nil, errUpdateInProgress
 		}
 	}
-	return errUpdateInProgress
+	return nil, errUpdateInProgress
 }
 
 func (s *RedisUpdateStore) Get(ctx context.Context, id string) (*UpdateRequest, error) {
@@ -181,10 +184,8 @@ func (s *RedisUpdateStore) loadRequest(ctx context.Context, id string) (*UpdateR
 	if err != nil || req == nil {
 		return req, err
 	}
-	if updateRequestWaiting(req.Status) {
-		// Restore a waiting request's offer entry if it is missing, e.g. after
-		// a replica running the previous release dropped it during a rolling
-		// deploy.
+	if !updateRequestTerminal(req.Status) {
+		// Restore an unfinished request's offer entry if a failed write lost it.
 		s.syncIndexes(ctx, req)
 	}
 	return req, nil
@@ -256,10 +257,10 @@ func (s *RedisUpdateStore) syncIndexes(ctx context.Context, req *UpdateRequest) 
 	case updateRequestTerminal(req.Status):
 		_ = s.clearActiveIfMatches(ctx, req.RuntimeID, req.ID)
 		s.rdb.ZRem(ctx, pendingKey, req.ID)
-	case req.Status == UpdateRunning:
-		// Installing: never offer it again.
+	case req.Status == UpdateRunning && !req.QueueWhenBusy:
+		// Installing, and no daemon will be offered it again (see prepareOffer).
 		s.rdb.ZRem(ctx, pendingKey, req.ID)
-	case updateRequestWaiting(req.Status):
+	case !updateRequestTerminal(req.Status):
 		// NX keeps an existing offer time; it only restores a missing entry.
 		s.rdb.ZAddNX(ctx, pendingKey, redis.Z{Score: float64(time.Now().UnixNano()), Member: req.ID})
 		if req.Status == UpdateScheduled {
@@ -271,12 +272,12 @@ func (s *RedisUpdateStore) syncIndexes(ctx context.Context, req *UpdateRequest) 
 }
 
 // redisUpdateEnvelope stores the fields the API payload leaves out beside it.
-// RunStartedAt is now part of the payload too; it is still written and read
-// here so replicas on the previous release keep it during a rolling deploy.
 type redisUpdateEnvelope struct {
 	Public          *UpdateRequest `json:"r"`
 	RunStartedAt    *time.Time     `json:"s,omitempty"`
 	InitiatorUserID string         `json:"u,omitempty"`
+	QueueWhenBusy   bool           `json:"q,omitempty"`
+	OfferLeaseUntil *time.Time     `json:"l,omitempty"`
 }
 
 func (s *RedisUpdateStore) marshalRequest(req *UpdateRequest) ([]byte, error) {
@@ -284,6 +285,8 @@ func (s *RedisUpdateStore) marshalRequest(req *UpdateRequest) ([]byte, error) {
 		Public:          req,
 		RunStartedAt:    req.RunStartedAt,
 		InitiatorUserID: req.InitiatorUserID,
+		QueueWhenBusy:   req.QueueWhenBusy,
+		OfferLeaseUntil: req.OfferLeaseUntil,
 	}
 	data, err := json.Marshal(env)
 	if err != nil {
@@ -304,6 +307,8 @@ func (s *RedisUpdateStore) unmarshalRequest(raw []byte) (*UpdateRequest, error) 
 		env.Public.RunStartedAt = env.RunStartedAt
 	}
 	env.Public.InitiatorUserID = env.InitiatorUserID
+	env.Public.QueueWhenBusy = env.QueueWhenBusy
+	env.Public.OfferLeaseUntil = env.OfferLeaseUntil
 	return env.Public, nil
 }
 
@@ -315,7 +320,7 @@ func (s *RedisUpdateStore) HasPending(ctx context.Context, runtimeID string) (bo
 	return cnt > 0, nil
 }
 
-func (s *RedisUpdateStore) PopPending(ctx context.Context, runtimeID string) (*UpdateRequest, error) {
+func (s *RedisUpdateStore) PopPending(ctx context.Context, runtimeID string, deferrableDaemon bool) (*UpdateRequest, error) {
 	pendingKey := updatePendingKey(runtimeID)
 
 	for attempt := 0; attempt < updateRedisPopMaxRetries; attempt++ {
@@ -333,15 +338,7 @@ func (s *RedisUpdateStore) PopPending(ctx context.Context, runtimeID string) (*U
 		}
 		id := ids[0]
 
-		req, err := s.loadRequest(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if req == nil || req.RuntimeID != runtimeID || !updateRequestWaiting(req.Status) {
-			s.rdb.ZRem(ctx, pendingKey, id)
-			continue
-		}
-
+		// Claim this delivery among replicas by moving the next offer time.
 		claimed, err := claimOfferScript.Run(
 			ctx, s.rdb,
 			[]string{pendingKey},
@@ -354,6 +351,26 @@ func (s *RedisUpdateStore) PopPending(ctx context.Context, runtimeID string) (*U
 		}
 		if claimed == 0 {
 			continue
+		}
+
+		// Record the offer with compare-and-set, so a cancel that lands first
+		// wins and the request is not delivered.
+		offered := false
+		req, err := s.mutate(ctx, id, func(req *UpdateRequest, now time.Time) error {
+			offered = req.RuntimeID == runtimeID && prepareOffer(req, deferrableDaemon, now)
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if req == nil || req.RuntimeID != runtimeID || updateRequestTerminal(req.Status) {
+			s.rdb.ZRem(ctx, pendingKey, id)
+			continue
+		}
+		if !offered {
+			// Not for this daemon (a running request for a non-deferrable
+			// daemon); its offer time already moved on.
+			return nil, nil
 		}
 		return req, nil
 	}

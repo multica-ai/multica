@@ -462,6 +462,10 @@ type ChatSessionUpdatedPayload struct {
 type DaemonHeartbeatRequestPayload struct {
 	RuntimeID           string `json:"runtime_id"`
 	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	// SupportsDeferredUpdate says the daemon understands
+	// DaemonHeartbeatPendingUpdate.Deferrable. Only such a daemon receives
+	// deferrable offers; every other daemon keeps the fail-fast contract.
+	SupportsDeferredUpdate bool `json:"supports_deferred_update,omitempty"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
@@ -499,11 +503,13 @@ const HeartbeatStatusRuntimeGone = "runtime_gone"
 // DaemonHeartbeatPendingUpdate describes a CLI-update action the daemon
 // should run for the runtime.
 //
-// Deferrable is set by servers that keep a request queued while the machine
-// is busy. A daemon that sees it reports "scheduled" instead of failing, holds
-// the request, and starts it once its last task finishes. The server re-offers
-// a queued request periodically, so a daemon that restarts in the meantime
-// picks it up again. Without the flag a daemon must fail the request with
+// Deferrable is set for a daemon that advertised SupportsDeferredUpdate when
+// the client that started the update can show a queued one. A daemon that sees
+// it reports "scheduled" instead of failing, holds the request, and starts it
+// once its last task finishes, after the server accepts its "running" report.
+// The server re-offers the request periodically (also after it is running, in
+// case the daemon missed that answer), so a daemon that restarts picks it up
+// again. Without the flag a daemon must fail a busy request with
 // RuntimeUpdateBusyError, which is what older servers understand.
 type DaemonHeartbeatPendingUpdate struct {
 	ID            string `json:"id"`

@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -51,6 +52,15 @@ type UpdateRequest struct {
 	RunStartedAt *time.Time `json:"run_started_at,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
+	// QueueWhenBusy is set when the client that started the update renders a
+	// queued update. Requests from older clients (installed CLIs, Desktop
+	// builds) keep failing fast when the machine is busy, which is all they
+	// know how to show.
+	QueueWhenBusy bool `json:"-"`
+	// OfferLeaseUntil blocks cancelling while a non-deferrable offer is out:
+	// a daemon on that path installs even when its "running" report is
+	// refused, so a cancel accepted in that window would not be honoured.
+	OfferLeaseUntil *time.Time `json:"-"`
 }
 
 const (
@@ -62,6 +72,10 @@ const (
 	updateScheduledTimeout = 24 * time.Hour
 	// updateStoreRetention is how long a finished request stays readable.
 	updateStoreRetention = 5 * time.Minute
+	// updateOfferLease is how long a non-deferrable offer waits for the
+	// daemon's answer before the request is cancellable again. Daemons answer
+	// within seconds (their report retries end after about 7s).
+	updateOfferLease = 60 * time.Second
 )
 
 // updateReofferInterval is how often a delivered but unstarted request is
@@ -78,6 +92,8 @@ var (
 	errUpdateNotRunnable = &updateError{msg: "this update was cancelled or is no longer queued"}
 	// errUpdateNotCancellable rejects cancelling once installation started.
 	errUpdateNotCancellable = &updateError{msg: "this update has already started or finished"}
+	// errUpdateBeingDelivered rejects cancelling during an offer lease.
+	errUpdateBeingDelivered = &updateError{msg: "the daemon is picking this update up; try again in a minute"}
 )
 
 type updateError struct{ msg string }
@@ -85,16 +101,20 @@ type updateError struct{ msg string }
 func (e *updateError) Error() string { return e.msg }
 
 type UpdateStore interface {
-	Create(ctx context.Context, runtimeID, targetVersion, initiatorUserID string) (*UpdateRequest, error)
+	Create(ctx context.Context, runtimeID, targetVersion, initiatorUserID string, queueWhenBusy bool) (*UpdateRequest, error)
 	Get(ctx context.Context, id string) (*UpdateRequest, error)
 	// GetActive returns the runtime's unfinished request, or nil.
 	GetActive(ctx context.Context, runtimeID string) (*UpdateRequest, error)
 	// HasPending reports whether a request is due to be offered to the daemon.
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
-	// PopPending claims the oldest due request for delivery. The request keeps
-	// its status: it only becomes running when the daemon says it started, and
-	// it is offered again after updateReofferInterval until then.
-	PopPending(ctx context.Context, runtimeID string) (*UpdateRequest, error)
+	// PopPending claims the oldest due request for delivery to a daemon that
+	// does (deferrableDaemon) or does not understand deferrable offers. The
+	// request keeps its status: it only becomes running when the daemon says
+	// it started, and it is offered again after updateReofferInterval until
+	// then. A queued request that is already running is offered again only to
+	// a deferrable daemon, which may have missed the answer to its "running"
+	// report. A non-deferrable offer takes an offer lease (see prepareOffer).
+	PopPending(ctx context.Context, runtimeID string, deferrableDaemon bool) (*UpdateRequest, error)
 	// MarkRunning records that the daemon started installing. It returns
 	// errUpdateNotRunnable once the request was cancelled, expired or finished,
 	// which is how a daemon holding a queued request learns it was cancelled.
@@ -102,7 +122,8 @@ type UpdateStore interface {
 	// Schedule records that the daemon deferred the update until it is idle.
 	Schedule(ctx context.Context, id string, activeTasks *int) (*UpdateRequest, error)
 	// Cancel stops a pending or scheduled request; errUpdateNotCancellable
-	// once it is running or finished.
+	// once it is running or finished, errUpdateBeingDelivered during an offer
+	// lease.
 	Cancel(ctx context.Context, id string) (*UpdateRequest, error)
 	Complete(ctx context.Context, id string, output string) error
 	Fail(ctx context.Context, id string, errMsg string) error
@@ -121,7 +142,41 @@ func updateRequestWaiting(status UpdateStatus) bool {
 	return status == UpdatePending || status == UpdateScheduled
 }
 
+// updateOfferLeased reports an offer still waiting for a non-deferrable
+// daemon's answer.
+func updateOfferLeased(req *UpdateRequest, now time.Time) bool {
+	return req.OfferLeaseUntil != nil && now.Before(*req.OfferLeaseUntil)
+}
+
+// offerDeferrable is whether an offer of req to this daemon may be deferred.
+func offerDeferrable(req *UpdateRequest, deferrableDaemon bool) bool {
+	return deferrableDaemon && req.QueueWhenBusy
+}
+
+// prepareOffer decides whether a due request is delivered to this daemon and
+// records the offer on req. A non-deferrable offer takes a lease so it cannot
+// be cancelled until the daemon answers (or the lease runs out): that daemon
+// would install regardless of a refused "running" report.
+func prepareOffer(req *UpdateRequest, deferrableDaemon bool, now time.Time) bool {
+	switch {
+	case updateRequestWaiting(req.Status):
+	case req.Status == UpdateRunning && offerDeferrable(req, deferrableDaemon):
+		return true
+	default:
+		return false
+	}
+	if !offerDeferrable(req, deferrableDaemon) {
+		lease := now.Add(updateOfferLease)
+		req.OfferLeaseUntil = &lease
+	}
+	return true
+}
+
 func applyUpdateTimeout(req *UpdateRequest, now time.Time) bool {
+	// Never end a request a daemon may be starting right now.
+	if updateOfferLeased(req, now) {
+		return false
+	}
 	switch req.Status {
 	case UpdatePending:
 		if now.Sub(req.CreatedAt) > updatePendingTimeout {
@@ -152,15 +207,14 @@ func applyUpdateTimeout(req *UpdateRequest, now time.Time) bool {
 // place and reports an error when the transition is not allowed.
 
 func transitionToRunning(req *UpdateRequest, now time.Time) error {
-	switch {
-	case req.Status == UpdateRunning:
-		// A retried "running" report.
-		return nil
-	case !updateRequestWaiting(req.Status):
+	if req.Status != UpdateRunning && !updateRequestWaiting(req.Status) {
 		return errUpdateNotRunnable
 	}
+	// A repeated report means the daemon did not get the answer to the first
+	// one and is only starting now, so the run clock restarts too.
 	req.Status = UpdateRunning
 	req.RunStartedAt = &now
+	req.OfferLeaseUntil = nil
 	req.UpdatedAt = now
 	return nil
 }
@@ -174,6 +228,7 @@ func transitionToScheduled(req *UpdateRequest, activeTasks *int, now time.Time) 
 	}
 	req.Status = UpdateScheduled
 	req.ActiveTasks = activeTasks
+	req.OfferLeaseUntil = nil
 	req.UpdatedAt = now
 	return nil
 }
@@ -181,6 +236,9 @@ func transitionToScheduled(req *UpdateRequest, activeTasks *int, now time.Time) 
 func transitionToCancelled(req *UpdateRequest, now time.Time) error {
 	if !updateRequestWaiting(req.Status) {
 		return errUpdateNotCancellable
+	}
+	if updateOfferLeased(req, now) {
+		return errUpdateBeingDelivered
 	}
 	req.Status = UpdateCancelled
 	req.UpdatedAt = now
@@ -196,6 +254,7 @@ func transitionToResult(req *UpdateRequest, status UpdateStatus, output, errMsg 
 	req.Status = status
 	req.Output = output
 	req.Error = errMsg
+	req.OfferLeaseUntil = nil
 	req.UpdatedAt = now
 	return true
 }
@@ -216,7 +275,7 @@ func NewInMemoryUpdateStore() *InMemoryUpdateStore {
 	}
 }
 
-func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion, initiatorUserID string) (*UpdateRequest, error) {
+func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion, initiatorUserID string, queueWhenBusy bool) (*UpdateRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -246,6 +305,7 @@ func (s *InMemoryUpdateStore) Create(_ context.Context, runtimeID, targetVersion
 		TargetVersion:   targetVersion,
 		CreatedAt:       now,
 		UpdatedAt:       now,
+		QueueWhenBusy:   queueWhenBusy,
 	}
 	s.requests[req.ID] = req
 	s.nextOffer[req.ID] = now
@@ -278,12 +338,12 @@ func (s *InMemoryUpdateStore) GetActive(_ context.Context, runtimeID string) (*U
 	return nil, nil
 }
 
-// dueLocked returns the runtime's oldest request due for delivery.
+// dueLocked returns the runtime's oldest unfinished request due for delivery.
 func (s *InMemoryUpdateStore) dueLocked(runtimeID string, now time.Time) *UpdateRequest {
 	var oldest *UpdateRequest
 	for id, req := range s.requests {
 		applyUpdateTimeout(req, now)
-		if req.RuntimeID != runtimeID || !updateRequestWaiting(req.Status) {
+		if req.RuntimeID != runtimeID || updateRequestTerminal(req.Status) {
 			continue
 		}
 		if next, ok := s.nextOffer[id]; ok && next.After(now) {
@@ -302,7 +362,7 @@ func (s *InMemoryUpdateStore) HasPending(_ context.Context, runtimeID string) (b
 	return s.dueLocked(runtimeID, time.Now()) != nil, nil
 }
 
-func (s *InMemoryUpdateStore) PopPending(_ context.Context, runtimeID string) (*UpdateRequest, error) {
+func (s *InMemoryUpdateStore) PopPending(_ context.Context, runtimeID string, deferrableDaemon bool) (*UpdateRequest, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -312,6 +372,9 @@ func (s *InMemoryUpdateStore) PopPending(_ context.Context, runtimeID string) (*
 		return nil, nil
 	}
 	s.nextOffer[req.ID] = now.Add(updateReofferInterval)
+	if !prepareOffer(req, deferrableDaemon, now) {
+		return nil, nil
+	}
 	return cloneUpdateRequest(req), nil
 }
 
@@ -383,6 +446,10 @@ func cloneUpdateRequest(req *UpdateRequest) *UpdateRequest {
 		t := *req.RunStartedAt
 		out.RunStartedAt = &t
 	}
+	if req.OfferLeaseUntil != nil {
+		t := *req.OfferLeaseUntil
+		out.OfferLeaseUntil = &t
+	}
 	return &out
 }
 
@@ -402,6 +469,9 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		TargetVersion string `json:"target_version"`
+		// QueueWhenBusy is sent by clients that show a queued update; see
+		// UpdateRequest.QueueWhenBusy.
+		QueueWhenBusy bool `json:"queue_when_busy"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -412,11 +482,23 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The update is machine-wide; one queued through another runtime on the
+	// same machine already covers it.
+	if existing, err := h.findMachineActiveUpdate(r.Context(), rt, member); err != nil {
+		slog.Error("load machine active update failed", "error", err, "runtime_id", uuidToString(rt.ID))
+		writeError(w, http.StatusInternalServerError, "failed to start the update")
+		return
+	} else if existing != nil {
+		writeError(w, http.StatusConflict, errUpdateInProgress.Error())
+		return
+	}
+
 	update, err := h.UpdateStore.Create(
 		r.Context(),
 		uuidToString(rt.ID),
 		req.TargetVersion,
 		uuidToString(member.UserID),
+		req.QueueWhenBusy,
 	)
 	if err != nil {
 		// Only the in-progress rejection is a conflict the caller can act on.
@@ -468,8 +550,10 @@ func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, update)
 }
 
-// GetActiveUpdate returns the runtime's unfinished update, so a queued update
-// stays visible across reloads and to everyone who can manage the runtime.
+// GetActiveUpdate returns the unfinished update on the runtime's machine, so a
+// queued update stays visible across reloads and to everyone who can manage
+// it. The returned request's runtime_id is the one to poll and cancel through:
+// it can be another runtime of the same machine.
 func (h *Handler) GetActiveUpdate(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	rt, member, ok := h.requireRuntimeReadAccess(w, r, obsmetrics.RuntimeLookupSourceRuntimeUpdatePoll, runtimeID)
@@ -477,17 +561,54 @@ func (h *Handler) GetActiveUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	update, err := h.UpdateStore.GetActive(r.Context(), uuidToString(rt.ID))
+	update, err := h.findMachineActiveUpdate(r.Context(), rt, member)
 	if err != nil {
 		slog.Warn("load active update failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to load update")
 		return
 	}
-	if update != nil && !canEditRuntime(member, rt) && update.InitiatorUserID != uuidToString(member.UserID) {
-		update = nil
-	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"update": update})
+}
+
+// findMachineActiveUpdate returns the unfinished update on rt's machine that
+// member may see: one on rt itself (for its managers or the initiator), or one
+// on another runtime of the same daemon that member owns. A machine card picks
+// whichever of its runtimes is online as the command channel, so the update
+// may have been queued through a sibling.
+func (h *Handler) findMachineActiveUpdate(ctx context.Context, rt db.AgentRuntime, member db.Member) (*UpdateRequest, error) {
+	runtimeID := uuidToString(rt.ID)
+	update, err := h.UpdateStore.GetActive(ctx, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	if update != nil && (canEditRuntime(member, rt) || update.InitiatorUserID == uuidToString(member.UserID)) {
+		return update, nil
+	}
+	if !rt.DaemonID.Valid || rt.DaemonID.String == "" {
+		return nil, nil
+	}
+	siblings, err := h.Queries.ListRuntimeOwnersByDaemon(ctx, db.ListRuntimeOwnersByDaemonParams{
+		WorkspaceID: rt.WorkspaceID,
+		DaemonID:    rt.DaemonID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, sibling := range siblings {
+		siblingID := uuidToString(sibling.ID)
+		if siblingID == runtimeID || !sibling.OwnerID.Valid || uuidToString(sibling.OwnerID) != uuidToString(member.UserID) {
+			continue
+		}
+		update, err := h.UpdateStore.GetActive(ctx, siblingID)
+		if err != nil {
+			return nil, err
+		}
+		if update != nil {
+			return update, nil
+		}
+	}
+	return nil, nil
 }
 
 // CancelUpdate stops an update that has not started installing yet.
@@ -516,7 +637,7 @@ func (h *Handler) CancelUpdate(w http.ResponseWriter, r *http.Request) {
 
 	update, err := h.UpdateStore.Cancel(r.Context(), updateID)
 	switch {
-	case errors.Is(err, errUpdateNotCancellable):
+	case errors.Is(err, errUpdateNotCancellable), errors.Is(err, errUpdateBeingDelivered):
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:
@@ -565,9 +686,9 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A daemon released before deferrable updates fails a busy offer with
-	// this exact text. Keep the request queued; the next re-offer that lands
-	// while the machine is idle starts it.
-	if req.Status == "failed" && req.Error == protocol.RuntimeUpdateBusyError && updateRequestWaiting(existing.Status) {
+	// this exact text. When the client asked for queueing, keep the request
+	// queued; the next re-offer that lands while the machine is idle starts it.
+	if req.Status == "failed" && req.Error == protocol.RuntimeUpdateBusyError && existing.QueueWhenBusy && updateRequestWaiting(existing.Status) {
 		req.Status = string(UpdateScheduled)
 		req.ActiveTasks = nil
 	}
