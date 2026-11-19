@@ -156,6 +156,7 @@
     "archive_completed_failed": "Failed to archive completed",
     "unarchive_failed": "Failed to unarchive",
     "archived_load_failed": "Failed to load archived notifications",
+    "load_failed": "Failed to load notifications",
     "filters_load_failed": "Could not load filters",
     "delete_failed": "Failed to delete notification. Try again.",
     "unsubscribe_archive_failed": "Failed to unsubscribe",

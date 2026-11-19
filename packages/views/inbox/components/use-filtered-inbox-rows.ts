@@ -20,6 +20,25 @@ import { useKeptOpenInboxRow } from "./use-kept-open-inbox-row";
 export const INBOX_SECTION_LIST = "section";
 
 const EMPTY_INBOX: InboxItem[] = [];
+
+/** Where the live Inbox list stands: only a `loaded` list may read as empty. */
+export type InboxListLoad = "loading" | "loaded" | "failed";
+
+/**
+ * A list that has loaded stays `loaded` when a later refresh fails: its rows
+ * stay on screen rather than the Inbox emptying. One that failed stays
+ * `failed` while it is tried again: a new attempt resets the query to pending,
+ * and its retries can take seconds.
+ */
+export function inboxListLoad(query: {
+  data: unknown;
+  isError: boolean;
+  isFetching: boolean;
+  errorUpdateCount: number;
+}): InboxListLoad {
+  if (query.data !== undefined) return "loaded";
+  return query.isError || (query.errorUpdateCount > 0 && query.isFetching) ? "failed" : "loading";
+}
 const EMPTY_TASKS: AgentTask[] = [];
 
 /**
@@ -36,7 +55,8 @@ const EMPTY_TASKS: AgentTask[] = [];
  * `enabled: false` reads nothing, for a caller that may not need the list.
  */
 export function useFilteredInboxRows(wsId: string, openKey: string | null, enabled = true) {
-  const { data: raw = EMPTY_INBOX } = useQuery({ ...inboxListOptions(wsId), enabled: enabled && !!wsId });
+  const query = useQuery({ ...inboxListOptions(wsId), enabled: enabled && !!wsId });
+  const raw = query.data ?? EMPTY_INBOX;
   const stored = useInboxFilters(wsId);
   // Every notification, not one per issue: the notification filters match any
   // notification of an issue.
@@ -77,6 +97,14 @@ export function useFilteredInboxRows(wsId: string, openKey: string | null, enabl
   return {
     rows,
     kept,
+    /**
+     * Whether the list has loaded. Only a list that loaded may read as empty:
+     * one still loading or that failed shows no rows without meaning there
+     * are none. A failed refresh of a loaded list keeps it as it was.
+     */
+    load: inboxListLoad(query),
+    retry: () => void query.refetch(),
+    retrying: query.isFetching,
     notifications,
     filtered: inboxFilterCount(filters) > 0,
     priorityFilterSupport,

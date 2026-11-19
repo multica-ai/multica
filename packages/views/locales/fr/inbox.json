@@ -156,6 +156,7 @@
     "archive_completed_failed": "Échec de l'archivage des éléments terminés",
     "unarchive_failed": "Échec du désarchivage",
     "archived_load_failed": "Échec du chargement des notifications archivées",
+    "load_failed": "Échec du chargement des notifications",
     "filters_load_failed": "Impossible de charger les filtres",
     "delete_failed": "Impossible de supprimer la notification. Réessayez.",
     "unsubscribe_archive_failed": "Échec du désabonnement",
