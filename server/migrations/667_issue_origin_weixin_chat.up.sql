@@ -5,8 +5,8 @@
 -- whole filename, so those rows are not 673/674 and the files are gone.
 -- The rows can still be in the table. A hardcoded weixin-only list drops
 -- sharecrm_chat (and any operator-added origin). Migration 668 then fails
--- VALIDATE with 23514 after this file has already committed, and 685 never
--- runs.
+-- VALIDATE with 23514 after this file has already committed, and later
+-- migrations, including 695, never run.
 --
 -- This statement only adds weixin_chat and sharecrm_chat when they are
 -- missing. It does not scan issue: the previous check was already validated,

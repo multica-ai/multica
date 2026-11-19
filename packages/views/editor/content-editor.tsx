@@ -69,6 +69,7 @@ import { repairEmptyListItems } from "./utils/repair-list-items";
 import { resolveClickIntent, useAppOrigin, useOptionalNavigation } from "../navigation";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
+import { BlockHandle } from "./block-handle";
 import { posFromAnchor, type TextAnchor } from "./text-anchor";
 import { insertDictation } from "./utils/insert-dictation";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
@@ -205,9 +206,16 @@ interface ContentEditorBaseProps {
   /**
    * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
    * lists the active agent's skills (chat); "command" merges Issue quick
-   * actions, skills matching a nonempty query, and built-ins such as /note.
+   * actions, skills matching a nonempty query, and built-ins such as /note;
+   * "blocks" inserts document blocks (Docs).
    */
-  slashCommandMode?: "skill" | "command";
+  slashCommandMode?: "skill" | "command" | "blocks";
+  /**
+   * Show a hover handle beside each block: "+" opens the block menu on a new
+   * line below, and the grip drags the block or opens turn-into, duplicate and
+   * delete. For long-form documents; pair it with `slashCommandMode="blocks"`.
+   */
+  showBlockHandles?: boolean;
   /**
    * Quick actions and Issue target-agent skills for the "command" `/` menu,
    * plus the resolver that turns a quick-action pick into draft text. Read
@@ -397,6 +405,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionContextItems,
       enableSlashCommands = false,
       slashCommandMode = "skill",
+      showBlockHandles = false,
       quickActionMenu,
       attachments,
       flushPendingOnUnmount = false,
@@ -1076,6 +1085,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           onMouseDown={handleContainerMouseDown}
         >
           <EditorContent className="flex flex-1 flex-col" editor={editor} />
+          {showBlockHandles && editor && (
+            <BlockHandle editor={editor} containerRef={wrapperRef} />
+          )}
           {showBubbleMenu && (
             <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} selectionAction={selectionAction} />
           )}

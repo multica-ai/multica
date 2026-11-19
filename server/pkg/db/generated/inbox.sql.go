@@ -871,11 +871,17 @@ WITH target AS (
       AND s.issue_id = target.issue_id
       AND s.archived = false AND s.read = false
       AND s.id <> $1
+    RETURNING s.id
 )
 UPDATE inbox_item AS item SET read = true
 WHERE item.id = $1
-RETURNING item.id, item.workspace_id, item.recipient_type, item.recipient_id, item.type, item.severity, item.issue_id, item.title, item.body, item.read, item.archived, item.created_at, item.actor_type, item.actor_id, item.details, item.section, item.snoozed_until, item.snoozed_at
+RETURNING item.id, item.workspace_id, item.recipient_type, item.recipient_id, item.type, item.severity, item.issue_id, item.title, item.body, item.read, item.archived, item.created_at, item.actor_type, item.actor_id, item.details, item.section, item.snoozed_until, item.snoozed_at, (SELECT count(*) FROM siblings)::bigint AS siblings_read
 `
+
+type MarkInboxReadRow struct {
+	InboxItem    InboxItem `json:"inbox_item"`
+	SiblingsRead int64     `json:"siblings_read"`
+}
 
 // Opening a row in the inbox opens its issue, so it reads every active unread
 // row on that issue, not just the one shown (MUL-8618). The inbox renders one
@@ -885,29 +891,30 @@ RETURNING item.id, item.workspace_id, item.recipient_type, item.recipient_id, it
 // opened outside the inbox. The item itself is read whether or not it is
 // archived; its siblings only while active, as in MarkInboxReadByIssue, which
 // keeps the probe on the partial index idx_inbox_active_by_issue. Items without
-// an issue are their own group.
-func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
+// an issue are their own group. siblings_read is how many other rows it read.
+func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (MarkInboxReadRow, error) {
 	row := q.db.QueryRow(ctx, markInboxRead, id)
-	var i InboxItem
+	var i MarkInboxReadRow
 	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.RecipientType,
-		&i.RecipientID,
-		&i.Type,
-		&i.Severity,
-		&i.IssueID,
-		&i.Title,
-		&i.Body,
-		&i.Read,
-		&i.Archived,
-		&i.CreatedAt,
-		&i.ActorType,
-		&i.ActorID,
-		&i.Details,
-		&i.Section,
-		&i.SnoozedUntil,
-		&i.SnoozedAt,
+		&i.InboxItem.ID,
+		&i.InboxItem.WorkspaceID,
+		&i.InboxItem.RecipientType,
+		&i.InboxItem.RecipientID,
+		&i.InboxItem.Type,
+		&i.InboxItem.Severity,
+		&i.InboxItem.IssueID,
+		&i.InboxItem.Title,
+		&i.InboxItem.Body,
+		&i.InboxItem.Read,
+		&i.InboxItem.Archived,
+		&i.InboxItem.CreatedAt,
+		&i.InboxItem.ActorType,
+		&i.InboxItem.ActorID,
+		&i.InboxItem.Details,
+		&i.InboxItem.Section,
+		&i.InboxItem.SnoozedUntil,
+		&i.InboxItem.SnoozedAt,
+		&i.SiblingsRead,
 	)
 	return i, err
 }

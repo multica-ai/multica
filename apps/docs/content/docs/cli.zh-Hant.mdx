@@ -401,7 +401,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | 建立、更新、分配和搜尋任務；管理評論、訂閱、標籤、屬性、喚醒、時間線與執行記錄 |
 | `project` | 管理專案、專案資源和專案使用的工作流 |
-| `inbox` | 讀取自己的通知，不改變已讀狀態 |
+| `inbox` | 讀取和管理自己的通知：列出、標為已讀、封存、稍後提醒 |
 | `workflow` | 管理工作流：狀態以及每個狀態交給誰處理 |
 | `issue-status` | 管理工作區狀態目錄：狀態及其顏色和圖示 |
 | `label`、`property` | 管理工作區標籤和自定義屬性 |
@@ -536,7 +536,14 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | | `activity <issue-id> <outcome>` | 記錄隊長評價 | |
 | `chat` | `history`、`thread [id]` | 讀取 AI 代理當前正在處理的外部聊天會話 | `--limit`、`--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | 管理目前聊天執行的跟進；見[聊天喚醒](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
-| `inbox` | `list` | [讀取目前通知](/inbox)，不標為已讀 | `--project`、`--type`、`--output`（`table` 或 `json`）；篩選在本機套用 |
+| `inbox` | `list` | [列出通知](/inbox)，不標為已讀；`--archived` 或 `--snoozed` 改為列出封存或稍後提醒的內容 | `--unread`、`--issue`、`--since`、`--project`、`--type`、`--output`（`table` 或 `json`）；`--archived` 讀取全部分頁 |
+| | `count` | 目前工作區及你所在各工作區的未讀數 | `--output` |
+| | `read [<id>...]` | 將通知標為已讀（作用於所在任務的全部通知）；或一個任務上的全部通知，或全部 | `--issue`、`--all`（需要 `--yes`） |
+| | `unread <id>...` | 將通知標為未讀 | |
+| | `archive [<id>...]` | 封存通知（作用於所在任務的全部通知）；或批次封存 | `--all`、`--read`、`--completed`（皆需 `--yes`） |
+| | `unarchive <id>...` | 還原已封存的通知 | |
+| | `snooze <id>...` | 讓通知所在任務暫時離開收件箱，直到指定時間 | `--until`（RFC 3339、`30m`、`3h`、`1d`、`1w`、`tomorrow`） |
+| | `unsnooze <id>...` | 讓稍後提醒的任務立即回到收件箱 | |
 
 ### Runtime
 

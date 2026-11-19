@@ -75,7 +75,8 @@ function useLinkHover(containerRef: React.RefObject<HTMLElement | null>, disable
       // in-app path rather than the shareable link the user expects.
       if (
         link.classList.contains("issue-mention") ||
-        link.classList.contains("project-mention")
+        link.classList.contains("project-mention") ||
+        link.classList.contains("doc-mention")
       ) {
         return;
       }

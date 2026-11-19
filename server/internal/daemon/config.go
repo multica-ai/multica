@@ -412,12 +412,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// built-in default. Disabling the daemon's watchdogs has never disabled this
 	// timer, and quietly turning it into "unbounded" here would be a much larger
 	// change than this one.
-	codexSemanticDefault := agentIdleWatchdog
-	if agentToolWatchdog > codexSemanticDefault {
-		codexSemanticDefault = agentToolWatchdog
-	}
-	if codexSemanticDefault <= 0 {
-		codexSemanticDefault = DefaultCodexSemanticInactivityTimeout
+	codexSemanticDefault := DefaultCodexSemanticInactivityTimeout
+	if agentIdleWatchdog > 0 {
+		codexSemanticDefault = max(agentIdleWatchdog, agentToolWatchdog)
 	}
 	codexSemanticInactivityTimeout, err := durationFromEnv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", codexSemanticDefault)
 	if err != nil {

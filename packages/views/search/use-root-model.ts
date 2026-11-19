@@ -42,6 +42,7 @@ const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
   squads: ["squads", "teams", "小队", "团队"],
   usage: ["usage", "analytics", "stats", "metrics", "统计", "分析", "用量"],
   runtimes: ["runtimes", "environments", "machines", "运行时"],
+  docs: ["docs", "knowledge", "知识库"],
   skills: ["skills", "library", "技能"],
   settings: ["settings", "config", "preferences", "设置", "配置"],
 };
@@ -233,6 +234,7 @@ export function useRootModel(
       autopilots: scope === "all" ? objects.autopilots : [],
       chats: scope === "all" ? objects.chats : [],
       skills: scope === "all" ? objects.skills : [],
+      docs: scope === "all" ? objects.docs : [],
       workspaces: scope === "all" ? objects.workspaces : [],
     };
 
@@ -264,6 +266,7 @@ export function useRootModel(
       visibleObjects.autopilots.length +
       visibleObjects.chats.length +
       visibleObjects.skills.length +
+      visibleObjects.docs.length +
       visibleObjects.workspaces.length;
     const hasResults =
       objectCount > 0 ||

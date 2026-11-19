@@ -54,7 +54,7 @@ export function PropRow({
         className,
       )}
     >
-      <span className="flex min-h-8 min-w-0 items-center gap-1.5 text-label text-muted-foreground">
+      <span data-slot="prop-row-label" className="flex min-h-8 min-w-0 items-center gap-1.5 text-label text-muted-foreground">
         {label}
       </span>
       <div className="flex min-h-8 min-w-0 items-center gap-1.5 truncate text-label">

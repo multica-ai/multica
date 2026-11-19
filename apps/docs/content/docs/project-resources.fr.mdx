@@ -38,6 +38,8 @@ Lors de la création d'un projet, vous pouvez aussi choisir des dépôts directe
 
 La `ref` d'une ressource définit la branche, le tag ou le commit que les checkouts suivants utilisent par défaut. `default_branch_hint` donne seulement à l'agent une indication sur la branche par défaut et n'impose pas de changement de branche.
 
+Pour un dépôt géré, l'agent démarre dans le dossier de travail de la tâche. En général, `multica repo checkout` crée un sous-dossier pour le dépôt et affiche son chemin. Exécutez depuis ce chemin les commandes qui exigent la racine du dépôt. Si le processus de l'agent doit lui-même démarrer à la racine et que vous contrôlez la machine du runtime, ajoutez un checkout existant comme dossier local. Les modes `in_place` et `worktree` démarrent tous deux l'agent à la racine d'un dépôt ; pour les dépôts git, privilégiez `worktree` pour isoler les exécutions et les lancer en parallèle. Voir [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire).
+
 ## Ajouter un répertoire local
 
 L'interface d'ajout d'un répertoire local n'existe que dans l'application de bureau, car les navigateurs ne peuvent pas sélectionner de dossiers sur votre ordinateur.

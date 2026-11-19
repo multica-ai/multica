@@ -19,6 +19,7 @@ import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 import { useIssueSidebarSectionsStore } from "@multica/core/issues/stores/issue-sidebar-sections-store";
 import { useSubIssuesCollapseStore } from "@multica/core/issues/stores/sub-issues-collapse-store";
+import { configureShortcutPlatform } from "@multica/core/shortcuts";
 
 vi.mock("./issue-wakeup-header-chip", () => ({
   IssueWakeupHeaderChip: ({ onOpen }: { onOpen: () => void }) => (
@@ -140,11 +141,18 @@ vi.mock("../../navigation", async () => ({
   ...(await vi.importActual<typeof import("../../navigation/use-held-until-arrival")>(
     "../../navigation/use-held-until-arrival",
   )),
-  AppLink: ({ children, href, ...props }: any) => (
-    <a href={href} {...props}>
-      {children}
-    </a>
-  ),
+  // Forwards ref: the header wraps the link in `TruncatedTooltip`, which
+  // measures the anchor it clones, exactly as the real AppLink supports.
+  AppLink: forwardRef<HTMLAnchorElement, any>(function MockAppLink(
+    { children, href, ...props },
+    ref,
+  ) {
+    return (
+      <a ref={ref} href={href} {...props}>
+        {children}
+      </a>
+    );
+  }),
   useNavigation: () => ({
     push: settingsPush,
     pathname: "/issues/issue-1",
@@ -1056,6 +1064,9 @@ describe("IssueDetail (shared)", () => {
     // Find only answers in a visible page; jsdom lays nothing out.
     const rects = vi.spyOn(HTMLElement.prototype, "getClientRects")
       .mockReturnValue([new DOMRect(0, 0, 1, 1)] as unknown as DOMRectList);
+    // jsdom's user agent names the host OS, which would make the find chord
+    // Cmd+F on a Mac host.
+    configureShortcutPlatform("linux");
     try {
       renderIssueDetail();
       await screen.findByText("Historical comment 0");
@@ -1072,6 +1083,7 @@ describe("IssueDetail (shared)", () => {
       expect(screen.getByTestId("virtuoso-mock")).toBeInTheDocument();
     } finally {
       rects.mockRestore();
+      configureShortcutPlatform(null);
     }
   });
 
@@ -1572,6 +1584,31 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByRole("link", { name: mockIssue.identifier })).toBeInTheDocument();
   });
 
+  it("reveals the header's clipped identifier and title on hover", async () => {
+    renderIssueDetail();
+    await screen.findByText("Implement authentication");
+
+    const link = screen.getByRole("link", { name: `${mockIssue.identifier} ${mockIssue.title}` });
+    // jsdom never lays out the header: model the clip the actions leave the leaf.
+    const leaf = link.firstElementChild as HTMLElement;
+    leaf.style.overflowX = "hidden";
+    Object.defineProperties(leaf, {
+      scrollWidth: { configurable: true, value: 320 },
+      clientWidth: { configurable: true, value: 100 },
+    });
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.pointerEnter(link, { pointerType: "mouse" });
+      await act(async () => { vi.advanceTimersByTime(550); });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(document.querySelector("[data-slot=tooltip-content]"))
+      .toHaveTextContent(`${mockIssue.identifier} ${mockIssue.title}`);
+  });
+
   describe("header icon buttons", () => {
     function renderWithDone() {
       const queryClient = createTestQueryClient();
@@ -1724,7 +1761,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByText("Details")).toBeInTheDocument();
+      expect(screen.getByRole("region", { name: "Details" })).toBeInTheDocument();
     });
 
     expect(screen.queryByRole("button", { name: /^Metadata\b/ })).not.toBeInTheDocument();
@@ -2008,6 +2045,59 @@ describe("IssueDetail (shared)", () => {
     expect(container.querySelector(`#comment-${root.id}`)?.querySelector(`[data-run-id="${second.id}"]`)).not.toBeNull();
   });
 
+  describe("overview Reply", () => {
+    const replyButton = async () => {
+      const nextStep = await waitFor(() => {
+        const el = document.querySelector<HTMLElement>('[data-slot="issue-next-step"]');
+        expect(el).not.toBeNull();
+        return el!;
+      });
+      return within(nextStep).getByRole("button", { name: "Reply" });
+    };
+
+    it("lands on an agent comment its run regrouped under the triggering comment", async () => {
+      const root = mockTimeline[0]!;
+      const task: AgentTask = { id: "ba2e8d1c-7f9b-4e2a-9c1d-123456789ab0", agent_id: "agent-1", runtime_id: "runtime-1", issue_id: "issue-1",
+        status: "completed", priority: 0, created_at: root.created_at, started_at: root.created_at, dispatched_at: root.created_at,
+        completed_at: "2026-01-16T00:01:00Z", result: null, error: null, trigger_comment_id: root.id, delivered_comment_ids: [root.id] };
+      const answer: TimelineEntry = { ...mockTimeline[1]!, id: "agent-answer", parent_id: null, source_task_id: task.id,
+        content: "Which schema should I keep?", created_at: "2026-01-16T00:01:00Z", updated_at: "2026-01-16T00:01:00Z" };
+      mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, status: "blocked" });
+      mockApiObj.listTimeline.mockResolvedValue([root, answer]);
+      mockApiObj.listTasksByIssue.mockResolvedValue([task]);
+      useCommentCollapseStore.setState({ collapsedByIssue: { "issue-1": [root.id] } });
+      renderIssueDetail();
+
+      await screen.findByText("Started working on this");
+      expect(document.getElementById("comment-agent-answer")).toBeNull();
+      fireEvent.click(await replyButton());
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-agent-answer")?.className).toContain(highlightedCommentBackgroundClass);
+      });
+      expect(document.getElementById("comment-agent-answer")?.closest(`#comment-${root.id}`)).not.toBeNull();
+      expect(useCommentCollapseStore.getState().isCollapsed("issue-1", root.id)).toBe(false);
+    });
+
+    it("unfolds a collapsed thread to land on the agent's latest reply", async () => {
+      const reply: TimelineEntry = { ...mockTimeline[1]!, id: "agent-reply", parent_id: "comment-1",
+        content: "Blocked on the API key", created_at: "2026-01-18T00:00:00Z", updated_at: "2026-01-18T00:00:00Z" };
+      mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, status: "blocked" });
+      mockApiObj.listTimeline.mockResolvedValue([...mockTimeline, reply]);
+      useCommentCollapseStore.setState({ collapsedByIssue: { "issue-1": ["comment-1"] } });
+      renderIssueDetail();
+
+      await screen.findByText("Started working on this");
+      expect(document.getElementById("comment-agent-reply")).toBeNull();
+      fireEvent.click(await replyButton());
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-agent-reply")?.className).toContain(highlightedCommentBackgroundClass);
+      });
+      expect(useCommentCollapseStore.getState().isCollapsed("issue-1", "comment-1")).toBe(false);
+    });
+  });
+
   // MUL-7628: Elon was asked first but replied last; his review used to render
   // under the request, above the rest of the thread.
   it("orders thread replies by send time and quotes the request a late reply answers", async () => {
@@ -2199,8 +2289,8 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
-  // Details is creator + immutable timestamps, so it ranks below the
-  // execution log, which is what people actually open the sidebar for.
+  // Details is creator + immutable timestamps, so it is small print under
+  // the cards, below the execution log people actually open the sidebar for.
   it("orders the Details section after the execution log", async () => {
     mockApiObj.listTasksByIssue.mockResolvedValue([
       {
@@ -2223,7 +2313,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     const executionLog = await screen.findByText("Execution log");
-    const details = screen.getByText("Details");
+    const details = screen.getByRole("region", { name: "Details" });
 
     // DOCUMENT_POSITION_FOLLOWING: Details comes after the execution log.
     expect(
@@ -2292,14 +2382,14 @@ describe("IssueDetail (shared)", () => {
   it("does not re-render comment cards when unrelated page state changes", async () => {
     renderIssueDetail();
     await screen.findByText("I can help with this");
-    await screen.findByText("Details");
+    await screen.findByRole("button", { name: "Properties" });
 
     const commentBodies = new Set(mockTimeline.map((entry) => entry.content));
     const cardRenders = () =>
       readonlyContentRenders.filter((content) => commentBodies.has(content)).length;
     const before = cardRenders();
 
-    fireEvent.click(screen.getByText("Details"));
+    fireEvent.click(screen.getByRole("button", { name: "Properties" }));
 
     expect(cardRenders()).toBe(before);
   });
@@ -2444,10 +2534,10 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetail();
 
       expect(await screen.findByText("created this issue on behalf of Test User")).toBeInTheDocument();
-      fireEvent.click(screen.getByText("Details"));
-      const creatorRow = screen.getByText("Created by").parentElement!;
-      expect(creatorRow).toHaveTextContent("Claude Agent");
-      expect(within(creatorRow).getByRole("link", { name: "On behalf of Test User" }))
+      const details = screen.getByRole("region", { name: "Details" });
+      expect(details).toHaveTextContent("Created by");
+      expect(details).toHaveTextContent("Claude Agent");
+      expect(within(details).getByRole("link", { name: "On behalf of Test User" }))
         .toHaveAttribute("href", "/test/members/user-1");
       expect(screen.queryByText("Requested by")).not.toBeInTheDocument();
     });
@@ -2468,7 +2558,6 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetail();
 
       expect(await screen.findByText("created this issue")).toBeInTheDocument();
-      fireEvent.click(screen.getByText("Details"));
       expect(screen.queryByText(/On behalf of/)).not.toBeInTheDocument();
       expect(screen.queryByText("Requested by")).not.toBeInTheDocument();
     });
@@ -2485,8 +2574,7 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetail();
 
       expect(await screen.findByText("created this issue on behalf of Unknown")).toBeInTheDocument();
-      fireEvent.click(screen.getByText("Details"));
-      expect(screen.getByText("Created by").parentElement).toHaveTextContent("On behalf of Unknown");
+      expect(screen.getByRole("region", { name: "Details" })).toHaveTextContent("On behalf of Unknown");
     });
   });
 
@@ -3008,26 +3096,39 @@ describe("IssueDetail (shared)", () => {
         driftStart ||= performance.now();
         return Math.min(performance.now() - driftStart, 300);
       };
+      // The update lands between two frames of the alignment loop, after its
+      // second measurement of the mounted anchor. Timing it from the test
+      // instead raced the loop on slow CI runners.
+      let interrupt: (() => void) | null = null;
+      let alignedReads = 0;
+      let interrupted = false;
       const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
         const container = this.closest<HTMLElement>("[data-tab-scroll-root]");
         if (this === container) return new DOMRect(0, 0, 400, 200);
         if (this.id === "comment-comment-2" && container) {
+          if (this.dataset.virtualThreadMounted !== "false" && ++alignedReads === 2 && interrupt) {
+            const update = interrupt;
+            setTimeout(() => {
+              update();
+              interrupted = true;
+            }, 0);
+          }
           return new DOMRect(0, 250 + drift() - container.scrollTop, 400, 100);
         }
         return new DOMRect(0, 0, 0, 0);
       });
       try {
         const { queryClient } = renderIssueDetailWithHighlight("comment-2");
+        interrupt = () =>
+          act(() => {
+            queryClient.setQueryData<TimelineEntry[]>(["issues", "timeline", "issue-1"], (old) => [
+              ...(old ?? []),
+              { ...mockTimeline[0]!, id: "comment-late", content: "Arrived mid-landing", created_at: "2026-01-18T00:00:00Z" },
+            ]);
+          });
         await waitFor(() => expect(hasHighlightedCommentBackground(document.getElementById("comment-comment-2"))).toBe(true));
+        await waitFor(() => expect(interrupted).toBe(true));
         const container = document.querySelector<HTMLElement>("[data-tab-scroll-root]")!;
-        act(() => {
-          queryClient.setQueryData<TimelineEntry[]>(["issues", "timeline", "issue-1"], (old) => [
-            ...(old ?? []),
-            { ...mockTimeline[0]!, id: "comment-late", content: "Arrived mid-landing", created_at: "2026-01-18T00:00:00Z" },
-          ]);
-        });
-        expect(driftStart).toBeGreaterThan(0);
-        expect(performance.now() - driftStart).toBeLessThan(300);
         // 250 + 300 drift - 16 top gap: where the comment sits once settled.
         await waitFor(() => expect(container.scrollTop).toBe(534), { timeout: 2000 });
       } finally {
@@ -3247,6 +3348,76 @@ describe("IssueDetail (shared)", () => {
           hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
         ).toBe(true);
       });
+    });
+
+    it("holds the composer back until a landing on cached data puts its target on screen (MUL-9538)", async () => {
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(issueKeys.detail("ws-1", "issue-1"), mockIssue);
+      queryClient.setQueryData(issueKeys.timeline("issue-1"), mockTimeline);
+      queryClient.setQueryData(issueKeys.tasks("issue-1"), []);
+      render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" highlightCommentId="comment-2" />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+
+      // The landing frame renders the target, not the composer below it.
+      expect(document.getElementById("comment-comment-2")).not.toBeNull();
+      expect(screen.queryByTestId("comment-composer-shell")).toBeNull();
+
+      await waitFor(() => expect(
+        hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
+      ).toBe(true));
+      expect(await screen.findByTestId("comment-composer-shell")).toBeInTheDocument();
+    });
+
+    it("holds the composer for an Inbox landing whose comment arrives a render later (MUL-9538)", async () => {
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(issueKeys.detail("ws-1", "issue-1"), mockIssue);
+      queryClient.setQueryData(issueKeys.timeline("issue-1"), mockTimeline);
+      queryClient.setQueryData(issueKeys.tasks("issue-1"), []);
+      const page = (highlightCommentId?: string) => (
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" highlightRequestPending highlightCommentId={highlightCommentId} />
+          </QueryClientProvider>
+        </I18nProvider>
+      );
+      // Web reads the comment from the URL fragment, which the router writes
+      // after the page's first render.
+      const { rerender } = render(page());
+      expect(screen.queryByTestId("comment-composer-shell")).toBeNull();
+      rerender(page("comment-2"));
+      expect(screen.queryByTestId("comment-composer-shell")).toBeNull();
+
+      await waitFor(() => expect(
+        hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
+      ).toBe(true));
+      expect(await screen.findByTestId("comment-composer-shell")).toBeInTheDocument();
+    });
+
+    it("lets the composer in at once when an Inbox landing names no comment", async () => {
+      const queryClient = createTestQueryClient();
+      queryClient.setQueryData(issueKeys.detail("ws-1", "issue-1"), mockIssue);
+      queryClient.setQueryData(issueKeys.timeline("issue-1"), mockTimeline);
+      queryClient.setQueryData(issueKeys.tasks("issue-1"), []);
+      render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <IssueDetail issueId="issue-1" highlightRequestPending />
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+      // Within a frame, well before the hold's upper bound.
+      expect(await screen.findByTestId("comment-composer-shell", {}, { timeout: 200 })).toBeInTheDocument();
+    });
+
+    it("renders the composer while a deep link's timeline is still loading", async () => {
+      mockApiObj.listTimeline.mockReturnValue(new Promise(() => {}));
+      renderIssueDetailWithHighlight("comment-2");
+      expect(await screen.findByTestId("comment-composer-shell")).toBeInTheDocument();
     });
 
     it("auto-expands a folded resolved thread when deep-link target is a reply inside it", async () => {

@@ -503,19 +503,25 @@
     "section_pull_requests": "Pull request'ы",
     "section_metadata": "Метаданные",
     "section_details": "Детали",
+    "sidebar_add": "Добавить",
     "sidebar_settings": {
       "open": "Настроить боковую панель",
       "title": "Боковая панель",
       "reset": "Сбросить",
-      "footer": "Перетаскивайте, чтобы менять порядок. Применяется ко всем задачам.",
+      "footer": "Применяется ко всем задачам.",
       "always_shown": "Показывается всегда",
       "empty": "В этой задаче нет",
       "customize": "Настроить",
-      "drag_handle": "Переместить «{{section}}»",
       "hidden_count_one": "Скрыт {{count}} раздел",
       "hidden_count_few": "Скрыто {{count}} раздела",
       "hidden_count_many": "Скрыто {{count}} разделов",
       "hidden_count_other": "Скрыто {{count}} раздела"
+    },
+    "next_step": {
+      "review_title": "Ждёт ревью",
+      "review_action": "Открыть PR",
+      "reply_title": "{{name}} ждёт ответа",
+      "reply_action": "Ответить"
     },
     "section_quick_actions": "Быстрые действия",
     "quick_actions_more": "Показать ещё: {{count}}",
