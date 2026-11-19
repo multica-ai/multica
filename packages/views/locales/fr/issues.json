@@ -286,6 +286,8 @@
     "button": "Affichage",
     "grouping_section": "Regroupement",
     "ordering_section": "Tri",
+    "apply_sort_to_all_projects": "Utiliser pour tous les projets",
+    "project_default_sort_saved": "Tri par défaut des projets enregistré",
     "card_properties_section": "Propriétés des cartes",
     "columns_section": "Colonnes",
     "columns_locked_by_filter": "Retirez le filtre d’état pour afficher ou masquer des colonnes.",

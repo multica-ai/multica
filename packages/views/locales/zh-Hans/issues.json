@@ -280,6 +280,8 @@
     "button": "显示",
     "grouping_section": "分组",
     "ordering_section": "排序",
+    "apply_sort_to_all_projects": "用于所有项目",
+    "project_default_sort_saved": "已设为项目的默认排序",
     "card_properties_section": "卡片属性",
     "columns_section": "列",
     "columns_locked_by_filter": "清除状态筛选后才能显示或隐藏列。",

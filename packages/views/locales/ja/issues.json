@@ -280,6 +280,8 @@
     "button": "表示",
     "grouping_section": "グループ化",
     "ordering_section": "並び替え",
+    "apply_sort_to_all_projects": "すべてのプロジェクトに適用",
+    "project_default_sort_saved": "プロジェクトの既定の並び替えを保存しました",
     "card_properties_section": "カードのプロパティ",
     "columns_section": "列",
     "columns_locked_by_filter": "列を表示・非表示にするには、ステータスの絞り込みを解除してください。",
