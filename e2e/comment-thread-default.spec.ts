@@ -76,14 +76,14 @@ test.describe("Comment thread starting preference", () => {
     await group.getByRole("button", { name: "Collapsed", exact: true }).click();
     await page.goto(`/${workspaceSlug}/issues/${issueId}`);
     await expect(body(3)).toBeHidden();
-    await page.keyboard.press("ControlOrMeta+k");
+    await page.getByRole("button", { name: "Search...", exact: true }).click();
     await page.getByRole("combobox").fill("Unfold all comments");
     await page.getByText("Unfold all comments", { exact: true }).click();
     for (const number of [1, 2, 3]) await expect(body(number)).toBeVisible();
     await page.reload();
     for (const number of [1, 2, 3]) await expect(body(number)).toBeVisible();
 
-    await page.keyboard.press("ControlOrMeta+k");
+    await page.getByRole("button", { name: "Search...", exact: true }).click();
     await page.getByRole("combobox").fill("Fold all comments");
     await page.getByText("Fold all comments", { exact: true }).click();
     for (const number of [1, 2, 3]) await expect(body(number)).toBeHidden();
