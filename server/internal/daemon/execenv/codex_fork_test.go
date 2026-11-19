@@ -50,3 +50,29 @@ func TestPublishCodexForkAbortsFailedStaging(t *testing.T) {
 		t.Fatalf("failed fork exposed its store: %v", err)
 	}
 }
+
+func TestStageCodexForkCopiesOnlySelectedSource(t *testing.T) {
+	t.Parallel()
+	source := t.TempDir()
+	stage := t.TempDir()
+	const sourceID = "019fe3de-56a2-7792-8913-ee53664dfa0e"
+	name := "rollout-2026-11-20T00-00-00-" + sourceID + ".jsonl"
+	for _, file := range []string{name, "unrelated.jsonl"} {
+		if err := os.WriteFile(filepath.Join(source, file), []byte(file), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	copied, err := stageCodexForkSource(source, stage, sourceID)
+	if err != nil || filepath.Base(copied) != name {
+		t.Fatalf("copied=%q error=%v", copied, err)
+	}
+	if _, err := os.Stat(filepath.Join(stage, "sessions", "unrelated.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("staging included unrelated history: %v", err)
+	}
+	if err := os.WriteFile(copied, []byte("changed copy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(source, name)); err != nil || string(data) != name {
+		t.Fatalf("source was changed: %q, error=%v", data, err)
+	}
+}
