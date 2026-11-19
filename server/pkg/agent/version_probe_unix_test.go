@@ -25,9 +25,7 @@ func fakeHermesForVersionProbe(t *testing.T, body string) (string, string) {
 	script := filepath.Join(dir, "hermes")
 	record := filepath.Join(dir, "argv.log")
 	content := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %q\n%s\n", record, body)
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
-		t.Fatalf("write fake hermes: %v", err)
-	}
+	writeTestExecutable(t, script, []byte(content))
 	return script, record
 }
 
