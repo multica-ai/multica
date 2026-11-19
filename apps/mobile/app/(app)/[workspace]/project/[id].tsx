@@ -1,10 +1,11 @@
+import { getServerConfig } from "@/data/server-config-store";
 /**
  * Project detail screen. Single column, scrolling:
  *
  *   Header card (icon + title + description, tap → edit)
  *   Properties section (Status / Priority / Lead — tap chip → picker)
  *   Resources section (read-only by default, "Add" button → resource form)
- *   Related issues (Open / Done bucketed list)
+ *   Related issues (collapsible workflow-ordered status groups)
  *
  * Per-record realtime: `useProjectRealtime(id, onDeleted=back)` subscribes
  * to `project:updated` (full replace) and `project:deleted` (pop back).
@@ -15,7 +16,6 @@
  */
 import { useCallback } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Linking,
@@ -48,8 +48,10 @@ import { useAuthStore } from "@/data/auth-store";
 import { useProjectRealtime } from "@/data/realtime/use-project-realtime";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useT } from "@/lib/i18n";
+import { useActionSheet } from "@/lib/use-action-sheet";
 
 export default function ProjectDetail() {
+  const { showActionSheetWithOptions } = useActionSheet();
   const { id } = useLocalSearchParams<{ id: string }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
@@ -95,7 +97,7 @@ export default function ProjectDetail() {
 
   const onPressMore = () => {
     if (!project) return;
-    const wsUrl = process.env.EXPO_PUBLIC_WEB_URL;
+    const wsUrl = getServerConfig().webUrl;
     const actions = ["cancel", isPinned ? "unpin" : "pin", "edit"];
     if (wsUrl) actions.push("open_web");
     if (canDelete) actions.push("delete");
@@ -113,7 +115,7 @@ export default function ProjectDetail() {
                 : t("common:actions.delete"),
     );
     const destructiveIndex = actions.indexOf("delete");
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,

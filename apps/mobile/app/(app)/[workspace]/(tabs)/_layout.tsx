@@ -9,7 +9,7 @@
  * DropdownMenu popover anchored above the tab. The popover is rendered
  * by `<MoreTabDropdownAnchor />` as a sibling of `<Tabs>`, NOT as a
  * `tabBarButton` replacement: keeping the real tab button intact means
- * the icon + "More" label render identically to the other three tabs.
+ * the icon + "More" label render identically to the other tabs.
  * We just open the dropdown imperatively from `listeners.tabPress` via
  * the exposed `TriggerRef.open()`.
  *
@@ -22,8 +22,8 @@
  */
 import { useRef } from "react";
 import { Tabs } from "expo-router";
-import { Image } from "expo-image";
-import { View } from "react-native";
+import { PlatformIcon } from "@/components/ui/platform-icon";
+import { Platform, View } from "react-native";
 import type { TriggerRef } from "@rn-primitives/dropdown-menu";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -74,6 +74,7 @@ export default function TabsLayout() {
           tabBarInactiveTintColor: theme.mutedForeground,
           tabBarStyle: { backgroundColor: theme.background },
           tabBarLabelStyle: { fontSize: 11 },
+          tabBarHideOnKeyboard: Platform.OS === "android",
         }}
       >
         <Tabs.Screen
@@ -83,21 +84,39 @@ export default function TabsLayout() {
             tabBarBadge: inboxBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:tray.fill" : "sf:tray"}
-                style={{ width: size, height: size, color }}
+              <PlatformIcon
+                ios={focused ? "tray.fill" : "tray"}
+                android={focused ? "file-tray" : "file-tray-outline"}
+                size={size}
+                color={color}
               />
             ),
           }}
         />
         <Tabs.Screen
-          name="my-issues"
+          name="issues"
           options={{
-            title: t("tabs.my_issues"),
+            title: t("tabs.issues"),
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:checklist" : "sf:checklist.unchecked"}
-                style={{ width: size, height: size, color }}
+              <PlatformIcon
+                ios="list.bullet"
+                android={focused ? "list" : "list-outline"}
+                size={size}
+                color={color}
+              />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="projects"
+          options={{
+            title: t("tabs.projects"),
+            tabBarIcon: ({ color, size, focused }) => (
+              <PlatformIcon
+                ios={focused ? "square.stack.fill" : "square.stack"}
+                android={focused ? "layers" : "layers-outline"}
+                size={size}
+                color={color}
               />
             ),
           }}
@@ -109,9 +128,11 @@ export default function TabsLayout() {
             tabBarBadge: chatBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
-              <Image
-                source={focused ? "sf:bubble.left.fill" : "sf:bubble.left"}
-                style={{ width: size, height: size, color }}
+              <PlatformIcon
+                ios={focused ? "bubble.left.fill" : "bubble.left"}
+                android={focused ? "chatbubble" : "chatbubble-outline"}
+                size={size}
+                color={color}
               />
             ),
           }}
@@ -121,9 +142,11 @@ export default function TabsLayout() {
           options={{
             title: t("tabs.more"),
             tabBarIcon: ({ color, size }) => (
-              <Image
-                source="sf:ellipsis"
-                style={{ width: size, height: size, color }}
+              <PlatformIcon
+                ios="ellipsis"
+                android="ellipsis-horizontal"
+                size={size}
+                color={color}
               />
             ),
           }}
@@ -138,6 +161,7 @@ export default function TabsLayout() {
             },
           })}
         />
+        <Tabs.Screen name="my-issues" options={{ href: null }} />
       </Tabs>
 
       <MoreTabDropdownAnchor triggerRef={moreTriggerRef} />

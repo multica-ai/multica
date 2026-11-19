@@ -26,8 +26,9 @@
  * vertical footprint minimal.
  */
 import { useMemo } from "react";
-import { ActivityIndicator, Linking, Pressable, ScrollView, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { openAttachment } from "@/data/attachment-media";
 import { resolveAttachmentUrl } from "@/lib/attachment-url";
 import { useLightbox } from "@/lib/markdown/lightbox-provider";
 import { useColorScheme } from "@/lib/use-color-scheme";
@@ -194,16 +195,9 @@ function AttachmentChipView({ item, onRemove, onRetry }: AttachmentChipProps) {
       // no signed-URL round-trip, works the same pre/post upload.
       open(item.localUri);
     } else {
-      // Non-image file chip: open the canonical download URL in Safari.
-      // `downloadUrl` comes from `api.uploadFile(...).download_url`, which
-      // on non-CloudFront deployments is a server-relative path like
-      // `/api/attachments/{id}/download` (MUL-2976). RN's `Linking.openURL`
-      // requires an absolute http(s) URL — `Cannot open URL` otherwise — so
-      // resolve against `EXPO_PUBLIC_API_URL` first. Already-absolute
-      // CloudFront/presigned URLs pass through unchanged. `null` (no
-      // downloadUrl yet) falls through to a no-op.
-      const target = resolveAttachmentUrl(item.downloadUrl);
-      if (target) void Linking.openURL(target);
+      if (item.id) {
+        void openAttachment(resolveAttachmentUrl(`/api/attachments/${item.id}/download`)!);
+      }
     }
   };
 

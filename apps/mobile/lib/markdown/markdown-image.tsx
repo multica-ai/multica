@@ -24,14 +24,14 @@
  * previous getSize callback overwrite state — guard with a `cancelled`
  * flag in the cleanup path.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Image as RNImage, Pressable, View } from "react-native";
 import { Image as ExpoImage } from "expo-image";
 import type { Attachment } from "@multica/core/types";
-import { matchAttachmentByURL } from "@multica/core/attachments/image-sequence";
-import { resolveAttachmentUrl } from "@/lib/attachment-url";
 import { useLightbox } from "./lightbox-provider";
 import { useImageSequence } from "./image-sequence";
+import { attachmentSource } from "@/lib/attachment-source";
+import { useAttachmentMedia } from "@/data/use-attachment-media";
 
 interface Props {
   uri: string;
@@ -44,29 +44,12 @@ export function MarkdownImage({ uri, attachments }: Props) {
   const sequence = useImageSequence();
   const [aspect, setAspect] = useState<number | null>(null);
 
-  const resolvedUri = useMemo(() => {
-    // mc://file/<id> → look up the matching attachment's loadable URL.
-    // No match (external link, html https URL, or unresolved mc://) falls
-    // through to the original uri.
-    //
-    // `matchAttachmentByURL` + this URL pick are the ones the shared sequence
-    // builder uses, so the URI a tap reports is byte-identical to the one
-    // `ImageSequenceProvider` put in the array — otherwise the lightbox could
-    // not find its position and would silently drop back to a single image.
-    const match = matchAttachmentByURL(uri, attachments);
-    const candidate: string | null | undefined = match
-      ? match.download_url || match.markdown_url || match.url
-      : uri;
-    // The backend may return a server-relative `download_url` (e.g.
-    // `/api/attachments/{id}/download`) when no CloudFront signer is
-    // configured — see MUL-2976. RN's image loader has no document
-    // origin to resolve against, so prepend `EXPO_PUBLIC_API_URL` for
-    // server-relative paths and let absolute URLs / external links pass
-    // through unchanged.
-    return resolveAttachmentUrl(candidate) ?? uri;
-  }, [uri, attachments]);
+  const source = useMemo(() => attachmentSource(uri, attachments), [uri, attachments]);
+  const { uri: resolvedUri, refetch } = useAttachmentMedia(source);
+  const retried = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!resolvedUri) return;
     let cancelled = false;
     RNImage.getSize(
       resolvedUri,
@@ -87,13 +70,20 @@ export function MarkdownImage({ uri, attachments }: Props) {
   }, [resolvedUri]);
 
   return (
-    <Pressable onPress={() => open(resolvedUri, sequence)}>
+    <Pressable onPress={() => open(source, sequence)}>
       <View className="rounded-lg overflow-hidden bg-muted">
         <ExpoImage
-          source={{ uri: resolvedUri }}
+          source={resolvedUri ? { uri: resolvedUri } : undefined}
           style={{ width: "100%", aspectRatio: aspect ?? 16 / 9 }}
           contentFit="contain"
           transition={150}
+          onError={() => {
+            // One fresh signature after an expired/failed native image load.
+            if (resolvedUri && retried.current !== source) {
+              retried.current = source;
+              void refetch();
+            }
+          }}
         />
       </View>
     </Pressable>

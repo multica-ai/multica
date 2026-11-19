@@ -27,6 +27,7 @@
  */
 import { useQueryClient } from "@tanstack/react-query";
 import type {
+  Issue,
   TaskCancelledPayload,
   TaskCompletedPayload,
   TaskDispatchPayload,
@@ -74,6 +75,11 @@ export function useIssueRealtime(
     (ws, wsId) => {
       if (!issueId) return;
 
+      const childrenKey = issueKeys.children(wsId, issueId);
+      const invalidateChildren = () => qc.invalidateQueries({ queryKey: childrenKey });
+      const isLoadedChild = (id: string | null | undefined) =>
+        qc.getQueryData<Issue[]>(childrenKey)?.some((child) => child.id === id) ?? false;
+
       const invalidateThisIssue = () => {
         qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
         qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
@@ -101,16 +107,29 @@ export function useIssueRealtime(
         invalidateThisIssue();
         invalidateTaskQueries();
       };
+      const onTaskStateEvent = (p: unknown) => {
+        if (isLoadedChild((p as TaskEventPayload).issue_id)) invalidateChildren();
+        onTaskEvent(p);
+      };
 
       return [
         // ----- Issue-level -----
+        ws.on("issue:created", (payload) => {
+          if (payload.issue.parent_issue_id === issueId) invalidateChildren();
+        }),
         ws.on("issue:updated", (payload) => {
+          if (
+            payload.issue.parent_issue_id === issueId ||
+            payload.prev_parent_issue_id === issueId ||
+            isLoadedChild(payload.issue.id)
+          ) invalidateChildren();
           if (payload.issue.id !== issueId) return;
           patchIssueDetail(qc, wsId, payload.issue);
           patchMyIssuesList(qc, wsId, payload.issue);
           patchIssuesList(qc, wsId, payload.issue);
         }),
         ws.on("issue:deleted", (payload) => {
+          if (isLoadedChild(payload.issue_id)) invalidateChildren();
           if (payload.issue_id !== issueId) return;
           clearIssueDetail(qc, wsId, issueId);
           removeFromMyIssuesList(qc, wsId, issueId);
@@ -229,17 +248,18 @@ export function useIssueRealtime(
         }),
 
         // ----- Agent task progress -----
-        ws.on("task:queued", onTaskEvent),
-        ws.on("task:coalesced", onTaskEvent),
-        ws.on("task:dispatch", onTaskEvent),
+        ws.on("task:queued", onTaskStateEvent),
+        ws.on("task:coalesced", onTaskStateEvent),
+        ws.on("task:dispatch", onTaskStateEvent),
         ws.on("task:progress", onTaskEvent),
-        ws.on("task:completed", onTaskEvent),
-        ws.on("task:failed", onTaskEvent),
-        ws.on("task:cancelled", onTaskEvent),
+        ws.on("task:completed", onTaskStateEvent),
+        ws.on("task:failed", onTaskStateEvent),
+        ws.on("task:cancelled", onTaskStateEvent),
 
         // ----- Reconnect -----
         ws.onReconnect(() => {
           invalidateIssueAfterReconnect(qc, wsId, issueId);
+          invalidateChildren();
         }),
       ];
     },

@@ -1,3 +1,4 @@
+import { issueWebUrl } from "@/lib/issue-web-url";
 /**
  * Issue detail screen.
  *
@@ -12,7 +13,6 @@
  */
 import { useCallback, useEffect } from "react";
 import {
-  ActionSheetIOS,
   ActivityIndicator,
   Alert,
   Linking,
@@ -44,8 +44,10 @@ import { useViewedIssuesStore } from "@/data/viewed-issues-store";
 import { useCommentSelectStore } from "@/data/comment-select-store";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
 import { useT } from "@/lib/i18n";
+import { useActionSheet } from "@/lib/use-action-sheet";
 
 export default function IssueDetail() {
+  const { showActionSheetWithOptions } = useActionSheet();
   // `highlight` + `h` come from inbox deep-link (apps/mobile/app/(app)/
   // [workspace]/(tabs)/inbox.tsx). `highlight` is the target comment id;
   // `h` is a per-tap nonce so re-tapping the same row re-fires the
@@ -94,6 +96,7 @@ export default function IssueDetail() {
     await Promise.all([
       detail.refetch(),
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, id) }),
+      qc.invalidateQueries({ queryKey: issueKeys.children(wsId, id) }),
     ]);
   }, [detail, qc, wsId, id]);
 
@@ -115,10 +118,7 @@ export default function IssueDetail() {
   // the timeline list, not in this menu — one entry per action.
   const onPressMore = useCallback(() => {
     if (!issue || !wsSlug) return;
-    const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
-    const issueLink = webUrl
-      ? `${webUrl}/${wsSlug}/issue/${issue.identifier}`
-      : null;
+    const issueLink = issueWebUrl(wsSlug, issue.identifier);
     const actions = ["cancel", "pin"];
     if (isPinned) actions[1] = "unpin";
     actions.push("edit");
@@ -141,7 +141,7 @@ export default function IssueDetail() {
                   : t("menu.delete_issue"),
     );
     const destructiveIndex = options.length - 1;
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,
@@ -175,7 +175,7 @@ export default function IssueDetail() {
         }
       },
     );
-  }, [issue, wsSlug, deleteIssue, isPinned, createPin, deletePin, t]);
+  }, [issue, wsSlug, deleteIssue, isPinned, createPin, deletePin, t, showActionSheetWithOptions]);
 
   return (
     <View className="flex-1 bg-background">

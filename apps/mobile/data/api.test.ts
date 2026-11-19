@@ -10,6 +10,12 @@ vi.hoisted(() => {
 
 // The real store pulls in expo-secure-store; the client only needs the slug.
 vi.mock("@/data/workspace-store", () => ({ getCurrentSlug: () => null }));
+vi.mock("react-native", () => ({
+  Platform: { OS: "android" },
+  Networking: { clearCookies: (done: (cleared: boolean) => void) => done(false) },
+}));
+vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "0.1.1" } } }));
+vi.mock("expo-secure-store", () => ({ getItemAsync: async () => null }));
 
 describe("api.listAgents", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -22,7 +28,33 @@ describe("api.listAgents", () => {
     const fetchMock = vi.fn(async () => Response.json([]));
     vi.stubGlobal("fetch", fetchMock);
     await expect(api.listAgents(opts)).resolves.toEqual([]);
-    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(`https://api.example.test${path}`, expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
+      `https://api.example.test${path}`,
+      expect.objectContaining({
+        credentials: "omit",
+        headers: expect.objectContaining({ "X-Client-OS": "android", "X-Client-Version": "0.1.1" }),
+      }),
+    );
+  });
+});
+
+describe("api.listChildIssues", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([{}, { issues: null }, { issues: [{ id: 123 }] }])("handles missing or malformed children in %j", async (body) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(body)));
+    await expect(api.listChildIssues("parent-1")).resolves.toEqual({ issues: [] });
+  });
+
+  it("uses the dedicated endpoint with cancellation and propagates load failures", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn(async () => Response.json({ error: "Unavailable" }, { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(api.listChildIssues("parent-1", { signal: controller.signal })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/issues/parent-1/children",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
   });
 });
 
@@ -65,6 +97,15 @@ describe("api.listIssues requester compatibility", () => {
     expect(fetchMock).toHaveBeenCalledTimes(supported ? 1 : 2);
     if (!supported) expect(String(fetchMock.mock.calls[1]?.[0])).toContain("creator_id=me");
   });
+  it("sends page ordering using the server's sort and direction parameters", async () => {
+    const fetchMock = vi.fn(async (_url: string) => Response.json({ issues: [], total: 0 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.listIssues({ limit: 100, offset: 200, sort_by: "created_at", sort_direction: "asc" });
+    const url = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      limit: "100", offset: "200", sort: "created_at", direction: "asc",
+    });
+  });
 });
 
 describe("api.sendChatMessage steering", () => {
@@ -94,5 +135,20 @@ describe("api.sendChatMessage steering", () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
     expect(body.steer).toBe(steer);
     expect(body.content).toBe("use the new path");
+  });
+});
+
+describe("native attachment metadata", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("falls back to the validated inline URL when the optional download-intent field drifts", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      id: "attachment-1", filename: "report.txt", url: "/uploads/report.txt",
+      download_url: "/api/attachments/attachment-1/signed-download?sig=s",
+      attachment_download_url: 123,
+    })));
+    const metadata = await api.getAttachmentForDownload("attachment-1");
+    expect(metadata.attachment_download_url).toBe("");
+    expect(metadata.download_url).toBe("/api/attachments/attachment-1/signed-download?sig=s");
   });
 });

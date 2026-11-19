@@ -48,6 +48,48 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      APP_ENV: production
+      EXPO_NO_DOTENV: "1"
+      EXPO_PUBLIC_API_URL: https://api.multica.ai
+      EXPO_PUBLIC_WEB_URL: https://multica.ai
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Install mobile dependencies
+        run: pnpm install --frozen-lockfile --filter @multica/mobile...
+      - name: Install native build tools
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006" "cmake;3.22.1"
+      - name: Generate Android project
+        run: pnpm -C apps/mobile exec expo prebuild -p android --no-install
+      - name: Build unsigned Release with embedded bundle
+        working-directory: apps/mobile/android
+        run: ./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon --max-workers=4
+      - name: Verify standalone bundle and unsigned artifact
+        run: |
+          apk=apps/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk
+          test -s "$apk"
+          unzip -Z1 "$apk" | grep -Fx assets/index.android.bundle
+          if "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"; then
+            echo "CI Release must be unsigned"
+            exit 1
+          fi
+
   mobile:
     runs-on: ubuntu-latest
     steps:

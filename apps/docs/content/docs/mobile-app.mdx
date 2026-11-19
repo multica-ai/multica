@@ -1,14 +1,26 @@
 ---
-title: Mobile app (iOS)
+title: Mobile app (iOS and Android)
 description: Install Multica on your iPhone from source, and connect to Cloud or a self-hosted instance.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-The Multica iOS client is not on the App Store yet. You can build a Release version from the public source repository on a Mac and install it on your own iPhone. There is no Android client yet.
+The Multica iOS client is not on the App Store yet. You can build a Release version from the public source repository on a Mac and install it on your own iPhone. Android builds use the same React Native client and produce a signed standalone APK.
 
 The installed app connects to Multica Cloud by default; sign in with your existing account. Workspaces, issues, comments, and run history all live on the server, so nothing needs to be synced from web or Desktop.
+
+Workspace and project issue lists load every page and group issues by status in the same workflow order. Tap a status heading to collapse or expand its rows; its full count stays visible. An issue with sub-issues lists them above its activity, with each child's identifier, title and status. Tap a child to open it.
+
+## Android APK
+
+Use JDK 17 and Android SDK 36. Configure an external release keystore, then run this command from the repository root:
+
+```bash
+pnpm -C apps/mobile android:release
+```
+
+The APK defaults to Multica Cloud and needs no Metro server. Signing, environment variants, private backend addresses and installation checks are described in the [Android build guide](https://github.com/multica-ai/multica/blob/main/apps/mobile/docs/android-release.md). Background push notifications are not included. The instructions below cover iPhone installation.
 
 ## Prerequisites
 
@@ -77,31 +89,13 @@ pnpm ios:mobile:device:prod:release
 
 ## Connecting to a self-hosted instance
 
-Release builds bake the API address into the app. `apps/mobile/.env.production` is committed with the public multica.ai defaults, so a fresh clone builds against production as-is.
+Open **Server settings** on the sign-in page, or **Settings → Server settings** after signing in. Enter the **API URL** (backend root) and **Web URL** (browser/link address), then save. They may share an origin or use separate hosts. The app remembers both addresses after a restart; no rebuild is needed. **Restore Cloud defaults**, followed by Save, returns to Multica Cloud.
 
-To connect to a self-hosted instance:
+Both addresses require HTTPS and a certificate trusted by the device. Custom ports and base paths are supported, for example API `https://multica.example.com:8443/backend` and Web `https://multica.example.com:8443/app`. A trailing `/api` in the API address is removed because request paths add it themselves; `/auth` and `/ws` use the same backend root. HTTP and certificate-verification bypasses are not supported in the distributed APK. The device must be able to reach the addresses; `localhost` refers to the phone itself.
 
-<Steps>
-<Step>
-Copy `apps/mobile/.env.production.example` to `apps/mobile/.env.production.local`, and fill in the addresses in the copy:
+Changing either address signs you out and clears local drafts, workspace selection and cached data. Sign in again on the selected instance. Server-side data remains on its original instance. File downloads and images obtain fresh signed URLs from that instance without exposing your session token to an external browser.
 
-```dotenv
-EXPO_PUBLIC_API_URL=https://api.example.com
-EXPO_PUBLIC_WEB_URL=https://app.example.com
-```
-
-The `.local` file overrides the committed defaults key by key and is gitignored, so personal endpoints never reach the repository. `EXPO_PUBLIC_API_URL` is required. `EXPO_PUBLIC_WEB_URL` powers entries like "Copy link" and "Open on web". Set both: a key you leave out falls back to the multica.ai default, so those entries would open multica.ai instead of your instance.
-</Step>
-<Step>
-Re-run the build command `pnpm ios:mobile:device:prod:release`. The iPhone must be able to reach the API address; when using a LAN address, don't write `localhost`, which on the iPhone points at the phone itself.
-</Step>
-</Steps>
-
-<Callout type="warning">
-Editing `.env.production` directly changes the production configuration of the current checkout. Keep personal values in the gitignored `.env.production.local`.
-</Callout>
-
-For mobile development, using the Simulator, or connecting to staging, see [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) in the repository.
+For development builds and initial installation defaults, see [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md).
 
 ## Next steps
 

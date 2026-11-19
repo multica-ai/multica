@@ -57,6 +57,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import { api, MAX_FILE_SIZE } from "@/data/api";
 import { useMentionDraftStore } from "@/data/stores/mention-draft-store";
+import { currentSessionEpoch, sessionEpochChanged } from "@/data/session-epoch";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { composerActions } from "@/lib/composer-actions";
 import { stripMarkdown } from "@/lib/strip-markdown";
@@ -271,6 +272,7 @@ export function MessageComposer({
 
   const handleSubmit = useCallback(async (queue: boolean) => {
     if (!canSend) return;
+    const epoch = currentSessionEpoch();
     const textSnap = text;
     const mentionsSnap = mentions;
     const attachmentsSnap = attachments;
@@ -303,6 +305,7 @@ export function MessageComposer({
         mentions: mentionsSnap,
         queue,
       });
+      if (sessionEpochChanged(epoch)) return;
       // Success → fully exit composing mode. Explicit triple-step
       // because a missing blur leaves the keyboard up; missing
       // Keyboard.dismiss races on iOS when focus is in-flight; missing
@@ -311,13 +314,14 @@ export function MessageComposer({
       Keyboard.dismiss();
       setExpanded(false);
     } catch {
+      if (sessionEpochChanged(epoch)) return;
       setText(textSnap);
       setAttachments(attachmentsSnap);
       mentionsSnap.forEach((m) =>
         useMentionDraftStore.getState().toggle(m),
       );
     } finally {
-      setSubmitting(false);
+      if (!sessionEpochChanged(epoch)) setSubmitting(false);
     }
   }, [
     canSend,
@@ -337,8 +341,10 @@ export function MessageComposer({
       localId: string,
       asset: { uri: string; name: string; type: string },
     ) => {
+      const epoch = currentSessionEpoch();
       try {
         const result = await api.uploadFile(asset, uploadContext);
+        if (sessionEpochChanged(epoch)) return;
         setAttachments((prev) =>
           prev.map((it) =>
             it.localId === localId
@@ -353,6 +359,7 @@ export function MessageComposer({
           ),
         );
       } catch (err) {
+        if (sessionEpochChanged(epoch)) return;
         const message =
           err instanceof Error ? err.message : t("common:states.error");
         setAttachments((prev) =>
@@ -368,10 +375,12 @@ export function MessageComposer({
   );
 
   const onImagePress = useCallback(async () => {
+    const epoch = currentSessionEpoch();
     const picker = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 1,
     });
+    if (sessionEpochChanged(epoch)) return;
     if (picker.canceled) return;
     const picked = picker.assets[0];
     if (!picked) return;
@@ -404,10 +413,12 @@ export function MessageComposer({
   }, [startUpload, t]);
 
   const onFilePress = useCallback(async () => {
+    const epoch = currentSessionEpoch();
     const picker = await DocumentPicker.getDocumentAsync({
       type: "*/*",
       copyToCacheDirectory: true,
     });
+    if (sessionEpochChanged(epoch)) return;
     if (picker.canceled) return;
     const picked = picker.assets[0];
     if (!picked) return;

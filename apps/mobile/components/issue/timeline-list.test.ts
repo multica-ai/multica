@@ -94,6 +94,7 @@ vi.mock("@/components/ui/text", () => ({ Text: "Text" }));
 vi.mock("./issue-header-card", () => ({ IssueHeaderCard: "IssueHeaderCard" }));
 vi.mock("./issue-description", () => ({ IssueDescription: "IssueDescription" }));
 vi.mock("./issue-reaction-row", () => ({ IssueReactionRow: "IssueReactionRow" }));
+vi.mock("./issue-children", () => ({ IssueChildren: "IssueChildren" }));
 vi.mock("./activity-row", () => ({ ActivityRow: "ActivityRow" }));
 vi.mock("./comment-card", () => ({ CommentCard: "CommentCard" }));
 vi.mock("@/data/stores/last-viewed-store", () => ({

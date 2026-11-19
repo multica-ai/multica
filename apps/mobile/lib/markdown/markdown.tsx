@@ -1,3 +1,5 @@
+import { openAttachment } from "@/data/attachment-media";
+import { attachmentSource, selectedAttachmentId } from "@/lib/attachment-source";
 /**
  * Public Markdown component for the mobile app. Hybrid renderer:
  *
@@ -37,7 +39,7 @@
  * a custom renderer — mobile doesn't lose anything that exists by
  * default elsewhere.
  */
-import { useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { Linking, View } from "react-native";
 import { router } from "expo-router";
 import { EnrichedMarkdownText } from "react-native-enriched-markdown";
@@ -105,7 +107,7 @@ interface Props {
   compact?: boolean;
 }
 
-export function Markdown({
+export const Markdown = memo(function Markdown({
   content,
   attachments,
   selectable = true,
@@ -163,6 +165,11 @@ export function Markdown({
         }
         return;
       }
+      const source = attachmentSource(url, attachments);
+      if (selectedAttachmentId(source)) {
+        void openAttachment(source);
+        return;
+      }
       // Everything else — http(s), mailto, tel, app-scheme deep links —
       // hand off to the system. Linking.openURL throws if no app handles
       // the URL; the catch keeps a stray tap from crashing the screen.
@@ -170,7 +177,7 @@ export function Markdown({
         // Silent: failing loudly is worse than a no-op tap.
       });
     },
-    [wsSlug],
+    [wsSlug, attachments],
   );
 
   if (segments.length === 0) return null;
@@ -218,4 +225,4 @@ export function Markdown({
       })}
     </View>
   );
-}
+});

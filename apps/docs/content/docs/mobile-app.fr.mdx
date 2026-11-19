@@ -1,14 +1,26 @@
 ---
-title: Application mobile (iOS)
+title: Application mobile (iOS et Android)
 description: Installez Multica sur votre iPhone à partir des sources, et connectez-vous à Cloud ou à une instance auto-hébergée.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Le client iOS de Multica n'est pas encore disponible sur l'App Store. Vous pouvez compiler une version Release à partir du dépôt de code source public sur un Mac et l'installer sur votre propre iPhone. Il n'existe pas encore de client Android.
+Le client iOS de Multica n'est pas encore disponible sur l'App Store. Vous pouvez compiler une version Release à partir du dépôt de code source public sur un Mac et l'installer sur votre propre iPhone. Android utilise le même client React Native et peut être compilé en APK signé autonome.
 
 L'application installée se connecte par défaut à Multica Cloud ; connectez-vous avec votre compte existant. Les espaces de travail, les tâches, les commentaires et l'historique des exécutions sont tous stockés sur le serveur : rien n'a besoin d'être synchronisé depuis le web ou Desktop.
+
+Les listes de tâches de l'espace de travail et des projets chargent toutes les pages et regroupent les tâches dans le même ordre de statuts. Touchez un en-tête de statut pour replier ou déplier ses lignes ; le nombre total reste visible. Les sous-tâches apparaissent au-dessus de l'activité, avec leur identifiant, leur titre et leur statut. Touchez une sous-tâche pour l'ouvrir.
+
+## APK Android
+
+Préparez JDK 17 et le SDK Android 36, configurez une clé de signature Release hors du dépôt, puis lancez depuis la racine :
+
+```bash
+pnpm -C apps/mobile android:release
+```
+
+L’APK se connecte à Multica Cloud par défaut et ne nécessite pas Metro. Consultez le [guide de compilation Android](https://github.com/multica-ai/multica/blob/main/apps/mobile/docs/android-release.md) pour la signature, les variantes, les adresses auto-hébergées et les vérifications. Les notifications push en arrière-plan ne sont pas incluses. Les instructions suivantes concernent l’iPhone.
 
 ## Prérequis
 
@@ -77,31 +89,13 @@ pnpm ios:mobile:device:prod:release
 
 ## Se connecter à une instance auto-hébergée
 
-Les builds Release intègrent l'adresse de l'API dans l'application. `apps/mobile/.env.production` est commité avec les valeurs publiques par défaut de multica.ai : un clone neuf compile donc directement la version de production.
+Ouvrez **Server settings** sur la page de connexion, ou **Settings → Server settings** après connexion. Saisissez **API URL** (racine du backend) et **Web URL** (adresse du navigateur et des liens), puis enregistrez. Les adresses peuvent partager une origine ou utiliser des hôtes distincts. Elles persistent après redémarrage, sans recompilation. **Restore Cloud defaults**, puis l’enregistrement, rétablit Multica Cloud.
 
-Pour vous connecter à une instance auto-hébergée :
+Les deux adresses exigent HTTPS avec un certificat reconnu par l’appareil. Les ports et chemins de base personnalisés sont pris en charge : par exemple API `https://multica.example.com:8443/backend` et Web `https://multica.example.com:8443/app`. Le suffixe `/api` de l’adresse API est retiré, car les chemins des requêtes l’ajoutent déjà ; `/auth` et `/ws` utilisent la même racine. L’APK distribué ne prend en charge ni HTTP ni le contournement de la vérification des certificats. `localhost` désigne le téléphone lui-même.
 
-<Steps>
-<Step>
-Copiez `apps/mobile/.env.production.example` vers `apps/mobile/.env.production.local`, puis renseignez les adresses dans la copie :
+Modifier l’une des adresses déconnecte le compte et efface les brouillons locaux, la sélection d’espace de travail et le cache. Reconnectez-vous sur l’instance choisie. Les données serveur restent sur l’instance d’origine. Les fichiers et images obtiennent de nouvelles URL signées auprès du serveur choisi, sans transmettre votre jeton de session au navigateur externe.
 
-```dotenv
-EXPO_PUBLIC_API_URL=https://api.example.com
-EXPO_PUBLIC_WEB_URL=https://app.example.com
-```
-
-Le fichier `.local` remplace les valeurs commitées clé par clé et est ignoré par git : vos adresses personnelles n'arrivent jamais dans le dépôt. `EXPO_PUBLIC_API_URL` est obligatoire. `EXPO_PUBLIC_WEB_URL` alimente des entrées comme « Copy link » et « Open on web ». Définissez les deux : une clé omise reprend la valeur par défaut de multica.ai, et ces entrées ouvriraient alors multica.ai au lieu de votre instance.
-</Step>
-<Step>
-Relancez la commande de compilation `pnpm ios:mobile:device:prod:release`. L'iPhone doit pouvoir joindre l'adresse de l'API ; si vous utilisez une adresse du réseau local, n'écrivez pas `localhost`, qui désigne sur l'iPhone le téléphone lui-même.
-</Step>
-</Steps>
-
-<Callout type="warning">
-Modifier directement `.env.production` change la configuration de production de la copie de travail actuelle. Gardez vos valeurs personnelles dans `.env.production.local`, ignoré par git.
-</Callout>
-
-Pour le développement mobile, l'utilisation du Simulateur ou la connexion à l'environnement de staging, consultez [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) dans le dépôt.
+Pour les builds de développement et les valeurs initiales, consultez [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md).
 
 ## Étapes suivantes
 

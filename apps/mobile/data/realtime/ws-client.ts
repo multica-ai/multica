@@ -61,6 +61,7 @@ export interface WSClientOptions {
   workspaceSlug: string;
   /** Mobile app version, surfaced to server logs for debuggability. */
   clientVersion?: string;
+  clientOS?: string;
   logger?: Logger;
 }
 
@@ -204,7 +205,7 @@ export class WSClient {
     const url = new URL(this.opts.url);
     url.searchParams.set("workspace_slug", this.opts.workspaceSlug);
     url.searchParams.set("client_platform", "mobile");
-    url.searchParams.set("client_os", "ios");
+    url.searchParams.set("client_os", this.opts.clientOS ?? "ios");
     if (this.opts.clientVersion) {
       url.searchParams.set("client_version", this.opts.clientVersion);
     }
@@ -214,11 +215,16 @@ export class WSClient {
     this.logger.info("[ws] dialing", url.toString().replace(/token=[^&]*/, "token=…"));
 
     ws.onopen = () => {
+      const token = this.opts.getToken ? this.opts.getToken() : this.opts.token;
+      if (!token) {
+        this.disconnect();
+        return;
+      }
       this.logger.info("[ws] socket open, sending auth frame");
       ws.send(
         JSON.stringify({
           type: "auth",
-          payload: { token: this.opts.getToken?.() ?? this.opts.token },
+          payload: { token },
         }),
       );
     };

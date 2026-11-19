@@ -30,7 +30,8 @@
  *                                  pendingTask
  */
 import { useQueryClient } from "@tanstack/react-query";
-import { chatKeys } from "@/data/queries/chat";
+import { chatKeys, isTaskMessageTaskId } from "@/data/queries/chat";
+import type { ChatMessage, ChatPendingTask } from "@multica/core/types";
 import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
 import {
   appendTaskMessage,
@@ -39,6 +40,7 @@ import {
   invalidatePendingTask,
   promotePendingTaskToRunning,
   seedPendingTaskFromQueued,
+  refreshTaskMessages,
 } from "./chat-ws-updaters";
 
 export function useChatSessionRealtime(
@@ -57,6 +59,21 @@ export function useChatSessionRealtime(
       const invalidateMine = () => {
         qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
         qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+      };
+      const onReconnect = () => {
+        invalidateMine();
+        const pending = qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId));
+        const messages = qc.getQueryData<ChatMessage[]>(chatKeys.messages(sessionId)) ?? [];
+        // Only traces already viewed in this session and its active task
+        // need backfill. Inactive cached traces become stale for next open.
+        const tasks = new Set([
+          pending?.task_id,
+          ...messages.filter((message) => message.task_id &&
+            qc.getQueryState(chatKeys.taskMessages(message.task_id))).slice(-20).map((message) => message.task_id),
+        ]);
+        for (const taskId of tasks) {
+          if (isTaskMessageTaskId(taskId)) void refreshTaskMessages(qc, taskId);
+        }
       };
 
       return [
@@ -124,7 +141,7 @@ export function useChatSessionRealtime(
           if (!isMine(payload)) return;
           appendTaskMessage(qc, payload);
         }),
-        ws.onReconnect(invalidateMine),
+        ws.onReconnect(onReconnect),
       ];
     },
     [sessionId, qc, onSessionDeleted],

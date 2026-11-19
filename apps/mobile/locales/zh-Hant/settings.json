@@ -87,5 +87,25 @@
     "chat_replies": "包含聊天回覆"
   },
   "groups.assignments_description": "任務分配給我或取消分配給我時。",
-  "groups.mentions_description": "有人用 @ 提到你時，包括 @all 和 @squad。"
+  "groups.mentions_description": "有人用 @ 提到你時，包括 @all 和 @squad。",
+  "server": {
+    "title": "伺服器設定",
+    "description": "使用 Multica Cloud，或連線至自己的 Multica 伺服器。API 和網頁位址可向管理員取得。",
+    "api_url": "API 位址",
+    "web_url": "網頁位址",
+    "api_help": "填寫後端根位址，可包含連接埠和基礎路徑。結尾的 /api 會移除，介面路徑會自動加入它。",
+    "web_help": "複製連結或在瀏覽器開啟 Multica 時使用的位址，可以與 API 位址不同。",
+    "save": "儲存伺服器設定",
+    "saving": "儲存中…",
+    "restore_defaults": "還原 Cloud 預設位址",
+    "change_title": "更換伺服器？",
+    "change_message": "將登出，並清除本機草稿和工作區快取。請在所選伺服器上重新登入。",
+    "save_sign_out": "儲存並登出",
+    "invalid": "請填寫完整的 HTTPS 位址，不含使用者名稱、密碼、查詢參數或錨點，並檢查網域、連接埠和基礎路徑。",
+    "https_required": "不支援 HTTP。請使用 HTTPS，並確保裝置信任伺服器憑證。",
+    "save_failed": "無法儲存伺服器設定，請重試。可能需要重新登入。",
+    "load_failed": "無法讀取已儲存的伺服器設定。請檢查位址並儲存後再登入。",
+    "security": "兩個位址都需要使用 HTTPS，且憑證須受裝置信任。儲存後生效，重新啟動 App 後仍會保留。",
+    "attachment_failed": "無法開啟附件，請重試。"
+  }
 }

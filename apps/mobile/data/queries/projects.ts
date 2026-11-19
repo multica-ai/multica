@@ -17,6 +17,7 @@ import { queryOptions } from "@tanstack/react-query";
 import type { Project } from "@multica/core/types";
 import { api } from "@/data/api";
 import { issueKeys } from "@/data/queries/issue-keys";
+import { fetchAllIssues } from "./all-issues";
 
 export const projectKeys = {
   all: (wsId: string | null) => ["projects", wsId] as const,
@@ -69,13 +70,7 @@ export const projectIssuesOptions = (wsId: string | null, projectId: string) =>
       "byProject",
       projectId,
     ] as const,
-    queryFn: async ({ signal }) => {
-      const res = await api.listIssues(
-        { project_id: projectId },
-        { signal },
-      );
-      return res.issues;
-    },
+    queryFn: ({ signal }) => fetchAllIssues(wsId, { project_id: projectId }, signal),
     enabled: !!wsId && !!projectId,
   });
 

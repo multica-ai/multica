@@ -1,5 +1,5 @@
 /**
- * View store for the workspace-wide Issues page (`more/issues.tsx`).
+ * View store for the workspace-wide Issues tab (`(tabs)/issues.tsx`).
  *
  * Shape mirrors `useMyIssuesViewStore` plus a `scope` field — workspace
  * Issues has `all / members / agents` scope tabs (see web
@@ -7,7 +7,7 @@
  * My Issues has its own `assigned / created / agents` scopes.
  *
  * The `scope` filter is **client-side** on `assignee_type` — see
- * `more/issues.tsx`'s `scopedIssues` derivation. Server param stays unset
+ * `(tabs)/issues.tsx`'s `scopedIssues` derivation. Server param stays unset
  * so the cache key (`issueKeys.list(wsId)`) and WS realtime invalidation
  * (`useIssuesRealtime`) don't have to know about scope.
  *

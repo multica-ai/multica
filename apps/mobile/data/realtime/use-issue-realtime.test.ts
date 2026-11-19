@@ -93,6 +93,27 @@ describe("useIssueRealtime owner issue revision on comment deletes", () => {
     state.subscriptionSetups.length = 0;
   });
 
+  it("refreshes children for creation, status changes, reparenting, deletion and task changes", () => {
+    const childrenKey = issueKeys.children(wsId, issueId);
+    const child = { id: "child-1", parent_issue_id: issueId } as Issue;
+    useIssueRealtime(issueId);
+    const emit = connect();
+    for (const [event, payload] of [
+      ["issue:created", { issue: child }],
+      ["issue:updated", { issue: { ...child, status: "done" } }],
+      ["issue:updated", { issue: { ...child, parent_issue_id: "other-parent" }, prev_parent_issue_id: issueId }],
+      ["issue:deleted", { issue_id: child.id }],
+      ["task:completed", { issue_id: child.id }],
+    ] as const) {
+      state.qc.setQueryData(childrenKey, [child]);
+      emit(event, payload);
+      expect(state.qc.getQueryState(childrenKey)?.isInvalidated, event).toBe(true);
+    }
+    state.qc.setQueryData(childrenKey, [child]);
+    emit("issue:updated", { issue: { id: "unrelated" } });
+    expect(state.qc.getQueryState(childrenKey)?.isInvalidated).toBe(false);
+  });
+
   it.each([
     ["comment:deleted", deletedPayload],
     ["comment:updated", tombstonePayload],

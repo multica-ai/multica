@@ -1,3 +1,4 @@
+import { getServerConfig } from "@/data/server-config-store";
 import { ActivityIndicator, Linking, ScrollView, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -99,7 +100,7 @@ export default function InboxNoticeDetail() {
         !summaryQuery.data?.availableActions &&
         summaryQuery.isFetching),
   });
-  const webUrl = process.env.EXPO_PUBLIC_WEB_URL?.replace(/\/+$/, "");
+  const webUrl = getServerConfig().webUrl;
   const billingUrl =
     webUrl && wsSlug ? `${webUrl}/${wsSlug}/settings?tab=billing` : null;
   const body = item ? getInboxNoticeBody(item) : null;

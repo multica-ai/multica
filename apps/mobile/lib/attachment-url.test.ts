@@ -26,6 +26,11 @@ describe("resolveAttachmentUrlWithBase", () => {
     ).toBe("https://api.example.test/api/attachments/att-1/download");
   });
 
+  it("does not duplicate a proxy prefix already supplied in attachment metadata", () => {
+    expect(resolveAttachmentUrlWithBase("/proxy/api/attachments/a/download", "https://host.test:8443/proxy"))
+      .toBe("https://host.test:8443/proxy/api/attachments/a/download");
+  });
+
   it("trims a trailing slash on the API base before joining", () => {
     expect(
       resolveAttachmentUrlWithBase(

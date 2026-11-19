@@ -1,6 +1,20 @@
-# Multica Mobile (iOS)
+# Multica Mobile (iOS and Android)
 
-Expo + React Native iOS client for Multica. Independent from web/desktop — shares types and pure utilities from `@multica/core/`. See [`AGENTS.md`](./AGENTS.md) for mobile architecture and development rules; `package.json` records the current dependency versions.
+Expo + React Native iOS and Android client for Multica. Independent from web/desktop — shares types and pure utilities from `@multica/core/`. See [`AGENTS.md`](./AGENTS.md) for mobile architecture and development rules; `package.json` records the current dependency versions.
+
+For Android, see [Android builds](./docs/android-release.md) for SDK setup,
+signing, production/staging/private endpoints and standalone APK verification.
+`pnpm -C apps/mobile android:release` builds a signed production APK using your
+external keystore. The iPhone instructions below require macOS/Xcode.
+
+The bottom bar opens Inbox, Issues, Projects, Chat and More directly.
+My Issues is hidden from the bar. More contains account settings, the workspace
+switcher and pinned items.
+
+Issue lists load every server page. The workspace Issues tab orders status
+sections as Plan/Backlog, Todo, In Progress, In Review, Blocked and Done.
+Tap a status heading to collapse or expand its rows; its full count stays visible.
+Custom and cancelled statuses remain visible in their own sections.
 
 ## Just want to use it on your phone? (no development)
 
@@ -10,7 +24,7 @@ Multica isn't on the App Store yet — until that changes, anyone who wants it o
 pnpm ios:mobile:device:prod:release
 ```
 
-This connects to the same backend as `multica.ai`, so your existing account just works. To use a private backend or your own bundle ID, copy `apps/mobile/.env.production.example` to `apps/mobile/.env.production.local` and edit the copy — it overrides the committed `.env.production` key by key and is gitignored, so personal values stay local.
+This connects to the same backend as `multica.ai`, so your existing account just works. Choose **Server settings** on the login page or in Settings to use a self-hosted backend without rebuilding. To change initial defaults or use your own bundle ID, copy `apps/mobile/.env.production.example` to `apps/mobile/.env.production.local` and edit the copy — it overrides the committed `.env.production` key by key and is gitignored, so personal values stay local.
 
 **Prerequisites**: Mac with Xcode, a free Apple ID added under Xcode → Settings → Accounts, iPhone connected via USB with [Developer Mode enabled](https://docs.expo.dev/guides/ios-developer-mode/). Walk through Expo's [Set up your environment](https://docs.expo.dev/get-started/set-up-your-environment/) (pick **Development build → iOS Device**) if any of that is missing.
 
@@ -149,9 +163,8 @@ A free Apple ID signs builds for **7 days only**, Debug and Release both. After 
 
 ## Pointing at a different backend
 
-Edit `EXPO_PUBLIC_API_URL` in `.env.staging`, `.env.production.local`, or `.env.development.local` (whichever variant you're running). Then:
+Open **Server settings** on the login page or in Settings. Save API URL and Web URL independently; they survive app restarts. **Restore Cloud defaults** fills the Cloud pair; save to apply it. Changing either address signs out, clears drafts/workspace/query caches, and requires authentication on the selected instance.
 
-- For an installed **Debug build**: restart Metro (`pnpm dev:mobile:staging`) so the next JS bundle picks up the new value.
-- For an installed **Release build**: re-run the `ios:mobile:device:staging:release` command — the value is baked into the embedded bundle at build time.
+Use HTTPS with a device-trusted certificate. Ports and reverse-proxy base paths are retained, e.g. API `https://host:8443/backend` and Web `https://host:8443/app`. The API value is the backend root; an optional trailing `/api` is normalized away to avoid duplicated API prefixes. Auth (`/auth`) and WS (`/ws`) are siblings of `/api` under that root. The distributed APK rejects HTTP. It does not bypass TLS validation.
 
-For local backend testing, use your Mac's LAN IP (`ipconfig getifaddr en0`), not `localhost`.
+Environment files choose defaults only for an installation without a saved preference. Development bundles still pick up env changes when Metro restarts; embedded Release defaults change on rebuild. A saved runtime preference wins over either. For local testing, the device must be able to reach the configured host; `localhost` refers to the device.

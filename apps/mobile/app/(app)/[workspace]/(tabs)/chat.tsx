@@ -38,16 +38,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  KeyboardAvoidingView,
   Platform,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "@/components/ui/keyboard-avoiding-view";
 import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Agent,
   ChatMessage,
   ChatPendingTask,
+  ChatQuickAction,
 } from "@multica/core/types";
 import {
   enqueuePendingChatTask,
@@ -57,6 +58,7 @@ import {
 import { refetchChatSessionsAfterCommit } from "@multica/core/chat/session-list";
 import { canAssignAgentToIssue } from "@multica/core/permissions/rules";
 import { api } from "@/data/api";
+import { assertCurrentSession, currentSessionEpoch, sessionEpochChanged } from "@/data/session-epoch";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { agentListOptions } from "@/data/queries/agents";
@@ -265,7 +267,7 @@ export default function ChatTab() {
   }, [isFocused, activeSessionId, activeSession?.has_unread, markRead]);
 
   // ── Mutations ──────────────────────────────────────────────────────────
-  const createSession = useCreateChatSession();
+  const { mutateAsync: createSession } = useCreateChatSession();
   const deleteSession = useDeleteChatSession();
 
   // ── Send burst ─────────────────────────────────────────────────────────
@@ -281,7 +283,7 @@ export default function ChatTab() {
         try {
           // Untitled on purpose: the server derives the title from the first
           // message it accepts, the same rule for every client and channel.
-          const session = await createSession.mutateAsync({
+          const session = await createSession({
             agent_id: currentAgent.id,
           });
           return session.id;
@@ -302,6 +304,7 @@ export default function ChatTab() {
       options: { clearDraft?: boolean; queue?: boolean } = {},
     ) => {
       if (!currentAgent) return;
+      const epoch = currentSessionEpoch();
       // Invoke permission was revoked while this session was open — the server
       // would refuse before persisting anything. The composer is disabled in
       // this state; this is the belt-and-braces guard.
@@ -324,7 +327,9 @@ export default function ChatTab() {
       let sessionId: string | null;
       try {
         sessionId = await ensureSession();
+        assertCurrentSession(epoch);
       } catch (err) {
+        if (sessionEpochChanged(epoch)) throw err;
         // Session create runs the same invoke gate as a send, so a permission
         // change refuses here too — and this is the only layer that sees the
         // reason code (MUL-6380).
@@ -373,6 +378,7 @@ export default function ChatTab() {
           attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
           queue: options.queue,
         });
+        assertCurrentSession(epoch);
         // Replace the local bubble before reconciling pending state. When the
         // server says this is a follow-up, its real message id lets the shared
         // queue filter hide it immediately instead of waiting for the refetch.
@@ -391,6 +397,7 @@ export default function ChatTab() {
           clearDraft(sessionId);
         }
       } catch (err) {
+        if (sessionEpochChanged(epoch)) throw err;
         qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
           old ? old.filter((m) => m.id !== optimistic.id) : old,
         );
@@ -420,9 +427,15 @@ export default function ChatTab() {
     ],
   );
 
+  const handleQuickAction = useCallback(
+    (action: ChatQuickAction) => handleSend(action.prompt, [], { clearDraft: false }),
+    [handleSend],
+  );
+
   // ── Cancel in-flight ───────────────────────────────────────────────────
   const handleStop = useCallback(() => {
     if (!pendingTask?.task_id || !activeSessionId) return;
+    const epoch = currentSessionEpoch();
     if (pendingTask.status === "queued") return;
     const taskId = pendingTask.task_id;
     const sessionId = activeSessionId;
@@ -433,7 +446,9 @@ export default function ChatTab() {
       .catch(() => {
         // Silent — task may have already terminated server-side.
       })
-      .finally(() => invalidatePendingTask(qc, sessionId));
+      .finally(() => {
+        if (!sessionEpochChanged(epoch)) invalidatePendingTask(qc, sessionId);
+      });
   }, [pendingTask, activeSessionId, qc]);
 
   // ── Header / sheet actions ─────────────────────────────────────────────
@@ -538,9 +553,7 @@ export default function ChatTab() {
           hasSessions={sessions.length > 0}
           agent={currentAgent}
           onPickPrompt={(text) => setDraft(draftKey, text)}
-          onQuickAction={(action) =>
-            handleSend(action.prompt, [], { clearDraft: false })
-          }
+          onQuickAction={handleQuickAction}
           quickActionsDisabled={sending || disabled}
           pendingTask={pendingTask}
           liveTaskMessages={liveTaskMessages}

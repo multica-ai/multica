@@ -52,6 +52,7 @@
     "search_placeholder": "搜尋任務和專案"
   },
   "detail": {
+    "sub_issues": "子任務",
     "properties": "屬性",
     "activity": "動態",
     "comments": "評論",
@@ -111,8 +112,10 @@
     "commented": "發表了評論"
   },
   "errors": {
+    "children_load_failed": "無法載入子任務。",
     "create_failed": "建立任務失敗",
-    "load_failed": "任務載入失敗：{{message}}"
+    "load_failed": "任務載入失敗：{{message}}",
+    "incomplete_list": "無法載入全部任務，請重試。"
   },
   "empty": {
     "filtered": "沒有符合當前篩選條件的任務。",

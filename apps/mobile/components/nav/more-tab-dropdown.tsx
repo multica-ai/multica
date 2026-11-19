@@ -3,10 +3,10 @@
  * tapped. Mounted as a sibling to the Tabs view, NOT as the tab button
  * itself: that way the real More tab button stays a standard React
  * Navigation `PlatformPressable` (icon + "More" label, full visual
- * parity with Inbox / My Issues / Chat).
+ * parity with Inbox / Issues / Projects / Chat).
  *
  * The wrapper View is absolute-positioned over the More tab's screen
- * rect (right 25%, bottom = safe-area, height = tab bar). It uses
+ * rect (right 20%, bottom = safe-area, height = tab bar). It uses
  * `pointerEvents="box-none"` so taps pass through to the real tab
  * button underneath; we open the dropdown imperatively from the tab's
  * `listeners.tabPress` via the exposed `TriggerRef.open()`. The
@@ -36,7 +36,7 @@
  */
 import { useMemo } from "react";
 import { Image, Pressable, View } from "react-native";
-import { Image as ExpoImage } from "expo-image";
+import { PlatformIcon, type PlatformIconProps } from "@/components/ui/platform-icon";
 import { router, usePathname } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -67,17 +67,16 @@ import { cn } from "@/lib/utils";
 const TAB_BAR_HEIGHT = 49;
 
 interface NavItem {
-  labelKey: "more_menu.pinned" | "more_menu.issues" | "more_menu.projects";
+  labelKey: "more_menu.pinned";
   /** SF Symbol name, rendered via expo-image `source: "sf:<name>"`. */
   icon: string;
+  androidIcon: PlatformIconProps["android"];
   /** Path under /:slug/ — final href is `/${slug}${path}`. */
   path: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { labelKey: "more_menu.pinned", icon: "pin", path: "/more/pins" },
-  { labelKey: "more_menu.issues", icon: "list.bullet", path: "/more/issues" },
-  { labelKey: "more_menu.projects", icon: "square.stack", path: "/more/projects" },
+  { labelKey: "more_menu.pinned", icon: "pin", androidIcon: "pin-outline", path: "/more/pins" },
 ];
 
 export function MoreTabDropdownAnchor({
@@ -107,7 +106,7 @@ export function MoreTabDropdownAnchor({
         position: "absolute",
         right: 0,
         bottom: insets.bottom,
-        width: "25%",
+        width: "20%",
         height: TAB_BAR_HEIGHT,
       }}
     >
@@ -160,10 +159,11 @@ export function MoreTabDropdownAnchor({
                 isActive(item.path) && "bg-secondary",
               )}
             >
-              <ExpoImage
-                source={`sf:${item.icon}`}
-                tintColor={theme.foreground}
-                style={{ width: 18, height: 18 }}
+              <PlatformIcon
+                ios={item.icon}
+                android={item.androidIcon}
+                color={theme.foreground}
+                size={18}
               />
               <Text className="text-sm text-foreground">{t(item.labelKey)}</Text>
             </DropdownMenuItem>
@@ -225,10 +225,11 @@ function UserCard({
           </Text>
         ) : null}
       </View>
-      <ExpoImage
-        source="sf:chevron.right"
-        tintColor={chevronTint}
-        style={{ width: 12, height: 12 }}
+      <PlatformIcon
+        ios="chevron.right"
+        android="chevron-forward"
+        color={chevronTint}
+        size={12}
       />
     </DropdownMenuItem>
   );
@@ -289,10 +290,11 @@ function WorkspaceCard({
         </Text>
       </View>
       {canSwitch ? (
-        <ExpoImage
-          source="sf:chevron.right"
-          tintColor={chevronTint}
-          style={{ width: 12, height: 12 }}
+        <PlatformIcon
+          ios="chevron.right"
+          android="chevron-forward"
+          color={chevronTint}
+          size={12}
         />
       ) : null}
     </DropdownMenuItem>

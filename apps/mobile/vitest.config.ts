@@ -34,6 +34,7 @@ export default defineConfig({
       "components/issue/run-cancel-button.test.ts",
       "components/inbox/inbox-screen.test.ts",
       "components/issue/timeline-list.test.ts",
+      "components/composer/message-composer.test.ts",
     ],
     passWithNoTests: true,
   },

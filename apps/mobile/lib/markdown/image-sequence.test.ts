@@ -1,6 +1,9 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Attachment } from "@multica/core/types";
+import { Alert } from "react-native";
+import { freshAttachmentUrl } from "@/data/attachment-media";
+import { invalidateSessionEpoch } from "@/data/session-epoch";
 
 const state = vi.hoisted(() => ({
   contexts: new Map<unknown, unknown>(),
@@ -12,6 +15,7 @@ vi.mock("react", async (importOriginal) => ({
   use: (context: unknown) => state.contexts.get(context),
   useMemo: (factory: () => unknown) => factory(),
   useEffect: vi.fn(),
+  useRef: (current: unknown) => ({ current }),
   useState: (initial: unknown) => {
     const setter = vi.fn();
     state.setters.push(setter);
@@ -19,11 +23,24 @@ vi.mock("react", async (importOriginal) => ({
   },
 }));
 vi.mock("react-native", () => ({
-  Image: { getSize: vi.fn() }, Pressable: "Pressable", View: "View",
+  Image: { getSize: vi.fn() }, Pressable: "Pressable", View: "View", Alert: { alert: vi.fn() },
 }));
 vi.mock("expo-image", () => ({ Image: "ExpoImage" }));
 vi.mock("react-native-image-viewing", () => ({ default: "ImageView" }));
 vi.mock("@/components/ui/text", () => ({ Text: "Text" }));
+
+vi.mock("@/data/server-config-store", () => ({ getServerConfig: () => ({ apiUrl: "", webUrl: "" }) }));
+vi.mock("@/data/attachment-media", () => ({
+  freshAttachmentUrl: vi.fn(),
+}));
+vi.mock("@/lib/i18n/singleton", () => ({ i18n: { t: (key: string) => key } }));
+vi.mock("@/data/use-attachment-media", () => ({
+  useAttachmentMedia: (source: string) => ({
+    uri: source.includes("11111111-1111-4111-8111-111111111111")
+      ? "https://cdn.example/signed.png?Signature=raw%2Bvalue" : source,
+    refetch: vi.fn(),
+  }),
+}));
 
 import { preprocessMobileMarkdown } from "./preprocess";
 import { splitMarkdown } from "./split-markdown";
@@ -45,6 +62,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.contexts.clear();
   state.setters.length = 0;
+  vi.mocked(freshAttachmentUrl).mockImplementation(async (source: string) => source.includes(ID)
+    ? "https://cdn.example/signed.png?Signature=raw%2Bvalue" : source);
 });
 
 // Follow real parsing, provider values and press/open callbacks. Native leaves
@@ -82,7 +101,7 @@ describe("mobile Markdown image sequence wiring", () => {
     ["HTML named entity", '<img src="https://cdn.example/a.png?a=1&amp;b=2">', "https://cdn.example/a.png?a=1&b=2", []],
     ["HTML Unicode", '<img src="https://cdn.example/图.png">', "https://cdn.example/%E5%9B%BE.png", []],
     ["HTML block", '<p align="center">\n<img src="https://cdn.example/图.png">\n</p>', "https://cdn.example/%E5%9B%BE.png", []],
-  ] as const)("keeps the %s image inside the screen sequence", (_name, middle, expectedUri, attachments) => {
+  ] as const)("keeps the %s image inside the screen sequence", async (_name, middle, expectedUri, attachments) => {
     const content = `![first](https://cdn.example/first.png)\n\n${middle}\n\n![last](https://cdn.example/last.png)`;
     const segments = splitMarkdown(preprocessMobileMarkdown(content)).filter((segment) => segment.type === "image");
     expect(segments).toHaveLength(3);
@@ -93,14 +112,15 @@ describe("mobile Markdown image sequence wiring", () => {
     const image = MarkdownImage({ uri: segments[1]!.uri, attachments: [...attachments] });
     const renderedUri = image.props.children.props.children.props.source.uri;
     image.props.onPress();
-    expect(state.setters[0]).toHaveBeenCalledExactlyOnceWith({
+    await vi.waitFor(() => expect(state.setters[0]).toHaveBeenCalledOnce());
+    expect(state.setters[0]).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       images: [
-        { uri: "https://cdn.example/first.png" },
+        {},
         { uri: expectedUri },
-        { uri: "https://cdn.example/last.png" },
+        {},
       ],
       index: 1,
-    });
+    }));
     expect(renderedUri).toBe(expectedUri);
   });
 
@@ -110,7 +130,7 @@ describe("mobile Markdown image sequence wiring", () => {
     ["Unicode URL", "!file[photo.png](https://cdn.example/图.png)", "https://cdn.example/%E5%9B%BE.png", []],
     ["entity-like URL", "!file[photo.png](https://cdn.example/a.png?a=1&amp;b=2)", "https://cdn.example/a.png?a=1&amp;b=2", []],
     ["backslash and brackets in URL", String.raw`!file[photo.png](https://cdn.example/a\b<c(d>.png)`, "https://cdn.example/a%5Cb%3Cc(d%3E.png", []],
-  ] as const)("renders an image file card (%s) inline at its sequence position", (_name, card, expectedUri, attachments) => {
+  ] as const)("renders an image file card (%s) inline at its sequence position", async (_name, card, expectedUri, attachments) => {
     const content = `![first](https://cdn.example/first.png)\n\n${card}\n\n![last](https://cdn.example/last.png)`;
     const segments = splitMarkdown(preprocessMobileMarkdown(content, attachments));
     expect(segments.map((segment) => segment.type)).toEqual(["image", "image", "image"]);
@@ -120,14 +140,15 @@ describe("mobile Markdown image sequence wiring", () => {
     state.contexts.set(provider.type, provider.props.value);
     const image = MarkdownImage({ uri: (segments[1] as { uri: string }).uri, attachments: [...attachments] });
     image.props.onPress();
-    expect(state.setters[0]).toHaveBeenCalledExactlyOnceWith({
+    await vi.waitFor(() => expect(state.setters[0]).toHaveBeenCalledOnce());
+    expect(state.setters[0]).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       images: [
-        { uri: "https://cdn.example/first.png" },
+        {},
         { uri: expectedUri },
-        { uri: "https://cdn.example/last.png" },
+        {},
       ],
       index: 1,
-    });
+    }));
   });
 
   it.each([
@@ -152,5 +173,48 @@ describe("mobile Markdown image sequence wiring", () => {
       "https://cdn.example/first.png",
       "https://cdn.example/last.png",
     ]);
+  });
+
+  it("opens the selected image without requesting unavailable or slow neighbors", async () => {
+    vi.mocked(freshAttachmentUrl).mockImplementation(async (source) => {
+      if (source !== "selected") throw new Error("Attachment metadata returned 404");
+      return "https://signed.test/selected";
+    });
+    LightboxProvider({ children: null }).props.value.open("selected", ["missing", "selected", "slow"]);
+    await vi.waitFor(() => expect(state.setters[0]).toHaveBeenCalledOnce());
+    expect(freshAttachmentUrl).toHaveBeenCalledExactlyOnceWith("selected");
+    expect(state.setters[0]).toHaveBeenCalledWith(expect.objectContaining({
+      images: [{}, { uri: "https://signed.test/selected" }, {}], index: 1,
+      sources: ["missing", "selected", "slow"],
+    }));
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it("reports a selected-image failure instead of silently ignoring it", async () => {
+    vi.mocked(freshAttachmentUrl).mockRejectedValueOnce(new Error("404"));
+    LightboxProvider({ children: null }).props.value.open("missing", ["missing", "valid"]);
+    await vi.waitFor(() => expect(Alert.alert).toHaveBeenCalledWith("settings:server.attachment_failed"));
+    expect(state.setters[0]).not.toHaveBeenCalled();
+  });
+
+  it("keeps distinct page identities while lazy images load or signatures change", () => {
+    const viewer = LightboxProvider({ children: null }).props.children[1];
+    const key = viewer.props.keyExtractor;
+    expect(key({}, 0)).not.toBe(key({}, 1));
+    expect(key({}, 1)).toBe(key({ uri: "https://signed.test/first" }, 1));
+    expect(key({ uri: "https://signed.test/first" }, 1)).toBe(key({ uri: "https://signed.test/renewed" }, 1));
+  });
+
+  it.each(["resolve", "reject"])("discards a selected-image %s after the session changes", async (outcome) => {
+    let resolve!: (uri: string) => void;
+    let reject!: (error: Error) => void;
+    vi.mocked(freshAttachmentUrl).mockReturnValueOnce(new Promise((yes, no) => { resolve = yes; reject = no; }));
+    LightboxProvider({ children: null }).props.value.open("selected");
+    invalidateSessionEpoch();
+    if (outcome === "resolve") resolve("https://old.test/signed");
+    else reject(new Error("old failure"));
+    await new Promise((done) => setTimeout(done, 0));
+    expect(state.setters[0]).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
   });
 });

@@ -1,14 +1,26 @@
 ---
-title: 모바일 앱(iOS)
+title: 모바일 앱(iOS 및 Android)
 description: 소스에서 Multica를 빌드해 iPhone에 설치하고 Cloud 또는 자체 호스팅 인스턴스에 연결합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica iOS 클라이언트는 아직 App Store에 출시되지 않았습니다. Mac에서 공개 소스 저장소의 Release 버전을 빌드해 자신의 iPhone에 설치할 수 있습니다. Android 클라이언트는 아직 제공하지 않습니다.
+Multica iOS 클라이언트는 아직 App Store에 출시되지 않았습니다. Mac에서 공개 소스 저장소의 Release 버전을 빌드해 자신의 iPhone에 설치할 수 있습니다. Android에서는 동일한 React Native 클라이언트로 서명된 독립 실행 APK를 빌드할 수 있습니다.
 
 설치된 앱은 기본적으로 Multica Cloud에 연결되며 기존 계정으로 로그인하면 됩니다. 워크스페이스, 태스크, 댓글, 실행 기록은 모두 서버에 저장되므로 Web이나 Desktop에서 동기화할 필요가 없습니다.
+
+워크스페이스와 프로젝트의 태스크 목록은 모든 페이지를 불러오고 같은 상태 순서로 그룹화합니다. 상태 제목을 누르면 접거나 펼칠 수 있으며 전체 개수는 계속 표시됩니다. 하위 태스크가 있으면 상세 화면의 활동 위에 식별자, 제목, 상태가 표시되며 눌러서 열 수 있습니다.
+
+## Android APK
+
+JDK 17과 Android SDK 36을 준비하고 저장소 외부의 Release 서명 키를 설정한 다음 루트에서 실행하세요:
+
+```bash
+pnpm -C apps/mobile android:release
+```
+
+APK는 기본적으로 Multica Cloud에 연결하며 Metro가 필요 없습니다. 서명, 환경 변형, 자체 호스팅 주소 및 설치 검증은 [Android 빌드 가이드](https://github.com/multica-ai/multica/blob/main/apps/mobile/docs/android-release.md)를 참고하세요. 백그라운드 푸시 알림은 포함되지 않습니다. 아래는 iPhone 설치 안내입니다.
 
 ## 준비 사항
 
@@ -77,31 +89,13 @@ pnpm ios:mobile:device:prod:release
 
 ## 자체 호스팅 인스턴스 연결
 
-Release 빌드는 API 주소를 앱에 포함합니다. `apps/mobile/.env.production`은 공개 multica.ai 기본값과 함께 커밋되어 있어 새로 클론한 상태에서도 프로덕션 빌드가 가능합니다.
+로그인 화면의 **Server settings** 또는 로그인 후 **Settings → Server settings**를 엽니다. **API URL**(백엔드 루트)과 **Web URL**(브라우저와 링크 주소)을 입력하고 저장하세요. 같은 도메인과 분리된 호스트를 모두 지원하며 재시작 후에도 유지됩니다. 다시 빌드할 필요가 없습니다. **Restore Cloud defaults**를 선택한 후 저장하면 Multica Cloud로 돌아갑니다.
 
-자체 호스팅 인스턴스에 연결하려면 다음과 같이 합니다.
+두 주소 모두 기기가 신뢰하는 인증서의 HTTPS를 사용해야 합니다. 사용자 지정 포트와 기본 경로를 지원합니다. 예: API `https://multica.example.com:8443/backend`, Web `https://multica.example.com:8443/app`. API 주소 끝의 `/api`는 제거되고 요청 경로가 자동으로 추가합니다. `/auth`와 `/ws`도 같은 백엔드 루트를 사용합니다. 배포 APK는 HTTP나 인증서 검증 우회를 지원하지 않습니다. `localhost`는 휴대전화 자체를 가리킵니다.
 
-<Steps>
-<Step>
-`apps/mobile/.env.production.example`을 `apps/mobile/.env.production.local`로 복사하고 복사본에 주소를 적습니다.
+주소 하나라도 변경하면 로그아웃되고 로컬 초안, 워크스페이스 선택, 캐시가 지워집니다. 선택한 인스턴스에서 다시 로그인하세요. 서버 데이터는 원래 인스턴스에 남습니다. 파일과 이미지는 선택한 서버에서 새 서명 URL을 받아 사용하며 세션 토큰을 외부 브라우저에 보내지 않습니다.
 
-```dotenv
-EXPO_PUBLIC_API_URL=https://api.example.com
-EXPO_PUBLIC_WEB_URL=https://app.example.com
-```
-
-`.local` 파일은 커밋된 기본값을 키 단위로 덮어쓰며 gitignore되므로 개인 API 주소가 저장소에 들어가지 않습니다. `EXPO_PUBLIC_API_URL`은 필수입니다. `EXPO_PUBLIC_WEB_URL`은 "Copy link", "Open on web" 같은 메뉴에 사용됩니다. 두 값을 모두 설정하세요. 적지 않은 키는 multica.ai 기본값을 그대로 쓰므로 이 메뉴가 자체 호스팅 인스턴스 대신 multica.ai를 엽니다.
-</Step>
-<Step>
-빌드 명령 `pnpm ios:mobile:device:prod:release`를 다시 실행합니다. iPhone에서 이 API 주소에 접근할 수 있어야 합니다. 로컬 네트워크 주소를 사용할 때는 `localhost`를 쓰지 마세요. iPhone에서는 휴대전화 자체를 가리킵니다.
-</Step>
-</Steps>
-
-<Callout type="warning">
-`.env.production`을 직접 수정하면 현재 checkout의 프로덕션 설정이 바뀝니다. 개인 값은 gitignore된 `.env.production.local`에 두세요.
-</Callout>
-
-모바일 개발, Simulator 사용, staging 연결 방법은 저장소의 [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md)를 참고하세요.
+개발 빌드와 최초 설치 기본값은 [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md)를 참고하세요.
 
 ## 다음 단계
 

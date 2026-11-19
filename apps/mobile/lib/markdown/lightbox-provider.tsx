@@ -21,10 +21,14 @@
  * The gesture is the platform's own horizontal paging rather than the
  * desktop chevrons — same semantics, phone-native interaction.
  */
-import { createContext, use, useMemo, useState, type ReactNode } from "react";
-import { View } from "react-native";
+import { createContext, use, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Alert, AppState, View } from "react-native";
 import ImageView from "react-native-image-viewing";
 import { Text } from "@/components/ui/text";
+import { freshAttachmentUrl } from "@/data/attachment-media";
+import { registerSessionConnection } from "@/data/realtime/session-connections";
+import { currentSessionEpoch, sessionEpochChanged } from "@/data/session-epoch";
+import { i18n } from "@/lib/i18n/singleton";
 
 interface LightboxApi {
   /**
@@ -47,8 +51,10 @@ export function useLightbox(): LightboxApi {
 }
 
 interface Viewing {
-  images: { uri: string }[];
+  images: { uri?: string }[];
+  sources: string[];
   index: number;
+  epoch: number;
 }
 
 export function LightboxProvider({ children }: { children: ReactNode }) {
@@ -56,18 +62,70 @@ export function LightboxProvider({ children }: { children: ReactNode }) {
   // Tracked separately from `viewing.index` so the counter follows a swipe;
   // `viewing` itself is the frozen snapshot taken when the viewer opened.
   const [currentIndex, setCurrentIndex] = useState(0);
+  const openSequence = useRef(0);
+  const reportedFailures = useRef(new Set<string>());
+
+  useEffect(() => registerSessionConnection(() => {
+    openSequence.current++;
+    setViewing(null);
+  }), []);
+
+  useEffect(() => {
+    if (!viewing) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    const refresh = () => {
+      void freshAttachmentUrl(viewing.sources[currentIndex], false, controller.signal)
+        .then((uri) => {
+          if (cancelled || sessionEpochChanged(viewing.epoch)) return;
+          setViewing((current) => {
+            if (!current || current.images[currentIndex]?.uri === uri) return current;
+            const images = [...current.images];
+            images[currentIndex] = { uri };
+            return { ...current, images };
+          });
+        }).catch(() => {
+          const source = viewing.sources[currentIndex];
+          if (cancelled || sessionEpochChanged(viewing.epoch) || reportedFailures.current.has(source)) return;
+          reportedFailures.current.add(source);
+          Alert.alert(i18n.t("settings:server.attachment_failed"));
+        });
+    };
+    // Keep the selected image's 60-second proxy capability usable while the
+    // viewer is open, on swipes and on return from the background.
+    refresh();
+    const timer = setInterval(refresh, 45_000);
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") refresh();
+    });
+    return () => { cancelled = true; controller.abort(); clearInterval(timer); sub.remove(); };
+  }, [viewing?.sources, viewing?.epoch, currentIndex]);
 
   const api = useMemo<LightboxApi>(
     () => ({
       open: (uri, sequence) => {
+        const epoch = currentSessionEpoch();
+        const attempt = ++openSequence.current;
         const uris = sequence?.length ? [...sequence] : [uri];
         const found = uris.indexOf(uri);
         // A URI the sequence doesn't know still opens, on its own — same
         // fallback web takes when `openAt` reports the key is unknown.
-        const images = found >= 0 ? uris : [uri];
+        const sources = found >= 0 ? uris : [uri];
         const index = found >= 0 ? found : 0;
-        setCurrentIndex(index);
-        setViewing({ images: images.map((u) => ({ uri: u })), index });
+        reportedFailures.current.clear();
+        // Resolve only the tapped image. Other history entries may no longer
+        // exist; their capabilities are loaded independently when swiped to.
+        void freshAttachmentUrl(uri).then((url) => {
+          if (attempt !== openSequence.current || sessionEpochChanged(epoch)) return;
+          setCurrentIndex(index);
+          setViewing({
+            images: sources.map((_, i) => i === index ? { uri: url } : {}),
+            sources, index, epoch,
+          });
+        }).catch(() => {
+          if (attempt !== openSequence.current || sessionEpochChanged(epoch)) return;
+          Alert.alert(i18n.t("settings:server.attachment_failed"));
+        });
       },
     }),
     [],
@@ -96,6 +154,7 @@ export function LightboxProvider({ children }: { children: ReactNode }) {
       {children}
       <ImageView
         images={viewing?.images ?? []}
+        keyExtractor={(_image, index) => String(index)}
         imageIndex={viewing?.index ?? 0}
         visible={!!viewing}
         onRequestClose={() => setViewing(null)}

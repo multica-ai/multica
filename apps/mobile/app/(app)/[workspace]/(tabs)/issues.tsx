@@ -31,11 +31,9 @@ import type {
 } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
-// Header chrome (back + "Issues" title) comes from the parent Stack
-// (`apps/mobile/app/(app)/[workspace]/_layout.tsx:269`). The Filter
-// affordance now lives in <ScopeToolbar> below, matching web's
-// IssuesHeader pattern (scope + filter share a row).
-import { StatusIcon } from "@/components/ui/status-icon";
+import { Header } from "@/components/ui/header";
+import { HeaderActions } from "@/components/ui/app-header-actions";
+import { IssueSectionHeader } from "@/components/issue/issue-section-header";
 import { IssueRow } from "@/components/issue/issue-row";
 import { IssuesLoading } from "@/components/issue/issues-loading";
 import { issueListOptions } from "@/data/queries/issues";
@@ -48,7 +46,7 @@ import { useClearFiltersOnWorkspaceChange } from "@/lib/use-clear-filters-on-wor
 import { PRIORITY_LABEL } from "@/lib/issue-status";
 import { useT } from "@/lib/i18n";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
-import { groupIssuesByStatus } from "@/lib/group-issues-by-status";
+import { useIssueSections } from "@/lib/use-issue-sections";
 import { filterIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
@@ -111,7 +109,9 @@ export default function IssuesPage() {
     [scopedIssues, statusFilters, priorityFilters],
   );
 
-  const sections = useMemo(() => groupIssuesByStatus(filtered, catalog.statuses), [filtered, catalog.statuses]);
+  const { sections, toggleSection } = useIssueSections(
+    filtered, catalog.statuses, wsId ?? "",
+  );
 
   const hasActiveFilters =
     statusFilters.length > 0 || priorityFilters.length > 0;
@@ -124,6 +124,7 @@ export default function IssuesPage() {
 
   return (
     <View className="flex-1 bg-background">
+      <Header title={t("navigation:tabs.issues")} right={<HeaderActions />} />
       <ScopeToolbar
         scopes={scopeItems}
         scope={scope}
@@ -174,9 +175,11 @@ export default function IssuesPage() {
             <View className="h-px bg-border ml-4" />
           )}
           renderSectionHeader={({ section }) => (
-            <SectionHeader
+            <IssueSectionHeader
               status={section.status}
-              count={section.data.length}
+              count={section.count}
+              expanded={section.expanded}
+              onPress={() => toggleSection(section.status)}
             />
           )}
           contentContainerClassName="pb-6"
@@ -337,27 +340,6 @@ function Chip({ label, onClear }: { label: string; onClear: () => void }) {
         color={THEME[colorScheme].mutedForeground}
       />
     </Pressable>
-  );
-}
-
-// The section header names its concrete built-in or custom status.
-function SectionHeader({
-  status,
-  count,
-}: {
-  status: IssueStatus;
-  count: number;
-}) {
-  const catalog = useIssueStatuses();
-  return (
-    <View className="flex-row items-center gap-2 px-4 py-2 bg-background">
-      {/* Category keys resolve to their canonical lifecycle glyph. */}
-      <StatusIcon status={status} category={catalog.categoryOf(status)} icon={catalog.iconOf(status)} color={catalog.colorOf(status)} size={14} />
-      <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-        {catalog.labelOf(status)}
-      </Text>
-      <Text className="text-xs text-muted-foreground/60">{count}</Text>
-    </View>
   );
 }
 

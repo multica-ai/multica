@@ -1,7 +1,7 @@
 /**
- * Mirrors web's exact status grouping. Category only orders sections; it never
- * merges them. Mobile groups its already-loaded rows and keeps unknown keys
- * visible while the catalog is loading.
+ * Concrete statuses remain separate, including unknown keys while the catalog
+ * loads. Default ordering follows the catalog; the workspace list can select
+ * the requested workflow-stage order.
  */
 import type { Issue, IssueStatus, IssueStatusEntry } from "@multica/core/types";
 import { BUILT_IN_STATUS_ORDER, BUILT_IN_STATUS_CATEGORY, STATUS_CATEGORIES, issueStatusCategory } from "./issue-status";
@@ -11,7 +11,19 @@ export interface IssueSection {
   data: Issue[];
 }
 
-export function groupIssuesByStatus(issues: Issue[], entries: IssueStatusEntry[] = []): IssueSection[] {
+// Accept the requested stage names as catalog names/keys without renaming or
+// merging concrete statuses. Other custom statuses stay in their lifecycle.
+const WORKFLOW_ORDER = new Map([
+  ["backlog", 0], ["plan", 0], ["todo", 1], ["inprogress", 2], ["inprocessing", 2],
+  ["inreview", 3], ["inreviewing", 3], ["blocked", 4], ["done", 5], ["cancelled", 6],
+]);
+const normalizeStage = (value: string) => value.toLowerCase().replace(/[\s_-]+/g, "");
+
+export function groupIssuesByStatus(
+  issues: Issue[],
+  entries: IssueStatusEntry[] = [],
+  order: "catalog" | "workflow" = "catalog",
+): IssueSection[] {
   const byStatus = new Map<IssueStatus, Issue[]>();
   for (const issue of issues) {
     const list = byStatus.get(issue.status);
@@ -22,7 +34,15 @@ export function groupIssuesByStatus(issues: Issue[], entries: IssueStatusEntry[]
   const rank = (key: string) => STATUS_CATEGORIES.indexOf(
     issueStatusCategory({ status: key, status_category: entryByKey.get(key)?.category ?? byStatus.get(key)?.[0]?.status_category }) ?? "unstarted",
   );
+  const workflowRank = (key: string) =>
+    WORKFLOW_ORDER.get(normalizeStage(key)) ??
+    WORKFLOW_ORDER.get(normalizeStage(entryByKey.get(key)?.name ?? "")) ??
+    [0.5, 2.5, 5.5, 6.5][rank(key)];
   return [...byStatus].sort(([a], [b]) => {
+    if (order === "workflow") {
+      const workflow = workflowRank(a) - workflowRank(b);
+      if (workflow) return workflow;
+    }
     const categoryRank = rank(a) - rank(b);
     if (categoryRank) return categoryRank;
     const aBuilt = BUILT_IN_STATUS_ORDER.indexOf(a as keyof typeof BUILT_IN_STATUS_CATEGORY);

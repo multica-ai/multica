@@ -32,6 +32,7 @@ import {
 import { THEME } from "@/lib/theme";
 import { useLocalePreference, useT, type LocalePreference } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { useServerConfigStore } from "@/data/server-config-store";
 
 const THEME_OPTIONS: ThemePreference[] = ["light", "dark", "system"];
 const LANGUAGE_OPTIONS: LocalePreference[] = [
@@ -54,6 +55,7 @@ function initialsOf(name: string | undefined): string {
 
 export default function SettingsPage() {
   const user = useAuthStore((s) => s.user);
+  const apiUrl = useServerConfigStore((s) => s.config.apiUrl);
   const logout = useAuthStore((s) => s.logout);
   const currentSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const setCurrentWorkspace = useWorkspaceStore((s) => s.setCurrentWorkspace);
@@ -132,6 +134,15 @@ export default function SettingsPage() {
           chevronColor={mutedFg}
           title={t("notifications.title")}
           subtitle={t("account.notifications_subtitle")}
+        />
+      </SectionGroup>
+
+      <SectionGroup title={t("server.title")}>
+        <NavRow
+          onPress={() => router.push("/settings/server")}
+          chevronColor={mutedFg}
+          title={t("server.title")}
+          subtitle={apiUrl}
         />
       </SectionGroup>
 

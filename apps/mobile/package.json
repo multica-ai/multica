@@ -1,9 +1,13 @@
 {
   "name": "@multica/mobile",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
+    "android": "expo prebuild -p android --no-install && expo run:android",
+    "android:release": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production node scripts/android-release.mjs",
+    "android:release:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging node scripts/android-release.mjs",
+    "android:release:dev": "dotenv -e .env.development.local -- cross-env APP_ENV=development node scripts/android-release.mjs",
     "dev": "expo start",
     "dev:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging expo start",
     "dev:prod": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production expo start",
@@ -17,11 +21,12 @@
     "ios:device:prod:release": "dotenv -e .env.production.local -e .env.production -- cross-env APP_ENV=production ./scripts/ios-run.sh --device --configuration Release",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && bash scripts/ios-run.test.sh"
+    "test": "vitest run && bash scripts/ios-run.test.sh && node --test scripts/android-release.test.mjs"
   },
   "dependencies": {
     "@expo/dom-webview": "~57.0.1",
     "@expo/metro-runtime": "~57.0.16",
+    "@expo/react-native-action-sheet": "^4.1.1",
     "@expo/vector-icons": "^15.1.1",
     "@multica/core": "workspace:*",
     "@react-native-community/datetimepicker": "9.1.0",

@@ -28,7 +28,8 @@
  *     isn't carried on every row, and mobile shouldn't re-derive the filter).
  *     Just invalidate on settle. Matches web.
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSessionMutation } from "@/data/use-session-mutation";
+import { useQueryClient } from "@tanstack/react-query";
 import type { QueryClient } from "@tanstack/react-query";
 import type { InboxItem } from "@multica/core/types";
 import { api } from "@/data/api";
@@ -65,9 +66,9 @@ export function useMarkInboxRead() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: (id: string) => api.markInboxRead(id),
-    onMutate: async (id) => {
+    onMutate: async (id, session) => {
       const key = inboxKeys.list(wsId);
       // Synchronous patch FIRST — see the file-level doc comment for why.
       const prev = qc.getQueryData<InboxItem[]>(key);
@@ -81,6 +82,7 @@ export function useMarkInboxRead() {
       );
       // Then the standard cancel for rollback.
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       return { prev, key };
     },
     onError: (_err, _id, ctx) => {
@@ -96,11 +98,12 @@ export function useArchiveInbox() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: (id: string) => api.archiveInbox(id),
-    onMutate: async (id) => {
+    onMutate: async (id, session) => {
       const key = inboxKeys.list(wsId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<InboxItem[]>(key);
       // Match web: archive every row that shares the same issue_id — the
       // single archive endpoint archives all sibling rows server-side too
@@ -131,11 +134,12 @@ export function useMarkAllInboxRead() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: () => api.markAllInboxRead(),
-    onMutate: async () => {
+    onMutate: async (_variables, session) => {
       const key = inboxKeys.list(wsId);
       await qc.cancelQueries({ queryKey: key });
+      session.assertCurrentSession();
       const prev = qc.getQueryData<InboxItem[]>(key);
       qc.setQueryData<InboxItem[]>(key, (old) =>
         old?.map((item) =>
@@ -161,7 +165,7 @@ export function useMarkAllInboxRead() {
 export function useArchiveAllInbox() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
-  return useMutation({
+  return useSessionMutation({
     mutationFn: () => api.archiveAllInbox(),
     onSettled: () => {
       refreshInboxAfterWrite(qc, wsId);
@@ -172,7 +176,7 @@ export function useArchiveAllInbox() {
 export function useArchiveAllReadInbox() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
-  return useMutation({
+  return useSessionMutation({
     mutationFn: () => api.archiveAllReadInbox(),
     onSettled: () => {
       refreshInboxAfterWrite(qc, wsId);
@@ -183,7 +187,7 @@ export function useArchiveAllReadInbox() {
 export function useArchiveCompletedInbox() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
-  return useMutation({
+  return useSessionMutation({
     mutationFn: () => api.archiveCompletedInbox(),
     onSettled: () => {
       refreshInboxAfterWrite(qc, wsId);

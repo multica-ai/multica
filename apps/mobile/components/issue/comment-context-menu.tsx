@@ -1,3 +1,4 @@
+import { issueWebUrl } from "@/lib/issue-web-url";
 /**
  * Native long-press actions for a comment bubble, with a pressed highlight
  * while the sheet is visible. Reply targets the inline composer.
@@ -6,7 +7,8 @@
  * iOS cannot present the next ActionSheet while the first is dismissing.
  */
 import { useCallback, useState } from "react";
-import { ActionSheetIOS, Alert } from "react-native";
+import { Alert } from "react-native";
+import { useActionSheet } from "@/lib/use-action-sheet";
 import { router } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
@@ -35,6 +37,7 @@ export function useCommentLongPress(
   issueIdentifier: string | undefined,
 ): { onLongPress: () => void; isPressed: boolean } {
   const [isPressed, setIsPressed] = useState(false);
+  const { showActionSheetWithOptions } = useActionSheet();
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id);
   const toggleReaction = useToggleCommentReaction(issueId);
@@ -54,8 +57,8 @@ export function useCommentLongPress(
     const isRoot = !entry.parent_id;
     const resolved = !!entry.resolved_at;
     const hasContent = !!entry.content;
-    const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
-    const canCopyLink = !!(webUrl && wsSlug && issueIdentifier);
+    const commentLink = wsSlug && issueIdentifier ? issueWebUrl(wsSlug, issueIdentifier, entry.id) : null;
+    const canCopyLink = !!commentLink;
     const reactions = (entry.reactions ?? []) as Reaction[];
 
     Haptics.selectionAsync().catch(() => {});
@@ -98,7 +101,7 @@ export function useCommentLongPress(
       ? actions.findIndex((a) => a.kind === "delete")
       : undefined;
 
-    ActionSheetIOS.showActionSheetWithOptions(
+    showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex,
@@ -134,6 +137,7 @@ export function useCommentLongPress(
             // Present the nested React sheet from inside this completion
             // callback — see file header for why.
             presentReactSheet({
+              showActionSheetWithOptions,
               entry,
               reactions,
               userId,
@@ -159,9 +163,8 @@ export function useCommentLongPress(
             useCommentSelectStore.getState().setSelecting(entry.id);
             return;
           case "copyLink": {
-            if (!canCopyLink) return;
-            const url = `${webUrl}/${wsSlug}/issue/${issueIdentifier}#comment-${entry.id}`;
-            Clipboard.setStringAsync(url);
+            if (!commentLink) return;
+            Clipboard.setStringAsync(commentLink);
             Haptics.notificationAsync(
               Haptics.NotificationFeedbackType.Success,
             ).catch(() => {});
@@ -206,12 +209,14 @@ export function useCommentLongPress(
     getName,
     keepReplies,
     t,
+    showActionSheetWithOptions,
   ]);
 
   return { onLongPress, isPressed };
 }
 
 function presentReactSheet(args: {
+  showActionSheetWithOptions: ReturnType<typeof useActionSheet>["showActionSheetWithOptions"];
   entry: TimelineEntry;
   reactions: Reaction[];
   userId: string | undefined;
@@ -219,7 +224,7 @@ function presentReactSheet(args: {
   issueId: string;
   toggle: (emoji: string, existing: Reaction | undefined) => void;
 }) {
-  const { entry, reactions, userId, wsSlug, issueId, toggle } = args;
+  const { entry, reactions, userId, wsSlug, issueId, toggle, showActionSheetWithOptions } = args;
   const emojis = QUICK_EMOJIS.slice(0, QUICK_ROW_SIZE);
   const t = i18n.t.bind(i18n);
   const options = [
@@ -229,7 +234,7 @@ function presentReactSheet(args: {
   ];
   const cancelButtonIndex = options.length - 1;
 
-  ActionSheetIOS.showActionSheetWithOptions(
+  showActionSheetWithOptions(
     { options, cancelButtonIndex },
     (i) => {
       if (i === cancelButtonIndex) return;

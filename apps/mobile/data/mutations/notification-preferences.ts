@@ -9,8 +9,8 @@
  * optimistic by default"). Toggle latency on cellular is real — the Switch
  * snapping back if the request hangs would look broken.
  */
+import { useSessionMutation } from "@/data/use-session-mutation";
 import {
-  useMutation,
   useQueryClient,
   type MutateOptions,
 } from "@tanstack/react-query";
@@ -90,7 +90,7 @@ export function useUpdateNotificationPreferences() {
 
   // Match Core's concurrency contract: serialize writes per workspace and
   // capture the slug so queued work cannot follow a later workspace switch.
-  const mutation = useMutation<
+  const mutation = useSessionMutation<
     NotificationPreferenceResponse,
     Error,
     NotificationPreferenceMutationVariables,
@@ -106,9 +106,10 @@ export function useUpdateNotificationPreferences() {
       }
       return api.updateNotificationPreferences(patch, targetWorkspaceSlug);
     },
-    onMutate: async ({ patch, workspaceId }) => {
+    onMutate: async ({ patch, workspaceId }, session) => {
       const targetKey = notificationPreferenceKeys.all(workspaceId);
       await qc.cancelQueries({ queryKey: targetKey });
+      session.assertCurrentSession();
       const previous =
         qc.getQueryData<NotificationPreferenceResponse>(targetKey);
       qc.setQueryData<NotificationPreferenceResponse>(targetKey, (old) => ({

@@ -14,6 +14,9 @@ vi.mock("react-native", () => ({
   ActionSheetIOS: {}, Alert: {}, FlatList: "FlatList", View: "View",
 }));
 vi.mock("expo-router", () => ({ router: { push: vi.fn() } }));
+vi.mock("@/lib/use-action-sheet", () => ({
+  useActionSheet: () => ({ showActionSheetWithOptions: vi.fn() }),
+}));
 vi.mock("@expo/vector-icons", () => ({ Ionicons: "Ionicons" }));
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: state.rows }),

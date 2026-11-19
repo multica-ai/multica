@@ -4,7 +4,8 @@
  * (`@/data/api`) and workspace store — the core hook depends on
  * `useWorkspaceId` from `packages/core/hooks` which mobile does not share.
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useSessionMutation } from "@/data/use-session-mutation";
+import { useQueryClient } from "@tanstack/react-query";
 import type { CreateLabelRequest, Label } from "@multica/core/types";
 import { api } from "@/data/api";
 import { labelKeys } from "@/data/queries/labels";
@@ -14,7 +15,7 @@ export function useCreateLabel() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
-  return useMutation({
+  return useSessionMutation({
     mutationFn: (body: CreateLabelRequest) => api.createLabel(body),
     onSuccess: (label) => {
       // Append to the workspace label list cache so the picker sees the
