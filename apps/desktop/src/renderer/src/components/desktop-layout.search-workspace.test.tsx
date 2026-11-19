@@ -212,9 +212,9 @@ it("cancels an in-flight search when the production router switches workspace", 
   await openSearch();
   holdA = true;
   fireEvent.change(input(), { target: { value: "alpha" } });
-  // Issues and projects: one held search request each. Docs search stays off
-  // because the fixture config leaves docs_v1 disabled.
-  await waitFor(() => expect(held.length).toBe(2), NETWORK_WAIT);
+  // Issues, projects and docs: one held search request each. The fixture
+  // config turns docs_v1 on, so docs search runs too.
+  await waitFor(() => expect(held.length).toBe(3), NETWORK_WAIT);
   await notify("synthetic-b");
   await act(async () => {
     for (const { response, payload } of held.splice(0)) response.end(JSON.stringify(payload));
