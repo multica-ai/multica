@@ -350,9 +350,10 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
       score: objects.docs[0]!.score,
       node: (
         <PaletteGroup key="docs" heading={t(($) => $.groups.docs)}>
-          {objects.docs.map(({ item: { doc, folder, snippet } }) => (
+          {objects.docs.map(({ item: { doc, folder, snippet, stale } }) => (
             <ObjectRow
               key={doc.id}
+              disabled={stale}
               value={`doc:${doc.id}`}
               icon={<FileText className={ROW_ICON_CLASS} />}
               title={doc.title || t(($) => $.untitled_doc)}

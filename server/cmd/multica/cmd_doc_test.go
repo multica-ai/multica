@@ -13,7 +13,7 @@ import (
 )
 
 func TestDocCommandsExposeOnlyAgentReadWrite(t *testing.T) {
-	expected := map[string]bool{"list": true, "search": true, "get": true, "create": true, "update": true}
+	expected := map[string]bool{"list": true, "search": true, "get": true, "create": true, "update": true, "move": true}
 	for _, command := range docCmd.Commands() {
 		if !expected[command.Name()] {
 			t.Fatalf("unexpected doc command: %s", command.Name())
@@ -64,5 +64,39 @@ func TestRunDocSearchQueriesServerSearch(t *testing.T) {
 	}
 	if !strings.Contains(out, "doc-1") || !strings.Contains(out, "content: ...rotate the credentials") {
 		t.Fatalf("table output missing the hit: %q", out)
+	}
+}
+
+func TestRunDocMoveSendsDestination(t *testing.T) {
+	const docID = "11111111-2222-3333-4444-555555555555"
+	const folderID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	var gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": docID, "title": "Runbook", "folder_id": gotBody["folder_id"]})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	for _, tc := range []struct {
+		folder string
+		want   any
+	}{{folderID, folderID}, {"root", nil}} {
+		_ = docMoveCmd.Flags().Set("folder", tc.folder)
+		if _, err := captureStdout(t, func() error { return runDocMove(docMoveCmd, []string{docID}) }); err != nil {
+			t.Fatalf("runDocMove(%s): %v", tc.folder, err)
+		}
+		if gotPath != "/api/docs/"+docID+"/move" || gotBody["folder_id"] != tc.want {
+			t.Fatalf("--folder %s sent %s %v", tc.folder, gotPath, gotBody)
+		}
+	}
+	_ = docMoveCmd.Flags().Set("folder", "")
+	if err := runDocMove(docMoveCmd, []string{docID}); err == nil || !strings.Contains(err.Error(), "--folder is required") {
+		t.Fatalf("missing --folder must explain itself: %v", err)
 	}
 }
