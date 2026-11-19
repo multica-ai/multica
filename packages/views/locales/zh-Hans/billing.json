@@ -220,6 +220,14 @@
       "title": "前往 Stripe Checkout？",
       "description": "套餐：{{plan}}。付款周期：{{interval}}。当前成员：{{count}}。Stripe 会重新统计席位，并在付款前显示最终金额。",
       "held_invite": "另含 1 个席位，留给发给 {{email}} 的邀请；升级完成后会自动发出。"
+    },
+    "held_invite": {
+      "title": "工作区已升级到 {{plan}}",
+      "description": "你之前留下了一份邀请：以{{role}}身份邀请 {{email}}，等升级后再发。现在发出吗？",
+      "role_admin": "管理员",
+      "role_member": "成员",
+      "send": "发送邀请",
+      "discard": "不发了"
     }
   },
   "return_page": {

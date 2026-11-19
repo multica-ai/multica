@@ -38,6 +38,8 @@ const RESULT_VALUES = new Set(["success", "cancel", "portal"]);
 // is worth carrying anywhere, and this one can end up in a third-party OAuth
 // state on the login detour below.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Stripe Checkout session IDs (`cs_test_…`, `cs_live_…`).
+const CHECKOUT_SESSION_RE = /^cs_[A-Za-z0-9_]{1,250}$/;
 
 export function BillingReturnPage() {
   const { t } = useT("billing");
@@ -50,6 +52,11 @@ export function BillingReturnPage() {
     workspaceIdRaw && UUID_RE.test(workspaceIdRaw) ? workspaceIdRaw : null;
   const resultParam = navigation.searchParams.get("result");
   const result = resultParam && RESULT_VALUES.has(resultParam) ? resultParam : null;
+  // Billing matches the session to the checkout it started for a held
+  // invitation, so it is forwarded in-app. It never joins the login detour.
+  const sessionIdRaw = navigation.searchParams.get("session_id");
+  const sessionId =
+    result && sessionIdRaw && CHECKOUT_SESSION_RE.test(sessionIdRaw) ? sessionIdRaw : null;
 
   const {
     data: workspaces,
@@ -97,7 +104,7 @@ export function BillingReturnPage() {
 
     const destination = `${paths.workspace(match.slug).settings()}?tab=billing${
       result ? `&result=${result}` : ""
-    }`;
+    }${sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ""}`;
     // replace(), not push(): the Stripe hop should not sit in history where a
     // back navigation would re-run this redirect.
     navigation.replace(destination);
@@ -108,6 +115,7 @@ export function BillingReturnPage() {
     match,
     navigation,
     result,
+    sessionId,
     user,
     workspaceIdParam,
     workspaces,

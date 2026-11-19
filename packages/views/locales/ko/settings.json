@@ -1385,7 +1385,8 @@
     "member_limit_full_description_no_upgrade": "대기 중인 초대를 취소하거나 멤버를 제거하면 자리가 생깁니다.",
     "toast_invalid_email": "올바른 이메일 주소를 입력하세요.",
     "toast_already_member": "{{email}}은(는) 이미 이 워크스페이스의 멤버입니다.",
-    "toast_invitation_pending": "{{email}}에게 보낸 초대가 이미 대기 중입니다."
+    "toast_invitation_pending": "{{email}}에게 보낸 초대가 이미 대기 중입니다.",
+    "toast_invite_check_unavailable": "기존 멤버와 초대를 확인하지 못했습니다. 잠시 후 다시 시도하세요."
   },
   "lark": {
     "section_title": "Lark",

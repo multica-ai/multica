@@ -1642,7 +1642,8 @@
     "member_limit_full_description_no_upgrade": "保留中の招待を取り消すか、メンバーを削除すると枠が空きます。",
     "toast_invalid_email": "有効なメールアドレスを入力してください。",
     "toast_already_member": "{{email}} はすでにこのワークスペースのメンバーです。",
-    "toast_invitation_pending": "{{email}} への招待はすでに保留中です。"
+    "toast_invitation_pending": "{{email}} への招待はすでに保留中です。",
+    "toast_invite_check_unavailable": "既存のメンバーと招待を確認できませんでした。しばらくしてからもう一度お試しください。"
   },
   "integrations": {
     "status_connected": "接続済み",

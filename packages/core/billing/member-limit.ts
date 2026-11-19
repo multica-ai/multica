@@ -210,25 +210,57 @@ export function clearUpgradeInvite(
 }
 
 /**
- * The held invitation a confirmed upgrade should send, if any. It qualifies
- * only when its own checkout started on this client and the subscription has
- * changed since (a version above the one seen when that checkout started)
- * with checkout no longer offered. A Stripe return to this tab names its
- * session and picks exactly that invitation. Without one (Desktop pays in the
- * system browser and the app only sees the plan change) a held invitation is
- * picked only when it is the only one waiting, never one of several.
+ * What a plan change means for the held invitations, if anything.
+ *
+ * A held invitation qualifies only when its own checkout started on this
+ * client and the subscription has changed since (a version above the one seen
+ * when that checkout started) with checkout no longer offered.
+ *
+ * - `send`: the Stripe return to this tab names that invitation's checkout,
+ *   so its payment went through. Members sends it.
+ * - `confirm`: the plan changed, but nothing ties the change to this
+ *   invitation's checkout. Desktop pays in the system browser and never sees
+ *   the return, and another admin may have upgraded from elsewhere. The
+ *   person who held it decides whether it still goes out.
+ *
+ * A return that names a session belonging to no held invitation (a plain
+ * upgrade) leaves them all alone.
  */
-export function heldInviteForConfirmedUpgrade(
+export type HeldInviteHandback =
+  | { kind: "send"; held: HeldInvite }
+  | { kind: "confirm"; held: HeldInvite };
+
+export function heldInviteHandback(
   held: HeldInvite[],
   subscription: { version: number; checkoutAvailable: boolean },
   returnSessionId: string | null,
-): HeldInvite | null {
+): HeldInviteHandback | null {
   if (subscription.checkoutAvailable) return null;
   const eligible = held.filter(
     (h) => h.checkout !== null && subscription.version > h.checkout.baseVersion,
   );
   if (returnSessionId) {
-    return eligible.find((h) => h.checkout?.sessionId === returnSessionId) ?? null;
+    const match = eligible.find((h) => h.checkout?.sessionId === returnSessionId);
+    return match ? { kind: "send", held: match } : null;
   }
-  return eligible.length === 1 ? eligible[0]! : null;
+  // Newest first, so a confirmation offers the latest one.
+  const latest = [...eligible].sort((a, b) => b.savedAt - a.savedAt)[0];
+  return latest ? { kind: "confirm", held: latest } : null;
+}
+
+/**
+ * The held invitation a Stripe cancel return gave up on. Stripe names the
+ * session only on success, so without one the cancel is attributed only when
+ * a single held invitation is waiting on a checkout; with several, none is
+ * dropped and they expire on their own.
+ */
+export function heldInviteForCancelledCheckout(
+  held: HeldInvite[],
+  returnSessionId: string | null,
+): HeldInvite | null {
+  const bound = held.filter((h) => h.checkout !== null);
+  if (returnSessionId) {
+    return bound.find((h) => h.checkout?.sessionId === returnSessionId) ?? null;
+  }
+  return bound.length === 1 ? bound[0]! : null;
 }

@@ -30,6 +30,7 @@ const data = vi.hoisted(() => ({
   shareLinks: [] as Array<Record<string, unknown>>,
   summary: null as Record<string, unknown> | null,
   memberLimit: null as Record<string, unknown> | null,
+  invitationsLoaded: true,
 }));
 const mockInvalidateQueries = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
@@ -38,9 +39,13 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: (opts: { queryKey: unknown[] }) => {
     const key = JSON.stringify(opts.queryKey);
     if (key.includes('"limit"')) return { data: data.memberLimit };
-    if (key.includes("invitations")) return { data: data.invitations };
+    if (key.includes("invitations")) {
+      return data.invitationsLoaded
+        ? { data: data.invitations, isSuccess: true }
+        : { data: undefined, isSuccess: false };
+    }
     if (key.includes("share-links")) return { data: data.shareLinks };
-    if (key.includes("members")) return { data: data.members };
+    if (key.includes("members")) return { data: data.members, isSuccess: true };
     return { data: data.summary };
   },
   useQueryClient: () => ({
@@ -133,6 +138,7 @@ beforeEach(() => {
   data.shareLinks = [];
   data.summary = null;
   data.memberLimit = null;
+  data.invitationsLoaded = true;
   localStorage.clear();
   configStore.getState().setFeatureFlags({});
 });
@@ -306,6 +312,23 @@ describe("MembersTab", () => {
       expect(new URLSearchParams(url.get()).get("tab")).toBe("members");
       expect(localStorage.getItem("multica:upgrade_invite:acme")).toBeNull();
       expect(screen.getByRole("dialog", { name: "Invite member" })).toBeInTheDocument();
+    });
+
+    it("waits for the invitation list before an upgrade can buy a seat", async () => {
+      enableBilling();
+      data.memberLimit = { action: "enforce", limit: 5, members: 4, pendingInvitations: 1 };
+      data.invitationsLoaded = false;
+      const user = userEvent.setup();
+      renderWithI18n(<MembersTab />);
+
+      const dialog = await openInvite(user, "linus@acme.dev");
+      const upgrade = within(dialog).getByRole("button", { name: "Upgrade and invite" });
+      expect(upgrade).toBeDisabled();
+      await user.click(upgrade);
+      await user.keyboard("{Enter}");
+
+      expect(new URLSearchParams(url.get()).get("tab")).toBe("members");
+      expect(localStorage.getItem("multica:upgrade_invite:acme")).toBeNull();
     });
 
     it("offers no upgrade when Billing is off, only ways to free a slot", async () => {

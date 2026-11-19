@@ -664,8 +664,9 @@ describe("BillingTab", () => {
       expect(mocks.checkout.mock.calls[0]?.[0]).not.toHaveProperty("additionalSeats");
     });
 
-    it("retires held invitations when an upgrade starts without one", async () => {
-      const token = boundHeldInvite("sarah@acme.dev", "cs_old");
+    it("leaves other tabs' held invitations alone when an upgrade starts without one", async () => {
+      // Tab A is still paying for its held invitation while tab B upgrades.
+      const token = boundHeldInvite("sarah@acme.dev", "cs_tab_a");
       const user = userEvent.setup();
       renderWithI18n(<BillingTab />);
 
@@ -674,32 +675,7 @@ describe("BillingTab", () => {
 
       await waitFor(() => expect(mocks.checkout).toHaveBeenCalledTimes(1));
       expect(mocks.checkout.mock.calls[0]?.[0]).not.toHaveProperty("additionalSeats");
-      expect(readUpgradeInvite("acme", token)).toBeNull();
-    });
-
-    it("hands the held invitation back once its upgrade shows, even without a Stripe return", () => {
-      // Desktop pays in the system browser: the app sees only the plan change.
-      const token = boundHeldInvite("sarah@acme.dev", "cs_desktop");
-      upgraded();
-      renderWithI18n(<BillingTab />);
-
-      expect(navigationState.push).toHaveBeenCalledWith(
-        `/acme/settings?tab=members&invite=resume&held_invite=${token}`,
-      );
-      expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-        queryKey: ["workspaces", "workspace-1", "members", "limit"],
-      });
-    });
-
-    it("waits for the plan change and polls while a held invitation's checkout is open", () => {
-      boundHeldInvite("sarah@acme.dev", "cs_desktop");
-      renderWithI18n(<BillingTab />);
-
-      expect(navigationState.push).not.toHaveBeenCalled();
-      const summaryOptions = mocks.useQuery.mock.calls
-        .map(([options]) => options)
-        .findLast((options) => options.queryKey?.[options.queryKey.length - 1] === "summary");
-      expect(summaryOptions.refetchInterval({ state: { data: mocks.summary } })).toBe(5_000);
+      expect(readUpgradeInvite("acme", token)?.checkout?.sessionId).toBe("cs_tab_a");
     });
 
     it("sends only the invitation of the checkout Stripe returned from", () => {
@@ -716,18 +692,89 @@ describe("BillingTab", () => {
         expect(navigationState.push).toHaveBeenCalledWith(
           `/acme/settings?tab=members&invite=resume&held_invite=${token}`,
         );
+        expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+          queryKey: ["workspaces", "workspace-1", "members", "limit"],
+        });
       } finally {
         vi.useRealTimers();
       }
     });
 
+    it("leaves held invitations alone after returning from a plain upgrade", () => {
+      boundHeldInvite("sarah@acme.dev", "cs_held");
+      navigationState.search = "tab=billing&result=success&session_id=cs_plain";
+      upgraded();
+      renderWithI18n(<BillingTab />);
+
+      expect(navigationState.push).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "Send invitation" })).not.toBeInTheDocument();
+    });
+
+    // Desktop pays in the system browser and never sees the return; another
+    // admin may also have upgraded from elsewhere. Neither proves this
+    // invitation's checkout was paid.
+    it("asks before sending when no return ties the plan change to the held checkout", async () => {
+      const email = "sarah@acme.dev";
+      const token = boundHeldInvite(email, "cs_unverified");
+      upgraded();
+      const user = userEvent.setup();
+      renderWithI18n(<BillingTab />);
+
+      expect(navigationState.push).not.toHaveBeenCalled();
+      expect(screen.getByText("The workspace is on Pro now")).toBeInTheDocument();
+      expect(
+        screen.getByText(`You held back an invitation for ${email} as a member until the upgrade. Send it now?`),
+      ).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Send invitation" }));
+      expect(navigationState.push).toHaveBeenCalledWith(
+        `/acme/settings?tab=members&invite=resume&held_invite=${token}`,
+      );
+    });
+
+    it("discards a held invitation the person no longer wants", async () => {
+      const token = boundHeldInvite("sarah@acme.dev", "cs_unverified");
+      upgraded();
+      const user = userEvent.setup();
+      renderWithI18n(<BillingTab />);
+
+      await user.click(screen.getByRole("button", { name: "Discard" }));
+
+      expect(readUpgradeInvite("acme", token)).toBeNull();
+      expect(navigationState.push).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "Send invitation" })).not.toBeInTheDocument();
+    });
+
+    it("waits for the plan change and polls while a held invitation's checkout is open", () => {
+      boundHeldInvite("sarah@acme.dev", "cs_desktop");
+      renderWithI18n(<BillingTab />);
+
+      expect(navigationState.push).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "Send invitation" })).not.toBeInTheDocument();
+      const summaryOptions = mocks.useQuery.mock.calls
+        .map(([options]) => options)
+        .findLast((options) => options.queryKey?.[options.queryKey.length - 1] === "summary");
+      expect(summaryOptions.refetchInterval({ state: { data: mocks.summary } })).toBe(5_000);
+    });
+
     it("drops the held invitation of a checkout cancelled at Stripe", () => {
+      // Stripe names the session only on success; the cancel return has none.
       const token = boundHeldInvite("sarah@acme.dev", "cs_test_1");
-      navigationState.search = "tab=billing&result=cancel&session_id=cs_test_1";
+      navigationState.search = "tab=billing&result=cancel";
       renderWithI18n(<BillingTab />);
 
       expect(readUpgradeInvite("acme", token)).toBeNull();
       expect(navigationState.push).not.toHaveBeenCalled();
+    });
+
+    it("does not guess which of several held checkouts a cancel belongs to", () => {
+      const first = boundHeldInvite("sarah@acme.dev", "cs_a");
+      const second = boundHeldInvite("omar@acme.dev", "cs_b");
+      navigationState.search = "tab=billing&result=cancel";
+      renderWithI18n(<BillingTab />);
+
+      expect(readUpgradeInvite("acme", first)).not.toBeNull();
+      expect(readUpgradeInvite("acme", second)).not.toBeNull();
     });
 
     it("shows members and pending invitations against the plan's limit", () => {

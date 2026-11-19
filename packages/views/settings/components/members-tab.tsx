@@ -431,8 +431,13 @@ export function MembersTab() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const navigation = useOptionalNavigation();
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
+  const memberListQuery = useQuery(memberListOptions(wsId));
+  const invitationListQuery = useQuery(invitationListOptions(wsId));
+  const members = memberListQuery.data ?? [];
+  const invitations = invitationListQuery.data ?? [];
+  // An upgrade buys a seat for the invitation, so it waits until both lists
+  // have loaded and the invitation is known to be sendable.
+  const inviteChecksReady = memberListQuery.isSuccess && invitationListQuery.isSuccess;
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [shareLinkOpen, setShareLinkOpen] = useState(false);
@@ -672,6 +677,9 @@ export function MembersTab() {
   // Why an invitation could not be sent even after paying, checked before
   // the upgrade buys a seat for it. The server re-checks on send.
   const upgradeInviteProblem = (email: string): string | null => {
+    if (!inviteChecksReady) {
+      return t(($) => $.members.toast_invite_check_unavailable);
+    }
     const normalized = email.toLowerCase();
     if (!INVITE_EMAIL_PATTERN.test(normalized)) {
       return t(($) => $.members.toast_invalid_email);
@@ -1223,7 +1231,7 @@ export function MembersTab() {
                 {canUpgradeForInvite ? (
                   <Button
                     type="button"
-                    disabled={inviteLoading || !inviteEmail.trim() || !navigation}
+                    disabled={inviteLoading || !inviteEmail.trim() || !navigation || !inviteChecksReady}
                     onClick={handleUpgradeAndInvite}
                   >
                     {t(($) => $.members.upgrade_and_invite)}

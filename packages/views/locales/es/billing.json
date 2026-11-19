@@ -226,6 +226,14 @@
       "title": "¿Continuar a Stripe Checkout?",
       "description": "Plan: {{plan}}. Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago.",
       "held_invite": "Incluye un puesto más para la invitación a {{email}}, que se enviará cuando se complete la mejora."
+    },
+    "held_invite": {
+      "title": "El espacio de trabajo ya está en {{plan}}",
+      "description": "Guardaste una invitación para {{email}} como {{role}} hasta mejorar el plan. ¿La envías ahora?",
+      "role_admin": "administrador",
+      "role_member": "miembro",
+      "send": "Enviar invitación",
+      "discard": "Descartar"
     }
   },
   "return_page": {

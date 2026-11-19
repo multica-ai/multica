@@ -27,7 +27,8 @@ import {
   usePurchaseWorkspaceSeats,
   bindUpgradeInviteCheckout,
   clearUpgradeInvite,
-  heldInviteForConfirmedUpgrade,
+  heldInviteForCancelledCheckout,
+  heldInviteHandback,
   listCheckoutHeldInvites,
   memberLimitKeys,
   memberLimitOptions,
@@ -311,6 +312,10 @@ function BillingTabContent() {
     );
   }, [workspaceSlug]);
   const handedBackHeldInviteRef = useRef(false);
+  const handledCancelReturnRef = useRef<string | null>(null);
+  // The plan changed but nothing ties it to the held invitation's checkout:
+  // ask before sending it.
+  const [heldInviteToConfirm, setHeldInviteToConfirm] = useState<HeldInvite | null>(null);
   const memberLimitQuery = useQuery(memberLimitOptions(wsId));
 
   useEffect(() => {
@@ -652,30 +657,9 @@ function BillingTabContent() {
     }
   }, [isCheckoutConfirmed, isSyncingCheckout]);
 
-  // A held invitation's upgrade went through: hand it back to Members to
-  // send. This reads the plan change itself rather than the Stripe return, so
-  // Desktop, which pays in the system browser and never sees that return, gets
-  // there too once the summary shows the new subscription.
-  useEffect(() => {
-    const summary = summaryQuery.data;
-    if (!summary || !workspaceSlug || handedBackHeldInviteRef.current) return;
-    if (returnResult === "cancel" && returnState.sessionId) {
-      const cancelled = listCheckoutHeldInvites(workspaceSlug).find(
-        (held) => held.checkout?.sessionId === returnState.sessionId,
-      );
-      if (cancelled) clearUpgradeInvite(workspaceSlug, cancelled.token);
-    }
-    const held = heldInviteForConfirmedUpgrade(
-      listCheckoutHeldInvites(workspaceSlug),
-      {
-        version: summary.entitlement.version,
-        checkoutAvailable: summary.availableActions.checkout,
-      },
-      returnResult === "success" ? returnState.sessionId : null,
-    );
-    setAwaitingHeldUpgrade(listCheckoutHeldInvites(workspaceSlug).length > 0);
-    if (!held) return;
+  const sendHeldInvite = (held: HeldInvite) => {
     handedBackHeldInviteRef.current = true;
+    setHeldInviteToConfirm(null);
     void queryClient.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
     // The Stripe callback params are still in this render's URL; leaving
     // them on would replay the checkout banner the next time Billing opens.
@@ -685,8 +669,54 @@ function BillingTabContent() {
     navigation.push(
       `${settingsHref(navigation.pathname, params, "members")}&invite=resume&held_invite=${encodeURIComponent(held.token)}`,
     );
+  };
+
+  // Decide what the latest summary means for held invitations. This reads the
+  // plan change itself, not just the Stripe return, so Desktop, which pays in
+  // the system browser and never sees the return, gets there too. Only a
+  // return naming the invitation's own checkout sends it straight away;
+  // otherwise the person who held it confirms (see heldInviteHandback).
+  useEffect(() => {
+    const summary = summaryQuery.data;
+    if (!summary || !workspaceSlug || handedBackHeldInviteRef.current) return;
+    if (returnResult === "cancel" && handledCancelReturnRef.current !== callbackKey) {
+      handledCancelReturnRef.current = callbackKey;
+      const cancelled = heldInviteForCancelledCheckout(
+        listCheckoutHeldInvites(workspaceSlug),
+        returnState.sessionId,
+      );
+      if (cancelled) clearUpgradeInvite(workspaceSlug, cancelled.token);
+    }
+    const waiting = listCheckoutHeldInvites(workspaceSlug);
+    const handback = heldInviteHandback(
+      waiting,
+      {
+        version: summary.entitlement.version,
+        checkoutAvailable: summary.availableActions.checkout,
+      },
+      returnResult === "success" ? returnState.sessionId : null,
+    );
+    setAwaitingHeldUpgrade(waiting.length > 0 && handback === null);
+    if (handback?.kind === "send") {
+      sendHeldInvite(handback.held);
+      return;
+    }
+    setHeldInviteToConfirm(handback?.held ?? null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- re-check on each summary read
   }, [summaryQuery.dataUpdatedAt, workspaceSlug, returnResult]);
+
+  const discardHeldInvite = (held: HeldInvite) => {
+    clearUpgradeInvite(workspaceSlug, held.token);
+    const next = heldInviteHandback(
+      listCheckoutHeldInvites(workspaceSlug),
+      {
+        version: summaryQuery.data?.entitlement.version ?? 0,
+        checkoutAvailable: summaryQuery.data?.availableActions.checkout ?? true,
+      },
+      null,
+    );
+    setHeldInviteToConfirm(next?.held ?? null);
+  };
 
   // Members links here with `?upgrade=pro` from a full invite dialog: open the
   // Pro checkout confirmation once the summary says checkout is available.
@@ -772,9 +802,6 @@ function BillingTabContent() {
 
   const handleCheckout = async () => {
     setActionError(null);
-    // A checkout that is not for a held invitation retires every held one,
-    // so none can be sent by an upgrade it was never part of.
-    if (!heldInvite && workspaceSlug) clearUpgradeInvite(workspaceSlug);
     const existing = checkoutIntentRef.current;
     const intent =
       existing?.wsId === wsId &&
@@ -1297,6 +1324,38 @@ function BillingTabContent() {
       title={t(($) => $.workspace.title)}
       scope="workspace"
     >
+      {heldInviteToConfirm ? (
+        <Alert>
+          <Info />
+          <AlertTitle>
+            {t(($) => $.workspace.held_invite.title, {
+              plan: planLabel(entitlements.plan),
+            })}
+          </AlertTitle>
+          <AlertDescription>
+            {t(($) => $.workspace.held_invite.description, {
+              email: heldInviteToConfirm.email,
+              role:
+                heldInviteToConfirm.role === "admin"
+                  ? t(($) => $.workspace.held_invite.role_admin)
+                  : t(($) => $.workspace.held_invite.role_member),
+            })}
+          </AlertDescription>
+          <div className="col-start-2 mt-2 flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => sendHeldInvite(heldInviteToConfirm)}>
+              {t(($) => $.workspace.held_invite.send)}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => discardHeldInvite(heldInviteToConfirm)}
+            >
+              {t(($) => $.workspace.held_invite.discard)}
+            </Button>
+          </div>
+        </Alert>
+      ) : null}
+
       {returnResult === "cancel" ? (
         <Alert>
           <AlertCircle />

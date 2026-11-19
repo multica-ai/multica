@@ -1657,7 +1657,8 @@
     "member_limit_full_description_no_upgrade": "Revoke a pending invitation or remove a member to free a slot.",
     "toast_invalid_email": "Enter a valid email address.",
     "toast_already_member": "{{email}} is already a member of this workspace.",
-    "toast_invitation_pending": "An invitation to {{email}} is already pending."
+    "toast_invitation_pending": "An invitation to {{email}} is already pending.",
+    "toast_invite_check_unavailable": "Could not check existing members and invitations. Try again in a moment."
   },
   "integrations": {
     "status_connected": "Connected",

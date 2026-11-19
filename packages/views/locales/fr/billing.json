@@ -226,6 +226,14 @@
       "title": "Continuer vers Stripe Checkout ?",
       "description": "Forfait : {{plan}}. Intervalle de facturation : {{interval}}. Membres humains actuels : {{count}}. Stripe recomptera les sièges et affichera le montant final avant le paiement.",
       "held_invite": "Un siège supplémentaire est inclus pour l'invitation à {{email}}, envoyée une fois la mise à niveau terminée."
+    },
+    "held_invite": {
+      "title": "L'espace de travail est maintenant en {{plan}}",
+      "description": "Vous avez mis de côté une invitation pour {{email}} en tant que {{role}} jusqu'à la mise à niveau. L'envoyer maintenant ?",
+      "role_admin": "administrateur",
+      "role_member": "membre",
+      "send": "Envoyer l'invitation",
+      "discard": "Abandonner"
     }
   },
   "return_page": {

@@ -220,6 +220,14 @@
       "title": "Stripe Checkout に進みますか？",
       "description": "プラン: {{plan}}。請求期間: {{interval}}。現在のユーザーメンバー: {{count}}。Stripe が席数を再集計し、お支払い前に最終金額を表示します。",
       "held_invite": "{{email}} への招待用に 1 席が追加されます。招待はアップグレード完了後に送信されます。"
+    },
+    "held_invite": {
+      "title": "ワークスペースは {{plan}} になりました",
+      "description": "アップグレードまで保留していた {{email}} への招待（{{role}}）があります。今すぐ送信しますか？",
+      "role_admin": "管理者",
+      "role_member": "メンバー",
+      "send": "招待を送信",
+      "discard": "破棄"
     }
   },
   "return_page": {

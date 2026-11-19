@@ -1657,7 +1657,8 @@
     "member_limit_full_description_no_upgrade": "Révoquez une invitation en attente ou retirez un membre pour libérer une place.",
     "toast_invalid_email": "Saisissez une adresse e-mail valide.",
     "toast_already_member": "{{email}} est déjà membre de cet espace de travail.",
-    "toast_invitation_pending": "Une invitation pour {{email}} est déjà en attente."
+    "toast_invitation_pending": "Une invitation pour {{email}} est déjà en attente.",
+    "toast_invite_check_unavailable": "Impossible de vérifier les membres et invitations existants. Réessayez dans un instant."
   },
   "integrations": {
     "status_connected": "Connecté",

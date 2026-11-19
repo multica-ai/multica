@@ -7,7 +7,8 @@ import type { MemberLimit, StorageAdapter } from "../types";
 import {
   bindUpgradeInviteCheckout,
   clearUpgradeInvite,
-  heldInviteForConfirmedUpgrade,
+  heldInviteForCancelledCheckout,
+  heldInviteHandback,
   isMemberLimitFull,
   isMemberLimitReachedError,
   listCheckoutHeldInvites,
@@ -138,31 +139,56 @@ describe("held upgrade invitations", () => {
   });
 });
 
-describe("heldInviteForConfirmedUpgrade", () => {
-  const held = (token: string, sessionId: string | null, baseVersion = 0): HeldInvite => ({
+describe("heldInviteHandback", () => {
+  const held = (token: string, sessionId: string | null, baseVersion = 0, savedAt = 1): HeldInvite => ({
     token,
     email: `${token}@acme.io`,
     role: "member",
-    savedAt: 1,
+    savedAt,
     checkout: sessionId ? { sessionId, baseVersion } : null,
   });
   const upgraded = { version: 1, checkoutAvailable: false };
 
   it("waits until the subscription changed after the invitation's own checkout", () => {
-    expect(heldInviteForConfirmedUpgrade([held("a", "cs_a")], { version: 0, checkoutAvailable: false }, null)).toBeNull();
-    expect(heldInviteForConfirmedUpgrade([held("a", "cs_a")], { version: 1, checkoutAvailable: true }, null)).toBeNull();
-    expect(heldInviteForConfirmedUpgrade([held("a", "cs_a", 1)], { version: 1, checkoutAvailable: false }, null)).toBeNull();
-    expect(heldInviteForConfirmedUpgrade([held("a", null)], upgraded, null)).toBeNull();
-    expect(heldInviteForConfirmedUpgrade([held("a", "cs_a")], upgraded, null)?.token).toBe("a");
+    expect(heldInviteHandback([held("a", "cs_a")], { version: 0, checkoutAvailable: false }, null)).toBeNull();
+    expect(heldInviteHandback([held("a", "cs_a")], { version: 1, checkoutAvailable: true }, null)).toBeNull();
+    expect(heldInviteHandback([held("a", "cs_a", 1)], { version: 1, checkoutAvailable: false }, null)).toBeNull();
+    expect(heldInviteHandback([held("a", null)], upgraded, null)).toBeNull();
   });
 
-  it("picks the invitation of the returned checkout session", () => {
+  it("sends only the invitation whose checkout the Stripe return names", () => {
     const both = [held("a", "cs_a"), held("b", "cs_b")];
-    expect(heldInviteForConfirmedUpgrade(both, upgraded, "cs_b")?.token).toBe("b");
-    expect(heldInviteForConfirmedUpgrade(both, upgraded, "cs_other")).toBeNull();
+    expect(heldInviteHandback(both, upgraded, "cs_b")).toEqual({ kind: "send", held: both[1] });
   });
 
-  it("never guesses between several invitations without a returned session", () => {
-    expect(heldInviteForConfirmedUpgrade([held("a", "cs_a"), held("b", "cs_b")], upgraded, null)).toBeNull();
+  it("leaves held invitations alone after a return from someone else's checkout", () => {
+    expect(heldInviteHandback([held("a", "cs_a")], upgraded, "cs_plain")).toBeNull();
+  });
+
+  it("asks before sending when nothing ties the plan change to the invitation", () => {
+    // Desktop never sees the Stripe return, and another admin may have
+    // upgraded from elsewhere: the person who held it decides.
+    const older = held("a", "cs_a", 0, 1);
+    const newer = held("b", "cs_b", 0, 2);
+    expect(heldInviteHandback([older, newer], upgraded, null)).toEqual({ kind: "confirm", held: newer });
+  });
+});
+
+describe("heldInviteForCancelledCheckout", () => {
+  const held = (token: string, sessionId: string | null): HeldInvite => ({
+    token,
+    email: `${token}@acme.io`,
+    role: "member",
+    savedAt: 1,
+    checkout: sessionId ? { sessionId, baseVersion: 0 } : null,
+  });
+
+  it("drops the named session's invitation, or the only one waiting when Stripe names none", () => {
+    expect(heldInviteForCancelledCheckout([held("a", "cs_a"), held("b", "cs_b")], "cs_b")?.token).toBe("b");
+    expect(heldInviteForCancelledCheckout([held("a", "cs_a"), held("w", null)], null)?.token).toBe("a");
+  });
+
+  it("drops none when several are waiting and Stripe names no session", () => {
+    expect(heldInviteForCancelledCheckout([held("a", "cs_a"), held("b", "cs_b")], null)).toBeNull();
   });
 });

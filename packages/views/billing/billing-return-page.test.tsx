@@ -94,21 +94,30 @@ describe("BillingReturnPage", () => {
     mockRefetchWorkspaces.mockReset();
   });
 
-  it("resolves the workspace id cloud authorized into its slug", async () => {
+  // Billing matches the session to the checkout it started for a held
+  // invitation, so the session id travels with the result in-app.
+  it("resolves the workspace id cloud authorized into its slug and keeps the checkout session", async () => {
     renderReturn("workspace_id=22222222-2222-2222-2222-222222222222&result=success&session_id=cs_test_123");
 
     await waitFor(() =>
       expect(mockReplace).toHaveBeenCalledWith(
-        "/globex/settings?tab=billing&result=success",
+        "/globex/settings?tab=billing&result=success&session_id=cs_test_123",
       ),
     );
   });
 
-  it("forwards cancel and portal results and drops the Stripe session id", async () => {
+  it("drops a session id that is not a Stripe checkout session", async () => {
+    renderReturn("workspace_id=22222222-2222-2222-2222-222222222222&result=success&session_id=../../evil");
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith("/globex/settings?tab=billing&result=success"),
+    );
+  });
+
+  it("forwards cancel and portal results", async () => {
     renderReturn("workspace_id=11111111-1111-1111-1111-111111111111&result=cancel&session_id=cs_test_9");
     await waitFor(() =>
       expect(mockReplace).toHaveBeenCalledWith(
-        "/acme/settings?tab=billing&result=cancel",
+        "/acme/settings?tab=billing&result=cancel&session_id=cs_test_9",
       ),
     );
 

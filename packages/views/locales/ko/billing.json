@@ -220,6 +220,14 @@
       "title": "Stripe Checkout으로 이동할까요?",
       "description": "요금제: {{plan}}. 결제 주기: {{interval}}. 현재 사용자 멤버: {{count}}. Stripe가 좌석을 다시 계산하고 결제 전에 최종 금액을 표시합니다.",
       "held_invite": "{{email}}에게 보낼 초대를 위해 좌석 1개가 추가됩니다. 초대는 업그레이드가 끝나면 전송됩니다."
+    },
+    "held_invite": {
+      "title": "워크스페이스가 이제 {{plan}} 요금제입니다",
+      "description": "업그레이드할 때까지 보류해 둔 {{email}} 초대({{role}})가 있습니다. 지금 보낼까요?",
+      "role_admin": "관리자",
+      "role_member": "멤버",
+      "send": "초대 보내기",
+      "discard": "버리기"
     }
   },
   "return_page": {

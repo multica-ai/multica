@@ -1642,7 +1642,8 @@
     "member_limit_full_description_no_upgrade": "撤回待接受的邀請或移除成員後，才能邀請新成員。",
     "toast_invalid_email": "請輸入有效的電子郵件地址。",
     "toast_already_member": "{{email}} 已經是這個工作區的成員。",
-    "toast_invitation_pending": "已經有一封發給 {{email}} 的待接受邀請。"
+    "toast_invitation_pending": "已經有一封發給 {{email}} 的待接受邀請。",
+    "toast_invite_check_unavailable": "暫時無法核對現有成員和邀請，請稍後再試。"
   },
   "integrations": {
     "status_connected": "已連線",

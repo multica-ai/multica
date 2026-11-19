@@ -1686,7 +1686,8 @@
     "member_limit_full_description_no_upgrade": "Отзовите ожидающее приглашение или удалите участника, чтобы освободить место.",
     "toast_invalid_email": "Введите корректный адрес электронной почты.",
     "toast_already_member": "{{email}} уже участник этого рабочего пространства.",
-    "toast_invitation_pending": "Приглашение для {{email}} уже ожидает ответа."
+    "toast_invitation_pending": "Приглашение для {{email}} уже ожидает ответа.",
+    "toast_invite_check_unavailable": "Не удалось проверить текущих участников и приглашения. Повторите попытку чуть позже."
   },
   "integrations": {
     "status_connected": "Подключено",
