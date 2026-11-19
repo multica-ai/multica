@@ -61,6 +61,55 @@ func (p previousReleaseUpdates) put(t *testing.T, req *UpdateRequest) {
 	}
 }
 
+// read is the previous release's loadRequest: it applies that release's
+// timeouts to the status it decodes and persists one that came due. It
+// returns the request as that release sees it.
+func (p previousReleaseUpdates) read(t *testing.T, id string) *UpdateRequest {
+	t.Helper()
+	ctx := context.Background()
+	raw, err := p.rdb.Get(ctx, updateKey(id)).Bytes()
+	if err != nil {
+		t.Fatalf("previous release: load: %v", err)
+	}
+	var env struct {
+		Public       *UpdateRequest `json:"r"`
+		RunStartedAt *time.Time     `json:"s"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("previous release: decode: %v", err)
+	}
+	req := env.Public
+	req.RunStartedAt = env.RunStartedAt
+	now := time.Now()
+	timedOut := false
+	switch req.Status {
+	case UpdatePending:
+		timedOut = now.Sub(req.CreatedAt) > updatePendingTimeout
+	case UpdateRunning:
+		timedOut = req.RunStartedAt != nil && now.Sub(*req.RunStartedAt) > updateRunningTimeout
+	}
+	if timedOut {
+		req.Status = UpdateTimeout
+		req.UpdatedAt = now
+		p.put(t, req)
+		deleteIfValueScript.Run(ctx, p.rdb, []string{updateActiveKey(req.RuntimeID)}, req.ID)
+		p.rdb.ZRem(ctx, updatePendingKey(req.RuntimeID), req.ID)
+	}
+	return req
+}
+
+// complete is the previous release's handling of a daemon's "completed"
+// report.
+func (p previousReleaseUpdates) complete(t *testing.T, id string) {
+	t.Helper()
+	req := p.read(t, id)
+	req.Status = UpdateCompleted
+	req.UpdatedAt = time.Now()
+	p.put(t, req)
+	deleteIfValueScript.Run(context.Background(), p.rdb, []string{updateActiveKey(req.RuntimeID)}, req.ID)
+	p.rdb.ZRem(context.Background(), updatePendingKey(req.RuntimeID), req.ID)
+}
+
 // fail is the previous release's handling of a daemon's busy report: it
 // rewrites the request as failed and frees only the runtime's own slot.
 func (p previousReleaseUpdates) fail(t *testing.T, req *UpdateRequest) {
@@ -173,9 +222,10 @@ func TestRedisUpdateStore_SlotsOfARequestThePreviousReleaseEndedAreReleased(t *t
 	}
 }
 
-// A slot this release wrote together with its request does not outlive a
-// request that is gone (evicted, say) by a whole day.
-func TestRedisUpdateStore_SlotOfAVanishedRequestIsReleased(t *testing.T) {
+// The slots of a request that is gone (evicted, say) do not outlive it by a
+// day: the machine's slot is released at once, and the runtime slots, which
+// could also be a previous-release replica's mid-create, within one lease.
+func TestRedisUpdateStore_SlotsOfAVanishedRequestClearWithinALease(t *testing.T) {
 	rdb := newRedisTestClient(t)
 	ctx := context.Background()
 	store := NewRedisUpdateStore(rdb)
@@ -188,10 +238,173 @@ func TestRedisUpdateStore_SlotOfAVanishedRequestIsReleased(t *testing.T) {
 	if err := rdb.Del(ctx, updateKey(req.ID)).Err(); err != nil {
 		t.Fatalf("drop request: %v", err)
 	}
+	for _, rt := range machine {
+		mustLeasedSlot(t, rdb, rt, req.ID)
+		rdb.Del(ctx, updateActiveKey(rt)) // the lease runs out
+	}
 	if _, err := store.Create(ctx, "runtime-b", "daemon:owner:m1", "v1.2.3", "user-1", true, machine...); err != nil {
-		t.Fatalf("create behind the slots of a vanished request: %v", err)
+		t.Fatalf("create behind the machine slot of a vanished request: %v", err)
 	}
 }
+
+// mustLeasedSlot asserts runtimeID's slot names holder and lasts no longer
+// than a lease.
+func mustLeasedSlot(t *testing.T, rdb *redis.Client, runtimeID, holder string) {
+	t.Helper()
+	ctx := context.Background()
+	if got, _ := rdb.Get(ctx, updateActiveKey(runtimeID)).Result(); got != holder {
+		t.Fatalf("slot of %s = %q, want %q", runtimeID, got, holder)
+	}
+	ttl, err := rdb.PTTL(ctx, updateActiveKey(runtimeID)).Result()
+	if err != nil || ttl <= 0 || ttl > updateRuntimeSlotLease {
+		t.Fatalf("slot of %s expires in %s (%v); want within one %s lease", runtimeID, ttl, err, updateRuntimeSlotLease)
+	}
+}
+
+// editStoredRequest rewrites a stored request in place, keeping its TTL; it
+// stands in for the passage of time.
+func editStoredRequest(t *testing.T, store *RedisUpdateStore, id string, fn func(*UpdateRequest)) {
+	t.Helper()
+	ctx := context.Background()
+	raw, err := store.rdb.Get(ctx, updateKey(id)).Bytes()
+	if err != nil {
+		t.Fatalf("edit: load %s: %v", id, err)
+	}
+	req, err := store.unmarshalRequest(raw)
+	if err != nil {
+		t.Fatalf("edit: decode %s: %v", id, err)
+	}
+	fn(req)
+	data, err := store.marshalRequest(req)
+	if err != nil {
+		t.Fatalf("edit: encode %s: %v", id, err)
+	}
+	if err := store.rdb.Set(ctx, updateKey(id), data, redis.KeepTTL).Err(); err != nil {
+		t.Fatalf("edit: store %s: %v", id, err)
+	}
+}
+
+// A previous-release replica reading a queued request (the page polling it,
+// say) must not end it while a daemon may be installing it. Review round 4,
+// item 2: offered to a 0.9.0 daemon at 119s, read by the previous release at
+// 121s.
+func TestRedisUpdateStore_PreviousReleaseReadCannotEndAQueuedRequest(t *testing.T) {
+	withUpdateReofferInterval(t, 0)
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisUpdateStore(rdb)
+	prev := previousReleaseUpdates{rdb}
+	machine := []string{"runtime-a", "runtime-b"}
+
+	req, err := store.Create(ctx, "runtime-a", "daemon:owner:m1", "v1.2.3", "user-1", true, machine...)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	editStoredRequest(t, store, req.ID, func(r *UpdateRequest) { r.CreatedAt = time.Now().Add(-119 * time.Second) })
+	if offered, err := store.PopPending(ctx, "runtime-a", false); err != nil || offered == nil {
+		t.Fatalf("offer to a 0.9.0 daemon = %+v, %v", offered, err)
+	}
+	editStoredRequest(t, store, req.ID, func(r *UpdateRequest) { r.CreatedAt = time.Now().Add(-121 * time.Second) })
+
+	if got := prev.read(t, req.ID); got.Status != UpdateScheduled {
+		t.Fatalf("previous release reads status %s, want scheduled (a status it never times out)", got.Status)
+	}
+	if got := mustGetUpdate(t, store, req.ID); got.Status != UpdatePending || got.LegacyOfferAt == nil {
+		t.Fatalf("after a previous-release read: %+v; want the offer still out", got)
+	}
+	if _, err := store.Create(ctx, "runtime-b", "daemon:owner:m1", "v1.2.3", "user-1", true, machine...); err != errUpdateInProgress {
+		t.Fatalf("second update while the first may be installing = %v, want errUpdateInProgress", err)
+	}
+
+	// The same holds once the daemon reported running.
+	if _, err := store.MarkRunning(ctx, req.ID); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+	editStoredRequest(t, store, req.ID, func(r *UpdateRequest) {
+		started := time.Now().Add(-140 * time.Second)
+		r.RunStartedAt = &started
+	})
+	prev.read(t, req.ID)
+	if got := mustGetUpdate(t, store, req.ID); got.Status != UpdateRunning {
+		t.Fatalf("status = %s after a previous-release read, want running", got.Status)
+	}
+}
+
+// A renewal never extends a slot another request holds, and one from a reader
+// holding a snapshot taken before the request ended changes nothing. Review
+// round 4, item 1.
+func TestRedisUpdateStore_RenewalOnlyTouchesTheRequestsOwnSlots(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisUpdateStore(rdb)
+	prev := previousReleaseUpdates{rdb}
+	machine := []string{"runtime-a", "runtime-b"}
+
+	req, err := store.Create(ctx, "runtime-a", "daemon:owner:m1", "v1.2.3", "user-1", true, machine...)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Runtime B's lease lapsed and a previous-release replica took the slot.
+	rdb.Del(ctx, updateActiveKey("runtime-b"))
+	prev.reserve(t, "runtime-b", "prev-b")
+	mustGetUpdate(t, store, req.ID) // a read renews the request's slots
+	mustLeasedSlot(t, rdb, "runtime-b", "prev-b")
+	mustLeasedSlot(t, rdb, "runtime-a", req.ID)
+
+	// A reader that loaded the request before it was cancelled renews late.
+	rdb.Del(ctx, updateActiveKey("runtime-b"))
+	staleRaw, err := rdb.Get(ctx, updateKey(req.ID)).Bytes()
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	stale := mustGetUpdate(t, store, req.ID)
+	if _, err := store.Cancel(ctx, req.ID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	prev.reserve(t, "runtime-b", "prev-b2")
+	store.renewQueued(ctx, stale, staleRaw)
+	mustLeasedSlot(t, rdb, "runtime-b", "prev-b2")
+	if n, _ := rdb.Exists(ctx, updateActiveKey("runtime-a"), updateMachineSlotKey("daemon:owner:m1")).Result(); n != 0 {
+		t.Fatalf("a late renewal retook %d slots of a cancelled request", n)
+	}
+	if _, err := rdb.ZScore(ctx, updateOffersKey("runtime-a"), req.ID).Result(); err != redis.Nil {
+		t.Fatalf("a late renewal restored the offer entry of a cancelled request (%v)", err)
+	}
+	// The previous release's request is mid-create on B: no second update.
+	if _, err := store.Create(ctx, "runtime-a", "daemon:owner:m1", "v1.2.3", "user-1", true, machine...); err != errUpdateInProgress {
+		t.Fatalf("create while the previous release is creating on B = %v, want errUpdateInProgress", err)
+	}
+}
+
+// When a previous-release replica records the daemon's result, what it leaves
+// behind blocks nothing for longer than its own slots do: this release
+// creates the next update at once, and after a rollback the previous release
+// does within one lease. Review round 4, item 4.
+func TestRedisUpdateStore_PreviousReleaseResultLeavesOnlyLeasedSlots(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	ctx := context.Background()
+	store := NewRedisUpdateStore(rdb)
+	prev := previousReleaseUpdates{rdb}
+	machine := []string{"runtime-a", "runtime-b"}
+
+	req, err := store.Create(ctx, "runtime-a", "daemon:owner:m1", "v1.2.3", "user-1", true, machine...)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := store.MarkRunning(ctx, req.ID); err != nil {
+		t.Fatalf("mark running: %v", err)
+	}
+	prev.complete(t, req.ID)
+
+	mustLeasedSlot(t, rdb, "runtime-b", req.ID)
+	if got := mustGetUpdate(t, store, req.ID); got.Status != UpdateCompleted {
+		t.Fatalf("status = %s, want completed", got.Status)
+	}
+	if _, err := store.Create(ctx, "runtime-b", "daemon:owner:m1", "v1.2.4", "user-1", true, machine...); err != nil {
+		t.Fatalf("next update after the previous release recorded the result: %v", err)
+	}
+}
+
 
 // machineFixture creates a machine owner with one public runtime of daemonID in
 // each given workspace.
