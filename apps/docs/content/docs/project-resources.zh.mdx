@@ -170,6 +170,8 @@ import { LocalDirModeDemo } from "@/components/demos/local-dir-mode-demo";
 
 例外：一开始要先和你的本地改动完成 merge 的运行（见[冲突处理](#conflicts-are-resolved-by-the-agent)）会提交它留下的全部内容，因为这些未提交的改动里有你的修改。
 
+Multica 会按 worktree 记录的提交检出本地可用的 Git 子模块。要把你在子模块里的改动带入运行，请先在子模块中提交。如果是嵌套子模块，还要在每一级中间子模块里提交更新后的子模块引用。交付时，Multica 将智能体的子模块提交保存到本地子模块仓库，并在外层仓库记录对应的提交 ID。要把分支共享到远端，请先发布外层仓库引用的子模块提交。
+
 想看某次运行存下了什么，用 `git for-each-ref refs/multica/leftovers` 列出这些 ref，再用 `git show --stat <ref>` 查看。`git restore --source=<ref> -- <path>` 可以把某个文件取回到你的工作目录。
 
 极少数情况下连这次提交或保存都做不了，例如仓库开了 `commit.gpgSign` 而运行时拿不到签名密钥。这时 worktree 会被刻意保留，运行标记为失败，在你仓库里执行 `git worktree list` 就能看到存放这些改动的目录。
