@@ -7487,6 +7487,16 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 	return workdir, true
 }
 
+func validateRequiredCodexResume(task Task, provider, codexHome string) error {
+	if provider != "codex" || task.ChatSessionID == "" {
+		return errors.New("required native resume is only supported for Codex chats")
+	}
+	if task.PriorSessionResumeUnavailable || !execenv.CodexResumeRolloutPresent(codexHome, task.PriorSessionID) {
+		return errors.New("required Codex session history is unavailable")
+	}
+	return nil
+}
+
 // gateCodexResumeToRolloutPresence drops the prior Codex session when its
 // rollout is not actually present in the task's CODEX_HOME sessions. A reused
 // workdir keeps PriorSessionID (gateResumeToReachableSession), but Codex session
@@ -9150,21 +9160,30 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	claudeResumeReady := provider == "claude" && migrateClaudeWorktreeTranscript(
 		env, task.PriorSessionID, env.WorkDir, task.PriorWorkDir, sanitizeAgentEnv(agentEnvOverrides), taskLog,
 	)
-	resumeReachable := gateResumeToReachableSession(
-		&task, &taskCtx, provider, env.WorkDir,
-		sessionHomeReachable(provider, env, envReused),
-		providerRefusesMissingSessionCwd(provider, !usesCustomProfileCommand),
-		provider == "codex" && codexWorktreeResumeEligible(env, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx)),
-		claudeResumeReady,
-		taskLog,
-	)
-	// A reachable workdir or continued local worktree is not sufficient for a
-	// Codex resume: the prior thread's rollout must be in this task's CODEX_HOME
-	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
-	// generated below if it isn't, so we never tell the agent it is continuing a
-	// conversation Codex will silently restart from scratch.
-	if resumeReachable {
-		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
+	resumeReachable := task.RequireNativeResume
+	if task.RequireNativeResume {
+		if err := validateRequiredCodexResume(task, provider, env.CodexHome); err != nil {
+			return TaskResult{}, err
+		}
+		// Forks resume the published child in its own prepared home.
+		taskCtx.PriorSessionResumed = true
+	} else {
+		resumeReachable = gateResumeToReachableSession(
+			&task, &taskCtx, provider, env.WorkDir,
+			sessionHomeReachable(provider, env, envReused),
+			providerRefusesMissingSessionCwd(provider, !usesCustomProfileCommand),
+			provider == "codex" && codexWorktreeResumeEligible(env, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx)),
+			claudeResumeReady,
+			taskLog,
+		)
+		// A reachable workdir or continued local worktree is not sufficient for a
+		// Codex resume: the prior thread's rollout must be in this task's CODEX_HOME
+		// sessions (MUL-4424 isolates them). Drop the resume before the brief is
+		// generated below if it isn't, so we never tell the agent it is continuing a
+		// conversation Codex will silently restart from scratch.
+		if resumeReachable {
+			gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
+		}
 	}
 
 	// Build the runtime brief and inject it into the provider-specific
@@ -9492,6 +9511,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// than a flag. Empty when the prompt already carries the notice, so a turn
 		// can never pay for it twice (MUL-5722).
 		ResumeExpected:         task.PriorSessionID != "",
+		RequireNativeResume:    task.RequireNativeResume,
 		ResumeContinuityNotice: backendResumeContinuityNotice(task),
 		TaskToken:              agentToken,
 		MulticaServerURL:       d.cfg.ServerBaseURL,
@@ -9666,7 +9686,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// A later repair or fresh-session turn cannot certify the original prompt.
 	noToolCallsStarted := result.NoToolCallsStarted && tools == 0
-	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
+	if !task.RequireNativeResume && shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
 		noToolCallsStarted = false
 		firstResult := result
 		firstUsage := result.Usage
@@ -9780,7 +9800,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// silence resumed a session the runtime cannot drive. Retire it so the
 	// next trigger starts fresh instead of re-entering the same hang; the
 	// cancel-ack (or the fail callback on daemon shutdown) carries it.
-	if retiredSessionID == "" {
+	if !task.RequireNativeResume && retiredSessionID == "" {
 		silent, wasSilent := outputObserver.silentFor()
 		if shouldRetireSilentResume(result.Status, task.PriorSessionID, silent, wasSilent) {
 			taskLog.Warn("resumed session produced no output before cancellation; retiring it so the next run starts fresh",
@@ -9958,7 +9978,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// conversation permanently blocks the issue: every follow-up
 		// task resumes the same poisoned session and hits the same 400.
 		failureReason, _ := classifyOpenCodeClockSkew(provider, errMsg)
-		if failureReason != "" && retiredSessionID == "" {
+		if !task.RequireNativeResume && failureReason != "" && retiredSessionID == "" {
 			retiredSessionID = result.SessionID
 			if retiredSessionID == "" {
 				retiredSessionID = task.PriorSessionID
@@ -9975,7 +9995,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// NEXT task off that thread rather than replaying the overflow
 			// forever (MUL-5722).
 			failureReason, _ = classifyResumeUnsafeTransport(provider, errMsg)
-			if failureReason != "" && retiredSessionID == "" && task.PriorSessionID != "" {
+			if !task.RequireNativeResume && failureReason != "" && retiredSessionID == "" && task.PriorSessionID != "" {
 				// Name the thread explicitly. The failure happens before the
 				// turn starts, so the backend has no session id to report and
 				// this row lands with session_id NULL — which means neither
@@ -9995,7 +10015,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 		if failureReason != "" {
-			taskLog.Warn("agent failed with a resume-unsafe error, retiring the session",
+			taskLog.Warn("agent failed with a resume-unsafe error",
 				"failure_reason", failureReason,
 			)
 		} else {
