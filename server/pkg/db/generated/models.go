@@ -1096,6 +1096,35 @@ type IssueChildEvent struct {
 	ProcessedAt  pgtype.Timestamptz `json:"processed_at"`
 }
 
+type IssueContinuation struct {
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	ChainID        pgtype.UUID        `json:"chain_id"`
+	RemainderID    pgtype.UUID        `json:"remainder_id"`
+	Generation     int64              `json:"generation"`
+	Version        int64              `json:"version"`
+	State          string             `json:"state"`
+	Contract       []byte             `json:"contract"`
+	History        []byte             `json:"history"`
+	LastProgressAt pgtype.Timestamptz `json:"last_progress_at"`
+	NextCheckAt    pgtype.Timestamptz `json:"next_check_at"`
+}
+
+type IssueContinuationIncident struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	ChainID           pgtype.UUID        `json:"chain_id"`
+	RemainderID       pgtype.UUID        `json:"remainder_id"`
+	Generation        int64              `json:"generation"`
+	Reason            string             `json:"reason"`
+	ObservedAt        pgtype.Timestamptz `json:"observed_at"`
+	TerminalAt        pgtype.Timestamptz `json:"terminal_at"`
+	OutboxState       string             `json:"outbox_state"`
+	NotifiedAt        pgtype.Timestamptz `json:"notified_at"`
+	LastDeliveryError pgtype.Text        `json:"last_delivery_error"`
+}
+
 type IssueDependency struct {
 	ID               pgtype.UUID `json:"id"`
 	IssueID          pgtype.UUID `json:"issue_id"`

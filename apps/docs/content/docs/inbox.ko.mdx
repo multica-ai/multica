@@ -170,3 +170,7 @@ multica inbox snooze <id>... --until tomorrow   # RFC 3339, 30m, 3h, 1d, 1w; uns
 - [댓글](/comments) — 답글, 멘션, 논의 스레드를 알아봅니다.
 - [댓글에서 에이전트 @멘션하기](/mentioning-agents) — 멤버 알림과 에이전트 실행의 차이를 이해합니다.
 - [자동화](/autopilots) — 작업 자동 생성과 기본 구독자를 설정합니다.
+
+## 작업 계속 진행 모니터링 파일럿
+
+운영자는 프로젝트별로 작업 계속 진행 모니터링을 켤 수 있습니다. 명시적으로 등록한 작업의 실행이 확인된 결과 없이 끝나거나 대기 기한이 지나면 지정된 소유자에게 비공개 알림을 한 번 보냅니다. 작업을 다시 실행하지 않습니다. 이 알림은 받은 편지함의 다시 알림을 해제합니다. 기본값은 꺼짐입니다. 자세한 내용은 [운영자 가이드](https://github.com/multica-ai/multica/blob/main/server/internal/continuation/README.md)를 확인하세요.

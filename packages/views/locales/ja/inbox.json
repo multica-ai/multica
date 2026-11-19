@@ -90,6 +90,7 @@
     "review_requested": "レビューを依頼",
     "task_completed": "実行完了",
     "task_failed": "実行失敗",
+    "continuation_stalled": "タスクの続行に確認が必要です",
     "agent_blocked": "エージェントがブロック",
     "agent_completed": "エージェントが完了",
     "reaction_added": "リアクションあり",

@@ -92,6 +92,7 @@
     "review_requested": "Relecture demandée",
     "task_completed": "Exécution terminée",
     "task_failed": "Exécution en échec",
+    "continuation_stalled": "La suite de la tâche nécessite votre attention",
     "agent_blocked": "Agent bloqué",
     "agent_completed": "Agent terminé",
     "reaction_added": "Réaction",
