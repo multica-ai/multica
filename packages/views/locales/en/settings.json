@@ -1647,7 +1647,13 @@
     "invitation_meta": "Sent {{sent}} · Expires {{expires}}",
     "revoke_invitation_aria": "Revoke invitation for {{email}}",
     "seats_used": "{{used}} of {{purchased}} seats used",
-    "manage_seats": "Manage seats"
+    "manage_seats": "Manage seats",
+    "member_limit_full_title": "This plan allows up to {{limit}} members. The workspace is full.",
+    "member_limit_full_description": "Upgrade to Pro for unlimited members, or remove a member first.",
+    "member_limit_full_description_pending": "Pending invitations take a slot too ({{pending}} now). Upgrade to Pro for unlimited members, or revoke an invitation or remove a member first.",
+    "member_limit_usage": "{{used}} / {{limit}} members",
+    "upgrade_and_invite": "Upgrade and invite",
+    "toast_member_limit_reached": "The workspace is full. Upgrade to invite more members."
   },
   "integrations": {
     "status_connected": "Connected",

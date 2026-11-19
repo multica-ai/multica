@@ -41,6 +41,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import {
   AlertDialog,
   AlertDialogContent,
@@ -73,6 +74,13 @@ import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import {
+  clearUpgradeInvite,
+  isMemberLimitFull,
+  isMemberLimitReachedError,
+  memberLimitKeys,
+  memberLimitOptions,
+  readUpgradeInvite,
+  saveUpgradeInvite,
   usePreviewWorkspaceSeatPurchase,
   usePurchaseWorkspaceSeats,
   workspaceSubscriptionSummaryOptions,
@@ -481,16 +489,27 @@ export function MembersTab() {
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
 
   // The Team panel's invite button links here with `?invite=1`; it waits for
-  // the member list so only managers get the dialog.
-  const inviteRequested = navigation?.searchParams.has("invite") ?? false;
+  // the member list so only managers get the dialog. Billing links back with
+  // `?invite=resume` once an upgrade started from a full invite dialog has
+  // gone through, and the held-back invitation is sent.
+  const inviteRequest = navigation?.searchParams.get("invite") ?? null;
   useEffect(() => {
-    if (!inviteRequested || !navigation || !currentMember) return;
-    if (canManageWorkspace) setInviteOpen(true);
+    if (inviteRequest === null || !navigation || !currentMember || !workspace) return;
     const params = new URLSearchParams(navigation.searchParams);
     params.delete("invite");
     navigation.replace(`${navigation.pathname}?${params}`);
+    if (!canManageWorkspace) return;
+    const held = inviteRequest === "resume" ? readUpgradeInvite(workspace.slug) : null;
+    clearUpgradeInvite(workspace.slug);
+    setInviteOpen(true);
+    if (!held) return;
+    setInviteEmail(held.email);
+    setInviteRole(held.role);
+    void qc
+      .invalidateQueries({ queryKey: memberLimitKeys.all(wsId) })
+      .then(() => inviteMember(held.email, held.role));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume the intent once the role is known
-  }, [inviteRequested, currentMember?.role]);
+  }, [inviteRequest, currentMember?.role, workspace?.slug]);
   const isOwner = currentMember?.role === "owner";
   const ownerCount = members.filter((m) => m.role === "owner").length;
   // Only owners/admins may list share links; skip the request for plain
@@ -501,6 +520,20 @@ export function MembersTab() {
     ...workspaceSubscriptionSummaryOptions(wsId),
     enabled: billingEnabled && canManageWorkspace,
   }).data?.seatCapacity;
+  const memberLimit = useQuery({
+    ...memberLimitOptions(wsId),
+    enabled: canManageWorkspace,
+  }).data;
+  // Only an enforced limit is shown; an observed one admits everyone.
+  const enforcedMemberLimit =
+    memberLimit?.action === "enforce" && memberLimit.limit !== null
+      ? {
+          used: (memberLimit.members ?? 0) + (memberLimit.pendingInvitations ?? 0),
+          limit: memberLimit.limit,
+          pending: memberLimit.pendingInvitations ?? 0,
+        }
+      : null;
+  const inviteBlockedByMemberLimit = isMemberLimitFull(memberLimit);
   const needle = memberQuery.trim().toLocaleLowerCase();
   const visibleMembers = needle
     ? members.filter(
@@ -524,15 +557,21 @@ export function MembersTab() {
     [qc, t, workspace, wsId],
   );
 
-  const handleInviteMember = async () => {
+  const inviteMember = async (email: string, role: MemberRole) => {
     if (!workspace) return;
-    const email = inviteEmail.trim();
-    const role = inviteRole;
     setInviteLoading(true);
     try {
       await sendInvitation(email, role);
       setInviteOpen(false);
+      void qc.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
     } catch (e) {
+      if (isMemberLimitReachedError(e)) {
+        // The limit filled up after this dialog last read it. Refetch so the
+        // dialog switches to its full state and offers the upgrade.
+        await qc.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
+        toast.error(t(($) => $.members.toast_member_limit_reached));
+        return;
+      }
       const code = errorCode(e);
       const capacityFailure = seatInvitationCapacityFailure(code);
       if (code === "seat_capacity_overcommitted") {
@@ -613,6 +652,18 @@ export function MembersTab() {
     } finally {
       setInviteLoading(false);
     }
+  };
+
+  const handleInviteMember = () => inviteMember(inviteEmail.trim(), inviteRole);
+
+  // The workspace is full: hold the invitation while Billing runs checkout
+  // for Pro, which sends it once the new plan is confirmed.
+  const handleUpgradeAndInvite = () => {
+    if (!workspace || !navigation) return;
+    saveUpgradeInvite(workspace.slug, { email: inviteEmail.trim(), role: inviteRole });
+    setInviteOpen(false);
+    const href = settingsHref(navigation.pathname, navigation.searchParams, "billing");
+    navigation.push(`${href}&upgrade=pro`);
   };
 
   const handlePurchaseSeatAndInvite = async () => {
@@ -930,6 +981,14 @@ export function MembersTab() {
             onChange={setView}
           />
           <div className="flex min-w-0 items-center gap-3">
+            {enforcedMemberLimit && !seats ? (
+              <span className="shrink-0 text-caption text-muted-foreground tabular-nums">
+                {t(($) => $.members.member_limit_usage, {
+                  used: enforcedMemberLimit.used,
+                  limit: enforcedMemberLimit.limit,
+                })}
+              </span>
+            ) : null}
             {seats && billingEnabled ? (
               <span className="shrink-0 text-caption text-muted-foreground">
                 {t(($) => $.members.seats_used, {
@@ -1046,7 +1105,9 @@ export function MembersTab() {
             className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              if (inviteEmail.trim()) void handleInviteMember();
+              if (!inviteEmail.trim()) return;
+              if (inviteBlockedByMemberLimit) handleUpgradeAndInvite();
+              else void handleInviteMember();
             }}
           >
             <div className="space-y-1.5">
@@ -1087,22 +1148,57 @@ export function MembersTab() {
                 </SelectContent>
               </Select>
             </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setInviteOpen(false)}
-                disabled={inviteLoading}
-              >
-                {t(($) => $.members.confirm_cancel)}
-              </Button>
-              <Button
-                type="submit"
-                disabled={inviteLoading || !inviteEmail.trim()}
-                aria-busy={inviteLoading || undefined}
-              >
-                {inviteLoading ? t(($) => $.members.inviting) : t(($) => $.members.invite_button)}
-              </Button>
+            {inviteBlockedByMemberLimit && enforcedMemberLimit ? (
+              <Alert>
+                <Users aria-hidden="true" />
+                <AlertTitle>
+                  {t(($) => $.members.member_limit_full_title, { limit: enforcedMemberLimit.limit })}
+                </AlertTitle>
+                <AlertDescription>
+                  {enforcedMemberLimit.pending > 0
+                    ? t(($) => $.members.member_limit_full_description_pending, {
+                        pending: enforcedMemberLimit.pending,
+                      })
+                    : t(($) => $.members.member_limit_full_description)}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+            <DialogFooter className={enforcedMemberLimit ? "sm:items-center sm:justify-between" : undefined}>
+              {enforcedMemberLimit ? (
+                <span className="text-caption text-muted-foreground tabular-nums">
+                  {t(($) => $.members.member_limit_usage, {
+                    used: enforcedMemberLimit.used,
+                    limit: enforcedMemberLimit.limit,
+                  })}
+                </span>
+              ) : null}
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setInviteOpen(false)}
+                  disabled={inviteLoading}
+                >
+                  {t(($) => $.members.confirm_cancel)}
+                </Button>
+                {inviteBlockedByMemberLimit ? (
+                  <Button
+                    type="button"
+                    disabled={inviteLoading || !inviteEmail.trim() || !navigation}
+                    onClick={handleUpgradeAndInvite}
+                  >
+                    {t(($) => $.members.upgrade_and_invite)}
+                  </Button>
+                ) : (
+                  <Button
+                    type="submit"
+                    disabled={inviteLoading || !inviteEmail.trim()}
+                    aria-busy={inviteLoading || undefined}
+                  >
+                    {inviteLoading ? t(($) => $.members.inviting) : t(($) => $.members.invite_button)}
+                  </Button>
+                )}
+              </div>
             </DialogFooter>
           </form>
         </DialogContent>

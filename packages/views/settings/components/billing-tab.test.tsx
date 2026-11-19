@@ -6,10 +6,12 @@ import { configStore } from "@multica/core/config";
 import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
 import type {
   AutopilotQuotaUsage,
+  MemberLimit,
   WorkspaceSubscriptionEntitlements,
   WorkspaceSubscriptionPrices,
   WorkspaceSubscriptionSummary,
 } from "@multica/core/types";
+import { saveUpgradeInvite } from "@multica/core/billing";
 import { renderWithI18n } from "../../test/i18n";
 
 const mocks = vi.hoisted(() => ({
@@ -28,6 +30,8 @@ const mocks = vi.hoisted(() => ({
   refetchPrices: vi.fn(),
   openExternal: vi.fn(),
   workspaceId: "workspace-1",
+  invalidateQueries: vi.fn(() => Promise.resolve()),
+  memberLimit: { action: "off", limit: null, members: null, pendingInvitations: null } as MemberLimit,
   prices: null as WorkspaceSubscriptionPrices | null,
   pricesLoading: false,
   pricesFetching: false,
@@ -101,9 +105,12 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: unknown) => mocks.useQuery(options),
+  useQueryClient: () => ({ invalidateQueries: mocks.invalidateQueries }),
+  queryOptions: <T,>(options: T) => options,
 }));
 
-vi.mock("@multica/core/billing", () => ({
+vi.mock("@multica/core/billing", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/billing")>()),
   workspaceSubscriptionPricesOptions: (wsId: string) => ({
     queryKey: ["workspace-subscriptions", wsId, "prices"],
   }),
@@ -157,13 +164,14 @@ vi.mock("@multica/core/paths", () => ({
 const navigationState = {
   search: "tab=billing",
   replace: vi.fn(),
+  push: vi.fn(),
 };
 vi.mock("../../navigation", () => ({
   useNavigation: () => ({
     pathname: "/acme/settings",
     searchParams: new URLSearchParams(navigationState.search),
     hash: "",
-    push: vi.fn(),
+    push: navigationState.push,
     replace: navigationState.replace,
     back: vi.fn(),
     getShareableUrl: vi.fn(),
@@ -315,8 +323,13 @@ describe("BillingTab", () => {
       reset_at: "2030-02-01T00:00:00Z",
       blocked_counts: {},
     });
+    localStorage.clear();
+    mocks.memberLimit = { action: "off", limit: null, members: null, pendingInvitations: null };
     mocks.useQuery.mockImplementation((options: unknown) => {
       const queryKey = (options as { queryKey?: readonly unknown[] }).queryKey;
+      if (queryKey?.[0] === "member-limit") {
+        return { data: mocks.memberLimit, isPending: false, isError: false };
+      }
       if (queryKey?.[queryKey.length - 1] === "prices") {
         return {
           data: mocks.prices,
@@ -590,6 +603,64 @@ describe("BillingTab", () => {
       "https://checkout.stripe.com/test-session",
       { webTarget: "same-tab" },
     );
+  });
+
+  describe("member limit", () => {
+    it("opens the Pro checkout confirmation when Members asks for an upgrade", async () => {
+      navigationState.search = "tab=billing&upgrade=pro";
+      renderWithI18n(<BillingTab />);
+
+      const confirm = await screen.findByRole("alertdialog");
+      expect(confirm).toHaveTextContent("Plan: Pro");
+      expect(navigationState.replace).toHaveBeenCalledWith("/acme/settings?tab=billing");
+    });
+
+    it("buys a seat for the held invitation and says so", async () => {
+      saveUpgradeInvite("acme", { email: "sarah@acme.dev", role: "member" });
+      const user = userEvent.setup();
+      renderWithI18n(<BillingTab />);
+
+      await user.click(screen.getByRole("button", { name: "Upgrade to Pro" }));
+      expect(screen.getByRole("alertdialog")).toHaveTextContent(
+        "One more seat is included for the invitation to sarah@acme.dev",
+      );
+      await user.click(screen.getByRole("button", { name: "Continue to Stripe" }));
+
+      await waitFor(() => expect(mocks.checkout).toHaveBeenCalledTimes(1));
+      expect(mocks.checkout.mock.calls[0]?.[0]).toMatchObject({ plan: "pro", additionalSeats: 1 });
+    });
+
+    it("hands the held invitation back to Members once the plan is confirmed", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
+      saveUpgradeInvite("acme", { email: "sarah@acme.dev", role: "member" });
+      navigationState.search = "tab=billing&result=success&session_id=cs_test_1";
+      Object.assign(mocks.entitlements, { plan: "pro", status: "active" });
+      mocks.summary.availableActions.checkout = false;
+      mocks.summaryDataUpdatedAt = Date.now() + 1;
+      mocks.summaryFetchedAfterMount = true;
+      try {
+        renderWithI18n(<BillingTab />);
+
+        expect(navigationState.push).toHaveBeenCalledWith(
+          "/acme/settings?tab=members&invite=resume",
+        );
+        expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+          queryKey: ["member-limit", "workspace-1"],
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("shows members and pending invitations against the plan's limit", () => {
+      mocks.memberLimit = { action: "observe", limit: 5, members: 4, pendingInvitations: 2 };
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Members")).toBeInTheDocument();
+      expect(screen.getByText("6 / 5")).toBeInTheDocument();
+      expect(screen.getByText("Pending invitations: 2")).toBeInTheDocument();
+    });
   });
 
   it("reuses the Checkout idempotency key after an ambiguous failure", async () => {

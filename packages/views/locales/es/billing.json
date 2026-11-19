@@ -135,7 +135,9 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "{{used}} completadas · {{reserved}} en curso",
       "resets_at": "Se reinicia el {{date}}",
-      "usage_unavailable": "El uso no está disponible temporalmente"
+      "usage_unavailable": "El uso no está disponible temporalmente",
+      "members": "Miembros",
+      "members_pending": "Invitaciones pendientes: {{pending}}"
     },
     "seats": {
       "title": "Puestos",
@@ -222,7 +224,8 @@
     },
     "confirm": {
       "title": "¿Continuar a Stripe Checkout?",
-      "description": "Plan: {{plan}}. Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago."
+      "description": "Plan: {{plan}}. Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago.",
+      "held_invite": "Incluye un puesto más para la invitación a {{email}}, que se enviará cuando se complete la mejora."
     }
   },
   "return_page": {

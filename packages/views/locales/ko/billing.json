@@ -134,7 +134,9 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "완료 {{used}} · 진행 중 {{reserved}}",
       "resets_at": "{{date}}에 초기화",
-      "usage_unavailable": "사용량을 일시적으로 불러올 수 없습니다"
+      "usage_unavailable": "사용량을 일시적으로 불러올 수 없습니다",
+      "members": "멤버",
+      "members_pending": "대기 중인 초대: {{pending}}건"
     },
     "seats": {
       "title": "좌석",
@@ -216,7 +218,8 @@
     },
     "confirm": {
       "title": "Stripe Checkout으로 이동할까요?",
-      "description": "요금제: {{plan}}. 결제 주기: {{interval}}. 현재 사용자 멤버: {{count}}. Stripe가 좌석을 다시 계산하고 결제 전에 최종 금액을 표시합니다."
+      "description": "요금제: {{plan}}. 결제 주기: {{interval}}. 현재 사용자 멤버: {{count}}. Stripe가 좌석을 다시 계산하고 결제 전에 최종 금액을 표시합니다.",
+      "held_invite": "{{email}}에게 보낼 초대를 위해 좌석 1개가 추가됩니다. 초대는 업그레이드가 끝나면 전송됩니다."
     }
   },
   "return_page": {

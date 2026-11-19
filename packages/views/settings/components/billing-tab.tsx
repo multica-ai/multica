@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   ArrowDown,
@@ -25,6 +25,10 @@ import {
   useReconcileWorkspaceSubscriptionSeats,
   usePreviewWorkspaceSeatPurchase,
   usePurchaseWorkspaceSeats,
+  memberLimitKeys,
+  memberLimitOptions,
+  readUpgradeInvite,
+  type UpgradeInvite,
   workspaceSubscriptionPricesOptions,
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
@@ -95,6 +99,7 @@ import {
 } from "./billing-state";
 import { formatStripeMinorAmount } from "./billing-format";
 import { BillingTrialSection } from "./billing-trial-section";
+import { settingsHref } from "./settings-navigation";
 
 export { formatStripeMinorAmount } from "./billing-format";
 
@@ -285,6 +290,15 @@ function BillingTabContent() {
     attempts: number;
   } | null>(null);
   const consumedCallbackKeyRef = useRef<string | null>(null);
+  const queryClient = useQueryClient();
+  // An invitation Members held back because the workspace was full. Checkout
+  // buys a seat for it, and it is sent once the new plan is confirmed.
+  const workspaceSlug = workspace?.slug ?? "";
+  const [heldInvite, setHeldInvite] = useState<UpgradeInvite | null>(null);
+  useEffect(() => {
+    setHeldInvite(workspaceSlug ? readUpgradeInvite(workspaceSlug) : null);
+  }, [workspaceSlug]);
+  const memberLimitQuery = useQuery(memberLimitOptions(wsId));
 
   useEffect(() => {
     checkoutIntentRef.current = null;
@@ -622,6 +636,34 @@ function BillingTabContent() {
     }
   }, [isCheckoutConfirmed, isSyncingCheckout]);
 
+  // The plan is active: hand the held invitation back to Members to send.
+  useEffect(() => {
+    if (!isCheckoutConfirmed || !heldInvite) return;
+    setHeldInvite(null);
+    void queryClient.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
+    // The Stripe callback params are still in this render's URL; leaving
+    // them on would replay the checkout banner the next time Billing opens.
+    const params = new URLSearchParams(navigation.searchParams);
+    params.delete("result");
+    params.delete("session_id");
+    navigation.push(`${settingsHref(navigation.pathname, params, "members")}&invite=resume`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hand over once per confirmed checkout
+  }, [isCheckoutConfirmed, heldInvite]);
+
+  // Members links here with `?upgrade=pro` from a full invite dialog: open the
+  // Pro checkout confirmation once the summary says checkout is available.
+  const upgradeRequest = navigation.searchParams.get("upgrade");
+  useEffect(() => {
+    if (upgradeRequest === null || summaryQuery.isPending) return;
+    const params = new URLSearchParams(navigation.searchParams);
+    params.delete("upgrade");
+    navigation.replace(`${navigation.pathname}?${params.toString()}`);
+    if (upgradeRequest === "pro" && summaryQuery.data?.availableActions.checkout === true) {
+      openCheckoutConfirm("pro");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- consume the intent once the summary is known
+  }, [upgradeRequest, summaryQuery.isPending]);
+
   const planLabel = (plan: string) => {
     switch (plan) {
       case "free":
@@ -700,6 +742,7 @@ function BillingTabContent() {
         plan: intent.plan,
         interval: intent.interval,
         idempotencyKey: intent.key,
+        ...(heldInvite ? { additionalSeats: 1 } : {}),
       });
       if (!response?.url) {
         setCheckoutConfirmOpen(false);
@@ -1083,6 +1126,18 @@ function BillingTabContent() {
       ? formatDateTime(quotaUsage.resetAt, locale)
       : null;
   const numberFormatter = new Intl.NumberFormat(locale);
+  // Members and pending invitations against the plan's member limit, shown
+  // whenever Cloud applies one (observed or enforced).
+  const memberLimitData = memberLimitQuery.data;
+  const memberLimit =
+    (memberLimitData?.action === "observe" || memberLimitData?.action === "enforce") &&
+    memberLimitData.limit !== null
+      ? {
+          used: (memberLimitData.members ?? 0) + (memberLimitData.pendingInvitations ?? 0),
+          limit: memberLimitData.limit,
+          pending: memberLimitData.pendingInvitations ?? 0,
+        }
+      : null;
   const isMutating =
     checkoutMutation.isPending ||
     portalMutation.isPending ||
@@ -1732,6 +1787,25 @@ function BillingTabContent() {
               </div>
             )}
           </SettingsRow>
+          {memberLimit ? (
+            <SettingsRow label={t(($) => $.workspace.limits.members)}>
+              <div className="flex flex-col gap-1 sm:items-end">
+                <span className="tabular-nums">
+                  {t(($) => $.workspace.limits.usage_total, {
+                    total: numberFormatter.format(memberLimit.used),
+                    limit: numberFormatter.format(memberLimit.limit),
+                  })}
+                </span>
+                {memberLimit.pending > 0 ? (
+                  <span className="text-caption text-muted-foreground tabular-nums">
+                    {t(($) => $.workspace.limits.members_pending, {
+                      pending: numberFormatter.format(memberLimit.pending),
+                    })}
+                  </span>
+                ) : null}
+              </div>
+            </SettingsRow>
+          ) : null}
         </SettingsCard>
       </SettingsSection>
 
@@ -2279,6 +2353,13 @@ function BillingTabContent() {
                     : t(($) => $.workspace.upgrade.yearly),
                 count: actualSeats,
               })}
+              {heldInvite ? (
+                <span className="mt-2 block">
+                  {t(($) => $.workspace.confirm.held_invite, {
+                    email: heldInvite.email,
+                  })}
+                </span>
+              ) : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

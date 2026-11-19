@@ -28,23 +28,27 @@ const data = vi.hoisted(() => ({
   invitations: [] as Array<Record<string, unknown>>,
   shareLinks: [] as Array<Record<string, unknown>>,
   summary: null as Record<string, unknown> | null,
+  memberLimit: null as Record<string, unknown> | null,
 }));
+const mockInvalidateQueries = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: <T,>(opts: T) => opts,
   useQuery: (opts: { queryKey: unknown[] }) => {
     const key = JSON.stringify(opts.queryKey);
+    if (key.includes("member-limit")) return { data: data.memberLimit };
     if (key.includes("invitations")) return { data: data.invitations };
     if (key.includes("share-links")) return { data: data.shareLinks };
     if (key.includes("members")) return { data: data.members };
     return { data: data.summary };
   },
   useQueryClient: () => ({
-    invalidateQueries: vi.fn(),
+    invalidateQueries: mockInvalidateQueries,
     fetchQuery: vi.fn(),
   }),
 }));
-vi.mock("@multica/core/billing", () => ({
+vi.mock("@multica/core/billing", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/billing")>()),
   usePreviewWorkspaceSeatPurchase: () => ({ mutateAsync: vi.fn() }),
   usePurchaseWorkspaceSeats: () => ({ mutateAsync: vi.fn() }),
   workspaceSubscriptionSummaryOptions: (wsId: string) => ({
@@ -87,6 +91,9 @@ vi.mock("../../navigation", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+import { toast } from "sonner";
+import { ApiError } from "@multica/core/api";
+import { readUpgradeInvite, saveUpgradeInvite } from "@multica/core/billing";
 import { MembersTab } from "./members-tab";
 
 const member = (id: string, name: string, role: string) => ({
@@ -124,6 +131,8 @@ beforeEach(() => {
   ];
   data.shareLinks = [];
   data.summary = null;
+  data.memberLimit = null;
+  localStorage.clear();
   configStore.getState().setFeatureFlags({});
 });
 
@@ -241,6 +250,82 @@ describe("MembersTab", () => {
       "href",
       "/acme/settings?tab=billing",
     );
+  });
+
+  describe("member limit", () => {
+    const openInvite = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.click(screen.getByRole("button", { name: "Invite member" }));
+      const dialog = await screen.findByRole("dialog", { name: "Invite member" });
+      await user.type(within(dialog).getByRole("textbox", { name: "Email" }), "sarah@acme.dev");
+      return dialog;
+    };
+
+    it("turns a full enforced limit into upgrade and invite, holding the invitation", async () => {
+      data.memberLimit = { action: "enforce", limit: 5, members: 4, pendingInvitations: 1 };
+      const user = userEvent.setup();
+      renderWithI18n(<MembersTab />);
+
+      const dialog = await openInvite(user);
+      expect(within(dialog).getByRole("alert")).toHaveTextContent(
+        "This plan allows up to 5 members. The workspace is full.",
+      );
+      expect(within(dialog).getByRole("alert")).toHaveTextContent("Pending invitations take a slot too (1 now)");
+      expect(within(dialog).getByText("5 / 5 members")).toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: "Invite" })).toBeNull();
+
+      await user.click(within(dialog).getByRole("button", { name: "Upgrade and invite" }));
+
+      expect(mockCreateMember).not.toHaveBeenCalled();
+      expect(readUpgradeInvite("acme")).toEqual({ email: "sarah@acme.dev", role: "member" });
+      expect(new URLSearchParams(url.get()).get("tab")).toBe("billing");
+      expect(new URLSearchParams(url.get()).get("upgrade")).toBe("pro");
+    });
+
+    it("stays out of the way while the limit is only observed", async () => {
+      data.memberLimit = { action: "observe", limit: 5, members: 6, pendingInvitations: 0 };
+      const user = userEvent.setup();
+      renderWithI18n(<MembersTab />);
+
+      const dialog = await openInvite(user);
+      expect(within(dialog).queryByRole("alert")).toBeNull();
+      expect(within(dialog).queryByText(/members$/)).toBeNull();
+      await user.click(within(dialog).getByRole("button", { name: "Invite" }));
+      await waitFor(() => expect(mockCreateMember).toHaveBeenCalled());
+    });
+
+    it("sends the held invitation when Billing hands back after the upgrade", async () => {
+      saveUpgradeInvite("acme", { email: "sarah@acme.dev", role: "admin" });
+      url.set("tab=members&invite=resume");
+      renderWithI18n(<MembersTab />);
+
+      await waitFor(() =>
+        expect(mockCreateMember).toHaveBeenCalledWith("ws-1", {
+          email: "sarah@acme.dev",
+          role: "admin",
+        }),
+      );
+      expect(readUpgradeInvite("acme")).toBeNull();
+      expect(new URLSearchParams(url.get()).has("invite")).toBe(false);
+    });
+
+    it("refetches the limit when the server refuses a member past it", async () => {
+      mockCreateMember.mockRejectedValue(
+        new ApiError("full", 403, "Forbidden", { code: "member_limit_reached" }),
+      );
+      const user = userEvent.setup();
+      renderWithI18n(<MembersTab />);
+
+      const dialog = await openInvite(user);
+      await user.click(within(dialog).getByRole("button", { name: "Invite" }));
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          "The workspace is full. Upgrade to invite more members.",
+        ),
+      );
+      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ["member-limit", "ws-1"] });
+      expect(screen.getByRole("dialog", { name: "Invite member" })).toBeInTheDocument();
+    });
   });
 
   it("gives members a read-only view without invite or share-link controls", () => {

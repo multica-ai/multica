@@ -135,7 +135,9 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "{{used}} terminées · {{reserved}} en cours",
       "resets_at": "Réinitialisation {{date}}",
-      "usage_unavailable": "La consommation est temporairement indisponible"
+      "usage_unavailable": "La consommation est temporairement indisponible",
+      "members": "Membres",
+      "members_pending": "Invitations en attente : {{pending}}"
     },
     "seats": {
       "title": "Sièges",
@@ -222,7 +224,8 @@
     },
     "confirm": {
       "title": "Continuer vers Stripe Checkout ?",
-      "description": "Forfait : {{plan}}. Intervalle de facturation : {{interval}}. Membres humains actuels : {{count}}. Stripe recomptera les sièges et affichera le montant final avant le paiement."
+      "description": "Forfait : {{plan}}. Intervalle de facturation : {{interval}}. Membres humains actuels : {{count}}. Stripe recomptera les sièges et affichera le montant final avant le paiement.",
+      "held_invite": "Un siège supplémentaire est inclus pour l'invitation à {{email}}, envoyée une fois la mise à niveau terminée."
     }
   },
   "return_page": {

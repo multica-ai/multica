@@ -135,7 +135,9 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "{{used}} completed · {{reserved}} in progress",
       "resets_at": "Resets {{date}}",
-      "usage_unavailable": "Usage is temporarily unavailable"
+      "usage_unavailable": "Usage is temporarily unavailable",
+      "members": "Members",
+      "members_pending": "Pending invitations: {{pending}}"
     },
     "seats": {
       "title": "Seats",
@@ -222,7 +224,8 @@
     },
     "confirm": {
       "title": "Continue to Stripe Checkout?",
-      "description": "Plan: {{plan}}. Billing interval: {{interval}}. Current human members: {{count}}. Stripe will re-count seats and show the final amount before payment."
+      "description": "Plan: {{plan}}. Billing interval: {{interval}}. Current human members: {{count}}. Stripe will re-count seats and show the final amount before payment.",
+      "held_invite": "One more seat is included for the invitation to {{email}}, which is sent once the upgrade completes."
     }
   },
   "return_page": {

@@ -134,7 +134,9 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "已完成 {{used}} · 進行中 {{reserved}}",
       "resets_at": "{{date}} 重置",
-      "usage_unavailable": "用量暫時不可用"
+      "usage_unavailable": "用量暫時不可用",
+      "members": "成員",
+      "members_pending": "待接受的邀請：{{pending}}"
     },
     "seats": {
       "title": "席位",
@@ -216,7 +218,8 @@
     },
     "confirm": {
       "title": "前往 Stripe Checkout？",
-      "description": "套餐：{{plan}}。付款週期：{{interval}}。當前成員：{{count}}。Stripe 會重新統計席位，並在付款前顯示最終金額。"
+      "description": "套餐：{{plan}}。付款週期：{{interval}}。當前成員：{{count}}。Stripe 會重新統計席位，並在付款前顯示最終金額。",
+      "held_invite": "另含 1 個席位，留給發給 {{email}} 的邀請；升級完成後會自動發出。"
     }
   },
   "return_page": {

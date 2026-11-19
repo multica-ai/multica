@@ -1647,7 +1647,13 @@
     "invitation_meta": "Envoyée le {{sent}} · Expire le {{expires}}",
     "revoke_invitation_aria": "Révoquer l'invitation de {{email}}",
     "seats_used": "{{used}} sièges utilisés sur {{purchased}}",
-    "manage_seats": "Gérer les sièges"
+    "manage_seats": "Gérer les sièges",
+    "member_limit_full_title": "Ce forfait autorise jusqu'à {{limit}} membres. L'espace de travail est complet.",
+    "member_limit_full_description": "Passez à Pro pour un nombre illimité de membres, ou retirez d'abord un membre.",
+    "member_limit_full_description_pending": "Les invitations en attente occupent aussi une place ({{pending}} actuellement). Passez à Pro pour un nombre illimité de membres, ou révoquez d'abord une invitation ou retirez un membre.",
+    "member_limit_usage": "{{used}} / {{limit}} membres",
+    "upgrade_and_invite": "Mettre à niveau et inviter",
+    "toast_member_limit_reached": "L'espace de travail est complet. Passez à un forfait supérieur pour inviter d'autres membres."
   },
   "integrations": {
     "status_connected": "Connecté",

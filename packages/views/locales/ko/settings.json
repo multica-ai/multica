@@ -1375,7 +1375,13 @@
     "invitation_meta": "{{sent}} 발송 · {{expires}} 만료",
     "revoke_invitation_aria": "{{email}}에 보낸 초대 취소",
     "seats_used": "{{purchased}}석 중 {{used}}석 사용",
-    "manage_seats": "좌석 관리"
+    "manage_seats": "좌석 관리",
+    "member_limit_full_title": "이 요금제는 멤버를 최대 {{limit}}명까지 허용하며, 자리가 모두 찼습니다",
+    "member_limit_full_description": "Pro로 업그레이드하면 멤버 수 제한이 없습니다. 먼저 멤버를 제거할 수도 있습니다.",
+    "member_limit_full_description_pending": "대기 중인 초대도 자리를 차지합니다(현재 {{pending}}건). Pro로 업그레이드하면 멤버 수 제한이 없습니다. 먼저 초대를 취소하거나 멤버를 제거할 수도 있습니다.",
+    "member_limit_usage": "멤버 {{used}} / {{limit}}명",
+    "upgrade_and_invite": "업그레이드하고 초대",
+    "toast_member_limit_reached": "멤버 자리가 모두 찼습니다. 더 초대하려면 업그레이드하세요."
   },
   "lark": {
     "section_title": "Lark",

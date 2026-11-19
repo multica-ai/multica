@@ -1632,7 +1632,13 @@
     "invitation_meta": "{{sent}} 傳送 · {{expires}} 過期",
     "revoke_invitation_aria": "撤銷發給 {{email}} 的邀請",
     "seats_used": "已用 {{used}} / {{purchased}} 個席位",
-    "manage_seats": "管理席位"
+    "manage_seats": "管理席位",
+    "member_limit_full_title": "目前套餐最多 {{limit}} 位成員，已滿",
+    "member_limit_full_description": "升級到 Pro 後成員不限，也可以先移除一位成員。",
+    "member_limit_full_description_pending": "待接受的邀請也佔名額（目前 {{pending}} 個）。升級到 Pro 後成員不限，也可以先撤回邀請或移除成員。",
+    "member_limit_usage": "{{used}} / {{limit}} 位成員",
+    "upgrade_and_invite": "升級並邀請",
+    "toast_member_limit_reached": "工作區成員已滿，升級後才能邀請更多成員。"
   },
   "integrations": {
     "status_connected": "已連線",
