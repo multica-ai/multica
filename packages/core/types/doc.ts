@@ -13,6 +13,14 @@ export interface DocSummary {
   createdAt: string;
   updatedAt: string;
 }
+/** A doc search hit: where the query matched, with an excerpt for content hits. */
+export interface SearchDocResult extends DocSummary {
+  matchSource: "title" | "content";
+  matchedSnippet: string | null;
+}
+export interface SearchDocsResponse {
+  docs: SearchDocResult[];
+}
 export interface Doc extends DocSummary {
   content: string;
 }

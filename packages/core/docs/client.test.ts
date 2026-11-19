@@ -100,4 +100,28 @@ describe("knowledge base client", () => {
       ),
     ).toBe(false);
   });
+
+  it("searches docs and keeps the hits it can read", async () => {
+    const { content: _content, ...summary } = validDoc;
+    const fetchMock = respond({
+      docs: [
+        { ...summary, match_source: "content", matched_snippet: "...rotate the keys..." },
+        { ...summary, id: "d2", match_source: "someday", matched_snippet: null },
+        { id: "", title: 7 },
+      ],
+    });
+    const result = await new ApiClient("https://api.example.test").searchDocs({ q: "rotate keys", limit: 5 });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "https://api.example.test/api/docs/search?q=rotate+keys&limit=5",
+    );
+    expect(result.docs.map((d) => [d.id, d.matchSource, d.matchedSnippet])).toEqual([
+      ["d1", "content", "...rotate the keys..."],
+      ["d2", "content", null],
+    ]);
+  });
+
+  it("falls back to no hits when the search response is malformed", async () => {
+    respond({ results: "nope" });
+    expect(await new ApiClient("https://api.example.test").searchDocs({ q: "x" })).toEqual({ docs: [] });
+  });
 });

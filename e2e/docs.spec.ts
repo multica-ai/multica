@@ -310,3 +310,19 @@ test("docs link from issues, show up in Cmd+K, and reorganize from the tree", as
   expect((await api.getDoc(created)).folder_id).toBe(folder.id);
   await page.screenshot({ path: info.outputPath("docs-tree.png"), animations: "disabled", style: "nextjs-portal { display: none; }" });
 });
+
+test("Cmd+K finds a doc by words that only appear in its content", async ({ page }) => {
+  const doc = await api.createDoc(
+    "Release runbook",
+    "# Rollout\n\nBefore cutover, rotate the zephyrine credentials and confirm the rollback owner.",
+  );
+  await page.goto(`/${slug}/docs`);
+  await page.getByRole("button", { name: "Search..." }).click();
+  await page.getByRole("combobox", { name: "Command bar" }).fill("zephyrine credentials");
+  const hit = page
+    .getByRole("group", { name: "Docs" })
+    .getByRole("option", { name: /Release runbook/ });
+  await expect(hit).toContainText("rotate the zephyrine credentials");
+  await hit.click();
+  await expect(page).toHaveURL(new RegExp(`/docs/${doc.id}$`));
+});

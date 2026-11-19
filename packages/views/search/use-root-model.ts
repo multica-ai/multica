@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { CommandBarContext } from "@multica/core/command-bar";
 import { WORKSPACE_PAGES, type WorkspacePageKey } from "@multica/core/paths";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
-import type { SearchIssueResult, SearchProjectResult } from "@multica/core/types";
+import type { SearchDocResult, SearchIssueResult, SearchProjectResult } from "@multica/core/types";
 import { useT } from "../i18n";
 import { useAgentCommandGroup, useAutopilotCommandGroup, useChatCommandGroup, useInboxCommandGroup, useProjectCommandGroup } from "./commands/context-commands";
 import { useGlobalCommands } from "./commands/global-commands";
@@ -12,7 +12,7 @@ import { useIssueCommandGroup } from "./commands/issue-commands";
 import { parseScope, scoreRow, scoreText, type SearchScope } from "./matching";
 import type { IssueTarget, PaletteCommand, PaletteCommandGroup } from "./types";
 import type { AgentEntry } from "./use-actor-directory";
-import { useObjectSearch, type ObjectHits, type Scored } from "./use-object-search";
+import { useObjectSearch, type ObjectHits, type PaletteDoc, type Scored } from "./use-object-search";
 import { useRecentItems, type RecentItem } from "./use-recent-items";
 import { useServerSearch, type SearchResults } from "./use-server-search";
 
@@ -102,6 +102,37 @@ const SERVER_ONLY_SCORE = 10;
 export function issueScore(issue: SearchIssueResult, q: string): number {
   if (issue.identifier.toLowerCase() === q) return 100;
   return Math.max(scoreText(issue.title, q), SERVER_ONLY_SCORE);
+}
+
+/**
+ * Title hits from the cached doc tree answer on every keystroke; the server
+ * adds what only it can find, content matches with an excerpt. A doc found
+ * both ways keeps its instant row, picking up the server's excerpt if any.
+ */
+export function mergeDocHits(
+  local: Scored<PaletteDoc>[],
+  server: SearchDocResult[],
+  folders: ReadonlyMap<string, string>,
+  q: string,
+): Scored<PaletteDoc>[] {
+  const fromServer = new Map(server.map((doc) => [doc.id, doc]));
+  const merged = local.map((hit) => {
+    const snippet = fromServer.get(hit.item.doc.id)?.matchedSnippet;
+    return snippet ? { ...hit, item: { ...hit.item, snippet } } : hit;
+  });
+  const listed = new Set(local.map((hit) => hit.item.doc.id));
+  for (const doc of server) {
+    if (listed.has(doc.id)) continue;
+    merged.push({
+      item: {
+        doc,
+        folder: doc.folderId ? (folders.get(doc.folderId) ?? null) : null,
+        ...(doc.matchedSnippet ? { snippet: doc.matchedSnippet } : {}),
+      },
+      score: Math.max(scoreText(doc.title, q), SERVER_ONLY_SCORE),
+    });
+  }
+  return merged;
 }
 
 export function projectScore(project: SearchProjectResult, q: string): number {
@@ -234,7 +265,7 @@ export function useRootModel(
       autopilots: scope === "all" ? objects.autopilots : [],
       chats: scope === "all" ? objects.chats : [],
       skills: scope === "all" ? objects.skills : [],
-      docs: scope === "all" ? objects.docs : [],
+      docs: scope === "all" ? mergeDocHits(objects.docs, results.docs, objects.docFolders, resultsQ) : [],
       workspaces: scope === "all" ? objects.workspaces : [],
     };
 
