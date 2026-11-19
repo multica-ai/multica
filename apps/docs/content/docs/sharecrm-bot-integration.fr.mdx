@@ -62,6 +62,7 @@ Pour connecter plusieurs agents, répétez cette procédure pour chacun avec une
 | **Message direct au bot** | Chaque message d'un membre associé rejoint une [discussion](/chat) Multica avec l'agent. |
 | **@mention dans un groupe** | Seuls les messages transmis au bot par ShareCRM sont traités. Le bot ne lit pas tout le groupe. |
 | **Images** | Les messages directs et de groupe acceptent PNG, JPEG, GIF, WebP et BMP. Les fichiers et messages vocaux ne sont pas transmis à l'agent. |
+| **Commande `/help`** | `/help` affiche `/help`, `/new`, `/clear` et `/issue`. Multica répond directement sans créer de discussion ni d'exécution et sans changer la discussion active. |
 | **Commande `/issue`** | `/issue <titre>` crée directement une tâche à votre nom et renvoie son identifiant et son titre. Ajoutez la description sur les lignes suivantes. Les images du même message deviennent des pièces jointes de la tâche. La commande n'apparaît pas dans les discussions Multica. |
 | **Commande `/new`** | Crée une discussion Multica vide et y achemine les messages suivants. `/new <message>` utilise ce message comme premier tour. La discussion précédente reste disponible. |
 | **Commande `/clear`** | Conserve la discussion, mais applique un nouveau contexte visible par l'agent au prochain message. `/clear <message>` utilise ce message comme premier tour après cette limite. L'historique complet reste visible dans Multica. |
@@ -86,6 +87,7 @@ Seuls les **membres de l'espace de travail** dont le compte ShareCRM est associ�
 - **Dans un groupe** : ajoutez le bot, puis envoyez `@your-bot <message>`. Répétez la @mention à chaque relance.
 - **En message direct** : écrivez au bot sans @mention ; chaque message est traité.
 - **Images** : joignez jusqu'à 8 images PNG, JPEG, GIF, WebP ou BMP, de 10 Mo maximum chacune. Les fichiers et messages vocaux ne sont pas pris en charge. Les réponses restent en texte brut.
+- **Afficher les commandes** : envoyez `/help` pour afficher `/help`, `/new`, `/clear` et `/issue`. Multica répond directement sans créer de discussion ni d'exécution et sans changer la discussion active.
 - **Créer une tâche** : envoyez `/issue la redirection de connexion ne fonctionne pas dans Safari`, puis une description sur les lignes suivantes si nécessaire. Les images du même message sont jointes à la tâche. Multica crée la tâche et renvoie son identifiant et son titre.
 - **Nouvelle discussion** : `/new` crée une discussion vide ; `/new <message>` y ajoute le premier tour. La discussion précédente est conservée.
 - **Effacer le contexte** : `/clear` conserve la discussion et renouvelle le contexte visible par l'agent au prochain message ; `/clear <message>` ajoute immédiatement le premier tour. L'historique complet reste visible.

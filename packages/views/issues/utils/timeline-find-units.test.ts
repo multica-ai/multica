@@ -2,7 +2,8 @@
 import { describe, expect, it } from "vitest";
 import type { AgentTask, TimelineEntry } from "@multica/core/types";
 import type { CommentRun } from "../components/comment-runs";
-import { buildTimelineFindUnits, type TimelineFindItem, type TimelineFolds } from "./timeline-find-units";
+import { buildTimelineFindUnits } from "./timeline-find-units";
+import type { TimelineFolds, TimelineRowItem } from "./timeline-row-content";
 
 function task(id: string, overrides: Partial<AgentTask> = {}): AgentTask {
   return { id, agent_id: "agent", runtime_id: "runtime", issue_id: "issue", status: "completed", priority: 0,
@@ -31,7 +32,7 @@ describe("buildTimelineFindUnits", () => {
   const runs = new Map([[root.id, [answered, silent]]]);
 
   it("lists every comment and run output the timeline shows, in reading order", () => {
-    const items: TimelineFindItem[] = [
+    const items: TimelineRowItem[] = [
       { kind: "comment", id: root.id, entry: root },
       { kind: "activity-group", id: "activity" },
       { kind: "run", id: standalone.task.id, run: standalone },
@@ -60,7 +61,7 @@ describe("buildTimelineFindUnits", () => {
     // A reply that resolved the thread folds the other replies behind a bar.
     const resolution = { ...reply, resolved_at: at(9) };
     const folded = new Map([[root.id, [resolution, answer]]]);
-    const thread: TimelineFindItem[] = [{ kind: "comment", id: root.id, entry: root }];
+    const thread: TimelineRowItem[] = [{ kind: "comment", id: root.id, entry: root }];
     expect(keys(buildTimelineFindUnits(thread, folded, new Map(), OPEN))).toEqual(["root", "reply"]);
     expect(keys(buildTimelineFindUnits(thread, folded, new Map(),
       { ...OPEN, expandedResolved: new Set([root.id]) }))).toEqual(["root", "reply", "answer"]);

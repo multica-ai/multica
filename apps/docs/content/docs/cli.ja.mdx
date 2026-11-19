@@ -404,7 +404,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | タスクの作成、更新、割り当て、検索。コメント、購読者、ラベル、プロパティ、ウェイクアップ、タイムライン、実行履歴の管理 |
 | `project` | プロジェクトとそのリソースを管理 |
-| `inbox` | 既読状態を変えずに自分の通知を読み取る |
+| `inbox` | 自分の通知を読み取り、管理する：一覧、既読、アーカイブ、スヌーズ |
 | `label`、`property` | ワークスペースのラベルとカスタムプロパティを管理 |
 | `view` | 保存したビューを読み取り、ビューに表示されるタスクを一覧 |
 | `agent`、`skill`、`squad` | エージェント、スキル、スクワッドを管理 |
@@ -527,7 +527,14 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `activity <issue-id> <outcome>` | リーダーの評価を記録 | |
 | `chat` | `history`、`thread [id]` | エージェントが現在処理している外部チャットセッションを読み取り | `--limit`、`--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | 現在のチャット実行の予定を管理。[チャットのウェイクアップ](#chat-wakeups)を参照 | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
-| `inbox` | `list` | 既読にせずに[現在の通知を読み取る](/inbox) | `--project`、`--type`、`--output`（`table` または `json`）；フィルターはローカルで適用 |
+| `inbox` | `list` | 既読にせずに[通知を一覧表示](/inbox)。`--archived` または `--snoozed` ではそれらを一覧表示 | `--unread`、`--issue`、`--since`、`--project`、`--type`、`--output`（`table` または `json`）；`--archived` は全ページを読む |
+| | `count` | このワークスペースと所属する各ワークスペースの未読件数 | `--output` |
+| | `read [<id>...]` | 通知を既読にする（各通知のタスク全体に適用）。または 1 つのタスクのすべての通知、またはすべて | `--issue`、`--all`（`--yes` が必要） |
+| | `unread <id>...` | 通知を未読に戻す | |
+| | `archive [<id>...]` | 通知をアーカイブする（各通知のタスク全体に適用）。または一括で | `--all`、`--read`、`--completed`（いずれも `--yes` が必要） |
+| | `unarchive <id>...` | アーカイブした通知を復元する | |
+| | `snooze <id>...` | 通知のタスクを指定時刻までインボックスから外す | `--until`（RFC 3339、`30m`、`3h`、`1d`、`1w`、`tomorrow`） |
+| | `unsnooze <id>...` | スヌーズ中のタスクをすぐに戻す | |
 
 ### Runtime
 

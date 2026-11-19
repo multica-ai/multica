@@ -12,7 +12,8 @@
     "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Paramètres",
-    "views": "Vues"
+    "views": "Vues",
+    "docs": "Documents"
   },
   "tab": {
     "issue": "Tâche",
@@ -27,7 +28,9 @@
     "attachment": "Pièce jointe",
     "create_agent": "Créer un agent",
     "my_agents": "Travail de mes agents",
-    "unknown": "Page inconnue"
+    "unknown": "Page inconnue",
+    "doc": "Documents",
+    "docFolder": "Dossier"
   },
   "help": {
     "trigger": "Aide",
@@ -118,7 +121,8 @@
     "reset_order": "Rétablir l’ordre par défaut",
     "copy_workspace_link": "Copier le lien de l’espace de travail",
     "workspace_meta_one": "{{slug}} · {{count}} membre",
-    "workspace_meta_other": "{{slug}} · {{count}} membres"
+    "workspace_meta_other": "{{slug}} · {{count}} membres",
+    "docs": "Documents"
   },
   "bottom_bar": {
     "label": "Barre d'état",

@@ -56,21 +56,37 @@ import { InboxDemo } from "@/components/demos/inbox-demo";
 
 ## 智能体与收件箱
 
-收件箱通知属于工作区成员。对于 `multica inbox list` 使用的活跃通知列表和归档通知，只有服务端验证运行的上游触发人就是运行环境所有者时，智能体才能读取该所有者的列表。这个身份会沿智能体调用链继承。由他人触发、没有可验证触发人的运行，以及没有任务绑定的云节点凭证，都不能读取。此保证只覆盖活跃列表和归档；稍后提醒、未读数和写接口沿用现有权限，另案处理。
+收件箱通知属于工作区成员。只有服务端验证运行的上游触发人就是运行环境所有者时，智能体才能读取和处理该所有者的通知。这个身份会沿智能体调用链继承。这条规则覆盖收件箱的所有操作：活跃列表、归档、稍后提醒列表、未读数，以及所有修改。由他人触发、没有可验证触发人的运行，以及没有任务绑定的云节点凭证，都会被拒绝。只有人可以删除通知。智能体做的每次修改都会在服务端留下记录，写明是哪个智能体、哪次运行、代哪个人操作。
 
 在评论中 @智能体、把任务分配给智能体或触发自动化，都会直接创建一次运行，不会给智能体留通知。`@all` 也只通知成员。
 
-## 用 CLI 读取
+## 用 CLI 管理
 
-复用现有 CLI 登录，列出当前通知，不会将通知标为已读：
+复用现有 CLI 登录读取和处理通知。列出通知不会将其标为已读：
 
 ```sh
-multica inbox list --project <project-id> --type mentioned --output json
+multica inbox count
+multica inbox list --unread --since 1d --output json
+multica inbox list --issue MUL-123
+multica inbox list --archived     # 或 --snoozed
 ```
 
-`--project` 接受完整 UUID 或唯一 ID 前缀，包括 `multica project list` 显示的短 ID。前缀会先通过项目列表解析，再读取收件箱；无匹配或前缀有歧义时会报错。
+每行显示通知 ID、任务编号、类型、来自谁、标题，以及评论或变更的简短摘要。`--unread`、`--issue`（任务编号或 UUID）、`--since`（RFC 3339 时间，或 `2h`、`1d`、`1w` 这样的时长）、`--project` 和 `--type` 用于筛选列表。`--archived` 会逐页读取整个归档，早已归档的任务也能找到并恢复。`--project` 接受完整 UUID 或唯一 ID 前缀，包括 `multica project list` 显示的短 ID；无匹配或前缀有歧义时会报错。表格还保留任务、评论和项目 ID，摘要会截短；`--output json` 带完整摘要。
 
-两个筛选条件都可省略，在拉取当前收件箱后于本地应用。JSON 包含通知、任务、项目和可选的评论 ID，以及类型、标题、已读状态和创建时间。默认输出为表格。获授权的智能体运行使用任务凭证读取运行环境所有者的通知，不会回退到人的登录凭证。
+用列表里的 ID 处理通知：
+
+```sh
+multica inbox read <id>...                      # unread <id>... 撤销
+multica inbox read --issue MUL-123              # 一个任务上的全部通知
+multica inbox archive <id>...                   # unarchive <id>... 恢复
+multica inbox snooze <id>... --until tomorrow   # RFC 3339、30m、3h、1d、1w；unsnooze <id>... 结束
+```
+
+与应用里一样，标为已读、归档或稍后提醒一条任务通知，会作用于整个任务；标为未读只改变这一条。某个 ID 失败不会中断其余 ID，命令会列出失败的条目并以非零状态退出。
+
+批量操作与收件箱菜单一致：`multica inbox read --all`，以及带 `--all`、`--read`（最新通知已读的任务）或 `--completed`（处于 `done` 或 `closed` 类状态的任务）的 `multica inbox archive`。它们需要 `--yes`，手动运行时也可以输入确认；除 `--completed` 外，稍后提醒中的任务不受影响：与应用一致，`--completed` 也会归档稍后提醒中已完成或已关闭的任务，并结束稍后提醒。每次修改都会输出实际改动的通知条数，包括整个任务上的通知；本来就是该状态的记为 0。`--output json` 返回同一计数，以及每个 ID 的结果。CLI 不能删除通知。
+
+获授权的智能体运行在这些操作中都使用任务凭证，不会回退到人的登录凭证。
 
 ## 处理通知
 

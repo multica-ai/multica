@@ -1,51 +1,24 @@
 "use client";
 
-import { useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
-import {
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  closestCenter,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from "@dnd-kit/core";
-import { restrictToParentElement, restrictToVerticalAxis } from "@dnd-kit/modifiers";
-import {
-  SortableContext,
-  arrayMove,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { EyeOff, GripVertical, RotateCcw, SlidersHorizontal } from "@multica/ui/icons";
+import { Fragment, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { EyeOff, RotateCcw, SlidersHorizontal } from "@multica/ui/icons";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ISSUE_SIDEBAR_ALWAYS_SHOWN,
+  ISSUE_SIDEBAR_GROUPS,
   selectIssueSidebarCustomized,
-  selectIssueSidebarOrder,
   useIssueSidebarSectionsStore,
   type IssueSidebarSection,
 } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
-import { IssueSidebarStack } from "./issue-sidebar-section";
+import { IssueSidebarAddMenu, IssueSidebarAddMenuProvider } from "./issue-sidebar-add-menu";
+import { IssueSidebarCard } from "./issue-sidebar-section";
 
-const DRAG_MODIFIERS = [restrictToVerticalAxis, restrictToParentElement];
-
-/**
- * Keyboard reordering listens for arrow keys on the document, but a Base UI
- * dialog (the mobile sidebar sheet) stops them from leaving it. Pass this as
- * the dialog popup's onKeyDown to let them through while a row is held.
- */
-export function letSidebarSettingsDragKeysThrough(event: KeyboardEvent & { preventBaseUIHandler: () => void }) {
-  if (event.target instanceof Element && event.target.closest('[data-sidebar-settings-handle][aria-pressed="true"]')) {
-    event.preventBaseUIHandler();
-  }
-}
+const CARD_GROUPS = ISSUE_SIDEBAR_GROUPS.slice(0, -1);
+const FOOTER_GROUP = ISSUE_SIDEBAR_GROUPS[ISSUE_SIDEBAR_GROUPS.length - 1]!;
 
 export function useIssueSidebarSectionLabels(): Record<IssueSidebarSection, string> {
   const { t } = useT("issues");
@@ -68,18 +41,24 @@ export function useIssueSidebarSectionLabels(): Record<IssueSidebarSection, stri
 }
 
 /**
- * The issue sidebar's sections in the reader's order, minus the ones they
- * hid. Each section sits in its own slot, which collapses while the section
- * renders nothing; that is how settings tells an empty section from a shown one.
+ * The issue sidebar: a strip level with the page header holding the "+" menu
+ * and settings, the overview card for what the issue needs next, then one card
+ * for everything else, its groups of related sections split by hairlines,
+ * minus the sections the reader hid. Each section sits in its own slot, which
+ * collapses while the section renders nothing; a group whose slots all
+ * collapse goes with them.
  */
 export function IssueSidebarSections({
   sections,
   available,
+  overview,
   revealed = [],
   onRevealEnd,
 }: {
   sections: Record<IssueSidebarSection, ReactNode>;
   available: readonly IssueSidebarSection[];
+  /** The first card: what state the issue is in, who has it, what it needs next. */
+  overview?: ReactNode;
   /**
    * Hidden sections to show anyway, such as the one a header chip jumped to.
    * Switching one of them in settings ends its reveal, so the switch wins.
@@ -88,49 +67,70 @@ export function IssueSidebarSections({
   onRevealEnd?: (section: IssueSidebarSection) => void;
 }) {
   const { t } = useT("issues");
-  const order = useIssueSidebarSectionsStore(selectIssueSidebarOrder);
   const hidden = useIssueSidebarSectionsStore((s) => s.hidden);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const isShown = (id: IssueSidebarSection) => !hidden.includes(id) || revealed.includes(id);
-  const visible = order.filter((id) => available.includes(id) && isShown(id));
+  const isShown = (id: IssueSidebarSection) => available.includes(id) && (!hidden.includes(id) || revealed.includes(id));
   const hiddenCount = available.filter((id) => !isShown(id)).length;
   const onShownChange = (id: IssueSidebarSection) => {
     if (revealed.includes(id)) onRevealEnd?.(id);
   };
   const getEmptySections = () =>
     new Set(
-      visible.filter(
-        (id) => containerRef.current?.querySelector(`[data-issue-sidebar-section="${id}"]`)?.childElementCount === 0,
+      available.filter(
+        (id) => isShown(id) && containerRef.current?.querySelector(`[data-issue-sidebar-section="${id}"]`)?.childElementCount === 0,
       ),
     );
+  const slots = (group: readonly IssueSidebarSection[]) =>
+    group.filter(isShown).map((id) => (
+      <div key={id} data-issue-sidebar-section={id} className="empty:hidden">
+        {sections[id]}
+      </div>
+    ));
 
   return (
-    <div ref={containerRef} data-mc="issue-properties" className="relative">
-      <IssueSidebarSettings
-        available={available}
-        getEmptySections={getEmptySections}
-        onShownChange={onShownChange}
-        trigger={
-          <IconButton
-            variant="ghost"
-            size="icon-xs"
-            label={t(($) => $.detail.sidebar_settings.open)}
-            className="absolute top-0.5 right-2 z-10 text-muted-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
-          >
-            <SlidersHorizontal />
-          </IconButton>
-        }
-      />
-      {/* The first header to render shares its row with the settings button. */}
-      <IssueSidebarStack className="[&>:nth-child(1_of_:not(:empty))>*>[data-slot=issue-sidebar-section-header]]:pr-9">
-        {visible.map((id) => (
-          <div key={id} data-issue-sidebar-section={id} className="empty:hidden">
-            {sections[id]}
-          </div>
-        ))}
-        {hiddenCount > 0 && (
-          <div className="px-2">
+    <IssueSidebarAddMenuProvider>
+      <div ref={containerRef} data-mc="issue-properties">
+        <div className="sticky top-0 z-10 flex h-12 items-center justify-end gap-1 border-b bg-background px-3">
+          <IssueSidebarAddMenu />
+          <IssueSidebarSettings
+            available={available}
+            getEmptySections={getEmptySections}
+            onShownChange={onShownChange}
+            trigger={
+              <IconButton
+                variant="ghost"
+                size="icon-xs"
+                label={t(($) => $.detail.sidebar_settings.open)}
+                className="text-muted-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
+              >
+                <SlidersHorizontal />
+              </IconButton>
+            }
+          />
+        </div>
+        <div className="flex flex-col gap-2 p-2">
+          {overview && <IssueSidebarCard>{overview}</IssueSidebarCard>}
+          {/* Each group draws the hairline above it; the card clips the
+              first visible group's, wherever the groups before it collapsed. */}
+          <IssueSidebarCard className="gap-0 overflow-clip py-0">
+            <div className="-mt-px">
+              {CARD_GROUPS.map((group) => {
+                const shown = slots(group);
+                return shown.length > 0 && (
+                  <div
+                    key={group[0]}
+                    data-slot="issue-sidebar-group"
+                    className="flex flex-col gap-3 border-t py-1.5 [&>*]:flow-root [&:not(:has(>:not(:empty)))]:hidden"
+                  >
+                    {shown}
+                  </div>
+                );
+              })}
+            </div>
+          </IssueSidebarCard>
+          <div className="flex flex-col gap-2 pt-1 [&>*]:flow-root">{slots(FOOTER_GROUP)}</div>
+          {hiddenCount > 0 && (
             <IssueSidebarSettings
               available={available}
               getEmptySections={getEmptySections}
@@ -140,7 +140,7 @@ export function IssueSidebarSections({
               trigger={
                 <button
                   type="button"
-                  className="flex h-7 max-w-full items-center gap-1.5 rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+                  className="flex h-7 max-w-full items-center gap-1.5 self-start rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent/50"
                 >
                   <EyeOff className="size-3.5 shrink-0" />
                   <span className="truncate">{t(($) => $.detail.sidebar_settings.hidden_count, { count: hiddenCount })}</span>
@@ -149,16 +149,16 @@ export function IssueSidebarSections({
                 </button>
               }
             />
-          </div>
-        )}
-      </IssueSidebarStack>
-    </div>
+          )}
+        </div>
+      </div>
+    </IssueSidebarAddMenuProvider>
   );
 }
 
 /**
- * Chooses which sections the issue sidebar shows and in what order. Changes
- * apply as they are made and hold for every issue on this device.
+ * Chooses which sections the issue sidebar shows, listed by the card they sit
+ * in. Changes apply as they are made and hold for every issue on this device.
  */
 export function IssueSidebarSettings({
   available,
@@ -179,26 +179,13 @@ export function IssueSidebarSettings({
 }) {
   const { t } = useT("issues");
   const labels = useIssueSidebarSectionLabels();
-  const fullOrder = useIssueSidebarSectionsStore(selectIssueSidebarOrder);
   const hidden = useIssueSidebarSectionsStore((s) => s.hidden);
   const customized = useIssueSidebarSectionsStore(selectIssueSidebarCustomized);
-  const setOrder = useIssueSidebarSectionsStore((s) => s.setOrder);
   const setHidden = useIssueSidebarSectionsStore((s) => s.setHidden);
   const reset = useIssueSidebarSectionsStore((s) => s.reset);
   const [empty, setEmpty] = useState<ReadonlySet<IssueSidebarSection>>(new Set());
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
 
-  const order = fullOrder.filter((id) => available.includes(id));
-
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return;
-    const from = fullOrder.indexOf(active.id as IssueSidebarSection);
-    const to = fullOrder.indexOf(over.id as IssueSidebarSection);
-    setOrder(arrayMove([...fullOrder], from, to));
-  };
+  const groups = ISSUE_SIDEBAR_GROUPS.map((group) => group.filter((id) => available.includes(id))).filter((group) => group.length > 0);
 
   return (
     <Popover onOpenChange={(open) => open && setEmpty(getEmptySections?.() ?? new Set())}>
@@ -216,10 +203,11 @@ export function IssueSidebarSettings({
             {t(($) => $.detail.sidebar_settings.reset)}
           </button>
         </div>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} modifiers={DRAG_MODIFIERS} onDragEnd={onDragEnd}>
-          <SortableContext items={order} strategy={verticalListSortingStrategy}>
-            <ul className="relative flex min-h-0 flex-col overflow-y-auto">
-              {order.map((id) => {
+        <ul className="flex min-h-0 flex-col overflow-y-auto">
+          {groups.map((group, i) => (
+            <Fragment key={group[0]}>
+              {i > 0 && <li role="separator" className="mx-2 my-1 h-px shrink-0 bg-border" />}
+              {group.map((id) => {
                 const locked = ISSUE_SIDEBAR_ALWAYS_SHOWN.includes(id);
                 const shown = !hidden.includes(id);
                 const note = locked
@@ -228,71 +216,29 @@ export function IssueSidebarSettings({
                     ? t(($) => $.detail.sidebar_settings.empty)
                     : null;
                 return (
-                  <SectionRow
-                    key={id}
-                    id={id}
-                    label={labels[id]}
-                    note={note}
-                    shown={shown}
-                    locked={locked}
-                    onShownChange={(next) => {
-                      setHidden(id, !next);
-                      onShownChange?.(id, next);
-                    }}
-                  />
+                  <li key={id} className="flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-label hover:bg-accent/50">
+                    <span className={cn("min-w-0 flex-1 truncate", !shown && "text-muted-foreground")}>{labels[id]}</span>
+                    {note && <span className="shrink-0 text-micro text-faint-foreground">{note}</span>}
+                    <Switch
+                      size="sm"
+                      checked={shown}
+                      disabled={locked}
+                      aria-label={labels[id]}
+                      onCheckedChange={(next) => {
+                        setHidden(id, !next);
+                        onShownChange?.(id, next);
+                      }}
+                    />
+                  </li>
                 );
               })}
-            </ul>
-          </SortableContext>
-        </DndContext>
+            </Fragment>
+          ))}
+        </ul>
         <p className="-mx-1 mt-1 shrink-0 border-t px-3 pt-2 pb-1.5 text-micro text-muted-foreground">
           {t(($) => $.detail.sidebar_settings.footer)}
         </p>
       </PopoverContent>
     </Popover>
-  );
-}
-
-function SectionRow({
-  id,
-  label,
-  note,
-  shown,
-  locked,
-  onShownChange,
-}: {
-  id: IssueSidebarSection;
-  label: string;
-  note: string | null;
-  shown: boolean;
-  locked: boolean;
-  onShownChange: (shown: boolean) => void;
-}) {
-  const { t } = useT("issues");
-  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
-  return (
-    <li
-      ref={setNodeRef}
-      style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn(
-        "flex h-8 shrink-0 items-center gap-1.5 rounded-md pr-2 pl-1 text-label",
-        isDragging ? "relative z-10 bg-popover shadow-[var(--menu-shadow)] ring-1 ring-surface-border" : "hover:bg-accent/50",
-      )}
-    >
-      <button
-        ref={setActivatorNodeRef}
-        type="button"
-        {...attributes}
-        {...listeners}
-        data-sidebar-settings-handle=""
-        aria-label={t(($) => $.detail.sidebar_settings.drag_handle, { section: label })}
-        className="flex size-5 shrink-0 cursor-grab touch-none items-center justify-center rounded-sm text-faint-foreground outline-none hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
-      >
-        <GripVertical className="size-3.5" />
-      </button>
-      <span className={cn("min-w-0 flex-1 truncate", !shown && "text-muted-foreground")}>{label}</span>
-      {note && <span className="shrink-0 text-micro text-faint-foreground">{note}</span>}
-      <Switch size="sm" checked={shown} disabled={locked} onCheckedChange={onShownChange} aria-label={label} />
-    </li>
   );
 }

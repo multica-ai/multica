@@ -103,6 +103,7 @@
     "group_users": "ユーザー",
     "group_issues": "タスク",
     "group_projects": "プロジェクト",
+    "group_docs": "ドキュメント",
     "all_members": "すべてのメンバー",
     "agent_badge": "エージェント",
     "squad_badge": "スクワッド",
@@ -227,5 +228,31 @@
       "later": "後で",
       "start": "音声入力を開始"
     }
+  },
+  "block_menu": {
+    "label": "ブロックを挿入",
+    "blocks": {
+      "paragraph": "テキスト",
+      "heading1": "見出し 1",
+      "heading2": "見出し 2",
+      "heading3": "見出し 3",
+      "bulletList": "箇条書きリスト",
+      "orderedList": "番号付きリスト",
+      "taskList": "チェックリスト",
+      "blockquote": "引用",
+      "codeBlock": "コードブロック",
+      "mermaid": "Mermaid 図",
+      "table": "表",
+      "divider": "区切り線",
+      "image": "画像",
+      "file": "ファイル"
+    }
+  },
+  "block_handle": {
+    "add": "下に追加",
+    "options": "ドラッグで移動、クリックでメニュー",
+    "turn_into": "変換",
+    "duplicate": "複製",
+    "delete": "削除"
   }
 }

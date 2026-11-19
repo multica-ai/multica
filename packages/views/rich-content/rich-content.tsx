@@ -25,7 +25,7 @@
  *             settled-but-malformed fence still renders as source.
  */
 
-import { createContext, isValidElement, memo, useContext, useMemo, useRef } from "react";
+import { createContext, isValidElement, memo, useContext, useMemo, useRef, type ReactElement } from "react";
 import ReactMarkdown, {
   type Components,
   type ExtraProps,
@@ -57,6 +57,7 @@ import {
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectMentionCard } from "../projects/components/project-mention-card";
+import { DocMentionCard } from "../docs/components/doc-mention-card";
 import { useLinkHover, LinkHoverCard } from "../editor/link-hover-card";
 import {
   openLink,
@@ -165,6 +166,15 @@ function ProjectMentionLink({ projectId, label }: { projectId: string; label?: s
   );
 }
 
+/** Doc mention chip; same click shielding as the issue and project chips. */
+function DocMentionLink({ docId, label }: { docId: string; label?: string }) {
+  return (
+    <span className="inline align-middle" onClick={(e) => e.stopPropagation()}>
+      <DocMentionCard docId={docId} fallbackLabel={label} />
+    </span>
+  );
+}
+
 function childrenToLabel(children: ReactNode): string | undefined {
   if (typeof children === "string") return children;
   if (Array.isArray(children)) return children.join("");
@@ -230,7 +240,7 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   const isAttachmentLink = href ? !!attachmentLink.resolve(href) : false;
 
   if (isMentionHref(href)) {
-    const match = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/);
+    const match = href.match(/^mention:\/\/(member|agent|issue|project|doc|all)\/(.+)$/);
     if (match?.[1] === "issue" && match[2]) {
       // A bare identifier (from the autolink preprocessor) is carried as the id
       // segment; a real mention carries a UUID. Dispatch on the id shape.
@@ -246,6 +256,9 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
     }
     if (match?.[1] === "project" && match[2]) {
       return <ProjectMentionLink projectId={match[2]} label={childrenToLabel(children)} />;
+    }
+    if (match?.[1] === "doc" && match[2]) {
+      return <DocMentionLink docId={match[2]} label={childrenToLabel(children)} />;
     }
     // Member / agent / all mentions
     return <span className="mention">{children}</span>;
@@ -317,6 +330,9 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   }
   if (entity?.kind === "project") {
     return <ProjectMentionLink projectId={entity.id} />;
+  }
+  if (entity?.kind === "doc") {
+    return <DocMentionLink docId={entity.id} />;
   }
 
   return plainLink;
@@ -501,6 +517,62 @@ const REHYPE_PLUGINS = [
   rehypeKatex,
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
+/**
+ * Rendered Markdown by source text. A comment mounts again whenever it scrolls
+ * back into a virtualized timeline or its issue is reopened, and parsing it
+ * (remark, rehype, sanitize, KaTeX) and building its element tree is most of
+ * that mount. Plugins, components and the URL transform are module constants,
+ * so the tree is a pure function of the processed source and React can reuse
+ * the elements across mounts. Settled content only: streaming text changes on
+ * every token and would only churn the cache (MUL-9538).
+ */
+interface RenderedMarkdown {
+  processed: string;
+  closedFences: ReturnType<typeof computeClosedFences>;
+  element: ReactElement;
+}
+
+const RENDERED_MARKDOWN_LIMIT = 150;
+const renderedMarkdown = new Map<string, RenderedMarkdown>();
+
+function renderMarkdown(content: string, cdnDomain: string): RenderedMarkdown {
+  const processed = highlightToHtml(
+    preprocessMarkdown(content, { cdnDomain, autolinkIssueIdentifiers: true }),
+  );
+  return {
+    processed,
+    // Derived from the SAME string handed to ReactMarkdown, so offsets line up
+    // with the hast node positions the `code`/`pre` renderers observe. Computing
+    // it from the raw pre-preprocess text would mis-match every rewritten node.
+    closedFences: computeClosedFences(processed),
+    // react-markdown's synchronous renderer is a plain function of its options.
+    element: ReactMarkdown({
+      children: processed,
+      remarkPlugins: REMARK_PLUGINS,
+      rehypePlugins: REHYPE_PLUGINS,
+      urlTransform: markdownUrlTransform,
+      components: COMPONENTS,
+    }),
+  };
+}
+
+function cachedRenderMarkdown(content: string, cdnDomain: string): RenderedMarkdown {
+  const key = `${cdnDomain}\u0000${content}`;
+  const hit = renderedMarkdown.get(key);
+  if (hit) {
+    // Least recently used goes first.
+    renderedMarkdown.delete(key);
+    renderedMarkdown.set(key, hit);
+    return hit;
+  }
+  const rendered = renderMarkdown(content, cdnDomain);
+  renderedMarkdown.set(key, rendered);
+  if (renderedMarkdown.size > RENDERED_MARKDOWN_LIMIT) {
+    renderedMarkdown.delete(renderedMarkdown.keys().next().value!);
+  }
+  return rendered;
+}
+
 // Component
 
 export interface RichContentProps {
@@ -540,18 +612,11 @@ export const RichContent = memo(function RichContent({
   // late config arrival reprocesses exactly once.
   const cdnDomain = useConfigStore((s) => s.cdnDomain);
 
-  const processed = useMemo(
-    () =>
-      highlightToHtml(
-        preprocessMarkdown(content, { cdnDomain, autolinkIssueIdentifiers: true }),
-      ),
-    [content, cdnDomain],
+  const settled = phase === "settled";
+  const { processed, closedFences, element } = useMemo(
+    () => (settled ? cachedRenderMarkdown : renderMarkdown)(content, cdnDomain),
+    [content, cdnDomain, settled],
   );
-
-  // Derived from the SAME string handed to ReactMarkdown, so offsets line up
-  // with the hast node positions the `code`/`pre` renderers observe. Computing
-  // it from the raw pre-preprocess text would mis-match every rewritten node.
-  const closedFences = useMemo(() => computeClosedFences(processed), [processed]);
   const tableSource = useMemo(() => ({ source: content, rendered: processed }), [content, processed]);
 
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -568,18 +633,11 @@ export const RichContent = memo(function RichContent({
     () => (
       <ClosedFenceContext.Provider value={closedFences}>
         <RichTableSourceContext.Provider value={tableSource}>
-          <ReactMarkdown
-            remarkPlugins={REMARK_PLUGINS}
-            rehypePlugins={REHYPE_PLUGINS}
-            urlTransform={markdownUrlTransform}
-            components={COMPONENTS}
-          >
-            {processed}
-          </ReactMarkdown>
+          {element}
         </RichTableSourceContext.Provider>
       </ClosedFenceContext.Provider>
     ),
-    [processed, closedFences, tableSource],
+    [element, closedFences, tableSource],
   );
 
   return (

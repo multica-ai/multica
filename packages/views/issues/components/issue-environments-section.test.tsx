@@ -82,6 +82,7 @@ const toastError = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 const focusEnvironment = vi.fn();
 
+import { IssueSidebarAddMenu, IssueSidebarAddMenuProvider } from "./issue-sidebar-add-menu";
 import { IssueEnvironmentsSection } from "./issue-environments-section";
 
 const HOUR = 3_600_000;
@@ -182,10 +183,23 @@ function renderSection(props: { assigneeType?: "agent" | "member" | null; assign
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
-        <IssueEnvironmentsSection issueId="issue-1" {...props} />
+        <IssueSidebarAddMenuProvider>
+          <IssueSidebarAddMenu />
+          <div data-testid="section">
+            <IssueEnvironmentsSection issueId="issue-1" {...props} />
+          </div>
+        </IssueSidebarAddMenuProvider>
       </I18nProvider>
     </QueryClientProvider>,
   );
+}
+
+/** With no environment yet, starting one goes through the sidebar's "+" menu. */
+async function openStartFromAddMenu() {
+  fireEvent.click(await screen.findByRole("button", { name: "Add" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Start an environment" }));
+  await waitFor(() => expect(screen.getAllByRole("menu")).toHaveLength(2));
+  return screen.getAllByRole("menu")[1]!;
 }
 
 async function openRowMenu(row: HTMLElement) {
@@ -213,11 +227,29 @@ describe("IssueEnvironmentsSection", () => {
     apiMock.getIssueEnvironmentCommand.mockReset();
   });
 
-  it("keeps the header and its start menu while the issue has no environments", async () => {
+  it("renders nothing while the issue has no environments and offers starting one from the + menu", async () => {
     mockTasks = [];
     renderSection();
-    expect(await screen.findByText("Environments")).toBeVisible();
-    expect(screen.queryByTestId("environment-row")).not.toBeInTheDocument();
+    const menu = await openStartFromAddMenu();
+    expect(within(menu).getByRole("menuitem", { name: /Ask an agent to start it/ })).toBeInTheDocument();
+    expect(screen.getByTestId("section")).toBeEmptyDOMElement();
+    expect(screen.queryByRole("button", { name: "Start an environment" })).toBeNull();
+  });
+
+  it("offers no start entry when nothing could start one or be asked to", async () => {
+    mockTasks = [];
+    mockAgents = [];
+    renderSection();
+    await waitFor(() => expect(screen.getByTestId("section")).toBeEmptyDOMElement());
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
+  });
+
+  it("leaves the + menu once an environment is listed", async () => {
+    mockEnvironments = [environment({})];
+    renderSection();
+    await screen.findByTestId("environment-row");
+    expect(screen.getByRole("button", { name: "Start an environment" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Add" })).toBeNull();
   });
 
   it("groups live environments by machine and links the running ones", async () => {
@@ -636,8 +668,7 @@ describe("IssueEnvironmentsSection", () => {
   it("asks the agent to start it when nothing can be started directly", async () => {
     mockTasks = [];
     renderSection({ assigneeType: "agent", assigneeId: "agent-1" });
-    fireEvent.click(await screen.findByRole("button", { name: "Start an environment" }));
-    const menu = await screen.findByRole("menu");
+    const menu = await openStartFromAddMenu();
     expect(within(menu).getByText(/hasn't run yet/)).toBeInTheDocument();
     fireEvent.click(within(menu).getByRole("menuitem", { name: /Ask Lambda to start it/ }));
     expect(createComment).toHaveBeenCalledTimes(1);

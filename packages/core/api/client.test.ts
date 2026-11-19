@@ -1838,6 +1838,24 @@ describe("ApiClient", () => {
       expect(att.id).toBe("att-1");
       expect([att.width, att.height]).toEqual(expected);
     });
+
+    it.each([
+      [{ thumbnail_url: "/api/attachments/att-1/thumbnail" }, "/api/attachments/att-1/thumbnail"],
+      [{ thumbnail_url: 42 }, undefined],
+      [{ thumbnail_url: "" }, undefined],
+      [{}, undefined],
+    ])("keeps the attachment and drops an unusable thumbnail %j", async (metadata, expected) => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({
+          id: "att-1", filename: "shot.png", url: "/uploads/shot.png",
+          download_url: "/uploads/shot.png", ...metadata,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )));
+      const att = await new ApiClient("https://api.example.test").getAttachment("att-1");
+      expect(att.id).toBe("att-1");
+      expect(att.thumbnail_url).toBe(expected);
+    });
   });
 
   describe("getAttachmentTextContent", () => {

@@ -321,6 +321,21 @@ describe("WorkPanel Inbox highlight", () => {
     expect(allIssues()).not.toHaveAttribute("aria-current");
   });
 
+  it("lights an issue opened from the Inbox at its identifier URL", async () => {
+    const qc = renderPanel("/acme/my-issues", [], [], [], [{ ...inboxItem(ISSUE), issue_identifier: ISSUE.identifier }]);
+    await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });
+    const row = within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME });
+    expect(row).toHaveAttribute("href", `/acme/issues/${ISSUE.identifier}`);
+    fireEvent.click(row);
+    // The issue page loads it by its identifier.
+    act(() => qc.setQueryData(issueDetailOptions("ws-1", ISSUE.identifier).queryKey, ISSUE));
+
+    await waitFor(() =>
+      expect(within(inInbox()).getByRole("link", { name: INBOX_ROW_NAME })).toHaveAttribute("aria-current", "page"),
+    );
+    expect(within(inMyIssues()).getByRole("link", { name: ISSUE.title })).not.toHaveAttribute("aria-current");
+  });
+
   it("moves the light to the list the issue is clicked in next", async () => {
     renderPanel("/acme/my-issues", [], [], [], [inboxItem(ISSUE)]);
     await within(await waitFor(inMyIssues)).findByRole("link", { name: ISSUE.title });

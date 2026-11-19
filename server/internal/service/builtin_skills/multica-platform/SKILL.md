@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Use for Multica actions the runtime brief does not fully cover: issue and PR contracts, sub-issues, batch changes, saved views, charts and files in comments, mentions, agents, squads, autopilots, projects, runtimes, local environments, skill import, themes. Not for product code you are working on."
+description: "Use for Multica actions the runtime brief does not fully cover: issue and PR contracts, sub-issues, batch changes, saved views, comment charts and files, mentions, inbox, agents, squads, autopilots, projects, runtimes, local environments, skill import, themes. Not for product code you are editing."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -31,13 +31,14 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/environments.md` | Local environments in the issue sidebar: writing `.multica/environments.toml`, `multica env start` / `stop` / `list`, detected servers |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
 | `references/themes.md` | Building or changing a Multica app theme: the format, the checker, delivering to Desktop's themes folder or as a `.zip` |
+| `references/inbox.md` | Going through the runtime owner's inbox for them: listing unread notifications, marking read or unread, archiving, snoozing, bulk clean-up (`multica inbox`) |
 
 Open what the task needs. A single-domain task usually needs one; a task that
 crosses domains needs each domain it touches — creating a squad, assigning it an
 issue, then writing a mention needs `squads.md`, `issues.md` and `mentions.md`,
 and skipping one of those means acting on a contract you have not read.
 
-What is never right is reading all eleven because you are not sure. Each
+What is never right is reading all of them because you are not sure. Each
 reference states its own contracts in full and none depends on another, so
 pick by domain and skip the rest.
 

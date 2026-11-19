@@ -406,6 +406,17 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}, finalizeMark, nil
 	}
 
+	// Help is answered before resolving a Chat so it cannot alter its route,
+	// history, or pending context boundary. A consumed /new or /clear body is
+	// literal agent input, even when it starts with /help.
+	if !startChat && !msg.ForceFresh && IsHelpCommand(msg.CommandText) {
+		return Result{
+			Outcome:        OutcomeHelp,
+			InstallationID: inst.ID,
+			Sender:         msg.Source.SenderID,
+		}, finalizeMark, nil
+	}
+
 	// 5-6. Resolve the current Chat route, then either append normally or
 	// atomically create the next Chat route with its optional first turn.
 	sessionCreator := identity.UserID

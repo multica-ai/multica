@@ -489,16 +489,22 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "メタデータ",
     "section_details": "詳細",
+    "sidebar_add": "追加",
     "sidebar_settings": {
       "open": "サイドバーをカスタマイズ",
       "title": "サイドバー",
       "reset": "リセット",
-      "footer": "ドラッグで並べ替え。すべてのタスクに適用されます。",
+      "footer": "すべてのタスクに適用されます。",
       "always_shown": "常に表示",
       "empty": "このタスクにはありません",
       "customize": "カスタマイズ",
-      "drag_handle": "{{section}}を並べ替え",
       "hidden_count_other": "{{count}} 個のセクションを非表示"
+    },
+    "next_step": {
+      "review_title": "レビュー待ち",
+      "review_action": "PR をレビュー",
+      "reply_title": "{{name}} が返信を待っています",
+      "reply_action": "返信"
     },
     "section_quick_actions": "クイックアクション",
     "quick_actions_more": "残り {{count}} 件を表示",

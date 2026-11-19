@@ -1,12 +1,19 @@
 package sharecrm
 
 import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func TestIssueCreatedText(t *testing.T) {
@@ -26,6 +33,54 @@ func TestIssueDuplicateText(t *testing.T) {
 	})
 	if got != "⚠️ Not created — active issue MUL-42 already exists: Fix login" {
 		t.Fatalf("duplicate text = %q", got)
+	}
+}
+
+func TestReplyHelpPostsSharedCommandList(t *testing.T) {
+	var gotText string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/im-gateway/auth/token", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0,
+			"data": map[string]any{"accessToken": "tok", "expiresIn": 3600, "tokenType": "Bearer"},
+		})
+	})
+	mux.HandleFunc("/im-gateway/qixin/message/send", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		gotText, _ = body["text"].(string)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"code": 0,
+			"data": map[string]any{"message_id": "out-help"},
+		})
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	raw, err := json.Marshal(installConfig{
+		AppID:              "app",
+		AppSecretEncrypted: base64.StdEncoding.EncodeToString([]byte("secret")),
+		GatewayBaseURL:     srv.URL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replier := NewOutboundReplier(OutboundReplierConfig{Client: NewClient(srv.Client())})
+	replier.Reply(context.Background(), engine.ResolvedInstallation{
+		Platform: db.ChannelInstallation{Config: raw},
+	}, channel.InboundMessage{
+		Source: channel.Source{ChatID: "0:fs:s:", ChatType: channel.ChatTypeP2P},
+		Text:   "/help",
+	}, engine.Result{Outcome: engine.OutcomeHelp})
+
+	want := stripMarkdown(engine.HelpTextEnglish)
+	if gotText != want {
+		t.Fatalf("help reply = %q, want %q", gotText, want)
+	}
+	for _, command := range []string{"/help", "/new", "/clear", "/issue"} {
+		if !strings.Contains(gotText, command) {
+			t.Fatalf("help reply missing %s: %q", command, gotText)
+		}
 	}
 }
 

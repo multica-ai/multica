@@ -56,21 +56,37 @@ import { InboxDemo } from "@/components/demos/inbox-demo";
 
 ## AI 代理與收件箱
 
-收件箱通知屬於工作區成員。對於 `multica inbox list` 使用的活躍通知列表和封存通知，只有伺服器驗證執行的上游觸發人就是執行環境擁有者時，AI 代理才能讀取該擁有者的列表。這個身分會沿 AI 代理呼叫鏈繼承。由他人觸發、沒有可驗證觸發人的執行，以及沒有任務綁定的雲端節點憑證，都不能讀取。此保證只涵蓋活躍列表和封存；稍後提醒、未讀數和寫入介面沿用現有權限，另案處理。
+收件箱通知屬於工作區成員。只有伺服器驗證執行的上游觸發人就是執行環境擁有者時，AI 代理才能讀取和處理該擁有者的通知。這個身分會沿 AI 代理呼叫鏈繼承。這條規則涵蓋收件箱的所有操作：活躍列表、封存、稍後提醒列表、未讀數，以及所有修改。由他人觸發、沒有可驗證觸發人的執行，以及沒有任務綁定的雲端節點憑證，都會被拒絕。只有人可以刪除通知。AI 代理做的每次修改都會在伺服器留下紀錄，寫明是哪個 AI 代理、哪次執行、代哪個人操作。
 
 在評論中 @ AI 代理、把任務分配給 AI 代理或觸發自動化，都會直接建立一次執行，不會給 AI 代理留通知。`@all` 也只通知成員。
 
-## 用 CLI 讀取
+## 用 CLI 管理
 
-沿用現有 CLI 登入，列出目前通知，不會將通知標為已讀：
+沿用現有 CLI 登入讀取和處理通知。列出通知不會將其標為已讀：
 
 ```sh
-multica inbox list --project <project-id> --type mentioned --output json
+multica inbox count
+multica inbox list --unread --since 1d --output json
+multica inbox list --issue MUL-123
+multica inbox list --archived     # 或 --snoozed
 ```
 
-`--project` 接受完整 UUID 或唯一 ID 前綴，包括 `multica project list` 顯示的短 ID。前綴會先透過專案列表解析，再讀取收件箱；沒有符合項目或前綴有歧義時會顯示錯誤。
+每列顯示通知 ID、任務編號、類型、來自誰、標題，以及評論或變更的簡短摘要。`--unread`、`--issue`（任務編號或 UUID）、`--since`（RFC 3339 時間，或 `2h`、`1d`、`1w` 這樣的時長）、`--project` 和 `--type` 用於篩選列表。`--archived` 會逐頁讀取整個封存，早已封存的任務也能找到並還原。`--project` 接受完整 UUID 或唯一 ID 前綴，包括 `multica project list` 顯示的短 ID；沒有符合項目或前綴有歧義時會顯示錯誤。表格還保留任務、評論和專案 ID，摘要會截短；`--output json` 帶完整摘要。
 
-兩個篩選條件都可省略，在取得目前收件箱後於本機套用。JSON 包含通知、任務、專案和可選的評論 ID，以及類型、標題、已讀狀態和建立時間。預設輸出為表格。獲授權的 AI 代理執行使用任務憑證讀取執行環境擁有者的通知，不會退回使用人的登入憑證。
+用列表裡的 ID 處理通知：
+
+```sh
+multica inbox read <id>...                      # unread <id>... 復原
+multica inbox read --issue MUL-123              # 一個任務上的全部通知
+multica inbox archive <id>...                   # unarchive <id>... 還原
+multica inbox snooze <id>... --until tomorrow   # RFC 3339、30m、3h、1d、1w；unsnooze <id>... 結束
+```
+
+與應用程式裡一樣，標為已讀、封存或稍後提醒一則任務通知，會作用於整個任務；標為未讀只改變這一則。某個 ID 失敗不會中斷其餘 ID，指令會列出失敗的項目並以非零狀態結束。
+
+批次操作與收件箱選單一致：`multica inbox read --all`，以及帶 `--all`、`--read`（最新通知已讀的任務）或 `--completed`（處於 `done` 或 `closed` 類狀態的任務）的 `multica inbox archive`。它們需要 `--yes`，手動執行時也可以輸入確認；除 `--completed` 外，稍後提醒中的任務不受影響：與應用程式一致，`--completed` 也會封存稍後提醒中已完成或已關閉的任務，並結束稍後提醒。每次修改都會輸出實際改動的通知則數，包括整個任務上的通知；原本就是該狀態的記為 0。`--output json` 回傳同一計數，以及每個 ID 的結果。CLI 不能刪除通知。
+
+獲授權的 AI 代理執行在這些操作中都使用任務憑證，不會退回使用人的登入憑證。
 
 ## 處理通知
 

@@ -1569,6 +1569,21 @@ func cleanupMcpConfigTemp(path string) {
 // tests can shrink it without waiting out the real bound.
 var detectVersionTimeout = 10 * time.Second
 
+// Keep the deadline in the error chain without its network-timeout wording:
+// task failures are also classified from the diagnostic text.
+type versionProbeTimeoutError struct {
+	limit time.Duration
+	cause error
+}
+
+func (e *versionProbeTimeoutError) Error() string {
+	return fmt.Sprintf("version probe timed out (limit %s): %v", e.limit, e.cause)
+}
+
+func (e *versionProbeTimeoutError) Unwrap() []error {
+	return []error{context.DeadlineExceeded, e.cause}
+}
+
 func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
@@ -1661,8 +1676,8 @@ func versionProbeRejectedArgs(ctx context.Context, err error) bool {
 }
 
 // runVersionProbe runs one `<cli> <args>` version probe and returns the
-// recognised version line. The error is unwrapped; detectCLIVersion adds the
-// command and the exec diagnosis.
+// recognised version line. detectCLIVersion adds the command and the exec
+// diagnosis to any probe error.
 func runVersionProbe(ctx context.Context, runtimeCmd Command, args []string) (string, error) {
 	var cmd *exec.Cmd
 	_, zcodeDesktop := zcodeDesktopScript(runtimeCmd.Path)
@@ -1696,6 +1711,9 @@ func runVersionProbe(ctx context.Context, runtimeCmd Command, args []string) (st
 		// answer.
 		if salvageProbeAnswer(runtimeCmd, strings.Join(args, " "), recognised, err) {
 			return version, nil
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", &versionProbeTimeoutError{limit: detectVersionTimeout, cause: err}
 		}
 		return "", err
 	}

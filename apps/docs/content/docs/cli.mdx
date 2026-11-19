@@ -419,7 +419,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | Create, update, assign, and search issues; manage comments, subscribers, labels, properties, wakeups, the timeline, and runs |
 | `project` | Manage projects, their resources, and the workflow they use |
-| `inbox` | Read your notifications without changing read status |
+| `inbox` | Read and manage your notifications: list, mark read, archive, snooze |
 | `workflow` | Manage issue workflows: statuses and who handles each one |
 | `issue-status` | Manage the workspace status catalog: statuses, their color, and their icon |
 | `label`, `property` | Manage workspace labels and custom properties |
@@ -562,7 +562,14 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `activity <issue-id> <outcome>` | Record a leader evaluation | |
 | `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | Manage follow-ups in the current chat run; see [Chat wakeups](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
-| `inbox` | `list` | [Read your active notifications](/inbox) without marking them read | `--project`, `--type`, `--output` (`table` or `json`); filters apply locally |
+| `inbox` | `list` | [List your notifications](/inbox) without marking them read; `--archived` or `--snoozed` lists those instead | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` or `json`); `--archived` reads every page |
+| | `count` | Unread count in this workspace and in each of your workspaces | `--output` |
+| | `read [<id>...]` | Mark notifications read, the whole issue for each; or every notification on one issue, or all | `--issue`, `--all` (needs `--yes`) |
+| | `unread <id>...` | Mark notifications unread | |
+| | `archive [<id>...]` | Archive notifications, the whole issue for each; or in bulk | `--all`, `--read`, `--completed` (each needs `--yes`) |
+| | `unarchive <id>...` | Restore archived notifications | |
+| | `snooze <id>...` | Take each notification's issue out of the inbox until a time | `--until` (RFC 3339, `30m`, `3h`, `1d`, `1w`, `tomorrow`) |
+| | `unsnooze <id>...` | Bring snoozed issues back now | |
 
 ### Runtime
 

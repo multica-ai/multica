@@ -15,7 +15,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// This file implements the Slack `/issue`, `/new`, and `/clear` SLASH COMMANDS. They are
+// This file implements the Slack `/issue`, `/new`, `/clear`, and `/help` SLASH COMMANDS. They are
 // deliberately separate from message-prefix commands: on Slack
 // a message whose first character is `/` is intercepted by the client as a
 // slash command and never delivered to the app, so the message-prefix form of
@@ -43,6 +43,7 @@ import (
 const issueSlashCommand = "/issue"
 const newSlashCommand = "/new"
 const clearSlashCommand = "/clear"
+const helpSlashCommand = "/help"
 
 // User-facing ephemeral replies. Kept terse; only the invoker sees them.
 const (
@@ -80,7 +81,7 @@ type slashControlStarter interface {
 	ClearSlackDMContext(ctx context.Context, inst engine.ResolvedInstallation, userID pgtype.UUID, cmd slack.SlashCommand, envelopeID string) error
 }
 
-// SlashCommandProcessor handles Slack `/issue`, `/new`, and `/clear` commands end to end.
+// SlashCommandProcessor handles Slack `/issue`, `/new`, `/clear`, and `/help` commands end to end.
 type SlashCommandProcessor struct {
 	q           slashQueries
 	tasks       quickCreateEnqueuer
@@ -151,11 +152,12 @@ func (p *SlashCommandProcessor) Handle(ctx context.Context, cmd slack.SlashComma
 // HandleEnvelope preserves Socket Mode's durable envelope id for control-command dedup.
 func (p *SlashCommandProcessor) HandleEnvelope(ctx context.Context, cmd slack.SlashCommand, envelopeID string) {
 	command := strings.TrimSpace(cmd.Command)
-	if !strings.EqualFold(command, issueSlashCommand) && command != newSlashCommand && command != clearSlashCommand {
+	if !strings.EqualFold(command, issueSlashCommand) && command != newSlashCommand && command != clearSlashCommand && command != helpSlashCommand {
 		return
 	}
+	cmd.Command = command
 	var text string
-	if command == newSlashCommand || command == clearSlashCommand {
+	if command == newSlashCommand || command == clearSlashCommand || command == helpSlashCommand {
 		text = p.processControl(ctx, cmd, envelopeID)
 	} else {
 		text = p.process(ctx, cmd)
@@ -190,6 +192,9 @@ func (p *SlashCommandProcessor) processControl(ctx context.Context, cmd slack.Sl
 		default:
 			return slashInternalErrorText
 		}
+	}
+	if cmd.Command == helpSlashCommand {
+		return engine.SlackHelpText
 	}
 	// Keep command availability and channel-routing guidance behind the same
 	// installation, account-binding, and workspace-membership checks as every

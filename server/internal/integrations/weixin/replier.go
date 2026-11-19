@@ -2,6 +2,7 @@ package weixin
 
 import (
 	"context"
+	"strings"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -27,6 +28,8 @@ func (o *Outbound) Reply(ctx context.Context, inst engine.ResolvedInstallation, 
 		text = "Your next message will start with fresh context."
 	case engine.OutcomeChatStarted:
 		text = "Started a new Multica chat. Send your next message here."
+	case engine.OutcomeHelp:
+		text = strings.ReplaceAll(engine.HelpTextEnglish, "`", "")
 	case engine.OutcomeIssueUsage:
 		text = "Use /issue <title> followed by an optional description."
 	case engine.OutcomeIngested:

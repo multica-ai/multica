@@ -404,7 +404,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | Créer, mettre à jour, assigner et rechercher des tâches ; gérer les commentaires, les abonnés, les étiquettes, les propriétés, les réveils, la chronologie et les exécutions |
 | `project` | Gérer les projets et leurs ressources |
-| `inbox` | Lire vos notifications sans modifier leur état lu |
+| `inbox` | Lire et gérer vos notifications : lister, marquer comme lues, archiver, reporter |
 | `label`, `property` | Gérer les étiquettes et les propriétés personnalisées de l'espace de travail |
 | `view` | Lire les vues enregistrées et lister les tâches qu'une vue affiche |
 | `agent`, `skill`, `squad` | Gérer les agents, les skills et les squads |
@@ -535,7 +535,14 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `activity <issue-id> <outcome>` | Enregistrer une évaluation du chef | |
 | `chat` | `history`, `thread [id]` | Lire la session de messagerie externe qu'un agent traite actuellement | `--limit`, `--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | Gérer le suivi dans l’exécution de chat en cours ; voir [Réveils de chat](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
-| `inbox` | `list` | [Lire vos notifications actives](/inbox) sans les marquer comme lues | `--project`, `--type`, `--output` (`table` ou `json`) ; filtres locaux |
+| `inbox` | `list` | [Lister vos notifications](/inbox) sans les marquer comme lues ; `--archived` ou `--snoozed` liste celles-ci à la place | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` ou `json`) ; `--archived` lit toutes les pages |
+| | `count` | Nombre de non-lus dans cet espace de travail et dans chacun de vos espaces | `--output` |
+| | `read [<id>...]` | Marquer des notifications comme lues, toute la tâche pour chacune ; ou toutes celles d'une tâche, ou toutes | `--issue`, `--all` (exige `--yes`) |
+| | `unread <id>...` | Marquer des notifications comme non lues | |
+| | `archive [<id>...]` | Archiver des notifications, toute la tâche pour chacune ; ou en lot | `--all`, `--read`, `--completed` (chacun exige `--yes`) |
+| | `unarchive <id>...` | Restaurer des notifications archivées | |
+| | `snooze <id>...` | Retirer la tâche de chaque notification de la boîte de réception jusqu'à une date | `--until` (RFC 3339, `30m`, `3h`, `1d`, `1w`, `tomorrow`) |
+| | `unsnooze <id>...` | Faire revenir maintenant des tâches reportées | |
 
 ### Runtime
 

@@ -495,17 +495,23 @@
     "section_pull_requests": "Pull requests",
     "section_metadata": "Métadonnées",
     "section_details": "Détails",
+    "sidebar_add": "Ajouter",
     "sidebar_settings": {
       "open": "Personnaliser la barre latérale",
       "title": "Barre latérale",
       "reset": "Réinitialiser",
-      "footer": "Faites glisser pour réordonner. S'applique à toutes les tâches.",
+      "footer": "S'applique à toutes les tâches.",
       "always_shown": "Toujours affiché",
       "empty": "Rien sur cette tâche",
       "customize": "Personnaliser",
-      "drag_handle": "Réordonner {{section}}",
       "hidden_count_one": "{{count}} section masquée",
       "hidden_count_other": "{{count}} sections masquées"
+    },
+    "next_step": {
+      "review_title": "Prête pour la revue",
+      "review_action": "Relire la PR",
+      "reply_title": "{{name}} attend une réponse",
+      "reply_action": "Répondre"
     },
     "section_quick_actions": "Actions rapides",
     "quick_actions_more": "Afficher {{count}} de plus",

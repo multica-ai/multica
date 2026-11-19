@@ -1864,6 +1864,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// because they are JSON-API consumers that always have
 		// workspace context.
 		r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
+		// Same access shape as /download, for grid tiles' native <img> src.
+		r.Get("/api/attachments/{id}/thumbnail", h.GetAttachmentThumbnail)
+		// The original of a thumbnailed image, for copying it from a tile.
+		r.Get("/api/attachments/{id}/original", h.GetAttachmentOriginal)
 		// Markdown links may point to an attachment in a different workspace.
 		// Resolve that workspace from the row and check membership before minting
 		// a fresh URL; the workspace-scoped metadata route stays unchanged.
@@ -2378,6 +2382,27 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			extension.MountWorkspaceRoutes(r, h)
 
 			// Projects
+			r.Route("/api/docs", func(r chi.Router) {
+				r.Get("/", h.ListDocTree)
+				r.Post("/", h.CreateDoc)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetDoc)
+					r.Patch("/", h.UpdateDoc)
+					r.With(handler.RequireHumanActor).Delete("/", h.DeleteDoc)
+					r.Post("/move", h.MoveDoc)
+					r.Get("/versions", h.ListDocVersions)
+					r.Get("/versions/{number}", h.GetDocVersion)
+				})
+			})
+			r.Route("/api/doc-folders", func(r chi.Router) {
+				r.Post("/", h.CreateDocFolder)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Patch("/", h.UpdateDocFolder)
+					r.With(handler.RequireHumanActor).Delete("/", h.DeleteDocFolder)
+					r.Post("/move", h.MoveDocFolder)
+				})
+			})
+
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
 				// Workspace owner only: every private project, joined or not.
@@ -2762,7 +2787,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/reject", h.RejectAppRequest)
 			})
 
-			// Inbox
+			// Inbox. Every handler here calls requireInboxOwnerAccess;
+			// TestEveryInboxRouteDeniesMachineCredentialsWithoutOwnerTrigger
+			// walks these routes and fails on one that skips it.
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				// Archived notifications, for the inbox's "Archived" sub-view.

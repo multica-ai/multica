@@ -99,6 +99,59 @@ func TestArchivedInboxMatchedNotificationKeepsItsCommentAnchor(t *testing.T) {
 	}
 }
 
+// An exact type, as the CLI filters, picks the group's newest notification of
+// that type, even under a newer one of another type or of the same type group.
+func TestArchivedInboxExactTypeMatchesBeforeGrouping(t *testing.T) {
+	ws := dbfx.Workspace(t, "Archive exact types", "archive-exact-type-"+uuid.NewString())
+	dbfx.Member(t, ws, testUserID, "owner")
+	old := time.Now().UTC().Add(-time.Hour)
+	insert := func(issue, kind string, created time.Time) string {
+		return dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id": ws, "recipient_type": "member", "recipient_id": testUserID,
+			"type": kind, "severity": "info", "title": "Typed", "issue_id": issue,
+			"archived": true, "created_at": created,
+		})
+	}
+	mentioned := dbfx.Issue(t, "Mentioned, then changed", testutil.Cols{"workspace_id": ws})
+	mention := insert(mentioned, "mentioned", old)
+	insert(mentioned, "status_changed", old.Add(time.Minute))
+	commented := dbfx.Issue(t, "Commented, then reacted", testutil.Cols{"workspace_id": ws})
+	comment := insert(commented, "new_comment", old)
+	insert(commented, "reaction_added", old.Add(time.Minute))
+	get := func(query string) []string {
+		var page archivedInboxPageResponse
+		testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInboxPage), inboxRequest(http.MethodGet, "/api/inbox/archived/page?"+query, ws)).Want(http.StatusOK).JSON(&page)
+		ids := []string{}
+		for _, item := range page.Items {
+			ids = append(ids, item.ID)
+		}
+		return ids
+	}
+	for query, want := range map[string][]string{
+		"notification_types=mentioned":                         {mention},
+		"notification_types=mentioned&group_id=" + mentioned:   {mention},
+		"notification_types=new_comment":                       {comment},
+		"notification_types=new_comment&group_id=" + commented: {comment},
+		"notification_types=new_comment,mentioned":             {comment, mention},
+		"notification_types=issue_assigned":                    {},
+	} {
+		got := get(query)
+		slices.Sort(got)
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s = %v, want %v", query, got, want)
+		}
+	}
+	var page archivedInboxPageResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInboxPage), inboxRequest(http.MethodGet, "/api/inbox/archived/page?limit=1", ws)).Want(http.StatusOK).JSON(&page)
+	if page.NextCursor == nil {
+		t.Fatal("two groups at limit=1 left no cursor")
+	}
+	for _, query := range []string{"notification_types=a,,b", "notification_types=mentioned&limit=1&cursor=" + url.QueryEscape(*page.NextCursor)} {
+		testutil.Call(t, inboxWorkspaceHandler(testHandler.ListArchivedInboxPage), inboxRequest(http.MethodGet, "/api/inbox/archived/page?"+query, ws)).Want(http.StatusBadRequest)
+	}
+}
+
 func TestArchivedInboxFiltersAndLookupUseLatestGroup(t *testing.T) {
 	ws := dbfx.Workspace(t, "Archive filters", "archive-filter-"+uuid.NewString())
 	dbfx.Member(t, ws, testUserID, "owner")
