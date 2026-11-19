@@ -2605,6 +2605,29 @@ func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestCodexForkThreadUsesBoundedResponse(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	wait := drainRPCScript(t, c, fs, []rpcResponse{{
+		method: "thread/fork",
+		result: json.RawMessage(`{"thread":{"id":"thr_child"}}`),
+		assertFn: func(t *testing.T, params map[string]any) {
+			if params["threadId"] != "thr_source" || params["excludeTurns"] != true {
+				t.Errorf("fork params = %v", params)
+			}
+		},
+	}})
+	defer wait()
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	childID, err := c.forkThread(ctx, "thr_source")
+	if childID != "thr_child" || err != nil || len(fs.Lines()) != 1 {
+		t.Fatalf("childID = %q, error = %v, RPCs = %v", childID, err, fs.Lines())
+	}
+}
+
 func TestCodexRequiredResumeRejectsMissingLineage(t *testing.T) {
 	t.Parallel()
 

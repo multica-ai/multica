@@ -88,7 +88,8 @@ type ExecOptions struct {
 	ResumeExpected bool
 	// RequireNativeResume prevents Codex from starting a new thread when the
 	// requested conversation must retain its native history.
-	RequireNativeResume bool
+	RequireNativeResume   bool
+	codexForkSourceThread string
 	// ResumeContinuityNotice is the text to prepend to the first turn when
 	// ResumeExpected holds but the backend lands on a fresh thread anyway. The
 	// caller owns the wording because only it knows what the surface lost — an
