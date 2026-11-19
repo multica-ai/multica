@@ -10,6 +10,12 @@ import type { Label } from "./label";
 
 // WebSocket event types (matching Go server protocol/events.go)
 export type WSEventType =
+  | "doc:created"
+  | "doc:updated"
+  | "doc:deleted"
+  | "doc_folder:created"
+  | "doc_folder:updated"
+  | "doc_folder:deleted"
   | "issue:created"
   | "issue:updated"
   | "issue_attachments:changed"
@@ -64,6 +70,7 @@ export type WSEventType =
   | "chat:reply_notification"
   | "chat:quick_actions"
   | "chat:cancel_finalized"
+  | "chat:wakeup_changed"
   | "chat:session_created"
   | "chat:session_read"
   | "chat:session_deleted"
@@ -553,6 +560,17 @@ export interface ChatQuickActionsPayload {
  * draft-restores endpoint. All fields beyond the discriminator are optional —
  * treat defensively and fall back to a refetch.
  */
+/**
+ * A chat wakeup was created, changed, ended, or started a turn (`task_id`).
+ * Delivered only to the conversation's owner.
+ */
+export interface ChatWakeupChangedPayload {
+  chat_session_id: string;
+  wakeup_id: string;
+  status: string;
+  task_id?: string;
+}
+
 export interface ChatCancelFinalizedPayload {
   outcome: "stopped" | "restored";
   chat_session_id: string;
@@ -698,6 +716,7 @@ export interface WSEventPayloadMap {
   "chat:reply_notification": ChatReplyNotificationPayload;
   "chat:quick_actions": ChatQuickActionsPayload;
   "chat:cancel_finalized": ChatCancelFinalizedPayload;
+  "chat:wakeup_changed": ChatWakeupChangedPayload;
   "chat:session_created": ChatSessionCreatedPayload;
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;

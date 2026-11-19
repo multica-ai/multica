@@ -1,71 +1,4 @@
 {
-  "title": "Facturación (página de prueba)",
-  "subtitle": "Pasarela directa a /api/v1/billing/* de multica-cloud. No es una UI terminada: solo todos los endpoints metidos en una página para poder verificar el proxy y el flujo de Stripe.",
-  "endpoints": {
-    "balance": "GET /api/cloud-billing/balance",
-    "transactions": "GET /api/cloud-billing/transactions",
-    "batches": "GET /api/cloud-billing/batches",
-    "topups": "GET /api/cloud-billing/topups",
-    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
-  },
-  "balance": {
-    "title": "Saldo",
-    "credits_suffix": "créditos",
-    "meta": "micros en bruto: {{micro}} · propietario: {{owner}}… · actualizado {{updated}}"
-  },
-  "buy": {
-    "title": "Comprar créditos / Gestionar facturación",
-    "no_tiers": "No hay niveles de precio configurados. Es probable que Cloud no tenga clave de Stripe: checkout devolverá 503.",
-    "tier_money_to_credits": "{{money}} → {{credits}} créditos",
-    "tier_bonus": " + {{credits}} de bonus",
-    "tier_bonus_with_expiry": " + {{credits}} de bonus ({{expiry}})",
-    "tier_id": "id: {{id}}",
-    "open_portal": "Abrir el portal de facturación de Stripe",
-    "portal_hint": "400 es lo esperado para usuarios que aún no han pagado (no existe registro de cliente en Stripe).",
-    "toast_no_url": "Cloud no devolvió URL de checkout",
-    "toast_checkout_failed": "El checkout falló",
-    "toast_no_portal_url": "No se devolvió URL del portal",
-    "toast_portal_failed": "El portal falló"
-  },
-  "checkout": {
-    "session_label": "Sesión de checkout {{prefix}}…",
-    "loading": "Cargando el estado del pedido…",
-    "fetch_failed": "No se ha podido obtener el estado: {{error}}",
-    "fetch_failed_unknown": "error desconocido",
-    "final_status": "Estado final: {{status}}",
-    "polling_status": "Consultando el estado… actual: {{status}}",
-    "status_unknown": "desconocido",
-    "label_order": "Pedido",
-    "label_tier": "Nivel",
-    "label_charged": "Cobrado",
-    "charged_value": "{{money}} · {{credits}} créditos",
-    "charged_with_bonus": "{{money}} · {{credits}} créditos + {{bonus}} de bonus",
-    "clear_url": "Quitar de la URL"
-  },
-  "transactions": {
-    "title": "Transacciones",
-    "empty": "Aún no hay transacciones.",
-    "credits_value": "{{value}} créditos",
-    "row_meta": "{{date}} · saldo después: {{balance}} créditos · ref: {{ref}}",
-    "ref_empty": "-"
-  },
-  "batches": {
-    "title": "Lotes de crédito",
-    "empty": "Aún no hay lotes.",
-    "remaining_over_total": "{{remaining}} / {{total}} créditos",
-    "id_suffix": "{{id}}…",
-    "consumed": "Consumidos: {{value}} créditos",
-    "expires_suffix": " · caduca {{value}}",
-    "never_expires_suffix": " · nunca caduca"
-  },
-  "topups": {
-    "title": "Pedidos de recarga",
-    "empty": "Aún no hay pedidos de recarga.",
-    "amount_to_credits": "{{money}} → {{credits}} créditos",
-    "amount_to_credits_with_bonus": "{{money}} → {{credits}} créditos + {{bonus}} de bonus",
-    "row_meta": "{{date}} · stripe: {{checkout}}",
-    "stripe_empty": "-"
-  },
   "workspace": {
     "title": "Facturación",
     "description": "Gestiona el plan, los límites, los puestos humanos y la facturación de Stripe de este espacio de trabajo.",
@@ -73,6 +6,7 @@
     "plan": {
       "free": "Gratis",
       "pro": "Pro",
+      "business": "Business",
       "unknown": "Plan desconocido"
     },
     "status": {
@@ -94,11 +28,13 @@
     "actions": {
       "retry": "Reintentar",
       "retry_autopilots": "Reintentar el uso de automatización",
-      "upgrade": "Actualizar a Pro",
+      "upgrade_to": "Actualizar a {{plan}}",
+      "switch_to": "Cambiar a {{plan}}",
       "manage": "Gestionar facturación",
       "add_seats": "Añadir puestos",
       "cancel": "Cancelar",
-      "continue_to_stripe": "Continuar a Stripe"
+      "continue_to_stripe": "Continuar a Stripe",
+      "check_status": "Comprobar estado"
     },
     "errors": {
       "action_title": "La acción de facturación falló",
@@ -119,13 +55,13 @@
       "syncing_title": "Activando tu suscripción",
       "syncing_description": "El pago se ha completado. Estamos esperando a que Stripe confirme el cambio de plan.",
       "timeout_description": "Se recibió el pago, pero la suscripción aún se está sincronizando. Actualiza esta página en un momento.",
-      "active_title": "Pro está activo",
-      "active_description": "Este espacio de trabajo ya tiene acceso a Pro."
+      "active_title": "{{plan}} está activo",
+      "active_description": "Este espacio de trabajo ya tiene acceso a {{plan}}."
     },
     "past_due": {
       "title": "El pago necesita atención",
       "description": "Actualiza tu método de pago en la gestión de facturación.",
-      "grace_description": "Actualiza tu método de pago antes del {{date}} para mantener el acceso a Pro."
+      "grace_description": "Actualiza tu método de pago antes del {{date}} para mantener tu plan de pago."
     },
     "subscription_notice": {
       "canceling_title": "La cancelación está programada",
@@ -134,7 +70,7 @@
       "incomplete_title": "La configuración de la suscripción está incompleta",
       "incomplete_description": "Abre la gestión de facturación para terminar o revisar la configuración del pago.",
       "incomplete_expired_title": "La configuración de la suscripción caducó",
-      "incomplete_expired_description": "La configuración de pago anterior caducó sin activar Pro. Inicia una nueva actualización cuando quieras.",
+      "incomplete_expired_description": "La configuración de pago anterior caducó antes de que empezara la suscripción. Inicia una nueva actualización cuando quieras.",
       "paused_title": "La suscripción está en pausa",
       "paused_description": "Abre la gestión de facturación para revisar la pausa y las opciones de recuperación disponibles.",
       "unpaid_title": "La suscripción está sin pagar",
@@ -149,19 +85,37 @@
       "member_count_one": "{{count}} miembro",
       "member_count_other": "{{count}} miembros",
       "billing_interval": "Intervalo de facturación",
-      "period_end": "El periodo actual termina"
+      "period_end": "El periodo actual termina",
+      "change_plan": "Cambiar de plan",
+      "business_adds": "Business añade proyectos privados, acceso por miembro, cuentas de apps del equipo y límites de automatización más altos.",
+      "plan_change_hold": "Cambio de plan",
+      "plan_change_confirming": "Cambiando a {{plan}}. Esperando la confirmación de Stripe; hasta entonces no se pueden cambiar los puestos ni el plan.",
+      "plan_change_unresolved": "No se ha podido confirmar el cambio a {{plan}}. Contacta con soporte para resolverlo; hasta entonces no se pueden cambiar los puestos ni el plan.",
+      "plan_change_state_confirming": "Confirmando",
+      "plan_change_state_unresolved": "Requiere soporte"
     },
     "upgrade": {
-      "title": "Actualizar a Pro",
-      "description": "Elige un intervalo de facturación y luego confirma los puestos actuales y el importe final en Stripe Checkout.",
+      "title": "Actualizar",
       "interval_label": "Intervalo de facturación",
       "monthly": "Mensual",
       "yearly": "Anual",
-      "pro_for_team_one": "Pro para {{count}} puesto humano",
-      "pro_for_team_other": "Pro para {{count}} puestos humanos",
       "price_loading": "Cargando precios de suscripción",
-      "unit_price": "{{price}} por puesto humano",
-      "price_at_checkout": "El servidor vuelve a contar los miembros humanos antes de la compra. Stripe Checkout muestra el precio por puesto y el total autorizados antes de que pagues."
+      "unit_price_month": "{{price}} por puesto humano / mes",
+      "unit_price_year_monthly": "{{price}} por puesto humano / mes, facturado anualmente",
+      "unit_price_year": "{{price}} por puesto humano / año",
+      "price_at_checkout": "El servidor vuelve a contar los miembros humanos antes de la compra. Stripe Checkout muestra el precio por puesto y el total autorizados antes de que pagues.",
+      "recommended": "Recomendado",
+      "features": {
+        "pro_members": "Miembros ilimitados",
+        "pro_autopilots": "1.000 ejecuciones de automatización por miembro al mes",
+        "pro_storage": "10 GB de almacenamiento de adjuntos por miembro",
+        "pro_dashboard": "90 días de historial en el panel",
+        "business_everything": "Todo lo incluido en Pro",
+        "business_access": "Proyectos privados y acceso por miembro",
+        "business_apps": "Cuentas de apps del equipo y reglas de aprobación",
+        "business_autopilots": "3.000 ejecuciones de automatización por miembro al mes",
+        "business_reports": "Informes de uso y coste por miembro"
+      }
     },
     "management": {
       "title": "Gestión de la suscripción",
@@ -171,7 +125,6 @@
     },
     "limits": {
       "title": "Uso y límites",
-      "issues": "Tareas",
       "autopilots": "Ejecuciones de automatización",
       "unlimited": "Ilimitado",
       "per_month": "{{count}} / mes",
@@ -182,7 +135,9 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "{{used}} completadas · {{reserved}} en curso",
       "resets_at": "Se reinicia el {{date}}",
-      "usage_unavailable": "El uso no está disponible temporalmente"
+      "usage_unavailable": "El uso no está disponible temporalmente",
+      "members": "Miembros",
+      "members_pending": "Invitaciones pendientes: {{pending}}"
     },
     "seats": {
       "title": "Puestos",
@@ -221,6 +176,7 @@
       "preview_failed": "El cálculo no está disponible temporalmente. Reintenta en un momento.",
       "capacity_out_of_sync": "El número de puestos en Stripe no coincide con el registro de facturación. Contacta con soporte antes de reintentar esta compra.",
       "in_progress": "Se está procesando otra compra de puestos. Espera a que termine; contacta con soporte si sigue así.",
+      "plan_change_in_progress": "Todavía se está procesando un cambio de plan. Vuelve a intentarlo en unos minutos.",
       "purchase_unreadable": "No se ha podido leer la respuesta de la compra. Reintenta este presupuesto; se reutilizará la misma solicitud de compra.",
       "purchase_failed": "No se han podido añadir los puestos. Reintenta con el mismo presupuesto, o actualiza si ha caducado.",
       "payment_failed": "No se ha podido completar el pago. Actualiza el método de pago en Stripe y solicita un presupuesto nuevo.",
@@ -239,18 +195,46 @@
       "delayed_description_with_expiry": "La comprobación automática se ha detenido. Si el intento sigue pendiente después del {{date}}, recarga esta página antes de solicitar otro presupuesto; contacta con soporte si sigue pendiente.",
       "submitted_one": "Se ha enviado una compra de {{count}} puesto. La nueva capacidad aparecerá cuando Stripe la confirme.",
       "submitted_other": "Se ha enviado una compra de {{count}} puestos. La nueva capacidad aparecerá cuando Stripe la confirme.",
-      "error_title": "No se ha podido actualizar el cálculo"
+      "error_title": "No se ha podido actualizar el cálculo",
+      "plan_change_unresolved": "No se ha podido confirmar un cambio de plan. Contacta con soporte antes de añadir puestos."
+    },
+    "plan_change": {
+      "upgrade_description": "Se aplica de inmediato. La diferencia del resto de este periodo de facturación se cobra ahora.",
+      "downgrade_description": "Se aplica de inmediato. La diferencia no utilizada se abona en tu próxima factura. La configuración de Business que ya tienes sigue funcionando, pero pasa a ser de solo lectura.",
+      "seats": "Puestos",
+      "charge_today": "Cobro de hoy",
+      "credit": "Abono en la próxima factura",
+      "next_invoice": "Próxima renovación",
+      "tax_notice": "Stripe determina los impuestos, créditos y detalles finales de la factura.",
+      "preview_loading": "Cargando el presupuesto...",
+      "preview_failed": "El presupuesto no está disponible temporalmente. Vuelve a intentarlo en un momento.",
+      "rate_limited": "Demasiadas solicitudes de presupuesto. Espera un momento y vuelve a intentarlo.",
+      "in_progress": "Se está procesando una compra de puestos. Vuelve a intentarlo cuando termine.",
+      "change_in_progress": "Todavía se está procesando un cambio de plan. Vuelve a intentarlo en unos minutos.",
+      "not_active": "Esta suscripción no puede cambiar de plan ahora. Se ha actualizado el plan actual.",
+      "quote_changed": "La suscripción o el precio han cambiado. Revisa el presupuesto actualizado antes de confirmar de nuevo.",
+      "payment_failed": "No se ha podido completar el pago. Actualiza el método de pago en la gestión de facturación y vuelve a intentarlo.",
+      "failed": "No se ha podido cambiar el plan. Vuelve a intentarlo con el mismo presupuesto.",
+      "unreadable": "No se ha podido leer la respuesta. Vuelve a intentarlo; se reutilizará la misma solicitud.",
+      "error_title": "No se ha podido cambiar el plan",
+      "success_title": "Plan cambiado",
+      "success_description": "Este espacio de trabajo ahora usa {{plan}}.",
+      "unresolved": "No se ha podido confirmar el cambio de plan anterior. Contacta con soporte antes de cambiar de plan.",
+      "check_failed": "No se ha podido comprobar el cambio de plan. Vuelve a intentarlo."
     },
     "confirm": {
       "title": "¿Continuar a Stripe Checkout?",
-      "description": "Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago."
+      "description": "Plan: {{plan}}. Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago.",
+      "held_invite": "Incluye un puesto de pago más para la invitación a {{email}}. Cuando se complete el pago, envíala desde Facturación."
+    },
+    "held_invite": {
+      "title": "El espacio de trabajo ya está en {{plan}}",
+      "description": "Guardaste una invitación para {{email}} como {{role}} hasta mejorar el plan. ¿La envías ahora?",
+      "role_admin": "administrador",
+      "role_member": "miembro",
+      "send": "Enviar invitación",
+      "discard": "Descartar"
     }
-  },
-  "shared": {
-    "request_failed": "La solicitud falló",
-    "refresh": "Actualizar",
-    "paging": "página {{page}} / {{totalPages}} · {{total}} en total",
-    "date_dash": "-"
   },
   "return_page": {
     "redirecting": "Volviendo a la facturación del espacio de trabajo…",
@@ -260,5 +244,76 @@
     "workspace_missing_description": "Has vuelto de Stripe, pero este espacio de trabajo ya no está disponible para ti: puede que se haya eliminado o que tu acceso haya cambiado. Abre Facturación en el espacio de trabajo que esperabas para comprobar el estado actual.",
     "retry": "Reintentar",
     "go_to_app": "Ir a Multica"
+  },
+  "paid_feature": {
+    "read_only": "Solo lectura. Mejora el plan para editar.",
+    "unavailable": "No está incluido en el plan de este espacio de trabajo.",
+    "view_plans": "Ver planes",
+    "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más."
+  },
+  "trial": {
+    "status": {
+      "active": "Prueba de Business",
+      "days_left_one": "queda {{count}} día",
+      "days_left_other": "quedan {{count}} días",
+      "active_label_one": "Prueba de Business, queda {{count}} día. Abrir Facturación.",
+      "active_label_other": "Prueba de Business, quedan {{count}} días. Abrir Facturación.",
+      "free": "Free",
+      "upgrade": "Actualizar",
+      "ended_label": "La prueba de Business terminó y este espacio de trabajo está en Free. Abre Facturación para actualizar.",
+      "ending": "termina ya",
+      "ending_label": "La prueba de Business está terminando. Abrir Facturación."
+    },
+    "reminder": {
+      "halfway_title_one": "Tu prueba de Business va por la mitad: queda {{count}} día.",
+      "halfway_title_other": "Tu prueba de Business va por la mitad: quedan {{count}} días.",
+      "days_left_title_one": "Queda {{count}} día de tu prueba de Business.",
+      "days_left_title_other": "Quedan {{count}} días de tu prueba de Business.",
+      "last_day_title": "Tu prueba de Business termina en menos de un día.",
+      "body": "El {{date}} este espacio de trabajo pasa a Free. Elige un plan para seguir con Business.",
+      "later": "Más tarde",
+      "choose_plan": "Elegir un plan"
+    },
+    "welcome": {
+      "title_one": "¡Bienvenido! Este espacio de trabajo tiene una prueba gratuita de Business de {{count}} día",
+      "title_other": "¡Bienvenido! Este espacio de trabajo tiene una prueba gratuita de Business de {{count}} días",
+      "body": "Los proyectos privados y las demás funciones de Business están activos. No hace falta tarjeta; al terminar la prueba, el espacio de trabajo pasa a Free.",
+      "action": "Ver qué incluye",
+      "close": "Cerrar"
+    },
+    "ended": {
+      "title": "Tu prueba de Business ha terminado",
+      "description": "{{workspace}} ahora está en Free. No se eliminó nada.",
+      "description_without_name": "Este espacio de trabajo ahora está en Free. No se eliminó nada.",
+      "kept": "Los miembros, proyectos y ajustes que ya tienes se mantienen igual.",
+      "private_projects": "Los proyectos privados siguen siendo privados. Sus listas de acceso son de solo lectura hasta que actualices.",
+      "autopilot": "Las automatizaciones tienen {{limit}} ejecuciones al mes; este mes se usaron {{used}}.",
+      "autopilot_paused": "Las automatizaciones tienen {{limit}} ejecuciones al mes y este mes se usaron {{used}}, así que están en pausa hasta el {{date}}.",
+      "keep_free": "Seguir en Free",
+      "upgrade": "Actualizar a Business",
+      "member_title": "Este espacio de trabajo ahora está en Free",
+      "member_description": "Los ajustes existentes siguen funcionando. Si necesitas más, pregunta a un administrador del espacio de trabajo."
+    },
+    "card": {
+      "title": "Prueba de Business",
+      "badge_one": "Prueba · queda {{count}} día",
+      "badge_other": "Prueba · quedan {{count}} días",
+      "description": "Prueba hasta el {{date}}. No hay método de pago registrado, así que después el espacio de trabajo pasa a Free y no se cobra nada.",
+      "started": "Empezó el {{date}}",
+      "progress": "Día {{day}} de {{total}}",
+      "ends": "Termina el {{date}}",
+      "ended_title": "La prueba de Business terminó",
+      "ended_description": "La prueba terminó el {{date}}. Elige un plan abajo para recuperar las funciones de Business.",
+      "choose_plan": "Elegir un plan",
+      "ended_description_member": "La prueba terminó el {{date}}. Pide a un administrador del espacio de trabajo que actualice el plan para recuperar las funciones de Business."
+    },
+    "features": {
+      "title": "Funciones de Business en tu prueba",
+      "description": "Al terminar la prueba no se elimina ni se desactiva nada; solo no podrás añadir más.",
+      "private_projects": {
+        "name": "Proyectos privados",
+        "after": "Siguen siendo privados después de la prueba. Sus listas de acceso pasan a solo lectura."
+      }
+    }
   }
 }

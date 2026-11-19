@@ -102,6 +102,14 @@ make migrate-down
 make sqlc
 ```
 
+`make test` は Go テストの実行前にデータベースを準備し、マイグレーションを適用します。`.env` のないワークツリーでは、`make` は自動的に `.env.worktree` を選択します。`make test ENV_FILE=.env.worktree` で明示的に指定することもできます。
+
+`make test`、`make check`、`make check-worktree` の前に、同じデータベースを使う開発用 API を停止し、バックグラウンドワーカーがテストジョブを処理しないようにしてください。起動方法に対応する停止方法を使います。
+
+- `make up` → `make down C=api`。
+- `make start` / `make dev` → `make stop`。`make start-worktree` → `make stop-worktree`。
+- `make server` → 実行中のターミナルで Ctrl-C を押します。
+
 ソースから CLI コマンドを実行するには:
 
 ```bash

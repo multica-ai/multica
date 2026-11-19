@@ -145,6 +145,21 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	memberLimit, err := h.memberLimitFor(r.Context(), requester.WorkspaceID, role, false)
+	if err != nil {
+		if errors.Is(err, errMemberLimitReached) {
+			// Like a full seat ledger, a full workspace admits nobody until its
+			// members or plan change, so repeated attempts spend the actor
+			// budget only.
+			h.consumeInvitationActorAdmission(r, admission)
+			writeMemberLimitReached(w)
+			return
+		}
+		slog.Warn("member limit check failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create invitation")
+		return
+	}
+
 	invitationID := uuid.New()
 	expiresAt := time.Now().Add(7 * 24 * time.Hour)
 	if err := h.reserveInvitationCapacity(r.Context(), uuid.UUID(requester.WorkspaceID.Bytes), invitationID, expiresAt); err != nil {
@@ -171,7 +186,8 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
 	}
 	var inv db.WorkspaceInvitation
-	if h.seatCapacityEnabled() {
+	var limitAdmission memberLimitAdmission
+	if h.seatCapacityEnabled() || memberLimit.active() {
 		tx, txErr := h.TxStarter.Begin(r.Context())
 		if txErr != nil {
 			h.compensateCapacityIntent(r.Context(), invitationID)
@@ -180,8 +196,14 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
-		inv, err = qtx.CreateInvitation(r.Context(), createParams)
+		err = memberLimit.lock(r.Context(), qtx)
 		if err == nil {
+			limitAdmission, err = memberLimit.admit(r.Context(), qtx)
+		}
+		if err == nil {
+			inv, err = qtx.CreateInvitation(r.Context(), createParams)
+		}
+		if err == nil && h.seatCapacityEnabled() {
 			err = qtx.DeleteSeatCapacityIntentForAction(r.Context(), db.DeleteSeatCapacityIntentForActionParams{
 				OperationToken: uuidToPG(invitationID), Action: seatcapacity.ActionReserveInvitation,
 			})
@@ -197,8 +219,15 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	} else {
 		inv, err = h.Queries.CreateInvitation(r.Context(), createParams)
 	}
+	if err == nil || errors.Is(err, errMemberLimitReached) {
+		limitAdmission.record(r.Context())
+	}
 	if err != nil {
 		h.compensateCapacityIntent(r.Context(), invitationID)
+		if errors.Is(err, errMemberLimitReached) {
+			writeMemberLimitReached(w)
+			return
+		}
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "invitation already pending for this email")
 			return
@@ -506,6 +535,17 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusGone, "invitation has expired")
 		return
 	}
+	// The invitation already holds its slot. A refusal leaves it pending, so
+	// the invitee can still accept once the workspace upgrades.
+	memberLimit, err := h.memberLimitFor(r.Context(), inv.WorkspaceID, inv.Role, true)
+	if err != nil {
+		if errors.Is(err, errMemberLimitReached) {
+			writeMemberLimitReached(w)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
+		return
+	}
 	capacityActive, err := h.beginCapacityConsume(r.Context(), uuid.UUID(inv.WorkspaceID.Bytes), uuid.UUID(inv.ID.Bytes), uuid.UUID(inv.ID.Bytes), uuid.UUID(user.ID.Bytes))
 	if err != nil {
 		writeSeatCapacityError(w, err)
@@ -521,9 +561,24 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
+	if err := memberLimit.lock(r.Context(), qtx); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
+		return
+	}
 
 	accepted, err := qtx.AcceptInvitation(r.Context(), inv.ID)
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
+		return
+	}
+	limitAdmission, err := memberLimit.admit(r.Context(), qtx)
+	if err != nil {
+		_ = tx.Rollback(r.Context())
+		if errors.Is(err, errMemberLimitReached) {
+			limitAdmission.record(r.Context())
+			writeMemberLimitReached(w)
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
 		return
 	}
@@ -568,6 +623,7 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
 		return
 	}
+	limitAdmission.record(r.Context())
 	if capacityActive {
 		h.confirmCapacityIntent(r.Context(), uuid.UUID(accepted.WorkspaceID.Bytes), uuid.UUID(accepted.ID.Bytes), uuid.UUID(member.ID.Bytes))
 	}

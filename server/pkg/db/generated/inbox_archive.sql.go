@@ -208,7 +208,7 @@ func (q *Queries) ArchivedInboxFacets(ctx context.Context, arg ArchivedInboxFace
 const listArchivedInboxPage = `-- name: ListArchivedInboxPage :many
 
 WITH base AS MATERIALIZED (
-    SELECT i.id, i.issue_id, COALESCE(i.issue_id, i.id) AS group_id, i.created_at, i.read,
+    SELECT i.id, i.issue_id, COALESCE(i.issue_id, i.id) AS group_id, i.created_at, i.read, i.type,
            CASE
                WHEN i.type = 'mentioned' THEN 'mention'
                WHEN i.type IN ('new_comment', 'reaction_added') THEN 'comment'
@@ -241,13 +241,14 @@ WITH base AS MATERIALIZED (
             AND active.issue_id = i.issue_id AND active.archived = false
       ))
 ), newest AS (
-    SELECT DISTINCT ON (group_id) base.id, base.issue_id, base.group_id, base.created_at, base.read, base.type_group, base.actor
+    SELECT DISTINCT ON (group_id) base.id, base.issue_id, base.group_id, base.created_at, base.read, base.type, base.type_group, base.actor
     FROM base
     WHERE (cardinality($5::text[]) = 0
            OR (type_group = ANY($5::text[])) <> ('type' = ANY($6::text[])))
-      AND (cardinality($7::text[]) = 0
-           OR COALESCE(actor = ANY($7::text[]), false) <> ('actor' = ANY($6::text[])))
-      AND ($8::timestamptz IS NULL OR created_at >= $8::timestamptz)
+      AND (cardinality($7::text[]) = 0 OR type = ANY($7::text[]))
+      AND (cardinality($8::text[]) = 0
+           OR COALESCE(actor = ANY($8::text[]), false) <> ('actor' = ANY($6::text[])))
+      AND ($9::timestamptz IS NULL OR created_at >= $9::timestamptz)
     ORDER BY group_id, created_at DESC, id DESC
 ), projected AS (
     SELECT newest.id, newest.created_at, newest.read,
@@ -264,33 +265,34 @@ WITH base AS MATERIALIZED (
 ), selected AS (
     SELECT projected.id, projected.created_at, projected.issue_status, projected.issue_priority
     FROM projected
-    WHERE (cardinality($9::text[]) = 0 OR (issue_ref IS NOT NULL
-           AND (issue_status = ANY($9::text[])) <> ('status' = ANY($6::text[]))))
-      AND (cardinality($10::text[]) = 0 OR (issue_ref IS NOT NULL
-           AND (issue_priority = ANY($10::text[])) <> ('priority' = ANY($6::text[]))))
+    WHERE (cardinality($10::text[]) = 0 OR (issue_ref IS NOT NULL
+           AND (issue_status = ANY($10::text[])) <> ('status' = ANY($6::text[]))))
       AND (cardinality($11::text[]) = 0 OR (issue_ref IS NOT NULL
-           AND (project_key = ANY($11::text[])) <> ('project' = ANY($6::text[]))))
+           AND (issue_priority = ANY($11::text[])) <> ('priority' = ANY($6::text[]))))
       AND (cardinality($12::text[]) = 0 OR (issue_ref IS NOT NULL
-           AND (assignee_key = ANY($12::text[])) <> ('assignee' = ANY($6::text[]))))
+           AND (project_key = ANY($12::text[])) <> ('project' = ANY($6::text[]))))
       AND (cardinality($13::text[]) = 0 OR (issue_ref IS NOT NULL
-           AND (label_ids && $13::text[]) <> ('label' = ANY($6::text[]))))
-      AND (cardinality($14::text[]) = 0 OR (issue_ref IS NOT NULL AND COALESCE(
-               ('overdue' = ANY($14::text[]) AND due_date < $15::date)
-            OR ('today' = ANY($14::text[]) AND due_date = $15::date)
-            OR ('this_week' = ANY($14::text[])
-                AND due_date >= $15::date - (EXTRACT(ISODOW FROM $15::date)::int - 1)
-                AND due_date < $15::date - (EXTRACT(ISODOW FROM $15::date)::int - 1) + 7)
-            OR ('next_7_days' = ANY($14::text[])
-                AND due_date >= $15::date AND due_date < $15::date + 7)
-            OR ('none' = ANY($14::text[]) AND due_date IS NULL), false)
+           AND (assignee_key = ANY($13::text[])) <> ('assignee' = ANY($6::text[]))))
+      AND (cardinality($14::text[]) = 0 OR (issue_ref IS NOT NULL
+           AND (label_ids && $14::text[]) <> ('label' = ANY($6::text[]))))
+      AND (cardinality($15::text[]) = 0 OR (issue_ref IS NOT NULL AND COALESCE(
+               ('overdue' = ANY($15::text[]) AND due_date < $16::date)
+            OR ('today' = ANY($15::text[]) AND due_date = $16::date)
+            OR ('this_week' = ANY($15::text[])
+                AND due_date >= $16::date - (EXTRACT(ISODOW FROM $16::date)::int - 1)
+                AND due_date < $16::date - (EXTRACT(ISODOW FROM $16::date)::int - 1) + 7)
+            OR ('next_7_days' = ANY($15::text[])
+                AND due_date >= $16::date AND due_date < $16::date + 7)
+            OR ('none' = ANY($15::text[]) AND due_date IS NULL), false)
            <> ('dueDate' = ANY($6::text[]))))
-      AND (NOT $16::boolean OR NOT read)
-      AND ($17::timestamptz IS NULL OR
-           (created_at, id) < ($17::timestamptz, $18::uuid))
+      AND (NOT $17::boolean OR NOT read)
+      AND ($18::timestamptz IS NULL OR
+           (created_at, id) < ($18::timestamptz, $19::uuid))
     ORDER BY created_at DESC, id DESC
-    LIMIT $19::int
+    LIMIT $20::int
 )
-SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, i.snoozed_until, i.snoozed_at, selected.issue_status, selected.issue_priority,
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details, i.section, i.snoozed_until, i.snoozed_at, i.returned_at, selected.issue_status, selected.issue_priority,
+       iss.number AS issue_number,
        iss.project_id AS issue_project_id,
        iss.assignee_type AS issue_assignee_type,
        iss.assignee_id AS issue_assignee_id,
@@ -318,31 +320,33 @@ ORDER BY i.created_at DESC, i.id DESC
 `
 
 type ListArchivedInboxPageParams struct {
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	RecipientID      pgtype.UUID        `json:"recipient_id"`
-	HiddenProjectIds []pgtype.UUID      `json:"hidden_project_ids"`
-	GroupID          pgtype.UUID        `json:"group_id"`
-	Types            []string           `json:"types"`
-	Negated          []string           `json:"negated"`
-	Actors           []string           `json:"actors"`
-	ReceivedAfter    pgtype.Timestamptz `json:"received_after"`
-	Statuses         []string           `json:"statuses"`
-	Priorities       []string           `json:"priorities"`
-	Projects         []string           `json:"projects"`
-	Assignees        []string           `json:"assignees"`
-	Labels           []string           `json:"labels"`
-	DueDates         []string           `json:"due_dates"`
-	Today            pgtype.Date        `json:"today"`
-	UnreadOnly       bool               `json:"unread_only"`
-	BeforeTime       pgtype.Timestamptz `json:"before_time"`
-	BeforeID         pgtype.UUID        `json:"before_id"`
-	PageLimit        int32              `json:"page_limit"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	RecipientID       pgtype.UUID        `json:"recipient_id"`
+	HiddenProjectIds  []pgtype.UUID      `json:"hidden_project_ids"`
+	GroupID           pgtype.UUID        `json:"group_id"`
+	Types             []string           `json:"types"`
+	Negated           []string           `json:"negated"`
+	NotificationTypes []string           `json:"notification_types"`
+	Actors            []string           `json:"actors"`
+	ReceivedAfter     pgtype.Timestamptz `json:"received_after"`
+	Statuses          []string           `json:"statuses"`
+	Priorities        []string           `json:"priorities"`
+	Projects          []string           `json:"projects"`
+	Assignees         []string           `json:"assignees"`
+	Labels            []string           `json:"labels"`
+	DueDates          []string           `json:"due_dates"`
+	Today             pgtype.Date        `json:"today"`
+	UnreadOnly        bool               `json:"unread_only"`
+	BeforeTime        pgtype.Timestamptz `json:"before_time"`
+	BeforeID          pgtype.UUID        `json:"before_id"`
+	PageLimit         int32              `json:"page_limit"`
 }
 
 type ListArchivedInboxPageRow struct {
 	InboxItem         InboxItem   `json:"inbox_item"`
 	IssueStatus       pgtype.Text `json:"issue_status"`
 	IssuePriority     pgtype.Text `json:"issue_priority"`
+	IssueNumber       pgtype.Int4 `json:"issue_number"`
 	IssueProjectID    pgtype.UUID `json:"issue_project_id"`
 	IssueAssigneeType pgtype.Text `json:"issue_assignee_type"`
 	IssueAssigneeID   pgtype.UUID `json:"issue_assignee_id"`
@@ -359,6 +363,8 @@ type ListArchivedInboxPageRow struct {
 // review_requested, task_completed, agent_blocked and agent_completed are no
 // longer written, but archived rows from older servers still carry them.
 // Select narrow group representatives before loading bodies or comment anchors.
+// notification_types matches exact types, for callers such as the CLI that
+// filter by one type rather than a type group.
 func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInboxPageParams) ([]ListArchivedInboxPageRow, error) {
 	rows, err := q.db.Query(ctx, listArchivedInboxPage,
 		arg.WorkspaceID,
@@ -367,6 +373,7 @@ func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInb
 		arg.GroupID,
 		arg.Types,
 		arg.Negated,
+		arg.NotificationTypes,
 		arg.Actors,
 		arg.ReceivedAfter,
 		arg.Statuses,
@@ -407,8 +414,10 @@ func (q *Queries) ListArchivedInboxPage(ctx context.Context, arg ListArchivedInb
 			&i.InboxItem.Section,
 			&i.InboxItem.SnoozedUntil,
 			&i.InboxItem.SnoozedAt,
+			&i.InboxItem.ReturnedAt,
 			&i.IssueStatus,
 			&i.IssuePriority,
+			&i.IssueNumber,
 			&i.IssueProjectID,
 			&i.IssueAssigneeType,
 			&i.IssueAssigneeID,

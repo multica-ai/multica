@@ -31,8 +31,9 @@ describe("clearWorkspaceStorage", () => {
     expect(adapter.removeItem).toHaveBeenCalledWith("multica:chat:activeSessionId:ws_123");
     expect(adapter.removeItem).toHaveBeenCalledWith("multica:chat:expanded:ws_123");
     expect(adapter.removeItem).toHaveBeenCalledWith("multica_navigation:ws_123");
-    // 8 non-draft keys, and no registered drafts in this test.
-    expect(adapter.removeItem).toHaveBeenCalledTimes(9);
+    expect(adapter.removeItem).toHaveBeenCalledWith("multica:upgrade_invite:ws_123");
+    // 10 non-draft keys, and no registered drafts in this test.
+    expect(adapter.removeItem).toHaveBeenCalledTimes(10);
   });
 
   it("also clears registered draft keys via the registry", () => {
@@ -57,8 +58,8 @@ describe("clearWorkspaceStorage", () => {
     expect(adapter.removeItem).toHaveBeenCalledWith("multica_test_draft:ws_123");
     // Globally-namespaced draft keys are removed without the slug suffix.
     expect(adapter.removeItem).toHaveBeenCalledWith("multica_test_global_draft");
-    // 8 non-draft keys + 2 registered draft keys.
-    expect(adapter.removeItem).toHaveBeenCalledTimes(11);
+    // 10 non-draft keys + 2 registered draft keys.
+    expect(adapter.removeItem).toHaveBeenCalledTimes(12);
   });
 });
 

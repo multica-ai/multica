@@ -11,6 +11,26 @@ import (
 	"testing"
 )
 
+func TestGetJSONReportsIncompleteResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		_, _ = io.WriteString(w, `{"messages":`)
+	}))
+	t.Cleanup(srv.Close)
+
+	var history map[string]any
+	err := NewAPIClient(srv.URL, "", "").GetJSON(context.Background(), "/api/chat/history", &history)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("expected truncated body error, got %v", err)
+	}
+	if message := userMessage(err, LangEN); !strings.Contains(message, "response ended before it was complete") {
+		t.Errorf("got %q, want incomplete response guidance", message)
+	}
+	if got := ExitCodeFor(err); got != ExitNetwork {
+		t.Errorf("exit code = %d, want %d", got, ExitNetwork)
+	}
+}
+
 func TestPostJSON(t *testing.T) {
 	type reqBody struct {
 		Name string `json:"name"`

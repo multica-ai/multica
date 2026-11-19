@@ -12,7 +12,8 @@
     "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Ajustes",
-    "views": "Vistas"
+    "views": "Vistas",
+    "docs": "Documentos"
   },
   "tab": {
     "issue": "Tarea",
@@ -27,7 +28,9 @@
     "attachment": "Adjunto",
     "create_agent": "Crear agente",
     "unknown": "Página desconocida",
-    "my_agents": "Trabajo de mis agentes"
+    "my_agents": "Trabajo de mis agentes",
+    "doc": "Documentos",
+    "docFolder": "Carpeta"
   },
   "help": {
     "trigger": "Ayuda",
@@ -118,7 +121,8 @@
     "reset_order": "Restablecer el orden predeterminado",
     "copy_workspace_link": "Copiar enlace del espacio de trabajo",
     "workspace_meta_one": "{{slug}} · {{count}} miembro",
-    "workspace_meta_other": "{{slug}} · {{count}} miembros"
+    "workspace_meta_other": "{{slug}} · {{count}} miembros",
+    "docs": "Documentos"
   },
   "bottom_bar": {
     "label": "Barra de estado",

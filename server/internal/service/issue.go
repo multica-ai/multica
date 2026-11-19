@@ -5,16 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/multica-ai/multica/server/internal/attribution"
 	"log/slog"
 	"sort"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/attribution"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
@@ -43,9 +43,6 @@ type IssueService struct {
 	// Metrics as "PostHog only", so leaving it unset is safe.
 	Metrics     *obsmetrics.BusinessMetrics
 	TaskService *TaskService
-	// Entitlements supplies Cloud's effective issue-count instruction. Nil is
-	// the self-hosted unlimited path.
-	Entitlements entitlement.Provider
 }
 
 func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.Client, ts *TaskService) *IssueService {
@@ -223,7 +220,7 @@ type IssueCreateResult struct {
 //
 // A healthy create is byte-identical to before this existed — the allocation
 // query is untouched and nothing extra is read on the way through. The collision
-// is the signal: AllocateIssueNumber bumps the counter inside the same
+// is the signal: IncrementIssueCounter bumps the counter inside the same
 // transaction as the INSERT, so the unique violation rolls the increment back
 // too and every later create in that workspace retries the same taken number
 // forever. Moving the counter first is what makes the second attempt land on a
@@ -234,6 +231,10 @@ type IssueCreateResult struct {
 // savepoint has to be established before the statement that might fail, so every
 // successful create would pay for it too.
 func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
+	// PostgreSQL TEXT rejects NUL, which survives a JSON round trip. Cleaned
+	// here so every create entry stores the same text.
+	p.Title = util.SanitizeTextForPostgres(p.Title)
+	p.Description.String = util.SanitizeTextForPostgres(p.Description.String)
 	res, err := s.createOnce(ctx, p, opts)
 	if err == nil {
 		return res, nil
@@ -281,7 +282,6 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 // Caller-owned validation is limited to transport-shaped checks: title
 // required, RFC3339 date format, assignee pair sanity.
 func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
-	issueCountPolicy := ResolveIssueCountPolicy(ctx, s.Entitlements, p.WorkspaceID)
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("begin tx: %w", err)
@@ -410,7 +410,7 @@ func (s *IssueService) createOnce(ctx context.Context, p IssueCreateParams, opts
 		return IssueCreateResult{DuplicateIssue: &dup}, ErrActiveDuplicate
 	}
 
-	issueNumber, err := AllocateIssueNumber(ctx, qtx, p.WorkspaceID, issueCountPolicy)
+	issueNumber, err := qtx.IncrementIssueCounter(ctx, p.WorkspaceID)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("allocate issue number: %w", err)
 	}

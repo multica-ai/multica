@@ -14,6 +14,7 @@
     "upload_image": "上傳圖片",
     "upload_file": "上傳檔案",
     "send": "傳送",
+    "queue": "排隊傳送",
     "default_placeholder": "輸入訊息...",
     "unavailable": "聊天不可用",
     "stop_agent": "停止 AI 代理",

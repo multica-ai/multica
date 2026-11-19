@@ -160,6 +160,12 @@ const EXPECTED = [
     ],
     source: "packages/ui/components/ui/switch.tsx",
   },
+  {
+    what: "the avatars",
+    find: (els) => els.filter((el) => el.attrs["data-slot"] === "avatar"),
+    classes: ["rounded-avatar"],
+    source: "packages/ui/components/common/actor-avatar.tsx",
+  },
   ...[
     ["open", "git-pull-request-arrow"],
     ["merged", "git-merge"],
@@ -199,7 +205,6 @@ const NOT_DRAWN = {
     tooltip: "no tooltip is open",
     input: "the page has no text input",
     button: "only small buttons are on the page",
-    avatar: "actor avatars are round (rounded-full) in the app",
     "board-column": "the page shows the list, not the board",
     "board-card": "the page shows the list, not the board",
   },

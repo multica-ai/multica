@@ -63,6 +63,7 @@ function fakeQc(): QueryClient {
       return undefined;
     },
     getQueriesData: () => [],
+    prefetchQuery: () => Promise.resolve(),
   } as unknown as QueryClient;
 }
 

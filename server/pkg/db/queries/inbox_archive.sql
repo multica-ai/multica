@@ -8,8 +8,10 @@
 
 -- name: ListArchivedInboxPage :many
 -- Select narrow group representatives before loading bodies or comment anchors.
+-- notification_types matches exact types, for callers such as the CLI that
+-- filter by one type rather than a type group.
 WITH base AS MATERIALIZED (
-    SELECT i.id, i.issue_id, COALESCE(i.issue_id, i.id) AS group_id, i.created_at, i.read,
+    SELECT i.id, i.issue_id, COALESCE(i.issue_id, i.id) AS group_id, i.created_at, i.read, i.type,
            CASE
                WHEN i.type = 'mentioned' THEN 'mention'
                WHEN i.type IN ('new_comment', 'reaction_added') THEN 'comment'
@@ -46,6 +48,7 @@ WITH base AS MATERIALIZED (
     FROM base
     WHERE (cardinality(sqlc.arg(types)::text[]) = 0
            OR (type_group = ANY(sqlc.arg(types)::text[])) <> ('type' = ANY(sqlc.arg(negated)::text[])))
+      AND (cardinality(sqlc.arg(notification_types)::text[]) = 0 OR type = ANY(sqlc.arg(notification_types)::text[]))
       AND (cardinality(sqlc.arg(actors)::text[]) = 0
            OR COALESCE(actor = ANY(sqlc.arg(actors)::text[]), false) <> ('actor' = ANY(sqlc.arg(negated)::text[])))
       AND (sqlc.narg(received_after)::timestamptz IS NULL OR created_at >= sqlc.narg(received_after)::timestamptz)
@@ -92,6 +95,7 @@ WITH base AS MATERIALIZED (
     LIMIT sqlc.arg(page_limit)::int
 )
 SELECT sqlc.embed(i), selected.issue_status, selected.issue_priority,
+       iss.number AS issue_number,
        iss.project_id AS issue_project_id,
        iss.assignee_type AS issue_assignee_type,
        iss.assignee_id AS issue_assignee_id,

@@ -70,9 +70,7 @@ func writeFakeQwenpawScript(t *testing.T, script string) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "qwenpaw")
-	if err := os.WriteFile(bin, []byte(script), 0755); err != nil {
-		t.Fatalf("write fake qwenpaw: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(script))
 	return bin
 }
 

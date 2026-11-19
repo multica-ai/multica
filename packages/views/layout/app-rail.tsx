@@ -16,8 +16,11 @@ import { CSS } from "@dnd-kit/utilities";
 import { CheckCheck, ExternalLink, Link2, RotateCcw, Settings, Users, type IconComponent } from "@multica/ui/icons";
 import { toast } from "sonner";
 import { useChatStore } from "@multica/core/chat";
+import { useMarkAllChatSessionsRead } from "@multica/core/chat/mutations";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
+import { useFeatureEnabled } from "@multica/core/config";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import {
   deduplicateInboxItems,
   inboxListOptions,
@@ -262,8 +265,15 @@ function RailSpaceMenu({
   const copyLink = async () => {
     if (await copyText(getShareableUrl(href))) toast.success(t(($) => $.rail.link_copied));
   };
+  const wsId = useCurrentWorkspace()?.id;
   const markAllRead = useMarkAllInboxRead();
-  const inboxUnread = useInboxUnreadCount(useCurrentWorkspace()?.id);
+  const inboxUnread = useInboxUnreadCount(wsId);
+  const markAllChatsRead = useMarkAllChatSessionsRead();
+  const { data: chatSessions = [] } = useQuery({
+    ...chatSessionsOptions(wsId ?? ""),
+    enabled: space === "chat" && !!wsId,
+  });
+  const unreadChatIds = chatSessions.filter((s) => (s.unread_count ?? 0) > 0).map((s) => s.id);
   const customOrder = useRailOrderStore((s) => s.order !== null);
   const setOrder = useRailOrderStore((s) => s.setOrder);
   return (
@@ -283,6 +293,21 @@ function RailSpaceMenu({
             <DropdownMenuItem
               onClick={() =>
                 markAllRead.mutate(undefined, {
+                  onError: () => toast.error(t(($) => $.rail.mark_all_read_failed)),
+                })
+              }
+            >
+              <CheckCheck />
+              {t(($) => $.rail.mark_all_read)}
+            </DropdownMenuItem>
+          </>
+        )}
+        {space === "chat" && unreadChatIds.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() =>
+                markAllChatsRead.mutate(unreadChatIds, {
                   onError: () => toast.error(t(($) => $.rail.mark_all_read_failed)),
                 })
               }
@@ -343,6 +368,13 @@ export function AppRail({
   const savedOrder = useRailOrderStore((s) => s.order);
   const setOrder = useRailOrderStore((s) => s.setOrder);
   const order = useMemo(() => resolveRailOrder(savedOrder), [savedOrder]);
+  // Docs stays in the saved order while docs_v1 is off, so it comes back in
+  // place when the flag is turned on; it is only left out of what renders.
+  const docsEnabled = useFeatureEnabled(DOCS_V1_FLAG, false);
+  const visibleOrder = useMemo(
+    () => (docsEnabled ? order : order.filter((id) => id !== "docs")),
+    [docsEnabled, order],
+  );
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
@@ -364,6 +396,12 @@ export function AppRail({
       icon: routeIconForPath(p.issues()),
       label: t(($) => $.rail.work),
       fullLabel: t(($) => $.spaces.work),
+    },
+    docs: {
+      href: p.docs(),
+      icon: routeIconForPath(p.docs()),
+      label: t(($) => $.rail.docs),
+      fullLabel: t(($) => $.nav.docs),
     },
     team: {
       href: p.agents(),
@@ -413,9 +451,9 @@ export function AppRail({
         onDragEnd={onDragEnd}
         onDragCancel={releaseClickGuard}
       >
-        <SortableContext items={order} strategy={verticalListSortingStrategy}>
+        <SortableContext items={visibleOrder} strategy={verticalListSortingStrategy}>
           <ul className="flex flex-col items-center gap-0.5">
-            {order.map((id) => (
+            {visibleOrder.map((id) => (
               <SortableRailItem key={id} id={id}>
                 <RailSpaceLink
                   space={id}

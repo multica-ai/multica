@@ -77,6 +77,8 @@ type issueBatchResult struct {
 	Outcome    string `json:"outcome"`
 	Code       string `json:"code,omitempty"`
 	Message    string `json:"message,omitempty"`
+	// RunOutcome is kept so --output json passes it through.
+	RunOutcome *issueRunOutcome `json:"run_outcome,omitempty"`
 }
 
 type issueBatchResponse struct {
@@ -368,6 +370,7 @@ func printIssueBatchResults(cmd *cobra.Command, resp issueBatchResponse) error {
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, resp)
 	}
+	noStart, _ := cmd.Flags().GetBool("no-start")
 	rows := make([][]string, 0, len(resp.Results))
 	counts := map[string]int{}
 	for _, r := range resp.Results {
@@ -378,6 +381,9 @@ func printIssueBatchResults(cmd *cobra.Command, resp issueBatchResponse) error {
 		reason := r.Message
 		if r.Code != "" && reason == "" {
 			reason = r.Code
+		}
+		if reason == "" {
+			reason = issueRunOutcomeNote(r.RunOutcome, noStart)
 		}
 		rows = append(rows, []string{key, strings.ReplaceAll(r.Outcome, "_", " "), reason})
 		counts[r.Outcome]++

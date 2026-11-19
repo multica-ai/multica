@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -201,6 +202,91 @@ func countTokens(lines []string, tok string) int {
 		}
 	}
 	return n
+}
+
+func TestTraecliExecutionModeNewAndResumedSessions(t *testing.T) {
+	t.Parallel()
+	for _, resumeID := range []string{"", "ses_existing"} {
+		name := "new"
+		if resumeID != "" {
+			name = "resumed"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			argsFile := filepath.Join(dir, "args.txt")
+			requestsFile := filepath.Join(dir, "requests.jsonl")
+			fakePath := filepath.Join(dir, "traecli")
+			writeTestExecutable(t, fakePath, []byte(fakeTraecliACPScript()))
+			backend, err := New("traecli", Config{
+				ExecutablePath: fakePath, Logger: slog.Default(),
+				Env: map[string]string{"TRAECLI_ARGS_FILE": argsFile, "TRAECLI_REQUESTS_FILE": requestsFile},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			const prompt = "Only explain the implementation plan. Do not change code or implement it."
+			session, err := backend.Execute(ctx, prompt, ExecOptions{ResumeSessionID: resumeID, Timeout: 5 * time.Second})
+			if err != nil {
+				t.Fatal(err)
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+			result := <-session.Result
+			if result.Status != "completed" || result.Output != "pong" {
+				t.Fatalf("status=%q error=%q output=%q", result.Status, result.Error, result.Output)
+			}
+			rawArgs, err := os.ReadFile(argsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args := strings.Split(strings.TrimSpace(string(rawArgs)), "\n")
+			for _, tool := range []string{"EnterPlanMode", "ExitPlanMode"} {
+				found := false
+				for i := 1; i < len(args); i++ {
+					if args[i-1] == "--disallowed-tool" && args[i] == tool {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("native %s must be disabled, args=%q", tool, args)
+				}
+			}
+			raw, err := os.ReadFile(requestsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompts := 0
+			for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+				var request struct {
+					Method string `json:"method"`
+					Params struct {
+						SessionID string `json:"sessionId"`
+						Prompt    []struct {
+							Text string `json:"text"`
+						} `json:"prompt"`
+					} `json:"params"`
+				}
+				if err := json.Unmarshal([]byte(line), &request); err != nil {
+					t.Fatal(err)
+				}
+				if request.Method != "session/prompt" {
+					continue
+				}
+				prompts++
+				if len(request.Params.Prompt) != 1 || request.Params.Prompt[0].Text != prompt || request.Params.SessionID != result.SessionID {
+					t.Fatalf("original request or session changed: %+v", request)
+				}
+			}
+			if prompts != 1 {
+				t.Fatalf("sent %d prompts, want only the original request", prompts)
+			}
+		})
+	}
 }
 
 func TestTraecliSetModelFailureFailsTask(t *testing.T) {

@@ -91,7 +91,7 @@ When a runtime is offline:
 - Runs already queued wait for the runtime to recover; they do not move to another computer. A queued run fails only once the runtime has stopped heartbeating for longer than the reconnect grace **and** the run has itself been queued that long. A runtime that is merely busy keeps its backlog, and work assigned to an already-offline runtime still gets a full grace period to wait.
 - Runs already in progress do not fail right away. They fail with `runtime_offline` only after the runtime's heartbeat has been missing longer than the reconnect grace (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 hours by default); eligible issue or chat runs can retry automatically.
 - When the daemon starts again, it re-registers its runtimes and reclaims runs that did not end cleanly last time.
-- A runtime offline for more than 7 days with no agents bound to it (including archived ones) is cleaned up automatically.
+- A runtime offline for more than 7 days with no active user agents or unfinished tasks is cleaned up automatically; archived agents and task history are preserved. For unbound legacy custom profiles, only instances on machines owned by the profile creator are kept until an administrator selects the machine.
 
 In the demo below, a run assigned while the computer is offline waits in the queue and is claimed only after the computer comes back online.
 
@@ -103,9 +103,13 @@ Detailed states and retry rules are in [Runs](/tasks).
 
 One daemon executes at most 20 runs at a time by default; each agent at most 6. Effective concurrency is the smaller of the two.
 
+Runs waiting for a Direct local directory do not use a daemon execution slot. They reacquire a slot before starting and still count as owned work for shutdown and update safety.
+
 Once a limit is reached, new runs keep queueing. Adjust a single agent's concurrency in the agent settings, and the machine-wide cap with `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Parallel runs compete for machine capacity, tool account quota, and the same working directory all at once.
 
 Token usage, cost, and failures across runs are summarized per workspace on the [Analytics](/analytics) page; `multica runtime usage <runtime-id>` shows token usage for a single runtime.
+
+For Claude Code and Codex runtimes, the runtime's page also shows **Limits**: how much of the plan's 5-hour session and weekly windows the CLI account has used, when each resets, and whether usage is running ahead of the time elapsed. The CLI reports these while it runs tasks, so the numbers are as of the runtime's latest run. API-key accounts have no plan limits to show.
 
 ## Local MCP configuration [#local-mcp]
 
@@ -129,6 +133,30 @@ Once an agent has an MCP configuration (even an empty one), Multica generates a 
 CodeBuddy, Kimi CLI, and Pi load their user-level configuration themselves at startup and combine it with what Multica sends, so the daemon does not pre-merge for them; doing so would start the same server twice. CodeBuddy keeps the Multica entry when names collide. Other tools not in the table receive only the agent's configuration.
 
 The merge happens on the runtime's computer; the commands, URLs, headers, and environment values of local servers are never uploaded. The "Inherited from runtime" list on the agent's **MCP** tab shows only each server's name, transport, source, and whether it is enabled; one shadowed by a same-named agent server is marked "Overridden by Multica". If a local configuration file cannot be parsed, the daemon logs a warning and that run uses only the agent's configuration.
+
+### Cursor MCP logins [#cursor-mcp-login]
+
+Cursor stores MCP OAuth logins per project directory, and every run has its own directory. The daemon therefore keeps one login file per Cursor agent on the runtime's computer, `cursor-mcp-auth/<agent-id>/mcp-auth.json` in the Multica config directory, and links each run to it. Log in to a server such as Mobbin once and the agent's later runs on that computer use the login. It is separate from the logins of your own Cursor projects, so a run never signs you out there. Every run of the agent on that computer uses it, including runs other members trigger.
+
+When the agent has an MCP configuration, each run gets its own Cursor data directory, and the run's `mcp-auth.json` there is the link. When it has none, the run uses your own Cursor data directory (`~/.cursor`, or the daemon's `CURSOR_DATA_DIR`) and the MCP servers configured there; the daemon only links the `mcp-auth.json` that Cursor keeps for the run's directory under `projects/` to the agent's file. The link is removed when the run's directory is cleaned up.
+
+Without an MCP configuration, two kinds of run are not linked, because their Cursor project is one you work in too and linking it would replace your own login there: runs that work in place in a project's local directory, and runs whose directory is enclosed by a git repository, such as a dotfiles repository in your home folder, since Cursor then treats that repository as the project. These runs use whatever login Cursor already holds for that directory, and their transcript gives no login command; log in by running `cursor-agent mcp login <server>` in that directory yourself.
+
+If a server still needs a login, the run's transcript says which one and gives the command to run on the runtime's computer. For an agent with an MCP configuration, for example:
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
+```
+
+For an agent without one, the command uses your own Cursor data directory:
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~/.cursor cursor-agent mcp login mobbin
+```
+
+Both commands run in a login folder kept next to the agent's login file, so they still work after the run's own directory has been cleaned up.
+
+The login applies from the agent's next run; the current run does not pick it up. To use a login file of your own instead, set `CURSOR_MCP_AUTH_SOURCE` in the agent's environment variables to an absolute path to an `mcp-auth.json` or the Cursor project directory containing it; it takes priority over the per-agent file. Two runs of one agent that refresh the same token at the same moment can still sign each other out; log in again if that happens.
 
 ## Cleanup and retention [#cleanup]
 
@@ -155,6 +183,8 @@ A run on a project's local directory works in your own directory, which the daem
 
 The daemon keeps one bare-repository cache per workspace repository, under `.repos/<workspace-id>/` in the workspaces root. Runs of the same workspace on this computer share it: each checkout creates a git worktree from the cache and only fetches new commits instead of cloning again. Codex runs on Linux and Windows are the exception and get a standalone clone with `.git` inside the work directory, because Codex's workspace-write sandbox leaves Git metadata outside the work directory read-only.
 
+New cache directory names use up to 16 ASCII characters from the repository name plus a 12-character hash, keeping long remote URLs from lengthening Git's metadata paths on Windows. During sync or checkout, an existing cache moves to the short name if no registered worktrees remain after pruning stale entries and the destination does not exist. Its contents are preserved without cloning again. Caches with registered worktrees keep their original paths so linked checkouts continue working. If migration fails, the daemon logs a warning and continues using the existing cache; a later attempt can retry.
+
 A cache is removed only when all three hold: no workspace or project references the repository any more, no worktrees remain, and no run has checked out from it for 30 days. It is cloned again when needed. After removing stale agent branches, the daemon runs `git reflog expire --expire=30.days --all` and `git gc --prune=30.days` on the cache while no runs are executing.
 
 ### Sessions, memory, and temporary directories
@@ -164,6 +194,7 @@ A cache is removed only when all three hold: no workspace or project references 
 | Codex session records (one per agent per issue) | `multica-sessions/` in the Codex home (default `~/.codex`) | Removed after 14 days unused; later runs on that issue can no longer resume the earlier Codex session |
 | Hermes session records | `hermes-sessions/` in the Multica config directory (default `~/.multica`; `~/.multica/profiles/<name>` for a named profile) | Removed after 14 days unused |
 | Hermes memory (one per agent) | `hermes-state/` in the same directory | Removed after 90 days unused |
+| Cursor MCP logins (one per agent) | `cursor-mcp-auth/` in the same directory | Kept |
 | Each run's private temporary directory (`TMPDIR`) | `multica-task-*` in the system temp directory | Removed when the run ends; if the daemon was killed, a later cleanup removes it |
 
 Hermes issue and chat tasks use their conversation's session directory as an isolated `HERMES_HOME`, with a regular `state.db` and its SQLite journals inside it. This works with both in-process ACP and gateway-backed Hermes. Existing session stores are reused, and task-local history is migrated before the next run starts.
@@ -230,7 +261,9 @@ Only workspace owners and admins can create, edit, or delete custom runtime prof
 3. Choose the protocol family the command is actually compatible with.
 4. Fill in the name, command, and fixed arguments, then save.
 
-The profile is shared across the workspace. Each connected computer looks up the command on its own; only computers that can resolve it on `PATH` register the corresponding runtime. Creating a profile does not install the command, and it does not sign other members in to the tool.
+A new profile belongs only to the computer selected when you create it. Only that computer’s daemon downloads and registers it; other computers are unaffected, even if they have the same command installed. If the command cannot be resolved, its error appears only on the selected computer. Creating a profile does not install the command or sign in to the tool.
+
+For older profiles, **Machine** in **Edit custom runtime** is optional: leave **Keep current machines** selected to change only the name, command, or other settings. Selecting a machine removes unused copies on other machines; active agents or unfinished tasks there block the binding. Archived agents and task history are preserved. Until the profile is bound, instances on machines owned by its creator are kept so the daemon can reconnect. Other members’ unused copies follow the normal seven-day offline cleanup.
 
 The command field takes an executable and arguments, not a shell script. Plain arguments, quotes, and backslash escapes work; pipes, redirects, `&&`, `;`, backticks, and environment variable expansion do not. When you need those behaviors, put them in a wrapper script and use that script as the command.
 

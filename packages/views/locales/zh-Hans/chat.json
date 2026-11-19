@@ -52,10 +52,10 @@
   "queue": {
     "title_other": "{{count}} 条排队消息",
     "clear": "全部清空",
-    "steer": "引导",
-    "steer_unavailable": "当前回复开始后才能引导",
+    "steer": "立即发送（停止当前回复）",
+    "steer_unavailable": "当前回复开始后可立即发送",
     "steer_no_permission": "你已没有运行该智能体的权限",
-    "steer_unavailable_toast": "暂时无法引导，正在刷新队列。",
+    "steer_unavailable_toast": "暂时无法立即发送，正在刷新队列。",
     "edit": "编辑排队消息",
     "remove": "移除排队消息",
     "more": "更多队列操作",
@@ -256,7 +256,9 @@
     "archive": "归档",
     "unarchive": "取消归档",
     "archived_title": "已归档",
-    "row_actions_aria": "聊天操作"
+    "row_actions_aria": "聊天操作",
+    "wakeup_preview": "回来汇报",
+    "wakeup_active": "等待回来汇报"
   },
   "header": {
     "agent_settings": "智能体设置",
@@ -264,5 +266,52 @@
     "delete": "删除会话",
     "archive": "归档会话",
     "unarchive": "取消归档"
+  },
+  "wakeup": {
+    "panel_title": "唤醒",
+    "panel_empty": "这个对话没有唤醒",
+    "panel_ended": "最近结束",
+    "limits_hint": "每个唤醒都会结束：等待默认 24 小时，最长 7 天。到期时如果还没等到，Agent 会回来一次，告诉你目前的进展。",
+    "strip_waiting": "等待中：{{title}}",
+    "card": "会回来汇报：{{title}}",
+    "ends": "{{relative}}到期",
+    "reminder_at": "{{relative}}提醒",
+    "next_check": "{{relative}}再检查",
+    "last_check": "上次检查：{{note}}",
+    "cancel": "取消唤醒",
+    "cancel_failed": "无法取消唤醒",
+    "retry": "重试",
+    "retry_failed": "无法重试该唤醒",
+    "status": {
+      "active": "等待中",
+      "fired": "已回报",
+      "expired": "已到期",
+      "cancelled": "已取消",
+      "failed": "未能运行"
+    },
+    "report": {
+      "waiting": "等待回报",
+      "running": "正在回报…",
+      "failed": "回报失败"
+    },
+    "failure": {
+      "permission_revoked": "发起人已无权运行此智能体",
+      "access_lost": "所关注的内容已移入私有项目",
+      "dispatch_failed": "智能体无法运行"
+    },
+    "kind": {
+      "condition": "条件满足时",
+      "at": "定时提醒",
+      "check": "定期检查"
+    },
+    "divider": {
+      "condition": "唤醒回报 · 条件满足",
+      "at": "唤醒回报 · 到点",
+      "check": "唤醒回报 · 检查",
+      "expired": "唤醒回报 · 已到期",
+      "generic": "唤醒回报"
+    },
+    "queue_label": "唤醒：{{title}}",
+    "queue_fallback": "唤醒"
   }
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Clock, Layers, Loader2, MessageSquare, Sparkles, SquarePen, UserPlus, Zap, type IconComponent } from "@multica/ui/icons";
+import { Clock, FileText, Layers, Loader2, MessageSquare, Sparkles, SquarePen, UserPlus, Zap, type IconComponent } from "@multica/ui/icons";
 import { Command as CommandPrimitive } from "cmdk";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -21,6 +21,7 @@ import { ProjectIcon } from "../projects/components/project-icon";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { useT } from "../i18n";
 import { HighlightText } from "./highlight-text";
+import { stripMentionMarkdown } from "../issues/utils/strip-mention-markdown";
 import { useIssueTargetWriter } from "./issue-target";
 import { usePalette } from "./palette-context";
 import { CommandGroupView, CommandRow, PaletteGroup, ROW_CLASS, ROW_ICON_CLASS, RowHint } from "./rows";
@@ -41,6 +42,7 @@ const TYPE_ORDER = [
   "squads",
   "members",
   "projects",
+  "docs",
   "issues",
   "autopilots",
   "chats",
@@ -335,6 +337,30 @@ export function RootView({ model, rawQuery }: { model: RootModel; rawQuery: stri
               query={query}
               detail={skill.description}
               onSelect={() => palette.navigate(p.skillDetail(skill.id))}
+            />
+          ))}
+        </PaletteGroup>
+      ),
+    });
+  }
+  if (objects.docs.length > 0) {
+    groups.push({
+      key: "docs",
+      type: "docs",
+      score: objects.docs[0]!.score,
+      node: (
+        <PaletteGroup key="docs" heading={t(($) => $.groups.docs)}>
+          {objects.docs.map(({ item: { doc, folder, snippet, stale } }) => (
+            <ObjectRow
+              key={doc.id}
+              disabled={stale}
+              value={`doc:${doc.id}`}
+              icon={<FileText className={ROW_ICON_CLASS} />}
+              title={doc.title || t(($) => $.untitled_doc)}
+              query={query}
+              // A content hit says why it matched; a title hit says where it lives.
+              detail={snippet ? stripMentionMarkdown(snippet) : (folder ?? undefined)}
+              onSelect={() => palette.navigate(p.docDetail(doc.id))}
             />
           ))}
         </PaletteGroup>

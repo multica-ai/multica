@@ -63,7 +63,9 @@ Multica 靠这次绑定确认消息来自哪位工作区成员。非成员无法
 
 先把 Bot 加入群聊，再 `@Bot` 并写下要求。Bot 只响应明确 @ 它的消息，执行时会带上群里最近的几条消息作为上下文。
 
-无论私聊还是群聊，每次执行的提示词还会列出所回复消息的飞书 ID：`chat_id`、`chat_type`、`message_id`、消息在话题中时的话题 `thread_id`，以及发送者的 `open_id`。这些是飞书的 ID，不是 Multica 的 ID；智能体如果有自己的飞书访问权限，可以用它们查到原消息或会话。`open_id` 只在当前连接的 Bot 所属应用内有效。Multica 没有记录到的 ID 不会出现。
+无论私聊还是群聊，每次执行的提示词还会列出所回复消息的飞书 ID：`chat_id`、`chat_type`、`message_id`、消息在话题中时的话题 `thread_id`，以及 `sender_open_id`（发送者的 `open_id`）。这些是飞书的 ID，不是 Multica 的 ID；智能体如果有自己的飞书访问权限，可以用它们查到原消息或会话。`open_id` 只在当前连接的 Bot 所属应用内有效。Multica 没有记录到的 ID 不会出现。
+
+多条消息合并为一次执行时，`message_id` 指向该批消息中的最后一条，`sender_open_id` 指向这条消息的发送者。恢复话题中较早的一次执行时，即使缺少 `message_id`，也可能包含 `thread_id`。
 
 ### 创建任务
 

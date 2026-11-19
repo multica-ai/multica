@@ -459,6 +459,7 @@ type AgentTaskResponse struct {
 	ParentTaskID       *string                  `json:"parent_task_id,omitempty"`
 	IsLeaderTask       bool                     `json:"is_leader_task,omitempty"`
 	LeaderRoleResolved bool                     `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
+	DocsEnabled        bool                     `json:"docs_enabled,omitempty"`         // the docs_v1 flag at claim time. The daemon writes the `multica doc` and mention://doc lines into the agent brief only when true, so agents are not pointed at an API that answers 403 docs_disabled. Mirror field: internal/daemon/types.go, same JSON name
 	Agent              *TaskAgentData           `json:"agent,omitempty"`
 	ConnectedApps      []ConnectedAppData       `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
 	Repos              []RepoData               `json:"repos,omitempty"`
@@ -563,6 +564,8 @@ type AgentTaskResponse struct {
 	ChatSource               *protocol.ChatSource `json:"chat_source,omitempty"`
 	ChatInThread             bool                 `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
 	ChatMessage              string               `json:"chat_message,omitempty"`                // user message for chat tasks
+	ChatSkillMessage         *string              `json:"chat_skill_message,omitempty"`          // verified member-authored input eligible for explicit skill selection
+	ChatResumeMessage        *string              `json:"chat_resume_message,omitempty"`         // excludes guidance already delivered to the resumed session
 	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
 	ChatIntro                bool                 `json:"chat_intro,omitempty"`                  // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
 	AutopilotRunID           string               `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks

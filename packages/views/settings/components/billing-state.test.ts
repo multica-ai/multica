@@ -9,6 +9,8 @@ import type {
 import {
   hasActiveWorkspaceSeatCapacity,
   resolveAutopilotUsage,
+  resolvePlanChangeTarget,
+  yearlyPriceMonthlyEquivalent,
 } from "./billing-state";
 
 const freeEntitlements: WorkspaceSubscriptionEntitlements = {
@@ -17,7 +19,6 @@ const freeEntitlements: WorkspaceSubscriptionEntitlements = {
   status: "inactive",
   seats: 3,
   limits: {
-    issueCount: { mode: "limited", limit: 17 },
     autopilotRuns: { mode: "limited", limit: 7 },
   },
   currentPeriodEnd: null,
@@ -141,7 +142,11 @@ describe("billing subscription state", () => {
         checkout: true,
         portal: true,
         purchaseSeats: false,
+        changePlan: false,
+        checkPlanChange: false,
       },
+      planChange: null,
+      trial: null,
     } satisfies WorkspaceSubscriptionSummary;
 
     expect(hasActiveWorkspaceSeatCapacity(canceledSummary)).toBe(false);
@@ -160,5 +165,73 @@ describe("billing subscription state", () => {
       },
     } satisfies WorkspaceSubscriptionSummary;
     expect(hasActiveWorkspaceSeatCapacity(activeSummary)).toBe(true);
+  });
+});
+
+describe("resolvePlanChangeTarget", () => {
+  const summary = (
+    plan: string,
+    changePlan: boolean,
+  ): WorkspaceSubscriptionSummary => ({
+    entitlement: { ...freeEntitlements, plan, status: "active" },
+    billingInterval: "month",
+    humanMembers: 3,
+    seatCapacity: null,
+    cancelAtPeriodEnd: false,
+    graceUntil: null,
+    hasStripeCustomer: true,
+    availableActions: {
+      checkout: false,
+      portal: true,
+      purchaseSeats: true,
+      changePlan,
+      checkPlanChange: false,
+    },
+    planChange: null,
+    trial: null,
+  });
+
+  it("switches between Pro and Business only when Cloud offers it", () => {
+    expect(resolvePlanChangeTarget(summary("pro", true))).toBe("business");
+    expect(resolvePlanChangeTarget(summary("business", true))).toBe("pro");
+    expect(resolvePlanChangeTarget(summary("pro", false))).toBeNull();
+  });
+
+  it("offers no switch for Free, an unknown plan, or a missing summary", () => {
+    expect(resolvePlanChangeTarget(summary("free", true))).toBeNull();
+    expect(resolvePlanChangeTarget(summary("enterprise", true))).toBeNull();
+    expect(resolvePlanChangeTarget(null)).toBeNull();
+  });
+});
+
+describe("yearlyPriceMonthlyEquivalent", () => {
+  it("divides a yearly price that splits evenly into months", () => {
+    expect(
+      yearlyPriceMonthlyEquivalent({
+        currency: "usd",
+        unitAmount: 14400,
+        interval: "year",
+        intervalCount: 1,
+      }),
+    ).toBe(1200);
+  });
+
+  it("returns null instead of rounding or converting a monthly price", () => {
+    expect(
+      yearlyPriceMonthlyEquivalent({
+        currency: "usd",
+        unitAmount: 10000,
+        interval: "year",
+        intervalCount: 1,
+      }),
+    ).toBeNull();
+    expect(
+      yearlyPriceMonthlyEquivalent({
+        currency: "usd",
+        unitAmount: 1500,
+        interval: "month",
+        intervalCount: 1,
+      }),
+    ).toBeNull();
   });
 });

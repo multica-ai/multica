@@ -12,7 +12,8 @@
     "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Settings",
-    "views": "Views"
+    "views": "Views",
+    "docs": "Docs"
   },
   "tab": {
     "issue": "Issue",
@@ -27,7 +28,9 @@
     "attachment": "Attachment",
     "create_agent": "Create Agent",
     "my_agents": "My agents' work",
-    "unknown": "Unknown page"
+    "unknown": "Unknown page",
+    "doc": "Docs",
+    "docFolder": "Folder"
   },
   "help": {
     "trigger": "Help",
@@ -118,7 +121,8 @@
     "reset_order": "Reset to default order",
     "copy_workspace_link": "Copy workspace link",
     "workspace_meta_one": "{{slug}} · {{count}} member",
-    "workspace_meta_other": "{{slug}} · {{count}} members"
+    "workspace_meta_other": "{{slug}} · {{count}} members",
+    "docs": "Docs"
   },
   "bottom_bar": {
     "label": "Status bar",

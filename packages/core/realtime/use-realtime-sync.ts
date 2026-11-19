@@ -1,4 +1,8 @@
 "use client";
+import { docKeys } from "../docs/queries";
+
+import { weixinKeys } from "../weixin/queries";
+
 
 import { useEffect, useRef } from "react";
 import { forgetLocalSearchIndex } from "../search-index/instance";
@@ -66,6 +70,7 @@ import {
   notificationPreferenceKeys,
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import { memberLimitKeys } from "../billing/member-limit";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
   showSystemNotification,
@@ -133,6 +138,8 @@ import type {
   ChatQuickActionsPendingState,
   ChatQuickActionsFailureState,
   ChatCancelFinalizedPayload,
+  ChatWakeupChangedPayload,
+  ChatWakeup,
   ChatMessage,
   ChatMessageEventPayload,
   ChatPendingTask,
@@ -714,6 +721,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: issueViewPrefKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: docKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -746,6 +754,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   // what the durable draft-restore rows exist for (#5219) — re-pull them so
   // a mounted composer recovers the prompt without a remount.
   qc.invalidateQueries({ queryKey: chatKeys.draftRestoresAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.wakeupsAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
@@ -1077,6 +1086,10 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
       },
+      weixin_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: weixinKeys.installations(wsId) });
+      },
       telegram_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: telegramKeys.installations(wsId) });
@@ -1204,7 +1217,7 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:reply_notification", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
+      "chat:message", "chat:done", "chat:reply_notification", "chat:quick_actions", "chat:cancel_finalized", "chat:wakeup_changed", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
@@ -1270,6 +1283,11 @@ export function useRealtimeSync(
         qc.setQueriesData<AgentTask[]>(subtreeFilter, (tasks) => tasks?.map((task) =>
           task.issue_id === issue.id ? { ...task, issue_title: issue.title } : task,
         ));
+      }
+      // Whose issue it is decides each subscriber's delivery tier, and a
+      // reassignment can change that without any subscriber event (MUL-9360).
+      if (payload.assignee_changed) {
+        qc.invalidateQueries({ queryKey: issueKeys.subscribers(issue.id) });
       }
       const wsId = getCurrentWsId();
       if (wsId) {
@@ -1406,6 +1424,13 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
     };
 
+    const docUnsubs = ([
+      "doc:created", "doc:updated", "doc:deleted",
+      "doc_folder:created", "doc_folder:updated", "doc_folder:deleted",
+    ] as const).map((event) => ws.on(event, () => {
+      const wsId = getCurrentWsId();
+      if (wsId) void qc.invalidateQueries({ queryKey: docKeys.all(wsId) });
+    }));
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment, issue_revision: issueRevision } = p as CommentCreatedPayload;
       if (!comment?.issue_id) return;
@@ -1646,6 +1671,8 @@ export function useRealtimeSync(
         const currentWsId = getCurrentWsId();
         if (currentWsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
+          // A declined invitation frees its member slot.
+          qc.invalidateQueries({ queryKey: memberLimitKeys.all(currentWsId) });
         }
         if (actorId === authStore.getState().user?.id) {
           qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
@@ -1861,6 +1888,32 @@ export function useRealtimeSync(
       }
     });
 
+    // A wakeup changed. When it started a turn (task_id), the turn's hidden
+    // input row is new too, so the transcript and queue refetch.
+    const unsubChatWakeupChanged = ws.on("chat:wakeup_changed", (p) => {
+      const payload = p as ChatWakeupChangedPayload;
+      chatWsLogger.info("chat:wakeup_changed (global)", payload);
+      qc.invalidateQueries({ queryKey: chatKeys.wakeups(payload.chat_session_id) });
+      const id = getCurrentWsId();
+      if (id) qc.invalidateQueries({ queryKey: chatKeys.myWakeups(id) });
+      if (payload.task_id) {
+        qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+        qc.invalidateQueries({ queryKey: chatKeys.messagesPage(payload.chat_session_id) });
+        qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+        invalidatePendingAggregate();
+        invalidateSessionLists();
+      }
+    });
+
+    // A wakeup's row shows how its report turn is going (last_task_status),
+    // so task lifecycle in a conversation with started wakeups refreshes it.
+    const refreshWakeupTurns = (sessionId: string) => {
+      const cached = qc.getQueryData<ChatWakeup[]>(chatKeys.wakeups(sessionId));
+      if (cached?.some((w) => w.last_task_id)) {
+        qc.invalidateQueries({ queryKey: chatKeys.wakeups(sessionId) });
+      }
+    };
+
     // Lifecycle events are invalidation hints. They intentionally omit queue
     // previews and message ids, so only the pending-task endpoint can author
     // the complete queue shape.
@@ -1903,6 +1956,7 @@ export function useRealtimeSync(
       );
       invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
     });
 
@@ -1954,6 +2008,7 @@ export function useRealtimeSync(
       );
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidateChatMessageQueries(qc, payload.chat_session_id);
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
       invalidateSessionLists();
     });
@@ -1970,6 +2025,7 @@ export function useRealtimeSync(
         (old) => removePendingChatTask(old, payload.task_id),
       );
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
     });
 
@@ -1992,6 +2048,7 @@ export function useRealtimeSync(
       );
       invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
       // FailTask persisted a failure chat_message, so the thread list's
       // last_message / unread_count / sort order changed too. Mirror the
@@ -2052,6 +2109,7 @@ export function useRealtimeSync(
     return () => {
       releaseSyncTarget();
       unsubAny();
+      unsubChatWakeupChanged();
       unsubGitHubInstallationCreated();
       unsubIssueUpdated();
       unsubIssueCreated();
@@ -2063,6 +2121,7 @@ export function useRealtimeSync(
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());
       unsubInboxNew();
+      docUnsubs.forEach(unsub => unsub());
       unsubCommentCreated();
       unsubCommentUpdated();
       unsubCommentDeleted();
