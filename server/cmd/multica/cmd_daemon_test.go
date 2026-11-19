@@ -1029,3 +1029,22 @@ func clearDaemonTaskEnv(t *testing.T) {
 		t.Setenv(key, "")
 	}
 }
+
+func TestPrintDaemonStatusShowsSkippedAgents(t *testing.T) {
+	t.Parallel()
+
+	health := map[string]any{
+		"pid": 1234, "uptime": "1m", "agents": []any{"codex"},
+		"skipped_agents": map[string]any{
+			"pi":     "version below minimum",
+			"claude": "version probe timed out (limit 10s)",
+		},
+	}
+	var out bytes.Buffer
+	printDaemonStatusReport(&out, "Daemon", health)
+	got := out.String()
+	want := "claude: version probe timed out (limit 10s); pi: version below minimum"
+	if !strings.Contains(got, "Skipped agents:  "+want+"\n") {
+		t.Fatalf("daemon status output = %q, want skipped providers and reasons in name order", got)
+	}
+}
