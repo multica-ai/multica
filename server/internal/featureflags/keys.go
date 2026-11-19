@@ -35,6 +35,13 @@ const (
 	// makes those endpoints answer 404, so clients stop syncing and search
 	// through the server again without a client release.
 	LocalSearchIndex = "local_search_index"
+	// DocsV1 gates workspace Docs (MUL-8370) while it is still being tested:
+	// the /api/docs and /api/doc-folders APIs, the Web/Desktop entry points,
+	// and the doc lines in the agent brief. Off by default so a release can
+	// ship the code without launching the feature; FF_DOCS_V1=true turns it on
+	// for a deployment. It is a GLOBAL switch. Turning it off leaves existing
+	// doc rows untouched — they simply become unreachable until it is back on.
+	DocsV1 = "docs_v1"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -59,6 +66,7 @@ var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
+	DocsV1,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -79,6 +87,10 @@ func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 
 func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, LocalSearchIndex, true)
+}
+
+func DocsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, DocsV1, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

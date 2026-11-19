@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import type { AgentTask, InboxItem } from "@multica/core/types";
@@ -24,6 +24,9 @@ const listData: { active: InboxItem[]; archived: InboxItem[]; lookup?: InboxItem
 const NO_SNOOZED: never[] = [];
 const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
 const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
+// The active list as a read that failed before anything loaded, and is
+// possibly being tried again.
+const activeFailure = { failed: false, retrying: false, refetch: vi.fn() };
 const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: (options: unknown) => options,
@@ -39,6 +42,11 @@ vi.mock("@tanstack/react-query", () => ({
     isError: false,
     refetch: vi.fn(),
     ...(options.queryKey.includes("lookup") ? lookupState : {}),
+    ...(options.queryKey.at(-1) === "list" && activeFailure.failed
+      ? activeFailure.retrying
+        ? { data: undefined, isError: false, isLoading: true, isFetching: true, errorUpdateCount: 1, refetch: activeFailure.refetch }
+        : { data: undefined, isError: true, isFetching: false, errorUpdateCount: 1, refetch: activeFailure.refetch }
+      : {}),
   }); },
   useInfiniteQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
     queryCalls.push(options);
@@ -266,6 +274,9 @@ function reset() {
   lookupState.isLoading = false;
   lookupState.isError = false;
   lookupState.refetch.mockClear();
+  activeFailure.failed = false;
+  activeFailure.retrying = false;
+  activeFailure.refetch.mockClear();
   queryCalls.length = 0;
   searchParams = new URLSearchParams();
   replace.mockClear();
@@ -441,6 +452,40 @@ describe("InboxPage", () => {
     expect(container.querySelector("[data-slot='list-column']")).toBeNull();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Inbox");
     expect(screen.queryByTestId("issue-detail")).toBeNull();
+  });
+
+  // A list that never loaded is not an empty Inbox (MUL-9635).
+  it.each([
+    ["a phone", PHONE],
+    ["desktop", DESKTOP],
+  ])("on %s, offers another try when the Inbox could not load, not an empty Inbox", (_device, width) => {
+    reset();
+    layout.width = width;
+    activeFailure.failed = true;
+
+    render(<InboxPage />);
+
+    const alert = screen.getByRole("alert");
+    expect(screen.queryByTestId("list")).toBeNull();
+    fireEvent.click(within(alert).getByRole("button"));
+    expect(activeFailure.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a phone", PHONE],
+    ["desktop", DESKTOP],
+  ])("on %s, keeps the load error while it is tried again", (_device, width) => {
+    reset();
+    layout.width = width;
+    activeFailure.failed = true;
+    activeFailure.retrying = true;
+    searchParams = new URLSearchParams("issue=issue-1");
+
+    render(<InboxPage />);
+
+    expect(within(screen.getByRole("alert")).getByRole("button")).toBeDisabled();
+    // Still unknown, so the open notification is not sent to its issue page.
+    expect(replace).not.toHaveBeenCalled();
   });
 
   // The live Inbox lives in the Work panel; the archive has nowhere else to list.

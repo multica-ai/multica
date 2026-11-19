@@ -233,5 +233,64 @@
     "unavailable": "このワークスペースのプランには含まれていません。",
     "view_plans": "プランを見る",
     "locked_error": "このワークスペースのプランには含まれていません。既存の設定はそのまま有効です。追加するにはアップグレードしてください。"
+  },
+  "trial": {
+    "status": {
+      "active": "Business トライアル",
+      "days_left_other": "残り {{count}} 日",
+      "active_label_other": "Business トライアル、残り {{count}} 日。請求を開きます。",
+      "free": "Free",
+      "upgrade": "アップグレード",
+      "ended_label": "Business トライアルが終了し、このワークスペースは Free になりました。請求を開いてアップグレードします。",
+      "ending": "まもなく終了",
+      "ending_label": "Business トライアルはまもなく終了します。請求を開きます。"
+    },
+    "reminder": {
+      "halfway_title_other": "Business トライアルは折り返しを過ぎました。残り {{count}} 日です。",
+      "days_left_title_other": "Business トライアルは残り {{count}} 日です。",
+      "last_day_title": "Business トライアルは 1 日以内に終了します。",
+      "body": "{{date}} にこのワークスペースは Free に切り替わります。Business を続けるにはプランを選択してください。",
+      "later": "後で",
+      "choose_plan": "プランを選択"
+    },
+    "welcome": {
+      "title_other": "ようこそ！このワークスペースは Business を {{count}} 日間無料でお試しいただけます",
+      "body": "プライベートプロジェクトなどの Business 機能を利用できます。カード登録は不要で、終了後は自動的に Free に切り替わります。",
+      "action": "含まれる機能を見る",
+      "close": "閉じる"
+    },
+    "ended": {
+      "title": "Business トライアルが終了しました",
+      "description": "{{workspace}} は Free に切り替わりました。データは削除されていません。",
+      "description_without_name": "このワークスペースは Free に切り替わりました。データは削除されていません。",
+      "kept": "既存のメンバー、プロジェクト、設定はそのまま残ります。",
+      "private_projects": "プライベートプロジェクトは非公開のままです。アクセスリストはアップグレードするまで読み取り専用です。",
+      "autopilot": "自動化は月 {{limit}} 回まで。今月は {{used}} 回使用しました。",
+      "autopilot_paused": "自動化は月 {{limit}} 回までで、今月は {{used}} 回使用したため、{{date}} まで一時停止しています。",
+      "keep_free": "Free のまま使う",
+      "upgrade": "Business にアップグレード",
+      "member_title": "このワークスペースは Free になりました",
+      "member_description": "既存の設定はそのまま使えます。さらに機能が必要な場合はワークスペースの管理者に相談してください。"
+    },
+    "card": {
+      "title": "Business トライアル",
+      "badge_other": "トライアル中 · 残り {{count}} 日",
+      "description": "{{date}} までトライアル中です。支払い方法が登録されていないため、終了後は Free に切り替わり、請求は発生しません。",
+      "started": "{{date}} 開始",
+      "progress": "{{total}} 日中 {{day}} 日目",
+      "ends": "{{date}} 終了",
+      "ended_title": "Business トライアルが終了しました",
+      "ended_description": "トライアルは {{date}} に終了しました。下でプランを選択すると Business の機能が戻ります。",
+      "choose_plan": "プランを選択",
+      "ended_description_member": "トライアルは {{date}} に終了しました。Business の機能を戻すには、ワークスペースの管理者にアップグレードを依頼してください。"
+    },
+    "features": {
+      "title": "トライアル中の Business 機能",
+      "description": "トライアル終了後も削除や無効化はされません。新規作成や追加ができなくなるだけです。",
+      "private_projects": {
+        "name": "プライベートプロジェクト",
+        "after": "終了後も非公開のまま。アクセスリストは読み取り専用になります。"
+      }
+    }
   }
 }

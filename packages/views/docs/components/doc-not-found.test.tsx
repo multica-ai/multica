@@ -2,7 +2,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { configStore } from "@multica/core/config";
 import { docKeys, useDocDraftStore } from "@multica/core/docs";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import type { Doc } from "@multica/core/types";
 import { DocPage } from "./doc-page";
 import { DocHistoryPage } from "./doc-history-page";
@@ -89,6 +91,7 @@ const gone = () => new ApiError("doc not found", 404);
 let qc: QueryClient;
 beforeEach(() => {
   vi.clearAllMocks();
+  configStore.getState().setFeatureFlags({ [DOCS_V1_FLAG]: true });
   useDocDraftStore.getState().clearDraft();
   qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   apiMock.listDocTree.mockResolvedValue({ folders: [], docs: [] });

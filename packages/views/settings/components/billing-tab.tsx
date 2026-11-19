@@ -81,6 +81,7 @@ import { useLocale, useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
 import { openExternal } from "../../platform";
 import {
+  SETTINGS_ANCHOR_ATTR,
   SettingsCard,
   SettingsRow,
   SettingsSection,
@@ -93,10 +94,23 @@ import {
   yearlyPriceMonthlyEquivalent,
 } from "./billing-state";
 import { formatStripeMinorAmount } from "./billing-format";
+import { BillingTrialSection } from "./billing-trial-section";
 
 export { formatStripeMinorAmount } from "./billing-format";
 
 const CHECKOUT_SYNC_TIMEOUT_MS = 30_000;
+const UPGRADE_SECTION_ANCHOR = "billing-upgrade";
+
+/** Brings the plan cards into view, as a settings deep link would. */
+function scrollToUpgrade() {
+  const target = document.querySelector<HTMLElement>(
+    `[${SETTINGS_ANCHOR_ATTR}="${UPGRADE_SECTION_ANCHOR}"]`,
+  );
+  const reduceMotion =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  target?.scrollIntoView?.({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
+}
 const SEAT_PURCHASE_POLL_TIMEOUT_MS = 2 * 60_000;
 const SEAT_PURCHASE_PREVIEW_DEBOUNCE_MS = 800;
 const PAID_PLANS = ["pro", "business"] as const;
@@ -346,10 +360,13 @@ function BillingTabContent() {
         : false,
   });
   const entitlements = summaryQuery.data?.entitlement;
+  // Checkout is done once paid seats are in effect. Neither the plan nor
+  // Checkout going away proves it: a trial already reports Business, and a
+  // first payment still incomplete also takes Checkout away.
   const isCheckoutConfirmed =
     returnResult === "success" &&
     returnObservedAt !== null &&
-    summaryQuery.data?.availableActions.checkout === false &&
+    hasActiveWorkspaceSeatCapacity(summaryQuery.data) &&
     summaryQuery.isFetchedAfterMount &&
     summaryQuery.dataUpdatedAt >= returnObservedAt;
   const activeSeatPurchaseRequestId =
@@ -1326,6 +1343,11 @@ function BillingTabContent() {
         </Alert>
       ) : null}
 
+      <BillingTrialSection
+        summary={summaryQuery.data}
+        onChoosePlan={canUpgrade ? scrollToUpgrade : undefined}
+      />
+
       <SettingsSection title={t(($) => $.workspace.current.title)}>
         <SettingsCard>
           <SettingsRow
@@ -1450,7 +1472,10 @@ function BillingTabContent() {
       </SettingsSection>
 
       {canUpgrade ? (
-        <SettingsSection title={t(($) => $.workspace.upgrade.title)}>
+        <SettingsSection
+          title={t(($) => $.workspace.upgrade.title)}
+          anchor={UPGRADE_SECTION_ANCHOR}
+        >
           <SettingsCard>
             <div className="space-y-5 p-4 sm:p-5">
               <div

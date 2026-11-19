@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -35,6 +36,19 @@ var docListCmd = &cobra.Command{
 	RunE:  runDocList,
 }
 
+var docSearchCmd = &cobra.Command{
+	Use:   "search <query>",
+	Short: "Search docs by title or content",
+	Long: "Search docs in the current workspace. The query matches doc titles and\n" +
+		"Markdown content; with several words, every word must appear somewhere\n" +
+		"in the doc. Title matches rank first.\n\n" +
+		"The MATCH column (match_source in --output json) reports whether the\n" +
+		"title or the content matched, with a short excerpt for content hits.\n" +
+		"Read a result with `multica doc get <doc-id>`.",
+	Args: exactArgs(1),
+	RunE: runDocSearch,
+}
+
 var docGetCmd = &cobra.Command{
 	Use:   "get <doc-id>",
 	Short: "Get a doc with its content and current revision",
@@ -56,8 +70,10 @@ var docUpdateCmd = &cobra.Command{
 }
 
 func init() {
-	docCmd.AddCommand(docListCmd, docGetCmd, docCreateCmd, docUpdateCmd)
+	docCmd.AddCommand(docListCmd, docSearchCmd, docGetCmd, docCreateCmd, docUpdateCmd)
 	docListCmd.Flags().String("output", "table", "Output format: table or json")
+	docSearchCmd.Flags().Int("limit", 20, "Maximum results (at most 50)")
+	docSearchCmd.Flags().String("output", "table", "Output format: table or json")
 	docGetCmd.Flags().String("output", "json", "Output format: json or content")
 	for _, cmd := range []*cobra.Command{docCreateCmd, docUpdateCmd} {
 		cmd.Flags().String("title", "", "Document title")
@@ -209,6 +225,50 @@ func runDocList(cmd *cobra.Command, _ []string) error {
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i][2] < rows[j][2] })
 	cli.PrintTable(os.Stdout, []string{"ID", "TYPE", "PATH", "REVISION", "UPDATED"}, rows)
+	return nil
+}
+
+func runDocSearch(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	params := url.Values{}
+	params.Set("q", args[0])
+	if v, _ := cmd.Flags().GetInt("limit"); v > 0 {
+		params.Set("limit", fmt.Sprintf("%d", v))
+	}
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/docs/search?"+params.Encode(), &result); err != nil {
+		return fmt.Errorf("search docs: %w", err)
+	}
+	if output, _ := cmd.Flags().GetString("output"); output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	docs, _ := result["docs"].([]any)
+	rows := make([][]string, 0, len(docs))
+	for _, raw := range docs {
+		doc, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		match := strVal(doc, "match_source")
+		if snippet := strVal(doc, "matched_snippet"); snippet != "" {
+			if runes := []rune(snippet); len(runes) > 60 {
+				snippet = string(runes[:57]) + "..."
+			}
+			match += ": " + snippet
+		}
+		updated := strVal(doc, "updated_at")
+		if len(updated) >= 10 {
+			updated = updated[:10]
+		}
+		rows = append(rows, []string{strVal(doc, "id"), strVal(doc, "title"), updated, match})
+	}
+	cli.PrintTable(os.Stdout, []string{"ID", "TITLE", "UPDATED", "MATCH"}, rows)
 	return nil
 }
 

@@ -270,6 +270,20 @@ export function InboxSection({
             {displayed.map((item) => renderRow(item))}
           </PanelList>
         )
+      ) : list.load === "failed" ? (
+        // A list that never loaded is not an empty Inbox: say so and offer
+        // another try rather than "No notifications".
+        <div role="alert" className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
+          <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.errors.load_failed)}</span>
+          <button
+            type="button"
+            disabled={list.retrying}
+            className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
+            onClick={list.retry}
+          >
+            {tInbox(($) => $.list.retry)}
+          </button>
+        </div>
       ) : list.filtered ? (
         <div className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
           <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.filters.empty)}</span>
@@ -281,11 +295,11 @@ export function InboxSection({
             {tInbox(($) => $.filters.clear)}
           </button>
         </div>
-      ) : (
+      ) : list.load === "loaded" ? (
         <p className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
           {t(($) => $.panels.work.inbox_empty)}
         </p>
-      )}
+      ) : null}
       {all.length > limit && (
         <button
           type="button"

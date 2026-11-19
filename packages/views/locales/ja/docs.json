@@ -62,5 +62,9 @@
   },
   "edited": "最終編集 {{time}}",
   "outline": "目次",
-  "link_copied": "リンクをコピーしました"
+  "link_copied": "リンクをコピーしました",
+  "unavailable": {
+    "title": "ドキュメントはまだ利用できません",
+    "description": "このワークスペースではドキュメントが有効になっていません。"
+  }
 }

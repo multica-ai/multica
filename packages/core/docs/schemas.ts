@@ -60,6 +60,27 @@ export const DocTreeSchema = z.object({
   folders: z.array(DocFolderSchema),
   docs: z.array(DocSummarySchema),
 });
+// One unparseable hit is dropped instead of emptying the whole result list.
+const searchHit = summary
+  .extend({
+    match_source: z.enum(["title", "content"]).catch("content"),
+    matched_snippet: z.string().nullable().optional(),
+  })
+  .transform((d) => ({
+    ...mapSummary(d),
+    matchSource: d.match_source,
+    matchedSnippet: d.matched_snippet ?? null,
+  }));
+export const DocSearchResponseSchema = z.object({
+  docs: z
+    .array(z.unknown())
+    .transform((rows) =>
+      rows.flatMap((row) => {
+        const hit = searchHit.safeParse(row);
+        return hit.success ? [hit.data] : [];
+      }),
+    ),
+});
 export const DocVersionSchema = z
   .object({
     doc_id: z.string(),

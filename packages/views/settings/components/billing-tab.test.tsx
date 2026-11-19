@@ -83,6 +83,7 @@ const mocks = vi.hoisted(() => ({
       checkPlanChange: false,
     },
     planChange: null as WorkspaceSubscriptionSummary["planChange"],
+    trial: null as WorkspaceSubscriptionSummary["trial"],
   } as WorkspaceSubscriptionSummary,
   usage: {
     action: "enforce" as "off" | "observe" | "enforce",
@@ -300,6 +301,7 @@ describe("BillingTab", () => {
         checkPlanChange: false,
       },
       planChange: null,
+      trial: null,
     });
     Object.assign(mocks.usage, {
       action: "enforce",
@@ -770,7 +772,7 @@ describe("BillingTab", () => {
         autopilotRuns: { mode: "unlimited", limit: null },
       },
     });
-    mocks.summary.availableActions.checkout = false;
+    setSeatCapacity({ humanMembers: 3, purchased: 3 });
     mocks.summaryDataUpdatedAt = Date.now() + 1;
     mocks.summaryFetchedAfterMount = true;
     try {
@@ -779,6 +781,45 @@ describe("BillingTab", () => {
       expect(screen.getByText("Pro is active")).toBeInTheDocument();
       expect(screen.getByText("Unlimited")).toBeInTheDocument();
       expect(screen.queryByText("5 / 7")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps syncing a checkout started during a trial until paid seats take effect", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
+    navigationState.search = "tab=billing&result=success&session_id=cs_test_1";
+    // Still on the Business trial while the first Pro payment is incomplete:
+    // the plan is paid and Checkout is gone, but nothing has been paid for.
+    Object.assign(mocks.entitlements, {
+      plan: "business",
+      status: "trialing",
+      limits: { autopilotRuns: { mode: "unlimited", limit: null } },
+    });
+    mocks.summary.trial = {
+      plan: "business",
+      state: "active",
+      startedAt: "2029-12-25T00:00:00Z",
+      endsAt: "2030-01-08T00:00:00Z",
+    };
+    mocks.summary.availableActions.checkout = false;
+    mocks.summaryDataUpdatedAt = Date.now() + 1;
+    mocks.summaryFetchedAfterMount = true;
+    try {
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Activating your subscription")).toBeInTheDocument();
+      expect(screen.queryByText("Business is active")).not.toBeInTheDocument();
+      const summaryOptions = mocks.useQuery.mock.calls
+        .map(([options]) => options)
+        .find(
+          (options) =>
+            options.queryKey?.[options.queryKey.length - 1] === "summary",
+        );
+      expect(
+        summaryOptions.refetchInterval({ state: { data: mocks.summary } }),
+      ).toBe(2_000);
     } finally {
       vi.useRealTimers();
     }
@@ -2014,6 +2055,102 @@ describe("BillingTab", () => {
         expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
       );
       expect(mocks.refetchSummary).toHaveBeenCalled();
+    });
+  });
+  describe("no-card trial", () => {
+    const DAY = 24 * 60 * 60 * 1000;
+
+    function setTrial(state: "active" | "expired", startedAt: number, days = 14) {
+      const endsAt = startedAt + days * DAY;
+      mocks.summary.trial = {
+        plan: "business",
+        state,
+        startedAt: new Date(startedAt).toISOString(),
+        endsAt: new Date(endsAt).toISOString(),
+      };
+      if (state === "active") {
+        Object.assign(mocks.entitlements, {
+          plan: "business",
+          status: "trialing",
+          limits: { autopilotRuns: { mode: "unlimited", limit: null } },
+          currentPeriodEnd: new Date(endsAt).toISOString(),
+        });
+      }
+      return endsAt;
+    }
+
+    it("shows where the trial stands and what each Business feature keeps", () => {
+      const endsAt = setTrial("active", Date.now() - 4.5 * DAY);
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByRole("heading", { name: "Business trial" })).toBeInTheDocument();
+      expect(screen.getByText("Trial · 10 days left")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          `Trial until ${new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(endsAt))}. No payment method is on file, so the workspace moves to Free afterwards and is not charged.`,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getAllByText("Day 5 of 14").length).toBeGreaterThan(0);
+      expect(screen.getByText("Private projects")).toBeInTheDocument();
+      expect(
+        screen.getByText("Stay private after the trial. Their access lists become read-only."),
+      ).toBeInTheDocument();
+      // A trialling manager subscribes through the same plan cards.
+      expect(screen.getByRole("button", { name: "Upgrade to Business" })).toBeInTheDocument();
+    });
+
+    it("takes a manager from the trial card to the plan cards", async () => {
+      setTrial("active", Date.now() - 4.5 * DAY);
+      const scrollIntoView = vi.fn();
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = scrollIntoView;
+      try {
+        renderWithI18n(<BillingTab />);
+        await userEvent.setup().click(screen.getByRole("button", { name: "Choose a plan" }));
+
+        expect(scrollIntoView).toHaveBeenCalledOnce();
+        expect(scrollIntoView.mock.contexts[0]).toHaveAttribute("data-settings-anchor", "billing-upgrade");
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    it("offers no plan choice to a member who cannot subscribe", () => {
+      setTrial("active", Date.now() - 4.5 * DAY);
+      mocks.summary.availableActions.checkout = false;
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.queryByRole("button", { name: "Choose a plan" })).not.toBeInTheDocument();
+    });
+
+    it("points an ended trial at the plans below", () => {
+      const endsAt = setTrial("expired", Date.now() - 20 * DAY);
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Business trial ended")).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          `The trial ended on ${new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(endsAt))}. Choose a plan below to get Business features back.`,
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/days? left/)).not.toBeInTheDocument();
+    });
+
+    it("does not send a member to plan cards that are hidden after trial expiry", () => {
+      setTrial("expired", Date.now() - 15 * DAY);
+      mocks.summary.availableActions.checkout = false;
+      renderWithI18n(<BillingTab />);
+      expect(screen.getByText("Business trial ended")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Upgrade to Pro" })).not.toBeInTheDocument();
+      expect(screen.queryByText(/Choose a plan below/)).not.toBeInTheDocument();
+      expect(screen.getByText(/Ask a workspace admin to upgrade/)).toBeInTheDocument();
+    });
+
+    it("says nothing about an end that only this clock has seen", () => {
+      // Cloud still reports the trial active, a moment past its end here.
+      setTrial("active", Date.now() - 14 * DAY - 1000);
+      renderWithI18n(<BillingTab />);
+      expect(screen.queryByText("Business trial ended")).not.toBeInTheDocument();
     });
   });
 });
