@@ -1638,7 +1638,11 @@
     "member_limit_full_description_pending": "保留中の招待も枠を使います（現在 {{pending}} 件）。Pro にアップグレードするとメンバー数は無制限です。先に招待を取り消すか、メンバーを削除することもできます。",
     "member_limit_usage": "{{used}} / {{limit}} 人",
     "upgrade_and_invite": "アップグレードして招待",
-    "toast_member_limit_reached": "メンバーが上限に達しています。さらに招待するにはアップグレードしてください。"
+    "toast_member_limit_reached": "メンバーが上限に達しています。さらに招待するにはアップグレードしてください。",
+    "member_limit_full_description_no_upgrade": "保留中の招待を取り消すか、メンバーを削除すると枠が空きます。",
+    "toast_invalid_email": "有効なメールアドレスを入力してください。",
+    "toast_already_member": "{{email}} はすでにこのワークスペースのメンバーです。",
+    "toast_invitation_pending": "{{email}} への招待はすでに保留中です。"
   },
   "integrations": {
     "status_connected": "接続済み",

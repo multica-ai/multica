@@ -81,6 +81,7 @@ import {
   memberLimitOptions,
   readUpgradeInvite,
   saveUpgradeInvite,
+  type UpgradeInvite,
   usePreviewWorkspaceSeatPurchase,
   usePurchaseWorkspaceSeats,
   workspaceSubscriptionSummaryOptions,
@@ -116,6 +117,9 @@ import {
 } from "./seat-invite-purchase";
 
 const SEAT_PURCHASE_CONFIRM_TIMEOUT_MS = 2 * 60_000;
+
+// Catches typos before an upgrade buys a seat for the invitation.
+const INVITE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type MembersView = "members" | "invitations" | "links";
 
@@ -490,17 +494,24 @@ export function MembersTab() {
 
   // The Team panel's invite button links here with `?invite=1`; it waits for
   // the member list so only managers get the dialog. Billing links back with
-  // `?invite=resume` once an upgrade started from a full invite dialog has
-  // gone through, and the held-back invitation is sent.
+  // `?invite=resume&held_invite=<token>` once the upgrade started for that
+  // held invitation has gone through, and the invitation is sent.
   const inviteRequest = navigation?.searchParams.get("invite") ?? null;
+  const heldInviteToken = navigation?.searchParams.get("held_invite") ?? null;
   useEffect(() => {
     if (inviteRequest === null || !navigation || !currentMember || !workspace) return;
     const params = new URLSearchParams(navigation.searchParams);
     params.delete("invite");
+    params.delete("held_invite");
     navigation.replace(`${navigation.pathname}?${params}`);
     if (!canManageWorkspace) return;
-    const held = inviteRequest === "resume" ? readUpgradeInvite(workspace.slug) : null;
-    clearUpgradeInvite(workspace.slug);
+    let held: UpgradeInvite | null = null;
+    if (inviteRequest === "resume") {
+      held = heldInviteToken ? readUpgradeInvite(workspace.slug, heldInviteToken) : null;
+      // The upgrade is done; no other held invitation can still be bound to
+      // a checkout that will complete.
+      clearUpgradeInvite(workspace.slug);
+    }
     setInviteOpen(true);
     if (!held) return;
     setInviteEmail(held.email);
@@ -509,7 +520,7 @@ export function MembersTab() {
       .invalidateQueries({ queryKey: memberLimitKeys.all(wsId) })
       .then(() => inviteMember(held.email, held.role));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume the intent once the role is known
-  }, [inviteRequest, currentMember?.role, workspace?.slug]);
+  }, [inviteRequest, heldInviteToken, currentMember?.role, workspace?.slug]);
   const isOwner = currentMember?.role === "owner";
   const ownerCount = members.filter((m) => m.role === "owner").length;
   // Only owners/admins may list share links; skip the request for plain
@@ -534,6 +545,8 @@ export function MembersTab() {
         }
       : null;
   const inviteBlockedByMemberLimit = isMemberLimitFull(memberLimit);
+  // Upgrading needs Billing; without it a full workspace can only free a slot.
+  const canUpgradeForInvite = inviteBlockedByMemberLimit && billingEnabled;
   const needle = memberQuery.trim().toLocaleLowerCase();
   const visibleMembers = needle
     ? members.filter(
@@ -656,14 +669,36 @@ export function MembersTab() {
 
   const handleInviteMember = () => inviteMember(inviteEmail.trim(), inviteRole);
 
+  // Why an invitation could not be sent even after paying, checked before
+  // the upgrade buys a seat for it. The server re-checks on send.
+  const upgradeInviteProblem = (email: string): string | null => {
+    const normalized = email.toLowerCase();
+    if (!INVITE_EMAIL_PATTERN.test(normalized)) {
+      return t(($) => $.members.toast_invalid_email);
+    }
+    if (members.some((m) => m.email.toLowerCase() === normalized)) {
+      return t(($) => $.members.toast_already_member, { email });
+    }
+    if (invitations.some((inv) => inv.invitee_email.toLowerCase() === normalized)) {
+      return t(($) => $.members.toast_invitation_pending, { email });
+    }
+    return null;
+  };
+
   // The workspace is full: hold the invitation while Billing runs checkout
   // for Pro, which sends it once the new plan is confirmed.
   const handleUpgradeAndInvite = () => {
     if (!workspace || !navigation) return;
-    saveUpgradeInvite(workspace.slug, { email: inviteEmail.trim(), role: inviteRole });
+    const email = inviteEmail.trim();
+    const problem = upgradeInviteProblem(email);
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    const token = saveUpgradeInvite(workspace.slug, { email, role: inviteRole });
     setInviteOpen(false);
     const href = settingsHref(navigation.pathname, navigation.searchParams, "billing");
-    navigation.push(`${href}&upgrade=pro`);
+    navigation.push(`${href}&upgrade=pro&held_invite=${encodeURIComponent(token)}`);
   };
 
   const handlePurchaseSeatAndInvite = async () => {
@@ -837,6 +872,8 @@ export function MembersTab() {
         try {
           await api.revokeInvitation(workspace.id, invitation.id);
           qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
+          // A revoked invitation frees its member slot.
+          qc.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
           toast.success(t(($) => $.members.toast_invitation_revoked));
         } catch (e) {
           toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_invitation_revoke_failed));
@@ -1106,8 +1143,8 @@ export function MembersTab() {
             onSubmit={(event) => {
               event.preventDefault();
               if (!inviteEmail.trim()) return;
-              if (inviteBlockedByMemberLimit) handleUpgradeAndInvite();
-              else void handleInviteMember();
+              if (canUpgradeForInvite) handleUpgradeAndInvite();
+              else if (!inviteBlockedByMemberLimit) void handleInviteMember();
             }}
           >
             <div className="space-y-1.5">
@@ -1155,11 +1192,13 @@ export function MembersTab() {
                   {t(($) => $.members.member_limit_full_title, { limit: enforcedMemberLimit.limit })}
                 </AlertTitle>
                 <AlertDescription>
-                  {enforcedMemberLimit.pending > 0
-                    ? t(($) => $.members.member_limit_full_description_pending, {
-                        pending: enforcedMemberLimit.pending,
-                      })
-                    : t(($) => $.members.member_limit_full_description)}
+                  {!billingEnabled
+                    ? t(($) => $.members.member_limit_full_description_no_upgrade)
+                    : enforcedMemberLimit.pending > 0
+                      ? t(($) => $.members.member_limit_full_description_pending, {
+                          pending: enforcedMemberLimit.pending,
+                        })
+                      : t(($) => $.members.member_limit_full_description)}
                 </AlertDescription>
               </Alert>
             ) : null}
@@ -1181,7 +1220,7 @@ export function MembersTab() {
                 >
                   {t(($) => $.members.confirm_cancel)}
                 </Button>
-                {inviteBlockedByMemberLimit ? (
+                {canUpgradeForInvite ? (
                   <Button
                     type="button"
                     disabled={inviteLoading || !inviteEmail.trim() || !navigation}
@@ -1192,7 +1231,7 @@ export function MembersTab() {
                 ) : (
                   <Button
                     type="submit"
-                    disabled={inviteLoading || !inviteEmail.trim()}
+                    disabled={inviteLoading || !inviteEmail.trim() || inviteBlockedByMemberLimit}
                     aria-busy={inviteLoading || undefined}
                   >
                     {inviteLoading ? t(($) => $.members.inviting) : t(($) => $.members.invite_button)}

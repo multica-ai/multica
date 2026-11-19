@@ -1638,7 +1638,11 @@
     "member_limit_full_description_pending": "待接受的邀請也佔名額（目前 {{pending}} 個）。升級到 Pro 後成員不限，也可以先撤回邀請或移除成員。",
     "member_limit_usage": "{{used}} / {{limit}} 位成員",
     "upgrade_and_invite": "升級並邀請",
-    "toast_member_limit_reached": "工作區成員已滿，升級後才能邀請更多成員。"
+    "toast_member_limit_reached": "工作區成員已滿，升級後才能邀請更多成員。",
+    "member_limit_full_description_no_upgrade": "撤回待接受的邀請或移除成員後，才能邀請新成員。",
+    "toast_invalid_email": "請輸入有效的電子郵件地址。",
+    "toast_already_member": "{{email}} 已經是這個工作區的成員。",
+    "toast_invitation_pending": "已經有一封發給 {{email}} 的待接受邀請。"
   },
   "integrations": {
     "status_connected": "已連線",

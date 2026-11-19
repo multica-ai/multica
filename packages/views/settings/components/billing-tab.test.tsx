@@ -11,7 +11,11 @@ import type {
   WorkspaceSubscriptionPrices,
   WorkspaceSubscriptionSummary,
 } from "@multica/core/types";
-import { saveUpgradeInvite } from "@multica/core/billing";
+import {
+  bindUpgradeInviteCheckout,
+  readUpgradeInvite,
+  saveUpgradeInvite,
+} from "@multica/core/billing";
 import { renderWithI18n } from "../../test/i18n";
 
 const mocks = vi.hoisted(() => ({
@@ -327,7 +331,7 @@ describe("BillingTab", () => {
     mocks.memberLimit = { action: "off", limit: null, members: null, pendingInvitations: null };
     mocks.useQuery.mockImplementation((options: unknown) => {
       const queryKey = (options as { queryKey?: readonly unknown[] }).queryKey;
-      if (queryKey?.[0] === "member-limit") {
+      if (queryKey?.[queryKey.length - 1] === "limit") {
         return { data: mocks.memberLimit, isPending: false, isError: false };
       }
       if (queryKey?.[queryKey.length - 1] === "prices") {
@@ -606,6 +610,18 @@ describe("BillingTab", () => {
   });
 
   describe("member limit", () => {
+    const upgraded = () => {
+      Object.assign(mocks.entitlements, { plan: "pro", status: "active", version: 1 });
+      mocks.summary.availableActions.checkout = false;
+      mocks.summaryDataUpdatedAt = Date.now() + 1;
+      mocks.summaryFetchedAfterMount = true;
+    };
+    const boundHeldInvite = (email: string, sessionId: string) => {
+      const token = saveUpgradeInvite("acme", { email, role: "member" });
+      bindUpgradeInviteCheckout("acme", token, { sessionId, baseVersion: 0 });
+      return token;
+    };
+
     it("opens the Pro checkout confirmation when Members asks for an upgrade", async () => {
       navigationState.search = "tab=billing&upgrade=pro";
       renderWithI18n(<BillingTab />);
@@ -615,42 +631,103 @@ describe("BillingTab", () => {
       expect(navigationState.replace).toHaveBeenCalledWith("/acme/settings?tab=billing");
     });
 
-    it("buys a seat for the held invitation and says so", async () => {
-      saveUpgradeInvite("acme", { email: "sarah@acme.dev", role: "member" });
+    it("buys a seat for the held invitation and binds it to that checkout", async () => {
+      const token = saveUpgradeInvite("acme", { email: "sarah@acme.dev", role: "member" });
+      navigationState.search = `tab=billing&upgrade=pro&held_invite=${token}`;
       const user = userEvent.setup();
       renderWithI18n(<BillingTab />);
 
-      await user.click(screen.getByRole("button", { name: "Upgrade to Pro" }));
-      expect(screen.getByRole("alertdialog")).toHaveTextContent(
+      expect(await screen.findByRole("alertdialog")).toHaveTextContent(
         "One more seat is included for the invitation to sarah@acme.dev",
       );
       await user.click(screen.getByRole("button", { name: "Continue to Stripe" }));
 
       await waitFor(() => expect(mocks.checkout).toHaveBeenCalledTimes(1));
       expect(mocks.checkout.mock.calls[0]?.[0]).toMatchObject({ plan: "pro", additionalSeats: 1 });
+      expect(readUpgradeInvite("acme", token)?.checkout).toEqual({ sessionId: "cs_test_1", baseVersion: 0 });
     });
 
-    it("hands the held invitation back to Members once the plan is confirmed", () => {
+    it("drops a cancelled held invitation, so a later upgrade buys no seat for it", async () => {
+      const token = saveUpgradeInvite("acme", { email: "sarah@acme.dev", role: "member" });
+      navigationState.search = `tab=billing&upgrade=pro&held_invite=${token}`;
+      const user = userEvent.setup();
+      renderWithI18n(<BillingTab />);
+
+      await screen.findByRole("alertdialog");
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(readUpgradeInvite("acme", token)).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: "Upgrade to Pro" }));
+      expect(screen.getByRole("alertdialog")).not.toHaveTextContent("One more seat");
+      await user.click(screen.getByRole("button", { name: "Continue to Stripe" }));
+      await waitFor(() => expect(mocks.checkout).toHaveBeenCalledTimes(1));
+      expect(mocks.checkout.mock.calls[0]?.[0]).not.toHaveProperty("additionalSeats");
+    });
+
+    it("retires held invitations when an upgrade starts without one", async () => {
+      const token = boundHeldInvite("sarah@acme.dev", "cs_old");
+      const user = userEvent.setup();
+      renderWithI18n(<BillingTab />);
+
+      await user.click(screen.getByRole("button", { name: "Upgrade to Pro" }));
+      await user.click(screen.getByRole("button", { name: "Continue to Stripe" }));
+
+      await waitFor(() => expect(mocks.checkout).toHaveBeenCalledTimes(1));
+      expect(mocks.checkout.mock.calls[0]?.[0]).not.toHaveProperty("additionalSeats");
+      expect(readUpgradeInvite("acme", token)).toBeNull();
+    });
+
+    it("hands the held invitation back once its upgrade shows, even without a Stripe return", () => {
+      // Desktop pays in the system browser: the app sees only the plan change.
+      const token = boundHeldInvite("sarah@acme.dev", "cs_desktop");
+      upgraded();
+      renderWithI18n(<BillingTab />);
+
+      expect(navigationState.push).toHaveBeenCalledWith(
+        `/acme/settings?tab=members&invite=resume&held_invite=${token}`,
+      );
+      expect(mocks.invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ["workspaces", "workspace-1", "members", "limit"],
+      });
+    });
+
+    it("waits for the plan change and polls while a held invitation's checkout is open", () => {
+      boundHeldInvite("sarah@acme.dev", "cs_desktop");
+      renderWithI18n(<BillingTab />);
+
+      expect(navigationState.push).not.toHaveBeenCalled();
+      const summaryOptions = mocks.useQuery.mock.calls
+        .map(([options]) => options)
+        .findLast((options) => options.queryKey?.[options.queryKey.length - 1] === "summary");
+      expect(summaryOptions.refetchInterval({ state: { data: mocks.summary } })).toBe(5_000);
+    });
+
+    it("sends only the invitation of the checkout Stripe returned from", () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
-      saveUpgradeInvite("acme", { email: "sarah@acme.dev", role: "member" });
+      boundHeldInvite("omar@acme.dev", "cs_other");
+      const token = boundHeldInvite("sarah@acme.dev", "cs_test_1");
       navigationState.search = "tab=billing&result=success&session_id=cs_test_1";
-      Object.assign(mocks.entitlements, { plan: "pro", status: "active" });
-      mocks.summary.availableActions.checkout = false;
-      mocks.summaryDataUpdatedAt = Date.now() + 1;
-      mocks.summaryFetchedAfterMount = true;
+      upgraded();
       try {
         renderWithI18n(<BillingTab />);
 
+        expect(navigationState.push).toHaveBeenCalledTimes(1);
         expect(navigationState.push).toHaveBeenCalledWith(
-          "/acme/settings?tab=members&invite=resume",
+          `/acme/settings?tab=members&invite=resume&held_invite=${token}`,
         );
-        expect(mocks.invalidateQueries).toHaveBeenCalledWith({
-          queryKey: ["member-limit", "workspace-1"],
-        });
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("drops the held invitation of a checkout cancelled at Stripe", () => {
+      const token = boundHeldInvite("sarah@acme.dev", "cs_test_1");
+      navigationState.search = "tab=billing&result=cancel&session_id=cs_test_1";
+      renderWithI18n(<BillingTab />);
+
+      expect(readUpgradeInvite("acme", token)).toBeNull();
+      expect(navigationState.push).not.toHaveBeenCalled();
     });
 
     it("shows members and pending invitations against the plan's limit", () => {

@@ -25,10 +25,14 @@ import {
   useReconcileWorkspaceSubscriptionSeats,
   usePreviewWorkspaceSeatPurchase,
   usePurchaseWorkspaceSeats,
+  bindUpgradeInviteCheckout,
+  clearUpgradeInvite,
+  heldInviteForConfirmedUpgrade,
+  listCheckoutHeldInvites,
   memberLimitKeys,
   memberLimitOptions,
   readUpgradeInvite,
-  type UpgradeInvite,
+  type HeldInvite,
   workspaceSubscriptionPricesOptions,
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
@@ -218,10 +222,12 @@ function BillingTabContent() {
     workspaceId: string | null;
     result: WorkspaceBillingReturnResult | null;
     observedAt: number | null;
+    sessionId: string | null;
   }>(() => ({
     workspaceId: wsId || null,
     result: returnResultParam,
     observedAt: returnResultParam === "success" ? Date.now() : null,
+    sessionId: returnSessionId,
   }));
   const returnStateMatchesWorkspace =
     returnState.workspaceId === null || returnState.workspaceId === wsId;
@@ -291,13 +297,20 @@ function BillingTabContent() {
   } | null>(null);
   const consumedCallbackKeyRef = useRef<string | null>(null);
   const queryClient = useQueryClient();
-  // An invitation Members held back because the workspace was full. Checkout
-  // buys a seat for it, and it is sent once the new plan is confirmed.
+  // The invitation Members held back for the checkout this page is about to
+  // start ("Upgrade and invite"). Only that checkout buys a seat for it.
   const workspaceSlug = workspace?.slug ?? "";
-  const [heldInvite, setHeldInvite] = useState<UpgradeInvite | null>(null);
+  const [heldInvite, setHeldInvite] = useState<HeldInvite | null>(null);
+  // Whether a held invitation's checkout is waiting for the plan change, so
+  // the summary is polled while this page is open and focused.
+  const [awaitingHeldUpgrade, setAwaitingHeldUpgrade] = useState(false);
   useEffect(() => {
-    setHeldInvite(workspaceSlug ? readUpgradeInvite(workspaceSlug) : null);
+    setHeldInvite(null);
+    setAwaitingHeldUpgrade(
+      workspaceSlug ? listCheckoutHeldInvites(workspaceSlug).length > 0 : false,
+    );
   }, [workspaceSlug]);
+  const handedBackHeldInviteRef = useRef(false);
   const memberLimitQuery = useQuery(memberLimitOptions(wsId));
 
   useEffect(() => {
@@ -334,6 +347,7 @@ function BillingTabContent() {
       workspaceId: wsId || null,
       result: returnResultParam,
       observedAt: returnResultParam === "success" ? Date.now() : null,
+      sessionId: returnSessionId,
     });
     if (returnResultParam === "cancel") checkoutIntentRef.current = null;
 
@@ -344,7 +358,7 @@ function BillingTabContent() {
     navigation.replace(
       query ? `${navigation.pathname}?${query}` : navigation.pathname,
     );
-  }, [callbackKey, navigation, returnResultParam, wsId]);
+  }, [callbackKey, navigation, returnResultParam, returnSessionId, wsId]);
 
   useEffect(() => {
     if (returnResult !== "success") {
@@ -371,7 +385,9 @@ function BillingTabContent() {
       (query.state.data?.seatCapacity?.activePurchase &&
         !seatPurchasePollingTimedOut)
         ? 2_000
-        : false,
+        : awaitingHeldUpgrade
+          ? 5_000
+          : false,
   });
   const entitlements = summaryQuery.data?.entitlement;
   // Checkout is done once paid seats are in effect. Neither the plan nor
@@ -636,30 +652,62 @@ function BillingTabContent() {
     }
   }, [isCheckoutConfirmed, isSyncingCheckout]);
 
-  // The plan is active: hand the held invitation back to Members to send.
+  // A held invitation's upgrade went through: hand it back to Members to
+  // send. This reads the plan change itself rather than the Stripe return, so
+  // Desktop, which pays in the system browser and never sees that return, gets
+  // there too once the summary shows the new subscription.
   useEffect(() => {
-    if (!isCheckoutConfirmed || !heldInvite) return;
-    setHeldInvite(null);
+    const summary = summaryQuery.data;
+    if (!summary || !workspaceSlug || handedBackHeldInviteRef.current) return;
+    if (returnResult === "cancel" && returnState.sessionId) {
+      const cancelled = listCheckoutHeldInvites(workspaceSlug).find(
+        (held) => held.checkout?.sessionId === returnState.sessionId,
+      );
+      if (cancelled) clearUpgradeInvite(workspaceSlug, cancelled.token);
+    }
+    const held = heldInviteForConfirmedUpgrade(
+      listCheckoutHeldInvites(workspaceSlug),
+      {
+        version: summary.entitlement.version,
+        checkoutAvailable: summary.availableActions.checkout,
+      },
+      returnResult === "success" ? returnState.sessionId : null,
+    );
+    setAwaitingHeldUpgrade(listCheckoutHeldInvites(workspaceSlug).length > 0);
+    if (!held) return;
+    handedBackHeldInviteRef.current = true;
     void queryClient.invalidateQueries({ queryKey: memberLimitKeys.all(wsId) });
     // The Stripe callback params are still in this render's URL; leaving
     // them on would replay the checkout banner the next time Billing opens.
     const params = new URLSearchParams(navigation.searchParams);
     params.delete("result");
     params.delete("session_id");
-    navigation.push(`${settingsHref(navigation.pathname, params, "members")}&invite=resume`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- hand over once per confirmed checkout
-  }, [isCheckoutConfirmed, heldInvite]);
+    navigation.push(
+      `${settingsHref(navigation.pathname, params, "members")}&invite=resume&held_invite=${encodeURIComponent(held.token)}`,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- re-check on each summary read
+  }, [summaryQuery.dataUpdatedAt, workspaceSlug, returnResult]);
 
   // Members links here with `?upgrade=pro` from a full invite dialog: open the
   // Pro checkout confirmation once the summary says checkout is available.
+  // `held_invite` names the invitation that checkout is for.
   const upgradeRequest = navigation.searchParams.get("upgrade");
+  const heldInviteToken = navigation.searchParams.get("held_invite");
   useEffect(() => {
     if (upgradeRequest === null || summaryQuery.isPending) return;
     const params = new URLSearchParams(navigation.searchParams);
     params.delete("upgrade");
+    params.delete("held_invite");
     navigation.replace(`${navigation.pathname}?${params.toString()}`);
+    const held =
+      heldInviteToken && workspaceSlug
+        ? readUpgradeInvite(workspaceSlug, heldInviteToken)
+        : null;
     if (upgradeRequest === "pro" && summaryQuery.data?.availableActions.checkout === true) {
+      setHeldInvite(held);
       openCheckoutConfirm("pro");
+    } else if (held) {
+      clearUpgradeInvite(workspaceSlug, held.token);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume the intent once the summary is known
   }, [upgradeRequest, summaryQuery.isPending]);
@@ -724,6 +772,9 @@ function BillingTabContent() {
 
   const handleCheckout = async () => {
     setActionError(null);
+    // A checkout that is not for a held invitation retires every held one,
+    // so none can be sent by an upgrade it was never part of.
+    if (!heldInvite && workspaceSlug) clearUpgradeInvite(workspaceSlug);
     const existing = checkoutIntentRef.current;
     const intent =
       existing?.wsId === wsId &&
@@ -750,6 +801,13 @@ function BillingTabContent() {
         return;
       }
       setCheckoutConfirmOpen(false);
+      if (heldInvite && workspaceSlug) {
+        bindUpgradeInviteCheckout(workspaceSlug, heldInvite.token, {
+          sessionId: response.sessionId,
+          baseVersion: summaryQuery.data?.entitlement.version ?? 0,
+        });
+        setAwaitingHeldUpgrade(true);
+      }
       openExternal(response.url, { webTarget: "same-tab" });
     } catch (error) {
       setCheckoutConfirmOpen(false);
@@ -765,7 +823,14 @@ function BillingTabContent() {
 
   const handleCheckoutConfirmOpenChange = (open: boolean) => {
     setCheckoutConfirmOpen(open);
-    if (!open) checkoutIntentRef.current = null;
+    if (open) return;
+    checkoutIntentRef.current = null;
+    // Cancelled before any checkout: the held invitation goes with it, so a
+    // later upgrade from this page does not buy a seat for it.
+    if (heldInvite && !checkoutMutation.isPending && workspaceSlug) {
+      clearUpgradeInvite(workspaceSlug, heldInvite.token);
+      setHeldInvite(null);
+    }
   };
 
   const openCheckoutConfirm = (plan: WorkspaceSubscriptionPaidPlan) => {

@@ -1653,7 +1653,11 @@
     "member_limit_full_description_pending": "Las invitaciones pendientes también ocupan un lugar ({{pending}} ahora). Pasa a Pro para tener miembros ilimitados, o revoca antes una invitación o elimina a un miembro.",
     "member_limit_usage": "{{used}} / {{limit}} miembros",
     "upgrade_and_invite": "Mejorar e invitar",
-    "toast_member_limit_reached": "El espacio de trabajo está lleno. Mejora el plan para invitar a más miembros."
+    "toast_member_limit_reached": "El espacio de trabajo está lleno. Mejora el plan para invitar a más miembros.",
+    "member_limit_full_description_no_upgrade": "Revoca una invitación pendiente o elimina a un miembro para liberar un lugar.",
+    "toast_invalid_email": "Introduce una dirección de correo válida.",
+    "toast_already_member": "{{email}} ya es miembro de este espacio de trabajo.",
+    "toast_invitation_pending": "Ya hay una invitación pendiente para {{email}}."
   },
   "integrations": {
     "status_connected": "Conectado",

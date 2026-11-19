@@ -1653,7 +1653,11 @@
     "member_limit_full_description_pending": "Les invitations en attente occupent aussi une place ({{pending}} actuellement). Passez à Pro pour un nombre illimité de membres, ou révoquez d'abord une invitation ou retirez un membre.",
     "member_limit_usage": "{{used}} / {{limit}} membres",
     "upgrade_and_invite": "Mettre à niveau et inviter",
-    "toast_member_limit_reached": "L'espace de travail est complet. Passez à un forfait supérieur pour inviter d'autres membres."
+    "toast_member_limit_reached": "L'espace de travail est complet. Passez à un forfait supérieur pour inviter d'autres membres.",
+    "member_limit_full_description_no_upgrade": "Révoquez une invitation en attente ou retirez un membre pour libérer une place.",
+    "toast_invalid_email": "Saisissez une adresse e-mail valide.",
+    "toast_already_member": "{{email}} est déjà membre de cet espace de travail.",
+    "toast_invitation_pending": "Une invitation pour {{email}} est déjà en attente."
   },
   "integrations": {
     "status_connected": "Connecté",
