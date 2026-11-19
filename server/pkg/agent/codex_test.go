@@ -2629,6 +2629,52 @@ func TestCodexRequiredResumeRejectsMissingLineage(t *testing.T) {
 	}
 }
 
+func TestCodexRequiredResumeUsesOnlyTheRequestedThread(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		result    json.RawMessage
+		wantError string
+	}{
+		{name: "same thread", result: json.RawMessage(`{"thread":{"id":"thr_fork"}}`)},
+		{name: "different thread", result: json.RawMessage(`{"thread":{"id":"thr_other"}}`), wantError: "different thread ID"},
+		{name: "missing thread", result: json.RawMessage(`{"thread":{}}`), wantError: "no thread ID"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, fs, _ := newTestCodexClient(t)
+			wait := drainRPCScript(t, c, fs, []rpcResponse{{method: "thread/resume", result: tc.result}})
+			defer wait()
+
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			threadID, resumed, err := c.startOrResumeThread(
+				ctx, ExecOptions{ResumeSessionID: "thr_fork", RequireNativeResume: true}, slog.Default(),
+			)
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) || resumed || threadID != "" {
+					t.Fatalf("got threadID=%q resumed=%v error=%v, want rejection containing %q", threadID, resumed, err, tc.wantError)
+				}
+			} else if err != nil || !resumed || threadID != "thr_fork" {
+				t.Fatalf("got threadID=%q resumed=%v error=%v, want the requested thread", threadID, resumed, err)
+			}
+			if len(fs.Lines()) != 1 {
+				t.Fatalf("expected only thread/resume, got %v", fs.Lines())
+			}
+		})
+	}
+
+	t.Run("no session ID", func(t *testing.T) {
+		c, fs, _ := newTestCodexClient(t)
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+		threadID, resumed, err := c.startOrResumeThread(ctx, ExecOptions{RequireNativeResume: true}, slog.Default())
+		if err == nil || resumed || threadID != "" || len(fs.Lines()) != 0 {
+			t.Fatalf("got threadID=%q resumed=%v error=%v RPCs=%v, want rejection without RPC", threadID, resumed, err, fs.Lines())
+		}
+	})
+}
+
 func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	t.Parallel()
 
