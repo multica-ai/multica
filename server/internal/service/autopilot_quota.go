@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -105,6 +106,107 @@ func (s *AutopilotService) quotaPolicy(ctx context.Context, workspaceID pgtype.U
 	}, true
 }
 
+// autopilotRunMetering says whether a run counts toward the workspace's
+// autopilot run quota. Runs a person starts are not metered.
+type autopilotRunMetering bool
+
+const (
+	meteredRun   autopilotRunMetering = true
+	unmeteredRun autopilotRunMetering = false
+)
+
+// createUnmeteredAutopilotRun inserts a run that never counts toward the quota,
+// whatever the policy, and never writes the quota tables. Request dedupe stays:
+// the idempotency key is stored on the run, so a retried request reuses its run
+// instead of executing twice. A key the metered path already admitted, such as
+// one a server from before unmetered runs reserved, lives only on its quota
+// reservation, so that is checked too. It shares createAutopilotRunWithQuota's
+// signature so dispatch can pick either one.
+func (s *AutopilotService) createUnmeteredAutopilotRun(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	source, idempotencyKey string,
+	params db.CreateAutopilotRunParams,
+) (db.AutopilotRun, bool, error) {
+	if !validAutopilotExecutionSource(source) {
+		return db.AutopilotRun{}, false, fmt.Errorf("invalid autopilot execution source %q", source)
+	}
+	key := db.GetAutopilotRunByIdempotencyKeyParams{
+		AutopilotID:    params.AutopilotID,
+		IdempotencyKey: pgtype.Text{String: idempotencyKey, Valid: idempotencyKey != ""},
+	}
+	policy, quotaEnabled := s.quotaPolicy(ctx, workspaceID)
+	if key.IdempotencyKey.Valid {
+		existing, err := s.Queries.GetAutopilotRunByIdempotencyKey(ctx, key)
+		if err == nil {
+			return existing, true, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return db.AutopilotRun{}, false, fmt.Errorf("lookup idempotent run: %w", err)
+		}
+		if quotaEnabled {
+			existing, found, err := s.meteredRunForRequestKey(ctx, workspaceID, policy, idempotencyKey)
+			if err != nil {
+				return db.AutopilotRun{}, false, err
+			}
+			if found {
+				s.recordAutopilotQuotaDecision(policy.action, source, "reused")
+				return existing, true, nil
+			}
+		}
+	}
+	params.IdempotencyKey = key.IdempotencyKey
+	run, err := s.Queries.CreateAutopilotRun(ctx, params)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "uq_autopilot_run_idempotency_key" {
+		// A concurrent request with the same key inserted first.
+		existing, lookupErr := s.Queries.GetAutopilotRunByIdempotencyKey(ctx, key)
+		if lookupErr != nil {
+			return db.AutopilotRun{}, false, fmt.Errorf("load concurrent idempotent run: %w", lookupErr)
+		}
+		return existing, true, nil
+	}
+	if err != nil {
+		return db.AutopilotRun{}, false, err
+	}
+	if quotaEnabled {
+		s.recordAutopilotQuotaDecision(policy.action, source, "unmetered")
+	}
+	return run, false, nil
+}
+
+// meteredRunForRequestKey finds the run the metered path admitted for a request
+// key in the current quota period. Like that path's own retry lookup, it ignores
+// released reservations and reads without taking the period lock.
+func (s *AutopilotService) meteredRunForRequestKey(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+	policy autopilotQuotaPolicy,
+	idempotencyKey string,
+) (db.AutopilotRun, bool, error) {
+	reservation, err := s.Queries.GetAutopilotQuotaReservationByKey(ctx, db.GetAutopilotQuotaReservationByKeyParams{
+		WorkspaceID:    workspaceID,
+		PeriodStart:    pgtype.Timestamptz{Time: policy.periodStart, Valid: true},
+		PeriodEnd:      pgtype.Timestamptz{Time: policy.periodEnd, Valid: true},
+		IdempotencyKey: idempotencyKey,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.AutopilotRun{}, false, nil
+	}
+	if err != nil {
+		return db.AutopilotRun{}, false, fmt.Errorf("lookup metered request key: %w", err)
+	}
+	run, err := s.Queries.GetAutopilotRunByQuotaReservation(ctx, reservation.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// An orphaned reservation has no run to reuse; the metered path releases it.
+		return db.AutopilotRun{}, false, nil
+	}
+	if err != nil {
+		return db.AutopilotRun{}, false, fmt.Errorf("load metered request run: %w", err)
+	}
+	return run, true, nil
+}
+
 // createAutopilotRunWithQuota reserves and links a run in one transaction.
 // When policy is off, it intentionally uses the legacy direct INSERT so a
 // self-hosted deployment never touches the quota tables.
@@ -137,6 +239,25 @@ func (s *AutopilotService) createAutopilotRunWithQuota(
 	period, err := qtx.EnsureAutopilotQuotaPeriod(ctx, periodArgs)
 	if err != nil {
 		return db.AutopilotRun{}, false, fmt.Errorf("lock quota period: %w", err)
+	}
+
+	if source == "manual" {
+		// A member's unmetered run keeps its request key on the run, not on a
+		// reservation. Reuse it so the same request is not admitted twice.
+		run, err := qtx.GetAutopilotRunByIdempotencyKey(ctx, db.GetAutopilotRunByIdempotencyKeyParams{
+			AutopilotID:    params.AutopilotID,
+			IdempotencyKey: pgtype.Text{String: idempotencyKey, Valid: idempotencyKey != ""},
+		})
+		if err == nil {
+			if err := tx.Commit(ctx); err != nil {
+				return db.AutopilotRun{}, false, fmt.Errorf("commit idempotent unmetered reuse: %w", err)
+			}
+			s.recordAutopilotQuotaDecision(policy.action, source, "reused")
+			return run, true, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return db.AutopilotRun{}, false, fmt.Errorf("lookup unmetered request key: %w", err)
+		}
 	}
 
 	existing, err := qtx.GetAutopilotQuotaReservationByKey(ctx, db.GetAutopilotQuotaReservationByKeyParams{
@@ -323,6 +444,7 @@ func autopilotRunFromTerminalRow(row db.UpdateAutopilotRunTerminalWithQuotaRow) 
 		Result: row.Result, CreatedAt: row.CreatedAt, SquadID: row.SquadID,
 		PlannedAt: row.PlannedAt, WebhookDeliveryID: row.WebhookDeliveryID,
 		QuotaReservationID: row.QuotaReservationID, ReasonCode: row.ReasonCode,
+		IdempotencyKey: row.IdempotencyKey,
 	}
 }
 
