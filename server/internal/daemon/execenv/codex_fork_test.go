@@ -86,3 +86,56 @@ func TestStageCodexForkCopiesOnlySelectedSource(t *testing.T) {
 		t.Fatalf("source was changed: %q, error=%v", data, err)
 	}
 }
+
+func TestResolveCodexForkSourceKeepsConversationScope(t *testing.T) {
+	shared := t.TempDir()
+	t.Setenv("CODEX_HOME", shared)
+	const sourceID = "019fe3de-56a2-7792-8913-ee53664dfa0e"
+	const rollout = "rollout-2026-11-20T00-00-00-" + sourceID + ".jsonl"
+	task := TaskContextForEnv{AgentID: "same-agent", ChatSessionID: "source-chat"}
+	other := TaskContextForEnv{AgentID: "same-agent", ChatSessionID: "other-chat"}
+	for _, dest := range []string{CodexSessionStorePath("", other), filepath.Join(shared, "sessions")} {
+		if err := os.MkdirAll(dest, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dest, rollout), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ResolveCodexForkSource("", task, "", sourceID); err == nil {
+		t.Fatal("fork accepted a rollout only present in unrelated history")
+	}
+	ownedRoot := t.TempDir()
+	managedSessions := filepath.Join(ownedRoot, codexHomeDirName, "sessions")
+	if err := os.MkdirAll(managedSessions, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(managedSessions, rollout), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	source, err := ResolveCodexForkSource("", task, ownedRoot, sourceID)
+	if err != nil || source.SessionsDir != managedSessions || source.ArchiveDir != "" {
+		t.Fatalf("source=%+v error=%v", source, err)
+	}
+	task.RequireNativeResume = true
+	if _, err := ResolveCodexForkSource("", task, ownedRoot, sourceID); err == nil {
+		t.Fatal("a published fork must not use an unrelated compatibility layout")
+	}
+
+	fork := filepath.Join(CodexSessionStorePath("source-profile", task), "fork")
+	for _, name := range []string{"sessions", "archived_sessions"} {
+		if err := os.MkdirAll(filepath.Join(fork, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(fork, "sessions", rollout), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ResolveCodexForkSource("other-profile", task, "", sourceID); err == nil {
+		t.Fatal("fork accepted history from another daemon profile")
+	}
+	source, err = ResolveCodexForkSource("source-profile", task, "", sourceID)
+	if err != nil || source.ArchiveDir != filepath.Join(fork, "archived_sessions") {
+		t.Fatalf("fork source=%+v error=%v", source, err)
+	}
+}

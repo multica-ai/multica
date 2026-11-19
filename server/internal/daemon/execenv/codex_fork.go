@@ -253,3 +253,54 @@ func copyCodexForkRollout(root *os.Root, name, dest string) error {
 	_, copyErr := io.Copy(target, source)
 	return errors.Join(copyErr, target.Close())
 }
+
+// CodexForkSource describes the history already owned by the source chat.
+type CodexForkSource struct {
+	SessionsDir string
+	ArchiveDir  string
+	ConfigPath  string
+}
+
+// ResolveCodexForkSource takes an optional environment root whose workspace,
+// agent and chat provenance the daemon has already verified.
+func ResolveCodexForkSource(profile string, task TaskContextForEnv, ownedEnvRoot, sessionID string) (CodexForkSource, error) {
+	if uuid.Validate(sessionID) != nil || task.ChatSessionID == "" || task.AgentID == "" || task.IssueID != "" {
+		return CodexForkSource{}, errors.New("Codex fork source chat and session are required")
+	}
+	sharedHome := resolveSharedCodexHome()
+	store := CodexSessionStorePath(profile, task)
+	source := CodexForkSource{SessionsDir: store}
+	config := filepath.Join(sharedHome, "config.toml")
+	if task.RequireNativeResume {
+		fork := filepath.Join(store, "fork")
+		source.SessionsDir = filepath.Join(fork, "sessions")
+		source.ArchiveDir = filepath.Join(fork, "archived_sessions")
+		if !validPublishedCodexFork(fork, sessionID) {
+			return CodexForkSource{}, errors.New("published Codex fork history is unavailable")
+		}
+	} else if !hasScopedCodexForkRollout(store, sessionID) {
+		if ownedEnvRoot == "" {
+			return CodexForkSource{}, errors.New("Codex source chat history is unavailable")
+		}
+		home := filepath.Join(ownedEnvRoot, codexHomeDirName)
+		if info, err := os.Lstat(home); err != nil || !info.IsDir() {
+			return CodexForkSource{}, errors.New("Codex source chat home is unavailable")
+		}
+		source.SessionsDir = filepath.Join(home, "sessions")
+		if !hasScopedCodexForkRollout(source.SessionsDir, sessionID) {
+			return CodexForkSource{}, errors.New("Codex source chat history is unavailable")
+		}
+		config = filepath.Join(home, "config.toml")
+	}
+	if _, err := os.Stat(config); err == nil {
+		source.ConfigPath = config
+	} else if !os.IsNotExist(err) {
+		return CodexForkSource{}, fmt.Errorf("inspect Codex fork provider config: %w", err)
+	}
+	return source, nil
+}
+
+func hasScopedCodexForkRollout(directory, sessionID string) bool {
+	info, err := os.Lstat(directory)
+	return err == nil && info.IsDir() && len(findCodexRollouts(directory, sessionID)) == 1
+}
