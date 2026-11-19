@@ -1053,6 +1053,7 @@
       "codex_resume_oversized": "Session too large to resume",
       "idle_watchdog": "Agent stopped after inactivity",
       "local_directory_error": "Local directory error",
+      "local_directory_missing": "Project's local folder no longer exists",
       "cancelled": "Cancelled by the system",
       "agent_error": "Agent execution error",
       "codex_semantic_inactivity": "Codex semantic inactivity timeout",
