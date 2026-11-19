@@ -251,8 +251,14 @@ func TestSearchDocsRanksTitleHitsAndExcerptsContent(t *testing.T) {
 	if got := search("值班 仪表盘"); len(got.Docs) != 1 || got.Docs[0].ID != cjk.ID {
 		t.Fatalf("multi-term CJK search: %v", ids(got))
 	}
+	// A title with LIKE wildcards still ranks as an exact match.
+	percent := create("100% uptime", "")
+	create("100% uptime review notes", "")
+	if got := search("100% uptime"); len(got.Docs) != 2 || got.Docs[0].ID != percent.ID {
+		t.Fatalf("exact title with %% must rank first: %v", ids(got))
+	}
 	// LIKE wildcards in the query are literal.
-	if got := search("%"); len(got.Docs) != 0 {
+	if got := search("%_"); len(got.Docs) != 0 {
 		t.Fatalf("a literal %% must not match everything: %v", ids(got))
 	}
 	testutil.Call(t, testHandler.SearchDocs, newRequest("GET", "/api/docs/search?q=", nil)).Want(http.StatusBadRequest)

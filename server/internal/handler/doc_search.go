@@ -78,8 +78,11 @@ func buildDocSearchQuery(phrase string, terms []string) (string, []any) {
 		allTermsInTitle = "(" + strings.Join(inTitle, " AND ") + ")"
 	}
 
+	// strpos and the exact-title tier take the raw (unescaped) phrase; LIKE
+	// takes the escaped one, so a title with % or _ still ranks as exact.
+	rawPhrase := nextArg(phrase)
 	rankCases := []string{
-		fmt.Sprintf("WHEN %s = %s THEN 0", title, phraseParam),
+		fmt.Sprintf("WHEN %s = %s THEN 0", title, rawPhrase),
 		fmt.Sprintf("WHEN %s LIKE %s || '%%' THEN 1", title, phraseParam),
 		fmt.Sprintf("WHEN %s LIKE %s THEN 2", title, contains(phraseParam)),
 	}
@@ -91,9 +94,8 @@ func buildDocSearchQuery(phrase string, terms []string) (string, []any) {
 	rankCases = append(rankCases, fmt.Sprintf("WHEN %s LIKE %s THEN 4", content, contains(phraseParam)))
 	rank := "CASE " + strings.Join(rankCases, " ") + " ELSE 5 END"
 
-	// strpos takes the raw (unescaped) needle. A multi-term content hit
-	// anchors on the first term; the Go snippet then centers on the earliest.
-	rawPhrase := nextArg(phrase)
+	// A multi-term content hit anchors on the first term; the Go snippet then
+	// centers on the earliest.
 	anchor := rawPhrase
 	if len(lowered) > 1 {
 		anchor = nextArg(lowered[0])
