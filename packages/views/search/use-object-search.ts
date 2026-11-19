@@ -52,6 +52,11 @@ export interface PaletteDoc {
   folder: string | null;
   /** Excerpt around a content match, from server search. */
   snippet?: string;
+  /**
+   * A server row answering an earlier query: still painted so the list does
+   * not flicker while the next request is in flight, but not selectable.
+   */
+  stale?: boolean;
 }
 
 const EMPTY_AUTOPILOTS: Autopilot[] = [];

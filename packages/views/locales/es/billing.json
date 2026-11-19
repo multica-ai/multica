@@ -135,7 +135,10 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "{{used}} completadas · {{reserved}} en curso",
       "resets_at": "Se reinicia el {{date}}",
-      "usage_unavailable": "El uso no está disponible temporalmente"
+      "usage_unavailable": "El uso no está disponible temporalmente",
+      "members": "Miembros",
+      "members_pending": "Invitaciones pendientes: {{pending}}",
+      "metering": "Cuentan las ejecuciones de programaciones, webhooks y agentes. Las que un miembro inicia con Ejecutar ahora no cuentan."
     },
     "seats": {
       "title": "Puestos",
@@ -222,7 +225,16 @@
     },
     "confirm": {
       "title": "¿Continuar a Stripe Checkout?",
-      "description": "Plan: {{plan}}. Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago."
+      "description": "Plan: {{plan}}. Intervalo de facturación: {{interval}}. Miembros humanos actuales: {{count}}. Stripe volverá a contar los puestos y mostrará el importe final antes del pago.",
+      "held_invite": "Incluye un puesto de pago más para la invitación a {{email}}. Cuando se complete el pago, envíala desde Facturación."
+    },
+    "held_invite": {
+      "title": "El espacio de trabajo ya está en {{plan}}",
+      "description": "Guardaste una invitación para {{email}} como {{role}} hasta mejorar el plan. ¿La envías ahora?",
+      "role_admin": "administrador",
+      "role_member": "miembro",
+      "send": "Enviar invitación",
+      "discard": "Descartar"
     }
   },
   "return_page": {
@@ -302,6 +314,10 @@
       "private_projects": {
         "name": "Proyectos privados",
         "after": "Siguen siendo privados después de la prueba. Sus listas de acceso pasan a solo lectura."
+      },
+      "guests": {
+        "name": "Invitados",
+        "after": "Los invitados actuales conservan su acceso después de la prueba. Para invitar a nuevos invitados necesitas Pro o Business."
       }
     }
   }

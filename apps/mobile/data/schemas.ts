@@ -620,7 +620,9 @@ export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   user_id: z.string().default(""),
-  role: z.enum(["owner", "admin", "member"]).catch("member"),
+  // `guest` (MUL-9420) must survive parsing: folded into `member`, a guest
+  // would be offered every member control the server then refuses.
+  role: z.enum(["owner", "admin", "member", "guest"]).catch("member"),
   created_at: z.string().default(""),
   name: z.string().default(""),
   email: z.string().default(""),

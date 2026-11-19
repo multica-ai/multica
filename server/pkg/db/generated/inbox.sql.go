@@ -207,8 +207,8 @@ WITH boundary AS MATERIALIZED (
       AND b.recipient_id = $3
       AND b.archived = false
       AND (b.snoozed_until IS NULL OR b.snoozed_until <= now())
-      AND ($4::uuid[] IS NULL OR b_iss.project_id IS NULL
-           OR NOT (b_iss.project_id = ANY($4::uuid[])))
+      AND ($4::uuid[] IS NULL
+           OR NOT (COALESCE(b_iss.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($4::uuid[])))
     ORDER BY GREATEST(b.created_at, b.returned_at) DESC, b.id DESC
     OFFSET $5::int - 1
     LIMIT 1
@@ -220,8 +220,8 @@ WITH boundary AS MATERIALIZED (
       AND o.recipient_id = $3
       AND o.archived = false
       AND (o.snoozed_until IS NULL OR o.snoozed_until <= now())
-      AND ($4::uuid[] IS NULL OR o_iss.project_id IS NULL
-           OR NOT (o_iss.project_id = ANY($4::uuid[])))
+      AND ($4::uuid[] IS NULL
+           OR NOT (COALESCE(o_iss.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($4::uuid[])))
       AND (GREATEST(o.created_at, o.returned_at), o.id) < (boundary.shown_at, boundary.id)
       -- An issue back from a snooze whose newest row does not carry the
       -- return yet (written by an older server, or not normalized) ranks too
@@ -331,7 +331,7 @@ WHERE i.workspace_id = $1
   AND ($4::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
       SELECT 1 FROM issue hidden_issue
       WHERE hidden_issue.id = i.issue_id
-        AND hidden_issue.project_id = ANY($4::uuid[])
+        AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($4::uuid[])
   ))
 `
 
@@ -628,8 +628,8 @@ SELECT count(*) > 0 FROM (
     WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3
       AND i.archived = false
       AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
-      AND ($4::uuid[] IS NULL OR iss.project_id IS NULL
-           OR NOT (iss.project_id = ANY($4::uuid[])))
+      AND ($4::uuid[] IS NULL
+           OR NOT (COALESCE(iss.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($4::uuid[])))
     ORDER BY GREATEST(i.created_at, i.returned_at) DESC, i.id DESC
     OFFSET $5::int
     LIMIT 1
@@ -719,7 +719,7 @@ WITH eligible_archived AS MATERIALIZED (
       AND ($4::uuid[] IS NULL OR i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1 FROM issue hidden_issue
           WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY($4::uuid[])
+            AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($4::uuid[])
       ))
       AND (i.issue_id IS NULL OR NOT EXISTS (
           SELECT 1
@@ -902,7 +902,7 @@ WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND 
   -- whose time has passed is listed again and keeps snoozed_until, which is
   -- how the client tells an issue that came back on its own.
   AND (i.snoozed_until IS NULL OR i.snoozed_until <= now())
-  AND ($4::uuid[] IS NULL OR iss.project_id IS NULL OR NOT (iss.project_id = ANY($4::uuid[])))
+  AND ($4::uuid[] IS NULL OR NOT (COALESCE(iss.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($4::uuid[])))
 ORDER BY GREATEST(i.created_at, i.returned_at) DESC, i.id DESC
 LIMIT $5
 `
@@ -1028,7 +1028,7 @@ FROM (
       AND ($3::uuid[] IS NULL OR NOT EXISTS (
           SELECT 1 FROM issue hidden_issue
           WHERE hidden_issue.id = i.issue_id
-            AND hidden_issue.project_id = ANY($3::uuid[])
+            AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($3::uuid[])
       ))
     GROUP BY i.issue_id
 ) g

@@ -135,7 +135,10 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "{{used}} completed · {{reserved}} in progress",
       "resets_at": "Resets {{date}}",
-      "usage_unavailable": "Usage is temporarily unavailable"
+      "usage_unavailable": "Usage is temporarily unavailable",
+      "members": "Members",
+      "members_pending": "Pending invitations: {{pending}}",
+      "metering": "Runs from schedules, webhooks, and agents count. Runs a member starts with Run now don't."
     },
     "seats": {
       "title": "Seats",
@@ -222,7 +225,16 @@
     },
     "confirm": {
       "title": "Continue to Stripe Checkout?",
-      "description": "Plan: {{plan}}. Billing interval: {{interval}}. Current human members: {{count}}. Stripe will re-count seats and show the final amount before payment."
+      "description": "Plan: {{plan}}. Billing interval: {{interval}}. Current human members: {{count}}. Stripe will re-count seats and show the final amount before payment.",
+      "held_invite": "One more paid seat is included for the invitation to {{email}}. Once the payment goes through, send it from Billing."
+    },
+    "held_invite": {
+      "title": "The workspace is on {{plan}} now",
+      "description": "You held back an invitation for {{email}} as {{role}} until the upgrade. Send it now?",
+      "role_admin": "an admin",
+      "role_member": "a member",
+      "send": "Send invitation",
+      "discard": "Discard"
     }
   },
   "return_page": {
@@ -302,6 +314,10 @@
       "private_projects": {
         "name": "Private projects",
         "after": "Stay private after the trial. Their access lists become read-only."
+      },
+      "guests": {
+        "name": "Guests",
+        "after": "Existing guests keep their access after the trial. New guests need Pro or Business."
       }
     }
   }

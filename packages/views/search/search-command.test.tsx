@@ -424,6 +424,39 @@ describe("SearchCommand", () => {
     expect(renderedValues()).toEqual(["command:new-issue", "command:chat-with-agent"]);
   });
 
+  describe("guest (MUL-9420)", () => {
+    beforeEach(() => {
+      seed(memberListOptions("ws-test"), [{ ...makeMember(ME, "Me Myself", "me@example.com"), role: "guest" }]);
+    });
+
+    it("offers no New issue on an empty query", () => {
+      renderSearch();
+
+      expect(renderedValues()).not.toContain("command:new-issue");
+    });
+
+    it("finds no New issue command and no hand-to-agent row while typing", async () => {
+      const user = userEvent.setup();
+      renderSearch();
+      await user.type(input(), "new");
+
+      expect(await rowText("New project")).toBeInTheDocument();
+      expect(screen.queryByText((_, el) => el?.textContent === "New issue" && el?.tagName === "SPAN")).toBeNull();
+      expect(renderedValues()).not.toContain("hand-to-agent");
+    });
+
+    it("drops New issue from a project's context commands", () => {
+      registerContext({
+        kind: "project",
+        project: { id: "proj-1", title: "Shared project", archived_at: null },
+      } as CommandBarContext);
+      renderSearch();
+
+      expect(renderedValues()).toContain("command:context-project:project-status");
+      expect(renderedValues()).not.toContain("command:context-project:project-new-issue");
+    });
+  });
+
   describe("pages and global commands", () => {
     it("filters navigation pages by query", async () => {
       const user = userEvent.setup();

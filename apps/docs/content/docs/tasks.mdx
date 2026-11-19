@@ -120,8 +120,8 @@ The `agent_error.` prefix is omitted in this table.
 | Reason | Meaning | What to do |
 | --- | --- | --- |
 | `provider_auth_or_access` | Model provider authentication failed or access denied (401/403) | Sign in again in that AI coding tool, or check the API key |
-| `provider_quota_limit` | Quota or balance exhausted (402) | Top up or switch accounts |
-| `provider_capacity_or_rate_limit` | Rate limited or out of capacity (429/529) | Retry later |
+| `provider_quota_limit` | Quota or balance exhausted | Top up or switch accounts |
+| `provider_capacity_or_rate_limit` | Rate limited or out of capacity | Retry later |
 | `provider_server_error` | Model provider server error (5xx) | Retry later |
 | `provider_network` | Network failure reaching the model provider | Retries automatically; check the executing machine's network if it persists |
 | `model_not_found_or_unavailable` | The model does not exist or is currently unavailable | Pick an available model in the agent settings |

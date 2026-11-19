@@ -188,7 +188,11 @@
       "pinned_settings": "ピン留めの表示",
       "views_settings": "ビューの表示",
       "views_builtin": "組み込みビュー",
-      "views_show_count": "件数"
+      "views_show_count": "件数",
+      "guest_badge": "ゲスト",
+      "guest_badge_hint": "共有されたプロジェクトを閲覧・コメントできます。",
+      "involved": "関わっているタスク",
+      "shared_projects": "共有されたプロジェクト"
     },
     "team": {
       "new_agent": "新規エージェント",

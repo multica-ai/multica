@@ -84,7 +84,7 @@ func TestBuildMetaSkillContentDocsFollowFlag(t *testing.T) {
 
 	for _, enabled := range []bool{false, true} {
 		out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1", DocsEnabled: enabled})
-		for _, line := range []string{"`multica doc list|search|get|create|update`", "mention://doc/<doc-id>"} {
+		for _, line := range []string{"`multica doc list|search|get|create|update|move`", "mention://doc/<doc-id>"} {
 			if got := strings.Contains(out, line); got != enabled {
 				t.Errorf("DocsEnabled=%v: brief contains %q = %v\n---\n%s", enabled, line, got, out)
 			}
@@ -320,6 +320,31 @@ func TestSlimQuickCreateAvailableCommands(t *testing.T) {
 		if strings.Contains(out, banned) {
 			t.Errorf("quick_create slim Available Commands should NOT advertise %q (hard guardrails forbid the call)", banned)
 		}
+	}
+}
+
+func TestAntigravityBackgroundTaskSafetyAllKinds(t *testing.T) {
+	t.Parallel()
+	for name, ctx := range map[string]TaskContextForEnv{
+		"comment":      {IssueID: "i", TriggerCommentID: "c"},
+		"assignment":   {IssueID: "i"},
+		"autopilot":    {AutopilotRunID: "r"},
+		"quick-create": {QuickCreatePrompt: "p"},
+		"chat":         {ChatSessionID: "c"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agy := buildMetaSkillContent("antigravity", ctx)
+			if !strings.Contains(agy, "yield the model subturn while waiting") ||
+				strings.Contains(agy, "whatever a tool response promises") || strings.Contains(agy, "Never background-and-yield") {
+				t.Fatal("Antigravity model-subturn contract missing or contradicted")
+			}
+			for _, provider := range []string{"claude", "codex", "codebuddy", "hermes"} {
+				other := buildMetaSkillContent(provider, ctx)
+				if !strings.Contains(other, "Never background-and-yield") || strings.Contains(other, "yield the model subturn") {
+					t.Fatalf("%s inherited Antigravity's exception", provider)
+				}
+			}
+		})
 	}
 }
 

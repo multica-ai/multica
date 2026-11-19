@@ -1,4 +1,8 @@
-export type MemberRole = "owner" | "admin" | "member";
+/**
+ * A guest (MUL-9420) sees only the projects in its `project_ids`, cannot edit
+ * issue properties or run agents, and takes no seat.
+ */
+export type MemberRole = "owner" | "admin" | "member" | "guest";
 
 export interface WorkspaceRepo {
   url: string;
@@ -104,6 +108,8 @@ export interface MemberWithUser {
   name: string;
   email: string;
   avatar_url: string | null;
+  /** The projects a guest can access. Absent for every other role. */
+  project_ids?: string[];
 }
 
 export interface Invitation {
@@ -120,6 +126,8 @@ export interface Invitation {
   inviter_name?: string;
   inviter_email?: string;
   workspace_name?: string;
+  /** The projects a guest invitation grants. */
+  project_ids?: string[];
 }
 
 export interface ShareLink {

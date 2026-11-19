@@ -40,6 +40,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1041,6 +1042,10 @@ func (h *Handler) requireWorkspaceMember(w http.ResponseWriter, r *http.Request,
 			return db.Member{}, false
 		}
 		writeError(w, http.StatusNotFound, notFoundMsg)
+		return db.Member{}, false
+	}
+	if projectaccess.IsGuestRole(member.Role) && !middleware.GuestMayRequest(r) {
+		middleware.RefuseGuest(w, r)
 		return db.Member{}, false
 	}
 

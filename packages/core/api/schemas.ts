@@ -38,6 +38,7 @@ import type {
   WorkspaceSubscriptionEntitlements,
   WorkspaceFeatureState,
   WorkspaceFeatures,
+  MemberLimit,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPlanPrices,
@@ -3886,6 +3887,29 @@ export const WorkspaceFeaturesSchema = z
     (value): WorkspaceFeatures => ({
       features: value.features as WorkspaceFeatures["features"],
     }),
+  );
+
+// A limit that cannot be read, or an action from a newer server, reads as off:
+// the server still checks every admission, so the worst case is a refusal
+// shown after the attempt instead of before it.
+export const MemberLimitSchema = z
+  .object({
+    action: z.enum(["off", "observe", "enforce"]).catch("off"),
+    limit: z.number().int().nonnegative().nullable().catch(null).default(null),
+    members: z.number().int().nonnegative().nullable().catch(null).default(null),
+    pending_invitations: z.number().int().nonnegative().nullable().catch(null).default(null),
+  })
+  .loose()
+  .transform(
+    (value): MemberLimit =>
+      value.action === "off" || value.limit === null
+        ? { action: "off", limit: null, members: null, pendingInvitations: null }
+        : {
+            action: value.action,
+            limit: value.limit,
+            members: value.members ?? 0,
+            pendingInvitations: value.pending_invitations ?? 0,
+          },
   );
 
 export const CreateWorkspaceSubscriptionCheckoutResponseSchema = z

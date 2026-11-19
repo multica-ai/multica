@@ -1,6 +1,6 @@
 "use client";
 
-import { Lock, Sparkles } from "@multica/ui/icons";
+import { Eye, Lock, Sparkles } from "@multica/ui/icons";
 import { resolveWorkspaceTrial } from "@multica/core/billing/trial";
 import type { PaidFeature, WorkspaceSubscriptionSummary } from "@multica/core/types";
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
@@ -13,6 +13,7 @@ import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
 
 const TRIAL_FEATURE_ICONS: Record<PaidFeature, IconComponent> = {
   private_projects: Lock,
+  guests: Eye,
 };
 const TRIAL_FEATURES = Object.keys(TRIAL_FEATURE_ICONS) as PaidFeature[];
 

@@ -6325,6 +6325,15 @@ func (h *Handler) GetActiveTaskForIssue(w http.ResponseWriter, r *http.Request) 
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
 	}
+	// A guest (MUL-9420) learns only that an agent is working on the issue,
+	// not where or on what instructions.
+	if h.isGuest(r, workspaceID, requestUserID(r)) {
+		for i := range resp {
+			resp[i] = guestTaskView(resp[i])
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"tasks": resp})
+		return
+	}
 	// Same issue-facing attribution surface as ListTasksByIssue — hydrate names.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 

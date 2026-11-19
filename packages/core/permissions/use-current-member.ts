@@ -30,3 +30,18 @@ export function useCurrentMember(wsId: string): {
     isLoading,
   };
 }
+
+/**
+ * Whether the current user is a guest of the workspace (MUL-9420). A guest
+ * reaches only its shared projects, so the shell hides everything else and
+ * skips the queries the server would refuse. False while the member list
+ * loads.
+ */
+export function useIsGuest(wsId: string | null | undefined): boolean {
+  const userId = useAuthStore((s) => s.user?.id ?? null);
+  const { data: members } = useQuery({
+    ...memberListOptions(wsId ?? ""),
+    enabled: !!wsId && !!userId,
+  });
+  return !!members?.some((m) => m.user_id === userId && m.role === "guest");
+}

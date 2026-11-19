@@ -106,6 +106,7 @@ Pour voir tous les réveils de l'espace de travail, ouvrez **Automatisation** et
 Quand une tâche a des sous-tâches, sa section Réveils affiche une règle marquée **Système**. Personne n'a besoin de la créer :
 
 - Quand toutes les sous-tâches d'une étape sont closes alors qu'une étape suivante attend, elle réveille l'assigné du parent, puis une fois encore quand toutes les sous-tâches sont closes. Des sous-tâches sans étape réveillent le parent une fois, à la clôture de la dernière.
+- Ajouter ou rouvrir une sous-tâche ne réveille personne, y compris une étape ajoutée après la clôture de toutes les autres : sortez-la de `backlog` pour la lancer, ou mentionnez l'assigné pour qu'il l'organise.
 - Un agent assigné est réveillé ; pour un squad, c'est son chef ; un membre assigné reçoit plutôt une notification dans sa boîte de réception. Sans assigné, personne n'est réveillé.
 - Tant que le parent est en `backlog`, rien n'est réveillé ; le réveil a lieu une fois le parent sorti de `backlog`.
 - L'instruction par défaut indique à l'agent quelle étape s'est close et laquelle suit : vérifier ses dépendances, puis sortir de `backlog` les sous-tâches de l'étape suivante. Quand tout est clos, il rassemble les résultats sur le parent.

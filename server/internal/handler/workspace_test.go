@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -1576,5 +1577,34 @@ func TestUpdateWorkspace_RejectsInvalidIssuePrefix(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&after)
 	if after != before {
 		t.Fatalf("issue_prefix changed on a rejected update: %q → %q", before, after)
+	}
+}
+
+func TestListWorkspacesTaskCredentialSeesOnlyBoundWorkspace(t *testing.T) {
+	bound := newInboxWriteFixture(t)
+	other := newInboxWriteFixture(t)
+	token := bound.taskToken(t, testUserID)
+	ids := func(got []WorkspaceResponse) map[string]bool {
+		set := make(map[string]bool, len(got))
+		for _, ws := range got {
+			set[ws.ID] = true
+		}
+		return set
+	}
+
+	// The owner's own credential still lists every workspace.
+	var owner []WorkspaceResponse
+	testutil.Call(t, testHandler.ListWorkspaces, newRequest(http.MethodGet, "/api/workspaces", nil)).Want(http.StatusOK).JSON(&owner)
+	if got := ids(owner); !got[bound.workspaceID] || !got[other.workspaceID] {
+		t.Fatalf("owner list = %v, want both %s and %s", got, bound.workspaceID, other.workspaceID)
+	}
+
+	// The CLI lists workspaces without a workspace selector.
+	asAgent := middleware.Auth(testHandler.Queries, nil, nil, nil)(http.HandlerFunc(testHandler.ListWorkspaces))
+	req := testutil.WithHeaders(testutil.JSONRequest(http.MethodGet, "/api/workspaces", nil), "Authorization", "Bearer "+token)
+	var agent []WorkspaceResponse
+	testutil.Call(t, asAgent.ServeHTTP, req).Want(http.StatusOK).JSON(&agent)
+	if len(agent) != 1 || agent[0].ID != bound.workspaceID {
+		t.Fatalf("task credential list = %v, want only bound workspace %s", ids(agent), bound.workspaceID)
 	}
 }

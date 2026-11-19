@@ -111,16 +111,20 @@ export function issueScore(issue: SearchIssueResult, q: string): number {
  * Title hits from the cached doc tree answer on every keystroke; the server
  * adds what only it can find, content matches with an excerpt. A doc found
  * both ways keeps its instant row, picking up the server's excerpt if any.
+ * While the server is still answering an earlier query (`stale`), its rows
+ * stay painted but disabled, the way stale issue rows are, and lend no
+ * excerpts to the fresh title hits.
  */
 export function mergeDocHits(
   local: Scored<PaletteDoc>[],
   server: SearchDocResult[],
   folders: ReadonlyMap<string, string>,
   q: string,
+  stale = false,
 ): Scored<PaletteDoc>[] {
   const fromServer = new Map(server.map((doc) => [doc.id, doc]));
   const merged = local.map((hit) => {
-    const snippet = fromServer.get(hit.item.doc.id)?.matchedSnippet;
+    const snippet = stale ? null : fromServer.get(hit.item.doc.id)?.matchedSnippet;
     return snippet ? { ...hit, item: { ...hit.item, snippet } } : hit;
   });
   const listed = new Set(local.map((hit) => hit.item.doc.id));
@@ -131,6 +135,7 @@ export function mergeDocHits(
         doc,
         folder: doc.folderId ? (folders.get(doc.folderId) ?? null) : null,
         ...(doc.matchedSnippet ? { snippet: doc.matchedSnippet } : {}),
+        ...(stale ? { stale: true } : {}),
       },
       score: Math.max(scoreText(doc.title, q), SERVER_ONLY_SCORE),
     });
@@ -270,15 +275,14 @@ export function useRootModel(
       autopilots: scope === "all" ? objects.autopilots : [],
       chats: scope === "all" ? objects.chats : [],
       skills: scope === "all" ? objects.skills : [],
-      // Server doc rows answering an earlier query are dropped rather than
-      // shown stale; the instant title hits cover the gap until they land.
       docs:
         scope === "all"
           ? mergeDocHits(
               objects.docs,
-              docSearch.query === searching.trim() ? docSearch.docs : [],
+              docSearch.docs,
               objects.docFolders,
               q,
+              docSearch.query !== searching.trim(),
             )
           : [],
       workspaces: scope === "all" ? objects.workspaces : [],

@@ -134,7 +134,10 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "已完成 {{used}} · 进行中 {{reserved}}",
       "resets_at": "{{date}} 重置",
-      "usage_unavailable": "用量暂时不可用"
+      "usage_unavailable": "用量暂时不可用",
+      "members": "成员",
+      "members_pending": "待接受的邀请：{{pending}}",
+      "metering": "时间表、Webhook 和智能体发起的运行计入额度，成员点击\"立即运行\"不计入。"
     },
     "seats": {
       "title": "席位",
@@ -216,7 +219,16 @@
     },
     "confirm": {
       "title": "前往 Stripe Checkout？",
-      "description": "套餐：{{plan}}。付款周期：{{interval}}。当前成员：{{count}}。Stripe 会重新统计席位，并在付款前显示最终金额。"
+      "description": "套餐：{{plan}}。付款周期：{{interval}}。当前成员：{{count}}。Stripe 会重新统计席位，并在付款前显示最终金额。",
+      "held_invite": "另含 1 个付费席位，留给发给 {{email}} 的邀请。付款完成后，在「账单与套餐」里发出这份邀请。"
+    },
+    "held_invite": {
+      "title": "工作区已升级到 {{plan}}",
+      "description": "你之前留下了一份邀请：以{{role}}身份邀请 {{email}}，等升级后再发。现在发出吗？",
+      "role_admin": "管理员",
+      "role_member": "成员",
+      "send": "发送邀请",
+      "discard": "不发了"
     }
   },
   "return_page": {
@@ -290,6 +302,10 @@
       "private_projects": {
         "name": "私有项目",
         "after": "到期后保持私有，访问名单只读。"
+      },
+      "guests": {
+        "name": "访客",
+        "after": "到期后已有访客保留访问权限，邀请新访客需要 Pro 或 Business。"
       }
     }
   }

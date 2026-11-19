@@ -122,6 +122,7 @@ To see every wakeup in the workspace, open **Autopilot** and switch to the **Iss
 When an issue has sub-issues, its Wakeups section shows a rule marked **System**. Nobody needs to create it:
 
 - When every sub-issue in a stage is closed and a later stage is still waiting, it wakes the parent's assignee, and it wakes them once more when every sub-issue is closed. Sub-issues without stages wake the parent once, when the last one closes.
+- Adding or reopening a sub-issue does not wake anyone, including a stage added after every sub-issue closed: move it out of `backlog` to start it, or mention the assignee to organize it.
 - An agent assignee is woken; for a squad, its leader is woken; a member assignee gets an inbox notification instead. Without an assignee, nobody is woken.
 - While the parent is in `backlog`, nothing is woken; it catches up once the parent leaves `backlog`.
 - The default instruction tells the agent which stage closed and which comes next: check its dependencies, then move the next stage's sub-issues out of `backlog`. When every sub-issue is closed, it brings their results together on the parent.
