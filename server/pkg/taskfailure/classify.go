@@ -682,6 +682,13 @@ var legacyUsageLimit403Reasons = map[string]bool{
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
 	rawError = WithoutCodebuddyProtocolSummary(rawError)
+	// Older daemons treated the billing rejection as a rate limit because
+	// they only recognized the numeric status and the structured balance code.
+	if reason == ReasonAgentProviderCapacityOrRateLimit.String() &&
+		strings.Contains(strings.ToLower(rawError), "insufficient balance") &&
+		Classify(rawError) == ReasonAgentProviderQuotaLimit {
+		return ReasonAgentProviderQuotaLimit
+	}
 	if legacyConcurrentRequestLimitReasons[reason] &&
 		strings.Contains(strings.ToLower(rawError), concurrentRequestLimitWitness) {
 		return ReasonAgentProviderCapacityOrRateLimit

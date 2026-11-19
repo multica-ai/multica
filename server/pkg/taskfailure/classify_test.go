@@ -671,3 +671,18 @@ func TestClassifyKeepsDeadlineExceededAsProviderNetwork(t *testing.T) {
 		t.Errorf("Classify(provider deadline) = %q, want %q", got, ReasonAgentProviderNetwork)
 	}
 }
+
+func TestNormalizeDaemonReasonDistinguishesInsufficientBalanceFromRateLimit(t *testing.T) {
+	legacy := ReasonAgentProviderCapacityOrRateLimit.String()
+	for _, tc := range []struct {
+		raw  string
+		want Reason
+	}{
+		{"API Error: Request rejected (429) · [1113][Insufficient balance or no resource package. Please recharge.]", ReasonAgentProviderQuotaLimit},
+		{"API Error: 429 Too Many Requests", ReasonAgentProviderCapacityOrRateLimit},
+	} {
+		if got := NormalizeDaemonReason(legacy, tc.raw); got != tc.want {
+			t.Errorf("NormalizeDaemonReason(%q, %q) = %q, want %q", legacy, tc.raw, got, tc.want)
+		}
+	}
+}
