@@ -1,4 +1,5 @@
 import type { LocaleResources } from "@multica/core/i18n";
+import viDocs from "./vi/docs.json";
 import viCommon from "./vi/common.json";
 import viAuth from "./vi/auth.json";
 import viSettings from "./vi/settings.json";
@@ -26,6 +27,7 @@ import viSquads from "./vi/squads.json";
 import viBilling from "./vi/billing.json";
 
 const resources: LocaleResources = {
+  docs: viDocs,
   common: viCommon,
   auth: viAuth,
   settings: viSettings,

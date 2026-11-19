@@ -81,7 +81,6 @@
     "run_blocked_attribution": "Không kích hoạt — không xác định được thành viên chịu trách nhiệm cho lần chạy này",
     "run_blocked_already_active": "Không kích hoạt — một lần chạy gần đây đã bao quát việc này",
     "run_blocked_quota_exceeded": "Không kích hoạt — đã đạt giới hạn số lần chạy trong kỳ này",
-    "run_blocked_issue_limit_reached": "Không kích hoạt — không gian làm việc đã đạt giới hạn số công việc",
     "run_blocked_generic": "Không kích hoạt — lần chạy đã bị chặn",
     "section_triggers": "Trigger",
     "section_run_history": "Lịch sử chạy",
@@ -184,6 +183,9 @@
     "url_copied": "Đã sao chép URL của webhook",
     "url_copy_failed": "Không sao chép được",
     "edit_schedule": "Chỉnh sửa lịch",
+    "edit_webhook": "Chỉnh sửa webhook",
+    "event_filter_summary_all": "Nhận mọi sự kiện",
+    "event_filter_summary_conditions_other": "{{count}} điều kiện",
     "rotate_url": "Đổi URL",
     "rotate_confirm_title": "Đổi URL của webhook",
     "rotate_confirm_description": "URL hiện tại sẽ ngừng hoạt động ngay lập tức. Mọi hệ thống bên ngoài đang gọi URL này phải được cập nhật sang URL mới. Tiếp tục?",
@@ -247,6 +249,18 @@
       "disabled_invalid_signature": "Không gửi lại được — chữ ký không hợp lệ",
       "disabled_rejected": "Không gửi lại được một lần gửi bị từ chối",
       "disabled_queued": "Vẫn đang chờ — hãy gửi lại khi nó hoàn tất"
+    },
+    "ignore": {
+      "title": "Lý do bỏ qua",
+      "payload_filtered": "Không thỏa điều kiện payload",
+      "event_filtered": "Sự kiện hoặc hành động không khớp",
+      "trigger_disabled": "Trigger đã tắt",
+      "autopilot_paused": "Autopilot đã tạm dừng",
+      "autopilot_archived": "Autopilot đã lưu trữ",
+      "quota_exceeded": "Đã hết quota lượt chạy",
+      "actual_value": "Giá trị thực tế",
+      "missing": "Thiếu trường",
+      "truncated": "Bản xem trước đã cắt ngắn. Xem body gốc để thấy đủ giá trị."
     }
   },
   "add_trigger_dialog": {
@@ -272,6 +286,12 @@
     "submitting": "Đang lưu...",
     "toast_updated": "Đã cập nhật lịch",
     "toast_update_failed": "Không cập nhật được lịch"
+  },
+  "edit_webhook_dialog": {
+    "title": "Chỉnh sửa webhook",
+    "label_placeholder": "vd: pull request trên GitHub",
+    "toast_updated": "Đã cập nhật webhook",
+    "toast_update_failed": "Cập nhật webhook thất bại"
   },
   "dialog": {
     "sr_create": "Autopilot mới",
@@ -328,12 +348,40 @@
     "webhook_created_done": "Xong",
     "event_filter_label": "Bộ lọc sự kiện",
     "event_filter_docs_link_label": "Tìm hiểu cách bộ lọc sự kiện hoạt động",
-    "event_filter_event_placeholder": "vd. workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "Thêm",
-    "event_filter_remove_label": "Xóa bộ lọc",
-    "event_filter_hint": "Chỉ xử lý các webhook khớp với những sự kiện này. Để trống để chấp nhận tất cả.",
+    "event_filter_event_placeholder": "Sự kiện, vd. pull_request",
+    "event_filter_actions_placeholder": "Hành động (không bắt buộc)",
+    "event_filter_add_rule": "Thêm quy tắc",
+    "event_filter_event_label": "Sự kiện",
+    "event_filter_actions_label": "Hành động",
+    "event_filter_new_rule_label": "Quy tắc mới",
+    "event_filter_condition_label": "Điều kiện",
+    "event_filter_error_event_required": "Nhập tên sự kiện.",
+    "event_filter_error_path_required": "Nhập trường payload.",
+    "event_filter_error_path_invalid": "Tách tên trường bằng dấu chấm, tối đa {{path}} ký tự.",
+    "event_filter_error_value_required": "Nhập giá trị.",
+    "event_filter_error_too_many_values": "Tối đa {{values}} giá trị.",
+    "event_filter_remove_label": "Xóa quy tắc",
+    "event_filter_hint": "Chỉ xử lý sự kiện khớp với một quy tắc và mọi điều kiện payload của nó. Để trống để chấp nhận mọi sự kiện.",
+    "event_filter_condition_remove_label": "Xóa điều kiện",
+    "event_filter_condition_add_label": "Thêm điều kiện",
+    "event_filter_condition_ops": {
+      "equals": "bằng",
+      "not_equals": "không bằng",
+      "contains": "chứa",
+      "in": "là một trong",
+      "exists": "tồn tại"
+    },
+    "event_filter_condition_path_label": "Trường payload",
+    "event_filter_condition_path_placeholder": "Trường payload, vd: pull_request.base.ref",
+    "event_filter_condition_op_label": "Toán tử",
+    "event_filter_condition_value_label": "Giá trị",
+    "event_filter_condition_value_placeholder": "vd: main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "Không phân biệt hoa thường",
     "schedule_multiple_notice": "Autopilot này có {{count}} lịch. Đóng hộp thoại này và chỉnh sửa từng lịch ở mục Trigger bên dưới.",
+    "webhook_multiple_notice": "Autopilot này có nhiều webhook. Đóng hộp thoại này và chỉnh sửa từng webhook trong mục Trigger bên dưới.",
+    "webhook_edit_filters": "Chỉnh sửa bộ lọc",
+    "webhook_filters_saved_separately": "Lưu riêng: Hủy ở đây không hoàn tác được.",
     "schedule_empty": "Không có lịch — autopilot này chỉ chạy khi được kích hoạt thủ công.",
     "schedule_add": "Thêm lịch",
     "error_title_required": "Hãy nhập tên cho autopilot này.",
@@ -347,7 +395,8 @@
         "label": "Chỉ chạy",
         "description": "Chạy ngầm, không tạo công việc"
       }
-    }
+    },
+    "event_filter_condition_all": "Và payload khớp mọi điều kiện"
   },
   "schedule_editor": {
     "time_label": "Thời gian",

@@ -102,6 +102,8 @@
   "mention": {
     "group_users": "Người dùng",
     "group_issues": "Công việc",
+    "group_projects": "Dự án",
+    "group_docs": "Tài liệu",
     "all_members": "Tất cả thành viên",
     "agent_badge": "Agent",
     "squad_badge": "Squad",
@@ -226,5 +228,31 @@
       "later": "Để sau",
       "start": "Bắt đầu đọc chính tả"
     }
+  },
+  "block_menu": {
+    "label": "Chèn khối",
+    "blocks": {
+      "paragraph": "Văn bản",
+      "heading1": "Tiêu đề 1",
+      "heading2": "Tiêu đề 2",
+      "heading3": "Tiêu đề 3",
+      "bulletList": "Danh sách dấu đầu dòng",
+      "orderedList": "Danh sách đánh số",
+      "taskList": "Danh sách việc cần làm",
+      "blockquote": "Trích dẫn",
+      "codeBlock": "Khối code",
+      "mermaid": "Sơ đồ Mermaid",
+      "table": "Bảng",
+      "divider": "Đường phân cách",
+      "image": "Hình ảnh",
+      "file": "Tệp"
+    }
+  },
+  "block_handle": {
+    "add": "Thêm bên dưới",
+    "options": "Kéo để di chuyển, nhấp để xem tùy chọn",
+    "turn_into": "Chuyển thành",
+    "duplicate": "Nhân bản",
+    "delete": "Xóa"
   }
 }

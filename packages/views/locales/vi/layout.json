@@ -12,7 +12,8 @@
     "runtimes": "Runtime",
     "skills": "Skills",
     "settings": "Cài đặt",
-    "views": "Chế độ xem"
+    "views": "Chế độ xem",
+    "docs": "Tài liệu"
   },
   "tab": {
     "issue": "Công việc",
@@ -27,7 +28,9 @@
     "attachment": "Tệp đính kèm",
     "create_agent": "Tạo Agent",
     "my_agents": "Việc của các agent của tôi",
-    "unknown": "Trang không xác định"
+    "unknown": "Trang không xác định",
+    "doc": "Tài liệu",
+    "docFolder": "Thư mục"
   },
   "help": {
     "trigger": "Trợ giúp",
@@ -116,7 +119,8 @@
     "mark_all_read_failed": "Không đánh dấu tất cả là đã đọc được",
     "reset_order": "Đặt lại thứ tự mặc định",
     "copy_workspace_link": "Sao chép liên kết không gian làm việc",
-    "workspace_meta_other": "{{slug}} · {{count}} thành viên"
+    "workspace_meta_other": "{{slug}} · {{count}} thành viên",
+    "docs": "Tài liệu"
   },
   "bottom_bar": {
     "label": "Thanh trạng thái",
@@ -184,7 +188,11 @@
       "pinned_settings": "Hiển thị đã ghim",
       "views_settings": "Hiển thị chế độ xem",
       "views_builtin": "Chế độ xem có sẵn",
-      "views_show_count": "Số lượng"
+      "views_show_count": "Số lượng",
+      "guest_badge": "Khách",
+      "guest_badge_hint": "Bạn có thể xem và bình luận trên các dự án được chia sẻ với bạn.",
+      "involved": "Tham gia",
+      "shared_projects": "Được chia sẻ với bạn"
     },
     "team": {
       "new_agent": "Agent mới",
