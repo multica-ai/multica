@@ -332,14 +332,29 @@
     "available": "利用可能",
     "action": "更新",
     "retry": "再試行",
+    "cancel": "キャンセル",
     "unknown_error": "不明なエラー",
     "initiate_failed": "更新を開始できませんでした",
     "status": {
       "pending": "デーモンを待っています...",
+      "scheduled": "アイドル時に更新",
       "running": "更新中...",
-      "completed": "更新が完了しました。デーモンを再起動しています...",
+      "completed": "{{version}} に更新しました",
       "failed": "更新に失敗しました",
-      "timeout": "タイムアウト"
+      "timeout": "タイムアウト",
+      "expired": "キューの期限切れ"
+    },
+    "note_no_interrupt": "実行中のタスクは中断されません。",
+    "expired_note": "マシンがアイドルになるのを 24 時間待ったため、期限切れになりました。",
+    "busy_note": "マシンがタスクを実行中だったため、更新は開始されませんでした。アイドル時に再試行してください。",
+    "steps": {
+      "queued": "キュー登録",
+      "wait": "タスクの完了を待機",
+      "tasks_finished": "タスク完了",
+      "install": "{{version}} をインストール",
+      "restart": "デーモンを再起動",
+      "wait_detail_with_tasks": "{{running}} 件実行中 · {{elapsed}} 待機",
+      "wait_detail": "{{elapsed}} 待機中"
     }
   },
   "charts": {

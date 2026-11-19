@@ -343,14 +343,29 @@
     "available": "disponible",
     "action": "Mettre à jour",
     "retry": "Réessayer",
+    "cancel": "Annuler",
     "unknown_error": "Erreur inconnue",
     "initiate_failed": "Échec du lancement de la mise à jour",
     "status": {
       "pending": "En attente du daemon...",
+      "scheduled": "Mise à jour à l'inactivité",
       "running": "Mise à jour...",
-      "completed": "Mise à jour terminée. Le daemon redémarre...",
+      "completed": "Mis à jour vers {{version}}",
       "failed": "Échec de la mise à jour",
-      "timeout": "Délai dépassé"
+      "timeout": "Délai dépassé",
+      "expired": "File expirée"
+    },
+    "note_no_interrupt": "Les tâches en cours ne seront pas interrompues.",
+    "expired_note": "Expirée après 24 heures d'attente sans que la machine soit inactive.",
+    "busy_note": "La machine était occupée, la mise à jour n'a donc pas démarré. Réessayez quand elle sera inactive.",
+    "steps": {
+      "queued": "En file d'attente",
+      "wait": "Attendre la fin des tâches",
+      "tasks_finished": "Tâches terminées",
+      "install": "Installer {{version}}",
+      "restart": "Redémarrer le daemon",
+      "wait_detail_with_tasks": "{{running}} en cours · {{elapsed}}",
+      "wait_detail": "En attente depuis {{elapsed}}"
     }
   },
   "charts": {
