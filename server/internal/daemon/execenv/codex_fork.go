@@ -45,26 +45,8 @@ func publishCodexFork(storeDir, requestID string, stage func(string) (string, er
 	}
 
 	destination := filepath.Join(storeDir, "fork")
-	receiptPath := filepath.Join(destination, "receipt.json")
-	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
-		if err != nil {
-			return "", err
-		}
-		data, err := os.ReadFile(receiptPath)
-		if err != nil {
-			return "", fmt.Errorf("read published Codex fork receipt: %w", err)
-		}
-		var receipt codexForkReceipt
-		if err := json.Unmarshal(data, &receipt); err != nil {
-			return "", fmt.Errorf("decode published Codex fork receipt: %w", err)
-		}
-		if receipt.RequestID != requestID {
-			return "", errors.New("a different Codex fork already owns the destination")
-		}
-		if !validPublishedCodexFork(destination, receipt.ChildID) {
-			return "", errors.New("published Codex fork history is unavailable")
-		}
-		return receipt.ChildID, nil
+	if childID, err := LookupPublishedCodexFork(storeDir, requestID); err != nil || childID != "" {
+		return childID, err
 	}
 
 	staging, err := os.MkdirTemp(storeDir, ".fork-staging-")
@@ -104,6 +86,34 @@ func publishCodexFork(storeDir, requestID string, stage func(string) (string, er
 		return "", fmt.Errorf("publish Codex fork: %w", err)
 	}
 	return childID, nil
+}
+
+// LookupPublishedCodexFork returns the child of an already published request.
+// Callers hold the destination conversation writer lock.
+func LookupPublishedCodexFork(storeDir, requestID string) (string, error) {
+	destination := filepath.Join(storeDir, "fork")
+	receiptPath := filepath.Join(destination, "receipt.json")
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		if err != nil {
+			return "", err
+		}
+		data, err := os.ReadFile(receiptPath)
+		if err != nil {
+			return "", fmt.Errorf("read published Codex fork receipt: %w", err)
+		}
+		var receipt codexForkReceipt
+		if err := json.Unmarshal(data, &receipt); err != nil {
+			return "", fmt.Errorf("decode published Codex fork receipt: %w", err)
+		}
+		if receipt.RequestID != requestID {
+			return "", errors.New("a different Codex fork already owns the destination")
+		}
+		if !validPublishedCodexFork(destination, receipt.ChildID) {
+			return "", errors.New("published Codex fork history is unavailable")
+		}
+		return receipt.ChildID, nil
+	}
+	return "", nil
 }
 
 func validPublishedCodexFork(dir, childID string) bool {

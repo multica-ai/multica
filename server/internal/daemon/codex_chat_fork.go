@@ -53,33 +53,44 @@ func (d *Daemon) runCodexChatForkTask(ctx context.Context, task Task, provider s
 		defer lock.Release()
 	}
 
-	var ownedEnvRoot string
-	if fork.SourceWorkDir != "" && !fork.SourceRequiresNativeResume {
-		sourceClaim := Task{ID: task.ID, WorkspaceID: task.WorkspaceID, AgentID: task.AgentID,
-			ChatSessionID: fork.SourceChatID, PriorWorkDir: fork.SourceWorkDir}
-		claim, workDir, _, ok, err := d.lockReusablePriorEnvRoot(ctx, sourceClaim, nil, "")
-		if err != nil {
-			return TaskResult{}, err
-		}
-		if ok {
-			defer claim.Release()
-			ownedEnvRoot = filepath.Dir(workDir)
-			defer d.markActiveEnvRoot(ownedEnvRoot)()
-		}
-	}
-	source, err := execenv.ResolveCodexForkSource(d.cfg.Profile, sourceTask, ownedEnvRoot, fork.SourceSessionID)
+	childID, err := execenv.LookupPublishedCodexFork(destinationStore, task.ID)
 	if err != nil {
 		return TaskResult{}, err
 	}
+	var source execenv.CodexForkSource
+	if childID == "" {
+		var ownedEnvRoot string
+		if fork.SourceWorkDir != "" && !fork.SourceRequiresNativeResume {
+			sourceClaim := Task{ID: task.ID, WorkspaceID: task.WorkspaceID, AgentID: task.AgentID,
+				ChatSessionID: fork.SourceChatID, PriorWorkDir: fork.SourceWorkDir}
+			claim, workDir, _, ok, err := d.lockReusablePriorEnvRoot(ctx, sourceClaim, nil, "")
+			if err != nil {
+				return TaskResult{}, err
+			}
+			if ok {
+				defer claim.Release()
+				ownedEnvRoot = filepath.Dir(workDir)
+				defer d.markActiveEnvRoot(ownedEnvRoot)()
+			}
+		}
+		source, err = execenv.ResolveCodexForkSource(d.cfg.Profile, sourceTask, ownedEnvRoot, fork.SourceSessionID)
+		if err != nil {
+			return TaskResult{}, err
+		}
+	}
+
 	if _, err := d.client.StartTask(ctx, task); err != nil {
 		return TaskResult{}, fmt.Errorf("start Codex fork task: %w", err)
+	}
+	if childID != "" {
+		return TaskResult{Status: "completed", SessionID: childID}, nil
 	}
 	cwd, err := os.MkdirTemp("", "multica-codex-fork-cwd-")
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create private Codex fork work directory: %w", err)
 	}
 	defer os.RemoveAll(cwd)
-	childID, err := execenv.ForkCodexChat(ctx, cfg, cwd, source.SessionsDir, source.ArchiveDir, source.ConfigPath,
+	childID, err = execenv.ForkCodexChat(ctx, cfg, cwd, source.SessionsDir, source.ArchiveDir, source.ConfigPath,
 		fork.SourceSessionID, destinationStore, task.ID)
 	if err != nil {
 		return TaskResult{}, err
