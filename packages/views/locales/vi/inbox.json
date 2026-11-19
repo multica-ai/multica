@@ -153,6 +153,7 @@
     "archive_completed_failed": "Không lưu trữ các mục đã hoàn thành được",
     "unarchive_failed": "Không hủy lưu trữ được",
     "archived_load_failed": "Không tải được thông báo đã lưu trữ",
+    "load_failed": "Không tải được thông báo",
     "filters_load_failed": "Không tải được bộ lọc",
     "delete_failed": "Không xóa được thông báo. Thử lại.",
     "unsubscribe_archive_failed": "Không bỏ theo dõi được",

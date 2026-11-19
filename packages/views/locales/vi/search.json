@@ -16,6 +16,7 @@
     "autopilots": "Autopilots",
     "chats": "Trò chuyện",
     "skills": "Skills",
+    "docs": "Tài liệu",
     "cancelled": "Đã hủy",
     "recent": "Gần đây",
     "workspaces": "Không gian làm việc",
@@ -160,5 +161,6 @@
   },
   "trigger": {
     "label": "Tìm kiếm..."
-  }
+  },
+  "untitled_doc": "Chưa có tiêu đề"
 }

@@ -182,19 +182,6 @@
     "toast_failed": "Không tạo được công việc",
     "toast_duplicate_title": "Công việc trùng lặp",
     "toast_duplicate_view": "Xem công việc hiện có",
-    "issue_limit": {
-      "title": "Không gian làm việc này đã đạt giới hạn công việc",
-      "checking_description": "Đang kiểm tra các thao tác thanh toán khả dụng cho không gian làm việc này…",
-      "upgrade_description": "Nâng cấp lên Pro để tiếp tục tạo công việc.",
-      "portal_description": "Mở Cổng thanh toán để quản lý gói đăng ký của không gian làm việc này và khôi phục việc tạo công việc.",
-      "contact_description": "Hãy nhờ chủ sở hữu hoặc quản trị viên của không gian làm việc nâng cấp lên Pro.",
-      "billing_description": "Mở Thanh toán để xem các lựa chọn nâng cấp khả dụng cho không gian làm việc này.",
-      "billing_unavailable_description": "Không tải được các thao tác thanh toán. Mở Thanh toán để thử lại.",
-      "billing_disabled_description": "Xóa một công việc hiện có để giải phóng dung lượng, hoặc liên hệ quản trị viên không gian làm việc của bạn.",
-      "upgrade_action": "Nâng cấp lên Pro",
-      "portal_action": "Mở Cổng thanh toán",
-      "billing_action": "Xem Thanh toán"
-    },
     "autopilot_quota_limit": {
       "title": "Không gian làm việc này đã đạt giới hạn số lần chạy autopilot",
       "checking_description": "Đang kiểm tra các thao tác thanh toán khả dụng cho không gian làm việc này…",

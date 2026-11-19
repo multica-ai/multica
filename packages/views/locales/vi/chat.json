@@ -256,7 +256,9 @@
     "archive": "Lưu trữ",
     "unarchive": "Bỏ lưu trữ",
     "archived_title": "Đã lưu trữ",
-    "row_actions_aria": "Thao tác trò chuyện"
+    "row_actions_aria": "Thao tác trò chuyện",
+    "wakeup_preview": "Đã quay lại báo cáo",
+    "wakeup_active": "Đang chờ báo cáo lại"
   },
   "header": {
     "agent_settings": "Cài đặt agent",
@@ -264,5 +266,52 @@
     "archive": "Lưu trữ cuộc trò chuyện",
     "unarchive": "Bỏ lưu trữ cuộc trò chuyện",
     "delete": "Xóa cuộc trò chuyện"
+  },
+  "wakeup": {
+    "panel_title": "Wakeup",
+    "panel_empty": "Không có wakeup nào trong cuộc trò chuyện này",
+    "panel_ended": "Đã kết thúc gần đây",
+    "limits_hint": "Mọi wakeup đều kết thúc: thời gian chờ mặc định là 24 giờ, tối đa 7 ngày. Nếu tới hạn trước, agent quay lại một lần để báo tình hình.",
+    "strip_waiting": "Đang chờ: {{title}}",
+    "card": "Sẽ báo cáo lại: {{title}}",
+    "ends": "kết thúc {{relative}}",
+    "reminder_at": "nhắc {{relative}}",
+    "next_check": "lần kiểm tra tiếp theo {{relative}}",
+    "last_check": "Lần kiểm tra gần nhất: {{note}}",
+    "cancel": "Hủy wakeup",
+    "cancel_failed": "Không hủy được wakeup",
+    "retry": "Thử lại",
+    "retry_failed": "Không thử lại được wakeup",
+    "status": {
+      "active": "Đang chờ",
+      "fired": "Đã báo cáo lại",
+      "expired": "Đã tới hạn",
+      "cancelled": "Đã hủy",
+      "failed": "Không chạy được"
+    },
+    "report": {
+      "waiting": "Đang chờ báo cáo",
+      "running": "Đang báo cáo…",
+      "failed": "Không báo cáo được"
+    },
+    "failure": {
+      "permission_revoked": "Người đã yêu cầu không còn chạy được agent này nữa",
+      "access_lost": "Thứ đang theo dõi đã chuyển sang dự án riêng tư",
+      "dispatch_failed": "Agent không chạy được"
+    },
+    "kind": {
+      "condition": "Khi xảy ra",
+      "at": "Nhắc hẹn",
+      "check": "Kiểm tra định kỳ"
+    },
+    "divider": {
+      "condition": "Báo cáo lại · đã xảy ra",
+      "at": "Báo cáo lại · nhắc hẹn",
+      "check": "Báo cáo lại · kiểm tra",
+      "expired": "Báo cáo lại · đã tới hạn",
+      "generic": "Báo cáo lại"
+    },
+    "queue_label": "Wakeup: {{title}}",
+    "queue_fallback": "Wakeup"
   }
 }

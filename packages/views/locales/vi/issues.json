@@ -550,9 +550,9 @@
     "subscribe": "Đăng ký theo dõi",
     "unsubscribe": "Hủy đăng ký theo dõi",
     "delegated_subscription_badge": "Đang theo dõi qua agent",
-    "delegated_subscription_hint": "Agent của bạn đã tạo công việc này thay mặt bạn, nên bạn được đăng ký theo dõi nó. Bạn sẽ nhận thông báo khi nó cần duyệt, hoàn thành hoặc bị tắc.",
+    "delegated_subscription_hint": "Agent của bạn đã tạo công việc này thay mặt bạn, nên bạn được đăng ký theo dõi nó. Khi đã bật Thay đổi trạng thái, bạn sẽ nhận thông báo khi nó cần duyệt, hoàn thành hoặc bị tắc.",
     "key_updates_subscription_badge": "Chỉ cập nhật quan trọng",
-    "key_updates_subscription_hint": "Công việc này là của người khác, và bạn theo dõi nó vì bạn đã tạo, bình luận hoặc được nhắc tới trong đó. Bạn sẽ nghe về lượt nhắc @mention, trả lời trong chuỗi của bạn, và khi nó cần duyệt, bị tắc hoặc hoàn thành.",
+    "key_updates_subscription_hint": "Công việc này là của người khác, và bạn theo dõi nó vì bạn đã tạo, bình luận hoặc được nhắc tới trong đó. Bạn sẽ nghe về lượt nhắc @mention, trả lời trong chuỗi của bạn, và, khi đã bật Thay đổi trạng thái, khi nó cần duyệt, bị tắc hoặc hoàn thành.",
     "key_updates_follow_all": "Nhận mọi hoạt động",
     "key_updates_follow_all_done": "Bạn sẽ nhận mọi hoạt động trên công việc này",
     "key_updates_settings": "Thay đổi mặc định",
@@ -575,6 +575,8 @@
     "quick_jump_label": "Điều hướng nhanh",
     "description_nav_label": "Mô tả công việc",
     "sub_issues_nav_progress": "Đã hoàn thành {{done}}/{{total}}",
+    "sub_issues_show_more_other": "Hiện thêm {{count}}",
+    "sub_issues_show_less": "Thu gọn",
     "thread_nav_label": "Đi tới luồng bình luận",
     "thread_nav_resolved_label": "{{title}} (đã giải quyết)",
     "thread_nav_reply_label": "{{author}}: {{title}}",
@@ -591,13 +593,15 @@
     },
     "update_failed": "Cập nhật công việc thất bại",
     "link_copied": "Đã sao chép liên kết",
+    "title_link_copied": "Đã sao chép link kèm tiêu đề",
     "link_copy_failed": "Sao chép liên kết thất bại",
     "workdir_path_copied": "Đã sao chép đường dẫn workdir",
     "project_directory_path_copied": "Đã sao chép đường dẫn thư mục dự án",
     "project_directory_path_copied_with_branch": "Đã sao chép đường dẫn thư mục dự án — công việc đang ở nhánh {{branch}}",
     "workdir_path_copy_failed": "Sao chép đường dẫn workdir thất bại",
     "workdir_path_unavailable": "Chưa có workdir cục bộ — công việc chưa được agent cục bộ chạy",
-    "pull_requests_empty_title": "Không có pull request nào được liên kết."
+    "pull_requests_empty_title": "Không có pull request nào được liên kết.",
+    "guest_readonly_note": "Khách có thể xem và bình luận, nhưng không thể thay đổi thuộc tính công việc."
   },
   "timeline": {
     "loading": "Đang tải...",
@@ -761,7 +765,9 @@
     "restart_failed": "Không thể dừng lần chạy hiện tại. Tin nhắn của bạn chưa được gửi.",
     "reply_action": "Trả lời",
     "actions_label": "Hành động bình luận",
-    "create_issue_from_selection": "Tạo công việc con từ đoạn đã chọn"
+    "create_issue_from_selection": "Tạo công việc con từ đoạn đã chọn",
+    "guest_placeholder": "Trả lời… bạn có thể @ thành viên",
+    "guest_hint": "Khách không thể @ agent hay gán công việc cho họ"
   },
   "reply": {
     "recipients_changed": "Đã đổi đối tượng trả lời. Hãy kiểm tra lại người nhận trước khi gửi lại.",
@@ -1025,6 +1031,7 @@
     "mark_read": "Đánh dấu đã đọc",
     "mark_unread": "Đánh dấu chưa đọc",
     "copy_link": "Sao chép liên kết",
+    "copy_title_as_link": "Sao chép link kèm tiêu đề",
     "copy_workdir_path": "Sao chép đường dẫn workdir cục bộ",
     "copy_project_directory_path": "Sao chép đường dẫn thư mục dự án",
     "copy_identifier": "Sao chép định danh",

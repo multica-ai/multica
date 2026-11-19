@@ -14,7 +14,8 @@
     "upload_image": "Tải lên hình ảnh",
     "emoji_label": "Emoji",
     "more_emojis": "Thêm emoji…",
-    "emoji_loading": "Đang tải…"
+    "emoji_loading": "Đang tải…",
+    "text_icon": "Icon chữ"
   },
   "avatar_crop": {
     "title": "Chỉnh sửa ảnh đại diện",
@@ -28,6 +29,14 @@
     "uploading": "Đang tải lên…",
     "loading": "Đang tải…",
     "load_failed": "Không tải được hình ảnh"
+  },
+  "text_avatar": {
+    "title": "Icon chữ",
+    "preview": "Xem trước",
+    "text_label": "Chữ",
+    "text_hint": "1–2 ký tự: chữ cái, chữ số hoặc tiếng Trung. Chữ dài hơn sẽ bị cắt.",
+    "color_label": "Màu",
+    "render_failed": "Không tạo được icon. Hãy thử lại."
   },
   "color_picker": {
     "saturation": "Độ bão hòa và độ sáng",

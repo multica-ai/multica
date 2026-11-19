@@ -30,6 +30,31 @@
   },
   "errors": {
     "accept_failed": "Không chấp nhận được lời mời",
-    "decline_failed": "Không từ chối được lời mời"
+    "decline_failed": "Không từ chối được lời mời",
+    "member_limit_reached": "{{workspace}} đã đầy. Hãy hỏi người đã mời bạn; bạn có thể tham gia khi không gian làm việc nâng cấp."
+  },
+  "join": {
+    "no_code": "Không tìm thấy mã mời. Hãy dùng liên kết chia sẻ hợp lệ.",
+    "invalid": "Liên kết mời này không hợp lệ hoặc đã hết hạn.",
+    "joined_title": "Đã tham gia!",
+    "redirecting": "Đang chuyển tới không gian làm việc của bạn...",
+    "error_title": "Rất tiếc",
+    "go_home": "Về trang chủ",
+    "loading": "Đang tải thông tin lời mời...",
+    "title": "Bạn được mời vào {{workspace}}",
+    "invited_by": "Được mời bởi {{name}}",
+    "join_as": "Bạn sẽ tham gia không gian làm việc này với vai trò",
+    "role_admin": "Quản trị viên",
+    "role_member": "Thành viên",
+    "login_required": "Bạn cần đăng nhập để tham gia không gian làm việc này.",
+    "join": "Tham gia không gian làm việc",
+    "joining": "Đang tham gia...",
+    "log_in_to_join": "Đăng nhập để tham gia",
+    "join_failed": "Không tham gia được không gian làm việc. Liên kết có thể đã hết hạn.",
+    "seats_full": "Mọi ghế thành viên đã mua đều đang được dùng. Hãy nhờ quản trị viên không gian làm việc thêm ghế rồi thử lại.",
+    "seats_unavailable": "Không xác minh được sức chứa thành viên. Hãy thử lại.",
+    "full_title": "{{workspace}} đã đầy",
+    "full_description": "Hãy liên hệ người đã mời bạn. Liên kết này dùng lại được khi không gian làm việc nâng cấp.",
+    "retry": "Thử lại"
   }
 }
