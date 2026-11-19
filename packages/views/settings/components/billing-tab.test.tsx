@@ -772,7 +772,7 @@ describe("BillingTab", () => {
         autopilotRuns: { mode: "unlimited", limit: null },
       },
     });
-    mocks.summary.availableActions.checkout = false;
+    setSeatCapacity({ humanMembers: 3, purchased: 3 });
     mocks.summaryDataUpdatedAt = Date.now() + 1;
     mocks.summaryFetchedAfterMount = true;
     try {
@@ -781,6 +781,45 @@ describe("BillingTab", () => {
       expect(screen.getByText("Pro is active")).toBeInTheDocument();
       expect(screen.getByText("Unlimited")).toBeInTheDocument();
       expect(screen.queryByText("5 / 7")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps syncing a checkout started during a trial until paid seats take effect", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
+    navigationState.search = "tab=billing&result=success&session_id=cs_test_1";
+    // Still on the Business trial while the first Pro payment is incomplete:
+    // the plan is paid and Checkout is gone, but nothing has been paid for.
+    Object.assign(mocks.entitlements, {
+      plan: "business",
+      status: "trialing",
+      limits: { autopilotRuns: { mode: "unlimited", limit: null } },
+    });
+    mocks.summary.trial = {
+      plan: "business",
+      state: "active",
+      startedAt: "2029-12-25T00:00:00Z",
+      endsAt: "2030-01-08T00:00:00Z",
+    };
+    mocks.summary.availableActions.checkout = false;
+    mocks.summaryDataUpdatedAt = Date.now() + 1;
+    mocks.summaryFetchedAfterMount = true;
+    try {
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.getByText("Activating your subscription")).toBeInTheDocument();
+      expect(screen.queryByText("Business is active")).not.toBeInTheDocument();
+      const summaryOptions = mocks.useQuery.mock.calls
+        .map(([options]) => options)
+        .find(
+          (options) =>
+            options.queryKey?.[options.queryKey.length - 1] === "summary",
+        );
+      expect(
+        summaryOptions.refetchInterval({ state: { data: mocks.summary } }),
+      ).toBe(2_000);
     } finally {
       vi.useRealTimers();
     }
@@ -2058,6 +2097,35 @@ describe("BillingTab", () => {
       ).toBeInTheDocument();
       // A trialling manager subscribes through the same plan cards.
       expect(screen.getByRole("button", { name: "Upgrade to Business" })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Compare plans" })).toHaveAttribute(
+        "href",
+        "https://multica.ai/pricing",
+      );
+    });
+
+    it("takes a manager from the trial card to the plan cards", async () => {
+      setTrial("active", Date.now() - 4.5 * DAY);
+      const scrollIntoView = vi.fn();
+      const original = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = scrollIntoView;
+      try {
+        renderWithI18n(<BillingTab />);
+        await userEvent.setup().click(screen.getByRole("button", { name: "Choose a plan" }));
+
+        expect(scrollIntoView).toHaveBeenCalledOnce();
+        expect(scrollIntoView.mock.contexts[0]).toHaveAttribute("data-settings-anchor", "billing-upgrade");
+      } finally {
+        Element.prototype.scrollIntoView = original;
+      }
+    });
+
+    it("offers no plan choice to a member who cannot subscribe", () => {
+      setTrial("active", Date.now() - 4.5 * DAY);
+      mocks.summary.availableActions.checkout = false;
+      renderWithI18n(<BillingTab />);
+
+      expect(screen.queryByRole("button", { name: "Choose a plan" })).not.toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Compare plans" })).toBeInTheDocument();
     });
 
     it("points an ended trial at the plans below", () => {

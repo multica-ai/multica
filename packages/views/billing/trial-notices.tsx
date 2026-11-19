@@ -302,16 +302,18 @@ function TrialEndedDialog({ wsId, trial }: { wsId: string; trial: EndedTrial }) 
 function TrialEndedToast({ wsId, trial }: { wsId: string; trial: EndedTrial }) {
   const { t } = useT("billing");
   const [seen, markSeen] = useNoticeSeen(wsId, trial.endsAt, "ended");
-  const shown = useRef(false);
+  // Per trial, not per mount: switching workspaces keeps this mounted.
+  const key = trialNoticeKey(wsId, trial.endsAt, "ended");
+  const shownFor = useRef<string | null>(null);
 
   useEffect(() => {
-    if (seen || shown.current) return;
-    shown.current = true;
+    if (seen || shownFor.current === key) return;
+    shownFor.current = key;
     markSeen();
     toast(t(($) => $.trial.ended.member_title), {
       description: t(($) => $.trial.ended.member_description),
     });
-  }, [markSeen, seen, t]);
+  }, [key, markSeen, seen, t]);
 
   return null;
 }

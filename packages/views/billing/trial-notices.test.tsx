@@ -16,6 +16,7 @@ const h = vi.hoisted(() => {
   const { create } = require("zustand") as typeof import("zustand");
   return {
     trial: { kind: "none" } as WorkspaceTrialView,
+    workspace: { id: "ws-1", name: "Acme Labs" },
     role: "owner" as "owner" | "admin" | "member",
     features: { private_projects: "available" } as Record<string, string>,
     usage: null as AutopilotQuotaUsage | null,
@@ -36,7 +37,7 @@ vi.mock("@multica/core/billing", async () => {
 });
 vi.mock("@multica/core/config", () => ({ useFeatureEnabled: () => true }));
 vi.mock("@multica/core/paths", () => ({
-  useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme Labs" }),
+  useCurrentWorkspace: () => h.workspace,
   useWorkspacePaths: () => ({ settings: () => "/acme/settings", chat: () => "/acme/chat" }),
 }));
 vi.mock("@multica/core/permissions", () => ({
@@ -89,6 +90,7 @@ const ended: WorkspaceTrialView = {
 
 beforeEach(() => {
   h.trial = { kind: "none" };
+  h.workspace = { id: "ws-1", name: "Acme Labs" };
   h.role = "owner";
   h.features = { private_projects: "available" };
   h.usage = null;
@@ -258,6 +260,17 @@ describe("WorkspaceTrialNotices", () => {
       renderWithI18n(<WorkspaceTrialNotices />);
     });
     expect(h.toast).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells a member about each workspace that ended, across a workspace switch", () => {
+    h.role = "member";
+    h.trial = ended;
+    const { rerender } = renderWithI18n(<WorkspaceTrialNotices />);
+    expect(h.toast).toHaveBeenCalledTimes(1);
+
+    h.workspace = { id: "ws-2", name: "Pixel Forge" };
+    rerender(<WorkspaceTrialNotices />);
+    expect(h.toast).toHaveBeenCalledTimes(2);
   });
 
   it("stays quiet once the week after the end has passed", () => {

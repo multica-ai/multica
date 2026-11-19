@@ -5,9 +5,11 @@ import { resolveWorkspaceTrial } from "@multica/core/billing/trial";
 import type { PaidFeature, WorkspaceSubscriptionSummary } from "@multica/core/types";
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import { Badge } from "@multica/ui/components/ui/badge";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { Progress } from "@multica/ui/components/ui/progress";
 import type { IconComponent } from "@multica/ui/icons";
 import { useLocale, useT } from "../../i18n";
+import { PRICING_URL } from "../../layout/help-links";
 import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
 
 const TRIAL_FEATURE_ICONS: Record<PaidFeature, IconComponent> = {
@@ -26,8 +28,11 @@ function formatDate(value: number, locale: string): string {
  */
 export function BillingTrialSection({
   summary,
+  onChoosePlan,
 }: {
   summary: WorkspaceSubscriptionSummary | null | undefined;
+  /** Shows "Choose a plan" for a caller who may subscribe. */
+  onChoosePlan?: () => void;
 }) {
   const { t } = useT("billing");
   const locale = useLocale();
@@ -54,19 +59,36 @@ export function BillingTrialSection({
       <SettingsSection title={t(($) => $.trial.card.title)}>
         <SettingsCard>
           <div className="space-y-4 p-4 sm:p-5" data-slot="billing-trial">
-            <div className="space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-title-sm font-semibold">{t(($) => $.workspace.plan.business)}</h3>
-                <Badge
-                  variant="secondary"
-                  className={trial.warning ? "bg-warning/10 text-warning tabular-nums" : "bg-brand/10 text-brand tabular-nums"}
-                >
-                  {t(($) => $.trial.card.badge, { count: trial.daysLeft })}
-                </Badge>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-title-sm font-semibold">{t(($) => $.workspace.plan.business)}</h3>
+                  <Badge
+                    variant="secondary"
+                    className={trial.warning ? "bg-warning/10 text-warning tabular-nums" : "bg-brand/10 text-brand tabular-nums"}
+                  >
+                    {t(($) => $.trial.card.badge, { count: trial.daysLeft })}
+                  </Badge>
+                </div>
+                <p className="max-w-[65ch] text-body text-muted-foreground">
+                  {t(($) => $.trial.card.description, { date: endsOn })}
+                </p>
               </div>
-              <p className="max-w-[65ch] text-body text-muted-foreground">
-                {t(($) => $.trial.card.description, { date: endsOn })}
-              </p>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <a
+                  href={PRICING_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                >
+                  {t(($) => $.trial.card.compare_plans)}
+                </a>
+                {onChoosePlan ? (
+                  <Button size="sm" onClick={onChoosePlan}>
+                    {t(($) => $.trial.card.choose_plan)}
+                  </Button>
+                ) : null}
+              </div>
             </div>
             <Progress
               value={(trial.day / trial.totalDays) * 100}

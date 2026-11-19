@@ -290,7 +290,9 @@
       "progress": "Jour {{day}} sur {{total}}",
       "ends": "Se termine le {{date}}",
       "ended_title": "L'essai Business est terminé",
-      "ended_description": "L'essai s'est terminé le {{date}}. Choisissez un forfait ci-dessous pour retrouver les fonctionnalités Business."
+      "ended_description": "L'essai s'est terminé le {{date}}. Choisissez un forfait ci-dessous pour retrouver les fonctionnalités Business.",
+      "compare_plans": "Comparer les forfaits",
+      "choose_plan": "Choisir un forfait"
     },
     "features": {
       "title": "Fonctionnalités Business de votre essai",

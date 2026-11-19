@@ -290,7 +290,9 @@
       "progress": "Día {{day}} de {{total}}",
       "ends": "Termina el {{date}}",
       "ended_title": "La prueba de Business terminó",
-      "ended_description": "La prueba terminó el {{date}}. Elige un plan abajo para recuperar las funciones de Business."
+      "ended_description": "La prueba terminó el {{date}}. Elige un plan abajo para recuperar las funciones de Business.",
+      "compare_plans": "Comparar planes",
+      "choose_plan": "Elegir un plan"
     },
     "features": {
       "title": "Funciones de Business en tu prueba",

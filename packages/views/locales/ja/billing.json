@@ -278,7 +278,9 @@
       "progress": "{{total}} 日中 {{day}} 日目",
       "ends": "{{date}} 終了",
       "ended_title": "Business トライアルが終了しました",
-      "ended_description": "トライアルは {{date}} に終了しました。下でプランを選択すると Business の機能が戻ります。"
+      "ended_description": "トライアルは {{date}} に終了しました。下でプランを選択すると Business の機能が戻ります。",
+      "compare_plans": "プランを比較",
+      "choose_plan": "プランを選択"
     },
     "features": {
       "title": "トライアル中の Business 機能",

@@ -314,7 +314,9 @@
       "progress": "День {{day}} из {{total}}",
       "ends": "Окончание: {{date}}",
       "ended_title": "Пробный период Business закончился",
-      "ended_description": "Пробный период закончился {{date}}. Выберите тариф ниже, чтобы вернуть функции Business."
+      "ended_description": "Пробный период закончился {{date}}. Выберите тариф ниже, чтобы вернуть функции Business.",
+      "compare_plans": "Сравнить тарифы",
+      "choose_plan": "Выбрать тариф"
     },
     "features": {
       "title": "Функции Business в пробном периоде",

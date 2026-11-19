@@ -131,7 +131,9 @@ const TRIAL_CLOCK_TICK_MS = 60 * 60 * 1000;
  * The trial view for a workspace, kept current: it re-renders hourly for the
  * day count and, when the trial ends, refetches everything the end changes
  * (plan, paid-feature states, autopilot limit) instead of waiting for their
- * stale times: once at the end, and once more TRIAL_END_SETTLE_MS later.
+ * stale times: once at the end, and once more TRIAL_END_SETTLE_MS later. A
+ * boundary that passed while the workspace was not showing (another desktop
+ * tab's workspace, a closed window) is caught up when it shows again.
  *
  * `enabled` is the caller's billing gate; a self-hosted deployment never
  * requests the summary.
@@ -163,22 +165,38 @@ export function useWorkspaceTrial(
   }, []);
 
   useEffect(() => {
+    // A workspace switch reuses this hook: count from now, not from the
+    // previous workspace's last tick.
+    setNow(Date.now());
     if (!endsAtRaw || !wsId) return;
     const endsAt = Date.parse(endsAtRaw);
     if (Number.isNaN(endsAt)) return;
-    const refresh = () => {
+    const keys = [
+      workspaceSubscriptionKeys.all(wsId),
+      workspaceFeatureKeys.all(wsId),
+      autopilotKeys.usage(wsId),
+    ];
+    // Refetch what was read before `boundary`; reads made after it are current.
+    const refreshReadsBefore = (boundary: number) => {
       setNow(Date.now());
-      void qc.invalidateQueries({ queryKey: workspaceSubscriptionKeys.all(wsId) });
-      void qc.invalidateQueries({ queryKey: workspaceFeatureKeys.all(wsId) });
-      void qc.invalidateQueries({ queryKey: autopilotKeys.usage(wsId) });
+      for (const queryKey of keys) {
+        void qc.invalidateQueries({
+          queryKey,
+          predicate: (query) =>
+            query.state.dataUpdatedAt > 0 && query.state.dataUpdatedAt < boundary,
+        });
+      }
     };
     const timers: number[] = [];
     for (const at of [endsAt, endsAt + TRIAL_END_SETTLE_MS]) {
       const delay = at - Date.now();
-      // A boundary already passed needs nothing: reads made after it are
-      // current. setTimeout overflows past ~24.8 days, far beyond a trial.
-      if (delay < 0 || delay > 2 ** 31 - 1) continue;
-      timers.push(window.setTimeout(refresh, delay));
+      if (delay <= 0) {
+        // Passed while this workspace was not showing: catch up now.
+        refreshReadsBefore(at);
+      } else if (delay <= 2 ** 31 - 1) {
+        // setTimeout overflows past ~24.8 days, far beyond a trial.
+        timers.push(window.setTimeout(() => refreshReadsBefore(at), delay));
+      }
     }
     return () => timers.forEach((id) => window.clearTimeout(id));
   }, [endsAtRaw, qc, wsId]);

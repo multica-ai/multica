@@ -290,7 +290,9 @@
       "progress": "Day {{day}} of {{total}}",
       "ends": "Ends {{date}}",
       "ended_title": "Business trial ended",
-      "ended_description": "The trial ended on {{date}}. Choose a plan below to get Business features back."
+      "ended_description": "The trial ended on {{date}}. Choose a plan below to get Business features back.",
+      "compare_plans": "Compare plans",
+      "choose_plan": "Choose a plan"
     },
     "features": {
       "title": "Business features in your trial",

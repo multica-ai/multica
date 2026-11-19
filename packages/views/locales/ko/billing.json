@@ -278,7 +278,9 @@
       "progress": "{{total}}일 중 {{day}}일째",
       "ends": "{{date}} 종료",
       "ended_title": "Business 체험이 끝났습니다",
-      "ended_description": "체험이 {{date}}에 끝났습니다. 아래에서 요금제를 선택하면 Business 기능을 다시 사용할 수 있습니다."
+      "ended_description": "체험이 {{date}}에 끝났습니다. 아래에서 요금제를 선택하면 Business 기능을 다시 사용할 수 있습니다.",
+      "compare_plans": "요금제 비교",
+      "choose_plan": "요금제 선택"
     },
     "features": {
       "title": "체험 중인 Business 기능",
