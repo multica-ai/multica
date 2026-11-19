@@ -49,6 +49,16 @@ var docSearchCmd = &cobra.Command{
 	RunE: runDocSearch,
 }
 
+var docMoveCmd = &cobra.Command{
+	Use:   "move <doc-id>",
+	Short: "Move a doc into a folder, or to the top level",
+	Long: "Move a doc into another folder of the workspace knowledge base.\n\n" +
+		"--folder takes a folder id (or a unique prefix of one from `multica doc list`), " +
+		"or `root` for the top level. Moving does not change the doc's content or revision.",
+	Args: exactArgs(1),
+	RunE: runDocMove,
+}
+
 var docGetCmd = &cobra.Command{
 	Use:   "get <doc-id>",
 	Short: "Get a doc with its content and current revision",
@@ -70,7 +80,9 @@ var docUpdateCmd = &cobra.Command{
 }
 
 func init() {
-	docCmd.AddCommand(docListCmd, docSearchCmd, docGetCmd, docCreateCmd, docUpdateCmd)
+	docCmd.AddCommand(docListCmd, docSearchCmd, docGetCmd, docCreateCmd, docUpdateCmd, docMoveCmd)
+	docMoveCmd.Flags().String("folder", "", "Destination folder id, or `root` for the top level (required)")
+	docMoveCmd.Flags().String("output", "json", "Output format: table or json")
 	docListCmd.Flags().String("output", "table", "Output format: table or json")
 	docSearchCmd.Flags().Int("limit", 20, "Maximum results (at most 50)")
 	docSearchCmd.Flags().String("output", "table", "Output format: table or json")
@@ -270,6 +282,34 @@ func runDocSearch(cmd *cobra.Command, args []string) error {
 	}
 	cli.PrintTable(os.Stdout, []string{"ID", "TITLE", "UPDATED", "MATCH"}, rows)
 	return nil
+}
+
+func runDocMove(cmd *cobra.Command, args []string) error {
+	destination, _ := cmd.Flags().GetString("folder")
+	if strings.TrimSpace(destination) == "" {
+		return fmt.Errorf("--folder is required: a folder id, or `root` for the top level")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	id, err := resolveDocRef(ctx, client, args[0], false)
+	if err != nil {
+		return err
+	}
+	folder, err := resolveDocFolderTarget(ctx, client, destination)
+	if err != nil {
+		return err
+	}
+	var doc map[string]any
+	if err := client.PostJSON(ctx, "/api/docs/"+id+"/move", map[string]any{"folder_id": folder}, &doc); err != nil {
+		return fmt.Errorf("move doc: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	return printDocSummary(doc, output)
 }
 
 func runDocGet(cmd *cobra.Command, args []string) error {
