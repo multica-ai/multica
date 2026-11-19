@@ -207,10 +207,11 @@ func (t *Trimmer) trim(ctx context.Context, r Recipient) (archived int64, done b
 		return 0, err == nil, err
 	}
 	// Settle which row ranks each issue by its return before ranking decides
-	// what to archive (see NormalizeInboxReturns).
-	if _, err := t.queries.NormalizeInboxReturns(ctx, db.NormalizeInboxReturnsParams{
-		WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
-	}); err != nil {
+	// what to archive (see NormalizeInboxReturns). Rows it could not reach
+	// this round keep the inbox queued; ArchiveInboxOverflow never archives an
+	// issue's unsettled newest row meanwhile.
+	settled, err := t.normalize(ctx, r)
+	if err != nil {
 		return 0, false, err
 	}
 	for range trimMaxBatches {
@@ -230,7 +231,25 @@ func (t *Trimmer) trim(ctx context.Context, r Recipient) (archived int64, done b
 	if err != nil {
 		return archived, false, err
 	}
-	return archived, !over, nil
+	return archived, settled && !over, nil
+}
+
+// normalize runs NormalizeInboxReturns until it returns a partial batch, at
+// most trimMaxBatches times. settled is false while rows may remain.
+func (t *Trimmer) normalize(ctx context.Context, r Recipient) (settled bool, err error) {
+	for range trimMaxBatches {
+		n, err := t.queries.NormalizeInboxReturns(ctx, db.NormalizeInboxReturnsParams{
+			WorkspaceID: r.WorkspaceID, RecipientType: r.RecipientType, RecipientID: r.RecipientID,
+			BatchSize: trimBatchSize,
+		})
+		if err != nil {
+			return false, err
+		}
+		if n < trimBatchSize {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // hiddenProjects returns the private projects a member recipient cannot see,

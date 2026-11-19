@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -372,5 +374,131 @@ func TestBulkArchiveClearsReturn(t *testing.T) {
 	}
 	if !isArchived(t, allID) || returnedAtOf(t, allID) != nil {
 		t.Fatalf("archive all: archived=%v returned_at=%v", isArchived(t, allID), returnedAtOf(t, allID))
+	}
+}
+
+// Migration 697 gives a snooze set before returned_at existed its return
+// rank, so the woken issue is in the very first list read of a full inbox.
+func TestReturnedAtBackfillRanksLegacySnooze(t *testing.T) {
+	workspaceID := limitInboxWorkspace(t, "Inbox limit backfill")
+	seedInboxRows(t, workspaceID, testUserID, inbox.ActiveLimit, time.Now().UTC().Add(-time.Hour), time.Millisecond)
+	issueID := dbfx.Issue(t, "Legacy snooze", testutil.Cols{"workspace_id": workspaceID})
+	wake := time.Now().Add(-time.Minute).UTC().Truncate(time.Microsecond)
+	legacy := testutil.Cols{"issue_id": issueID, "snoozed_until": wake, "snoozed_at": wake.Add(-24 * time.Hour)}
+	olderID := insertOldInboxRow(t, workspaceID, "legacy-older", legacy)
+	legacy["created_at"] = time.Now().Add(-47 * time.Hour)
+	newestID := insertOldInboxRow(t, workspaceID, "legacy-newest", legacy)
+
+	backfill, err := os.ReadFile("../../migrations/697_inbox_item_returned_at_backfill.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Scoped to this workspace: the test database is shared with packages
+	// running in parallel.
+	scoped := strings.Replace(string(backfill), "WHERE s.archived = false", "WHERE s.workspace_id = $1 AND s.archived = false", 1)
+	if scoped == string(backfill) {
+		t.Fatal("backfill migration no longer has the expected filter to scope")
+	}
+	dbfx.Exec(t, scoped, workspaceID)
+
+	if at := returnedAtOf(t, newestID); at == nil || !at.Equal(wake) || returnedAtOf(t, olderID) != nil {
+		t.Fatalf("newest returned_at=%v older=%v; want only the newest at the wake time", at, returnedAtOf(t, olderID))
+	}
+	var items []InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListInbox),
+		inboxRequest(http.MethodGet, "/api/inbox", workspaceID)).
+		Want(http.StatusOK).
+		JSON(&items)
+	if len(items) == 0 || items[0].ID != newestID {
+		t.Fatal("the woken issue is missing from the first read of a full inbox")
+	}
+}
+
+// Even before its rank is settled, the archive never takes a woken issue's
+// newest row on that stale rank.
+func TestArchiveInboxOverflowSparesUnsettledReturn(t *testing.T) {
+	workspaceID := limitInboxWorkspace(t, "Inbox limit archive guard")
+	seedInboxRows(t, workspaceID, testUserID, inbox.ActiveLimit, time.Now().UTC().Add(-time.Hour), time.Millisecond)
+	issueID := dbfx.Issue(t, "Unsettled snooze", testutil.Cols{"workspace_id": workspaceID})
+	wake := time.Now().Add(-time.Minute)
+	newestID := insertOldInboxRow(t, workspaceID, "unsettled", testutil.Cols{
+		"issue_id": issueID, "snoozed_until": wake, "snoozed_at": wake.Add(-24 * time.Hour),
+	})
+
+	archived, err := testHandler.Queries.ArchiveInboxOverflow(context.Background(), db.ArchiveInboxOverflowParams{
+		WorkspaceID: parseUUID(workspaceID), RecipientType: "member", RecipientID: parseUUID(testUserID),
+		Keep: inbox.ActiveLimit, BatchSize: 500,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isArchived(t, newestID) || archived != 0 {
+		t.Fatalf("archived=%d, woken row archived=%v; want the woken issue's newest row spared", archived, isArchived(t, newestID))
+	}
+}
+
+// A notification that joins a running snooze takes the issue's return rank
+// when it is written, not only once the trimmer settles it.
+func TestDeliverIntoSnoozeHandsReturnToNewRow(t *testing.T) {
+	workspaceID := limitInboxWorkspace(t, "Inbox limit join snooze")
+	issueID := dbfx.Issue(t, "Snoozed issue", testutil.Cols{"workspace_id": workspaceID})
+	until := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
+	holderID := insertOldInboxRow(t, workspaceID, "holder", testutil.Cols{
+		"issue_id": issueID, "snoozed_until": until, "snoozed_at": time.Now(), "returned_at": until,
+	})
+
+	item, inserted, err := inbox.Deliver(context.Background(), testHandler.Queries, nil, inbox.Notification{
+		Params: db.CreateInboxItemParams{
+			WorkspaceID: parseUUID(workspaceID), RecipientType: "member", RecipientID: parseUUID(testUserID),
+			Type: "new_comment", Severity: "info", IssueID: parseUUID(issueID), Title: "joined",
+			Details: []byte(`{}`),
+		},
+		IgnorePreferences: true,
+	})
+	if err != nil || !inserted {
+		t.Fatalf("Deliver = inserted %v, err %v", inserted, err)
+	}
+	joinedID := uuidToString(item.ID)
+	if at := returnedAtOf(t, joinedID); at == nil || !at.Equal(until) || returnedAtOf(t, holderID) != nil {
+		t.Fatalf("joined returned_at=%v holder=%v; want the rank handed to the joining row", at, returnedAtOf(t, holderID))
+	}
+}
+
+// NormalizeInboxReturns skips rows another write holds instead of waiting on
+// them, and settles them on a later call.
+func TestNormalizeInboxReturnsSkipsLockedRows(t *testing.T) {
+	workspaceID := limitInboxWorkspace(t, "Inbox limit normalize lock")
+	issueID := dbfx.Issue(t, "Unsettled snooze", testutil.Cols{"workspace_id": workspaceID})
+	wake := time.Now().Add(-time.Minute)
+	newestID := insertOldInboxRow(t, workspaceID, "unsettled", testutil.Cols{
+		"issue_id": issueID, "snoozed_until": wake, "snoozed_at": wake.Add(-24 * time.Hour),
+	})
+	params := db.NormalizeInboxReturnsParams{
+		WorkspaceID: parseUUID(workspaceID), RecipientType: "member", RecipientID: parseUUID(testUserID), BatchSize: 500,
+	}
+
+	ctx := context.Background()
+	tx, err := dbfx.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM inbox_item WHERE id = $1 FOR UPDATE`, newestID); err != nil {
+		t.Fatal(err)
+	}
+	callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	n, err := testHandler.Queries.NormalizeInboxReturns(callCtx, params)
+	cancel()
+	if rbErr := tx.Rollback(ctx); rbErr != nil {
+		t.Fatal(rbErr)
+	}
+	if err != nil || n != 0 {
+		t.Fatalf("normalize under a held lock = %d, %v; want 0 without waiting", n, err)
+	}
+
+	if n, err := testHandler.Queries.NormalizeInboxReturns(ctx, params); err != nil || n != 1 {
+		t.Fatalf("normalize after the lock = %d, %v; want the row settled", n, err)
+	}
+	if at := returnedAtOf(t, newestID); at == nil {
+		t.Fatal("the woken row still has no return rank")
 	}
 }
