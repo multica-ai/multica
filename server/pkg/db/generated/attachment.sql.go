@@ -1387,6 +1387,16 @@ UPDATE attachment
 SET comment_id = CASE
   WHEN id = ANY($3::uuid[]) THEN $1
   ELSE NULL
+END,
+issue_id = CASE
+  WHEN id = ANY($3::uuid[]) THEN issue_id
+  WHEN uploader_type = 'member' AND EXISTS (
+    SELECT 1 FROM member m
+    WHERE m.workspace_id = attachment.workspace_id
+      AND m.user_id = attachment.uploader_id
+      AND m.role = 'guest'
+  ) THEN NULL
+  ELSE issue_id
 END
 WHERE issue_id = $2
   AND source_context_id IS NULL
@@ -1402,6 +1412,9 @@ type ReplaceCommentAttachmentsParams struct {
 	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
 }
 
+// A file removed from the comment stays an issue attachment, except a guest's
+// (MUL-9420): a guest attaches files only through its comments, so its file
+// goes back to being its unbound draft rather than staying on the issue.
 func (q *Queries) ReplaceCommentAttachments(ctx context.Context, arg ReplaceCommentAttachmentsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, replaceCommentAttachments, arg.CommentID, arg.IssueID, arg.AttachmentIds)
 	if err != nil {

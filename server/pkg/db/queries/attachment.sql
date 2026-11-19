@@ -109,10 +109,23 @@ WHERE workspace_id = sqlc.arg(workspace_id)
   AND id = ANY(sqlc.arg(attachment_ids)::uuid[]);
 
 -- name: ReplaceCommentAttachments :execrows
+-- A file removed from the comment stays an issue attachment, except a guest's
+-- (MUL-9420): a guest attaches files only through its comments, so its file
+-- goes back to being its unbound draft rather than staying on the issue.
 UPDATE attachment
 SET comment_id = CASE
   WHEN id = ANY(sqlc.arg(attachment_ids)::uuid[]) THEN $1
   ELSE NULL
+END,
+issue_id = CASE
+  WHEN id = ANY(sqlc.arg(attachment_ids)::uuid[]) THEN issue_id
+  WHEN uploader_type = 'member' AND EXISTS (
+    SELECT 1 FROM member m
+    WHERE m.workspace_id = attachment.workspace_id
+      AND m.user_id = attachment.uploader_id
+      AND m.role = 'guest'
+  ) THEN NULL
+  ELSE issue_id
 END
 WHERE issue_id = $2
   AND source_context_id IS NULL

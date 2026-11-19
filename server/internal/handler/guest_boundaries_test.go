@@ -280,10 +280,124 @@ func TestGuestDraftUploadBindsOnlyWithItsComment(t *testing.T) {
 		t.Fatalf("guest edit draft: issue %v comment %v, want the issue and the comment", issueID, commentID)
 	}
 
-	// A member's upload attaches to the issue as before.
+	// Removing both files from its comment takes them off the issue too: they
+	// go back to being the guest's drafts.
+	guestRequest(t, testHandler.UpdateComment, f.guest, http.MethodPut, "/api/comments/"+comment.ID,
+		map[string]any{"content": "no files", "attachment_ids": []string{}}, "commentId", comment.ID).
+		Want(http.StatusOK)
+	for _, id := range []string{draft.ID, second.ID} {
+		if issueID, commentID := attachmentBinding(t, id); issueID != nil || commentID != nil {
+			t.Fatalf("guest file removed from its comment: issue %v comment %v, want unbound", issueID, commentID)
+		}
+	}
+	guestRequest(t, testHandler.ListAttachments, testUserID, http.MethodGet, "/api/issues/"+f.sharedIssue+"/attachments", nil, "id", f.sharedIssue).
+		Want(http.StatusOK).JSON(&listed)
+	for _, a := range listed {
+		if a.ID == draft.ID || a.ID == second.ID {
+			t.Fatal("the issue still lists a file the guest removed from its comment")
+		}
+	}
+
+	// A member's upload attaches to the issue as before, and stays there when
+	// removed from the member's comment.
 	memberUpload := uploadDraftToIssue(t, testUserID, f.sharedIssue)
 	if issueID, _ := attachmentBinding(t, memberUpload.ID); issueID == nil || *issueID != f.sharedIssue {
 		t.Fatalf("member upload issue = %v, want bound to the issue", issueID)
+	}
+	var memberComment CommentResponse
+	guestRequest(t, testHandler.CreateComment, testUserID, http.MethodPost, "/api/issues/"+f.sharedIssue+"/comments",
+		CreateCommentRequest{Content: "member file", AttachmentIDs: []string{memberUpload.ID}}, "id", f.sharedIssue).
+		Want(http.StatusCreated).JSON(&memberComment)
+	guestRequest(t, testHandler.UpdateComment, testUserID, http.MethodPut, "/api/comments/"+memberComment.ID,
+		map[string]any{"content": "member file removed", "attachment_ids": []string{}}, "commentId", memberComment.ID).
+		Want(http.StatusOK)
+	if issueID, commentID := attachmentBinding(t, memberUpload.ID); issueID == nil || *issueID != f.sharedIssue || commentID != nil {
+		t.Fatalf("member file removed from its comment: issue %v comment %v, want kept on the issue", issueID, commentID)
+	}
+}
+
+// waitForLockWaiters blocks until at least n other backends of this database
+// wait on a lock.
+func waitForLockWaiters(t *testing.T, n int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := testPool.QueryRow(context.Background(), `
+			SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting >= n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d backends waiting on a lock, want %d", waiting, n)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// Publishing a comment and editing another one with the same draft take the
+// draft and the issue in the same order, so they never deadlock: the issue
+// lock is held while the edit and then the publish queue behind it.
+func TestCommentEditAndCreateWithSameDraftDoNotDeadlock(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	t.Cleanup(func() { testHandler.Storage = origStorage })
+	f := newGuestFixture(t)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE uploader_id = $1`, f.guest)
+	})
+	var existing CommentResponse
+	guestRequest(t, testHandler.CreateComment, f.guest, http.MethodPost, "/api/issues/"+f.sharedIssue+"/comments",
+		CreateCommentRequest{Content: "to be edited"}, "id", f.sharedIssue).Want(http.StatusCreated).JSON(&existing)
+	draft := uploadDraftToIssue(t, f.guest, f.sharedIssue)
+
+	ctx := context.Background()
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM issue WHERE id = $1 FOR UPDATE`, f.sharedIssue); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	var edit, create *testutil.Response
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		edit = guestRequest(t, testHandler.UpdateComment, f.guest, http.MethodPut, "/api/comments/"+existing.ID,
+			map[string]any{"content": "edited with the draft", "attachment_ids": []string{draft.ID}}, "commentId", existing.ID)
+	}()
+	waitForLockWaiters(t, 1)
+	go func() {
+		defer wg.Done()
+		create = guestRequest(t, testHandler.CreateComment, f.guest, http.MethodPost, "/api/issues/"+f.sharedIssue+"/comments",
+			CreateCommentRequest{Content: "published with the draft", AttachmentIDs: []string{draft.ID}}, "id", f.sharedIssue)
+	}()
+	waitForLockWaiters(t, 2)
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+
+	for name, resp := range map[string]*testutil.Response{"edit": edit, "create": create} {
+		if resp.Code >= http.StatusInternalServerError {
+			t.Errorf("%s = %d %s, want no server error", name, resp.Code, resp.Body.String())
+		}
+	}
+	if edit.Code != http.StatusOK {
+		t.Fatalf("edit = %d %s, want 200: it queued first", edit.Code, edit.Body.String())
+	}
+	// The edit took the draft; the publish is refused instead of failing.
+	if create.Code != http.StatusConflict {
+		t.Fatalf("create = %d %s, want 409 for a draft the edit already took", create.Code, create.Body.String())
+	}
+	if _, commentID := attachmentBinding(t, draft.ID); commentID == nil || *commentID != existing.ID {
+		t.Fatalf("draft comment = %v, want the edited comment", commentID)
 	}
 }
 

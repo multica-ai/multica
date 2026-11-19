@@ -3584,8 +3584,19 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
+		// Unbound drafts this edit may adopt are locked before UpdateComment
+		// takes the issue, the order CreateComment uses. The reverse order
+		// deadlocks against a comment created with the same draft.
+		if replaceAttachments && len(attachmentIDs) > 0 {
+			_, err = qtx.LockUnboundAttachmentsForCommentLink(r.Context(), db.LockUnboundAttachmentsForCommentLinkParams{
+				WorkspaceID:   existing.WorkspaceID,
+				AttachmentIds: attachmentIDs,
+			})
+		}
 		var updated db.UpdateCommentRow
-		updated, err = qtx.UpdateComment(r.Context(), updateParams)
+		if err == nil {
+			updated, err = qtx.UpdateComment(r.Context(), updateParams)
+		}
 		if err == nil {
 			comment = updated.Comment()
 			issueRevision = updated.IssueRevision
