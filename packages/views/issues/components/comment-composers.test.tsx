@@ -233,6 +233,7 @@ vi.mock("../../editor", async () => ({
         onChange={(event) => {
           valueRef.current = event.target.value;
           setEditorValue(event.target.value);
+          console.log("DEBUG onUpdate fired:", JSON.stringify(event.target.value), "onUpdate:", typeof onUpdate);
           onUpdate?.(event.target.value);
         }}
         onKeyDown={(event) => {
@@ -951,7 +952,8 @@ describe("comment composers", () => {
 
     await act(async () => {
       resolveSubmit(true);
-      await Promise.resolve();
+
+    console.log("DEBUG after resolve:", JSON.stringify(useCommentDraftStore.getState().drafts));      await Promise.resolve();
     });
 
     expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toBeUndefined();
@@ -976,12 +978,14 @@ describe("comment composers", () => {
 
     // Still mounted, still typing while the request is in flight.
     fireEvent.change(editor, { target: { value: "draft A plus more" } });
+    console.log("DEBUG after change:", JSON.stringify(useCommentDraftStore.getState().drafts));
 
     await act(async () => {
       resolveSubmit(true);
       await Promise.resolve();
     });
 
+    console.log("DEBUG drafts:", JSON.stringify(useCommentDraftStore.getState().drafts));
     expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toBe("draft A plus more");
     // ...and the post-send caret policy must stand down with it: the guard left
     // the editor holding "draft A plus more", so blurring would yank the caret

@@ -40,7 +40,7 @@ describe("useCommentRuntimeOriginator", () => {
   it("records the picked run for a current-task mention and sends the map", () => {
     const { result } = renderHook(() => useCommentRuntimeOriginator());
     routing_select(result, currentTaskPick);
-    const [, sourceTaskIds] = routing_select_then_args(result, 
+    const [, sourceTaskIds] = routing_select_then_args(result,
       "[@Studio Helper](mention://agent/agent-studio) go",
     );
     expect(sourceTaskIds).toEqual({ "agent-studio": "task-run-1" });
@@ -51,7 +51,7 @@ describe("useCommentRuntimeOriginator", () => {
     const { result } = renderHook(() => useCommentRuntimeOriginator());
     routing_select(result, currentTaskPick);
     routing_select(result, requesterPick);
-    const [requesterIds, sourceTaskIds] = routing_select_then_args(result, 
+    const [requesterIds, sourceTaskIds] = routing_select_then_args(result,
       "[@Studio Helper](mention://agent/agent-studio) go",
     );
     expect(requesterIds).toEqual(["agent-studio"]);

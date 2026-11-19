@@ -1754,11 +1754,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if len(sourceTasks) > 0 && req.RuntimeOriginatorMode == "requester" {
-		// The two pick kinds contradict: the popover only sends one.
-		writeError(w, http.StatusBadRequest, "runtime_source_task_ids conflicts with runtime_originator_mode=requester")
-		return
-	}
+	// Picks are per-agent: a comment may pin one agent's continuation to its
+	// current task while routing another agent through the member's own
+	// runtime. Each map applies only to the agents it names.
 	if len(sourceTasks) > 0 {
 		routing.sourceTasks = sourceTasks
 	}
@@ -3613,11 +3611,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if len(sourceTasks) > 0 && req.RuntimeOriginatorMode == "requester" {
-		// The two pick kinds contradict: the popover only sends one.
-		writeError(w, http.StatusBadRequest, "runtime_source_task_ids conflicts with runtime_originator_mode=requester")
-		return
-	}
+	// Picks are per-agent: a comment may pin one agent's continuation to its
+	// current task while routing another agent through the member's own
+	// runtime. Each map applies only to the agents it names.
 	if len(sourceTasks) > 0 {
 		routing.sourceTasks = sourceTasks
 	}

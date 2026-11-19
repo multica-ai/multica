@@ -102,7 +102,7 @@ function ReplyInput({
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
-  const runtimeOriginator = useCommentRuntimeOriginator();
+  const runtimeOriginator = useCommentRuntimeOriginator(draftKey);
   const editorRef = useRef<ContentEditorRef>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   // See CommentInput — replying mid-upload posts without the file.

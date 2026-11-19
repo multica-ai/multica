@@ -398,7 +398,7 @@ function useEditAttachmentState(
   const [initialValue, setInitialValue] = useState(entry.content ?? "");
   const [initialContentBase, setInitialContentBase] = useState(entry.content ?? "");
   const [revisionConflict, setRevisionConflict] = useState(false);
-  const runtimeOriginator = useCommentRuntimeOriginator();
+  const runtimeOriginator = useCommentRuntimeOriginator(`edit:${issueId}:${entry.id}` as const);
   const editorRef = useRef<ContentEditorRef>(null);
   // Saving mid-upload would persist the edit without the file the user just
   // pasted in — same failure as posting a new comment.

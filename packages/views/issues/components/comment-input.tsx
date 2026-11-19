@@ -67,7 +67,6 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
-  const runtimeOriginator = useCommentRuntimeOriginator();
   const editorRef = useRef<ContentEditorRef>(null);
   // A guest (MUL-9420) comments and mentions people, nothing that runs agents.
   const guest = useIsGuest(useCurrentWorkspace()?.id);
@@ -78,6 +77,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
   // Subscribe to the persisted draft so text written into it from outside
   // this composer shows up even while it is mounted.
   const draftKey = `new:${issueId}` as const;
+  const runtimeOriginator = useCommentRuntimeOriginator(draftKey);
   const [initialDraft] = useState(() =>
     useCommentDraftStore.getState().getDraft(draftKey),
   );
