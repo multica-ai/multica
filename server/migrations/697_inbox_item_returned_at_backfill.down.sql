@@ -1,1 +1,0 @@
--- Nothing to undo: returned_at is dropped by 695's down migration.

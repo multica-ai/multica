@@ -3,8 +3,6 @@ package handler
 import (
 	"context"
 	"net/http"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -377,8 +375,9 @@ func TestBulkArchiveClearsReturn(t *testing.T) {
 	}
 }
 
-// Migration 697 gives a snooze set before returned_at existed its return
-// rank, so the woken issue is in the very first list read of a full inbox.
+// The trimmer's startup backfill gives a snooze set before returned_at
+// existed its return rank, so the woken issue is in the very first list read
+// of a full inbox.
 func TestReturnedAtBackfillRanksLegacySnooze(t *testing.T) {
 	workspaceID := limitInboxWorkspace(t, "Inbox limit backfill")
 	seedInboxRows(t, workspaceID, testUserID, inbox.ActiveLimit, time.Now().UTC().Add(-time.Hour), time.Millisecond)
@@ -389,17 +388,10 @@ func TestReturnedAtBackfillRanksLegacySnooze(t *testing.T) {
 	legacy["created_at"] = time.Now().Add(-47 * time.Hour)
 	newestID := insertOldInboxRow(t, workspaceID, "legacy-newest", legacy)
 
-	backfill, err := os.ReadFile("../../migrations/697_inbox_item_returned_at_backfill.up.sql")
-	if err != nil {
-		t.Fatal(err)
+	trimmer := inbox.NewTrimmer(testHandler.Queries, nil)
+	if n, err := trimmer.Backfill(context.Background(), parseUUID(workspaceID)); err != nil || n != 1 {
+		t.Fatalf("Backfill = %d, %v; want the one snoozed issue ranked", n, err)
 	}
-	// Scoped to this workspace: the test database is shared with packages
-	// running in parallel.
-	scoped := strings.Replace(string(backfill), "WHERE s.archived = false", "WHERE s.workspace_id = $1 AND s.archived = false", 1)
-	if scoped == string(backfill) {
-		t.Fatal("backfill migration no longer has the expected filter to scope")
-	}
-	dbfx.Exec(t, scoped, workspaceID)
 
 	if at := returnedAtOf(t, newestID); at == nil || !at.Equal(wake) || returnedAtOf(t, olderID) != nil {
 		t.Fatalf("newest returned_at=%v older=%v; want only the newest at the wake time", at, returnedAtOf(t, olderID))
@@ -500,5 +492,83 @@ func TestNormalizeInboxReturnsSkipsLockedRows(t *testing.T) {
 	}
 	if at := returnedAtOf(t, newestID); at == nil {
 		t.Fatal("the woken row still has no return rank")
+	}
+}
+
+// Two rows joining a snooze hand the rank over in either order and leave it
+// on the newer one.
+func TestHandInboxReturnToRowInReverseOrder(t *testing.T) {
+	workspaceID := limitInboxWorkspace(t, "Inbox limit handoff order")
+	issueID := dbfx.Issue(t, "Snoozed issue", testutil.Cols{"workspace_id": workspaceID})
+	until := time.Now().Add(time.Hour).UTC().Truncate(time.Microsecond)
+	holderID := insertOldInboxRow(t, workspaceID, "holder", testutil.Cols{
+		"issue_id": issueID, "snoozed_until": until, "snoozed_at": time.Now(), "returned_at": until,
+	})
+	ctx := context.Background()
+	create := func(title string) db.InboxItem {
+		item, err := testHandler.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			WorkspaceID: parseUUID(workspaceID), RecipientType: "member", RecipientID: parseUUID(testUserID),
+			Type: "new_comment", Severity: "info", IssueID: parseUUID(issueID), Title: title, Details: []byte(`{}`),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return item
+	}
+	hand := func(item db.InboxItem) {
+		if err := testHandler.Queries.HandInboxReturnToRow(ctx, db.HandInboxReturnToRowParams{
+			WorkspaceID: item.WorkspaceID, RecipientType: item.RecipientType, RecipientID: item.RecipientID,
+			IssueID: item.IssueID, KeepID: item.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := create("a")
+	b := create("b")
+	hand(b)
+	hand(a)
+
+	if at := returnedAtOf(t, uuidToString(b.ID)); at == nil || !at.Equal(until) {
+		t.Fatalf("newer row returned_at = %v, want %v", at, until)
+	}
+	if returnedAtOf(t, uuidToString(a.ID)) != nil || returnedAtOf(t, holderID) != nil {
+		t.Fatal("an older row kept the issue's return rank")
+	}
+}
+
+// While a duplicate rank is held by another write, the trim archives
+// nothing; once it is settled, it keeps exactly the newest ActiveLimit rows.
+func TestInboxTrimmerWaitsForHeldDuplicateRank(t *testing.T) {
+	workspaceID := limitInboxWorkspace(t, "Inbox limit held rank")
+	seedInboxRows(t, workspaceID, testUserID, inbox.ActiveLimit, time.Now().UTC().Add(-time.Hour), time.Millisecond)
+	issueID := dbfx.Issue(t, "Duplicate rank", testutil.Cols{"workspace_id": workspaceID})
+	now := time.Now()
+	staleID := insertOldInboxRow(t, workspaceID, "stale-holder", testutil.Cols{"issue_id": issueID, "returned_at": now})
+	insertOldInboxRow(t, workspaceID, "newest", testutil.Cols{
+		"issue_id": issueID, "returned_at": now, "created_at": now.Add(-47 * time.Hour),
+	})
+	plain := func() int {
+		return dbfx.Count(t, `SELECT count(*) FROM inbox_item WHERE workspace_id = $1 AND issue_id IS NULL AND NOT archived`, workspaceID)
+	}
+
+	ctx := context.Background()
+	tx, err := dbfx.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM inbox_item WHERE id = $1 FOR UPDATE`, staleID); err != nil {
+		t.Fatal(err)
+	}
+	trimInbox(t, workspaceID)
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := plain(); n != inbox.ActiveLimit {
+		t.Fatalf("plain rows = %d while the rank was held, want all %d kept", n, inbox.ActiveLimit)
+	}
+
+	trimInbox(t, workspaceID)
+	if n := plain(); n != inbox.ActiveLimit-1 || !isArchived(t, staleID) {
+		t.Fatalf("plain rows = %d, stale holder archived=%v; want %d kept beside the issue", n, isArchived(t, staleID), inbox.ActiveLimit-1)
 	}
 }
