@@ -273,7 +273,13 @@ function renderReplyInput({
   size = "sm",
   draftKey,
 }: {
-  onSubmit?: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<string | boolean>;
+  onSubmit?: (
+    content: string,
+    attachmentIds?: string[],
+    suppressAgentIds?: string[],
+    steerTaskIds?: string[],
+    ...routingArgs: import("./comment-runtime-originator").CommentRoutingArgs
+  ) => Promise<string | boolean>;
   onAccepted?: (commentId: string) => void;
   size?: "sm" | "default";
   draftKey?: `reply:${string}:${string}`;

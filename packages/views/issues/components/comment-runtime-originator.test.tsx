@@ -55,22 +55,22 @@ describe("useCommentRuntimeOriginator", () => {
       "[@Studio Helper](mention://agent/agent-studio) go",
     );
     expect(requesterIds).toEqual(["agent-studio"]);
-    expect(sourceTaskIds).toEqual({});
+    expect(sourceTaskIds).toBeUndefined();
   });
 
   it("drops the pick once the mention leaves the draft", () => {
     const { result } = renderHook(() => useCommentRuntimeOriginator());
     routing_select(result, currentTaskPick);
     result.current.prune("no mention here");
-    const [, sourceTaskIds] = routing_select_then_args(result, "no mention here");
-    expect(sourceTaskIds).toEqual({});
+    const args = routing_select_then_args(result, "no mention here");
+    expect(args.length).toBe(0);
   });
 
   it("ignores picks for agents that never make it into the payload", () => {
     const { result } = renderHook(() => useCommentRuntimeOriginator());
     routing_select(result, currentTaskPick);
-    const [, sourceTaskIds] = routing_select_then_args(result, "no mention here");
-    expect(sourceTaskIds).toEqual({});
+    const args = routing_select_then_args(result, "no mention here");
+    expect(args.length).toBe(0);
     expect(routing_select_then_args(result, "[@Studio Helper](mention://agent/agent-studio) go")[1]).toEqual({
       "agent-studio": "task-run-1",
     });

@@ -8,6 +8,8 @@ const AGENT_MENTION = /\[@?(?:\\.|[^\]\\])+\]\(mention:\/\/agent\/([^)]+)\)/g;
  * "my runtime" row records the requester override; a "current task" row
  * records the run it continues (agent id → that run's task id).
  */
+export type CommentRoutingArgs = [] | [ids: string[]] | [ids: string[], sources: Record<string, string>];
+
 export function useCommentRuntimeOriginator() {
   const requester = useRef(new Set<string>());
   const sourceTasks = useRef(new Map<string, string>());
@@ -34,13 +36,20 @@ export function useCommentRuntimeOriginator() {
         if (!mentioned.has(id)) sourceTasks.current.delete(id);
       }
     },
-    requestArgs(markdown: string): [string[], Record<string, string>] {
+    requestArgs(markdown: string): CommentRoutingArgs {
       const mentioned = new Set(Array.from(markdown.matchAll(AGENT_MENTION), (match) => match[1]));
       const ids = [...requester.current].filter((id) => mentioned.has(id));
       const sourceEntries = [...sourceTasks.current].filter(([id]) => mentioned.has(id));
-      // Empty values are harmless: the client omits both payload fields when
-      // the arrays/maps are empty, so a plain sticky comment stays sticky.
-      return [ids, Object.fromEntries(sourceEntries)];
+      // Conditional arity on purpose: a plain sticky comment spreads to ZERO
+      // extra arguments, so existing submission arity (and its tests) stay
+      // byte-identical. Only an explicit pick adds positional arguments.
+      if (sourceEntries.length) {
+        return [ids, Object.fromEntries(sourceEntries)];
+      }
+      if (ids.length) {
+        return [ids];
+      }
+      return [];
     },
     clear() {
       requester.current.clear();
