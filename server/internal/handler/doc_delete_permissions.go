@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -11,12 +12,13 @@ import (
 // Deleting a doc also deletes its version history, so the rule follows
 // requireIssueDeletion: workspace owners and admins may delete anything;
 // members may delete what they created or what an agent they currently own
-// created. Unlike issues, agents and machine credentials never delete docs,
-// whoever created them.
+// created. Unlike issues, only a signed-in human session deletes docs: agents,
+// machine credentials and personal access tokens are refused whoever created
+// the doc, so a script or CLI holding a PAT cannot wipe docs and their history.
 func (h *Handler) requireDocDeletion(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, creatorType string, creatorID pgtype.UUID, noun string) bool {
 	wsID := uuidToString(workspaceID)
 	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
-	if isMachineCredentialActor(r) || actorType != "member" || r.Header.Get("X-Agent-ID") != "" {
+	if isMachineCredentialActor(r) || middleware.IsPersonalAccessToken(r.Context()) || actorType != "member" || r.Header.Get("X-Agent-ID") != "" {
 		writeError(w, http.StatusForbidden, "only humans can delete "+noun+"s")
 		return false
 	}

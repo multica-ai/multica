@@ -3,8 +3,12 @@ package handler
 import (
 	"net/http"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -88,6 +92,71 @@ func TestDocDeletionPermissions(t *testing.T) {
 					want = http.StatusNoContent
 				}
 				testutil.Call(t, del, req).Want(want)
+				if count := dbfx.Count(t, "SELECT count(*) FROM "+table+" WHERE id=$1", id); (count == 0) != tc.allowed {
+					t.Fatalf("remaining %s rows = %d, allowed = %v", table, count, tc.allowed)
+				}
+			})
+		}
+	}
+}
+
+// A mul_ personal access token authenticates as its human, but Auth sets no
+// X-Actor-Source for it, so the handler-level cases above cannot tell it from
+// a login session. Go through the real Auth middleware: a PAT must not delete
+// even what its owner may delete in the app, while a login session still can.
+func TestDocDeletionRefusesPersonalAccessTokens(t *testing.T) {
+	pat := "mul_" + uuid.NewString()
+	dbfx.Insert(t, "personal_access_token", testutil.Cols{"user_id": testUserID, "name": "Doc delete test", "token_hash": auth.HashToken(pat), "token_prefix": pat[:12]})
+	session, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": testUserID, "exp": time.Now().Add(time.Hour).Unix()}).SignedString(auth.JWTSecret())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"doc", "folder"} {
+		for _, tc := range []struct {
+			name, role, creator, credential string
+			allowed                         bool
+		}{
+			{"member PAT denied own", "member", "self", "pat", false},
+			{"admin PAT denied others", "admin", "other", "pat", false},
+			{"member session deletes own", "member", "self", "session", true},
+			{"admin session deletes others", "admin", "other", "session", true},
+		} {
+			t.Run(kind+"/"+tc.name, func(t *testing.T) {
+				ws := dbfx.Workspace(t, "doc deletion pat", "doc-delete-pat-"+uuid.NewString())
+				dbfx.Member(t, ws, testUserID, tc.role)
+				creator := testUserID
+				if tc.creator == "other" {
+					creator = dbfx.User(t, "Other", "doc-delete-pat-"+uuid.NewString()+"@example.test")
+					dbfx.Member(t, ws, creator, "member")
+				}
+				path, create, del, table := "/api/docs", testHandler.CreateDoc, testHandler.DeleteDoc, "doc"
+				if kind == "folder" {
+					path, create, del, table = "/api/doc-folders", testHandler.CreateDocFolder, testHandler.DeleteDocFolder, "doc_folder"
+				}
+				req := newRequestAs(creator, http.MethodPost, path, map[string]any{"title": "delete target"})
+				req.Header.Set("X-Workspace-ID", ws)
+				var created struct {
+					ID string `json:"id"`
+				}
+				testutil.Call(t, create, req).Want(http.StatusCreated).JSON(&created)
+				id := created.ID
+				t.Cleanup(func() {
+					dbfx.Exec(t, "DELETE FROM doc_version WHERE doc_id=$1", id)
+					dbfx.Exec(t, "DELETE FROM "+table+" WHERE id=$1", id)
+				})
+
+				req = withURLParam(testutil.WithHeaders(testutil.JSONRequest(http.MethodDelete, path+"/"+id, nil), "X-Workspace-ID", ws), "id", id)
+				token := session
+				if tc.credential == "pat" {
+					token = pat
+				}
+				req.Header.Set("Authorization", "Bearer "+token)
+				serve := middleware.Auth(testHandler.Queries, nil, nil, nil)(middleware.RequireWorkspaceMember(testHandler.Queries)(http.HandlerFunc(del)))
+				want := http.StatusForbidden
+				if tc.allowed {
+					want = http.StatusNoContent
+				}
+				testutil.Call(t, serve.ServeHTTP, req).Want(want)
 				if count := dbfx.Count(t, "SELECT count(*) FROM "+table+" WHERE id=$1", id); (count == 0) != tc.allowed {
 					t.Fatalf("remaining %s rows = %d, allowed = %v", table, count, tc.allowed)
 				}
