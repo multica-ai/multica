@@ -98,6 +98,36 @@ describe("RichTable", () => {
     }
   });
 
+  it("measures again for web fonts only while they are still loading", async () => {
+    const rect = vi.spyOn(HTMLTableCellElement.prototype, "getBoundingClientRect").mockReturnValue({ width: 100 } as DOMRect);
+    const clientWidth = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(560);
+    const measures = async (status: FontFaceSet["status"]) => {
+      let fontsLoaded!: () => void;
+      const ready = new Promise<void>((resolve) => (fontsLoaded = resolve));
+      Object.defineProperty(document, "fonts", { configurable: true, value: { status, ready } });
+      rect.mockClear();
+      const view = renderTable();
+      const first = rect.mock.calls.length;
+      fontsLoaded();
+      await ready;
+      await Promise.resolve();
+      const total = rect.mock.calls.length;
+      view.unmount();
+      return { first, total };
+    };
+    try {
+      const loaded = await measures("loaded");
+      expect(loaded.first).toBeGreaterThan(0);
+      expect(loaded.total).toBe(loaded.first);
+      const loading = await measures("loading");
+      expect(loading.total).toBeGreaterThan(loading.first);
+    } finally {
+      delete (document as { fonts?: unknown }).fonts;
+      rect.mockRestore();
+      clientWidth.mockRestore();
+    }
+  });
+
   it("resizes a column from the keyboard, persists it, and resets", async () => {
     const { table, unmount } = renderTable();
     const handle = screen.getByRole("separator", { name: "Resize Relation column" });

@@ -13,6 +13,7 @@ import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { AppRail } from "./app-rail";
 import { useAppShell } from "./app-shell-context";
+import { PanelScrollFadeContext } from "./panel-nav";
 import { SpacePanelContent } from "./space-panel";
 
 /**
@@ -35,6 +36,7 @@ export function CompactNavSheet() {
 
   if (!isCompact) return null;
   const hasPanel = !!shell?.hasPanel;
+  const coarsePointer = window.matchMedia("(pointer: coarse)").matches;
 
   return (
     <Sheet open={openMobile} onOpenChange={setOpenMobile}>
@@ -53,7 +55,9 @@ export function CompactNavSheet() {
         <AppRail />
         {hasPanel && (
           <div className="my-2 mr-2 flex w-[260px] min-w-0 flex-col overflow-hidden rounded-xl bg-page-canvas shadow-[var(--surface-shadow)] ring-1 ring-surface-border">
-            <SpacePanelContent space={shell?.space ?? null} />
+            <PanelScrollFadeContext.Provider value={!coarsePointer}>
+              <SpacePanelContent space={shell?.space ?? null} />
+            </PanelScrollFadeContext.Provider>
           </div>
         )}
       </SheetContent>

@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -27,6 +28,22 @@ const (
 var (
 	validDocActions = []string{"edit", "restore"}
 )
+
+func (h *Handler) docsV1Enabled(ctx context.Context) bool {
+	return featureflags.DocsV1Enabled(ctx, h.FeatureFlags)
+}
+
+// RequireDocsV1 answers 403 docs_disabled while the docs_v1 flag is off, so
+// the API, the CLI and agents cannot reach Docs before it launches.
+func (h *Handler) RequireDocsV1(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !h.docsV1Enabled(r.Context()) {
+			writeFeatureDisabled(w, "docs_disabled", "Docs is not enabled")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 type DocSummaryResponse struct {
 	ID            string  `json:"id"`
@@ -315,7 +332,10 @@ func (h *Handler) CreateDoc(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	req.Title = strings.TrimSpace(req.Title)
+	// PostgreSQL TEXT rejects NUL, which survives a JSON round trip.
+	req.Title = strings.TrimSpace(sanitizeNullBytes(req.Title))
+	req.Content = sanitizeNullBytes(req.Content)
+	req.Message = sanitizeNullBytes(req.Message)
 	if !validateDocTitle(w, req.Title) || !validateDocContent(w, req.Content) || !validateDocMessage(w, req.Message) {
 		return
 	}
@@ -417,15 +437,20 @@ func (h *Handler) UpdateDoc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Title != nil {
-		trimmed := strings.TrimSpace(*req.Title)
+		trimmed := strings.TrimSpace(sanitizeNullBytes(*req.Title))
 		req.Title = &trimmed
 		if !validateDocTitle(w, trimmed) {
 			return
 		}
 	}
-	if req.Content != nil && !validateDocContent(w, *req.Content) {
-		return
+	if req.Content != nil {
+		content := sanitizeNullBytes(*req.Content)
+		req.Content = &content
+		if !validateDocContent(w, content) {
+			return
+		}
 	}
+	req.Message = sanitizeNullBytes(req.Message)
 	if !validateDocMessage(w, req.Message) {
 		return
 	}
@@ -595,10 +620,6 @@ func (h *Handler) DeleteDoc(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if isMachineCredentialActor(r) || actorType != "member" || r.Header.Get("X-Agent-ID") != "" {
-		writeError(w, http.StatusForbidden, "only humans can delete docs")
-		return
-	}
 	id, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "doc id")
 	if !ok {
 		return
@@ -611,12 +632,16 @@ func (h *Handler) DeleteDoc(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(ctx)
 	q := h.Queries.WithTx(tx)
-	if _, err = q.GetDocForUpdate(ctx, db.GetDocForUpdateParams{ID: id, WorkspaceID: wsUUID}); err != nil {
+	doc, err := q.GetDocForUpdate(ctx, db.GetDocForUpdateParams{ID: id, WorkspaceID: wsUUID})
+	if err != nil {
 		if isNotFound(err) {
 			writeError(w, 404, "doc not found")
 		} else {
 			writeError(w, 500, "failed to delete doc")
 		}
+		return
+	}
+	if !h.requireDocDeletionFor(w, r, doc) {
 		return
 	}
 	if err = q.DeleteDoc(ctx, db.DeleteDocParams{ID: id, WorkspaceID: wsUUID}); err != nil {
@@ -704,7 +729,7 @@ func (h *Handler) CreateDocFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	req.Title = strings.TrimSpace(req.Title)
+	req.Title = strings.TrimSpace(sanitizeNullBytes(req.Title))
 	if !validateDocFolderTitle(w, req.Title) {
 		return
 	}
@@ -765,7 +790,7 @@ func (h *Handler) UpdateDocFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	req.Title = strings.TrimSpace(req.Title)
+	req.Title = strings.TrimSpace(sanitizeNullBytes(req.Title))
 	if !validateDocFolderTitle(w, req.Title) {
 		return
 	}
@@ -875,11 +900,6 @@ func (h *Handler) DeleteDocFolder(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	actorType, _ := h.resolveActor(r, userID, workspaceID)
-	if isMachineCredentialActor(r) || actorType != "member" || r.Header.Get("X-Agent-ID") != "" {
-		writeError(w, http.StatusForbidden, "only humans can delete folders")
-		return
-	}
 	folderUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "folder id")
 	if !ok {
 		return
@@ -896,12 +916,16 @@ func (h *Handler) DeleteDocFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete folder")
 		return
 	}
-	if _, err := qtx.GetDocFolder(ctx, db.GetDocFolderParams{ID: folderUUID, WorkspaceID: wsUUID}); err != nil {
+	folder, err := qtx.GetDocFolder(ctx, db.GetDocFolderParams{ID: folderUUID, WorkspaceID: wsUUID})
+	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "folder not found")
 		} else {
 			writeError(w, http.StatusInternalServerError, "failed to delete folder")
 		}
+		return
+	}
+	if !h.requireDocFolderDeletionFor(w, r, folder) {
 		return
 	}
 	children, err := qtx.CountDocFolderChildren(ctx, db.CountDocFolderChildrenParams{WorkspaceID: wsUUID, FolderID: folderUUID})
@@ -921,7 +945,7 @@ func (h *Handler) DeleteDocFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete folder")
 		return
 	}
-	_, actorID := h.resolveActor(r, userID, workspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	h.publish(protocol.EventDocFolderDeleted, workspaceID, actorType, actorID, map[string]any{"folder_id": uuidToString(folderUUID)})
 	w.WriteHeader(http.StatusNoContent)
 }

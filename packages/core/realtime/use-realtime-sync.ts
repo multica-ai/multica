@@ -71,6 +71,7 @@ import {
   notificationPreferenceKeys,
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import { memberLimitKeys } from "../billing/member-limit";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
   showSystemNotification,
@@ -1675,6 +1676,8 @@ export function useRealtimeSync(
         const currentWsId = getCurrentWsId();
         if (currentWsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
+          // A declined invitation frees its member slot.
+          qc.invalidateQueries({ queryKey: memberLimitKeys.all(currentWsId) });
         }
         if (actorId === authStore.getState().user?.id) {
           qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });

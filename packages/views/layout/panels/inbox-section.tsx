@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, type Ref, useLayoutEffect, useMemo, useState } from "react";
+import { memo, type ReactNode, type Ref, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -182,13 +182,43 @@ export function InboxSection({
   }, [list.notifications]);
 
   const scrollRef = usePanelScrollRef();
+  // Rows are memoized and re-render only when their own props change, not on
+  // every navigation that re-renders this section (MUL-9609); the handlers
+  // keep one identity and read this render's state when they run.
+  const latest = {
+    prefetch: (item: InboxItem) => void prefetchRow(item),
+    archive: (item: InboxItem) => {
+      archive(item.id, inboxRowKey(item));
+      leaveIfOpen(item);
+    },
+    unsubscribe: (item: InboxItem) => {
+      unsubscribeArchive({ id: item.id, issueId: item.issue_id! });
+      leaveIfOpen(item);
+    },
+    snooze: (item: InboxItem, until: Date) => {
+      snooze(item, until);
+      leaveIfOpen(item);
+    },
+  };
+  const latestRef = useRef(latest);
+  useLayoutEffect(() => {
+    latestRef.current = latest;
+  });
+  const handlers = useMemo<InboxRowHandlers>(() => ({
+    prefetch: (item) => latestRef.current.prefetch(item),
+    archive: (item) => latestRef.current.archive(item),
+    unsubscribe: (item) => latestRef.current.unsubscribe(item),
+    snooze: (item, until) => latestRef.current.snooze(item, until),
+  }), []);
   const renderRow = (item: InboxItem, measure?: RowMeasure) => (
     <InboxRow
       key={item.id}
       item={item}
-      measure={measure}
+      // Two props rather than the object: a fresh object every render would
+      // defeat the row's memo (the measuring ref keeps one identity).
+      measureIndex={measure?.index}
+      measureRef={measure?.ref}
       href={inboxRowHref(p, item)}
-      onPrefetch={() => void prefetchRow(item)}
       active={
         (!!item.issue_id && item.issue_id === activeIssueId) ||
         (!!openKey && (item.issue_id ?? item.id) === openKey)
@@ -197,22 +227,8 @@ export function InboxSection({
       kept={list.kept?.item.id === item.id ? keptText.line(list.kept) : null}
       settled={list.kept?.item.id === item.id && list.kept.reason !== "filtered"}
       updatesWhileSnoozed={item.issue_id ? (updatesWhileSnoozed.get(item.issue_id) ?? 0) : 0}
-      onArchive={() => {
-        archive(item.id, inboxRowKey(item));
-        leaveIfOpen(item);
-      }}
-      onUnsubscribe={
-        item.issue_id && unsubscribable(item)
-          ? () => {
-              unsubscribeArchive({ id: item.id, issueId: item.issue_id! });
-              leaveIfOpen(item);
-            }
-          : undefined
-      }
-      onSnooze={(until) => {
-        snooze(item, until);
-        leaveIfOpen(item);
-      }}
+      unsubscribable={!!item.issue_id && unsubscribable(item)}
+      handlers={handlers}
     />
   );
 
@@ -254,6 +270,20 @@ export function InboxSection({
             {displayed.map((item) => renderRow(item))}
           </PanelList>
         )
+      ) : list.load === "failed" ? (
+        // A list that never loaded is not an empty Inbox: say so and offer
+        // another try rather than "No notifications".
+        <div role="alert" className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
+          <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.errors.load_failed)}</span>
+          <button
+            type="button"
+            disabled={list.retrying}
+            className="shrink-0 rounded-md px-1 font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50"
+            onClick={list.retry}
+          >
+            {tInbox(($) => $.list.retry)}
+          </button>
+        </div>
       ) : list.filtered ? (
         <div className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
           <span className="min-w-0 flex-1 truncate">{tInbox(($) => $.filters.empty)}</span>
@@ -265,11 +295,11 @@ export function InboxSection({
             {tInbox(($) => $.filters.clear)}
           </button>
         </div>
-      ) : (
+      ) : list.load === "loaded" ? (
         <p className={cn(PANEL_ROW_CLASS, "pl-[2.375rem] text-caption text-faint-foreground")}>
           {t(($) => $.panels.work.inbox_empty)}
         </p>
-      )}
+      ) : null}
       {all.length > limit && (
         <button
           type="button"
@@ -507,26 +537,34 @@ function InboxSectionActions({
   );
 }
 
-function InboxRow({
+/** What a row does with its notification; one stable set shared by every row. */
+interface InboxRowHandlers {
+  /** Warms the issue a row opens, so the click renders from cache. */
+  prefetch: (item: InboxItem) => void;
+  archive: (item: InboxItem) => void;
+  /** Unsubscribe & archive. */
+  unsubscribe: (item: InboxItem) => void;
+  snooze: (item: InboxItem, until: Date) => void;
+}
+
+const InboxRow = memo(function InboxRow({
   item,
-  measure,
+  measureIndex,
+  measureRef,
   href,
-  onPrefetch,
   active,
   compact,
   kept,
   settled,
   updatesWhileSnoozed,
-  onArchive,
-  onUnsubscribe,
-  onSnooze,
+  unsubscribable,
+  handlers,
 }: {
   item: InboxItem;
-  /** Set when the row is one of a virtualized list's window. */
-  measure?: RowMeasure;
+  /** Set when the row is one of a virtualized list's window (`RowMeasure`). */
+  measureIndex?: number;
+  measureRef?: Ref<HTMLLIElement>;
   href: string;
-  /** Warms the issue this row opens, so the click renders from cache. */
-  onPrefetch: () => void;
   active: boolean;
   /** One line (status, title, agents, dot or time) instead of the actor line under the title. */
   compact: boolean;
@@ -536,11 +574,14 @@ function InboxRow({
   settled: boolean;
   /** Notifications that arrived while the issue was snoozed. */
   updatesWhileSnoozed: number;
-  onArchive: () => void;
-  /** Unsubscribe & archive; only for issues that are not the viewer's own. */
-  onUnsubscribe?: () => void;
-  onSnooze: (until: Date) => void;
+  /** Offers Unsubscribe & archive; only for issues that are not the viewer's own. */
+  unsubscribable: boolean;
+  handlers: InboxRowHandlers;
 }) {
+  const onPrefetch = () => handlers.prefetch(item);
+  const onArchive = () => handlers.archive(item);
+  const onUnsubscribe = unsubscribable ? () => handlers.unsubscribe(item) : undefined;
+  const onSnooze = (until: Date) => handlers.snooze(item, until);
   const { t } = useT("inbox");
   const typeLabels = useTypeLabels();
   const timeAgo = useTimeAgo();
@@ -619,8 +660,8 @@ function InboxRow({
 
   return (
     <li
-      ref={measure?.ref}
-      data-index={measure?.index}
+      ref={measureRef}
+      data-index={measureIndex}
       data-inbox-row
       data-read={unread ? "false" : "true"}
       className="group/inbox relative"
@@ -792,7 +833,7 @@ function InboxRow({
       )}
     </li>
   );
-}
+});
 
 /** A row's hover button. */
 function rowButtonClass(compact: boolean) {

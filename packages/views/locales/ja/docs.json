@@ -47,7 +47,8 @@
     "retry": "再試行",
     "conflict": "{{name}} が更新しました。下書きを保持しています。再読み込みして続けてください。",
     "reload": "最新版を読み込む",
-    "draft": "保存した下書き"
+    "draft": "保存した下書き",
+    "unsaved_changes": "保存していない変更"
   },
   "history": {
     "title": "履歴",
@@ -55,7 +56,15 @@
     "restore": "このバージョンを復元",
     "loading": "読み込み中..."
   },
+  "not_found": {
+    "title": "ドキュメントが見つかりません",
+    "description": "削除された可能性があります。"
+  },
   "edited": "最終編集 {{time}}",
   "outline": "目次",
-  "link_copied": "リンクをコピーしました"
+  "link_copied": "リンクをコピーしました",
+  "unavailable": {
+    "title": "ドキュメントはまだ利用できません",
+    "description": "このワークスペースではドキュメントが有効になっていません。"
+  }
 }

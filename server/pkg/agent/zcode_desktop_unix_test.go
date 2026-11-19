@@ -32,7 +32,7 @@ func TestZcodeLinuxDesktopHeadless(t *testing.T) {
 			t.Setenv("ELECTRON_RUN_AS_NODE", "0")
 			t.Setenv("ZCODE_DATA_BASE_DIR", root)
 			t.Setenv("PATH", root) // No standalone Node.js.
-			if err := os.WriteFile(bin, []byte(`#!/bin/sh
+			writeTestExecutable(t, bin, []byte(`#!/bin/sh
 if [ "$ELECTRON_RUN_AS_NODE" != 1 ] || [ "$1" != "$ZCODE_EXPECTED_SCRIPT" ]; then
   printf 'GUI launched\n' > "$ZCODE_GUI_MARKER"
   exit 1
@@ -44,9 +44,7 @@ if [ "$1" = --version ]; then
   exit 0
 fi
 exec /bin/sh "$script" "$@"
-`), 0o755); err != nil {
-				t.Fatal(err)
-			}
+`))
 			if symlink {
 				link := filepath.Join(root, "zcode")
 				if err := os.Symlink(bin, link); err != nil {

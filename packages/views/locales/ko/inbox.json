@@ -153,6 +153,7 @@
     "archive_completed_failed": "완료된 항목을 보관하지 못했습니다",
     "unarchive_failed": "보관 해제에 실패했습니다",
     "archived_load_failed": "보관된 알림을 불러오지 못했습니다",
+    "load_failed": "알림을 불러오지 못했습니다",
     "filters_load_failed": "필터를 불러올 수 없습니다",
     "delete_failed": "알림을 삭제하지 못했습니다. 다시 시도해 주세요.",
     "unsubscribe_archive_failed": "구독 해제에 실패했습니다",

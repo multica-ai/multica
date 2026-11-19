@@ -44,14 +44,20 @@ blockquotes, or `<details>`. A fenced `diff` of agent instructions cannot invoke
 its mention targets. Copy the mention syntax out of code and paste it into
 ordinary prose to trigger it. Prose mentions in blockquotes still count.
 
-One `mention://` form deliberately sits OUTSIDE this parser:
+Two `mention://` forms deliberately sit OUTSIDE this parser. The first is
 `[Label](mention://project/<uuid>)`. `project` is absent from the type group
 above, so the backend never parses it and it can enqueue nothing — it is a
 render-only link every client makes navigable (a chip on web and desktop, an
 ordinary link that opens the project on tap on mobile). That is the whole point:
 a project reference should never be able to start a run. Use it freely to point
-at a project; everything else in this document is about the four types (plus
-`all`) the parser does recognize.
+at a project.
+
+The second is `[Doc Title](mention://doc/<doc-id>)`:
+`doc` is not in the type group either, so a doc link is render-only and
+enqueues nothing. Read the doc it points at with `multica doc get <doc-id>`.
+
+Everything else in this document is about the four types (plus `all`) the
+parser does recognize.
 
 ## Step 1 — look up the UUID
 

@@ -1,6 +1,8 @@
 import type {
   AutopilotQuotaUsage,
   WorkspaceSubscriptionEntitlements,
+  WorkspaceSubscriptionPaidPlan,
+  WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionSummary,
 } from "@multica/core/types";
 
@@ -75,4 +77,35 @@ export function hasActiveWorkspaceSeatCapacity(
   summary: WorkspaceSubscriptionSummary | null | undefined,
 ): boolean {
   return summary?.seatCapacity != null;
+}
+
+/**
+ * The plan an active subscription can switch to, or null when Cloud does not
+ * offer a switch. Cloud's `changePlan` action is the gate; the current plan
+ * only decides the direction, so an unknown plan never offers a switch.
+ */
+export function resolvePlanChangeTarget(
+  summary: WorkspaceSubscriptionSummary | null | undefined,
+): WorkspaceSubscriptionPaidPlan | null {
+  if (summary?.availableActions.changePlan !== true) return null;
+  switch (summary.entitlement.plan) {
+    case "pro":
+      return "business";
+    case "business":
+      return "pro";
+    default:
+      return null;
+  }
+}
+
+/**
+ * A yearly per-seat price expressed per month, in minor units. Returns null
+ * when the yearly amount does not divide evenly into twelve minor-unit
+ * months, so the caller shows the yearly amount instead of a rounded one.
+ */
+export function yearlyPriceMonthlyEquivalent(
+  price: WorkspaceSubscriptionPrice,
+): number | null {
+  if (price.interval !== "year" || price.intervalCount !== 1) return null;
+  return price.unitAmount % 12 === 0 ? price.unitAmount / 12 : null;
 }

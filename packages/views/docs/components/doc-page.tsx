@@ -26,6 +26,7 @@ import {
   docDetailOptions,
   docTreeOptions,
   folderAncestry,
+  isDocNotFound,
 } from "@multica/core/docs";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -40,10 +41,24 @@ import { useDocDraft } from "./use-doc-draft";
 import { DocOutline, MIN_OUTLINE_HEADINGS, useDocOutline } from "./doc-outline";
 import { MoveDialog } from "./move-dialog";
 import { DeleteDocDialog } from "./doc-tree";
+import { useCanDeleteDoc } from "./use-can-delete-doc";
+import { DocNotFound } from "./doc-not-found";
+import { DocsGate } from "./docs-gate";
+
 export function DocPage({ docId }: { docId: string }) {
+  return (
+    <DocsGate>
+      <DocPageContent docId={docId} />
+    </DocsGate>
+  );
+}
+
+function DocPageContent({ docId }: { docId: string }) {
   const wsId = useWorkspaceId();
   const { t } = useT("docs");
   const query = useQuery(docDetailOptions(wsId, docId));
+  // Also when it was open: a refetch answered 404 once someone deleted it.
+  if (isDocNotFound(query.error)) return <DocNotFound docId={docId} />;
   if (!query.data)
     return (
       <div className="p-6">
@@ -68,6 +83,7 @@ function DocEditor({ doc }: { doc: Doc }) {
   const { draft, status, dirty, change, retry, reload } = useDocDraft(doc);
   const [moving, setMoving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const canDelete = useCanDeleteDoc()(doc);
   const ancestors = folderAncestry(tree?.folders ?? [], doc.folderId);
   const author = getActorName(doc.updatedByType, doc.updatedById);
   const { getShareableUrl } = useNavigation();
@@ -141,13 +157,15 @@ function DocEditor({ doc }: { doc: Doc }) {
                   <FolderInput />
                   {t(($) => $.actions.move)}
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  variant="destructive"
-                  onClick={() => setDeleting(true)}
-                >
-                  <Trash2 />
-                  {t(($) => $.actions.delete)}
-                </DropdownMenuItem>
+                {canDelete && (
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => setDeleting(true)}
+                  >
+                    <Trash2 />
+                    {t(($) => $.actions.delete)}
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </>

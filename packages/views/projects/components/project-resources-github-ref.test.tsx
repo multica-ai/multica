@@ -348,6 +348,31 @@ describe("ProjectResourcesSection — github_repo checkout ref", () => {
     });
   });
 
+  it.each([
+    "https://github.com/multica-ai/one.git",
+    "https://github.com/multica-ai/two",
+    "git@github.com:multica-ai/two.git",
+  ])("clears the previous branch when replacing a browse URL with %s", async (url) => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /add repository/i }));
+    const input = screen.getByLabelText(/paste a github url/i);
+    fireEvent.change(input, {
+      target: { value: "https://github.com/multica-ai/one/tree/release/2026-09" },
+    });
+    expect((screen.getByLabelText(/starting branch/i) as HTMLInputElement).value).toBe("release/2026-09");
+
+    fireEvent.change(input, { target: { value: url } });
+    expect((screen.getByLabelText(/starting branch/i) as HTMLInputElement).value).toBe("");
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    await waitFor(() => expect(createMock).toHaveBeenCalledTimes(1));
+    expect(createMock.mock.calls[0]?.[0]).toEqual({
+      resource_type: "github_repo",
+      resource_ref: { url },
+    });
+  });
+
   it("omits the ref key entirely when the field is left empty", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 

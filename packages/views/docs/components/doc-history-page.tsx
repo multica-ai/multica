@@ -7,6 +7,7 @@ import {
   docDetailOptions,
   docVersionsOptions,
   docVersionOptions,
+  isDocNotFound,
   useUpdateDoc,
 } from "@multica/core/docs";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -16,7 +17,18 @@ import { ReadonlyContent } from "../../editor";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { DocNotFound } from "./doc-not-found";
+import { DocsGate } from "./docs-gate";
+
 export function DocHistoryPage({ docId }: { docId: string }) {
+  return (
+    <DocsGate>
+      <DocHistoryPageContent docId={docId} />
+    </DocsGate>
+  );
+}
+
+function DocHistoryPageContent({ docId }: { docId: string }) {
   const { t } = useT("docs");
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
@@ -48,6 +60,7 @@ export function DocHistoryPage({ docId }: { docId: string }) {
       void doc.refetch();
     }
   };
+  if (isDocNotFound(doc.error)) return <DocNotFound docId={docId} />;
   return (
     <div className="flex h-full min-h-0 flex-col">
       <BreadcrumbHeader

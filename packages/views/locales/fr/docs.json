@@ -47,7 +47,8 @@
     "retry": "Réessayer",
     "conflict": "{{name}} a modifié le document. Votre brouillon est conservé. Rechargez pour continuer.",
     "reload": "Recharger la dernière version",
-    "draft": "Votre brouillon conservé"
+    "draft": "Votre brouillon conservé",
+    "unsaved_changes": "Modifications non enregistrées"
   },
   "history": {
     "title": "Historique",
@@ -55,7 +56,15 @@
     "restore": "Restaurer cette version",
     "loading": "Chargement..."
   },
+  "not_found": {
+    "title": "Document introuvable",
+    "description": "Il a peut-être été supprimé."
+  },
   "edited": "Modifié {{time}}",
   "outline": "Plan",
-  "link_copied": "Lien copié"
+  "link_copied": "Lien copié",
+  "unavailable": {
+    "title": "Documents n'est pas disponible",
+    "description": "Documents n'est pas activé dans cet espace de travail."
+  }
 }

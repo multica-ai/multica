@@ -42,6 +42,9 @@ export function docVersionOptions(wsId: string, id: string, number: number) {
   });
 }
 
+export function isDocNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
 export function isDocRevisionConflict(error: unknown): boolean {
   if (!(error instanceof ApiError) || error.status !== 409) return false;
   const body = error.body as { code?: unknown } | undefined;

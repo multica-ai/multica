@@ -24,9 +24,10 @@ export {
 export { useCommentCollapseStore } from "./comment-collapse-store";
 export {
   useIssueSidebarSectionsStore,
+  selectIssueSidebarOrder,
   selectIssueSidebarCustomized,
+  resolveIssueSidebarOrder,
   resolveIssueSidebarHidden,
-  ISSUE_SIDEBAR_GROUPS,
   ISSUE_SIDEBAR_SECTIONS,
   ISSUE_SIDEBAR_ALWAYS_SHOWN,
   type IssueSidebarSection,
