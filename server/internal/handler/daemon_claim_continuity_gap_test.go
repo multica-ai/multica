@@ -23,6 +23,7 @@ func claimOneTaskForRuntime(t *testing.T, runtimeID, daemonID string) claimConti
 	w := httptest.NewRecorder()
 	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
+	refreshClaimFixtureHeartbeat(t, runtimeID)
 	testHandler.ClaimTaskByRuntime(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())

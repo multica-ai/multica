@@ -2155,6 +2155,7 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 
 	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
+	refreshClaimFixtureHeartbeat(t, runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
 	var resp struct {
@@ -2221,6 +2222,7 @@ func TestClaimTask_ProjectDescriptionInjected(t *testing.T) {
 
 	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
+	refreshClaimFixtureHeartbeat(t, runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
 	var resp struct {
@@ -2310,6 +2312,7 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 
 	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
+	refreshClaimFixtureHeartbeat(t, runtimeID)
 	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
 	var resp struct {
@@ -2393,6 +2396,7 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceAndProjectContext(t *testi
 	rctx.URLParams.Add("runtimeId", runtimeID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
+	refreshClaimFixtureHeartbeat(t, runtimeID)
 	testHandler.ClaimTaskByRuntime(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -2513,6 +2517,7 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	rctx.URLParams.Add("runtimeId", localRuntimeID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
+	refreshClaimFixtureHeartbeat(t, localRuntimeID)
 	testHandler.ClaimTaskByRuntime(w, req)
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("ClaimTaskByRuntime (mismatch): expected 500, got %d: %s", w.Code, w.Body.String())
