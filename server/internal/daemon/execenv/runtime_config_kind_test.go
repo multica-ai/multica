@@ -323,6 +323,31 @@ func TestSlimQuickCreateAvailableCommands(t *testing.T) {
 	}
 }
 
+func TestAntigravityBackgroundTaskSafetyAllKinds(t *testing.T) {
+	t.Parallel()
+	for name, ctx := range map[string]TaskContextForEnv{
+		"comment":      {IssueID: "i", TriggerCommentID: "c"},
+		"assignment":   {IssueID: "i"},
+		"autopilot":    {AutopilotRunID: "r"},
+		"quick-create": {QuickCreatePrompt: "p"},
+		"chat":         {ChatSessionID: "c"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agy := buildMetaSkillContent("antigravity", ctx)
+			if !strings.Contains(agy, "yield the model subturn while waiting") ||
+				strings.Contains(agy, "whatever a tool response promises") || strings.Contains(agy, "Never background-and-yield") {
+				t.Fatal("Antigravity model-subturn contract missing or contradicted")
+			}
+			for _, provider := range []string{"claude", "codex", "codebuddy", "hermes"} {
+				other := buildMetaSkillContent(provider, ctx)
+				if !strings.Contains(other, "Never background-and-yield") || strings.Contains(other, "yield the model subturn") {
+					t.Fatalf("%s inherited Antigravity's exception", provider)
+				}
+			}
+		})
+	}
+}
+
 // TestBackgroundTaskSafetySlimHardPins asserts the slim brief carries the
 // same hardened Background Task Safety pins as the legacy brief (MUL-4140).
 // The verbose path is covered by
