@@ -434,6 +434,7 @@ export type {
   PaidFeature,
   WorkspaceFeatureState,
   WorkspaceFeatures,
+  MemberLimit,
 } from "./billing";
 export type { IssueWakeup, IssueWakeupInput, SystemWakeup, WorkspaceSystemWakeup, WakeupPreview, IssueWakeupSummaryRow, WakeupCondition, WakeupPausedReason, WakeupRun, PausedWakeup, WakeupSource } from "./issue-wakeup";
 

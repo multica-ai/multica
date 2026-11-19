@@ -1632,7 +1632,20 @@
     "invitation_meta": "{{sent}} 傳送 · {{expires}} 過期",
     "revoke_invitation_aria": "撤銷發給 {{email}} 的邀請",
     "seats_used": "已用 {{used}} / {{purchased}} 個席位",
-    "manage_seats": "管理席位"
+    "manage_seats": "管理席位",
+    "member_limit_full_title": "目前套餐最多 {{limit}} 位成員，已滿",
+    "member_limit_full_description": "升級到 Pro 後成員不限。每位成員佔一個付費席位，這次升級會為這份邀請多買一個。也可以先移除一位成員。",
+    "member_limit_full_description_pending": "待接受的邀請也佔名額（目前 {{pending}} 個）。升級到 Pro 後成員不限（每位成員佔一個付費席位，這次升級會為這份邀請多買一個），也可以先撤回邀請或移除成員。",
+    "member_limit_usage": "{{used}} / {{limit}} 位成員",
+    "upgrade_and_invite": "升級並邀請",
+    "toast_member_limit_reached": "工作區成員已滿，升級後才能邀請更多成員。",
+    "member_limit_full_description_no_upgrade": "撤回待接受的邀請或移除成員後，才能邀請新成員。",
+    "toast_invalid_email": "請輸入有效的電子郵件地址。",
+    "toast_already_member": "{{email}} 已經是這個工作區的成員。",
+    "toast_invitation_pending": "已經有一封發給 {{email}} 的待接受邀請。",
+    "toast_invite_check_unavailable": "暫時無法核對現有成員和邀請，請稍後再試。",
+    "member_limit_full_description_billing": "工作區的訂閱需要處理。到「帳單與套餐」恢復訂閱後才能加人，也可以先移除一位成員。",
+    "open_billing": "開啟帳單與套餐"
   },
   "integrations": {
     "status_connected": "已連線",

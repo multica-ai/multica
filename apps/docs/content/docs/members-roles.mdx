@@ -41,7 +41,11 @@ The invitee accepts by logging in with that email — no prior signup is needed.
 
 The invitation link appears only in the email; there is no place in the product to view or copy it. If the email fails to send, the invitation record still exists — revoke it and send a new one.
 
-When you need a link you can pass along yourself, generate one under **Share links** in **Settings → Members** by choosing a role and an expiry. Anyone with the link can join with that role until it expires or is revoked.
+When you need a link you can pass along yourself, generate one under **Share links** in **Settings → Members** by choosing a role and an expiry. Anyone with the link can join with that role until it expires or is revoked, as long as the workspace has a free member slot (see below).
+
+### Member limit
+
+On Multica Cloud, a workspace on the Free plan can have up to 5 members. Members and pending invitations each take a slot; guests take none. While the limit applies, a new invitation, an accepted invitation or a share-link join that would go past it is refused until a slot frees up (an invitation is revoked or a member removed) or the workspace upgrades. Existing members are never removed. When the workspace is full, admins see **Upgrade and invite** in the invite dialog: once the payment goes through, **Settings → Billing** offers to send the held invitation. On Pro and Business each member takes a paid seat. Self-hosted workspaces have no member limit.
 
 ## Change roles
 

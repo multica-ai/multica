@@ -285,6 +285,7 @@ import type {
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrices,
   WorkspaceFeatures,
+  MemberLimit,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspaceSubscriptionSeatReconcileResult,
@@ -447,6 +448,7 @@ import {
   UNCONFIRMED_BATCH_UPDATE,
   WorkspaceSubscriptionPricesSchema,
   WorkspaceFeaturesSchema,
+  MemberLimitSchema,
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
   WorkspaceSeatPurchasePreviewSchema,
@@ -2647,6 +2649,18 @@ export class ApiClient {
     );
   }
 
+  // The plan's member limit (MUL-9488). A response that cannot be read falls
+  // back to no limit: the server still checks every admission.
+  async getMemberLimit(workspaceId: string): Promise<MemberLimit> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/member-limit`);
+    return parseWithFallback<MemberLimit>(
+      raw,
+      MemberLimitSchema,
+      { action: "off", limit: null, members: null, pendingInvitations: null },
+      { endpoint: "GET /api/workspaces/:id/member-limit" },
+    );
+  }
+
   async getWorkspaceSubscriptionPrices(): Promise<WorkspaceSubscriptionPrices | null> {
     const raw = await this.fetch<unknown>("/api/cloud-subscriptions/prices");
     return parseWithFallback<WorkspaceSubscriptionPrices | null>(
@@ -2668,6 +2682,9 @@ export class ApiClient {
           plan: data.plan,
           interval: data.interval,
           idempotency_key: data.idempotencyKey,
+          ...(data.additionalSeats
+            ? { additional_seats: data.additionalSeats }
+            : {}),
         }),
         extraHeaders: {
           "Content-Type": "application/json",
