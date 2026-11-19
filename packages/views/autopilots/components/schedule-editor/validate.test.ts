@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
 import { findScheduleRejection } from "./validate";
-import { parseCron } from "./cron-mapping";
+import { parseCron } from "@multica/core/autopilots/schedule";
 
 // The submit paths call this right before writing: the editor's inline error
 // only covers previews that have settled, so a cron typed and saved in one

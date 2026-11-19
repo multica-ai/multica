@@ -38,18 +38,18 @@ import { SegmentedToggle } from "../../../common/segmented-toggle";
 import { formatInTimeZone } from "../../../common/format-in-time-zone";
 import { TimezonePicker } from "../pickers/timezone-picker";
 import { useT } from "../../../i18n";
-import type { DayPattern, ScheduleConfig, TimePattern } from "./model";
-import { DAY_KEYS, pad2, timeParts } from "./model";
 import {
+  type DayPattern,
+  type ScheduleConfig,
+  type TimePattern,
+  DAY_KEYS,
+  pad2,
+  timeParts,
   cronFields,
   extractTimezonePrefix,
   hasTimezonePrefix,
   parseCron,
   toCron,
-} from "./cron-mapping";
-import { classifyScheduleRejection } from "./validate";
-import { useDescribeSchedule } from "./describe";
-import {
   clampWindow,
   defaultAtTime,
   defaultEveryTime,
@@ -59,7 +59,9 @@ import {
   toggleDay,
   type EveryPattern,
   type ScheduleWindow,
-} from "./transitions";
+} from "@multica/core/autopilots/schedule";
+import { classifyScheduleRejection } from "./validate";
+import { useDescribeSchedule } from "./describe";
 
 export interface ScheduleEditorProps {
   value: ScheduleConfig;

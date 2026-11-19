@@ -204,7 +204,18 @@ export class WSClient {
     this.logger.warn(
       `ws: disconnected, reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`,
     );
-    this.reconnectTimer = setTimeout(() => this.connect(), delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
+  }
+
+  /** Skip the remaining backoff of a pending reconnect, e.g. when the app returns to the foreground. */
+  reconnectNow() {
+    if (!this.reconnectTimer) return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.connect();
   }
 
   private onAuthenticated() {

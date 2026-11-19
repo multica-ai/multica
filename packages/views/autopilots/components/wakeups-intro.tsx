@@ -22,7 +22,7 @@ import {
 } from "../../layout/feature-intro";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { useLocale, useT } from "../../i18n";
-import { parseCron } from "./schedule-editor/cron-mapping";
+import { parseCron } from "@multica/core/autopilots/schedule";
 import { useDescribeSchedule } from "./schedule-editor/describe";
 
 const TURING = { name: "Turing", initials: "T", avatarUrl: formatAvatarEmoji("🧩"), isAgent: true };

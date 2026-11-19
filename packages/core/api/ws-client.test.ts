@@ -496,6 +496,36 @@ describe("WSClient", () => {
       simulateDisconnect();
       expect(lastTimerDelay()).toBe(1000);
     });
+
+    it("reconnectNow() skips the pending backoff", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      ws.connect();
+      simulateDisconnect();
+      const dropped = FakeWebSocket.lastInstance;
+
+      ws.reconnectNow();
+      expect(FakeWebSocket.lastInstance).not.toBe(dropped);
+
+      // The skipped timer must not open another socket later.
+      const reopened = FakeWebSocket.lastInstance;
+      vi.advanceTimersByTime(60_000);
+      expect(FakeWebSocket.lastInstance).toBe(reopened);
+    });
+
+    it("reconnectNow() leaves a live or in-flight connection alone", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      ws.setAuth("tok", "acme");
+      ws.connect();
+      const first = FakeWebSocket.lastInstance;
+      ws.reconnectNow();
+      expect(FakeWebSocket.lastInstance).toBe(first);
+
+      simulateDisconnect();
+      vi.runOnlyPendingTimers();
+      const retry = FakeWebSocket.lastInstance;
+      ws.reconnectNow();
+      expect(FakeWebSocket.lastInstance).toBe(retry);
+    });
   });
 });
 

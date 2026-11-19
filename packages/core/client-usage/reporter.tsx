@@ -60,6 +60,7 @@ export function ClientUsageReporter({
   }, [reportIfNeeded, userID]);
 
   useEffect(() => {
+    if (typeof document === "undefined") return;
     const onFocus = () => void reportIfNeeded();
     const onVisibility = () => {
       if (document.visibilityState === "visible") void reportIfNeeded();

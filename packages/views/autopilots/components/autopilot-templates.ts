@@ -7,7 +7,7 @@ import {
   Shield,
   type IconComponent,
 } from "@multica/ui/icons";
-import type { ScheduleConfig } from "./schedule-editor/model";
+import type { ScheduleConfig } from "@multica/core/autopilots/schedule";
 
 // Templates offered by the empty state and the Autopilots panel.
 // Prompts stay raw English because they're injected directly into the

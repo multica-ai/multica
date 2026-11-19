@@ -9,7 +9,7 @@ import type { StorageAdapter } from "../types/storage";
  *  ApiClient and WSClient so all HTTP requests and WS connections from
  *  this app instance are tagged with platform / version / os. */
 export interface ClientIdentity {
-  /** Logical client kind: "web" | "desktop" | "cli" | "daemon". */
+  /** Logical client kind: "web" | "desktop" | "mobile" | "cli" | "daemon". */
   platform?: string;
   /** Client/app version string (e.g. "0.1.0"). */
   version?: string;
@@ -46,4 +46,11 @@ export interface CoreProviderProps {
   localeAdapter?: LocaleAdapter;
   /** Automatically sync the signed-in user's locale. Pause during one-shot handoffs. Default: true. */
   syncUserLocale?: boolean;
+  /** Calls `onActivity` whenever the user returns to or uses the app; returns a teardown.
+   *  Drives token-mode session renewal (default: browser focus, visibility, and input
+   *  events) and lets a dropped realtime connection retry without waiting out its backoff. */
+  subscribeAppActivity?: (onActivity: () => void) => () => void;
+  /** Opens the destination path after the current workspace is deleted or the
+   *  user is removed from it. Default: a full-page navigation. */
+  onWorkspaceLost?: (destination: string) => void;
 }

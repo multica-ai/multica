@@ -9,9 +9,8 @@ import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/di
 import { toast } from "sonner";
 import type { AutopilotTrigger } from "@multica/core/types";
 import { ScheduleEditor } from "./schedule-editor/schedule-editor";
-import { parseCron, toCron } from "./schedule-editor/cron-mapping";
+import { parseCron, toCron, type ScheduleConfig } from "@multica/core/autopilots/schedule";
 import { useScheduleSubmitGate } from "./schedule-editor/validate";
-import type { ScheduleConfig } from "./schedule-editor/model";
 import { useT } from "../../i18n";
 
 // The only place in the UI where an existing schedule can be changed. The

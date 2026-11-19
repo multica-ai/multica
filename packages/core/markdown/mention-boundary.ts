@@ -1,10 +1,9 @@
 /**
  * Where an `@` starts a mention token rather than continuing the word before it.
  *
- * Single source of truth for both composers: the web/desktop editor
- * (packages/views/editor/extensions/mention-suggestion.tsx) and the mobile
- * comment composer (apps/mobile/lib/mention-serialize.ts). They have to agree —
- * the same text must offer the picker on every client.
+ * Single source of truth for every client's composer, today the web/desktop
+ * editor (packages/views/editor/extensions/mention-suggestion.tsx). They have
+ * to agree — the same text must offer the picker on every client.
  *
  * Tiptap's own rule is `allowedPrefixes`, defaulting to `[" "]`: a half-width
  * space and nothing else. That makes a mention unreachable in the two ways CJK

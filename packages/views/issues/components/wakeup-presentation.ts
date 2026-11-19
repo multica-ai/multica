@@ -8,7 +8,7 @@ import type {
 } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
-import { parseCron } from "../../autopilots/components/schedule-editor/cron-mapping";
+import { parseCron } from "@multica/core/autopilots/schedule";
 import { useDescribeSchedule } from "../../autopilots/components/schedule-editor/describe";
 import { useConditionNames } from "./wakeup-condition-names";
 

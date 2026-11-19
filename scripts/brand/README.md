@@ -34,7 +34,6 @@ with `--check` and fails when a copy drifts from `multica-brand.ts`.
 - `apps/web/public/favicon.svg`, `apps/docs/app/icon.svg`: favicon, with a dark-mode variant
 - `apps/web/public/icons/icon.svg`: full-bleed source for the home-screen icons
 - `docs/assets/logo-{light,dark}.svg`: the README wordmark
-- `apps/mobile/components/brand/multica-logo.tsx`: the block between the `GENERATED` markers. Mobile does not depend on `@multica/ui`.
 - `server/cmd/multica/cmd_auth.go`: the `.brand` SVG on the `multica login` callback page
 
 `generate.mjs` runs `sync.mjs`, then renders the bitmaps in Chromium:
