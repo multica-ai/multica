@@ -156,6 +156,53 @@ export function resolveWorkspaceTrial(
 }
 
 /**
+ * After refetching paid-feature reads made before a plan change settled, a
+ * read that is still failing and on screen is asked again after these
+ * delays; then it is left to the next focus or mount.
+ */
+export const PAID_READ_RETRY_MS = [30_000, 60_000, 120_000, 300_000] as const;
+
+type QueryClientLike = ReturnType<typeof useQueryClient>;
+
+/**
+ * Refetch the workspace's paid-feature reads (feature states, autopilot
+ * usage) that were last answered before `boundary`, including ones that never
+ * answered at all, and keep retrying with backoff while one shown on screen
+ * still fails. Reads answered after `boundary` are current and left alone.
+ */
+async function refreshPaidReadsBefore(
+  qc: QueryClientLike,
+  wsId: string,
+  boundary: number,
+  wait: (ms: number) => Promise<void>,
+  isCancelled: () => boolean,
+): Promise<void> {
+  const keys = [workspaceFeatureKeys.all(wsId), autopilotKeys.usage(wsId)];
+  const outdated = (query: { state: { dataUpdatedAt: number; fetchStatus: string } }) =>
+    query.state.fetchStatus !== "fetching" && query.state.dataUpdatedAt < boundary;
+  for (let attempt = 0; ; attempt++) {
+    await Promise.all(
+      keys.map((queryKey) => qc.invalidateQueries({ queryKey, predicate: outdated })),
+    );
+    if (isCancelled()) return;
+    const failing = keys.some((queryKey) =>
+      qc
+        .getQueryCache()
+        .findAll({ queryKey })
+        .some(
+          (query) =>
+            query.state.status === "error" &&
+            query.getObserversCount() > 0 &&
+            query.state.dataUpdatedAt < boundary,
+        ),
+    );
+    if (!failing || attempt >= PAID_READ_RETRY_MS.length) return;
+    await wait(PAID_READ_RETRY_MS[attempt]!);
+    if (isCancelled()) return;
+  }
+}
+
+/**
  * Re-render often enough for day counts, and exactly when the trial ends.
  */
 const TRIAL_CLOCK_TICK_MS = 60 * 60 * 1000;
@@ -183,11 +230,13 @@ export function useWorkspaceTrial(
   enabled: boolean,
 ): WorkspaceTrialView {
   const qc = useQueryClient();
-  // The summary's own short stale time and refetch on focus: a plan changed
-  // on another device shows up when this tab comes back.
   const summaryQuery = useQuery({
     ...workspaceSubscriptionSummaryOptions(wsId),
     enabled: enabled && wsId.length > 0,
+    // During a trial, coming back to the tab always re-reads the plan, even
+    // inside the stale time: it may have been bought on another device.
+    refetchOnWindowFocus: (query) =>
+      query.state.data?.trial?.state === "active" ? "always" : true,
   });
   const [now, setNow] = useState(() => Date.now());
   const summary = enabled ? summaryQuery.data : null;
@@ -237,23 +286,26 @@ export function useWorkspaceTrial(
   useEffect(() => {
     if (planSeenAt === undefined || !wsId) return;
     const boundary = planSeenAt + TRIAL_END_SETTLE_MS;
-    const refresh = () => {
-      for (const queryKey of [workspaceFeatureKeys.all(wsId), autopilotKeys.usage(wsId)]) {
-        void qc.invalidateQueries({
-          queryKey,
-          predicate: (query) =>
-            query.state.dataUpdatedAt > 0 && query.state.dataUpdatedAt < boundary,
-        });
+    let cancelled = false;
+    let timer: number | undefined;
+    const wait = (ms: number) =>
+      new Promise<void>((resolve) => {
+        timer = window.setTimeout(resolve, ms);
+      });
+    const run = async () => {
+      const delay = boundary - Date.now();
+      // A boundary that passed while this workspace was not showing is caught
+      // up now.
+      if (delay > 0) await wait(delay);
+      if (!cancelled) {
+        await refreshPaidReadsBefore(qc, wsId, boundary, wait, () => cancelled);
       }
     };
-    const delay = boundary - Date.now();
-    if (delay <= 0) {
-      // Passed while this workspace was not showing: catch up now.
-      refresh();
-      return;
-    }
-    const id = window.setTimeout(refresh, delay);
-    return () => window.clearTimeout(id);
+    void run();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
   }, [planSeenAt, qc, wsId]);
   const cloudSaysActive = summary?.trial?.state === "active";
   const cloudConfirmsEnd =

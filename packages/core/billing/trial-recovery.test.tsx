@@ -259,3 +259,75 @@ it("converges a freshly opened app to Pro's access", async () => {
     qc.clear();
   }
 });
+
+// Coming back within the summary's stale time during a trial still re-reads
+// the plan: it may have been bought on another device a moment ago.
+it("re-reads the plan on refocus during a trial even while the summary is fresh", async () => {
+  vi.useFakeTimers();
+  const t0 = endsAt - 7 * 24 * 60 * 60 * 1000;
+  vi.setSystemTime(t0);
+  const convertedAt = t0 + 15_000;
+  setApiInstance({
+    getWorkspaceSubscriptionSummary: async () => (Date.now() < convertedAt ? active : paid),
+    getWorkspaceFeatures: async () => ({
+      features: { private_projects: Date.now() < convertedAt + 60_000 ? "available" : "locked" },
+    }),
+  } as unknown as ApiClient);
+  const qc = createQueryClient();
+  qc.setQueryData(workspaceSubscriptionKeys.summary(ws), active);
+  qc.setQueryData(workspaceFeatureKeys.all(ws), { features: { private_projects: "available" } });
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  const { result, unmount } = renderHook(() => ({
+    trial: useWorkspaceTrial(ws, true),
+    access: usePaidFeatureAccess(ws, "private_projects", { hasExistingConfig: true }),
+  }), { wrapper });
+  try {
+    focusManager.setFocused(false);
+    await advance(20_000);
+    await act(async () => { focusManager.setFocused(true); });
+    await advance(10);
+    expect(result.current.trial.kind).toBe("none");
+    await advance(10 * 60 * 1000);
+    expect(result.current.access.state).toBe("read_only");
+  } finally {
+    unmount();
+    qc.clear();
+  }
+});
+
+// A paid-feature read that failed (first read, or the refresh after a plan
+// change) is asked again with backoff once the service recovers.
+it.each([
+  ["the first read", 0, 10_000],
+  ["the refresh after the plan change", 65_000, 80_000],
+] as const)("recovers paid-feature access when %s fails", async (_name, failFrom, failUntil) => {
+  vi.useFakeTimers();
+  const t0 = endsAt - 7 * 24 * 60 * 60 * 1000;
+  vi.setSystemTime(t0);
+  setApiInstance({
+    getWorkspaceSubscriptionSummary: async () => paid,
+    getWorkspaceFeatures: async () => {
+      const elapsed = Date.now() - t0;
+      if (elapsed >= failFrom && elapsed < failUntil) throw new Error("HTTP 503");
+      return { features: { private_projects: elapsed < 50_000 ? "available" : "locked" } };
+    },
+  } as unknown as ApiClient);
+  const qc = createQueryClient();
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  );
+  const { result, unmount } = renderHook(() => ({
+    trial: useWorkspaceTrial(ws, true),
+    access: usePaidFeatureAccess(ws, "private_projects", { hasExistingConfig: true }),
+  }), { wrapper });
+  try {
+    // Step through ten minutes so renders between timers run, as in a page.
+    for (let i = 0; i < 60; i++) await advance(10_000);
+    expect(result.current.access.state).toBe("read_only");
+  } finally {
+    unmount();
+    qc.clear();
+  }
+});
