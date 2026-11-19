@@ -57,7 +57,8 @@ export function AppBottomBar() {
   const floatingChatEnabled = useChatStore((s) => s.floatingChatEnabled);
   const { pathname } = useNavigation();
   const chatPath = useWorkspacePaths().chat();
-  // Both halves are about agents, which a guest (MUL-9420) has no access to.
+  // Chat and team status are about agents, and the trial about billing, none
+  // of which a guest (MUL-9420) has access to.
   const guest = useIsGuest(wsId);
 
   if (!wsId || isMobile) return null;
@@ -75,7 +76,7 @@ export function AppBottomBar() {
       className="hidden h-8 shrink-0 items-center justify-between gap-4 pr-[18px] pl-3 md:flex"
     >
       <div className="flex min-w-0 items-center gap-1">
-        <TrialStatus wsId={wsId} />
+        {!guest && <TrialStatus wsId={wsId} />}
         {!guest && <TeamStatus wsId={wsId} />}
       </div>
       {!guest && showChat && <ChatBar />}

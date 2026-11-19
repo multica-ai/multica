@@ -24,6 +24,13 @@ vi.mock("../../navigation", () => ({
   }),
 }));
 
+// The composer asks whether the viewer is a guest (MUL-9420); these tests
+// render as a member without an auth store.
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
+
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Ada" }),
 }));
