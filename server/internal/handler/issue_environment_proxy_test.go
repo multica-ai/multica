@@ -153,44 +153,61 @@ func TestEnvironmentProxyAuthorizationAndState(t *testing.T) {
 	outsider := dbfx.User(t, "outside", "env-outside-"+uuid.NewString()+"@example.com")
 	project := newPrivateProjectFixture(t)
 	memberToken := proxyToken(t, testUserID)
-	serve := func(token string) int {
-		req := httptest.NewRequest(http.MethodGet, testAppOrigin+environmentLaunchURL(id, "/", true).String(), nil)
+	serve := func(token, environmentID string) (int, string) {
+		req := httptest.NewRequest(http.MethodGet, testAppOrigin+environmentLaunchURL(environmentID, "/", true).String(), nil)
 		req.Header.Set("Authorization", "Bearer "+token)
-		return callPreview(router, req).Code
+		rec := callPreview(router, req)
+		return rec.Code, rec.Body.String()
 	}
-	if got := serve(proxyToken(t, outsider)); got != 403 {
-		t.Fatalf("nonmember status = %d", got)
+	missingStatus, missingBody := serve(memberToken, uuid.NewString())
+	if missingStatus != http.StatusNotFound {
+		t.Fatalf("missing environment status = %d", missingStatus)
 	}
+	// A hidden environment must be indistinguishable from a missing one, so
+	// these cases compare the whole response, not just the status code.
+	assertHidden := func(label, token string) {
+		t.Helper()
+		status, body := serve(token, id)
+		if status != missingStatus || body != missingBody {
+			t.Fatalf("%s got %d %q, want the missing environment's %d %q", label, status, body, missingStatus, missingBody)
+		}
+	}
+	assertHidden("nonmember", proxyToken(t, outsider))
 	dbfx.Exec(t, `UPDATE issue SET project_id=$1 WHERE id=$2`, project.projectID, issue)
-	if got := serve(proxyToken(t, project.outsider)); got != 403 {
-		t.Fatalf("private project status = %d", got)
+	assertHidden("private project outsider", proxyToken(t, project.outsider))
+	assertHidden("private project workspace admin", proxyToken(t, project.outsideAdmin))
+	// The fixture environment runs on an online, tunnel-capable runtime, so a
+	// member who can see the project must actually launch, not merely differ
+	// from the hidden case.
+	if status, body := serve(memberToken, id); status != http.StatusFound {
+		t.Fatalf("private project member launch = %d %s, want %d", status, body, http.StatusFound)
 	}
 	dbfx.Exec(t, `UPDATE issue SET project_id=NULL WHERE id=$1`, issue)
 	for _, state := range []string{"stopped", "exited"} {
 		dbfx.Exec(t, `UPDATE issue_environment SET state=$1 WHERE id=$2`, state, id)
-		if got := serve(memberToken); got != 410 {
+		if got, _ := serve(memberToken, id); got != 410 {
 			t.Fatalf("%s status = %d", state, got)
 		}
 	}
 	dbfx.Exec(t, `UPDATE issue_environment SET state='running',last_seen_at=now()-interval '10 minutes' WHERE id=$1`, id)
-	if got := serve(memberToken); got != 503 {
+	if got, _ := serve(memberToken, id); got != 503 {
 		t.Fatalf("stale environment status = %d", got)
 	}
 	dbfx.Exec(t, `UPDATE issue_environment SET last_seen_at=now(),port=NULL WHERE id=$1`, id)
-	if got := serve(memberToken); got != 404 {
+	if got, _ := serve(memberToken, id); got != 404 {
 		t.Fatalf("missing port status = %d", got)
 	}
 	dbfx.Exec(t, `UPDATE issue_environment SET port=41000 WHERE id=$1`, id)
 	dbfx.Exec(t, `UPDATE agent_runtime SET metadata='{}' WHERE id=$1`, rt)
-	if got := serve(memberToken); got != 409 {
+	if got, _ := serve(memberToken, id); got != 409 {
 		t.Fatalf("legacy daemon status = %d", got)
 	}
 	dbfx.Exec(t, `UPDATE agent_runtime SET status='offline' WHERE id=$1`, rt)
-	if got := serve(memberToken); got != 503 {
+	if got, _ := serve(memberToken, id); got != 503 {
 		t.Fatalf("offline daemon status = %d", got)
 	}
 	dbfx.Exec(t, `DELETE FROM issue_environment WHERE id=$1`, id)
-	if got := serve(memberToken); got != 404 {
+	if got, _ := serve(memberToken, id); got != 404 {
 		t.Fatalf("missing environment status = %d", got)
 	}
 }
