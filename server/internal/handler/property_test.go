@@ -454,34 +454,43 @@ func TestListPropertiesUsageSingleScan(t *testing.T) {
 	}
 }
 
-// Counting a single definition must not read the workspace's property bags
-// more often than the per-definition `properties ? id` query it replaced.
-// Under a sequential scan, bags past the TOAST threshold are fetched from the
-// TOAST table on every read, so the extra reads show up as buffer accesses.
-func TestPropertyUsageSingleDefinitionReadsBagsOnce(t *testing.T) {
+// Counting usage must not read the workspace's property bags more often than
+// the per-definition `properties ? id` queries it replaced. Under a
+// sequential scan, bags past the TOAST threshold are fetched from the TOAST
+// table on every read, so extra reads show up as buffer accesses. Large bags
+// both carry and miss the counted keys: a filter that re-reads only the
+// matching bags must still fail.
+func TestPropertyUsageReadsBagsNoMoreThanPerDefinitionScans(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
 	suffix := uuid.NewString()[:8]
 	ws := dbfx.Workspace(t, "Property usage TOAST "+suffix, "prop-toast-"+suffix)
-	active := dbfx.Insert(t, "issue_property", testutil.Cols{"workspace_id": ws, "name": "Active", "type": "text"})
+	activeA := dbfx.Insert(t, "issue_property", testutil.Cols{"workspace_id": ws, "name": "Active A", "type": "text"})
+	activeB := dbfx.Insert(t, "issue_property", testutil.Cols{"workspace_id": ws, "name": "Active B", "type": "text"})
 	archived := dbfx.Insert(t, "issue_property", testutil.Cols{
 		"workspace_id": ws, "name": "Archived", "type": "text", "archived_at": testutil.Raw("now()"),
 	})
 	// Random hex does not compress, so each bag is stored out of line.
-	for i := 0; i < 5; i++ {
+	addLargeIssue := func(extraKeys ...string) {
+		t.Helper()
 		noise := make([]byte, 4096)
 		if _, err := rand.Read(noise); err != nil {
 			t.Fatal(err)
 		}
-		raw, _ := json.Marshal(map[string]string{archived: hex.EncodeToString(noise)})
-		dbfx.Issue(t, "large archived value", testutil.Cols{"workspace_id": ws, "properties": string(raw)})
+		props := map[string]string{archived: hex.EncodeToString(noise)}
+		for _, key := range extraKeys {
+			props[key] = "v"
+		}
+		raw, _ := json.Marshal(props)
+		dbfx.Issue(t, "large property bag", testutil.Cols{"workspace_id": ws, "properties": string(raw)})
 	}
-	raw, _ := json.Marshal(map[string]string{active: "v"})
-	dbfx.Issue(t, "active value", testutil.Cols{"workspace_id": ws, "properties": string(raw)})
+	for i := 0; i < 3; i++ {
+		addLargeIssue()
+		addLargeIssue(activeA, activeB)
+	}
 
-	query, args := propertyUsageQuery(parseUUID(ws), []db.IssueProperty{{ID: parseUUID(active)}})
 	tx, err := testPool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		t.Fatal(err)
@@ -495,11 +504,7 @@ func TestPropertyUsageSingleDefinitionReadsBagsOnce(t *testing.T) {
 	if _, err := tx.Exec(ctx, "SET LOCAL max_parallel_workers_per_gather = 0"); err != nil {
 		t.Fatal(err)
 	}
-	var count int64
-	if err := tx.QueryRow(ctx, query, args...).Scan(&count); err != nil || count != 1 {
-		t.Fatalf("usage count: got %d (err %v), want 1", count, err)
-	}
-	buffers := func(sql string) int64 {
+	buffers := func(sql string, args ...any) int64 {
 		t.Helper()
 		var raw []byte
 		if err := tx.QueryRow(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) "+sql, args...).Scan(&raw); err != nil {
@@ -516,13 +521,43 @@ func TestPropertyUsageSingleDefinitionReadsBagsOnce(t *testing.T) {
 		}
 		return plan[0].Plan.Hit + plan[0].Plan.Read
 	}
-	// Measure the usage query first: rows other tests add later can only
-	// make the per-definition query read more.
-	usage := buffers(query)
-	perDefinition := buffers(`SELECT COUNT(*) FROM issue i WHERE i.workspace_id = $1::uuid AND i.properties ? $2::text`)
-	if usage > perDefinition {
-		t.Fatalf("single-definition usage count read %d buffers under a sequential scan, more than the %d of one `properties ? id` scan",
-			usage, perDefinition)
+	usageBuffers := func(keys ...string) int64 {
+		t.Helper()
+		defs := make([]db.IssueProperty, len(keys))
+		for i, key := range keys {
+			defs[i] = db.IssueProperty{ID: parseUUID(key)}
+		}
+		query, args := propertyUsageQuery(parseUUID(ws), defs)
+		counts := make([]int64, len(keys))
+		dest := make([]any, len(keys))
+		for i := range counts {
+			dest[i] = &counts[i]
+		}
+		if err := tx.QueryRow(ctx, query, args...).Scan(dest...); err != nil {
+			t.Fatalf("usage query for %d definitions: %v", len(keys), err)
+		}
+		for i, n := range counts {
+			if n != 3 {
+				t.Fatalf("usage query for %d definitions: count %d = %d, want 3", len(keys), i, n)
+			}
+		}
+		return buffers(query, args...)
+	}
+	perDefinitionBuffers := func(key string) int64 {
+		t.Helper()
+		return buffers(`SELECT COUNT(*) FROM issue i WHERE i.workspace_id = $1::uuid AND i.properties ? $2::text`, parseUUID(ws), key)
+	}
+
+	// Measure the usage queries first: rows other tests add later can only
+	// make the per-definition queries read more.
+	one := usageBuffers(activeA)
+	two := usageBuffers(activeA, activeB)
+	scanA, scanB := perDefinitionBuffers(activeA), perDefinitionBuffers(activeB)
+	if one > scanA {
+		t.Fatalf("one definition: usage count read %d buffers under a sequential scan, more than the %d of one `properties ? id` scan", one, scanA)
+	}
+	if two > scanA+scanB {
+		t.Fatalf("two definitions: usage count read %d buffers under a sequential scan, more than the %d of two `properties ? id` scans", two, scanA+scanB)
 	}
 }
 
