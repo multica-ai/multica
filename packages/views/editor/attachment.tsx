@@ -541,21 +541,39 @@ function ImageAttachmentView({
   const handleCopyLink = () => copyLink(linkUrl);
   const figureRef = useRef<HTMLSpanElement>(null);
   const toolbarRef = useRef<HTMLSpanElement>(null);
-  const [toolbarActive, setToolbarActive] = useState(false);
-  const showToolbar = () => setToolbarActive(true);
+  const [toolbarActivation, setToolbarActivation] = useState<"hover-or-focus" | "touch" | null>(null);
+  const showToolbar = () => setToolbarActivation((activation) => activation ?? "hover-or-focus");
   const hideToolbarIfIdle = (event?: "pointerleave" | "blur") => {
     const figure = figureRef.current;
     if (!figure) return;
     const hovered = event !== "pointerleave" && figure.matches(":hover");
     const keyboardFocused = event !== "blur" && figure.querySelector(":focus-visible") !== null;
-    if (!hovered && !keyboardFocused) setToolbarActive(false);
+    setToolbarActivation((activation) => {
+      // A touch tap emits pointerleave as soon as the finger lifts.
+      if (activation === "touch") return event === "blur" ? null : activation;
+      return hovered || keyboardFocused ? activation : null;
+    });
   };
   // Chromium can omit pointerleave when the hovered download button becomes disabled.
   const { downloading, handleDownload } = useAttachmentDownloadState(() =>
     onDownload()?.finally(hideToolbarIfIdle),
   );
   const hasToolbar = !uploading && !!src;
-  const toolbarOpen = hasToolbar && (toolbarActive || downloading);
+  const toolbarOpen = hasToolbar && (toolbarActivation !== null || downloading);
+
+  useEffect(() => {
+    const figure = figureRef.current;
+    if (toolbarActivation !== "touch" || !figure) return;
+
+    const onOutsidePointerDown = (event: PointerEvent) => {
+      if (!event.composedPath().includes(figure)) {
+        setToolbarActivation((activation) => activation === "touch" ? null : activation);
+      }
+    };
+    const ownerDocument = figure.ownerDocument;
+    ownerDocument.addEventListener("pointerdown", onOutsidePointerDown, true);
+    return () => ownerDocument.removeEventListener("pointerdown", onOutsidePointerDown, true);
+  }, [toolbarActivation]);
 
   useEffect(() => {
     const figure = figureRef.current;
@@ -637,7 +655,12 @@ function ImageAttachmentView({
         style={sizeStyle}
         contentEditable={false}
         onClick={clickable ? onView : undefined}
-        onPointerEnter={showToolbar}
+        onPointerEnter={(event) => {
+          if (!editable || event.pointerType !== "touch") showToolbar();
+        }}
+        onPointerUp={(event) => {
+          if (editable && hasToolbar && event.pointerType === "touch") setToolbarActivation("touch");
+        }}
         onPointerLeave={() => hideToolbarIfIdle("pointerleave")}
         onFocus={showToolbar}
         onBlur={(event) => {
