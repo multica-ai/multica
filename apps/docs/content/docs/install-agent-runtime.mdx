@@ -161,6 +161,11 @@ Choose the provider and model in QwenPaw's own configuration. Multica cannot ove
 Run `reasonix setup` and configure a default provider and model before starting the daemon.
 
 </Accordion>
+<Accordion title="Qoder CLI / Qoder CN CLI" id="qoder">
+
+If Qoder works in the desktop app but a local Multica run reports an authentication error, test the same model with the Qoder CLI on the daemon host, as the OS user who runs the daemon. Finding the executable only confirms that the daemon can locate it. The CLI starts with the daemon's environment and any task overrides; a credential available only to the desktop app may be missing. If the CLI also fails, complete the CLI sign-in or provider setup before retrying the Multica run.
+
+</Accordion>
 </Accordions>
 
 </Step>
