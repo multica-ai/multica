@@ -70,6 +70,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildClaudeArgs(opts, b.cfg.Logger)
+	sessionTitle := b.sessionTitle(opts, args)
 
 	// If the caller provided an MCP config, write it to a temp file and pass
 	// --mcp-config <path> so the agent uses a controlled set of MCP servers
@@ -138,8 +139,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		supplements = newClaudeSupplementSession(runCtx)
 	}
 	initializer := supplements
-	if initializer == nil && opts.SkillInvocation != nil {
+	if initializer == nil && (opts.SkillInvocation != nil || sessionTitle != "") {
 		initializer = newClaudeSupplementSession(runCtx)
+	}
+	if initializer != nil {
+		initializer.sessionTitle = sessionTitle
 	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() {
@@ -192,7 +196,16 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	go func() {
 		var commands map[string]bool
 		if initializer != nil {
-			if initErr := initializer.initialize(inputWriter, opts.HandshakeTimeout, opts.EnableTaskSupplement); initErr != nil {
+			timeout := opts.HandshakeTimeout
+			if supplements == nil && opts.SkillInvocation == nil {
+				// Optional session naming must not delay the first prompt
+				// for the full supplement handshake budget.
+				const titleHandshakeTimeout = 2 * time.Second
+				if timeout <= 0 || timeout > titleHandshakeTimeout {
+					timeout = titleHandshakeTimeout
+				}
+			}
+			if initErr := initializer.initialize(inputWriter, timeout, opts.EnableTaskSupplement, sessionTitle != ""); initErr != nil {
 				b.cfg.Logger.Warn("Claude initialization unavailable; continuing with text input", "error", initErr)
 				initializer.end()
 			} else if !slashCommandsDisabled(b.cfg.LaunchPrefix, opts.ExtraArgs, opts.CustomArgs) {
@@ -384,8 +397,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 			case "control_request":
 				var reply func(io.Writer) error
-				if supplements != nil {
-					reply, _ = supplements.prepareHook(msg)
+				if supplements != nil || sessionTitle != "" {
+					reply, _ = initializer.prepareHook(msg)
 				}
 				controlMu.Lock()
 				pendingControls++
@@ -1176,6 +1189,20 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	// log a warning rather than letting the CLI receive two conflicting
 	// --effort values.
 	"--effort": blockedWithValue,
+}
+
+func (b *claudeBackend) sessionTitle(opts ExecOptions, args []string) string {
+	if opts.ResumeSessionID != "" || !b.cfg.BuiltinRuntime ||
+		hasFlag(args, "--name") || hasFlag(args, "-n") ||
+		hasFlag(b.cfg.LaunchPrefix, "--name") || hasFlag(b.cfg.LaunchPrefix, "-n") {
+		return ""
+	}
+	// Claude Code 2.1.94 added sessionTitle to UserPromptSubmit hook output.
+	version, err := parseSemver(b.cfg.CLIVersion)
+	if err != nil || version.lessThan(semver{Major: 2, Minor: 1, Patch: 94}) {
+		return ""
+	}
+	return strings.TrimSpace(opts.ThreadName)
 }
 
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
