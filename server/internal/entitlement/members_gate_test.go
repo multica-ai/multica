@@ -82,6 +82,47 @@ func TestMembersGateFailsOpenAlone(t *testing.T) {
 	}
 }
 
+// A members gate of the wrong JSON shape must not fail the decode of the
+// whole policy: on a cold cache that would turn an enforced autopilot quota
+// off. A malformed autopilot_runs gate still fails the policy open.
+func TestMembersGateOfTheWrongShapeFailsOpenAlone(t *testing.T) {
+	const autopilot = `"autopilot_runs": {"action": "enforce", "limit": 23,
+		"period_start": "2026-08-01T00:00:00Z", "period_end": "2026-09-01T00:00:00Z",
+		"reset_at": "2026-09-01T00:00:00Z"}`
+	policy := func(gates string) string {
+		return `{"schema_version": 1, "policy_revision": 5, "subscription_version": 0,
+			"valid_until": "2030-01-01T00:00:00Z", "valid_for_seconds": 60,
+			"gates": {` + gates + `}}`
+	}
+	for _, members := range []string{
+		`"members": {"action": "enforce", "limit": "five"}`,
+		`"members": ["enforce"]`,
+		`"members": "enforce"`,
+	} {
+		t.Run(members, func(t *testing.T) {
+			server := httptest.NewServer(bodyHandler(http.StatusOK, policy(autopilot+", "+members)))
+			defer server.Close()
+			client := newTestClient(t, server.URL, nil)
+			workspaceID := uuid.New()
+
+			if got := client.Gate(context.Background(), workspaceID, GateMembers); got.Gate.Action != ActionOff || got.Reason != ReasonGateInvalid {
+				t.Fatalf("members = %+v, want off/gate_invalid", got)
+			}
+			if got := client.Gate(context.Background(), workspaceID, GateAutopilotRuns); got.Gate.Action != ActionEnforce {
+				t.Fatalf("autopilot = %+v, want the enforced quota", got)
+			}
+		})
+	}
+
+	server := httptest.NewServer(bodyHandler(http.StatusOK,
+		policy(`"autopilot_runs": {"action": "enforce", "limit": "23"}, "members": {"action": "enforce", "limit": 5}`)))
+	defer server.Close()
+	client := newTestClient(t, server.URL, nil)
+	if got := client.Gate(context.Background(), uuid.New(), GateAutopilotRuns); got.Gate.Action != ActionOff || got.Reason != ReasonInvalidPolicy {
+		t.Fatalf("malformed autopilot = %+v, want the whole policy failed open", got)
+	}
+}
+
 func TestRefreshGateFetchesPastACurrentCache(t *testing.T) {
 	clock := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
 	var calls atomic.Int64

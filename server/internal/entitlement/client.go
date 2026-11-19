@@ -293,6 +293,37 @@ type wirePolicy struct {
 	// wrong JSON type, cannot fail the decode of the whole policy and with it
 	// the metered gates. normalizeFeatures parses it entry by entry.
 	Features json.RawMessage `json:"features"`
+	// undecodableGates names gates whose value had the wrong JSON shape.
+	undecodableGates map[string]bool
+}
+
+// UnmarshalJSON decodes each gate on its own. A gate of the wrong JSON shape
+// is marked undecodable instead of failing the whole response, so an optional
+// gate falls back alone and cannot take autopilot_runs down with it.
+func (p *wirePolicy) UnmarshalJSON(data []byte) error {
+	type plain wirePolicy
+	var envelope struct {
+		plain
+		// Shallower than plain.Gates, so it receives the "gates" key.
+		Gates map[string]json.RawMessage `json:"gates"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+	*p = wirePolicy(envelope.plain)
+	p.Gates = make(map[string]wireGate, len(envelope.Gates))
+	for name, raw := range envelope.Gates {
+		var gate wireGate
+		if err := json.Unmarshal(raw, &gate); err != nil {
+			if p.undecodableGates == nil {
+				p.undecodableGates = make(map[string]bool)
+			}
+			p.undecodableGates[name] = true
+			continue
+		}
+		p.Gates[name] = gate
+	}
+	return nil
 }
 
 type wireGate struct {
@@ -374,6 +405,11 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 	// the autopilot quota off.
 	gateReasons := make(map[GateName]Reason)
 	for _, name := range []GateName{GateMembers} {
+		if wire.undecodableGates[string(name)] {
+			gates[name] = Gate{Action: ActionOff}
+			gateReasons[name] = ReasonGateInvalid
+			continue
+		}
 		wireGate, ok := wire.Gates[string(name)]
 		if !ok {
 			gates[name] = Gate{Action: ActionOff}
