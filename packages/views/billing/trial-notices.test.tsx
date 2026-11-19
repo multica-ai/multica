@@ -8,7 +8,8 @@ import { renderWithI18n } from "../test/i18n";
 import { WorkspaceTrialNotices } from "./trial-notices";
 
 const DAY = 24 * 60 * 60 * 1000;
-const ENDS_AT = Date.parse("2030-01-15T08:00:00Z");
+// Ended trials in these tests ended two days ago, so they have settled.
+const ENDS_AT = Date.now() - 2 * DAY;
 
 const h = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -18,6 +19,8 @@ const h = vi.hoisted(() => {
     role: "owner" as "owner" | "admin" | "member",
     features: { private_projects: "available" } as Record<string, string>,
     usage: null as AutopilotQuotaUsage | null,
+    /** When the mocked feature and usage answers were received. */
+    dataUpdatedAt: Date.now(),
     push: vi.fn(),
     toast: vi.fn(),
     chat: create<{ isOpen: boolean; floatingChatEnabled: boolean }>(() => ({
@@ -47,9 +50,11 @@ vi.mock("@tanstack/react-query", async () => {
     useQuery: (options: { queryKey: readonly unknown[] }) => {
       const key = options.queryKey;
       if (key[0] === "workspace-features") {
-        return { data: { features: h.features }, isPending: false };
+        return { data: { features: h.features }, isPending: false, dataUpdatedAt: h.dataUpdatedAt };
       }
-      if (key[key.length - 1] === "usage") return { data: h.usage, isPending: false };
+      if (key[key.length - 1] === "usage") {
+        return { data: h.usage, isPending: false, dataUpdatedAt: h.dataUpdatedAt };
+      }
       return { data: undefined, isPending: true };
     },
   };
@@ -74,13 +79,20 @@ function active(overrides: Partial<Extract<WorkspaceTrialView, { kind: "active" 
   };
 }
 
-const ended: WorkspaceTrialView = { kind: "ended", plan: "business", endsAt: ENDS_AT, recent: true };
+const ended: WorkspaceTrialView = {
+  kind: "ended",
+  plan: "business",
+  endsAt: ENDS_AT,
+  recent: true,
+  settled: true,
+};
 
 beforeEach(() => {
   h.trial = { kind: "none" };
   h.role = "owner";
   h.features = { private_projects: "available" };
   h.usage = null;
+  h.dataUpdatedAt = Date.now();
   h.push.mockReset();
   h.toast.mockReset();
   h.chat.setState({ isOpen: false, floatingChatEnabled: true });
@@ -153,6 +165,34 @@ describe("WorkspaceTrialNotices", () => {
     h.trial = active({ daysLeft: 14, day: 1 });
     renderWithI18n(<WorkspaceTrialNotices />);
     expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+  });
+
+  it("shows the welcome once another corner card closes", () => {
+    useSessionPromptStore.setState({ corner: "whats-new" });
+    h.trial = active({ daysLeft: 14, day: 1 });
+    renderWithI18n(<WorkspaceTrialNotices />);
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+
+    act(() => useSessionPromptStore.getState().releaseCorner("whats-new"));
+    expect(
+      screen.getByRole("heading", { name: "Welcome! This workspace has a free 14-day Business trial" }),
+    ).toBeInTheDocument();
+    expect(useSessionPromptStore.getState().corner).toBe("trial");
+  });
+
+  it("waits for the end to settle before telling a manager what changed", () => {
+    h.trial = { ...ended, settled: false } as WorkspaceTrialView;
+    h.features = { private_projects: "locked" };
+    const { unmount } = renderWithI18n(<WorkspaceTrialNotices />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    unmount();
+
+    // Settled, but the cached answers predate it: wait for fresh ones.
+    h.trial = ended;
+    h.dataUpdatedAt = ENDS_AT;
+    renderWithI18n(<WorkspaceTrialNotices />);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(useTrialNoticeStore.getState().seen).toEqual([]);
   });
 
   it("tells a manager what changed, listing only restrictions in force", () => {

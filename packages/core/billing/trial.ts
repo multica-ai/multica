@@ -26,6 +26,14 @@ export const TRIAL_WARNING_DAYS = 3;
 export const TRIAL_ENDED_VISIBLE_DAYS = 7;
 
 /**
+ * How long after the end the app refetches once more. The server caches
+ * Cloud's enforcement policy for up to a minute and the viewer's clock can be
+ * off from Cloud's, so a refetch exactly at the end can still read the trial's
+ * Business policy.
+ */
+export const TRIAL_END_SETTLE_MS = 70 * 1000;
+
+/**
  * Owners and admins get one dismissible reminder at each of these points:
  * halfway, three days left, and the last day.
  */
@@ -54,6 +62,11 @@ export type WorkspaceTrialView =
       endsAt: number;
       /** Within the week after the end, while the status bar still shows it. */
       recent: boolean;
+      /**
+       * Past TRIAL_END_SETTLE_MS after the end: paid-feature states and limits
+       * read from now on are Free's.
+       */
+      settled: boolean;
     };
 
 /**
@@ -105,6 +118,7 @@ export function resolveWorkspaceTrial(
     plan: trial.plan,
     endsAt,
     recent: now - endsAt < TRIAL_ENDED_VISIBLE_DAYS * DAY_MS,
+    settled: now - endsAt >= TRIAL_END_SETTLE_MS,
   };
 }
 
@@ -115,9 +129,9 @@ const TRIAL_CLOCK_TICK_MS = 60 * 60 * 1000;
 
 /**
  * The trial view for a workspace, kept current: it re-renders hourly for the
- * day count and, at the moment the trial ends, refetches everything the end
- * changes (plan, paid-feature states, autopilot limit) instead of waiting for
- * their stale times.
+ * day count and, when the trial ends, refetches everything the end changes
+ * (plan, paid-feature states, autopilot limit) instead of waiting for their
+ * stale times: once at the end, and once more TRIAL_END_SETTLE_MS later.
  *
  * `enabled` is the caller's billing gate; a self-hosted deployment never
  * requests the summary.
@@ -136,8 +150,12 @@ export function useWorkspaceTrial(
   });
   const [now, setNow] = useState(() => Date.now());
   const summary = enabled ? summaryQuery.data : null;
+  // Keyed on the end, not on the state, so the follow-up refetch survives the
+  // summary turning from active to expired at the first one.
   const endsAtRaw =
-    summary?.trial?.state === "active" ? summary.trial.endsAt : null;
+    summary?.trial && summary.trial.state !== "converted"
+      ? summary.trial.endsAt
+      : null;
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), TRIAL_CLOCK_TICK_MS);
@@ -148,16 +166,21 @@ export function useWorkspaceTrial(
     if (!endsAtRaw || !wsId) return;
     const endsAt = Date.parse(endsAtRaw);
     if (Number.isNaN(endsAt)) return;
-    const delay = endsAt - Date.now();
-    // setTimeout overflows past ~24.8 days; the hourly tick covers the rest.
-    if (delay > 2 ** 31 - 1) return;
-    const id = window.setTimeout(() => {
+    const refresh = () => {
       setNow(Date.now());
       void qc.invalidateQueries({ queryKey: workspaceSubscriptionKeys.all(wsId) });
       void qc.invalidateQueries({ queryKey: workspaceFeatureKeys.all(wsId) });
       void qc.invalidateQueries({ queryKey: autopilotKeys.usage(wsId) });
-    }, Math.max(0, delay));
-    return () => window.clearTimeout(id);
+    };
+    const timers: number[] = [];
+    for (const at of [endsAt, endsAt + TRIAL_END_SETTLE_MS]) {
+      const delay = at - Date.now();
+      // A boundary already passed needs nothing: reads made after it are
+      // current. setTimeout overflows past ~24.8 days, far beyond a trial.
+      if (delay < 0 || delay > 2 ** 31 - 1) continue;
+      timers.push(window.setTimeout(refresh, delay));
+    }
+    return () => timers.forEach((id) => window.clearTimeout(id));
   }, [endsAtRaw, qc, wsId]);
 
   return resolveWorkspaceTrial(summary, now);

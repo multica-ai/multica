@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { WorkspaceSubscriptionSummary, WorkspaceTrial } from "../types";
-import { DAY_MS, resolveWorkspaceTrial } from "./trial";
+import { DAY_MS, TRIAL_END_SETTLE_MS, resolveWorkspaceTrial } from "./trial";
 
 const startedAt = Date.parse("2026-12-05T08:00:00Z");
 const endsAt = startedAt + 14 * DAY_MS;
@@ -86,6 +86,7 @@ describe("resolveWorkspaceTrial", () => {
       plan: "business",
       endsAt,
       recent: true,
+      settled: false,
     });
   });
 
@@ -99,6 +100,16 @@ describe("resolveWorkspaceTrial", () => {
       kind: "ended",
       recent: false,
     });
+  });
+
+  it("settles once the server can no longer hold the trial's policy", () => {
+    const expired = summary({ state: "expired" });
+    expect(
+      resolveWorkspaceTrial(expired, endsAt + TRIAL_END_SETTLE_MS - 1),
+    ).toMatchObject({ kind: "ended", settled: false });
+    expect(
+      resolveWorkspaceTrial(expired, endsAt + TRIAL_END_SETTLE_MS),
+    ).toMatchObject({ kind: "ended", settled: true });
   });
 
   it("skips reminders a short trial never reaches", () => {

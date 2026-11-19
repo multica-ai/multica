@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Bot, Hourglass, Lock, Sparkles, Users, X } from "@multica/ui/icons";
 import { autopilotQuotaUsageOptions } from "@multica/core/autopilots";
 import {
+  TRIAL_END_SETTLE_MS,
   trialNoticeKey,
   useTrialNoticeStore,
   useWorkspaceTrial,
@@ -78,11 +79,10 @@ export function WorkspaceTrialNotices() {
     );
   }
   if (!trial.recent) return null;
-  return isManager ? (
-    <TrialEndedDialog wsId={wsId} trial={trial} />
-  ) : (
-    <TrialEndedToast wsId={wsId} trial={trial} />
-  );
+  if (!isManager) return <TrialEndedToast wsId={wsId} trial={trial} />;
+  // The dialog lists what is restricted now; until the end has settled, the
+  // server may still answer with the trial's Business policy.
+  return trial.settled ? <TrialEndedDialog wsId={wsId} trial={trial} /> : null;
 }
 
 function useOpenBilling() {
@@ -150,11 +150,14 @@ function TrialWelcomeCard({ wsId, trial }: { wsId: string; trial: ActiveTrial })
   const launcherVisible =
     floatingChatEnabled && !chatOpen && !isFloatingChatRouteSuppressed(pathname, chatPath);
 
+  // Claim the corner whenever it is free, including after another card that
+  // held it closes; give it back once seen or unmounted.
   useEffect(() => {
-    if (seen) return;
-    useSessionPromptStore.getState().claimCorner("trial");
-    return () => useSessionPromptStore.getState().releaseCorner("trial");
-  }, [seen]);
+    const store = useSessionPromptStore.getState();
+    if (seen) store.releaseCorner("trial");
+    else if (corner === null) store.claimCorner("trial");
+  }, [corner, seen]);
+  useEffect(() => () => useSessionPromptStore.getState().releaseCorner("trial"), []);
 
   // Another card holds the corner, or the chat window covers it.
   if (seen || corner !== "trial" || chatOpen) return null;
@@ -215,9 +218,22 @@ function TrialEndedDialog({ wsId, trial }: { wsId: string; trial: EndedTrial }) 
   const workspaceName = useCurrentWorkspace()?.name ?? "";
   const [seen, markSeen] = useNoticeSeen(wsId, trial.endsAt, "ended");
   const openBilling = useOpenBilling();
-  const featuresQuery = useQuery({ ...workspaceFeaturesOptions(wsId), enabled: !seen });
-  const usageQuery = useQuery({ ...autopilotQuotaUsageOptions(wsId), enabled: !seen });
-  if (seen || featuresQuery.isPending || usageQuery.isPending) return null;
+  // Read both again on mount and use only answers received after the end
+  // settled, so a cached Business answer never leaves a restriction out.
+  const settledAt = trial.endsAt + TRIAL_END_SETTLE_MS;
+  const featuresQuery = useQuery({
+    ...workspaceFeaturesOptions(wsId),
+    enabled: !seen,
+    refetchOnMount: "always",
+  });
+  const usageQuery = useQuery({
+    ...autopilotQuotaUsageOptions(wsId),
+    enabled: !seen,
+    refetchOnMount: "always",
+  });
+  const current = (query: { isPending: boolean; dataUpdatedAt: number }) =>
+    !query.isPending && query.dataUpdatedAt >= settledAt;
+  if (seen || !current(featuresQuery) || !current(usageQuery)) return null;
 
   const count = new Intl.NumberFormat(locale);
   const privateProjectsLocked = featuresQuery.data?.features?.private_projects === "locked";
