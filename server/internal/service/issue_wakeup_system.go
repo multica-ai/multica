@@ -384,6 +384,16 @@ func childDoneFacts(receipts []db.IssueWakeupReceipt) map[string]any {
 	return facts
 }
 
+// closingChangePending reports whether a sub-issue change that can close a
+// stage is recorded but has not reached the rule yet: a change not processed,
+// or a hint that arrived after this pass took its own.
+func closingChangePending(ctx context.Context, tx pgx.Tx, w db.IssueWakeup) (bool, error) {
+	var pending bool
+	err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM issue_wakeup_receipt WHERE "+conditionHintSQL+") OR "+
+		"EXISTS(SELECT 1 FROM issue_child_event WHERE parent_id=$2 AND processed_at IS NULL AND kind NOT IN ('attached','reopened'))", w.ID, w.IssueID).Scan(&pending)
+	return pending, err
+}
+
 // dispatchSystem evaluates a system rule and wakes, notifies or records its
 // outcome. It mirrors dispatch: the same lock order, receipts, runaway
 // protection and timeline entries.
@@ -490,8 +500,15 @@ func (s *IssueWakeupService) dispatchSystem(ctx context.Context, prev db.IssueWa
 		// Adding or reopening sub-issues closed nothing: a next stage added
 		// after the last one closed reads as a stage boundary, but the
 		// assignee was already woken for that close. Record it as seen; the
-		// next close wakes again.
-		state = fingerprint
+		// next close wakes again. A close this pass already reads but whose
+		// change is still on its way keeps the state for that change's pass.
+		pending, err := closingChangePending(ctx, tx, w)
+		if err != nil {
+			return err
+		}
+		if !pending {
+			state = fingerprint
+		}
 	case met && fingerprint != state:
 		if err = recordConditionMet(ctx, q, w, observed, causes, now); err != nil {
 			return err
