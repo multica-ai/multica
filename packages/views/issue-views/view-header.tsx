@@ -45,6 +45,7 @@ import { cn } from "@multica/ui/lib/utils";
 import type { CreateIssueViewRequest, IssueView } from "@multica/core/api/schemas";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { useActiveIssueView } from "@multica/core/issue-views/use-active-view";
 import type { IssueViewScope } from "@multica/core/issue-views/queries";
 import {
@@ -144,6 +145,8 @@ export function IssueViewHeader({
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  // A guest (MUL-9420) cannot create issues.
+  const guest = useIsGuest(wsId);
   const paths = useWorkspacePaths();
   const viewScope = viewScopeOf(base);
   const { activeView, setActive, missing } = useActiveIssueView(wsId, viewScope);
@@ -573,7 +576,7 @@ export function IssueViewHeader({
             onTableFacetChange={controller.setActiveTableFacet}
             iconOnly
           />
-          {!hideCreate && (
+          {!hideCreate && !guest && (
             <IconButton
               label={t(($) => $.views.new_issue)}
               shortcut={<ActionShortcutKeycaps action="createIssue" />}

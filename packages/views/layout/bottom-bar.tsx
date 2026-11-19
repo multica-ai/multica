@@ -3,6 +3,7 @@
 import { TriangleAlert } from "@multica/ui/icons";
 import { useChatStore } from "@multica/core/chat";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { TrialStatus } from "../billing/trial-status";
 import { ChatBar } from "../chat/components/chat-bar";
@@ -56,6 +57,9 @@ export function AppBottomBar() {
   const floatingChatEnabled = useChatStore((s) => s.floatingChatEnabled);
   const { pathname } = useNavigation();
   const chatPath = useWorkspacePaths().chat();
+  // Chat and team status are about agents, and the trial about billing, none
+  // of which a guest (MUL-9420) has access to.
+  const guest = useIsGuest(wsId);
 
   if (!wsId || isMobile) return null;
   // Same gates as the floating window: the Settings preference, and the Chat
@@ -72,10 +76,10 @@ export function AppBottomBar() {
       className="hidden h-8 shrink-0 items-center justify-between gap-4 pr-[18px] pl-3 md:flex"
     >
       <div className="flex min-w-0 items-center gap-1">
-        <TrialStatus wsId={wsId} />
-        <TeamStatus wsId={wsId} />
+        {!guest && <TrialStatus wsId={wsId} />}
+        {!guest && <TeamStatus wsId={wsId} />}
       </div>
-      {showChat && <ChatBar />}
+      {!guest && showChat && <ChatBar />}
     </footer>
   );
 }

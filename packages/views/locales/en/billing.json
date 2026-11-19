@@ -137,7 +137,8 @@
       "resets_at": "Resets {{date}}",
       "usage_unavailable": "Usage is temporarily unavailable",
       "members": "Members",
-      "members_pending": "Pending invitations: {{pending}}"
+      "members_pending": "Pending invitations: {{pending}}",
+      "metering": "Runs from schedules, webhooks, and agents count. Runs a member starts with Run now don't."
     },
     "seats": {
       "title": "Seats",
@@ -313,6 +314,10 @@
       "private_projects": {
         "name": "Private projects",
         "after": "Stay private after the trial. Their access lists become read-only."
+      },
+      "guests": {
+        "name": "Guests",
+        "after": "Existing guests keep their access after the trial. New guests need Pro or Business."
       }
     }
   }

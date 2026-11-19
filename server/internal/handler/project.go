@@ -500,6 +500,11 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// A new project shared with a guest is a guest addition (MUL-9420).
+	guestAdmission, ok := h.requireGuestProjectAddition(w, r, wsUUID, pgtype.UUID{}, privateMemberIDs)
+	if !ok {
+		return
+	}
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	creatorID, ok := parseUUIDOrBadRequest(w, actorID, "creator_id")
@@ -609,6 +614,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	admission.admitted(r.Context())
+	guestAdmission.admitted(r.Context())
 
 	resourceResp := make([]ProjectResourceResponse, len(resourceRows))
 	for i, row := range resourceRows {
@@ -773,11 +779,18 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Adding a guest to the member list (or naming one lead of a private
+	// project) shares the project with it (MUL-9420).
+	guestAdmission, ok := h.requireGuestProjectAddition(w, r, prevProject.WorkspaceID, prevProject.ID, access.addIDs)
+	if !ok {
+		return
+	}
 	project, ok := h.writeProjectUpdate(w, r, params, access, userID)
 	if !ok {
 		return
 	}
 	admission.admitted(r.Context())
+	guestAdmission.admitted(r.Context())
 	resp := projectToResponse(project)
 	h.fillProjectIssueStats(r.Context(), &resp, project)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)

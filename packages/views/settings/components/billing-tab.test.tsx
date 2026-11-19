@@ -1049,6 +1049,7 @@ describe("BillingTab", () => {
       expect(screen.getByText("Pro is active")).toBeInTheDocument();
       expect(screen.getByText("Unlimited")).toBeInTheDocument();
       expect(screen.queryByText("5 / 7")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Runs a member starts with Run now/)).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -1592,6 +1593,31 @@ describe("BillingTab", () => {
     expect(screen.getByText("Limit reached")).toBeInTheDocument();
     expect(screen.getByText("7 / 7")).toBeInTheDocument();
     expect(screen.getByText("5 completed · 2 in progress")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Runs from schedules, webhooks, and agents count. Runs a member starts with Run now don't.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows observed usage over the limit without reporting it reached", () => {
+    Object.assign(mocks.usage, {
+      action: "observe",
+      used: 9,
+      reserved: 0,
+      total: 9,
+      limit: 7,
+      reached: null,
+    });
+
+    renderWithI18n(<BillingTab />);
+
+    expect(screen.getByText("9 / 7")).toBeInTheDocument();
+    expect(screen.getByText("Current usage")).toBeInTheDocument();
+    expect(screen.queryByText("Limit reached")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Usage is temporarily unavailable"),
+    ).not.toBeInTheDocument();
   });
 
   it("does not render missing limited usage as zero or unlimited", async () => {

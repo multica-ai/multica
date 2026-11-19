@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -479,18 +480,28 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 		limit = min(req.Limit, searchIndexChangesMaxLimit)
 	}
 
+	// Agents and other non-user callers have no per-user marker to check.
+	viewer, _ := util.ParseUUID(requestUserID(r))
 	var (
-		pruned   bool
-		target   = cur.Target
-		changes  []db.ListSearchIndexChangesRow
-		issues   []db.Issue
-		comments []db.ListSearchIndexCommentsByIDsRow
-		projects []db.Project
+		pruned        bool
+		accessChanged bool
+		target        = cur.Target
+		changes       []db.ListSearchIndexChangesRow
+		issues        []db.Issue
+		comments      []db.ListSearchIndexCommentsByIDsRow
+		projects      []db.Project
 	)
 	err = h.runSearchIndexRead(ctx, func(q *db.Queries) error {
 		var err error
 		if pruned, err = q.SearchIndexSinceIsPruned(ctx, cur.Since); err != nil || pruned {
 			return err
+		}
+		if viewer.Valid {
+			if accessChanged, err = q.SearchAccessChangedAfter(ctx, db.SearchAccessChangedAfterParams{
+				WorkspaceID: wsUUID, UserID: viewer, SinceSnapshot: cur.Since,
+			}); err != nil || accessChanged {
+				return err
+			}
 		}
 		if target == "" {
 			if target, err = q.GetSearchIndexCurrentSnapshot(ctx); err != nil {
@@ -558,6 +569,14 @@ func (h *Handler) ListSearchIndexChanges(w http.ResponseWriter, r *http.Request)
 	}
 	if pruned {
 		writeError(w, http.StatusGone, "search index cursor expired; rebuild the local index")
+		return
+	}
+	if accessChanged {
+		// The caller's access changed after this copy's snapshot (made a
+		// guest or a member, or a guest gained or lost a project). The
+		// content it gained or lost was not rewritten, so no change would
+		// deliver or remove it; only a rebuild does.
+		writeError(w, http.StatusGone, "search index access changed; rebuild the local index")
 		return
 	}
 	// Entities in a project the caller cannot see are reported as deleted, so

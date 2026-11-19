@@ -600,7 +600,8 @@
     "workdir_path_unavailable": "暫無本地 workdir — 這個任務還沒被本地 AI 代理執行過",
     "unsubscribe_subtree_succeeded": "已取消訂閱此任務及其子任務。",
     "subscription_update_failed": "無法更新訂閱狀態，請重試。",
-    "pull_requests_empty_title": "暫無關聯 PR。"
+    "pull_requests_empty_title": "暫無關聯 PR。",
+    "guest_readonly_note": "訪客可以查看和評論，不能修改任務屬性。"
   },
   "timeline": {
     "loading": "載入中…",
@@ -764,7 +765,9 @@
     "restart_failed": "沒能停止當前執行，訊息還沒有傳送。",
     "reply_action": "回覆",
     "actions_label": "評論操作",
-    "create_issue_from_selection": "用選取內容建立子任務"
+    "create_issue_from_selection": "用選取內容建立子任務",
+    "guest_placeholder": "回覆… 可以 @ 成員",
+    "guest_hint": "訪客不能 @ 智慧體，也不能分配任務給智慧體"
   },
   "reply": {
     "recipients_changed": "回覆目標已變更。請重新確認收件者後再傳送。",

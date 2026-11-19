@@ -136,7 +136,8 @@
       "resets_at": "{{date}} にリセット",
       "usage_unavailable": "使用量は一時的に利用できません",
       "members": "メンバー",
-      "members_pending": "保留中の招待：{{pending}} 件"
+      "members_pending": "保留中の招待：{{pending}} 件",
+      "metering": "スケジュール、Webhook、エージェントによる実行はカウントされます。メンバーが「今すぐ実行」で開始した実行はカウントされません。"
     },
     "seats": {
       "title": "席数",
@@ -301,6 +302,10 @@
       "private_projects": {
         "name": "プライベートプロジェクト",
         "after": "終了後も非公開のまま。アクセスリストは読み取り専用になります。"
+      },
+      "guests": {
+        "name": "ゲスト",
+        "after": "終了後も既存のゲストはアクセスを保持します。新しいゲストの招待には Pro または Business が必要です。"
       }
     }
   }

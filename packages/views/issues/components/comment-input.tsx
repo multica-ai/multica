@@ -2,6 +2,9 @@
 
 import { useRef, useState, useEffect, useMemo } from "react";
 import { cn } from "@multica/ui/lib/utils";
+import { Info } from "@multica/ui/icons";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
@@ -57,6 +60,9 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
+  // A guest (MUL-9420) comments and mentions people, nothing that runs agents.
+  const guest = useIsGuest(useCurrentWorkspace()?.id);
+  const placeholder = guest ? t(($) => $.comment.guest_placeholder) : t(($) => $.comment.leave_comment_placeholder);
   // Sending mid-upload would strip the pending image's blob URL out of the
   // markdown and bind no attachment id — the comment posts without the file.
   const uploadGate = useUploadGate(editorRef);
@@ -291,7 +297,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           ref={editorRef}
           value={persistedDraft ?? content}
           onReady={lazy.onReady}
-          placeholder={t(($) => $.comment.leave_comment_placeholder)}
+          placeholder={placeholder}
           onUpdate={(md) => {
             setContent(md);
             setIsEmpty(!md.trim());
@@ -307,7 +313,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           debounceMs={100}
           currentIssueId={issueId}
           attachments={pendingAttachments}
-          enableSlashCommands
+          enableSlashCommands={!guest}
           slashCommandMode="command"
           quickActionMenu={quickActionMenu}
         />
@@ -321,7 +327,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
           data-testid="comment-composer-shell"
           role="button"
           tabIndex={0}
-          aria-label={t(($) => $.comment.leave_comment_placeholder)}
+          aria-label={placeholder}
           className="flex-1 min-h-0 cursor-text px-3 py-2"
           onClick={() => lazy.activate()}
           onKeyDown={(e) => {
@@ -335,7 +341,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
               exact type metrics (line-height 1.625 from prose.css), so the
               shell→editor swap doesn't shift layout. */}
           <div className="rich-text-editor text-body">
-            <p className="text-muted-foreground">{t(($) => $.comment.leave_comment_placeholder)}</p>
+            <p className="text-muted-foreground">{placeholder}</p>
           </div>
         </div>
       )}
@@ -345,15 +351,20 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation, annotat
       <ComposerToolbar
         className="px-1.5 pb-1"
         voice={voice}
-        hasRecipients={showsTriggerChips}
-        recipients={<CommentTriggerChips
+        hasRecipients={guest || showsTriggerChips}
+        recipients={guest ? (
+          <p className="flex items-center gap-1.5 px-1.5 text-caption text-muted-foreground">
+            <Info className="size-3.5 shrink-0" aria-hidden="true" />
+            <span className="truncate">{t(($) => $.comment.guest_hint)}</span>
+          </p>
+        ) : <CommentTriggerChips
           recipients={recipients}
           blocked={triggerPreview.blocked}
           hasAllMembersMention={triggerPreview.hasAllMembersMention}
           draftContent={composedContent}
           onActionChange={setAction}
         />}
-        tools={<ComposerTools voice={voice} onAttach={(file) => lazy.uploadOrQueue([file])} />}
+        tools={guest ? null : <ComposerTools voice={voice} onAttach={(file) => lazy.uploadOrQueue([file])} />}
         send={routing.restartTaskIds.length > 0 ? (
           <Button
             size="sm"

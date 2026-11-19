@@ -10,6 +10,10 @@ import {
   useCommentTriggerPreview,
 } from "./use-comment-trigger-preview";
 
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("@multica/core/api", () => ({
   api: {
     previewCommentTriggers: vi.fn(),

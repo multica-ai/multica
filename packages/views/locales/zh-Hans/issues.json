@@ -600,7 +600,8 @@
     "workdir_path_unavailable": "暂无本地 workdir — 这个任务还没被本地智能体运行过",
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
     "subscription_update_failed": "无法更新订阅状态，请重试。",
-    "pull_requests_empty_title": "暂无关联 PR。"
+    "pull_requests_empty_title": "暂无关联 PR。",
+    "guest_readonly_note": "访客可以查看和评论，不能修改任务属性。"
   },
   "timeline": {
     "loading": "加载中…",
@@ -764,7 +765,9 @@
     "restart_failed": "没能停止当前运行，消息还没有发送。",
     "reply_action": "回复",
     "actions_label": "评论操作",
-    "create_issue_from_selection": "用选中内容创建子任务"
+    "create_issue_from_selection": "用选中内容创建子任务",
+    "guest_placeholder": "回复… 可以 @ 成员",
+    "guest_hint": "访客不能 @ 智能体，也不能分配任务给智能体"
   },
   "reply": {
     "recipients_changed": "回复目标已变化。请重新确认接收者后再发送。",

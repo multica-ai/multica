@@ -137,7 +137,8 @@
       "resets_at": "Réinitialisation {{date}}",
       "usage_unavailable": "La consommation est temporairement indisponible",
       "members": "Membres",
-      "members_pending": "Invitations en attente : {{pending}}"
+      "members_pending": "Invitations en attente : {{pending}}",
+      "metering": "Les exécutions lancées par une planification, un webhook ou un agent sont comptées. Celles qu'un membre lance avec Exécuter maintenant ne le sont pas."
     },
     "seats": {
       "title": "Sièges",
@@ -313,6 +314,10 @@
       "private_projects": {
         "name": "Projets privés",
         "after": "Restent privés après l'essai. Leurs listes d'accès passent en lecture seule."
+      },
+      "guests": {
+        "name": "Invités",
+        "after": "Les invités existants gardent leur accès après l'essai. Inviter de nouveaux invités nécessite Pro ou Business."
       }
     }
   }

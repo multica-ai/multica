@@ -14,6 +14,10 @@ import { ReplyInput } from "./reply-input";
 import { CommentInput } from "./comment-input";
 
 // Avatar profile navigation is unrelated to composer behavior.
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null, AgentStatusDot: () => null }));
 
 const preview = vi.hoisted(() => vi.fn<typeof import("@multica/core/api")["api"]["previewCommentTriggers"]>(async () => ({ agents: [], blocked: [] })));

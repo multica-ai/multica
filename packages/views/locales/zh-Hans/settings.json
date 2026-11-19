@@ -1596,6 +1596,10 @@
       "member": {
         "label": "成员",
         "description": "创建并处理任务"
+      },
+      "guest": {
+        "label": "访客",
+        "description": "只能查看和评论分享给他的项目，不能运行智能体。"
       }
     },
     "share_links_create_title": "创建分享链接",
@@ -1645,7 +1649,32 @@
     "toast_invitation_pending": "已经有一封发给 {{email}} 的待接受邀请。",
     "toast_invite_check_unavailable": "暂时无法核对现有成员和邀请，请稍后再试。",
     "member_limit_full_description_billing": "工作区的订阅需要处理。到「账单与套餐」恢复订阅后才能加人，也可以先移除一位成员。",
-    "open_billing": "打开账单与套餐"
+    "open_billing": "打开账单与套餐",
+    "guest_free_tag": "免费 · 不占席位",
+    "guest_projects_label": "可以访问的项目",
+    "guest_projects_add": "添加项目…",
+    "guest_projects_remove": "移除 {{project}}",
+    "guest_projects_hint": "访客看不到其他项目、智能体、自动化和设置。",
+    "invite_guest_button": "邀请访客",
+    "all_label": "全部",
+    "guests_label": "访客",
+    "guest_count": "{{count}} 位访客",
+    "list_separator": "、",
+    "takes_seat": "占 1 个席位",
+    "frees_seat": "不占席位",
+    "make_member": "转为成员",
+    "make_member_title": "把 {{name}} 转为成员？",
+    "make_member_description": "{{name}} 可以访问整个工作区、运行智能体，会占用 1 个席位。",
+    "make_member_seat_description": "{{name}} 可以访问整个工作区、运行智能体。已购席位已用完，将补购 1 个席位。",
+    "purchase_seat_and_make_member": "补购席位并转为成员",
+    "making_member": "正在转为成员…",
+    "make_guest_title": "把 {{name}} 转为访客",
+    "make_guest_description": "{{name}} 之后只能访问下面的项目，并释放 1 个席位。他的智能体、自动化和运行时权限会被收回。",
+    "make_guest_button": "转为访客",
+    "manage_projects": "管理可访问的项目",
+    "manage_projects_title": "{{name}} 可以访问的项目",
+    "save_projects": "保存",
+    "toast_projects_updated": "已更新可访问的项目"
   },
   "integrations": {
     "status_connected": "已连接",

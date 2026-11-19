@@ -113,16 +113,19 @@ type FeatureName string
 
 const (
 	FeaturePrivateProjects FeatureName = "private_projects"
+	// FeatureGuests covers adding guests (MUL-9420): inviting one, making a
+	// member a guest, and sharing more projects with a guest.
+	FeatureGuests FeatureName = "guests"
 )
 
 // Features lists every paid feature this consumer understands.
 func Features() []FeatureName {
-	return []FeatureName{FeaturePrivateProjects}
+	return []FeatureName{FeaturePrivateProjects, FeatureGuests}
 }
 
 func (n FeatureName) Valid() bool {
 	switch n {
-	case FeaturePrivateProjects:
+	case FeaturePrivateProjects, FeatureGuests:
 		return true
 	default:
 		return false

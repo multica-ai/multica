@@ -593,7 +593,8 @@
     "thread_nav_hide_replies": "Ocultar respuestas",
     "load_failed": "No se pudo cargar la tarea.",
     "load_retry": "Reintentar",
-    "not_found_title": "Tarea no encontrada"
+    "not_found_title": "Tarea no encontrada",
+    "guest_readonly_note": "Los invitados pueden ver y comentar, pero no cambiar las propiedades de la tarea."
   },
   "timeline": {
     "loading": "Cargando...",
@@ -772,7 +773,9 @@
     "restart_failed": "No se ha podido detener la ejecución actual. Tu mensaje no se envió.",
     "reply_action": "Responder",
     "actions_label": "Acciones del comentario",
-    "create_issue_from_selection": "Crear subtarea a partir de la selección"
+    "create_issue_from_selection": "Crear subtarea a partir de la selección",
+    "guest_placeholder": "Responder… puedes mencionar a miembros con @",
+    "guest_hint": "Los invitados no pueden mencionar agentes ni asignarles tareas"
   },
   "reply": {
     "recipients_changed": "El destino de la respuesta ha cambiado. Revisa los destinatarios antes de volver a enviar.",
