@@ -3,6 +3,7 @@ package execenv
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -83,7 +84,8 @@ type CodexHomeOptions struct {
 	// run resumes the same thread. Empty when no stable key is available (e.g. a
 	// task with no issue), in which case sessions/ stays task-local. See
 	// codexSessionStoreDir and prepareCodexSessionsDir (MUL-4424).
-	SessionStoreKey string
+	SessionStoreKey     string
+	RequireNativeResume bool
 	// CodexCustomArgs are the effective Codex CLI args this task will launch
 	// with (daemon defaults + profile-fixed + per-agent custom_args). Only the
 	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
@@ -584,6 +586,13 @@ func prepareCodexSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions
 	sharedSessions := filepath.Join(sharedHome, "sessions")
 	storeDir := codexSessionStoreDir(sharedHome, opts.SessionStoreKey)
 
+	if opts.RequireNativeResume {
+		if storeDir == "" {
+			return errors.New("required Codex resume has no conversation store")
+		}
+		return mountCodexForkStore(codexHome, storeDir, logger)
+	}
+
 	// local_directory tasks have no reusable envRoot, so their history can only
 	// persist across task IDs in the per-issue store. The daemon still verifies
 	// the specific rollout is present before claiming a resume (see
@@ -640,6 +649,25 @@ func prepareCodexSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions
 	logger.Info("execenv: migrated codex-home sessions from shared symlink to task-local dir",
 		"codex_home", codexHome, "resume_session", false)
 	return os.MkdirAll(dst, 0o755)
+}
+
+// A published fork holds the active rollout and archived lineage in one unit.
+func mountCodexForkStore(codexHome, storeDir string, logger *slog.Logger) error {
+	forkDir := filepath.Join(storeDir, "fork")
+	names := []string{"sessions", "archived_sessions"}
+	for _, name := range names {
+		info, err := os.Lstat(filepath.Join(forkDir, name))
+		if err != nil || !info.IsDir() {
+			return fmt.Errorf("required Codex fork history is unavailable: %s", name)
+		}
+	}
+	for _, name := range names {
+		if err := ensureCodexSessionsLink(filepath.Join(codexHome, name), filepath.Join(forkDir, name)); err != nil {
+			return err
+		}
+	}
+	touchCodexSessionStore(storeDir, logger)
+	return nil
 }
 
 // linkCodexSessionsToStore points codex-home/sessions (dst) at the per-issue

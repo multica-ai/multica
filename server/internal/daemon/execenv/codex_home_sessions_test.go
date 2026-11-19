@@ -788,3 +788,30 @@ func assertPresent(t *testing.T, path string) {
 		t.Errorf("expected %s to be preserved: %v", filepath.Base(path), err)
 	}
 }
+
+func TestPrepareCodexSessionsMountsPublishedForkLineage(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	taskHome := t.TempDir()
+	const key = "profile/agent/chat-fork"
+	opts := CodexHomeOptions{SessionStoreKey: key, RequireNativeResume: true}
+	store := filepath.Join(codexSessionStoreDir(sharedHome, key), "fork")
+	for _, name := range []string{"sessions", "archived_sessions"} {
+		if err := os.MkdirAll(filepath.Join(store, name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := prepareCodexSessionsDir(taskHome, sharedHome, opts, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sessions", "archived_sessions"} {
+		got, err := filepath.EvalSymlinks(filepath.Join(taskHome, name))
+		want, wantErr := filepath.EvalSymlinks(filepath.Join(store, name))
+		if err != nil || wantErr != nil || !sameCodexPath(got, want) {
+			t.Fatalf("%s resolves to %q, error=%v", name, got, err)
+		}
+	}
+	if err := prepareCodexSessionsDir(t.TempDir(), t.TempDir(), opts, testLogger()); err == nil {
+		t.Fatal("required resume silently accepted a missing fork store")
+	}
+}
