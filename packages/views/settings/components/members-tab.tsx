@@ -85,6 +85,8 @@ import {
   saveUpgradeInvite,
   type UpgradeInvite,
   usePreviewWorkspaceSeatPurchase,
+  refreshFeaturesOnLockedError,
+  usePaidFeatureAccess,
   usePurchaseWorkspaceSeats,
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
@@ -112,6 +114,7 @@ import {
 } from "./settings-layout";
 import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { formatStripeMinorAmount } from "./billing-format";
+import { PaidFeatureNotice, usePaidFeatureErrorMessage } from "../../billing";
 import { GuestProjectsDialog, GuestProjectsField, useShareableProjects } from "./guest-projects";
 import {
   isSingleSeatInvitePreview,
@@ -618,6 +621,11 @@ export function MembersTab() {
   const canUpgradeForInvite =
     inviteBlockedByMemberLimit && billingEnabled && !subscriptionNeedsAttention;
   const guestsEnabled = useFeatureEnabled(WORKSPACE_GUESTS_FLAG, false);
+  // Guests are a paid feature: a plan without them keeps its existing guests
+  // (they can be removed, narrowed or made members) but adds no new ones.
+  const guestAccess = usePaidFeatureAccess(wsId, "guests", { hasExistingConfig: false });
+  const canAddGuests = guestsEnabled && guestAccess.canAdd;
+  const paidFeatureError = usePaidFeatureErrorMessage();
   const shareableProjects = useShareableProjects(wsId);
   const projectTitles = new Map(shareableProjects.map((project) => [project.id, project.title]));
   const guestCount = members.filter((m) => m.role === "guest").length;
@@ -800,7 +808,10 @@ export function MembersTab() {
         return false;
       }
       if (await handleSeatRefusal(e, { email, role, projectIds })) return false;
-      toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_invitation_failed));
+      refreshFeaturesOnLockedError(qc, wsId, e);
+      toast.error(
+        paidFeatureError(e, e instanceof Error ? e.message : t(($) => $.members.toast_invitation_failed)),
+      );
       return false;
     } finally {
       setInviteLoading(false);
@@ -1093,7 +1104,8 @@ export function MembersTab() {
       }
       setProjectsDialog(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_role_failed));
+      refreshFeaturesOnLockedError(qc, wsId, e);
+      toast.error(paidFeatureError(e, e instanceof Error ? e.message : t(($) => $.members.toast_role_failed)));
     }
   };
 
@@ -1184,6 +1196,7 @@ export function MembersTab() {
     { value: "0", label: t(($) => $.members.expiry_never) },
   ];
   const inviteRoles: MemberRole[] = guestsEnabled ? ["member", "admin", "guest"] : ["member", "admin"];
+  const guestInviteLocked = inviteRole === "guest" && !canAddGuests;
   const views: { value: MembersView; label: string; count: number }[] = [
     {
       value: "members",
@@ -1303,7 +1316,7 @@ export function MembersTab() {
                     member={m}
                     canManage={canManageWorkspace}
                     canManageOwners={isOwner}
-                    guestsEnabled={guestsEnabled}
+                    guestsEnabled={canAddGuests}
                     projectNames={(m.project_ids ?? []).flatMap((id) => projectTitles.get(id) ?? [])}
                     ownerCount={ownerCount}
                     isSelf={m.user_id === user?.id}
@@ -1370,7 +1383,7 @@ export function MembersTab() {
             className="space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!inviteEmail.trim() || guestInviteMissingProjects) return;
+              if (!inviteEmail.trim() || guestInviteMissingProjects || guestInviteLocked) return;
               if (inviteCanUpgrade) handleUpgradeAndInvite();
               else if (!inviteFull) void handleInviteMember();
             }}
@@ -1429,7 +1442,9 @@ export function MembersTab() {
                 ))}
               </div>
             </fieldset>
-            {inviteRole === "guest" ? (
+            {inviteRole === "guest" && guestAccess.state === "unavailable" ? (
+              <PaidFeatureNotice state="unavailable" />
+            ) : inviteRole === "guest" ? (
               <GuestProjectsField
                 id="invite-guest-projects"
                 projects={shareableProjects}
@@ -1498,7 +1513,11 @@ export function MembersTab() {
                   <Button
                     type="submit"
                     disabled={
-                      inviteLoading || !inviteEmail.trim() || inviteFull || guestInviteMissingProjects
+                      inviteLoading ||
+                      !inviteEmail.trim() ||
+                      inviteFull ||
+                      guestInviteMissingProjects ||
+                      guestInviteLocked
                     }
                     aria-busy={inviteLoading || undefined}
                   >

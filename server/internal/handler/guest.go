@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
@@ -32,6 +33,18 @@ func (h *Handler) guestsEnabled(w http.ResponseWriter, r *http.Request) bool {
 	}
 	writeFeatureDisabled(w, "workspace_guests_disabled", "guests are not enabled")
 	return false
+}
+
+// requireGuestAddition admits a write that adds a guest or widens one:
+// guests must be switched on for this deployment (the rollout flag) and
+// included in the workspace's plan (the guests paid feature). Removing a
+// guest, narrowing its projects and promoting it are never restricted, and
+// existing guests keep their access after a downgrade.
+func (h *Handler) requireGuestAddition(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, operation string) (featureAdmission, bool) {
+	if !h.guestsEnabled(w, r) {
+		return featureAdmission{}, false
+	}
+	return h.requireFeatureAddition(w, r, workspaceID, entitlement.FeatureGuests, operation)
 }
 
 // isGuest reports whether userID is a guest of the workspace. A failed lookup
@@ -289,6 +302,20 @@ func (h *Handler) SetMemberProjects(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	added, err := h.Queries.CountProjectsUserIsNotMemberOf(r.Context(), db.CountProjectsUserIsNotMemberOfParams{
+		ProjectIds: ids, WorkspaceID: target.WorkspaceID, UserID: target.UserID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update projects")
+		return
+	}
+	// Only sharing another project widens the guest; narrowing never is.
+	var admission featureAdmission
+	if added > 0 {
+		if admission, ok = h.requireGuestAddition(w, r, target.WorkspaceID, "add_projects"); !ok {
+			return
+		}
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -305,6 +332,7 @@ func (h *Handler) SetMemberProjects(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update projects")
 		return
 	}
+	admission.admitted(r.Context())
 
 	user, err := h.Queries.GetUser(r.Context(), target.UserID)
 	if err != nil {

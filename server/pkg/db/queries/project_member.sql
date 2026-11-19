@@ -167,3 +167,14 @@ SELECT r.id, a.project_id
 FROM autopilot_run r
 JOIN autopilot a ON a.id = r.autopilot_id
 WHERE r.id = ANY(sqlc.arg('ids')::uuid[]);
+
+-- name: CountProjectsUserIsNotMemberOf :one
+-- How many of project_ids the user is not a member of yet: setting a guest's
+-- projects to these adds that many (MUL-9420).
+SELECT count(*)::bigint FROM unnest(sqlc.arg('project_ids')::uuid[]) AS requested(id)
+WHERE NOT EXISTS (
+    SELECT 1 FROM project_member pm
+    WHERE pm.workspace_id = sqlc.arg('workspace_id')
+      AND pm.user_id = sqlc.arg('user_id')
+      AND pm.project_id = requested.id
+);

@@ -313,6 +313,10 @@
       "private_projects": {
         "name": "Private projects",
         "after": "Stay private after the trial. Their access lists become read-only."
+      },
+      "guests": {
+        "name": "Guests",
+        "after": "Existing guests keep their access after the trial. New guests need Pro or Business."
       }
     }
   }

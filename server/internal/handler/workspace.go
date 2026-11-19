@@ -744,13 +744,17 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 	var guestProjects []pgtype.UUID
 	switch {
 	case toGuest && !wasGuest:
-		if !h.guestsEnabled(w, r) {
+		var admission featureAdmission
+		if admission, ok = h.requireGuestAddition(w, r, target.WorkspaceID, "make_guest"); !ok {
 			return
 		}
 		if guestProjects, ok = h.parseGuestProjectIDs(w, r, target.WorkspaceID, req.ProjectIDs); !ok {
 			return
 		}
 		updatedMember, ok = h.demoteMemberToGuest(w, r, requester, target, guestProjects)
+		if ok {
+			admission.admitted(r.Context())
+		}
 	case wasGuest && !toGuest:
 		updatedMember, ok = h.promoteGuest(w, r, target, role)
 	default:

@@ -16,6 +16,9 @@ var guestRoutes = compileGuestRoutes([]string{
 	// assignees), and leaving it.
 	"GET /api/workspaces/*",
 	"GET /api/workspaces/*/members",
+	// Which paid features the plan includes: not sensitive, and shared
+	// components read it to render locked states.
+	"GET /api/workspaces/*/features",
 	"POST /api/workspaces/*/leave",
 
 	// Reading issues in the guest's projects.

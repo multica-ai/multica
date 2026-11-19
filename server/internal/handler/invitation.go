@@ -90,8 +90,9 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	}
 	guest := projectaccess.IsGuestRole(role)
 	var guestProjects []pgtype.UUID
+	var guestAdmission featureAdmission
 	if guest {
-		if !h.guestsEnabled(w, r) {
+		if guestAdmission, ok = h.requireGuestAddition(w, r, requester.WorkspaceID, "invite"); !ok {
 			return
 		}
 		if guestProjects, ok = h.parseGuestProjectIDs(w, r, requester.WorkspaceID, req.ProjectIDs); !ok {
@@ -258,6 +259,7 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	guestAdmission.admitted(r.Context())
 	slog.Info("invitation created", append(logger.RequestAttrs(r), "invitation_id", uuidToString(inv.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
 
 	resp := invitationToResponse(inv)

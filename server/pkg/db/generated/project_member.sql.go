@@ -112,6 +112,31 @@ func (q *Queries) AddUserToProjects(ctx context.Context, arg AddUserToProjectsPa
 	return items, nil
 }
 
+const countProjectsUserIsNotMemberOf = `-- name: CountProjectsUserIsNotMemberOf :one
+SELECT count(*)::bigint FROM unnest($1::uuid[]) AS requested(id)
+WHERE NOT EXISTS (
+    SELECT 1 FROM project_member pm
+    WHERE pm.workspace_id = $2
+      AND pm.user_id = $3
+      AND pm.project_id = requested.id
+)
+`
+
+type CountProjectsUserIsNotMemberOfParams struct {
+	ProjectIds  []pgtype.UUID `json:"project_ids"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	UserID      pgtype.UUID   `json:"user_id"`
+}
+
+// How many of project_ids the user is not a member of yet: setting a guest's
+// projects to these adds that many (MUL-9420).
+func (q *Queries) CountProjectsUserIsNotMemberOf(ctx context.Context, arg CountProjectsUserIsNotMemberOfParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countProjectsUserIsNotMemberOf, arg.ProjectIds, arg.WorkspaceID, arg.UserID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const deleteProjectMember = `-- name: DeleteProjectMember :execrows
 DELETE FROM project_member
 WHERE project_id = $1
