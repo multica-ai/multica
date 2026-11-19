@@ -347,7 +347,7 @@ WHERE i.workspace_id = $1
   AND s.user_id = $2
   AND s.unsubscribed_at IS NULL
   -- MUL-8472: private projects the caller cannot see.
-  AND ($3::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY($3::uuid[])))
+  AND ($3::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY($3::uuid[])))
 `
 
 type ListSubscribedIssueIDsParams struct {

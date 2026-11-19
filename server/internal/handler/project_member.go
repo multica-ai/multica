@@ -539,6 +539,12 @@ func (h *Handler) AddProjectMembers(w http.ResponseWriter, r *http.Request) {
 	if !h.requireProjectAccessManager(w, r, member, project, "only workspace admins and the member who manages this project's access can add members") {
 		return
 	}
+	// Sharing the project with a guest who is not in it yet is a guest
+	// addition (MUL-9420), whatever the project's visibility.
+	guestAdmission, ok := h.requireGuestProjectAddition(w, r, project.WorkspaceID, project.ID, ids)
+	if !ok {
+		return
+	}
 	var admission featureAdmission
 	if projectVisibilityOrDefault(project.Visibility) == projectaccess.VisibilityPrivate {
 		grows, err := h.projectMembersGrow(r, project, ids)
@@ -581,6 +587,7 @@ func (h *Handler) AddProjectMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	admission.admitted(r.Context())
+	guestAdmission.admitted(r.Context())
 	h.publishProjectMembersChanged(project, member.UserID)
 	h.ListProjectMembers(w, r)
 }

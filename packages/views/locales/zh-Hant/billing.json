@@ -302,6 +302,10 @@
       "private_projects": {
         "name": "私有專案",
         "after": "到期後保持私有，存取名單唯讀。"
+      },
+      "guests": {
+        "name": "訪客",
+        "after": "到期後既有訪客保留存取權限，邀請新訪客需要 Pro 或 Business。"
       }
     }
   }

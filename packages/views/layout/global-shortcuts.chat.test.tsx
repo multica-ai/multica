@@ -21,6 +21,7 @@ const h = vi.hoisted(() => ({
   navigation: { pathname: "/acme/issues", push: vi.fn() },
   toggleSidebar: vi.fn(),
   searchToggle: vi.fn(),
+  guest: false,
 }));
 
 vi.mock("@multica/core/chat", () => ({
@@ -35,7 +36,9 @@ vi.mock("@multica/core/issues/stores", () => ({
 vi.mock("@multica/core/modals", () => ({
   useModalStore: { getState: () => ({ modal: null }) },
 }));
+vi.mock("@multica/core/permissions", () => ({ useIsGuest: () => h.guest }));
 vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ id: "ws-1" }),
   useWorkspacePaths: () => ({
     inbox: () => "/acme/inbox",
     chat: () => "/acme/chat",
@@ -92,6 +95,7 @@ beforeEach(() => {
   h.chat.isOpen = false;
   h.chat.activeSessionId = null;
   h.navigation.pathname = "/acme/issues";
+  h.guest = false;
 });
 
 afterEach(() => {
@@ -122,6 +126,16 @@ describe("chat toggle shortcut", () => {
     expect(getByTestId("composer").parentElement).toHaveAttribute("inert");
     pressCreate();
     expect(openCreateIssueWithPreference).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves C unclaimed for a guest, who cannot create issues (MUL-9420)", () => {
+    h.guest = true;
+    render(<GlobalShortcuts />);
+    const event = new KeyboardEvent("keydown", { key: "c", bubbles: true, cancelable: true });
+    document.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(openCreateIssueWithPreference).not.toHaveBeenCalled();
   });
 
   it("toggles the floating window and consumes the chord", () => {

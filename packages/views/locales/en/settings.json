@@ -1611,6 +1611,10 @@
       "member": {
         "label": "Member",
         "description": "Create and work on issues"
+      },
+      "guest": {
+        "label": "Guest",
+        "description": "Views and comments on the projects shared with them. Can't run agents."
       }
     },
     "share_links_create_title": "Create share link",
@@ -1660,7 +1664,32 @@
     "toast_invitation_pending": "An invitation to {{email}} is already pending.",
     "toast_invite_check_unavailable": "Could not check existing members and invitations. Try again in a moment.",
     "member_limit_full_description_billing": "The workspace's subscription needs attention. Restore it in Billing to add members, or remove a member first.",
-    "open_billing": "Open Billing"
+    "open_billing": "Open Billing",
+    "guest_free_tag": "Free · no seat",
+    "guest_projects_label": "Projects they can access",
+    "guest_projects_add": "Add project…",
+    "guest_projects_remove": "Remove {{project}}",
+    "guest_projects_hint": "Guests can't see other projects, agents, autopilots or settings.",
+    "invite_guest_button": "Invite guest",
+    "all_label": "All",
+    "guests_label": "Guests",
+    "guest_count": "Guests: {{count}}",
+    "list_separator": ", ",
+    "takes_seat": "Takes 1 seat",
+    "frees_seat": "Frees a seat",
+    "make_member": "Make member",
+    "make_member_title": "Make {{name}} a member?",
+    "make_member_description": "{{name}} will see the whole workspace and can run agents. This takes 1 seat.",
+    "make_member_seat_description": "{{name}} will see the whole workspace and can run agents. All purchased seats are in use, so this buys 1 more.",
+    "purchase_seat_and_make_member": "Buy seat and make member",
+    "making_member": "Making member…",
+    "make_guest_title": "Make {{name}} a guest",
+    "make_guest_description": "{{name}} will only see the projects below and frees a seat. Their agents, autopilots and runtime access are taken back.",
+    "make_guest_button": "Make guest",
+    "manage_projects": "Manage accessible projects",
+    "manage_projects_title": "Projects {{name}} can access",
+    "save_projects": "Save",
+    "toast_projects_updated": "Projects updated"
   },
   "integrations": {
     "status_connected": "Connected",

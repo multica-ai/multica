@@ -4022,6 +4022,13 @@ export class ApiClient {
     });
   }
 
+  async setMemberProjects(workspaceId: string, memberId: string, projectIds: string[]): Promise<MemberWithUser> {
+    return this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}/projects`, {
+      method: "PUT",
+      body: JSON.stringify({ project_ids: projectIds }),
+    });
+  }
+
   async deleteMember(workspaceId: string, memberId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
       method: "DELETE",

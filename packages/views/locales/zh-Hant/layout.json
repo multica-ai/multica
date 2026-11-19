@@ -188,7 +188,11 @@
       "pinned_settings": "固定顯示",
       "views_settings": "檢視顯示",
       "views_builtin": "內建檢視",
-      "views_show_count": "數量"
+      "views_show_count": "數量",
+      "guest_badge": "訪客",
+      "guest_badge_hint": "你可以查看和評論分享給你的專案。",
+      "involved": "我參與的",
+      "shared_projects": "分享給你的專案"
     },
     "team": {
       "new_agent": "新建 AI 代理",

@@ -183,7 +183,9 @@ type TableViewProps = {
   search: string;
   onSearchChange: (query: string) => void;
   onLoadedIssuesChange: (issues: Issue[]) => void;
-  onCreateIssue: (defaults: IssueCreateDefaults) => void;
+  /** Omitted when the viewer cannot create issues: the row's add-sub-issue
+   *  button goes with it. */
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   exportIssues: () => Promise<Issue[]>;
   resolveExportLookups: (needs: {
     projects: boolean;
@@ -671,7 +673,8 @@ export function InlineTitle({
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   /** Navigate to the issue — clicking the title is the primary way IN. */
   onOpen: (event: React.MouseEvent) => void;
-  onCreateSubIssue: () => void;
+  /** Omitted when the viewer cannot create issues. */
+  onCreateSubIssue?: () => void;
   onToggleParent: () => void;
   toggleLabel: string;
   renameLabel: string;
@@ -800,23 +803,25 @@ export function InlineTitle({
             * follows the row's hover colour, since that is what the cell is
             * painted with when they appear. */}
           <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 bg-gradient-to-l from-background from-70% to-transparent pr-1 pl-8 opacity-0 transition-opacity group-hover:from-[color-mix(in_oklab,var(--muted)_50%,var(--background))] group-hover/title:pointer-events-auto group-hover/title:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
-            <DeferredTooltip
-              content={createSubIssueLabel}
-              trigger={
-                <button
-                  type="button"
-                  aria-label={createSubIssueLabel}
-                  className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onCreateSubIssue();
-                  }}
-                  onAuxClick={stopRowNavigation}
-                >
-                  <Plus className="size-3" />
-                </button>
-              }
-            />
+            {onCreateSubIssue && (
+              <DeferredTooltip
+                content={createSubIssueLabel}
+                trigger={
+                  <button
+                    type="button"
+                    aria-label={createSubIssueLabel}
+                    className="rounded-xs p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCreateSubIssue();
+                    }}
+                    onAuxClick={stopRowNavigation}
+                  >
+                    <Plus className="size-3" />
+                  </button>
+                }
+              />
+            )}
             <DeferredTooltip
               content={renameLabel}
               trigger={
@@ -991,7 +996,7 @@ type TableViewMeta = {
    *  category and owner to decide whether the write needs confirming first. */
   updateIssue: (issue: Issue, updates: Partial<UpdateIssueRequest>) => void;
   openIssue: (issue: Issue, event?: React.MouseEvent) => void;
-  createSubIssue: (issue: Issue) => void;
+  createSubIssue: ((issue: Issue) => void) | undefined;
   toggleTableParentCollapsed: (issueId: string) => void;
   handleIssueSelection: (issueId: string, shiftKey: boolean) => void;
   getActorName: (actorType: string, actorId: string) => string;
@@ -1191,7 +1196,7 @@ function IssueTableBodyCell({
           onEditingChange={setEditorOpen}
           onUpdate={onUpdate}
           onOpen={(event) => meta.openIssue(issue, event)}
-          onCreateSubIssue={() => meta.createSubIssue(issue)}
+          onCreateSubIssue={meta.createSubIssue && (() => meta.createSubIssue?.(issue))}
           onToggleParent={() => meta.toggleTableParentCollapsed(issue.id)}
           toggleLabel={t(($) => $.table.toggle_sub_issues)}
           renameLabel={t(($) => $.table.rename_title)}
@@ -2236,9 +2241,11 @@ export function TableView({
     [intentNavigate, paths, handlePeekClick],
   );
 
-  const createSubIssue = useCallback(
-    (issue: Issue) =>
-      onCreateIssue(subIssueCreateDefaults(issue)),
+  const createSubIssue = useMemo(
+    () =>
+      onCreateIssue
+        ? (issue: Issue) => onCreateIssue(subIssueCreateDefaults(issue))
+        : undefined,
     [onCreateIssue],
   );
 

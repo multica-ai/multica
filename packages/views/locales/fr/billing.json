@@ -314,6 +314,10 @@
       "private_projects": {
         "name": "Projets privés",
         "after": "Restent privés après l'essai. Leurs listes d'accès passent en lecture seule."
+      },
+      "guests": {
+        "name": "Invités",
+        "after": "Les invités existants gardent leur accès après l'essai. Inviter de nouveaux invités nécessite Pro ou Business."
       }
     }
   }
