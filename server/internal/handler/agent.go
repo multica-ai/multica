@@ -1578,7 +1578,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// — this runtime's own discovered catalog is. Keeps a Hermes Agent user's
 	// clear 400 instead of accepting a level the daemon would later drop.
 	if req.ThinkingLevel != "" {
-		switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
+		switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID, req.Model, req.ThinkingLevel) {
 		case acpEffortAbsent:
 			writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
 			return
@@ -2303,7 +2303,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, thinkingLevelRejection(provider, value))
 				return
 			}
-			switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID) {
+			switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID, effectiveModelValue(params, existing), value) {
 			case acpEffortAbsent:
 				writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(provider))
 				return
@@ -2334,7 +2334,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, existingThinkingLevelRejection(provider, existing.ThinkingLevel.String))
 			return
 		}
-		switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID) {
+		switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID, effectiveModelValue(params, existing), existing.ThinkingLevel.String) {
 		case acpEffortAbsent:
 			writeError(w, http.StatusBadRequest, existingThinkingCapabilityRejection(provider, existing.ThinkingLevel.String))
 			return
@@ -2813,11 +2813,35 @@ var ambiguousACPEffortProviders = map[string]bool{
 // turns an undiscovered catalog into a refusal, because for those the name
 // genuinely does not answer the question and guessing "yes" is what let a Hermes
 // Agent user persist a level the daemon would later drop.
-func (h *Handler) acpThinkingDecision(ctx context.Context, provider string, runtimeID pgtype.UUID) acpEffortEvidence {
+func partialEffortCatalogKey(runtimeID string) string {
+	return "partial-effort:" + runtimeID
+}
+
+func (h *Handler) acpThinkingDecision(ctx context.Context, provider string, runtimeID pgtype.UUID, model, level string) acpEffortEvidence {
 	if !agent.UsesACPCatalogThinking(provider) {
 		return acpEffortPresent
 	}
-	snapshot := h.cachedModelCatalog(ctx, uuidToString(runtimeID))
+	runtimeKey := uuidToString(runtimeID)
+	snapshot := h.cachedModelCatalog(ctx, runtimeKey)
+	if provider == "hermes" {
+		partial := h.cachedModelCatalog(ctx, partialEffortCatalogKey(runtimeKey))
+		if partial != nil && (snapshot == nil || partial.StoredAt.After(snapshot.StoredAt)) {
+			for _, entry := range partial.Models {
+				if (entry.ID != model || model == "") && !(model == "" && entry.Default) {
+					continue
+				}
+				if entry.Thinking != nil {
+					for _, option := range entry.Thinking.SupportedLevels {
+						if option.Value == level {
+							return acpEffortPresent
+						}
+					}
+				}
+				break
+			}
+			return acpEffortUnknown
+		}
+	}
 	if snapshot == nil || len(snapshot.Models) == 0 {
 		if ambiguousACPEffortProviders[provider] {
 			return acpEffortUnknown

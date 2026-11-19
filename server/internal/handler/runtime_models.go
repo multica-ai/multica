@@ -518,7 +518,8 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		// stand-in the provider substituted after discovery failed, not the
 		// runtime's real catalog. Older daemons omit it; absent means "this
 		// daemon cannot tell us", which stays the pre-MUL-5549 behaviour.
-		Fallback bool `json:"fallback"`
+		Fallback                  bool `json:"fallback"`
+		EffortDiscoveryIncomplete bool `json:"effort_discovery_incomplete"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -557,6 +558,15 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		// store nor grounds to discard a real catalog we already hold. Treat it
 		// like a failure and leave the cache untouched (MUL-5549).
 		if h.ModelCatalogCache != nil {
+			if body.Fallback && body.EffortDiscoveryIncomplete && supported && len(body.Models) > 0 {
+				if err := h.ModelCatalogCache.Put(r.Context(), partialEffortCatalogKey(runtimeID), body.Models, nil, true); err != nil {
+					slog.Warn("partial effort catalog cache write failed", "error", err, "runtime_id", runtimeID)
+				}
+			} else if !body.Fallback {
+				if err := h.ModelCatalogCache.Invalidate(r.Context(), partialEffortCatalogKey(runtimeID)); err != nil {
+					slog.Warn("partial effort catalog cache invalidate failed", "error", err, "runtime_id", runtimeID)
+				}
+			}
 			switch modelCatalogCacheDecision(body.Models, supported, body.Fallback) {
 			case modelCatalogCacheStore:
 				if err := h.ModelCatalogCache.Put(r.Context(), runtimeID, body.Models, body.UnavailableModels, supported); err != nil {
