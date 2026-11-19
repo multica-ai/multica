@@ -328,6 +328,33 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(["issues", "tasks"]);
   });
 
+  it("recovers the persisted reply when only task:completed arrives", async () => {
+    const ws = createMockWs();
+    const sessionId = "chat-1";
+    const taskId = "task-1";
+    const pendingKey = chatKeys.pendingTask(sessionId);
+    const messagesKey = chatKeys.messages(sessionId);
+    const reply = { id: "reply-1", task_id: taskId, role: "assistant", content: "Done" };
+    qc.setQueryData(pendingKey, { task_id: taskId, status: "running" });
+    qc.setQueryData(messagesKey, []);
+    const observer = new QueryObserver(qc, {
+      queryKey: messagesKey,
+      queryFn: async () => [reply],
+      staleTime: Infinity,
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    try {
+      renderHook(() => useRealtimeSync(ws, stores), { wrapper: createWrapper(qc) });
+      const handler = vi.mocked(ws.on).mock.calls.find(([event]) => event === "task:completed")?.[1];
+      expect(handler).toBeDefined();
+      await act(async () => { handler!({ task_id: taskId, chat_session_id: sessionId }); });
+      expect(qc.getQueryData(pendingKey)).toEqual({});
+      await waitFor(() => expect(observer.getCurrentResult().data).toEqual([reply]));
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it("invalidates per-chat-session caches (no wsId in key) on ws instance change", () => {
     // These keys are not under the ["chat", wsId] prefix, so they need their
     // own recovery invalidation when reconnecting after missed chat/task events.
