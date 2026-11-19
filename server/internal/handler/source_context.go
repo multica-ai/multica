@@ -538,6 +538,7 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "issue is required for manual mode")
 			return
 		}
+		req.Issue.Title = sanitizeNullBytes(req.Issue.Title)
 		if strings.TrimSpace(req.Issue.Title) == "" {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"code": "invalid_request", "error": "title is required"})
 			return
@@ -678,7 +679,7 @@ func (h *Handler) cloneSourceContext(ctx context.Context, workspaceID, userID, c
 }
 
 func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Request, workspaceID, userID pgtype.UUID, input CreateIssueRequest, capture service.SourceContextCapture, limits service.SourceContextLimitUsage) error {
-	title := strings.TrimSpace(input.Title)
+	title := strings.TrimSpace(sanitizeNullBytes(input.Title))
 	if title == "" {
 		return sourceContextBadRequest("title is required")
 	}

@@ -1165,6 +1165,7 @@ func (r *Router) drop(ctx context.Context, set ResolverSet, msg channel.InboundM
 }
 
 func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand, issuePrefix string, assignedRunFireAt time.Time) (service.IssueCreateResult, error) {
+	cmd.Title = strings.TrimSpace(util.SanitizeTextForPostgres(cmd.Title))
 	if cmd.Title == "" {
 		return service.IssueCreateResult{}, ErrEmptyIssueTitle
 	}

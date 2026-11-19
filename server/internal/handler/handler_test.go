@@ -1546,6 +1546,18 @@ func TestUpdateIssueAllowsExplicitUnassign(t *testing.T) {
 	}
 }
 
+func TestCreateIssueRejectsNULOnlyTitle(t *testing.T) {
+	var response struct {
+		Error string `json:"error"`
+	}
+	testutil.Call(t, testHandler.CreateIssue, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "\x00",
+	})).Want(http.StatusBadRequest).JSON(&response)
+	if response.Error != "title is required" {
+		t.Fatalf("error = %q, want title is required", response.Error)
+	}
+}
+
 // A NUL survives the JSON round trip but PostgreSQL TEXT rejects it, so an
 // agent filing tool output that carries one got a 500 and no issue.
 func TestIssueTextDropsNULBytes(t *testing.T) {

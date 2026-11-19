@@ -3370,6 +3370,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.Title = sanitizeNullBytes(req.Title)
 
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
