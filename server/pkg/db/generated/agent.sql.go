@@ -391,11 +391,22 @@ SET status = 'cancelled',
     cancelled_by_type = $2,
     cancelled_by_id = $3,
     cancelled_by_name = $4,
+    context = CASE
+      WHEN task.trigger_comment_id IS NULL
+       AND COALESCE(cardinality(task.coalesced_comment_ids), 0) = 0 THEN task.context
+      ELSE COALESCE(task.context, '{}'::jsonb) || jsonb_build_object(
+        'cancelled_comment_revisions', COALESCE((
+          SELECT jsonb_object_agg(c.id::text, c.revision)
+          FROM comment c
+          JOIN issue i ON i.id = c.issue_id AND i.workspace_id = c.workspace_id
+          WHERE i.id = task.issue_id
+            AND (c.id = task.trigger_comment_id OR c.id = ANY(task.coalesced_comment_ids))
+        ), '{}'::jsonb))
+    END,
     delivered_comment_ids = CASE
       -- Chat and ordinary issue tasks almost never carry a delegated-failure
-      -- recovery signal. Keep their high-frequency user-cancel path to a
-      -- no-join update; only validate task lineage after the cheap comment
-      -- shape probe finds a possible recovery signal.
+      -- recovery signal. Only validate recovery lineage after the cheap
+      -- comment shape probe finds a possible recovery signal.
       WHEN task.trigger_comment_id IS NULL
        AND COALESCE(cardinality(task.coalesced_comment_ids), 0) = 0
         THEN task.delivered_comment_ids
@@ -8860,13 +8871,15 @@ func (q *Queries) SetDeferredChannelIssueTaskRuntimeOverlay(ctx context.Context,
 
 const setTaskDeliveredCommentIDs = `-- name: SetTaskDeliveredCommentIDs :one
 UPDATE agent_task_queue
-SET delivered_comment_ids = $1::uuid[]
-WHERE id = $2
-  AND runtime_id = $3
+SET delivered_comment_ids = $1::uuid[],
+    context = COALESCE(context, '{}'::jsonb) ||
+        jsonb_build_object('delivered_comment_revisions', $2::jsonb)
+WHERE id = $3
+  AND runtime_id = $4
   AND status = 'dispatched'
   AND started_at IS NULL
-  AND dispatched_at = $4
-  AND trigger_comment_id IS NOT DISTINCT FROM $5::uuid
+  AND dispatched_at = $5
+  AND trigger_comment_id IS NOT DISTINCT FROM $6::uuid
   AND NOT EXISTS (
       SELECT 1
       FROM unnest($1::uuid[]) AS delivered(id)
@@ -8880,11 +8893,12 @@ RETURNING delivered_comment_ids
 `
 
 type SetTaskDeliveredCommentIDsParams struct {
-	DeliveredCommentIds      []pgtype.UUID      `json:"delivered_comment_ids"`
-	TaskID                   pgtype.UUID        `json:"task_id"`
-	RuntimeID                pgtype.UUID        `json:"runtime_id"`
-	DispatchedAt             pgtype.Timestamptz `json:"dispatched_at"`
-	ExpectedTriggerCommentID pgtype.UUID        `json:"expected_trigger_comment_id"`
+	DeliveredCommentIds       []pgtype.UUID      `json:"delivered_comment_ids"`
+	DeliveredCommentRevisions []byte             `json:"delivered_comment_revisions"`
+	TaskID                    pgtype.UUID        `json:"task_id"`
+	RuntimeID                 pgtype.UUID        `json:"runtime_id"`
+	DispatchedAt              pgtype.Timestamptz `json:"dispatched_at"`
+	ExpectedTriggerCommentID  pgtype.UUID        `json:"expected_trigger_comment_id"`
 }
 
 // Replace (rather than append to) the delivery receipt for this claim. A stale
@@ -8895,6 +8909,7 @@ type SetTaskDeliveredCommentIDsParams struct {
 func (q *Queries) SetTaskDeliveredCommentIDs(ctx context.Context, arg SetTaskDeliveredCommentIDsParams) ([]pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, setTaskDeliveredCommentIDs,
 		arg.DeliveredCommentIds,
+		arg.DeliveredCommentRevisions,
 		arg.TaskID,
 		arg.RuntimeID,
 		arg.DispatchedAt,

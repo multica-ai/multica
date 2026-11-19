@@ -757,7 +757,7 @@ func (s *AutopilotService) guardAutopilotProjectAccess(ctx context.Context, ap d
 	if !human.Valid {
 		human = ResolveAutopilotTriggerPrincipal(ctx, s.Queries, run.TriggerID, current.ID, current.WorkspaceID)
 	}
-	err = s.TaskSvc.guardRunProjectsAccess(ctx, current.WorkspaceID, leader, human, leader.OwnerID, current.ProjectID)
+	err = guardRunProjectsAccess(ctx, s.TaskSvc.Queries, current.WorkspaceID, leader, human, leader.OwnerID, current.ProjectID)
 	if errors.Is(err, ErrProjectAccessDenied) {
 		return &errDispatchSkipped{
 			reason: "the person this run acts for or the agent's owner cannot access the autopilot's private project",

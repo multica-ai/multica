@@ -142,6 +142,8 @@ var pgBigmOperatorClass = extensionOperatorClass{
 var concurrentIndexCleanups = map[string]string{
 	"733_comment_idempotency_receipt_key":                       "uq_comment_idempotency_receipt_key",
 	"734_comment_idempotency_receipt_created":                   "idx_comment_idempotency_receipt_created",
+	"736_comment_delivery_obligation_unique_idx":                "uq_comment_delivery_obligation_target",
+	"737_comment_delivery_obligation_due_idx":                   "idx_comment_delivery_obligation_due",
 	"729_remote_app_connection_workspace_idx":                   "uq_remote_app_connection_owner_ws",
 	"720_remote_app_oauth_client_idx":                           "uq_remote_app_oauth_client_app_redirect",
 	"721_remote_app_connection_owner_idx":                       "uq_remote_app_connection_owner",

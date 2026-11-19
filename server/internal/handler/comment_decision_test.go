@@ -58,6 +58,7 @@ func TestCommentMergeTerminalOutcome(t *testing.T) {
 	}{
 		{"real merge coalesces", commentMergeSucceeded, true, DispatchCoalesced, ReasonCoalesced},
 		{"attribution fail-closed is blocked, not success", commentMergeAttributionBlocked, true, DispatchBlocked, ReasonAttributionBlocked},
+		{"project access denial is blocked, not success", commentMergeProjectAccessBlocked, true, DispatchBlocked, ReasonProjectAccessBlocked},
 		{"unknown error is blocked, not success", commentMergeError, true, DispatchBlocked, ReasonInternalError},
 		{"no pending task defers to active-task decision", commentMergeNoPendingTask, false, "", ""},
 	}
