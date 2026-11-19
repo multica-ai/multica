@@ -251,12 +251,14 @@ func TestUnreadInboxSummaryTaskCredentialStaysInBoundWorkspace(t *testing.T) {
 				}()
 				return done
 			}
-			waiters := func(n int) {
+			// joined waits until n callers are inside the pending follow-up
+			// generation, counted under the guard's admission lock.
+			joined := func(n int) {
 				t.Helper()
 				deadline := time.Now().Add(2 * time.Second)
-				for h.InboxReads.SummaryWaiters() != n {
+				for h.InboxReads.PendingSummaryCallers(testUserID) != n {
 					if time.Now().After(deadline) {
-						t.Fatalf("summary waiters = %d, want %d", h.InboxReads.SummaryWaiters(), n)
+						t.Fatalf("pending summary callers = %d, want %d", h.InboxReads.PendingSummaryCallers(testUserID), n)
 					}
 					time.Sleep(time.Millisecond)
 				}
@@ -265,18 +267,24 @@ func TestUnreadInboxSummaryTaskCredentialStaysInBoundWorkspace(t *testing.T) {
 			// An owner request occupies the running query, so the next two
 			// requests queue into one shared follow-up query.
 			warmUp := serve(asOwner, ownerRequest())
-			<-starter.blocked
+			select {
+			case <-starter.blocked:
+			case rec := <-warmUp:
+				t.Fatalf("warm-up summary finished before its query was held: %d %s", rec.Code, rec.Body.String())
+			case <-time.After(5 * time.Second):
+				t.Fatal("warm-up summary query never started")
+			}
 			var agentDone, ownerDone <-chan *httptest.ResponseRecorder
 			if agentFirst {
 				agentDone = serve(asAgent, agentRequest())
-				waiters(2)
+				joined(1)
 				ownerDone = serve(asOwner, ownerRequest())
 			} else {
 				ownerDone = serve(asOwner, ownerRequest())
-				waiters(2)
+				joined(1)
 				agentDone = serve(asAgent, agentRequest())
 			}
-			waiters(3)
+			joined(2)
 			close(gate)
 
 			summaryOf := func(name string, done <-chan *httptest.ResponseRecorder) map[string]int64 {
