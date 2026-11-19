@@ -516,12 +516,12 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		var httpErr *cli.HTTPError
 		if errors.As(err, &httpErr) && httpErr.Kind() == cli.KindAuthRequired {
 			if taskContext {
-				fmt.Fprintln(os.Stderr, cli.FormatError(err, false))
+				fmt.Fprintln(os.Stderr, cli.FormatError(err, debugFlag))
 			} else {
 				fmt.Fprintln(os.Stderr, "Token is invalid or expired. Run 'multica login' to re-authenticate.")
 			}
 		} else {
-			fmt.Fprintf(os.Stderr, "Could not verify the token: %s\n", cli.FormatError(err, false))
+			fmt.Fprintf(os.Stderr, "Could not verify the token: %s\n", cli.FormatError(err, debugFlag))
 		}
 		return nil
 	}
