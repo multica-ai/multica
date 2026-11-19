@@ -71,7 +71,11 @@ multica --profile container workspace switch my-workspace
 exec multica --profile container daemon start --foreground --no-auto-update
 ```
 
-Run login and workspace selection when provisioning the profile. Keep the container user's `~/.multica` and the workspace root on writable storage if they must survive container replacement. Configure the coding tool's own authentication separately. Let the container supervisor restart the foreground daemon, and upgrade the CLI by replacing the image.
+Run login and workspace selection when provisioning the profile. For a long-lived runtime, mount the container user's `~/.multica` on writable persistent storage. It stores the profile's access token and the daemon ID. If the directory is lost when the container is replaced, you must log in again and the daemon registers a new runtime. Agents assigned to the original runtime cannot pick up tasks in the replacement container.
+
+To preserve run directories and the `.repos` cache across container replacements, mount the workspaces root on writable persistent storage. With `--profile container`, the default workspaces root is `~/multica_workspaces_container`.
+
+Configure the coding tool's own authentication separately. Let the container supervisor restart the foreground daemon, and upgrade the CLI by replacing the image.
 
 ### Start at login [#autostart]
 

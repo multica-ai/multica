@@ -71,7 +71,11 @@ multica --profile container workspace switch my-workspace
 exec multica --profile container daemon start --foreground --no-auto-update
 ```
 
-初始化 profile 時執行登入及工作區選擇。若更換容器後仍需保留資料，請將容器使用者的 `~/.multica` 和工作目錄根路徑放在可寫入的持久儲存空間。另行設定程式開發工具的驗證。由容器管理器重新啟動前景守護程序，並透過更換映像檔升級 CLI。
+初始化 profile 時執行登入及工作區選擇。若要在更換容器後繼續使用同一個執行時，必須將容器使用者的 `~/.multica` 掛載到可寫入的持久儲存空間。此目錄儲存 profile 的存取權杖及守護程序 ID。若更換容器時遺失此目錄，你需要重新登入，守護程序也會註冊新的執行時。指派給原執行時的 AI 代理無法在新容器中領取任務。
+
+將工作目錄根路徑掛載到可寫入的持久儲存空間，即可在更換容器後保留執行目錄及 `.repos` 快取。使用 `--profile container` 時，預設的工作目錄根路徑是 `~/multica_workspaces_container`。
+
+另行設定程式開發工具的驗證。由容器管理器重新啟動前景守護程序，並透過更換映像檔升級 CLI。
 
 ### 開機自啟 [#autostart]
 

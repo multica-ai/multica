@@ -71,7 +71,11 @@ multica --profile container workspace switch my-workspace
 exec multica --profile container daemon start --foreground --no-auto-update
 ```
 
-Connectez-vous et sélectionnez l’espace de travail lors de l’initialisation du profil. Si les données doivent survivre au remplacement du conteneur, placez le répertoire `~/.multica` de l’utilisateur du conteneur et la racine des répertoires de travail sur un stockage persistant accessible en écriture. Configurez séparément l’authentification de l’outil de développement. Laissez le gestionnaire du conteneur redémarrer le daemon au premier plan et remplacez l’image pour mettre à jour le CLI.
+Connectez-vous et sélectionnez l’espace de travail lors de l’initialisation du profil. Pour conserver le même runtime dans la durée, montez le répertoire `~/.multica` de l’utilisateur du conteneur sur un stockage persistant accessible en écriture. Ce répertoire contient le jeton d’accès du profil et l’identifiant du daemon. Si le répertoire est perdu lors du remplacement du conteneur, vous devrez vous reconnecter et le daemon enregistrera un nouveau runtime. Les agents affectés au runtime d’origine ne pourront pas récupérer de tâches dans le nouveau conteneur.
+
+Pour conserver les répertoires d’exécution et le cache `.repos` après le remplacement du conteneur, montez la racine des répertoires de travail sur un stockage persistant accessible en écriture. Avec `--profile container`, la racine par défaut est `~/multica_workspaces_container`.
+
+Configurez séparément l’authentification de l’outil de développement. Laissez le gestionnaire du conteneur redémarrer le daemon au premier plan et remplacez l’image pour mettre à jour le CLI.
 
 ### Démarrage à l'ouverture de session [#autostart]
 
