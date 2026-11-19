@@ -399,7 +399,7 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Poll until completed/failed/timeout.
+	// Poll until the update finishes, or until it is queued behind agent work.
 	updateID := strVal(update, "id")
 	for {
 		select {
@@ -413,7 +413,8 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 		}
 
 		status := strVal(update, "status")
-		if status == "completed" || status == "failed" || status == "timeout" {
+		switch status {
+		case "completed", "failed", "timeout", "cancelled", "expired", "scheduled":
 			output, _ := cmd.Flags().GetString("output")
 			if status != "completed" {
 				// main prints the returned error, so printing the same sentence here
@@ -422,6 +423,11 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 					if err := cli.PrintJSON(os.Stdout, update); err != nil {
 						return err
 					}
+				}
+				if status == "scheduled" {
+					// Agent work is running. The update starts by itself once the
+					// machine is idle, which can take far longer than this wait.
+					return fmt.Errorf("runtime update queued (%s): the machine is running agent work and will update once it is idle", updateID)
 				}
 				return fmt.Errorf("runtime update %s: %s", status, strVal(update, "error"))
 			}

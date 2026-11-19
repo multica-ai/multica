@@ -431,3 +431,28 @@ func TestRuntimeUpdateWaitFailedJSONStillPrintsBody(t *testing.T) {
 		t.Fatalf("stdout = %#v, want the failed update object", got)
 	}
 }
+
+func TestRuntimeUpdateWaitStopsWhenQueued(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "scheduled"})
+	defer srv.Close()
+
+	err := runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "table"), []string{"rt-1"})
+	if err == nil {
+		t.Fatal("queued update returned nil; it has not been installed")
+	}
+	if !strings.Contains(err.Error(), "queued") || !strings.Contains(err.Error(), "upd-1") {
+		t.Fatalf("error = %q, want it to say the update is queued", err.Error())
+	}
+}
+
+func TestRuntimeUpdateWaitCancelledReturnsError(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	srv := runtimeUpdateStub(t, map[string]any{"id": "upd-1", "status": "cancelled"})
+	defer srv.Close()
+
+	err := runRuntimeUpdate(newRuntimeUpdateTestCmd(srv.URL, "table"), []string{"rt-1"})
+	if err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("error = %v, want the cancelled status", err)
+	}
+}
