@@ -382,6 +382,9 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 
 	body := map[string]any{
 		"target_version": targetVersion,
+		// This CLI reports a queued update instead of waiting on it, so the
+		// server may queue the update while the machine is busy.
+		"queue_when_busy": true,
 	}
 
 	var update map[string]any

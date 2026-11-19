@@ -456,3 +456,27 @@ func TestRuntimeUpdateWaitCancelledReturnsError(t *testing.T) {
 		t.Fatalf("error = %v, want the cancelled status", err)
 	}
 }
+
+func TestRuntimeUpdateAsksServerToQueueWhenBusy(t *testing.T) {
+	isolateRuntimeUpdateTest(t)
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "upd-1", "status": "pending"})
+	}))
+	defer srv.Close()
+
+	cmd := newRuntimeUpdateTestCmd(srv.URL, "json")
+	_ = cmd.Flags().Set("wait", "false")
+	if _, err := captureRuntimeStdout(t, func() error {
+		return runRuntimeUpdate(cmd, []string{"rt-1"})
+	}); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if body["queue_when_busy"] != true {
+		t.Fatalf("request body = %v; this CLI handles a queued update and must say so", body)
+	}
+}
