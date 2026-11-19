@@ -158,12 +158,7 @@ export function DaemonRuntimeActions() {
               <ScrollText className="size-3.5 mr-1.5" />
               {t(($) => $.desktop.daemon.view_logs)}
             </Button>
-            {externallyManaged ? (
-              <span className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
-                <Info className="size-3.5 shrink-0" />
-                {t(($) => $.desktop.daemon.managed_externally)}
-              </span>
-            ) : (
+            {!externallyManaged && (
               <>
                 <Button
                   size="sm"
@@ -188,6 +183,13 @@ export function DaemonRuntimeActions() {
           </>
         )}
 
+        {externallyManaged && (isRunning || isStopped) && (
+          <span className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
+            <Info className="size-3.5 shrink-0" />
+            {t(($) => $.desktop.daemon.managed_externally)}
+          </span>
+        )}
+
         {isStopped && (
           <Button size="sm" onClick={handleStart} disabled={actionLoading}>
             {actionLoading ? (
@@ -195,7 +197,7 @@ export function DaemonRuntimeActions() {
             ) : (
               <Play className="size-3.5 mr-1.5" />
             )}
-            {t(($) => $.desktop.daemon.start)}
+            {t(($) => externallyManaged ? $.desktop.daemon.start_local : $.desktop.daemon.start)}
           </Button>
         )}
 

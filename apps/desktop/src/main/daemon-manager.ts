@@ -417,6 +417,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
             ? "recovery_paused"
             : "stopped",
       profile: active.name,
+      externallyManaged: externalDaemonObserved,
     };
   }
 

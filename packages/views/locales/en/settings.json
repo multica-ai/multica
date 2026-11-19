@@ -1530,6 +1530,7 @@
       "restarting": "Restarting daemon",
       "restarting_description": "Runtimes will be back online in a few seconds.",
       "view_logs": "View logs",
+      "start_local": "Start local daemon",
       "managed_externally": "Managed outside the app",
       "restart": "Restart",
       "stop": "Stop",
