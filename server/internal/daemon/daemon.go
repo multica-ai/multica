@@ -8327,6 +8327,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	stopPrepareLease := d.startTaskPrepareLeaseExtender(prepareCtx, task, taskLog)
 	defer stopPrepareLease()
 
+	if task.CodexChatFork != nil {
+		return d.runCodexChatForkTask(prepareCtx, task, provider, agent.Config{
+			ExecutablePath: entry.Path, LaunchPrefix: profileFixedArgs,
+			CodexVersion: resolvedVersion, TaskID: task.ID, RuntimeID: task.RuntimeID,
+			Logger: taskLog,
+		})
+	}
+
 	if err := d.ensureTaskSkillBundles(prepareCtx, &task); err != nil {
 		return TaskResult{}, err
 	}
