@@ -1244,7 +1244,14 @@ func lockWorkspaceTaskOwners(ctx context.Context, qtx *db.Queries, workspaceID p
 	return nil
 }
 
+// DeleteWorkspace refuses machine credentials: a task token or cloud node PAT
+// authenticates as its owner, and deleting a workspace takes every issue, doc
+// and agent in it, so only a human may do it.
 func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	workspaceID := workspaceIDFromURL(r, "id")
 
 	// Defense in depth: the route is already gated by the
