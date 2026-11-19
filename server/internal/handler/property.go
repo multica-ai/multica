@@ -423,13 +423,16 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 
 // propertyUsageKeyCheckLimit is the most definitions countPropertyUsage counts
 // with per-key existence checks. Those checks cost one `?` per requested key
-// per property-carrying issue, whatever the issue stores; the expansion pass
-// costs one row per key the issue stores, archived definitions' values
-// included. Up to this many keys the checks were never slower than the
-// expansion even when every issue stores a single key (the expansion's best
-// case), and they stay far cheaper when issues also carry archived values.
-// Above it, sparse values make the checks lose to one expansion pass.
-const propertyUsageKeyCheckLimit = 4
+// per property-carrying issue, and each `?` re-reads the issue's property bag,
+// which is expensive once the bag is large enough to be TOASTed. The
+// expansion pass reads each bag once and emits one row per stored key,
+// archived definitions' values included. Measured on PG17 (90k issues with
+// values): up to this many keys the checks are no slower than the expansion
+// even when every issue stores a single key, the expansion's best case, and
+// they win clearly when issues also carry archived values. With issues
+// carrying ~40 values each, the two meet around this limit. Above it, sparse
+// values make most checks miss, and the expansion wins.
+const propertyUsageKeyCheckLimit = 8
 
 // propertyUsageUsesKeyCheck reports whether counting usage for this many
 // definitions should use per-key existence checks rather than one expansion
