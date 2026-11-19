@@ -21,7 +21,17 @@ export function DocNotFound({ docId }: { docId: string }) {
     draft &&
     (draft.title !== draft.baseTitle || draft.content !== draft.baseContent)
       ? draft
-      : draft?.backup;
+      : undefined;
+  const backup = draft?.backup;
+  const savedDraftLabel = t(($) => $.editor.draft);
+  const previews = [
+    {
+      key: "current",
+      draft: unsaved,
+      label: backup ? t(($) => $.editor.unsaved_changes) : savedDraftLabel,
+    },
+    { key: "backup", draft: backup, label: savedDraftLabel },
+  ];
   return (
     <div className="flex h-full flex-col overflow-auto">
       <CollectionPageState
@@ -37,21 +47,23 @@ export function DocNotFound({ docId }: { docId: string }) {
           </AppLink>
         }
       >
-        {unsaved && (
-          <details
-            open
-            className="w-full max-w-2xl rounded-md border p-3 text-left text-body"
-          >
-            <summary className="cursor-pointer">
-              {t(($) => $.editor.draft)}
-            </summary>
-            <textarea
-              aria-label={t(($) => $.editor.draft)}
-              readOnly
-              value={`${unsaved.title}\n\n${unsaved.content}`}
-              className="mt-2 min-h-40 w-full resize-y rounded-md bg-muted p-2 font-mono text-caption"
-            />
-          </details>
+        {previews.map(
+          ({ key, draft, label }) =>
+            draft && (
+              <details
+                key={key}
+                open
+                className="w-full max-w-2xl rounded-md border p-3 text-left text-body"
+              >
+                <summary className="cursor-pointer">{label}</summary>
+                <textarea
+                  aria-label={label}
+                  readOnly
+                  value={`${draft.title}\n\n${draft.content}`}
+                  className="mt-2 min-h-40 w-full resize-y rounded-md bg-muted p-2 font-mono text-caption"
+                />
+              </details>
+            ),
         )}
       </CollectionPageState>
     </div>

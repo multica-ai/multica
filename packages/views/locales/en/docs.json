@@ -47,7 +47,8 @@
     "retry": "Retry",
     "conflict": "Updated by {{name}}. Your draft is kept. Reload to continue.",
     "reload": "Reload latest",
-    "draft": "Your saved draft"
+    "draft": "Your saved draft",
+    "unsaved_changes": "Unsaved changes"
   },
   "history": {
     "title": "History",

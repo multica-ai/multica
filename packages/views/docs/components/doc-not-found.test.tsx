@@ -139,6 +139,37 @@ it("a save answered with not found turns the editor into the gone state", async 
   expect(screen.queryByRole("button", { name: "Not saved · Retry" })).toBeNull();
 });
 
+it("keeps the conflict backup and newer unsaved edits readable after deletion", async () => {
+  const latest = { ...doc, content: "Steps from another editor", revision: 2 };
+  apiMock.getDoc.mockResolvedValueOnce(doc).mockResolvedValue(latest);
+  apiMock.updateDoc.mockRejectedValue(
+    new ApiError("Changed", 409, "Conflict", { code: "revision_conflict" }),
+  );
+  mount(<DocPage docId="runbook" />);
+
+  const body = await screen.findByLabelText<HTMLTextAreaElement>("Body");
+  fireEvent.change(body, { target: { value: "Edit before the conflict" } });
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Reload latest" }, { timeout: 4000 }),
+  );
+  await waitFor(() => expect(body.value).toBe(latest.content));
+  fireEvent.change(body, { target: { value: "Edit after reloading" } });
+
+  apiMock.getDoc.mockRejectedValue(gone());
+  apiMock.updateDoc.mockRejectedValue(gone());
+  await act(async () => {
+    await qc.invalidateQueries({ queryKey: docKeys.all("review-ws") });
+  });
+
+  await screen.findByText("Doc not found");
+  const backup = screen.getByLabelText<HTMLTextAreaElement>("Your saved draft");
+  expect(backup.value).toBe("Release runbook\n\nEdit before the conflict");
+  expect(backup.readOnly).toBe(true);
+  const current = screen.getByLabelText<HTMLTextAreaElement>("Unsaved changes");
+  expect(current.value).toBe("Release runbook\n\nEdit after reloading");
+  expect(current.readOnly).toBe(true);
+});
+
 it("a gone doc without unsaved text shows no draft", async () => {
   apiMock.getDoc.mockRejectedValue(gone());
   mount(<DocPage docId="runbook" />);

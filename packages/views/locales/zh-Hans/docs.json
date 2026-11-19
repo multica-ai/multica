@@ -47,7 +47,8 @@
     "retry": "重试",
     "conflict": "{{name}} 已更新文档。草稿已保留，刷新后继续编辑。",
     "reload": "刷新最新版本",
-    "draft": "保留的草稿"
+    "draft": "保留的草稿",
+    "unsaved_changes": "未保存的修改"
   },
   "history": {
     "title": "历史",
