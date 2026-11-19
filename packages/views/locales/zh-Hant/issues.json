@@ -280,7 +280,7 @@
     "button": "顯示",
     "grouping_section": "分組",
     "ordering_section": "排序",
-    "apply_sort_to_all_projects": "用於所有專案",
+    "apply_sort_to_all_projects": "設為所有專案預設排序",
     "project_default_sort_saved": "已設為專案的預設排序",
     "card_properties_section": "卡片屬性",
     "columns_section": "欄",

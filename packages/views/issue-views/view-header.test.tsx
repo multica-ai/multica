@@ -44,7 +44,7 @@ vi.mock("../issues/components/filter-chips-bar", () => ({
 vi.mock("../issues/components/issues-header", () => ({
   IssueDisplayControls: ({ onApplySortToAllProjects }: { onApplySortToAllProjects?: () => void }) =>
     onApplySortToAllProjects ? (
-      <button type="button" onClick={onApplySortToAllProjects}>Use for all projects</button>
+      <button type="button" onClick={onApplySortToAllProjects}>Set as default for all projects</button>
     ) : null,
   IssueFilterMenu: ({ trigger, open }: { trigger: React.ReactNode; open?: boolean }) => (
     <>
@@ -232,7 +232,7 @@ describe("IssueViewHeader sort for all projects", () => {
     configured.getState().setViewMode("list");
     renderProject();
 
-    await userEvent.click(screen.getByRole("button", { name: "Use for all projects" }));
+    await userEvent.click(screen.getByRole("button", { name: "Set as default for all projects" }));
 
     expect(getIssueSurfaceViewStore("project:p-2").getState().sortBy).toBe("position");
     expect(configured.getState().sortBy).toBe("updated_at");
@@ -242,11 +242,11 @@ describe("IssueViewHeader sort for all projects", () => {
   it("is not offered while a saved view is open", () => {
     active.view = savedView();
     renderProject();
-    expect(screen.queryByRole("button", { name: "Use for all projects" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Set as default for all projects" })).toBeNull();
   });
 
   it("is not offered outside a project", () => {
     renderHeader("workspace", "workspace:all");
-    expect(screen.queryByRole("button", { name: "Use for all projects" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Set as default for all projects" })).toBeNull();
   });
 });

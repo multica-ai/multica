@@ -280,7 +280,7 @@
     "button": "显示",
     "grouping_section": "分组",
     "ordering_section": "排序",
-    "apply_sort_to_all_projects": "用于所有项目",
+    "apply_sort_to_all_projects": "设为所有项目默认排序",
     "project_default_sort_saved": "已设为项目的默认排序",
     "card_properties_section": "卡片属性",
     "columns_section": "列",

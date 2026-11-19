@@ -286,7 +286,7 @@
     "button": "Display",
     "grouping_section": "Grouping",
     "ordering_section": "Ordering",
-    "apply_sort_to_all_projects": "Use for all projects",
+    "apply_sort_to_all_projects": "Set as default for all projects",
     "project_default_sort_saved": "Default sort saved for projects",
     "card_properties_section": "Card properties",
     "columns_section": "Columns",
