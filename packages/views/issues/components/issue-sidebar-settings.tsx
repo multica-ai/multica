@@ -42,11 +42,9 @@ export function useIssueSidebarSectionLabels(): Record<IssueSidebarSection, stri
 
 /**
  * The issue sidebar: a strip level with the page header holding the "+" menu
- * and settings, the overview card for what the issue needs next, then one card
- * for everything else, its groups of related sections split by hairlines,
- * minus the sections the reader hid. Each section sits in its own slot, which
- * collapses while the section renders nothing; a group whose slots all
- * collapse goes with them.
+ * and settings, then the overview card and one card per group of related
+ * sections, minus the sections the reader hid. Each section sits in its own slot, which collapses while the
+ * section renders nothing; a card whose slots all collapse goes with them.
  */
 export function IssueSidebarSections({
   sections,
@@ -111,24 +109,14 @@ export function IssueSidebarSections({
         </div>
         <div className="flex flex-col gap-2 p-2">
           {overview && <IssueSidebarCard>{overview}</IssueSidebarCard>}
-          {/* Each group draws the hairline above it; the card clips the
-              first visible group's, wherever the groups before it collapsed. */}
-          <IssueSidebarCard className="gap-0 overflow-clip py-0">
-            <div className="-mt-px">
-              {CARD_GROUPS.map((group) => {
-                const shown = slots(group);
-                return shown.length > 0 && (
-                  <div
-                    key={group[0]}
-                    data-slot="issue-sidebar-group"
-                    className="flex flex-col gap-3 border-t py-1.5 [&>*]:flow-root [&:not(:has(>:not(:empty)))]:hidden"
-                  >
-                    {shown}
-                  </div>
-                );
-              })}
-            </div>
-          </IssueSidebarCard>
+          {CARD_GROUPS.map((group) => {
+            const shown = slots(group);
+            return shown.length > 0 && (
+              <IssueSidebarCard key={group[0]} className="[&:not(:has(>:not(:empty)))]:hidden">
+                {shown}
+              </IssueSidebarCard>
+            );
+          })}
           <div className="flex flex-col gap-2 pt-1 [&>*]:flow-root">{slots(FOOTER_GROUP)}</div>
           {hiddenCount > 0 && (
             <IssueSidebarSettings

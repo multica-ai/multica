@@ -30,7 +30,6 @@ function renderSections(revealed?: IssueSidebarSection[]) {
 
 const renderedOrder = () => screen.getAllByText(/^body:/).map((el) => el.textContent!.slice("body:".length));
 const cardOf = (text: string) => screen.getByText(text).closest("[data-slot=issue-sidebar-card]");
-const groupOf = (text: string) => screen.getByText(text).closest("[data-slot=issue-sidebar-group]");
 
 async function openSettings() {
   fireEvent.click(screen.getByRole("button", { name: "Customize sidebar" }));
@@ -40,22 +39,19 @@ async function openSettings() {
 describe("IssueSidebarSections", () => {
   beforeEach(() => useIssueSidebarSectionsStore.getState().reset());
 
-  it("puts the overview on its own card, then every other section on one card in related groups", () => {
+  it("puts the overview first, then groups related sections into cards", () => {
     renderSections();
     expect(renderedOrder()).toEqual(available.filter((id) => id !== "apps"));
     const cards = document.querySelectorAll("[data-slot=issue-sidebar-card]");
-    expect(cards).toHaveLength(2);
     expect(cards[0]).toHaveTextContent("overview");
-    expect(cardOf("body:properties")).toBe(cards[1]);
-    expect(cardOf("body:wakeups")).toBe(cards[1]);
-    expect(groupOf("body:pull_requests")).toBe(groupOf("body:environments"));
-    expect(groupOf("body:parent")).toBe(groupOf("body:duplicates"));
-    expect(groupOf("body:pull_requests")).not.toBe(groupOf("body:parent"));
+    expect(cardOf("body:pull_requests")).toBe(cardOf("body:environments"));
+    expect(cardOf("body:parent")).toBe(cardOf("body:duplicates"));
+    expect(cardOf("body:pull_requests")).not.toBe(cardOf("body:parent"));
     // Creator and timestamps are small print under the cards, not a card.
     expect(cardOf("body:details")).toBeNull();
   });
 
-  it("leaves hidden sections out, and drops a group once all of its sections are hidden", () => {
+  it("leaves hidden sections out, and drops a card once all of its sections are hidden", () => {
     act(() => {
       useIssueSidebarSectionsStore.getState().setHidden("execution_log", true);
       useIssueSidebarSectionsStore.getState().setHidden("metadata", true);
@@ -64,11 +60,10 @@ describe("IssueSidebarSections", () => {
 
     expect(screen.queryByText("body:execution_log")).toBeNull();
     expect(container.querySelector('[data-issue-sidebar-section="execution_log"]')).toBeNull();
-    expect(container.querySelectorAll("[data-slot=issue-sidebar-group]")).toHaveLength(4);
     expect(screen.getByRole("button", { name: /2 sections hidden/ })).toBeInTheDocument();
   });
 
-  it("collapses the Output group while it has nothing to show, offering its actions from the strip's + menu", async () => {
+  it("collapses the Output card while it has nothing to show, offering its actions from the strip's + menu", async () => {
     function EmptyOutput({ id, label }: { id: string; label: string }) {
       useIssueSidebarAddEntry(id, { order: 0, items: <DropdownMenuItem>{label}</DropdownMenuItem> });
       return null;
@@ -87,10 +82,9 @@ describe("IssueSidebarSections", () => {
         />
       </I18nProvider>,
     );
-    const outputGroup = document.querySelector('[data-issue-sidebar-section="pull_requests"]')!.parentElement!;
-    expect(outputGroup).toHaveAttribute("data-slot", "issue-sidebar-group");
-    // The group hides itself once every section slot in it is empty.
-    expect([...outputGroup.children].every((slot) => slot.childNodes.length === 0)).toBe(true);
+    const outputCard = document.querySelector('[data-issue-sidebar-section="pull_requests"]')!.parentElement!;
+    // The card hides itself once every section slot in it is empty.
+    expect([...outputCard.children].every((slot) => slot.childNodes.length === 0)).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(await screen.findByRole("menuitem", { name: "Link pull request" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Start an environment" })).toBeInTheDocument();
