@@ -182,6 +182,7 @@ func Classify(rawError string) Reason {
 	case httpQuotaCodeRe.MatchString(lower),
 		containsAny(lower,
 			"insufficient_balance",
+			"insufficient balance",
 			"balance is too low",
 			"monthly usage limit",
 			"usage limit",

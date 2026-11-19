@@ -70,6 +70,7 @@ func TestClassifyRules(t *testing.T) {
 		// 4. Provider quota / billing.
 		{"402", "API Error: 402 Payment Required", ReasonAgentProviderQuotaLimit},
 		{"insufficient_balance", `{"error":{"code":"insufficient_balance"}}`, ReasonAgentProviderQuotaLimit},
+		{"provider 429 with insufficient balance", "API Error: Request rejected (429) · [1113][Insufficient balance or no resource package. Please recharge.]", ReasonAgentProviderQuotaLimit},
 		{"balance is too low", "balance is too low to make this request", ReasonAgentProviderQuotaLimit},
 		{"monthly usage limit", "You've hit your org's monthly usage limit", ReasonAgentProviderQuotaLimit},
 		{"usage limit", "Account exceeded the daily usage limit", ReasonAgentProviderQuotaLimit},
