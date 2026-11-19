@@ -23,6 +23,24 @@ import (
 // a full phishing pitch into a workspace name that gets sent from our domain.
 const maxSubjectFieldRunes = 60
 
+// EmailSender is implemented by every delivery backend (SMTP relay, Resend,
+// SES, DEV stdout) so handlers depend on the interface, not a concrete provider.
+type EmailSender interface {
+	SendVerificationCode(to, code string) error
+	SendInvitationEmail(to, inviterName, workspaceName, invitationID string) error
+}
+
+// NewEmailSender selects a delivery backend from EMAIL_PROVIDER. "ses" uses
+// native AWS SES via ambient IAM credentials (instance/task role — no static
+// secret to provision, store, or rotate). Anything else preserves the existing
+// SMTP relay → Resend API → DEV stdout auto-detection in NewEmailService.
+func NewEmailSender() EmailSender {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("EMAIL_PROVIDER")), "ses") {
+		return newSESSender()
+	}
+	return NewEmailService()
+}
+
 type EmailService struct {
 	client          *resend.Client
 	fromEmail       string
@@ -338,13 +356,7 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 // (6-digit numeric) so no user-controlled text reaches the email body here.
 // Delivery priority: SMTP relay → Resend API → DEV stdout.
 func (s *EmailService) SendVerificationCode(to, code string) error {
-	body := fmt.Sprintf(
-		`<div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">
-			<h2>Your verification code</h2>
-			<p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 24px 0;">%s</p>
-			<p>This code expires in 10 minutes.</p>
-			<p style="color: #666; font-size: 14px;">If you didn't request this code, you can safely ignore this email.</p>
-		</div>`, code)
+	body := verificationHTML(code)
 
 	if s.smtpHost != "" {
 		return s.sendSMTP(to, "Your Multica verification code", body)
@@ -389,25 +401,44 @@ func (s *EmailService) SendInvitationEmail(to, inviterName, workspaceName, invit
 // Separated from SendInvitationEmail so the sanitization behavior is unit-testable
 // without needing to mock the Resend SDK or an SMTP server.
 func buildInvitationParams(from, to, inviterName, workspaceName, inviteURL string) *resend.SendEmailRequest {
-	safeWorkspace := html.EscapeString(workspaceName)
-	safeInviter := html.EscapeString(inviterName)
-	subjectInviter := sanitizeSubjectField(inviterName)
-	subjectWorkspace := sanitizeSubjectField(workspaceName)
-
 	return &resend.SendEmailRequest{
 		From:    from,
 		To:      []string{to},
-		Subject: fmt.Sprintf("%s invited you to %s on Multica", subjectInviter, subjectWorkspace),
-		Html: fmt.Sprintf(
-			`<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
-				<h2>You're invited to join %s</h2>
-				<p><strong>%s</strong> invited you to collaborate in the <strong>%s</strong> workspace on Multica.</p>
-				<p style="margin: 24px 0;">
-					<a href="%s" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Accept invitation</a>
-				</p>
-				<p style="color: #666; font-size: 14px;">You'll need to log in to accept or decline the invitation.</p>
-			</div>`, safeWorkspace, safeInviter, safeWorkspace, inviteURL),
+		Subject: invitationSubject(inviterName, workspaceName),
+		Html:    invitationHTML(inviterName, workspaceName, inviteURL),
 	}
+}
+
+// ---------- shared templates (used by all providers) ----------
+
+func verificationHTML(code string) string {
+	return fmt.Sprintf(
+		`<div style="font-family: sans-serif; max-width: 400px; margin: 0 auto;">
+			<h2>Your verification code</h2>
+			<p style="font-size: 32px; font-weight: bold; letter-spacing: 8px; margin: 24px 0;">%s</p>
+			<p>This code expires in 10 minutes.</p>
+			<p style="color: #666; font-size: 14px;">If you didn't request this code, you can safely ignore this email.</p>
+		</div>`, code)
+}
+
+func invitationHTML(inviterName, workspaceName, inviteURL string) string {
+	safeWorkspace := html.EscapeString(workspaceName)
+	safeInviter := html.EscapeString(inviterName)
+	return fmt.Sprintf(
+		`<div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+			<h2>You're invited to join %s</h2>
+			<p><strong>%s</strong> invited you to collaborate in the <strong>%s</strong> workspace on Multica.</p>
+			<p style="margin: 24px 0;">
+				<a href="%s" style="display: inline-block; padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: 500;">Accept invitation</a>
+			</p>
+			<p style="color: #666; font-size: 14px;">You'll need to log in to accept or decline the invitation.</p>
+		</div>`, safeWorkspace, safeInviter, safeWorkspace, inviteURL)
+}
+
+func invitationSubject(inviterName, workspaceName string) string {
+	return fmt.Sprintf("%s invited you to %s on Multica",
+		sanitizeSubjectField(inviterName),
+		sanitizeSubjectField(workspaceName))
 }
 
 // sanitizeSubjectField prepares user-controlled text for the email Subject line.
