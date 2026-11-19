@@ -53,6 +53,8 @@ Multica は、普段使っている AI コーディングツールの代わり�
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+Claude Code では、デーモンの環境変数 `CLAUDE_CONFIG_DIR` に絶対パスを指定すると、Multica はその場所からユーザーとプラグインのスキルを一覧表示・インポートします。起動ラッパー内だけで指定したパスはスキャンに反映されません。
+
 Amp のモデル欄では、基盤モデルの ID ではなく `high` などの Amp の**モード**を指定します。空欄なら Amp の既定値を使います。
 
 Amp ではデーモンまたはエージェントの環境に `AMP_API_KEY` も必要で、保存済みの対話型ログインだけでは実行できません。
