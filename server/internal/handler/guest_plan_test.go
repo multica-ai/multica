@@ -13,11 +13,21 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
+// useCloudURL sets the shared handler's configured Cloud URL, which is what
+// makes it a Cloud deployment for guests.
+func useCloudURL(t *testing.T, url string) {
+	t.Helper()
+	prior := testHandler.cfg.CloudURL
+	testHandler.cfg.CloudURL = url
+	t.Cleanup(func() { testHandler.cfg.CloudURL = prior })
+}
+
 // useGuestsFeature makes the shared handler a Cloud deployment after the
 // commercial launch (billing_workspace_subscriptions on) whose entitlement
 // stub returns decision for the guests paid feature in the test workspace.
 func useGuestsFeature(t *testing.T, decision entitlement.FeatureDecision) {
 	t.Helper()
+	useCloudURL(t, "https://cloud.example.test")
 	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
 	stub := entitlementtest.New()
 	stub.SetFeature(uuid.MustParse(testWorkspaceID), entitlement.FeatureGuests, decision)
@@ -216,14 +226,26 @@ func TestGuestsReleaseFollowsTheCommercialLaunch(t *testing.T) {
 		return testutil.Call(t, testHandler.CreateInvitation, req)
 	}
 
-	// Self-host: no Cloud entitlements. The retired key cannot turn guests off.
+	// Self-host: no Cloud URL. The retired key cannot turn guests off.
 	priorFeatures := testHandler.Features
 	testHandler.Features = nil
 	t.Cleanup(func() { testHandler.Features = priorFeatures })
+	useCloudURL(t, "")
 	withFeatureFlag(t, testHandler, "workspace_guests", false)
 	invite("-selfhost").Want(http.StatusCreated)
 	if on, ok := guestsConfigFlag(t); !ok || !on {
 		t.Fatalf("self-host config workspace_guests = %v (present %v), want true", on, ok)
+	}
+
+	// A Cloud URL whose plan client is unavailable: still Cloud, so adding
+	// guests is refused even with the commercial switch on.
+	useCloudURL(t, "https://cloud.example.test")
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	if resp := invite("-noplans"); resp.Code != http.StatusForbidden || !strings.Contains(resp.Body.String(), "workspace_guests_disabled") {
+		t.Fatalf("Cloud guest invite without a plan client = %d %s, want 403 workspace_guests_disabled", resp.Code, resp.Body.String())
+	}
+	if on, _ := guestsConfigFlag(t); on {
+		t.Fatal("Cloud config workspace_guests without a plan client = true, want false")
 	}
 
 	// Cloud before the commercial launch.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -32,14 +33,22 @@ const maxGuestProjects = 100
 // It is derived, not a flag of its own.
 const WorkspaceGuestsConfigKey = "workspace_guests"
 
-// guestsReleased reports whether this deployment offers adding guests. A
-// self-hosted server, which has no Cloud plans, always does. On Cloud, guests
-// are part of the commercial launch and ship with it: they become available
-// when billing_workspace_subscriptions is turned on, and the workspace's plan
-// then decides through the guests paid feature (requireGuestAddition).
+// guestsReleased reports whether this deployment offers adding guests. The
+// deployment mode comes from configuration, not from whether the Cloud plan
+// client came up:
+//
+//   - No Cloud URL (self-host): always. There are no Cloud plans.
+//   - A Cloud URL: guests are part of the commercial launch. They are offered
+//     once billing_workspace_subscriptions is on, and the workspace's plan
+//     then decides through the guests paid feature (requireGuestAddition).
+//     When the plan client is unavailable (a malformed Cloud URL), nothing
+//     could apply the plan, so adding guests is refused rather than allowed.
 func (h *Handler) guestsReleased(ctx context.Context) bool {
-	if h.Features == nil {
+	if strings.TrimSpace(h.cfg.CloudURL) == "" {
 		return true
+	}
+	if h.Features == nil {
+		return false
 	}
 	return featureflags.BillingWorkspaceSubscriptionsEnabled(ctx, h.FeatureFlags)
 }
