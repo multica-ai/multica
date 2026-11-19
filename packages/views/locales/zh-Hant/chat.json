@@ -262,6 +262,11 @@
     "wakeup_active": "等待回來匯報"
   },
   "header": {
+    "fork": "建立聊天分支",
+    "fork_pending": "正在建立分支…",
+    "fork_failed": "無法建立聊天分支。請確認聊天沒有執行中的任務，且 Codex 執行環境可用。",
+    "fork_ready": "聊天分支已就緒",
+    "open_fork": "開啟分支",
     "agent_settings": "AI 代理設定",
     "rename": "重新命名會話",
     "delete": "刪除會話",

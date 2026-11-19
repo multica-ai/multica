@@ -343,6 +343,7 @@ import {
   ChatPendingTaskSchema,
   ChatSessionListSchema,
   ChatForkSchema,
+  type ChatFork,
   ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
   SendChatMessageResponseSchema,
@@ -4527,14 +4528,14 @@ export class ApiClient {
 
   async createChatFork(sessionId: string) {
     const raw: unknown = await this.fetch(`/api/chat/sessions/${sessionId}/forks`, { method: "POST" });
-    return parseWithFallback(raw, ChatForkSchema.nullable(), null, {
+    return parseWithFallback<ChatFork | null>(raw, ChatForkSchema.nullable(), null, {
       endpoint: "POST /api/chat/sessions/:id/forks",
     });
   }
 
   async getChatFork(sessionId: string, taskId: string) {
     const raw: unknown = await this.fetch(`/api/chat/sessions/${sessionId}/forks/${taskId}`);
-    return parseWithFallback(raw, ChatForkSchema.nullable(), null, {
+    return parseWithFallback<ChatFork | null>(raw, ChatForkSchema.nullable(), null, {
       endpoint: "GET /api/chat/sessions/:id/forks/:taskId",
     });
   }
