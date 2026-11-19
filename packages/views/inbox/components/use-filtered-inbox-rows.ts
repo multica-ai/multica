@@ -26,11 +26,18 @@ export type InboxListLoad = "loading" | "loaded" | "failed";
 
 /**
  * A list that has loaded stays `loaded` when a later refresh fails: its rows
- * stay on screen rather than the Inbox emptying.
+ * stay on screen rather than the Inbox emptying. One that failed stays
+ * `failed` while it is tried again: a new attempt resets the query to pending,
+ * and its retries can take seconds.
  */
-export function inboxListLoad(query: { data: unknown; isError: boolean }): InboxListLoad {
+export function inboxListLoad(query: {
+  data: unknown;
+  isError: boolean;
+  isFetching: boolean;
+  errorUpdateCount: number;
+}): InboxListLoad {
   if (query.data !== undefined) return "loaded";
-  return query.isError ? "failed" : "loading";
+  return query.isError || (query.errorUpdateCount > 0 && query.isFetching) ? "failed" : "loading";
 }
 const EMPTY_TASKS: AgentTask[] = [];
 

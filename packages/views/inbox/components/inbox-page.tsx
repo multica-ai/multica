@@ -380,8 +380,9 @@ export function InboxPage() {
 
   // A targeted lookup must not hide pages that have already loaded. Its
   // pending/error states only block resolution of the off-page selection.
-  const viewLoading = isArchivedView ? archivedLoading : loading;
-  const viewError = isArchivedView ? archivedError : inboxQuery.isError && !inboxQuery.data;
+  // A list that failed and is being tried again keeps its error, not a skeleton.
+  const viewLoading = isArchivedView ? archivedLoading : loading && !liveFailed;
+  const viewError = isArchivedView ? archivedError : liveFailed;
   const needsLookup = isArchivedView && !!selectedKey && !selectedOnPage;
   const lookupLoading = needsLookup && (lookup.isLoading || presence.isLoading);
   const lookupError = needsLookup && (lookup.isError || presence.isError) && !selected;

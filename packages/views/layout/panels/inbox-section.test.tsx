@@ -777,6 +777,23 @@ describe("InboxSection while the Inbox loads", () => {
     expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining("Back again")]);
   });
 
+  it("keeps saying it could not load while a retry waits on a busy server", async () => {
+    apiMock.listInbox.mockRejectedValue(busy());
+    renderUnloaded();
+    await advance(30_000);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(4);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await advance(0);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(5);
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load notifications");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+
+    await advance(30_000);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(8);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
   it("says No notifications when the server answers with none", async () => {
     apiMock.listInbox.mockResolvedValue([]);
     renderUnloaded();

@@ -24,8 +24,9 @@ const listData: { active: InboxItem[]; archived: InboxItem[]; lookup?: InboxItem
 const NO_SNOOZED: never[] = [];
 const queryCalls: Array<{ queryKey: readonly unknown[]; enabled?: boolean }> = [];
 const lookupState = { isLoading: false, isError: false, refetch: vi.fn() };
-// The active list as a read that failed before anything loaded.
-const activeFailure = { failed: false, refetch: vi.fn() };
+// The active list as a read that failed before anything loaded, and is
+// possibly being tried again.
+const activeFailure = { failed: false, retrying: false, refetch: vi.fn() };
 const queryClient = vi.hoisted(() => ({ setQueryData: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({
   queryOptions: (options: unknown) => options,
@@ -42,7 +43,9 @@ vi.mock("@tanstack/react-query", () => ({
     refetch: vi.fn(),
     ...(options.queryKey.includes("lookup") ? lookupState : {}),
     ...(options.queryKey.at(-1) === "list" && activeFailure.failed
-      ? { data: undefined, isError: true, isFetching: false, refetch: activeFailure.refetch }
+      ? activeFailure.retrying
+        ? { data: undefined, isError: false, isLoading: true, isFetching: true, errorUpdateCount: 1, refetch: activeFailure.refetch }
+        : { data: undefined, isError: true, isFetching: false, errorUpdateCount: 1, refetch: activeFailure.refetch }
       : {}),
   }); },
   useInfiniteQuery: (options: { queryKey: readonly unknown[]; enabled?: boolean }) => {
@@ -272,6 +275,7 @@ function reset() {
   lookupState.isError = false;
   lookupState.refetch.mockClear();
   activeFailure.failed = false;
+  activeFailure.retrying = false;
   activeFailure.refetch.mockClear();
   queryCalls.length = 0;
   searchParams = new URLSearchParams();
@@ -465,6 +469,23 @@ describe("InboxPage", () => {
     expect(screen.queryByTestId("list")).toBeNull();
     fireEvent.click(within(alert).getByRole("button"));
     expect(activeFailure.refetch).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a phone", PHONE],
+    ["desktop", DESKTOP],
+  ])("on %s, keeps the load error while it is tried again", (_device, width) => {
+    reset();
+    layout.width = width;
+    activeFailure.failed = true;
+    activeFailure.retrying = true;
+    searchParams = new URLSearchParams("issue=issue-1");
+
+    render(<InboxPage />);
+
+    expect(within(screen.getByRole("alert")).getByRole("button")).toBeDisabled();
+    // Still unknown, so the open notification is not sent to its issue page.
+    expect(replace).not.toHaveBeenCalled();
   });
 
   // The live Inbox lives in the Work panel; the archive has nowhere else to list.
