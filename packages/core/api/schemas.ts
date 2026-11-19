@@ -4114,6 +4114,7 @@ export const RuntimeUpdateSchema = z.object({
   scheduled_at: z.string().optional(),
   active_tasks: z.number().int().nonnegative().optional().catch(undefined),
   run_started_at: z.string().optional(),
+  cancellable: z.boolean().optional().catch(undefined),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();

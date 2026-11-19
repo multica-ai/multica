@@ -1279,6 +1279,12 @@ export interface RuntimeUpdate {
   active_tasks?: number;
   /** When installation started. */
   run_started_at?: string;
+  /**
+   * Whether Cancel would succeed now. False while the daemon may be picking
+   * the update up, and for updates started by clients that cannot show a
+   * cancelled one. Absent on older servers.
+   */
+  cancellable?: boolean;
   created_at: string;
   updated_at: string;
 }

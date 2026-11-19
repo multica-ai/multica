@@ -329,6 +329,14 @@ describe("UpdateSection queued updates", () => {
     expect(await screen.findByText("Updates when idle")).toBeInTheDocument();
   });
 
+  it("hides Cancel when the server says it would not succeed", async () => {
+    follow(request({ cancellable: false }));
+    renderSection({ runtimeId: "runtime-1", currentVersion: "v0.9.0" });
+
+    expect(await screen.findByText("Updates when idle")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+
   it("drops Cancel once installation starts", async () => {
     follow(request({ status: "running", run_started_at: new Date(clock).toISOString() }));
     renderSection({ runtimeId: "runtime-1", currentVersion: "v0.9.0" });

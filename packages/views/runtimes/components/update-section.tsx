@@ -355,18 +355,19 @@ export function UpdateSection({
               </span>
             )}
 
-            {(status === "pending" || status === "scheduled") && (
-              <Button
-                variant="ghost"
-                size="xs"
-                className="ml-auto"
-                onClick={handleCancel}
-                disabled={cancel.isPending}
-                aria-busy={cancel.isPending || undefined}
-              >
-                {t(($) => $.update.cancel)}
-              </Button>
-            )}
+            {(status === "pending" || status === "scheduled") &&
+              update?.cancellable !== false && (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="ml-auto"
+                  onClick={handleCancel}
+                  disabled={cancel.isPending}
+                  aria-busy={cancel.isPending || undefined}
+                >
+                  {t(($) => $.update.cancel)}
+                </Button>
+              )}
 
             {canStart && (
               <Button
