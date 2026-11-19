@@ -1082,6 +1082,34 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	return &Session{Supplement: supplement, SupplementReady: supplementReady, Messages: msgCh, Result: resCh}, nil
 }
 
+// ForkCodexThread forks a source rollout already copied into the private
+// staging CODEX_HOME. It launches no model turn.
+func ForkCodexThread(ctx context.Context, cfg Config, cwd, sourceThreadID string) (string, error) {
+	if cfg.Env["CODEX_HOME"] == "" || sourceThreadID == "" {
+		return "", errors.New("Codex fork requires a staging home and source thread ID")
+	}
+	backend, err := New("codex", cfg)
+	if err != nil {
+		return "", err
+	}
+	session, err := backend.(*codexBackend).executeOnce(ctx, "", ExecOptions{
+		Cwd: cwd, Timeout: time.Minute, codexForkSourceThread: sourceThreadID,
+	}, 1)
+	if err != nil {
+		return "", err
+	}
+	for range session.Messages {
+	}
+	result, ok := <-session.Result
+	if !ok {
+		return "", errors.New("Codex fork closed without a result")
+	}
+	if result.Status != "completed" {
+		return "", fmt.Errorf("Codex fork failed: %s", result.Error)
+	}
+	return result.SessionID, nil
+}
+
 func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions, attempt int) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -1163,7 +1191,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
 
 	// Getting a process is the only step that depends on the warm pool.
-	pooled := b.cfg.WarmPool != nil
+	pooled := b.cfg.WarmPool != nil && opts.codexForkSourceThread == ""
 	var proc *codexProcess
 	var fingerprint string
 	if pooled {
@@ -1392,6 +1420,19 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			}
 			b.cfg.Logger.Info("codex lifecycle", "phase", "initialize_response", "warm_pool", pooled, "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", proc.cmd.Process.Pid, "attempt", attempt, "latency", time.Since(initializeStarted).Round(time.Millisecond).String())
 			c.notify("initialized")
+
+			if opts.codexForkSourceThread != "" {
+				childID, err := c.forkThread(runCtx, opts.codexForkSourceThread)
+				cleanupConfirmed := closeProc()
+				if err != nil {
+					resCh <- Result{Status: "failed", Error: err.Error()}
+				} else if !cleanupConfirmed {
+					resCh <- Result{Status: "failed", Error: "Codex fork process cleanup was not confirmed"}
+				} else {
+					resCh <- Result{Status: "completed", SessionID: childID}
+				}
+				return
+			}
 
 			// 2. Start a new thread, or resume the prior one for this issue. When
 			// resume fails (thread GCed on the server, schema drift, etc.) we fall
@@ -1907,6 +1948,21 @@ func codexThreadConfig() map[string]any {
 // answer a fresh start request. The returned threadID is what subsequent
 // turn/start calls must reference, and resumed indicates whether the prior
 // thread was picked up (only useful for logging).
+func (c *codexClient) forkThread(ctx context.Context, sourceID string) (string, error) {
+	result, err := c.request(ctx, "thread/fork", map[string]any{
+		"threadId":     sourceID,
+		"excludeTurns": true,
+	})
+	if err != nil {
+		return "", err
+	}
+	childID := extractThreadID(result)
+	if childID == "" || childID == sourceID {
+		return "", errors.New("Codex fork did not return a distinct child thread ID")
+	}
+	return childID, nil
+}
+
 func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions, logger *slog.Logger) (string, bool, error) {
 	if opts.RequireNativeResume && opts.ResumeSessionID == "" {
 		return "", false, fmt.Errorf("codex native resume requires a thread ID")
@@ -2643,7 +2699,7 @@ func (e *codexHandshakeTimeoutError) Unwrap() error {
 
 func isCodexHandshakeRPC(method string) bool {
 	switch method {
-	case "initialize", "thread/start", "thread/resume", "thread/name/set", "turn/start":
+	case "initialize", "thread/start", "thread/resume", "thread/fork", "thread/name/set", "turn/start":
 		return true
 	default:
 		return false
