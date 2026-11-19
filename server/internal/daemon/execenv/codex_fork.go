@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/pelletier/go-toml/v2"
 )
 
 type codexForkReceipt struct {
@@ -107,7 +108,7 @@ func validPublishedCodexFork(dir, childID string) bool {
 // ForkCodexChat publishes a native fork from daemon-resolved conversation paths.
 // sourceArchiveDir is set only for a source fork whose archive is owned by that
 // conversation. The caller must pin both stores and resolve source access.
-func ForkCodexChat(ctx context.Context, cfg agent.Config, cwd, sourceSessionsDir, sourceArchiveDir, sourceID, destinationStore, requestID string) (string, error) {
+func ForkCodexChat(ctx context.Context, cfg agent.Config, cwd, sourceSessionsDir, sourceArchiveDir, sourceConfigPath, sourceID, destinationStore, requestID string) (string, error) {
 	return publishCodexFork(destinationStore, requestID, func(staging string) (string, error) {
 		if err := ctx.Err(); err != nil {
 			return "", err
@@ -128,15 +129,43 @@ func ForkCodexChat(ctx context.Context, cfg agent.Config, cwd, sourceSessionsDir
 			cfg.Env = make(map[string]string, 1)
 		}
 		cfg.Env["CODEX_HOME"] = staging
+		stagingConfig := filepath.Join(staging, "config.toml")
+		if sourceConfigPath != "" {
+			if err := writeCodexForkProviders(sourceConfigPath, stagingConfig); err != nil {
+				return "", err
+			}
+		}
 		childID, err := agent.ForkCodexThread(ctx, cfg, cwd, sourceID)
 		if err != nil {
 			return "", err
+		}
+		if err := os.Remove(stagingConfig); err != nil && !os.IsNotExist(err) {
+			return "", fmt.Errorf("remove temporary Codex provider config: %w", err)
 		}
 		if err := os.Rename(stagedSource, filepath.Join(archive, filepath.Base(stagedSource))); err != nil {
 			return "", fmt.Errorf("archive staged Codex source: %w", err)
 		}
 		return childID, nil
 	})
+}
+
+// Copy only provider definitions from the daemon-resolved runtime config.
+func writeCodexForkProviders(source, destination string) error {
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return fmt.Errorf("read Codex fork provider config: %w", err)
+	}
+	var providers struct {
+		ModelProviders map[string]any `toml:"model_providers,omitempty"`
+	}
+	if err := toml.Unmarshal(data, &providers); err != nil {
+		return errors.New("decode Codex fork provider config")
+	}
+	encoded, err := toml.Marshal(providers)
+	if err != nil {
+		return errors.New("encode Codex fork provider config")
+	}
+	return os.WriteFile(destination, encoded, 0o600)
 }
 
 func stageCodexForkSource(sourceSessionsDir, staging, sourceID string) (string, error) {

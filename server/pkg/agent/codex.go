@@ -2039,6 +2039,42 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 	return []map[string]any{{"type": "text", "text": text}}
 }
 
+type codexForkThreadResponse struct {
+	Thread struct {
+		ID            string `json:"id"`
+		ModelProvider string `json:"modelProvider"`
+	} `json:"thread"`
+}
+
+func (c *codexClient) forkThread(ctx context.Context, sourceID string) (string, error) {
+	sourceResult, err := c.request(ctx, "thread/read", map[string]any{
+		"threadId": sourceID, "includeTurns": false,
+	})
+	if err != nil {
+		return "", err
+	}
+	var source codexForkThreadResponse
+	if err := json.Unmarshal(sourceResult, &source); err != nil || source.Thread.ID != sourceID || source.Thread.ModelProvider == "" {
+		return "", errors.New("Codex fork source provider is unavailable")
+	}
+	result, err := c.request(ctx, "thread/fork", map[string]any{
+		"threadId":      sourceID,
+		"excludeTurns":  true,
+		"modelProvider": source.Thread.ModelProvider,
+	})
+	if err != nil {
+		return "", err
+	}
+	var child codexForkThreadResponse
+	if err := json.Unmarshal(result, &child); err != nil || child.Thread.ID == "" || child.Thread.ID == sourceID {
+		return "", errors.New("Codex fork did not return a distinct child thread ID")
+	}
+	if child.Thread.ModelProvider != source.Thread.ModelProvider {
+		return "", errors.New("Codex fork changed the source model provider")
+	}
+	return child.Thread.ID, nil
+}
+
 // startOrResumeThread picks between Codex's thread/resume and thread/start
 // based on opts.ResumeSessionID. When a prior thread ID is provided it first
 // tries thread/resume; recoverable protocol errors (unknown thread, schema
@@ -2047,21 +2083,6 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 // answer a fresh start request. The returned threadID is what subsequent
 // turn/start calls must reference, and resumed indicates whether the prior
 // thread was picked up (only useful for logging).
-func (c *codexClient) forkThread(ctx context.Context, sourceID string) (string, error) {
-	result, err := c.request(ctx, "thread/fork", map[string]any{
-		"threadId":     sourceID,
-		"excludeTurns": true,
-	})
-	if err != nil {
-		return "", err
-	}
-	childID := extractThreadID(result)
-	if childID == "" || childID == sourceID {
-		return "", errors.New("Codex fork did not return a distinct child thread ID")
-	}
-	return childID, nil
-}
-
 func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions, logger *slog.Logger) (string, bool, error) {
 	if opts.RequireNativeResume && opts.ResumeSessionID == "" {
 		return "", false, fmt.Errorf("codex native resume requires a thread ID")

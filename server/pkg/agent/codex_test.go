@@ -2610,10 +2610,13 @@ func TestCodexForkThreadUsesBoundedResponse(t *testing.T) {
 
 	c, fs, _ := newTestCodexClient(t)
 	wait := drainRPCScript(t, c, fs, []rpcResponse{{
+		method: "thread/read",
+		result: json.RawMessage(`{"thread":{"id":"thr_source","modelProvider":"fixture"}}`),
+	}, {
 		method: "thread/fork",
-		result: json.RawMessage(`{"thread":{"id":"thr_child"}}`),
+		result: json.RawMessage(`{"thread":{"id":"thr_child","modelProvider":"fixture"}}`),
 		assertFn: func(t *testing.T, params map[string]any) {
-			if params["threadId"] != "thr_source" || params["excludeTurns"] != true {
+			if params["threadId"] != "thr_source" || params["excludeTurns"] != true || params["modelProvider"] != "fixture" {
 				t.Errorf("fork params = %v", params)
 			}
 		},
@@ -2623,7 +2626,7 @@ func TestCodexForkThreadUsesBoundedResponse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
 	childID, err := c.forkThread(ctx, "thr_source")
-	if childID != "thr_child" || err != nil || len(fs.Lines()) != 1 {
+	if childID != "thr_child" || err != nil || len(fs.Lines()) != 2 {
 		t.Fatalf("childID = %q, error = %v, RPCs = %v", childID, err, fs.Lines())
 	}
 }
