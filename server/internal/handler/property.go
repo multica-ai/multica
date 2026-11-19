@@ -393,26 +393,14 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeArchived := r.URL.Query().Get("include_archived") == "true"
-	// The whole catalog (archived included) is a cheap read of
-	// issue_property; the size of the full catalog also tells
-	// countPropertyUsage which counting strategy is cheaper.
-	all, err := h.Queries.ListIssueProperties(r.Context(), db.ListIssuePropertiesParams{
+	listed, err := h.Queries.ListIssueProperties(r.Context(), db.ListIssuePropertiesParams{
 		WorkspaceID:     wsUUID,
-		IncludeArchived: true,
+		IncludeArchived: includeArchived,
 	})
 	if err != nil {
 		slog.Warn("ListIssueProperties failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list properties")
 		return
-	}
-	listed := all
-	if !includeArchived {
-		listed = make([]db.IssueProperty, 0, len(all))
-		for _, p := range all {
-			if !p.ArchivedAt.Valid {
-				listed = append(listed, p)
-			}
-		}
 	}
 	// usage_count costs a pass over the workspace's property-carrying issues,
 	// so callers that only need the catalog (issue surfaces, CLI name
@@ -420,7 +408,7 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 	// Anything else keeps the counts, which is what older clients expect.
 	var usage map[string]int64
 	if r.URL.Query().Get("include_usage") != "false" {
-		if usage, err = h.countPropertyUsage(r.Context(), wsUUID, listed, len(all)); err != nil {
+		if usage, err = h.countPropertyUsage(r.Context(), wsUUID, listed); err != nil {
 			slog.Warn("count property usage failed", append(logger.RequestAttrs(r), "error", err)...)
 			writeError(w, http.StatusInternalServerError, "failed to list properties")
 			return
@@ -433,30 +421,35 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"properties": resp, "total": len(resp)})
 }
 
-// propertyUsageKeyCheckRatio decides how countPropertyUsage counts. Checking
-// each requested key on every issue costs about requested-keys-present per
-// issue; expanding every stored key costs about all-keys-present, archived
-// definitions' values included, and each expanded key is roughly a third of
-// the cost of a matched existence check (PG17, synthetic 90k issues with
-// values). Requesting at most 1/4 of the catalog — e.g. the default list in a
-// workspace with many archived properties — makes the existence check the
-// cheaper one; otherwise one expansion pass wins.
-const propertyUsageKeyCheckRatio = 4
+// propertyUsageKeyCheckLimit is the most definitions countPropertyUsage counts
+// with per-key existence checks. Those checks cost one `?` per requested key
+// per property-carrying issue, whatever the issue stores; the expansion pass
+// costs one row per key the issue stores, archived definitions' values
+// included. Up to this many keys the checks were never slower than the
+// expansion even when every issue stores a single key (the expansion's best
+// case), and they stay far cheaper when issues also carry archived values.
+// Above it, sparse values make the checks lose to one expansion pass.
+const propertyUsageKeyCheckLimit = 4
+
+// propertyUsageUsesKeyCheck reports whether counting usage for this many
+// definitions should use per-key existence checks rather than one expansion
+// pass over every stored key.
+func propertyUsageUsesKeyCheck(definitions int) bool {
+	return definitions <= propertyUsageKeyCheckLimit
+}
 
 // countPropertyUsage returns, keyed by property id, how many of the
 // workspace's issues carry a value for each of the given definitions.
-// catalogSize is the number of definitions in the workspace, archived
-// included, which bounds how many distinct keys an issue can carry.
-func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUID, props []db.IssueProperty, catalogSize int) (map[string]int64, error) {
+func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUID, props []db.IssueProperty) (map[string]int64, error) {
 	usage := make(map[string]int64, len(props))
 	if len(props) == 0 {
 		return usage, nil
 	}
-	if len(props)*propertyUsageKeyCheckRatio <= catalogSize {
-		keys := make([]string, len(props))
-		for i, p := range props {
-			keys[i] = uuidToString(p.ID)
-		}
+	keys := make([]string, len(props))
+	for i, p := range props {
+		keys[i] = uuidToString(p.ID)
+	}
+	if propertyUsageUsesKeyCheck(len(keys)) {
 		rows, err := h.Queries.CountIssuePropertyUsageForKeys(ctx, db.CountIssuePropertyUsageForKeysParams{
 			WorkspaceID:  workspaceID,
 			PropertyKeys: keys,
@@ -469,7 +462,10 @@ func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUI
 		}
 		return usage, nil
 	}
-	rows, err := h.Queries.CountIssuePropertyUsage(ctx, workspaceID)
+	rows, err := h.Queries.CountIssuePropertyUsage(ctx, db.CountIssuePropertyUsageParams{
+		WorkspaceID:  workspaceID,
+		PropertyKeys: keys,
+	})
 	if err != nil {
 		return nil, err
 	}

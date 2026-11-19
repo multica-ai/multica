@@ -12,22 +12,23 @@ ORDER BY position ASC, LOWER(name) ASC;
 -- go back to a per-definition `properties ? id` subquery:
 -- idx_issue_properties_gin is jsonb_path_ops, which cannot serve `?`, so each
 -- definition re-scanned every issue in the workspace. The handler picks one
--- of the two shapes below; see countPropertyUsage.
+-- of the two shapes below by how many keys it counts; see countPropertyUsage.
 
 -- name: CountIssuePropertyUsage :many
--- Counts every key stored on the workspace's issues, archived definitions
--- included. Cost scales with the total number of stored keys.
+-- Expands every key stored on each issue once and keeps the requested ones.
+-- Cost scales with the number of stored keys, whatever is requested.
 SELECT k.key::text AS property_key, COUNT(*)::bigint AS usage_count
 FROM issue i
 CROSS JOIN LATERAL jsonb_object_keys(i.properties) AS k(key)
 WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
   AND i.properties <> '{}'::jsonb
+  AND k.key = ANY(sqlc.arg('property_keys')::text[])
 GROUP BY k.key;
 
 -- name: CountIssuePropertyUsageForKeys :many
--- Counts only the given keys with one existence check per key per issue.
--- Cost scales with the requested keys, not with whatever else (e.g.
--- archived definitions' values) the issues carry.
+-- One existence check per requested key per issue. Cost scales with the
+-- requested keys, not with whatever else (e.g. archived definitions' values)
+-- the issues carry, but every check re-reads the issue's property bag.
 SELECT k.key::text AS property_key, COUNT(*)::bigint AS usage_count
 FROM issue i
 CROSS JOIN LATERAL unnest(sqlc.arg('property_keys')::text[]) AS k(key)

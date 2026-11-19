@@ -30,8 +30,14 @@ FROM issue i
 CROSS JOIN LATERAL jsonb_object_keys(i.properties) AS k(key)
 WHERE i.workspace_id = $1::uuid
   AND i.properties <> '{}'::jsonb
+  AND k.key = ANY($2::text[])
 GROUP BY k.key
 `
+
+type CountIssuePropertyUsageParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	PropertyKeys []string    `json:"property_keys"`
+}
 
 type CountIssuePropertyUsageRow struct {
 	PropertyKey string `json:"property_key"`
@@ -44,11 +50,11 @@ type CountIssuePropertyUsageRow struct {
 // go back to a per-definition `properties ? id` subquery:
 // idx_issue_properties_gin is jsonb_path_ops, which cannot serve `?`, so each
 // definition re-scanned every issue in the workspace. The handler picks one
-// of the two shapes below; see countPropertyUsage.
-// Counts every key stored on the workspace's issues, archived definitions
-// included. Cost scales with the total number of stored keys.
-func (q *Queries) CountIssuePropertyUsage(ctx context.Context, workspaceID pgtype.UUID) ([]CountIssuePropertyUsageRow, error) {
-	rows, err := q.db.Query(ctx, countIssuePropertyUsage, workspaceID)
+// of the two shapes below by how many keys it counts; see countPropertyUsage.
+// Expands every key stored on each issue once and keeps the requested ones.
+// Cost scales with the number of stored keys, whatever is requested.
+func (q *Queries) CountIssuePropertyUsage(ctx context.Context, arg CountIssuePropertyUsageParams) ([]CountIssuePropertyUsageRow, error) {
+	rows, err := q.db.Query(ctx, countIssuePropertyUsage, arg.WorkspaceID, arg.PropertyKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -87,9 +93,9 @@ type CountIssuePropertyUsageForKeysRow struct {
 	UsageCount  int64  `json:"usage_count"`
 }
 
-// Counts only the given keys with one existence check per key per issue.
-// Cost scales with the requested keys, not with whatever else (e.g.
-// archived definitions' values) the issues carry.
+// One existence check per requested key per issue. Cost scales with the
+// requested keys, not with whatever else (e.g. archived definitions' values)
+// the issues carry, but every check re-reads the issue's property bag.
 func (q *Queries) CountIssuePropertyUsageForKeys(ctx context.Context, arg CountIssuePropertyUsageForKeysParams) ([]CountIssuePropertyUsageForKeysRow, error) {
 	rows, err := q.db.Query(ctx, countIssuePropertyUsageForKeys, arg.PropertyKeys, arg.WorkspaceID)
 	if err != nil {

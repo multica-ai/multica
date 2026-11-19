@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/multica-ai/multica/server/internal/issueproperty"
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -253,33 +254,199 @@ func TestListPropertiesUsageCount(t *testing.T) {
 		t.Fatalf("archived property listed without include_archived")
 	}
 
-	// Both counting strategies must agree; catalogSize picks which one runs.
-	var defs []db.IssueProperty
-	for _, id := range []string{propA.ID, propB.ID, unused.ID} {
-		p, err := testHandler.Queries.GetIssueProperty(context.Background(), db.GetIssuePropertyParams{
-			ID: parseUUID(id), WorkspaceID: parseUUID(testWorkspaceID),
-		})
-		if err != nil {
-			t.Fatalf("GetIssueProperty: %v", err)
-		}
-		defs = append(defs, p)
+	// Both counting queries must agree; countPropertyUsage picks one by how
+	// many keys it counts.
+	ctx := context.Background()
+	ws := parseUUID(testWorkspaceID)
+	keys := []string{propA.ID, propB.ID, unused.ID}
+	checked, err := testHandler.Queries.CountIssuePropertyUsageForKeys(ctx, db.CountIssuePropertyUsageForKeysParams{WorkspaceID: ws, PropertyKeys: keys})
+	if err != nil {
+		t.Fatalf("CountIssuePropertyUsageForKeys: %v", err)
 	}
-	for _, strategy := range []struct {
-		name        string
-		catalogSize int
-	}{
-		{"expand all keys", len(defs)},
-		{"check requested keys", len(defs) * propertyUsageKeyCheckRatio},
-	} {
-		got, err := testHandler.countPropertyUsage(context.Background(), parseUUID(testWorkspaceID), defs, strategy.catalogSize)
+	expanded, err := testHandler.Queries.CountIssuePropertyUsage(ctx, db.CountIssuePropertyUsageParams{WorkspaceID: ws, PropertyKeys: keys})
+	if err != nil {
+		t.Fatalf("CountIssuePropertyUsage: %v", err)
+	}
+	byCheck, byExpand := map[string]int64{}, map[string]int64{}
+	for _, row := range checked {
+		byCheck[row.PropertyKey] = row.UsageCount
+	}
+	for _, row := range expanded {
+		byExpand[row.PropertyKey] = row.UsageCount
+	}
+	for id, n := range want {
+		if byCheck[id] != n || byExpand[id] != n {
+			t.Fatalf("usage_count for %s: key check %d, expansion %d, want %d", id, byCheck[id], byExpand[id], n)
+		}
+	}
+}
+
+// propertyListReadDB records which property queries ListProperties runs and
+// how many definition rows the database returns to it.
+type propertyListReadDB struct {
+	db.DBTX
+	usageQueries []string
+	catalogRows  int
+}
+
+type propertyListRows struct {
+	pgx.Rows
+	observer *propertyListReadDB
+}
+
+func (r *propertyListRows) Next() bool {
+	ok := r.Rows.Next()
+	if ok {
+		r.observer.catalogRows++
+	}
+	return ok
+}
+
+func (d *propertyListReadDB) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	switch {
+	case strings.Contains(sql, "unnest("):
+		d.usageQueries = append(d.usageQueries, "key check")
+	case strings.Contains(sql, "jsonb_object_keys("):
+		d.usageQueries = append(d.usageQueries, "expansion")
+	case strings.Contains(sql, "FROM issue_property"):
+		rows, err := d.DBTX.Query(ctx, sql, args...)
 		if err != nil {
-			t.Fatalf("%s: countPropertyUsage: %v", strategy.name, err)
+			return nil, err
 		}
-		for id, n := range want {
-			if got[id] != n {
-				t.Fatalf("%s: usage_count for %s: got %d, want %d", strategy.name, id, got[id], n)
-			}
+		return &propertyListRows{Rows: rows, observer: d}, nil
+	}
+	return d.DBTX.Query(ctx, sql, args...)
+}
+
+// The counting strategy follows the number of definitions counted, not the
+// share of the catalog they make up, and a catalog-only request reads only
+// the definitions it returns.
+func TestListPropertiesUsageStrategy(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	slug := "prop-usage-" + uuid.NewString()[:8]
+	var wsID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ($1, $1, '', 'PUS')
+		RETURNING id::text
+	`, slug).Scan(&wsID); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE workspace_id = $1`, wsID)
+		testPool.Exec(context.Background(), `DELETE FROM issue_property WHERE workspace_id = $1`, wsID)
+		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+	addProperty := func(name string, archived bool) string {
+		t.Helper()
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue_property (workspace_id, name, type, archived_at)
+			VALUES ($1, $2, 'text', CASE WHEN $3::bool THEN now() END)
+			RETURNING id::text
+		`, wsID, name, archived).Scan(&id); err != nil {
+			t.Fatalf("seed property: %v", err)
 		}
+		return id
+	}
+	addIssue := func(propertyIDs ...string) {
+		t.Helper()
+		props := map[string]string{}
+		for _, id := range propertyIDs {
+			props[id] = "v"
+		}
+		raw, _ := json.Marshal(props)
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, properties)
+			VALUES ($1, 'usage strategy', 'todo', 'none', 'member', $2,
+			        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1), $3)
+		`, wsID, testUserID, raw); err != nil {
+			t.Fatalf("seed issue: %v", err)
+		}
+	}
+	list := func(query string) (*propertyListReadDB, map[string]int64) {
+		t.Helper()
+		observer := &propertyListReadDB{DBTX: testPool}
+		h := *testHandler
+		h.Queries = db.New(observer)
+		w := httptest.NewRecorder()
+		req := newRequest("GET", "/api/properties"+query, nil)
+		req.Header.Set("X-Workspace-ID", wsID)
+		h.ListProperties(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListProperties%s: expected 200, got %d: %s", query, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Properties []PropertyResponse `json:"properties"`
+		}
+		json.NewDecoder(w.Body).Decode(&resp)
+		counts := make(map[string]int64, len(resp.Properties))
+		for _, p := range resp.Properties {
+			counts[p.ID] = p.UsageCount
+		}
+		return observer, counts
+	}
+
+	// One definition, nothing archived: the key check is the cheapest count
+	// whatever the issues store.
+	first := addProperty("First", false)
+	addIssue(first)
+	addIssue(first)
+	observer, counts := list("")
+	if got := strings.Join(observer.usageQueries, ","); got != "key check" {
+		t.Fatalf("single definition: usage queries %q, want key check", got)
+	}
+	if counts[first] != 2 {
+		t.Fatalf("single definition: usage_count %d, want 2", counts[first])
+	}
+
+	// More active definitions than the key-check limit, many archived, one
+	// value per issue: per-key checks would mostly miss, so expand once.
+	active := []string{first}
+	for len(active) <= propertyUsageKeyCheckLimit {
+		id := addProperty(fmt.Sprintf("Active %d", len(active)), false)
+		active = append(active, id)
+		addIssue(id)
+	}
+	archived := make([]string, 0, 4*len(active))
+	for i := 0; i < 4*len(active); i++ {
+		archived = append(archived, addProperty(fmt.Sprintf("Archived %d", i), true))
+	}
+	addIssue(archived[0])
+	observer, counts = list("")
+	if got := strings.Join(observer.usageQueries, ","); got != "expansion" {
+		t.Fatalf("%d sparse definitions: usage queries %q, want expansion", len(active), got)
+	}
+	for i, id := range active {
+		want := int64(1)
+		if i == 0 {
+			want = 2
+		}
+		if counts[id] != want {
+			t.Fatalf("active %d: usage_count %d, want %d", i, counts[id], want)
+		}
+	}
+	if _, ok := counts[archived[0]]; ok {
+		t.Fatalf("archived definition listed without include_archived")
+	}
+	_, counts = list("?include_archived=true")
+	if counts[archived[0]] != 1 {
+		t.Fatalf("archived definition: usage_count %d, want 1", counts[archived[0]])
+	}
+
+	// Catalog-only requests leave archived definitions in the database.
+	observer, counts = list("?include_usage=false")
+	if len(observer.usageQueries) != 0 || observer.catalogRows != len(active) || len(counts) != len(active) {
+		t.Fatalf("include_usage=false: usage queries %v, %d definition rows read, %d listed; want none, %d, %d",
+			observer.usageQueries, observer.catalogRows, len(counts), len(active), len(active))
+	}
+	observer, counts = list("?include_archived=true&include_usage=false")
+	if all := len(active) + len(archived); len(observer.usageQueries) != 0 || observer.catalogRows != all || len(counts) != all {
+		t.Fatalf("include_archived=true&include_usage=false: usage queries %v, %d definition rows read, %d listed; want none, %d, %d",
+			observer.usageQueries, observer.catalogRows, len(counts), all, all)
 	}
 }
 
