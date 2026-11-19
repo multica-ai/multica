@@ -3094,6 +3094,9 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 			if err != nil {
 				return fmt.Errorf("cancel queued task: %w", err)
 			}
+			if isNativeChatForkTask(task) {
+				return settleNativeChatFork(ctx, qtx, task, "")
+			}
 			cancelledChatMessage, err = s.settleQueuedChatInput(ctx, qtx, task, opts.QueueAction)
 			return err
 		})
@@ -3139,7 +3142,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 			if err != nil {
 				return err
 			}
-			if !cancelled.ChatSessionID.Valid {
+			if !cancelled.ChatSessionID.Valid || isNativeChatForkTask(cancelled) {
 				return nil
 			}
 			return qtx.AdvanceCancelledChatSessionPointer(ctx, cancelled.ID)
@@ -3162,7 +3165,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 	slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCancelled(ctx, task)
 	s.publishRequeuedChatTasks(ctx, queuedChat)
-	if !opts.QueuedOnly {
+	if !opts.QueuedOnly && !isNativeChatForkTask(task) {
 		cancelledChatMessage = s.finalizeCancelledChatMessage(ctx, task, opts)
 	}
 
@@ -5876,6 +5879,9 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 // a human may have edited in the meantime, so replaying the failed attempt is
 // never what the workspace wants.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
+	if isNativeChatForkTask(t) {
+		return false
+	}
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
@@ -6719,6 +6725,12 @@ func settleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.Age
 	}
 	var queued []db.AgentTaskQueue
 	for _, task := range tasks {
+		if isNativeChatForkTask(task) && (task.Status == "cancelled" || task.Status == "failed") {
+			if err := settleNativeChatFork(ctx, q, task, ""); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if task.ChatSessionID.Valid && (task.Status == "completed" || task.Status == "failed" || task.Status == "cancelled") {
 			next, err := RequeueChatTaskSupplements(ctx, q, task, pgtype.UUID{})
 			if err != nil {
