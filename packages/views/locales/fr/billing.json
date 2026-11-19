@@ -6,6 +6,7 @@
     "plan": {
       "free": "Gratuit",
       "pro": "Pro",
+      "business": "Business",
       "unknown": "Forfait inconnu"
     },
     "status": {
@@ -27,11 +28,13 @@
     "actions": {
       "retry": "Réessayer",
       "retry_autopilots": "Réessayer le chargement de la consommation des automatisations",
-      "upgrade": "Passer à Pro",
+      "upgrade_to": "Passer à {{plan}}",
+      "switch_to": "Basculer vers {{plan}}",
       "manage": "Gérer la facturation",
       "add_seats": "Ajouter des sièges",
       "cancel": "Annuler",
-      "continue_to_stripe": "Continuer vers Stripe"
+      "continue_to_stripe": "Continuer vers Stripe",
+      "check_status": "Vérifier l'état"
     },
     "errors": {
       "action_title": "Échec de l'action de facturation",
@@ -52,13 +55,13 @@
       "syncing_title": "Activation de votre abonnement",
       "syncing_description": "Le paiement est terminé. Nous attendons que Stripe confirme le changement de forfait.",
       "timeout_description": "Le paiement a été reçu, mais l'abonnement est encore en cours de synchronisation. Actualisez cette page dans un instant.",
-      "active_title": "Pro est actif",
-      "active_description": "Cet espace de travail a désormais accès à Pro."
+      "active_title": "{{plan}} est actif",
+      "active_description": "Cet espace de travail a désormais accès à {{plan}}."
     },
     "past_due": {
       "title": "Le paiement demande votre attention",
       "description": "Mettez à jour votre moyen de paiement dans la gestion de la facturation.",
-      "grace_description": "Mettez à jour votre moyen de paiement avant le {{date}} pour conserver l'accès Pro."
+      "grace_description": "Mettez à jour votre moyen de paiement avant le {{date}} pour conserver votre forfait payant."
     },
     "subscription_notice": {
       "canceling_title": "Résiliation programmée",
@@ -67,7 +70,7 @@
       "incomplete_title": "La configuration de l'abonnement est incomplète",
       "incomplete_description": "Ouvrez la gestion de la facturation pour terminer ou vérifier la configuration du paiement.",
       "incomplete_expired_title": "La configuration de l'abonnement a expiré",
-      "incomplete_expired_description": "La configuration du paiement précédente a expiré sans activer Pro. Lancez une nouvelle mise à niveau lorsque vous serez prêt.",
+      "incomplete_expired_description": "La configuration du paiement précédente a expiré avant le début de l'abonnement. Lancez une nouvelle mise à niveau lorsque vous serez prêt.",
       "paused_title": "L'abonnement est en pause",
       "paused_description": "Ouvrez la gestion de la facturation pour vérifier la pause et les options de rétablissement disponibles.",
       "unpaid_title": "L'abonnement est impayé",
@@ -82,19 +85,37 @@
       "member_count_one": "{{count}} membre",
       "member_count_other": "{{count}} membres",
       "billing_interval": "Intervalle de facturation",
-      "period_end": "Fin de la période en cours"
+      "period_end": "Fin de la période en cours",
+      "change_plan": "Changer de forfait",
+      "business_adds": "Business ajoute les projets privés, l'accès par membre, les comptes d'applications d'équipe et des limites d'automatisation plus élevées.",
+      "plan_change_hold": "Changement de forfait",
+      "plan_change_confirming": "Passage à {{plan}} en cours. En attente de la confirmation de Stripe ; les sièges et le forfait ne peuvent pas être modifiés d'ici là.",
+      "plan_change_unresolved": "Le passage à {{plan}} n'a pas pu être confirmé. Contactez l'assistance pour le régler ; les sièges et le forfait ne peuvent pas être modifiés d'ici là.",
+      "plan_change_state_confirming": "Confirmation en cours",
+      "plan_change_state_unresolved": "Assistance requise"
     },
     "upgrade": {
-      "title": "Passer à Pro",
-      "description": "Choisissez un intervalle de facturation, puis confirmez le nombre de sièges et le montant final dans Stripe Checkout.",
+      "title": "Mettre à niveau",
       "interval_label": "Intervalle de facturation",
       "monthly": "Mensuel",
       "yearly": "Annuel",
-      "pro_for_team_one": "Pro pour {{count}} siège humain",
-      "pro_for_team_other": "Pro pour {{count}} sièges humains",
       "price_loading": "Chargement des tarifs d'abonnement",
-      "unit_price": "{{price}} par siège humain",
-      "price_at_checkout": "Le serveur recompte les membres humains avant l'achat. Stripe Checkout affiche le tarif par siège et le total faisant foi avant le paiement."
+      "unit_price_month": "{{price}} par siège humain / mois",
+      "unit_price_year_monthly": "{{price}} par siège humain / mois, facturé annuellement",
+      "unit_price_year": "{{price}} par siège humain / an",
+      "price_at_checkout": "Le serveur recompte les membres humains avant l'achat. Stripe Checkout affiche le tarif par siège et le total faisant foi avant le paiement.",
+      "recommended": "Recommandé",
+      "features": {
+        "pro_members": "Membres illimités",
+        "pro_autopilots": "1 000 exécutions d'automatisation par membre et par mois",
+        "pro_storage": "10 Go de stockage de pièces jointes par membre",
+        "pro_dashboard": "90 jours d'historique dans le tableau de bord",
+        "business_everything": "Tout ce qui est inclus dans Pro",
+        "business_access": "Projets privés et accès par membre",
+        "business_apps": "Comptes d'applications d'équipe et règles d'approbation",
+        "business_autopilots": "3 000 exécutions d'automatisation par membre et par mois",
+        "business_reports": "Rapports d'utilisation et de coût par membre"
+      }
     },
     "management": {
       "title": "Gestion de l'abonnement",
@@ -153,6 +174,7 @@
       "preview_failed": "L'estimation est temporairement indisponible. Réessayez dans un instant.",
       "capacity_out_of_sync": "Le nombre de sièges dans Stripe ne correspond pas au relevé de facturation. Contactez l'assistance avant de réessayer cet achat.",
       "in_progress": "Un autre achat de sièges est en cours de traitement. Attendez qu'il se termine ; contactez l'assistance si cet état persiste.",
+      "plan_change_in_progress": "Un changement de forfait est encore en cours de traitement. Réessayez dans quelques minutes.",
       "purchase_unreadable": "Impossible de lire la réponse à l'achat. Réessayez avec ce devis : la même demande d'achat sera réutilisée.",
       "purchase_failed": "Impossible d'ajouter les sièges. Réessayez avec le même devis ou actualisez s'il a expiré.",
       "payment_failed": "Le paiement n'a pas pu être effectué. Mettez à jour le moyen de paiement dans Stripe, puis demandez un nouveau devis.",
@@ -171,11 +193,36 @@
       "delayed_description_with_expiry": "La vérification automatique s'est arrêtée. Si la tentative est encore en attente après {{date}}, rechargez cette page avant de demander un autre devis ; contactez l'assistance si l'attente persiste.",
       "submitted_one": "Un achat de {{count}} siège a été soumis. La nouvelle capacité apparaîtra après confirmation par Stripe.",
       "submitted_other": "Un achat de {{count}} sièges a été soumis. La nouvelle capacité apparaîtra après confirmation par Stripe.",
-      "error_title": "Impossible de mettre à jour l'estimation"
+      "error_title": "Impossible de mettre à jour l'estimation",
+      "plan_change_unresolved": "Un changement de forfait n'a pas pu être confirmé. Contactez l'assistance avant d'ajouter des sièges."
+    },
+    "plan_change": {
+      "upgrade_description": "Prend effet immédiatement. La différence pour le reste de la période de facturation est facturée maintenant.",
+      "downgrade_description": "Prend effet immédiatement. La différence non utilisée est créditée sur votre prochaine facture. Les paramètres Business déjà configurés continuent de fonctionner, mais passent en lecture seule.",
+      "seats": "Sièges",
+      "charge_today": "Montant facturé aujourd'hui",
+      "credit": "Crédit sur la prochaine facture",
+      "next_invoice": "Prochain renouvellement",
+      "tax_notice": "Stripe détermine les taxes, les crédits et les détails définitifs de la facture.",
+      "preview_loading": "Chargement du devis...",
+      "preview_failed": "Le devis est temporairement indisponible. Réessayez dans un instant.",
+      "rate_limited": "Trop de demandes de devis. Patientez un instant, puis réessayez.",
+      "in_progress": "Un achat de sièges est en cours de traitement. Réessayez une fois qu'il sera terminé.",
+      "change_in_progress": "Un changement de forfait est encore en cours de traitement. Réessayez dans quelques minutes.",
+      "not_active": "Cet abonnement ne peut pas changer de forfait pour le moment. Le forfait actuel a été actualisé.",
+      "quote_changed": "L'abonnement ou le tarif a changé. Consultez le devis actualisé avant de confirmer à nouveau.",
+      "payment_failed": "Le paiement n'a pas pu être effectué. Mettez à jour le moyen de paiement dans la gestion de la facturation, puis réessayez.",
+      "failed": "Le forfait n'a pas pu être changé. Réessayez avec le même devis.",
+      "unreadable": "La réponse est illisible. Réessayez ; la même demande sera réutilisée.",
+      "error_title": "Impossible de changer de forfait",
+      "success_title": "Forfait changé",
+      "success_description": "Cet espace de travail utilise désormais {{plan}}.",
+      "unresolved": "Le changement de forfait précédent n'a pas pu être confirmé. Contactez l'assistance avant de changer de forfait.",
+      "check_failed": "Impossible de vérifier le changement de forfait. Réessayez."
     },
     "confirm": {
       "title": "Continuer vers Stripe Checkout ?",
-      "description": "Intervalle de facturation : {{interval}}. Membres humains actuels : {{count}}. Stripe recomptera les sièges et affichera le montant final avant le paiement."
+      "description": "Forfait : {{plan}}. Intervalle de facturation : {{interval}}. Membres humains actuels : {{count}}. Stripe recomptera les sièges et affichera le montant final avant le paiement."
     }
   },
   "return_page": {

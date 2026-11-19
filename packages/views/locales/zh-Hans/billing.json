@@ -6,6 +6,7 @@
     "plan": {
       "free": "Free",
       "pro": "Pro",
+      "business": "Business",
       "unknown": "未知套餐"
     },
     "status": {
@@ -27,11 +28,13 @@
     "actions": {
       "retry": "重试",
       "retry_autopilots": "重试加载自动化用量",
-      "upgrade": "升级到 Pro",
+      "upgrade_to": "升级到 {{plan}}",
+      "switch_to": "切换到 {{plan}}",
       "manage": "管理账单",
       "add_seats": "添加席位",
       "cancel": "取消",
-      "continue_to_stripe": "前往 Stripe"
+      "continue_to_stripe": "前往 Stripe",
+      "check_status": "检查状态"
     },
     "errors": {
       "action_title": "账单操作失败",
@@ -52,13 +55,13 @@
       "syncing_title": "正在启用订阅",
       "syncing_description": "付款已完成，正在等待 Stripe 确认套餐变化。",
       "timeout_description": "付款已收到，但订阅仍在同步。请稍后刷新页面。",
-      "active_title": "Pro 已启用",
-      "active_description": "这个工作区现在可以使用 Pro。"
+      "active_title": "{{plan}} 已启用",
+      "active_description": "这个工作区现在可以使用 {{plan}}。"
     },
     "past_due": {
       "title": "付款信息需要处理",
       "description": "请前往账单管理更新付款方式。",
-      "grace_description": "请在 {{date}} 前更新付款方式，以继续使用 Pro。"
+      "grace_description": "请在 {{date}} 前更新付款方式，以继续使用付费套餐。"
     },
     "subscription_notice": {
       "canceling_title": "订阅已安排取消",
@@ -67,7 +70,7 @@
       "incomplete_title": "订阅开通尚未完成",
       "incomplete_description": "打开账单管理，完成或检查付款设置。",
       "incomplete_expired_title": "订阅开通已过期",
-      "incomplete_expired_description": "上一次付款设置未能启用 Pro 且已过期，需要时请重新发起升级。",
+      "incomplete_expired_description": "上一次付款设置在订阅生效前已过期，需要时请重新发起升级。",
       "paused_title": "订阅已暂停",
       "paused_description": "打开账单管理，查看暂停原因和可用的恢复方式。",
       "unpaid_title": "订阅款项尚未支付",
@@ -81,18 +84,37 @@
       "members_description": "智能体和待接受的邀请不计入席位。",
       "member_count_other": "{{count}} 位成员",
       "billing_interval": "付款周期",
-      "period_end": "当前周期结束时间"
+      "period_end": "当前周期结束时间",
+      "change_plan": "更换套餐",
+      "business_adds": "Business 增加私有项目、按成员授权、团队应用账号，以及更高的自动化额度。",
+      "plan_change_hold": "套餐变更",
+      "plan_change_confirming": "正在切换到 {{plan}}，等待 Stripe 确认。确认之前不能更换套餐或增加席位。",
+      "plan_change_unresolved": "切换到 {{plan}} 的结果没有确认。请联系支持处理；处理完成之前不能更换套餐或增加席位。",
+      "plan_change_state_confirming": "确认中",
+      "plan_change_state_unresolved": "需要支持处理"
     },
     "upgrade": {
-      "title": "升级到 Pro",
-      "description": "选择付款周期，然后在 Stripe Checkout 确认当前席位和最终金额。",
+      "title": "升级",
       "interval_label": "付款周期",
       "monthly": "月付",
       "yearly": "年付",
-      "pro_for_team_other": "为 {{count}} 个成员席位升级 Pro",
       "price_loading": "正在加载订阅价格",
-      "unit_price": "每个成员席位 {{price}}",
-      "price_at_checkout": "购买前，服务端会重新统计成员。付款前，Stripe Checkout 会显示权威的单席位价格和总额。"
+      "unit_price_month": "每个成员席位每月 {{price}}",
+      "unit_price_year_monthly": "每个成员席位每月 {{price}}，按年付费",
+      "unit_price_year": "每个成员席位每年 {{price}}",
+      "price_at_checkout": "购买前，服务端会重新统计成员。付款前，Stripe Checkout 会显示权威的单席位价格和总额。",
+      "recommended": "推荐",
+      "features": {
+        "pro_members": "成员不限",
+        "pro_autopilots": "自动化每人每月 1,000 次",
+        "pro_storage": "每人 10 GB 附件存储",
+        "pro_dashboard": "统计查看最近 90 天",
+        "business_everything": "Pro 的全部功能",
+        "business_access": "私有项目和按成员授权",
+        "business_apps": "团队应用账号和审批规则",
+        "business_autopilots": "自动化每人每月 3,000 次",
+        "business_reports": "按成员的用量和成本报表"
+      }
     },
     "management": {
       "title": "订阅管理",
@@ -149,6 +171,7 @@
       "preview_failed": "暂时无法获取估算金额，请稍后重试。",
       "capacity_out_of_sync": "Stripe 席位数与计费记录不一致。再次购买前，请联系支持人员。",
       "in_progress": "另一笔席位购买正在处理中。请等待其完成；若长时间未完成，请联系支持人员。",
+      "plan_change_in_progress": "套餐变更还在处理中，请几分钟后再试。",
       "purchase_unreadable": "无法读取购买响应。请重试当前报价；系统会复用同一购买请求。",
       "purchase_failed": "无法添加席位。可使用同一报价重试；报价过期时请刷新。",
       "payment_failed": "付款未能完成。请在 Stripe 更新付款方式，然后重新获取报价。",
@@ -164,11 +187,36 @@
       "delayed_description": "自动检查已停止，购买仍可能完成。开始另一笔购买前，请稍后再查看或联系支持人员。",
       "delayed_description_with_expiry": "自动检查已停止。若到 {{date}} 仍在等待，请重新加载页面后再获取报价；若状态仍未更新，请联系支持人员。",
       "submitted_other": "购买 {{count}} 个席位的请求已提交。Stripe 确认后会显示新容量。",
-      "error_title": "无法更新估算金额"
+      "error_title": "无法更新估算金额",
+      "plan_change_unresolved": "有一次套餐变更的结果没有确认。请先联系支持，再增加席位。"
+    },
+    "plan_change": {
+      "upgrade_description": "立即生效。本计费周期剩余时间的差价现在扣款。",
+      "downgrade_description": "立即生效。未用完的差价会抵扣下一期账单。已经配置好的 Business 设置继续生效，但变为只读。",
+      "seats": "席位",
+      "charge_today": "今天扣款",
+      "credit": "抵扣下期账单",
+      "next_invoice": "下次续费",
+      "tax_notice": "税费、抵扣和最终账单明细由 Stripe 确定。",
+      "preview_loading": "正在获取报价...",
+      "preview_failed": "暂时无法获取报价，请稍后重试。",
+      "rate_limited": "报价请求过于频繁，请稍等后重试。",
+      "in_progress": "有一笔席位购买正在处理中，请等它完成后再试。",
+      "change_in_progress": "套餐变更还在处理中，请几分钟后再试。",
+      "not_active": "这个订阅现在无法更换套餐。当前套餐已刷新。",
+      "quote_changed": "订阅或价格已变化，请查看刷新后的报价再确认。",
+      "payment_failed": "付款未能完成。请在账单管理中更新付款方式后重试。",
+      "failed": "无法更换套餐。可使用同一报价重试。",
+      "unreadable": "无法读取响应。请重试；系统会复用同一请求。",
+      "error_title": "无法更换套餐",
+      "success_title": "套餐已更换",
+      "success_description": "这个工作区现在使用 {{plan}}。",
+      "unresolved": "上一次套餐变更的结果没有确认。请先联系支持，再更换套餐。",
+      "check_failed": "无法检查套餐变更，请重试。"
     },
     "confirm": {
       "title": "前往 Stripe Checkout？",
-      "description": "付款周期：{{interval}}。当前成员：{{count}}。Stripe 会重新统计席位，并在付款前显示最终金额。"
+      "description": "套餐：{{plan}}。付款周期：{{interval}}。当前成员：{{count}}。Stripe 会重新统计席位，并在付款前显示最终金额。"
     }
   },
   "return_page": {

@@ -194,6 +194,13 @@ export interface CreateBillingPortalSessionResponse {
 
 export type WorkspaceSubscriptionInterval = "month" | "year";
 
+/**
+ * A plan a workspace can buy or switch to. Free is not purchasable: it is what
+ * a workspace has without an active subscription. `entitlement.plan` stays an
+ * open string because Cloud may report plans this client does not know.
+ */
+export type WorkspaceSubscriptionPaidPlan = "pro" | "business";
+
 export type WorkspaceEntitlementLimit =
   | { mode: "limited"; limit: number }
   | { mode: "unlimited"; limit: null };
@@ -237,7 +244,26 @@ export interface WorkspaceSubscriptionSummary {
     checkout: boolean;
     portal: boolean;
     purchaseSeats: boolean;
+    /** Switch the active subscription between Pro and Business. */
+    changePlan: boolean;
+    /** Ask Cloud to settle a plan change that is still confirming. */
+    checkPlanChange: boolean;
   };
+  /**
+   * A plan change that still holds the subscription. While present, seat
+   * purchases and other plan changes are unavailable.
+   */
+  planChange: WorkspacePlanChangeHold | null;
+}
+
+export interface WorkspacePlanChangeHold {
+  targetPlan: string;
+  /**
+   * "confirming": Cloud is establishing Stripe's outcome. "unresolved": Cloud
+   * could not, and support has to settle it.
+   */
+  state: "confirming" | "unresolved";
+  since: string;
 }
 
 export interface WorkspaceSeatCapacity {
@@ -270,12 +296,18 @@ export interface WorkspaceSubscriptionPrice {
   intervalCount: number;
 }
 
-export interface WorkspaceSubscriptionPrices {
+export interface WorkspaceSubscriptionPlanPrices {
   month: WorkspaceSubscriptionPrice;
   year: WorkspaceSubscriptionPrice;
 }
 
+export type WorkspaceSubscriptionPrices = Record<
+  WorkspaceSubscriptionPaidPlan,
+  WorkspaceSubscriptionPlanPrices
+>;
+
 export interface CreateWorkspaceSubscriptionCheckoutRequest {
+  plan: WorkspaceSubscriptionPaidPlan;
   interval: WorkspaceSubscriptionInterval;
   idempotencyKey: string;
 }
@@ -321,6 +353,52 @@ export interface PurchaseWorkspaceSeatsResponse {
   prorationAmount: number;
   nextInvoiceAmount: number;
   status: "pending" | "submitted" | "confirmed";
+}
+
+export interface PreviewWorkspacePlanChangeRequest {
+  plan: WorkspaceSubscriptionPaidPlan;
+}
+
+/**
+ * Cloud's quote for switching the active subscription to another plan. Seats
+ * and the billing interval stay the same.
+ */
+export interface WorkspacePlanChangePreview {
+  currentPlan: WorkspaceSubscriptionPaidPlan;
+  targetPlan: WorkspaceSubscriptionPaidPlan;
+  interval: WorkspaceSubscriptionInterval;
+  seats: number;
+  subscriptionVersion: number;
+  currency: string;
+  /**
+   * Proration in minor currency units. Positive for an upgrade, charged now;
+   * negative for a downgrade, credited against the next invoice.
+   */
+  prorationAmount: number;
+  /** Next full recurring invoice on the target plan, in minor units. */
+  nextInvoiceAmount: number;
+  /** True when the proration is invoiced immediately (upgrades). */
+  invoiceNow: boolean;
+  quotedAt: string;
+}
+
+export interface ChangeWorkspacePlanRequest {
+  plan: WorkspaceSubscriptionPaidPlan;
+  expectedSubscriptionVersion: number;
+  quotedAt: string;
+  acceptedProrationAmount: number;
+  currency: string;
+  idempotencyKey: string;
+}
+
+export interface ChangeWorkspacePlanResponse {
+  plan: WorkspaceSubscriptionPaidPlan;
+  previousPlan: WorkspaceSubscriptionPaidPlan;
+  interval: WorkspaceSubscriptionInterval;
+  seats: number;
+  currency: string;
+  prorationAmount: number;
+  invoiceNow: boolean;
 }
 
 export interface WorkspaceSubscriptionSeatReconcileResult {

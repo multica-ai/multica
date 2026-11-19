@@ -290,6 +290,10 @@ import type {
   WorkspaceSeatPurchasePreview,
   PurchaseWorkspaceSeatsRequest,
   PurchaseWorkspaceSeatsResponse,
+  PreviewWorkspacePlanChangeRequest,
+  WorkspacePlanChangePreview,
+  ChangeWorkspacePlanRequest,
+  ChangeWorkspacePlanResponse,
   CreateWorkspaceSubscriptionPortalResponse,
   SourceContextPreview,
   CreateCommentSubIssueManualRequest,
@@ -445,6 +449,8 @@ import {
   WorkspaceSubscriptionSeatReconcileResultSchema,
   WorkspaceSeatPurchasePreviewSchema,
   PurchaseWorkspaceSeatsResponseSchema,
+  WorkspacePlanChangePreviewSchema,
+  ChangeWorkspacePlanResponseSchema,
   CreateWorkspaceSubscriptionPortalResponseSchema,
   DingTalkInstallationSchema,
   ListDingTalkInstallationsResponseSchema,
@@ -2630,6 +2636,7 @@ export class ApiClient {
       {
         method: "POST",
         body: JSON.stringify({
+          plan: data.plan,
           interval: data.interval,
           idempotency_key: data.idempotencyKey,
         }),
@@ -2710,6 +2717,53 @@ export class ApiClient {
       PurchaseWorkspaceSeatsResponseSchema,
       null,
       { endpoint: "POST /api/cloud-subscriptions/seats/purchases" },
+    );
+  }
+
+  async previewWorkspacePlanChange(
+    data: PreviewWorkspacePlanChangeRequest,
+  ): Promise<WorkspacePlanChangePreview | null> {
+    const res = await this.fetchRaw(
+      "/api/cloud-subscriptions/plan-changes/preview",
+      {
+        method: "POST",
+        body: JSON.stringify({ plan: data.plan }),
+        extraHeaders: { "Content-Type": "application/json" },
+      },
+    );
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback<WorkspacePlanChangePreview | null>(
+      raw,
+      WorkspacePlanChangePreviewSchema,
+      null,
+      { endpoint: "POST /api/cloud-subscriptions/plan-changes/preview" },
+    );
+  }
+
+  async changeWorkspacePlan(
+    data: ChangeWorkspacePlanRequest,
+  ): Promise<ChangeWorkspacePlanResponse | null> {
+    const res = await this.fetchRaw("/api/cloud-subscriptions/plan-changes", {
+      method: "POST",
+      body: JSON.stringify({
+        plan: data.plan,
+        expected_subscription_version: data.expectedSubscriptionVersion,
+        quoted_at: data.quotedAt,
+        accepted_proration_amount: data.acceptedProrationAmount,
+        currency: data.currency,
+        idempotency_key: data.idempotencyKey,
+      }),
+      extraHeaders: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": data.idempotencyKey,
+      },
+    });
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback<ChangeWorkspacePlanResponse | null>(
+      raw,
+      ChangeWorkspacePlanResponseSchema,
+      null,
+      { endpoint: "POST /api/cloud-subscriptions/plan-changes" },
     );
   }
 
