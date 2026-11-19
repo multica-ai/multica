@@ -29,10 +29,33 @@ describe("notification preference patches", () => {
   it("uses an explicit all value when enabling a previously muted group", () => {
     expect(
       deriveNotificationPreferencePatch(
-        { status_changes: "muted", comments: "muted" },
+        { updates: "muted", comments: "muted" },
         { comments: "muted" },
       ),
+    ).toEqual({ updates: "all" });
+  });
+
+  it("treats a missing status_changes as muted, so turning it on is stored", () => {
+    expect(notificationPreferenceValue({}, "status_changes")).toBe("muted");
+    expect(
+      deriveNotificationPreferencePatch({}, { status_changes: "all" }),
     ).toEqual({ status_changes: "all" });
+    // The server echoes the default explicitly; enabling from there is the same patch.
+    expect(
+      deriveNotificationPreferencePatch({ status_changes: "muted" }, { status_changes: "all" }),
+    ).toEqual({ status_changes: "all" });
+    expect(
+      deriveNotificationPreferencePatch({ status_changes: "all" }, {}),
+    ).toEqual({ status_changes: "muted" });
+    expect(
+      applyNotificationPreferencePatch({}, { status_changes: "all" }),
+    ).toEqual({ status_changes: "all" });
+    expect(
+      applyNotificationPreferencePatch({ status_changes: "all" }, { status_changes: "muted" }),
+    ).toEqual({});
+    expect(
+      rollbackNotificationPreferencePatch({ status_changes: "all" }, { status_changes: "all" }, {}),
+    ).toEqual({});
   });
 
   it("merges optimistic patches without dropping unrelated preferences", () => {

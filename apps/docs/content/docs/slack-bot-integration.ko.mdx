@@ -1,12 +1,12 @@
 ---
 title: Slack Bot
-description: 에이전트용 Slack Bot을 만들어 DM, 채널, /issue, /new 및 /clear 명령에서 사용합니다.
+description: 에이전트용 Slack Bot을 만들어 DM, 채널, @Multica /help, /issue, /new 및 /clear 명령에서 사용합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica는 사용자가 직접 만든 Slack app을 사용합니다. 연결하면 팀 멤버가 Bot과 DM을 나누고, 채널에서 @멘션하고, `/issue`로 태스크를 만들고, `/new`으로 새 Multica Chat을 시작하거나 `/clear`로 현재 Chat의 에이전트 컨텍스트를 초기화할 수 있습니다.
+Multica는 사용자가 직접 만든 Slack app을 사용합니다. 연결하면 팀 멤버가 Bot과 DM을 나누고, 채널에서 @멘션하고, `@Multica /help`로 명령을 확인하고, `/issue`로 태스크를 만들고, `/new`으로 새 Multica Chat을 시작하거나 `/clear`로 현재 Chat의 에이전트 컨텍스트를 초기화할 수 있습니다.
 
 Slack app 하나는 Multica 에이전트 하나에 대응합니다. 여러 에이전트를 연결하려면 에이전트마다 별도의 app을 만드세요.
 
@@ -75,7 +75,7 @@ settings:
   token_rotation_enabled: false
 ```
 
-만들기 전에 두 `Multica` 값을 에이전트 이름으로 바꿀 수 있습니다. manifest의 권한이나 이벤트를 삭제하지 마세요. 삭제하면 DM, 채널 멘션, 답글, `/issue`, `/new`, `/clear`가 작동하지 않을 수 있습니다.
+만들기 전에 두 `Multica` 값을 에이전트 이름으로 바꿀 수 있습니다. manifest의 권한이나 이벤트를 삭제하지 마세요. 삭제하면 DM, 채널 멘션, 답글, `@Multica /help`, `/issue`, `/new`, `/clear`가 작동하지 않을 수 있습니다.
 
 <Callout type="warning">
 Slack slash command 이름은 workspace 전체에서 공유됩니다. 설치된 다른 app이 이미 `/new` 또는 `/clear`를 사용 중이면 app을 만들거나 업데이트할 때 충돌하는 명령이 거부됩니다. 충돌을 해결하거나 메시지 형식인 `@Multica /new [메시지]` 또는 `@Multica /clear [메시지]`를 보내 네이티브 slash command 가로채기를 우회하세요.
@@ -150,6 +150,12 @@ DM이나 Bot을 @멘션한 채널 메시지에 파일을 그대로 첨부하세�
 
 이 기능에는 `files:read` scope가 필요합니다. 첨부 파일 지원 이전에 설치한 app이라면 1단계의 안내를 참고하세요. 파일 하나는 20 MiB 이하여야 하고 메시지 하나에 최대 10개까지 담깁니다. 용량을 초과했거나 아직 업로드 중이거나 Slack 외부에 있는 파일(예: Google Drive, Dropbox 링크)은 건너뛰며, 메시지 본문은 그대로 에이전트에 전달됩니다.
 
+### `@Multica /help`로 명령 확인하기
+
+DM, 채널 또는 thread에서 `@Multica /help`를 보내면 `@Multica /help`, `@Multica /new [메시지]`, `@Multica /clear [메시지]`, `@Multica /issue <제목>`(다음 줄부터는 설명)이 표시됩니다. Multica는 Chat이나 실행을 만들거나 현재 Chat을 변경하지 않고 직접 답합니다.
+
+기본 manifest는 `/issue`, `/new`, `/clear`만 네이티브 slash command로 등록합니다. `@Multica /help`는 manifest 변경이나 재설치 없이 사용할 수 있습니다. 네이티브 `/issue <설명>`은 에이전트가 설명으로 태스크를 만들도록 요청합니다.
+
 ### `/issue`로 태스크 만들기
 
 채널이나 DM에서 다음을 입력합니다.
@@ -204,6 +210,7 @@ API 서비스를 다시 시작한 뒤 Slack app을 연결하세요. 이 키는 �
 - **app을 확인할 수 없음**: manifest에 `users:read`가 포함되어 있는지 확인하고 권한을 업데이트한 뒤 app을 다시 설치합니다.
 - **DM 메뉴가 없음**: `app_home.messages_tab_enabled`가 `true`인지 확인합니다.
 - **채널에서 답변이 없음**: Bot이 채널에 초대되었고 메시지에서 @멘션했는지 확인합니다.
+- **`/help`가 Multica에 도착하지 않음**: `@Multica /help`를 보내세요. 기본 manifest는 네이티브 `/help`를 등록하지 않습니다.
 - **`/issue`, `/new` 또는 `/clear`가 없음**: manifest에 세 slash command와 `commands` scope가 포함되어 있는지 확인하고 app을 다시 설치합니다. Slack에서 `/new` 또는 `/clear`가 이미 사용 중이라고 표시되면 `@Multica` 메시지 형식을 사용하거나 workspace 수준의 명령 충돌을 먼저 해결하세요.
 - **파일이 에이전트에 도착하지 않음**: manifest에 `files:read`가 포함되어 있는지, scope를 추가한 뒤 app을 다시 설치했는지 확인하고, 파일이 20 MiB 이하인지도 확인합니다.
 - **Bot이 실행되지 않음**: 에이전트가 보관 처리되었는지, 사용하는 [런타임](/daemon-runtimes)이 온라인인지 확인합니다.

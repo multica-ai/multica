@@ -30,11 +30,15 @@ Un répertoire local ne s'applique qu'au daemon auquel il est lié. Lorsque le d
 
 Ouvrez le projet et cliquez sur **Ajouter un dépôt** dans **Ressources → Dépôts**. Recherchez un dépôt rattaché à l'espace de travail ou collez une URL Git. Les dépôts de l'espace de travail se gèrent dans **Paramètres → Code** ; une fois GitHub connecté, la même page propose **Choisir depuis GitHub** pour importer les dépôts auxquels la GitHub App a accès.
 
+Coller une URL de branche GitHub (`https://github.com/owner/repo/tree/branch`) renseigne séparément l’URL du dépôt et la branche de départ. Les noms de branche encodés dans l’URL sont décodés ; les paramètres de requête et les ancres de page sont exclus. Vérifiez la branche de départ avant d’ajouter le dépôt. Modifier l’URL du dépôt efface la branche de départ précédente, sauf si la nouvelle URL en précise une.
+
 Les dépôts ne se limitent pas à GitHub : toute URL Git accessible par le runtime fonctionne comme ressource de dépôt. Une instance Multica auto-hébergée peut aussi connecter des instances Forgejo, Gitea ou GitLab auto-hébergées dans **Paramètres → Code** ; voir [Fournisseurs Git auto-hébergés](/vcs-integration).
 
 Lors de la création d'un projet, vous pouvez aussi choisir des dépôts directement sous **Dépôts**. Un même projet peut rattacher plusieurs dépôts GitHub.
 
 La `ref` d'une ressource définit la branche, le tag ou le commit que les checkouts suivants utilisent par défaut. `default_branch_hint` donne seulement à l'agent une indication sur la branche par défaut et n'impose pas de changement de branche.
+
+Pour un dépôt géré, l'agent démarre dans le dossier de travail de la tâche. En général, `multica repo checkout` crée un sous-dossier pour le dépôt et affiche son chemin. Exécutez depuis ce chemin les commandes qui exigent la racine du dépôt. Si le processus de l'agent doit lui-même démarrer à la racine et que vous contrôlez la machine du runtime, ajoutez un checkout existant comme dossier local. Les modes `in_place` et `worktree` démarrent tous deux l'agent à la racine d'un dépôt ; pour les dépôts git, privilégiez `worktree` pour isoler les exécutions et les lancer en parallèle. Voir [Comment les exécutions partagent le répertoire](#comment-les-exécutions-partagent-le-répertoire).
 
 ## Ajouter un répertoire local
 
@@ -92,7 +96,7 @@ Un répertoire local dispose de deux modes d'exécution, définis par ressource 
 
 L'agent travaille directement dans votre répertoire, et les exécutions ont lieu une à la fois. Lorsque deux exécutions utilisent le même répertoire réel, la seconde passe en `waiting_local_directory` et reprend une fois que la première a libéré le répertoire. Deux chemins qui mènent au même répertoire via des liens symboliques différents sont sérialisés de la même manière.
 
-L'attente ne modifie pas le répertoire. Une exécution en attente peut être annulée ; sinon, elle attend que le répertoire devienne disponible.
+L'attente ne modifie pas le répertoire et n'occupe pas de slot d'exécution du daemon. Une exécution en attente peut être annulée ; sinon, elle reprend le démarrage lorsque le répertoire et la capacité d'exécution sont disponibles.
 
 Un simple répertoire non git ne peut utiliser que ce mode : le mode worktree est réservé aux dépôts git.
 
@@ -155,6 +159,8 @@ Une exécution qui n'a pas pu enregistrer sa branche, par exemple parce qu'elle 
 
 </Accordion>
 <Accordion title="Rien n'est perdu en silence" id="nothing-is-silently-lost">
+
+Pendant une exécution en worktree, un fichier d'instructions du runtime suivi par Git, comme `CLAUDE.md` ou `AGENTS.md`, est marqué `skip-worktree` dans l'index privé de la tâche. Le brief injecté reste ainsi hors des commits de l'agent, sans modifier votre checkout. Les modifications intentionnelles de ce fichier restent non commitées jusqu'au rétablissement du suivi lors du nettoyage, puis suivent les règles de livraison ci-dessous. Les fichiers du runtime non suivis et les répertoires de compétences doivent toujours être exclus des commits de l'agent.
 
 Rien de ce que l'agent laisse non commité n'est supprimé avec le worktree, y compris lorsque l'exécution échoue en cours de route. Sa destination dépend de ce que l'agent a fait pendant l'exécution :
 

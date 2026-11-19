@@ -310,7 +310,7 @@ WHERE i.workspace_id = sqlc.arg(workspace_id)
   AND s.user_id = sqlc.arg(user_id)
   AND s.unsubscribed_at IS NULL
   -- MUL-8472: private projects the caller cannot see.
-  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])));
+  AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])));
 
 -- name: IsIssueSubscriber :one
 SELECT EXISTS(

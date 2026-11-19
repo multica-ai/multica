@@ -89,6 +89,26 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 	return i, err
 }
 
+const getMemberForUpdate = `-- name: GetMemberForUpdate :one
+SELECT id, workspace_id, user_id, role, created_at, pinned_at FROM member WHERE id = $1 FOR UPDATE
+`
+
+// Locks a member row for a role change, so concurrent changes to the same
+// member apply one after the other and each re-checks the role it starts from.
+func (q *Queries) GetMemberForUpdate(ctx context.Context, id pgtype.UUID) (Member, error) {
+	row := q.db.QueryRow(ctx, getMemberForUpdate, id)
+	var i Member
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Role,
+		&i.CreatedAt,
+		&i.PinnedAt,
+	)
+	return i, err
+}
+
 const getRealtimeMemberships = `-- name: GetRealtimeMemberships :many
 SELECT m.user_id, m.workspace_id
 FROM member m
@@ -97,6 +117,7 @@ JOIN (
            unnest($2::uuid[]) AS workspace_id
 ) AS requested
     ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id
+WHERE m.role <> 'guest'
 `
 
 type GetRealtimeMembershipsParams struct {
@@ -109,6 +130,8 @@ type GetRealtimeMembershipsRow struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+// Guests (MUL-9420) get no realtime stream: workspace fanout is not narrowed
+// to their projects, so a socket that becomes a guest's is closed.
 func (q *Queries) GetRealtimeMemberships(ctx context.Context, arg GetRealtimeMembershipsParams) ([]GetRealtimeMembershipsRow, error) {
 	rows, err := q.db.Query(ctx, getRealtimeMemberships, arg.UserIds, arg.WorkspaceIds)
 	if err != nil {

@@ -67,6 +67,14 @@ interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   virtualizeRows?: boolean;
   virtualRowHeight?: number;
   virtualOverscan?: number;
+  // The element that scrolls both axes, for callers that save and restore its
+  // offsets; data attributes land on the same element.
+  scrollContainerRef?: (element: HTMLDivElement | null) => void;
+  scrollContainerAttributes?: { [attribute: `data-${string}`]: string | undefined };
+  // Vertical offset to open at. With virtualizeRows the virtualizer scrolls
+  // its element here when it attaches, so a restored offset must come in
+  // through this rather than only through scrollContainerRef.
+  initialScrollTop?: number;
 }
 
 // Headless data-table shell — adapted from Dice UI's data-table
@@ -97,6 +105,9 @@ export function DataTable<TData>({
   virtualizeRows = false,
   virtualRowHeight = 41,
   virtualOverscan = 10,
+  scrollContainerRef,
+  scrollContainerAttributes,
+  initialScrollTop,
   className,
   ...props
 }: DataTableProps<TData>) {
@@ -317,6 +328,13 @@ export function DataTable<TData>({
   }, [columnSizing, leafColumns]);
 
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
+  const attachScrollContainer = React.useCallback(
+    (element: HTMLDivElement | null) => {
+      scrollRef.current = element;
+      scrollContainerRef?.(element);
+    },
+    [scrollContainerRef],
+  );
 
   // Drives the pinned columns' trailing shadow. It only means something once
   // content is passing beneath them, so it stays off at rest. The state is a
@@ -360,6 +378,7 @@ export function DataTable<TData>({
     estimateSize: () => virtualRowHeight,
     getItemKey: getVirtualRowKey,
     overscan: virtualOverscan,
+    initialOffset: initialScrollTop,
     // Rows are not all one height. Callers use renderRow for group headers and
     // end-of-column footers, which are shorter than a data row, so a single
     // estimate drifts from the real layout as those accumulate — the window
@@ -372,9 +391,12 @@ export function DataTable<TData>({
   const firstVirtualItem = virtualItems[0];
   const lastVirtualItem = virtualItems[virtualItems.length - 1];
   const virtualPaddingTop = firstVirtualItem?.start ?? 0;
+  // Before the virtualizer has measured the viewport it yields no items; the
+  // spacer still spans every row so the first commit has its real height
+  // (a restored scroll offset assigned then is not clamped to the top).
   const virtualPaddingBottom = lastVirtualItem
     ? rowVirtualizer.getTotalSize() - lastVirtualItem.end
-    : 0;
+    : rowVirtualizer.getTotalSize();
 
   const bodyProps: DataTableBodyProps<TData> = {
     table,
@@ -398,7 +420,8 @@ export function DataTable<TData>({
     >
       <div className="relative flex min-h-0 flex-1 flex-col">
       <div
-        ref={scrollRef}
+        ref={attachScrollContainer}
+        {...scrollContainerAttributes}
         className="flex min-h-0 flex-1 flex-col overflow-auto bg-background"
       >
         <table

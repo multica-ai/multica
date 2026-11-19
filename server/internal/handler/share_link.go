@@ -300,6 +300,29 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A joiner who also holds a pending email invitation takes the slot that
+	// invitation reserved, exactly as accepting it would.
+	holdsInvitation := false
+	if h.Entitlements != nil {
+		_, pendingErr := h.Queries.GetPendingInvitationByEmail(r.Context(), db.GetPendingInvitationByEmailParams{
+			WorkspaceID: linkPreview.WorkspaceID, InviteeEmail: strings.ToLower(user.Email),
+		})
+		if pendingErr != nil && !errors.Is(pendingErr, pgx.ErrNoRows) {
+			writeError(w, http.StatusInternalServerError, "failed to join workspace")
+			return
+		}
+		holdsInvitation = pendingErr == nil
+	}
+	memberLimit, err := h.memberLimitFor(r.Context(), linkPreview.WorkspaceID, linkPreview.Role, holdsInvitation)
+	if err != nil {
+		if errors.Is(err, errMemberLimitReached) {
+			writeMemberLimitReached(w)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to join workspace")
+		return
+	}
+
 	var capacityToken uuid.UUID
 	if h.seatCapacityEnabled() {
 		capacityToken, err = h.beginShareJoinCapacity(r.Context(), uuid.UUID(linkPreview.WorkspaceID.Bytes), uuid.UUID(linkPreview.ID.Bytes), uuid.UUID(user.ID.Bytes))
@@ -321,6 +344,11 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 
 	qtx := h.Queries.WithTx(tx)
+	if err := memberLimit.lock(r.Context(), qtx); err != nil {
+		h.compensateCapacityIntent(r.Context(), capacityToken)
+		writeError(w, http.StatusInternalServerError, "failed to join workspace")
+		return
+	}
 
 	link, err := qtx.ClaimShareLinkByID(r.Context(), linkPreview.ID)
 	if err != nil {
@@ -374,6 +402,22 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A joiner whose pending invitation was settled above takes the slot that
+	// invitation held, as accepting it would; otherwise the join is a new slot.
+	memberLimit.reserved = settledInvitationID.Valid
+	limitAdmission, err := memberLimit.admit(r.Context(), qtx)
+	if err != nil {
+		_ = tx.Rollback(r.Context())
+		h.compensateCapacityIntent(r.Context(), capacityToken)
+		if errors.Is(err, errMemberLimitReached) {
+			limitAdmission.record(r.Context())
+			writeMemberLimitReached(w)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to join workspace")
+		return
+	}
+
 	member, err := qtx.CreateMember(r.Context(), db.CreateMemberParams{
 		WorkspaceID: link.WorkspaceID,
 		UserID:      user.ID,
@@ -416,6 +460,7 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to join workspace")
 		return
 	}
+	limitAdmission.record(r.Context())
 	if capacityToken != uuid.Nil {
 		h.confirmCapacityIntent(r.Context(), uuid.UUID(link.WorkspaceID.Bytes), capacityToken, uuid.UUID(member.ID.Bytes))
 	}

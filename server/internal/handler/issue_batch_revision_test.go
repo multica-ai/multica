@@ -135,3 +135,20 @@ func TestConditionalBatchCombinedMutationAdvancesRevisionOnce(t *testing.T) {
 		})
 	}
 }
+
+func TestConditionalBatchReportsRevisionAndRunOutcome(t *testing.T) {
+	agentID := seededReadyAgentID(t)
+	issue := createIssueForTest(t, map[string]any{"title": "conditional assignment", "status": "todo"})
+	req := newRequest(http.MethodPost, "/api/issues/conditional-batch-update", map[string]any{
+		"issue_ids": []string{issue.ID},
+		"updates":   map[string]any{"assignee_type": "agent", "assignee_id": agentID},
+	})
+	req.URL.RawQuery = fmt.Sprintf("expected_revision=%d", issue.Revision)
+	var resp batchUpdateTestResponse
+	testutil.Call(t, testHandler.BatchUpdateIssues, req).Want(http.StatusOK).JSON(&resp)
+	result := resultFor(t, resp, issue.ID)
+	if result.IssueRevision <= issue.Revision {
+		t.Fatalf("revision = %d, want greater than %d", result.IssueRevision, issue.Revision)
+	}
+	wantRunOutcome(t, result.RunOutcome, "agent", agentID, DispatchQueued, ReasonQueued)
+}

@@ -79,7 +79,6 @@
     "run_blocked_attribution": "No disparado: la ejecución no pudo atribuirse a un miembro responsable",
     "run_blocked_already_active": "No disparado: una ejecución reciente ya cubre esto",
     "run_blocked_quota_exceeded": "No disparado: se alcanzó el límite de ejecuciones de este periodo",
-    "run_blocked_issue_limit_reached": "No disparado: el espacio de trabajo alcanzó su límite de tareas",
     "run_blocked_generic": "No se ha disparado: la ejecución se ha bloqueado",
     "section_triggers": "Disparadores",
     "section_run_history": "Historial de ejecuciones",
@@ -184,6 +183,10 @@
     "url_copied": "URL del webhook copiada",
     "url_copy_failed": "No se ha podido copiar",
     "edit_schedule": "Editar programación",
+    "edit_webhook": "Editar webhook",
+    "event_filter_summary_all": "Acepta todos los eventos",
+    "event_filter_summary_conditions_one": "{{count}} condición",
+    "event_filter_summary_conditions_other": "{{count}} condiciones",
     "rotate_url": "Rotar URL",
     "rotate_confirm_title": "Rotar URL del webhook",
     "rotate_confirm_description": "La URL actual dejará de funcionar inmediatamente. Cualquier sistema externo que la llame debe actualizarse con la nueva URL. ¿Continuar?",
@@ -247,6 +250,18 @@
       "disabled_invalid_signature": "No se puede repetir: la firma no era válida",
       "disabled_rejected": "No se puede repetir una entrega rechazada",
       "disabled_queued": "Todavía en cola: repítela cuando se estabilice"
+    },
+    "ignore": {
+      "title": "Motivo de omisión",
+      "payload_filtered": "El contenido no cumple las condiciones",
+      "event_filtered": "El evento o la acción no coincide",
+      "trigger_disabled": "Disparador desactivado",
+      "autopilot_paused": "Automatización en pausa",
+      "autopilot_archived": "Automatización archivada",
+      "quota_exceeded": "Cuota de ejecuciones alcanzada",
+      "actual_value": "Valor real",
+      "missing": "Campo ausente",
+      "truncated": "Vista previa truncada. Consulta el contenido original para ver el valor completo."
     }
   },
   "add_trigger_dialog": {
@@ -272,6 +287,12 @@
     "submitting": "Guardando...",
     "toast_updated": "Programación actualizada",
     "toast_update_failed": "No se ha podido actualizar la programación"
+  },
+  "edit_webhook_dialog": {
+    "title": "Editar webhook",
+    "label_placeholder": "p. ej., Pull requests de GitHub",
+    "toast_updated": "Webhook actualizado",
+    "toast_update_failed": "No se ha podido actualizar el webhook"
   },
   "dialog": {
     "sr_create": "Nueva automatización",
@@ -328,12 +349,24 @@
     "webhook_created_done": "Hecho",
     "event_filter_label": "Filtros de eventos",
     "event_filter_docs_link_label": "Aprende cómo funcionan los filtros de eventos",
-    "event_filter_event_placeholder": "p. ej., workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "Añadir",
-    "event_filter_remove_label": "Quitar filtro",
-    "event_filter_hint": "Solo procesa webhooks que coincidan con estos eventos. Déjalo vacío para aceptar todos.",
+    "event_filter_event_placeholder": "Evento, p. ej., pull_request",
+    "event_filter_actions_placeholder": "Acciones (opcional)",
+    "event_filter_add_rule": "Añadir regla",
+    "event_filter_event_label": "Evento",
+    "event_filter_actions_label": "Acciones",
+    "event_filter_new_rule_label": "Nueva regla",
+    "event_filter_condition_label": "Condición",
+    "event_filter_error_event_required": "Introduce un nombre de evento.",
+    "event_filter_error_path_required": "Introduce un campo del contenido.",
+    "event_filter_error_path_invalid": "Separa los nombres de campo con puntos, hasta {{path}} caracteres.",
+    "event_filter_error_value_required": "Introduce un valor.",
+    "event_filter_error_too_many_values": "Hasta {{values}} valores.",
+    "event_filter_remove_label": "Eliminar regla",
+    "event_filter_hint": "Solo se procesan eventos que coinciden con una regla y todas sus condiciones. Deja vacío para aceptar todos los eventos.",
     "schedule_multiple_notice": "Esta automatización tiene {{count}} programaciones. Cierra este diálogo y edita cada una en Disparadores, más abajo.",
+    "webhook_multiple_notice": "Esta automatización tiene varios webhooks. Cierra este diálogo y edita cada uno en Disparadores, más abajo.",
+    "webhook_edit_filters": "Editar filtros",
+    "webhook_filters_saved_separately": "Los filtros se guardan por separado: Cancelar aquí no los deshace.",
     "schedule_empty": "Sin programación: esta automatización solo se ejecuta cuando se dispara manualmente.",
     "schedule_add": "Añadir programación",
     "error_title_required": "Introduce un nombre para esta automatización.",
@@ -347,7 +380,24 @@
         "label": "Solo ejecutar",
         "description": "Ejecución silenciosa, sin crear tarea"
       }
-    }
+    },
+    "event_filter_condition_remove_label": "Eliminar condición",
+    "event_filter_condition_add_label": "Añadir condición",
+    "event_filter_condition_ops": {
+      "equals": "es",
+      "not_equals": "no es",
+      "contains": "contiene",
+      "in": "es uno de",
+      "exists": "existe"
+    },
+    "event_filter_condition_path_label": "Campo del contenido",
+    "event_filter_condition_path_placeholder": "Campo del contenido, p. ej., pull_request.base.ref",
+    "event_filter_condition_op_label": "Operador",
+    "event_filter_condition_value_label": "Valor",
+    "event_filter_condition_value_placeholder": "p. ej., main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "Ignorar mayúsculas",
+    "event_filter_condition_all": "Y el contenido cumple todas las condiciones"
   },
   "schedule_editor": {
     "time_label": "Hora",

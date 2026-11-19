@@ -12,6 +12,7 @@ import type {
   NotificationGroupKey,
   NotificationPreferences,
 } from "@multica/core/types";
+import { notificationPreferenceValue } from "@multica/core/notification-preferences/patch";
 import { Text } from "@/components/ui/text";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
@@ -77,13 +78,10 @@ export default function NotificationsSettingsScreen() {
   const preferences: NotificationPreferences = data?.preferences ?? {};
 
   const onToggle = (key: NotificationGroupKey, enabled: boolean) => {
-    const next: NotificationPreferences = { ...preferences };
-    if (enabled) {
-      // Default is "all" — omitting the key keeps the object clean.
-      delete next[key];
-    } else {
-      next[key] = "muted";
-    }
+    const next: NotificationPreferences = {
+      ...preferences,
+      [key]: enabled ? "all" : "muted",
+    };
     mutation.mutate(next);
   };
 
@@ -116,7 +114,8 @@ export default function NotificationsSettingsScreen() {
         title={t("groups.inbox_notifications")}
       >
         {INBOX_GROUPS.map((group, idx) => {
-          const enabled = preferences[group.key] !== "muted";
+          const enabled =
+            notificationPreferenceValue(preferences, group.key) !== "muted";
           const isLast = idx === INBOX_GROUPS.length - 1;
           return (
             <View key={group.key}>

@@ -7,7 +7,6 @@ import {
   useState,
   type ComponentProps,
   type ReactNode,
-  type Ref,
 } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { ChevronRight, PanelRight, type IconComponent } from "@multica/ui/icons";
@@ -24,6 +23,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
 import { ActionShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useT } from "../i18n";
+import { useRestoredScrollRef } from "../platform/scroll-restoration";
 import {
   AnimatedRightSidebar,
   getAnimatedRightSidebarInitialOpen,
@@ -36,6 +36,8 @@ import { BreadcrumbHeader, type BreadcrumbSegment } from "./breadcrumb-header";
 /** The reading column of an object page; the header above it stays full width. */
 export const OBJECT_PAGE_BODY =
   "mx-auto w-full max-w-[var(--object-page-max-width,760px)] px-[var(--space-lg,1.5rem)] py-[var(--space-xl,2rem)]";
+
+const OBJECT_PAGE_SCROLL_KEY = "object";
 
 /** What an object page shows, as themes see it on `data-type`. */
 export type ObjectPageType = "project" | "agent" | "squad" | "runtime" | "member" | "autopilot" | "skill";
@@ -61,7 +63,7 @@ interface ObjectPageProps {
    */
   children: ReactNode;
   /** The body scroll owner, for sections that virtualize their rows. */
-  scrollRef?: Ref<HTMLDivElement>;
+  scrollRef?: (el: HTMLDivElement | null) => void;
 }
 
 /**
@@ -109,6 +111,17 @@ export function ObjectPage({ type, segments, leaf, actions, panel, layoutId, chi
 
   useRightSidebarShortcut(shortcutTargetRef, toggle);
 
+  // The body is the page's one vertical scroller: the platform restores its
+  // offset when the page mounts again (e.g. switching back to its tab).
+  const restoreScrollRef = useRestoredScrollRef(OBJECT_PAGE_SCROLL_KEY);
+  const attachBody = useCallback(
+    (el: HTMLDivElement | null) => {
+      scrollRef?.(el);
+      restoreScrollRef(el);
+    },
+    [scrollRef, restoreScrollRef],
+  );
+
   const header = (
     <BreadcrumbHeader
       segments={segments}
@@ -135,7 +148,15 @@ export function ObjectPage({ type, segments, leaf, actions, panel, layoutId, chi
     />
   );
 
-  const body = <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>;
+  const body = (
+    <div
+      ref={attachBody}
+      data-tab-scroll-root={OBJECT_PAGE_SCROLL_KEY}
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+    >
+      {children}
+    </div>
+  );
 
   if (!panel) {
     return (

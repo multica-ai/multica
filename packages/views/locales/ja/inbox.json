@@ -153,6 +153,7 @@
     "archive_completed_failed": "完了した項目をアーカイブできませんでした",
     "unarchive_failed": "アーカイブ解除に失敗しました",
     "archived_load_failed": "アーカイブ済み通知を読み込めませんでした",
+    "load_failed": "通知を読み込めませんでした",
     "filters_load_failed": "フィルターを読み込めませんでした",
     "delete_failed": "通知を削除できませんでした。もう一度お試しください。",
     "unsubscribe_archive_failed": "購読解除に失敗しました",

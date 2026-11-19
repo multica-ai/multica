@@ -1,8 +1,8 @@
-import { AlarmClock, BellOff, CircleDot, Command, FolderKanban, Gauge, Globe, History, Layers, ListChecks, ListPlus, Lock, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Terminal, Users, Workflow, type IconComponent } from "@multica/ui/icons";
+import { AlarmClock, BellOff, CircleDot, Command, Folder, FolderKanban, Gauge, Globe, History, Layers, ListChecks, ListPlus, Lock, MessageSquarePlus, Mic, Palette, PanelLeft, Pin, Quote, Server, Sparkles, Terminal, Users, WeChat, Workflow, type IconComponent } from "@multica/ui/icons";
 import type { SupportedLocale } from "@multica/core/i18n";
 import type { WorkspacePaths } from "@multica/core/paths";
 import type { ReleaseStamp } from "@multica/core/whats-new";
-import { ANNOTATIONS_HERO, ENVIRONMENTS_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, type WhatsNewHero } from "./heroes";
+import { ANNOTATIONS_HERO, CHAT_STEERING_HERO, CHAT_WAKEUP_HERO, ENVIRONMENTS_HERO, PROJECT_FOLDERS_HERO, SNOOZE_HERO, THEMES_HERO, VOICE_HERO, WEIXIN_HERO, type WhatsNewHero } from "./heroes";
 
 export interface HighlightCopy {
   title: string;
@@ -45,6 +45,140 @@ export const WHATS_NEW_DECK_SINCE = "0.9.0";
  * reach users only through the Help menu.
  */
 export const WHATS_NEW_RELEASES: WhatsNewRelease[] = [
+  {
+    version: "0.11.0",
+    date: "2026-11-18",
+    highlights: [
+      {
+        id: "chat-wakeups",
+        icon: AlarmClock,
+        hero: CHAT_WAKEUP_HERO,
+        action: { kind: "route", to: (p) => p.chat() },
+        copy: {
+          en: {
+            title: "Agents come back to report in chat",
+            body: "Ask an agent in chat to tell you when an issue is done or a PR merges, and it reports back in the same conversation; it also follows up when it asks someone else for you. The strip above the message box shows what it's waiting for.",
+          },
+          "zh-Hans": {
+            title: "智能体会回到聊天里汇报",
+            body: "在聊天中让智能体在任务完成或 PR 合并时告诉你，它会回到同一个对话里汇报；替你找人要答复或评审时，它也会自动跟进。输入框上方的提示条会显示它正在等什么。",
+          },
+          "zh-Hant": {
+            title: "AI 代理會回到聊天裡匯報",
+            body: "在聊天中請 AI 代理在任務完成或 PR 合併時告訴你，它會回到同一個對話裡匯報；替你找人要答覆或審查時，它也會自動跟進。輸入框上方的提示列會顯示它正在等什麼。",
+          },
+          ja: {
+            title: "エージェントがチャットに戻って報告",
+            body: "チャットでエージェントに、タスクの完了や PR のマージを知らせるよう頼むと、同じ会話に戻って報告します。あなたの代わりに誰かへ回答やレビューを頼んだときも自動でフォローし、待っている内容は入力欄の上のバーに表示されます。",
+          },
+          ko: {
+            title: "에이전트가 채팅으로 돌아와 알려 주기",
+            body: "채팅에서 에이전트에게 태스크가 끝나거나 PR이 머지되면 알려 달라고 하면, 같은 대화로 돌아와 알려 줍니다. 나 대신 다른 사람에게 답변이나 리뷰를 요청할 때도 알아서 후속 확인하며, 기다리는 내용은 입력창 위 막대에 표시됩니다.",
+          },
+          fr: {
+            title: "Les agents reviennent faire le point dans la discussion",
+            body: "Dans une discussion, demandez à un agent de vous prévenir quand une tâche est terminée ou qu'une PR est fusionnée : il revient faire le point dans la même conversation. Il assure aussi le suivi quand il sollicite quelqu'un pour vous, et le bandeau au-dessus de la zone de saisie montre ce qu'il attend.",
+          },
+        },
+      },
+      {
+        id: "chat-steering",
+        icon: MessageSquarePlus,
+        hero: CHAT_STEERING_HERO,
+        action: { kind: "route", to: (p) => p.chat() },
+        copy: {
+          en: {
+            title: "Add to a reply while it's running",
+            body: "While an agent replies in chat, keep typing and send: when the box says Add to current run, your message joins that reply without stopping it. With an attachment, among other cases, it says Start after this run and waits for the next turn.",
+          },
+          "zh-Hans": {
+            title: "在回复进行中补充要求",
+            body: "智能体在聊天中回复时，可以继续输入并发送：输入框显示「插话到当前运行」时，消息会并入这次回复，不会打断它。带附件等情况会显示「本轮结束后开始」，消息会等到下一轮再处理。",
+          },
+          "zh-Hant": {
+            title: "在回覆進行中補充要求",
+            body: "AI 代理在聊天中回覆時，可以繼續輸入並送出：輸入框顯示「插話到當前執行」時，訊息會併入這次回覆，不會打斷它。帶附件等情況會顯示「本輪結束後開始」，訊息會等到下一輪再處理。",
+          },
+          ja: {
+            title: "返信の途中で指示を追加",
+            body: "チャットでエージェントが返信している間も入力して送信でき、入力欄に「現在の実行に追加」と出ていれば、返信を止めずにその返信に加わります。添付ファイルがある場合などは「この実行の後に開始」と表示され、次のターンで処理されます。",
+          },
+          ko: {
+            title: "답변 도중에 지시 추가하기",
+            body: "에이전트가 채팅에서 답하는 동안에도 입력해 보낼 수 있으며, 입력창에 '현재 실행에 추가'가 보이면 답변을 멈추지 않고 그 답변에 반영됩니다. 첨부 파일이 있을 때처럼 '이번 실행 후 시작'이 보이면 다음 차례에 처리됩니다.",
+          },
+          fr: {
+            title: "Complétez une réponse en cours",
+            body: "Pendant qu'un agent répond dans une discussion, continuez à écrire et envoyez : si la zone de saisie indique Ajouter à l'exécution en cours, votre message rejoint cette réponse sans l'interrompre. Avec une pièce jointe, entre autres, elle indique Démarrer après cette exécution et le message attend le tour suivant.",
+          },
+        },
+      },
+      {
+        id: "weixin-channel",
+        icon: WeChat,
+        hero: WEIXIN_HERO,
+        action: { kind: "route", to: (p) => p.agents() },
+        copy: {
+          en: {
+            title: "Chat with an agent from WeChat",
+            body: "Open an agent you own, choose Add messaging channel under Messaging, pick WeChat, and scan the QR code with your own WeChat. Then message the bot privately in WeChat; replies and files come back there.",
+          },
+          "zh-Hans": {
+            title: "在微信里和智能体对话",
+            body: "打开你拥有的智能体，在「消息渠道」中选择「添加消息渠道」→「微信」，用你自己的微信扫码。之后在微信里私聊这个机器人，回复和文件都会发回微信。",
+          },
+          "zh-Hant": {
+            title: "在微信裡和 AI 代理對話",
+            body: "打開你擁有的 AI 代理，在「訊息渠道」中選擇「新增訊息管道」→「微信」，用你自己的微信掃碼。之後在微信裡私訊這個機器人，回覆和檔案都會傳回微信。",
+          },
+          ja: {
+            title: "WeChat からエージェントと話す",
+            body: "自分のエージェントを開き、「メッセージング」で「メッセージチャネルを追加」→「WeChat」を選び、自分の WeChat で QR コードをスキャンします。あとは WeChat でボットに個別メッセージを送ると、返信やファイルも WeChat に届きます。",
+          },
+          ko: {
+            title: "WeChat에서 에이전트와 대화하기",
+            body: "내가 소유한 에이전트를 열고 '메신저'에서 '메시지 채널 추가' → 'WeChat'을 고른 뒤, 내 WeChat으로 QR 코드를 스캔하세요. 이후 WeChat에서 봇에게 개인 메시지를 보내면 답변과 파일도 WeChat으로 돌아옵니다.",
+          },
+          fr: {
+            title: "Discutez avec un agent depuis WeChat",
+            body: "Ouvrez un agent dont vous êtes propriétaire, choisissez Ajouter un canal de messagerie sous Messagerie, puis WeChat, et scannez le code QR avec votre propre compte WeChat. Écrivez ensuite au bot en privé dans WeChat : les réponses et les fichiers y reviennent.",
+          },
+        },
+      },
+      {
+        id: "project-folders",
+        icon: Folder,
+        hero: PROJECT_FOLDERS_HERO,
+        action: { kind: "route", to: (p) => p.projects() },
+        copy: {
+          en: {
+            title: "Organize projects into folders",
+            body: "In the sidebar, click + next to Projects and choose New folder, then drag projects into it or pick Move to folder from a project's menu. On Projects, open Display settings to group by folder.",
+          },
+          "zh-Hans": {
+            title: "用文件夹整理项目",
+            body: "在侧栏「项目」旁点「+」→「新建文件夹」，再把项目拖进去，或在项目菜单里选「移动到文件夹」。在「项目」页打开「显示设置」，还可以按文件夹分组。",
+          },
+          "zh-Hant": {
+            title: "用資料夾整理專案",
+            body: "在側欄「專案」旁點「+」→「新增資料夾」，再把專案拖進去，或在專案選單裡選「移動到資料夾」。在「專案」頁打開「顯示設定」，還可以按資料夾分組。",
+          },
+          ja: {
+            title: "フォルダでプロジェクトを整理",
+            body: "サイドバーの「プロジェクト」横の「+」から「新しいフォルダ」を選び、プロジェクトをドラッグして入れるか、プロジェクトのメニューで「フォルダに移動」を選びます。「プロジェクト」ページの「表示設定」では、フォルダごとにグループ化もできます。",
+          },
+          ko: {
+            title: "폴더로 프로젝트 정리하기",
+            body: "사이드바의 '프로젝트' 옆 '+'에서 '새 폴더'를 고른 뒤, 프로젝트를 끌어다 넣거나 프로젝트 메뉴에서 '폴더로 이동'을 고르세요. '프로젝트' 페이지의 '표시 설정'에서 폴더별로 그룹화할 수도 있습니다.",
+          },
+          fr: {
+            title: "Rangez vos projets dans des dossiers",
+            body: "Dans la barre latérale, cliquez sur + à côté de Projets puis sur Nouveau dossier, et glissez-y des projets ou choisissez Déplacer vers un dossier dans le menu d'un projet. Dans Projets, ouvrez Affichage pour regrouper par dossier.",
+          },
+        },
+      },
+    ],
+  },
   {
     version: "0.10.0",
     date: "2026-11-16",

@@ -106,6 +106,8 @@
   "mention": {
     "group_users": "Users",
     "group_issues": "Issues",
+    "group_projects": "Projects",
+    "group_docs": "Docs",
     "all_members": "All members",
     "agent_badge": "Agent",
     "squad_badge": "Squad",
@@ -230,5 +232,31 @@
       "later": "Not now",
       "start": "Start dictating"
     }
+  },
+  "block_menu": {
+    "label": "Insert block",
+    "blocks": {
+      "paragraph": "Text",
+      "heading1": "Heading 1",
+      "heading2": "Heading 2",
+      "heading3": "Heading 3",
+      "bulletList": "Bulleted list",
+      "orderedList": "Numbered list",
+      "taskList": "Task list",
+      "blockquote": "Quote",
+      "codeBlock": "Code block",
+      "mermaid": "Mermaid diagram",
+      "table": "Table",
+      "divider": "Divider",
+      "image": "Image",
+      "file": "File"
+    }
+  },
+  "block_handle": {
+    "add": "Add below",
+    "options": "Drag to move, click for options",
+    "turn_into": "Turn into",
+    "duplicate": "Duplicate",
+    "delete": "Delete"
   }
 }

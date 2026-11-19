@@ -106,6 +106,8 @@
   "mention": {
     "group_users": "Utilisateurs",
     "group_issues": "Tâches",
+    "group_projects": "Projets",
+    "group_docs": "Documents",
     "all_members": "Tous les membres",
     "agent_badge": "Agent",
     "squad_badge": "Squad",
@@ -230,5 +232,31 @@
       "later": "Plus tard",
       "start": "Commencer à dicter"
     }
+  },
+  "block_menu": {
+    "label": "Insérer un bloc",
+    "blocks": {
+      "paragraph": "Texte",
+      "heading1": "Titre 1",
+      "heading2": "Titre 2",
+      "heading3": "Titre 3",
+      "bulletList": "Liste à puces",
+      "orderedList": "Liste numérotée",
+      "taskList": "Liste de tâches",
+      "blockquote": "Citation",
+      "codeBlock": "Bloc de code",
+      "mermaid": "Diagramme Mermaid",
+      "table": "Tableau",
+      "divider": "Séparateur",
+      "image": "Image",
+      "file": "Fichier"
+    }
+  },
+  "block_handle": {
+    "add": "Ajouter en dessous",
+    "options": "Glisser pour déplacer, cliquer pour les options",
+    "turn_into": "Transformer en",
+    "duplicate": "Dupliquer",
+    "delete": "Supprimer"
   }
 }

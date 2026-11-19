@@ -153,6 +153,7 @@
     "archive_completed_failed": "归档已完成失败",
     "unarchive_failed": "取消归档失败",
     "archived_load_failed": "无法加载已归档通知",
+    "load_failed": "无法加载通知",
     "filters_load_failed": "无法加载筛选项",
     "delete_failed": "无法删除通知，请重试。",
     "unsubscribe_archive_failed": "取消订阅失败",

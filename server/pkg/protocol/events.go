@@ -102,6 +102,7 @@ const (
 	EventChatSessionRead     = "chat:session_read"
 	EventChatSessionDeleted  = "chat:session_deleted"
 	EventChatSessionUpdated  = "chat:session_updated"
+	EventChatWakeupChanged   = "chat:wakeup_changed"
 
 	// Project events
 	EventProjectCreated         = "project:created"
@@ -150,6 +151,13 @@ const (
 	// A member's own view and sidebar preferences. Always private to that
 	// member: it exists so their other devices follow along.
 	EventIssueViewPreferenceChanged = "issue_view_preference:changed"
+
+	EventDocCreated       = "doc:created"
+	EventDocUpdated       = "doc:updated"
+	EventDocDeleted       = "doc:deleted"
+	EventDocFolderCreated = "doc_folder:created"
+	EventDocFolderUpdated = "doc_folder:updated"
+	EventDocFolderDeleted = "doc_folder:deleted"
 
 	// Pin events
 	EventPinCreated   = "pin:created"

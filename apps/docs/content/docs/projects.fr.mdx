@@ -26,7 +26,7 @@ Un travail qu'une seule tâche suffit à décrire n'a pas besoin de projet. Les 
 
 ## Parcourir les projets
 
-Ouvrez **Tous les projets** et choisissez **Grille** ou **Tableau** dans le menu d'affichage. Les deux dispositions proposent la recherche et des filtres par statut, priorité et responsable. Regroupez les projets selon ces mêmes champs, ou gardez la grille sans regroupement. Dans le tableau, déplacer un projet vers une autre colonne modifie le champ correspondant.
+Ouvrez **Tous les projets** et choisissez **Grille** ou **Tableau** dans le menu d'affichage. Les deux dispositions proposent la recherche et des filtres par statut, priorité et responsable. Regroupez les projets selon ces mêmes champs ou par [dossier](#folders), ou gardez la grille sans regroupement. Dans le tableau, déplacer un projet vers une autre colonne modifie le champ correspondant.
 
 La grille peut afficher les dates de début et d'échéance, la progression et la dernière activité. Triez par ces champs, par nom, statut, priorité ou date de création. La disposition, le regroupement, le tri, les colonnes visibles et les filtres sont enregistrés par utilisateur et espace de travail, et synchronisés entre appareils. Le texte de recherche n'est pas enregistré.
 
@@ -104,17 +104,29 @@ multica project member add <project-id> carol@example.com
 
 Rendre un projet privé à **Tout l’espace de travail** permet à tous les membres de l'espace de travail de voir le projet, ses tâches, ses commentaires et ses pièces jointes. L'application demande une confirmation avant d'enregistrer ; `multica project update --visibility workspace` applique le changement immédiatement.
 
+Si l’offre de votre espace de travail limite les projets privés, les projets déjà privés le restent et leurs membres y gardent accès. Vous ne pouvez alors ni créer de projet privé, ni rendre un projet privé, ni y ajouter de membre, même en nommant responsable une personne extérieure au projet. Les membres habilités peuvent toujours modifier les détails du projet, retirer des membres, ouvrir l’accès à tout l’espace de travail, et archiver ou supprimer le projet. Le propriétaire de l’espace peut toujours rejoindre le projet (voir [Reprise par le propriétaire de l'espace de travail](#workspace-owner-recovery)).
+
 ### Reprise par le propriétaire de l'espace de travail [#workspace-owner-recovery]
 
 Un projet privé peut n'avoir aucun `owner` ni `admin` sur sa liste, voire plus aucun membre. Le `owner` de l'espace de travail peut intervenir depuis **Paramètres → Général → Projets privés**, une section visible des seuls propriétaires (pas des `admin`). Elle liste chaque projet privé avec son nom et ses membres, et rien d'autre : les tâches, commentaires et pièces jointes restent masqués tant que vous ne l'avez pas rejoint.
 
 Cliquez sur **Rejoindre** et confirmez pour vous ajouter à la liste des membres. Vous y apparaissez comme n'importe quel membre, les membres existants reçoivent une notification dans leur boîte de réception et, en tant que propriétaire sur la liste, vous pouvez gérer l'accès du projet. Rejoindre un projet ne change pas son responsable. Un projet dont tous les membres sont partis se récupère de la même façon : rejoignez-le, puis gérez-le ou supprimez-le depuis la page du projet.
 
+## Dossiers [#folders]
+
+Les dossiers regroupent des projets liés, par exemple tout ce qui concerne un lancement ou une équipe, pour que la section Projets de la barre latérale reste courte. Les dossiers sont partagés : tous les membres voient les mêmes dossiers, et n'importe quel membre peut en créer, en renommer, en supprimer, et y ajouter ou en retirer des projets. Un projet est dans un dossier au plus, et les dossiers ne s'imbriquent pas. Un dossier sert uniquement à organiser : il ne change pas qui peut voir les projets.
+
+- **Créer un dossier** : cliquez sur **+** dans la section Projets de la barre latérale et choisissez **Nouveau dossier**, ou choisissez **Déplacer vers un dossier → Nouveau dossier…** dans le menu d'un projet pour le créer avec ce projet dedans.
+- **Déplacer un projet** : choisissez **Déplacer vers un dossier** dans le menu du projet, ou faites glisser le projet sur un dossier de la barre latérale, ou hors de celui-ci. À la création d'un projet, choisissez son dossier dans la boîte de dialogue ; **+** sur la ligne d'un dossier crée un projet dans ce dossier.
+- **Renommer ou supprimer un dossier** : faites un clic droit dessus dans la barre latérale. Supprimer un dossier ramène ses projets au premier niveau ; rien d'autre ne change.
+
+Les dossiers ouverts dans votre barre latérale et l'ordre des dossiers et des projets vous sont propres et n'affectent pas les autres membres. Les filtres de la section Projets s'appliquent à l'intérieur des dossiers : un dossier dont tous les projets sont filtrés est masqué, tandis qu'un dossier vide reste visible pour que vous puissiez le remplir. Dans **Tous les projets**, regroupez par **Dossier** pour voir les projets de chaque dossier ensemble ; dans le tableau, déplacer un projet vers une autre colonne le place dans ce dossier.
+
 ## Épingler à la barre latérale
 
 Un projet épinglé apparaît dans votre barre latérale. L'épinglage est une préférence personnelle et n'affecte pas les autres membres.
 
-Dans les réglages de la section Projets, **Icônes par défaut uniquement** remplace les icônes personnalisées par le dossier par défaut dans cette section. Cette option est désactivée par défaut et ne modifie pas les icônes des projets eux-mêmes.
+Dans les réglages de la section Projets, **Icônes par défaut uniquement** remplace les icônes personnalisées par l'icône de projet par défaut dans cette section. Cette option est désactivée par défaut et ne modifie pas les icônes des projets eux-mêmes.
 
 ## Archiver et restaurer
 

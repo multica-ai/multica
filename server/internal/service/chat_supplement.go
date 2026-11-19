@@ -41,7 +41,9 @@ func requeueChatTaskSupplements(ctx context.Context, q *db.Queries, task db.Agen
 		attr := attribution.DirectHumanRun(row.AuthorID, attribution.EvidenceChat, row.ChatSessionID)
 		source, _, evidenceKind, evidenceRef := attributionCreateParams(attr)
 		next, err := q.CreateChatTask(ctx, db.CreateChatTaskParams{
-			ID: dbid.NewV7(), AgentID: task.AgentID, RuntimeID: task.RuntimeID,
+			// Only members create supplements; the requeued turn keeps the
+			// verified member stamp an explicit skill selection requires.
+			Context: []byte(`{"chat_input_actor_type":"member"}`), ID: dbid.NewV7(), AgentID: task.AgentID, RuntimeID: task.RuntimeID,
 			Priority: 3, ChatSessionID: task.ChatSessionID, InitiatorUserID: row.AuthorID,
 			OriginatorUserID: row.AuthorID, AccountableUserID: row.AuthorID,
 			OriginatorSource: source, TriggerEvidenceKind: evidenceKind,

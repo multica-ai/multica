@@ -256,7 +256,9 @@
     "archive": "보관",
     "unarchive": "보관 해제",
     "archived_title": "보관됨",
-    "row_actions_aria": "채팅 작업"
+    "row_actions_aria": "채팅 작업",
+    "wakeup_preview": "보고하러 돌아옴",
+    "wakeup_active": "보고 대기 중"
   },
   "header": {
     "agent_settings": "에이전트 설정",
@@ -264,5 +266,52 @@
     "delete": "채팅 삭제",
     "archive": "채팅 보관",
     "unarchive": "채팅 보관 해제"
+  },
+  "wakeup": {
+    "panel_title": "웨이크업",
+    "panel_empty": "이 대화에는 웨이크업이 없습니다",
+    "panel_ended": "최근 종료됨",
+    "limits_hint": "모든 웨이크업에는 끝이 있습니다. 기본 대기 시간은 24시간, 최대 7일입니다. 기한이 먼저 오면 에이전트가 한 번 돌아와 현재 상황을 알려 드립니다.",
+    "strip_waiting": "대기 중: {{title}}",
+    "card": "나중에 보고: {{title}}",
+    "ends": "{{relative}} 만료",
+    "reminder_at": "{{relative}} 알림",
+    "next_check": "다음 확인 {{relative}}",
+    "last_check": "마지막 확인: {{note}}",
+    "cancel": "웨이크업 취소",
+    "cancel_failed": "웨이크업을 취소하지 못했습니다",
+    "retry": "다시 시도",
+    "retry_failed": "웨이크업을 다시 시도하지 못했습니다",
+    "status": {
+      "active": "대기 중",
+      "fired": "보고함",
+      "expired": "기한 도달",
+      "cancelled": "취소됨",
+      "failed": "실행하지 못함"
+    },
+    "report": {
+      "waiting": "보고 대기 중",
+      "running": "보고 중…",
+      "failed": "보고하지 못했습니다"
+    },
+    "failure": {
+      "permission_revoked": "요청한 사람이 더 이상 이 에이전트를 실행할 수 없습니다",
+      "access_lost": "지켜보던 항목이 비공개 프로젝트로 이동했습니다",
+      "dispatch_failed": "에이전트를 실행할 수 없습니다"
+    },
+    "kind": {
+      "condition": "조건 충족 시",
+      "at": "알림",
+      "check": "주기적 확인"
+    },
+    "divider": {
+      "condition": "보고하러 돌아옴 · 조건 충족",
+      "at": "보고하러 돌아옴 · 알림",
+      "check": "보고하러 돌아옴 · 확인",
+      "expired": "보고하러 돌아옴 · 기한 도달",
+      "generic": "보고하러 돌아옴"
+    },
+    "queue_label": "웨이크업: {{title}}",
+    "queue_fallback": "웨이크업"
   }
 }

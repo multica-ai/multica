@@ -668,6 +668,11 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 	// refresh, and wakes the runtime so a queued successor is claimed now
 	// rather than at the daemon's next poll.
 	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled, reactionTargets)
+	// After commit: a firing wakeup locks its row before the session, so
+	// ending wakeups inside the archive tx could deadlock with it.
+	if req.Archived {
+		h.chatWakeups().EndForArchivedSession(r.Context(), updated.ID)
+	}
 
 	resolvedSessionID := uuidToString(updated.ID)
 	status := updated.Status
@@ -779,6 +784,10 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := qtx.DeleteChatDraftRestoresBySession(r.Context(), session.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete chat session draft restores")
+		return
+	}
+	if err := qtx.DeleteChatWakeupsBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session wakeups")
 		return
 	}
 
@@ -1377,6 +1386,9 @@ type QueuedChatTaskResponse struct {
 	CreatedAt string `json:"created_at"`
 	MessageID string `json:"message_id,omitempty"`
 	Content   string `json:"content,omitempty"`
+	// WakeupID marks a turn a chat wakeup started. Its input is for the
+	// runtime, so Content is empty and clients show the wakeup's title.
+	WakeupID string `json:"wakeup_id,omitempty"`
 }
 
 type PrioritizeQueuedChatTaskResponse struct {
@@ -1699,13 +1711,17 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 		if task.Status != "queued" {
 			continue
 		}
-		queued = append(queued, QueuedChatTaskResponse{
+		item := QueuedChatTaskResponse{
 			TaskID:    uuidToString(task.ID),
 			Status:    task.Status,
 			CreatedAt: timestampToString(task.CreatedAt),
 			MessageID: uuidToString(task.MessageID),
 			Content:   task.Content,
-		})
+		}
+		if task.MessageKind == protocol.ChatMessageKindWakeup {
+			item.Content, item.WakeupID = "", uuidToString(task.WakeupID)
+		}
+		queued = append(queued, item)
 	}
 
 	writeJSON(w, http.StatusOK, PendingChatTaskResponse{
@@ -2073,6 +2089,9 @@ func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure p
 	if !at.Valid || kind == protocol.ChatMessageKindOnboardingKickoff {
 		return nil
 	}
+	if kind == protocol.ChatMessageKindWakeup {
+		content = ""
+	}
 	return &ChatLastMessage{
 		Content:       content,
 		Role:          role,
@@ -2101,6 +2120,10 @@ type ChatMessageResponse struct {
 	// QuickActions are sanitized follow-ups generated with this assistant turn.
 	// Always an empty array for legacy rows and user messages.
 	QuickActions []protocol.ChatQuickAction `json:"quick_actions"`
+	// WakeupID is set on a wakeup turn's input row (message_kind "wakeup"),
+	// whose content is withheld: it is the runtime's input, not something
+	// the person wrote.
+	WakeupID *string `json:"wakeup_id,omitempty"`
 	// Attachments linked to this message via chat_message_id. The chat
 	// bubble renders file cards from these, and the daemon claim path
 	// (daemon.go) pulls structured metadata from the same source so the
@@ -2125,6 +2148,9 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 }
 
 func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) ChatMessageResponse {
+	if m.MessageKind == protocol.ChatMessageKindWakeup {
+		m.Content = ""
+	}
 	return ChatMessageResponse{
 		ID:            uuidToString(m.ID),
 		ChatSessionID: uuidToString(m.ChatSessionID),
@@ -2137,6 +2163,7 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 		MessageKind:   normalizeMessageKind(m.MessageKind),
 		QuickActions:  decodeChatQuickActions(m.QuickActions),
 		Attachments:   attachments,
+		WakeupID:      uuidToPtr(m.WakeupID),
 	}
 }
 
@@ -2185,6 +2212,8 @@ func normalizeMessageKind(kind string) string {
 		return protocol.ChatMessageKindOnboardingKickoff
 	case protocol.ChatMessageKindOnboardingOpening:
 		return protocol.ChatMessageKindOnboardingOpening
+	case protocol.ChatMessageKindWakeup:
+		return protocol.ChatMessageKindWakeup
 	default:
 		return protocol.ChatMessageKindMessage
 	}

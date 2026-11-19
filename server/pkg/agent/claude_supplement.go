@@ -25,6 +25,8 @@ var claudeSupplementEvents = []string{"UserPromptSubmit", "PreToolUse", "PostToo
 // instead insert context while the provider is waiting at a turn boundary.
 // A Stop hook with pending input continues the same loop; an empty Stop closes
 // admission before releasing Claude. No supplement is ever a new user prompt.
+// The same SDK control session discovers commands without installing hooks when
+// only explicit skills need initialization.
 // Wire contract: anthropics/claude-agent-sdk-python, _internal/query.py.
 type claudeSupplementSession struct {
 	ctx         context.Context
@@ -34,6 +36,7 @@ type claudeSupplementSession struct {
 	ended       bool
 	pending     []*claudeSupplementInput
 	initialized chan error
+	commands    map[string]bool
 }
 
 type claudeSupplementInput struct {
@@ -47,15 +50,17 @@ func newClaudeSupplementSession(ctx context.Context) *claudeSupplementSession {
 	return &claudeSupplementSession{ctx: ctx, initialized: make(chan error, 1)}
 }
 
-func (s *claudeSupplementSession) initialize(w io.Writer, timeout time.Duration) error {
+func (s *claudeSupplementSession) initialize(w io.Writer, timeout time.Duration, installHooks bool) error {
 	if timeout <= 0 {
 		timeout = claudeSupplementHandshakeTimeout
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, timeout)
 	defer cancel()
 	hooks := make(map[string]any, len(claudeSupplementEvents))
-	for _, event := range claudeSupplementEvents {
-		hooks[event] = []any{map[string]any{"hookCallbackIds": []string{"multica-supplement-" + event}}}
+	if installHooks {
+		for _, event := range claudeSupplementEvents {
+			hooks[event] = []any{map[string]any{"hookCallbackIds": []string{"multica-supplement-" + event}}}
+		}
 	}
 	if err := writeClaudeFrame(w, map[string]any{
 		"type": "control_request", "request_id": claudeSupplementInitializeID,
@@ -67,7 +72,7 @@ func (s *claudeSupplementSession) initialize(w io.Writer, timeout time.Duration)
 	case err := <-s.initialized:
 		return err
 	case <-ctx.Done():
-		return fmt.Errorf("claude supplement initialization: %w", ctx.Err())
+		return fmt.Errorf("claude SDK initialization: %w", ctx.Err())
 	}
 }
 
@@ -76,18 +81,41 @@ func (s *claudeSupplementSession) handleResponse(raw json.RawMessage) {
 		RequestID string `json:"request_id"`
 		Subtype   string `json:"subtype"`
 		Error     string `json:"error"`
+		Response  struct {
+			Commands []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"commands"`
+		} `json:"response"`
 	}
 	if json.Unmarshal(raw, &response) != nil || response.RequestID != claudeSupplementInitializeID {
 		return
 	}
 	var err error
 	if response.Subtype != "success" {
-		err = fmt.Errorf("claude supplement initialization rejected: %s", response.Error)
+		err = fmt.Errorf("claude SDK initialization rejected: %s", response.Error)
+	} else {
+		s.mu.Lock()
+		s.commands = make(map[string]bool, len(response.Response.Commands))
+		for _, command := range response.Response.Commands {
+			// Claude resolves personal skills ahead of project skills with the
+			// same name. Only an explicitly project-scoped catalog entry can
+			// authorize native expansion of our installed skill. Unknown scope
+			// (including a changed SDK format) safely falls back to injection.
+			s.commands[command.Name] = strings.HasSuffix(command.Description, " (project)")
+		}
+		s.mu.Unlock()
 	}
 	select {
 	case s.initialized <- err:
 	default:
 	}
+}
+
+func (s *claudeSupplementSession) availableCommands() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.commands
 }
 
 func (s *claudeSupplementSession) ready() bool {

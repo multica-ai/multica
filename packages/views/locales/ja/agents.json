@@ -813,7 +813,7 @@
     "tool_kind_misc": "その他",
     "trigger_wakeup": "起動",
     "context_receipt_title": "受け取ったコンテキスト",
-    "context_receipt_summary_other": "{{count}} 件のソース · {{size}}",
+    "context_receipt_summary_other": "{{count}} 件のソース",
     "context_receipt_model": "モデル",
     "context_receipt_session": "セッション",
     "context_receipt_session_resumed": "以前のセッションを再開（その履歴もコンテキストに含まれます）",
@@ -827,7 +827,7 @@
     "context_receipt_col_delivery": "渡し方",
     "context_receipt_col_load": "読み込み",
     "context_receipt_same_as_brief": "ランタイム説明と同じ",
-    "context_receipt_footnote": "エージェント開始前に daemon が記録。サイズと短いハッシュのみで、内容は保存されません。「検証済み」はこのランタイムのバージョンでファイルの読み込みを確認済みという意味です。 スキルのサイズとハッシュは、書き込まれたパッケージ全体を対象とします。",
+    "context_receipt_footnote": "エージェント起動前に daemon が記録します。サイズと短いハッシュのみを保存し、内容は保存しません。「検証済み」は、このランタイムバージョンでファイルの読み込みをテスト済みであることを示します。skill のサイズとハッシュは書き込まれたパッケージ全体が対象です。ファイルのバイト数はモデルが実際に読んだ内容を示しません。",
     "context_source_runtime_brief": "ランタイム説明",
     "context_source_agent_instructions": "エージェントの指示",
     "context_source_project_description": "プロジェクトの説明",
@@ -843,7 +843,13 @@
     "context_load_verified": "検証済み",
     "context_load_verified_other_version": "{{version}} でのみ検証済み",
     "context_load_unverified": "未検証",
-    "context_load_not_delivered": "未送信"
+    "context_load_not_delivered": "未送信",
+    "context_receipt_direct_bytes": "直接入力：{{size}}",
+    "context_receipt_file_bytes": "ディスク上のファイル：{{size}}",
+    "context_receipt_package": "パッケージ",
+    "context_receipt_instruction_file_bytes": "指示ファイル：{{size}}",
+    "context_receipt_skill_package_bytes": "スキルパッケージ：{{size}}",
+    "context_receipt_other_file_bytes": "その他のファイル：{{size}}"
   },
   "task_failure": {
     "cancelled_by_system": "システムによってキャンセルされました",

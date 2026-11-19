@@ -6,7 +6,7 @@ SELECT l.*,
             AND (sqlc.narg('hidden_project_ids')::uuid[] IS NULL OR NOT EXISTS (
                 SELECT 1 FROM issue hidden_issue
                 WHERE hidden_issue.id = x.issue_id
-                  AND hidden_issue.project_id = ANY(sqlc.narg('hidden_project_ids')::uuid[])
+                  AND COALESCE(hidden_issue.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(sqlc.narg('hidden_project_ids')::uuid[])
             )))
         WHEN 'agent' THEN (SELECT COUNT(*) FROM agent_to_label x WHERE x.label_id = l.id)
         WHEN 'skill' THEN (SELECT COUNT(*) FROM skill_to_label x WHERE x.label_id = l.id)

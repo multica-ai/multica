@@ -140,6 +140,21 @@ var pgBigmOperatorClass = extensionOperatorClass{
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
+	"676_chat_wakeup_due_idx":                                   "idx_chat_wakeup_due",
+	"677_chat_wakeup_session_idx":                               "idx_chat_wakeup_session",
+	"678_chat_wakeup_requester_idx":                             "idx_chat_wakeup_requester",
+	"680_entitlement_limit_overage_scope_idx":                   "uq_entitlement_limit_overage_scope",
+	"682_project_folder_name_idx":                               "uq_project_folder_workspace_name",
+	"684_entitlement_feature_attempt_scope_idx":                 "uq_entitlement_feature_attempt_scope",
+	"686_doc_folder_pkey_index":                                 "doc_folder_pkey_idx",
+	"688_doc_pkey_index":                                        "doc_pkey_idx",
+	"690_doc_version_pkey_index":                                "doc_version_pkey_idx",
+	"692_doc_folder_workspace_idx":                              "doc_folder_workspace_idx",
+	"693_doc_workspace_idx":                                     "doc_workspace_idx",
+	"694_doc_version_workspace_idx":                             "doc_version_workspace_idx",
+	"696_inbox_item_active_shown_idx":                           "idx_inbox_active_shown",
+	"698_autopilot_run_idempotency_key_idx":                     "uq_autopilot_run_idempotency_key",
+	"701_member_search_access_pkey_index":                       "member_search_access_pkey_idx",
 	"671_weixin_account_state_unique_index":                     "weixin_account_state_pkey",
 	"669_weixin_login_session_unique_index":                     "weixin_login_session_pkey",
 	"666_weixin_login_expiry_idx":                               "weixin_login_expiry_idx",

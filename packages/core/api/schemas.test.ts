@@ -1586,6 +1586,16 @@ describe("InboxItemListSchema", () => {
     ).toHaveLength(1);
   });
 
+  it("keeps the row when the issue identifier is unusable", () => {
+    const parsed = parseWithFallback(
+      [row({ issue_identifier: 7 }), row({ id: "inbox-2", issue_identifier: "MUL-7" })],
+      InboxItemListSchema,
+      EMPTY_INBOX_ITEMS,
+      ENDPOINT,
+    );
+    expect(parsed.map((item) => item.issue_identifier)).toEqual([null, "MUL-7"]);
+  });
+
   it("returns the empty fallback when an issue projection is wrong-typed", () => {
     expect(
       parseWithFallback(

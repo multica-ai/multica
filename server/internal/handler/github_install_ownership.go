@@ -60,9 +60,8 @@ func verifyGitHubInstallationOwnership(ctx context.Context, code string, install
 }
 
 // githubOwnershipErrorCode maps a verification failure to the `github_error`
-// code carried back to Settings. The frontend renders one generic "connect
-// failed" toast for all of them; the distinction is for operators reading
-// logs and support tickets.
+// code carried back to Settings, where known codes receive specific recovery
+// instructions and unknown codes fall back to a generic connection error.
 func githubOwnershipErrorCode(err error) string {
 	switch {
 	case errors.Is(err, errGitHubInstallationNotAuthorized):

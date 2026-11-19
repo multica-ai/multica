@@ -137,11 +137,15 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if opts.EnableTaskSupplement {
 		supplements = newClaudeSupplementSession(runCtx)
 	}
+	initializer := supplements
+	if initializer == nil && opts.SkillInvocation != nil {
+		initializer = newClaudeSupplementSession(runCtx)
+	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() {
 		closeStdinOnce.Do(func() { _ = stdin.Close() })
-		if supplements != nil {
-			supplements.end()
+		if initializer != nil {
+			initializer.end()
 		}
 	}
 	// Capture stderr into both the daemon log (as before) and a bounded tail
@@ -186,13 +190,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// timeout.
 	writeDone := make(chan error, 1)
 	go func() {
-		if supplements != nil {
-			if initErr := supplements.initialize(inputWriter, opts.HandshakeTimeout); initErr != nil {
-				b.cfg.Logger.Warn("Claude additional messages unavailable; continuing normally", "error", initErr)
-				supplements.end()
+		var commands map[string]bool
+		if initializer != nil {
+			if initErr := initializer.initialize(inputWriter, opts.HandshakeTimeout, opts.EnableTaskSupplement); initErr != nil {
+				b.cfg.Logger.Warn("Claude initialization unavailable; continuing with text input", "error", initErr)
+				initializer.end()
+			} else if !slashCommandsDisabled(b.cfg.LaunchPrefix, opts.ExtraArgs, opts.CustomArgs) {
+				commands = initializer.availableCommands()
 			}
 		}
-		err := writeClaudeInput(inputWriter, prompt)
+		blocks := []string{prompt}
+		if opts.SkillInvocation != nil {
+			blocks = opts.SkillInvocation.claudeTextBlocks(commands)
+		}
+		err := writeClaudeInput(inputWriter, blocks...)
 		if err != nil {
 			closeStdin()
 			if supplements != nil {
@@ -221,6 +232,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
 		seenUsage := make(map[string]struct{})
+		rateLimits := newRateLimitTracker(opts.OnRateLimits)
 		eventCount := 0
 		invalidEventCount := 0
 		assistantEventCount := 0
@@ -232,8 +244,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		pendingControls := 0
 		closeRequested := false
 		closeAfterControls := func() {
-			if supplements != nil {
-				supplements.end()
+			if initializer != nil {
+				initializer.end()
 			}
 			controlMu.Lock()
 			defer controlMu.Unlock()
@@ -319,6 +331,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if b.handleUser(msg, msgCh) {
 					sawAsyncLaunch = true
 				}
+			case "rate_limit_event":
+				if update, ok := parseClaudeRateLimitEvent(msg.RateLimitInfo); ok {
+					rateLimits.apply(update)
+				}
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
@@ -398,8 +414,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					}
 				}(msg, reply)
 			case "control_response":
-				if supplements != nil {
-					supplements.handleResponse(msg.Response)
+				if initializer != nil {
+					initializer.handleResponse(msg.Response)
 				}
 			}
 		}
@@ -742,6 +758,9 @@ type claudeSDKMessage struct {
 
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`
+
+	// rate_limit_event fields
+	RateLimitInfo json.RawMessage `json:"rate_limit_info,omitempty"`
 
 	// control request fields
 	RequestID string          `json:"request_id,omitempty"`
@@ -1219,8 +1238,8 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	return args
 }
 
-func writeClaudeInput(w io.Writer, prompt string) error {
-	data, err := buildClaudeInput(prompt)
+func writeClaudeInput(w io.Writer, prompts ...string) error {
+	data, err := buildClaudeInput(prompts...)
 	if err != nil {
 		return err
 	}
@@ -1230,17 +1249,16 @@ func writeClaudeInput(w io.Writer, prompt string) error {
 	return nil
 }
 
-func buildClaudeInput(prompt string) ([]byte, error) {
+func buildClaudeInput(prompts ...string) ([]byte, error) {
+	content := make([]map[string]string, 0, len(prompts))
+	for _, prompt := range prompts {
+		content = append(content, map[string]string{"type": "text", "text": prompt})
+	}
 	payload := map[string]any{
 		"type": "user",
 		"message": map[string]any{
-			"role": "user",
-			"content": []map[string]string{
-				{
-					"type": "text",
-					"text": prompt,
-				},
-			},
+			"role":    "user",
+			"content": content,
 		},
 	}
 	data, err := json.Marshal(payload)
@@ -1551,6 +1569,21 @@ func cleanupMcpConfigTemp(path string) {
 // tests can shrink it without waiting out the real bound.
 var detectVersionTimeout = 10 * time.Second
 
+// Keep the deadline in the error chain without its network-timeout wording:
+// task failures are also classified from the diagnostic text.
+type versionProbeTimeoutError struct {
+	limit time.Duration
+	cause error
+}
+
+func (e *versionProbeTimeoutError) Error() string {
+	return fmt.Sprintf("version probe timed out (limit %s): %v", e.limit, e.cause)
+}
+
+func (e *versionProbeTimeoutError) Unwrap() []error {
+	return []error{context.DeadlineExceeded, e.cause}
+}
+
 func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
@@ -1643,8 +1676,8 @@ func versionProbeRejectedArgs(ctx context.Context, err error) bool {
 }
 
 // runVersionProbe runs one `<cli> <args>` version probe and returns the
-// recognised version line. The error is unwrapped; detectCLIVersion adds the
-// command and the exec diagnosis.
+// recognised version line. detectCLIVersion adds the command and the exec
+// diagnosis to any probe error.
 func runVersionProbe(ctx context.Context, runtimeCmd Command, args []string) (string, error) {
 	var cmd *exec.Cmd
 	_, zcodeDesktop := zcodeDesktopScript(runtimeCmd.Path)
@@ -1678,6 +1711,9 @@ func runVersionProbe(ctx context.Context, runtimeCmd Command, args []string) (st
 		// answer.
 		if salvageProbeAnswer(runtimeCmd, strings.Join(args, " "), recognised, err) {
 			return version, nil
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", &versionProbeTimeoutError{limit: detectVersionTimeout, cause: err}
 		}
 		return "", err
 	}

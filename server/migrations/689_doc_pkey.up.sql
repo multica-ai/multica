@@ -1,0 +1,1 @@
+ALTER TABLE doc ADD CONSTRAINT doc_pkey PRIMARY KEY USING INDEX doc_pkey_idx;

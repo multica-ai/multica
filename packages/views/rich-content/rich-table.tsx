@@ -237,11 +237,15 @@ export function RichTableFrame({ model, getMarkdown, tableRef: onTable, children
     fit();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
     observer?.observe(wrapper);
-    // Content widths change when a web font replaces its fallback.
-    void document.fonts?.ready.then(() => {
-      measuredAt = -1;
-      fit();
-    });
+    // Content widths change when a web font replaces its fallback. Once the
+    // fonts have loaded, `ready` resolves at once and a second measure of every
+    // table would only repeat the first.
+    if (document.fonts && document.fonts.status !== "loaded") {
+      void document.fonts.ready.then(() => {
+        measuredAt = -1;
+        fit();
+      });
+    }
     return () => {
       active = false;
       observer?.disconnect();
