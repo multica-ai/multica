@@ -62,6 +62,7 @@ function summary(purchased: number, available: number): WorkspaceSubscriptionSum
       checkPlanChange: false,
     },
     planChange: null,
+    trial: null,
   };
 }
 

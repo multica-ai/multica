@@ -3,7 +3,10 @@ package handler
 import (
 	"context"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
@@ -187,5 +190,83 @@ func TestDocTextDropsNULBytes(t *testing.T) {
 	testutil.Call(t, testHandler.UpdateDocFolder, withURLParam(newRequest("PATCH", "/api/doc-folders/"+folder.ID, map[string]any{"title": "Ref\x00s"}), "id", folder.ID)).Want(http.StatusOK).JSON(&folder)
 	if folder.Title != "Refs" {
 		t.Fatalf("folder rename must drop NUL bytes: %+v", folder)
+	}
+}
+
+func TestSearchDocsRanksTitleHitsAndExcerptsContent(t *testing.T) {
+	create := func(title, content string) DocResponse {
+		t.Helper()
+		var doc DocResponse
+		testutil.Call(t, testHandler.CreateDoc, newRequest("POST", "/api/docs", map[string]any{"title": title, "content": content})).Want(http.StatusCreated).JSON(&doc)
+		t.Cleanup(func() {
+			testPool.Exec(context.Background(), "DELETE FROM doc_version WHERE doc_id = $1", doc.ID)
+			testPool.Exec(context.Background(), "DELETE FROM doc WHERE id = $1", doc.ID)
+		})
+		return doc
+	}
+	// Unique words keep this test's rows apart from other docs in the shared DB.
+	long := strings.Repeat("filler text. ", 400) + "Rotate the zephyrine credentials before cutover." + strings.Repeat(" more filler.", 400)
+	inContent := create("Release runbook", long)
+	exact := create("Zephyrine", "")
+	prefix := create("Zephyrine rollout plan", "")
+	cjk := create("值班手册", "遇到 zephyrine 告警先看仪表盘，再联系负责人。")
+	create("Unrelated", "nothing to see")
+
+	type result struct {
+		Docs []SearchDocResponse `json:"docs"`
+	}
+	search := func(q string) result {
+		t.Helper()
+		var out result
+		testutil.Call(t, testHandler.SearchDocs, newRequest("GET", "/api/docs/search?q="+url.QueryEscape(q), nil)).Want(http.StatusOK).JSON(&out)
+		return out
+	}
+	ids := func(r result) []string {
+		out := make([]string, len(r.Docs))
+		for i, d := range r.Docs {
+			out[i] = d.ID
+		}
+		return out
+	}
+
+	got := search("Zephyrine")
+	if want := []string{exact.ID, prefix.ID}; len(got.Docs) < 4 || got.Docs[0].ID != want[0] || got.Docs[1].ID != want[1] {
+		t.Fatalf("exact title, then title prefix, must lead: %v", ids(got))
+	}
+	var content *SearchDocResponse
+	for i := range got.Docs {
+		if got.Docs[i].ID == inContent.ID {
+			content = &got.Docs[i]
+		}
+	}
+	if content == nil || content.MatchSource != "content" || content.MatchedSnippet == nil ||
+		!strings.Contains(*content.MatchedSnippet, "zephyrine credentials") || utf8.RuneCountInString(*content.MatchedSnippet) > 200 {
+		t.Fatalf("a content hit deep in a long doc needs a short excerpt around the match: %+v", content)
+	}
+	if got.Docs[0].MatchSource != "title" || got.Docs[0].MatchedSnippet != nil {
+		t.Fatalf("title hits carry no snippet: %+v", got.Docs[0])
+	}
+
+	// Every term must appear, in either field.
+	if got := search("值班 仪表盘"); len(got.Docs) != 1 || got.Docs[0].ID != cjk.ID {
+		t.Fatalf("multi-term CJK search: %v", ids(got))
+	}
+	// A title with LIKE wildcards still ranks as an exact match.
+	percent := create("100% uptime", "")
+	create("100% uptime review notes", "")
+	if got := search("100% uptime"); len(got.Docs) != 2 || got.Docs[0].ID != percent.ID {
+		t.Fatalf("exact title with %% must rank first: %v", ids(got))
+	}
+	// LIKE wildcards in the query are literal.
+	if got := search("%_"); len(got.Docs) != 0 {
+		t.Fatalf("a literal %% must not match everything: %v", ids(got))
+	}
+	testutil.Call(t, testHandler.SearchDocs, newRequest("GET", "/api/docs/search?q=", nil)).Want(http.StatusBadRequest)
+	cross := newRequest("GET", "/api/docs/search?q=zephyrine", nil)
+	cross.Header.Set("X-Workspace-ID", "00000000-0000-4000-8000-000000000099")
+	var other result
+	testutil.Call(t, testHandler.SearchDocs, cross).JSON(&other)
+	if len(other.Docs) != 0 {
+		t.Fatalf("search leaked across workspaces: %v", ids(other))
 	}
 }

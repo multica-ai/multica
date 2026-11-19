@@ -19,6 +19,8 @@ import { useChatStore } from "@multica/core/chat";
 import { useMarkAllChatSessionsRead } from "@multica/core/chat/mutations";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
+import { useFeatureEnabled } from "@multica/core/config";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import {
   deduplicateInboxItems,
   inboxListOptions,
@@ -366,6 +368,13 @@ export function AppRail({
   const savedOrder = useRailOrderStore((s) => s.order);
   const setOrder = useRailOrderStore((s) => s.setOrder);
   const order = useMemo(() => resolveRailOrder(savedOrder), [savedOrder]);
+  // Docs stays in the saved order while docs_v1 is off, so it comes back in
+  // place when the flag is turned on; it is only left out of what renders.
+  const docsEnabled = useFeatureEnabled(DOCS_V1_FLAG, false);
+  const visibleOrder = useMemo(
+    () => (docsEnabled ? order : order.filter((id) => id !== "docs")),
+    [docsEnabled, order],
+  );
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
@@ -442,9 +451,9 @@ export function AppRail({
         onDragEnd={onDragEnd}
         onDragCancel={releaseClickGuard}
       >
-        <SortableContext items={order} strategy={verticalListSortingStrategy}>
+        <SortableContext items={visibleOrder} strategy={verticalListSortingStrategy}>
           <ul className="flex flex-col items-center gap-0.5">
-            {order.map((id) => (
+            {visibleOrder.map((id) => (
               <SortableRailItem key={id} id={id}>
                 <RailSpaceLink
                   space={id}

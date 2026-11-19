@@ -1842,6 +1842,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// Paid-feature states for read-only and upgrade UI; the
 					// server enforces on every write regardless.
 					r.Get("/features", h.GetWorkspaceFeatures)
+					// The plan's member limit for upgrade UI; every admission
+					// is checked on the server regardless.
+					r.Get("/member-limit", h.GetMemberLimit)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 					// Listing GitHub installations is member-visible so the
@@ -2329,10 +2332,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Commercial (server/ee) workspace routes; none in an open-source build.
 			extension.MountWorkspaceRoutes(r, h)
 
-			// Projects
+			// Docs, behind the docs_v1 flag until launch.
 			r.Route("/api/docs", func(r chi.Router) {
+				r.Use(h.RequireDocsV1)
 				r.Get("/", h.ListDocTree)
 				r.Post("/", h.CreateDoc)
+				r.Get("/search", h.SearchDocs)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetDoc)
 					r.Patch("/", h.UpdateDoc)
@@ -2343,6 +2348,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 			r.Route("/api/doc-folders", func(r chi.Router) {
+				r.Use(h.RequireDocsV1)
 				r.Post("/", h.CreateDocFolder)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Patch("/", h.UpdateDocFolder)
@@ -2351,6 +2357,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
 				// Workspace owner only: every private project, joined or not.

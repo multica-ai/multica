@@ -537,7 +537,7 @@ CLI 配置檔案包含可代表你訪問 Multica 的令牌。不要提交到倉�
 | `chat` | `history`、`thread [id]` | 讀取 AI 代理當前正在處理的外部聊天會話 | `--limit`、`--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | 管理目前聊天執行的跟進；見[聊天喚醒](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | [列出通知](/inbox)，不標為已讀；`--archived` 或 `--snoozed` 改為列出封存或稍後提醒的內容 | `--unread`、`--issue`、`--since`、`--project`、`--type`、`--output`（`table` 或 `json`）；`--archived` 讀取全部分頁 |
-| | `count` | 目前工作區及你所在各工作區的未讀數 | `--output` |
+| | `count` | 目前工作區及你所在各工作區的未讀數；AI 代理執行時只回傳所在工作區 | `--output` |
 | | `read [<id>...]` | 將通知標為已讀（作用於所在任務的全部通知）；或一個任務上的全部通知，或全部 | `--issue`、`--all`（需要 `--yes`） |
 | | `unread <id>...` | 將通知標為未讀 | |
 | | `archive [<id>...]` | 封存通知（作用於所在任務的全部通知）；或批次封存 | `--all`、`--read`、`--completed`（皆需 `--yes`） |

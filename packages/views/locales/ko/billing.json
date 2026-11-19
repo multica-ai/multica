@@ -134,7 +134,9 @@
       "usage_total": "{{total}} / {{limit}}",
       "usage_breakdown": "완료 {{used}} · 진행 중 {{reserved}}",
       "resets_at": "{{date}}에 초기화",
-      "usage_unavailable": "사용량을 일시적으로 불러올 수 없습니다"
+      "usage_unavailable": "사용량을 일시적으로 불러올 수 없습니다",
+      "members": "멤버",
+      "members_pending": "대기 중인 초대: {{pending}}건"
     },
     "seats": {
       "title": "좌석",
@@ -216,7 +218,16 @@
     },
     "confirm": {
       "title": "Stripe Checkout으로 이동할까요?",
-      "description": "요금제: {{plan}}. 결제 주기: {{interval}}. 현재 사용자 멤버: {{count}}. Stripe가 좌석을 다시 계산하고 결제 전에 최종 금액을 표시합니다."
+      "description": "요금제: {{plan}}. 결제 주기: {{interval}}. 현재 사용자 멤버: {{count}}. Stripe가 좌석을 다시 계산하고 결제 전에 최종 금액을 표시합니다.",
+      "held_invite": "{{email}}에게 보낼 초대를 위한 유료 좌석 1개가 추가됩니다. 결제가 완료되면 결제 및 요금제에서 초대를 보내세요."
+    },
+    "held_invite": {
+      "title": "워크스페이스가 이제 {{plan}} 요금제입니다",
+      "description": "업그레이드할 때까지 보류해 둔 {{email}} 초대({{role}})가 있습니다. 지금 보낼까요?",
+      "role_admin": "관리자",
+      "role_member": "멤버",
+      "send": "초대 보내기",
+      "discard": "버리기"
     }
   },
   "return_page": {
@@ -233,5 +244,64 @@
     "unavailable": "이 워크스페이스의 요금제에 포함되어 있지 않습니다.",
     "view_plans": "요금제 보기",
     "locked_error": "이 워크스페이스의 요금제에 포함되어 있지 않습니다. 기존 설정은 계속 적용되며, 추가하려면 업그레이드하세요."
+  },
+  "trial": {
+    "status": {
+      "active": "Business 체험",
+      "days_left_other": "{{count}}일 남음",
+      "active_label_other": "Business 체험, {{count}}일 남음. 결제 화면을 엽니다.",
+      "free": "Free",
+      "upgrade": "업그레이드",
+      "ended_label": "Business 체험이 끝나 이 워크스페이스는 Free로 전환되었습니다. 결제 화면을 열어 업그레이드하세요.",
+      "ending": "곧 종료",
+      "ending_label": "Business 체험이 곧 끝납니다. 결제 화면을 엽니다."
+    },
+    "reminder": {
+      "halfway_title_other": "Business 체험이 절반 지났습니다. {{count}}일 남았습니다.",
+      "days_left_title_other": "Business 체험이 {{count}}일 남았습니다.",
+      "last_day_title": "Business 체험이 하루 안에 끝납니다.",
+      "body": "{{date}}에 이 워크스페이스는 Free로 전환됩니다. Business를 계속 사용하려면 요금제를 선택하세요.",
+      "later": "나중에",
+      "choose_plan": "요금제 선택"
+    },
+    "welcome": {
+      "title_other": "환영합니다! 이 워크스페이스는 Business를 {{count}}일 동안 무료로 체험할 수 있습니다",
+      "body": "비공개 프로젝트 등 Business 기능을 사용할 수 있습니다. 카드 등록은 필요 없으며, 체험이 끝나면 자동으로 Free로 전환됩니다.",
+      "action": "포함된 기능 보기",
+      "close": "닫기"
+    },
+    "ended": {
+      "title": "Business 체험이 끝났습니다",
+      "description": "{{workspace}}이(가) Free로 전환되었습니다. 삭제된 데이터는 없습니다.",
+      "description_without_name": "이 워크스페이스가 Free로 전환되었습니다. 삭제된 데이터는 없습니다.",
+      "kept": "기존 멤버, 프로젝트, 설정은 그대로 유지됩니다.",
+      "private_projects": "비공개 프로젝트는 비공개로 유지됩니다. 접근 목록은 업그레이드 전까지 읽기 전용입니다.",
+      "autopilot": "자동화는 월 {{limit}}회이며, 이번 달 {{used}}회 사용했습니다.",
+      "autopilot_paused": "자동화는 월 {{limit}}회이며, 이번 달 {{used}}회 사용해 {{date}}까지 일시 중지되었습니다.",
+      "keep_free": "Free로 계속 사용",
+      "upgrade": "Business로 업그레이드",
+      "member_title": "이 워크스페이스는 Free로 전환되었습니다",
+      "member_description": "기존 설정은 그대로 동작합니다. 더 필요한 기능이 있으면 워크스페이스 관리자에게 문의하세요."
+    },
+    "card": {
+      "title": "Business 체험",
+      "badge_other": "체험 중 · {{count}}일 남음",
+      "description": "{{date}}까지 체험합니다. 결제 수단이 등록되어 있지 않으므로 체험 후 Free로 전환되며 요금이 청구되지 않습니다.",
+      "started": "{{date}} 시작",
+      "progress": "{{total}}일 중 {{day}}일째",
+      "ends": "{{date}} 종료",
+      "ended_title": "Business 체험이 끝났습니다",
+      "ended_description": "체험이 {{date}}에 끝났습니다. 아래에서 요금제를 선택하면 Business 기능을 다시 사용할 수 있습니다.",
+      "choose_plan": "요금제 선택",
+      "ended_description_member": "체험이 {{date}}에 끝났습니다. Business 기능을 다시 사용하려면 워크스페이스 관리자에게 업그레이드를 요청하세요."
+    },
+    "features": {
+      "title": "체험 중인 Business 기능",
+      "description": "체험이 끝나도 삭제되거나 꺼지지 않습니다. 새로 추가할 수만 없게 됩니다.",
+      "private_projects": {
+        "name": "비공개 프로젝트",
+        "after": "체험 후에도 비공개로 유지되며, 접근 목록은 읽기 전용이 됩니다."
+      }
+    }
   }
 }

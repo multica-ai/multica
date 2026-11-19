@@ -47,7 +47,8 @@
     "retry": "Reintentar",
     "conflict": "{{name}} actualizó el documento. Tu borrador se conserva. Recarga para continuar.",
     "reload": "Cargar última versión",
-    "draft": "Tu borrador guardado"
+    "draft": "Tu borrador guardado",
+    "unsaved_changes": "Cambios sin guardar"
   },
   "history": {
     "title": "Historial",
@@ -55,7 +56,15 @@
     "restore": "Restaurar esta versión",
     "loading": "Cargando..."
   },
+  "not_found": {
+    "title": "Documento no encontrado",
+    "description": "Puede haberse eliminado."
+  },
   "edited": "Editado {{time}}",
   "outline": "Esquema",
-  "link_copied": "Enlace copiado"
+  "link_copied": "Enlace copiado",
+  "unavailable": {
+    "title": "Documentos no está disponible",
+    "description": "Este espacio de trabajo no tiene Documentos activado."
+  }
 }

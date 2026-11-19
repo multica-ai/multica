@@ -38,6 +38,7 @@ import type {
   WorkspaceSubscriptionEntitlements,
   WorkspaceFeatureState,
   WorkspaceFeatures,
+  MemberLimit,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPlanPrices,
@@ -3691,6 +3692,24 @@ export const WorkspaceSubscriptionSummarySchema = z
       .nullable()
       .optional()
       .catch(null),
+    // Absent on a cloud that predates trials. A malformed value reads as no
+    // trial: the entitlement still carries the plan the workspace has.
+    trial: z
+      .object({
+        plan: z.string().min(1),
+        state: z.enum(["active", "expired", "converted"]),
+        started_at: z.string().min(1),
+        ends_at: z.string().min(1),
+      })
+      .loose()
+      .refine(
+        (value) =>
+          !Number.isNaN(Date.parse(value.started_at)) &&
+          !Number.isNaN(Date.parse(value.ends_at)),
+      )
+      .nullable()
+      .optional()
+      .catch(null),
   })
   .loose()
   .transform(
@@ -3735,6 +3754,14 @@ export const WorkspaceSubscriptionSummarySchema = z
             targetPlan: value.plan_change.target_plan,
             state: value.plan_change.state,
             since: value.plan_change.since,
+          }
+        : null,
+      trial: value.trial
+        ? {
+            plan: value.trial.plan,
+            state: value.trial.state,
+            startedAt: value.trial.started_at,
+            endsAt: value.trial.ends_at,
           }
         : null,
     }),
@@ -3862,6 +3889,29 @@ export const WorkspaceFeaturesSchema = z
     (value): WorkspaceFeatures => ({
       features: value.features as WorkspaceFeatures["features"],
     }),
+  );
+
+// A limit that cannot be read, or an action from a newer server, reads as off:
+// the server still checks every admission, so the worst case is a refusal
+// shown after the attempt instead of before it.
+export const MemberLimitSchema = z
+  .object({
+    action: z.enum(["off", "observe", "enforce"]).catch("off"),
+    limit: z.number().int().nonnegative().nullable().catch(null).default(null),
+    members: z.number().int().nonnegative().nullable().catch(null).default(null),
+    pending_invitations: z.number().int().nonnegative().nullable().catch(null).default(null),
+  })
+  .loose()
+  .transform(
+    (value): MemberLimit =>
+      value.action === "off" || value.limit === null
+        ? { action: "off", limit: null, members: null, pendingInvitations: null }
+        : {
+            action: value.action,
+            limit: value.limit,
+            members: value.members ?? 0,
+            pendingInvitations: value.pending_invitations ?? 0,
+          },
   );
 
 export const CreateWorkspaceSubscriptionCheckoutResponseSchema = z

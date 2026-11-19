@@ -13,11 +13,14 @@ type GateName string
 
 const (
 	GateAutopilotRuns GateName = "autopilot_runs"
+	// GateMembers caps a workspace's members. Guests take no slot. It has no
+	// period: the limit is a ceiling on headcount, not a budget that resets.
+	GateMembers GateName = "members"
 )
 
 func (n GateName) valid() bool {
 	switch n {
-	case GateAutopilotRuns:
+	case GateAutopilotRuns, GateMembers:
 		return true
 	default:
 		return false
@@ -53,6 +56,10 @@ const (
 	// without touching the rest of an otherwise valid policy.
 	ReasonFeatureMissing Reason = "feature_missing"
 	ReasonFeatureInvalid Reason = "feature_invalid"
+	// ReasonGateMissing and ReasonGateInvalid fail one optional gate open the
+	// same way, leaving autopilot_runs and the features untouched.
+	ReasonGateMissing Reason = "gate_missing"
+	ReasonGateInvalid Reason = "gate_invalid"
 )
 
 // Gate is the effective instruction for one generic enforcement point. Limits
@@ -90,6 +97,14 @@ type Decision struct {
 // attempt, enforce rejects it.
 type Provider interface {
 	Gate(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
+}
+
+// Refresher re-reads one gate ahead of its cached lifetime. A consumer calls
+// it only right before rejecting, so a plan change made moments ago (an
+// upgrade that was just paid for) is not refused on a policy cached before it.
+// A Provider without it rejects on the cached decision.
+type Refresher interface {
+	RefreshGate(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
 }
 
 // FeatureName is a stable paid-feature key. Unlike a GateName it meters

@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -27,6 +28,22 @@ const (
 var (
 	validDocActions = []string{"edit", "restore"}
 )
+
+func (h *Handler) docsV1Enabled(ctx context.Context) bool {
+	return featureflags.DocsV1Enabled(ctx, h.FeatureFlags)
+}
+
+// RequireDocsV1 answers 403 docs_disabled while the docs_v1 flag is off, so
+// the API, the CLI and agents cannot reach Docs before it launches.
+func (h *Handler) RequireDocsV1(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !h.docsV1Enabled(r.Context()) {
+			writeFeatureDisabled(w, "docs_disabled", "Docs is not enabled")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 
 type DocSummaryResponse struct {
 	ID            string  `json:"id"`

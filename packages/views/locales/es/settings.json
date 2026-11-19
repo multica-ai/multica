@@ -1647,7 +1647,20 @@
     "seats_used": "{{used}} de {{purchased}} puestos usados",
     "share_links_description": "Cualquiera con el enlace puede unirse con el rol elegido hasta que caduque o lo revoques.",
     "share_links_label": "Enlaces de invitación",
-    "you": "Tú"
+    "you": "Tú",
+    "member_limit_full_title": "Este plan permite hasta {{limit}} miembros. El espacio de trabajo está lleno.",
+    "member_limit_full_description": "Pasa a Pro para tener miembros ilimitados. Cada miembro ocupa un puesto de pago, y la mejora incluye uno para esta invitación. O elimina antes a un miembro.",
+    "member_limit_full_description_pending": "Las invitaciones pendientes también ocupan un lugar ({{pending}} ahora). Pasa a Pro para tener miembros ilimitados (cada miembro ocupa un puesto de pago, y la mejora incluye uno para esta invitación), o revoca antes una invitación o elimina a un miembro.",
+    "member_limit_usage": "{{used}} / {{limit}} miembros",
+    "upgrade_and_invite": "Mejorar e invitar",
+    "toast_member_limit_reached": "El espacio de trabajo está lleno. Mejora el plan para invitar a más miembros.",
+    "member_limit_full_description_no_upgrade": "Revoca una invitación pendiente o elimina a un miembro para liberar un lugar.",
+    "toast_invalid_email": "Introduce una dirección de correo válida.",
+    "toast_already_member": "{{email}} ya es miembro de este espacio de trabajo.",
+    "toast_invitation_pending": "Ya hay una invitación pendiente para {{email}}.",
+    "toast_invite_check_unavailable": "No se pudieron comprobar los miembros y las invitaciones actuales. Inténtalo de nuevo en un momento.",
+    "member_limit_full_description_billing": "La suscripción del espacio de trabajo necesita atención. Restablécela en Facturación para añadir miembros, o elimina antes a un miembro.",
+    "open_billing": "Abrir Facturación"
   },
   "integrations": {
     "status_connected": "Conectado",

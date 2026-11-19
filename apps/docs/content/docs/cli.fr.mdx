@@ -536,7 +536,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | `chat` | `history`, `thread [id]` | Lire la session de messagerie externe qu'un agent traite actuellement | `--limit`, `--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | Gérer le suivi dans l’exécution de chat en cours ; voir [Réveils de chat](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | [Lister vos notifications](/inbox) sans les marquer comme lues ; `--archived` ou `--snoozed` liste celles-ci à la place | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` ou `json`) ; `--archived` lit toutes les pages |
-| | `count` | Nombre de non-lus dans cet espace de travail et dans chacun de vos espaces | `--output` |
+| | `count` | Nombre de non-lus dans cet espace de travail et dans chacun de vos espaces ; une exécution d'agent ne voit que son propre espace | `--output` |
 | | `read [<id>...]` | Marquer des notifications comme lues, toute la tâche pour chacune ; ou toutes celles d'une tâche, ou toutes | `--issue`, `--all` (exige `--yes`) |
 | | `unread <id>...` | Marquer des notifications comme non lues | |
 | | `archive [<id>...]` | Archiver des notifications, toute la tâche pour chacune ; ou en lot | `--all`, `--read`, `--completed` (chacun exige `--yes`) |

@@ -4,6 +4,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { ApiClient, ApiError, setApiInstance } from "../api";
 import { createQueryClient } from "../query-client";
 import { inboxKeys, inboxUnreadSummaryOptions } from "./queries";
+import { INBOX_TRANSIENT_RETRIES } from "./retry";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -18,10 +19,12 @@ it.each(["listInbox", "listSnoozedInbox", "getInboxUnreadSummary"] as const)(
   },
 );
 
-it("keeps cached counts on 503 without retrying, then refreshes on the next request", async () => {
+it("retries a busy summary after Retry-After, keeping cached counts until it answers", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   const summary = [{ workspace_id: "ws-1", count: 3 }];
+  const busy = () => Response.json({ error: "busy" }, { status: 503, headers: { "Retry-After": "2" } });
   const fetch = vi.fn()
-    .mockResolvedValueOnce(Response.json({ error: "busy" }, { status: 503, headers: { "Retry-After": "1" } }))
+    .mockResolvedValueOnce(busy())
     .mockResolvedValueOnce(Response.json([{ workspace_id: "ws-1", count: 4 }]));
   vi.stubGlobal("fetch", fetch);
   setApiInstance(new ApiClient("https://api.example.test"));
@@ -29,12 +32,38 @@ it("keeps cached counts on 503 without retrying, then refreshes on the next requ
   qc.setQueryData(inboxKeys.unreadSummary(), summary);
   const options = { ...inboxUnreadSummaryOptions(), staleTime: 0 };
   try {
-    await expect(qc.fetchQuery(options)).rejects.toBeInstanceOf(ApiError);
+    const result = qc.fetchQuery(options);
+    await vi.advanceTimersByTimeAsync(1999);
+    // Not before the server said to come back.
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(qc.getQueryData(inboxKeys.unreadSummary())).toEqual(summary);
-    await expect(qc.fetchQuery(options)).resolves.toEqual([{ workspace_id: "ws-1", count: 4 }]);
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(result).resolves.toEqual([{ workspace_id: "ws-1", count: 4 }]);
     expect(fetch).toHaveBeenCalledTimes(2);
-  } finally { qc.clear(); }
+  } finally {
+    qc.clear();
+    vi.useRealTimers();
+  }
+});
+
+it("gives up on a server that stays busy after three retries, keeping cached counts", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  const summary = [{ workspace_id: "ws-1", count: 3 }];
+  const fetch = vi.fn(async () => Response.json({ error: "busy" }, { status: 503, headers: { "Retry-After": "1" } }));
+  vi.stubGlobal("fetch", fetch);
+  setApiInstance(new ApiClient("https://api.example.test"));
+  const qc = createQueryClient();
+  qc.setQueryData(inboxKeys.unreadSummary(), summary);
+  try {
+    const result = qc.fetchQuery({ ...inboxUnreadSummaryOptions(), staleTime: 0 }).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await result).toBeInstanceOf(ApiError);
+    expect(fetch).toHaveBeenCalledTimes(1 + INBOX_TRANSIENT_RETRIES);
+    expect(qc.getQueryData(inboxKeys.unreadSummary())).toEqual(summary);
+  } finally {
+    qc.clear();
+    vi.useRealTimers();
+  }
 });
 
 it("Query cancellation aborts the superseded summary HTTP request", async () => {
@@ -56,13 +85,13 @@ it("Query cancellation aborts the superseded summary HTTP request", async () => 
 });
 
 it("does not depend on an API error class to recognize overload", async () => {
-  const busy = Object.assign(new Error("busy"), { status: 503 });
-  const getInboxUnreadSummary = vi.fn().mockRejectedValue(busy);
+  const busy = Object.assign(new Error("busy"), { status: 503, retryAfterMs: 0 });
+  const getInboxUnreadSummary = vi.fn().mockRejectedValueOnce(busy).mockResolvedValue([]);
   setApiInstance({ getInboxUnreadSummary } as unknown as ApiClient);
   const qc = createQueryClient();
   try {
-    await expect(qc.fetchQuery(inboxUnreadSummaryOptions())).rejects.toBe(busy);
-    expect(getInboxUnreadSummary).toHaveBeenCalledTimes(1);
+    await expect(qc.fetchQuery({ ...inboxUnreadSummaryOptions(), retryDelay: 0 })).resolves.toEqual([]);
+    expect(getInboxUnreadSummary).toHaveBeenCalledTimes(2);
   } finally { qc.clear(); }
 });
 

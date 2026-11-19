@@ -35,12 +35,13 @@ const (
 	// makes those endpoints answer 404, so clients stop syncing and search
 	// through the server again without a client release.
 	LocalSearchIndex = "local_search_index"
-	// RuntimeUpdateQueue lets a busy machine queue a Runtimes-page CLI update
-	// instead of failing it (MUL-9633). Off by default for multi-node deploys:
-	// turn it on once no API replica of the earlier release is left, because
-	// those replicas fail a queued request on the daemon's busy report. A
-	// single-node server (in-memory update store) queues regardless.
-	RuntimeUpdateQueue = "runtime_update_queue"
+	// DocsV1 gates workspace Docs (MUL-8370) while it is still being tested:
+	// the /api/docs and /api/doc-folders APIs, the Web/Desktop entry points,
+	// and the doc lines in the agent brief. Off by default so a release can
+	// ship the code without launching the feature; FF_DOCS_V1=true turns it on
+	// for a deployment. It is a GLOBAL switch. Turning it off leaves existing
+	// doc rows untouched — they simply become unreachable until it is back on.
+	DocsV1 = "docs_v1"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -65,6 +66,7 @@ var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
+	DocsV1,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -83,12 +85,12 @@ func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, TriageV1, false)
 }
 
-func RuntimeUpdateQueueEnabled(ctx context.Context, flags *featureflag.Service) bool {
-	return flags.IsEnabled(ctx, RuntimeUpdateQueue, false)
-}
-
 func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, LocalSearchIndex, true)
+}
+
+func DocsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, DocsV1, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

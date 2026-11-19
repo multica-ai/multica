@@ -1632,7 +1632,20 @@
     "invitation_meta": "{{sent}} に送信 · {{expires}} に期限切れ",
     "revoke_invitation_aria": "{{email}} への招待を取り消す",
     "seats_used": "{{purchased}} 席中 {{used}} 席を使用",
-    "manage_seats": "席を管理"
+    "manage_seats": "席を管理",
+    "member_limit_full_title": "このプランのメンバー上限は {{limit}} 人で、上限に達しています",
+    "member_limit_full_description": "Pro にアップグレードするとメンバー数は無制限です。メンバーごとに有料席が必要で、今回のアップグレードにはこの招待用の 1 席が含まれます。先にメンバーを削除することもできます。",
+    "member_limit_full_description_pending": "保留中の招待も枠を使います（現在 {{pending}} 件）。Pro にアップグレードするとメンバー数は無制限です（メンバーごとに有料席が必要で、今回のアップグレードにはこの招待用の 1 席が含まれます）。先に招待を取り消すか、メンバーを削除することもできます。",
+    "member_limit_usage": "{{used}} / {{limit}} 人",
+    "upgrade_and_invite": "アップグレードして招待",
+    "toast_member_limit_reached": "メンバーが上限に達しています。さらに招待するにはアップグレードしてください。",
+    "member_limit_full_description_no_upgrade": "保留中の招待を取り消すか、メンバーを削除すると枠が空きます。",
+    "toast_invalid_email": "有効なメールアドレスを入力してください。",
+    "toast_already_member": "{{email}} はすでにこのワークスペースのメンバーです。",
+    "toast_invitation_pending": "{{email}} への招待はすでに保留中です。",
+    "toast_invite_check_unavailable": "既存のメンバーと招待を確認できませんでした。しばらくしてからもう一度お試しください。",
+    "member_limit_full_description_billing": "ワークスペースのサブスクリプションに対応が必要です。請求とプランで復旧するとメンバーを追加できます。先にメンバーを削除することもできます。",
+    "open_billing": "請求とプランを開く"
   },
   "integrations": {
     "status_connected": "接続済み",

@@ -8,10 +8,13 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { useAuthStore } from "@multica/core/auth";
+import { isMemberLimitReachedError } from "@multica/core/billing";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { ShareLinkInfo, Workspace } from "@multica/core/types";
+import { useT } from "@multica/views/i18n";
 
 function JoinInner() {
+  const { t } = useT("invite");
   const router = useRouter();
   const searchParams = useSearchParams();
   const code = searchParams.get("code");
@@ -23,12 +26,15 @@ function JoinInner() {
   const [joining, setJoining] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const [joined, setJoined] = useState(false);
+  // The workspace has no free member slot; the link works again once it
+  // upgrades.
+  const [workspaceFull, setWorkspaceFull] = useState(false);
 
   // Load the share-link preview once. No auth needed: this endpoint only
   // exposes the workspace name/slug and the inviter.
   useEffect(() => {
     if (!code) {
-      setInfoError("No invite code found. Please use a valid share link.");
+      setInfoError(t(($) => $.join.no_code));
       return;
     }
     let cancelled = false;
@@ -38,11 +44,12 @@ function JoinInner() {
         if (!cancelled) setInfo(data);
       })
       .catch(() => {
-        if (!cancelled) setInfoError("This invite link is invalid or has expired.");
+        if (!cancelled) setInfoError(t(($) => $.join.invalid));
       });
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load the preview once per code
   }, [code]);
 
   const handleJoin = () => {
@@ -54,6 +61,8 @@ function JoinInner() {
     }
     setJoining(true);
     setJoinError(null);
+    // A retry shows its own outcome: the link may have been revoked since.
+    setWorkspaceFull(false);
     api
       .joinByShareLink(code)
       .then(async (result) => {
@@ -89,15 +98,19 @@ function JoinInner() {
           return;
         }
         setJoining(false);
+        if (isMemberLimitReachedError(e)) {
+          setWorkspaceFull(true);
+          return;
+        }
         if (code === "seat_capacity_full") {
-          setJoinError("All purchased member seats are in use. Ask a workspace admin to add a seat before trying again.");
+          setJoinError(t(($) => $.join.seats_full));
           return;
         }
         if (code === "seat_capacity_unavailable") {
-          setJoinError("Member capacity could not be verified. Please try again.");
+          setJoinError(t(($) => $.join.seats_unavailable));
           return;
         }
-        setJoinError(msg || "Failed to join the workspace. The link may have expired.");
+        setJoinError(msg || t(($) => $.join.join_failed));
       });
   };
 
@@ -107,40 +120,54 @@ function JoinInner() {
         <CardContent className="space-y-4 pt-6">
           {joined ? (
             <>
-              <h1 className="text-title-lg font-semibold text-center">Joined!</h1>
-              <p className="text-center text-muted-foreground">Redirecting to your workspace...</p>
+              <h1 className="text-title-lg font-semibold text-center">{t(($) => $.join.joined_title)}</h1>
+              <p className="text-center text-muted-foreground">{t(($) => $.join.redirecting)}</p>
             </>
           ) : infoError ? (
             <>
-              <h1 className="text-title-lg font-semibold text-center">Oops</h1>
+              <h1 className="text-title-lg font-semibold text-center">{t(($) => $.join.error_title)}</h1>
               <p className="text-center text-muted-foreground">{infoError}</p>
               <div className="flex justify-center pt-2">
                 <Button variant="outline" onClick={() => router.push("/")}>
-                  Go Home
+                  {t(($) => $.join.go_home)}
                 </Button>
               </div>
             </>
           ) : !info ? (
-            <div className="py-6 text-center text-muted-foreground">Loading invite details...</div>
+            <div className="py-6 text-center text-muted-foreground">{t(($) => $.join.loading)}</div>
+          ) : workspaceFull ? (
+            <>
+              <h1 className="text-title-lg font-semibold text-center">
+                {t(($) => $.join.full_title, { workspace: info.workspace_name })}
+              </h1>
+              <p className="text-center text-muted-foreground">{t(($) => $.join.full_description)}</p>
+              {/* A slot can free up without the link changing (an invitation
+                  revoked, a member removed), so the join stays one click away. */}
+              <div className="flex justify-center pt-2">
+                <Button variant="outline" onClick={handleJoin} disabled={joining}>
+                  {joining ? t(($) => $.join.joining) : t(($) => $.join.retry)}
+                </Button>
+              </div>
+            </>
           ) : (
             <>
               <h1 className="text-title-lg font-semibold text-center">
-                You&apos;re invited to {info.workspace_name}
+                {t(($) => $.join.title, { workspace: info.workspace_name })}
               </h1>
               {info.creator_name && (
                 <p className="text-center text-muted-foreground">
-                  Invited by {info.creator_name}
+                  {t(($) => $.join.invited_by, { name: info.creator_name })}
                 </p>
               )}
               <p className="flex items-center justify-center gap-2 text-center text-body text-muted-foreground">
-                <span>You&apos;ll join this workspace as</span>
+                <span>{t(($) => $.join.join_as)}</span>
                 <Badge variant="outline">
-                  {info.role === "admin" ? "Administrator" : "Member"}
+                  {info.role === "admin" ? t(($) => $.join.role_admin) : t(($) => $.join.role_member)}
                 </Badge>
               </p>
               {!user && (
                 <p className="text-center text-body text-muted-foreground">
-                  You&apos;ll need to log in to join this workspace.
+                  {t(($) => $.join.login_required)}
                 </p>
               )}
               {joinError && (
@@ -148,7 +175,11 @@ function JoinInner() {
               )}
               <div className="flex justify-center gap-2 pt-2">
                 <Button onClick={handleJoin} disabled={joining}>
-                  {joining ? "Joining..." : user ? "Join Workspace" : "Log In to Join"}
+                  {joining
+                    ? t(($) => $.join.joining)
+                    : user
+                      ? t(($) => $.join.join)
+                      : t(($) => $.join.log_in_to_join)}
                 </Button>
               </div>
             </>
@@ -159,9 +190,14 @@ function JoinInner() {
   );
 }
 
+function JoinFallback() {
+  const { t } = useT("invite");
+  return <div className="flex min-h-screen items-center justify-center">{t(($) => $.join.loading)}</div>;
+}
+
 export default function JoinPage() {
   return (
-    <Suspense fallback={<div className="flex min-h-screen items-center justify-center">Loading...</div>}>
+    <Suspense fallback={<JoinFallback />}>
       <JoinInner />
     </Suspense>
   );

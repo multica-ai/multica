@@ -4,6 +4,7 @@ import { TriangleAlert } from "@multica/ui/icons";
 import { useChatStore } from "@multica/core/chat";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { TrialStatus } from "../billing/trial-status";
 import { ChatBar } from "../chat/components/chat-bar";
 import { isFloatingChatRouteSuppressed } from "../chat/floating-chat-visibility";
 import { useT } from "../i18n";
@@ -43,8 +44,8 @@ function TeamStatus({ wsId }: { wsId: string }) {
 }
 
 /**
- * The bar under the content card: workspace status on the left, quick chat on
- * the right. It sits on the app shell, in the strip the card's bottom margin
+ * The bar under the content card: workspace status (the plan trial, then
+ * stuck work) on the left, quick chat on the right. It sits on the app shell, in the strip the card's bottom margin
  * used to take. Below `md` there is no bar and quick chat is the floating
  * launcher.
  */
@@ -70,7 +71,10 @@ export function AppBottomBar() {
       // column as the page header's trailing action.
       className="hidden h-8 shrink-0 items-center justify-between gap-4 pr-[18px] pl-3 md:flex"
     >
-      <TeamStatus wsId={wsId} />
+      <div className="flex min-w-0 items-center gap-1">
+        <TrialStatus wsId={wsId} />
+        <TeamStatus wsId={wsId} />
+      </div>
       {showChat && <ChatBar />}
     </footer>
   );

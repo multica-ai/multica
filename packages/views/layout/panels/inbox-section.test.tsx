@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@multica/core/api";
+import { createQueryClient } from "@multica/core/query-client";
 import {
   DEFAULT_SIDEBAR_INBOX_SETTINGS,
   useSidebarTreeStore,
@@ -33,6 +35,11 @@ const state = vi.hoisted(() => ({
   unsnooze: vi.fn(() => Promise.resolve()),
 }));
 
+const apiMock = vi.hoisted(() => ({ listInbox: vi.fn() }));
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
+  api: apiMock,
+}));
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
@@ -710,5 +717,104 @@ describe("InboxSection with every row shown", () => {
     renderInPanel(30);
     fireEvent.click(screen.getByRole("button", { name: "Show 25 more…" }));
     expect(rows()).toHaveLength(30);
+  });
+});
+
+describe("InboxSection while the Inbox loads", () => {
+  // The app's own client, so the inbox retry policy is the one under test.
+  function renderUnloaded() {
+    const client = createQueryClient();
+    client.setQueryData(snoozedInboxOptions("ws-1").queryKey, []);
+    client.setQueryData(agentListOptions("ws-1").queryKey, []);
+    client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
+    const nav = adapter("/acme/issues");
+    renderWithI18n(
+      <QueryClientProvider client={client}>
+        <NavigationProvider value={nav}>
+          <Harness activeIssueId={null} pathname={nav.pathname} openKey={null} />
+        </NavigationProvider>
+      </QueryClientProvider>,
+    );
+    return client;
+  }
+  const busy = () => new ApiError("inbox reads are busy", 503, "Service Unavailable", undefined, 1000);
+  const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    apiMock.listInbox.mockReset();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("shows the notifications once a busy server answers", async () => {
+    apiMock.listInbox
+      .mockRejectedValueOnce(busy())
+      .mockResolvedValue([item({ id: "n1", issue_id: "issue-a", title: "After the wait" })]);
+    renderUnloaded();
+    await advance(0);
+    // Waiting out Retry-After is not an empty Inbox.
+    expect(screen.queryByText("No notifications")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await advance(2000);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(2);
+    expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining("After the wait")]);
+  });
+
+  it("says the Inbox could not load, with a retry, when the server stays busy", async () => {
+    apiMock.listInbox.mockRejectedValue(busy());
+    renderUnloaded();
+    await advance(30_000);
+
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(4);
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load notifications");
+    expect(screen.queryByText("No notifications")).toBeNull();
+
+    apiMock.listInbox.mockResolvedValue([item({ id: "n1", issue_id: "issue-a", title: "Back again" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await advance(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining("Back again")]);
+  });
+
+  it("keeps saying it could not load while a retry waits on a busy server", async () => {
+    apiMock.listInbox.mockRejectedValue(busy());
+    renderUnloaded();
+    await advance(30_000);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(4);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await advance(0);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(5);
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load notifications");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+
+    await advance(30_000);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(8);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
+  it("says No notifications when the server answers with none", async () => {
+    apiMock.listInbox.mockResolvedValue([]);
+    renderUnloaded();
+    await advance(0);
+    expect(screen.getByText("No notifications")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps the rows it has when a refresh fails", async () => {
+    apiMock.listInbox.mockResolvedValueOnce([item({ id: "n1", issue_id: "issue-a", title: "Still here" })]);
+    const client = renderUnloaded();
+    await advance(0);
+    expect(rows()).toHaveLength(1);
+
+    apiMock.listInbox.mockRejectedValue(busy());
+    await act(async () => {
+      void client.invalidateQueries({ queryKey: ["inbox", "ws-1", "list"] });
+    });
+    await advance(30_000);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(5);
+    expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining("Still here")]);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

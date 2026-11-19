@@ -277,7 +277,9 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString(duplicateOfCommandLine)
 	b.WriteString("- `multica issue wakeup <create|list|get|update|disable|trigger|delete|runs|events>` — persist an event, condition or time wakeup on this issue, then finish the current run. When the platform can check the fact itself, use one `--until-*` condition so no run starts before it holds; check the rule's `last_error` for missing PR links or snapshots, which are retried automatically. Conditions, PR rules and actor filters: `multica issue wakeup create --help` and the multica-platform issues reference.\n")
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
-	b.WriteString("- `multica doc list|get|create|update` — workspace docs; `doc update` needs `--base-revision` from `multica doc get` (details: `multica doc --help`).\n")
+	if ctx.DocsEnabled {
+		b.WriteString("- `multica doc list|search|get|create|update|move` — workspace docs; `doc search <query>` matches titles and content; `doc update` needs `--base-revision` from `multica doc get` (details: `multica doc --help`).\n")
+	}
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file` with a file inside your working directory; full flags: `multica issue comment add --help`.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>] [--fresh]` — repository checkout on a dedicated branch; re-running it keeps a checkout that has uncommitted or unpushed work, or is already on this task's branch, and only fetches; a clean, fully pushed checkout on another branch starts over on a new branch. `--fresh` discards uncommitted and untracked files for a new branch; commits stay on the old branch, so push any you still need first.\n\n")
 	b.WriteString("Commits use the user's configured Git identity; keep it unless asked. For a requested override in a managed checkout use `git config --worktree user.name` / `user.email` — plain or `--local` config can leak into a shared cache; never change the global identity.\n\n")
@@ -838,7 +840,7 @@ func writeTraecliSkills(b *strings.Builder, skills []SkillContextForEnv) {
 }
 
 // writeMentions emits the @mention side-effects section (compressed).
-func writeMentions(b *strings.Builder) {
+func writeMentions(b *strings.Builder, docsEnabled bool) {
 	b.WriteString("## Mentions\n\n")
 	b.WriteString("Mention links are **side-effecting actions**:\n\n")
 	b.WriteString("- `[MUL-123](mention://issue/<issue-id>)` — clickable link (no side effect)\n")
@@ -846,7 +848,9 @@ func writeMentions(b *strings.Builder) {
 	// agent writes this form (or pastes the project URL, which the reader's
 	// client unfurls into the same chip) a project reference stays dead text.
 	b.WriteString("- `[Project Name](mention://project/<project-id>)` — clickable link (no side effect)\n")
-	b.WriteString("- `[Doc Title](mention://doc/<doc-id>)` — clickable link (no side effect); read it with `multica doc get <doc-id>`\n")
+	if docsEnabled {
+		b.WriteString("- `[Doc Title](mention://doc/<doc-id>)` — clickable link (no side effect); read it with `multica doc get <doc-id>`\n")
+	}
 	b.WriteString("- `[@Name](mention://member/<user-id>)` — **notifies a human**\n")
 	b.WriteString("- `[@Name](mention://agent/<agent-id>)` — **enqueues a new run for that agent**\n\n")
 	// No prescriptive default here (MUL-6417): the mention syntax hides its
@@ -1056,7 +1060,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeSkills(&b, provider, ctx)
 
 	if kind == kindIssue {
-		writeMentions(&b)
+		writeMentions(&b, ctx.DocsEnabled)
 		writeAttachments(&b)
 	}
 

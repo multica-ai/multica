@@ -1647,7 +1647,20 @@
     "invitation_meta": "Sent {{sent}} · Expires {{expires}}",
     "revoke_invitation_aria": "Revoke invitation for {{email}}",
     "seats_used": "{{used}} of {{purchased}} seats used",
-    "manage_seats": "Manage seats"
+    "manage_seats": "Manage seats",
+    "member_limit_full_title": "This plan allows up to {{limit}} members. The workspace is full.",
+    "member_limit_full_description": "Upgrade to Pro for unlimited members. Each member is a paid seat, and the upgrade includes one for this invitation. Or remove a member first.",
+    "member_limit_full_description_pending": "Pending invitations take a slot too ({{pending}} now). Upgrade to Pro for unlimited members (each member is a paid seat, and the upgrade includes one for this invitation), or revoke an invitation or remove a member first.",
+    "member_limit_usage": "{{used}} / {{limit}} members",
+    "upgrade_and_invite": "Upgrade and invite",
+    "toast_member_limit_reached": "The workspace is full. Upgrade to invite more members.",
+    "member_limit_full_description_no_upgrade": "Revoke a pending invitation or remove a member to free a slot.",
+    "toast_invalid_email": "Enter a valid email address.",
+    "toast_already_member": "{{email}} is already a member of this workspace.",
+    "toast_invitation_pending": "An invitation to {{email}} is already pending.",
+    "toast_invite_check_unavailable": "Could not check existing members and invitations. Try again in a moment.",
+    "member_limit_full_description_billing": "The workspace's subscription needs attention. Restore it in Billing to add members, or remove a member first.",
+    "open_billing": "Open Billing"
   },
   "integrations": {
     "status_connected": "Connected",

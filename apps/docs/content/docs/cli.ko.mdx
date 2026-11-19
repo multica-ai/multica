@@ -528,7 +528,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | `chat` | `history`, `thread [id]` | 에이전트가 현재 처리 중인 외부 채팅 대화 읽기 | `--limit`, `--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | 현재 채팅 실행의 후속 작업 관리. [채팅 웨이크업](#chat-wakeups) 참고 | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
 | `inbox` | `list` | 읽음으로 표시하지 않고 [알림 목록 보기](/inbox). `--archived` 또는 `--snoozed`는 해당 목록을 보여 줌 | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` 또는 `json`); `--archived`는 모든 페이지를 읽음 |
-| | `count` | 이 워크스페이스와 소속된 각 워크스페이스의 읽지 않은 알림 수 | `--output` |
+| | `count` | 이 워크스페이스와 소속된 각 워크스페이스의 읽지 않은 알림 수. 에이전트 실행에서는 해당 워크스페이스만 | `--output` |
 | | `read [<id>...]` | 알림을 읽음으로 표시(각 알림의 태스크 전체에 적용). 또는 한 태스크의 모든 알림, 또는 전체 | `--issue`, `--all` (`--yes` 필요) |
 | | `unread <id>...` | 알림을 읽지 않음으로 표시 | |
 | | `archive [<id>...]` | 알림 보관(각 알림의 태스크 전체에 적용). 또는 일괄 보관 | `--all`, `--read`, `--completed` (모두 `--yes` 필요) |
