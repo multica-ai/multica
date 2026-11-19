@@ -22,7 +22,7 @@ import { _electron as electron, expect, test, type CDPSession, type ElectronAppl
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { cpus, loadavg, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   attachFrameMetrics, interactionLatency, lastClick, median, pageNow, quantile, settle, stallsBetween,
@@ -113,6 +113,12 @@ async function launchDesktop(outDir: string, label: string): Promise<Desktop> {
     },
   });
   const userData = await app.evaluate(({ app }) => app.getPath("userData"));
+  // Only a dev launch takes the suffix; anything else is a real install's data.
+  if (!basename(userData).includes(`perf-${label}-`)) {
+    await app.close().catch(() => {});
+    rmSync(home, { recursive: true, force: true });
+    throw new Error(`refusing to use app data outside this run: ${userData}`);
+  }
   const close = async () => {
     // A dev launch registers itself as the multica:// handler; hand it back.
     await app.evaluate(({ app }) => app.removeAsDefaultProtocolClient("multica", process.execPath, [app.getAppPath()])).catch(() => {});
