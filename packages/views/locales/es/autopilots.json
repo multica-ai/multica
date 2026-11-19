@@ -387,6 +387,8 @@
       "equals": "es",
       "not_equals": "no es",
       "contains": "contiene",
+      "not_contains": "no contiene",
+      "not_regex": "no coincide",
       "in": "es uno de",
       "exists": "existe"
     },

@@ -369,6 +369,8 @@
       "equals": "is",
       "not_equals": "is not",
       "contains": "contains",
+      "not_contains": "does not contain",
+      "not_regex": "does not match",
       "in": "is one of",
       "exists": "exists"
     },

@@ -368,6 +368,8 @@
       "equals": "是",
       "not_equals": "不是",
       "contains": "包含",
+      "not_contains": "不包含",
+      "not_regex": "不匹配",
       "in": "是其中之一",
       "exists": "存在"
     },
