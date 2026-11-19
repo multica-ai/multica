@@ -756,6 +756,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			file: "references/skill-import.md",
 			want: []string{
 				"multica skill import --url <url> --output json",
+				"multica skill import --dir <skill-folder> --output json",
 				"/api/skills/import",
 				"clawhub.ai",
 				"skills.sh",

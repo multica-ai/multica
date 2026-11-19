@@ -526,7 +526,7 @@ Les tableaux ci-dessous couvrent toutes les commandes de premier niveau actuelle
 | | `member list/invite <email>` | Consulter les membres, envoyer des invitations | `invite` : `--role` (member ou admin, member par défaut) |
 | `repo` | `list/add/remove/checkout` | Gérer les dépôts de l'espace de travail et les extraire localement | `--url` (répétable) ; `checkout` : `--ref` |
 | `skill` | `list/get/create/update/delete` | Gérer les skills | |
-| | `import` | Importer un skill depuis une URL ou un fichier local | `--url` / `--file`, `--on-conflict` (`fail`, `overwrite`, `rename`, `skip` ; `fail` par défaut) |
+| | `import` | Importer un skill depuis une URL, une archive locale ou un dossier local | `--url` / `--file` / `--dir`, `--on-conflict` (`fail`, `overwrite`, `rename`, `skip` ; `fail` par défaut) |
 | | `search <query>` | Rechercher des skills | |
 | | `files list/upsert/delete <skill-id>` | Gérer les fichiers d'un skill | |
 | | `label list/add/remove <skill-id>` | Gérer les étiquettes d'un skill | `add` / `remove` : `<label-id>` accepte un UUID complet ou un préfixe court |

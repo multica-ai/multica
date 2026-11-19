@@ -31,10 +31,11 @@ Sur la page **Skills** de l'espace de travail, choisissez « Nouveau skill ». Q
 
 La copie depuis un runtime prend un instantané des fichiers à ce moment-là. Les modifications ultérieures des fichiers locaux ne mettent pas automatiquement à jour la version de l'espace de travail ; réimportez le skill ou modifiez-le dans Multica.
 
-Le même format d'archive fonctionne depuis le CLI :
+Depuis le CLI, importez une archive ou un dossier qui contient `SKILL.md` à sa racine :
 
 ```bash
 multica skill import --file ./review-helper.skill
+multica skill import --dir ./review-helper
 ```
 
 Si un skill portant le même nom existe déjà dans l'espace de travail, l'import peut s'arrêter, écraser le contenu existant, enregistrer sous un nouveau nom ou ignorer le skill. L'écrasement par import est réservé au créateur du skill ; un `admin` de l'espace de travail qui peut modifier le skill dans l'application ne peut pas pour autant l'écraser par import. Pour récupérer une version plus récente d'un skill déjà présent dans l'espace de travail, utilisez plutôt [Mettre à jour un skill importé](#mettre-à-jour-un-skill-importé).
