@@ -613,6 +613,44 @@ function ProjectFoldersArt() {
   );
 }
 
+/* ── Chat help: /help in a messaging app lists the bot's commands ──── */
+
+/** Chat commands are typed literally in every language, so the art shows them as-is. */
+const CHAT_HELP_SENT = "/help";
+const CHAT_HELP_COMMANDS = [
+  { command: "/new", words: [34, 22] },
+  { command: "/clear", words: [28, 40] },
+  { command: "/issue", words: [38, 26] },
+];
+
+function ChatHelpArt() {
+  return (
+    <Surface className="top-4 left-6 w-[19rem]">
+      <div className="flex h-8 items-center gap-1.5 px-3">
+        <span className="grid size-5 place-items-center rounded-full bg-brand/10 text-brand">
+          <Bot className="size-3" />
+        </span>
+        <span className="text-label font-medium">{SAMPLE.agent}</span>
+      </div>
+      <div className="flex flex-col gap-2 bg-muted/60 p-3 pb-8">
+        <span className="ml-auto rounded-md bg-primary px-2 py-1 font-mono text-caption text-primary-foreground">
+          {CHAT_HELP_SENT}
+        </span>
+        <div className="flex w-fit flex-col gap-1.5 rounded-md bg-surface-raised px-2.5 py-2 ring-1 ring-black/5 dark:ring-white/10">
+          {CHAT_HELP_COMMANDS.map(({ command, words }) => (
+            <div key={command} className="flex items-center gap-2">
+              <span className="w-12 font-mono text-caption font-medium">{command}</span>
+              {words.map((w) => (
+                <span key={w} className="h-1.5 rounded-full bg-foreground/35" style={{ width: w }} />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </Surface>
+  );
+}
+
 export const THEMES_HERO: WhatsNewHero = { ground: "orange", Art: ThemesArt };
 export const ENVIRONMENTS_HERO: WhatsNewHero = { ground: "ice", Art: EnvironmentsArt };
 export const ANNOTATIONS_HERO: WhatsNewHero = { ground: "lime", Art: AnnotationsArt };
@@ -622,3 +660,4 @@ export const CHAT_WAKEUP_HERO: WhatsNewHero = { ground: "lime", Art: ChatWakeupA
 export const CHAT_STEERING_HERO: WhatsNewHero = { ground: "orange", Art: ChatSteeringArt };
 export const WEIXIN_HERO: WhatsNewHero = { ground: "ice", Art: WeixinArt };
 export const PROJECT_FOLDERS_HERO: WhatsNewHero = { ground: "brand", Art: ProjectFoldersArt };
+export const CHAT_HELP_HERO: WhatsNewHero = { ground: "lime", Art: ChatHelpArt };
