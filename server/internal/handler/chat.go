@@ -1286,11 +1286,7 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	messages = visibleChatMessages(messages)
 
-	messageIDs := make([]pgtype.UUID, len(messages))
-	for i, m := range messages {
-		messageIDs[i] = m.ID
-	}
-	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messageIDs)
+	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messages)
 
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, m := range messages {
@@ -1351,11 +1347,7 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 		messages[i], messages[j] = messages[j], messages[i]
 	}
 
-	messageIDs := make([]pgtype.UUID, len(messages))
-	for i, m := range messages {
-		messageIDs[i] = m.ID
-	}
-	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messageIDs)
+	groupedAtt := h.groupChatMessageAttachments(r.Context(), workspaceID, messages)
 
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, m := range messages {
