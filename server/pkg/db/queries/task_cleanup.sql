@@ -45,6 +45,8 @@ SET status = 'failed',
     completed_at = now(),
     chat_finalize_deferred_at = NULL
 WHERE id = @id AND status = 'cancelled'
+  AND (sqlc.narg('expected_dispatched_at')::timestamptz IS NULL
+       OR dispatched_at = sqlc.narg('expected_dispatched_at')::timestamptz)
 RETURNING *;
 
 -- name: MarkPiTaskProcessCleanupPending :exec
