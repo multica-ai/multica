@@ -102,11 +102,17 @@ function isNewer(latest: string, current: string): boolean {
   return false;
 }
 
-/** The running daemon already reports the version this update was for. */
-function hasReached(target: string, current: string | null): boolean {
+/**
+ * The running daemon reports exactly the version this update installs. Only an
+ * exact match counts: an older target is a deliberate downgrade that has not
+ * happened yet.
+ */
+function runsTarget(target: string, current: string | null): boolean {
   if (!current) return false;
-  if (!parseReleaseVersion(target) || !parseReleaseVersion(current)) return false;
-  return !isNewer(target, current);
+  const t = parseReleaseVersion(target);
+  const c = parseReleaseVersion(current);
+  if (!t || !c) return false;
+  return t.every((part, i) => part === c[i]);
 }
 
 type ChipStatus = Exclude<RuntimeUpdateStatus, "cancelled">;
@@ -197,11 +203,13 @@ export function UpdateSection({
       setDismissedId(update.id);
       return;
     }
+    // An install whose result report was lost still shows as running; the
+    // restarted daemon reporting the target version settles it. A request
+    // that has not started stays on screen (with Cancel) whatever the current
+    // version is: the daemon will still install it.
     if (
-      status !== "failed" &&
-      status !== "timeout" &&
-      status !== "expired" &&
-      hasReached(update.target_version, currentVersion)
+      (status === "running" || status === "completed") &&
+      runsTarget(update.target_version, currentVersion)
     ) {
       setDismissedId(update.id);
       return;

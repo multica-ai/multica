@@ -329,6 +329,16 @@ describe("UpdateSection queued updates", () => {
     expect(await screen.findByText("Updates when idle")).toBeInTheDocument();
   });
 
+  it("keeps a queued update for an older version on screen with Cancel", async () => {
+    // The CLI can queue a specific (older) version; the daemon still installs
+    // it once idle, so the running version must not hide the request.
+    follow(request({ target_version: "v0.10.0", cancellable: true }));
+    renderSection({ runtimeId: "runtime-1", currentVersion: "v0.11.1" });
+
+    expect(await screen.findByText("Updates when idle")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
   it("hides Cancel when the server says it would not succeed", async () => {
     follow(request({ cancellable: false }));
     renderSection({ runtimeId: "runtime-1", currentVersion: "v0.9.0" });
