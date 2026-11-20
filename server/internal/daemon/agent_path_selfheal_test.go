@@ -211,6 +211,8 @@ func TestResolveAgentEntry_PrefersLivePathWhenVersionDetectFails(t *testing.T) {
 
 	if _, _, err := d.resolveAgentEntryForLaunch(ctx, "codex", entry); err == nil {
 		t.Fatal("launch accepted the replacement before its version was verified")
+	} else if !strings.Contains(err.Error(), v2) || strings.Contains(err.Error(), v1) {
+		t.Fatalf("launch error should name the replacement path %q: %v", v2, err)
 	}
 
 	detectVersionOK = true

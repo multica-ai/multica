@@ -1046,7 +1046,7 @@ func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string
 		return entry, d.agentVersion(provider), outcome.rejected
 	}
 	if outcome.failure != nil {
-		return entry, d.agentVersion(provider), fmt.Errorf("resolve agent executable %q for launch: %w", entry.Path, outcome.failure)
+		return entry, d.agentVersion(provider), fmt.Errorf("resolve agent executable %q for launch: %w", resolved.Path, outcome.failure)
 	}
 	if outcome.adopted.path != "" {
 		return resolved, version, nil
@@ -1212,9 +1212,8 @@ func (d *Daemon) resolveAgentLaunchTarget(ctx context.Context, provider string, 
 // registration enforces. Path and version are published together under
 // resolvedPathsMu so any observer of the path also sees the matching version;
 // the shared d.agentVersion cache is refreshed too, for registration hygiene.
-// It returns a zero adopted pair when nothing usable was found, so the caller
-// keeps the (stale) pinned entry and the candidate is never launched. Runs
-// under healGroup, one invocation at a time per provider.
+// An unverified candidate can be reported for diagnostics without publishing
+// or launching it. Runs under healGroup, one invocation at a time per provider.
 //
 // A candidate refused by the minimum-version gate is reported back rather than
 // swallowed: not launching it is right, but it is also the whole verdict a
