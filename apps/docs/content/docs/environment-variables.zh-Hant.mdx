@@ -291,6 +291,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 
 | 變數 | 預設值 | 說明 |
 |---|---|---|
+| `LOG_LEVEL` | `debug` | 守護程序日誌層級。使用 `multica config set log_level info` 設定設定檔的預設值。環境變數優先。 |
 | `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log` 達到多少 MB 時輪轉 |
 | `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 最多保留幾個輪轉檔案 |
 | `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | 輪轉檔案保留的天數 |

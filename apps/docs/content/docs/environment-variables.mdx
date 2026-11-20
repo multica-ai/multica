@@ -301,6 +301,7 @@ When the daemon runs in the background (not attached to a terminal), it writes l
 
 | Variable | Default | Description |
 |---|---|---|
+| `LOG_LEVEL` | `debug` | Daemon log level. Set a profile default with `multica config set log_level info`. The environment variable overrides the profile. |
 | `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | Size in MB at which `daemon.log` rotates |
 | `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | Maximum number of rotated files kept |
 | `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | Days rotated files are kept |
