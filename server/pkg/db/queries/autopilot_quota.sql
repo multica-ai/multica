@@ -149,12 +149,3 @@ WHERE r.state = 'reserved'
   )
 ORDER BY r.created_at
 LIMIT @row_limit;
-
--- name: MarkAutopilotQuotaLimitRaised :exec
--- Multica confirmed a paid add-on for the workspace. Marks the period the
--- payment counts in, so an instance about to reject a run there reads the
--- Cloud policy again first. With no period row yet no run was ever metered or
--- rejected there, so there is nothing to mark.
-UPDATE autopilot_quota_period
-SET limit_raised_at = now(), updated_at = now()
-WHERE workspace_id = $1 AND period_start <= now() AND period_end > now();

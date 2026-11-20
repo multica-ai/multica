@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/entitlement"
-	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -132,24 +130,19 @@ func (h *Handler) proxyCloudAutopilotAddonPurchase(
 	writeCloudRuntimeResponse(w, resp)
 }
 
-// recordAutopilotAddonPaid makes the raised limit effective on every API
-// instance: it marks the workspace's current quota period, which any instance
-// reads before rejecting a run, and refreshes this instance's cached policy so
-// the Billing page shows the new limit at once. Both are best effort: the
-// add-on is already paid, and without them a rejection still re-reads a policy
-// older than a few seconds and the cached policy expires within a minute.
+// recordAutopilotAddonPaid refreshes this instance's cached policy so the
+// Billing page shows the raised limit at once. Admission does not depend on
+// it: every instance fetches the policy from Cloud before rejecting a run.
 func (h *Handler) recordAutopilotAddonPaid(r *http.Request, workspaceID string) {
 	workspaceUUID, err := util.ParseUUID(workspaceID)
 	if err != nil {
 		return
 	}
+	refresher, ok := h.Entitlements.(entitlement.FreshRefresher)
+	if !ok {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer cancel()
-	if err := h.Queries.MarkAutopilotQuotaLimitRaised(ctx, workspaceUUID); err != nil {
-		slog.Warn("mark autopilot quota limit raised failed",
-			append(logger.RequestAttrs(r), "workspace_id", workspaceID, "error", err)...)
-	}
-	if refresher, ok := h.Entitlements.(entitlement.ChangeRefresher); ok {
-		refresher.RefreshGateSince(ctx, uuid.UUID(workspaceUUID.Bytes), entitlement.GateAutopilotRuns, time.Now())
-	}
+	refresher.RefreshGateNow(ctx, uuid.UUID(workspaceUUID.Bytes), entitlement.GateAutopilotRuns)
 }

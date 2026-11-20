@@ -1,45 +1,14 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 )
-
-// seedAutopilotQuotaPeriod gives the test workspace a quota period covering
-// now, the row a paid add-on marks.
-func seedAutopilotQuotaPeriod(t *testing.T) {
-	t.Helper()
-	ctx := context.Background()
-	now := time.Now().UTC()
-	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	cleanup := func() {
-		testPool.Exec(context.Background(), `DELETE FROM autopilot_quota_period WHERE workspace_id = $1`, testWorkspaceID)
-	}
-	cleanup()
-	t.Cleanup(cleanup)
-	if _, err := testPool.Exec(ctx, `INSERT INTO autopilot_quota_period (workspace_id, period_start, period_end)
-		VALUES ($1, $2, $3)`, testWorkspaceID, start, start.AddDate(0, 1, 0)); err != nil {
-		t.Fatalf("seed quota period: %v", err)
-	}
-}
-
-func autopilotQuotaLimitRaised(t *testing.T) bool {
-	t.Helper()
-	var raised bool
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT limit_raised_at IS NOT NULL FROM autopilot_quota_period WHERE workspace_id = $1`, testWorkspaceID,
-	).Scan(&raised); err != nil {
-		t.Fatalf("read quota period: %v", err)
-	}
-	return raised
-}
 
 func TestCloudWorkspaceAutopilotAddonCheckoutForwardsOnlyAllowlistedFields(t *testing.T) {
 	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
@@ -115,7 +84,7 @@ func TestCloudWorkspaceAutopilotAddonCheckoutValidatesLocally(t *testing.T) {
 	}
 }
 
-func TestCloudWorkspaceAutopilotAddonPaidSessionMarksTheQuotaPeriod(t *testing.T) {
+func TestCloudWorkspaceAutopilotAddonSessionStatusIsForwarded(t *testing.T) {
 	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
 	read := func(status string) *httptest.ResponseRecorder {
 		t.Helper()
@@ -134,15 +103,8 @@ func TestCloudWorkspaceAutopilotAddonPaidSessionMarksTheQuotaPeriod(t *testing.T
 		return w
 	}
 
-	seedAutopilotQuotaPeriod(t)
 	read("open")
-	if autopilotQuotaLimitRaised(t) {
-		t.Fatal("an unpaid session must not mark the quota period")
-	}
 	read("paid")
-	if !autopilotQuotaLimitRaised(t) {
-		t.Fatal("a paid session must mark the quota period for other API instances")
-	}
 
 	invalid := &fakeCloudRuntimeProxy{enabled: true}
 	useCloudRuntimeProxy(t, invalid)

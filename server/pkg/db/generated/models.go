@@ -326,7 +326,6 @@ type AutopilotQuotaPeriod struct {
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 	RejectionNotifiedAt    pgtype.Timestamptz `json:"rejection_notified_at"`
 	RejectionNotifiedLimit pgtype.Int8        `json:"rejection_notified_limit"`
-	LimitRaisedAt          pgtype.Timestamptz `json:"limit_raised_at"`
 }
 
 type AutopilotQuotaReservation struct {

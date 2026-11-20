@@ -76,9 +76,12 @@ func newAutopilotQuotaInstance(t *testing.T, f *autopilotQuotaFixture, cloud *fa
 
 func cleanupPolicyChange(t *testing.T, f *autopilotQuotaFixture) {
 	t.Helper()
-	t.Cleanup(func() {
-		f.pool.Exec(context.Background(), `DELETE FROM inbox_item WHERE workspace_id = $1 AND type = 'autopilot_quota_exceeded'`, f.workspaceID)
-	})
+	t.Cleanup(func() { cleanupNotices(t, f) })
+}
+
+func cleanupNotices(t *testing.T, f *autopilotQuotaFixture) {
+	t.Helper()
+	f.pool.Exec(context.Background(), `DELETE FROM inbox_item WHERE workspace_id = $1 AND type = 'autopilot_quota_exceeded'`, f.workspaceID)
 }
 
 func countAutopilotQuotaNotices(t *testing.T, f *autopilotQuotaFixture) map[string]int {
@@ -108,10 +111,12 @@ func scheduleRun(ctx context.Context, svc *AutopilotService, f *autopilotQuotaFi
 	return err
 }
 
-// Instance B cached the policy before the add-on; instance A confirmed the
-// purchase. B's very next scheduled run must start, without a "limit reached"
-// notice, although B's cached policy is seconds old and still fresh.
-func TestAutopilotQuotaAddonPurchasedOnAnotherInstanceAdmitsNextRun(t *testing.T) {
+// Stripe's webhook confirmed the add-on to Cloud while the payer has not
+// returned to the app, so no Multica instance has heard of it. Instance B
+// cached the old limit a moment ago (well inside RefreshGate's 5 s reuse
+// window); its very next scheduled run must still start, without a "limit
+// reached" notice.
+func TestAutopilotQuotaWebhookConfirmedAddonAdmitsNextRunBeforeReturn(t *testing.T) {
 	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 1)
 	cleanupPolicyChange(t, fixture)
 	cloud := newFakeCloudPolicy(t, fixture, 1)
@@ -119,33 +124,41 @@ func TestAutopilotQuotaAddonPurchasedOnAnotherInstanceAdmitsNextRun(t *testing.T
 	instanceB := newAutopilotQuotaInstance(t, fixture, cloud)
 	ctx := context.Background()
 
+	// Both instances hold the full quota's policy.
 	if err := scheduleRun(ctx, instanceB, fixture, "fill-on-b"); err != nil {
 		t.Fatalf("fill quota on B: %v", err)
 	}
+	var quotaErr *AutopilotQuotaExceededError
+	if err := scheduleRun(ctx, instanceA, fixture, "reject-on-a"); !errors.As(err, &quotaErr) {
+		t.Fatalf("run on A before the add-on = %v, want quota error", err)
+	}
+	if err := scheduleRun(ctx, instanceB, fixture, "reject-on-b"); !errors.As(err, &quotaErr) {
+		t.Fatalf("run on B before the add-on = %v, want quota error", err)
+	}
+	cleanupNotices(t, fixture)
 	fetchesBefore := cloud.fetches.Load()
 
-	// The add-on is paid: Cloud raises the limit and A marks the quota period,
-	// as the Checkout status proxy does on a paid session.
+	// Webhook settles the add-on in Cloud. Nothing happens in Multica.
 	cloud.limit.Store(1001)
-	if err := instanceA.Queries.MarkAutopilotQuotaLimitRaised(ctx, fixture.workspaceID); err != nil {
-		t.Fatalf("mark limit raised on A: %v", err)
-	}
 
 	if err := scheduleRun(ctx, instanceB, fixture, "after-addon-on-b"); err != nil {
-		t.Fatalf("scheduled run on B after the add-on = %v, want admitted", err)
+		t.Fatalf("scheduled run on B after the webhook = %v, want admitted", err)
 	}
-	if got := cloud.fetches.Load() - fetchesBefore; got != 1 {
-		t.Fatalf("B fetched the policy %d times after the change, want exactly one refresh", got)
+	if err := scheduleRun(ctx, instanceA, fixture, "after-addon-on-a"); err != nil {
+		t.Fatalf("scheduled run on A after the webhook = %v, want admitted", err)
+	}
+	if got := cloud.fetches.Load() - fetchesBefore; got != 2 {
+		t.Fatalf("instances fetched the policy %d times after the change, want one refresh each", got)
 	}
 	if notices := countAutopilotQuotaNotices(t, fixture); len(notices) != 0 {
 		t.Fatalf("limit-reached notices after the add-on = %v, want none", notices)
 	}
 }
 
-// Without a confirmed add-on, a rejection re-reads the policy only past the
-// client's short reuse window: repeated rejections on a policy received
-// moments ago cost no Cloud request.
-func TestAutopilotQuotaRejectionWithoutLimitRaisedReusesAFreshPolicy(t *testing.T) {
+// Every rejection asks Cloud for the current policy first, once, and still
+// rejects when the limit is really reached; the notice goes out once per
+// limit, not once per rejection.
+func TestAutopilotQuotaRejectionFetchesThePolicyOnce(t *testing.T) {
 	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 1)
 	cleanupPolicyChange(t, fixture)
 	cloud := newFakeCloudPolicy(t, fixture, 1)
@@ -162,28 +175,33 @@ func TestAutopilotQuotaRejectionWithoutLimitRaisedReusesAFreshPolicy(t *testing.
 			t.Fatalf("rejection %d = %v, want quota error", i, err)
 		}
 	}
-	if got := cloud.fetches.Load() - fetchesBefore; got != 0 {
-		t.Fatalf("rejections fetched the policy %d times, want none", got)
+	if got := cloud.fetches.Load() - fetchesBefore; got != 3 {
+		t.Fatalf("3 rejections fetched the policy %d times, want one each", got)
 	}
-
-	// A marked period whose refreshed policy is still full rejects too, after
-	// one refresh, and the next rejection reuses the refreshed policy.
-	if err := instance.Queries.MarkAutopilotQuotaLimitRaised(ctx, fixture.workspaceID); err != nil {
-		t.Fatalf("mark limit raised: %v", err)
+	total := 0
+	for _, n := range countAutopilotQuotaNotices(t, fixture) {
+		total += n
 	}
-	var quotaErr *AutopilotQuotaExceededError
-	if err := scheduleRun(ctx, instance, fixture, "reject-after-mark"); !errors.As(err, &quotaErr) {
-		t.Fatalf("rejection after an unrelated mark = %v, want quota error", err)
+	if total == 0 {
+		t.Fatal("no limit-reached notice for a real rejection")
 	}
-	if got := cloud.fetches.Load() - fetchesBefore; got != 1 {
-		t.Fatalf("rejection after a mark fetched %d times, want one", got)
+	first := total
+	if err := scheduleRun(ctx, instance, fixture, "reject-again"); err == nil {
+		t.Fatal("run past the limit admitted")
+	}
+	total = 0
+	for _, n := range countAutopilotQuotaNotices(t, fixture) {
+		total += n
+	}
+	if total != first {
+		t.Fatalf("notices grew from %d to %d on the same limit", first, total)
 	}
 }
 
 // When nobody confirmed the add-on in the app (the payer closed the Stripe
 // tab and Cloud settled it from the webhook), a rejection still asks for the
 // current policy first, so a raised limit admits the run.
-func TestAutopilotQuotaRejectionRefreshesThePolicyWithoutAMark(t *testing.T) {
+func TestAutopilotQuotaRejectionRefreshesThePolicyFromTheStub(t *testing.T) {
 	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 1)
 	cleanupPolicyChange(t, fixture)
 	if _, _, err := fixture.service.createAutopilotRunWithQuota(

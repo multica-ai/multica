@@ -94,10 +94,6 @@ type Decision struct {
 	PolicyRevision      int64
 	SubscriptionVersion int64
 	CloudValidUntil     time.Time
-	// ReceivedAt is when this process received the policy the decision was
-	// read from, on its own clock. It is zero for a fail-open decision that
-	// has no policy behind it.
-	ReceivedAt time.Time
 }
 
 // Provider is the only interface the autopilot consumer
@@ -120,13 +116,13 @@ type Refresher interface {
 	RefreshGate(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
 }
 
-// ChangeRefresher re-reads one gate when the cached policy may predate a
-// change Multica recorded itself, such as a paid add-on purchase confirmed on
-// another API instance. It fetches again unless the cached policy was
-// received at or after since, bypassing the short reuse window RefreshGate
-// applies.
-type ChangeRefresher interface {
-	RefreshGateSince(ctx context.Context, workspaceID uuid.UUID, name GateName, since time.Time) Decision
+// FreshRefresher re-reads one gate from Cloud now, skipping the short reuse
+// window RefreshGate applies; concurrent callers for a workspace share one
+// fetch. The autopilot quota calls it right before rejecting a run, so a limit
+// Cloud raised moments ago (a paid add-on confirmed by Stripe's webhook) is
+// never refused on a policy any instance cached before it.
+type FreshRefresher interface {
+	RefreshGateNow(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
 }
 
 // FeatureName is a stable paid-feature key. Unlike a GateName it meters

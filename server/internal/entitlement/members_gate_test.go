@@ -242,7 +242,7 @@ func TestStorageBytesGateFailsOpenAlone(t *testing.T) {
 	}
 }
 
-func TestRefreshGateSinceSkipsTheReuseWindowForAnOlderPolicy(t *testing.T) {
+func TestRefreshGateNowSkipsTheReuseWindow(t *testing.T) {
 	clock := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
 	var calls atomic.Int64
 	var limit atomic.Int64
@@ -261,30 +261,23 @@ func TestRefreshGateSinceSkipsTheReuseWindowForAnOlderPolicy(t *testing.T) {
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
-	first := client.Gate(context.Background(), workspaceID, GateAutopilotRuns)
-	if first.Gate.Limit == nil || *first.Gate.Limit != 10 || !first.ReceivedAt.Equal(clock) {
-		t.Fatalf("first = %+v; want limit 10 received now", first)
+	if first := client.Gate(context.Background(), workspaceID, GateAutopilotRuns); first.Gate.Limit == nil || *first.Gate.Limit != 10 {
+		t.Fatalf("first = %+v; want limit 10", first)
 	}
-	receivedAt := first.ReceivedAt
 
-	// An add-on is bought one second later, inside RefreshGate's reuse window.
+	// Cloud raises the limit one second later (an add-on confirmed by
+	// Stripe's webhook), inside RefreshGate's reuse window.
 	limit.Store(1010)
 	clock = clock.Add(time.Second)
 	if reused := client.RefreshGate(context.Background(), workspaceID, GateAutopilotRuns); *reused.Gate.Limit != 10 || calls.Load() != 1 {
 		t.Fatalf("RefreshGate = %+v, calls = %d; it reuses a policy this young", reused, calls.Load())
 	}
-	// The cached policy predates the change, so RefreshGateSince fetches anyway.
-	changedAt := receivedAt.Add(500 * time.Millisecond)
-	refreshed := client.RefreshGateSince(context.Background(), workspaceID, GateAutopilotRuns, changedAt)
+	refreshed := client.RefreshGateNow(context.Background(), workspaceID, GateAutopilotRuns)
 	if refreshed.Gate.Limit == nil || *refreshed.Gate.Limit != 1010 || refreshed.Reason != ReasonRefreshed || calls.Load() != 2 {
-		t.Fatalf("RefreshGateSince = %+v, calls = %d; want the new limit", refreshed, calls.Load())
+		t.Fatalf("RefreshGateNow = %+v, calls = %d; want the new limit", refreshed, calls.Load())
 	}
-	if !refreshed.ReceivedAt.Equal(clock) {
-		t.Fatalf("refreshed ReceivedAt = %v, want %v", refreshed.ReceivedAt, clock)
-	}
-	// A policy received after the change is current: no second fetch.
-	again := client.RefreshGateSince(context.Background(), workspaceID, GateAutopilotRuns, changedAt)
-	if *again.Gate.Limit != 1010 || again.Reason != ReasonCacheFresh || calls.Load() != 2 {
-		t.Fatalf("again = %+v, calls = %d; a policy newer than the change is reused", again, calls.Load())
+	// The refreshed policy is cached for everyone else.
+	if cached := client.Gate(context.Background(), workspaceID, GateAutopilotRuns); *cached.Gate.Limit != 1010 || calls.Load() != 2 {
+		t.Fatalf("Gate after refresh = %+v, calls = %d", cached, calls.Load())
 	}
 }

@@ -147,17 +147,13 @@ refusals cost at most one Cloud request per workspace per five seconds. A
 failed fetch answers exactly like `Gate`. The Cloud client implements it;
 `entitlementtest.Stub` does too (`SetRefreshed`).
 
-`ChangeRefresher.RefreshGateSince` is the variant for a change Multica
-confirmed itself. When the Billing return page reads a paid autopilot add-on
-Checkout Session through one API instance, that instance sets
-`autopilot_quota_period.limit_raised_at` on the workspace's current period.
-Any instance about to reject an autopilot run already holds that row in the
-admission transaction; when its cached policy (`Decision.ReceivedAt`) is older
-than the mark plus a clock-skew margin, it leaves the transaction, calls
-`RefreshGateSince`, which skips the five-second reuse window, and runs the
-admission once more on the new policy. Without a mark it calls `RefreshGate`
-before rejecting, so an add-on Cloud settled from Stripe's webhook alone is
-seen once the cached policy is a few seconds old.
+`FreshRefresher.RefreshGateNow` fetches without the reuse window; concurrent
+callers for a workspace share one fetch. The autopilot quota calls it right
+before rejecting a run: the admission transaction sees the quota is full on
+the cached policy, leaves the transaction, fetches the current policy and runs
+the admission once more on it. A limit Cloud raised moments ago, such as an
+add-on Stripe's webhook confirmed before the payer returned to the app, admits
+the next run on every instance. Each rejection costs one Cloud request.
 
 ## Member limit
 

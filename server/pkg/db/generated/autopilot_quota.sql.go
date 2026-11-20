@@ -37,7 +37,7 @@ FROM changed
 WHERE p.workspace_id = changed.workspace_id
   AND p.period_start = changed.period_start
   AND p.period_end = changed.period_end
-RETURNING p.workspace_id, p.period_start, p.period_end, p.used_count, p.reserved_count, p.blocked_counts, p.created_at, p.updated_at, p.rejection_notified_at, p.rejection_notified_limit, p.limit_raised_at
+RETURNING p.workspace_id, p.period_start, p.period_end, p.used_count, p.reserved_count, p.blocked_counts, p.created_at, p.updated_at, p.rejection_notified_at, p.rejection_notified_limit
 `
 
 // used_count is monotonic within a period: consuming a reserved slot is the
@@ -56,7 +56,6 @@ func (q *Queries) ConsumeAutopilotQuotaReservation(ctx context.Context, reservat
 		&i.UpdatedAt,
 		&i.RejectionNotifiedAt,
 		&i.RejectionNotifiedLimit,
-		&i.LimitRaisedAt,
 	)
 	return i, err
 }
@@ -111,7 +110,7 @@ INSERT INTO autopilot_quota_period (workspace_id, period_start, period_end)
 VALUES ($1, $2, $3)
 ON CONFLICT (workspace_id, period_start, period_end) DO UPDATE
 SET updated_at = autopilot_quota_period.updated_at
-RETURNING workspace_id, period_start, period_end, used_count, reserved_count, blocked_counts, created_at, updated_at, rejection_notified_at, rejection_notified_limit, limit_raised_at
+RETURNING workspace_id, period_start, period_end, used_count, reserved_count, blocked_counts, created_at, updated_at, rejection_notified_at, rejection_notified_limit
 `
 
 type EnsureAutopilotQuotaPeriodParams struct {
@@ -136,13 +135,12 @@ func (q *Queries) EnsureAutopilotQuotaPeriod(ctx context.Context, arg EnsureAuto
 		&i.UpdatedAt,
 		&i.RejectionNotifiedAt,
 		&i.RejectionNotifiedLimit,
-		&i.LimitRaisedAt,
 	)
 	return i, err
 }
 
 const getAutopilotQuotaPeriod = `-- name: GetAutopilotQuotaPeriod :one
-SELECT workspace_id, period_start, period_end, used_count, reserved_count, blocked_counts, created_at, updated_at, rejection_notified_at, rejection_notified_limit, limit_raised_at FROM autopilot_quota_period
+SELECT workspace_id, period_start, period_end, used_count, reserved_count, blocked_counts, created_at, updated_at, rejection_notified_at, rejection_notified_limit FROM autopilot_quota_period
 WHERE workspace_id = $1 AND period_start = $2 AND period_end = $3
 `
 
@@ -166,7 +164,6 @@ func (q *Queries) GetAutopilotQuotaPeriod(ctx context.Context, arg GetAutopilotQ
 		&i.UpdatedAt,
 		&i.RejectionNotifiedAt,
 		&i.RejectionNotifiedLimit,
-		&i.LimitRaisedAt,
 	)
 	return i, err
 }
@@ -223,7 +220,7 @@ SET blocked_counts = jsonb_set(
 WHERE workspace_id = $2
   AND period_start = $3
   AND period_end = $4
-RETURNING workspace_id, period_start, period_end, used_count, reserved_count, blocked_counts, created_at, updated_at, rejection_notified_at, rejection_notified_limit, limit_raised_at
+RETURNING workspace_id, period_start, period_end, used_count, reserved_count, blocked_counts, created_at, updated_at, rejection_notified_at, rejection_notified_limit
 `
 
 type IncrementAutopilotQuotaBlockedParams struct {
@@ -252,7 +249,6 @@ func (q *Queries) IncrementAutopilotQuotaBlocked(ctx context.Context, arg Increm
 		&i.UpdatedAt,
 		&i.RejectionNotifiedAt,
 		&i.RejectionNotifiedLimit,
-		&i.LimitRaisedAt,
 	)
 	return i, err
 }
@@ -262,7 +258,7 @@ UPDATE autopilot_quota_period
 SET reserved_count = reserved_count + 1,
     updated_at = now()
 WHERE workspace_id = $1 AND period_start = $2 AND period_end = $3
-RETURNING workspace_id, period_start, period_end, used_count, reserved_count, blocked_counts, created_at, updated_at, rejection_notified_at, rejection_notified_limit, limit_raised_at
+RETURNING workspace_id, period_start, period_end, used_count, reserved_count, blocked_counts, created_at, updated_at, rejection_notified_at, rejection_notified_limit
 `
 
 type IncrementAutopilotQuotaReservedParams struct {
@@ -285,7 +281,6 @@ func (q *Queries) IncrementAutopilotQuotaReserved(ctx context.Context, arg Incre
 		&i.UpdatedAt,
 		&i.RejectionNotifiedAt,
 		&i.RejectionNotifiedLimit,
-		&i.LimitRaisedAt,
 	)
 	return i, err
 }
@@ -361,21 +356,6 @@ func (q *Queries) ListRecoverableAutopilotQuotaReservations(ctx context.Context,
 	return items, nil
 }
 
-const markAutopilotQuotaLimitRaised = `-- name: MarkAutopilotQuotaLimitRaised :exec
-UPDATE autopilot_quota_period
-SET limit_raised_at = now(), updated_at = now()
-WHERE workspace_id = $1 AND period_start <= now() AND period_end > now()
-`
-
-// Multica confirmed a paid add-on for the workspace. Marks the period the
-// payment counts in, so an instance about to reject a run there reads the
-// Cloud policy again first. With no period row yet no run was ever metered or
-// rejected there, so there is nothing to mark.
-func (q *Queries) MarkAutopilotQuotaLimitRaised(ctx context.Context, workspaceID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, markAutopilotQuotaLimitRaised, workspaceID)
-	return err
-}
-
 const markAutopilotQuotaRejectionNotified = `-- name: MarkAutopilotQuotaRejectionNotified :one
 UPDATE autopilot_quota_period
 SET rejection_notified_at = now(),
@@ -384,7 +364,7 @@ SET rejection_notified_at = now(),
 WHERE workspace_id = $2
 	AND period_start = $3
 	AND period_end = $4
-RETURNING workspace_id, period_start, period_end, used_count, reserved_count, blocked_counts, created_at, updated_at, rejection_notified_at, rejection_notified_limit, limit_raised_at
+RETURNING workspace_id, period_start, period_end, used_count, reserved_count, blocked_counts, created_at, updated_at, rejection_notified_at, rejection_notified_limit
 `
 
 type MarkAutopilotQuotaRejectionNotifiedParams struct {
@@ -415,7 +395,6 @@ func (q *Queries) MarkAutopilotQuotaRejectionNotified(ctx context.Context, arg M
 		&i.UpdatedAt,
 		&i.RejectionNotifiedAt,
 		&i.RejectionNotifiedLimit,
-		&i.LimitRaisedAt,
 	)
 	return i, err
 }
@@ -445,7 +424,7 @@ FROM changed
 WHERE p.workspace_id = changed.workspace_id
   AND p.period_start = changed.period_start
   AND p.period_end = changed.period_end
-RETURNING p.workspace_id, p.period_start, p.period_end, p.used_count, p.reserved_count, p.blocked_counts, p.created_at, p.updated_at, p.rejection_notified_at, p.rejection_notified_limit, p.limit_raised_at
+RETURNING p.workspace_id, p.period_start, p.period_end, p.used_count, p.reserved_count, p.blocked_counts, p.created_at, p.updated_at, p.rejection_notified_at, p.rejection_notified_limit
 `
 
 // Release is intentionally limited to still-reserved work. A consumed
@@ -464,7 +443,6 @@ func (q *Queries) ReleaseAutopilotQuotaReservation(ctx context.Context, reservat
 		&i.UpdatedAt,
 		&i.RejectionNotifiedAt,
 		&i.RejectionNotifiedLimit,
-		&i.LimitRaisedAt,
 	)
 	return i, err
 }
