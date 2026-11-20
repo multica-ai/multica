@@ -897,8 +897,9 @@ type (
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":            runtimeID,
-		"supports_batch_import": true,
+		"runtime_id":               runtimeID,
+		"supports_batch_import":    true,
+		"supports_deferred_update": true,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -908,6 +909,11 @@ func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*Heartbea
 // ReportUpdateResult sends the CLI update result back to the server.
 func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/update/%s/result", runtimeID, updateID), result, nil)
+}
+
+// ReportUpdateResultInto is ReportUpdateResult that decodes the answer.
+func (c *Client) ReportUpdateResultInto(ctx context.Context, runtimeID, updateID string, result map[string]any, out any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/update/%s/result", runtimeID, updateID), result, out)
 }
 
 // ReportModelListResult sends the model-discovery result back to the server.
