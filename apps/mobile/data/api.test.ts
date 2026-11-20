@@ -26,6 +26,20 @@ describe("api.listAgents", () => {
   });
 });
 
+// The server leaves guests out of the member list unless the caller declares
+// it can render them; useIsGuest reads the caller's own row from that list.
+describe("api.listMembers", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("advertises the guest capability", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => Response.json([]));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.listMembers("ws-1");
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers["X-Client-Capabilities"]).toBe("workspace-guests-v1");
+  });
+});
+
 describe("api.deleteComment", () => {
   const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
 
@@ -52,5 +66,47 @@ describe("api.deleteComment", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(url, expect.objectContaining({ method: "DELETE" }));
+  });
+});
+
+
+describe("api.listIssues requester compatibility", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it.each([false, true])("checks server support before returning Created rows (supported=%s)", async (supported) => {
+    const fetchMock = vi.fn(async (_url: string) => Response.json({ issues: [], total: 0, ...(supported ? { created_by_user_id: "me" } : {}) }));
+    vi.stubGlobal("fetch", fetchMock);
+    await api.listIssues({ created_by_user_id: "me" });
+    expect(fetchMock).toHaveBeenCalledTimes(supported ? 1 : 2);
+    if (!supported) expect(String(fetchMock.mock.calls[1]?.[0])).toContain("creator_id=me");
+  });
+});
+
+describe("api.sendChatMessage steering", () => {
+  const accepted = {
+    message_id: "message-1",
+    task_id: "task-1",
+    created_at: "2026-11-16T00:00:00Z",
+  };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  // The server decides whether a send can join the running reply; the client
+  // only states intent. Default sends ask to steer, the explicit queue does not.
+  it.each([
+    [undefined, true],
+    [{ attachmentIds: ["attachment-1"] }, true],
+    [{ queue: false }, true],
+    [{ queue: true }, false],
+  ])("with %j sends steer=%s", async (opts, steer) => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      Response.json(accepted, { status: 201 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.sendChatMessage("session-1", "use the new path", opts);
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.steer).toBe(steer);
+    expect(body.content).toBe("use the new path");
   });
 });

@@ -54,3 +54,18 @@ export function isAccessChangeReady(
   if (change.permission_mode === "private") return true;
   return change.invocation_targets.length > 0;
 }
+
+/**
+ * Whether the agent is invocable by specific members, the configuration the
+ * `agent_invocation_members` paid feature covers: `public_to` with member or
+ * team targets and no workspace target. Mirrors the server's gate.
+ */
+export function usesInvocationMembers(
+  permissionMode: AgentPermissionMode | undefined | null,
+  invocationTargets: readonly AgentInvocationTarget[] | undefined | null,
+): boolean {
+  return (
+    effectiveAccessScope(permissionMode, invocationTargets) === "specific-people" &&
+    (invocationTargets ?? []).some((t) => t.target_type === "member" || t.target_type === "team")
+  );
+}

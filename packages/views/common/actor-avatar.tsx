@@ -82,7 +82,7 @@ interface ActorAvatarProps {
 const FOCUSABLE_ANCESTOR_SELECTOR =
   'a[href], button:not([disabled]), [role="button"]:not([aria-disabled="true"]), [tabindex]:not([tabindex="-1"])';
 const PROFILE_LINK_CONTROL_SELECTOR =
-  'button, [role^="menuitem"], [role="option"], [data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-slot="popover-trigger"]';
+  'button, [role^="menuitem"], [role="option"], [data-slot="dropdown-menu-item"], [data-slot="dropdown-menu-checkbox-item"], [data-trigger="popover"]';
 
 export function ActorAvatar({
   actorType,

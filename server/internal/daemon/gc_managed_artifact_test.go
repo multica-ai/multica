@@ -161,7 +161,7 @@ func TestGC_IdleChatSkipsChangedCompletion(t *testing.T) {
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "resumed-chat", &meta)
 	writeFile(t, filepath.Join(taskDir, chatCacheFile), 32)
 	ctx := context.Background()
-	action, checked := d.taskDirGCDecision(ctx, taskDir)
+	action, checked, removal := d.taskDirGCDecision(ctx, taskDir)
 	if action != gcActionCleanChatArtifacts {
 		t.Fatalf("expected initial completion to be eligible, got %v", action)
 	}
@@ -170,7 +170,7 @@ func TestGC_IdleChatSkipsChangedCompletion(t *testing.T) {
 	// the completion associated with the chat status request.
 	meta.CompletedAt = meta.CompletedAt.Add(time.Hour)
 	createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "resumed-chat", &meta)
-	d.applyGCActionWithChatMeta(ctx, taskDir, action, &gcStats{}, checked)
+	d.applyGCActionWithChatMeta(ctx, taskDir, action, &gcStats{}, checked, removal)
 	assertKept(t, taskDir, chatCacheFile)
 	assertGone(t, taskDir, chatArtifactSweepFile)
 	d.gcWorkspace(ctx, filepath.Dir(taskDir), &gcStats{})

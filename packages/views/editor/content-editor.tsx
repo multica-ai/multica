@@ -66,11 +66,14 @@ import {
 import { configStore } from "@multica/core/config";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { repairEmptyListItems } from "./utils/repair-list-items";
-import { resolveClickIntent, useAppOrigin } from "../navigation";
+import { resolveClickIntent, useAppOrigin, useOptionalNavigation } from "../navigation";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
+import { BlockHandle } from "./block-handle";
 import { posFromAnchor, type TextAnchor } from "./text-anchor";
+import { insertDictation } from "./utils/insert-dictation";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
+import { useOpenAttachmentLink } from "./use-open-attachment-link";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
@@ -125,6 +128,7 @@ function isInNodeViewChrome(target: HTMLElement): boolean {
 // Types
 
 interface ContentEditorBaseProps {
+  ariaLabel?: string;
   /**
    * `baseMarkdown` is the last authoritative controlled value this editor
    * actually adopted before producing `markdown`. A dirty-editor realtime
@@ -136,6 +140,8 @@ interface ContentEditorBaseProps {
   className?: string;
   debounceMs?: number;
   onSubmit?: () => void;
+  /** Fixed annotation keys: Enter saves, Shift+Enter breaks, Mod+Enter submits. */
+  onEnter?: () => void;
   onBlur?: () => void;
   /**
    * Upload transport. `uploadId` is minted by the editor when it inserts the
@@ -195,18 +201,27 @@ interface ContentEditorBaseProps {
   /** Chat can surface current/recent issue/project suggestions. Other editors use default mention behavior. */
   mentionMode?: "default" | "context";
   mentionContextItems?: MentionItem[];
+  /** Leave guests out of the @ list, for places guests cannot open (docs). */
+  mentionHideGuests?: boolean;
   /** Enable the `/` command picker. Defaults false. */
   enableSlashCommands?: boolean;
   /**
    * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
-   * lists the active agent's skills (chat); "command" shows the fixed built-in
-   * command menu (issue comments), e.g. /note.
+   * lists the active agent's skills (chat); "command" merges Issue quick
+   * actions, skills matching a nonempty query, and built-ins such as /note;
+   * "blocks" inserts document blocks (Docs).
    */
-  slashCommandMode?: "skill" | "command";
+  slashCommandMode?: "skill" | "command" | "blocks";
   /**
-   * Quick actions to offer in the "command" `/` menu, plus the resolver that
-   * turns a pick into the text it would post (MUL-5465). Read through
-   * functions so a newly created action appears without remounting the editor.
+   * Show a hover handle beside each block: "+" opens the block menu on a new
+   * line below, and the grip drags the block or opens turn-into, duplicate and
+   * delete. For long-form documents; pair it with `slashCommandMode="blocks"`.
+   */
+  showBlockHandles?: boolean;
+  /**
+   * Quick actions and Issue target-agent skills for the "command" `/` menu,
+   * plus the resolver that turns a quick-action pick into draft text. Read
+   * through functions so cached updates appear without remounting the editor.
    */
   quickActionMenu?: BuiltinCommandSuggestionOptions;
   /**
@@ -301,6 +316,15 @@ interface ContentEditorRef {
    */
   insertMarkdownAtEnd: (markdown: string) => boolean;
   /**
+   * Insert plain text where the user would type next — the caret, or the end
+   * of the document when the editor has not been focused since it mounted —
+   * with a space before it when two words of a spaced language would touch.
+   * Fires the normal `onUpdate` pipeline. For voice input, whose text arrives
+   * after focus has moved to the mic button. Returns false while the Tiptap
+   * instance is not up.
+   */
+  insertText: (text: string) => boolean;
+  /**
    * Draw a placeholder for an upload this document is not showing yet, and
    * report whether it landed.
    *
@@ -363,12 +387,14 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
   function ContentEditor(
     {
       defaultValue,
+      ariaLabel,
       value,
       onUpdate,
       placeholder: placeholderText = "",
       className,
       debounceMs = 300,
       onSubmit,
+      onEnter,
       onBlur,
       onUploadFile,
       pasteAsFileThreshold,
@@ -379,8 +405,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       disableMentions = false,
       mentionMode = "default",
       mentionContextItems,
+      mentionHideGuests = false,
       enableSlashCommands = false,
       slashCommandMode = "skill",
+      showBlockHandles = false,
       quickActionMenu,
       attachments,
       flushPendingOnUnmount = false,
@@ -397,6 +425,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const pendingBaseRef = useRef<string | null>(null);
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
+    const onEnterRef = useRef(onEnter);
     const onBlurRef = useRef(onBlur);
     const onReadyRef = useRef(onReady);
     const onUploadingChangeRef = useRef(onUploadingChange);
@@ -504,9 +533,22 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const appOriginRef = useRef(appOrigin);
     appOriginRef.current = appOrigin;
 
+    // A link to one of this deployment's attachments opens in the viewer
+    // rather than as a raw storage URL in the browser. This component renders
+    // the AttachmentDownloadProvider itself, so its records are passed in.
+    const attachmentLink = useOpenAttachmentLink(providerAttachments);
+    const openAttachmentLinkRef = useRef(attachmentLink.open);
+    openAttachmentLinkRef.current = attachmentLink.open;
+    // `openInNewTab` present means Desktop, which has no browser tab to give a
+    // modified or middle click; on web those still open the link in one.
+    const desktopTabs = !!useOptionalNavigation()?.openInNewTab;
+    const desktopTabsRef = useRef(desktopTabs);
+    desktopTabsRef.current = desktopTabs;
+
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
+    onEnterRef.current = onEnter;
     onBlurRef.current = onBlur;
     onReadyRef.current = onReady;
     onUploadingChangeRef.current = onUploadingChange;
@@ -562,6 +604,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // auto-focusing a brand-new conversation) would hit a null editor and no-op.
     // Latch the intent here and honor it in `onCreate` once the editor exists.
     const focusOnReadyRef = useRef(false);
+    // Whether the user has placed a caret in this instance; until then the
+    // selection is the parser's default at the start of the document.
+    const caretPlacedRef = useRef(false);
     // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
@@ -609,15 +654,18 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         placeholder: () => placeholderRef.current,
         queryClient,
         onSubmitRef,
+        onEnterRef,
         onUploadFileRef,
         pasteAsFileThresholdRef,
         disableMentions,
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
+        mentionHideGuests,
         enableSlashCommands,
         slashCommandMode,
         quickActionMenu: {
           getQuickActions: () => quickActionMenuRef.current?.getQuickActions?.() ?? [],
+          getSkills: (editor) => quickActionMenuRef.current?.getSkills?.(editor) ?? [],
           subscribeQuickActions: (refresh) => {
             quickActionMenuListeners.current.add(refresh);
             return () => { quickActionMenuListeners.current.delete(refresh); };
@@ -645,6 +693,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           onUpdateRef.current?.(md, base);
         }, debounceMs);
       },
+      onFocus: () => {
+        caretPlacedRef.current = true;
+      },
       onBlur: () => {
         onBlurRef.current?.();
       },
@@ -660,6 +711,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             if (!href || isMentionHref(href)) return false;
 
             event.preventDefault();
+            const modified = event.metaKey || event.ctrlKey || event.shiftKey;
+            if (
+              (desktopTabsRef.current || !modified) &&
+              openAttachmentLinkRef.current(href)
+            ) {
+              return true;
+            }
             openLink(
               href,
               workspaceSlugRef.current,
@@ -678,6 +736,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             const href = target.closest("a")?.getAttribute("href");
             if (!href || isMentionHref(href)) return false;
             event.preventDefault();
+            if (desktopTabsRef.current && openAttachmentLinkRef.current(href)) return true;
             openLink(
               href,
               workspaceSlugRef.current,
@@ -689,6 +748,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         },
         attributes: {
           class: cn("flex-1 rich-text-editor text-body outline-none", className),
+          "data-mc": "content",
+          ...(ariaLabel ? { role: "textbox", "aria-label": ariaLabel, "aria-multiline": "true" } : {}),
         },
       },
     });
@@ -972,6 +1033,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         });
         return true;
       },
+      insertText: (text: string) => {
+        if (!editor || editor.isDestroyed) return false;
+        insertDictation(editor, text, caretPlacedRef.current);
+        return true;
+      },
       flushPendingUpdate: () => {
         // No armed timer = nothing typed since the last emit. The editor is
         // already clean, so the host has nothing to re-route.
@@ -1003,6 +1069,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       if (!editor) return;
 
       const target = event.target as HTMLElement;
+      // React events bubble through portals: a press inside an overlay (the
+      // attachment viewer) is not a press on the editor's empty area.
+      if (!event.currentTarget.contains(target)) return;
       if (target.closest(".ProseMirror")) return;
       if (target.closest("a, button, input, textarea, [role='button'], [data-node-view-wrapper]")) return;
 
@@ -1016,14 +1085,18 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       <AttachmentDownloadProvider attachments={providerAttachments}>
         <div
           ref={wrapperRef}
-          className="relative flex flex-1 min-h-full flex-col"
+          className="relative flex min-w-0 flex-1 min-h-full flex-col"
           onMouseDown={handleContainerMouseDown}
         >
           <EditorContent className="flex flex-1 flex-col" editor={editor} />
+          {showBlockHandles && editor && (
+            <BlockHandle editor={editor} containerRef={wrapperRef} />
+          )}
           {showBubbleMenu && (
             <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} selectionAction={selectionAction} />
           )}
           <LinkHoverCard {...hover} />
+          {attachmentLink.modal}
         </div>
       </AttachmentDownloadProvider>
     );

@@ -8,6 +8,7 @@ import { renderWithI18n } from "../../test/i18n";
 
 const update = vi.fn();
 const runNow = vi.fn();
+const cancelTaskById = vi.fn();
 let detail: { autopilot: Autopilot; triggers: AutopilotTrigger[]; collaborators: [] };
 let runs: AutopilotRun[];
 
@@ -23,7 +24,14 @@ vi.mock("@multica/core/paths", () => ({
 }));
 vi.mock("@multica/core/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/api")>();
-  return { ...actual, api: { ...actual.api, getBaseUrl: () => "https://api.test" } };
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      getBaseUrl: () => "https://api.test",
+      cancelTaskById: (...args: unknown[]) => cancelTaskById(...args),
+    },
+  };
 });
 vi.mock("@multica/core/autopilots/queries", () => ({
   autopilotDetailOptions: () => ({ queryKey: ["autopilot"], queryFn: async () => detail }),
@@ -147,6 +155,7 @@ function mount() {
 beforeEach(() => {
   update.mockReset();
   runNow.mockReset();
+  cancelTaskById.mockReset();
   detail = { autopilot: makeAutopilot(), triggers: [scheduleTrigger], collaborators: [] };
   runs = [
     run({ id: "r1", issue_id: "issue-24" }),
@@ -222,6 +231,33 @@ describe("AutopilotDetailPage", () => {
     expect(await within(history).findByText("2")).toBeVisible();
     expect(within(history).getByRole("link", { name: /Issue linked/ })).toHaveAttribute("href", "/ws/issues/issue-24");
     expect(within(history).getByText("Runtime is offline")).toHaveClass("text-destructive");
+  });
+
+  it("stops a running run-only run from its history row", async () => {
+    const user = userEvent.setup();
+    detail.autopilot = makeAutopilot({ execution_mode: "run_only" });
+    runs = [
+      run({ id: "r1", status: "running", task_id: "task-1" }),
+      run({ id: "r2", status: "completed", task_id: "task-2" }),
+    ];
+    cancelTaskById.mockResolvedValue({});
+    mount();
+    const history = (await screen.findByRole("heading", { name: "Run history", level: 2 })).closest("section")!;
+
+    const stop = await within(history).findByRole("button", { name: "Stop run" });
+    expect(within(history).getAllByRole("button", { name: "Stop run" })).toHaveLength(1);
+    await user.click(stop);
+    expect(cancelTaskById).toHaveBeenCalledWith("task-1");
+  });
+
+  it("keeps the stop button off a reader's run history", async () => {
+    detail.autopilot = makeAutopilot({ execution_mode: "run_only", can_write: false } as Partial<Autopilot>);
+    runs = [run({ id: "r1", status: "running", task_id: "task-1" })];
+    mount();
+    const history = (await screen.findByRole("heading", { name: "Run history", level: 2 })).closest("section")!;
+
+    await within(history).findByText("1");
+    expect(within(history).queryByRole("button", { name: "Stop run" })).toBeNull();
   });
 
   it("shows a reader the page without write controls", async () => {

@@ -123,9 +123,7 @@ func writeFakeDimScript(t *testing.T, requestsFile string) string {
 	t.Helper()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "dim")
-	if err := os.WriteFile(bin, []byte(fakeDimACPScript()), 0o755); err != nil {
-		t.Fatalf("write fake dim: %v", err)
-	}
+	writeTestExecutable(t, bin, []byte(fakeDimACPScript()))
 	return bin
 }
 

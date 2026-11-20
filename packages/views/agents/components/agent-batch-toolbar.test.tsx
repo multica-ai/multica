@@ -6,24 +6,41 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
+import enBilling from "../../locales/en/billing.json";
+import { ApiError } from "@multica/core/api";
+import type { MemberWithUser, WorkspaceFeatures } from "@multica/core/types";
+import { toast } from "sonner";
 
-const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
+const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents, billing: enBilling } };
 
 const updateAgentSpy = vi.hoisted(() =>
   vi.fn(async (_id: string, _patch: Record<string, unknown>) => ({})),
 );
 const archiveSpy = vi.hoisted(() => vi.fn(async () => ({})));
 const restoreSpy = vi.hoisted(() => vi.fn(async () => ({})));
+const featuresSpy = vi.hoisted(() =>
+  vi.fn(async (): Promise<WorkspaceFeatures> => ({ features: {} })),
+);
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
-vi.mock("@multica/core/api", () => ({
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
   api: {
     updateAgent: updateAgentSpy,
     archiveAgent: archiveSpy,
     restoreAgent: restoreSpy,
+    getWorkspaceFeatures: featuresSpy,
   },
+}));
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  useWorkspacePaths: () => ({ settings: () => "/acme/settings" }),
+}));
+vi.mock("../../navigation", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  AppLink: ({ href, children }: { href: string; children: React.ReactNode }) => <a href={href}>{children}</a>,
 }));
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => <div>avatar</div>,
@@ -88,14 +105,14 @@ function makeRow(
   };
 }
 
-function renderToolbar(rows: AgentListRow[]) {
+function renderToolbar(rows: AgentListRow[], members: MemberWithUser[] = []) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const ui = (nextRows: AgentListRow[]) => (
     <QueryClientProvider client={qc}>
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
         <AgentBatchToolbar
           rows={nextRows}
-          members={[]}
+          members={members}
           currentUserId="user-1"
           onClear={() => {}}
         />
@@ -109,9 +126,25 @@ function renderToolbar(rows: AgentListRow[]) {
   };
 }
 
+const MEMBERS = [
+  { user_id: "u-a", name: "Alice", role: "member" },
+  { user_id: "u-b", name: "Bob", role: "member" },
+  { user_id: "u-c", name: "Carol", role: "member" },
+] as unknown as MemberWithUser[];
+
+function specificPeople(...ids: string[]) {
+  return {
+    permission_mode: "public_to" as const,
+    invocation_targets: ids.map((id) => ({ target_type: "member", target_id: id })),
+  };
+}
+
 beforeEach(() => {
   updateAgentSpy.mockClear();
   updateAgentSpy.mockResolvedValue({});
+  featuresSpy.mockReset();
+  featuresSpy.mockResolvedValue({ features: {} });
+  vi.mocked(toast.error).mockClear();
 });
 
 describe("AgentBatchToolbar — action order", () => {
@@ -267,5 +300,97 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
       screen.getByRole("radio", { name: /Entire workspace/ }),
     ).not.toBeChecked();
     expect(updateAgentSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("AgentBatchToolbar — plan without member access (MUL-9491)", () => {
+  it("offers Specific people when the plan includes it", async () => {
+    featuresSpy.mockResolvedValue({ features: { agent_invocation_members: "available" } });
+    renderToolbar([makeRow("a", "user-1")]);
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await waitFor(() => expect(screen.getByRole("radio", { name: /^Specific people/ })).toBeEnabled());
+    expect(screen.queryByText("View plans")).not.toBeInTheDocument();
+  });
+
+  it("disables Specific people in bulk when a selected agent has no member list", async () => {
+    featuresSpy.mockResolvedValue({ features: { agent_invocation_members: "locked" } });
+    renderToolbar(
+      [
+        makeRow("a", "user-1", specificPeople("u-a", "u-b")),
+        makeRow("b", "user-1", { permission_mode: "public_to", invocation_targets: [{ target_type: "workspace", target_id: null }] }),
+      ],
+      MEMBERS,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    expect(await screen.findByText("Not included in this workspace's plan.")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^Specific people/ })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: /^Entire workspace/ })).toBeEnabled();
+    expect(screen.getByRole("button", { name: enBilling.paid_feature.badge_label })).toBeInTheDocument();
+  });
+
+  it("lets a locked plan bulk-reduce agents that share the same people", async () => {
+    featuresSpy.mockResolvedValue({ features: { agent_invocation_members: "locked" } });
+    renderToolbar(
+      [makeRow("a", "user-1", specificPeople("u-a", "u-b")), makeRow("b", "user-1", specificPeople("u-a", "u-b"))],
+      MEMBERS,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await screen.findByText("Read-only. Upgrade to edit.");
+    const members = screen.getByRole("radio", { name: /^Specific people/ });
+    expect(members).toBeEnabled();
+    fireEvent.click(members);
+    expect(screen.getByRole("checkbox", { name: /Bob/ })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Carol/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /Alice/ }));
+    const apply = screen.getByRole("button", { name: "Apply" });
+    await waitFor(() => expect(apply).toBeEnabled());
+    fireEvent.click(apply);
+
+    await waitFor(() => expect(updateAgentSpy).toHaveBeenCalledTimes(2));
+    for (const id of ["a", "b"]) {
+      expect(updateAgentSpy).toHaveBeenCalledWith(id, {
+        permission_mode: "public_to",
+        invocation_targets: [{ target_type: "member", target_id: "u-a" }],
+      });
+    }
+  });
+
+  it("offers only the people every selected agent already has", async () => {
+    featuresSpy.mockResolvedValue({ features: { agent_invocation_members: "locked" } });
+    renderToolbar(
+      [makeRow("a", "user-1", specificPeople("u-a", "u-b")), makeRow("b", "user-1", specificPeople("u-a"))],
+      MEMBERS,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await screen.findByText("Read-only. Upgrade to edit.");
+    const members = screen.getByRole("radio", { name: /^Specific people/ });
+    expect(members).toBeEnabled();
+    fireEvent.click(members);
+    expect(screen.getByRole("checkbox", { name: /Alice/ })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Bob/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: /Carol/ })).not.toBeInTheDocument();
+  });
+
+  it("explains a feature_locked refusal and refetches the plan", async () => {
+    featuresSpy.mockResolvedValue({ features: { agent_invocation_members: "available" } });
+    updateAgentSpy.mockImplementation(async (id: string) => {
+      if (id === "b") {
+        throw new ApiError("locked", 403, "Forbidden", { code: "feature_locked", feature: "agent_invocation_members" });
+      }
+      return {};
+    });
+    renderToolbar([makeRow("a", "user-1"), makeRow("b", "user-1")]);
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await waitFor(() => expect(featuresSpy).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("radio", { name: /Entire workspace/ }));
+    const apply = screen.getByRole("button", { name: "Apply" });
+    await waitFor(() => expect(apply).toBeEnabled());
+    fireEvent.click(apply);
+
+    await waitFor(() => expect(updateAgentSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(enBilling.paid_feature.locked_error),
+    );
+    await waitFor(() => expect(featuresSpy).toHaveBeenCalledTimes(2));
   });
 });

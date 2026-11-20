@@ -28,6 +28,8 @@ La création d'un espace de travail demande trois informations :
 
 Le créateur devient automatiquement `owner`.
 
+Pendant l’essai Business d’un espace de travail Multica Cloud, la barre d’état affiche le nombre de jours restants. Cliquez dessus pour voir la date de fin et les fonctionnalités incluses dans **Facturation**. L’essai ne demande aucune carte bancaire. Sans souscription à une offre payante, l’espace de travail passe à Free à la fin de l’essai.
+
 ## Modifier les paramètres
 
 `owner` et `admin` peuvent modifier le nom, le logo, la description, le contexte et le préfixe des tâches ; `member` peut seulement les consulter.
@@ -48,7 +50,7 @@ Le dernier `owner` ne peut pas quitter l'espace de travail ; promouvez d'abord u
 
 ## Supprimer un espace de travail
 
-Seul un `owner` peut supprimer un espace de travail. La suppression retire définitivement tout son travail, ses membres, la configuration de ses agents et l'historique de ses exécutions, et elle est irréversible. Si vous vous absentez seulement pour un temps, il suffit de quitter l'espace de travail.
+Seul un `owner` peut supprimer un espace de travail. Le propriétaire doit le faire lui-même. L’API refuse les demandes de suppression faites avec un jeton de tâche ou un PAT de nœud cloud. La suppression retire définitivement tout son travail, ses membres, la configuration de ses agents et l'historique de ses exécutions, et elle est irréversible. Si vous vous absentez seulement pour un temps, il suffit de quitter l'espace de travail.
 
 ## Étapes suivantes
 

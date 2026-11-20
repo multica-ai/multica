@@ -6,11 +6,12 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "@multica/views/locales/en/common.json";
 import enAuth from "@multica/views/locales/en/auth.json";
 import enSettings from "@multica/views/locales/en/settings.json";
+import enInvite from "@multica/views/locales/en/invite.json";
 import { ApiError } from "@multica/core/api";
 import type { ReactNode } from "react";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, auth: enAuth, settings: enSettings },
+  en: { common: enCommon, auth: enAuth, settings: enSettings, invite: enInvite },
 };
 
 function createWrapper() {
@@ -244,5 +245,50 @@ describe("JoinPage", () => {
       await screen.findByRole("button", { name: "Join Workspace" }),
     );
     await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
+  });
+
+  it("replaces the join action with the full state when the member limit refuses", async () => {
+    const user = userEvent.setup();
+    authStateRef.state.user = { id: "u1", email: "a@b.com" };
+    mockJoinByShareLink.mockRejectedValue(
+      new ApiError("server fallback", 403, "Forbidden", { code: "member_limit_reached" }),
+    );
+
+    render(<JoinPage />, { wrapper: createWrapper() });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Join Workspace" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Acme is full" })).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText("Contact the person who invited you. This link works again once the workspace upgrades."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Join Workspace" })).not.toBeInTheDocument();
+
+    // A slot frees up (an invitation revoked): the same page joins on retry.
+    mockJoinByShareLink.mockResolvedValue({ workspace_id: "ws-1", workspace_slug: "acme" });
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(screen.getByText("Joined!")).toBeInTheDocument());
+    expect(mockJoinByShareLink).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a retry's own failure instead of the earlier full state", async () => {
+    const user = userEvent.setup();
+    authStateRef.state.user = { id: "u1", email: "a@b.com" };
+    mockJoinByShareLink.mockRejectedValueOnce(
+      new ApiError("server fallback", 403, "Forbidden", { code: "member_limit_reached" }),
+    );
+    render(<JoinPage />, { wrapper: createWrapper() });
+    await user.click(await screen.findByRole("button", { name: "Join Workspace" }));
+    await screen.findByRole("heading", { name: "Acme is full" });
+
+    // The link was revoked in the meantime.
+    mockJoinByShareLink.mockRejectedValueOnce(new Error("share link not found or expired"));
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(screen.getByText("share link not found or expired")).toBeInTheDocument());
+    expect(screen.queryByRole("heading", { name: "Acme is full" })).not.toBeInTheDocument();
   });
 });

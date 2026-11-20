@@ -174,6 +174,12 @@ func TestSidebarProjectsPreferenceIsItsOwnDocument(t *testing.T) {
 	})
 	// The starred-views list writes its own document wholesale.
 	put("sidebar", map[string]any{"hidden": []string{}, "order": []string{"builtin:my_issues"}})
+	// So does the All Projects page.
+	put("projects_page", map[string]any{"layout": "board", "groupBy": "lead"})
+	if page, pageDoc := get("projects_page", testUserID); pageDoc["layout"] != "board" ||
+		page.ScopeID == nil || *page.ScopeID != testUserID {
+		t.Fatalf("projects_page must round-trip keyed by the user, got %s (scope %v)", page.Prefs, page.ScopeID)
+	}
 
 	got, doc := get("sidebar_projects", testUserID)
 	if order, _ := doc["order"].([]any); len(order) != 2 || order[0] != "p2" {
@@ -189,5 +195,8 @@ func TestSidebarProjectsPreferenceIsItsOwnDocument(t *testing.T) {
 	otherID := createSecondWorkspaceMember(t)
 	if got, _ := get("sidebar_projects", otherID); string(got.Prefs) != "{}" {
 		t.Fatalf("another member must not inherit my project settings, got %s", got.Prefs)
+	}
+	if got, _ := get("projects_page", otherID); string(got.Prefs) != "{}" {
+		t.Fatalf("another member must not inherit my projects page settings, got %s", got.Prefs)
 	}
 }

@@ -33,6 +33,7 @@ export function UpdateNotification() {
         type="button"
         onClick={() => setDismissed(true)}
         className="absolute top-2 right-2 rounded-md p-1 text-muted-foreground hover:text-foreground transition-colors"
+        aria-label="Dismiss"
       >
         <X className="size-3.5" />
       </button>

@@ -8,12 +8,15 @@ import { CSS } from "@dnd-kit/utilities";
 import type { Issue, IssueProperty, Project, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useModalStore } from "@multica/core/modals";
 import { propertyListOptions } from "@multica/core/properties";
 import { CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { descriptionPreview } from "./description-preview";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { CalendarClock, CalendarDays } from "@multica/ui/icons";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { CardControl } from "../../common/card-control";
 import { PropertyIcon } from "../../common/property-icon";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -26,10 +29,12 @@ import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { ProgressRing } from "./progress-ring";
 import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
+import { runConfirmIntent } from "../actions/run-confirm-gate";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
 import { IssueDuplicateOfMarker } from "./issue-duplicates";
+import { IssuePullRequestChips, useIssuePullRequestSummaries } from "./pull-request-chips";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import {
   PEEK_TARGET_ATTR,
@@ -39,19 +44,6 @@ import {
 } from "../surface/peek-context";
 function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
-}
-
-/** Stops event from bubbling to Link/drag handlers */
-function PickerWrapper({ children, className }: { children: React.ReactNode; className?: string }) {
-  const stop = (e: React.SyntheticEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-  };
-  return (
-    <div onClick={stop} onMouseDown={stop} onPointerDown={stop} className={className}>
-      {children}
-    </div>
-  );
 }
 
 export const BoardCardContent = memo(function BoardCardContent({
@@ -93,13 +85,22 @@ export const BoardCardContent = memo(function BoardCardContent({
   const labels = issue.labels ?? [];
 
   const surfaceActions = useIssueSurfaceActionsOptional();
+  const { entryOf } = useIssueStatuses(cardWsId);
+  const openModal = useModalStore((s) => s.open);
+  // Card pickers are single-issue writes like the right-click menu on this same
+  // card, so handing the issue to an agent confirms first (MUL-6463).
   const handleUpdate = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
+      const intent = runConfirmIntent(issue, updates, { entryOf });
+      if (intent) {
+        openModal("issue-run-confirm", intent);
+        return;
+      }
       surfaceActions?.updateIssue(issue.id, updates, {
         errorMessage: t(($) => $.card.update_failed),
       });
     },
-    [issue.id, surfaceActions, t],
+    [issue, entryOf, openModal, surfaceActions, t],
   );
   const canEdit = editable && !!surfaceActions;
 
@@ -114,6 +115,8 @@ export const BoardCardContent = memo(function BoardCardContent({
     storeProperties.project && cardGrouping !== "project" && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
+  const pullRequests = useIssuePullRequestSummaries(issue.id, storeProperties.pullRequests);
+  const showPullRequests = storeProperties.pullRequests && pullRequests.length > 0;
   // Keeps the chip row from rendering an empty flex container when the status
   // chip is the only thing in it and it decides to render nothing.
   const showCustomStatus = useIsCustomStatus(issue.status);
@@ -129,7 +132,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const priorityLabel = t(($) => $.priority[issue.priority]);
   const priorityIconNode = showPriority ? (
     canEdit ? (
-      <PickerWrapper className="flex">
+      <CardControl className="flex">
         <PriorityPicker
           priority={issue.priority}
           onUpdate={handleUpdate}
@@ -144,7 +147,7 @@ export const BoardCardContent = memo(function BoardCardContent({
             </button>
           }
         />
-      </PickerWrapper>
+      </CardControl>
     ) : (
       <span
         aria-label={priorityLabel}
@@ -181,14 +184,14 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   const assigneeNode = showAssigneeSection ? (
     canEdit ? (
-      <PickerWrapper className={assigneeContainerClass}>
+      <CardControl className={assigneeContainerClass}>
         <AssigneePicker
           assigneeType={issue.assignee_type}
           assigneeId={issue.assignee_id}
           onUpdate={handleUpdate}
           trigger={assigneeInner}
         />
-      </PickerWrapper>
+      </CardControl>
     ) : (
       <span className={assigneeContainerClass}>{assigneeInner}</span>
     )
@@ -198,7 +201,12 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showRightMeta = !!showStartDate || !!showDueDate || !!showChildProgress || showUpdatedHint;
 
   return (
-    <div className="rounded-lg border-[0.5px] border-surface-border bg-surface py-3 px-2.5 shadow-[var(--surface-shadow)] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-surface-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-surface-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50">
+    <div
+      data-mc="board-card"
+      data-status={issue.status}
+      data-priority={issue.priority}
+      data-assignee-type={issue.assignee_type ?? "none"}
+      className="rounded-board-card border-[0.5px] border-board-card-border bg-board-card py-[var(--board-card-padding-y,var(--space-sm,0.75rem))] px-[var(--board-card-padding-x,0.625rem)] shadow-[var(--board-card-shadow,var(--surface-shadow))] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-board-card-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-board-card-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50">
       {/* Row 1: priority + identifier (left), agent activity + assignee (right) */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -224,10 +232,10 @@ export const BoardCardContent = memo(function BoardCardContent({
         );
       })()}
 
-      {/* Chip row: status + project + labels + custom property values.
+      {/* Chip row: status + project + labels + PRs + custom property values.
           The status chip renders only for a CUSTOM status — the column header
           already names the category. (MUL-6243) */}
-      {(showCustomStatus || showProject || showLabels || cardCustomProperties.length > 0) && (
+      {(showCustomStatus || showProject || showLabels || showPullRequests || cardCustomProperties.length > 0) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           <CustomStatusChip status={issue.status} />
           {showProject && (
@@ -243,6 +251,9 @@ export const BoardCardContent = memo(function BoardCardContent({
             <span className="text-micro text-muted-foreground">
               +{labels.length - 2}
             </span>
+          )}
+          {showPullRequests && (
+            <IssuePullRequestChips pullRequests={pullRequests} max={2} insideLink />
           )}
           {cardCustomProperties.map((property) => (
             <span
@@ -268,7 +279,7 @@ export const BoardCardContent = memo(function BoardCardContent({
             <div className="ml-auto flex shrink-0 items-center gap-2">
               {showStartDate && (
                 canEdit ? (
-                  <PickerWrapper className="flex shrink-0">
+                  <CardControl className="flex shrink-0">
                     <StartDatePicker
                       startDate={issue.start_date}
                       onUpdate={handleUpdate}
@@ -280,7 +291,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                         </span>
                       }
                     />
-                  </PickerWrapper>
+                  </CardControl>
                 ) : (
                   <span className="flex shrink-0 items-center gap-1 text-caption text-muted-foreground">
                     <CalendarClock className="size-3" />
@@ -290,7 +301,7 @@ export const BoardCardContent = memo(function BoardCardContent({
               )}
               {showDueDate && (
                 canEdit ? (
-                  <PickerWrapper className="flex shrink-0">
+                  <CardControl className="flex shrink-0">
                     <DueDatePicker
                       dueDate={issue.due_date}
                       onUpdate={handleUpdate}
@@ -308,7 +319,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                         </span>
                       }
                     />
-                  </PickerWrapper>
+                  </CardControl>
                 ) : (
                   <span
                     className={`flex shrink-0 items-center gap-1 text-caption ${

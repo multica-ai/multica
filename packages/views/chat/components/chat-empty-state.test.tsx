@@ -32,7 +32,7 @@ const adapter = (): NavigationAdapter => ({
   getShareableUrl: (path: string) => `https://app.test${path}`,
 });
 
-function renderEmptyState(value: Agent, customizeHref: string | null = null) {
+function renderEmptyState(value: Agent) {
   const onPickPrompt = vi.fn();
   render(
     <I18nProvider locale="en" resources={{ en: { chat: enChat } }}>
@@ -41,7 +41,6 @@ function renderEmptyState(value: Agent, customizeHref: string | null = null) {
           agent={value}
           hasSessions={false}
           onPickPrompt={onPickPrompt}
-          customizeHref={customizeHref}
         />
       </NavigationProvider>
     </I18nProvider>,
@@ -82,30 +81,5 @@ describe("chat empty-state conversation starters", () => {
     expect(onPickPrompt).toHaveBeenCalledWith(
       "Suggest three useful issues I could assign to you.",
     );
-  });
-});
-
-// Who may see "customize" is decided by the container (chat-window reads the
-// agent permission and the backend capability); this suite only proves the
-// empty state renders the affordance exactly when it is handed a target.
-describe("chat empty-state customize affordance", () => {
-  afterEach(cleanup);
-
-  const href = "/acme/agents/agent-1?view=general&focus=conversation_starters";
-
-  it("links a viewer who may edit the agent to its conversation starters", () => {
-    renderEmptyState(agent(), href);
-
-    expect(
-      screen.getByRole("link", { name: "Customize starters" }),
-    ).toHaveAttribute("href", href);
-  });
-
-  it("stays out of the DOM for a viewer who may not edit the agent", () => {
-    renderEmptyState(agent());
-
-    expect(
-      screen.queryByRole("link", { name: "Customize starters" }),
-    ).toBeNull();
   });
 });

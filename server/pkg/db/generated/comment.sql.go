@@ -886,6 +886,54 @@ func (q *Queries) ListCommentAncestorPath(ctx context.Context, arg ListCommentAn
 	return items, nil
 }
 
+const listCommentOriginsForIssue = `-- name: ListCommentOriginsForIssue :many
+SELECT id, author_type, author_id, created_at FROM comment
+WHERE id = ANY($1::uuid[])
+  AND issue_id = $2
+  AND workspace_id = $3
+  AND deleted_at IS NULL
+`
+
+type ListCommentOriginsForIssueParams struct {
+	Ids         []pgtype.UUID `json:"ids"`
+	IssueID     pgtype.UUID   `json:"issue_id"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+}
+
+type ListCommentOriginsForIssueRow struct {
+	ID         pgtype.UUID        `json:"id"`
+	AuthorType string             `json:"author_type"`
+	AuthorID   pgtype.UUID        `json:"author_id"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+// Author and time of the live comments in @ids, without their bodies: the
+// issue attachment list labels each file with the comment that delivered it.
+func (q *Queries) ListCommentOriginsForIssue(ctx context.Context, arg ListCommentOriginsForIssueParams) ([]ListCommentOriginsForIssueRow, error) {
+	rows, err := q.db.Query(ctx, listCommentOriginsForIssue, arg.Ids, arg.IssueID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCommentOriginsForIssueRow{}
+	for rows.Next() {
+		var i ListCommentOriginsForIssueRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCommentThreadHistory = `-- name: ListCommentThreadHistory :many
 WITH RECURSIVE thread_history AS (
   SELECT root.id, root.issue_id, root.author_type, root.author_id, root.content, root.type, root.created_at, root.updated_at, root.parent_id, root.workspace_id, root.resolved_at, root.resolved_by_type, root.resolved_by_id, root.source_task_id, root.quick_action_id, root.via_plugin_id, root.revision, root.recovery_settled_at, root.deleted_at, root.suppressed_agent_ids
@@ -1921,6 +1969,62 @@ func (q *Queries) ListThreadCommentsForIssuePaged(ctx context.Context, arg ListT
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listThreadMemberAuthors = `-- name: ListThreadMemberAuthors :many
+WITH RECURSIVE root_of AS (
+    SELECT c.id, c.parent_id
+    FROM comment c
+    WHERE c.id = $1 AND c.workspace_id = $2
+    UNION ALL
+    SELECT p.id, p.parent_id
+    FROM comment p
+    JOIN root_of r ON p.id = r.parent_id
+),
+thread AS (
+    SELECT c.id
+    FROM comment c
+    WHERE c.id = (SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1)
+    UNION ALL
+    SELECT c.id
+    FROM comment c
+    JOIN thread t ON c.parent_id = t.id
+)
+SELECT DISTINCT c.author_id
+FROM comment c
+JOIN thread t ON t.id = c.id
+WHERE c.id <> $1
+  AND c.author_type = 'member'
+  AND c.deleted_at IS NULL
+`
+
+type ListThreadMemberAuthorsParams struct {
+	CommentID   pgtype.UUID `json:"comment_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// The members who wrote any other comment in the thread @comment_id belongs
+// to: its root and every reply under that root, at any depth. Used by the
+// bystander delivery tier, so a reply in a thread you took part in still
+// reaches you on an issue you are only watching (MUL-9343).
+func (q *Queries) ListThreadMemberAuthors(ctx context.Context, arg ListThreadMemberAuthorsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listThreadMemberAuthors, arg.CommentID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var author_id pgtype.UUID
+		if err := rows.Scan(&author_id); err != nil {
+			return nil, err
+		}
+		items = append(items, author_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

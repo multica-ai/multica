@@ -212,7 +212,7 @@ function ForkPrimary({ onClick }: { onClick: () => void }) {
       </div>
       <span
         aria-hidden
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-background/10 px-4 py-2 text-label font-medium transition-colors group-hover:bg-background/20"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-background/10 px-4 py-2 text-label font-medium transition-colors group-hover:bg-background/20"
       >
         {t(($) => $.step_platform.download_button)}
         <ArrowRight className="h-3.5 w-3.5" />
@@ -310,7 +310,7 @@ function CliInstallDialog({
   const { t } = useT("onboarding");
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? null : onClose())}>
-      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
+      <DialogContent className="flex max-h-[85%] flex-col sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>{t(($) => $.step_platform.cli_dialog_title)}</DialogTitle>
         </DialogHeader>

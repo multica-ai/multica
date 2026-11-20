@@ -21,7 +21,8 @@
     "active": "Active",
     "paused": "Paused",
     "paused_runtime_required": "Paused — the assignee needs a runtime",
-    "archived": "Archived"
+    "archived": "Archived",
+    "paused_project_archived": "Paused — its project is archived"
   },
   "execution_mode": {
     "create_issue": "Create Issue",
@@ -80,7 +81,6 @@
     "run_blocked_attribution": "Not triggered — the run couldn't be attributed to a responsible member",
     "run_blocked_already_active": "Not triggered — a recent run already covers this",
     "run_blocked_quota_exceeded": "Not triggered — the run limit for this period has been reached",
-    "run_blocked_issue_limit_reached": "Not triggered — the workspace has reached its issue limit",
     "run_blocked_generic": "Not triggered — the run was blocked",
     "section_triggers": "Triggers",
     "section_run_history": "Run history",
@@ -115,7 +115,8 @@
       "cancel": "Cancel",
       "confirm": "Delete",
       "deleting": "Deleting..."
-    }
+    },
+    "paused_project_archived": "Paused because its project was archived. Restore the project, then reactivate this autopilot."
   },
   "access": {
     "title": "Manage access",
@@ -147,6 +148,8 @@
   "run": {
     "issue_linked": "Issue linked",
     "view_log": "View execution log",
+    "stop": "Stop run",
+    "stop_failed": "Could not stop the run.",
     "skipped_group": {
       "label": "Skipped",
       "summary": "{{count}} skipped runs"
@@ -180,6 +183,10 @@
     "url_copied": "Webhook URL copied",
     "url_copy_failed": "Failed to copy",
     "edit_schedule": "Edit schedule",
+    "edit_webhook": "Edit webhook",
+    "event_filter_summary_all": "Accepts all events",
+    "event_filter_summary_conditions_one": "{{count}} condition",
+    "event_filter_summary_conditions_other": "{{count}} conditions",
     "rotate_url": "Rotate URL",
     "rotate_confirm_title": "Rotate webhook URL",
     "rotate_confirm_description": "The current URL will stop working immediately. Any external systems calling it must be updated with the new URL. Continue?",
@@ -243,6 +250,18 @@
       "disabled_invalid_signature": "Can't replay — signature was invalid",
       "disabled_rejected": "Can't replay a rejected delivery",
       "disabled_queued": "Still queued — replay once it settles"
+    },
+    "ignore": {
+      "title": "Ignore reason",
+      "payload_filtered": "Payload conditions not met",
+      "event_filtered": "Event or action did not match",
+      "trigger_disabled": "Trigger disabled",
+      "autopilot_paused": "Autopilot paused",
+      "autopilot_archived": "Autopilot archived",
+      "quota_exceeded": "Run quota reached",
+      "actual_value": "Actual value",
+      "missing": "Field missing",
+      "truncated": "Preview truncated. See the raw body for the full value."
     }
   },
   "add_trigger_dialog": {
@@ -268,6 +287,12 @@
     "submitting": "Saving...",
     "toast_updated": "Schedule updated",
     "toast_update_failed": "Failed to update schedule"
+  },
+  "edit_webhook_dialog": {
+    "title": "Edit webhook",
+    "label_placeholder": "e.g. GitHub pull requests",
+    "toast_updated": "Webhook updated",
+    "toast_update_failed": "Failed to update webhook"
   },
   "dialog": {
     "sr_create": "New Autopilot",
@@ -324,12 +349,40 @@
     "webhook_created_done": "Done",
     "event_filter_label": "Event filters",
     "event_filter_docs_link_label": "Learn how event filters work",
-    "event_filter_event_placeholder": "e.g. workflow_run",
-    "event_filter_actions_placeholder": "completed, failed",
-    "event_filter_add": "Add",
-    "event_filter_remove_label": "Remove filter",
-    "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
+    "event_filter_event_placeholder": "Event, e.g. pull_request",
+    "event_filter_actions_placeholder": "Actions (optional)",
+    "event_filter_add_rule": "Add rule",
+    "event_filter_event_label": "Event",
+    "event_filter_actions_label": "Actions",
+    "event_filter_new_rule_label": "New rule",
+    "event_filter_condition_label": "Condition",
+    "event_filter_error_event_required": "Enter an event name.",
+    "event_filter_error_path_required": "Enter a payload field.",
+    "event_filter_error_path_invalid": "Separate field names with dots, up to {{path}} characters.",
+    "event_filter_error_value_required": "Enter a value.",
+    "event_filter_error_too_many_values": "Up to {{values}} values.",
+    "event_filter_remove_label": "Remove rule",
+    "event_filter_hint": "Only process events matching a rule and all its payload conditions. Leave empty to accept all events.",
+    "event_filter_condition_remove_label": "Remove condition",
+    "event_filter_condition_add_label": "Add condition",
+    "event_filter_condition_ops": {
+      "equals": "is",
+      "not_equals": "is not",
+      "contains": "contains",
+      "in": "is one of",
+      "exists": "exists"
+    },
+    "event_filter_condition_path_label": "Payload field",
+    "event_filter_condition_path_placeholder": "Payload field, e.g. pull_request.base.ref",
+    "event_filter_condition_op_label": "Operator",
+    "event_filter_condition_value_label": "Value",
+    "event_filter_condition_value_placeholder": "e.g. main",
+    "event_filter_condition_values_placeholder": "main, release",
+    "event_filter_condition_ignore_case": "Ignore case",
     "schedule_multiple_notice": "This autopilot has {{count}} schedules. Close this dialog and edit each one under Triggers below.",
+    "webhook_multiple_notice": "This autopilot has more than one webhook. Close this dialog and edit each one under Triggers below.",
+    "webhook_edit_filters": "Edit filters",
+    "webhook_filters_saved_separately": "Saved on their own: Cancel here won't undo them.",
     "schedule_empty": "No schedule — this autopilot only runs when triggered manually.",
     "schedule_add": "Add schedule",
     "error_title_required": "Enter a name for this autopilot.",
@@ -343,7 +396,8 @@
         "label": "Run only",
         "description": "Silent run, no issue created"
       }
-    }
+    },
+    "event_filter_condition_all": "And payload matches all conditions"
   },
   "schedule_editor": {
     "time_label": "Time",
@@ -543,6 +597,26 @@
         "reply": "\"The PR is merged. Updating the docs and closing the issue.\"",
         "event_examples": "PR merged, new comment"
       }
+    },
+    "defaults": {
+      "title": "When sub-issues finish",
+      "description": "Wakes the parent's assignee when a stage finishes and a later stage is waiting, and once more when every sub-issue is closed. A member assignee gets an inbox notification instead.",
+      "badge": "Workspace default",
+      "enabled": "On by default",
+      "instruction": "Default instruction",
+      "instruction_hint": "Sent to the woken agent. Leave empty to use the built-in instruction below.",
+      "instruction_placeholder": "Leave empty to use the built-in instruction",
+      "builtin": "Built-in instruction",
+      "instruction_invalid": "Keep the instruction within 4,000 bytes.",
+      "save": "Save",
+      "saving": "Saving…",
+      "save_error": "Could not save the default.",
+      "customized_one": "{{count}} open issue has its own setting and ignores this default.",
+      "customized_other": "{{count}} open issues have their own setting and ignore this default.",
+      "admin_only": "Only owners and admins can change these defaults.",
+      "load_error": "Could not load wakeup defaults.",
+      "edit_instruction": "Edit default instruction",
+      "view_instruction": "View default instruction"
     }
   },
   "intro": {

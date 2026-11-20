@@ -69,6 +69,7 @@ import {
 } from "../../issues/components/wakeup-presentation";
 import { wakeupCountsOptions } from "./wakeups-tab";
 import { WakeupsIntro } from "./wakeups-intro";
+import { SystemWakeupDefaults } from "./system-wakeup-defaults";
 
 const SCOPES = ["active", "paused", "disabled", "ended", "all"] as const;
 
@@ -516,6 +517,8 @@ export function WorkspaceWakeups() {
   } else {
     body = (
       <CollectionList
+        // Shares the autopilots route with that page's own list.
+        scrollKey="wakeups"
         label={t(($) => $.wakeups.scopes[filters.scope])}
         columns={columns}
         rows={rows}
@@ -579,6 +582,12 @@ export function WorkspaceWakeups() {
         actions={
           <CollectionCreateButton label={t(($) => $.wakeups.create)} onClick={() => setCreateOpen(true)} />
         }
+      />
+      <SystemWakeupDefaults
+        onShowCustomized={() => {
+          // Issues that turned the rule off sit under "Turned off", so widen the scope.
+          if (!batch.isPending) change({ scope: "all", kind: "all", source: "system", agent_id: "" });
+        }}
       />
       {pausedCount > 0 && latestPaused && filters.scope !== "paused" && (
         <div

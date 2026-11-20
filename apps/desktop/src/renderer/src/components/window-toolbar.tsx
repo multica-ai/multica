@@ -36,7 +36,7 @@ import { browsingHistoryKeyForUrl } from "@/stores/tab-store";
 // inset plus Back, Forward and the panel toggle (3 × 28px, 2 × 8px gaps) and
 // a 12px trailing pad. It spans the rail and the start of the tab bar, which
 // pads itself past it.
-const TRAFFIC_LIGHT_CLEARANCE = 88;
+export const TRAFFIC_LIGHT_CLEARANCE = 88;
 export const WINDOW_TOOLBAR_CLEARANCE = 200;
 const LONG_PRESS_DURATION_MS = 500;
 const LONG_PRESS_MOVE_TOLERANCE_PX = 8;
@@ -161,17 +161,17 @@ function HistoryMenuItem({
   const { visual, title } = useTabPresentation(url, fallbackTitle);
 
   return (
-    <DropdownMenuItem
-      className="h-8 min-w-0 gap-2 px-2"
-      onClick={onSelect}
-    >
-      <ResourceLeadingVisual visual={visual} />
-      <TruncatedTooltip content={title}>
+    <TruncatedTooltip content={title}>
+      <DropdownMenuItem
+        className="h-8 min-w-0 gap-2 px-2"
+        onClick={onSelect}
+      >
+        <ResourceLeadingVisual visual={visual} />
         <span className="min-w-0 flex-1 truncate">
           {title}
         </span>
-      </TruncatedTooltip>
-    </DropdownMenuItem>
+      </DropdownMenuItem>
+    </TruncatedTooltip>
   );
 }
 
@@ -253,6 +253,7 @@ export function WindowToolbar() {
   return (
     <div
       data-slot="window-toolbar"
+      data-mc="window-toolbar"
       className="fixed left-0 top-0 z-30 flex h-10 shrink-0 items-center pr-3"
       style={
         {

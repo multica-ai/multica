@@ -2,6 +2,25 @@ package service
 
 import "testing"
 
+func TestResumeUnsafeFailureIgnoresCodebuddyProtocolSummary(t *testing.T) {
+	const summary = "\n[codebuddy protocol: exit_code=0 stdout_bytes=1400 stderr_bytes=0 event_count=1 invalid_event_count=0 assistant_event_count=0 tool_use_count=0 saw_result=true result_is_error=true result_bytes=0 last_assistant_bytes=0 scanner_error=false]"
+	for _, tc := range []struct {
+		name, reason, raw string
+		want              bool
+	}{
+		{"model", "agent_error.model_not_found_or_unavailable", `HTTP 404 {"type":"invalid_request_error","code":"model_not_found"}`, false},
+		{"auth", "agent_error.provider_auth_or_access", `HTTP 401 {"type":"invalid_request_error","code":"invalid_api_key"}`, false},
+		{"actual poisoned request", "agent_error.unknown", `HTTP 400 {"type":"invalid_request_error","message":"Could not process image"}`, true},
+		{"already retired reason", "api_invalid_request", "no details", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ResumeUnsafeFailure(tc.reason, tc.raw+summary); got != tc.want {
+				t.Errorf("ResumeUnsafeFailure = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestResumeUnsafeFailureEmptyHistoryMessage covers the manual-retry half of
 // GH #6066. The claim handler resolves a rerun's session from the exact source
 // task via ResumeUnsafeFailure rather than GetLastTaskSession, so a gap here

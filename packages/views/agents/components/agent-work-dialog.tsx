@@ -25,7 +25,7 @@ export function AgentWorkDialog({
   const { t } = useT("agents");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(85dvh,52rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+      <DialogContent className="flex h-[min(85%,52rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
         <DialogHeader className="shrink-0 gap-1 border-b px-5 py-4 pr-12">
           <DialogTitle>{t(($) => $.tabs.work)}</DialogTitle>
           <DialogDescription className="truncate">{agent.name}</DialogDescription>

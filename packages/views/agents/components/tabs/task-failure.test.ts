@@ -9,6 +9,7 @@ import esAgents from "../../../locales/es/agents.json";
 import jaAgents from "../../../locales/ja/agents.json";
 import koAgents from "../../../locales/ko/agents.json";
 import zhHansAgents from "../../../locales/zh-Hans/agents.json";
+import ruAgents from "../../../locales/ru/agents.json";
 import zhHantAgents from "../../../locales/zh-Hant/agents.json";
 
 import {
@@ -29,6 +30,7 @@ const AGENT_RESOURCES = {
   ko: koAgents,
   fr: frAgents,
   es: esAgents,
+  ru: ruAgents,
 } as const;
 
 function fixedT(locale: SupportedLocale): TFunction<"agents"> {
@@ -123,6 +125,7 @@ describe("cancelReasonLabel", () => {
       ko: "시스템에서 취소함",
       fr: "Annulée par le système",
       es: "Cancelada por el sistema",
+      ru: "Отменено системой",
     };
 
     for (const locale of Object.keys(expected) as SupportedLocale[]) {
@@ -187,6 +190,17 @@ describe("failureReasonLabel", () => {
     );
     expect(failureReasonLabel("cancelled", enT)).toBe(
       "Cancelled by the system",
+    );
+  });
+
+  // MUL-9665: a project's linked folder that was deleted used to read as the
+  // generic "Local directory error", which never said the folder was gone.
+  it("names a deleted project folder instead of a generic local directory error", () => {
+    expect(failureReasonLabel("local_directory_missing", enT)).toBe(
+      "Project's local folder no longer exists",
+    );
+    expect(failureReasonLabel("local_directory_missing", fixedT("zh-Hans"))).toBe(
+      "项目的本地文件夹已不存在",
     );
   });
 

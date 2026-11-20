@@ -30,9 +30,10 @@ import { useWorkspaceId } from "@multica/core/hooks";
  * `onSwitchMode`; the shell stores it as the next panel's `data` so seeding
  * works exactly like a fresh open.
  *
- * Manual-mode `isExpanded` is lifted up because it drives `DialogContent`'s
- * className — the className lives here in the shell since the Popup is here,
- * but the toggle for that state lives in the manual panel body.
+ * `isExpanded` is lifted up because it drives `DialogContent`'s className —
+ * the className lives here in the shell since the Popup is here, but the
+ * toggle for that state lives in the panel bodies. It is persisted in the
+ * create-mode store, so the dialog reopens at the size it was last left at.
  */
 export function CreateIssueDialog({
   onClose,
@@ -122,7 +123,9 @@ function CreateIssueDialogBody({
   const [mode, setMode] = useState<CreateMode>(initialMode);
   const [manualOpened, setManualOpened] = useState(initialMode === "manual");
   const [panelData, setPanelData] = useState(data ?? null);
-  const [isExpanded, setIsExpanded] = useState(false);
+  // Remembered across opens: the dialog reopens at the size it was left at.
+  const isExpanded = useCreateModeStore((s) => s.expanded);
+  const setIsExpanded = useCreateModeStore((s) => s.setExpanded);
   const effectiveData = {
     ...(panelData ?? {}),
     ...sourceContextData,
@@ -158,7 +161,7 @@ function CreateIssueDialogBody({
           // `max-w-[calc(100%-2rem)]` safety margin, leaving the card flush
           // against both screen edges on a 430px viewport (MUL-6236). Restore
           // the margin here and let the `sm:` widths take over above 640px.
-          "!w-full !max-w-[calc(100vw-1.5rem)]",
+          "!w-full !max-w-[calc(100%-1.5rem)]",
           // Source-context create needs numeric collapsed/expanded endpoints
           // so its preview transition can interpolate the height. Ordinary
           // quick create has no expanding preview and keeps its original
@@ -169,7 +172,7 @@ function CreateIssueDialogBody({
               ? sourceContextExpanded
                 ? "!h-5/6 sm:!max-w-2xl"
                 : "!h-96 sm:!max-w-xl"
-              : "!max-h-[80dvh] sm:!max-w-xl",
+              : "!max-h-[80%] sm:!max-w-xl",
         )
       : cn(
           manualDialogContentClass(isExpanded),

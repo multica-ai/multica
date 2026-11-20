@@ -29,6 +29,11 @@
  * (packages/views/chat/components/chat-window.tsx ~262-345):
  *   seed messages → seed pendingTask → flip activeSessionId → POST →
  *   patch pendingTask with server task_id + created_at.
+ *
+ * During a reply on a queue-capable server, Send asks to add the message to
+ * that reply (`steer`) and the composer's Queue action keeps it for the next
+ * turn. The server decides whether steering applies; an accepted steer keeps
+ * the running head instead of seeding a new turn.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -49,7 +54,8 @@ import {
   hideQueuedChatMessages,
   removePendingChatTask,
 } from "@multica/core/chat/pending";
-import { canAssignAgentToIssue } from "@multica/core/permissions";
+import { refetchChatSessionsAfterCommit } from "@multica/core/chat/session-list";
+import { canAssignAgentToIssue } from "@multica/core/permissions/rules";
 import { api } from "@/data/api";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -75,9 +81,10 @@ import { useChatSessionPickerStore } from "@/data/stores/chat-session-picker-sto
 import { useChatSessionRealtime } from "@/data/realtime/use-chat-session-realtime";
 import {
   invalidatePendingTask,
-  seedAcceptedPendingTask,
+  reconcileAcceptedChatSend,
 } from "@/data/realtime/chat-ws-updaters";
 import { useWorkspaceAgentAvailability } from "@/lib/workspace-agent-availability";
+import { queuedChatMessages } from "@/lib/chat-queued-messages";
 import {
   dispatchReasonCode,
 } from "@/lib/dispatch-reason";
@@ -155,6 +162,7 @@ export default function ChatTab() {
     pendingChatTaskOptions(activeSessionId),
   );
   const visibleMessages = hideQueuedChatMessages(messages, pendingTask);
+  const queuedMessages = queuedChatMessages(pendingTask, messages);
   // Live execution trace for the in-flight task. `task:message` WS events
   // append rows to this same cache key via `appendTaskMessage`, so the
   // list/pill stay in sync without a polling fetch. `enabled` is gated by
@@ -264,16 +272,17 @@ export default function ChatTab() {
   const sessionPromiseRef = useRef<Promise<string | null> | null>(null);
 
   const ensureSession = useCallback(
-    async (titleSeed: string): Promise<string | null> => {
+    async (): Promise<string | null> => {
       if (activeSessionId) return activeSessionId;
       if (!currentAgent) return null;
       if (sessionPromiseRef.current) return sessionPromiseRef.current;
 
       const promise = (async () => {
         try {
+          // Untitled on purpose: the server derives the title from the first
+          // message it accepts, the same rule for every client and channel.
           const session = await createSession.mutateAsync({
             agent_id: currentAgent.id,
-            title: titleSeed.slice(0, 50),
           });
           return session.id;
         } finally {
@@ -290,7 +299,7 @@ export default function ChatTab() {
     async (
       content: string,
       attachmentIds: string[] = [],
-      options: { clearDraft?: boolean } = {},
+      options: { clearDraft?: boolean; queue?: boolean } = {},
     ) => {
       if (!currentAgent) return;
       // Invoke permission was revoked while this session was open — the server
@@ -314,7 +323,7 @@ export default function ChatTab() {
       const isNewSession = !activeSessionId;
       let sessionId: string | null;
       try {
-        sessionId = await ensureSession(content);
+        sessionId = await ensureSession();
       } catch (err) {
         // Session create runs the same invoke gate as a send, so a permission
         // change refuses here too — and this is the only layer that sees the
@@ -358,35 +367,26 @@ export default function ChatTab() {
       }
 
       try {
+        // One request per tap, never replayed: a send whose outcome is unknown
+        // fails visibly and keeps the draft, so a retry is the user's choice.
         const result = await api.sendChatMessage(sessionId, content, {
           attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
+          queue: options.queue,
         });
         // Replace the local bubble before reconciling pending state. When the
         // server says this is a follow-up, its real message id lets the shared
         // queue filter hide it immediately instead of waiting for the refetch.
-        qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
-          old?.map((message) =>
-            message.id === optimistic.id
-              ? {
-                  ...message,
-                  id: result.message_id,
-                  task_id: result.task_id,
-                  created_at: result.created_at,
-                }
-              : message,
-          ),
-        );
-        seedAcceptedPendingTask(qc, {
+        reconcileAcceptedChatSend(qc, {
           chat_session_id: sessionId,
-          task_id: result.task_id,
-          created_at: result.created_at,
-          message_id: result.message_id,
-          content,
+          optimistic_message_id: optimistic.id,
           optimistic_task_id: optimisticTaskId,
-          supports_queue: result.supports_queue,
-          queued: result.queued,
+          content,
+          result,
         });
-        qc.invalidateQueries({ queryKey: chatKeys.messages(sessionId) });
+        // This send just committed the new session's server-derived title.
+        if (isNewSession) {
+          void refetchChatSessionsAfterCommit(qc, chatKeys.sessions(wsId));
+        }
         if (options.clearDraft !== false) {
           clearDraft(sessionId);
         }
@@ -406,6 +406,7 @@ export default function ChatTab() {
       }
     },
     [
+      wsId,
       activeSessionId,
       currentAgent,
       accessRevoked,
@@ -543,6 +544,7 @@ export default function ChatTab() {
           quickActionsDisabled={sending || disabled}
           pendingTask={pendingTask}
           liveTaskMessages={liveTaskMessages}
+          queuedMessages={queuedMessages}
           availability={presenceAvailability}
         />
         {runtimeBound ? (
@@ -560,6 +562,7 @@ export default function ChatTab() {
           onStop={handleStop}
           sending={sending}
           allowStop={pendingTask?.status !== "queued"}
+          allowSendWhileSending={pendingTask?.supports_queue === true}
           disabled={disabled}
           disabledReason={disabledReason}
         />

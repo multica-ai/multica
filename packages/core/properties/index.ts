@@ -1,4 +1,4 @@
-export { propertyKeys, propertyListOptions } from "./queries";
+export { propertyKeys, propertyListOptions, propertyUsageListOptions } from "./queries";
 export {
   useCreateProperty,
   useUpdateProperty,
