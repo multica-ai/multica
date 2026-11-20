@@ -226,9 +226,10 @@ function useAssigneeChoices(filter: string, open = true) {
 
   const getFreq = (type: string, id: string) => freqMap.get(`${type}:${id}`) ?? 0;
 
-  // Only actors this user can pick are listed, matching the create-issue
-  // modal: agents they may invoke that have a runtime, and squads whose
-  // leader has one. Anything else would be a row that can't be clicked.
+  // Only actors this user can pick are listed: agents they may invoke that
+  // have a runtime, and squads whose leader is such an agent (the server
+  // checks the leader's invoke permission). Anything else would be a row
+  // that can't be clicked, or a pick the server rejects.
   const role =
     memberRole === "owner" || memberRole === "admin" || memberRole === "member"
       ? memberRole
@@ -239,13 +240,9 @@ function useAssigneeChoices(filter: string, open = true) {
       isAgentRuntimeBound(a) &&
       canAssignAgentToIssue(a, { userId: user?.id ?? null, role }).allowed,
   );
-  const runnableAgentIds = new Set(
-    agents
-      .filter((agent) => !agent.archived_at && isAgentRuntimeBound(agent))
-      .map((agent) => agent.id),
-  );
+  const assignableAgentIds = new Set(assignableAgents.map((a) => a.id));
   const assignableSquads = squads.filter(
-    (s) => !s.archived_at && runnableAgentIds.has(s.leader_id),
+    (s) => !s.archived_at && assignableAgentIds.has(s.leader_id),
   );
 
   const query = filter.trim().toLowerCase();

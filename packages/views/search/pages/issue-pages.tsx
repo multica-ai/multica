@@ -199,7 +199,7 @@ export function IssueAssigneePage({ target, query }: { target: IssueTarget; quer
   });
   const visibleAgents = filterByLabel(sortedAgents, q, (e) => e.agent.name);
   const visibleSquads = filterByLabel(
-    squads.filter((entry) => entry.runnable),
+    squads.filter((entry) => entry.assignable),
     q,
     (e) => e.squad.name,
   );

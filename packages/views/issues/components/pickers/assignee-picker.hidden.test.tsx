@@ -1,5 +1,5 @@
 // The assignee picker lists only actors the current user can actually pick:
-// agents they may invoke that have a runtime, and squads whose leader has one.
+// agents they may invoke that have a runtime, and squads whose leader is one.
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -21,6 +21,9 @@ const AGENTS = [
 const SQUADS = [
   { id: "squad-ok", name: "Runnable Squad", archived_at: null, leader_id: "agent-shared" },
   { id: "squad-stuck", name: "Stuck Squad", archived_at: null, leader_id: "agent-unbound" },
+  // Leader has a runtime but is someone else's private agent: the server
+  // rejects the pick, so it's hidden too.
+  { id: "squad-private", name: "Private Squad", archived_at: null, leader_id: "agent-theirs" },
 ];
 const FREQUENCY = [
   { assignee_type: "agent", assignee_id: "agent-theirs", frequency: 9 },
@@ -39,7 +42,15 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
-vi.mock("@multica/core/auth", () => ({ useAuthStore: () => ({ id: "user-1" }) }));
+vi.mock("@multica/core/auth", () => {
+  const state = { user: { id: "user-1" } };
+  return {
+    useAuthStore: Object.assign(
+      (selector?: (s: typeof state) => unknown) => (selector ? selector(state) : state),
+      { getState: () => state },
+    ),
+  };
+});
 vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: (a: { runtime_id: string | null }) => !!a.runtime_id,
 }));
@@ -87,5 +98,6 @@ describe("AssigneePicker unpickable actors", () => {
     expect(screen.queryByText("Theirs")).toBeNull();
     expect(screen.queryByText("Unbound")).toBeNull();
     expect(screen.queryByText("Stuck Squad")).toBeNull();
+    expect(screen.queryByText("Private Squad")).toBeNull();
   });
 });

@@ -24,8 +24,8 @@ export interface AgentEntry {
 
 export interface SquadEntry {
   squad: Squad;
-  /** A squad runs through its leader, so it is runnable when the leader is. */
-  runnable: boolean;
+  /** A squad runs through its leader, so it is assignable when the leader is. */
+  assignable: boolean;
 }
 
 const EMPTY_AGENTS: Agent[] = [];
@@ -65,10 +65,10 @@ export function useActorDirectory(enabled: boolean) {
   }, [agentsData, byAgent, role, runtimes, userId]);
 
   const squads = useMemo<SquadEntry[]>(() => {
-    const runnable = new Set(agents.filter((entry) => entry.runtimeBound).map((entry) => entry.agent.id));
+    const assignable = new Set(agents.filter((entry) => entry.assignable).map((entry) => entry.agent.id));
     return squadsData
       .filter((squad) => !squad.archived_at)
-      .map((squad) => ({ squad, runnable: runnable.has(squad.leader_id) }));
+      .map((squad) => ({ squad, assignable: assignable.has(squad.leader_id) }));
   }, [agents, squadsData]);
 
   return useMemo(() => ({ agents, squads, members }), [agents, squads, members]);
