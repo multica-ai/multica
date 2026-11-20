@@ -238,7 +238,7 @@ export function WorkflowHandoffConfirmDialog({
           </div>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="sm:flex-wrap">
           <Button variant="outline" onClick={onCancel}>
             {t(($) => $.workflows.confirm.cancel)}
           </Button>
