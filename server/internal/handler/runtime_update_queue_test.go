@@ -152,6 +152,20 @@ func TestUpdateQueue_OneUnfinishedUpdatePerMachine(t *testing.T) {
 	})
 }
 
+func TestUpdateQueue_OnlyQueuedRequestsAreCancellable(t *testing.T) {
+	forEachUpdateStore(t, func(t *testing.T, store UpdateStore, _ func(string, time.Duration)) {
+		ctx := context.Background()
+		// A CLI request does not opt into queueing; its --wait does not know "cancelled".
+		cli := mustCreateUpdate(t, store, "rt-1", "machine-1", false)
+		if _, err := store.Transition(ctx, cli.ID, cancelUpdate); !errors.Is(err, errUpdateNotCancellable) {
+			t.Fatalf("cancel CLI request: %v, want errUpdateNotCancellable", err)
+		}
+		if got, _ := store.Get(ctx, cli.ID); got.Status != UpdatePending || updateCancellable(got) {
+			t.Fatalf("CLI request = %+v, want pending and not cancellable", got)
+		}
+	})
+}
+
 func TestUpdateQueue_ConcurrentCreatesOnOneMachine(t *testing.T) {
 	forEachUpdateStore(t, func(t *testing.T, store UpdateStore, _ func(string, time.Duration)) {
 		const n = 16
@@ -288,7 +302,7 @@ func TestQueuedUpdateThroughHandlers(t *testing.T) {
 	}
 	w = call(testHandler.CancelUpdate, http.MethodPost, "/api/runtimes/"+rtA+"/update/"+created.ID+"/cancel", nil,
 		"runtimeId", rtA, "updateId", created.ID)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("second cancel: %d, want 409", w.Code)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"status":"cancelled"`) {
+		t.Fatalf("second cancel (another tab): %d %s, want 200 cancelled", w.Code, w.Body.String())
 	}
 }

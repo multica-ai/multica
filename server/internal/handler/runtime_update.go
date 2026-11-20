@@ -67,7 +67,7 @@ const (
 var (
 	errUpdateInProgress     = &updateError{msg: "an update is already in progress or queued on this machine"}
 	errUpdateWithdrawn      = &updateError{msg: "this update was cancelled, expired, or has already finished"}
-	errUpdateNotCancellable = &updateError{msg: "this update has already started installing and can no longer be cancelled"}
+	errUpdateNotCancellable = &updateError{msg: "this update can no longer be cancelled"}
 )
 
 type updateError struct{ msg string }
@@ -184,8 +184,19 @@ func scheduleUpdate(activeTasks *int) updateTransition {
 	}
 }
 
+// updateCancellable: only requests from clients that chose to queue can be
+// cancelled — other clients (the CLI's --wait) do not know "cancelled".
+func updateCancellable(req *UpdateRequest) bool {
+	return req.QueueWhenBusy && updateRequestWaiting(req.Status)
+}
+
+// cancelUpdate is idempotent: cancelling a cancelled request succeeds, so two
+// tabs cancelling the same update both see it cancelled.
 func cancelUpdate(req *UpdateRequest, now time.Time) error {
-	if !updateRequestWaiting(req.Status) {
+	if req.Status == UpdateCancelled {
+		return nil
+	}
+	if !updateCancellable(req) {
 		return errUpdateNotCancellable
 	}
 	req.Status = UpdateCancelled
@@ -357,7 +368,7 @@ func cloneUpdateRequest(req *UpdateRequest) *UpdateRequest {
 // Handlers
 
 func writeUpdate(w http.ResponseWriter, update *UpdateRequest) {
-	update.Cancellable = updateRequestWaiting(update.Status)
+	update.Cancellable = updateCancellable(update)
 	writeJSON(w, http.StatusOK, update)
 }
 
@@ -435,7 +446,7 @@ func (h *Handler) GetActiveUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if update != nil {
-		update.Cancellable = updateRequestWaiting(update.Status)
+		update.Cancellable = updateCancellable(update)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"update": update})
 }
