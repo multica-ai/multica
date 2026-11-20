@@ -47,16 +47,16 @@ var featureCases = []struct {
 }{
 	{"self-hosted", nil, false, 0},
 	{"off", &entitlement.FeatureDecision{Action: entitlement.ActionOff, Reason: entitlement.ReasonRefreshed}, false, 0},
-	{"observe", &entitlement.FeatureDecision{Action: entitlement.ActionObserve, Reason: entitlement.ReasonRefreshed, PolicyRevision: 6}, false, 1},
-	{"enforce", &entitlement.FeatureDecision{Action: entitlement.ActionEnforce, Reason: entitlement.ReasonRefreshed, PolicyRevision: 6}, true, 0},
+	{"observe", &entitlement.FeatureDecision{Action: entitlement.ActionObserve, Reason: entitlement.ReasonRefreshed, PolicyRevision: 7}, false, 1},
+	{"enforce", &entitlement.FeatureDecision{Action: entitlement.ActionEnforce, Reason: entitlement.ReasonRefreshed, PolicyRevision: 7}, true, 0},
 }
 
 func enforced() *entitlement.FeatureDecision {
-	return &entitlement.FeatureDecision{Action: entitlement.ActionEnforce, Reason: entitlement.ReasonRefreshed, PolicyRevision: 6}
+	return &entitlement.FeatureDecision{Action: entitlement.ActionEnforce, Reason: entitlement.ReasonRefreshed, PolicyRevision: 7}
 }
 
 func observed() *entitlement.FeatureDecision {
-	return &entitlement.FeatureDecision{Action: entitlement.ActionObserve, Reason: entitlement.ReasonRefreshed, PolicyRevision: 6}
+	return &entitlement.FeatureDecision{Action: entitlement.ActionObserve, Reason: entitlement.ReasonRefreshed, PolicyRevision: 7}
 }
 
 func featureAttemptsFor(t *testing.T, feature entitlement.FeatureName) featureAttemptCounts {

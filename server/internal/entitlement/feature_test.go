@@ -56,10 +56,10 @@ func TestCloudFeatureActionsAreDeliveredUnchanged(t *testing.T) {
 	}
 }
 
-// Revision 6 adds three features. Each is read on its own: a policy from an
+// Revision 7 adds three features. Each is read on its own: a policy from an
 // older Cloud that lacks them leaves them off without touching the features
 // it does carry.
-func TestRevisionSixFeaturesAreReadIndependently(t *testing.T) {
+func TestRevisionSevenFeaturesAreReadIndependently(t *testing.T) {
 	server := httptest.NewServer(featurePolicyHandler(t, `{
 		"private_projects":{"action":"observe"},
 		"agent_invocation_members":{"action":"enforce"},

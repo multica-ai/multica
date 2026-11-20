@@ -17,7 +17,7 @@ The client reads:
 
 - `schema_version`: only version 1 is accepted.
 - `policy_revision`: the effective-instruction generation, currently fixed at
-  `6` by Cloud and not deployment configuration. Cloud advances it when the
+  `7` by Cloud and not deployment configuration. Cloud advances it when the
   meaning or set of actionable instructions changes, including additive
   instructions; `schema_version` changes only for incompatible wire parsing.
 - `subscription_version`: the workspace's monotonic subscription revision. A
@@ -66,7 +66,7 @@ and the features keep their instructions. See [Member limit](#member-limit).
 `gates.storage_bytes` (revision 6) is optional the same way; see
 [Attachment storage limit](#attachment-storage-limit).
 
-Revision 6 adds the `agent_invocation_members`, `runtime_member_sharing` and
+Revision 7 adds the `agent_invocation_members`, `runtime_member_sharing` and
 `team_app_accounts` features. It is safe in either order: an older consumer
 ignores features it does not know, and this consumer reads a policy without
 one as that feature `off` with reason `feature_missing`.
