@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -142,22 +143,6 @@ func propertyToResponse(p db.IssueProperty, usageCount int64) PropertyResponse {
 		resp.ArchivedAt = &s
 	}
 	return resp
-}
-
-func propertyListRowToResponse(row db.ListIssuePropertiesRow) PropertyResponse {
-	return propertyToResponse(db.IssueProperty{
-		ID:          row.ID,
-		WorkspaceID: row.WorkspaceID,
-		Name:        row.Name,
-		Type:        row.Type,
-		Description: row.Description,
-		Icon:        row.Icon,
-		Config:      row.Config,
-		Position:    row.Position,
-		ArchivedAt:  row.ArchivedAt,
-		CreatedAt:   row.CreatedAt,
-		UpdatedAt:   row.UpdatedAt,
-	}, row.UsageCount)
 }
 
 type CreatePropertyRequest struct {
@@ -408,7 +393,7 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeArchived := r.URL.Query().Get("include_archived") == "true"
-	rows, err := h.Queries.ListIssueProperties(r.Context(), db.ListIssuePropertiesParams{
+	listed, err := h.Queries.ListIssueProperties(r.Context(), db.ListIssuePropertiesParams{
 		WorkspaceID:     wsUUID,
 		IncludeArchived: includeArchived,
 	})
@@ -417,11 +402,97 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list properties")
 		return
 	}
-	resp := make([]PropertyResponse, len(rows))
-	for i, row := range rows {
-		resp[i] = propertyListRowToResponse(row)
+	// usage_count costs a pass over the workspace's property-carrying issues,
+	// so callers that only need the catalog (issue surfaces, CLI name
+	// resolution, realtime refetches) send include_usage=false and get 0.
+	// Anything else keeps the counts, which is what older clients expect.
+	var usage map[string]int64
+	if r.URL.Query().Get("include_usage") != "false" {
+		if usage, err = h.countPropertyUsage(r.Context(), wsUUID, listed); err != nil {
+			slog.Warn("count property usage failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to list properties")
+			return
+		}
+	}
+	resp := make([]PropertyResponse, len(listed))
+	for i, p := range listed {
+		resp[i] = propertyToResponse(p, usage[uuidToString(p.ID)])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"properties": resp, "total": len(resp)})
+}
+
+// propertyUsageKeysPerScan caps how many definitions one usage scan counts:
+// each becomes an output column, and PostgreSQL allows at most 1664.
+const propertyUsageKeysPerScan = 1000
+
+// countPropertyUsage returns, keyed by property id, how many of the
+// workspace's issues carry a value for each of the given definitions.
+func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUID, props []db.IssueProperty) (map[string]int64, error) {
+	usage := make(map[string]int64, len(props))
+	for start := 0; start < len(props); start += propertyUsageKeysPerScan {
+		chunk := props[start:min(start+propertyUsageKeysPerScan, len(props))]
+		query, args := propertyUsageQuery(workspaceID, chunk)
+		counts := make([]int64, len(chunk))
+		dest := make([]any, len(chunk))
+		for i := range counts {
+			dest[i] = &counts[i]
+		}
+		if err := h.DB.QueryRow(ctx, query, args...).Scan(dest...); err != nil {
+			return nil, err
+		}
+		for i, p := range chunk {
+			usage[uuidToString(p.ID)] = counts[i]
+		}
+	}
+	return usage, nil
+}
+
+// propertyUsageQuery counts, in one pass over the workspace's issues, how
+// many carry each definition's key: one COUNT(*) FILTER column per
+// definition, in order.
+//
+// The shape is deliberate:
+//   - Not a per-definition `properties ? id` subquery: idx_issue_properties_gin
+//     is jsonb_path_ops, which cannot serve `?`, so each definition re-read
+//     every issue in the workspace.
+//   - No row per (issue, key), as jsonb_object_keys or an unnest join would
+//     produce: when most issues carry the counted keys, building and grouping
+//     those rows costs more than the per-definition scans did.
+//   - The scan filters on workspace_id alone, inside an OFFSET 0 subquery,
+//     and every JSON check runs above it. A JSON condition in the same scan
+//     can be checked before workspace_id (PostgreSQL appends the equality it
+//     derives for workspace_id after the other filters). A sequential scan
+//     then reads every other workspace's bags too, which costs most when
+//     other workspaces store large ones.
+//   - `properties || '{}'` detoasts each bag once for all the `?` checks.
+//     Bags past the TOAST threshold would otherwise be fetched and
+//     decompressed again for every `?`. A single definition skips it: its
+//     one `?` reads the bag once already.
+func propertyUsageQuery(workspaceID pgtype.UUID, props []db.IssueProperty) (string, []any) {
+	if len(props) == 1 {
+		return `SELECT COUNT(*) FILTER (WHERE s.properties ? $2::text)
+FROM (
+	SELECT i.properties
+	FROM issue i
+	WHERE i.workspace_id = $1::uuid
+	OFFSET 0
+) s`, []any{workspaceID, uuidToString(props[0].ID)}
+	}
+	args := make([]any, 0, len(props)+1)
+	args = append(args, workspaceID)
+	columns := make([]string, len(props))
+	for i, p := range props {
+		args = append(args, uuidToString(p.ID))
+		columns[i] = fmt.Sprintf("COUNT(*) FILTER (WHERE s.properties ? $%d::text)", len(args))
+	}
+	return fmt.Sprintf(`SELECT %s
+FROM (
+	SELECT i.properties || '{}'::jsonb AS properties
+	FROM issue i
+	WHERE i.workspace_id = $1::uuid
+	OFFSET 0
+) s
+WHERE s.properties <> '{}'::jsonb`, strings.Join(columns, ", ")), args
 }
 
 func (h *Handler) GetProperty(w http.ResponseWriter, r *http.Request) {
