@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -93,7 +94,10 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 // promote or claim it even after fire_at is due, and a fresh online heartbeat
 // releases that exact child without consuming another retry.
 func TestRuntimeOfflineRetryWaitsForHealthyRuntime(t *testing.T) {
-	pool := newResolveOriginatorPool(t)
+	sharedPool := newResolveOriginatorPool(t)
+	// Other packages sweep offline runtimes across all workspaces. Keep this
+	// deliberately stale fixture isolated until its own failure creates a retry.
+	pool := testutil.IsolatedDB(t, sharedPool.Config().ConnString())
 	ctx := context.Background()
 	q := db.New(pool)
 	_, _, agentID, issueID := seedAttributionFixture(t, pool)

@@ -98,6 +98,7 @@ func TestReplierNoticesReadTheAskersLanguage(t *testing.T) {
 				res  engine.Result
 				want string
 			}{
+				{"help", engine.Result{Outcome: engine.OutcomeHelp}, want.Help},
 				{"offline", engine.Result{Outcome: engine.OutcomeAgentOffline}, want.AgentOffline},
 				{"archived", engine.Result{Outcome: engine.OutcomeAgentArchived}, want.AgentArchived},
 				{"invoke denied", engine.Result{Outcome: engine.OutcomeInvokeDenied}, want.InvokeDenied},

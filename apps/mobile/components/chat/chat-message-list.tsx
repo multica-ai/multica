@@ -21,11 +21,14 @@ import type {
 } from "@multica/core/types";
 import type { AgentAvailability } from "@multica/core/agents";
 import { continuousCorners } from "@/lib/radius";
+import { THEME } from "@/lib/theme";
+import { useColorScheme } from "@/lib/use-color-scheme";
 import { taskMessagesOptions } from "@/data/queries/chat";
 import { Text } from "@/components/ui/text";
 import { Markdown } from "@/lib/markdown";
 import { ImageSequenceProvider } from "@/lib/markdown/image-sequence";
 import { failureReasonKey } from "@/lib/failure-reason-label";
+import type { QueuedChatMessage } from "@/lib/chat-queued-messages";
 import { formatElapsedMs } from "@/lib/format-elapsed";
 import { cn } from "@/lib/utils";
 import { useChatSelectStore } from "@/data/chat-select-store";
@@ -66,13 +69,15 @@ interface Props {
   /** Live timeline rows for the in-flight task. Already fetched by the
    *  parent so this list doesn't have to manage its own subscription. */
   liveTaskMessages?: TaskMessagePayload[];
+  /** Follow-ups waiting for their turn, rendered after the live reply. */
+  queuedMessages?: QueuedChatMessage[];
   /** Resolved availability — drives the StatusPill's "Offline" /
    *  "Reconnecting" stages. Pass `undefined` while loading. */
   availability?: AgentAvailability;
 }
 
 export function ChatMessageList({
-  messages,
+  messages: allMessages,
   loading,
   hasSessions,
   agent,
@@ -81,12 +86,19 @@ export function ChatMessageList({
   quickActionsDisabled = false,
   pendingTask,
   liveTaskMessages,
+  queuedMessages = [],
   availability,
 }: Props) {
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
   // Pressable below. When null, the Pressable stays disabled and every tap
   // passes through to the list cells / bubble long-press wrappers normally.
   const selectingId = useChatSelectStore((s) => s.selectingId);
+  // A wakeup turn's input is the runtime's, not a message the person wrote;
+  // its content is withheld, so it would render as an empty bubble.
+  const messages = useMemo(
+    () => allMessages.filter((m) => m.message_kind !== "wakeup"),
+    [allMessages],
+  );
 
   // Every image in this session, in message order (MUL-5752), so tapping one
   // opens the lightbox at its position and a swipe walks the rest.
@@ -179,16 +191,21 @@ export function ChatMessageList({
       )}
       ItemSeparatorComponent={MessageSeparator}
       ListFooterComponent={
-        showLiveSection ? (
+        showLiveSection || queuedMessages.length > 0 ? (
           <View style={{ paddingTop: 12 }} className="gap-2">
             {showLiveTimeline ? (
               <ChatTimeline items={liveTaskMessages ?? []} isStreaming />
             ) : null}
-            <StatusPill
-              pendingTask={pendingTask}
-              taskMessages={liveTaskMessages}
-              availability={availability}
-            />
+            {showLiveSection ? (
+              <StatusPill
+                pendingTask={pendingTask}
+                taskMessages={liveTaskMessages}
+                availability={availability}
+              />
+            ) : null}
+            {queuedMessages.map((row) => (
+              <QueuedMessageRow key={row.task_id} message={row} />
+            ))}
           </View>
         ) : null
       }
@@ -229,6 +246,48 @@ export function ChatMessageList({
 
 function MessageSeparator() {
   return <View style={{ height: 12 }} />;
+}
+
+/**
+ * A follow-up waiting for its turn. Sits after the live reply, where it will
+ * run, dimmed and captioned so it does not read as part of the current
+ * reply. Read-only on mobile: removing or editing queued messages stays on
+ * web and desktop. Once its turn starts the server row returns to the
+ * transcript in this position.
+ */
+function QueuedMessageRow({ message }: { message: QueuedChatMessage }) {
+  const { t } = useT("chat");
+  const { colorScheme } = useColorScheme();
+  return (
+    <View className="self-end max-w-[80%] items-end gap-1 opacity-60">
+      <View
+        className="gap-1.5 rounded-xl border-2 border-transparent bg-muted px-3.5 py-2"
+        style={continuousCorners}
+      >
+        {message.content.trim() ? (
+          <Markdown
+            content={message.content}
+            attachments={message.attachments}
+            compact
+          />
+        ) : null}
+        <CommentAttachmentList
+          attachments={message.attachments}
+          content={message.content}
+        />
+      </View>
+      <View className="flex-row items-center gap-1 px-1">
+        <Ionicons
+          name="time-outline"
+          size={12}
+          color={THEME[colorScheme].mutedForeground}
+        />
+        <Text className="text-xs text-muted-foreground">
+          {t("status.queued")}
+        </Text>
+      </View>
+    </View>
+  );
 }
 
 function MessageRow({

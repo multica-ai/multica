@@ -25,8 +25,9 @@ func TestPrivateProjectDaemonIssueGCChecks(t *testing.T) {
 		wantFound bool
 	}{
 		{"user outsider", f.outsider, false, false},
+		{"user workspace admin outside the project", f.outsideAdmin, false, false},
 		{"user project member", f.insider, false, true},
-		{"user workspace owner", testUserID, false, true},
+		{"user workspace owner in the member list", testUserID, false, true},
 		{"daemon token of a runtime owner outside the project", f.outsider, true, true},
 		{"daemon token project member", f.insider, true, true},
 		{"workspace token", "", true, true},

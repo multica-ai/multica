@@ -407,11 +407,9 @@ func appLabel(slug string) string {
 
 // notify writes the approver's inbox item. Confirmation and connection
 // requests are always delivered: the agent is stopped until the person
-// answers. Results follow the recipient's agent-activity preference.
+// answers. Results follow the recipient's agent-activity preference; the
+// inbox type registry owns both rules.
 func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType string) {
-	if notifType == NotifActionResult && s.mutedAgentActivity(ctx, req) {
-		return
-	}
 	actorType := pgtype.Text{String: "agent", Valid: true}
 	agentName := "Agent"
 	if agent, err := s.q.GetAgent(ctx, req.AgentID); err == nil {
@@ -460,52 +458,26 @@ func (s *Service) notify(ctx context.Context, req db.AppActionRequest, notifType
 		"summary":         req.Summary,
 		"expires_at":      util.TimestampToString(req.ExpiresAt),
 	})
-	item, inserted, err := inbox.CreateIfEligible(ctx, s.q, db.CreateInboxItemParams{
-		ID:            dbid.NewV7(),
-		WorkspaceID:   req.WorkspaceID,
-		RecipientType: "member",
-		RecipientID:   req.ApproverUserID,
-		Type:          notifType,
-		Severity:      severity,
-		IssueID:       req.IssueID,
-		Title:         title,
-		Body:          pgtype.Text{String: body, Valid: true},
-		ActorType:     actorType,
-		ActorID:       req.AgentID,
-		Details:       details,
+	_, _, err := inbox.Deliver(ctx, s.q, s.bus, inbox.Notification{
+		Params: db.CreateInboxItemParams{
+			ID:            dbid.NewV7(),
+			WorkspaceID:   req.WorkspaceID,
+			RecipientType: "member",
+			RecipientID:   req.ApproverUserID,
+			Type:          notifType,
+			Severity:      severity,
+			IssueID:       req.IssueID,
+			Title:         title,
+			Body:          pgtype.Text{String: body, Valid: true},
+			ActorType:     actorType,
+			ActorID:       req.AgentID,
+			Details:       details,
+		},
+		IssueStatus: &issueStatus,
 	})
 	if err != nil {
 		slog.Warn("connectedapps: create inbox item failed", "request_id", util.UUIDToString(req.ID), "error", err)
-		return
 	}
-	if !inserted || s.bus == nil {
-		return
-	}
-	s.bus.Publish(events.Event{
-		Type: "inbox:new", WorkspaceID: util.UUIDToString(item.WorkspaceID), ActorType: "agent", ActorID: util.UUIDToString(req.AgentID),
-		Payload: map[string]any{"item": map[string]any{
-			"id": util.UUIDToString(item.ID), "workspace_id": util.UUIDToString(item.WorkspaceID),
-			"recipient_type": item.RecipientType, "recipient_id": util.UUIDToString(item.RecipientID),
-			"type": item.Type, "severity": item.Severity, "issue_id": util.UUIDToPtr(item.IssueID),
-			"title": item.Title, "body": util.TextToPtr(item.Body), "read": item.Read, "archived": item.Archived,
-			"created_at": util.TimestampToString(item.CreatedAt), "actor_type": util.TextToPtr(item.ActorType),
-			"actor_id": util.UUIDToPtr(item.ActorID), "details": json.RawMessage(item.Details), "issue_status": issueStatus,
-		}},
-	})
-}
-
-// mutedAgentActivity reports whether the recipient muted the agent-activity
-// group, which app results belong to.
-func (s *Service) mutedAgentActivity(ctx context.Context, req db.AppActionRequest) bool {
-	pref, err := s.q.GetNotificationPreference(ctx, db.GetNotificationPreferenceParams{
-		WorkspaceID: req.WorkspaceID, UserID: req.ApproverUserID,
-	})
-	if err != nil {
-		return false
-	}
-	prefs := map[string]string{}
-	_ = json.Unmarshal(pref.Preferences, &prefs)
-	return prefs["agent_activity"] == "muted"
 }
 
 // RunSweeper runs Sweep every minute until ctx ends. Safe on every replica:

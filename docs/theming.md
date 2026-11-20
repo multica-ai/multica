@@ -13,8 +13,8 @@ Appearance → Theme options**. Themes never run JavaScript.
 **Settings → Appearance → Manage** lists the themes installed on the device
 and the community theme store; the built-in themes are in the theme picker. Install a theme from the
 store there, or with **Import theme**, from a `.zip` of the folder or from the
-folder itself; a theme `.zip` attached to a chat or comment installs with
-**Install theme** on the attachment. Themes are saved on the device, like every other Appearance
+folder itself, including a theme `.zip` downloaded from a chat or comment
+attachment. Themes are saved on the device, like every other Appearance
 setting; **Remove** on a theme's card deletes it, and goes back to Default
 when it was in use. **Check for updates** looks for new releases of the
 themes installed from the store.
@@ -316,6 +316,12 @@ UI primitives carry a `data-slot`; these are public too: `button` (also
 `alert-dialog-content`, `sheet-content`, `tabs-list`, `tabs-trigger`,
 `card`, `kbd`, `separator`. Line icons are `svg.icon`.
 
+Every button is `[data-slot="button"]`, including one that opens a menu,
+popover, tooltip or dialog. `data-variant` is `default`, `outline`, `brand`,
+`brandSubtle`, `secondary`, `ghost`, `destructive` or `link`; `data-size` is
+`default`, `xs`, `sm`, `lg`, `icon`, `icon-xs`, `icon-sm` or `icon-lg`. A
+button whose menu or popover is open also has `aria-expanded="true"`.
+
 ### State on `<html>`
 
 | Class or attribute | When |
@@ -457,9 +463,9 @@ to the skill's routing table instead of an entry to every agent's skill list.
   itself. Every later save to the theme in use applies within a second, so
   ask for changes and watch them land.
 - **On the web, or with an agent on another machine.** The agent attaches
-  the theme as a `.zip`. **Install theme** on the attachment reads it with
-  the same checks and confirmation as **Import theme**; a newer version of
-  the same id replaces the old one.
+  the theme as a `.zip`. Download it and install it with **Import theme**,
+  which runs the checks and asks before installing; a newer version of the
+  same id replaces the old one.
 
 The checker runs without installing the repository, from a sparse clone
 and Node 22.18 or newer:
@@ -795,7 +801,7 @@ and dark differ, both defaults are given.
 | `--space-lg` | `1.5rem` | Spacing step: an object page's side padding, the issue page's top padding on phones. |
 | `--space-xl` | `2rem` | Spacing step: an object page's top padding, the issue page's padding. |
 | `--page-padding-x` | `var(--space-md, 1rem)` | Side padding of page headers, the toolbars under them and full-width lists. |
-| `--sidebar-panel-width` | `240px` | Starting width of the navigation panel, kept between 200px and 320px. Once the person drags its edge, their width wins. |
+| `--sidebar-panel-width` | `280px` | Starting width of the navigation panel, kept between 200px and 320px. Once the person drags its edge, their width wins. |
 | `--content-max-width` | `clamp(56rem, 70cqi, 70rem)` | Widest the reading column gets on an issue page and in chat. |
 | `--object-page-max-width` | `760px` | Widest the body of a project, agent, squad, runtime or other object page gets. |
 

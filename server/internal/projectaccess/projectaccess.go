@@ -3,8 +3,15 @@
 // realtime fanout all call into it instead of re-deriving visibility.
 //
 // The rule: a project with visibility "private" is visible to its
-// project_member rows and to workspace owners/admins. Every other project is
-// visible to every workspace member. An issue's visibility is its project's.
+// project_member rows and to nobody else. A workspace role grants no
+// visibility: an owner or admin sees a private project only as one of its
+// members (MUL-9284). Every other project is visible to every workspace
+// member. An issue's visibility is its project's.
+//
+// A guest (MUL-9420) sees only the projects it is a member of, whatever their
+// visibility, and nothing outside a project. Its hidden set therefore holds
+// every other project plus NoProject, which stands in for "no project" so the
+// same SQL predicates (COALESCE(project_id, NoProject)) hide project-less rows.
 //
 // A viewer is a set of principals (human user ids). A member request has one
 // principal: the member. An agent run has two: the human who triggered it and
@@ -25,14 +32,26 @@ import (
 const (
 	VisibilityWorkspace = "workspace"
 	VisibilityPrivate   = "private"
+
+	RoleGuest = "guest"
 )
+
+// NoProject is the hidden-set entry for objects outside any project. It is the
+// nil UUID, which no project id can be.
+var NoProject = pgtype.UUID{Valid: true}
+
+// IsGuestRole reports whether a workspace role is the project-scoped guest.
+func IsGuestRole(role string) bool {
+	return role == RoleGuest
+}
 
 // ValidVisibility reports whether v is a storable project visibility.
 func ValidVisibility(v string) bool {
 	return v == VisibilityWorkspace || v == VisibilityPrivate
 }
 
-// IsManagerRole reports whether a workspace role sees every private project.
+// IsManagerRole reports whether a workspace role may manage the access of a
+// project its holder can see. It grants no visibility of its own.
 func IsManagerRole(role string) bool {
 	return role == "owner" || role == "admin"
 }
@@ -41,6 +60,7 @@ func IsManagerRole(role string) bool {
 type Querier interface {
 	GetMemberByUserAndWorkspace(ctx context.Context, arg db.GetMemberByUserAndWorkspaceParams) (db.Member, error)
 	ListHiddenProjectIDsForUser(ctx context.Context, arg db.ListHiddenProjectIDsForUserParams) ([]pgtype.UUID, error)
+	ListHiddenProjectIDsForGuest(ctx context.Context, arg db.ListHiddenProjectIDsForGuestParams) ([]pgtype.UUID, error)
 	ListPrivateProjectIDs(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error)
 }
 
@@ -70,10 +90,14 @@ func (h *Hidden) add(ids []pgtype.UUID) {
 func (h Hidden) Empty() bool { return len(h.ids) == 0 }
 
 // CanSeeProject reports whether an object in projectID is visible. Objects
-// outside any project (invalid projectID) are always visible.
+// outside any project (invalid projectID) are visible unless the set hides
+// NoProject.
 func (h Hidden) CanSeeProject(projectID pgtype.UUID) bool {
-	if !projectID.Valid || len(h.set) == 0 {
+	if len(h.set) == 0 {
 		return true
+	}
+	if !projectID.Valid {
+		projectID = NoProject
 	}
 	_, hidden := h.set[projectID.Bytes]
 	return !hidden
@@ -96,16 +120,26 @@ func (h Hidden) IDs() []pgtype.UUID {
 	return h.ids
 }
 
-// ForMember computes the hidden set for one workspace member whose role the
-// caller already knows (request middleware loaded it).
-func ForMember(ctx context.Context, q Querier, workspaceID, userID pgtype.UUID, role string) (Hidden, error) {
+// ForMember computes the hidden set for one current workspace member: every
+// private project they are not a member of, or for a guest every project they
+// are not a member of and everything outside a project.
+func ForMember(ctx context.Context, q Querier, member db.Member) (Hidden, error) {
 	h := newHidden()
-	if IsManagerRole(role) {
+	if IsGuestRole(member.Role) {
+		ids, err := q.ListHiddenProjectIDsForGuest(ctx, db.ListHiddenProjectIDsForGuestParams{
+			WorkspaceID: member.WorkspaceID,
+			UserID:      member.UserID,
+		})
+		if err != nil {
+			return Hidden{}, err
+		}
+		h.add([]pgtype.UUID{NoProject})
+		h.add(ids)
 		return h, nil
 	}
 	ids, err := q.ListHiddenProjectIDsForUser(ctx, db.ListHiddenProjectIDsForUserParams{
-		WorkspaceID: workspaceID,
-		UserID:      userID,
+		WorkspaceID: member.WorkspaceID,
+		UserID:      member.UserID,
 	})
 	if err != nil {
 		return Hidden{}, err
@@ -124,9 +158,6 @@ func ForPrincipals(ctx context.Context, q Querier, workspaceID pgtype.UUID, prin
 	private, err := q.ListPrivateProjectIDs(ctx, workspaceID)
 	if err != nil {
 		return Hidden{}, err
-	}
-	if len(private) == 0 {
-		return h, nil
 	}
 	all := newHidden()
 	all.add(private)
@@ -156,7 +187,11 @@ func ForPrincipals(ctx context.Context, q Querier, workspaceID pgtype.UUID, prin
 		if err != nil {
 			return Hidden{}, err
 		}
-		one, err := ForMember(ctx, q, workspaceID, p, member.Role)
+		// Without private projects only a guest has anything hidden.
+		if len(private) == 0 && !IsGuestRole(member.Role) {
+			continue
+		}
+		one, err := ForMember(ctx, q, member)
 		if err != nil {
 			return Hidden{}, err
 		}

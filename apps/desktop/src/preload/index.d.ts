@@ -10,6 +10,7 @@ import type {
 } from "../shared/issue-window";
 import type {
   ManualUpdateCheckResult,
+  UpdaterDownloadState,
   UpdaterPreferences,
 } from "../shared/updater-types";
 import type {
@@ -250,6 +251,8 @@ interface DaemonAPI {
 }
 
 interface UpdaterAPI {
+  getDownloadState: () => Promise<UpdaterDownloadState>;
+  onDownloadState: (callback: (state: UpdaterDownloadState) => void) => () => void;
   onUpdateAvailable: (callback: (info: { version: string; releaseNotes?: string }) => void) => () => void;
   onDownloadProgress: (callback: (progress: { percent: number }) => void) => () => void;
   onUpdateDownloaded: (

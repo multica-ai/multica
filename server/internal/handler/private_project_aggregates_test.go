@@ -88,7 +88,10 @@ func TestPrivateProjectDashboardsKeepWorkspaceTotals(t *testing.T) {
 				t.Fatalf("outsider: hidden project_id returned %d rows, want the missing-project answer (0)", len(rows))
 			}
 			outside := get(ep.h, ep.path, f.outsider, "")
-			for name, userID := range map[string]string{"project member": f.insider, "workspace owner": testUserID} {
+			if rows := get(ep.h, ep.path, f.outsideAdmin, secret); len(rows) != 0 {
+				t.Fatalf("workspace admin outside the project: hidden project_id returned %d rows, want 0", len(rows))
+			}
+			for name, userID := range map[string]string{"project member": f.insider, "workspace admin outside the project": f.outsideAdmin} {
 				if got, want := sum(outside, ep.count), sum(get(ep.h, ep.path, userID, ""), ep.count); got != want || got < share {
 					t.Fatalf("workspace %s: outsider = %v, %s = %v, want equal totals that include the private project's %v", ep.count, got, name, want, share)
 				}

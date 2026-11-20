@@ -110,10 +110,6 @@ vi.mock("@multica/core/auth", () => {
   };
 });
 
-vi.mock("./use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: () => vi.fn(),
-}));
-
 vi.mock("@multica/core/issues/queries", () => ({
   issueDetailOptions: (wsId: string, id: string) => ({
     queryKey: ["issues", wsId, "detail", id],

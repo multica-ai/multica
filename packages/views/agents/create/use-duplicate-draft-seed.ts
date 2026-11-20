@@ -24,6 +24,7 @@ export function useDuplicateDraftSeed({
   currentUserId,
   fallbackRuntimeId,
   nameSuffix,
+  canAddInvocationMembers,
   onSeed,
 }: {
   source: Agent | null;
@@ -33,6 +34,9 @@ export function useDuplicateDraftSeed({
   currentUserId: string | null;
   fallbackRuntimeId: string;
   nameSuffix: string;
+  /** Whether the plan allows a member list on a new agent; `null` while the
+   *  workspace's features are loading. A locked plan copies "Only me". */
+  canAddInvocationMembers: boolean | null;
   onSeed: (draft: AgentDraft, runtimeReset: boolean) => void;
 }): void {
   const seededRef = useRef(false);
@@ -42,16 +46,23 @@ export function useDuplicateDraftSeed({
   onSeedRef.current = onSeed;
 
   useEffect(() => {
-    if (seededRef.current || !source || !runtimesSettled) return;
+    if (
+      seededRef.current ||
+      !source ||
+      !runtimesSettled ||
+      canAddInvocationMembers === null
+    ) return;
     seededRef.current = true;
     const draft = buildDuplicateDraft(source, {
       runtimes,
       currentUserId,
       fallbackRuntimeId,
       nameSuffix,
+      canAddInvocationMembers,
     });
     onSeedRef.current(draft, draft.runtimeId !== source.runtime_id);
   }, [
+    canAddInvocationMembers,
     currentUserId,
     fallbackRuntimeId,
     nameSuffix,

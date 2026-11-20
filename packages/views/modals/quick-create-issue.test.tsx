@@ -30,7 +30,6 @@ const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
-const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2).
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
@@ -204,10 +203,6 @@ vi.mock("@multica/core/api", () => ({
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
-}));
-
-vi.mock("./use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: () => mockShowIssueLimitUpgradePrompt,
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -718,28 +713,6 @@ describe("AgentCreatePanel", () => {
     });
   });
 
-  it("shows the upgrade recovery immediately when quick create is rejected by the issue preflight", async () => {
-    const user = userEvent.setup();
-    const onClose = vi.fn();
-    mockQuickCreateIssue.mockRejectedValue(
-      new ApiError("workspace has reached its issue limit", 402, "Payment Required", {
-        code: "issue_limit_reached",
-        limit: 1000,
-        policy_revision: 1,
-      }),
-    );
-
-    renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
-    await user.click(screen.getByRole("button", { name: /^Create$/i }));
-
-    await waitFor(() => {
-      expect(mockShowIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
-    });
-    expect(mockToastSuccess).not.toHaveBeenCalled();
-    expect(mockClearDraft).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
   it("reveals optional fields from the overflow and submits their values", async () => {
     const user = userEvent.setup();
 
@@ -1083,6 +1056,14 @@ describe("AgentCreatePanel", () => {
 
     expect(mockSetShared).not.toHaveBeenCalled();
     expect(screen.getByTestId("project-picker")).toHaveTextContent("Project proj-1");
+  });
+
+  it("opens without a project when asked for none, over an unfinished draft's project", () => {
+    mockIssueDraftStore.draft.shared.projectId = "proj-1";
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn(), data: { project_id: null } });
+
+    expect(screen.queryByText("Project proj-1")).toBeNull();
   });
 
   // When the modal was opened from "Add sub issue" on an existing issue,

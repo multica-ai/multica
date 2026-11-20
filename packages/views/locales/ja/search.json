@@ -6,6 +6,7 @@
   "breadcrumb_aria": "現在のメニュー",
   "groups": {
     "pages": "ページ",
+    "views": "ビュー",
     "commands": "コマンド",
     "members": "メンバー",
     "agents": "エージェント",
@@ -15,6 +16,7 @@
     "autopilots": "オートパイロット",
     "chats": "チャット",
     "skills": "スキル",
+    "docs": "ドキュメント",
     "cancelled": "キャンセル済み",
     "recent": "最近の項目",
     "workspaces": "ワークスペース",
@@ -122,7 +124,6 @@
     "unsubscribed": "購読を解除しました",
     "label_added": "ラベル {{name}} を追加しました",
     "label_removed": "ラベル {{name}} を削除しました",
-    "label_failed": "一部のタスクにラベル {{name}} を追加できませんでした",
     "update_failed": "更新に失敗しました",
     "assigned": "{{identifier}} を {{name}} に割り当てました"
   },
@@ -160,5 +161,6 @@
   },
   "trigger": {
     "label": "検索..."
-  }
+  },
+  "untitled_doc": "無題"
 }

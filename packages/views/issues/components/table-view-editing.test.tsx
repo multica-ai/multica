@@ -34,6 +34,7 @@ import type {
   IssueTableRowsResponse,
 } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
+import { ScrollRestorationProvider } from "../../platform";
 import { IssueSurfaceSelectionProvider } from "../surface/selection-context";
 import type { IssueSurfaceSelection } from "../surface/selection-context";
 import type { IssueCreateDefaults } from "../surface/types";
@@ -207,10 +208,12 @@ function Harness({
   childProgressMap,
   surfaceKey,
   onCreateIssue = () => {},
+  canCreate = true,
 }: {
   childProgressMap: Map<string, ChildProgress>;
   surfaceKey: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
+  canCreate?: boolean;
 }) {
   return (
     <ViewStoreProvider store={getIssueSurfaceViewStore(surfaceKey)}>
@@ -221,7 +224,7 @@ function Harness({
           search=""
           onSearchChange={() => {}}
           onLoadedIssuesChange={() => {}}
-          onCreateIssue={onCreateIssue}
+          onCreateIssue={canCreate ? onCreateIssue : undefined}
           exportIssues={() => Promise.resolve(serverIssues)}
           resolveExportLookups={() =>
             Promise.resolve({
@@ -434,6 +437,25 @@ describe("TableView cell editors under data refresh", () => {
     });
   });
 
+  it("offers no sub-issue creation when the viewer cannot create issues (guest, MUL-9420)", async () => {
+    serverIssues = [makeIssue("a", "Alpha task", "todo")];
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map()}
+          surfaceKey={`test-no-sub-issue-${Math.floor(Math.random() * 1e9)}`}
+          canCreate={false}
+        />
+      </QueryClientProvider>,
+    );
+
+    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    expect(within(row).queryByRole("button", { name: "Create sub-issue" })).toBeNull();
+    // The row's other title action stays.
+    expect(within(row).getByRole("button", { name: "Rename issue" })).toBeInTheDocument();
+  });
+
   it("uses the preferred peek for both titles and row space; Shift opens the full page instead", async () => {
     useIssueOpeningStore.getState().setOpenMode("peek");
     serverIssues = [makeIssue("a", "Alpha task", "todo")];
@@ -570,6 +592,33 @@ describe("TableView cell editors under data refresh", () => {
       "_blank",
       "noopener,noreferrer",
     );
+  });
+  it("brings the table back to where it was scrolled when it mounts again", async () => {
+    serverIssues = [makeIssue("a", "Alpha task", "todo")];
+    const get = vi.fn((key: string) =>
+      key === "table" ? { top: 820, left: 160, height: 4000 } : undefined,
+    );
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <ScrollRestorationProvider adapter={{ get }}>
+          <Harness
+            childProgressMap={new Map()}
+            surfaceKey={`test-scroll-restore-${Math.floor(Math.random() * 1e9)}`}
+          />
+        </ScrollRestorationProvider>
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("MUL-a");
+    const scroller = document.querySelector<HTMLElement>(
+      '[data-tab-scroll-root="table"]',
+    )!;
+    // Marked so the tab coordinator captures it on the way out, and given
+    // both saved offsets back when it attaches.
+    expect(scroller).toContainElement(screen.getByText("MUL-a"));
+    expect(scroller.scrollTop).toBe(820);
+    expect(scroller.scrollLeft).toBe(160);
   });
 });
 
