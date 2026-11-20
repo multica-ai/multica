@@ -3,8 +3,8 @@
 -- Older releases used these full ledger keys for the same logical change.
 -- The runner does not delete them, and the files must not come back: a
 -- database that never recorded that exact string would execute them again,
--- and 649/657/661/665/673/674/681/682/683/684/685/686/695/696/697/698 are now
--- different migrations.
+-- and 649/657/661/665/673/674/681/682/683/684/685/686/695/696/697/698/703/704
+-- are now different migrations.
 --   649_issue_origin_sharecrm_chat / 650_issue_origin_sharecrm_chat_validate
 --   657_issue_origin_sharecrm_chat / 658_issue_origin_sharecrm_chat_validate
 --   661_issue_origin_sharecrm_chat / 662_issue_origin_sharecrm_chat_validate
@@ -15,6 +15,7 @@
 --   685_issue_origin_sharecrm_chat / 686_issue_origin_sharecrm_chat_validate
 --   695_issue_origin_sharecrm_chat / 696_issue_origin_sharecrm_chat_validate
 --   697_issue_origin_sharecrm_chat / 698_issue_origin_sharecrm_chat_validate
+--   703_issue_origin_sharecrm_chat / 704_issue_origin_sharecrm_chat_validate
 --
 -- 681/682 on upstream are project_folder and its name index. 683/684 are
 -- entitlement_feature_attempt and its scope index. 685-694 are the docs
@@ -22,11 +23,15 @@
 -- idx_inbox_active_shown. 697/698 are autopilot_run.idempotency_key and
 -- uq_autopilot_run_idempotency_key. 699 widens member and invitation roles
 -- for guests. 700-702 are member_search_access and its primary key.
+-- 703-707 are doc_comment, its primary key, and its doc and workspace
+-- indexes. 708/709 build idx_attachment_workspace_size and drop
+-- idx_attachment_workspace. 710 adds
+-- autopilot_quota_period.rejection_notified_limit.
 -- A database that already recorded the ShareCRM filenames above still runs
 -- this file: the ledger key is the whole filename, not the numeric prefix.
 -- When weixin_chat and sharecrm_chat are already allowed, including when a
 -- retired widen left the check NOT VALID, this file returns without another
--- catalog swap. Migration 704 validates.
+-- catalog swap. Migration 712 validates.
 --
 -- 667/668 on this fork already union sharecrm_chat in, including on a
 -- database whose 667 committed before that repair existed (668 reads the

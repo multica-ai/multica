@@ -56,7 +56,7 @@ func TestShareCRMOriginMigrationsUpDownAndCatalog(t *testing.T) {
 
 	assertShareCRMOriginRejected(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000001")
 
-	applyMigrationFile(t, ctx, conn.Conn(), "703_issue_origin_sharecrm_chat.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "711_issue_origin_sharecrm_chat.up.sql")
 	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), false, true, true)
 	if _, err := conn.Exec(ctx, `INSERT INTO issue (id, origin_type) VALUES ($1, 'sharecrm_chat')`, "00000000-0000-4000-8000-000000000002"); err != nil {
 		t.Fatalf("insert sharecrm_chat after widening constraint: %v", err)
@@ -65,15 +65,15 @@ func TestShareCRMOriginMigrationsUpDownAndCatalog(t *testing.T) {
 		t.Fatalf("insert weixin_chat after ShareCRM widening: %v", err)
 	}
 
-	applyMigrationFile(t, ctx, conn.Conn(), "704_issue_origin_sharecrm_chat_validate.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "712_issue_origin_sharecrm_chat_validate.up.sql")
 	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), true, true, true)
 
-	applyMigrationFile(t, ctx, conn.Conn(), "704_issue_origin_sharecrm_chat_validate.down.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "712_issue_origin_sharecrm_chat_validate.down.sql")
 	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), false, true, true)
 	if _, err := conn.Exec(ctx, `DELETE FROM issue WHERE origin_type = 'sharecrm_chat'`); err != nil {
 		t.Fatalf("remove ShareCRM row before narrowing rollback: %v", err)
 	}
-	applyMigrationFile(t, ctx, conn.Conn(), "703_issue_origin_sharecrm_chat.down.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "711_issue_origin_sharecrm_chat.down.sql")
 	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), true, true, false)
 	assertShareCRMOriginRejected(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000004")
 	if _, err := conn.Exec(ctx, `INSERT INTO issue (id, origin_type) VALUES ($1, 'weixin_chat')`, "00000000-0000-4000-8000-000000000005"); err != nil {
@@ -167,8 +167,8 @@ func TestShareCRMOriginSurvivesWeChatUpgrade(t *testing.T) {
 
 	applyMigrationFile(t, ctx, conn.Conn(), "667_issue_origin_weixin_chat.up.sql")
 	applyMigrationFile(t, ctx, conn.Conn(), "668_issue_origin_weixin_chat_validate.up.sql")
-	applyMigrationFile(t, ctx, conn.Conn(), "703_issue_origin_sharecrm_chat.up.sql")
-	applyMigrationFile(t, ctx, conn.Conn(), "704_issue_origin_sharecrm_chat_validate.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "711_issue_origin_sharecrm_chat.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "712_issue_origin_sharecrm_chat_validate.up.sql")
 	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), true, true, true)
 	assertIssueOrigin(t, ctx, conn.Conn(), sharecrmIssue, "sharecrm_chat")
 	if _, err := conn.Exec(ctx, `INSERT INTO issue (id, origin_type) VALUES ($1, 'weixin_chat')`, "00000000-0000-4000-8000-000000000012"); err != nil {
@@ -260,8 +260,8 @@ func TestStuckUpstream667RestoresExistingOrigins(t *testing.T) {
 		}
 	}
 
-	applyMigrationFile(t, ctx, conn.Conn(), "703_issue_origin_sharecrm_chat.up.sql")
-	applyMigrationFile(t, ctx, conn.Conn(), "704_issue_origin_sharecrm_chat_validate.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "711_issue_origin_sharecrm_chat.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "712_issue_origin_sharecrm_chat_validate.up.sql")
 	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), true, true, true)
 	if !originAllowed(t, ctx, conn.Conn(), "custom_origin") || !originAllowed(t, ctx, conn.Conn(), "weird'origin") {
 		t.Fatal("repair lost an origin that still had rows")
@@ -311,10 +311,10 @@ func TestOriginNarrowingRollsBackWhileRowsRemain(t *testing.T) {
 
 	applyMigrationFile(t, ctx, conn.Conn(), "667_issue_origin_weixin_chat.up.sql")
 	applyMigrationFile(t, ctx, conn.Conn(), "668_issue_origin_weixin_chat_validate.up.sql")
-	applyMigrationFile(t, ctx, conn.Conn(), "703_issue_origin_sharecrm_chat.up.sql")
-	applyMigrationFile(t, ctx, conn.Conn(), "704_issue_origin_sharecrm_chat_validate.up.sql")
-	if _, err := conn.Exec(ctx, readMigrationFile(t, "703_issue_origin_sharecrm_chat.down.sql")); !isCheckViolation(err) {
-		t.Fatalf("703 down with a sharecrm row: got %v, want check violation", err)
+	applyMigrationFile(t, ctx, conn.Conn(), "711_issue_origin_sharecrm_chat.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "712_issue_origin_sharecrm_chat_validate.up.sql")
+	if _, err := conn.Exec(ctx, readMigrationFile(t, "711_issue_origin_sharecrm_chat.down.sql")); !isCheckViolation(err) {
+		t.Fatalf("711 down with a sharecrm row: got %v, want check violation", err)
 	}
 	assertShareCRMOriginConstraint(t, ctx, conn.Conn(), true, true, true)
 	assertIssueOrigin(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000031", "sharecrm_chat")
