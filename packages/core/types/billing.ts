@@ -445,7 +445,12 @@ export interface CreateWorkspaceSubscriptionPortalResponse {
  * can be reduced, but nothing can be added. The server enforces on every
  * write; this is only for rendering.
  */
-export type PaidFeature = "private_projects" | "guests";
+export type PaidFeature =
+  | "private_projects"
+  | "guests"
+  | "agent_invocation_members"
+  | "runtime_member_sharing"
+  | "team_app_accounts";
 
 export type WorkspaceFeatureState = "available" | "locked";
 

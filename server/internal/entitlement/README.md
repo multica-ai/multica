@@ -17,7 +17,7 @@ The client reads:
 
 - `schema_version`: only version 1 is accepted.
 - `policy_revision`: the effective-instruction generation, currently fixed at
-  `4` by Cloud and not deployment configuration. Cloud advances it when the
+  `7` by Cloud and not deployment configuration. Cloud advances it when the
   meaning or set of actionable instructions changes, including additive
   instructions; `schema_version` changes only for incompatible wire parsing.
 - `subscription_version`: the workspace's monotonic subscription revision. A
@@ -65,6 +65,11 @@ without it, or with a malformed one, as `members` `off` with reason
 and the features keep their instructions. See [Member limit](#member-limit).
 `gates.storage_bytes` (revision 6) is optional the same way; see
 [Attachment storage limit](#attachment-storage-limit).
+
+Revision 7 adds the `agent_invocation_members`, `runtime_member_sharing` and
+`team_app_accounts` features. It is safe in either order: an older consumer
+ignores features it does not know, and this consumer reads a policy without
+one as that feature `off` with reason `feature_missing`.
 
 Responses tolerate unknown JSON fields and gates for additive compatibility.
 Unknown schema/action, malformed fields, a missing `autopilot_runs` gate, HTTP
@@ -223,12 +228,18 @@ configured, including the access control it defines: a private project stays
 visible only to its members after a downgrade. Each feature classifies its own
 writes; the handler entry point is `requireFeatureAddition`
 (`server/internal/handler/paid_feature.go`), called after the ordinary
-permission checks, so a caller refused by those gets the ordinary error.
+permission checks, so a caller refused by those gets the ordinary error. A
+handler that can only tell whether its write adds while holding row locks
+reads the decision first (`paidFeature`) and decides on the locked state, so
+it never waits on Cloud under a lock.
 
 | Feature | Restricted additions | Always allowed |
 | --- | --- | --- |
 | `private_projects` | create a private project; make a project private; add someone who is not a member yet, directly or by making them the lead | remove members; make it workspace-visible; delete or archive; set the lead to an existing member, an agent or nobody; other fields; the owner's recovery join |
 | `guests` | invite a guest; make a member a guest; share another project with a guest | remove a guest; narrow a guest's projects; make a guest a member; accept an invitation sent while the plan included guests |
+| `agent_invocation_members` | create an agent that specific members may invoke (including duplicating one and the CLI `--public-to-member`); add someone to the list; switch from "only me" or "whole workspace" to specific members | remove someone; switch to "only me" or "whole workspace" (an emptied list is the whole workspace); re-save the same list; other fields; invoking the agent |
+| `runtime_member_sharing` | add someone to a private runtime's `shared_with`, including switching from "only me" or public to specific members (decided on the locked runtime row) | remove someone; make it public or "only me"; re-save the same list; using the runtime |
+| `team_app_accounts` | connect a team account for an app that has none, including after a disconnect (checked when the connect starts and again in the OAuth callback before the account is written); give an agent a team-account app or switch one from a personal account; raise an agent's level on a team account; set a team rule to a value that is neither its current value nor the default | reauthorize an app's existing team account; disconnect; remove an app from an agent; lower a level; restore default team rules (Allow all actions); personal accounts and rules; gateway calls, including existing `block` rules |
 
 A stale cached `enforce` is downgraded to `observe` with reason `stale` and
 `Downgraded` set, then to `off`, exactly like gates, so a Cloud outage admits additions rather than

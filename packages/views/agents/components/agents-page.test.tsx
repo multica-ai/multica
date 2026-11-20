@@ -71,6 +71,7 @@ vi.mock("@tanstack/react-query", () => ({
     return { data: [], isLoading: false, isPending: false, isSuccess: true };
   },
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  queryOptions: <T,>(options: T) => options,
 }));
 
 // The list virtualizes; render every row so DOM order reflects sort order.

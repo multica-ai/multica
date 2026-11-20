@@ -9,6 +9,9 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import type { Agent } from "@multica/core/types";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import enAgents from "../../locales/en/agents.json";
+import enBilling from "../../locales/en/billing.json";
+import { ApiError } from "@multica/core/api";
+import { workspaceFeatureKeys } from "@multica/core/billing";
 
 const mockCreateAgent = vi.hoisted(() => vi.fn());
 const mockReplace = vi.hoisted(() => vi.fn());
@@ -32,9 +35,11 @@ vi.mock("../../navigation", () => ({
 vi.mock("@multica/core/api", () => {
   class ApiError extends Error {
     status: number;
-    constructor(message: string, status: number) {
+    body: unknown;
+    constructor(message: string, status: number, _statusText?: string, body?: unknown) {
       super(message);
       this.status = status;
+      this.body = body;
     }
   }
   return {
@@ -80,7 +85,7 @@ const CREATED_AGENT: Agent = {
 function wrapper(queryClient: QueryClient) {
   return function TestWrapper({ children }: { children: ReactNode }) {
     return (
-      <I18nProvider locale="en" resources={{ en: { agents: enAgents } }}>
+      <I18nProvider locale="en" resources={{ en: { agents: enAgents, billing: enBilling } }}>
         <QueryClientProvider client={queryClient}>
           {children}
         </QueryClientProvider>
@@ -146,5 +151,31 @@ describe("useCreateAgentSubmit cache handoff", () => {
     expect(queryClient.invalidateQueries).toHaveBeenCalledWith({
       queryKey: workspaceKeys.agents("ws-1"),
     });
+  });
+});
+
+describe("useCreateAgentSubmit plan refusal", () => {
+  it("shows the paid-feature message for feature_locked and refetches the plan", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    mockCreateAgent.mockRejectedValue(
+      new ApiError("locked", 403, "Forbidden", { code: "feature_locked", feature: "agent_invocation_members" }),
+    );
+    const { result } = renderHook(
+      () =>
+        useCreateAgentSubmit({
+          draft: { ...EMPTY_AGENT_DRAFT, name: "Shared", runtimeId: "runtime-1", permissionScope: "members", memberIds: new Set(["u2"]) },
+          runtimeId: "runtime-1",
+          squadId: null,
+        }),
+      { wrapper: wrapper(queryClient) },
+    );
+    await act(async () => {
+      await result.current.create();
+    });
+    expect(result.current.formError).toBe(enBilling.paid_feature.locked_error);
+    expect(result.current.nameError).toBeNull();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceFeatureKeys.all("ws-1") });
+    expect(mockReplace).not.toHaveBeenCalled();
   });
 });

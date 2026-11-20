@@ -248,7 +248,22 @@
     "read_only": "読み取り専用です。編集するにはアップグレードしてください。",
     "unavailable": "このワークスペースのプランには含まれていません。",
     "view_plans": "プランを見る",
-    "locked_error": "このワークスペースのプランには含まれていません。既存の設定はそのまま有効です。追加するにはアップグレードしてください。"
+    "locked_error": "このワークスペースのプランには含まれていません。既存の設定はそのまま有効です。追加するにはアップグレードしてください。",
+    "upgrade_to_add": "アップグレード",
+    "business": "Business",
+    "badge_label": "Business の機能。詳細を表示",
+    "upgrade_to_business": "Business にアップグレード",
+    "ask_admin": "Business へのアップグレードをワークスペースの管理者に依頼してください。",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "特定のメンバーにエージェントの実行を許可するのは Business の機能です",
+        "description": "自分だけ、またはワークスペース全体に公開する設定は、どのプランでも使えます。"
+      },
+      "runtime_member_sharing": {
+        "title": "ランタイムを特定のメンバーと共有するのは Business の機能です",
+        "description": "\"非公開\" と \"公開\" は、どのプランでも使えます。"
+      }
+    }
   },
   "trial": {
     "status": {

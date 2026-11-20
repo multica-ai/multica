@@ -120,10 +120,17 @@ func (h *Handler) ComposioCallback(w http.ResponseWriter, r *http.Request) {
 	connectedAccountID := q.Get("connected_account_id")
 
 	result, err := h.Composio.CompleteCallback(r.Context(), state, status, connectedAccountID)
+	if errors.Is(err, composio.ErrTeamConnectRefused) {
+		// The handshake was verified and only the workspace's plan refused
+		// the account: say so, so the page offers the upgrade instead of a
+		// retry that would fail the same way.
+		http.Redirect(w, r, h.Composio.CallbackRedirectFailure(result, composio.CallbackFeatureLockedReason), http.StatusFound)
+		return
+	}
 	if err != nil {
-		// Every failure (tampered/expired state, non-success status, write
-		// error) collapses to the generic failure redirect — we never tell the
-		// browser which check failed.
+		// Every other failure (tampered/expired state, non-success status,
+		// write error) collapses to the generic failure redirect — we never
+		// tell the browser which check failed.
 		http.Redirect(w, r, h.Composio.CallbackRedirect(result, false), http.StatusFound)
 		return
 	}

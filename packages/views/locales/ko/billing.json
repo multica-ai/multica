@@ -248,7 +248,22 @@
     "read_only": "읽기 전용입니다. 편집하려면 업그레이드하세요.",
     "unavailable": "이 워크스페이스의 요금제에 포함되어 있지 않습니다.",
     "view_plans": "요금제 보기",
-    "locked_error": "이 워크스페이스의 요금제에 포함되어 있지 않습니다. 기존 설정은 계속 적용되며, 추가하려면 업그레이드하세요."
+    "locked_error": "이 워크스페이스의 요금제에 포함되어 있지 않습니다. 기존 설정은 계속 적용되며, 추가하려면 업그레이드하세요.",
+    "upgrade_to_add": "업그레이드",
+    "business": "Business",
+    "badge_label": "Business 기능. 자세히 보기",
+    "upgrade_to_business": "Business로 업그레이드",
+    "ask_admin": "워크스페이스 관리자에게 Business로 업그레이드를 요청하세요.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "특정 사용자에게 에이전트 실행을 허용하는 것은 Business 기능입니다",
+        "description": "나만 사용하거나 워크스페이스 전체에 공개하는 설정은 모든 요금제에서 사용할 수 있습니다."
+      },
+      "runtime_member_sharing": {
+        "title": "런타임을 특정 멤버와 공유하는 것은 Business 기능입니다",
+        "description": "\"비공개\"와 \"공개\"는 모든 요금제에서 사용할 수 있습니다."
+      }
+    }
   },
   "trial": {
     "status": {

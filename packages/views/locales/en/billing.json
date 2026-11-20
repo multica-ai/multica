@@ -254,7 +254,22 @@
     "read_only": "Read-only. Upgrade to edit.",
     "unavailable": "Not included in this workspace's plan.",
     "view_plans": "View plans",
-    "locked_error": "This isn't included in the workspace's plan. Existing settings keep working; upgrade to add more."
+    "locked_error": "This isn't included in the workspace's plan. Existing settings keep working; upgrade to add more.",
+    "upgrade_to_add": "Upgrade to add",
+    "business": "Business",
+    "badge_label": "Business feature. Show details",
+    "upgrade_to_business": "Upgrade to Business",
+    "ask_admin": "Ask a workspace admin to upgrade to Business.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "Letting specific people run an agent is a Business feature",
+        "description": "\"Only me\" and \"Entire workspace\" stay available on every plan."
+      },
+      "runtime_member_sharing": {
+        "title": "Sharing a runtime with specific members is a Business feature",
+        "description": "\"Private\" and \"Public\" stay available on every plan."
+      }
+    }
   },
   "trial": {
     "status": {
