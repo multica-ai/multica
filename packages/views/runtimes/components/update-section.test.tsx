@@ -292,6 +292,32 @@ describe("UpdateSection queued updates", () => {
     expect(screen.queryByText(/Update complete/)).not.toBeInTheDocument();
   });
 
+  it("shows the machine's existing queue when another tab already queued one", async () => {
+    vi.mocked(api.initiateUpdate).mockRejectedValue(new ApiError("in progress", 409, "Conflict"));
+    vi.mocked(api.getActiveUpdate).mockResolvedValueOnce(null).mockResolvedValueOnce(update({}));
+
+    renderSection({ runtimeId: "runtime-1", currentVersion: "v0.4.0" });
+    fireEvent.click(await screen.findByRole("button", { name: "Update" }));
+
+    expect(await screen.findByText("Updates when idle")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    expect(screen.queryByText("Failed to initiate update")).not.toBeInTheDocument();
+  });
+
+  it("does not claim installation started when the update already ended", async () => {
+    vi.mocked(api.getActiveUpdate).mockResolvedValue(update({}));
+    vi.mocked(api.cancelUpdate).mockRejectedValue(new ApiError("not cancellable", 409, "Conflict"));
+    vi.mocked(api.getUpdateResult).mockResolvedValue(update({ status: "expired", cancellable: false }));
+
+    renderSection({ runtimeId: "runtime-1", currentVersion: "v0.4.0" });
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+
+    expect(
+      await screen.findByText("Expired after waiting 24 hours for the machine to go idle."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/installation has already started/)).not.toBeInTheDocument();
+  });
+
   it("shows an expired queue as a neutral note", async () => {
     vi.mocked(api.getActiveUpdate).mockResolvedValue(update({ status: "expired", cancellable: false }));
 

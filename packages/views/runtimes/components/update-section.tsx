@@ -161,7 +161,8 @@ export function UpdateSection({
     api
       .getActiveUpdate(runtimeId)
       .then((active) => {
-        if (!stale) setUpdate(active);
+        // Keep an update this page started while the lookup was in flight.
+        if (!stale) setUpdate((prev) => active ?? prev);
       })
       .catch(() => {});
     return () => {
@@ -211,9 +212,14 @@ export function UpdateSection({
     setNote(null);
     try {
       setUpdate(await api.initiateUpdate(runtimeId, latestVersion));
-    } catch {
-      setUpdate(null);
-      setNote("initiate_failed");
+    } catch (err) {
+      // 409: the machine already has an update (e.g. from another tab); show it.
+      const active =
+        err instanceof ApiError && err.status === 409
+          ? await api.getActiveUpdate(runtimeId).catch(() => null)
+          : null;
+      setUpdate(active);
+      if (!active) setNote("initiate_failed");
     } finally {
       setSubmitting(false);
     }
@@ -227,8 +233,12 @@ export function UpdateSection({
       const cancelled = await api.cancelUpdate(runtimeId, update.id);
       setUpdate(cancelled.status === "cancelled" ? null : cancelled);
     } catch (err) {
-      setNote(err instanceof ApiError && err.status === 409 ? "cancel_conflict" : "cancel_failed");
-      api.getUpdateResult(runtimeId, update.id).then(setUpdate, () => {});
+      const conflict = err instanceof ApiError && err.status === 409;
+      const latest = await api.getUpdateResult(runtimeId, update.id).catch(() => null);
+      if (latest) setUpdate(latest.status === "cancelled" ? null : latest);
+      // A 409 means it started or ended meanwhile; only a start needs saying.
+      if (!conflict) setNote("cancel_failed");
+      else if (latest?.status === "running") setNote("cancel_conflict");
     } finally {
       setCancelling(false);
     }
