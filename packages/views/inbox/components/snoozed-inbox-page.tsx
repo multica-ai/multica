@@ -24,6 +24,7 @@ import { useBuiltinViewLabel } from "../../issue-views/builtin-views";
 import { useLocale, useT } from "../../i18n";
 import { InboxSnoozeMenu } from "./inbox-snooze-menu";
 import { formatSnoozeTime } from "./inbox-snooze-time";
+import { inboxListLoad } from "./use-filtered-inbox-rows";
 import { useInboxSnooze } from "./use-inbox-snooze";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -57,7 +58,9 @@ export function SnoozedInboxPage() {
   const p = useWorkspacePaths();
   const locale = useLocale();
   const title = useBuiltinViewLabel()("snoozed");
-  const { data: snoozed, isLoading } = useQuery(snoozedInboxOptions(wsId));
+  const snoozedQuery = useQuery(snoozedInboxOptions(wsId));
+  const snoozed = snoozedQuery.data;
+  const load = inboxListLoad(snoozedQuery);
   const { snooze, unsnooze } = useInboxSnooze();
 
   const groups = useMemo<CollectionGroup<SnoozedInboxIssue>[]>(() => {
@@ -124,7 +127,19 @@ export function SnoozedInboxPage() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <CollectionPageHeader icon={AlarmClock} title={title} />
-      {isLoading ? (
+      {load === "failed" ? (
+        <CollectionPageState
+          icon={AlarmClock}
+          tone="warning"
+          role="alert"
+          title={t(($) => $.errors.load_failed)}
+          actions={
+            <Button variant="outline" disabled={snoozedQuery.isFetching} onClick={() => void snoozedQuery.refetch()}>
+              {t(($) => $.list.retry)}
+            </Button>
+          }
+        />
+      ) : load === "loading" ? (
         <div className="space-y-2 p-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-8 w-full" />
