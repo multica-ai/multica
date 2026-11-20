@@ -97,9 +97,15 @@ func sharedMemoryPython() string {
 }
 
 func sharedMemoryQuery(task Task) string {
+	// For a comment-triggered run, the comment is the user's immediate intent.
+	// Including the full issue description here lets its repeated/background
+	// terms drown out a short, specific question in BM25 fallback retrieval.
+	if comment := strings.TrimSpace(task.TriggerCommentContent); comment != "" {
+		return truncateMemoryQuery(comment, 12000)
+	}
 	parts := []string{
 		task.ThreadName, task.IssueTitle, task.IssueDescription,
-		task.TriggerCommentContent, task.ChatHistory, task.ChatMessage,
+		task.ChatHistory, task.ChatMessage,
 		task.AutopilotTitle, task.AutopilotDescription, task.QuickCreatePrompt,
 		task.HandoffNote,
 	}
@@ -112,15 +118,25 @@ func sharedMemoryQuery(task Task) string {
 		if b.Len() > 0 {
 			b.WriteByte('\n')
 		}
-		if b.Len()+len(part) > 12000 {
-			part = part[:max(0, 12000-b.Len())]
-		}
+		part = truncateMemoryQuery(part, max(0, 12000-b.Len()))
 		b.WriteString(part)
 		if b.Len() >= 12000 {
 			break
 		}
 	}
 	return b.String()
+}
+
+func truncateMemoryQuery(query string, maxBytes int) string {
+	if len(query) <= maxBytes {
+		return query
+	}
+	// Do not split a multi-byte rune when applying the query byte cap.
+	query = query[:maxBytes]
+	for !utf8.ValidString(query) {
+		query = query[:len(query)-1]
+	}
+	return query
 }
 
 func searchSharedMemoryBM25(root, query string, limit int) []sharedMemoryFact {

@@ -26,6 +26,18 @@ func TestBuildPromptInjectsRelevantSharedMemoryFromIssueDescription(t *testing.T
 	}
 }
 
+func TestSharedMemoryQueryPrioritizesCommentOverIssueDescription(t *testing.T) {
+	comment := "대표님이 아이유에게 최근 요청한 테스트 문장이 뭐야?"
+	got := sharedMemoryQuery(Task{
+		IssueTitle:            "NEX-1848 기억 공유",
+		IssueDescription:      strings.Repeat("반복되는 배경 문맥 해외 ETP 신청 기록 장부 게이트 ", 100),
+		TriggerCommentContent: comment,
+	})
+	if got != comment {
+		t.Fatalf("comment-triggered retrieval should use the immediate request only; got %q", got)
+	}
+}
+
 func TestSharedMemoryPromptBoundsCountAndApproximateTokenBudget(t *testing.T) {
 	facts := make([]sharedMemoryFact, 12)
 	for i := range facts {
