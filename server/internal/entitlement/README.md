@@ -239,6 +239,9 @@ chart fetches to fill its leftmost week, and send the limit in
 stale `enforce`, marked `Downgraded` on the `Decision`) and self-hosted
 deployments read up to the request maximum of 371 days with no header. The
 runtime usage endpoints keep their own 365-day maximum and no plan limit.
+The dashboard's `365d` range is offered only while the frontend flag
+`dashboard_history_365d` is on (off by default): the two series that scan
+`agent_task_queue` take seconds over a year of history in a large workspace.
 
 `GET /api/workspaces/{id}/features` reports `limits.dashboard_history_days`
 only under `enforce`, so an observed rollout is invisible to users.
@@ -250,5 +253,7 @@ are aggregated per workspace, UTC day, requested days and returned days in
 limit admitted under a configured observe, admitted because of a downgrade,
 and cut short under enforce, with the latest limit, action and reason. The
 write runs off the request path with its own 500 ms timeout; a failure drops
-the row and never changes the response. Counts are read requests, including
+the row and never changes the response. It selects its workspace row under
+`FOR KEY SHARE`, so a write racing workspace deletion either waits for it and
+inserts nothing or is removed by it. Counts are read requests, including
 the dashboard's periodic refresh, so use distinct workspaces for reach.

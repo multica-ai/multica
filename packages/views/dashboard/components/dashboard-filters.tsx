@@ -12,7 +12,12 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
-import { ALL_PROJECTS, TIME_RANGES, type TimeRange } from "./dashboard-shared";
+import {
+  ALL_PROJECTS,
+  TIME_RANGES,
+  type TimeRange,
+  type TimeRangeOption,
+} from "./dashboard-shared";
 import { isRangeAllowed, type UpgradePlan } from "../history-range";
 
 type DashboardProject = { id: string; title: string; icon: string | null };
@@ -40,16 +45,18 @@ export function TimeRangeFilter({
   maxDays = null,
   planForDays = () => null,
   onViewPlans = null,
+  ranges = TIME_RANGES,
 }: {
   days: TimeRange;
   onChange: (days: TimeRange) => void;
   maxDays?: number | null;
   planForDays?: (days: TimeRange) => UpgradePlan | null;
   onViewPlans?: (() => void) | null;
+  ranges?: readonly TimeRangeOption[];
 }) {
   const { t } = useT("usage");
-  const current = TIME_RANGES.find((r) => r.days === days) ?? TIME_RANGES[2];
-  const hasLocked = TIME_RANGES.some((r) => !isRangeAllowed(r.days, maxDays));
+  const current = ranges.find((r) => r.days === days) ?? TIME_RANGES[2];
+  const hasLocked = ranges.some((r) => !isRangeAllowed(r.days, maxDays));
 
   return (
     <DropdownMenu>
@@ -75,7 +82,7 @@ export function TimeRangeFilter({
             if (isRangeAllowed(next, maxDays)) onChange(next);
           }}
         >
-          {TIME_RANGES.map((range) => {
+          {ranges.map((range) => {
             const allowed = isRangeAllowed(range.days, maxDays);
             const plan = allowed ? null : planForDays(range.days);
             return (

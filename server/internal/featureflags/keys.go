@@ -49,6 +49,13 @@ const (
 	// serves this version. Existing guests keep their narrowed access either
 	// way.
 	WorkspaceGuests = "workspace_guests"
+	// DashboardHistory365d offers the 365-day range on the workspace dashboard
+	// (MUL-9490). Off by default: the two dashboard series that scan
+	// agent_task_queue directly take seconds over a year of history in a large
+	// workspace, so the range waits until those queries are measured or
+	// optimized at production scale. It only hides the range in the client;
+	// the plan's history limit is enforced on the server either way.
+	DashboardHistory365d = "dashboard_history_365d"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -74,6 +81,7 @@ var frontendPublicFlags = []string{
 	ComposioMCPApps,
 	PluginsV1,
 	DocsV1,
+	DashboardHistory365d,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {

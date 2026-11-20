@@ -13,7 +13,10 @@ import {
 } from "@multica/ui/components/ui/number-flow";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureEnabled } from "@multica/core/config";
-import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
+import {
+  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+  DASHBOARD_HISTORY_365D_FLAG,
+} from "@multica/core/feature-flags";
 import { workspaceSubscriptionPricesOptions } from "@multica/core/billing";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { Agent } from "@multica/core/types";
@@ -80,7 +83,7 @@ import {
   isRangeAllowed,
   planForRange,
 } from "../history-range";
-import { TIME_RANGES } from "./dashboard-shared";
+import { dashboardTimeRanges } from "./dashboard-shared";
 
 // Stable references — `data ?? []` would create a new empty array on
 // every render while the query is loading, which breaks useMemo's
@@ -171,7 +174,8 @@ export function DashboardPage() {
   // upgrade restores the pick.
   const [selectedDays, setSelectedDays] = useState<TimeRange>(30);
   const history = useDashboardHistoryLimit(wsId);
-  const days = effectiveRange(selectedDays, history.maxDays);
+  const ranges = dashboardTimeRanges(useFeatureEnabled(DASHBOARD_HISTORY_365D_FLAG, false));
+  const days = effectiveRange(selectedDays, history.maxDays, ranges);
   // Every dashboard query waits for the limit and is keyed on it.
   const historyLimit = history.ready ? history.maxDays : undefined;
   const billingEnabled = useFeatureEnabled(BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG, false);
@@ -179,7 +183,7 @@ export function DashboardPage() {
   const viewPlans = () => navigation.push(`${workspacePaths.settings()}?tab=billing`);
   // Plan labels on locked ranges come from the limits Cloud enforces; prices
   // are read only once a range is actually locked.
-  const hasLockedRange = TIME_RANGES.some((r) => !isRangeAllowed(r.days, history.maxDays));
+  const hasLockedRange = ranges.some((r) => !isRangeAllowed(r.days, history.maxDays));
   const { data: prices } = useQuery({
     ...workspaceSubscriptionPricesOptions(wsId),
     enabled: billingEnabled && hasLockedRange && wsId.length > 0,
@@ -567,6 +571,7 @@ export function DashboardPage() {
             maxDays={history.maxDays}
             planForDays={(range) => planForRange(range, planLimits)}
             onViewPlans={billingEnabled ? viewPlans : null}
+            ranges={ranges}
           />
           <ProjectFilter
             projects={projects}

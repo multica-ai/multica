@@ -1,5 +1,5 @@
 import type { WorkspacePlanLimits } from "@multica/core/types";
-import { TIME_RANGES, type TimeRange } from "./components/dashboard-shared";
+import { TIME_RANGES, type TimeRange, type TimeRangeOption } from "./components/dashboard-shared";
 
 /**
  * Plan-limited dashboard ranges (MUL-9490).
@@ -14,14 +14,19 @@ export function isRangeAllowed(days: TimeRange, maxDays: number | null): boolean
 }
 
 /**
- * The range the page reads: the selection when the plan covers it, otherwise
- * the longest range that fits. Derived on every render and never written back,
+ * The range the page reads: the selection when it is offered and the plan
+ * covers it, otherwise the longest offered range that fits. Derived on every render and never written back,
  * so a plan change moves the page and an upgrade restores the selection.
  */
-export function effectiveRange(selected: TimeRange, maxDays: number | null): TimeRange {
-  if (isRangeAllowed(selected, maxDays)) return selected;
+export function effectiveRange(
+  selected: TimeRange,
+  maxDays: number | null,
+  ranges: readonly TimeRangeOption[] = TIME_RANGES,
+): TimeRange {
+  const offered = ranges.some((r) => r.days === selected);
+  if (offered && isRangeAllowed(selected, maxDays)) return selected;
   let best: TimeRange = TIME_RANGES[0].days;
-  for (const range of TIME_RANGES) {
+  for (const range of ranges) {
     if (range.days <= (maxDays ?? Infinity) && range.days > best) best = range.days;
   }
   return best;

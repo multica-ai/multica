@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addDaysIso, aggregateByWeek, todayIso } from "../runtimes/utils";
 import { aggregateWeeklyErrors, aggregateWeeklyTasks, aggregateWeeklyTime } from "./utils";
+import { dashboardTimeRanges } from "./components/dashboard-shared";
 import {
   earliestReadableDay,
   effectiveRange,
@@ -26,6 +27,9 @@ describe("effectiveRange", () => {
     expect(effectiveRange(7, 30)).toBe(7);
     // A limit shorter than every multi-day range still leaves today.
     expect(effectiveRange(30, 3)).toBe(1);
+    // Without the year range, a 365 pick reads the longest offered range.
+    expect(effectiveRange(365, null, dashboardTimeRanges(false))).toBe(180);
+    expect(effectiveRange(365, null, dashboardTimeRanges(true))).toBe(365);
     expect(isRangeAllowed(30, 30)).toBe(true);
     expect(isRangeAllowed(90, 30)).toBe(false);
   });

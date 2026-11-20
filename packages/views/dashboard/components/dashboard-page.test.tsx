@@ -242,8 +242,10 @@ vi.mock("@tanstack/react-query", async () => {
 });
 
 const billingEnabledRef = vi.hoisted(() => ({ current: true }));
+const yearRangeEnabledRef = vi.hoisted(() => ({ current: true }));
 vi.mock("@multica/core/config", () => ({
-  useFeatureEnabled: () => billingEnabledRef.current,
+  useFeatureEnabled: (key: string) =>
+    key === "dashboard_history_365d" ? yearRangeEnabledRef.current : billingEnabledRef.current,
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -934,6 +936,7 @@ describe("DashboardPage — plan history limit (MUL-9490)", () => {
     historyLimitRef.current = null;
     planLimitsRef.current = null;
     billingEnabledRef.current = true;
+    yearRangeEnabledRef.current = true;
     tzRef.current = "UTC";
     cleanup();
   });
@@ -962,6 +965,17 @@ describe("DashboardPage — plan history limit (MUL-9490)", () => {
     await user.click(option);
     expect(daysInKeys("daily")).toContain(371);
     expect(daysInKeys("by-agent")).toContain(365);
+  });
+
+  it("leaves 365 days out until its flag is on", async () => {
+    yearRangeEnabledRef.current = false;
+    historyLimitRef.current = 30;
+    const user = userEvent.setup();
+    renderDashboard();
+    const menu = await openRangeMenu(user);
+    expect(within(menu).queryByRole("menuitemradio", { name: /365d/ })).toBeNull();
+    expect(within(menu).getByRole("menuitemradio", { name: /180d/ })).toHaveAttribute("aria-disabled", "true");
+    expect(queryKeys.filter((k) => k[0] === "dashboard").every((k) => k[3] !== 365 && k[3] !== 371)).toBe(true);
   });
 
   it("locks ranges past the plan and labels the plan that covers each", async () => {
