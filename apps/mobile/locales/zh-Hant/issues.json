@@ -281,7 +281,7 @@
       "iteration_limit": "迭代達上限",
       "agent_blocked": "需要輸入",
       "api_invalid_request": "請求被拒",
-      "skill_bundle_unavailable": "Skill 下載失敗",
+      "skill_bundle_unavailable": "skill 下載失敗",
       "runtime_cli_timeout": "執行時 CLI 超時",
       "environment_prepare_failed": "環境準備失敗",
       "runtime_access_denied": "無執行時權限",
