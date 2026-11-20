@@ -1368,10 +1368,9 @@ export function useRealtimeSync(
       if (wsId) {
         onIssuePropertiesChanged(qc, wsId, issue_id, properties ?? {}, issue_revision);
         scheduleProjectActivityRefresh(wsId);
-        // The catalog embeds per-definition usage counts; every value
-        // set/unset shifts them. The list is tiny, so a refetch beats
-        // trying to patch counts client-side.
-        qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+        // Value set/unset shifts usage counts only; the plain catalog is
+        // unchanged. Only the settings view observes the counted list.
+        qc.invalidateQueries({ queryKey: propertyKeys.withUsage(wsId) });
       }
     });
 
@@ -2020,11 +2019,17 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      qc.setQueryData<ChatPendingTask>(
-        chatKeys.pendingTask(payload.chat_session_id),
-        (old) => removePendingChatTask(old, payload.task_id),
+      const pendingKey = chatKeys.pendingTask(payload.chat_session_id);
+      // chat:done normally clears this turn and refreshes its reply. If the
+      // turn is still pending locally, recover the persisted outcome here.
+      if (qc.getQueryData<ChatPendingTask>(pendingKey)?.task_id === payload.task_id) {
+        invalidateChatMessageQueries(qc, payload.chat_session_id);
+        invalidateSessionLists();
+      }
+      qc.setQueryData<ChatPendingTask>(pendingKey, (old) =>
+        removePendingChatTask(old, payload.task_id),
       );
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      qc.invalidateQueries({ queryKey: pendingKey });
       refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
     });
