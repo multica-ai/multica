@@ -225,15 +225,19 @@ vi.mock("@dnd-kit/utilities", () => ({
 // nothing (and throws on its resize plumbing). Render every lane inline so the
 // virtualized swimlane exposes its lanes/cells/cards to the DOM, matching the
 // non-virtualized behavior these tests assert.
+const mockVirtuosoLocation = vi.hoisted(() => vi.fn());
 vi.mock("react-virtuoso", () => ({
-  Virtuoso: ({ data, itemContent, components }: any) => (
-    <div data-testid="virtuoso-mock">
-      {(data ?? []).map((item: any, i: number) => (
-        <div key={i}>{itemContent(i, item)}</div>
-      ))}
-      {components?.Footer ? <components.Footer /> : null}
-    </div>
-  ),
+  Virtuoso: ({ data, itemContent, components, initialTopMostItemIndex }: any) => {
+    mockVirtuosoLocation(initialTopMostItemIndex);
+    return (
+      <div data-testid="virtuoso-mock">
+        {(data ?? []).map((item: any, i: number) => (
+          <div key={i}>{itemContent(i, item)}</div>
+        ))}
+        {components?.Footer ? <components.Footer /> : null}
+      </div>
+    );
+  },
 }));
 
 const mockIssues: Issue[] = [
@@ -1888,6 +1892,16 @@ describe("SwimLaneView", () => {
 
 describe("SwimLaneView tab-session scroll restoration (MUL-4741)", () => {
   it("registers the outer scroller for memento capture and restores the saved offset at attach", () => {
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect");
+    rect.mockImplementation(function (this: HTMLElement) {
+      const scroller = this.closest<HTMLElement>('[data-tab-scroll-root="swimlane"]');
+      return {
+        top: scroller && this !== scroller ? 176 - scroller.scrollTop : 100,
+        left: 0, right: 800, bottom: 800, width: 800, height: 700,
+        x: 0, y: 100, toJSON: () => ({}),
+      };
+    });
+    mockVirtuosoLocation.mockClear();
     const adapter = {
       get: (key: string) =>
         key === "swimlane" ? { top: 240, height: 2000 } : undefined,
@@ -1916,5 +1930,9 @@ describe("SwimLaneView tab-session scroll restoration (MUL-4741)", () => {
     // Restore side: the ref-attach assignment applies the saved offset
     // before first paint (jsdom has no layout, so no clamping applies).
     expect(scroller!.scrollTop).toBe(240);
+    // The virtualizer's item offset excludes the 76px of padding/header
+    // above its list, so the outer scroller also lands at 240 in Chromium.
+    expect(mockVirtuosoLocation).toHaveBeenLastCalledWith({ index: 0, offset: 164 });
+    rect.mockRestore();
   });
 });

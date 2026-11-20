@@ -1,0 +1,11 @@
+{
+  "extends": "@multica/tsconfig/react-library.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["vite/client"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", ".storybook/*.ts", ".storybook/*.tsx"],
+  "exclude": ["node_modules", "storybook-static"]
+}

@@ -894,6 +894,52 @@ sleep 60
 `
 }
 
+func TestAntigravityBackendManagedWakeup(t *testing.T) {
+	t.Parallel()
+
+	// Trimmed agy 1.5.12 capture with one repeated final usage snapshot.
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+cat <<'JSONL'
+{"event":"step_update","step_update":{"step_index":0,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":8975,"output_tokens":84,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":9059}}}
+{"event":"step_update","step_update":{"step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"sleep 25"}}}}
+{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"sleep 25"},"output":"Command exited with code 0."}}}
+{"event":"step_update","step_update":{"step_index":3,"state":"DONE","step_type":"agent_response","text_delta":"Waiting for completion.\n","usage":{"input_tokens":2325,"output_tokens":8,"thinking_tokens":0,"cache_read_tokens":6935,"total_tokens":2333}}}
+{"event":"step_update","step_update":{"step_index":4,"state":"DONE","step_type":"system_message"}}
+{"event":"step_update","step_update":{"step_index":5,"state":"ACTIVE","step_type":"agent_response","text_delta":"Command finished."}}
+{"event":"step_update","step_update":{"step_index":5,"state":"DONE","step_type":"agent_response","text_delta":"\n","usage":{"input_tokens":2297,"output_tokens":7,"thinking_tokens":0,"cache_read_tokens":7227,"total_tokens":2304}}}
+{"event":"step_update","step_update":{"step_index":5,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":2297,"output_tokens":7,"thinking_tokens":0,"cache_read_tokens":7227,"total_tokens":2304}}}
+{"event":"result","result":{"status":"SUCCESS","response":"Waiting for completion.\nCommand finished.\n","usage":{"input_tokens":13597,"output_tokens":99,"thinking_tokens":0,"cache_read_tokens":14162,"total_tokens":13696}}}
+JSONL
+`))
+	backend := &antigravityBackend{cfg: Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()}}
+	ctx, cancel := context.WithTimeout(context.Background(), testFallbackTimeout)
+	defer cancel()
+	session, err := backend.Execute(ctx, "fixture prompt", ExecOptions{ResumeSessionID: "conversation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tools []Message
+	for msg := range session.Messages {
+		if msg.Type == MessageToolUse || msg.Type == MessageToolResult {
+			tools = append(tools, msg)
+		}
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.Output != "Waiting for completion.\nCommand finished.\n" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if len(tools) != 2 || tools[0].Type != MessageToolUse || tools[1].Type != MessageToolResult ||
+		tools[0].Tool != "run_command" || tools[0].CallID == "" || tools[0].CallID != tools[1].CallID {
+		t.Fatalf("expected one closed run_command call, got %+v", tools)
+	}
+	want := TokenUsage{InputTokens: 13597, OutputTokens: 99, CacheReadTokens: 14162}
+	if len(result.Usage) != 1 || result.Usage["unknown"] != want {
+		t.Fatalf("usage = %+v, want %+v", result.Usage, want)
+	}
+}
+
 func TestAntigravityBackendStreamJSONCapturesUsage(t *testing.T) {
 	t.Parallel()
 

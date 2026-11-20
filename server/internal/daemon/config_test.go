@@ -956,6 +956,18 @@ func TestLoadConfig_CodexSemanticInactivityDerivesFromWatchdog(t *testing.T) {
 	if got := load(t).CodexSemanticInactivityTimeout; got != DefaultCodexSemanticInactivityTimeout {
 		t.Fatalf("CodexSemanticInactivityTimeout = %s, want the codex built-in %s when watchdogs are off", got, DefaultCodexSemanticInactivityTimeout)
 	}
+
+	// A configured tool budget cannot enable the daemon watchdog or determine
+	// Codex's default when the daemon watchdog is off.
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "9h")
+	if got := load(t).CodexSemanticInactivityTimeout; got != DefaultCodexSemanticInactivityTimeout {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want %s with a disabled idle watchdog and a configured tool budget", got, DefaultCodexSemanticInactivityTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", "20m")
+	if got := load(t).CodexSemanticInactivityTimeout; got != 20*time.Minute {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want explicit 20m with the daemon watchdog disabled", got)
+	}
 }
 
 func TestLoadConfig_OpenCodeIdleWatchdog(t *testing.T) {

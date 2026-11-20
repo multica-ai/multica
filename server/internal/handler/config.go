@@ -93,6 +93,8 @@ type AppConfig struct {
 	// ignored the unknown JSON field and still returned success, so clients
 	// must fail closed when this declaration is absent.
 	AgentConversationStartersSupported bool `json:"agent_conversation_starters_supported"`
+	// Older builds acknowledge trigger writes while dropping conditions.
+	WebhookPayloadConditionsSupported bool `json:"webhook_payload_conditions_supported"`
 
 	// IssueCreatePropertiesSupported tells independently deployed clients that
 	// POST /api/issues validates and persists the optional properties bag.
@@ -106,6 +108,12 @@ type AppConfig struct {
 	// replies too and omit this, so clients must promise nothing about
 	// replies unless it is declared.
 	CommentDeleteKeepRepliesSupported bool `json:"comment_delete_keep_replies_supported"`
+
+	// IssueBatchOpsSupported tells clients that batch update accepts labels,
+	// properties and dry_run, and that batch update and delete return
+	// per-issue results. Older handlers ignore those fields — a dry run there
+	// would write — so clients must fail closed when this is absent.
+	IssueBatchOpsSupported bool `json:"issue_batch_ops_supported"`
 
 	// ServerVersion is the running API build version, so self-hosted
 	// operators can confirm what's deployed and include it in bug reports.
@@ -125,8 +133,10 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		// running, the save gate is running with it.
 		LocalWorktreeSupported:             true,
 		AgentConversationStartersSupported: true,
+		WebhookPayloadConditionsSupported:  true,
 		IssueCreatePropertiesSupported:     true,
 		CommentDeleteKeepRepliesSupported:  true,
+		IssueBatchOpsSupported:             true,
 		AllowSignup:                        os.Getenv("ALLOW_SIGNUP") != "false",
 		GoogleClientID:                     os.Getenv("GOOGLE_CLIENT_ID"),
 		WorkspaceCreationDisabled:          os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
@@ -144,6 +154,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
 	config.ThemeStoreEnabled = h.ThemeStore != nil
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
+	config.FeatureFlags[WorkspaceGuestsConfigKey] = h.guestsReleased(r.Context())
 	// Only surface the build version on self-hosted deployments. The managed
 	// cloud is continuously deployed and its users can't choose the build, so
 	// the Help popover's version row would just be noise there (MUL-4108).

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Check, Loader2 } from "@multica/ui/icons";
 import { Badge } from "@multica/ui/components/ui/badge";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -14,9 +14,13 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Input } from "@multica/ui/components/ui/input";
 import { api } from "@multica/core/api";
+import type { PaidFeatureAccess } from "@multica/core/billing";
+import { useWorkspacePaths } from "@multica/core/paths";
 import type { AppAccountScope, AppCatalogEntry, AppsOverview } from "@multica/core/types";
 import { ComposioToolkitLogo } from "../../common/composio-toolkit-logo";
+import { PaidFeatureNotice, usePaidFeatureErrorMessage } from "../../billing";
 import { useT } from "../../i18n";
+import { AppLink } from "../../navigation";
 import { isDesktopShell, openExternal } from "../../platform";
 
 /**
@@ -32,6 +36,8 @@ export function AddAppDialog({
   catalog,
   catalogLoading,
   catalogError,
+  teamAccess,
+  onConnectError,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -41,8 +47,12 @@ export function AddAppDialog({
   catalog: AppCatalogEntry[];
   catalogLoading: boolean;
   catalogError: boolean;
+  /** The plan's `team_app_accounts` access. Omitted means available. */
+  teamAccess?: Pick<PaidFeatureAccess, "canAdd" | "state">;
+  onConnectError?: (error: unknown) => void;
 }) {
   const { t } = useT("settings");
+  const paidFeatureError = usePaidFeatureErrorMessage();
   const [query, setQuery] = useState("");
   const [connecting, setConnecting] = useState<string | null>(null);
 
@@ -51,6 +61,14 @@ export function AddAppDialog({
     for (const c of overview[scope]) if (c.status === "active") set.add(c.toolkit_slug);
     return set;
   }, [overview, scope]);
+  // A team account that already exists (active or expired) can always be
+  // reauthorized; only a team account for a new app needs the paid feature.
+  const existingTeam = useMemo(
+    () => new Set(overview.team.filter((c) => c.status !== "revoked").map((c) => c.toolkit_slug)),
+    [overview.team],
+  );
+  const canAddTeam = teamAccess?.canAdd ?? true;
+  const teamState = scope === "team" ? teamAccess?.state : null;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -64,7 +82,7 @@ export function AddAppDialog({
   }, [catalog, query]);
 
   async function connect(app: AppCatalogEntry) {
-    if (connecting || (scope === "team" && !canManage)) return;
+    if (connecting || (scope === "team" && (!canManage || (!canAddTeam && !existingTeam.has(app.slug))))) return;
     setConnecting(app.slug);
     try {
       const { redirect_url } = await api.connectApp(scope, app.slug);
@@ -73,7 +91,8 @@ export function AddAppDialog({
       // browser and stays here, so the row must become clickable again.
       if (isDesktopShell()) setConnecting(null);
     } catch (e) {
-      toast.error(e instanceof Error && e.message ? e.message : t(($) => $.connected_apps.toast_failed));
+      onConnectError?.(e);
+      toast.error(paidFeatureError(e, e instanceof Error && e.message ? e.message : t(($) => $.connected_apps.toast_failed)));
       setConnecting(null);
     }
   }
@@ -87,6 +106,10 @@ export function AddAppDialog({
         </span>
       );
     }
+    const reconnect = scope === "team" && existingTeam.has(app.slug);
+    if (scope === "team" && canManage && !canAddTeam && !reconnect) {
+      return <UpgradeToAddLink />;
+    }
     return (
       <Button
         size="xs"
@@ -95,7 +118,11 @@ export function AddAppDialog({
         onClick={() => connect(app)}
       >
         {connecting === app.slug && <Loader2 className="animate-spin" />}
-        {connecting === app.slug ? t(($) => $.connected_apps.add.connecting) : t(($) => $.connected_apps.add.connect)}
+        {connecting === app.slug
+          ? t(($) => $.connected_apps.add.connecting)
+          : reconnect
+            ? t(($) => $.connected_apps.reconnect)
+            : t(($) => $.connected_apps.add.connect)}
       </Button>
     );
   };
@@ -107,6 +134,9 @@ export function AddAppDialog({
           <DialogTitle>{scope === "team" ? t(($) => $.connected_apps.add.connect_team) : t(($) => $.connected_apps.add.connect_personal)}</DialogTitle>
           <DialogDescription>{scope === "team" ? t(($) => $.connected_apps.add.team_description) : t(($) => $.connected_apps.add.personal_description)}</DialogDescription>
         </DialogHeader>
+        {canManage && (teamState === "read_only" || teamState === "unavailable") ? (
+          <PaidFeatureNotice state={teamState} />
+        ) : null}
         <Input
           autoFocus
           value={query}
@@ -148,5 +178,16 @@ export function AddAppDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Stands in for Connect where the plan cannot add a team account. */
+function UpgradeToAddLink() {
+  const { t } = useT("billing");
+  const paths = useWorkspacePaths();
+  return (
+    <AppLink href={`${paths.settings()}?tab=billing`} className={buttonVariants({ size: "xs", variant: "outline" })}>
+      {t(($) => $.paid_feature.upgrade_to_add)}
+    </AppLink>
   );
 }

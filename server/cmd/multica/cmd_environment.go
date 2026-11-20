@@ -249,6 +249,21 @@ func callDaemonEnvironment(parent context.Context, path string, body, out any, t
 	if resp.StatusCode == http.StatusNotFound && strings.HasPrefix(string(respBody), "404 page not found") {
 		return fmt.Errorf("this daemon does not support environments yet; update it with `multica update`")
 	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		httpErr := &cli.HTTPError{
+			Method:     req.Method,
+			Path:       path,
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(respBody)),
+			TaskScoped: cli.RequestUsedTaskToken(resp),
+		}
+		// Keep the daemon's explanation: it says what the daemon wanted.
+		message := httpErr.Body
+		if httpErr.TaskScoped {
+			message += "\n" + cli.TaskTokenRejectedMessage()
+		}
+		return cli.WithUserMessage(message, httpErr)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("%s", strings.TrimSpace(string(respBody)))
 	}

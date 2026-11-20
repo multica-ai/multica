@@ -1,0 +1,72 @@
+/* Motion used only by the voice input prototypes. */
+
+@keyframes voice-shimmer {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+
+.voice-shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--muted-foreground) 0%,
+    var(--muted-foreground) 40%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 60%,
+    var(--muted-foreground) 100%
+  );
+  background-size: 250% 100%;
+  background-clip: text;
+  color: transparent;
+  animation: voice-shimmer 1.6s linear infinite;
+}
+
+@keyframes voice-caret {
+  0%, 45% { opacity: 1; }
+  55%, 100% { opacity: 0; }
+}
+
+.voice-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.1em;
+  margin-left: 1px;
+  vertical-align: -0.15em;
+  background: var(--brand);
+  animation: voice-caret 1s step-end infinite;
+}
+
+@keyframes voice-rec-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.voice-rec-dot {
+  animation: voice-rec-dot 1.2s ease-in-out infinite;
+}
+
+@keyframes voice-landed {
+  from { background-color: color-mix(in oklab, var(--brand) 18%, transparent); }
+  to { background-color: transparent; }
+}
+
+.voice-landed {
+  border-radius: 3px;
+  animation: voice-landed 1.4s cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Fade the oldest waveform samples out at the leading edge. */
+.voice-wave-fade {
+  mask-image: linear-gradient(90deg, transparent 0, #000 24px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-shimmer,
+  .voice-caret,
+  .voice-rec-dot,
+  .voice-landed {
+    animation: none;
+  }
+  .voice-shimmer {
+    color: var(--muted-foreground);
+  }
+}

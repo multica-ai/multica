@@ -1,0 +1,95 @@
+{
+  "untitled": "無題",
+  "version_number": "v{{number}}",
+  "kb": "ドキュメント",
+  "actions": {
+    "new": "新規",
+    "new_doc": "新規ドキュメント",
+    "new_folder": "新規フォルダ",
+    "rename": "名前を変更",
+    "move": "移動...",
+    "delete": "削除",
+    "cancel": "キャンセル",
+    "history": "履歴",
+    "more": "その他",
+    "copy_link": "リンクをコピー"
+  },
+  "errors": {
+    "move": "移動できませんでした",
+    "delete": "削除できませんでした",
+    "save": "保存できませんでした"
+  },
+  "move": {
+    "title": "\"{{title}}\"を移動",
+    "destination": "移動先",
+    "root": "ナレッジベース（最上位）",
+    "current": "現在",
+    "confirm": "移動"
+  },
+  "delete": {
+    "title": "このドキュメントを削除しますか？",
+    "description": "\"{{title}}\"とその履歴がすべて削除されます。元に戻せません。",
+    "confirm": "削除",
+    "folder_title": "フォルダーを削除しますか？",
+    "folder_description": "空のフォルダーのみ削除できます。"
+  },
+  "tree": {
+    "more": "{{title}} のその他の操作",
+    "empty": "ドキュメントはまだありません",
+    "new_doc_in": "「{{title}}」にドキュメントを作成"
+  },
+  "editor": {
+    "placeholder": "入力するか / でコマンド...",
+    "title_label": "タイトル",
+    "saving": "保存中...",
+    "saved": "保存済み",
+    "save_failed": "未保存 · 再試行",
+    "retry": "再試行",
+    "conflict": "{{name}} が更新しました。下書きを保持しています。再読み込みして続けてください。",
+    "reload": "最新版を読み込む",
+    "draft": "保存した下書き",
+    "unsaved_changes": "保存していない変更"
+  },
+  "history": {
+    "title": "履歴",
+    "current": "現在",
+    "restore": "このバージョンを復元",
+    "loading": "読み込み中..."
+  },
+  "not_found": {
+    "title": "ドキュメントが見つかりません",
+    "description": "削除された可能性があります。"
+  },
+  "edited": "最終編集 {{time}}",
+  "outline": "目次",
+  "link_copied": "リンクをコピーしました",
+  "unavailable": {
+    "title": "ドキュメントはまだ利用できません",
+    "description": "このワークスペースではドキュメントが有効になっていません。"
+  },
+  "comments": {
+    "title": "コメント",
+    "add": "コメント",
+    "open": "未解決 {{count}}",
+    "resolved": "解決済み {{count}}",
+    "close": "コメントを閉じる",
+    "quote_missing": "コメントされたテキストが変更されました",
+    "reply_placeholder": "返信、または @ でメンション…",
+    "new_placeholder": "コメントを入力、@ でメンション…",
+    "submit": "コメント",
+    "reply": "返信",
+    "cancel": "キャンセル",
+    "resolve": "解決",
+    "reopen": "再開",
+    "delete": "コメントを削除",
+    "resolved_by": "{{name}} が解決",
+    "replies_other": "{{count}} 件の返信",
+    "empty_open": "未解決のコメントはありません。テキストを選択して「コメント」で始められます。",
+    "empty_resolved": "解決済みのコメントはありません。",
+    "errors": {
+      "save": "コメントを投稿できませんでした",
+      "delete": "コメントを削除できませんでした",
+      "resolve": "スレッドを更新できませんでした"
+    }
+  }
+}

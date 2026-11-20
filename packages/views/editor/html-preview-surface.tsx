@@ -96,7 +96,7 @@ export function HtmlPreviewSurface({
           if (backdropPress.current && outside(event)) dialogRef.current?.close();
           backdropPress.current = false;
         }}
-        className="relative m-0 block max-h-none w-full max-w-none border-0 bg-transparent p-0 text-inherit open:fixed open:inset-0 open:m-auto open:h-[min(90dvh,calc(100dvh-2rem))] open:w-[min(72rem,calc(100vw-2rem))] open:overflow-hidden open:rounded-xl open:bg-surface-raised open:shadow-[var(--floating-shadow)] open:ring-1 open:ring-surface-border backdrop:bg-black/10 backdrop:backdrop-blur-xs"
+        className="relative m-0 block max-h-none w-full max-w-none border-0 bg-transparent p-0 text-inherit open:fixed open:top-[env(safe-area-inset-top)] open:right-[env(safe-area-inset-right)] open:bottom-[env(safe-area-inset-bottom)] open:left-[env(safe-area-inset-left)] open:m-auto open:h-[min(90dvh,calc(100dvh-2rem-env(safe-area-inset-top)-env(safe-area-inset-bottom)))] open:w-[min(72rem,calc(100vw-2rem-env(safe-area-inset-left)-env(safe-area-inset-right)))] open:overflow-hidden open:rounded-xl open:bg-surface-raised open:shadow-[var(--floating-shadow)] open:ring-1 open:ring-surface-border backdrop:bg-black/10 backdrop:backdrop-blur-xs"
       >
         {children}
         {open && (

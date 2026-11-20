@@ -1,0 +1,1 @@
+ALTER TABLE member_search_access ADD CONSTRAINT member_search_access_pkey PRIMARY KEY USING INDEX member_search_access_pkey_idx;

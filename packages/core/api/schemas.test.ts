@@ -875,6 +875,13 @@ describe("ChatPendingTaskSchema", () => {
       status: "running",
     });
     expect(parsed.queued_tasks).toBeUndefined();
+    expect(parsed.can_supplement).toBeUndefined();
+  });
+
+  it("accepts explicit steering capability and ignores malformed values", () => {
+    expect(ChatPendingTaskSchema.parse({ can_supplement: true }).can_supplement).toBe(true);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: false }).can_supplement).toBe(false);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: "yes" }).can_supplement).toBeUndefined();
   });
 
   it("parses queued task summaries", () => {
@@ -930,6 +937,14 @@ describe("SendChatMessageResponseSchema", () => {
 
   it("ignores a malformed additive queue position without losing the accepted send", () => {
     expect(SendChatMessageResponseSchema.parse({ ...base, queued: "no" }).queued).toBeUndefined();
+  });
+
+  it("preserves steering acceptance and tolerates older or malformed metadata", () => {
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true }).steered).toBe(true);
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true, message_task_id: "root-task" }).message_task_id).toBe("root-task");
+    expect(SendChatMessageResponseSchema.parse(base).steered).toBeUndefined();
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: "yes", message_created_at: 42, message_task_id: 42 }))
+      .toMatchObject({ ...base, steered: undefined, message_created_at: undefined, message_task_id: undefined });
   });
 });
 
@@ -1569,6 +1584,16 @@ describe("InboxItemListSchema", () => {
     expect(
       parseWithFallback([withoutOptionals], InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
     ).toHaveLength(1);
+  });
+
+  it("keeps the row when the issue identifier is unusable", () => {
+    const parsed = parseWithFallback(
+      [row({ issue_identifier: 7 }), row({ id: "inbox-2", issue_identifier: "MUL-7" })],
+      InboxItemListSchema,
+      EMPTY_INBOX_ITEMS,
+      ENDPOINT,
+    );
+    expect(parsed.map((item) => item.issue_identifier)).toEqual([null, "MUL-7"]);
   });
 
   it("returns the empty fallback when an issue projection is wrong-typed", () => {

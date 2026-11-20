@@ -921,8 +921,8 @@ export function CreateSkillDialog({
         className={cn(
           "flex flex-col gap-0 overflow-hidden p-0",
           wide
-            ? "!h-[min(600px,85vh)] !max-w-2xl !w-full"
-            : "!h-auto !max-h-[85vh] !max-w-md !w-full",
+            ? "!h-[min(600px,85%)] !max-w-2xl !w-full"
+            : "!h-auto !max-h-[85%] !max-w-md !w-full",
         )}
       >
         {/* Header */}

@@ -65,9 +65,13 @@ func multicaCLICommand() string {
 // Keep the explicit watch/poll restriction and its foreground-watch exception
 // together. User-requested persistent services require a separate lifecycle,
 // readiness verification, durable logs, and a cleanup handle.
-func writeBackgroundTaskSafetySlim(b *strings.Builder) {
+func writeBackgroundTaskSafetySlim(b *strings.Builder, provider string) {
 	b.WriteString("## Background Task Safety\n\n")
-	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any run-owned work still active is orphaned, its result lost, and the final comment you meant to post never sends. There is no background-completion wakeup, whatever a tool response promises; an issue wakeup (`multica issue wakeup create`) is different — the platform stores it and starts a new run later. Never background-and-yield: collect required results inside foreground tool calls that block to completion, run unobservable work synchronously, and never end a turn \"standing by\" for something to finish — that message becomes your final output.\n\n")
+	if provider == "antigravity" {
+		b.WriteString("Multica marks the task terminal when the `agy -p` process exits — any run-owned work still active is orphaned, its result lost, and the final comment you meant to post never sends. Non-daemon `task-XXX` commands and subagents managed by agy keep `agy -p` alive and deliver completion notifications in the same process. Stop calling tools and yield the model subturn while waiting, without polling `manage_task` or task logs. Processes detached from agy (such as `&` or `nohup`) have no such wakeup; an issue or chat wakeup (`multica issue wakeup create` / `multica chat wakeup create`) is different — the platform stores it and starts a new run later. For detached work, never background-and-yield: collect required results inside foreground tool calls that block to completion, run unobservable work synchronously, and never end a turn \"standing by\" for something to finish — that message becomes your final output.\n\n")
+	} else {
+		b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any run-owned work still active is orphaned, its result lost, and the final comment you meant to post never sends. There is no background-completion wakeup, whatever a tool response promises; an issue or chat wakeup (`multica issue wakeup create` / `multica chat wakeup create`) is different — the platform stores it and starts a new run later. Never background-and-yield: collect required results inside foreground tool calls that block to completion, run unobservable work synchronously, and never end a turn \"standing by\" for something to finish — that message becomes your final output.\n\n")
+	}
 	b.WriteString("External systems triggered by your completed actions — CI, GitHub Actions after a successful push — are not run-owned: do not wait for them, and do not run `gh pr checks --watch`, `gh run watch`, or sleep/retry polls. A repo's merge gate (\"CI must be green before merge\") is NOT your delivery acceptance criteria. Deliver what you have — \"Local tests pass; CI running: <PR link>\" is a complete hand-off. The one exception: when the trigger comment or the issue's acceptance criteria explicitly ask for the CI result, collect it as ONE foreground blocking call (`gh pr checks <pr> --watch`) inside this same turn.\n\n")
 	b.WriteString("A user explicitly asking for a local service to stay available after the turn is a persistent service handoff, not background-and-yield — allowed only when the running service itself is the requested deliverable. Detach its lifecycle from this run first (durable logs, a recorded cleanup handle such as PID/profile), verify readiness, and reply with the URL, logs, and stop instructions. Without a supervisor, describe survival as best-effort, not guaranteed. When the repository declares the service in `.multica/environments.toml`, start it with `multica env start <name>` instead: the daemon supervises it, keeps its log, stops it at its TTL, and shows it in the issue sidebar.\n\n")
 	b.WriteString("Never terminate `multica` or `multica.exe` by executable name: a long-lived matching process may be the workspace daemon. Cancel only the exact child PID you started, and before terminating it compare that PID with `multica daemon status --output json`; never kill it if it is the reported daemon PID.\n\n")
@@ -277,6 +281,9 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString(duplicateOfCommandLine)
 	b.WriteString("- `multica issue wakeup <create|list|get|update|disable|trigger|delete|runs|events>` — persist an event, condition or time wakeup on this issue, then finish the current run. When the platform can check the fact itself, use one `--until-*` condition so no run starts before it holds; check the rule's `last_error` for missing PR links or snapshots, which are retried automatically. Conditions, PR rules and actor filters: `multica issue wakeup create --help` and the multica-platform issues reference.\n")
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
+	if ctx.DocsEnabled {
+		b.WriteString("- `multica doc list|search|get|create|update|move` — workspace docs; `doc search <query>` matches titles and content; `doc update` needs `--base-revision` from `multica doc get` (details: `multica doc --help`).\n")
+	}
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file` with a file inside your working directory; full flags: `multica issue comment add --help`.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>] [--fresh]` — repository checkout on a dedicated branch; re-running it keeps a checkout that has uncommitted or unpushed work, or is already on this task's branch, and only fetches; a clean, fully pushed checkout on another branch starts over on a new branch. `--fresh` discards uncommitted and untracked files for a new branch; commits stay on the old branch, so push any you still need first.\n\n")
 	b.WriteString("Commits use the user's configured Git identity; keep it unless asked. For a requested override in a managed checkout use `git config --worktree user.name` / `user.email` — plain or `--local` config can leak into a shared cache; never change the global identity.\n\n")
@@ -522,6 +529,9 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 	if ctx.ProjectTitle != "" {
 		fmt.Fprintf(b, "The active project for this task is **%s**.\n\n", ctx.ProjectTitle)
 	}
+	if ctx.ProjectArchived {
+		b.WriteString("This project is **archived**: existing issues stay readable and editable, but it accepts no new issues — the API returns 409 `project_archived` for `--project` writes into it. Finish the work at hand; do not restore the project unless the user asks.\n\n")
+	}
 	if desc := strings.TrimSpace(ctx.ProjectDescription); desc != "" {
 		b.WriteString("Project description — durable context the project owner set for work in this project:\n\n")
 		b.WriteString(desc)
@@ -607,6 +617,7 @@ func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("- If asked about the workspace, use `multica workspace get --output json`\n")
 	b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 	b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
+	b.WriteString("- When you act toward someone else for the user (ask a person or agent something, hand off work, request a review, send an email or message) and they want the outcome back (a decision, an answer, a review, work done), or whenever you promise to report back later, create a chat wakeup before you reply — read `multica chat wakeup create --help` first. If they only wanted someone told, don't; when unsure, ask in your reply\n")
 	b.WriteString("- Keep responses concise and direct\n\n")
 }
 
@@ -743,6 +754,12 @@ func writeSubIssueCreation(b *strings.Builder, ctx TaskContextForEnv) {
 // import; the brief's rendered-output tests pin the two together.
 const platformSkillName = "multica-platform"
 
+// platformSkillDomains is the domain list from the platform skill's
+// description, repeated in the brief's recall hint for agents that never read
+// the skill listing. TestPlatformSkillDomainsMatchDescription keeps it equal to
+// the description, so a new reference cannot ship without reaching the brief.
+const platformSkillDomains = "issue and PR contracts, sub-issues, batch changes, saved views, comment charts and files, mentions, inbox, agents, squads, autopilots, projects, runtimes, local environments, skill import, themes"
+
 // subIssueContractsSkill returns how the brief should refer to the skill
 // carrying the sub-issue contracts, and whether any such skill is installed.
 //
@@ -796,7 +813,7 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	// what keeps that consolidation from costing recall, and it must therefore
 	// name the skill that actually holds those contracts.
 	if platformSlug != "" {
-		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, local environments, skill import — load the `" + platformSlug + "` skill and open the reference(s) its routing table names for the domains your task touches.\n\n")
+		b.WriteString("For a Multica platform action this brief does not fully cover — " + platformSkillDomains + " — load the `" + platformSlug + "` skill and open the reference(s) its routing table names for the domains your task touches.\n\n")
 	}
 }
 
@@ -822,12 +839,12 @@ func writeTraecliSkills(b *strings.Builder, skills []SkillContextForEnv) {
 	}
 	b.WriteString("\n")
 	if platformSlug != "" {
-		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, local environments, skill import — read `" + skillPath(platformSlug) + "` and open the reference(s) its routing table names for the domains your task touches.\n\n")
+		b.WriteString("For a Multica platform action this brief does not fully cover — " + platformSkillDomains + " — read `" + skillPath(platformSlug) + "` and open the reference(s) its routing table names for the domains your task touches.\n\n")
 	}
 }
 
 // writeMentions emits the @mention side-effects section (compressed).
-func writeMentions(b *strings.Builder) {
+func writeMentions(b *strings.Builder, docsEnabled bool) {
 	b.WriteString("## Mentions\n\n")
 	b.WriteString("Mention links are **side-effecting actions**:\n\n")
 	b.WriteString("- `[MUL-123](mention://issue/<issue-id>)` — clickable link (no side effect)\n")
@@ -835,6 +852,9 @@ func writeMentions(b *strings.Builder) {
 	// agent writes this form (or pastes the project URL, which the reader's
 	// client unfurls into the same chip) a project reference stays dead text.
 	b.WriteString("- `[Project Name](mention://project/<project-id>)` — clickable link (no side effect)\n")
+	if docsEnabled {
+		b.WriteString("- `[Doc Title](mention://doc/<doc-id>)` — clickable link (no side effect); read it with `multica doc get <doc-id>`\n")
+	}
 	b.WriteString("- `[@Name](mention://member/<user-id>)` — **notifies a human**\n")
 	b.WriteString("- `[@Name](mention://agent/<agent-id>)` — **enqueues a new run for that agent**\n\n")
 	// No prescriptive default here (MUL-6417): the mention syntax hides its
@@ -995,7 +1015,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	// every resume; they now travel in the per-turn user message
 	// (daemon.BuildPrompt) instead. See MUL-5377.
 	writeHeader(&b)
-	writeBackgroundTaskSafetySlim(&b)
+	writeBackgroundTaskSafetySlim(&b, provider)
 	writeAgentIdentity(&b, ctx)
 	writeRequestingUser(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
@@ -1044,7 +1064,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeSkills(&b, provider, ctx)
 
 	if kind == kindIssue {
-		writeMentions(&b)
+		writeMentions(&b, ctx.DocsEnabled)
 		writeAttachments(&b)
 	}
 

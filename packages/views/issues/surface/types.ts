@@ -26,6 +26,12 @@ export interface IssueSurfaceProps {
   modes: IssueSurfaceMode[];
   surfaceKey?: string;
   createDefaults?: IssueCreateDefaults;
+  /**
+   * False hides the surface's new-issue affordances (column "+", empty-state
+   * actions). Table sub-issue creation stays: a sub-issue keeps its parent's
+   * project. Defaults to true.
+   */
+  allowCreate?: boolean;
   /** Server-owned membership search shared by non-Table issue surfaces. */
   search?: string;
 }

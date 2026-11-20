@@ -140,6 +140,9 @@ type Service struct {
 	// connects for the same new app do not register two configs.
 	authCreateMu sync.Mutex
 	tools        toolCache
+	// teamConnectGate decides whether a completed team handshake may write
+	// its account; see SetTeamConnectGate.
+	teamConnectGate TeamConnectGate
 }
 
 // NewService validates its inputs and returns a ready Service. It errors when a
@@ -482,6 +485,21 @@ func (s *Service) CreateMCPSession(ctx context.Context, userID pgtype.UUID) (*MC
 // route and 404'd after the legacy rewrite. When FrontendBaseURL is unset it
 // returns a site-relative path.
 func (s *Service) CallbackRedirect(result CallbackResult, success bool) string {
+	return s.callbackRedirect(result, success, "")
+}
+
+// CallbackFeatureLockedReason marks a failed connect the workspace's plan
+// refused (ErrTeamConnectRefused), so the page can show the upgrade prompt
+// instead of asking the user to retry. Clients that do not know the reason
+// still see the ordinary failure.
+const CallbackFeatureLockedReason = "feature_locked"
+
+// CallbackRedirectFailure is the failure redirect carrying a reason.
+func (s *Service) CallbackRedirectFailure(result CallbackResult, reason string) string {
+	return s.callbackRedirect(result, false, reason)
+}
+
+func (s *Service) callbackRedirect(result CallbackResult, success bool, reason string) string {
 	if result.ReturnTo != "" && SafeReturnPath(result.ReturnTo) {
 		path, rawQuery, _ := strings.Cut(result.ReturnTo, "?")
 		q, err := url.ParseQuery(rawQuery)
@@ -492,6 +510,9 @@ func (s *Service) CallbackRedirect(result CallbackResult, success bool) string {
 			q.Set("app_connected", result.ToolkitSlug)
 		} else {
 			q.Set("app_connect_error", result.ToolkitSlug)
+			if reason != "" {
+				q.Set("app_connect_error_reason", reason)
+			}
 		}
 		return s.frontendURL + path + "?" + q.Encode()
 	}
@@ -501,6 +522,9 @@ func (s *Service) CallbackRedirect(result CallbackResult, success bool) string {
 		q.Set("connected", result.ToolkitSlug)
 	} else {
 		q.Set("error", "composio_connect_failed")
+		if reason != "" {
+			q.Set("reason", reason)
+		}
 	}
 	if result.Team() {
 		q.Set("scope", "team")

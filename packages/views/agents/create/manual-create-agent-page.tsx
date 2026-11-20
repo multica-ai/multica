@@ -9,6 +9,7 @@ import {
   toStoredAgentDraft,
 } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { usePaidFeatureAccess } from "@multica/core/billing";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import type { RuntimeDevice } from "@multica/core/types";
@@ -70,6 +71,11 @@ export function ManualCreateAgentPage() {
     ? agents.find((agent) => agent.id === duplicateId) ?? null
     : null;
 
+  // A new agent has no member list yet, so a locked plan is "unavailable".
+  const invocationMembers = usePaidFeatureAccess(wsId, "agent_invocation_members", {
+    hasExistingConfig: false,
+  });
+
   // True when a duplicate had to fall back to another runtime, which drops the
   // source's model / thinking / speed. The notice explains the empty fields.
   const [duplicateRuntimeReset, setDuplicateRuntimeReset] = useState(false);
@@ -89,6 +95,7 @@ export function ManualCreateAgentPage() {
     currentUserId: form.currentUserId,
     fallbackRuntimeId: form.usableRuntimes[0]?.id ?? "",
     nameSuffix: t(($) => $.create_dialog.duplicate_copy_suffix),
+    canAddInvocationMembers: invocationMembers.isPending ? null : invocationMembers.canAdd,
     onSeed: (duplicated, runtimeReset) => {
       // Only the forced fallback gets the notice; a later manual runtime switch
       // is the user's own doing and needs no explanation.

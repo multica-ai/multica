@@ -23,7 +23,10 @@ JOIN (
     SELECT unnest(sqlc.arg(user_ids)::uuid[]) AS user_id,
            unnest(sqlc.arg(workspace_ids)::uuid[]) AS workspace_id
 ) AS requested
-    ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id;
+    ON m.user_id = requested.user_id AND m.workspace_id = requested.workspace_id
+-- Guests (MUL-9420) get no realtime stream: workspace fanout is not narrowed
+-- to their projects, so a socket that becomes a guest's is closed.
+WHERE m.role <> 'guest';
 
 -- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
@@ -34,6 +37,11 @@ RETURNING *;
 UPDATE member SET role = $2
 WHERE id = $1
 RETURNING *;
+
+-- name: GetMemberForUpdate :one
+-- Locks a member row for a role change, so concurrent changes to the same
+-- member apply one after the other and each re-checks the role it starts from.
+SELECT * FROM member WHERE id = $1 FOR UPDATE;
 
 -- name: DeleteMember :exec
 DELETE FROM member WHERE id = $1;

@@ -8,7 +8,8 @@
     "upload_image": "Subir imagen",
     "emoji_label": "Emoji",
     "more_emojis": "Más emojis…",
-    "emoji_loading": "Cargando…"
+    "emoji_loading": "Cargando…",
+    "text_icon": "Icono de texto"
   },
   "avatar_crop": {
     "title": "Editar avatar",
@@ -22,6 +23,14 @@
     "uploading": "Subiendo…",
     "loading": "Cargando…",
     "load_failed": "No se ha podido cargar la imagen"
+  },
+  "text_avatar": {
+    "title": "Icono de texto",
+    "preview": "Vista previa",
+    "text_label": "Texto",
+    "text_hint": "1–2 caracteres: letras, números o chino. El resto se recorta.",
+    "color_label": "Color",
+    "render_failed": "No se pudo crear el icono. Inténtalo de nuevo."
   },
   "color_picker": {
     "saturation": "Saturación y brillo",

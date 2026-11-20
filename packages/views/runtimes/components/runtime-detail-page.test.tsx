@@ -67,7 +67,9 @@ vi.mock("./rename-machine-dialog", () => ({
     open ? <div role="dialog">Rename machine dialog</div> : null,
 }));
 vi.mock("./runtime-profiles-dialog", () => ({
-  RuntimeProfilesDialog: () => <div role="dialog">Custom runtime dialog</div>,
+  RuntimeProfilesDialog: ({ daemonId }: { daemonId?: string }) => (
+    <div role="dialog" data-daemon-id={daemonId}>Custom runtime dialog</div>
+  ),
 }));
 
 const NOW = Date.now();
@@ -136,6 +138,25 @@ function renderPage({
 }
 
 describe("RuntimeDetailPage", () => {
+  it("binds creation to the selected machine when viewing another computer", () => {
+    renderPage({
+      runtimeId: "rt-remote",
+      runtimes: [
+        makeRuntime(),
+        makeRuntime({
+          id: "rt-remote",
+          daemon_id: "daemon-remote",
+          name: "Codex (Remote Mac)",
+          device_info: "Remote Mac",
+        }),
+      ],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Add custom runtime/ }));
+    expect(screen.getByRole("dialog")).toHaveAttribute(
+      "data-daemon-id", "daemon-remote",
+    );
+  });
+
   it("keeps the breadcrumb header in place while the machine loads", () => {
     const { container } = renderPage({ runtimes: null });
 
