@@ -1073,6 +1073,25 @@ export function InboxPage() {
         </div>
       )}
       <div className="mt-4 flex gap-2">
+        {(detailItem.type === "doc_comment" || detailItem.type === "doc_mentioned") &&
+          detailItem.details?.doc_id && (
+            <Button
+              size="sm"
+              variant="outline"
+              render={
+                <AppLink
+                  href={`${wsPaths.docDetail(detailItem.details.doc_id)}${
+                    detailItem.details.thread_id
+                      ? `?thread=${encodeURIComponent(detailItem.details.thread_id)}`
+                      : ""
+                  }`}
+                />
+              }
+              nativeButton={false}
+            >
+              {t(($) => $.detail.open_doc)}
+            </Button>
+          )}
         {detailItem.type === "project_owner_joined" && detailItem.details?.project_id && (
           <Button
             size="sm"

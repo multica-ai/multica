@@ -55,6 +55,8 @@
     "due_date_changed": "Due date changed",
     "new_comment": "New comment",
     "mentioned": "Mentioned",
+    "doc_comment": "New comment on a doc",
+    "doc_mentioned": "Mentioned in a doc",
     "review_requested": "Review requested",
     "task_completed": "Task completed",
     "task_failed": "Task failed",

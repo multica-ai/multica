@@ -1430,6 +1430,12 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) void qc.invalidateQueries({ queryKey: docKeys.all(wsId) });
     }));
+    // A discussion changed on one doc: refetch that doc's comments only.
+    docUnsubs.push(ws.on("doc_comment:changed", (p) => {
+      const wsId = getCurrentWsId();
+      const docId = (p as { doc_id?: string } | undefined)?.doc_id;
+      if (wsId && docId) void qc.invalidateQueries({ queryKey: docKeys.comments(wsId, docId) });
+    }));
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment, issue_revision: issueRevision } = p as CommentCreatedPayload;
       if (!comment?.issue_id) return;

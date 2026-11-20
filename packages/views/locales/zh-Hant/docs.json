@@ -66,5 +66,30 @@
   "unavailable": {
     "title": "知識庫暫未開放",
     "description": "目前工作區尚未開啟知識庫。"
+  },
+  "comments": {
+    "title": "評論",
+    "add": "評論",
+    "open": "未解決 {{count}}",
+    "resolved": "已解決 {{count}}",
+    "close": "關閉評論",
+    "quote_missing": "原文已修改，找不到劃線位置",
+    "reply_placeholder": "回覆，或 @ 某人…",
+    "new_placeholder": "寫下評論，@ 提及某人…",
+    "submit": "評論",
+    "reply": "回覆",
+    "cancel": "取消",
+    "resolve": "解決",
+    "reopen": "重新開啟",
+    "delete": "刪除評論",
+    "resolved_by": "{{name}} 已解決",
+    "replies_other": "{{count}} 則回覆",
+    "empty_open": "沒有未解決的評論。選取文字後點「評論」即可發起。",
+    "empty_resolved": "沒有已解決的評論。",
+    "errors": {
+      "save": "評論送出失敗",
+      "delete": "評論刪除失敗",
+      "resolve": "無法更新討論"
+    }
   }
 }

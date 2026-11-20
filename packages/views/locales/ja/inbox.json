@@ -73,7 +73,8 @@
     "open_project": "プロジェクトを開く",
     "autopilot_quota_upgrade": "アップグレード方法を見る",
     "archive": "アーカイブ",
-    "unarchive": "アーカイブ解除"
+    "unarchive": "アーカイブ解除",
+    "open_doc": "ドキュメントを開く"
   },
   "types": {
     "issue_assigned": "割り当て済み",
@@ -103,7 +104,9 @@
     "app_action_requested": "確認が必要",
     "app_action_reminder": "確認の期限が近い",
     "app_connect_requested": "アプリの接続依頼",
-    "app_action_result": "アプリ操作の結果"
+    "app_action_result": "アプリ操作の結果",
+    "doc_comment": "ドキュメントへの新しいコメント",
+    "doc_mentioned": "ドキュメントでメンションされました"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",

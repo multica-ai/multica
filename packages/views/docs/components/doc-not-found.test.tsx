@@ -29,7 +29,7 @@ const { apiMock, ApiError } = vi.hoisted(() => {
     ApiError,
     apiMock: {
       getDoc: vi.fn(), updateDoc: vi.fn(), listDocTree: vi.fn(),
-      listDocVersions: vi.fn(), getDocVersion: vi.fn(),
+      listDocVersions: vi.fn(), getDocVersion: vi.fn(), listDocComments: vi.fn(),
       listMembers: vi.fn(), listAgents: vi.fn(),
     },
   };
@@ -55,7 +55,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Reviewer" }),
 }));
 vi.mock("../../navigation", () => ({
-  useNavigation: () => ({ pathname: "/review/docs/runbook", push: vi.fn(), getShareableUrl: (path: string) => path }),
+  useNavigation: () => ({ pathname: "/review/docs/runbook", push: vi.fn(), getShareableUrl: (path: string) => path, searchParams: new URLSearchParams() }),
   AppLink: ({ children, href, className }: { children: React.ReactNode; href: string; className?: string }) => (
     <a href={href} className={className}>{children}</a>
   ),
@@ -95,6 +95,7 @@ beforeEach(() => {
   useDocDraftStore.getState().clearDraft();
   qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   apiMock.listDocTree.mockResolvedValue({ folders: [], docs: [] });
+  apiMock.listDocComments.mockResolvedValue([]);
   apiMock.listMembers.mockResolvedValue([]);
   apiMock.listAgents.mockResolvedValue([]);
 });

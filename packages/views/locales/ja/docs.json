@@ -66,5 +66,30 @@
   "unavailable": {
     "title": "ドキュメントはまだ利用できません",
     "description": "このワークスペースではドキュメントが有効になっていません。"
+  },
+  "comments": {
+    "title": "コメント",
+    "add": "コメント",
+    "open": "未解決 {{count}}",
+    "resolved": "解決済み {{count}}",
+    "close": "コメントを閉じる",
+    "quote_missing": "コメントされたテキストが変更されました",
+    "reply_placeholder": "返信、または @ でメンション…",
+    "new_placeholder": "コメントを入力、@ でメンション…",
+    "submit": "コメント",
+    "reply": "返信",
+    "cancel": "キャンセル",
+    "resolve": "解決",
+    "reopen": "再開",
+    "delete": "コメントを削除",
+    "resolved_by": "{{name}} が解決",
+    "replies_other": "{{count}} 件の返信",
+    "empty_open": "未解決のコメントはありません。テキストを選択して「コメント」で始められます。",
+    "empty_resolved": "解決済みのコメントはありません。",
+    "errors": {
+      "save": "コメントを投稿できませんでした",
+      "delete": "コメントを削除できませんでした",
+      "resolve": "スレッドを更新できませんでした"
+    }
   }
 }

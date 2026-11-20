@@ -75,7 +75,8 @@
     "open_project": "Ouvrir le projet",
     "autopilot_quota_upgrade": "Voir les options de mise à niveau",
     "archive": "Archiver",
-    "unarchive": "Désarchiver"
+    "unarchive": "Désarchiver",
+    "open_doc": "Ouvrir le document"
   },
   "types": {
     "issue_assigned": "Assigné",
@@ -105,7 +106,9 @@
     "app_action_requested": "Confirmation requise",
     "app_action_reminder": "Confirmation bientôt expirée",
     "app_connect_requested": "Connecter une app",
-    "app_action_result": "Résultat d'action d'app"
+    "app_action_result": "Résultat d'action d'app",
+    "doc_comment": "Nouveau commentaire sur un document",
+    "doc_mentioned": "Mentionné dans un document"
   },
   "labels": {
     "set_status_to": "Statut défini sur",
