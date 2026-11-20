@@ -76,6 +76,9 @@ describe("formatStorageBytes", () => {
     expect(formatStorageBytes(48_000_000, "en")).toBe("48 MB");
     expect(formatStorageBytes(999, "en")).toBe("999 B");
     expect(formatStorageBytes(2_500_000_000_000, "en")).toBe("2.5 TB");
+    // Rounding up to the next unit names that unit.
+    expect(formatStorageBytes(999_990_000, "en")).toBe("1 GB");
+    expect(formatStorageBytes(999_940_000, "en")).toBe("999.9 MB");
   });
 });
 

@@ -65,7 +65,12 @@ export function formatStorageBytes(bytes: number, locale?: string): string {
     value /= 1000;
     unit++;
   }
-  const rounded = Math.round(value * 10) / 10;
+  let rounded = Math.round(value * 10) / 10;
+  // 999.99 MB rounds to 1000 MB; show it as 1 GB instead.
+  if (rounded >= 1000 && unit < STORAGE_UNITS.length - 1) {
+    rounded = Math.round(rounded / 100) / 10;
+    unit++;
+  }
   const formatted = new Intl.NumberFormat(locale, {
     maximumFractionDigits: Number.isInteger(rounded) ? 0 : 1,
   }).format(rounded);
