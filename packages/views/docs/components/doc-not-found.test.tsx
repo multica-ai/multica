@@ -120,6 +120,15 @@ it("control: a load that failed for another reason still offers Retry", async ()
   expect(screen.queryByText("Doc not found")).toBeNull();
 });
 
+it("while the doc loads, shows its title from the tree in the page frame instead of a Loading line", async () => {
+  apiMock.getDoc.mockReturnValue(new Promise(() => {}));
+  apiMock.listDocTree.mockResolvedValue({ folders: [], docs: [doc] });
+  mount(<DocPage docId="runbook" />);
+  expect(await screen.findByText("Release runbook")).toBeTruthy();
+  expect(screen.queryByText("Loading...")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+});
+
 it("replaces the open editor when the doc is deleted elsewhere and keeps the unsaved text readable", async () => {
   apiMock.getDoc.mockResolvedValue(doc);
   mount(<DocPage docId="runbook" />);
