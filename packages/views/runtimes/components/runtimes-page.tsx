@@ -83,6 +83,7 @@ import {
   type CollectionGroup,
 } from "../../layout/collection-list";
 import { cn } from "@multica/ui/lib/utils";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useNavigation } from "../../navigation";
 import { useRestoredScrollRef } from "../../platform/scroll-restoration";
 import { getMikaOnboarding, pickContentLang } from "../../onboarding/templates";
@@ -303,8 +304,27 @@ export function RuntimesPage({
   const matchesStatus = (online: boolean) =>
     statusFilter === "all" || (statusFilter === "online") === online;
 
-  const visibleMachines = filterRuntimeMachines(machineList, search, "all").filter(
-    (machine) => matchesStatus(machine.health === "online"),
+  // Besides the machine's own fields, a machine matches its owner's name: in a
+  // workspace with many members, people look for a colleague's machine by who
+  // runs it.
+  const searchedMachineIds = new Set(
+    filterRuntimeMachines(machineList, search, "all").map((machine) => machine.id),
+  );
+  const ownerMatchesSearch = (machine: RuntimeMachine) => {
+    const query = search.trim().toLowerCase();
+    const ownerId = machine.runtimes[0]?.owner_id;
+    const owner = ownerId
+      ? members.find((member) => member.user_id === ownerId)?.name
+      : undefined;
+    return (
+      !!owner &&
+      (owner.toLowerCase().includes(query) || matchesPinyin(owner, query))
+    );
+  };
+  const visibleMachines = machineList.filter(
+    (machine) =>
+      (searchedMachineIds.has(machine.id) || ownerMatchesSearch(machine)) &&
+      matchesStatus(machine.health === "online"),
   );
   const qoderConfigured = qoder?.configured === true;
   const qoderTitle = t(($) => $.qoder.cloud_title);
