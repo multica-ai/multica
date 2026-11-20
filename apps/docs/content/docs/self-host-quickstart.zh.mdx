@@ -377,7 +377,7 @@ docker compose -f docker-compose.selfhost.yml exec -T postgres \
   pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
 ```
 
-如果你改过 `POSTGRES_USER` / `POSTGRES_DB`，把 `multica` 换成 `.env` 里的实际值。数据存在名为 `multica_pgdata` 的 volume 里，`docker compose down` 不会删它，但 `down -v` 会。
+如果你改过 `POSTGRES_USER` / `POSTGRES_DB`，把 `multica` 换成 `.env` 里的实际值。数据存在名为 `multica_pgdata` 的 volume 里（如果 `.env` 设置了 `COMPOSE_PROJECT_NAME=<name>`，则是 `<name>_pgdata`；同一台机器上已有别的 checkout 在用 `multica` 时，`make selfhost` 会自动设置它），`docker compose down` 不会删它，但 `down -v` 会。
 
 <Callout type="warning">
 **不要把 `pg_dump` 直接管道接给 `gzip`。** shell 取的是管道里**最后一条**命令的退出码，所以 `pg_dump ... | gzip > backup.sql.gz` 在导出失败时照样返回 `0`，留下一个格式完全合法、但里面什么都没有的 20 字节压缩包。先重定向到文件，`pg_dump` 自己的退出码才算数，`&&` 也只会压缩真正成功的那份导出。
