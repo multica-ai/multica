@@ -28,6 +28,7 @@
     "actions": {
       "retry": "Retry",
       "retry_autopilots": "Retry automation usage",
+      "retry_storage": "Retry attachment storage usage",
       "upgrade_to": "Upgrade to {{plan}}",
       "switch_to": "Switch to {{plan}}",
       "manage": "Manage billing",
@@ -138,7 +139,17 @@
       "usage_unavailable": "Usage is temporarily unavailable",
       "members": "Members",
       "members_pending": "Pending invitations: {{pending}}",
-      "metering": "Runs from schedules, webhooks, and agents count. Runs a member starts with Run now don't."
+      "metering": "Runs from schedules, webhooks, and agents count. Runs a member starts with Run now don't.",
+      "storage": "Attachment storage",
+      "storage_description": "Attachments in issues, comments, and chat.",
+      "storage_label": "Attachment storage usage",
+      "addon": "Add-on runs",
+      "addon_description": "When the allowance runs out, automations pause until next month or until you buy more runs.",
+      "addon_included": "Includes {{runs}} add-on runs",
+      "addon_none": "None this month",
+      "addon_purchased": "{{runs}} bought this month",
+      "addon_buy": "Buy · {{price}} / {{runs}} runs",
+      "addon_buy_fallback": "Buy more runs"
     },
     "seats": {
       "title": "Seats",
@@ -221,7 +232,9 @@
       "success_title": "Plan changed",
       "success_description": "This workspace is now on {{plan}}.",
       "unresolved": "The previous plan change could not be confirmed. Contact support before changing plans.",
-      "check_failed": "Could not check the plan change. Try again."
+      "check_failed": "Could not check the plan change. Try again.",
+      "addon_downgrade_notice": "This month's limit becomes {{limit}} runs after the switch, including runs you bought. {{used}} runs are used this month.",
+      "addon_downgrade_notice_limit_only": "This month's limit becomes {{limit}} runs after the switch, including runs you bought."
     },
     "confirm": {
       "title": "Continue to Stripe Checkout?",
@@ -250,7 +263,22 @@
     "read_only": "Read-only. Upgrade to edit.",
     "unavailable": "Not included in this workspace's plan.",
     "view_plans": "View plans",
-    "locked_error": "This isn't included in the workspace's plan. Existing settings keep working; upgrade to add more."
+    "locked_error": "This isn't included in the workspace's plan. Existing settings keep working; upgrade to add more.",
+    "upgrade_to_add": "Upgrade to add",
+    "business": "Business",
+    "badge_label": "Business feature. Show details",
+    "upgrade_to_business": "Upgrade to Business",
+    "ask_admin": "Ask a workspace admin to upgrade to Business.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "Letting specific people run an agent is a Business feature",
+        "description": "\"Only me\" and \"Entire workspace\" stay available on every plan."
+      },
+      "runtime_member_sharing": {
+        "title": "Sharing a runtime with specific members is a Business feature",
+        "description": "\"Private\" and \"Public\" stay available on every plan."
+      }
+    }
   },
   "trial": {
     "status": {
@@ -320,5 +348,35 @@
         "after": "Existing guests keep their access after the trial. New guests need Pro or Business."
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} wasn't uploaded",
+    "copy_title": "The sub-issue wasn't created: its source attachments couldn't be copied",
+    "admin_body": "Attachment storage is full ({{used}} / {{limit}}). Existing attachments aren't affected.",
+    "admin_body_no_figures": "Attachment storage is full. Existing attachments aren't affected.",
+    "member_body": "Attachment storage is full. Ask an admin to upgrade the plan, or delete attachments you no longer need.",
+    "dismiss": "Dismiss"
+  },
+  "autopilot_addon": {
+    "title": "Buy more automation runs",
+    "description": "Add-on runs are valid this month and shared by everyone in the workspace. The plan allowance is used first.",
+    "options_label": "Number of runs",
+    "option": "{{runs}} runs",
+    "usage_summary": "{{used}} / {{limit}} used this month, resets {{date}}.",
+    "pay": "Continue to pay {{amount}}",
+    "pay_fallback": "Continue to payment",
+    "cancel": "Cancel",
+    "loading": "Loading the add-on price…",
+    "unavailable": "This workspace can't buy add-on runs right now.",
+    "conflict": "Add-on runs can't be bought right now, or the price changed. Review the options and try again.",
+    "error": "The payment page couldn't be opened. Try again.",
+    "success_title": "Runs added",
+    "success_description": "{{runs}} runs were added for this month. Automations start again with their next run.",
+    "confirming_title": "Confirming the payment",
+    "confirming_description": "Runs are added as soon as Stripe confirms the payment. Check the usage below in a moment.",
+    "not_paid_title": "Payment not completed",
+    "not_paid_description": "Nothing was charged and no runs were added.",
+    "cancel_title": "Payment canceled",
+    "cancel_description": "Nothing was charged."
   }
 }

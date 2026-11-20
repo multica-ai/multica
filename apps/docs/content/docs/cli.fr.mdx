@@ -292,7 +292,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - Les options `--custom-env` n'existent que sur `agent create`. Pour modifier les variables ensuite, utilisez `agent env set`, qui remplace l'ensemble ; les clés dont la valeur est `****` gardent leur valeur actuelle.
 - `agent update --mcp-config null` efface la configuration MCP.
 - `--custom-args` est un tableau JSON placé à la fin des arguments de lancement. Choisissez le modèle avec `--model` ; certains outils refusent un `--model` dans les arguments personnalisés.
-- `--permission-mode` détermine qui peut invoquer l'agent : `private` pour le propriétaire seul, ou `public_to` avec `--public-to-workspace` ou `--public-to-member <user-id>`. `--visibility private|workspace` est l'ancienne forme, convertie en `--permission-mode` ; si les deux sont fournis, `--permission-mode` l'emporte.
+- `--permission-mode` détermine qui peut invoquer l'agent : `private` pour le propriétaire seul, ou `public_to` avec `--public-to-workspace` ou `--public-to-member <user-id>`. `--visibility private|workspace` est l'ancienne forme, convertie en `--permission-mode` ; si les deux sont fournis, `--permission-mode` l'emporte. Sur Multica Cloud, les listes de membres sont incluses dans Business. Avec Free et Pro, quand la restriction est appliquée, `agent create` ou `agent update` qui donne une liste à un agent ou y ajoute quelqu'un est refusé avec `feature_locked` ; retirer des membres, réenregistrer la même liste et passer à `private` ou `--public-to-workspace` restent possibles.
 
 ## Daemon et runtimes
 

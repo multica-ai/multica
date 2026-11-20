@@ -28,6 +28,7 @@
     "actions": {
       "retry": "다시 시도",
       "retry_autopilots": "자동화 사용량 다시 시도",
+      "retry_storage": "첨부 파일 저장 공간 사용량 다시 시도",
       "upgrade_to": "{{plan}}로 업그레이드",
       "switch_to": "{{plan}}로 전환",
       "manage": "결제 관리",
@@ -137,7 +138,17 @@
       "usage_unavailable": "사용량을 일시적으로 불러올 수 없습니다",
       "members": "멤버",
       "members_pending": "대기 중인 초대: {{pending}}건",
-      "metering": "일정, Webhook, 에이전트로 시작된 실행은 집계됩니다. 멤버가 지금 실행으로 시작한 실행은 집계되지 않습니다."
+      "metering": "일정, Webhook, 에이전트로 시작된 실행은 집계됩니다. 멤버가 지금 실행으로 시작한 실행은 집계되지 않습니다.",
+      "storage": "첨부 파일 저장 공간",
+      "storage_description": "이슈, 댓글, 채팅의 첨부 파일입니다.",
+      "storage_label": "첨부 파일 저장 공간 사용량",
+      "addon": "추가 실행 횟수",
+      "addon_description": "한도를 다 쓰면 다음 달 초기화되거나 추가 구매할 때까지 자동화가 일시 중지됩니다.",
+      "addon_included": "추가 구매 {{runs}}회 포함",
+      "addon_none": "이번 달 추가 구매 없음",
+      "addon_purchased": "이번 달 {{runs}}회 추가 구매함",
+      "addon_buy": "추가 구매 · {{price}} / {{runs}}회",
+      "addon_buy_fallback": "실행 횟수 추가 구매"
     },
     "seats": {
       "title": "좌석",
@@ -215,7 +226,9 @@
       "success_title": "요금제가 변경됨",
       "success_description": "이제 이 워크스페이스는 {{plan}} 요금제를 사용합니다.",
       "unresolved": "이전 요금제 변경을 확인할 수 없습니다. 요금제를 변경하기 전에 지원팀에 문의하세요.",
-      "check_failed": "요금제 변경을 확인할 수 없습니다. 다시 시도하세요."
+      "check_failed": "요금제 변경을 확인할 수 없습니다. 다시 시도하세요.",
+      "addon_downgrade_notice": "변경 후 이번 달 한도는 추가 구매분을 포함해 {{limit}}회가 됩니다. 이번 달에 {{used}}회를 사용했습니다.",
+      "addon_downgrade_notice_limit_only": "변경 후 이번 달 한도는 추가 구매분을 포함해 {{limit}}회가 됩니다."
     },
     "confirm": {
       "title": "Stripe Checkout으로 이동할까요?",
@@ -244,7 +257,22 @@
     "read_only": "읽기 전용입니다. 편집하려면 업그레이드하세요.",
     "unavailable": "이 워크스페이스의 요금제에 포함되어 있지 않습니다.",
     "view_plans": "요금제 보기",
-    "locked_error": "이 워크스페이스의 요금제에 포함되어 있지 않습니다. 기존 설정은 계속 적용되며, 추가하려면 업그레이드하세요."
+    "locked_error": "이 워크스페이스의 요금제에 포함되어 있지 않습니다. 기존 설정은 계속 적용되며, 추가하려면 업그레이드하세요.",
+    "upgrade_to_add": "업그레이드",
+    "business": "Business",
+    "badge_label": "Business 기능. 자세히 보기",
+    "upgrade_to_business": "Business로 업그레이드",
+    "ask_admin": "워크스페이스 관리자에게 Business로 업그레이드를 요청하세요.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "특정 사용자에게 에이전트 실행을 허용하는 것은 Business 기능입니다",
+        "description": "나만 사용하거나 워크스페이스 전체에 공개하는 설정은 모든 요금제에서 사용할 수 있습니다."
+      },
+      "runtime_member_sharing": {
+        "title": "런타임을 특정 멤버와 공유하는 것은 Business 기능입니다",
+        "description": "\"비공개\"와 \"공개\"는 모든 요금제에서 사용할 수 있습니다."
+      }
+    }
   },
   "trial": {
     "status": {
@@ -308,5 +336,35 @@
         "after": "체험 후에도 기존 게스트는 접근 권한을 유지합니다. 새 게스트를 초대하려면 Pro 또는 Business가 필요합니다."
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}}을(를) 업로드하지 못했습니다",
+    "copy_title": "하위 이슈가 생성되지 않았습니다: 원본 첨부 파일을 복사할 수 없습니다",
+    "admin_body": "첨부 파일 저장 공간이 가득 찼습니다({{used}} / {{limit}}). 기존 첨부 파일에는 영향이 없습니다.",
+    "admin_body_no_figures": "첨부 파일 저장 공간이 가득 찼습니다. 기존 첨부 파일에는 영향이 없습니다.",
+    "member_body": "첨부 파일 저장 공간이 가득 찼습니다. 관리자에게 요금제 업그레이드를 요청하거나 필요 없는 첨부 파일을 삭제하세요.",
+    "dismiss": "닫기"
+  },
+  "autopilot_addon": {
+    "title": "자동화 실행 횟수 추가 구매",
+    "description": "추가 구매한 횟수는 이번 달에만 유효하며 워크스페이스 전체가 함께 사용합니다. 플랜 한도를 먼저 사용합니다.",
+    "options_label": "추가할 횟수",
+    "option": "{{runs}}회",
+    "usage_summary": "이번 달 {{used}} / {{limit}}회 사용, {{date}}에 초기화.",
+    "pay": "{{amount}} 결제하러 가기",
+    "pay_fallback": "결제하러 가기",
+    "cancel": "취소",
+    "loading": "추가 구매 가격을 불러오는 중…",
+    "unavailable": "이 워크스페이스는 지금 실행 횟수를 추가 구매할 수 없습니다.",
+    "conflict": "지금은 추가 구매할 수 없거나 가격이 변경되었습니다. 옵션을 확인한 후 다시 시도하세요.",
+    "error": "결제 페이지를 열지 못했습니다. 다시 시도하세요.",
+    "success_title": "실행 횟수를 추가했습니다",
+    "success_description": "이번 달에 {{runs}}회가 추가되었습니다. 자동화는 다음 실행부터 다시 시작됩니다.",
+    "confirming_title": "결제를 확인하는 중",
+    "confirming_description": "Stripe가 결제를 확인하면 바로 실행 횟수가 추가됩니다. 잠시 후 아래 사용량을 확인하세요.",
+    "not_paid_title": "결제가 완료되지 않았습니다",
+    "not_paid_description": "청구되지 않았으며 실행 횟수도 추가되지 않았습니다.",
+    "cancel_title": "결제를 취소했습니다",
+    "cancel_description": "청구되지 않았습니다."
   }
 }

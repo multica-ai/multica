@@ -185,15 +185,20 @@
     "autopilot_quota_limit": {
       "title": "該工作區的自動化執行次數已達到上限",
       "checking_description": "正在查詢該工作區可用的帳單操作…",
-      "upgrade_description": "升級到 Pro 後可恢復自動化執行。",
+      "upgrade_description": "升級到 Pro 可提高每月上限並恢復自動化執行，也可以等待額度重置。",
       "portal_description": "開啟帳單門戶管理該工作區的訂閱，以恢復自動化執行。",
-      "contact_description": "請聯絡工作區所有者或管理員升級到 Pro。",
+      "contact_description": "請聯絡工作區所有者或管理員升級方案，或等待額度重置。",
       "billing_description": "請前往帳單設定檢視該工作區可用的升級選項。",
       "billing_unavailable_description": "暫時無法載入帳單操作，請前往帳單設定重試。",
       "billing_disabled_description": "請等待當前額度重置，或聯絡工作區管理員。",
       "upgrade_action": "升級到 Pro",
       "portal_action": "開啟帳單門戶",
-      "billing_action": "檢視帳單"
+      "billing_action": "檢視帳單",
+      "addon_description": "加購執行次數可在本月恢復自動化執行，也可以等待額度重置。",
+      "contact_addon_description": "請聯絡工作區所有者或管理員加購執行次數，或等待額度重置。",
+      "contact_addon_or_upgrade_description": "請聯絡工作區所有者或管理員加購執行次數或升級方案，或等待額度重置。",
+      "addon_action": "加購執行次數",
+      "upgrade_business_action": "升級到 Business"
     },
     "toast_link_subissues_all_failed": "關聯子任務失敗",
     "toast_link_subissues_partial": "{{total}} 個子任務中有 {{failed}} 個關聯失敗",

@@ -7,3 +7,4 @@ export * from "./paid-features";
 export * from "./trial";
 export * from "./trial-notice-store";
 export * from "./member-limit";
+export * from "./storage-limit";

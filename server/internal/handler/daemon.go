@@ -1441,10 +1441,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-type DaemonHeartbeatRequest struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
-}
+type DaemonHeartbeatRequest = protocol.DaemonHeartbeatRequestPayload
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
 // heartbeat hot path. Probes are read-only (ZCARD in Redis) so a timeout is
@@ -1585,7 +1582,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	updateMs = time.Since(updateStart).Milliseconds()
 
-	ack, m, err := h.processHeartbeat(r.Context(), runtimeID, req.SupportsBatchImport)
+	ack, m, err := h.processHeartbeat(r.Context(), runtimeID, req)
 	probeModelMs = m.ProbeModelMs
 	popModelMs = m.PopModelMs
 	probeSkillsMs = m.ProbeSkillsMs
@@ -1629,7 +1626,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // captured each runtime's liveness state in a connection lease, so the hot
 // path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
 // fallback for a daemon that stops receiving WebSocket acknowledgements.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, req protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
@@ -1649,7 +1646,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		}
 		return nil, err
 	}
-	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
+	ack, _, err := h.processHeartbeat(ctx, runtimeID, req)
 	return ack, err
 }
 
@@ -1789,7 +1786,7 @@ type heartbeatMetrics struct {
 // heartbeats using only the runtime ID. Each transport records liveness first:
 // HTTP uses its stateless runtime row, while WebSocket uses the connection
 // lease. Auth and request decoding also remain transport-specific.
-func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, req protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
 	var m heartbeatMetrics
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
@@ -1805,13 +1802,14 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	cancelProbeUpdate()
 	switch {
 	case probeUpdateErr == nil && hasUpdate:
-		pending, popUpdateErr := h.UpdateStore.PopPending(ctx, runtimeID)
+		pending, popUpdateErr := h.UpdateStore.PopPending(ctx, runtimeID, req.SupportsQueuedUpdate)
 		if popUpdateErr != nil {
 			slog.Warn("update PopPending failed", "error", popUpdateErr, "runtime_id", runtimeID)
 		} else if pending != nil {
 			ack.PendingUpdate = &protocol.DaemonHeartbeatPendingUpdate{
 				ID:            pending.ID,
 				TargetVersion: pending.TargetVersion,
+				Deferrable:    offerDeferrable(pending, req.SupportsQueuedUpdate),
 			}
 		}
 	case probeUpdateErr != nil:
@@ -1886,7 +1884,7 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	switch {
 	case probeErr == nil && hasImport:
 		popStart := time.Now()
-		if supportsBatchImport {
+		if req.SupportsBatchImport {
 			pendingImports, popErr := h.LocalSkillImportStore.PopPendingBatch(ctx, runtimeID, maxLocalSkillImportBatch)
 			m.PopImportMs = time.Since(popStart).Milliseconds()
 			if popErr != nil {

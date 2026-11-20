@@ -28,6 +28,7 @@
     "actions": {
       "retry": "Reintentar",
       "retry_autopilots": "Reintentar el uso de automatización",
+      "retry_storage": "Reintentar uso del almacenamiento de adjuntos",
       "upgrade_to": "Actualizar a {{plan}}",
       "switch_to": "Cambiar a {{plan}}",
       "manage": "Gestionar facturación",
@@ -138,7 +139,17 @@
       "usage_unavailable": "El uso no está disponible temporalmente",
       "members": "Miembros",
       "members_pending": "Invitaciones pendientes: {{pending}}",
-      "metering": "Cuentan las ejecuciones de programaciones, webhooks y agentes. Las que un miembro inicia con Ejecutar ahora no cuentan."
+      "metering": "Cuentan las ejecuciones de programaciones, webhooks y agentes. Las que un miembro inicia con Ejecutar ahora no cuentan.",
+      "storage": "Almacenamiento de adjuntos",
+      "storage_description": "Adjuntos de incidencias, comentarios y chats.",
+      "storage_label": "Uso del almacenamiento de adjuntos",
+      "addon": "Ejecuciones adicionales",
+      "addon_description": "Cuando se agota la asignación, las automatizaciones se pausan hasta el próximo mes o hasta que compres más ejecuciones.",
+      "addon_included": "Incluye {{runs}} ejecuciones adicionales",
+      "addon_none": "Ninguna este mes",
+      "addon_purchased": "{{runs}} compradas este mes",
+      "addon_buy": "Comprar · {{price}} / {{runs}} ejecuciones",
+      "addon_buy_fallback": "Comprar más ejecuciones"
     },
     "seats": {
       "title": "Puestos",
@@ -221,7 +232,9 @@
       "success_title": "Plan cambiado",
       "success_description": "Este espacio de trabajo ahora usa {{plan}}.",
       "unresolved": "No se ha podido confirmar el cambio de plan anterior. Contacta con soporte antes de cambiar de plan.",
-      "check_failed": "No se ha podido comprobar el cambio de plan. Vuelve a intentarlo."
+      "check_failed": "No se ha podido comprobar el cambio de plan. Vuelve a intentarlo.",
+      "addon_downgrade_notice": "Tras el cambio, el límite de este mes será de {{limit}} ejecuciones, incluidas las compradas. Este mes se han usado {{used}}.",
+      "addon_downgrade_notice_limit_only": "Tras el cambio, el límite de este mes será de {{limit}} ejecuciones, incluidas las compradas."
     },
     "confirm": {
       "title": "¿Continuar a Stripe Checkout?",
@@ -250,7 +263,22 @@
     "read_only": "Solo lectura. Mejora el plan para editar.",
     "unavailable": "No está incluido en el plan de este espacio de trabajo.",
     "view_plans": "Ver planes",
-    "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más."
+    "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más.",
+    "upgrade_to_add": "Mejorar el plan",
+    "business": "Business",
+    "badge_label": "Función de Business. Ver detalles",
+    "upgrade_to_business": "Pasar a Business",
+    "ask_admin": "Pide a un administrador del espacio de trabajo que pase el plan a Business.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "Permitir que personas concretas ejecuten un agente es una función de Business",
+        "description": "\"Solo yo\" y \"Todo el espacio de trabajo\" siguen disponibles en todos los planes."
+      },
+      "runtime_member_sharing": {
+        "title": "Compartir un runtime con miembros concretos es una función de Business",
+        "description": "\"Privado\" y \"Público\" siguen disponibles en todos los planes."
+      }
+    }
   },
   "trial": {
     "status": {
@@ -320,5 +348,35 @@
         "after": "Los invitados actuales conservan su acceso después de la prueba. Para invitar a nuevos invitados necesitas Pro o Business."
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} no se subió",
+    "copy_title": "No se creó la subincidencia: no se pudieron copiar sus adjuntos de origen",
+    "admin_body": "El almacenamiento de adjuntos está lleno ({{used}} / {{limit}}). Los adjuntos existentes no se ven afectados.",
+    "admin_body_no_figures": "El almacenamiento de adjuntos está lleno. Los adjuntos existentes no se ven afectados.",
+    "member_body": "El almacenamiento de adjuntos está lleno. Pide a un administrador que actualice el plan o elimina los adjuntos que ya no necesites.",
+    "dismiss": "Cerrar"
+  },
+  "autopilot_addon": {
+    "title": "Comprar más ejecuciones de automatización",
+    "description": "Las ejecuciones adicionales valen para este mes y las comparte todo el espacio de trabajo. Primero se usa la asignación del plan.",
+    "options_label": "Número de ejecuciones",
+    "option": "{{runs}} ejecuciones",
+    "usage_summary": "{{used}} / {{limit}} usadas este mes; se restablece el {{date}}.",
+    "pay": "Continuar para pagar {{amount}}",
+    "pay_fallback": "Continuar al pago",
+    "cancel": "Cancelar",
+    "loading": "Cargando el precio del complemento…",
+    "unavailable": "Este espacio de trabajo no puede comprar ejecuciones adicionales ahora.",
+    "conflict": "No se pueden comprar ejecuciones ahora o el precio cambió. Revisa las opciones y vuelve a intentarlo.",
+    "error": "No se pudo abrir la página de pago. Vuelve a intentarlo.",
+    "success_title": "Ejecuciones añadidas",
+    "success_description": "Se añadieron {{runs}} ejecuciones para este mes. Las automatizaciones se reanudan en su próxima ejecución.",
+    "confirming_title": "Confirmando el pago",
+    "confirming_description": "Las ejecuciones se añaden en cuanto Stripe confirma el pago. Revisa el uso más abajo en unos momentos.",
+    "not_paid_title": "Pago no completado",
+    "not_paid_description": "No se cobró nada ni se añadieron ejecuciones.",
+    "cancel_title": "Pago cancelado",
+    "cancel_description": "No se cobró nada."
   }
 }

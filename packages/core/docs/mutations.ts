@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
 import type {
+  CreateDocCommentRequest,
   CreateDocFolderRequest,
   CreateDocRequest,
   Doc,
@@ -128,5 +129,37 @@ export function useDeleteDocFolder() {
         folders: tree.folders.filter((f) => f.id !== id),
       }));
     },
+  });
+}
+
+/** Comment writes refetch the doc's discussions; the server is the source of truth. */
+function useDocCommentsInvalidate() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return (docId: string) => qc.invalidateQueries({ queryKey: docKeys.comments(wsId, docId) });
+}
+
+export function useCreateDocComment(docId: string) {
+  const invalidate = useDocCommentsInvalidate();
+  return useMutation({
+    mutationFn: (data: CreateDocCommentRequest) => api.createDocComment(docId, data),
+    onSettled: () => invalidate(docId),
+  });
+}
+
+export function useSetDocCommentResolved(docId: string) {
+  const invalidate = useDocCommentsInvalidate();
+  return useMutation({
+    mutationFn: ({ commentId, resolved }: { commentId: string; resolved: boolean }) =>
+      api.setDocCommentResolved(docId, commentId, resolved),
+    onSettled: () => invalidate(docId),
+  });
+}
+
+export function useDeleteDocComment(docId: string) {
+  const invalidate = useDocCommentsInvalidate();
+  return useMutation({
+    mutationFn: (commentId: string) => api.deleteDocComment(docId, commentId),
+    onSettled: () => invalidate(docId),
   });
 }

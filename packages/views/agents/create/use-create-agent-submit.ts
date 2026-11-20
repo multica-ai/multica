@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { buildCreateAgentRequest, type AgentDraft } from "@multica/core/agents";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { refreshFeaturesOnLockedError } from "@multica/core/billing";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { Agent } from "@multica/core/types";
 import {
@@ -15,6 +16,7 @@ import {
 import { useNavigation } from "../../navigation";
 import { withSquadParam } from "./squad-param";
 import { useT } from "../../i18n";
+import { usePaidFeatureErrorMessage } from "../../billing";
 
 interface AgentCreateErrors {
   nameError: string | null;
@@ -58,6 +60,7 @@ export function useCreateAgentSubmit(options: {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const qc = useQueryClient();
+  const paidFeatureError = usePaidFeatureErrorMessage();
 
   const [creating, setCreating] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
@@ -129,8 +132,11 @@ export function useCreateAgentSubmit(options: {
         t(($) => $.creation_studio.create_failed),
         t(($) => $.creation_studio.name_conflict),
       );
+      refreshFeaturesOnLockedError(qc, wsId, error);
       setNameError(nextErrors.nameError);
-      setFormError(nextErrors.formError);
+      setFormError(
+        nextErrors.formError === null ? null : paidFeatureError(error, nextErrors.formError),
+      );
       setCreating(false);
     }
   };

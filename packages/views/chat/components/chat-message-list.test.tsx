@@ -995,6 +995,17 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });
 
+  it("tells the reader to restore or relink a deleted project folder", async () => {
+    // MUL-9665. The reason has no agent_error family to degrade into, so
+    // without an entry it would land on the generic fallback, which cannot
+    // say the folder is gone or where to fix it.
+    renderFailure("local_directory_missing");
+    expect(
+      await screen.findByText(enChat.message_list.failure.local_directory_missing),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
   it("renders dedicated recovery copy for persisted runtime access denial", async () => {
     renderFailure("runtime_access_denied");
     expect(

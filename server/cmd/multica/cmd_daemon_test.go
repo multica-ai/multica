@@ -1029,3 +1029,28 @@ func clearDaemonTaskEnv(t *testing.T) {
 		t.Setenv(key, "")
 	}
 }
+
+func TestPrintDaemonStatusShowsSkippedAgents(t *testing.T) {
+	t.Parallel()
+
+	health := map[string]any{
+		"pid":        1234,
+		"uptime":     "1m",
+		"agents":     []any{"claude", "codex", "dsh", "pi"},
+		"workspaces": []any{},
+		"skipped_agents": map[string]any{
+			"pi":     "version below minimum",
+			"claude": "version probe timed out (limit 10s)",
+			"dsh":    "exit status 1\nstdout: booting\r\nstderr: invalid profile at /tmp/DSH  workspace",
+		},
+	}
+	var out bytes.Buffer
+	printDaemonStatusReport(&out, "Daemon", health)
+	got := out.String()
+	want := "Skipped agents:  claude: version probe timed out (limit 10s); " +
+		"dsh: exit status 1 stdout: booting stderr: invalid profile at /tmp/DSH  workspace; " +
+		"pi: version below minimum\nWorkspaces:"
+	if !strings.Contains(got, want) {
+		t.Fatalf("daemon status output = %q, want it to contain %q", got, want)
+	}
+}

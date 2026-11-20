@@ -80,6 +80,8 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ push: vi.fn() }),
 }));
 
+vi.mock("../../billing/storage-limit-notice", () => ({ useStorageLimitToast: () => () => false }));
+
 vi.mock("./delete-workspace-dialog", () => ({
   DeleteWorkspaceDialog: () => null,
 }));

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { i18n } from "@/lib/i18n/singleton";
 import { runFailureBadgeLabel } from "@/lib/run-failure-badge";
 import { AgentTaskSchema } from "./schemas";
 
@@ -47,7 +48,7 @@ describe("AgentTaskSchema failure_reason (#7913 regression)", () => {
     // The end-to-end shape of the bug: parse, then look up. Either half alone
     // passed while the run row still rendered a bare "Failed".
     const task = parseFailedTask("environment_prepare_failed");
-    expect(runFailureBadgeLabel(task.failure_reason)).toBe(
+    expect(runFailureBadgeLabel(task.failure_reason, i18n.getFixedT("en", "issues"))).toBe(
       "Environment setup failed",
     );
   });

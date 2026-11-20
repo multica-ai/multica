@@ -70,12 +70,19 @@
     "original_input": "Entrada original",
     "retry_with_context": "Reintentar con contexto",
     "edit_advanced": "Editar como formulario avanzado",
-    "autopilot_quota_exceeded_body": "Este espacio de trabajo ha alcanzado su límite de {{limit}} ejecuciones de automatizaciones para el periodo actual. No se iniciarán más ejecuciones de automatizaciones hasta que se reinicie la cuota {{resetAt}}.",
+    "autopilot_quota_exceeded_body": "Este espacio de trabajo alcanzó su límite de {{limit}} ejecuciones de autopilot del periodo actual. Las siguientes ejecuciones no se iniciarán hasta que la asignación se restablezca {{resetAt}}, o hasta que el espacio de trabajo mejore su plan o compre más ejecuciones.",
     "project_owner_joined_body": "{{name}} es propietario del espacio de trabajo y se ha añadido a este proyecto privado. Ahora puede ver sus tareas, comentarios y archivos adjuntos.",
     "open_project": "Abrir proyecto",
-    "autopilot_quota_upgrade": "Ver opciones de mejora del plan",
+    "autopilot_quota_upgrade": "Ver opciones",
     "archive": "Archivar",
-    "unarchive": "Desarchivar"
+    "unarchive": "Desarchivar",
+    "open_doc": "Abrir documento",
+    "autopilot_quota_upgrade_action": "Mejorar plan",
+    "autopilot_quota_addon_action": "Comprar más ejecuciones",
+    "autopilot_quota_portal_action": "Gestionar facturación",
+    "autopilot_quota_contact_upgrade": "Pide a un propietario o administrador del espacio de trabajo que mejore el plan.",
+    "autopilot_quota_contact_addon": "Pide a un propietario o administrador del espacio de trabajo que compre más ejecuciones.",
+    "autopilot_quota_contact_addon_or_upgrade": "Pide a un propietario o administrador del espacio de trabajo que compre más ejecuciones o mejore el plan."
   },
   "types": {
     "issue_assigned": "Asignada",
@@ -105,7 +112,9 @@
     "app_action_requested": "Necesita tu confirmación",
     "app_action_reminder": "La confirmación caduca pronto",
     "app_connect_requested": "Conectar una aplicación",
-    "app_action_result": "Resultado de la acción de la aplicación"
+    "app_action_result": "Resultado de la acción de la aplicación",
+    "doc_comment": "Nuevo comentario en un documento",
+    "doc_mentioned": "Te mencionaron en un documento"
   },
   "labels": {
     "set_status_to": "Establecer estado en",

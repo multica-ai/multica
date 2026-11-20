@@ -155,6 +155,10 @@ var concurrentIndexCleanups = map[string]string{
 	"696_inbox_item_active_shown_idx":                           "idx_inbox_active_shown",
 	"698_autopilot_run_idempotency_key_idx":                     "uq_autopilot_run_idempotency_key",
 	"701_member_search_access_pkey_index":                       "member_search_access_pkey_idx",
+	"704_doc_comment_pkey_index":                                "doc_comment_pkey_idx",
+	"706_doc_comment_doc_idx":                                   "doc_comment_doc_idx",
+	"707_doc_comment_workspace_idx":                             "doc_comment_workspace_idx",
+	"708_attachment_workspace_size_idx":                         "idx_attachment_workspace_size",
 	"671_weixin_account_state_unique_index":                     "weixin_account_state_pkey",
 	"669_weixin_login_session_unique_index":                     "weixin_login_session_pkey",
 	"666_weixin_login_expiry_idx":                               "weixin_login_expiry_idx",
@@ -444,6 +448,7 @@ var concurrentDownIndexCleanups = map[string]string{
 	"463_drop_issue_description_bigm_index":                 "idx_issue_description_bigm",
 	"464_drop_issue_description_trgm_index":                 "idx_issue_description_trgm",
 	"473_drop_agent_task_queue_chat_with_session_index":     "idx_agent_task_queue_chat_with_session_created_at",
+	"709_drop_attachment_workspace_index":                   "idx_attachment_workspace",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {

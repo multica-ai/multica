@@ -70,12 +70,19 @@
     "original_input": "Original input",
     "retry_with_context": "Retry with context",
     "edit_advanced": "Edit as advanced form",
-    "autopilot_quota_exceeded_body": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. Further autopilot runs will not start until the allowance resets {{resetAt}}.",
+    "autopilot_quota_exceeded_body": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. Further autopilot runs will not start until the allowance resets {{resetAt}}, or until the workspace upgrades or buys more runs.",
     "project_owner_joined_body": "{{name}} is a workspace owner and added themselves to this private project. They can now see its issues, comments, and attachments.",
     "open_project": "Open project",
-    "autopilot_quota_upgrade": "View upgrade options",
+    "autopilot_quota_upgrade": "View options",
     "archive": "Archive",
-    "unarchive": "Unarchive"
+    "unarchive": "Unarchive",
+    "open_doc": "Open doc",
+    "autopilot_quota_upgrade_action": "Upgrade",
+    "autopilot_quota_addon_action": "Buy more runs",
+    "autopilot_quota_portal_action": "Manage billing",
+    "autopilot_quota_contact_upgrade": "Ask a workspace owner or admin to upgrade the plan.",
+    "autopilot_quota_contact_addon": "Ask a workspace owner or admin to buy more runs.",
+    "autopilot_quota_contact_addon_or_upgrade": "Ask a workspace owner or admin to buy more runs or upgrade the plan."
   },
   "types": {
     "issue_assigned": "Assigned",
@@ -105,7 +112,9 @@
     "app_action_requested": "Needs your confirmation",
     "app_action_reminder": "Confirmation expiring soon",
     "app_connect_requested": "Connect an app",
-    "app_action_result": "App action result"
+    "app_action_result": "App action result",
+    "doc_comment": "New comment on a doc",
+    "doc_mentioned": "Mentioned in a doc"
   },
   "labels": {
     "set_status_to": "Set status to",

@@ -292,7 +292,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-env` 系列只在 `agent create` 中可用。之后修改用 `agent env set`，它整体替换原有变量，值写成 `****` 的键保留原值。
 - `agent update --mcp-config null` 清除 MCP 配置。
 - `--custom-args` 是 JSON 数组，排在启动参数的最后。选模型用 `--model`，部分工具会拒绝出现在自定义参数里的 `--model`。
-- 谁能调用智能体用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是旧写法，会映射到 `--permission-mode`；两者同时给出时以 `--permission-mode` 为准。
+- 谁能调用智能体用 `--permission-mode`：`private` 只有所有者，`public_to` 配合 `--public-to-workspace` 或 `--public-to-member <user-id>`。`--visibility private|workspace` 是旧写法，会映射到 `--permission-mode`；两者同时给出时以 `--permission-mode` 为准。在 Multica Cloud 上，Business 包含成员名单。Free 和 Pro 工作区开启强制后，`agent create` 或 `agent update` 新建名单或往名单里加人会以 `feature_locked` 拒绝；移除成员、原样保存名单、改成 `private` 或 `--public-to-workspace` 仍然可以。
 
 ## 守护进程和运行时
 

@@ -1,14 +1,14 @@
 ---
 title: 成员与权限
-description: 邀请成员，并用 owner、admin 和 member 三种角色管理工作区权限。
+description: 邀请成员和访客，为每个人选择合适的工作区权限。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { RolesDemo } from "@/components/demos/roles-demo";
 
-加入[工作区](/workspaces)的人都是成员，每位成员有一个角色：`owner`、`admin` 或 `member`。角色只控制工作区设置和团队管理；创建任务、发表评论等日常协作对所有成员开放。工作区还可以有[访客](#访客)，访客只能看到分享给自己的项目。
+在[工作区](/workspaces)中，`owner`、`admin` 和 `member` 都能创建任务和发表评论，但管理设置和成员的权限不同。[访客](#访客)只能在分享给自己的项目中查看任务和发表评论。
 
-## 三种角色
+## 成员管理权限 [#三种角色]
 
 | 操作 | owner | admin | member |
 |---|:---:|:---:|:---:|
@@ -24,7 +24,7 @@ import { RolesDemo } from "@/components/demos/roles-demo";
 <RolesDemo />
 
 <Callout type="info">
-角色不决定谁能运行智能体。每个智能体有独立的访问范围（Access），`owner` 和 `admin` 也不能绕过它运行未授权的智能体。详见[智能体](/agents#权限与-access)。
+访客无法运行智能体。每个智能体有独立的访问范围（Access），`owner` 和 `admin` 也不能绕过它运行未授权的智能体。详见[智能体](/agents#权限与-access)。
 </Callout>
 
 <Callout type="info">

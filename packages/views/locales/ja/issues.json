@@ -1075,6 +1075,7 @@
     "assignee": {
       "trigger_unassigned": "未割り当て",
       "search_placeholder": "担当者を割り当て...",
+      "recent_group": "最近",
       "members_group": "メンバー",
       "agents_group": "エージェント",
       "squads_group": "スクワッド",

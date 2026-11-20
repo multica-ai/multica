@@ -1,14 +1,14 @@
 ---
 title: 멤버와 권한
-description: 멤버를 초대하고 owner, admin, member 세 가지 역할로 워크스페이스 권한을 관리합니다.
+description: 멤버와 게스트를 초대하고 각 사람에게 맞는 접근 권한을 설정합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { RolesDemo } from "@/components/demos/roles-demo";
 
-[워크스페이스](/workspaces)에 참여한 사람은 모두 멤버이며, 각 멤버는 `owner`, `admin`, `member` 중 하나의 역할을 가집니다. 역할은 워크스페이스 설정과 팀 관리 권한만 제어합니다. 태스크 생성, 댓글 작성 같은 일상적인 협업은 모든 멤버에게 열려 있습니다. 워크스페이스에는 [게스트](#게스트)도 둘 수 있으며, 게스트는 공유받은 프로젝트만 볼 수 있습니다.
+[워크스페이스](/workspaces)의 `owner`, `admin`, `member`는 모두 태스크를 만들고 댓글을 작성할 수 있습니다. 설정과 멤버를 관리할 권한은 역할마다 다릅니다. [게스트](#게스트)는 공유받은 프로젝트에서만 태스크를 읽고 댓글을 작성할 수 있습니다.
 
-## 세 가지 역할
+## 멤버 관리 권한 [#세-가지-역할]
 
 | 작업 | owner | admin | member |
 |---|:---:|:---:|:---:|
@@ -24,7 +24,7 @@ import { RolesDemo } from "@/components/demos/roles-demo";
 <RolesDemo />
 
 <Callout type="info">
-역할은 에이전트를 실행할 수 있는 사람을 결정하지 않습니다. 각 에이전트에는 별도의 접근 범위(Access)가 있으며, `owner`와 `admin`도 권한이 없는 에이전트를 우회해서 실행할 수 없습니다. 자세한 내용은 [에이전트](/agents#권한과-access)를 참고하세요.
+게스트는 에이전트를 실행할 수 없습니다. 각 에이전트에는 별도의 접근 범위(Access)가 있으며, `owner`와 `admin`도 권한이 없는 에이전트를 우회해서 실행할 수 없습니다. 자세한 내용은 [에이전트](/agents#권한과-access)를 참고하세요.
 </Callout>
 
 <Callout type="info">

@@ -46,6 +46,8 @@ const TYPE_KEY: Record<InboxItemType, string> = {
   due_date_changed: "type.due_date_changed",
   new_comment: "type.new_comment",
   mentioned: "type.mentioned",
+  doc_comment: "type.doc_comment",
+  doc_mentioned: "type.doc_mentioned",
   review_requested: "type.review_requested",
   task_completed: "type.task_completed",
   task_failed: "type.task_failed",

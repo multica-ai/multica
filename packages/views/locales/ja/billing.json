@@ -28,6 +28,7 @@
     "actions": {
       "retry": "再試行",
       "retry_autopilots": "自動化の使用量を再取得",
+      "retry_storage": "添付ファイルの保存容量の使用量を再試行",
       "upgrade_to": "{{plan}} にアップグレード",
       "switch_to": "{{plan}} に切り替え",
       "manage": "請求を管理",
@@ -137,7 +138,17 @@
       "usage_unavailable": "使用量は一時的に利用できません",
       "members": "メンバー",
       "members_pending": "保留中の招待：{{pending}} 件",
-      "metering": "スケジュール、Webhook、エージェントによる実行はカウントされます。メンバーが「今すぐ実行」で開始した実行はカウントされません。"
+      "metering": "スケジュール、Webhook、エージェントによる実行はカウントされます。メンバーが「今すぐ実行」で開始した実行はカウントされません。",
+      "storage": "添付ファイルの保存容量",
+      "storage_description": "タスク、コメント、チャットの添付ファイル。",
+      "storage_label": "添付ファイルの保存容量の使用量",
+      "addon": "追加の実行回数",
+      "addon_description": "実行枠を使い切ると、翌月のリセットまたは追加購入まで自動化は停止します。",
+      "addon_included": "うち追加分 {{runs}} 回",
+      "addon_none": "今月の追加購入なし",
+      "addon_purchased": "今月 {{runs}} 回を追加購入済み",
+      "addon_buy": "追加購入 · {{price}} / {{runs}} 回",
+      "addon_buy_fallback": "実行回数を追加購入"
     },
     "seats": {
       "title": "席数",
@@ -215,7 +226,9 @@
       "success_title": "プランを変更しました",
       "success_description": "このワークスペースは {{plan}} になりました。",
       "unresolved": "前回のプラン変更を確認できませんでした。プランを変更する前にサポートにお問い合わせください。",
-      "check_failed": "プラン変更を確認できませんでした。再度お試しください。"
+      "check_failed": "プラン変更を確認できませんでした。再度お試しください。",
+      "addon_downgrade_notice": "切り替え後、今月の上限は追加購入分を含めて {{limit}} 回になります。今月はすでに {{used}} 回使用しています。",
+      "addon_downgrade_notice_limit_only": "切り替え後、今月の上限は追加購入分を含めて {{limit}} 回になります。"
     },
     "confirm": {
       "title": "Stripe Checkout に進みますか？",
@@ -244,7 +257,22 @@
     "read_only": "読み取り専用です。編集するにはアップグレードしてください。",
     "unavailable": "このワークスペースのプランには含まれていません。",
     "view_plans": "プランを見る",
-    "locked_error": "このワークスペースのプランには含まれていません。既存の設定はそのまま有効です。追加するにはアップグレードしてください。"
+    "locked_error": "このワークスペースのプランには含まれていません。既存の設定はそのまま有効です。追加するにはアップグレードしてください。",
+    "upgrade_to_add": "アップグレード",
+    "business": "Business",
+    "badge_label": "Business の機能。詳細を表示",
+    "upgrade_to_business": "Business にアップグレード",
+    "ask_admin": "Business へのアップグレードをワークスペースの管理者に依頼してください。",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "特定のメンバーにエージェントの実行を許可するのは Business の機能です",
+        "description": "自分だけ、またはワークスペース全体に公開する設定は、どのプランでも使えます。"
+      },
+      "runtime_member_sharing": {
+        "title": "ランタイムを特定のメンバーと共有するのは Business の機能です",
+        "description": "\"非公開\" と \"公開\" は、どのプランでも使えます。"
+      }
+    }
   },
   "trial": {
     "status": {
@@ -308,5 +336,35 @@
         "after": "終了後も既存のゲストはアクセスを保持します。新しいゲストの招待には Pro または Business が必要です。"
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} はアップロードされませんでした",
+    "copy_title": "サブタスクは作成されませんでした：元の添付ファイルをコピーできません",
+    "admin_body": "添付ファイルの保存容量が上限に達しました（{{used}} / {{limit}}）。既存の添付ファイルには影響しません。",
+    "admin_body_no_figures": "添付ファイルの保存容量が上限に達しました。既存の添付ファイルには影響しません。",
+    "member_body": "添付ファイルの保存容量が上限に達しました。管理者にプランのアップグレードを依頼するか、不要な添付ファイルを削除してください。",
+    "dismiss": "閉じる"
+  },
+  "autopilot_addon": {
+    "title": "自動化の実行回数を追加購入",
+    "description": "追加購入した回数は今月中有効で、ワークスペース全員で共有します。プランの実行枠から先に使われます。",
+    "options_label": "追加する回数",
+    "option": "{{runs}} 回",
+    "usage_summary": "今月の使用量 {{used}} / {{limit}} 回、{{date}} にリセット。",
+    "pay": "{{amount}} の支払いに進む",
+    "pay_fallback": "支払いに進む",
+    "cancel": "キャンセル",
+    "loading": "追加購入の価格を読み込んでいます…",
+    "unavailable": "このワークスペースは現在、実行回数を追加購入できません。",
+    "conflict": "現在は追加購入できないか、価格が変更されました。オプションを確認してもう一度お試しください。",
+    "error": "支払いページを開けませんでした。もう一度お試しください。",
+    "success_title": "実行回数を追加しました",
+    "success_description": "今月の実行回数に {{runs}} 回を追加しました。自動化は次回の実行から再開します。",
+    "confirming_title": "支払いを確認しています",
+    "confirming_description": "Stripe が支払いを確認するとすぐに実行回数が追加されます。しばらくしてから下の使用量を確認してください。",
+    "not_paid_title": "支払いが完了していません",
+    "not_paid_description": "請求は発生しておらず、実行回数も追加されていません。",
+    "cancel_title": "支払いをキャンセルしました",
+    "cancel_description": "請求は発生していません。"
   }
 }

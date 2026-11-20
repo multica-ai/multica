@@ -28,6 +28,7 @@
     "actions": {
       "retry": "Réessayer",
       "retry_autopilots": "Réessayer le chargement de la consommation des automatisations",
+      "retry_storage": "Réessayer l'utilisation du stockage des pièces jointes",
       "upgrade_to": "Passer à {{plan}}",
       "switch_to": "Basculer vers {{plan}}",
       "manage": "Gérer la facturation",
@@ -138,7 +139,17 @@
       "usage_unavailable": "La consommation est temporairement indisponible",
       "members": "Membres",
       "members_pending": "Invitations en attente : {{pending}}",
-      "metering": "Les exécutions lancées par une planification, un webhook ou un agent sont comptées. Celles qu'un membre lance avec Exécuter maintenant ne le sont pas."
+      "metering": "Les exécutions lancées par une planification, un webhook ou un agent sont comptées. Celles qu'un membre lance avec Exécuter maintenant ne le sont pas.",
+      "storage": "Stockage des pièces jointes",
+      "storage_description": "Pièces jointes des tickets, commentaires et discussions.",
+      "storage_label": "Utilisation du stockage des pièces jointes",
+      "addon": "Exécutions supplémentaires",
+      "addon_description": "Une fois l'allocation épuisée, les automatisations sont suspendues jusqu'au mois prochain ou jusqu'à l'achat d'exécutions supplémentaires.",
+      "addon_included": "Dont {{runs}} exécutions supplémentaires",
+      "addon_none": "Aucune ce mois-ci",
+      "addon_purchased": "{{runs}} achetées ce mois-ci",
+      "addon_buy": "Acheter · {{price}} / {{runs}} exécutions",
+      "addon_buy_fallback": "Acheter des exécutions"
     },
     "seats": {
       "title": "Sièges",
@@ -221,7 +232,9 @@
       "success_title": "Forfait changé",
       "success_description": "Cet espace de travail utilise désormais {{plan}}.",
       "unresolved": "Le changement de forfait précédent n'a pas pu être confirmé. Contactez l'assistance avant de changer de forfait.",
-      "check_failed": "Impossible de vérifier le changement de forfait. Réessayez."
+      "check_failed": "Impossible de vérifier le changement de forfait. Réessayez.",
+      "addon_downgrade_notice": "Après le changement, la limite de ce mois sera de {{limit}} exécutions, achats compris. {{used}} exécutions ont été utilisées ce mois-ci.",
+      "addon_downgrade_notice_limit_only": "Après le changement, la limite de ce mois sera de {{limit}} exécutions, achats compris."
     },
     "confirm": {
       "title": "Continuer vers Stripe Checkout ?",
@@ -250,7 +263,22 @@
     "read_only": "Lecture seule. Passez à un forfait supérieur pour modifier.",
     "unavailable": "Non inclus dans le forfait de cet espace de travail.",
     "view_plans": "Voir les forfaits",
-    "locked_error": "Non inclus dans le forfait de l'espace de travail. Les réglages existants restent actifs ; changez de forfait pour en ajouter."
+    "locked_error": "Non inclus dans le forfait de l'espace de travail. Les réglages existants restent actifs ; changez de forfait pour en ajouter.",
+    "upgrade_to_add": "Changer de forfait",
+    "business": "Business",
+    "badge_label": "Fonctionnalité Business. Voir les détails",
+    "upgrade_to_business": "Passer à Business",
+    "ask_admin": "Demandez à un administrateur de l'espace de travail de passer au forfait Business.",
+    "upgrade_card": {
+      "agent_invocation_members": {
+        "title": "Autoriser des personnes précises à exécuter un agent est une fonctionnalité Business",
+        "description": "\"Moi uniquement\" et \"Tout l'espace de travail\" restent disponibles dans tous les forfaits."
+      },
+      "runtime_member_sharing": {
+        "title": "Partager un environnement avec des membres précis est une fonctionnalité Business",
+        "description": "\"Privé\" et \"Public\" restent disponibles dans tous les forfaits."
+      }
+    }
   },
   "trial": {
     "status": {
@@ -320,5 +348,35 @@
         "after": "Les invités existants gardent leur accès après l'essai. Inviter de nouveaux invités nécessite Pro ou Business."
       }
     }
+  },
+  "storage_limit": {
+    "title": "{{filename}} n'a pas été importé",
+    "copy_title": "Le sous-ticket n'a pas été créé : ses pièces jointes sources n'ont pas pu être copiées",
+    "admin_body": "Le stockage des pièces jointes est plein ({{used}} / {{limit}}). Les pièces jointes existantes ne sont pas affectées.",
+    "admin_body_no_figures": "Le stockage des pièces jointes est plein. Les pièces jointes existantes ne sont pas affectées.",
+    "member_body": "Le stockage des pièces jointes est plein. Demandez à un administrateur de changer de forfait, ou supprimez les pièces jointes dont vous n'avez plus besoin.",
+    "dismiss": "Fermer"
+  },
+  "autopilot_addon": {
+    "title": "Acheter des exécutions d'automatisation",
+    "description": "Les exécutions supplémentaires sont valables ce mois-ci et partagées par tout l'espace de travail. L'allocation du forfait est utilisée en premier.",
+    "options_label": "Nombre d'exécutions",
+    "option": "{{runs}} exécutions",
+    "usage_summary": "{{used}} / {{limit}} utilisées ce mois-ci, réinitialisation le {{date}}.",
+    "pay": "Continuer pour payer {{amount}}",
+    "pay_fallback": "Continuer vers le paiement",
+    "cancel": "Annuler",
+    "loading": "Chargement du prix du complément…",
+    "unavailable": "Cet espace de travail ne peut pas acheter d'exécutions pour le moment.",
+    "conflict": "Impossible d'acheter des exécutions pour le moment, ou le prix a changé. Vérifiez les options et réessayez.",
+    "error": "La page de paiement n'a pas pu s'ouvrir. Réessayez.",
+    "success_title": "Exécutions ajoutées",
+    "success_description": "{{runs}} exécutions ont été ajoutées pour ce mois. Les automatisations reprennent à leur prochaine exécution.",
+    "confirming_title": "Confirmation du paiement",
+    "confirming_description": "Les exécutions sont ajoutées dès que Stripe confirme le paiement. Consultez l'utilisation ci-dessous dans un instant.",
+    "not_paid_title": "Paiement non finalisé",
+    "not_paid_description": "Rien n'a été débité et aucune exécution n'a été ajoutée.",
+    "cancel_title": "Paiement annulé",
+    "cancel_description": "Rien n'a été débité."
   }
 }

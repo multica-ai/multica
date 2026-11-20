@@ -55,26 +55,55 @@ func (a featureAdmission) admitted(ctx context.Context) {
 // rejection and answers 403 feature_locked; under observe it admits the
 // addition and returns an admission to record after the write commits.
 func (h *Handler) requireFeatureAddition(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, feature entitlement.FeatureName, operation string) (featureAdmission, bool) {
-	if h.Features == nil || !workspaceID.Valid {
-		return featureAdmission{}, true
-	}
-	decision := h.Features.Feature(r.Context(), uuid.UUID(workspaceID.Bytes), feature)
-	if decision.Action == entitlement.ActionOff {
-		return featureAdmission{}, true
-	}
-	attempts := service.EntitlementFeatureAttempts{Queries: h.Queries}
-	attempt := service.FeatureAttempt{
-		WorkspaceID: workspaceID,
-		Feature:     feature,
-		Operation:   operation,
-		Decision:    decision,
-	}
-	if decision.Restricted() {
-		attempts.Record(r.Context(), attempt)
+	admission, ok := h.paidFeature(r.Context(), workspaceID, feature).addition(r.Context(), operation)
+	if !ok {
 		writeFeatureLocked(w, feature)
+	}
+	return admission, ok
+}
+
+// paidFeature is one paid feature's decision for one workspace, read ahead of
+// the write. A handler that decides whether its write adds only while holding
+// row locks reads it first, so it never waits on Cloud under a lock, then
+// calls addition on the locked state.
+type paidFeature struct {
+	attempts service.EntitlementFeatureAttempts
+	attempt  service.FeatureAttempt
+	// active is false when the feature is off or there is no provider, as on
+	// a self-hosted deployment: nothing is restricted or recorded.
+	active bool
+}
+
+func (h *Handler) paidFeature(ctx context.Context, workspaceID pgtype.UUID, feature entitlement.FeatureName) paidFeature {
+	if h.Features == nil || !workspaceID.Valid {
+		return paidFeature{}
+	}
+	decision := h.Features.Feature(ctx, uuid.UUID(workspaceID.Bytes), feature)
+	if decision.Action == entitlement.ActionOff {
+		return paidFeature{}
+	}
+	return paidFeature{
+		attempts: service.EntitlementFeatureAttempts{Queries: h.Queries},
+		attempt:  service.FeatureAttempt{WorkspaceID: workspaceID, Feature: feature, Decision: decision},
+		active:   true,
+	}
+}
+
+// addition decides one write that adds to the feature. ok=false means the
+// addition is rejected: the rejection is already recorded and the caller
+// answers feature_locked. Otherwise the returned admission records an
+// observed addition once the write commits.
+func (f paidFeature) addition(ctx context.Context, operation string) (featureAdmission, bool) {
+	if !f.active {
+		return featureAdmission{}, true
+	}
+	attempt := f.attempt
+	attempt.Operation = operation
+	if attempt.Decision.Restricted() {
+		f.attempts.Record(ctx, attempt)
 		return featureAdmission{}, false
 	}
-	return featureAdmission{attempts: attempts, attempt: attempt, record: true}, true
+	return featureAdmission{attempts: f.attempts, attempt: attempt, record: true}, true
 }
 
 func writeFeatureLocked(w http.ResponseWriter, feature entitlement.FeatureName) {

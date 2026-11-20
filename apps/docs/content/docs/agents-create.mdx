@@ -101,10 +101,12 @@ Access decides which members can run this agent (assign, @-mention, or chat):
 | Access | Meaning |
 |---|---|
 | **Only me** | Only you can run it. The default. |
-| **Entire workspace** | Every workspace member can run it. |
+| **Entire workspace** | Members with the `owner`, `admin`, or `member` role. |
 | **Specific people** | Only you and the selected members can run it. |
 
 ![Access settings: Only me, Entire workspace, Specific people](/images/docs/agent-access-settings.webp)
+
+On Multica Cloud, **Specific people** is included in Business. On Free and Pro, an agent that already has a list keeps it, and people can still be removed or the agent switched to **Only me** or **Entire workspace**, but nobody new can be added and other agents cannot get a list. Self-hosted workspaces have **Specific people**.
 
 Only the agent owner can change Access; workspace admins cannot. Workspace `owner`s and `admin`s can manage the rest of the configuration, but cannot use their admin role to run agents they aren't granted.
 

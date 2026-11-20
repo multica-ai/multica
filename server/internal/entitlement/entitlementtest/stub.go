@@ -27,6 +27,7 @@ type Stub struct {
 var (
 	_ entitlement.Provider        = (*Stub)(nil)
 	_ entitlement.Refresher       = (*Stub)(nil)
+	_ entitlement.FreshRefresher  = (*Stub)(nil)
 	_ entitlement.FeatureProvider = (*Stub)(nil)
 )
 
@@ -69,7 +70,12 @@ func (s *Stub) RefreshGate(ctx context.Context, workspaceID uuid.UUID, name enti
 	return s.Gate(ctx, workspaceID, name)
 }
 
-// Refreshes lists every RefreshGate call.
+// RefreshGateNow behaves like RefreshGate: every stub refresh is forced.
+func (s *Stub) RefreshGateNow(ctx context.Context, workspaceID uuid.UUID, name entitlement.GateName) entitlement.Decision {
+	return s.RefreshGate(ctx, workspaceID, name)
+}
+
+// Refreshes lists every RefreshGate and RefreshGateNow call.
 func (s *Stub) Refreshes() []Call {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

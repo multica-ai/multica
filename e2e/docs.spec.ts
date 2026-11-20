@@ -327,3 +327,67 @@ test("Cmd+K finds a doc by words that only appear in its content", async ({ page
   await hit.click();
   await expect(page).toHaveURL(new RegExp(`/docs/${doc.id}$`));
 });
+
+test("comment on selected text, reply, find it again after reload, resolve and reopen", async ({ page }, info) => {
+  const doc = await api.createDoc(
+    "Release runbook",
+    "# Before release\n\nMigrations must rehearse a day ahead in staging.\n\nConfirm the rollback owner.",
+  );
+  await page.goto(`/${slug}/docs/${doc.id}`);
+  const editor = page.locator('.ProseMirror[contenteditable="true"]').first();
+  await expect(editor).toBeVisible();
+
+  // Select a word, then "Comment" in the selection toolbar.
+  await editor.getByText("Migrations must rehearse", { exact: false }).dblclick({ position: { x: 150, y: 8 } });
+  const selected = await page.evaluate(() => window.getSelection()?.toString().trim());
+  expect(selected).toBeTruthy();
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  const panel = page.getByRole("complementary", { name: "Comments" });
+  await expect(panel).toBeVisible();
+  // The new discussion's composer takes focus once it has mounted.
+  await expect(panel.locator('.ProseMirror[contenteditable="true"]').first()).toBeFocused();
+  await page.keyboard.type("Can index-only migrations rehearse the same day?");
+  await panel.getByRole("button", { name: "Comment", exact: true }).click();
+
+  const thread = panel.getByRole("group", { name: selected! });
+  await expect(thread).toContainText("Can index-only migrations rehearse the same day?");
+  await expect(page.getByRole("button", { name: /^Comments\s*1$/ })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => CSS.highlights.has("doc-comment") || CSS.highlights.has("doc-comment-active"))).toBe(true);
+
+  await thread.click();
+  await panel.getByRole("button", { name: "Reply", exact: true }).waitFor();
+  const replyBox = thread.locator('.ProseMirror[contenteditable="true"]');
+  await replyBox.click();
+  await expect(replyBox).toBeFocused();
+  await page.keyboard.type("Yes, with CONCURRENTLY.");
+  await panel.getByRole("button", { name: "Reply", exact: true }).click();
+  // Sent: the composer clears and the reply renders as a message.
+  await expect(replyBox).toHaveText("");
+  await expect(thread.getByText("Yes, with CONCURRENTLY.", { exact: true })).toBeVisible();
+  await page.screenshot({ path: info.outputPath("doc-comments.png"), animations: "disabled", style: "nextjs-portal { display: none; }" });
+
+  // After a reload the highlight is found again by text; clicking it opens the discussion.
+  await page.reload();
+  await expect(page.getByRole("button", { name: /^Comments\s*1$/ })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => CSS.highlights.get("doc-comment")?.size ?? 0)).toBe(1);
+  await editor.getByText("Migrations must rehearse", { exact: false }).click({ position: { x: 150, y: 8 } });
+  await expect(panel.getByRole("group", { name: selected! }).getByText("Yes, with CONCURRENTLY.", { exact: true })).toBeVisible();
+
+  // Clicking into the open discussion's reply box leaves the doc where it is.
+  await panel.getByRole("group", { name: selected! }).locator('.ProseMirror[contenteditable="true"]').click();
+  await expect(panel.getByRole("group", { name: selected! }).locator('.ProseMirror[contenteditable="true"]')).toBeFocused();
+
+  // Resolving keeps the open list in view and clears the highlight.
+  await panel.getByRole("button", { name: "Resolve", exact: true }).click();
+  await expect(panel.getByRole("tab", { name: "Open 0" })).toHaveAttribute("aria-selected", "true");
+  await expect(panel.getByRole("tab", { name: "Resolved 1" })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => (CSS.highlights.get("doc-comment")?.size ?? 0) + (CSS.highlights.get("doc-comment-active")?.size ?? 0)))
+    .toBe(0);
+
+  // Reopening brings it back to the open list.
+  await panel.getByRole("tab", { name: "Resolved 1" }).click();
+  await panel.getByRole("button", { name: "Reopen", exact: true }).click();
+  await expect(panel.getByRole("tab", { name: "Open 1" })).toHaveAttribute("aria-selected", "true");
+  await expect(panel.getByRole("group", { name: selected! })).toBeVisible();
+});

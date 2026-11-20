@@ -271,6 +271,9 @@
       "completed": "執行成功",
       "failed": "執行失敗",
       "cancelled": "已取消"
+    },
+    "failure_badge": {
+      "local_directory_missing": "資料夾不存在"
     }
   },
   "header_filter": "篩選",

@@ -19,6 +19,8 @@ export const workspaceSubscriptionKeys = {
     [...workspaceSubscriptionKeys.all(wsId), "summary"] as const,
   prices: (wsId: string) =>
     [...workspaceSubscriptionKeys.all(wsId), "prices"] as const,
+  autopilotAddonCheckout: (wsId: string, sessionId: string) =>
+    [...workspaceSubscriptionKeys.all(wsId), "autopilot-addon-checkout", sessionId] as const,
 };
 
 /**
@@ -68,6 +70,20 @@ export function workspaceSubscriptionPricesOptions(wsId: string) {
     staleTime: (query) =>
       workspaceSubscriptionPricesStaleTime(query.state.data),
     refetchOnWindowFocus: true,
+    retry: false,
+  });
+}
+
+/**
+ * An add-on Checkout Session the payer came back from. Cloud records a paid
+ * session before answering, so this is also what confirms the purchase.
+ */
+export function workspaceAutopilotAddonCheckoutOptions(wsId: string, sessionId: string) {
+  return queryOptions({
+    queryKey: workspaceSubscriptionKeys.autopilotAddonCheckout(wsId, sessionId),
+    queryFn: () => api.getWorkspaceAutopilotAddonCheckout(sessionId),
+    enabled: wsId.length > 0 && sessionId.length > 0,
+    staleTime: 0,
     retry: false,
   });
 }

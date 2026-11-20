@@ -836,6 +836,8 @@ function matchesMentionQuery(item: MentionItem, query: string): boolean {
 interface MentionSuggestionOptions {
   mode?: "default" | "context";
   getContextItems?: () => MentionItem[];
+  /** Leave guests out of the member list, where the mention leads somewhere they cannot open. */
+  hideGuests?: boolean;
 }
 
 export function createMentionSuggestion(
@@ -883,6 +885,7 @@ export function createMentionSuggestion(
         : [];
 
     const memberItems: MentionItem[] = members
+      .filter((m) => !(options.hideGuests && m.role === "guest"))
       .filter((m) => m.name.toLowerCase().includes(q) || matchesPinyin(m.name, q))
       .map((m) => ({
         id: m.user_id,
