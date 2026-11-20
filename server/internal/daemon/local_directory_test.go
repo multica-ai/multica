@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -884,8 +885,10 @@ func TestAcquireLocalDirectoryLock_ReportsDeletedDirectoryAsMissing(t *testing.T
 			if got.FailureReason != tc.wantReason {
 				t.Errorf("failure_reason = %q, want %q (error %q)", got.FailureReason, tc.wantReason, got.Error)
 			}
-			if !strings.Contains(got.Error, path) {
-				t.Errorf("error %q does not name the linked path %q", got.Error, path)
+			// validateLocalPath formats the path with %q, which escapes Windows
+			// backslashes.
+			if quoted := strconv.Quote(path); !strings.Contains(got.Error, quoted) {
+				t.Errorf("error %q does not name the linked path %s", got.Error, quoted)
 			}
 			// The server upgrades older daemons' reports by this text, so the
 			// two must agree on the reason.
