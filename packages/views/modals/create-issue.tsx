@@ -57,6 +57,7 @@ import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
+import { useRecordAssigneePick } from "../issues/components/pickers/assignee-picker";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
@@ -302,6 +303,10 @@ export function ManualCreatePanel({
     return draft.manual.assigneeId;
   });
   const [assigneeCleared, setAssigneeCleared] = useState(data?.manual_assignee_cleared === true);
+  // Only an assignee picked by hand in this dialog feeds the picker's local
+  // ranking — not a prefilled or remembered default — and only once created.
+  const assigneePickedRef = useRef(false);
+  const recordAssigneePick = useRecordAssigneePick();
   const [startDate, setStartDate] = useState<string | null>(draft.manual.startDate);
   const [dueDate, setDueDate] = useState<string | null>(
     (data?.due_date as string | undefined) ?? draft.shared.dueDate,
@@ -823,6 +828,10 @@ export function ManualCreatePanel({
     }
   },
     onAccepted: () => {
+      if (assigneePickedRef.current && assigneeType && assigneeId) {
+        recordAssigneePick(assigneeType, assigneeId);
+      }
+      assigneePickedRef.current = false;
       // Only the assignee persists across independent create sessions.
       setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");
@@ -1142,10 +1151,14 @@ export function ManualCreatePanel({
                 <AssigneePicker
                   assigneeType={assigneeType ?? null}
                   assigneeId={assigneeId ?? null}
-                  onUpdate={(u) => updateAssignee(
-                    u.assignee_type ?? undefined,
-                    u.assignee_id ?? undefined,
-                  )}
+                  onUpdate={(u) => {
+                    assigneePickedRef.current = true;
+                    updateAssignee(
+                      u.assignee_type ?? undefined,
+                      u.assignee_id ?? undefined,
+                    );
+                  }}
+                  recordPicks={false}
                   triggerRender={<PillButton />}
                   tooltip={tIssues(($) => $.detail.prop_assignee)}
                   align="start"

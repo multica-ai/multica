@@ -34,6 +34,8 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 const mockParentIssue = vi.hoisted(() => ({ value: null as Issue | null }));
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
+const mockRecordAssigneePick = vi.hoisted(() => vi.fn());
+const assigneePickerProps = vi.hoisted(() => ({ recordPicks: undefined as boolean | undefined }));
 type VoiceOptions = { insert: (text: string) => boolean; submit?: () => void };
 const voiceOptions = vi.hoisted(() => ({ last: null as VoiceOptions | null }));
 
@@ -482,7 +484,19 @@ vi.mock("../issues/components", () => ({
     <div data-testid="priority-picker" onClick={() => onUpdate({ priority: "high" })} />
   ),
   StagePicker: () => <div data-testid="stage-picker" />,
-  AssigneePicker: () => <div data-testid="assignee-picker" />,
+  // Surface onUpdate so tests can drive manual picks.
+  AssigneePicker: ({ onUpdate, recordPicks }: {
+    onUpdate: (u: { assignee_type: string; assignee_id: string }) => void;
+    recordPicks?: boolean;
+  }) => {
+    assigneePickerProps.recordPicks = recordPicks;
+    return (
+      <div data-testid="assignee-picker">
+        <button type="button" onClick={() => onUpdate({ assignee_type: "member", assignee_id: "alice" })}>pick alice</button>
+        <button type="button" onClick={() => onUpdate({ assignee_type: "agent", assignee_id: "bot" })}>pick bot</button>
+      </div>
+    );
+  },
   // Surface open/onOpenChange so tests can assert progressive-disclosure
   // behavior (mounted only when the user has opted in or has a value).
   StartDatePicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
@@ -510,6 +524,10 @@ vi.mock("../issues/components", () => ({
       onClick={() => onOpenChange?.(false)}
     />
   ),
+}));
+
+vi.mock("../issues/components/pickers/assignee-picker", () => ({
+  useRecordAssigneePick: () => mockRecordAssigneePick,
 }));
 
 vi.mock("../issues/components/pickers/custom-property-picker", () => ({
@@ -882,6 +900,37 @@ describe("CreateIssueModal", () => {
 
     expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
+  });
+
+  it("records only the assignee picked by hand and finally submitted", async () => {
+    const user = userEvent.setup();
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    // The picker leaves recording to the dialog.
+    expect(assigneePickerProps.recordPicks).toBe(false);
+    await user.click(screen.getByRole("button", { name: "pick alice" }));
+    await user.click(screen.getByRole("button", { name: "pick bot" }));
+    expect(mockRecordAssigneePick).not.toHaveBeenCalled();
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Assigned issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledWith("agent", "bot"));
+    expect(mockRecordAssigneePick).toHaveBeenCalledTimes(1);
+    expect(mockRecordAssigneePick).toHaveBeenCalledWith("agent", "bot");
+  });
+
+  it("does not record a remembered default assignee", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.assigneeType = "member";
+    mockDraftStore.draft.manual.assigneeId = "alice";
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Default assignee");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledWith("member", "alice"));
+    expect(mockRecordAssigneePick).not.toHaveBeenCalled();
   });
 
   it("starts a fresh create from todo without a remembered stage", async () => {

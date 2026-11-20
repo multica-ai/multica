@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enIssues from "../../../locales/en/issues.json";
+import { useAssigneePicksStore } from "@multica/core/issues/stores/assignee-picks-store";
 import { AssigneePicker } from "./assignee-picker";
 
 const MEMBERS = [{ user_id: "user-1", name: "Ada Lovelace", role: "member" }];
@@ -25,10 +26,10 @@ const SQUADS = [
   // rejects the pick, so it's hidden too.
   { id: "squad-private", name: "Private Squad", archived_at: null, leader_id: "agent-theirs" },
 ];
-const FREQUENCY = [
-  { assignee_type: "agent", assignee_id: "agent-theirs", frequency: 9 },
-  { assignee_type: "squad", assignee_id: "squad-stuck", frequency: 8 },
-  { assignee_type: "agent", assignee_id: "agent-shared", frequency: 1 },
+const PICKS = [
+  ...Array.from({ length: 9 }, () => ({ type: "agent" as const, id: "agent-theirs" })),
+  ...Array.from({ length: 8 }, () => ({ type: "squad" as const, id: "squad-stuck" })),
+  { type: "agent" as const, id: "agent-shared" },
 ];
 
 vi.mock("@tanstack/react-query", () => ({
@@ -36,7 +37,6 @@ vi.mock("@tanstack/react-query", () => ({
     if (queryKey[0] === "members") return { data: MEMBERS };
     if (queryKey[0] === "agents") return { data: AGENTS };
     if (queryKey[0] === "squads") return { data: SQUADS };
-    if (queryKey[0] === "frequency") return { data: FREQUENCY };
     return { data: [] };
   },
 }));
@@ -64,7 +64,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"] }),
   agentListOptions: () => ({ queryKey: ["agents"] }),
   squadListOptions: () => ({ queryKey: ["squads"] }),
-  assigneeFrequencyOptions: () => ({ queryKey: ["frequency"] }),
 }));
 vi.mock("../../../common/actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
@@ -79,6 +78,7 @@ function rowsIn(label: string): string[] {
 
 describe("AssigneePicker unpickable actors", () => {
   it("hides agents and squads the user cannot assign, including from Recent", async () => {
+    useAssigneePicksStore.setState({ byScope: { "user-1:workspace-1": PICKS } });
     render(
       <I18nProvider locale="en" resources={{ en: { issues: enIssues } }}>
         <AssigneePicker

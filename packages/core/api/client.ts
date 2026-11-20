@@ -125,7 +125,6 @@ import type {
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
   TimelineEntry,
-  AssigneeFrequencyEntry,
   TaskMessagePayload,
   TaskContextReceiptResponse,
   RuntimeRateLimitsResponse,
@@ -2155,10 +2154,6 @@ export class ApiClient {
     return parseWithFallback(raw, TimelineEntriesSchema, EMPTY_TIMELINE_ENTRIES, {
       endpoint: "GET /api/issues/:id/timeline",
     });
-  }
-
-  async getAssigneeFrequency(): Promise<AssigneeFrequencyEntry[]> {
-    return this.fetch("/api/assignee-frequency");
   }
 
   async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number): Promise<Comment> {

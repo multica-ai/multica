@@ -9,7 +9,6 @@ import {
 import { api } from "../api";
 import { issueKeys } from "./queries";
 import { projectKeys } from "../projects/queries";
-import { workspaceKeys } from "../workspace/queries";
 import { inboxKeys, type ArchivedInboxCache } from "../inbox/queries";
 import {
   cancelInboxLists,
@@ -389,8 +388,6 @@ export function useUpdateIssue() {
           Object.prototype.hasOwnProperty.call(vars, "project_id"),
       });
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
-      // Refresh the assignee picker's Recent group after a reassignment.
-      if (!err && vars.assignee_id) qc.invalidateQueries({ queryKey: workspaceKeys.assigneeFrequency(wsId) });
       if (ctx) {
         invalidateStaleListKeys(qc, ctx.change.staleKeys);
       }

@@ -169,7 +169,6 @@ export {
 } from "./quick-action";
 export type {
   TimelineEntry,
-  AssigneeFrequencyEntry,
 } from "./activity";
 export type { IssueSubscriber, IssueSubscriberDelivery } from "./subscriber";
 export type * from "./events";
