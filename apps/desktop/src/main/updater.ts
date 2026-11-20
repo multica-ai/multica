@@ -151,6 +151,7 @@ export function setupAutoUpdater(
       // when a provider does not emit an error event for that failure.
       void result?.downloadPromise?.catch((err) => {
         console.error("Failed to download update:", err);
+        if (downloadState.status === "downloading") record?.("updater-error");
         reportDownloadFailure(err);
       });
       return result;
