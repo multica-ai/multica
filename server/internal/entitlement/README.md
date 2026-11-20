@@ -63,6 +63,8 @@ older consumer ignores the unknown gate, and this consumer reads a policy
 without it, or with a malformed one, as `members` `off` with reason
 `gate_missing` or `gate_invalid`. Only that gate falls back; `autopilot_runs`
 and the features keep their instructions. See [Member limit](#member-limit).
+`gates.storage_bytes` (revision 6) is optional the same way; see
+[Attachment storage limit](#attachment-storage-limit).
 
 Responses tolerate unknown JSON fields and gates for additive compatibility.
 Unknown schema/action, malformed fields, a missing `autopilot_runs` gate, HTTP
@@ -166,6 +168,38 @@ since the gate has no period of its own.
 Clients read `GET /api/workspaces/{id}/member-limit` (member-readable), which
 returns `action` and, while a limit applies, `limit`, `members` and
 `pending_invitations`.
+
+## Attachment storage limit
+
+`storage_bytes` caps the attachment bytes a workspace holds, on every plan:
+Cloud sends Free's flat limit or the paid plan's per-seat limit. It carries a
+`limit` and no period. `service.StorageQuota`
+(`server/internal/service/storage_quota.go`) checks it.
+
+Usage is not stored: it is `SUM(size_bytes)` over the workspace's attachment
+rows (`SumWorkspaceAttachmentBytes`, an index-only scan on
+`idx_attachment_workspace_size`), so cascade deletes are reflected at once.
+Every attachment row counts; thumbnails are not rows. `off` reads nothing.
+The sum has its own timeout (`DefaultStorageSumTimeout`, 300 ms); a timeout or
+error admits the upload and is counted in `multica_storage_quota_sum_total`.
+
+| Path | Checked as |
+| --- | --- |
+| `POST /api/upload-file` with a workspace | used + file size, before the object is written |
+| Create a sub-issue from a comment (copies the source attachments) | used + copied bytes, before the sub-issue or any copy exists |
+| Files received through a messaging channel | recorded after they are stored, never refused |
+
+`enforce` refuses with `403 storage_limit_reached`, `used_bytes` and
+`limit_bytes`, after re-reading the policy with `RefreshGate`. `observe`
+admits and records. Reads, downloads, thumbnails and deletes are never
+checked. It is a soft limit: no lock is taken, so uploads in flight when a
+workspace crosses its limit all pass. Attempts are recorded in
+`entitlement_limit_overage` under gate `storage_bytes`, grouped by UTC
+calendar month.
+
+Clients read `GET /api/workspaces/{id}/storage-usage` (member-readable), which
+returns `action` and, while a limit applies, `used_bytes` and `limit_bytes`;
+`reached` is present only under `enforce`.
 
 ## Paid features
 

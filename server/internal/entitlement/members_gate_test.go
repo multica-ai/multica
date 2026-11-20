@@ -197,3 +197,47 @@ func TestRefreshGateWithoutCloudIsOff(t *testing.T) {
 		t.Fatalf("decision = %+v", decision)
 	}
 }
+
+func TestStorageBytesGateIsAPeriodlessCeiling(t *testing.T) {
+	server := httptest.NewServer(policyHandler(func(p *wirePolicy) {
+		p.Gates[string(GateStorageBytes)] = membersGate(ActionEnforce, 1_000_000_000)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server.URL, nil)
+
+	decision := client.Gate(context.Background(), uuid.New(), GateStorageBytes)
+	if decision.Gate.Action != ActionEnforce || decision.Gate.Limit == nil ||
+		*decision.Gate.Limit != 1_000_000_000 || decision.Gate.PeriodStart != nil {
+		t.Fatalf("decision = %+v, want enforce 1e9 without a period", decision)
+	}
+}
+
+// A Cloud that does not send storage_bytes yet, or sends it malformed, leaves
+// storage off without touching the other gates.
+func TestStorageBytesGateFailsOpenAlone(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		mutate func(*wirePolicy)
+		reason Reason
+	}{
+		{"missing", func(*wirePolicy) {}, ReasonGateMissing},
+		{"enforce without limit", func(p *wirePolicy) {
+			p.Gates[string(GateStorageBytes)] = wireGate{Action: string(ActionEnforce)}
+		}, ReasonGateInvalid},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			server := httptest.NewServer(policyHandler(tt.mutate))
+			defer server.Close()
+			client := newTestClient(t, server.URL, nil)
+			workspaceID := uuid.New()
+
+			storage := client.Gate(context.Background(), workspaceID, GateStorageBytes)
+			if storage.Gate.Action != ActionOff || storage.Reason != tt.reason {
+				t.Fatalf("storage = %+v, want off/%s", storage, tt.reason)
+			}
+			if autopilot := client.Gate(context.Background(), workspaceID, GateAutopilotRuns); autopilot.Gate.Action != ActionEnforce {
+				t.Fatalf("autopilot = %+v, want the enforced quota from the same policy", autopilot)
+			}
+		})
+	}
+}

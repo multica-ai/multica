@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/imagemetadata"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/thumbnail"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -597,6 +598,15 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			// Bind the session too so reads (groupChatMessageAttachments) and
 			// GC classify the row consistently before it gains a message id.
 			params.ChatSessionID = task.ChatSessionID
+		}
+
+		// Every field is validated; check the storage limit before writing
+		// the object, so a refused upload stores nothing.
+		if err := h.storageQuota().Admit(r.Context(), params.WorkspaceID, params.SizeBytes, service.StorageSourceUpload); err != nil {
+			if !writeStorageLimitReached(w, err) {
+				writeError(w, http.StatusInternalServerError, "upload failed")
+			}
+			return
 		}
 
 		if dimensions, ok := imagemetadata.Dimensions(data); ok {

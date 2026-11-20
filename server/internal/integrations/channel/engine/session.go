@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -918,7 +919,28 @@ func (s *ChatSession) BindMediaRefsWithResult(ctx context.Context, in BindMediaI
 		// gone, atomically. Either way the reconciler settles the objects.
 		return BindMediaResult{}, fmt.Errorf("commit media: %w", err)
 	}
+	if len(in.MediaRefs) > 0 {
+		if hook := mediaStoredHook.Load(); hook != nil {
+			(*hook)(context.WithoutCancel(ctx), in.WorkspaceID)
+		}
+	}
 	return result, nil
+}
+
+// mediaStoredHook runs after channel media becomes attachments. Every channel
+// adapter builds its own ChatSession, so the server installs the hook once
+// instead of threading it through each one.
+var mediaStoredHook atomic.Pointer[func(context.Context, pgtype.UUID)]
+
+// SetMediaStoredHook installs fn to run after a channel message's media is
+// stored as attachments in a workspace (MUL-9489: the storage limit records,
+// but never refuses, these files). nil removes it. fn must not fail the bind.
+func SetMediaStoredHook(fn func(ctx context.Context, workspaceID pgtype.UUID)) {
+	if fn == nil {
+		mediaStoredHook.Store(nil)
+		return
+	}
+	mediaStoredHook.Store(&fn)
 }
 
 func (s *ChatSession) clearMediaPending(ctx context.Context, q SessionQueries, in BindMediaInput) error {

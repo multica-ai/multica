@@ -484,6 +484,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.Features = entitlementClient
 		h.AutopilotService.Entitlements = entitlementClient
 		h.AutopilotService.QuotaMetrics = opts.BusinessMetrics
+		storageQuota := service.StorageQuota{
+			Sums:         queries,
+			Entitlements: entitlementClient,
+			Overages:     service.EntitlementOverages{Queries: queries},
+		}
+		if opts.BusinessMetrics != nil {
+			storageQuota.Metrics = opts.BusinessMetrics
+		}
+		engine.SetMediaStoredHook(func(ctx context.Context, workspaceID pgtype.UUID) {
+			storageQuota.RecordStored(ctx, workspaceID, service.StorageSourceChannel)
+		})
 	}
 	// Cloud Runtime and strict seat capacity are one managed deployment. Reuse
 	// the same base URL so Billing cannot be readable while invitation writes
@@ -1846,6 +1857,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// The plan's member limit for upgrade UI; every admission
 					// is checked on the server regardless.
 					r.Get("/member-limit", h.GetMemberLimit)
+					r.Get("/storage-usage", h.GetStorageUsage)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 					// Listing GitHub installations is member-visible so the

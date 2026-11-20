@@ -565,6 +565,20 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "mode must be manual or agent")
 		return
 	}
+	// Copying the source attachments stores new bytes, so it is checked like
+	// an upload, before the sub-issue or any copy exists.
+	var copyBytes int64
+	for _, row := range build.Rows {
+		copyBytes += row.SizeBytes
+	}
+	if copyBytes > 0 {
+		if err := h.storageQuota().Admit(r.Context(), wsUUID, copyBytes, service.StorageSourceSubIssue); err != nil {
+			if !writeStorageLimitReached(w, err) {
+				writeError(w, http.StatusInternalServerError, "failed to check attachment storage")
+			}
+			return
+		}
+	}
 	contextID := dbid.NewV7()
 	capture, objectKeys, err := h.cloneSourceContext(r.Context(), wsUUID, userUUID, contextID, build)
 	if err != nil {
