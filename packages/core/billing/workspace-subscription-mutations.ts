@@ -4,10 +4,12 @@ import type {
   ChangeWorkspacePlanRequest,
   CreateWorkspaceSubscriptionCheckoutRequest,
   PreviewWorkspacePlanChangeRequest,
+  CreateWorkspaceAutopilotAddonCheckoutRequest,
   PreviewWorkspaceSeatPurchaseRequest,
   PurchaseWorkspaceSeatsRequest,
 } from "../types";
 import { workspaceSubscriptionKeys } from "./workspace-subscription-queries";
+import { autopilotKeys } from "../autopilots/queries";
 
 export function useCreateWorkspaceSubscriptionCheckout(wsId: string) {
   const queryClient = useQueryClient();
@@ -89,5 +91,29 @@ export function useCreateWorkspaceSubscriptionPortal(wsId: string) {
         queryKey: workspaceSubscriptionKeys.summary(wsId),
       });
     },
+  });
+}
+
+/**
+ * Refresh everything a paid add-on changes: the summary and add-on reads
+ * (limit, this month's add-ons) and the autopilot usage meter.
+ */
+export function invalidateAfterAutopilotAddon(
+  queryClient: ReturnType<typeof useQueryClient>,
+  wsId: string,
+) {
+  void queryClient.invalidateQueries({
+    queryKey: workspaceSubscriptionKeys.all(wsId),
+  });
+  void queryClient.invalidateQueries({
+    queryKey: autopilotKeys.usage(wsId),
+  });
+}
+
+/** Start paying for autopilot add-on packs on Stripe Checkout. */
+export function useCreateWorkspaceAutopilotAddonCheckout() {
+  return useMutation({
+    mutationFn: (data: CreateWorkspaceAutopilotAddonCheckoutRequest) =>
+      api.createWorkspaceAutopilotAddonCheckout(data),
   });
 }

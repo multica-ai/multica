@@ -39,7 +39,13 @@ const (
 	ActionObserve Action = "observe"
 	ActionEnforce Action = "enforce"
 
+	// NotificationFirstRejectionPerPeriod notifies on the first rejection of
+	// a period only.
 	NotificationFirstRejectionPerPeriod = "first_rejection_per_period"
+	// NotificationFirstRejectionPerLimit notifies on the first rejection for
+	// each limit within a period, so a limit raised by an add-on purchase
+	// re-arms the notice (policy revision 6).
+	NotificationFirstRejectionPerLimit = "first_rejection_per_limit"
 )
 
 type Reason string
@@ -108,6 +114,15 @@ type Provider interface {
 // A Provider without it rejects on the cached decision.
 type Refresher interface {
 	RefreshGate(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
+}
+
+// FreshRefresher re-reads one gate from Cloud now, skipping the short reuse
+// window RefreshGate applies; concurrent callers for a workspace share one
+// fetch. The autopilot quota calls it right before rejecting a run, so a limit
+// Cloud raised moments ago (a paid add-on confirmed by Stripe's webhook) is
+// never refused on a policy any instance cached before it.
+type FreshRefresher interface {
+	RefreshGateNow(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision
 }
 
 // FeatureName is a stable paid-feature key. Unlike a GateName it meters

@@ -44,6 +44,9 @@ import type {
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPlanPrices,
   WorkspaceSubscriptionPrices,
+  CreateWorkspaceAutopilotAddonCheckoutResponse,
+  WorkspaceAutopilotAddonCheckout,
+  WorkspaceAutopilotAddonPrice,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspacePlanChangePreview,
   ChangeWorkspacePlanResponse,
@@ -3700,7 +3703,21 @@ export const WorkspaceSubscriptionSummarySchema = z
       // Absent on a cloud that predates plan switching: no switch is offered.
       change_plan: z.boolean().optional(),
       check_plan_change: z.boolean().optional(),
+      // Absent on a cloud that predates add-ons; a malformed value offers none.
+      purchase_autopilot_runs: z.boolean().optional().catch(undefined),
     }).loose(),
+    // Absent on an older cloud, and a malformed value reads as no add-ons:
+    // the limit in the entitlement already includes them.
+    autopilot_addon: z
+      .object({
+        purchased_runs: z.number().int().nonnegative(),
+        period_start: z.string().min(1),
+        period_end: z.string().min(1),
+      })
+      .loose()
+      .nullable()
+      .optional()
+      .catch(null),
     // Absent on an older cloud, and a malformed value reads as no hold: the
     // server still refuses the operations a hold blocks.
     plan_change: z
@@ -3771,7 +3788,16 @@ export const WorkspaceSubscriptionSummarySchema = z
         purchaseSeats: value.available_actions.purchase_seats,
         changePlan: value.available_actions.change_plan ?? false,
         checkPlanChange: value.available_actions.check_plan_change ?? false,
+        purchaseAutopilotRuns:
+          value.available_actions.purchase_autopilot_runs ?? false,
       },
+      autopilotAddon: value.autopilot_addon
+        ? {
+            purchasedRuns: value.autopilot_addon.purchased_runs,
+            periodStart: value.autopilot_addon.period_start,
+            periodEnd: value.autopilot_addon.period_end,
+          }
+        : null,
       planChange: value.plan_change
         ? {
             targetPlan: value.plan_change.target_plan,
@@ -3879,18 +3905,75 @@ const WorkspaceSubscriptionPlanPricesSchema = z
     }),
   );
 
+// The add-on pack is optional and read on its own: a missing or malformed
+// pack price hides the add-on without taking the plan prices down with it.
+const WorkspaceAutopilotAddonPriceSchema = z
+  .object({
+    currency: z.string().regex(/^[a-z]{3}$/),
+    unit_amount: z.number().int().positive(),
+    runs_per_pack: z.number().int().positive(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceAutopilotAddonPrice => ({
+      currency: value.currency,
+      unitAmount: value.unit_amount,
+      runsPerPack: value.runs_per_pack,
+    }),
+  );
+
 // Every paid plan must be priced: a response missing one plan reads as "prices
 // unavailable" as a whole rather than offering one plan without the other.
 export const WorkspaceSubscriptionPricesSchema = z
   .object({
     pro: WorkspaceSubscriptionPlanPricesSchema,
     business: WorkspaceSubscriptionPlanPricesSchema,
+    autopilot_addon: WorkspaceAutopilotAddonPriceSchema.nullable()
+      .optional()
+      .catch(null),
   })
   .loose()
   .transform(
     (value): WorkspaceSubscriptionPrices => ({
       pro: value.pro,
       business: value.business,
+      autopilotAddon: value.autopilot_addon ?? null,
+    }),
+  );
+
+export const CreateWorkspaceAutopilotAddonCheckoutResponseSchema = z
+  .object({
+    session_id: z.string().min(1),
+    url: StripeHostedURLSchema,
+  })
+  .loose()
+  .transform(
+    (value): CreateWorkspaceAutopilotAddonCheckoutResponse => ({
+      sessionId: value.session_id,
+      url: value.url,
+    }),
+  );
+
+// A session status this client does not know reads as open: the page keeps
+// waiting for Stripe instead of claiming success or failure.
+export const WorkspaceAutopilotAddonCheckoutSchema = z
+  .object({
+    session_id: z.string().min(1),
+    status: z.enum(["paid", "open", "unpaid", "expired"]).catch("open"),
+    packs: z.number().int().positive(),
+    runs: z.number().int().positive(),
+    currency: z.string().regex(/^[a-z]{3}$/),
+    amount: z.number().int().nonnegative(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceAutopilotAddonCheckout => ({
+      sessionId: value.session_id,
+      status: value.status,
+      packs: value.packs,
+      runs: value.runs,
+      currency: value.currency,
+      amount: value.amount,
     }),
   );
 
@@ -4054,6 +4137,14 @@ export const WorkspacePlanChangePreviewSchema = z
     next_invoice_amount: z.number().int().nonnegative(),
     invoice_now: z.boolean(),
     quoted_at: z.string().min(1),
+    // Absent on a cloud that predates add-ons.
+    autopilot_runs_limit_after: z
+      .number()
+      .int()
+      .nonnegative()
+      .nullable()
+      .optional()
+      .catch(null),
   })
   .loose()
   .refine((value) => value.current_plan !== value.target_plan, {
@@ -4071,6 +4162,7 @@ export const WorkspacePlanChangePreviewSchema = z
       nextInvoiceAmount: value.next_invoice_amount,
       invoiceNow: value.invoice_now,
       quotedAt: value.quoted_at,
+      autopilotRunsLimitAfter: value.autopilot_runs_limit_after ?? null,
     }),
   );
 

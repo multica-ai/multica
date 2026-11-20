@@ -288,6 +288,9 @@ import type {
   CreateBillingPortalSessionResponse,
   WorkspaceSubscriptionSummary,
   WorkspaceSubscriptionPrices,
+  CreateWorkspaceAutopilotAddonCheckoutRequest,
+  CreateWorkspaceAutopilotAddonCheckoutResponse,
+  WorkspaceAutopilotAddonCheckout,
   WorkspaceFeatures,
   MemberLimit,
   StorageUsage,
@@ -454,6 +457,8 @@ import {
   BatchUpdateIssuesResponseSchema,
   UNCONFIRMED_BATCH_UPDATE,
   WorkspaceSubscriptionPricesSchema,
+  CreateWorkspaceAutopilotAddonCheckoutResponseSchema,
+  WorkspaceAutopilotAddonCheckoutSchema,
   WorkspaceFeaturesSchema,
   MemberLimitSchema,
   StorageUsageSchema,
@@ -2884,6 +2889,51 @@ export class ApiClient {
       CreateWorkspaceSubscriptionPortalResponseSchema,
       null,
       { endpoint: "POST /api/cloud-subscriptions/portal-sessions" },
+    );
+  }
+
+  // Autopilot add-on packs (managers only), paid on Stripe Checkout. A
+  // non-2xx answer throws ApiError with Cloud's status: 409 not purchasable or
+  // price changed.
+  async createWorkspaceAutopilotAddonCheckout(
+    data: CreateWorkspaceAutopilotAddonCheckoutRequest,
+  ): Promise<CreateWorkspaceAutopilotAddonCheckoutResponse | null> {
+    const res = await this.fetchRaw(
+      "/api/cloud-subscriptions/autopilot-addon/checkout-sessions",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          packs: data.packs,
+          expected_unit_amount: data.expectedUnitAmount,
+          currency: data.currency,
+          idempotency_key: data.idempotencyKey,
+        }),
+        extraHeaders: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": data.idempotencyKey,
+        },
+      },
+    );
+    const raw = (await res.json()) as unknown;
+    return parseWithFallback<CreateWorkspaceAutopilotAddonCheckoutResponse | null>(
+      raw,
+      CreateWorkspaceAutopilotAddonCheckoutResponseSchema,
+      null,
+      { endpoint: "POST /api/cloud-subscriptions/autopilot-addon/checkout-sessions" },
+    );
+  }
+
+  async getWorkspaceAutopilotAddonCheckout(
+    sessionId: string,
+  ): Promise<WorkspaceAutopilotAddonCheckout | null> {
+    const raw = await this.fetch<unknown>(
+      `/api/cloud-subscriptions/autopilot-addon/checkout-sessions/${encodeURIComponent(sessionId)}`,
+    );
+    return parseWithFallback<WorkspaceAutopilotAddonCheckout | null>(
+      raw,
+      WorkspaceAutopilotAddonCheckoutSchema,
+      null,
+      { endpoint: "GET /api/cloud-subscriptions/autopilot-addon/checkout-sessions/:id" },
     );
   }
 

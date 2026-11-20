@@ -35,10 +35,13 @@ The client reads:
   limit and period parameters as `enforce`. Multica also downgrades an expired
   cached `enforce` instruction to `observe` locally (see below).
 - `gates.*.notifications`: an optional, additive delivery policy. The autopilot
-  quota consumer recognizes `first_rejection_per_period` and delivers one
-  workspace notice for the first rejected execution in the Cloud-defined quota
-  period. A malformed notification policy is ignored without invalidating an
-  otherwise valid enforcement gate.
+  quota consumer recognizes two values. `first_rejection_per_period` delivers
+  one notice for the first rejected execution in the Cloud-defined quota
+  period. `first_rejection_per_limit` (revision 6) delivers one notice for the
+  first rejection at each limit within the period, so a limit raised by an
+  add-on purchase re-arms the notice. Any other value, or a malformed
+  notification policy, disables notices without invalidating an otherwise
+  valid enforcement gate.
 - `features`: paid-feature restrictions, one `{"action": ...}` per feature
   (revision 4). See [Paid features](#paid-features). Each feature is parsed on
   its own, after the rest of the policy: a missing, unknown, or malformed
@@ -143,6 +146,14 @@ upgraded is not refused on a policy cached before the upgrade, and repeated
 refusals cost at most one Cloud request per workspace per five seconds. A
 failed fetch answers exactly like `Gate`. The Cloud client implements it;
 `entitlementtest.Stub` does too (`SetRefreshed`).
+
+`FreshRefresher.RefreshGateNow` fetches without the reuse window; concurrent
+callers for a workspace share one fetch. The autopilot quota calls it right
+before rejecting a run: the admission transaction sees the quota is full on
+the cached policy, leaves the transaction, fetches the current policy and runs
+the admission once more on it. A limit Cloud raised moments ago, such as an
+add-on Stripe's webhook confirmed before the payer returned to the app, admits
+the next run on every instance. Each rejection costs one Cloud request.
 
 ## Member limit
 

@@ -30,6 +30,8 @@ Une automatisation est activée par défaut après l'enregistrement. **Exécuter
 
 Sur Multica Cloud, **Exécuter maintenant** ne consomme aucune unité du quota d’automatisation quand un membre lance lui-même l’exécution. Il peut s’en servir même si le quota est épuisé. Les exécutions planifiées, celles déclenchées par webhook et celles qu’un agent lance pour un membre sont décomptées du quota.
 
+Une fois le quota épuisé, les exécutions décomptées sont ignorées jusqu’à sa réinitialisation au début du mois suivant. Sur Pro et Business, un propriétaire ou un administrateur peut aussi acheter des exécutions dans **Paramètres → Facturation** (10 $ les 1 000 exécutions, réglées sur la page de paiement Stripe et valables le mois en cours) ; sur Free, passer à un forfait supérieur augmente la limite. Les propriétaires, les administrateurs et le membre qui a créé l’automatisation reçoivent une notification dans la boîte de réception la première fois qu’une exécution est ignorée à chaque limite.
+
 Voici une automatisation dont le mode de sortie est Créer une tâche. Cliquez sur **Exécuter maintenant**, ou avancez jusqu'à la prochaine exécution planifiée, et regardez-la créer une tâche, la confier à l'agent, puis terminer l'exécution.
 
 <AutopilotDemo />

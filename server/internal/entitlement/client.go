@@ -61,6 +61,7 @@ type Client struct {
 var (
 	_ Provider        = (*Client)(nil)
 	_ Refresher       = (*Client)(nil)
+	_ FreshRefresher  = (*Client)(nil)
 	_ FeatureProvider = (*Client)(nil)
 )
 
@@ -130,6 +131,26 @@ func (c *Client) RefreshGate(ctx context.Context, workspaceID uuid.UUID, name Ga
 		func(cached cacheEntry, now time.Time) bool {
 			return cached.hasPolicy && now.Before(cached.freshUntil) && now.Sub(cached.receivedAt) < minForcedRefreshAge
 		})
+	if err != nil {
+		return c.Gate(ctx, workspaceID, name)
+	}
+	reason := ReasonCacheFresh
+	if refreshed {
+		reason = ReasonRefreshed
+	}
+	return c.recordDecision(name, decisionFromEntry(entry, name, reason, false))
+}
+
+// RefreshGateNow fetches the workspace's policy from Cloud now, without
+// RefreshGate's reuse window, then resolves the gate from it. Concurrent
+// callers for the workspace share one fetch. When the fetch fails it answers
+// exactly like Gate, from the cache or fail-open.
+func (c *Client) RefreshGateNow(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision {
+	if !c.Enabled() || workspaceID == uuid.Nil || !name.valid() {
+		return c.Gate(ctx, workspaceID, name)
+	}
+	entry, refreshed, err := c.refreshShared(ctx, workspaceID, "now:"+workspaceID.String(),
+		func(cacheEntry, time.Time) bool { return false })
 	if err != nil {
 		return c.Gate(ctx, workspaceID, name)
 	}
@@ -523,7 +544,12 @@ func normalizeFeature(raw json.RawMessage) featureEntry {
 // notification object must never invalidate the enforcement gate and fail open
 // the underlying quota, so it is dropped independently.
 func normalizeNotificationPolicy(wire *wireNotificationPolicy) *NotificationPolicy {
-	if wire == nil || wire.OnRejection != NotificationFirstRejectionPerPeriod {
+	if wire == nil {
+		return nil
+	}
+	switch wire.OnRejection {
+	case NotificationFirstRejectionPerPeriod, NotificationFirstRejectionPerLimit:
+	default:
 		return nil
 	}
 	return &NotificationPolicy{

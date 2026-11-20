@@ -241,3 +241,43 @@ func TestStorageBytesGateFailsOpenAlone(t *testing.T) {
 		})
 	}
 }
+
+func TestRefreshGateNowSkipsTheReuseWindow(t *testing.T) {
+	clock := time.Date(2026, 11, 19, 9, 0, 0, 0, time.UTC)
+	var calls atomic.Int64
+	var limit atomic.Int64
+	limit.Store(10)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		policy := samplePolicy(6, 1, 60, ActionEnforce)
+		gate := policy.Gates[string(GateAutopilotRuns)]
+		value := int(limit.Load())
+		gate.Limit = &value
+		policy.Gates[string(GateAutopilotRuns)] = gate
+		writePolicy(t, w, policy)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server.URL, nil)
+	client.now = func() time.Time { return clock }
+	workspaceID := uuid.New()
+
+	if first := client.Gate(context.Background(), workspaceID, GateAutopilotRuns); first.Gate.Limit == nil || *first.Gate.Limit != 10 {
+		t.Fatalf("first = %+v; want limit 10", first)
+	}
+
+	// Cloud raises the limit one second later (an add-on confirmed by
+	// Stripe's webhook), inside RefreshGate's reuse window.
+	limit.Store(1010)
+	clock = clock.Add(time.Second)
+	if reused := client.RefreshGate(context.Background(), workspaceID, GateAutopilotRuns); *reused.Gate.Limit != 10 || calls.Load() != 1 {
+		t.Fatalf("RefreshGate = %+v, calls = %d; it reuses a policy this young", reused, calls.Load())
+	}
+	refreshed := client.RefreshGateNow(context.Background(), workspaceID, GateAutopilotRuns)
+	if refreshed.Gate.Limit == nil || *refreshed.Gate.Limit != 1010 || refreshed.Reason != ReasonRefreshed || calls.Load() != 2 {
+		t.Fatalf("RefreshGateNow = %+v, calls = %d; want the new limit", refreshed, calls.Load())
+	}
+	// The refreshed policy is cached for everyone else.
+	if cached := client.Gate(context.Background(), workspaceID, GateAutopilotRuns); *cached.Gate.Limit != 1010 || calls.Load() != 2 {
+		t.Fatalf("Gate after refresh = %+v, calls = %d", cached, calls.Load())
+	}
+}
