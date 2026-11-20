@@ -291,11 +291,12 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 
 ### デーモンのログ [#daemon-logs]
 
+`LOG_LEVEL`. デーモンの既定のログレベルは `debug` です。デーモンのログレベル。プロファイルの既定値は `multica config set log_level info` で設定します。環境変数が優先されます。
+
 デーモンがバックグラウンドで（ターミナルにつながずに）動いているとき、ログは `~/.multica/daemon.log`（名前付きプロファイルでは `~/.multica/profiles/<name>/daemon.log`）に書かれ、サイズでローテーションされます。ローテーション後のファイルは gzip で圧縮されます。
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `LOG_LEVEL` | `debug` | デーモンのログレベル。プロファイルの既定値は `multica config set log_level info` で設定します。環境変数が優先されます。 |
 | `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | `daemon.log` をローテーションするサイズ（MB） |
 | `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | 残すローテーション済みファイルの最大数 |
 | `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | ローテーション済みファイルを残す日数 |

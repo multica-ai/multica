@@ -288,11 +288,12 @@ Le daemon nettoie régulièrement les répertoires des exécutions, les caches d
 
 ### Journaux du daemon [#daemon-logs]
 
+`LOG_LEVEL`. Le niveau par défaut du daemon est `debug`. Niveau des journaux du daemon. Définissez la valeur du profil avec `multica config set log_level info`. La variable d’environnement est prioritaire.
+
 Quand le daemon tourne en arrière-plan (sans terminal attaché), il écrit ses journaux dans `~/.multica/daemon.log`, ou `~/.multica/profiles/<name>/daemon.log` pour un profil nommé, avec une rotation par taille ; les fichiers issus de la rotation sont compressés en gzip.
 
 | Variable | Valeur par défaut | Description |
 |---|---|---|
-| `LOG_LEVEL` | `debug` | Niveau des journaux du daemon. Définissez la valeur du profil avec `multica config set log_level info`. La variable d’environnement est prioritaire. |
 | `MULTICA_DAEMON_LOG_MAX_SIZE_MB` | `20` | Taille en Mo à partir de laquelle `daemon.log` tourne |
 | `MULTICA_DAEMON_LOG_MAX_BACKUPS` | `5` | Nombre maximal de fichiers tournés conservés |
 | `MULTICA_DAEMON_LOG_MAX_AGE_DAYS` | `30` | Nombre de jours de conservation des fichiers tournés |

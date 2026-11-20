@@ -56,9 +56,9 @@ var configSetCmd = &cobra.Command{
 	Long: "Supported keys: " +
 		"server_url, app_url, workspace_id, " +
 		"device_name, runtime_name, workspaces_root, max_concurrent_tasks, poll_interval, ws_claim_poll_interval, " +
-		"heartbeat_interval, log_level, agent_timeout, agent_idle_watchdog, agent_tool_watchdog, " +
+		"heartbeat_interval, agent_timeout, agent_idle_watchdog, agent_tool_watchdog, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
-		"disable_auto_update, auto_update_check_interval, disable_auto_reload.\n\n" +
+		"disable_auto_update, auto_update_check_interval, disable_auto_reload, log_level.\n\n" +
 		"The daemon keys (device_name, runtime_name, workspaces_root, max_concurrent_tasks, " +
 		"poll_interval, ws_claim_poll_interval, heartbeat_interval, agent_timeout, agent_idle_watchdog, agent_tool_watchdog, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
@@ -66,7 +66,6 @@ var configSetCmd = &cobra.Command{
 		"--flag / env counterparts and are read by `daemon start` when " +
 		"neither the flag nor the env var is set. " +
 		"Precedence: --flag > MULTICA_… env > config.json > built-in default. " +
-		"log_level controls daemon logs (debug, info, warn, error). LOG_LEVEL overrides it. " +
 		"Duration keys take a Go duration (e.g. '10s', '500ms', '1m30s'); " +
 		"most keys require a positive value, while agent_timeout, agent_idle_watchdog, " +
 		"and agent_tool_watchdog also accept '0s' to disable their limit. " +
@@ -74,7 +73,8 @@ var configSetCmd = &cobra.Command{
 		"(single-direction: setting one to 'true' turns that behavior off, " +
 		"'false' clears the override so env/default decides). Pass an empty " +
 		"string to clear a persisted " +
-		"value (e.g. `config set poll_interval \"\"`).",
+		"value (e.g. `config set poll_interval \"\"`). " +
+		"log_level controls daemon logs (debug, info, warn, error). LOG_LEVEL overrides it.",
 	Args: exactArgs(2),
 	RunE: runConfigSet,
 }
