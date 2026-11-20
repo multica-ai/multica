@@ -41,6 +41,32 @@ func readProbeInvocations(t *testing.T, record string) []string {
 	return strings.Split(strings.TrimRight(string(data), "\n"), "\n")
 }
 
+func TestDetectVersionPreservesPublicTraeInstallation(t *testing.T) {
+	for _, tc := range []struct {
+		name, output, want string
+		loadsProjectFile   bool
+	}{
+		{"public release", "traecli 0.209.1\ninstallation: public", "traecli 0.209.1(public edition)", true},
+		{"older public release", "traecli 0.209.0\ninstallation: public", "traecli 0.209.0(public edition)", false},
+		{"missing installation marker", "traecli 0.216.0", "traecli 0.216.0", false},
+		{"different CLI", "mock-cli 0.216.0\ninstallation: public", "mock-cli 0.216.0", false},
+		{"legacy CLI", "trae-cli version 0.121.3", "trae-cli version 0.121.3", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "traecli")
+			script := "#!/bin/sh\ncat <<'VERSION'\n" + tc.output + "\nVERSION\n"
+			writeTestExecutable(t, path, []byte(script))
+			got, err := DetectVersion(t.Context(), NewCommand(path, nil))
+			if err != nil || got != tc.want {
+				t.Fatalf("version = %q, error = %v; want %q", got, err, tc.want)
+			}
+			if loads := TraeLoadsProjectInstructions(got); loads != tc.loadsProjectFile {
+				t.Fatalf("TraeLoadsProjectInstructions(%q) = %v; want %v", got, loads, tc.loadsProjectFile)
+			}
+		})
+	}
+}
+
 // MUL-9132: `hermes --version` runs an update check against GitHub, so the
 // Hermes probe must go through `acp --version`, and a Hermes that answers it
 // must never see the root `--version`.
