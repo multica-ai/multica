@@ -1,5 +1,6 @@
 "use client";
 
+import { dispatchReasonCode } from "@multica/core/api";
 import type {
   AgentTask,
   IssueWakeup,
@@ -344,6 +345,8 @@ export function useWakeupText() {
     return `${t(($) => $.wakeups.expiry_at, { time: at })} · ${then}`;
   };
   const error = (err: unknown, fallback: string) => {
+    const runLimit = issueRunLimitLabel(dispatchReasonCode(err), t);
+    if (runLimit) return runLimit;
     const status =
       err && typeof err === "object" && "status" in err
         ? err.status
