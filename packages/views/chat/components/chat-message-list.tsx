@@ -1005,7 +1005,7 @@ function MessageFooter({
   // settled — one place for every turn. Putting it on the process fold would
   // hide it on the turns that have no tool calls to fold, which is exactly
   // where a reader last saw it on the status pill a second earlier.
-  const contextUsage = latestContextUsage(contextItems ?? []);
+  const contextUsage = useMemo(() => latestContextUsage(contextItems ?? []), [contextItems]);
   if (message.elapsed_ms == null && !showCopy && !contextUsage) return null;
   return (
     <div className="flex items-center gap-1.5">

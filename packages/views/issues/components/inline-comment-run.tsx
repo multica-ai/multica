@@ -175,12 +175,12 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   // historical run never loads its transcript, so the figure comes off the
   // task row; while one is loaded (live, or expanded) the stream is newer and
   // wins inside the chip.
-  const contextChip = <ContextUsageChip items={data} usage={taskContextUsage(task)} />;
+  const contextUsage = taskContextUsage(task);
   // Before the agent session starts there is no transcript to open.
   const hasTranscript = !PRE_RUN_STATUSES.includes(task.status);
   if (presentation === "header" && showCommentRunInHeader(run)) {
     return <span className="inline-flex shrink-0 items-center gap-1" data-comment-actions data-run-id={task.id}>
-      {contextChip}
+      <ContextUsageChip items={data} usage={contextUsage} />
       {fullLogButton}
       {transcript}
     </span>;
@@ -231,7 +231,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           <ChevronRight ref={state.disclosure.chevronRef} aria-hidden className={cn("size-3.5 shrink-0", expanded && "rotate-90")} />
         </button>
         <span className={cn("shrink-0 whitespace-nowrap text-label tabular-nums text-muted-foreground", showIdentity && !active && "@max-[32rem]/run:hidden")}>{elapsed}</span>
-        {contextChip}
+        {/* Yields the narrow row to identity like the elapsed time beside it. */}
+        <ContextUsageChip items={data} usage={contextUsage} className={cn(showIdentity && !active && "@max-[32rem]/run:hidden")} />
         {hasTranscript && fullLogButton}
         {stopButton}
         {(!hasReply || replacesFailureNotice) && ended && <Button
@@ -371,6 +372,9 @@ function InlineStep({ row, live, formatText }: { row: TraceRow; live: boolean; f
         ? tAgents(($) => $.transcript.context_compacted_before, { tokens: formatTokens(context.preTokens) })
         : tAgents(($) => $.transcript.context_compacted)
     : t(($) => $.inline_run.error);
+  // A context event this client cannot read is neither an error nor a step
+  // worth a row; the full log still lists it with its raw fields.
+  if (row.kind === "context" && context?.kind !== "compaction") return null;
   return <details className="min-w-0 text-caption" onToggle={onToggle}>
     <TruncatedTooltip content={summary}>
       <summary onClick={disclosure.onTrigger} className="flex cursor-pointer list-none items-center gap-2 rounded-xs py-1.5 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
