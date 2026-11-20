@@ -111,7 +111,7 @@ Multica は、こうしたエージェントとチームメイトを 1 つのワ
 - **[すべてをセルフホスト](SELF_HOSTING.md) →** Docker Compose または Helm で、自前のインフラ上に構築できます。
 - **[お使いの Git ホスト](https://multica.ai/docs/ja/vcs-integration) →** GitHub、GitLab、Gitea、Forgejo に対応しています。セルフホスト版も使えます。
 - **[ワークスペース](https://multica.ai/docs/ja/workspaces) →** エージェント、タスク、設定をチームごとに分けられます。
-- **[ロール](https://multica.ai/docs/ja/members-roles)と[アクセススコープ](https://multica.ai/docs/ja/agents#権限と-access) →** `owner`、`admin`、`member`、そして各メンバーがどのエージェントを実行できるかを正確に設定できます。
+- **[ロール](https://multica.ai/docs/ja/members-roles)と[アクセススコープ](https://multica.ai/docs/ja/agents#権限と-access) →** ゲストに特定のプロジェクトを共有し、ワークスペースのロールや各エージェントを実行できる人を設定できます。
 - **[セキュリティモデル](https://multica.ai/docs/ja/security-model) →** エージェントが何にアクセスでき、何にアクセスできないか。
 - **[Slack、Feishu/Lark、DingTalk、WeCom、Telegram、WeChat](https://multica.ai/docs/ja/channels) →** チームが普段やり取りしている場所から、エージェントに作業を頼み、その進み具合を追えます。WeChat は接続用 QR コードをスキャンしたアカウントからの DM のみ受け付けます。Feishu/Lark の新しい接続は、現在は中国本土の Feishu でのみ利用できます。DingTalk、WeCom、Telegram は[コミュニティによるメンテナンス](https://multica.ai/docs/ja/community-maintained)です。
 - **Web、[デスクトップ](https://multica.ai/docs/ja/desktop-app)、[モバイル](https://multica.ai/docs/ja/mobile-app) →** macOS、Windows、Linux、iPhone、iPad で同じワークスペースを使えます。iOS アプリは現在ソースからビルドする形で、まだ App Store では提供していません。

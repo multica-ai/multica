@@ -102,7 +102,7 @@ multica project update <project-id> --visibility private --member alice@example.
 multica project member add <project-id> carol@example.com
 ```
 
-Switching a private project back to **Entire workspace** makes the project and its issues, comments, and attachments visible to every workspace member. The app asks for confirmation first; `multica project update --visibility workspace` applies the change immediately.
+Switching a private project back to **Entire workspace** makes the project and its issues, comments, and attachments visible to members with the `owner`, `admin`, or `member` role. Guests see the project only if it is shared with them. The app asks for confirmation first; `multica project update --visibility workspace` applies the change immediately.
 
 If your workspace plan restricts private projects, existing private projects keep their visibility and member lists. The restriction blocks creating a private project, making a project private, and adding people to a private project, including by naming a new member as lead. Members with permission can still edit project details, remove members, switch access to **Entire workspace**, and archive or delete the project. The workspace owner can still join through [Workspace owner recovery](#workspace-owner-recovery).
 
@@ -114,7 +114,7 @@ Click **Join** and confirm to add yourself to the member list. You appear in the
 
 ## Folders
 
-Folders group related projects, such as everything for one launch or one team, so the sidebar's Projects section stays short. Folders are shared: every member sees the same folders, and any member can create, rename, or delete one and move projects in and out of it. A project is in at most one folder, and folders do not nest. A folder only organizes projects; it does not change who can see them.
+Folders group related projects, such as everything for one launch or one team, so the sidebar's Projects section stays short. Owners, admins, and members share the same folders and can create, rename, or delete one and move projects in and out of it. A project is in at most one folder, and folders do not nest. A folder only organizes projects; it does not change who can see them.
 
 - **Create a folder**: click **+** on the sidebar's Projects section and choose **New folder**, or choose **Move to folder → New folder…** in a project's menu to create one with that project in it.
 - **Move a project**: choose **Move to folder** in the project's menu, or drag the project onto a folder in the sidebar, or out of it. When creating a project, pick its folder in the create dialog; **+** on a folder row creates a project in that folder.
@@ -136,7 +136,7 @@ Active autopilots that create issues in the project are paused. To restore the p
 
 ## Create, edit, and delete
 
-Any workspace member can create and edit projects. Members can delete projects they created or that an agent they currently own created; agents can delete only their own projects. Human `owner` and `admin` members can delete any project, including older projects with an unknown creator. A private project can only be edited or deleted by people on its member list, so an `owner` or `admin` has to be on the list first.
+Owners, admins, and members can create and edit projects. Members can delete projects they created or that an agent they currently own created; agents can delete only their own projects. Human `owner` and `admin` members can delete any project, including older projects with an unknown creator. A private project can only be edited or deleted by people on its member list, so an `owner` or `admin` has to be on the list first.
 
 <Callout type="warning">
 Deleting a project does not delete its issues: they detach and stay in the workspace. The project's description, status, and resources are permanently deleted.

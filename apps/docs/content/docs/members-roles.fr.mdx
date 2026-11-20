@@ -1,14 +1,14 @@
 ---
 title: Membres et rôles
-description: Invitez des membres et gérez les permissions de l'espace de travail avec les rôles owner, admin et member.
+description: Invitez des membres et des invités et choisissez les droits d’accès de chacun.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { RolesDemo } from "@/components/demos/roles-demo";
 
-Toute personne qui rejoint un [espace de travail](/workspaces) en est membre, et chaque membre a un rôle : `owner`, `admin` ou `member`. Les rôles ne contrôlent que les paramètres de l'espace de travail et la gestion de l'équipe ; la collaboration au quotidien — créer des tâches, écrire des commentaires — est ouverte à tous les membres. Un espace de travail peut aussi avoir des [invités](#invités), qui ne voient que les projets partagés avec eux.
+Dans un [espace de travail](/workspaces), les rôles `owner`, `admin` et `member` permettent de créer des tâches et de les commenter. Leurs droits diffèrent pour la gestion des paramètres et des membres. Les [invités](#invités) peuvent lire et commenter les tâches uniquement dans les projets partagés avec eux.
 
-## Les trois rôles
+## Droits des propriétaires, administrateurs et membres [#les-trois-rôles]
 
 | Action | owner (Propriétaire) | admin (Administrateur) | member (Membre) |
 |---|:---:|:---:|:---:|
@@ -24,7 +24,7 @@ Un espace de travail doit toujours conserver au moins un `owner` : le dernier `o
 <RolesDemo />
 
 <Callout type="info">
-Les rôles ne déterminent pas qui peut exécuter un agent. Chaque agent a son propre périmètre d'accès (**Accès**), et `owner` comme `admin` ne peuvent pas le contourner pour exécuter des agents auxquels l'accès ne leur a pas été accordé. Consultez [Agents](/agents#permissions-et-accès).
+Les invités ne peuvent pas exécuter d’agent. Chaque agent a son propre périmètre d'accès (**Accès**), et `owner` comme `admin` ne peuvent pas le contourner pour exécuter des agents auxquels l'accès ne leur a pas été accordé. Consultez [Agents](/agents#permissions-et-accès).
 </Callout>
 
 <Callout type="info">

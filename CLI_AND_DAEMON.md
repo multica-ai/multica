@@ -610,7 +610,7 @@ multica workspace list --full-id
 multica workspace list --output json
 ```
 
-The current default workspace is marked with `*`. Table output shows short UUID prefixes — pass `--full-id` when you need the canonical UUIDs.
+The current default workspace is marked with `*`. Table output shows short UUID prefixes — pass `--full-id` when you need the canonical UUIDs. With a task token, the list contains only the workspace bound to the run.
 
 ### Switch Default Workspace
 
@@ -1134,11 +1134,13 @@ To assign a squad instead, use `--squad` (name or ID) or `--squad-id` (canonical
 multica autopilot trigger <id>            # Fires the autopilot once, returns the run
 ```
 
+On Multica Cloud, a member running this command directly uses no automation quota. Runs triggered by an agent on a member's behalf, a schedule, or a webhook count toward the workspace quota. When an agent triggers a run after an enforced limit is reached, the API returns HTTP 429 with `reason_code: quota_exceeded` and a `Retry-After` header.
+
 The command exits non-zero unless the run actually started (`issue_created` or
-`running`). A `skipped` run — admission refused, runtime offline, quota
-exhausted, a duplicate already in flight — dispatched nothing; its
-`failure_reason` and `reason_code` are printed to stderr, and `--output json`
-still writes the full run to stdout first.
+`running`). If a run is `skipped` (for example, the runtime is offline
+or a duplicate is already in flight), the CLI prints its
+`failure_reason` and `reason_code` to stderr. With `--output json`,
+it first writes the full run to stdout.
 
 Run as an agent (inside a task, or over A2A), the trigger is authorized as the
 human that run acts for, not as the owner of the machine it executes on. That

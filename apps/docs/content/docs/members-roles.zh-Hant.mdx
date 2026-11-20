@@ -1,14 +1,14 @@
 ---
 title: 成員與權限
-description: 邀請成員，並用 owner、admin 和 member 三種角色管理工作區權限。
+description: 邀請成員與訪客，為每個人選擇合適的工作區權限。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { RolesDemo } from "@/components/demos/roles-demo";
 
-加入[工作區](/workspaces)的人都是成員，每位成員有一個角色：`owner`、`admin` 或 `member`。角色只控制工作區設定和團隊管理；建立任務、發表評論等日常協作對所有成員開放。工作區還可以有[訪客](#訪客)，訪客只能看到分享給自己的專案。
+在[工作區](/workspaces)中，`owner`、`admin` 和 `member` 都能建立任務和發表評論，但管理設定和成員的權限不同。[訪客](#訪客)只能在分享給自己的專案中檢視任務和發表評論。
 
-## 三種角色
+## 成員管理權限 [#三種角色]
 
 | 操作 | owner | admin | member |
 |---|:---:|:---:|:---:|
@@ -24,7 +24,7 @@ import { RolesDemo } from "@/components/demos/roles-demo";
 <RolesDemo />
 
 <Callout type="info">
-角色不決定誰能執行 AI 代理。每個 AI 代理有獨立的訪問範圍（Access），`owner` 和 `admin` 也不能繞過它執行未授權的 AI 代理。詳見[AI 代理](/agents#權限與-access)。
+訪客無法執行 AI 代理。每個 AI 代理有獨立的訪問範圍（Access），`owner` 和 `admin` 也不能繞過它執行未授權的 AI 代理。詳見[AI 代理](/agents#權限與-access)。
 </Callout>
 
 <Callout type="info">
