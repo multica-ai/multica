@@ -304,8 +304,8 @@ export function ManualCreatePanel({
   });
   const [assigneeCleared, setAssigneeCleared] = useState(data?.manual_assignee_cleared === true);
   const recordAssigneePick = useRecordAssigneePick();
-  // The hand-picked assignee of the request in flight, recorded on success.
-  const submittedPickRef = useRef<{ type: IssueAssigneeType; id: string } | null>(null);
+  // The draft's pending hand pick that the request in flight submits.
+  const submittedPickRef = useRef<IssueCreateDraft["manual"]["assigneePick"]>(undefined);
   const [startDate, setStartDate] = useState<string | null>(draft.manual.startDate);
   const [dueDate, setDueDate] = useState<string | null>(
     (data?.due_date as string | undefined) ?? draft.shared.dueDate,
@@ -428,7 +428,7 @@ export function ManualCreatePanel({
     setManual({
       assigneeType: type,
       assigneeId: id,
-      ...(changed ? { assigneePicked: !!id } : {}),
+      ...(changed ? { assigneePick: type && id ? { type, id } : undefined } : {}),
     });
   };
   const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
@@ -557,18 +557,13 @@ export function ManualCreatePanel({
       const pendingDesc = descEditorRef.current?.flushPendingUpdate?.();
       if (pendingDesc != null) setManual({ description: pendingDesc });
       submittedDraftRef.current = useIssueDraftStore.getState().draft;
-      // Only an assignee picked by hand feeds the picker's ranking, not a
-      // prefilled or remembered one. A prefill from `data` replaces the
-      // draft's assignee in the form, so the draft's pick must match it.
-      const submittedManual = submittedDraftRef.current.manual;
+      // Only a hand pick of the submitted assignee feeds the picker's
+      // ranking; a prefilled or remembered assignee never matches one.
+      const pendingPick = submittedDraftRef.current.manual.assigneePick;
       submittedPickRef.current =
-        submittedManual.assigneePicked &&
-        assigneeType &&
-        assigneeId &&
-        submittedManual.assigneeType === assigneeType &&
-        submittedManual.assigneeId === assigneeId
-          ? { type: assigneeType, id: assigneeId }
-          : null;
+        pendingPick?.type === assigneeType && pendingPick?.id === assigneeId
+          ? pendingPick
+          : undefined;
       try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
       const activeAttachmentIds = draftAttachments
@@ -847,7 +842,7 @@ export function ManualCreatePanel({
     onAccepted: () => {
       const pick = submittedPickRef.current;
       if (pick) recordAssigneePick(pick.type, pick.id);
-      submittedPickRef.current = null;
+      submittedPickRef.current = undefined;
       // Only the assignee persists across independent create sessions.
       setLastAssignee(assigneeType, assigneeId);
       setLastMode("manual");
@@ -862,6 +857,11 @@ export function ManualCreatePanel({
       const untouched =
         useIssueDraftStore.getState().draft === submittedDraftRef.current;
       if (untouched) clearDraft();
+      // A kept draft must not count the same pick again on its next create;
+      // a newer pick made during the request stays.
+      else if (pick && useIssueDraftStore.getState().draft.manual.assigneePick === pick) {
+        setManual({ assigneePick: undefined });
+      }
       if (!mountedRef.current || !untouched) return;
       if (keepOpen) {
         resetForNextIssue();

@@ -148,6 +148,7 @@ const emptyIssueDraft = () => ({
     startDate: null as string | null,
     assigneeType: undefined as "agent" | "squad" | "member" | undefined,
     assigneeId: undefined as string | undefined,
+    assigneePick: undefined as { type: "agent" | "squad" | "member"; id: string } | undefined,
     labelIds: [] as string[],
     propertyValues: {} as Record<string, string | number | boolean | string[]>,
   },
@@ -971,6 +972,47 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("button", { name: "Create Issue" }));
     await waitFor(() => expect(mockRecordAssigneePick).toHaveBeenCalledTimes(1));
     expect(mockRecordAssigneePick).toHaveBeenCalledWith("agent", "bot");
+  });
+
+  it("counts a hand pick once when the kept draft is submitted again", async () => {
+    const user = userEvent.setup();
+    let resolveCreate!: (v: unknown) => void;
+    mockCreateIssue.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveCreate = resolve; }),
+    );
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "pick bot" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "First");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(1));
+    // Editing the title mid-flight keeps the draft open after success.
+    await user.type(screen.getByPlaceholderText("Issue title"), " again");
+    await act(async () => {
+      resolveCreate({ id: "issue-1", identifier: "TES-1", title: "First", status: "todo", labels: [] });
+    });
+    await waitFor(() => expect(mockRecordAssigneePick).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+    await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledTimes(2));
+    expect(mockRecordAssigneePick).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not credit an earlier hand pick to a prefilled assignee", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.manual.assigneeType = "member";
+    mockDraftStore.draft.manual.assigneeId = "alice";
+    mockDraftStore.draft.manual.assigneePick = { type: "member", id: "alice" };
+    renderModal(<CreateIssueModal onClose={vi.fn()} data={{ assignee_type: "agent", assignee_id: "bot" }} />);
+
+    // Re-picking the prefilled assignee writes it into the draft.
+    await user.click(screen.getByRole("button", { name: "pick bot" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Prefilled");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockSetLastAssignee).toHaveBeenCalledWith("agent", "bot"));
+    expect(mockRecordAssigneePick).not.toHaveBeenCalled();
   });
 
   it("records a hand-picked assignee kept in a reopened draft", async () => {
