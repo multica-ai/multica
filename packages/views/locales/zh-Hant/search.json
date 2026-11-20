@@ -6,6 +6,7 @@
   "breadcrumb_aria": "目前選單",
   "groups": {
     "pages": "頁面",
+    "views": "檢視",
     "commands": "命令",
     "members": "成員",
     "agents": "AI 代理",
@@ -15,6 +16,7 @@
     "autopilots": "自動化",
     "chats": "對話",
     "skills": "Skills",
+    "docs": "文件",
     "cancelled": "已取消",
     "recent": "最近",
     "workspaces": "工作區",
@@ -85,7 +87,9 @@
   },
   "inbox": {
     "archive": "封存",
-    "mark_unread": "標為未讀"
+    "mark_unread": "標為未讀",
+    "mark_all_read": "收件箱全部標為已讀",
+    "archive_all_read": "封存收件箱全部已讀"
   },
   "chat": {
     "link_project": "關聯到專案...",
@@ -120,7 +124,6 @@
     "unsubscribed": "已取消訂閱",
     "label_added": "已新增標籤 {{name}}",
     "label_removed": "已移除標籤 {{name}}",
-    "label_failed": "未能給所有任務新增標籤 {{name}}",
     "update_failed": "更新失敗",
     "assigned": "已把 {{identifier}} 指派給 {{name}}"
   },
@@ -158,5 +161,6 @@
   },
   "trigger": {
     "label": "搜尋..."
-  }
+  },
+  "untitled_doc": "未命名"
 }

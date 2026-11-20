@@ -850,11 +850,6 @@ func (o *Outbound) handleInboxNew(e events.Event) {
 	if rt, _ := item["recipient_type"].(string); rt != "member" {
 		return
 	}
-	// A row written as read reports the member's own action (a run they
-	// stopped themselves), so there is nothing to tell them.
-	if read, _ := item["read"].(bool); read {
-		return
-	}
 	recipientIDStr, _ := item["recipient_id"].(string)
 	workspaceIDStr, _ := item["workspace_id"].(string)
 	if recipientIDStr == "" || workspaceIDStr == "" {
@@ -1095,7 +1090,7 @@ func (o *Outbound) memberBindingFor(ctx context.Context, item map[string]any, wo
 }
 
 // inboxActorAgent reads the agent an inbox notification names as its actor,
-// when it names one. The payload is the map inboxItemToResponse builds, whose
+// when it names one. The payload is the map inbox.Deliver builds, whose
 // actor fields are pointers (util.TextToPtr / util.UUIDToPtr) and nil for a
 // notification a member authored. Both spellings are accepted, the same
 // defensive shape itemIDOf uses, so a payload that was re-encoded on its way

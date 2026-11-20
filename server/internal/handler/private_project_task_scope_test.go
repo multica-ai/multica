@@ -194,6 +194,7 @@ func TestPrivateProjectQuickCreateHistoryRequiresTargetAndParent(t *testing.T) {
 	f := newPrivateProjectFixture(t)
 	targetProject := dbfx.Project(t, f.marker+" target", testutil.Cols{"visibility": "private"})
 	addProjectMemberRow(t, targetProject, f.outsider)
+	addProjectMemberRow(t, targetProject, testUserID)
 	contextJSON, err := json.Marshal(map[string]string{
 		"type": "quick_create", "project_id": targetProject, "parent_issue_id": f.secretIssue,
 	})
@@ -210,7 +211,8 @@ func TestPrivateProjectQuickCreateHistoryRequiresTargetAndParent(t *testing.T) {
 	}{
 		{"target only", f.outsider, true},
 		{"parent only", f.insider, true},
-		{"workspace owner", testUserID, false},
+		{"workspace admin in neither", f.outsideAdmin, true},
+		{"member of both", testUserID, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := []AgentTaskResponse{{ID: "quick-create", Result: "private output"}, {ID: "public-issue", Result: "public output"}}

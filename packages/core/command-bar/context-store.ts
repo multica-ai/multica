@@ -33,6 +33,8 @@ export type CommandBarContext =
       item: InboxItem | null;
       archive: (id: string) => void;
       markUnread: (id: string) => void;
+      markAllRead: () => void;
+      archiveAllRead: () => void;
     }
   | {
       kind: "chat";

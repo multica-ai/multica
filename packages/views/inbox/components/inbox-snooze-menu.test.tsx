@@ -1,140 +1,107 @@
 import { useState } from "react";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithI18n } from "../../test/i18n";
 import { InboxSnoozeMenu } from "./inbox-snooze-menu";
-import { formatSnoozeTime } from "./inbox-snooze-time";
 
-const at = (y: number, m: number, d: number, h: number, min = 0) => new Date(y, m - 1, d, h, min);
-// A Wednesday afternoon, with the evening still more than an hour away.
-const NOW = at(2026, 6, 17, 14, 20);
-// The times are written the way the locale writes them, which is the
-// formatter's business and has its own tests.
-const time = (until: Date, now = NOW) => formatSnoozeTime(until, now, "en");
+const onSnooze = vi.fn();
 
-function Harness({
-  onSnooze,
-  onUnsnooze,
-  snoozed,
-  initialOpen = true,
-}: {
-  onSnooze: (until: Date) => void;
-  onUnsnooze?: () => void;
-  snoozed?: boolean;
-  initialOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(initialOpen);
-  return (
-    <InboxSnoozeMenu
-      open={open}
-      onOpenChange={setOpen}
-      snoozed={snoozed}
-      onSnooze={onSnooze}
-      onUnsnooze={onUnsnooze}
-      trigger={<button type="button">Snooze</button>}
-    />
+async function findDay(date: Date): Promise<HTMLElement> {
+  await screen.findByText("Pick a date and time");
+  // The calendar loads lazily, which can take a while on a busy test run.
+  return vi.waitUntil(
+    () => document.querySelector<HTMLElement>(`button[data-day="${date.toLocaleDateString()}"]`),
+    { timeout: 10_000 },
   );
 }
 
-beforeEach(() => {
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(NOW);
-});
-afterEach(() => {
-  vi.useRealTimers();
-});
+function Harness({ initialOpen = true }: { initialOpen?: boolean }) {
+  const [open, setOpen] = useState(initialOpen);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open from outside
+      </button>
+      <InboxSnoozeMenu
+        open={open}
+        onOpenChange={setOpen}
+        onSnooze={onSnooze}
+        trigger={<button type="button">Snooze</button>}
+      />
+    </>
+  );
+}
 
 describe("InboxSnoozeMenu", () => {
-  it("offers a few times worth one click, each with the time it means", async () => {
-    renderWithI18n(<Harness onSnooze={vi.fn()} />);
+  beforeEach(() => {
+    // Monday, November 16, 14:20 local. Only the clock is faked, so the lazy
+    // calendar still loads.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 16, 14, 20));
+    onSnooze.mockReset();
+  });
+  afterEach(() => vi.useRealTimers());
 
+  it("offers five durations, each with the time it ends", async () => {
+    renderWithI18n(<Harness />);
     const items = await screen.findAllByRole("menuitem");
     expect(items.map((item) => item.textContent)).toEqual([
-      `In 1 hour${time(at(2026, 6, 17, 15, 20))}`,
-      `Later today${time(at(2026, 6, 17, 18))}`,
-      `Tomorrow${time(at(2026, 6, 18, 9))}`,
-      `Next Monday${time(at(2026, 6, 22, 9))}`,
-      "Pick a time...",
+      "1 hour3:20 PM",
+      "3 hours5:20 PM",
+      "1 daytomorrow 2:20 PM",
+      "3 daysThu 2:20 PM",
+      "1 weekNov 23, 2:20 PM",
+      "Pick a date and time…",
     ]);
-    expect(
-      screen.getByText("Comes back early if something new needs you, such as a mention or a failed run."),
-    ).toBeInTheDocument();
   });
 
-  it("snoozes until the time picked", async () => {
-    const onSnooze = vi.fn();
-    renderWithI18n(<Harness onSnooze={onSnooze} />);
+  it("snoozes until a day and time picked in place of the list", async () => {
+    renderWithI18n(<Harness />);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Pick a date and time/ }));
 
-    fireEvent.click(await screen.findByRole("menuitem", { name: /^Later today/ }));
+    expect(await screen.findByText("Pick a date and time")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Snooze until tomorrow 9:00 AM" })).toBeEnabled();
 
-    expect(onSnooze).toHaveBeenCalledWith(at(2026, 6, 17, 18));
+    fireEvent.click(await findDay(new Date(2026, 10, 20)));
+    const hour = screen.getByRole("textbox", { name: "Hour" });
+    fireEvent.keyDown(hour, { key: "1" });
+    fireEvent.keyDown(hour, { key: "5" });
+    fireEvent.click(screen.getByRole("button", { name: "Snooze until Fri 3:00 PM" }));
+
+    expect(onSnooze).toHaveBeenCalledWith(new Date(2026, 10, 20, 15, 0));
+    expect(screen.queryByText("Pick a date and time")).toBeNull();
   });
 
-  it("offers the way back only for an issue that is already snoozed", async () => {
-    const onUnsnooze = vi.fn();
-    const { unmount } = renderWithI18n(<Harness onSnooze={vi.fn()} onUnsnooze={onUnsnooze} />);
-    await screen.findByRole("menuitem", { name: /^In 1 hour/ });
-    expect(screen.queryByRole("menuitem", { name: "Unsnooze" })).toBeNull();
-    unmount();
+  it("refuses a time that has already passed", async () => {
+    renderWithI18n(<Harness />);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Pick a date and time/ }));
+    fireEvent.click(await findDay(new Date(2026, 10, 16)));
 
-    renderWithI18n(<Harness onSnooze={vi.fn()} onUnsnooze={onUnsnooze} snoozed />);
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Unsnooze" }));
-
-    expect(onUnsnooze).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Pick a time in the future, within a year." })).toBeDisabled();
   });
 
-  it("reads the clock again each time it opens", async () => {
-    renderWithI18n(<Harness onSnooze={vi.fn()} initialOpen={false} />);
-    const later = at(2026, 6, 17, 15, 0);
-    vi.setSystemTime(later);
-
-    fireEvent.click(screen.getByRole("button", { name: "Snooze" }));
-
-    expect(await screen.findByRole("menuitem", { name: /^In 1 hour/ })).toHaveTextContent(
-      time(at(2026, 6, 17, 16, 0), later),
-    );
-  });
-});
-
-describe("InboxSnoozeMenu custom time", () => {
-  async function openDialog(onSnooze = vi.fn()) {
-    renderWithI18n(<Harness onSnooze={onSnooze} />);
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Pick a time..." }));
-    const dialog = await screen.findByRole("dialog");
-    const field = dialog.querySelector('input[type="datetime-local"]') as HTMLInputElement;
-    return { dialog, field, onSnooze };
-  }
-
-  it("starts from tomorrow morning", async () => {
-    const { dialog, field } = await openDialog();
-
-    expect(within(dialog).getByRole("heading", { name: "Snooze until" })).toBeInTheDocument();
-    expect(field.value).toBe("2026-06-18T09:00");
+  it("goes back to the durations", async () => {
+    renderWithI18n(<Harness />);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Pick a date and time/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Back" }));
+    expect(await screen.findByRole("menuitem", { name: /^1 hour/ })).toBeInTheDocument();
   });
 
-  it("snoozes until the time typed, in the viewer's own time zone", async () => {
-    const { dialog, field, onSnooze } = await openDialog();
-
-    fireEvent.change(field, { target: { value: "2026-07-03T08:30" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Snooze" }));
-
-    expect(onSnooze).toHaveBeenCalledWith(at(2026, 7, 3, 8, 30));
-    expect(screen.queryByRole("dialog")).toBeNull();
+  it("reads the clock when the parent opens it, as H and the hover card do", async () => {
+    renderWithI18n(<Harness initialOpen={false} />);
+    vi.setSystemTime(new Date(2026, 10, 16, 16, 20));
+    fireEvent.click(screen.getByText("Open from outside"));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^1 hour/ }));
+    expect(onSnooze).toHaveBeenCalledWith(new Date(2026, 10, 16, 17, 20));
   });
 
-  it("refuses a time that has passed and says what it takes", async () => {
-    const { dialog, field, onSnooze } = await openDialog();
-
-    fireEvent.change(field, { target: { value: "2026-06-17T09:00" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Snooze" }));
-
-    expect(onSnooze).not.toHaveBeenCalled();
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      "Choose a time in the future, within a year.",
-    );
-    expect(field).toHaveAttribute("aria-invalid", "true");
-
-    fireEvent.change(field, { target: { value: "2026-06-19T09:00" } });
-    expect(within(dialog).queryByRole("alert")).toBeNull();
+  it("opens on the durations again after closing from the picker", async () => {
+    renderWithI18n(<Harness />);
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Pick a date and time/ }));
+    await screen.findByText("Pick a date and time");
+    fireEvent.keyDown(screen.getByRole("button", { name: "Back" }), { key: "Escape" });
+    await vi.waitUntil(() => !screen.queryByText("Pick a date and time"));
+    fireEvent.click(screen.getByText("Open from outside"));
+    expect(await screen.findByRole("menuitem", { name: /^1 hour/ })).toBeInTheDocument();
   });
 });

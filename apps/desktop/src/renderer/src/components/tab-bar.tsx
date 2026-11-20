@@ -306,13 +306,17 @@ function SortableTabItem({
       >
         {title}
       </span>
+      {/* group-active keeps Pin/Close shown while pressed. In macOS fullscreen on a
+          secondary display, Electron sends an offset pointermove right after
+          pointerdown (electron/electron#55100); that drops :hover, hides the
+          button before mouseup, and the click lands on the tab instead. */}
       <span
         onClick={handleTogglePin}
         onPointerDown={stopDragOnAction}
         role="button"
         aria-label={pinLabel}
         title={pinLabel}
-        className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
+        className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex group-active:flex hover:bg-muted-foreground/20 hover:text-foreground"
       >
         {tab.pinned ? <PinOff className="size-2.5" /> : <Pin className="size-2.5" />}
       </span>
@@ -322,7 +326,7 @@ function SortableTabItem({
           onPointerDown={stopDragOnAction}
           role="button"
           aria-label={closeLabel}
-          className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
+          className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex group-active:flex hover:bg-muted-foreground/20 hover:text-foreground"
         >
           <X className="size-2.5" />
         </span>

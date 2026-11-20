@@ -9,9 +9,18 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { InboxItem, InboxWorkspaceUnread } from "../types";
-import { useArchiveInboxUpdates, useDeleteInbox, useMarkInboxRead, useMarkInboxUnread, useMarkIssueInboxRead, useSnoozeInbox, useUnarchiveInbox, useUnsnoozeInbox } from "./mutations";
+import {
+  useDeleteInbox,
+  useMarkInboxRead,
+  useMarkInboxUnread,
+  useMarkIssueInboxRead,
+  useUnarchiveInbox,
+  undoUnsubscribeArchiveInbox,
+  useUnsubscribeArchiveInbox,
+} from "./mutations";
 import { inboxKeys, useInboxUnreadCount } from "./queries";
 import { onInboxSummaryInvalidate } from "./ws-updaters";
+import { issueKeys } from "../issues/queries";
 import { createQueryClient } from "../query-client";
 
 vi.mock("../hooks", () => ({
@@ -398,157 +407,6 @@ describe("useUnarchiveInbox", () => {
  * (MUL-6967). These pin the property that replaces the old local recompute:
  * whatever races, the badge converges on the server's value.
  */
-describe("useSnoozeInbox", () => {
-  const UNTIL = "2026-06-18T01:00:00.000Z";
-  let queryClient: QueryClient;
-  let snoozeInbox: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
-    snoozeInbox = vi.fn(async () => undefined);
-    setApiInstance({ snoozeInbox } as unknown as ApiClient);
-    queryClient.setQueryData(inboxKeys.list(WORKSPACE_ID), [
-      item({ id: "inbox-1", issue_id: "issue-1", archived: false, read: true }),
-      item({ id: "inbox-2", issue_id: "issue-1", archived: false, read: true }),
-      item({ id: "inbox-3", issue_id: "issue-1", archived: true, read: true }),
-      item({ id: "inbox-4", issue_id: "issue-2", archived: false, read: true }),
-    ]);
-    queryClient.setQueryData(inboxKeys.unreadSummary(), [{ workspace_id: WORKSPACE_ID, count: 1 }]);
-  });
-
-  it("puts every active notification of the issue away at once, and makes the row unread", async () => {
-    let finish!: () => void;
-    snoozeInbox.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
-    const { result } = renderHook(() => useSnoozeInbox(), { wrapper: createWrapper(queryClient) });
-
-    act(() => result.current.mutate({ id: "inbox-1", until: UNTIL }));
-    await waitFor(() => expect(snoozeInbox).toHaveBeenCalledWith("inbox-1", UNTIL));
-
-    expect(listCache(queryClient).map((row) => [row.id, row.snoozed_until ?? null, row.read])).toEqual([
-      ["inbox-1", UNTIL, false],
-      ["inbox-2", UNTIL, true],
-      // Archived, and another issue's: neither is touched.
-      ["inbox-3", null, true],
-      ["inbox-4", null, true],
-    ]);
-
-    await act(async () => finish());
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    // The badge is the server's to count: a snoozed issue leaves it.
-    await waitFor(() => {
-      expect(queryClient.getQueryState(inboxKeys.list(WORKSPACE_ID))?.isInvalidated).toBe(true);
-      expect(queryClient.getQueryState(inboxKeys.unreadSummary())?.isInvalidated).toBe(true);
-    });
-  });
-
-  it("puts the issue back when the request fails", async () => {
-    snoozeInbox.mockRejectedValue(new Error("offline"));
-    const { result } = renderHook(() => useSnoozeInbox(), { wrapper: createWrapper(queryClient) });
-
-    act(() => result.current.mutate({ id: "inbox-1", until: UNTIL }));
-    await waitFor(() => expect(result.current.isError).toBe(true));
-
-    expect(listCache(queryClient).every((row) => row.snoozed_until == null && row.read)).toBe(true);
-  });
-});
-
-describe("useArchiveInboxUpdates", () => {
-  let queryClient: QueryClient;
-  let archiveInboxUpdates: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
-    archiveInboxUpdates = vi.fn(async () => undefined);
-    setApiInstance({ archiveInboxUpdates } as unknown as ApiClient);
-    queryClient.setQueryData(inboxKeys.list(WORKSPACE_ID), [
-      item({ id: "inbox-1", issue_id: "issue-1", archived: false, read: true }),
-      item({ id: "inbox-2", issue_id: "issue-1", archived: false, read: true }),
-      item({ id: "inbox-3", issue_id: "issue-2", archived: false }),
-      item({ id: "inbox-4", issue_id: null, archived: false, read: true }),
-    ]);
-  });
-
-  it("takes the named issues out of the list at once, a notification without an issue by its own id", async () => {
-    let finish!: () => void;
-    archiveInboxUpdates.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve; }));
-    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-    const { result } = renderHook(() => useArchiveInboxUpdates(), { wrapper: createWrapper(queryClient) });
-
-    act(() => result.current.mutate({ groups: ["issue-1", "inbox-4"], readOnly: true }));
-    await waitFor(() => expect(archiveInboxUpdates).toHaveBeenCalledWith(["issue-1", "inbox-4"], true));
-
-    expect(listCache(queryClient).map((row) => [row.id, row.archived])).toEqual([
-      ["inbox-1", true],
-      ["inbox-2", true],
-      ["inbox-3", false],
-      ["inbox-4", true],
-    ]);
-
-    // The server decides what really left, so the list is read back.
-    await act(async () => finish());
-    await waitFor(() =>
-      expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: inboxKeys.all(WORKSPACE_ID) })),
-    );
-  });
-
-  it("puts the rows back when the request fails", async () => {
-    archiveInboxUpdates.mockRejectedValue(new Error("offline"));
-    const { result } = renderHook(() => useArchiveInboxUpdates(), { wrapper: createWrapper(queryClient) });
-
-    act(() => result.current.mutate({ groups: ["issue-1"], readOnly: false }));
-    await waitFor(() => expect(result.current.isError).toBe(true));
-
-    expect(listCache(queryClient).every((row) => !row.archived)).toBe(true);
-  });
-});
-
-describe("useUnsnoozeInbox", () => {
-  const UNTIL = "2026-06-18T01:00:00.000Z";
-  let queryClient: QueryClient;
-  let unsnoozeInbox: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
-    unsnoozeInbox = vi.fn(async () => undefined);
-    setApiInstance({ unsnoozeInbox } as unknown as ApiClient);
-    queryClient.setQueryData(inboxKeys.list(WORKSPACE_ID), [
-      item({ id: "inbox-1", issue_id: "issue-1", archived: false, snoozed_until: UNTIL }),
-      item({ id: "inbox-2", issue_id: "issue-1", archived: false, snoozed_until: UNTIL }),
-      item({ id: "inbox-4", issue_id: "issue-2", archived: false, snoozed_until: UNTIL }),
-    ]);
-  });
-
-  it("brings the whole issue back now and leaves other snoozes alone", async () => {
-    const { result } = renderHook(() => useUnsnoozeInbox(), { wrapper: createWrapper(queryClient) });
-
-    act(() => result.current.mutate("inbox-2"));
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(unsnoozeInbox).toHaveBeenCalledWith("inbox-2");
-    expect(listCache(queryClient).map((row) => [row.id, row.snoozed_until ?? null])).toEqual([
-      ["inbox-1", null],
-      ["inbox-2", null],
-      ["inbox-4", UNTIL],
-    ]);
-  });
-
-  it("keeps the issue snoozed when the request fails", async () => {
-    unsnoozeInbox.mockRejectedValue(new Error("offline"));
-    const { result } = renderHook(() => useUnsnoozeInbox(), { wrapper: createWrapper(queryClient) });
-
-    act(() => result.current.mutate("inbox-2"));
-    await waitFor(() => expect(result.current.isError).toBe(true));
-
-    expect(listCache(queryClient).every((row) => row.snoozed_until === UNTIL)).toBe(true);
-  });
-});
-
 describe("unread summary is server-owned", () => {
   let queryClient: QueryClient;
 
@@ -686,4 +544,99 @@ describe("unread summary is server-owned", () => {
       }
     },
   );
+});
+
+describe("useUnsubscribeArchiveInbox", () => {
+  function setup(api: Partial<ApiClient>) {
+    const qc = createQueryClient();
+    setApiInstance({ listInbox: vi.fn(() => new Promise(() => {})), ...api } as unknown as ApiClient);
+    qc.setQueryData(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "a", archived: false }),
+      item({ id: "b", archived: false }),
+      item({ id: "c", issue_id: "issue-2", archived: false }),
+    ]);
+    const { result } = renderHook(() => useUnsubscribeArchiveInbox(), { wrapper: createWrapper(qc) });
+    return { qc, result };
+  }
+
+  it("leaves the issue before archiving and takes its rows out at once", async () => {
+    const calls: string[] = [];
+    const { qc, result } = setup({
+      unsubscribeFromIssue: vi.fn(async (id: string) => { calls.push(`unsubscribe:${id}`); }),
+      archiveInbox: vi.fn(async (id: string) => { calls.push(`archive:${id}`); return {} as never; }),
+    });
+    act(() => result.current.mutate({ id: "a", issueId: "issue-1", scope: "issue" }));
+    await waitFor(() =>
+      expect(listCache(qc).map((i) => [i.id, i.archived])).toEqual([["a", true], ["b", true], ["c", false]]),
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(calls).toEqual(["unsubscribe:issue-1", "archive:a"]);
+  });
+
+  it("uses the subtree opt-out for scope subtree and refreshes subscriber lists", async () => {
+    const unsubscribeFromIssueSubtree = vi.fn(async () => {});
+    const { qc, result } = setup({ unsubscribeFromIssueSubtree, archiveInbox: vi.fn(async () => ({}) as never) });
+    qc.setQueryData(issueKeys.subscribers("issue-1"), []);
+    act(() => result.current.mutate({ id: "a", issueId: "issue-1", scope: "subtree" }));
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(unsubscribeFromIssueSubtree).toHaveBeenCalledWith("issue-1");
+    expect(qc.getQueryState(issueKeys.subscribers("issue-1"))?.isInvalidated).toBe(true);
+  });
+
+  it("reports the result through its own callbacks after the caller unmounts", async () => {
+    for (const fail of [false, true]) {
+      let settle!: () => void;
+      let reject!: (e: Error) => void;
+      const request = new Promise<void>((res, rej) => { settle = res; reject = rej; });
+      const qc = createQueryClient();
+      setApiInstance({
+        listInbox: vi.fn(() => new Promise(() => {})),
+        listSubscribedIssueIds: vi.fn(async () => []),
+        unsubscribeFromIssue: vi.fn(() => request),
+        archiveInbox: vi.fn(async () => ({}) as never),
+      } as unknown as ApiClient);
+      const onSuccess = vi.fn();
+      const onError = vi.fn();
+      const { result, unmount } = renderHook(
+        () => useUnsubscribeArchiveInbox({ onSuccess, onError }),
+        { wrapper: createWrapper(qc) },
+      );
+      act(() => result.current.mutate({ id: "a", issueId: "issue-1", scope: "issue" }));
+      unmount();
+      await act(async () => { if (fail) reject(new Error("nope")); else settle(); });
+      await waitFor(() => expect((fail ? onError : onSuccess)).toHaveBeenCalledOnce());
+      expect(fail ? onSuccess : onError).not.toHaveBeenCalled();
+      qc.clear();
+    }
+  });
+
+  it("does not archive when the unsubscribe fails, and puts the rows back", async () => {
+    const archiveInbox = vi.fn(async () => ({}) as never);
+    const { qc, result } = setup({
+      unsubscribeFromIssue: vi.fn(async () => { throw new Error("nope"); }),
+      archiveInbox,
+    });
+    act(() => result.current.mutate({ id: "a", issueId: "issue-1", scope: "issue" }));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(archiveInbox).not.toHaveBeenCalled();
+    expect(listCache(qc).every((i) => !i.archived)).toBe(true);
+  });
+});
+
+describe("undoUnsubscribeArchiveInbox", () => {
+  it("restores the subscription as it was, never by subscribing again, then the item", async () => {
+    const calls: string[] = [];
+    const qc = createQueryClient();
+    const subscribeToIssue = vi.fn(async () => {});
+    setApiInstance({
+      subscribeToIssue,
+      undoUnsubscribeFromIssue: vi.fn(async (id: string) => { calls.push(`undo:${id}`); }),
+      unarchiveInbox: vi.fn(async (id: string) => { calls.push(`unarchive:${id}`); return {} as never; }),
+      listInbox: vi.fn(() => new Promise(() => {})),
+      listSubscribedIssueIds: vi.fn(async () => []),
+    } as unknown as ApiClient);
+    await undoUnsubscribeArchiveInbox(qc, WORKSPACE_ID, { id: "a", issueId: "issue-1" });
+    expect(calls).toEqual(["undo:issue-1", "unarchive:a"]);
+    expect(subscribeToIssue).not.toHaveBeenCalled();
+  });
 });

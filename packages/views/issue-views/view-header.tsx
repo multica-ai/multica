@@ -45,6 +45,7 @@ import { cn } from "@multica/ui/lib/utils";
 import type { CreateIssueViewRequest, IssueView } from "@multica/core/api/schemas";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { useActiveIssueView } from "@multica/core/issue-views/use-active-view";
 import type { IssueViewScope } from "@multica/core/issue-views/queries";
 import {
@@ -53,7 +54,7 @@ import {
   type BuiltinViewKey,
 } from "@multica/core/issue-views/sidebar-views";
 import { issueViewTarget } from "@multica/core/issue-views/view-target";
-import { isUnreadView } from "@multica/core/issue-views/unread-view";
+import { isFilteredBuiltinViewKey } from "@multica/core/issue-views/builtin-issue-views";
 import {
   isIssueViewModified,
   isIssueViewUndefined,
@@ -91,7 +92,7 @@ import type { IssueSurfaceController } from "../issues/surface/use-issue-surface
 import { useT } from "../i18n";
 import { useMyIssuesScope } from "../my-issues/use-my-issues-scope";
 import { DeleteViewDialog } from "./delete-view-dialog";
-import { UnreadViewIcon } from "./unread-view-icon";
+import { BUILTIN_VIEW_ICON, useBuiltinViewLabel } from "./builtin-views";
 import { useIssueViewActions } from "./use-view-actions";
 import { ViewNameInput } from "./view-name-input";
 
@@ -127,17 +128,25 @@ export function IssueViewHeader({
   controller,
   base,
   baseMenu,
+  baseBadge,
+  hideCreate = false,
   trailing,
 }: {
   controller: IssueSurfaceController;
   base: IssueViewHeaderBase;
   /** Name-menu items for the page itself, e.g. project actions. */
   baseMenu?: ReactNode;
+  /** Marker after the page's own name, e.g. an archived project's tag. */
+  baseBadge?: ReactNode;
+  /** Drops the new-issue button, e.g. on an archived project. */
+  hideCreate?: boolean;
   /** Layout toggles at the far end, e.g. the project's properties panel. */
   trailing?: ReactNode;
 }) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  // A guest (MUL-9420) cannot create issues.
+  const guest = useIsGuest(wsId);
   const paths = useWorkspacePaths();
   const viewScope = viewScopeOf(base);
   const { activeView, setActive, missing } = useActiveIssueView(wsId, viewScope);
@@ -159,6 +168,7 @@ export function IssueViewHeader({
   const setAssigneeTypeForPage = useIssuesScopeStore((s) => s.setScope);
   const setAssigneeType = (next: IssuesScope) => setAssigneeTypeForPage(scopePage, next);
   const myScope = useMyIssuesScope();
+  const builtinLabel = useBuiltinViewLabel();
   const setMyScope = useStore(myIssuesViewStore, (s) => s.setScope);
 
   const storeApi = useViewStoreApi();
@@ -168,24 +178,20 @@ export function IssueViewHeader({
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const toggleAgentRunningFilter = useViewStore((s) => s.toggleAgentRunningFilter);
 
-  // My agents' work is still a page (old links and open tabs land on it), but
-  // no longer a built-in view: it has a name and no star.
-  const myAgents = base.kind === "my" && myScope === "agents";
-  const builtinKey: BuiltinViewKey | null =
-    base.kind === "workspace" ? "all_issues" : base.kind === "my" && !myAgents ? "my_issues" : null;
+  const builtinKey: BuiltinViewKey | null = base.kind === "workspace" ? "all_issues" : null;
   const baseName =
     base.kind === "project"
       ? base.project.title
-      : myAgents
-        ? t(($) => $.views.builtin.my_agents)
-        : t(($) => $.views.builtin[builtinKey!]);
+      : base.kind === "my"
+        ? myScope === "agents"
+          ? t(($) => $.views.builtin.my_agents)
+          : t(($) => $.views.builtin.my_issues)
+        : builtinLabel("all_issues");
   const baseIcon =
     base.kind === "project" ? (
       <ProjectIcon project={base.project} size="sm" />
-    ) : myAgents ? (
-      <Bot className="size-4" />
-    ) : builtinKey === "my_issues" ? (
-      <CircleUser className="size-4" />
+    ) : base.kind === "my" ? (
+      myScope === "agents" ? <Bot className="size-4" /> : <CircleUser className="size-4" />
     ) : (
       <ListTodo className="size-4" />
     );
@@ -208,10 +214,10 @@ export function IssueViewHeader({
     if (needsSetup) setSetupFilterOpen(true);
     else setFilterOpen(true);
   }, [activeView, editViewId, needsSetup, stopEdit]);
-  const unreadView = isUnreadView(activeView);
-  const activeViewName = unreadView ? t(($) => $.views.builtin.unread) : activeView?.name;
-  const starId = unreadView
-    ? null
+  const activeBuiltin = isFilteredBuiltinViewKey(activeView?.id) ? activeView.id : null;
+  const activeViewName = activeBuiltin ? builtinLabel(activeBuiltin) : activeView?.name;
+  const starId = activeBuiltin
+    ? builtinViewItemId(activeBuiltin)
     : activeView
       ? savedViewItemId(activeView.id)
       : builtinKey
@@ -365,9 +371,10 @@ export function IssueViewHeader({
   const title = (
     <>
       <RefreshablePageIcon refreshing={controller.isRefreshing}>
-        {unreadView ? <UnreadViewIcon /> : activeView ? <Layers className="size-4" /> : baseIcon}
+        {activeBuiltin ? BUILTIN_VIEW_ICON[activeBuiltin] : activeView ? <Layers className="size-4" /> : baseIcon}
       </RefreshablePageIcon>
       <span className="min-w-0 truncate">{activeView ? activeViewName : baseName}</span>
+      {!activeView && baseBadge}
     </>
   );
 
@@ -476,7 +483,7 @@ export function IssueViewHeader({
                       <DropdownMenuItem
                         onClick={() =>
                           actions.copyLink(
-                            myAgents
+                            base.kind === "my" && myScope === "agents"
                               ? paths.myAgents()
                               : base.kind === "my"
                                 ? paths.myIssues()
@@ -569,15 +576,17 @@ export function IssueViewHeader({
             onTableFacetChange={controller.setActiveTableFacet}
             iconOnly
           />
-          <IconButton
-            label={t(($) => $.views.new_issue)}
-            shortcut={<ActionShortcutKeycaps action="createIssue" />}
-            tooltipSide="bottom"
-            className="text-muted-foreground"
-            onClick={() => controller.openCreateIssue()}
-          >
-            <SquarePen />
-          </IconButton>
+          {!hideCreate && !guest && (
+            <IconButton
+              label={t(($) => $.views.new_issue)}
+              shortcut={<ActionShortcutKeycaps action="createIssue" />}
+              tooltipSide="bottom"
+              className="text-muted-foreground"
+              onClick={() => controller.openCreateIssue()}
+            >
+              <SquarePen />
+            </IconButton>
+          )}
           {trailing && (
             <>
               <Separator orientation="vertical" className="ml-1 data-vertical:h-4 data-vertical:self-center" />

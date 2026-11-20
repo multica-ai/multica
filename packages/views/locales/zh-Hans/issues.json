@@ -550,7 +550,12 @@
     "subscribe": "订阅",
     "unsubscribe": "取消订阅",
     "delegated_subscription_badge": "由智能体代你关注",
-    "delegated_subscription_hint": "你的智能体代你创建了这个任务，因此你在关注它。待评审、完成或受阻时会通知你。",
+    "delegated_subscription_hint": "你的智能体代你创建了这个任务，因此你在关注它。打开状态变更后，待评审、完成或受阻时会通知你。",
+    "key_updates_subscription_badge": "仅关键更新",
+    "key_updates_subscription_hint": "这是别人负责的任务，你是因为创建、评论或被 @ 才订阅的。只有 @你、回复你参与的讨论，以及（打开状态变更时）待评审、受阻、完成时会通知你。",
+    "key_updates_follow_all": "接收全部动态",
+    "key_updates_follow_all_done": "之后会收到这个任务的全部动态",
+    "key_updates_settings": "修改默认设置",
     "project_subscription_badge": "通过项目订阅",
     "project_subscription_hint": "你订阅了这个项目的全部任务。在这里取消订阅只会停止这个任务的通知。",
     "unsubscribe_this": "取消订阅此任务",
@@ -568,6 +573,8 @@
     "quick_jump_label": "快捷跳转",
     "description_nav_label": "任务描述",
     "sub_issues_nav_progress": "已完成 {{done}}/{{total}}",
+    "sub_issues_show_more_other": "再显示 {{count}} 条",
+    "sub_issues_show_less": "收起",
     "thread_nav_label": "快速跳转到讨论",
     "thread_nav_resolved_label": "{{title}}（已解决）",
     "thread_nav_reply_label": "{{author}}：{{title}}",
@@ -584,6 +591,7 @@
     },
     "update_failed": "更新任务失败",
     "link_copied": "已复制链接",
+    "title_link_copied": "已复制带标题的链接",
     "link_copy_failed": "复制链接失败",
     "workdir_path_copied": "已复制本地 workdir 路径",
     "project_directory_path_copied": "已复制项目目录路径",
@@ -592,7 +600,8 @@
     "workdir_path_unavailable": "暂无本地 workdir — 这个任务还没被本地智能体运行过",
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
     "subscription_update_failed": "无法更新订阅状态，请重试。",
-    "pull_requests_empty_title": "暂无关联 PR。"
+    "pull_requests_empty_title": "暂无关联 PR。",
+    "guest_readonly_note": "访客可以查看和评论，不能修改任务属性。"
   },
   "timeline": {
     "loading": "加载中…",
@@ -756,7 +765,9 @@
     "restart_failed": "没能停止当前运行，消息还没有发送。",
     "reply_action": "回复",
     "actions_label": "评论操作",
-    "create_issue_from_selection": "用选中内容创建子任务"
+    "create_issue_from_selection": "用选中内容创建子任务",
+    "guest_placeholder": "回复… 可以 @ 成员",
+    "guest_hint": "访客不能 @ 智能体，也不能分配任务给智能体"
   },
   "reply": {
     "recipients_changed": "回复目标已变化。请重新确认接收者后再发送。",
@@ -960,7 +971,37 @@
     "cancel": "取消",
     "copy_links": "复制链接",
     "links_copied_other": "已复制 {{count}} 个链接",
-    "delete_count_other": "删除 {{count}} 个任务"
+    "delete_count_other": "删除 {{count}} 个任务",
+    "labels": "标签",
+    "project": "项目",
+    "due_date": "截止日期",
+    "more": "更多操作",
+    "stage": "阶段",
+    "custom_properties": "自定义属性",
+    "pick_date": "选择日期…",
+    "property_edit": "设置值…",
+    "result_unknown": "无法确认哪些任务已修改，重试前请先检查列表。",
+    "property_clear": "清空（{{count}} 个已设置）",
+    "labels_search": "添加或移除标签…",
+    "clear_labels_other": "清除这 {{count}} 个任务的全部标签",
+    "set_parent_title_other": "为 {{count}} 个任务设置父任务",
+    "set_parent_description_other": "搜索一个任务，设为所选 {{count}} 个任务的父任务",
+    "skipped_title_other": "已更新 {{updated}} 个任务，{{count}} 个未更新",
+    "skipped_more": "还有 {{count}} 个",
+    "select_skipped_other": "只选中这 {{count}} 个",
+    "server_outdated": "当前服务器版本还不支持批量修改标签和自定义属性，请升级后重试。",
+    "skip_reason": {
+      "invalid_id": "不是有效的任务",
+      "not_found": "任务不存在或你无权查看",
+      "invalid_value": "这个值不适用于该任务",
+      "parent_self": "不能把任务设为它自己的父任务",
+      "parent_not_found": "找不到父任务",
+      "parent_cycle": "父任务是它的子任务，会形成循环",
+      "workflow_rejected": "所在项目的工作流不允许这项修改",
+      "assignee_not_allowed": "不能分配给这个负责人",
+      "properties_too_large": "自定义属性会超出大小上限",
+      "write_failed": "保存失败"
+    }
   },
   "card": {
     "update_failed": "更新任务失败",
@@ -990,6 +1031,7 @@
     "mark_read": "标为已读",
     "mark_unread": "标为未读",
     "copy_link": "复制链接",
+    "copy_title_as_link": "复制带标题的链接",
     "copy_workdir_path": "复制本地 workdir 路径",
     "copy_project_directory_path": "复制项目目录路径",
     "copy_identifier": "复制标识符",
@@ -1033,6 +1075,7 @@
     "assignee": {
       "trigger_unassigned": "未分配",
       "search_placeholder": "分配给...",
+      "recent_group": "最近",
       "members_group": "成员",
       "agents_group": "智能体",
       "squads_group": "小队",
@@ -1786,7 +1829,10 @@
       "my_issues": "我的任务",
       "my_agents": "我的智能体在做",
       "all_issues": "全部任务",
-      "unread": "未读"
+      "my_work": "我的工作",
+      "working": "执行中",
+      "subscribed": "已订阅",
+      "snoozed": "已延后"
     },
     "untitled": "未命名视图",
     "copy_name": "{{name}}（副本）",

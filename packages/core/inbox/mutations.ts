@@ -4,7 +4,9 @@ import { api } from "../api";
 import { inboxKeys, mapArchivedInboxCache, patchArchivedInboxCaches, type ArchivedInboxCache } from "./queries";
 import { onInboxInvalidate, onInboxSummaryInvalidate } from "./ws-updaters";
 import { useWorkspaceId } from "../hooks";
-import type { InboxItem } from "../types";
+import { issueKeys } from "../issues/queries";
+import { refreshSubscribedIssues } from "../issues/subscribed";
+import type { InboxItem, SnoozedInboxIssue } from "../types";
 
 /**
  * Refresh workspace inbox lists and the account-level unread summary after a
@@ -170,67 +172,6 @@ export function useArchiveInbox() {
   });
 }
 
-/**
- * Snooze an issue until a time. Issue-level, like archive: every active
- * notification on the issue is put away with it, and the one snoozed from is
- * unread again so it reads as new when it comes back.
- */
-export function useSnoozeInbox() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: ({ id, until }: { id: string; until: string }) => api.snoozeInbox(id, until),
-    onMutate: async ({ id, until }) => {
-      await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
-      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-      const issueId = prev?.find((item) => item.id === id)?.issue_id;
-      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
-        old?.map((item) => {
-          if (item.archived) return item;
-          if (item.id === id) return { ...item, snoozed_until: until, read: false };
-          return issueId && item.issue_id === issueId ? { ...item, snoozed_until: until } : item;
-        }),
-      );
-      return { prev };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
-    },
-    onSettled: () => {
-      // A snoozed issue leaves the badge until it comes back.
-      refreshInboxAfterWrite(qc, wsId);
-    },
-  });
-}
-
-/** Bring a snoozed issue back now. */
-export function useUnsnoozeInbox() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: (id: string) => api.unsnoozeInbox(id),
-    onMutate: async (id) => {
-      await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
-      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-      const issueId = prev?.find((item) => item.id === id)?.issue_id;
-      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
-        old?.map((item) =>
-          !item.archived && (item.id === id || (issueId && item.issue_id === issueId))
-            ? { ...item, snoozed_until: null }
-            : item,
-        ),
-      );
-      return { prev };
-    },
-    onError: (_err, _id, ctx) => {
-      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
-    },
-    onSettled: () => {
-      refreshInboxAfterWrite(qc, wsId);
-    },
-  });
-}
-
 export function useDeleteInbox() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -281,34 +222,273 @@ export function useUnarchiveInbox() {
   });
 }
 
+export type InboxUnsubscribeScope = "issue" | "subtree";
+
+/** Subscription state changed for the viewer: re-read everything derived from it. */
+function refreshAfterSubscriptionWrite(qc: QueryClient, wsId: string) {
+  refreshInboxAfterWrite(qc, wsId);
+  qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+  void refreshSubscribedIssues(qc, wsId);
+}
+
 /**
- * Move issues that only carry updates to the archive: what reading an update
- * comes to (`readOnly`), and what clearing the section does to the rest.
- * `groups` are list keys (`issue_id ?? id`).
+ * Leave the issue an inbox item is about, then archive the item: the one-step
+ * "stop telling me about this" for issues the viewer is only watching.
  *
- * The rows leave at once. Which of them the server really archived is its
- * call — an issue that gained something addressed to the user in the meantime
- * stays — so the list is refreshed on settle rather than trusted.
+ * Unsubscribes first so a failed unsubscribe never archives — an archived row
+ * whose issue keeps notifying would read as the action having worked. The row
+ * leaves the list optimistically, like a plain archive.
  */
-export function useArchiveInboxUpdates() {
+export interface UnsubscribeArchiveVariables {
+  id: string;
+  issueId: string;
+  scope: InboxUnsubscribeScope;
+}
+
+/**
+ * The callbacks are the mutation's own, not `mutate`'s: the surfaces that fire
+ * this move on to the next notification at once, and per-call callbacks die
+ * with the component that made the call, taking the confirmation and its Undo
+ * (or the error) with them.
+ */
+export interface UnsubscribeArchiveCallbacks {
+  onSuccess?: (variables: UnsubscribeArchiveVariables) => void;
+  onError?: (error: Error, variables: UnsubscribeArchiveVariables) => void;
+}
+
+export function useUnsubscribeArchiveInbox(callbacks: UnsubscribeArchiveCallbacks = {}) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: ({ groups, readOnly }: { groups: readonly string[]; readOnly: boolean }) =>
-      api.archiveInboxUpdates(groups, readOnly),
-    onMutate: async ({ groups }) => {
+    mutationFn: async ({ id, issueId, scope }: UnsubscribeArchiveVariables) => {
+      if (scope === "subtree") await api.unsubscribeFromIssueSubtree(issueId);
+      else await api.unsubscribeFromIssue(issueId);
+      await api.archiveInbox(id);
+    },
+    onMutate: async ({ issueId }) => {
       await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
       const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
-      const keys = new Set(groups);
+      qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+        old?.map((item) => (item.issue_id === issueId ? { ...item, archived: true } : item)),
+      );
+      return { prev };
+    },
+    onSuccess: (_data, vars) => callbacks.onSuccess?.(vars),
+    onError: (err, vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+      callbacks.onError?.(err, vars);
+    },
+    onSettled: () => refreshAfterSubscriptionWrite(qc, wsId),
+  });
+}
+
+/**
+ * Undo for `useUnsubscribeArchiveInbox` with scope "issue": restore the
+ * subscription as it was, then the item. A plain function rather than a hook,
+ * because it runs from a toast that outlives the page that showed it.
+ *
+ * Restoring is not subscribing again: that would rewrite a commenter, delegated
+ * or project-inherited subscription to manual, and the issue would start
+ * delivering more than it did before the user left it.
+ */
+export async function undoUnsubscribeArchiveInbox(
+  qc: QueryClient,
+  wsId: string,
+  { id, issueId }: { id: string; issueId: string },
+): Promise<void> {
+  try {
+    await api.undoUnsubscribeFromIssue(issueId);
+    await api.unarchiveInbox(id);
+  } finally {
+    refreshAfterSubscriptionWrite(qc, wsId);
+  }
+}
+
+export function useMarkAllInboxRead() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.markAllInboxRead(),
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: inboxKeys.list(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
       qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
         old?.map((item) =>
-          !item.archived && keys.has(item.issue_id ?? item.id) ? { ...item, archived: true } : item,
+          !item.archived ? { ...item, read: true } : item,
         ),
       );
       return { prev };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+    },
+    onSettled: () => {
+      refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
+// The three batch-archive mutations below all move items into the archive, so
+// each invalidates BOTH lists on settle — plus the unread summary, since an
+// archived unread group leaves the badge.
+export function useArchiveAllInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.archiveAllInbox(),
+    onSettled: () => {
+      refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
+export function useArchiveAllReadInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.archiveAllReadInbox(),
+    onSettled: () => {
+      refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
+export function useArchiveCompletedInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.archiveCompletedInbox(),
+    onSettled: () => {
+      refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
+/**
+ * Undo for a batch archive: restore the notifications it took, one request
+ * per row, since a restore brings back the whole issue's group. A plain
+ * function rather than a hook, because it runs from a toast that outlives the
+ * page that showed it.
+ */
+export async function undoArchiveInboxBatch(
+  qc: QueryClient,
+  wsId: string,
+  ids: readonly string[],
+): Promise<void> {
+  try {
+    await Promise.all(ids.map((id) => api.unarchiveInbox(id)));
+  } finally {
+    refreshInboxAfterWrite(qc, wsId);
+  }
+}
+
+/**
+ * When the issue of an inbox item is snoozed until, as far as the cache knows;
+ * null when it isn't snoozed or its time has passed.
+ */
+export function cachedInboxSnoozedUntil(qc: QueryClient, wsId: string, id: string): Date | null {
+  const snoozed = qc.getQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId));
+  const issueId = cachedInboxIssueId(qc, wsId, id) ?? snoozed?.find((entry) => entry.item_id === id)?.issue_id;
+  if (!issueId) return null;
+  const until =
+    snoozed?.find((entry) => entry.issue_id === issueId)?.snoozed_until ??
+    qc
+      .getQueryData<InboxItem[]>(inboxKeys.list(wsId))
+      ?.find((item) => item.issue_id === issueId && !item.archived && item.snoozed_until)?.snoozed_until;
+  if (!until) return null;
+  const date = new Date(until);
+  return date.getTime() > Date.now() ? date : null;
+}
+
+export interface SnoozeInboxInput {
+  /** Any notification on the issue; the snooze covers the whole issue. */
+  id: string;
+  until: Date;
+}
+
+/**
+ * Snooze an issue in the inbox until a time (MUL-9333). Optimistic: the
+ * issue's rows carry the time at once, which takes the issue out of the list
+ * (`deduplicateInboxItems`), and the Snoozed view gains or moves the entry.
+ */
+export function useSnoozeInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, until }: SnoozeInboxInput) => api.snoozeInbox(id, until.toISOString()),
+    onMutate: async ({ id, until }) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      const prevSnoozed = qc.getQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId));
+      const snoozedUntil = until.toISOString();
+      const issueId =
+        cachedInboxIssueId(qc, wsId, id) ?? prevSnoozed?.find((entry) => entry.item_id === id)?.issue_id ?? null;
+      if (issueId) {
+        qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+          old?.map((item) => (item.issue_id === issueId && !item.archived ? { ...item, snoozed_until: snoozedUntil } : item)),
+        );
+        qc.setQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId), (old) => {
+          if (!old) return old;
+          const existing = old.find((entry) => entry.issue_id === issueId);
+          const entry: SnoozedInboxIssue = existing
+            ? { ...existing, snoozed_until: snoozedUntil }
+            : { issue_id: issueId, item_id: id, snoozed_until: snoozedUntil, snoozed_at: new Date().toISOString(), updates: 0 };
+          return [...old.filter((other) => other.issue_id !== issueId), entry].sort(
+            (a, b) => new Date(a.snoozed_until).getTime() - new Date(b.snoozed_until).getTime(),
+          );
+        });
+      }
+      return { prev, prevSnoozed };
+    },
+    onError: (_err, _input, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+      if (ctx?.prevSnoozed) qc.setQueryData(inboxKeys.snoozed(wsId), ctx.prevSnoozed);
+    },
+    onSettled: () => {
+      refreshInboxAfterWrite(qc, wsId);
+    },
+  });
+}
+
+export interface UnsnoozeInboxInput {
+  id: string;
+  /** Restore the issue as read, for undoing a snooze on an issue that was read. */
+  read?: boolean;
+}
+
+/**
+ * End a snooze now: the issue is back in the inbox. Optimistic on the
+ * Snoozed view and on rows still in the list cache (an undo right after
+ * snoozing); the rest of the list follows the server.
+ */
+export function useUnsnoozeInbox() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, read }: UnsnoozeInboxInput) => api.unsnoozeInbox(id, { read }),
+    onMutate: async ({ id, read }) => {
+      await qc.cancelQueries({ queryKey: inboxKeys.all(wsId) });
+      const prev = qc.getQueryData<InboxItem[]>(inboxKeys.list(wsId));
+      const prevSnoozed = qc.getQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId));
+      const issueId =
+        prevSnoozed?.find((entry) => entry.item_id === id)?.issue_id ?? cachedInboxIssueId(qc, wsId, id);
+      if (issueId) {
+        qc.setQueryData<SnoozedInboxIssue[]>(inboxKeys.snoozed(wsId), (old) =>
+          old?.filter((entry) => entry.issue_id !== issueId),
+        );
+        qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), (old) =>
+          old?.map((item) =>
+            item.issue_id === issueId && !item.archived
+              ? { ...item, snoozed_until: null, ...(read !== undefined ? { read } : {}) }
+              : item,
+          ),
+        );
+      }
+      return { prev, prevSnoozed };
+    },
+    onError: (_err, _input, ctx) => {
+      if (ctx?.prev) qc.setQueryData(inboxKeys.list(wsId), ctx.prev);
+      if (ctx?.prevSnoozed) qc.setQueryData(inboxKeys.snoozed(wsId), ctx.prevSnoozed);
     },
     onSettled: () => {
       refreshInboxAfterWrite(qc, wsId);

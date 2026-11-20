@@ -9,6 +9,7 @@ import {
 import { api } from "../api";
 import { issueKeys } from "./queries";
 import { projectKeys } from "../projects/queries";
+import { workspaceKeys } from "../workspace/queries";
 import { inboxKeys, type ArchivedInboxCache } from "../inbox/queries";
 import {
   cancelInboxLists,
@@ -51,6 +52,8 @@ import type {
   ListIssuesResponse,
   MoveIssueRequest,
   UpdateIssueRequest,
+  BatchIssueLabelOps,
+  BatchIssuePropertyOps,
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
@@ -386,6 +389,8 @@ export function useUpdateIssue() {
           Object.prototype.hasOwnProperty.call(vars, "project_id"),
       });
       qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+      // Refresh the assignee picker's Recent group after a reassignment.
+      if (!err && vars.assignee_id) qc.invalidateQueries({ queryKey: workspaceKeys.assigneeFrequency(wsId) });
       if (ctx) {
         invalidateStaleListKeys(qc, ctx.change.staleKeys);
       }
@@ -556,10 +561,17 @@ export function useBatchUpdateIssues() {
     mutationFn: ({
       ids,
       updates,
+      labels,
+      properties,
     }: {
       ids: string[];
       updates: UpdateIssueRequest;
-    }) => api.batchUpdateIssues(ids, updates),
+      labels?: BatchIssueLabelOps;
+      properties?: BatchIssuePropertyOps;
+    }) =>
+      labels || properties
+        ? api.batchUpdateIssues(ids, updates, { labels, properties })
+        : api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
       // Control and description-merge fields are not safe optimistic cache
       // patches. The server resolves description against description_base, so
@@ -696,6 +708,14 @@ export function useBatchUpdateIssues() {
       // refreshed below, plus the specific keys the coordinator flagged as
       // drifted — the surgical replacement for the old blanket "invalidate
       // myAll on project move" safety net (MUL-3669 / #4548).
+      // Label and property writes are not patched optimistically; the
+      // realtime events usually land first, and this catches a dropped socket.
+      if (_vars.labels || _vars.properties) {
+        qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+        qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+        qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
+        for (const id of _vars.ids) qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, id) });
+      }
       invalidateIssueDerivatives(qc, wsId, {
         statusOrProjectChanged:
           _vars.updates.status !== undefined ||
@@ -1204,12 +1224,19 @@ export function useToggleIssueSubscriber(issueId: string) {
         qc.setQueryData<IssueSubscriber[]>(
           issueKeys.subscribers(issueId),
           (old) => {
+            // An explicit subscribe rewrites an existing row's reason to
+            // manual. The delivery tier is the server's to report, so it is
+            // dropped until onSettled refetches it.
             if (
               old?.some(
                 (s) => s.user_id === userId && s.user_type === userType,
               )
             )
-              return old;
+              return old.map((s) =>
+                s.user_id === userId && s.user_type === userType
+                  ? { ...s, reason: "manual" as const, delivery: undefined }
+                  : s,
+              );
             return [...(old ?? []), temp];
           },
         );

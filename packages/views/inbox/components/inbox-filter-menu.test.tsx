@@ -91,6 +91,7 @@ function renderMenu({
   priorityFilterSupport = "supported",
   issueFieldsSupport = "supported",
   archived = false,
+  activeIssueIds,
   getArchivedInboxFacets = vi.fn(async () => ({ statuses: {}, priorities: {}, actors: {}, unreadCount: 0 })),
   statusEntries = BUILT_IN_STATUS_ORDER.map(statusEntry),
 }: {
@@ -98,6 +99,7 @@ function renderMenu({
   priorityFilterSupport?: InboxFilterSupport;
   issueFieldsSupport?: InboxFilterSupport;
   archived?: boolean;
+  activeIssueIds?: ReadonlySet<string>;
   getArchivedInboxFacets?: ReturnType<typeof vi.fn>;
   statusEntries?: IssueStatusEntry[];
 } = {}) {
@@ -125,6 +127,7 @@ function renderMenu({
         items={items}
         priorityFilterSupport={priorityFilterSupport}
         issueFieldsSupport={issueFieldsSupport}
+        activeIssueIds={activeIssueIds}
         archived={archived}
       />
     </QueryClientProvider>,
@@ -156,53 +159,16 @@ afterEach(() => {
 });
 
 describe("InboxFilterMenu", () => {
-  it("narrows the main inbox by the issue only", async () => {
+  it("groups the fields into notification and issue sections", async () => {
     renderMenu({
       items: [item("from-alice", "todo", "high", { actor_type: "member", actor_id: "alice" })],
     });
     openMenu();
 
-    for (const name of ["Status", "Priority", "Project", "Assignee", "Label", "Due date"]) {
-      expect(await screen.findByRole("menuitem", { name: new RegExp(`^${name}`) })).toBeTruthy();
-    }
-    // The sections already say what kind of notification a row is.
-    for (const name of ["Read state", "Type", "From", "Received", "Agent status"]) {
-      expect(screen.queryByRole("menuitem", { name: new RegExp(`^${name}`) })).toBeNull();
-    }
-    // One group of fields needs no heading to tell it from another.
-    expect(screen.queryByText("Notification")).toBeNull();
-    expect(screen.queryByText("Issue")).toBeNull();
-
-    fireEvent.change(screen.getByRole("textbox", { name: "Filter by field or value…" }), {
-      target: { value: "last 7" },
-    });
-    expect(await screen.findByText("No results")).toBeTruthy();
-  });
-
-  it("leaves a notification filter picked in the archive dormant in the main inbox", async () => {
-    const store = useInboxFilterStore.getState();
-    store.toggleFilterValue("ws-1", "type", "mention");
-    store.toggleUnreadOnly("ws-1");
-    renderMenu();
-
-    // Not counted on the trigger, not pinned in the menu, and still stored.
-    openMenu();
-    await screen.findByRole("menuitem", { name: /^Status/ });
-    expect(screen.queryByText("Active")).toBeNull();
-    expect(storedFilters()).toMatchObject({ types: ["mention"], unreadOnly: true });
-  });
-
-  it("groups the archive's fields into notification and issue sections", async () => {
-    renderMenu({
-      archived: true,
-      getArchivedInboxFacets: vi.fn(async () => ({ statuses: {}, priorities: {}, actors: { "member:alice": 1 }, unreadCount: 0 })),
-    });
-    openMenu();
-
     const notification = await screen.findByText("Notification");
     const issue = screen.getByText("Issue");
-    for (const name of ["Read state", "Type", "From", "Received", "Status", "Priority", "Project", "Assignee", "Label", "Due date"]) {
-      expect(await screen.findByRole("menuitem", { name: new RegExp(`^${name}`) })).toBeTruthy();
+    for (const name of ["Read state", "Type", "From", "Received", "Status", "Priority", "Agent status", "Project", "Assignee", "Label", "Due date"]) {
+      expect(screen.getByRole("menuitem", { name: new RegExp(`^${name}`) })).toBeTruthy();
     }
     expect(notification.compareDocumentPosition(issue) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText("Active")).toBeNull();
@@ -212,7 +178,7 @@ describe("InboxFilterMenu", () => {
     const store = useInboxFilterStore.getState();
     store.toggleFilterValue("ws-1", "type", "mention");
     store.setFilterNegated("ws-1", "type", true);
-    renderMenu({ archived: true });
+    renderMenu();
     openMenu("1 active filter");
 
     expect(await screen.findByText("Active")).toBeTruthy();
@@ -225,8 +191,10 @@ describe("InboxFilterMenu", () => {
 
   it("selects a notification type and switches it to is not", async () => {
     renderMenu({
-      archived: true,
-      getArchivedInboxFacets: vi.fn(async () => ({ statuses: {}, priorities: {}, actors: {}, types: { mention: 1, comment: 1 }, unreadCount: 0 })),
+      items: [
+        item("mention", "todo", "high"),
+        item("comment", "todo", "high", { type: "new_comment" }),
+      ],
     });
     await openSubmenu("Type");
     fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /Comments & reactions.*1 notification/ }));
@@ -237,7 +205,7 @@ describe("InboxFilterMenu", () => {
   });
 
   it("keeps is not when it is chosen before the first type", async () => {
-    renderMenu({ archived: true });
+    renderMenu({ items: [item("mention", "todo", "high")] });
     await openSubmenu("Type");
     fireEvent.click(await screen.findByRole("menuitemradio", { name: "is not" }));
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Agent runs/ }));
@@ -247,7 +215,7 @@ describe("InboxFilterMenu", () => {
   });
 
   it("finds a value by search and adds it in one click", async () => {
-    renderMenu({ archived: true });
+    renderMenu();
     openMenu();
     fireEvent.change(await screen.findByRole("textbox", { name: "Filter by field or value…" }), {
       target: { value: "last 7" },
@@ -354,18 +322,36 @@ describe("InboxFilterMenu", () => {
     expect(storedFilters()).toBeUndefined();
   });
 
-  it("hides From when the archive has no notification with an actor", async () => {
-    renderMenu({ archived: true });
+  it("offers only the actors the view's notifications carry", async () => {
+    renderMenu({
+      items: [
+        item("from-alice", "todo", "high", { actor_type: "member", actor_id: "alice" }),
+        item("from-bob", "done", "low", { actor_type: "agent", actor_id: "bob" }),
+      ],
+    });
+
+    await openSubmenu("From");
+    const alice = await screen.findByRole("menuitemcheckbox", { name: /Alice.*1 notification/ });
+    expect(screen.getByRole("menuitemcheckbox", { name: /Bob.*1 notification/ })).toBeTruthy();
+
+    fireEvent.click(alice);
+    expect(storedFilters()?.actors).toEqual(["member:alice"]);
+  });
+
+  it("hides From when no notification carries an actor", async () => {
+    renderMenu();
     openMenu();
 
     await screen.findByRole("menuitem", { name: /^Status/ });
     expect(screen.queryByRole("menuitem", { name: /^From/ })).toBeNull();
   });
 
-  it("filters the archive to unread and counts the unread issues behind it", async () => {
+  it("filters to unread and counts the unread issues behind it", async () => {
     renderMenu({
-      archived: true,
-      getArchivedInboxFacets: vi.fn(async () => ({ statuses: {}, priorities: {}, actors: {}, unreadCount: 1 })),
+      items: [
+        item("unread", "todo", "high"),
+        item("read", "done", "low", { read: true }),
+      ],
     });
 
     await openSubmenu("Read state");
@@ -375,6 +361,25 @@ describe("InboxFilterMenu", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "1 active filter" })).toHaveTextContent("1"),
     );
+  });
+
+  it("filters by agent status without a count beside it", async () => {
+    renderMenu({ activeIssueIds: new Set(["issue-todo-high"]) });
+
+    await openSubmenu("Agent status");
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /^Idle$/ }));
+
+    expect(storedFilters()?.agent).toBe("idle");
+  });
+
+  it("hides agent status in the archive and ignores a carried-over selection", async () => {
+    useInboxFilterStore.getState().setAgent("ws-1", "idle");
+    renderMenu({ archived: true });
+
+    // Not counted on the trigger, and not offered in the menu.
+    openMenu();
+    await screen.findByRole("menuitem", { name: /^Status/ });
+    expect(screen.queryByRole("menuitem", { name: /^Agent status/ })).toBeNull();
   });
 
   it("hides priority and clears its filter for a legacy response", async () => {

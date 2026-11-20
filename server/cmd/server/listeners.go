@@ -104,7 +104,7 @@ var memberPrivateEvents = map[string]bool{
 // horizontal-scaling plan tracked in MUL-1138.
 //
 // audience, when given, narrows events about private projects (MUL-8472) to
-// their members and workspace owners/admins; see privateProjectAudience.
+// their members; see privateProjectAudience.
 func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...privateProjectAudience) {
 	var projectAudience privateProjectAudience
 	if len(audience) > 0 {
@@ -154,14 +154,28 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster, audience ...priv
 		sendToRecipient(b, e, recipientID)
 	})
 
+	// inbox:snoozed — a snooze names its recipient at the top level; a row
+	// written into a snooze carries it on the nested item, like inbox:new.
+	bus.Subscribe(protocol.EventInboxSnoozed, func(e events.Event) {
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			return
+		}
+		recipientID, _ := payload["recipient_id"].(string)
+		if item, ok := payload["item"].(map[string]any); ok && recipientID == "" {
+			recipientID, _ = item["recipient_id"].(string)
+		}
+		sendToRecipient(b, e, recipientID)
+	})
+
 	// inbox:read, inbox:archived, inbox:unarchived, inbox:batch-read,
-	// inbox:batch-archived, inbox:snoozed, inbox:unsnoozed,
-	// issue_unread:changed — extract recipient from top-level payload
+	// inbox:batch-archived, issue_unread:changed — extract recipient from
+	// top-level payload
 	for _, eventType := range []string{
 		protocol.EventInboxRead, protocol.EventInboxArchived, protocol.EventInboxUnarchived,
 		protocol.EventInboxDeleted,
 		protocol.EventInboxBatchRead, protocol.EventInboxBatchArchived,
-		protocol.EventInboxSnoozed, protocol.EventInboxUnsnoozed,
+		protocol.EventInboxUnsnoozed,
 		protocol.EventIssueUnreadChanged,
 	} {
 		bus.Subscribe(eventType, func(e events.Event) {

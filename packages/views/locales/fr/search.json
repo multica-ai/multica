@@ -6,6 +6,7 @@
   "breadcrumb_aria": "Menu actuel",
   "groups": {
     "pages": "Pages",
+    "views": "Vues",
     "commands": "Commandes",
     "members": "Membres",
     "agents": "Agents",
@@ -15,6 +16,7 @@
     "autopilots": "Automatisations",
     "chats": "Discussions",
     "skills": "Skills",
+    "docs": "Documents",
     "cancelled": "Annulés",
     "recent": "Récents",
     "workspaces": "Espaces de travail",
@@ -88,7 +90,9 @@
   },
   "inbox": {
     "archive": "Archiver",
-    "mark_unread": "Marquer comme non lu"
+    "mark_unread": "Marquer comme non lu",
+    "mark_all_read": "Tout marquer comme lu dans la boîte de réception",
+    "archive_all_read": "Archiver tous les éléments lus"
   },
   "chat": {
     "link_project": "Associer à un projet...",
@@ -123,7 +127,6 @@
     "unsubscribed": "Désabonné",
     "label_added": "Libellé {{name}} ajouté",
     "label_removed": "Libellé {{name}} retiré",
-    "label_failed": "Impossible d'ajouter le libellé {{name}} à toutes les tâches",
     "update_failed": "Échec de la mise à jour",
     "assigned": "{{identifier}} assignée à {{name}}"
   },
@@ -161,5 +164,6 @@
   },
   "trigger": {
     "label": "Rechercher..."
-  }
+  },
+  "untitled_doc": "Sans titre"
 }

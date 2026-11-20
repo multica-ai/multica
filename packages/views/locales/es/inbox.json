@@ -3,6 +3,12 @@
     "title": "Bandeja de entrada",
     "back": "Bandeja de entrada"
   },
+  "menu": {
+    "mark_all_read": "Marcar todo como leído",
+    "archive_all": "Archivar todo",
+    "archive_all_read": "Archivar todo lo leído",
+    "archive_completed": "Archivar lo completado"
+  },
   "filters": {
     "tooltip": "Filtrar bandeja",
     "active_count_one": "{{count}} filtro activo",
@@ -27,7 +33,8 @@
     "type_system": "Sistema",
     "received_today": "Hoy",
     "received_last_7_days": "Últimos 7 días",
-    "received_last_30_days": "Últimos 30 días"
+    "received_last_30_days": "Últimos 30 días",
+    "agent_idle": "Inactivo"
   },
   "context_menu": {
     "mark_read": "Marcar como leído",
@@ -36,11 +43,7 @@
     "unarchive": "Desarchivar",
     "open_in_new_tab": "Abrir en una pestaña nueva",
     "delete": "Eliminar",
-    "snooze_in_one_hour": "Posponer 1 hora",
-    "snooze_later_today": "Posponer hasta más tarde hoy",
-    "snooze_tomorrow": "Posponer hasta mañana",
-    "snooze_next_week": "Posponer hasta el próximo lunes",
-    "unsnooze": "Cancelar posposición"
+    "unsubscribe_archive": "Darse de baja y archivar"
   },
   "list": {
     "loading_selection": "Cargando notificación…",
@@ -63,15 +66,23 @@
   },
   "detail": {
     "select_prompt": "Selecciona una notificación para ver los detalles",
+    "empty": "Tu bandeja de entrada está vacía",
     "original_input": "Entrada original",
     "retry_with_context": "Reintentar con contexto",
     "edit_advanced": "Editar como formulario avanzado",
-    "autopilot_quota_exceeded_body": "Este espacio de trabajo ha alcanzado su límite de {{limit}} ejecuciones de automatizaciones para el periodo actual. No se iniciarán más ejecuciones de automatizaciones hasta que se reinicie la cuota {{resetAt}}.",
-    "autopilot_quota_upgrade": "Ver opciones de mejora del plan",
+    "autopilot_quota_exceeded_body": "Este espacio de trabajo alcanzó su límite de {{limit}} ejecuciones de autopilot del periodo actual. Las siguientes ejecuciones no se iniciarán hasta que la asignación se restablezca {{resetAt}}, o hasta que el espacio de trabajo mejore su plan o compre más ejecuciones.",
+    "project_owner_joined_body": "{{name}} es propietario del espacio de trabajo y se ha añadido a este proyecto privado. Ahora puede ver sus tareas, comentarios y archivos adjuntos.",
+    "open_project": "Abrir proyecto",
+    "autopilot_quota_upgrade": "Ver opciones",
     "archive": "Archivar",
     "unarchive": "Desarchivar",
-    "nothing_needs_you": "Nada pendiente de ti",
-    "nothing_needs_you_hint": "Las tareas aparecen a la izquierda cuando un agente entrega un resultado o alguien te menciona."
+    "open_doc": "Abrir documento",
+    "autopilot_quota_upgrade_action": "Mejorar plan",
+    "autopilot_quota_addon_action": "Comprar más ejecuciones",
+    "autopilot_quota_portal_action": "Gestionar facturación",
+    "autopilot_quota_contact_upgrade": "Pide a un propietario o administrador del espacio de trabajo que mejore el plan.",
+    "autopilot_quota_contact_addon": "Pide a un propietario o administrador del espacio de trabajo que compre más ejecuciones.",
+    "autopilot_quota_contact_addon_or_upgrade": "Pide a un propietario o administrador del espacio de trabajo que compre más ejecuciones o mejore el plan."
   },
   "types": {
     "issue_assigned": "Asignada",
@@ -88,7 +99,6 @@
     "review_requested": "Revisión solicitada",
     "task_completed": "Ejecución completada",
     "task_failed": "Ejecución fallida",
-    "task_cancelled": "Ejecución cancelada",
     "agent_blocked": "Agente bloqueado",
     "agent_completed": "Agente completado",
     "reaction_added": "Reaccionó",
@@ -97,11 +107,14 @@
     "quick_create_unconfirmed": "Creación con agente sin confirmar",
     "autopilot_paused": "Automatización en pausa",
     "children_done": "Sub-tareas finalizadas",
+    "project_owner_joined": "El propietario se unió al proyecto",
     "autopilot_quota_exceeded": "Límite de ejecuciones de automatizaciones alcanzado",
     "app_action_requested": "Necesita tu confirmación",
     "app_action_reminder": "La confirmación caduca pronto",
     "app_connect_requested": "Conectar una aplicación",
-    "app_action_result": "Resultado de la acción de la aplicación"
+    "app_action_result": "Resultado de la acción de la aplicación",
+    "doc_comment": "Nuevo comentario en un documento",
+    "doc_mentioned": "Te mencionaron en un documento"
   },
   "labels": {
     "set_status_to": "Establecer estado en",
@@ -121,9 +134,22 @@
   "toasts": {
     "source_context_retry_started": "Reintento iniciado con el contexto original",
     "archived": "Notificación archivada",
+    "archived_many_one": "{{count}} notificación archivada",
+    "archived_many_other": "{{count}} notificaciones archivadas",
     "unarchived": "Notificación restaurada",
     "deleted": "Notificación eliminada",
-    "snoozed": "Pospuesta hasta {{time}}"
+    "unsubscribed_archived": "Baja y archivo hechos",
+    "unsubscribed_archived_subtree": "Te diste de baja de esta tarea y sus subtareas",
+    "unsubscribed_hint": "Sus actualizaciones no llegarán a tu bandeja. Las @menciones sí.",
+    "undo": "Deshacer"
+  },
+  "kept": {
+    "archived": "Archivado",
+    "leaves": "Sale de la bandeja al continuar",
+    "filtered": "Ya no coincide con tus filtros",
+    "notification_archived": "Notificación archivada",
+    "next": "Siguiente",
+    "next_tooltip": "Abrir la siguiente: {{title}}"
   },
   "errors": {
     "archived_lookup_failed": "No se ha podido cargar la notificación enlazada",
@@ -133,53 +159,63 @@
     "mark_unread_failed": "No se ha podido marcar como no leído",
     "archive_failed": "No se ha podido archivar",
     "mark_done_failed": "No se ha podido marcar como hecho",
+    "mark_all_read_failed": "No se ha podido marcar todo como leído",
+    "archive_all_failed": "No se ha podido archivar todo",
+    "archive_all_read_failed": "No se ha podido archivar los elementos leídos",
+    "archive_completed_failed": "No se ha podido archivar lo completado",
     "unarchive_failed": "No se ha podido desarchivar",
     "archived_load_failed": "No se han podido cargar las notificaciones archivadas",
+    "load_failed": "No se han podido cargar las notificaciones",
     "filters_load_failed": "No se han podido cargar los filtros",
     "delete_failed": "No se pudo eliminar la notificación. Inténtalo de nuevo.",
-    "snooze_failed": "No se pudo posponer",
-    "unsnooze_failed": "No se pudo cancelar la posposición"
+    "unsubscribe_archive_failed": "No se pudo dar de baja",
+    "undo_unsubscribe_failed": "No se pudo deshacer"
   },
   "delete_dialog": {
     "title": "¿Eliminar notificación?",
     "description": "Esta notificación se eliminará permanentemente. Las tareas y ejecuciones relacionadas se conservarán.",
     "issue_description": "Las notificaciones de esta tarea en esta vista se eliminarán permanentemente. La tarea y sus ejecuciones se conservarán.",
-    "cancel": "Cancelar"
+    "cancel": "Cancelar",
+    "active_issue_description": "Las notificaciones activas de esta tarea se eliminarán permanentemente. Las notificaciones archivadas anteriormente se conservarán y volverán a aparecer en Archivadas. La tarea y sus ejecuciones se conservarán."
   },
-  "sections": {
-    "needs_you": "Pendientes de ti",
-    "working": "En curso",
-    "updates": "Novedades",
-    "snoozed": "Pospuestas",
-    "clear_updates": "Vaciar",
-    "queued": "En cola",
-    "caught_up": "Todo al día",
-    "still_working_one": "{{count}} agente sigue trabajando. Los resultados volverán aquí.",
-    "still_working_other": "{{count}} agentes siguen trabajando. Los resultados volverán aquí."
-  },
-  "reasons": {
-    "review": "Lista para revisar",
-    "question": "Espera tu respuesta",
-    "mention": "Te mencionó",
-    "failed": "Ejecución fallida",
-    "cancelled": "Ejecución cancelada",
-    "assigned": "Asignada a ti",
-    "comment": "Nuevo comentario",
-    "finished": "Ejecución terminada",
-    "stopped_by_you": "Detuviste esta ejecución",
-    "stopped_by": "{{name}} detuvo esta ejecución",
-    "stopped_by_system": "Detenida por el sistema"
+  "unsubscribe": {
+    "title": "Darse de baja y archivar. Dejarás de recibir sus actualizaciones; las @menciones te seguirán llegando.",
+    "this_issue": "Solo esta tarea",
+    "subtree_one": "Esta tarea y su {{count}} subtarea",
+    "subtree_other": "Esta tarea y sus {{count}} subtareas",
+    "subtree_unknown": "Esta tarea y sus subtareas"
   },
   "snooze": {
     "action": "Posponer",
-    "unsnooze": "Cancelar posposición",
-    "in_one_hour": "En 1 hora",
-    "later_today": "Más tarde hoy",
-    "tomorrow": "Mañana",
-    "next_week": "El próximo lunes",
-    "pick_time": "Elegir fecha y hora...",
-    "hint": "Vuelve antes si algo nuevo requiere tu atención, como una mención o una ejecución fallida.",
-    "custom_title": "Posponer hasta",
-    "custom_invalid": "Elige una fecha futura, dentro de un año."
+    "menu_title": "Posponer hasta…",
+    "unsnooze": "Recuperar ahora",
+    "change_time": "Cambiar hora",
+    "hours_1": "1 hora",
+    "hours_3": "3 horas",
+    "days_1": "1 día",
+    "days_3": "3 días",
+    "weeks_1": "1 semana",
+    "pick_time": "Elegir fecha y hora…",
+    "picker_title": "Elegir fecha y hora",
+    "picker_back": "Volver",
+    "picker_time": "Hora",
+    "picker_hour": "Hora",
+    "picker_minute": "Minuto",
+    "picker_submit": "Posponer hasta {{time}}",
+    "hint": "Vuelve antes si te mencionan por tu nombre, te asignan o falla una ejecución.",
+    "custom_invalid": "Elige una hora futura, dentro de un año.",
+    "back_at": "Vuelve {{time}}",
+    "returned": "Pospuesto hasta ahora",
+    "updates_one": "{{count}} novedad mientras estaba pospuesto",
+    "updates_other": "{{count}} novedades mientras estaba pospuesto",
+    "toast_snoozed": "Pospuesto hasta {{time}}",
+    "toast_unsnoozed": "De vuelta en tu bandeja",
+    "undo": "Deshacer",
+    "failed": "No se pudo posponer",
+    "unsnooze_failed": "No se pudo recuperar",
+    "view_empty": "Nada pospuesto",
+    "view_empty_description": "Pospón un issue desde tu bandeja de entrada y esperará aquí hasta que sea hora de volver.",
+    "col_updates": "Mientras estaba pospuesto",
+    "col_back": "Vuelve"
   }
 }

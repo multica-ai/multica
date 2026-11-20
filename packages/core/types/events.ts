@@ -10,6 +10,13 @@ import type { Label } from "./label";
 
 // WebSocket event types (matching Go server protocol/events.go)
 export type WSEventType =
+  | "doc:created"
+  | "doc:updated"
+  | "doc:deleted"
+  | "doc_folder:created"
+  | "doc_folder:updated"
+  | "doc_folder:deleted"
+  | "doc_comment:changed"
   | "issue:created"
   | "issue:updated"
   | "issue_attachments:changed"
@@ -39,8 +46,6 @@ export type WSEventType =
   | "inbox:unread"
   | "inbox:archived"
   | "inbox:unarchived"
-  | "inbox:snoozed"
-  | "inbox:unsnoozed"
   | "inbox:deleted"
   | "inbox:batch-read"
   | "inbox:batch-archived"
@@ -66,6 +71,7 @@ export type WSEventType =
   | "chat:reply_notification"
   | "chat:quick_actions"
   | "chat:cancel_finalized"
+  | "chat:wakeup_changed"
   | "chat:session_created"
   | "chat:session_read"
   | "chat:session_deleted"
@@ -242,20 +248,6 @@ export interface InboxArchivedPayload {
 }
 
 export interface InboxUnarchivedPayload {
-  item_id: string;
-  issue_id: string | null;
-  recipient_id: string;
-}
-
-/** Personal: the recipient snoozed an issue's notifications until a time. */
-export interface InboxSnoozedPayload {
-  item_id: string;
-  issue_id: string | null;
-  recipient_id: string;
-  snoozed_until: string;
-}
-
-export interface InboxUnsnoozedPayload {
   item_id: string;
   issue_id: string | null;
   recipient_id: string;
@@ -569,6 +561,17 @@ export interface ChatQuickActionsPayload {
  * draft-restores endpoint. All fields beyond the discriminator are optional —
  * treat defensively and fall back to a refetch.
  */
+/**
+ * A chat wakeup was created, changed, ended, or started a turn (`task_id`).
+ * Delivered only to the conversation's owner.
+ */
+export interface ChatWakeupChangedPayload {
+  chat_session_id: string;
+  wakeup_id: string;
+  status: string;
+  task_id?: string;
+}
+
 export interface ChatCancelFinalizedPayload {
   outcome: "stopped" | "restored";
   chat_session_id: string;
@@ -698,8 +701,6 @@ export interface WSEventPayloadMap {
   "inbox:unread": InboxUnreadPayload;
   "inbox:archived": InboxArchivedPayload;
   "inbox:unarchived": InboxUnarchivedPayload;
-  "inbox:snoozed": InboxSnoozedPayload;
-  "inbox:unsnoozed": InboxUnsnoozedPayload;
   "inbox:deleted": { item_id: string; recipient_id: string; count: number };
   "inbox:batch-read": InboxBatchReadPayload;
   "inbox:batch-archived": InboxBatchArchivedPayload;
@@ -716,6 +717,7 @@ export interface WSEventPayloadMap {
   "chat:reply_notification": ChatReplyNotificationPayload;
   "chat:quick_actions": ChatQuickActionsPayload;
   "chat:cancel_finalized": ChatCancelFinalizedPayload;
+  "chat:wakeup_changed": ChatWakeupChangedPayload;
   "chat:session_created": ChatSessionCreatedPayload;
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;

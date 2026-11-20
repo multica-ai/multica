@@ -3,6 +3,12 @@
     "title": "收件箱",
     "back": "收件箱"
   },
+  "menu": {
+    "mark_all_read": "全部标为已读",
+    "archive_all": "归档全部",
+    "archive_all_read": "归档全部已读",
+    "archive_completed": "归档已完成"
+  },
   "filters": {
     "tooltip": "筛选收件箱",
     "active_count_other": "{{count}} 个筛选条件",
@@ -25,7 +31,8 @@
     "type_system": "系统",
     "received_today": "今天",
     "received_last_7_days": "最近 7 天",
-    "received_last_30_days": "最近 30 天"
+    "received_last_30_days": "最近 30 天",
+    "agent_idle": "空闲"
   },
   "context_menu": {
     "mark_read": "标为已读",
@@ -34,11 +41,7 @@
     "unarchive": "取消归档",
     "open_in_new_tab": "在新标签页打开",
     "delete": "删除",
-    "snooze_in_one_hour": "推迟 1 小时",
-    "snooze_later_today": "推迟到今天晚些时候",
-    "snooze_tomorrow": "推迟到明天",
-    "snooze_next_week": "推迟到下周一",
-    "unsnooze": "取消推迟"
+    "unsubscribe_archive": "取消订阅并归档"
   },
   "list": {
     "loading_selection": "正在加载通知…",
@@ -61,15 +64,23 @@
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",
+    "empty": "收件箱为空",
     "original_input": "原始输入",
     "retry_with_context": "保留上下文重试",
     "edit_advanced": "在完整表单中编辑",
-    "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置前，后续自动化执行将不会启动。",
-    "autopilot_quota_upgrade": "查看升级方案",
+    "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置、升级套餐或加购之前，后续自动化执行将不会启动。",
+    "project_owner_joined_body": "{{name}} 是工作区所有者，已把自己加入这个私有项目，现在可以看到其中的任务、评论和附件。",
+    "open_project": "打开项目",
+    "autopilot_quota_upgrade": "查看选项",
     "archive": "归档",
     "unarchive": "取消归档",
-    "nothing_needs_you": "没有需要你处理的任务",
-    "nothing_needs_you_hint": "智能体交回结果、有人 @ 你时，会出现在左侧。"
+    "open_doc": "打开文档",
+    "autopilot_quota_upgrade_action": "升级",
+    "autopilot_quota_addon_action": "加购执行次数",
+    "autopilot_quota_portal_action": "管理账单",
+    "autopilot_quota_contact_upgrade": "请联系工作区所有者或管理员升级套餐。",
+    "autopilot_quota_contact_addon": "请联系工作区所有者或管理员加购执行次数。",
+    "autopilot_quota_contact_addon_or_upgrade": "请联系工作区所有者或管理员加购执行次数或升级套餐。"
   },
   "types": {
     "issue_assigned": "已分配",
@@ -86,7 +97,6 @@
     "review_requested": "请求审查",
     "task_completed": "运行已完成",
     "task_failed": "运行失败",
-    "task_cancelled": "运行已取消",
     "agent_blocked": "智能体被阻塞",
     "agent_completed": "智能体已完成",
     "reaction_added": "添加了表情反应",
@@ -95,11 +105,14 @@
     "quick_create_unconfirmed": "通过智能体创建结果未确认",
     "autopilot_paused": "自动化已暂停",
     "children_done": "子任务已全部结束",
+    "project_owner_joined": "所有者加入了项目",
     "autopilot_quota_exceeded": "自动化执行次数已用完",
     "app_action_requested": "等待你确认",
     "app_action_reminder": "确认即将过期",
     "app_connect_requested": "请连接应用",
-    "app_action_result": "应用操作结果"
+    "app_action_result": "应用操作结果",
+    "doc_comment": "文档有新评论",
+    "doc_mentioned": "在文档中提到了你"
   },
   "labels": {
     "set_status_to": "状态设为",
@@ -119,9 +132,21 @@
   "toasts": {
     "source_context_retry_started": "已使用原始上下文开始重试",
     "archived": "已归档通知",
+    "archived_many_other": "已归档 {{count}} 条通知",
     "unarchived": "已恢复通知",
     "deleted": "通知已删除",
-    "snoozed": "已推迟到 {{time}}"
+    "unsubscribed_archived": "已取消订阅并归档",
+    "unsubscribed_archived_subtree": "已取消订阅此任务及其子任务",
+    "unsubscribed_hint": "之后的普通动态不会再进收件箱，@你时仍会通知",
+    "undo": "撤销"
+  },
+  "kept": {
+    "archived": "已归档",
+    "leaves": "离开后移出收件箱",
+    "filtered": "不再符合筛选",
+    "notification_archived": "通知已归档",
+    "next": "下一条",
+    "next_tooltip": "打开下一条：{{title}}"
   },
   "errors": {
     "archived_lookup_failed": "无法加载链接指向的通知",
@@ -131,52 +156,61 @@
     "mark_unread_failed": "标为未读失败",
     "archive_failed": "归档失败",
     "mark_done_failed": "标为已完成失败",
+    "mark_all_read_failed": "全部标为已读失败",
+    "archive_all_failed": "归档全部失败",
+    "archive_all_read_failed": "归档已读失败",
+    "archive_completed_failed": "归档已完成失败",
     "unarchive_failed": "取消归档失败",
     "archived_load_failed": "无法加载已归档通知",
+    "load_failed": "无法加载通知",
     "filters_load_failed": "无法加载筛选项",
     "delete_failed": "无法删除通知，请重试。",
-    "snooze_failed": "无法推迟",
-    "unsnooze_failed": "无法取消推迟"
+    "unsubscribe_archive_failed": "取消订阅失败",
+    "undo_unsubscribe_failed": "撤销失败"
   },
   "delete_dialog": {
     "title": "删除通知？",
     "description": "此通知将被永久删除，关联任务和运行记录不受影响。",
     "issue_description": "当前视图中此任务的通知将被永久删除，任务和运行记录不受影响。",
-    "cancel": "取消"
+    "cancel": "取消",
+    "active_issue_description": "此任务在收件箱中的通知将被永久删除。此前归档的通知会保留，并重新显示在归档视图中。任务和运行记录不受影响。"
   },
-  "sections": {
-    "needs_you": "要你处理",
-    "working": "运行中",
-    "updates": "动态",
-    "snoozed": "已推迟",
-    "clear_updates": "清空",
-    "queued": "排队中",
-    "caught_up": "都处理完了",
-    "still_working_other": "{{count}} 个智能体还在运行，有结果会回到这里。"
-  },
-  "reasons": {
-    "review": "等你验收",
-    "question": "等你回答",
-    "mention": "提到你",
-    "failed": "运行失败",
-    "cancelled": "运行已取消",
-    "assigned": "分配给你",
-    "comment": "新评论",
-    "finished": "运行完成",
-    "stopped_by_you": "你停止了这次运行",
-    "stopped_by": "{{name}} 停止了这次运行",
-    "stopped_by_system": "系统停止了这次运行"
+  "unsubscribe": {
+    "title": "取消订阅并归档：不再收到它的订阅通知，@你时仍会通知",
+    "this_issue": "仅此任务",
+    "subtree_other": "此任务及其 {{count}} 个子任务",
+    "subtree_unknown": "此任务及其子任务"
   },
   "snooze": {
-    "action": "推迟",
-    "unsnooze": "取消推迟",
-    "in_one_hour": "1 小时后",
-    "later_today": "今天晚些时候",
-    "tomorrow": "明天",
-    "next_week": "下周一",
-    "pick_time": "选择时间...",
-    "hint": "有新的事需要你处理时会提前回来，比如有人 @ 你，或智能体运行失败。",
-    "custom_title": "推迟到",
-    "custom_invalid": "请选择一年内的未来时间。"
+    "action": "延后",
+    "menu_title": "延后到…",
+    "unsnooze": "现在回来",
+    "change_time": "修改时间",
+    "hours_1": "1 小时",
+    "hours_3": "3 小时",
+    "days_1": "1 天",
+    "days_3": "3 天",
+    "weeks_1": "1 周",
+    "pick_time": "选择日期和时间…",
+    "picker_title": "选择日期和时间",
+    "picker_back": "返回",
+    "picker_time": "时间",
+    "picker_hour": "时",
+    "picker_minute": "分",
+    "picker_submit": "延后到 {{time}}",
+    "hint": "被点名 @、被指派或运行失败时会提前回来。",
+    "custom_invalid": "请选择一年内的未来时间。",
+    "back_at": "{{time}} 回来",
+    "returned": "延后到期",
+    "updates_other": "期间 {{count}} 条动态",
+    "toast_snoozed": "已延后到 {{time}}",
+    "toast_unsnoozed": "已回到收件箱",
+    "undo": "撤销",
+    "failed": "延后失败",
+    "unsnooze_failed": "恢复失败",
+    "view_empty": "没有延后的事项",
+    "view_empty_description": "在收件箱里延后一个任务，它会在这里等到时间再回来。",
+    "col_updates": "延后期间",
+    "col_back": "回来时间"
   }
 }

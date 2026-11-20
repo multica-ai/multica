@@ -15,15 +15,18 @@ export type InboxItemType =
   | "due_date_changed"
   | "new_comment"
   | "mentioned"
+  // A new comment in a doc discussion the recipient wrote in, or one that
+  // mentions them. Details carry doc_id, thread_id and the quoted text.
+  | "doc_comment"
+  | "doc_mentioned"
+  | "task_failed"
+  | "reaction_added"
+  // No longer written, but older servers wrote them and those rows remain;
+  // keep their labels and filter groups so history still reads and filters.
   | "review_requested"
   | "task_completed"
-  | "task_failed"
-  // A run the recipient started was cancelled. `details` names who by
-  // (`cancelled_by_type`, `cancelled_by_id`, `cancelled_by_name`).
-  | "task_cancelled"
   | "agent_blocked"
   | "agent_completed"
-  | "reaction_added"
   | "quick_create_done"
   | "quick_create_failed"
   // Quick create whose outcome could not be verified. Distinct from
@@ -37,6 +40,10 @@ export type InboxItemType =
   // Sub-issues of an issue assigned to the recipient closed (the child_done
   // system rule notifies a member assignee instead of waking an agent).
   | "children_done"
+  // A workspace owner added themselves to a private project the recipient is
+  // a member of. Issue-less: details carry project_id, project_title and
+  // joined_by (the owner's name).
+  | "project_owner_joined"
   // Connected Apps (MUL-8516): an agent waits on the recipient to confirm an
   // app call, or to connect their account.
   | "app_action_requested"
@@ -45,33 +52,14 @@ export type InboxItemType =
   | "app_action_result";
 
 /**
- * The Inbox section a notification was filed under when it was written.
- * `needs_you`: it is addressed to the recipient, so the issue waits on them.
- * `updates`: they only follow the issue.
- */
-export type InboxSection = "needs_you" | "updates";
-
-/**
- * One workspace's inbox counts in the cross-workspace summary
- * (`GET /api/inbox/unread-summary`). The rail badge and the workspace
- * switcher dot read it.
+ * One workspace's unread inbox count in the cross-workspace summary
+ * (`GET /api/inbox/unread-summary`). The sidebar uses this to light a dot on
+ * the workspace switcher when a workspace OTHER than the active one has
+ * unread items.
  */
 export interface InboxWorkspaceUnread {
   workspace_id: string;
-  /** Unread issues. */
   count: number;
-  /**
-   * Issues waiting on the user, read or not: the rows of the Inbox's "Needs
-   * you" section, and what the badge shows. Absent from a server that
-   * predates the sectioned Inbox, where the badge falls back to `count`.
-   */
-  needs_you?: number;
-  /**
-   * When the workspace's next snoozed issue comes back. The counts leave it
-   * out until then and nothing arrives when the time passes, so the summary
-   * is read again at this time. Absent when nothing is snoozed.
-   */
-  next_wake_at?: string;
 }
 
 export interface InboxItem {
@@ -84,6 +72,12 @@ export interface InboxItem {
   type: InboxItemType;
   severity: InboxSeverity;
   issue_id: string | null;
+  /**
+   * The linked issue's identifier (MUL-123). Links use it so they open the
+   * canonical issue URL directly; a UUID URL is rewritten after load, which
+   * mounts the issue page twice on web. Absent on older servers.
+   */
+  issue_identifier?: string | null;
   title: string;
   body: string | null;
   issue_status: IssueStatus | null;
@@ -108,16 +102,24 @@ export interface InboxItem {
   created_at: string;
   details: Record<string, string> | null;
   /**
-   * Absent from a server that predates the sectioned Inbox; every row then
-   * belongs to the one list it had.
-   */
-  section?: InboxSection | null;
-  /**
-   * When a snoozed row comes back. A time in the past means it already has.
-   * Snoozing is issue-level, so every row the issue had at the time carries
-   * the same value.
+   * When the issue came back from a snooze. A listed row only carries a time
+   * that has passed: a snoozed issue is left out of the list until then.
+   * Absent on servers that predate snooze.
    */
   snoozed_until?: string | null;
+  /** When that snooze began. */
+  snoozed_at?: string | null;
+}
+
+/** One snoozed issue in the viewer's inbox (`GET /api/inbox/snoozed`). */
+export interface SnoozedInboxIssue {
+  issue_id: string;
+  /** The issue's newest notification: the id the snooze endpoints take. */
+  item_id: string;
+  snoozed_until: string;
+  snoozed_at: string;
+  /** Notifications that arrived on the issue while it was snoozed. */
+  updates: number;
 }
 
 

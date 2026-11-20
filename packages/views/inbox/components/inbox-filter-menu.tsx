@@ -5,7 +5,7 @@ import { Filter, RotateCcw, Search } from "@multica/ui/icons";
 import { PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import { DUE_DATE_FILTERS, FILTER_NONE_VALUE } from "@multica/core/issues/stores/filter-tree";
 import {
-  INBOX_NOTIFICATION_FILTER_KEYS,
+  INBOX_AGENT_FILTERS,
   INBOX_RECEIVED_FILTERS,
   INBOX_TYPE_GROUPS,
   activeInboxFilterKeys,
@@ -57,18 +57,21 @@ import {
 import { useStatusOptions } from "../../issues/utils/status-options";
 import { useT } from "../../i18n";
 import {
+  INBOX_AGENT_ICONS,
   INBOX_FILTER_ICONS,
   INBOX_TYPE_ICONS,
   useInboxFilterChips,
   useInboxFilterLabels,
 } from "./inbox-filter-options";
 
+const EMPTY_ISSUE_IDS: ReadonlySet<string> = new Set();
 const NO_COUNTS = new Map<string, number>();
 
-const NOTIFICATION_KEYS = INBOX_NOTIFICATION_FILTER_KEYS;
+const NOTIFICATION_KEYS: readonly InboxFilterKey[] = ["unread", "type", "actor", "received"];
 const ISSUE_KEYS: readonly InboxFilterKey[] = [
   "status",
   "priority",
+  "agent",
   "project",
   "assignee",
   "label",
@@ -110,12 +113,8 @@ function ValueItem({
 
 /**
  * The inbox filter, shaped like the issue filter: search, the dimensions in
- * use pinned on top, "is" / "is not" per field, and each field's current
- * value on its row.
- *
- * The main Inbox is narrowed by the issue only: its sections already say what
- * kind of notification a row is and whether it is read. The archive is one
- * flat list, so it also offers the notification fields.
+ * use pinned on top, then notification and issue fields, "is" / "is not" per
+ * field, and each field's current value on its row.
  *
  * `items` are the view's notifications, every one rather than one per issue:
  * the notification fields match any notification of an issue.
@@ -125,13 +124,22 @@ export function InboxFilterMenu({
   items,
   priorityFilterSupport,
   issueFieldsSupport = "supported",
+  activeIssueIds = EMPTY_ISSUE_IDS,
   archived = false,
+  sectionTrigger,
 }: {
   wsId: string;
   items: InboxItem[];
   priorityFilterSupport: InboxFilterSupport;
   issueFieldsSupport?: InboxFilterSupport;
+  /** Issues an agent is running or queued on. */
+  activeIssueIds?: ReadonlySet<string>;
   archived?: boolean;
+  /**
+   * In a panel section's header instead of a page header: a plain row button
+   * styled by the section, its menu opening to the right.
+   */
+  sectionTrigger?: { className: string; activeClassName: string };
 }) {
   const { t } = useT("inbox");
   const { t: tIssues } = useT("issues");
@@ -142,6 +150,9 @@ export function InboxFilterMenu({
   const clearPriorityFilters = useInboxFilterStore((state) => state.clearPriorityFilters);
   const clearIssueFieldFilters = useInboxFilterStore((state) => state.clearIssueFieldFilters);
   const [open, setOpen] = useState(false);
+  // The body is built only while the menu is open or closing: the trigger
+  // also sits in the always-mounted Work panel, which re-renders often.
+  const [bodyMounted, setBodyMounted] = useState(false);
   const [search, setSearch] = useState("");
   const [activeAtOpen, setActiveAtOpen] = useState<ReadonlySet<InboxFilterKey> | null>(null);
   const query = search.trim().toLowerCase();
@@ -165,10 +176,10 @@ export function InboxFilterMenu({
     switch (key) {
       case "priority":
         return priorityFilterSupport === "supported";
-      case "unread":
-        return archived;
+      case "agent":
+        return !archived;
       case "actor":
-        return archived && actorOptions.length > 0;
+        return actorOptions.length > 0;
       case "project":
       case "assignee":
       case "label":
@@ -176,7 +187,7 @@ export function InboxFilterMenu({
         return issueFieldsSupported;
       case "type":
       case "received":
-        return archived && serverOnlySupported;
+        return serverOnlySupported;
       default:
         return true;
     }
@@ -197,8 +208,8 @@ export function InboxFilterMenu({
   // Counts are faceted: each respects every other active dimension while
   // ignoring its own, so it says how many rows selecting that value shows.
   const localCounts = useMemo(
-    () => (archived || !open ? null : inboxFacetCounts(items, effectiveFilters)),
-    [archived, open, items, effectiveFilters],
+    () => (archived || !open ? null : inboxFacetCounts(items, effectiveFilters, { activeIssueIds })),
+    [archived, open, items, effectiveFilters, activeIssueIds],
   );
   const counts = {
     types: archived ? toMap(facets?.types) : localCounts?.types ?? NO_COUNTS,
@@ -360,6 +371,19 @@ export function InboxFilterMenu({
             ))}
           </>
         );
+      case "agent":
+        return INBOX_AGENT_FILTERS.map((agent) => {
+          const Icon = INBOX_AGENT_ICONS[agent];
+          return (
+            <ValueItem
+              key={agent}
+              checked={effectiveFilters.agent === agent}
+              onToggle={() => store.setAgent(wsId, agent)}
+              icon={<Icon className="size-3.5 text-muted-foreground" />}
+              label={labels.agent[agent]}
+            />
+          );
+        });
       case "project":
         return (
           <>
@@ -448,12 +472,12 @@ export function InboxFilterMenu({
   // The dimensions in use when the menu opened go first; membership is
   // taken at open, so a row never jumps out from under the pointer.
   const activeKeys = activeAtOpen ?? new Set(activeInboxFilterKeys(effectiveFilters));
-  const group = (title: string | null, keys: readonly InboxFilterKey[]) => {
+  const group = (title: string, keys: readonly InboxFilterKey[]) => {
     const shown = keys.filter((key) => available(key) && !activeKeys.has(key));
     if (shown.length === 0) return null;
     return (
       <DropdownMenuGroup>
-        {title && <DropdownMenuLabel>{title}</DropdownMenuLabel>}
+        <DropdownMenuLabel>{title}</DropdownMenuLabel>
         {shown.map(section)}
       </DropdownMenuGroup>
     );
@@ -481,9 +505,7 @@ export function InboxFilterMenu({
         valueHits.push(listHit("type", type, labels.type[type], <Icon className="size-3.5 text-muted-foreground" />));
       }
     }
-    if (available("actor")) {
-      for (const option of actorOptions) valueHits.push(listHit("actor", option.key, option.name, actorAvatar(option)));
-    }
+    for (const option of actorOptions) valueHits.push(listHit("actor", option.key, option.name, actorAvatar(option)));
     if (available("received")) {
       for (const received of INBOX_RECEIVED_FILTERS) {
         valueHits.push({
@@ -496,6 +518,14 @@ export function InboxFilterMenu({
     if (available("priority")) {
       for (const option of valueCatalog("priority")) valueHits.push(listHit("priority", option.value, option.label, option.icon));
     }
+    if (available("agent")) {
+      for (const agent of INBOX_AGENT_FILTERS) {
+        valueHits.push({
+          key: "agent", value: agent, label: labels.agent[agent], icon: null,
+          checked: effectiveFilters.agent === agent, onToggle: () => store.setAgent(wsId, agent),
+        });
+      }
+    }
     for (const dimension of ["project", "assignee", "label", "dueDate"] as const) {
       if (!available(dimension)) continue;
       for (const option of valueCatalog(dimension)) valueHits.push(listHit(dimension, option.value, option.label, option.icon));
@@ -503,7 +533,7 @@ export function InboxFilterMenu({
   }
   const matchedValues = valueHits.filter((hit) => matchesFilterQuery(hit.label, query)).slice(0, 50);
 
-  const menuBody = query ? (
+  const menuBody = !bodyMounted ? null : query ? (
     <>
       {fieldHits.length > 0 && (
         <DropdownMenuGroup>
@@ -553,8 +583,7 @@ export function InboxFilterMenu({
         </>
       )}
       {group(t(($) => $.filters.section_notification), NOTIFICATION_KEYS)}
-      {/* With no notification fields the heading has nothing to tell apart. */}
-      {group(archived ? t(($) => $.filters.section_issue) : null, ISSUE_KEYS)}
+      {group(t(($) => $.filters.section_issue), ISSUE_KEYS)}
       {activeCount > 0 && (
         <>
           <DropdownMenuSeparator />
@@ -575,33 +604,63 @@ export function InboxFilterMenu({
   return (
     <DropdownMenu
       open={open}
+      onOpenChangeComplete={(next) => {
+        if (!next) setBodyMounted(false);
+      }}
       onOpenChange={(next) => {
         setOpen(next);
+        if (next) setBodyMounted(true);
         setActiveAtOpen(next ? new Set(activeInboxFilterKeys(effectiveFilters)) : null);
         if (!next) setSearch("");
       }}
     >
-      <DropdownMenuTrigger
-        render={
-          <IconButton
-            variant={activeCount > 0 ? "default" : "ghost"}
-            size="icon-sm"
-            label={triggerLabel}
-            tooltipSide="bottom"
-            className={cn(
-              "text-muted-foreground",
-              activeCount > 0 &&
-                "w-auto gap-1 bg-brand px-2 text-white hover:bg-brand/90",
-            )}
-          />
-        }
+      {sectionTrigger ? (
+        <DropdownMenuTrigger
+          render={
+            <button
+              type="button"
+              aria-label={triggerLabel}
+              className={cn(
+                sectionTrigger.className,
+                "data-popup-open:bg-surface-selected data-popup-open:opacity-100",
+                activeCount > 0 ? sectionTrigger.activeClassName : "data-popup-open:text-foreground",
+              )}
+            />
+          }
+        >
+          <Filter className="size-3.5" />
+          {activeCount > 0 && (
+            <span className="text-caption tabular-nums">{activeCount}</span>
+          )}
+        </DropdownMenuTrigger>
+      ) : (
+        <DropdownMenuTrigger
+          render={
+            <IconButton
+              variant={activeCount > 0 ? "default" : "ghost"}
+              size="icon-sm"
+              label={triggerLabel}
+              tooltipSide="bottom"
+              className={cn(
+                "text-muted-foreground",
+                activeCount > 0 &&
+                  "w-auto gap-1 bg-brand px-2 text-white hover:bg-brand/90",
+              )}
+            />
+          }
+        >
+          <Filter className="size-4" />
+          {activeCount > 0 && (
+            <span className="text-caption tabular-nums">{activeCount}</span>
+          )}
+        </DropdownMenuTrigger>
+      )}
+      <DropdownMenuContent
+        side={sectionTrigger ? "right" : undefined}
+        align={sectionTrigger ? "start" : "end"}
+        sideOffset={sectionTrigger ? 8 : undefined}
+        className="w-auto min-w-64 p-0"
       >
-        <Filter className="size-4" />
-        {activeCount > 0 && (
-          <span className="text-caption tabular-nums">{activeCount}</span>
-        )}
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-auto min-w-64 p-0">
         <div data-filter-search className="flex items-center gap-1.5 border-b border-foreground/5 px-2.5 py-2">
           <Search className="size-3.5 shrink-0 text-muted-foreground" />
           <input

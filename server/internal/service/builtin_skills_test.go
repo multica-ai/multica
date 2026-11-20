@@ -352,17 +352,19 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// These are task nouns, not section headings: a task arrives as "set up an
 	// autopilot", never as "Core model".
 	triggerWords := map[string]string{
-		"references/issues.md":       "issue",
-		"references/sub-issues.md":   "sub-issue",
-		"references/mentions.md":     "mention",
-		"references/agents.md":       "agent",
-		"references/squads.md":       "squad",
-		"references/autopilots.md":   "autopilot",
-		"references/projects.md":     "project",
-		"references/runtimes.md":     "runtime",
-		"references/environments.md": "local environment",
-		"references/skill-import.md": "skill import",
-		"references/themes.md":       "theme",
+		"references/issues.md":        "issue",
+		"references/sub-issues.md":    "sub-issue",
+		"references/batch-changes.md": "batch",
+		"references/mentions.md":      "mention",
+		"references/agents.md":        "agent",
+		"references/squads.md":        "squad",
+		"references/autopilots.md":    "autopilot",
+		"references/projects.md":      "project",
+		"references/runtimes.md":      "runtime",
+		"references/environments.md":  "local environment",
+		"references/skill-import.md":  "skill import",
+		"references/themes.md":        "theme",
+		"references/inbox.md":         "inbox",
 	}
 
 	skill, ok := findSkill(t, PlatformSkillName)
@@ -438,6 +440,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"references/environments.md",
 				"references/skill-import.md",
 				"references/themes.md",
+				"references/inbox.md",
 				// Invariants deduplicated out of the eight merged bodies. Each
 				// was repeated in most of them; the router is now their only
 				// home, so losing one here loses it everywhere.
@@ -730,8 +733,23 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"~/.config/Multica/themes",
 				"does not switch to it",
 				"every save to the theme in use applies",
-				"**Install theme**",
+				"**Import theme**",
 				"multica attachment upload <path>",
+			},
+		},
+		{
+			// MUL-9549: an agent manages only its triggering owner's inbox,
+			// cannot delete, and bulk sweeps need explicit confirmation.
+			file: "references/inbox.md",
+			want: []string{
+				"**runtime owner's** inbox",
+				"do not retry with another credential",
+				"Notifications cannot be deleted from the CLI",
+				"multica inbox list --unread --output json",
+				"multica inbox read --issue MUL-123",
+				"multica inbox snooze <id>... --until 3h",
+				"multica inbox read --all --yes",
+				"Only run a bulk change when the person asked for that sweep",
 			},
 		},
 		{

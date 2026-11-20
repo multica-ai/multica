@@ -854,7 +854,7 @@ describe("handleInboxNew", () => {
     expect(showNotification).not.toHaveBeenCalled();
   });
 
-  it("shows a banner only for what is addressed to the user and unread", async () => {
+  it("skips the banner for a move to in_progress but still refreshes the inbox", async () => {
     const qc = createQueryClient();
     qc.setQueryData<Workspace[]>(workspaceKeys.list(), [workspace()]);
     qc.setQueryData(notificationPreferenceKeys.all("ws-a"), {
@@ -863,23 +863,22 @@ describe("handleInboxNew", () => {
     const invalidate = vi.spyOn(qc, "invalidateQueries");
     const showNotification = stubDesktopAPI();
 
-    // An update on something the user only follows.
-    await handleInboxNew(qc, inboxItem({ id: "update", section: "updates" }));
-    // A run the user stopped themselves comes back already read.
-    await handleInboxNew(qc, inboxItem({ id: "stopped", type: "task_cancelled", section: "needs_you", read: true }));
-
+    await handleInboxNew(
+      qc,
+      inboxItem({ type: "status_changed", details: { from: "todo", to: "in_progress" } }),
+    );
     expect(showNotification).not.toHaveBeenCalled();
-    // The list still learns about both. Its refresh is not awaited by the
-    // handler, which has nothing left to wait for once the banner is skipped.
     await vi.waitFor(() =>
-      expect(invalidate).toHaveBeenCalledWith({ queryKey: inboxKeys.all("ws-a") }),
+      expect(invalidate).toHaveBeenCalledWith(
+        expect.objectContaining({ queryKey: inboxKeys.all("ws-a") }),
+      ),
     );
 
-    await handleInboxNew(qc, inboxItem({ id: "mention", section: "needs_you" }));
-    // A server that predates sections sends none: everything was addressed to the user.
-    await handleInboxNew(qc, inboxItem({ id: "legacy" }));
-
-    expect(showNotification.mock.calls.map(([payload]) => payload.itemId)).toEqual(["mention", "legacy"]);
+    await handleInboxNew(
+      qc,
+      inboxItem({ type: "status_changed", details: { from: "in_progress", to: "in_review" } }),
+    );
+    expect(showNotification).toHaveBeenCalledTimes(1);
   });
 
   // The tests below exercise the COLD-cache mute path (source preference not

@@ -6,6 +6,7 @@
   "breadcrumb_aria": "Current menu",
   "groups": {
     "pages": "Pages",
+    "views": "Views",
     "commands": "Commands",
     "members": "Members",
     "agents": "Agents",
@@ -15,6 +16,7 @@
     "autopilots": "Autopilots",
     "chats": "Chats",
     "skills": "Skills",
+    "docs": "Docs",
     "cancelled": "Cancelled",
     "recent": "Recent",
     "workspaces": "Workspaces",
@@ -88,7 +90,9 @@
   },
   "inbox": {
     "archive": "Archive",
-    "mark_unread": "Mark as unread"
+    "mark_unread": "Mark as unread",
+    "mark_all_read": "Mark all inbox items as read",
+    "archive_all_read": "Archive all read inbox items"
   },
   "chat": {
     "link_project": "Link to project...",
@@ -123,7 +127,6 @@
     "unsubscribed": "Unsubscribed",
     "label_added": "Added label {{name}}",
     "label_removed": "Removed label {{name}}",
-    "label_failed": "Couldn't add label {{name}} to every issue",
     "update_failed": "Update failed",
     "assigned": "Assigned {{identifier}} to {{name}}"
   },
@@ -161,5 +164,6 @@
   },
   "trigger": {
     "label": "Search..."
-  }
+  },
+  "untitled_doc": "Untitled"
 }

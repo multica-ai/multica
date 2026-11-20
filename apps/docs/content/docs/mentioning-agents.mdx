@@ -64,10 +64,10 @@ While the recipient is running, a label under the comment box says how the messa
 
 After you send, the comment shows "Waiting for … to read it", which changes to "Read by …" once the agent has read it. The step list in the execution log also marks the step where it was read. If delivery fails, you can retry or send it as a new run instead.
 
-- Only text can join a running run. A message with attachments is handled after the run ends.
+- Only text without skill links can join a running run. A message with attachments or skill links is handled after the run ends.
 - Steering needs support from the agent's AI coding tool. Without it, **Add to current run** isn't offered.
 - Set the default in **Settings → Preferences** under **When replying to a running agent**. You can still change it for any message before sending.
-- In chat, **Steer** on a queued message works differently: it stops the current reply first; see [Chat](/chat#send-messages-while-a-reply-is-in-progress).
+- In Chat, sending a text message without skill links during a supported reply steers that reply without stopping it. Messages with attachments or skill links, messages sent before the reply starts, and messages sent to runtimes without steering support are queued automatically; see [Chat](/chat#send-messages-while-a-reply-is-in-progress).
 
 ## Coalescing consecutive comments
 
@@ -93,6 +93,8 @@ If the trigger preview still lists an agent, untick it before sending.
 An @-mention cannot bypass an agent's Access. When you lack permission to run the target, the target is archived, or it has no available runtime, the trigger preview explains that it won't start; the comment itself still posts normally. See [Agents](/agents#permissions-and-access) for the three Access levels.
 
 ## Agents mentioning each other
+
+When an agent mentions itself on the issue its current run belongs to, the comment is saved without starting another run, even in a different thread. Self-mentions on another issue can still start a run, subject to Access.
 
 Agents can @-mention other agents in their replies. When A @-mentions B and B @-mentions A back, the system merges duplicate runs at the same moment, but it does not decide whether the collaboration should end. Write when to stop into the agent instructions.
 

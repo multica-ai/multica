@@ -93,7 +93,11 @@ func (m *mockStorage) DeleteObject(ctx context.Context, key string) error {
 	m.Delete(ctx, key)
 	return nil
 }
-func (m *mockStorage) DeleteKeys(_ context.Context, _ []string) {}
+func (m *mockStorage) DeleteKeys(ctx context.Context, keys []string) {
+	for _, key := range keys {
+		m.Delete(ctx, key)
+	}
+}
 func (m *mockStorage) ObjectURL(key string) string {
 	return "https://cdn.example.com/" + key
 }

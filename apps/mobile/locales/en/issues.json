@@ -275,6 +275,9 @@
       "completed": "Run succeeded",
       "failed": "Run failed",
       "cancelled": "Cancelled"
+    },
+    "failure_badge": {
+      "local_directory_missing": "Folder missing"
     }
   },
   "header_filter": "Filter",

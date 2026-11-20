@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { notificationPreferenceKeys } from "@multica/core/notification-preferences/queries";
@@ -7,8 +9,18 @@ import enSettings from "../../locales/en/settings.json";
 import { NotificationsTab } from "./notifications-tab";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-a" }));
-vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "ws-a", name: "Acme" }) }));
-const mutate = vi.hoisted(() => vi.fn());
+vi.mock("@multica/core/paths", () => ({
+  useCurrentWorkspace: () => ({ id: "ws-a", name: "Acme" }),
+  useWorkspacePaths: () => ({ inbox: () => "/acme/inbox" }),
+}));
+vi.mock("../../navigation", () => ({
+  AppLink: ({ href, children, className }: { href: string; children: ReactNode; className?: string }) => (
+    <a href={href} className={className}>
+      {children}
+    </a>
+  ),
+}));
+const { mutate } = vi.hoisted(() => ({ mutate: vi.fn() }));
 vi.mock("@multica/core/notification-preferences/mutations", () => ({
   useUpdateNotificationPreferences: () => ({ mutate }),
 }));
@@ -16,7 +28,7 @@ vi.mock("./browser-notification-setting", () => ({ BrowserNotificationSetting: (
 
 afterEach(() => {
   cleanup();
-  mutate.mockClear();
+  mutate.mockReset();
 });
 
 function renderTab(preferences: Record<string, string> = {}) {
@@ -29,46 +41,84 @@ function renderTab(preferences: Record<string, string> = {}) {
       </I18nProvider>
     </QueryClientProvider>,
   );
+  return qc;
 }
 
-describe("inbox notification settings", () => {
-  it("offers no way to turn off what is addressed to the user", () => {
-    renderTab();
-    const needsYou = screen.getByRole("region", { name: "Needs you" });
-
-    for (const label of ["Mentions", "Assignments", "Runs you started", "Issues you created or are assigned"]) {
-      expect(within(needsYou).getByText(label)).toBeInTheDocument();
-    }
-    expect(within(needsYou).getAllByText("Always on")).toHaveLength(4);
-    // The one choice: whether a mention of a group counts as the user's.
-    expect(within(needsYou).getAllByRole("switch")).toHaveLength(1);
-    expect(within(needsYou).getByRole("switch", { name: "@all and @squad" })).toBeChecked();
-  });
-
-  it("sends group mentions to Updates when their switch is off", () => {
-    renderTab({ comments: "muted" });
-
-    fireEvent.click(screen.getByRole("switch", { name: "@all and @squad" }));
-
-    expect(mutate).toHaveBeenCalledWith({ comments: "muted", mentions: "muted" }, expect.anything());
-  });
-
-  it("lets each kind of update be turned off", () => {
-    renderTab({ status_changes: "muted" });
-    const updates = screen.getByRole("region", { name: "Updates" });
-
-    expect(within(updates).getAllByRole("switch").map((el) => el.getAttribute("aria-label"))).toEqual([
-      "Comments",
+describe("Inbox notification settings", () => {
+  it("groups the events by how they reach you", () => {
+    renderTab({ updates: "muted" });
+    const inbox = screen.getByRole("region", { name: "Inbox" });
+    const lines = Array.from(
+      inbox.querySelectorAll("[data-settings-anchor] .font-medium, .text-caption.font-medium"),
+      (el) => el.textContent,
+    );
+    expect(lines).toEqual([
+      "About you",
+      "Assignments",
+      "Mentions",
+      "Reactions",
+      "Issues you subscribe to",
+      "Other people's issues",
       "Status changes",
-      "Assignment changes",
+      "Comments",
       "Priority & Due date",
+      "Projects you subscribe to",
       "New issues",
-      "Agent runs",
+      "Agents",
+      "Agent activity",
     ]);
-    expect(within(updates).getByRole("switch", { name: "Status changes" })).not.toBeChecked();
+    expect(within(inbox).getByRole("switch", { name: "Priority & Due date" })).not.toBeChecked();
+    expect(within(inbox).getByRole("switch", { name: "Comments" })).toBeChecked();
+  });
 
-    fireEvent.click(within(updates).getByRole("switch", { name: "Status changes" }));
-    expect(mutate).toHaveBeenCalledWith({}, expect.anything());
+  it("leaves status changes off until you turn them on", async () => {
+    const user = userEvent.setup();
+    renderTab();
+    const statusChanges = within(screen.getByRole("region", { name: "Inbox" })).getByRole("switch", {
+      name: "Status changes",
+    });
+    expect(statusChanges).not.toBeChecked();
+
+    await user.click(statusChanges);
+    expect(mutate).toHaveBeenCalledWith({ status_changes: "all" }, expect.anything());
+  });
+
+  it("shows status changes on once you turned them on", () => {
+    renderTab({ status_changes: "all" });
+    const inbox = screen.getByRole("region", { name: "Inbox" });
+    expect(within(inbox).getByRole("switch", { name: "Status changes" })).toBeChecked();
+  });
+
+  it.each<{ preferences: Record<string, string>; shown: string }>([
+    { preferences: {}, shown: "Key updates only" },
+    { preferences: { others_issues: "key_updates" }, shown: "Key updates only" },
+    { preferences: { others_issues: "all" }, shown: "All activity" },
+  ])("shows how much of other people's issues reaches you: %j", ({ preferences, shown }) => {
+    renderTab(preferences);
+    const inbox = screen.getByRole("region", { name: "Inbox" });
+    expect(within(inbox).getByRole("combobox", { name: "Other people's issues" })).toHaveTextContent(shown);
+  });
+
+  it("explains how notifications leave the Inbox, with a way to the archived ones", () => {
+    renderTab();
+    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
+    expect(leaving).toHaveTextContent("Reading a notification doesn't take it out of the Inbox.");
+    expect(leaving).toHaveTextContent("Issues others complete stay in your Inbox.");
+    expect(within(leaving).getByRole("link", { name: "View archived" })).toHaveAttribute(
+      "href",
+      "/acme/inbox?view=archived",
+    );
+  });
+
+  it.each<{ preferences: Record<string, string>; checked: boolean }>([
+    { preferences: {}, checked: true },
+    { preferences: { auto_archive_completed: "muted" }, checked: false },
+  ])("toggles archiving issues you complete: %j", ({ preferences, checked }) => {
+    renderTab(preferences);
+    const leaving = screen.getByRole("region", { name: "Leaving the Inbox" });
+    const toggle = within(leaving).getByRole("switch", { name: "Archive issues you complete" });
+    if (checked) expect(toggle).toBeChecked();
+    else expect(toggle).not.toBeChecked();
   });
 });
 

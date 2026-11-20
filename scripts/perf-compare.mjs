@@ -17,12 +17,23 @@
  * `--scenario` picks the measurement: `typing-under-live-runs` (default) or
  * `image-thread` (MUL-8182). Both write the same report path, so one run
  * measures exactly one of them.
+ *
+ * `core-paths`, `core-issue` and `core-inbox` (MUL-9539) run the core-path
+ * benchmark, which needs a real local API instead of synthetic HTTP. Run the
+ * script inside the API's environment so both builds talk to it and share
+ * its seeded dataset:
+ *
+ *   make env-exec ARGS="-- node scripts/perf-compare.mjs --scenario core-paths --base <ref> --head <ref>"
+ *
+ * The spec takes its own rounds from PERF_REPEATS / PERF_WARMUP, and every
+ * other PERF_* setting (PERF_CPU_THROTTLE, PERF_INBOX_ROWS, …) passes through.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { connect, createServer } from "node:net";
+import { renderCoreReport } from "./perf-core-report.mjs";
 
 const repoRoot = execFileSync("git", ["rev-parse", "--show-toplevel"]).toString().trim();
 const args = process.argv.slice(2);
@@ -53,6 +64,11 @@ const SCENARIOS = {
       ["js_heap_mb", "JS heap (MB)"],
     ],
   },
+  ...Object.fromEntries([
+    ["core-paths", "Core paths: big issues and Inbox switching (MUL-9539)"],
+    ["core-issue", "Core paths: big issues (MUL-9539)"],
+    ["core-inbox", "Core paths: Inbox switching (MUL-9539)"],
+  ].map(([name, title]) => [name, { title, spec: "core-paths.spec.ts", core: true }])),
 };
 const scenarioName = flag("scenario", "typing-under-live-runs");
 const scenario = SCENARIOS[scenarioName];
@@ -61,6 +77,31 @@ if (!baseRef || !scenario) {
     `usage: node scripts/perf-compare.mjs --base <ref> [--head <ref>] [--out <dir>] [--scenario ${Object.keys(SCENARIOS).join("|")}]`,
   );
   process.exit(2);
+}
+
+/**
+ * The local API a core scenario measures against: the one whose environment
+ * `make env-exec` exported. Both builds use it, and the dataset it holds is
+ * seeded once and reused, so the two sides see the same data.
+ */
+let apiUrl;
+if (scenario.core) {
+  const missing = ["MULTICA_DEV_PROFILE", "DATABASE_URL", "PORT"].filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    console.error(
+      `--scenario ${scenarioName} needs a local API: start one with \`make up C=api ARGS="--ephemeral"\`, then run this ` +
+        `script through \`make env-exec ARGS="-- node scripts/perf-compare.mjs ..."\` (missing ${missing.join(", ")}).`,
+    );
+    process.exit(2);
+  }
+  apiUrl = `http://localhost:${process.env.PORT}`;
+  try {
+    const response = await fetch(`${apiUrl}/health`);
+    if (!response.ok) throw new Error(`status ${response.status}`);
+  } catch (error) {
+    console.error(`the local API at ${apiUrl} is not healthy (${error instanceof Error ? error.message : error}); is \`make up C=api\` running?`);
+    process.exit(2);
+  }
 }
 
 const run = (cmd, cmdArgs, opts = {}) =>
@@ -227,10 +268,17 @@ async function measure(ref, label) {
     // two real builds to avoid the ambiguity costs minutes on every local run,
     // and buys nothing on CI, where the runner is always cold anyway.
     const buildStart = Date.now();
+    // A core scenario's app calls the API on its own origin, which the server
+    // proxies to REMOTE_API_URL, as in production. `make env-exec` exports the
+    // API environment's direct URLs; left in place at build or at runtime they
+    // send the browser cross-origin to the API, whose origin check refuses
+    // this server's random port, and the issue history never renders.
+    const sameOrigin = scenario.core ? { NEXT_PUBLIC_API_URL: "", NEXT_PUBLIC_WS_URL: "" } : {};
+    const buildEnv = { ...process.env, ...sameOrigin };
     const buildLog = execFileSync(
       "pnpm",
       ["exec", "turbo", "build", "--filter=@multica/web", `--cache-dir=${buildCache}`],
-      { cwd: checkout, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+      { cwd: checkout, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], env: buildEnv },
     );
     process.stdout.write(buildLog);
     const buildS = seconds(buildStart);
@@ -240,7 +288,7 @@ async function measure(ref, label) {
     const startStart = Date.now();
     server = spawn("pnpm", ["--filter", "@multica/web", "start"], {
       cwd: checkout,
-      env: { ...process.env, PORT: String(port), REMOTE_API_URL: "http://127.0.0.1:1" },
+      env: { ...process.env, ...sameOrigin, PORT: String(port), REMOTE_API_URL: apiUrl ?? "http://127.0.0.1:1" },
       stdio: "ignore",
       detached: true,
     });
@@ -257,14 +305,20 @@ async function measure(ref, label) {
     const measureStart = Date.now();
     let scenarioExit = 0;
     try {
+      // The core spec runs its own warmup and rounds, each in a fresh browser
+      // context, and writes one report covering all of them (PERF_REPEATS).
+      // --repeat-each on top would multiply the rounds, not set them.
+      const repeat = scenario.core ? [] : [`--repeat-each=${process.env.PERF_REPEATS ?? "1"}`];
       run("pnpm", ["exec", "playwright", "test", "--config=playwright.perf.config.ts",
-        `--repeat-each=${process.env.PERF_REPEATS ?? "1"}`, ...(scenario.spec ? [scenario.spec] : [])], {
+        ...repeat, ...(scenario.spec ? [scenario.spec] : [])], {
         cwd: repoRoot,
         env: {
           ...process.env,
           PLAYWRIGHT_BASE_URL: `http://127.0.0.1:${port}`,
           PERF_REPORT_PATH: reportPath,
           PERF_SCENARIO: scenarioName,
+          PERF_REF: sha.slice(0, 10),
+          PERF_LABEL: label,
         },
       });
     } catch (error) {
@@ -277,6 +331,12 @@ async function measure(ref, label) {
       report = JSON.parse(readFileSync(reportPath, "utf8"));
     } catch {
       report = { status: "invalid", invalid: ["the scenario produced no readable report"] };
+    }
+    // The core spec's report has no verdict of its own: a step whose content
+    // never appears fails the test, so the process exit is the verdict.
+    if (scenario.core && !report.status) {
+      report.status = scenarioExit === 0 ? "ok" : "invalid";
+      report.invalid = scenarioExit === 0 ? [] : [`the scenario process exited ${scenarioExit}`];
     }
     // The scenario process has the last word. A report that says `ok` from a
     // run whose process then failed is not a sample: whatever failed after the
@@ -311,6 +371,7 @@ const METRICS = [
 ];
 
 function markdown(base, head) {
+  if (scenario.core) return coreMarkdown(base, head);
   const usable = base.status === "ok" && head.status === "ok";
   const rows = [...METRICS, ...scenario.metrics].map(([key, label]) => {
     const a = base[key];
@@ -343,6 +404,35 @@ function markdown(base, head) {
   ].join("\n");
 }
 
+const timingLine = (r) =>
+  `install ${r.timings_s.install}s · build ${r.timings_s.build}s${r.build_cached ? " (restored from cache — not a real build)" : ""} · start ${r.timings_s.start}s · measure ${r.timings_s.measure}s`;
+
+/** The core-path table from scripts/perf-core-report.mjs, one column per ref. */
+function coreMarkdown(base, head) {
+  const usable = base.status === "ok" && head.status === "ok";
+  const sideLine = (name, r) =>
+    `- ${name} \`${r.ref}\` (${r.sha.slice(0, 9)}) — ${r.status}${r.invalid?.length ? `: ${r.invalid.join("; ")}` : ""}`;
+  let table;
+  try {
+    table = renderCoreReport([{ label: "base", report: base }, { label: "head", report: head }]);
+  } catch (error) {
+    table = `**Not comparable:** ${error instanceof Error ? error.message : error}`;
+  }
+  return [
+    `## ${scenario.title}`,
+    "",
+    usable
+      ? "Each side measured in turn on this machine against the same local API and dataset. This is a report, not a merge gate — read small differences as noise until a second run agrees."
+      : `**Not a usable comparison.** base: \`${base.status}\`, head: \`${head.status}\`.`,
+    table,
+    "",
+    sideLine("base", base),
+    sideLine("head", head),
+    `- base timings: ${timingLine(base)}`,
+    `- head timings: ${timingLine(head)}`,
+  ].join("\n");
+}
+
 mkdirSync(outDir, { recursive: true });
 // The files this script writes, cleared up front: a comparison that aborts
 // early must not leave the previous run's summary looking like its own.
@@ -367,6 +457,8 @@ try {
   // The comparison itself only fails when a sample is not usable. A slower
   // head is information for the reviewer, not a failure of this script.
   exitCode = base.status === "ok" && head.status === "ok" ? 0 : 1;
+  // Core reports from two datasets do not describe the same work.
+  if (scenario.core && base.dataset?.digest !== head.dataset?.digest) exitCode = 1;
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(`\ncomparison aborted: ${message}`);

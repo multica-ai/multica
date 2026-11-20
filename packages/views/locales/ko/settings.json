@@ -426,9 +426,13 @@
         "label": "알림 보관",
         "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다."
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "구독 해제 후 보관",
+        "description": "열린 알림의 태스크 구독을 해제하고 보관합니다. 나 또는 내 에이전트의 태스크가 아닐 때 사용할 수 있습니다."
+      },
       "snoozeInboxItem": {
         "label": "알림 미루기",
-        "description": "열려 있는 인박스 알림이 돌아올 시간을 선택합니다."
+        "description": "인박스에서 연 태스크를 미룹니다. 이미 미뤘다면 지금 되돌립니다."
       },
       "send": {
         "label": "보내기",
@@ -717,6 +721,7 @@
     "save_failed": "속성을 저장하지 못했습니다",
     "limit_hint": "활성 속성 {{count}}/{{max}}",
     "archived_badge": "보관됨",
+    "options_preview": "{{name}}의 모든 옵션 보기",
     "types": {
       "text": "텍스트",
       "number": "숫자",
@@ -826,48 +831,53 @@
     "toast_profile_failed": "프로필을 업데이트하지 못했습니다"
   },
   "notifications": {
+    "title": "인박스",
+    "description": "'작업' 사이드바의 인박스에 들어올 이벤트를 고릅니다. 끈 이벤트는 알림을 만들지 않으며, 다시 켜도 놓친 알림은 돌아오지 않습니다.",
+    "categories": {
+      "direct": "나와 직접 관련된 것",
+      "issues": "구독 중인 태스크",
+      "projects": "구독 중인 프로젝트",
+      "agents": "에이전트"
+    },
+    "others_issues": {
+      "label": "다른 사람의 태스크",
+      "description": "다른 사람이나 그 사람의 에이전트에게 배정된 태스크 중, 만들거나 댓글을 달거나 멘션되어 자동으로 구독한 것. 주요 업데이트는 나를 향한 @멘션, 참여한 스레드의 답글, 그리고 상태 변경을 켠 경우 검토 필요·차단·완료처럼 사람이 봐야 하는 상태입니다.",
+      "key_updates": "주요 업데이트만",
+      "all": "모든 활동"
+    },
+    "leaving": {
+      "title": "인박스에서 빠지는 경우",
+      "description": "읽어도 인박스에서 사라지지 않습니다.",
+      "manual_label": "직접 보관",
+      "manual_description": "사이드바의 행이나 알림 상단에서",
+      "manual_value": "언제든지",
+      "done_label": "내가 완료한 태스크 보관",
+      "done_description": "태스크를 완료 또는 취소 계열 상태로 바꾸면 그 알림은 보관됩니다. 다른 사람이 완료한 태스크는 인박스에 남습니다.",
+      "archived_label": "보관된 알림",
+      "archived_description": "여기서 다시 찾고 보관을 해제할 수 있습니다",
+      "archived_action": "보관된 알림 보기"
+    },
     "toast_failed": "알림 설정을 업데이트하지 못했습니다",
-    "needs_you": {
-      "title": "처리 필요",
-      "description": "나에게 온 알림은 처리하거나 보관할 때까지 인박스의 '처리 필요'에 남습니다. 끌 수 없습니다.",
-      "always_on": "항상 켜짐",
-      "mentions": {
-        "label": "멘션",
-        "description": "누군가 나를 @멘션할 때"
-      },
+    "groups": {
       "assignments": {
         "label": "할당",
-        "description": "태스크가 나에게 할당될 때"
-      },
-      "runs": {
-        "label": "내가 시작한 실행",
-        "description": "에이전트가 완료하거나 실패할 때, 질문할 때, 또는 실행이 취소될 때"
-      },
-      "your_issues": {
-        "label": "내가 만들었거나 담당하는 태스크",
-        "description": "새 댓글이 달리거나 상태가 내 처리를 기다리게 될 때"
-      }
-    },
-    "updates": {
-      "title": "업데이트",
-      "description": "팔로우 중인 태스크의 활동입니다. 배지에 포함되지 않으며 읽으면 인박스에서 사라집니다. 꺼도 태스크에서는 볼 수 있습니다."
-    },
-    "groups": {
-      "mentions": {
-        "label": "@all 및 @squad",
-        "description": "그룹 멘션도 '처리 필요'에 들어갑니다. 끄면 '업데이트'로 들어갑니다."
-      },
-      "comments": {
-        "label": "댓글",
-        "description": "팔로우 중인 태스크에 새 댓글이 달릴 때"
+        "description": "태스크에 할당되거나 할당 해제될 때"
       },
       "status_changes": {
         "label": "상태 변경",
         "description": "팔로우 중인 태스크의 상태가 바뀔 때(예: 할 일, 진행 중, 완료)"
       },
-      "assignments": {
-        "label": "할당 변경",
-        "description": "내 할당이 해제되거나 팔로우 중인 태스크의 담당자가 바뀔 때"
+      "comments": {
+        "label": "댓글",
+        "description": "팔로우 중인 태스크에 새 댓글이 달릴 때"
+      },
+      "mentions": {
+        "label": "멘션",
+        "description": "누군가 나를 @멘션할 때(@all, @squad 포함)"
+      },
+      "reactions": {
+        "label": "반응",
+        "description": "내가 만든 태스크나 내가 쓴 댓글에 누군가 반응할 때"
       },
       "updates": {
         "label": "우선순위 및 마감일",
@@ -878,8 +888,8 @@
         "description": "구독 중인 프로젝트에 태스크가 생성될 때"
       },
       "agent_activity": {
-        "label": "에이전트 실행",
-        "description": "팔로우 중인 태스크에서 에이전트 실행이 실패하거나 막혔을 때"
+        "label": "에이전트 활동",
+        "description": "에이전트 실행이 실패하거나, 에이전트가 요청한 앱 작업이 차단되거나 만료될 때"
       },
       "chat_replies": {
         "label": "채팅 답변 포함"
@@ -887,8 +897,7 @@
     },
     "system": {
       "title": "시스템 알림",
-      "label": "Multica가 백그라운드에 있을 때 시스템 알림 표시",
-      "description": "인박스에서는 '처리 필요'만 배너를 띄웁니다. '업데이트'는 띄우지 않습니다."
+      "label": "Multica가 백그라운드에 있을 때 시스템 알림 표시"
     },
     "browser": {
       "label": "브라우저 알림",
@@ -948,7 +957,7 @@
     "section_general": "워크스페이스 정보",
     "logo_label": "워크스페이스 아이콘",
     "change_logo_aria": "워크스페이스 로고 변경",
-    "click_logo_hint": "로고를 클릭하여 새 이미지를 업로드하세요",
+    "click_logo_hint": "로고를 클릭해 이미지를 업로드하거나 텍스트 아이콘을 만드세요",
     "toast_logo_failed": "워크스페이스 로고를 업로드하지 못했습니다",
     "name_label": "이름",
     "description_label": "설명",
@@ -1012,7 +1021,7 @@
     "disconnect": "연결 해제",
     "disconnecting": "연결 해제 중...",
     "disconnect_confirm_title": "GitHub App 연결 해제",
-    "disconnect_confirm_description": "Multica가 이 설치의 Webhook 수신을 중단합니다. 기존 PR 미러와 연결은 유지되며, 언제든 다시 연결해 업데이트를 재개할 수 있습니다.",
+    "disconnect_confirm_description": "이 워크스페이스에서 {{login}} 연결을 해제할까요? 이 계정의 업데이트가 중단됩니다. 기존 PR 기록과 링크는 유지되며 다른 연결에는 영향을 주지 않습니다.",
     "disconnect_confirm_cancel": "취소",
     "disconnect_confirm_action": "연결 해제",
     "not_configured": "이 배포에는 GitHub 연동이 설정되어 있지 않습니다. 운영자가 다음 값을 설정해야 합니다:",
@@ -1033,7 +1042,18 @@
     "feature_auto_link_description": "제목이나 브랜치 이름에 태스크 번호(예: {{example}})가 있거나 설명에 \"Closes {{example}}\"가 있는 PR을 해당 태스크에 연결합니다.",
     "status_paused": "일시 중지됨",
     "pause": "GitHub 기능 일시 중지",
-    "resume": "GitHub 기능 재개"
+    "resume": "GitHub 기능 재개",
+    "add_account": "계정 또는 조직 추가",
+    "disconnect_account": "{{login}} 연결 해제",
+    "errors": {
+      "missing_authorization": "GitHub에서 사용자 인증을 반환하지 않았습니다. 다시 연결하고 인증을 완료하세요. 기존 설치에서 반복되면 Multica 운영자에게 문의하세요.",
+      "installation_not_authorized": "개인 설치에는 소유자의 GitHub 계정을 사용하세요. 조직 설치에는 승인된 모든 저장소의 관리자 권한이 있는 계정을 사용하고 저장소를 하나 이상 선택하세요.",
+      "invalid_state": "GitHub 연결 요청이 만료되었거나 유효하지 않습니다. 설정 → 코드에서 다시 연결하세요.",
+      "incomplete_callback": "GitHub 연결 응답이 불완전합니다. 설정 → 코드에서 다시 연결하세요.",
+      "bad_workspace": "연결할 워크스페이스를 찾을 수 없습니다. 대상 워크스페이스를 열고 설정 → 코드에서 다시 시도하세요.",
+      "verification_failed": "GitHub 설치 관리 권한을 확인하지 못했습니다. 다시 연결하고 반복되면 Multica 운영자에게 GitHub App 설정 확인을 요청하세요.",
+      "persist_failed": "GitHub 연결을 저장하지 못했습니다. 설정 → 코드에서 다시 시도하고 반복되면 Multica 운영자에게 문의하세요."
+    }
   },
   "vcs": {
     "section_title": "셀프 호스팅 Git",
@@ -1194,7 +1214,13 @@
       "up_to_date": "최신 버전입니다.",
       "downloading": "v{{version}}을(를) 백그라운드에서 다운로드 중입니다. 설치 준비가 끝나면 알림을 드립니다.",
       "check_now": "지금 확인",
-      "checking": "확인 중..."
+      "checking": "확인 중...",
+      "check_unavailable": "지금 업데이트를 확인할 수 없습니다. 잠시 후 다시 시도하세요.",
+      "check_network": "업데이트 서비스에 연결할 수 없습니다. 네트워크 연결을 확인하고 다시 시도하세요.",
+      "check_failed": "업데이트 확인에 실패했습니다. 다시 시도하세요.",
+      "download_failed": "업데이트 다운로드에 실패했습니다. 현재 버전을 계속 사용하면서 다시 시도할 수 있습니다.",
+      "download_ready": "v{{version}} 설치 준비가 완료되었습니다.",
+      "retry": "다시 시도"
     },
     "daemon": {
       "title": "데몬",
@@ -1313,6 +1339,10 @@
       "member": {
         "label": "멤버",
         "description": "태스크 생성 및 작업"
+      },
+      "guest": {
+        "label": "게스트",
+        "description": "공유된 프로젝트만 보고 댓글을 남길 수 있습니다. 에이전트는 실행할 수 없습니다."
       }
     },
     "share_links_create_title": "공유 링크 만들기",
@@ -1349,7 +1379,45 @@
     "invitation_meta": "{{sent}} 발송 · {{expires}} 만료",
     "revoke_invitation_aria": "{{email}}에 보낸 초대 취소",
     "seats_used": "{{purchased}}석 중 {{used}}석 사용",
-    "manage_seats": "좌석 관리"
+    "manage_seats": "좌석 관리",
+    "member_limit_full_title": "이 요금제는 멤버를 최대 {{limit}}명까지 허용하며, 자리가 모두 찼습니다",
+    "member_limit_full_description": "Pro로 업그레이드하면 멤버 수 제한이 없습니다. 멤버마다 유료 좌석이 필요하며, 이번 업그레이드에는 이 초대를 위한 좌석 1개가 포함됩니다. 먼저 멤버를 제거할 수도 있습니다.",
+    "member_limit_full_description_pending": "대기 중인 초대도 자리를 차지합니다(현재 {{pending}}건). Pro로 업그레이드하면 멤버 수 제한이 없습니다(멤버마다 유료 좌석이 필요하며, 이번 업그레이드에는 이 초대를 위한 좌석 1개가 포함됩니다). 먼저 초대를 취소하거나 멤버를 제거할 수도 있습니다.",
+    "member_limit_usage": "멤버 {{used}} / {{limit}}명",
+    "upgrade_and_invite": "업그레이드하고 초대",
+    "toast_member_limit_reached": "멤버 자리가 모두 찼습니다. 더 초대하려면 업그레이드하세요.",
+    "member_limit_full_description_no_upgrade": "대기 중인 초대를 취소하거나 멤버를 제거하면 자리가 생깁니다.",
+    "toast_invalid_email": "올바른 이메일 주소를 입력하세요.",
+    "toast_already_member": "{{email}}은(는) 이미 이 워크스페이스의 멤버입니다.",
+    "toast_invitation_pending": "{{email}}에게 보낸 초대가 이미 대기 중입니다.",
+    "toast_invite_check_unavailable": "기존 멤버와 초대를 확인하지 못했습니다. 잠시 후 다시 시도하세요.",
+    "member_limit_full_description_billing": "워크스페이스 구독에 조치가 필요합니다. 결제 및 요금제에서 구독을 복구하면 멤버를 추가할 수 있습니다. 먼저 멤버를 제거할 수도 있습니다.",
+    "open_billing": "결제 및 요금제 열기",
+    "guest_free_tag": "무료 · 좌석 없음",
+    "guest_projects_label": "접근할 수 있는 프로젝트",
+    "guest_projects_add": "프로젝트 추가…",
+    "guest_projects_remove": "{{project}} 제거",
+    "guest_projects_hint": "게스트는 다른 프로젝트, 에이전트, 자동화, 설정을 볼 수 없습니다.",
+    "invite_guest_button": "게스트 초대",
+    "all_label": "전체",
+    "guests_label": "게스트",
+    "guest_count": "게스트 {{count}}명",
+    "list_separator": ", ",
+    "takes_seat": "좌석 1개 사용",
+    "frees_seat": "좌석 반환",
+    "make_member": "멤버로 전환",
+    "make_member_title": "{{name}} 님을 멤버로 전환할까요?",
+    "make_member_description": "{{name}} 님이 워크스페이스 전체를 보고 에이전트를 실행할 수 있습니다. 좌석 1개를 사용합니다.",
+    "make_member_seat_description": "{{name}} 님이 워크스페이스 전체를 보고 에이전트를 실행할 수 있습니다. 구매한 좌석을 모두 사용 중이라 1개를 추가 구매합니다.",
+    "purchase_seat_and_make_member": "좌석 구매 후 멤버로 전환",
+    "making_member": "멤버로 전환 중…",
+    "make_guest_title": "{{name}} 님을 게스트로 전환",
+    "make_guest_description": "{{name}} 님은 아래 프로젝트만 볼 수 있고 좌석이 반환됩니다. 에이전트, 자동화, 런타임 접근은 회수됩니다.",
+    "make_guest_button": "게스트로 전환",
+    "manage_projects": "접근 가능한 프로젝트 관리",
+    "manage_projects_title": "{{name}} 님이 접근할 수 있는 프로젝트",
+    "save_projects": "저장",
+    "toast_projects_updated": "프로젝트를 업데이트했습니다"
   },
   "lark": {
     "section_title": "Lark",
@@ -1686,6 +1754,30 @@
     "apps": "Multica로 연결한 팀 또는 개인 계정을 각 에이전트에 추가합니다.",
     "plugins": "설치하면 도구, 예약 훅, 저장소를 추가할 수 있으며 플러그인마다 권한을 부여합니다."
   },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "연결 QR 코드를 스캔한 계정과의 개인 메시지입니다.",
+    "loading": "연결 중…",
+    "empty": "에이전트의 연동 탭에서 WeChat을 연결하세요.",
+    "close": "닫기",
+    "action_failed": "작업을 완료하지 못했습니다. 다시 시도하세요.",
+    "privacy_hint": "메시지는 이 워크스페이스에서 본인의 권한으로 실행됩니다. QR 코드를 공유하지 마세요.",
+    "qr_label": "WeChat 연결 QR 코드",
+    "scan_hint": "WeChat으로 스캔한 후 휴대폰에서 확인하세요.",
+    "scanned": "스캔되었습니다. WeChat에서 연결을 확인하세요.",
+    "verify_hint": "WeChat 인증이 필요합니다. 휴대폰에 표시된 코드를 입력하세요.",
+    "verify_label": "인증 코드",
+    "verify": "인증",
+    "success": "연결되었습니다. WeChat에서 봇에게 새 메시지를 보내세요.",
+    "expired": "QR 코드가 만료되었습니다. 새로 생성하세요.",
+    "blocked": "WeChat이 추가 인증을 차단했습니다. 나중에 다시 시도하세요.",
+    "already_bound": "이 봇은 이미 WeChat에 연결되어 있습니다. 이전 클라이언트의 연결을 해제하고 다시 시도하세요.",
+    "refresh": "새 QR 코드",
+    "retry": "다시 시도",
+    "already_connected": "이 WeChat 계정은 {{agent}}에 연결되어 있습니다. 먼저 해당 연결을 해제하세요.",
+    "connected_elsewhere": "이 WeChat 계정은 다른 곳에 연결되어 있습니다. 먼저 기존 연결을 해제하세요.",
+    "authorization_expired": "WeChat 인증이 만료되었습니다. 다시 스캔하여 연결하세요."
+  },
   "connected_apps": {
     "description": "에이전트가 외부 앱을 사용할 때 쓰는 계정입니다. 허용된 작업은 즉시 실행됩니다.",
     "loading": "앱을 불러오는 중…",
@@ -1965,5 +2057,26 @@
       "retry_failed": "이 녹음을 변환하지 못했습니다",
       "show_more": "더 보기"
     }
+  },
+  "private_projects": {
+    "title": "비공개 프로젝트",
+    "description": "비공개 프로젝트는 해당 프로젝트 멤버만 열 수 있습니다. 워크스페이스 소유자는 각 프로젝트의 멤버를 확인하고, 개입이 필요할 때 자신을 추가할 수 있습니다.",
+    "empty": "이 워크스페이스에는 비공개 프로젝트가 없습니다.",
+    "load_failed": "비공개 프로젝트를 불러오지 못했습니다.",
+    "retry": "다시 시도",
+    "no_members": "멤버 없음",
+    "lead_name": "{{name}}(리드)",
+    "more_members": "외 {{count}}명",
+    "archived": "보관됨",
+    "member": "참여 중",
+    "open": "열기",
+    "join": "참여",
+    "join_title": "“{{title}}” 프로젝트에 참여할까요?",
+    "join_description": "이 프로젝트의 멤버 목록에 추가되며 태스크, 댓글, 첨부 파일을 볼 수 있게 됩니다. 현재 멤버에게 알림이 전송됩니다.",
+    "join_description_empty": "이 프로젝트에는 멤버가 없습니다. 참여하면 유일한 멤버가 되며 태스크, 댓글, 첨부 파일을 볼 수 있게 됩니다.",
+    "join_confirm": "프로젝트 참여",
+    "cancel": "취소",
+    "toast_joined": "{{title}}에 참여했습니다",
+    "toast_failed": "프로젝트에 참여하지 못했습니다."
   }
 }

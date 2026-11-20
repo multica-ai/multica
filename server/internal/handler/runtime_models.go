@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -353,7 +354,7 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 	resolvedRuntimeID := uuidToString(rt.ID)
 
 	if r.URL.Query().Get("force") != "true" {
-		if cached := h.cachedModelCatalog(r.Context(), resolvedRuntimeID); cached != nil {
+		if cached, _ := h.currentModelCatalog(r.Context(), resolvedRuntimeID, rt.Provider); cached != nil {
 			age := cached.Age(time.Now())
 			if age >= modelCatalogRevalidateAfter {
 				h.revalidateModelCatalog(r.Context(), resolvedRuntimeID)
@@ -386,6 +387,36 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	h.requestDaemonPendingWork(resolvedRuntimeID, protocol.PendingWorkKindModelList)
 	writeJSON(w, http.StatusOK, req)
+}
+
+func (h *Handler) currentModelCatalog(ctx context.Context, runtimeID, provider string) (*ModelCatalogSnapshot, bool) {
+	complete := h.cachedModelCatalog(ctx, runtimeID)
+	if provider == "hermes" {
+		partial := h.cachedModelCatalog(ctx, partialEffortCatalogKey(runtimeID))
+		if partial != nil && (complete == nil || partial.StoredAt.After(complete.StoredAt)) {
+			if complete != nil {
+				partial.Models = fillMissingModelThinking(partial.Models, complete.Models)
+			}
+			return partial, true
+		}
+	}
+	return complete, false
+}
+
+// fillMissingModelThinking preserves the live model list and fills in effort
+// metadata that a partial discovery could not confirm again.
+func fillMissingModelThinking(models, complete []ModelEntry) []ModelEntry {
+	thinkingByID := make(map[string]*ModelThinking, len(complete))
+	for _, model := range complete {
+		thinkingByID[model.ID] = model.Thinking
+	}
+	merged := slices.Clone(models)
+	for i := range merged {
+		if merged[i].Thinking == nil {
+			merged[i].Thinking = thinkingByID[merged[i].ID]
+		}
+	}
+	return merged
 }
 
 // cachedModelCatalog returns a usable cached catalog, or nil when the cache is
@@ -481,7 +512,8 @@ func (h *Handler) GetModelListRequest(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 
-	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
+	rt, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
 		return
 	}
 
@@ -518,7 +550,8 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		// stand-in the provider substituted after discovery failed, not the
 		// runtime's real catalog. Older daemons omit it; absent means "this
 		// daemon cannot tell us", which stays the pre-MUL-5549 behaviour.
-		Fallback bool `json:"fallback"`
+		Fallback                  bool `json:"fallback"`
+		EffortDiscoveryIncomplete bool `json:"effort_discovery_incomplete"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -532,7 +565,14 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		if body.Supported != nil {
 			supported = *body.Supported
 		}
-		if err := h.ModelListStore.Complete(r.Context(), requestID, body.Models, body.UnavailableModels, supported); err != nil {
+		partialEffort := body.Fallback && body.EffortDiscoveryIncomplete && supported && len(body.Models) > 0
+		models := body.Models
+		if partialEffort && rt.Provider == "hermes" {
+			if complete := h.cachedModelCatalog(r.Context(), runtimeID); complete != nil {
+				models = fillMissingModelThinking(models, complete.Models)
+			}
+		}
+		if err := h.ModelListStore.Complete(r.Context(), requestID, models, body.UnavailableModels, supported); err != nil {
 			// Surface the store failure as 5xx so the daemon can retry instead
 			// of swallowing the report (leaves the request stuck in running
 			// until the server-side timeout, which is exactly the "looks OK
@@ -557,6 +597,17 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		// store nor grounds to discard a real catalog we already hold. Treat it
 		// like a failure and leave the cache untouched (MUL-5549).
 		if h.ModelCatalogCache != nil {
+			if partialEffort {
+				// Store only this report's evidence so a refresh cannot extend
+				// the lifetime of effort metadata from the complete snapshot.
+				if err := h.ModelCatalogCache.Put(r.Context(), partialEffortCatalogKey(runtimeID), body.Models, body.UnavailableModels, true); err != nil {
+					slog.Warn("partial effort catalog cache write failed", "error", err, "runtime_id", runtimeID)
+				}
+			} else if !body.Fallback {
+				if err := h.ModelCatalogCache.Invalidate(r.Context(), partialEffortCatalogKey(runtimeID)); err != nil {
+					slog.Warn("partial effort catalog cache invalidate failed", "error", err, "runtime_id", runtimeID)
+				}
+			}
 			switch modelCatalogCacheDecision(body.Models, supported, body.Fallback) {
 			case modelCatalogCacheStore:
 				if err := h.ModelCatalogCache.Put(r.Context(), runtimeID, body.Models, body.UnavailableModels, supported); err != nil {

@@ -27,7 +27,7 @@ export interface SidebarProjectPrefs {
   projectSettings: SidebarProjectSettings;
   /** How expanded rows, projects and built-in views alike, list their issues. */
   issueSettings: SidebarIssueSettings;
-  /** Manual project order; projects missing from it follow in list order. */
+  /** Manual order of the projects and the "No project" row; projects missing from it follow in list order. */
   projectOrder: string[];
 }
 

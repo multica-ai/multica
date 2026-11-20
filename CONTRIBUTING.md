@@ -342,6 +342,7 @@ make up C=api,web,daemon     # choose the components
 make status                  # what is running, and whether it is yours
 make list                    # every environment on this machine
 make down                    # stop the processes, keep the data
+make down C=daemon           # stop only the listed components
 make destroy                 # stop, then drop the database and free the slot
 make gc                      # collect expired environments or ones whose checkout is gone
 ```
@@ -592,6 +593,14 @@ make migrate-down
 
 These generic targets require a valid env file in the current directory.
 
+`make test` prepares and migrates the database before running the Go tests. In a worktree without `.env`, `make` automatically selects `.env.worktree`; you can also select it explicitly with `make test ENV_FILE=.env.worktree`.
+
+Before `make test`, `make check`, or `make check-worktree`, stop any development API using the same database so its background workers cannot pick up test jobs. Use the stop command that matches how you started it:
+
+- `make up` → `make down C=api`.
+- `make start` / `make dev` → `make stop`; `make start-worktree` → `make stop-worktree`.
+- `make server` → press Ctrl-C in its terminal.
+
 ### Dev Toolbar
 
 Set `VITE_DEV_TOOLBAR=1` to pin a status bar to the bottom of the Web and Desktop dev builds. It shows the client, backend host, workspace, your role, and route, plus live JS heap, last navigation time, main-thread long-task share, in-flight requests, and WebSocket state. Production builds never render it.
@@ -737,7 +746,7 @@ fixtures:
 
 ```bash
 make up C=api,web ARGS="--ephemeral"
-make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue, --json
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs all"      # or: chat builder issue task, --json
 make destroy ARGS="--yes"
 ```
 
@@ -747,6 +756,30 @@ with a wide description and a comment with a diff. The script registers a
 fixture runtime with the profile token and completes each task with canned
 Markdown through the daemon API, so it also works inside a daemon-managed task.
 It prints the URL of everything it created and exits.
+
+`task` is for UI and CLI work that needs an agent mid-run: agent status,
+the issue's execution log, Working / Idle filters, task panels. It assigns a new
+issue to the `Fixture Worker` agent, claims and starts the task, writes a few
+execution log entries and moves the issue to In Progress, then leaves the task
+running. `--queued` adds a second task queued behind it on the same issue.
+With `--json` it also prints `task_id`, `agent_id` and the task's `mat_`
+`auth_token`, which is what the CLI needs to run as that agent inside a task
+checkout:
+
+```bash
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --queued --json"
+make env-exec ARGS="-- node scripts/dev-fixtures.mjs task --hold"   # Ctrl-C to stop
+```
+
+Nothing heartbeats for the fixture runtime by default, so it shows offline
+about 150 seconds after the run. The held tasks are unaffected: the server
+fails them only once the runtime has been silent for its reconnect grace
+(`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 hours by default), and an API restart does
+not touch them. When a screenshot needs the runtime or agent shown online, add
+`--hold`: the script then keeps heartbeating until Ctrl-C instead of exiting. A
+new environment, or `make destroy`, drops every held task with its database;
+run `task` again there. The fixture runtime reports the checkout's
+`git describe` version as its CLI version.
 
 ### Desktop
 

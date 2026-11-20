@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
+import { toast } from "sonner";
 import {
+  Archive,
+  CheckCheck,
   FolderPlus,
   MessageCircleQuestion,
   MessageSquare,
@@ -11,9 +14,11 @@ import {
 } from "@multica/ui/icons";
 import { useChatStore } from "@multica/core/chat";
 import type { CommandBarContext } from "@multica/core/command-bar";
+import { useArchiveAllReadInbox, useMarkAllInboxRead } from "@multica/core/inbox/mutations";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useIsGuest } from "@multica/core/permissions";
 import { useShortcut } from "@multica/core/shortcuts";
 import { isFloatingChatRouteSuppressed } from "../../chat/floating-chat-visibility";
 import { useNavigation } from "../../navigation";
@@ -27,28 +32,40 @@ import type { PaletteCommand } from "../types";
  */
 export function useGlobalCommands(contexts: readonly CommandBarContext[]): PaletteCommand[] {
   const { t } = useT("search");
+  const { t: tInbox } = useT("inbox");
   const palette = usePalette();
   const p = useWorkspacePaths();
   const navigation = useNavigation();
   const createIssueShortcut = useShortcut("createIssue");
   const toggleChatShortcut = useShortcut("toggleChat");
+  const markAllRead = useMarkAllInboxRead();
+  const archiveAllRead = useArchiveAllReadInbox();
+  // A guest (MUL-9420) cannot create issues.
+  const guest = useIsGuest(useCurrentWorkspace()?.id);
 
   const projectContext = contexts.find((c) => c.kind === "project");
   const projectId = projectContext?.kind === "project" ? projectContext.project.id : null;
+  const inboxContext = contexts.find((c) => c.kind === "inbox");
+  const inbox = inboxContext?.kind === "inbox" ? inboxContext : null;
   const { pathname } = navigation;
 
   return useMemo<PaletteCommand[]>(() => {
     const chatPath = p.chat();
+    const newIssue: PaletteCommand[] = guest
+      ? []
+      : [
+          {
+            id: "new-issue",
+            label: t(($) => $.commands.new_issue),
+            icon: SquarePen,
+            keywords: ["new", "issue", "create", "add", "新建", "任务"],
+            shortcut: createIssueShortcut,
+            run: () => openCreateIssueWithPreference(projectId ? { project_id: projectId } : undefined),
+            primary: true,
+          },
+        ];
     return [
-      {
-        id: "new-issue",
-        label: t(($) => $.commands.new_issue),
-        icon: SquarePen,
-        keywords: ["new", "issue", "create", "add", "新建", "任务"],
-        shortcut: createIssueShortcut,
-        run: () => openCreateIssueWithPreference(projectId ? { project_id: projectId } : undefined),
-        primary: true,
-      },
+      ...newIssue,
       {
         id: "chat-with-agent",
         label: t(($) => $.commands.chat_with_agent),
@@ -82,6 +99,44 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
         run: () => palette.openHostDialog({ type: "new-autopilot" }),
       },
       {
+        id: "inbox-mark-all-read",
+        label: t(($) => $.inbox.mark_all_read),
+        icon: CheckCheck,
+        keywords: ["inbox", "read", "all", "收件箱", "已读"],
+        run: () => {
+          if (inbox) {
+            inbox.markAllRead();
+            return;
+          }
+          markAllRead.mutateAsync(undefined).catch((err: unknown) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : tInbox(($) => $.errors.mark_all_read_failed),
+            ),
+          );
+        },
+      },
+      {
+        id: "inbox-archive-all-read",
+        label: t(($) => $.inbox.archive_all_read),
+        icon: Archive,
+        keywords: ["inbox", "archive", "read", "收件箱", "归档"],
+        run: () => {
+          if (inbox) {
+            inbox.archiveAllRead();
+            return;
+          }
+          archiveAllRead.mutateAsync(undefined).catch((err: unknown) =>
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : tInbox(($) => $.errors.archive_all_read_failed),
+            ),
+          );
+        },
+      },
+      {
         id: "theme",
         label: t(($) => $.commands.change_theme),
         icon: Palette,
@@ -97,13 +152,18 @@ export function useGlobalCommands(contexts: readonly CommandBarContext[]): Palet
       },
     ];
   }, [
+    archiveAllRead,
     createIssueShortcut,
+    guest,
+    inbox,
+    markAllRead,
     navigation,
     p,
     palette,
     pathname,
     projectId,
     t,
+    tInbox,
     toggleChatShortcut,
   ]);
 }

@@ -88,6 +88,7 @@ func newAutopilotQuotaFixture(t *testing.T, action entitlement.Action, limit int
 	t.Cleanup(func() {
 		pool.Exec(context.Background(), `DELETE FROM autopilot_quota_reservation WHERE workspace_id = $1`, workspaceID)
 		pool.Exec(context.Background(), `DELETE FROM autopilot_quota_period WHERE workspace_id = $1`, workspaceID)
+		pool.Exec(context.Background(), `DELETE FROM entitlement_limit_overage WHERE workspace_id = $1`, workspaceID)
 	})
 	return fixture
 }
@@ -171,6 +172,76 @@ func TestAutopilotQuotaRejectsUnknownExecutionSource(t *testing.T) {
 	)
 	if err == nil || !strings.Contains(err.Error(), "invalid autopilot execution source") {
 		t.Fatalf("unknown source error = %v, want application validation", err)
+	}
+}
+
+func TestAutopilotQuotaUnmeteredRunIgnoresFullQuota(t *testing.T) {
+	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 0)
+	metrics := &autopilotQuotaMetricsRecorder{}
+	fixture.service.QuotaMetrics = metrics
+	ctx := context.Background()
+	params := fixture.createRunArgs
+	params.Source = "manual"
+
+	run, reused, err := fixture.service.createUnmeteredAutopilotRun(ctx, fixture.workspaceID, "manual", "member-run-now", params)
+	if err != nil || reused {
+		t.Fatalf("unmetered admission = reused %v, %v; want a fresh run", reused, err)
+	}
+	if run.QuotaReservationID.Valid {
+		t.Fatal("unmetered run reserved quota")
+	}
+	usage, err := fixture.service.AutopilotQuotaUsage(ctx, fixture.workspaceID)
+	if err != nil || *usage.Used != 0 || *usage.Reserved != 0 || len(usage.BlockedCounts) != 0 {
+		t.Fatalf("usage after unmetered run = %+v, %v; want nothing counted or blocked", usage, err)
+	}
+	if got := metrics.count("enforce", "manual", "unmetered"); got != 1 {
+		t.Fatalf("unmetered decisions = %d, want 1", got)
+	}
+
+	// A retried request reuses its run; a new request gets a new one.
+	again, reused, err := fixture.service.createUnmeteredAutopilotRun(ctx, fixture.workspaceID, "manual", "member-run-now", params)
+	if err != nil || !reused || again.ID != run.ID {
+		t.Fatalf("retried unmetered admission = %s reused %v, %v; want %s reused", util.UUIDToString(again.ID), reused, err, util.UUIDToString(run.ID))
+	}
+	other, reused, err := fixture.service.createUnmeteredAutopilotRun(ctx, fixture.workspaceID, "manual", "member-run-now-2", params)
+	if err != nil || reused || other.ID == run.ID {
+		t.Fatalf("second unmetered admission = %s reused %v, %v; want a new run", util.UUIDToString(other.ID), reused, err)
+	}
+
+	// The same source stays metered when it is not a member's own press.
+	if _, _, err := fixture.service.createAutopilotRunWithQuota(ctx, fixture.workspaceID, "manual", "agent-run-now", params); !errors.As(err, new(*AutopilotQuotaExceededError)) {
+		t.Fatalf("metered manual admission error = %v, want quota exceeded", err)
+	}
+
+	if _, _, err := fixture.service.createUnmeteredAutopilotRun(ctx, fixture.workspaceID, "manul", "invalid-source", params); err == nil ||
+		!strings.Contains(err.Error(), "invalid autopilot execution source") {
+		t.Fatalf("unknown source error = %v, want application validation", err)
+	}
+}
+
+func TestAutopilotQuotaUnmeteredConcurrentRetriesShareOneRun(t *testing.T) {
+	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 0)
+	ctx := context.Background()
+	params := fixture.createRunArgs
+	params.Source = "manual"
+
+	const attempts = 8
+	ids := make([]pgtype.UUID, attempts)
+	errs := make([]error, attempts)
+	var wg sync.WaitGroup
+	for i := range attempts {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			run, _, err := fixture.service.createUnmeteredAutopilotRun(ctx, fixture.workspaceID, "manual", "concurrent-run-now", params)
+			ids[i], errs[i] = run.ID, err
+		}()
+	}
+	wg.Wait()
+	for i := range attempts {
+		if errs[i] != nil || ids[i] != ids[0] {
+			t.Fatalf("attempt %d = %s, %v; want every attempt to share %s", i, util.UUIDToString(ids[i]), errs[i], util.UUIDToString(ids[0]))
+		}
 	}
 }
 
@@ -563,6 +634,15 @@ func TestAutopilotQuotaNoticeRetriesAfterWorkspaceManagerIsRestored(t *testing.T
 	); err != nil {
 		t.Fatalf("remove final workspace manager role: %v", err)
 	}
+	// The demoted owner also created the autopilot, and an autopilot's creator
+	// is notified too. Point the autopilot at a creator who is no longer a
+	// member so the rejection has no recipient at all.
+	if _, err := fixture.pool.Exec(ctx, `
+		UPDATE autopilot SET created_by_type = 'member', created_by_id = $2 WHERE id = $1`,
+		fixture.autopilotID, uuid.New(),
+	); err != nil {
+		t.Fatalf("point autopilot at a departed creator: %v", err)
+	}
 
 	assertRejected := func(key string) {
 		t.Helper()
@@ -722,6 +802,124 @@ func TestAutopilotQuotaObserveToEnforceAndOffFinalization(t *testing.T) {
 		ctx, fixture.workspaceID, "api", "reopened-after-off", fixture.createRunArgs,
 	); err != nil {
 		t.Fatalf("admission after reopening policy: %v", err)
+	}
+}
+
+// The same limit under off, observe and enforce: off neither blocks nor
+// records, observe admits every run but records each would-block for the
+// workspace, enforce rejects and records.
+func TestAutopilotQuotaRecordsOverLimitAttemptsPerWorkspace(t *testing.T) {
+	fixture := newAutopilotQuotaFixture(t, entitlement.ActionOff, 1)
+	ctx := context.Background()
+	overages := EntitlementOverages{Queries: fixture.queries}
+	create := func(key string) error {
+		_, _, err := fixture.service.createAutopilotRunWithQuota(ctx, fixture.workspaceID, "schedule", key, fixture.createRunArgs)
+		return err
+	}
+	workspaceOverages := func() []LimitOverage {
+		t.Helper()
+		rows, err := overages.ForWorkspace(ctx, fixture.workspaceID)
+		if err != nil {
+			t.Fatalf("ForWorkspace: %v", err)
+		}
+		return rows
+	}
+
+	for i := 0; i < 3; i++ {
+		if err := create(fmt.Sprintf("off-%d", i)); err != nil {
+			t.Fatalf("off admission %d: %v", i, err)
+		}
+	}
+	if rows := workspaceOverages(); len(rows) != 0 {
+		t.Fatalf("off recorded overages: %+v", rows)
+	}
+
+	fixture.setPolicy(entitlement.ActionObserve, fixture.periodStart, fixture.periodEnd, 1)
+	for i := 0; i < 3; i++ {
+		if err := create(fmt.Sprintf("observe-%d", i)); err != nil {
+			t.Fatalf("observe admission %d must not be blocked: %v", i, err)
+		}
+	}
+	rows := workspaceOverages()
+	if len(rows) != 1 {
+		t.Fatalf("observe overages = %+v, want one period row", rows)
+	}
+	got := rows[0]
+	if got.Gate != entitlement.GateAutopilotRuns || got.Limit != 1 || got.PeakUsage != 3 || got.Over != 2 ||
+		got.ObservedCount != 2 || got.EnforcedCount != 0 ||
+		!got.PeriodStart.Equal(fixture.periodStart) || !got.PeriodEnd.Equal(fixture.periodEnd) ||
+		got.FirstExceededAt.IsZero() || got.LastExceededAt.Before(got.FirstExceededAt) {
+		t.Fatalf("observe overage = %+v", got)
+	}
+	usage, err := fixture.service.AutopilotQuotaUsage(ctx, fixture.workspaceID)
+	if err != nil || len(usage.BlockedCounts) != 0 || usage.Reached != nil {
+		t.Fatalf("observe usage = %+v, %v; observe must not count as blocked", usage, err)
+	}
+
+	fixture.setPolicy(entitlement.ActionEnforce, fixture.periodStart, fixture.periodEnd, 1)
+	var quotaErr *AutopilotQuotaExceededError
+	if err := create("enforce-0"); !errors.As(err, &quotaErr) {
+		t.Fatalf("enforce admission error = %v, want quota exceeded", err)
+	}
+	got = workspaceOverages()[0]
+	if got.ObservedCount != 2 || got.EnforcedCount != 1 || got.PeakUsage != 4 || got.Over != 3 {
+		t.Fatalf("enforce overage = %+v", got)
+	}
+
+	byPeriod, err := overages.ForPeriod(ctx, entitlement.GateAutopilotRuns, fixture.periodStart, fixture.periodEnd)
+	if err != nil {
+		t.Fatalf("ForPeriod: %v", err)
+	}
+	found := false
+	for _, row := range byPeriod {
+		if row.WorkspaceID == fixture.workspace {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("ForPeriod = %+v, missing workspace %s", byPeriod, fixture.workspace)
+	}
+
+	// A mid-period upgrade that raises the limit above the peak clears Over
+	// while keeping the history of attempts.
+	fixture.setPolicy(entitlement.ActionObserve, fixture.periodStart, fixture.periodEnd, 3)
+	if err := create("observe-after-upgrade"); err != nil {
+		t.Fatalf("observe after upgrade: %v", err)
+	}
+	got = workspaceOverages()[0]
+	if got.Limit != 3 || got.PeakUsage != 4 || got.Over != 1 || got.ObservedCount != 3 {
+		t.Fatalf("overage after upgrade = %+v", got)
+	}
+
+	// An upgrade above the peak followed by a run inside the new limit must
+	// clear Over even though that run is not itself over the limit. History
+	// (counts, peak, times) stays.
+	before := got
+	fixture.setPolicy(entitlement.ActionObserve, fixture.periodStart, fixture.periodEnd, 10)
+	if err := create("observe-within-raised-limit"); err != nil {
+		t.Fatalf("observe within raised limit: %v", err)
+	}
+	got = workspaceOverages()[0]
+	if got.Limit != 10 || got.Over != 0 || got.PeakUsage != before.PeakUsage ||
+		got.ObservedCount != before.ObservedCount || got.EnforcedCount != before.EnforcedCount ||
+		!got.LastExceededAt.Equal(before.LastExceededAt) {
+		t.Fatalf("overage after upgrade above peak = %+v, before = %+v", got, before)
+	}
+	byPeriod, err = overages.ForPeriod(ctx, entitlement.GateAutopilotRuns, fixture.periodStart, fixture.periodEnd)
+	if err != nil {
+		t.Fatalf("ForPeriod after upgrade: %v", err)
+	}
+	for _, row := range byPeriod {
+		if row.WorkspaceID == fixture.workspace && (row.Limit != 10 || row.Over != 0) {
+			t.Fatalf("ForPeriod after upgrade = %+v", row)
+		}
+	}
+}
+
+func TestLimitOverageNeverReportsNegativeOver(t *testing.T) {
+	rows := limitOveragesFromRows([]db.EntitlementLimitOverage{{LimitValue: 10, PeakUsage: 4}})
+	if len(rows) != 1 || rows[0].Over != 0 {
+		t.Fatalf("rows = %+v, want Over clamped to zero", rows)
 	}
 }
 

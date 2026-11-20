@@ -875,6 +875,13 @@ describe("ChatPendingTaskSchema", () => {
       status: "running",
     });
     expect(parsed.queued_tasks).toBeUndefined();
+    expect(parsed.can_supplement).toBeUndefined();
+  });
+
+  it("accepts explicit steering capability and ignores malformed values", () => {
+    expect(ChatPendingTaskSchema.parse({ can_supplement: true }).can_supplement).toBe(true);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: false }).can_supplement).toBe(false);
+    expect(ChatPendingTaskSchema.parse({ can_supplement: "yes" }).can_supplement).toBeUndefined();
   });
 
   it("parses queued task summaries", () => {
@@ -930,6 +937,14 @@ describe("SendChatMessageResponseSchema", () => {
 
   it("ignores a malformed additive queue position without losing the accepted send", () => {
     expect(SendChatMessageResponseSchema.parse({ ...base, queued: "no" }).queued).toBeUndefined();
+  });
+
+  it("preserves steering acceptance and tolerates older or malformed metadata", () => {
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true }).steered).toBe(true);
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: true, message_task_id: "root-task" }).message_task_id).toBe("root-task");
+    expect(SendChatMessageResponseSchema.parse(base).steered).toBeUndefined();
+    expect(SendChatMessageResponseSchema.parse({ ...base, steered: "yes", message_created_at: 42, message_task_id: 42 }))
+      .toMatchObject({ ...base, steered: undefined, message_created_at: undefined, message_task_id: undefined });
   });
 });
 
@@ -1489,23 +1504,6 @@ describe("InboxUnreadSummarySchema", () => {
     ]);
   });
 
-  it("carries the needs-you count, and reads a malformed one as absent", () => {
-    const parsed = parseWithFallback(
-      [
-        { workspace_id: "ws-1", count: 2, needs_you: 5 },
-        { workspace_id: "ws-2", count: 1, needs_you: "many" },
-        { workspace_id: "ws-3", count: 4 },
-      ],
-      InboxUnreadSummarySchema,
-      EMPTY_INBOX_UNREAD_SUMMARY,
-      ENDPOINT,
-    );
-    // An absent count is what an older server sends: the badge then falls
-    // back to `count`, so one bad value must not blank every workspace.
-    expect(parsed.map((entry) => entry.needs_you)).toEqual([5, undefined, undefined]);
-    expect(parsed.map((entry) => entry.count)).toEqual([2, 1, 4]);
-  });
-
   it("returns the empty fallback (dot hidden) for a non-array body", () => {
     expect(
       parseWithFallback({ rows: [] }, InboxUnreadSummarySchema, EMPTY_INBOX_UNREAD_SUMMARY, ENDPOINT),
@@ -1579,29 +1577,6 @@ describe("InboxItemListSchema", () => {
     expect(parsed).toHaveLength(1);
   });
 
-  it("carries the section and snooze time, and reads malformed ones as unset", () => {
-    const parsed = parseWithFallback(
-      [
-        row({ id: "a", section: "needs_you", snoozed_until: "2026-06-16T09:00:00Z" }),
-        row({ id: "b", section: "updates", snoozed_until: null }),
-        row({ id: "c", section: "some_future_section", snoozed_until: 12 }),
-        row({ id: "d" }),
-      ],
-      InboxItemListSchema,
-      EMPTY_INBOX_ITEMS,
-      ENDPOINT,
-    );
-    // A section this client does not know must not blank the whole inbox.
-    expect(parsed).toHaveLength(4);
-    expect(parsed.map((item) => item.section)).toEqual(["needs_you", "updates", undefined, undefined]);
-    expect(parsed.map((item) => item.snoozed_until)).toEqual([
-      "2026-06-16T09:00:00Z",
-      null,
-      undefined,
-      undefined,
-    ]);
-  });
-
   it("accepts rows that omit the nullable optional fields", () => {
     const { body, issue_id, ...withoutOptionals } = row();
     void body;
@@ -1609,6 +1584,16 @@ describe("InboxItemListSchema", () => {
     expect(
       parseWithFallback([withoutOptionals], InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
     ).toHaveLength(1);
+  });
+
+  it("keeps the row when the issue identifier is unusable", () => {
+    const parsed = parseWithFallback(
+      [row({ issue_identifier: 7 }), row({ id: "inbox-2", issue_identifier: "MUL-7" })],
+      InboxItemListSchema,
+      EMPTY_INBOX_ITEMS,
+      ENDPOINT,
+    );
+    expect(parsed.map((item) => item.issue_identifier)).toEqual([null, "MUL-7"]);
   });
 
   it("returns the empty fallback when an issue projection is wrong-typed", () => {

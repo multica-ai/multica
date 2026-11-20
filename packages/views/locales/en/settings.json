@@ -432,9 +432,13 @@
         "label": "Archive notification",
         "description": "Archive the open inbox notification, or restore it while reading the archive."
       },
+      "unsubscribeArchiveInboxItem": {
+        "label": "Unsubscribe & archive",
+        "description": "Leave the open notification's issue and archive it. Offered on issues that are not yours or your agents'."
+      },
       "snoozeInboxItem": {
         "label": "Snooze notification",
-        "description": "Choose when the open inbox notification comes back."
+        "description": "Snooze the open inbox issue, or bring it back now if it is snoozed."
       },
       "send": {
         "label": "Send",
@@ -726,6 +730,7 @@
     "save_failed": "Couldn't save property",
     "limit_hint": "{{count}}/{{max}} active properties",
     "archived_badge": "Archived",
+    "options_preview": "Show all options for {{name}}",
     "types": {
       "text": "Text",
       "number": "Number",
@@ -835,48 +840,53 @@
     "toast_profile_failed": "Failed to update profile"
   },
   "notifications": {
+    "title": "Inbox",
+    "description": "Choose which events reach the Inbox in the Work sidebar. A turned-off event creates no notification, and turning it back on doesn't bring back what you missed.",
+    "categories": {
+      "direct": "About you",
+      "issues": "Issues you subscribe to",
+      "projects": "Projects you subscribe to",
+      "agents": "Agents"
+    },
+    "others_issues": {
+      "label": "Other people's issues",
+      "description": "Issues assigned to someone else or their agent, that you only follow because you created, commented on or were mentioned in them. Key updates are @mentions, replies in threads you joined, and, with Status changes on, statuses that need a person, like in review, blocked or done.",
+      "key_updates": "Key updates only",
+      "all": "All activity"
+    },
+    "leaving": {
+      "title": "Leaving the Inbox",
+      "description": "Reading a notification doesn't take it out of the Inbox.",
+      "manual_label": "Archive by hand",
+      "manual_description": "From its row in the sidebar, or the top of the notification",
+      "manual_value": "Anytime",
+      "done_label": "Archive issues you complete",
+      "done_description": "When you move an issue to Done or Cancelled, its notifications are archived. Issues others complete stay in your Inbox.",
+      "archived_label": "Archived notifications",
+      "archived_description": "Find them again and unarchive them",
+      "archived_action": "View archived"
+    },
     "toast_failed": "Failed to update notification settings",
-    "needs_you": {
-      "title": "Needs you",
-      "description": "Anything addressed to you stays under Needs you in the Inbox until you handle or archive it. These can't be turned off.",
-      "always_on": "Always on",
-      "mentions": {
-        "label": "Mentions",
-        "description": "When someone @mentions you"
-      },
+    "groups": {
       "assignments": {
         "label": "Assignments",
-        "description": "When an issue is assigned to you"
-      },
-      "runs": {
-        "label": "Runs you started",
-        "description": "When the agent finishes, fails, asks you something, or the run is cancelled"
-      },
-      "your_issues": {
-        "label": "Issues you created or are assigned",
-        "description": "New comments, or a status that waits on you"
-      }
-    },
-    "updates": {
-      "title": "Updates",
-      "description": "Activity on issues you follow. Not counted in the badge, and gone from the Inbox once read. What you turn off stays visible on the issue."
-    },
-    "groups": {
-      "mentions": {
-        "label": "@all and @squad",
-        "description": "Group mentions also go to Needs you. When off, they go to Updates."
-      },
-      "comments": {
-        "label": "Comments",
-        "description": "New comments on issues you follow"
+        "description": "When you are assigned or unassigned from an issue"
       },
       "status_changes": {
         "label": "Status changes",
         "description": "When an issue you follow changes status (e.g. todo, in progress, done)"
       },
-      "assignments": {
-        "label": "Assignment changes",
-        "description": "When you are unassigned, or an issue you follow is reassigned"
+      "comments": {
+        "label": "Comments",
+        "description": "New comments on issues you follow"
+      },
+      "mentions": {
+        "label": "Mentions",
+        "description": "When someone @mentions you, including @all and @squad"
+      },
+      "reactions": {
+        "label": "Reactions",
+        "description": "When someone reacts to an issue you created or a comment you wrote"
       },
       "updates": {
         "label": "Priority & Due date",
@@ -887,8 +897,8 @@
         "description": "When an issue is created in a project you subscribe to"
       },
       "agent_activity": {
-        "label": "Agent runs",
-        "description": "When an agent run fails or gets blocked on an issue you follow"
+        "label": "Agent activity",
+        "description": "When an agent run fails, or an app action an agent asked to run is blocked or expires"
       },
       "chat_replies": {
         "label": "Include chat replies"
@@ -896,8 +906,7 @@
     },
     "system": {
       "title": "System Notifications",
-      "label": "Show system notifications when Multica is in the background",
-      "description": "From the Inbox, only Needs you shows a banner. Updates never do."
+      "label": "Show system notifications when Multica is in the background"
     },
     "browser": {
       "label": "Browser notifications",
@@ -957,7 +966,7 @@
     "section_general": "Workspace details",
     "logo_label": "Workspace logo",
     "change_logo_aria": "Change workspace logo",
-    "click_logo_hint": "Click the logo to upload a new image",
+    "click_logo_hint": "Click the logo to upload an image or create a text icon",
     "toast_logo_failed": "Failed to upload workspace logo",
     "name_label": "Name",
     "description_label": "Description",
@@ -1021,7 +1030,7 @@
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting…",
     "disconnect_confirm_title": "Disconnect GitHub App",
-    "disconnect_confirm_description": "Multica will stop receiving webhooks for this installation. Existing PR mirrors and links are kept; reconnect any time to resume updates.",
+    "disconnect_confirm_description": "Disconnect {{login}} from this workspace? Updates for this account will stop. Existing PR records and links are kept; other connections are unaffected.",
     "disconnect_confirm_cancel": "Cancel",
     "disconnect_confirm_action": "Disconnect",
     "not_configured": "GitHub integration is not configured for this deployment. Operators must set",
@@ -1042,7 +1051,18 @@
     "feature_auto_link_description": "Links a PR to the issue whose ID, e.g. {{example}}, is in its title or branch name, or follows “Closes” in its description.",
     "status_paused": "Paused",
     "pause": "Pause GitHub features",
-    "resume": "Resume GitHub features"
+    "resume": "Resume GitHub features",
+    "add_account": "Add account or organization",
+    "disconnect_account": "Disconnect {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub did not return user authorization. Retry connecting and complete authorization. If it repeats for an existing installation, ask your Multica operator for help.",
+      "installation_not_authorized": "Use the owning GitHub account for a personal installation, or an account with admin access to every authorized repository for an organization. Select at least one repository.",
+      "invalid_state": "This GitHub connection request expired or is invalid. Start the connection again from Settings → Code.",
+      "incomplete_callback": "GitHub returned an incomplete connection response. Start the connection again from Settings → Code.",
+      "bad_workspace": "Could not find the workspace for this connection. Open the intended workspace and retry from Settings → Code.",
+      "verification_failed": "Could not verify your GitHub installation access. Retry connecting; if it repeats, ask your Multica operator to check the GitHub App configuration.",
+      "persist_failed": "Could not save the GitHub connection. Retry from Settings → Code; if it repeats, contact your Multica operator."
+    }
   },
   "vcs": {
     "section_title": "Self-hosted Git",
@@ -1462,7 +1482,13 @@
       "up_to_date": "You're on the latest version.",
       "downloading": "v{{version}} is downloading in the background — you'll be notified when it's ready to install.",
       "check_now": "Check now",
-      "checking": "Checking…"
+      "checking": "Checking…",
+      "check_unavailable": "Unable to check for updates right now. Please try again later.",
+      "check_network": "Cannot reach the update service. Check your connection and try again.",
+      "check_failed": "Unable to check for updates. Please try again.",
+      "download_failed": "Update download failed. You can keep using the current version and retry.",
+      "download_ready": "v{{version}} is ready to install.",
+      "retry": "Retry"
     },
     "daemon": {
       "title": "Daemon",
@@ -1585,6 +1611,10 @@
       "member": {
         "label": "Member",
         "description": "Create and work on issues"
+      },
+      "guest": {
+        "label": "Guest",
+        "description": "Views and comments on the projects shared with them. Can't run agents."
       }
     },
     "share_links_create_title": "Create share link",
@@ -1621,7 +1651,45 @@
     "invitation_meta": "Sent {{sent}} · Expires {{expires}}",
     "revoke_invitation_aria": "Revoke invitation for {{email}}",
     "seats_used": "{{used}} of {{purchased}} seats used",
-    "manage_seats": "Manage seats"
+    "manage_seats": "Manage seats",
+    "member_limit_full_title": "This plan allows up to {{limit}} members. The workspace is full.",
+    "member_limit_full_description": "Upgrade to Pro for unlimited members. Each member is a paid seat, and the upgrade includes one for this invitation. Or remove a member first.",
+    "member_limit_full_description_pending": "Pending invitations take a slot too ({{pending}} now). Upgrade to Pro for unlimited members (each member is a paid seat, and the upgrade includes one for this invitation), or revoke an invitation or remove a member first.",
+    "member_limit_usage": "{{used}} / {{limit}} members",
+    "upgrade_and_invite": "Upgrade and invite",
+    "toast_member_limit_reached": "The workspace is full. Upgrade to invite more members.",
+    "member_limit_full_description_no_upgrade": "Revoke a pending invitation or remove a member to free a slot.",
+    "toast_invalid_email": "Enter a valid email address.",
+    "toast_already_member": "{{email}} is already a member of this workspace.",
+    "toast_invitation_pending": "An invitation to {{email}} is already pending.",
+    "toast_invite_check_unavailable": "Could not check existing members and invitations. Try again in a moment.",
+    "member_limit_full_description_billing": "The workspace's subscription needs attention. Restore it in Billing to add members, or remove a member first.",
+    "open_billing": "Open Billing",
+    "guest_free_tag": "Free · no seat",
+    "guest_projects_label": "Projects they can access",
+    "guest_projects_add": "Add project…",
+    "guest_projects_remove": "Remove {{project}}",
+    "guest_projects_hint": "Guests can't see other projects, agents, autopilots or settings.",
+    "invite_guest_button": "Invite guest",
+    "all_label": "All",
+    "guests_label": "Guests",
+    "guest_count": "Guests: {{count}}",
+    "list_separator": ", ",
+    "takes_seat": "Takes 1 seat",
+    "frees_seat": "Frees a seat",
+    "make_member": "Make member",
+    "make_member_title": "Make {{name}} a member?",
+    "make_member_description": "{{name}} will see the whole workspace and can run agents. This takes 1 seat.",
+    "make_member_seat_description": "{{name}} will see the whole workspace and can run agents. All purchased seats are in use, so this buys 1 more.",
+    "purchase_seat_and_make_member": "Buy seat and make member",
+    "making_member": "Making member…",
+    "make_guest_title": "Make {{name}} a guest",
+    "make_guest_description": "{{name}} will only see the projects below and frees a seat. Their agents, autopilots and runtime access are taken back.",
+    "make_guest_button": "Make guest",
+    "manage_projects": "Manage accessible projects",
+    "manage_projects_title": "Projects {{name}} can access",
+    "save_projects": "Save",
+    "toast_projects_updated": "Projects updated"
   },
   "integrations": {
     "status_connected": "Connected",
@@ -1701,6 +1769,30 @@
     "mcp": "Added by admins and shared across the workspace, then assigned per agent.",
     "apps": "Team or personal accounts connected through Multica and added to each agent.",
     "plugins": "Installed packages that can add tools, scheduled hooks, and storage, each with its own permissions."
+  },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "Private messages with the account that scans the connection QR code.",
+    "loading": "Connecting…",
+    "empty": "Connect WeChat from an agent’s Integrations tab.",
+    "close": "Close",
+    "action_failed": "Could not complete this action. Try again.",
+    "privacy_hint": "Messages will run as you in this workspace. Do not share this QR code.",
+    "qr_label": "WeChat connection QR code",
+    "scan_hint": "Scan with WeChat and confirm on your phone.",
+    "scanned": "Scanned. Confirm the connection in WeChat.",
+    "verify_hint": "WeChat requires a verification code. Enter the code shown on your phone.",
+    "verify_label": "Verification code",
+    "verify": "Verify",
+    "success": "Connected. Send a new message to the bot in WeChat to start.",
+    "expired": "This QR code has expired. Generate a new one.",
+    "blocked": "WeChat has blocked further verification attempts. Try again later.",
+    "already_bound": "This bot is already bound in WeChat. Disconnect the previous client and try again.",
+    "refresh": "New QR code",
+    "retry": "Retry",
+    "already_connected": "This WeChat account is connected to {{agent}}. Disconnect it there first.",
+    "connected_elsewhere": "This WeChat account is connected elsewhere. Disconnect the existing connection first.",
+    "authorization_expired": "WeChat authorization expired. Scan again to reconnect."
   },
   "connected_apps": {
     "description": "Accounts your agents use to access external apps. Allowed actions run immediately.",
@@ -1986,5 +2078,26 @@
       "retry_failed": "Couldn't transcribe this recording",
       "show_more": "Show more"
     }
+  },
+  "private_projects": {
+    "title": "Private projects",
+    "description": "Only the members of a private project can open it. As a workspace owner you can see who is in each one, and add yourself when you need to step in.",
+    "empty": "This workspace has no private projects.",
+    "load_failed": "Could not load private projects.",
+    "retry": "Retry",
+    "no_members": "No members",
+    "lead_name": "{{name}} (lead)",
+    "more_members": "+{{count}} more",
+    "archived": "Archived",
+    "member": "You're a member",
+    "open": "Open",
+    "join": "Join",
+    "join_title": "Join “{{title}}”?",
+    "join_description": "You will be added to this project's member list and will see its issues, comments, and attachments. Its current members will be notified.",
+    "join_description_empty": "This project has no members. You will be its only member, and will see its issues, comments, and attachments.",
+    "join_confirm": "Join project",
+    "cancel": "Cancel",
+    "toast_joined": "You joined {{title}}",
+    "toast_failed": "Could not join the project."
   }
 }

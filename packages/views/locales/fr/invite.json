@@ -30,6 +30,31 @@
   },
   "errors": {
     "accept_failed": "Échec de l'acceptation de l'invitation",
-    "decline_failed": "Échec du refus de l'invitation"
+    "decline_failed": "Échec du refus de l'invitation",
+    "member_limit_reached": "{{workspace}} est complet. Contactez la personne qui vous a invité ; vous pourrez le rejoindre une fois son forfait mis à niveau."
+  },
+  "join": {
+    "no_code": "Aucun code d'invitation trouvé. Utilisez un lien de partage valide.",
+    "invalid": "Ce lien d'invitation n'est pas valide ou a expiré.",
+    "joined_title": "C'est fait !",
+    "redirecting": "Redirection vers votre espace de travail...",
+    "error_title": "Oups",
+    "go_home": "Retour à l'accueil",
+    "loading": "Chargement de l'invitation...",
+    "title": "Vous êtes invité à rejoindre {{workspace}}",
+    "invited_by": "Invitation de {{name}}",
+    "join_as": "Vous rejoindrez cet espace de travail en tant que",
+    "role_admin": "Administrateur",
+    "role_member": "Membre",
+    "login_required": "Vous devez vous connecter pour rejoindre cet espace de travail.",
+    "join": "Rejoindre l'espace de travail",
+    "joining": "Adhésion...",
+    "log_in_to_join": "Se connecter pour rejoindre",
+    "join_failed": "Impossible de rejoindre l'espace de travail. Le lien a peut-être expiré.",
+    "seats_full": "Tous les sièges achetés sont occupés. Demandez à un administrateur de l'espace de travail d'ajouter un siège avant de réessayer.",
+    "seats_unavailable": "Impossible de vérifier la capacité en membres. Réessayez.",
+    "full_title": "{{workspace}} est complet",
+    "full_description": "Contactez la personne qui vous a invité. Ce lien fonctionnera de nouveau une fois le forfait de l'espace de travail mis à niveau.",
+    "retry": "Réessayer"
   }
 }
