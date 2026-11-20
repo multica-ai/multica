@@ -120,7 +120,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 
 | 原因 | 含义 | 处理 |
 | --- | --- | --- |
-| `provider_auth_or_access` | 模型服务认证失败或无访问权限（401/403） | 在该 AI 编程工具中重新登录，或检查 API key |
+| `provider_auth_or_access` | 模型服务认证失败或无访问权限 | 检查模型账号的登录状态、API key 和所需资源的访问权限 |
 | `provider_quota_limit` | 配额或余额用尽 | 充值或更换账号 |
 | `provider_capacity_or_rate_limit` | 限流或容量不足 | 稍后重试 |
 | `provider_server_error` | 模型服务端错误（5xx） | 稍后重试 |

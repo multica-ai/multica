@@ -10,6 +10,9 @@ describe("runFailureBadgeLabel", () => {
     expect(runFailureBadgeLabel("agent_error.provider_network", tEn)).toBe(
       "Network error",
     );
+    expect(runFailureBadgeLabel("agent_error.provider_auth_or_access", tEn)).toBe(
+      "Auth or access failed",
+    );
     expect(runFailureBadgeLabel("skill_bundle_unavailable", tEn)).toBe(
       "Skill download failed",
     );
