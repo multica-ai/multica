@@ -4,12 +4,16 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // fakeHermesForVersionProbe writes a fake hermes that appends each argv it is
@@ -21,9 +25,7 @@ func fakeHermesForVersionProbe(t *testing.T, body string) (string, string) {
 	script := filepath.Join(dir, "hermes")
 	record := filepath.Join(dir, "argv.log")
 	content := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %q\n%s\n", record, body)
-	if err := os.WriteFile(script, []byte(content), 0o755); err != nil {
-		t.Fatalf("write fake hermes: %v", err)
-	}
+	writeTestExecutable(t, script, []byte(content))
 	return script, record
 }
 
@@ -108,8 +110,16 @@ func TestDetectVersionHermesDoesNotFallBackOnTimeout(t *testing.T) {
 	detectVersionTimeout = time.Second
 	t.Cleanup(func() { detectVersionTimeout = orig })
 
-	if _, err := DetectVersion(context.Background(), Command{Path: script}.ForVersionProbe("hermes")); err == nil {
-		t.Fatal("expected an error from a hanging probe, got nil")
+	_, err := DetectVersion(context.Background(), Command{Path: script}.ForVersionProbe("hermes"))
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "version probe timed out") {
+		t.Fatalf("hanging Hermes probe error = %v, want an explicit timeout", err)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || !strings.Contains(err.Error(), exitErr.Error()) || !strings.Contains(err.Error(), script) {
+		t.Fatalf("hanging Hermes probe error = %v, want the executable and original process error", err)
+	}
+	if got := taskfailure.Classify(err.Error()); got != taskfailure.ReasonAgentProcessFailure {
+		t.Fatalf("hanging Hermes probe classification = %s, want %s; error: %v", got, taskfailure.ReasonAgentProcessFailure, err)
 	}
 	// The kill can land before a cold shell writes its log line, so assert only
 	// that the root --version never ran.
@@ -117,6 +127,15 @@ func TestDetectVersionHermesDoesNotFallBackOnTimeout(t *testing.T) {
 		if got != "acp --version" {
 			t.Fatalf("hermes was invoked as %q after the probe timed out; want no fallback", got)
 		}
+	}
+}
+
+func TestDetectVersionNonzeroExitIsNotATimeout(t *testing.T) {
+	script, _ := fakeHermesForVersionProbe(t, `exit 3`)
+	_, err := DetectVersion(context.Background(), Command{Path: script})
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 3 || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("version probe error = %v, want ordinary exit status 3", err)
 	}
 }
 

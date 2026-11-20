@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -30,6 +31,26 @@ func TestWriteSourceContextErrorHidesInternalDetails(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), "failed to capture source context") {
 		t.Fatalf("generic source-context error missing: %s", recorder.Body.String())
+	}
+}
+
+func TestCommentSubIssueRejectsNULOnlyTitle(t *testing.T) {
+	sourceID := dbfx.Issue(t, "source issue")
+	commentID := dbfx.Comment(t, sourceID, "source comment")
+	var preview sourceContextPreviewResponse
+	testutil.Call(t, testHandler.PreviewCommentSubIssue, withURLParam(newRequest(http.MethodGet,
+		"/api/comments/"+commentID+"/sub-issue-preview", nil), "commentId", commentID)).Want(http.StatusOK).JSON(&preview)
+
+	var response struct {
+		Error string `json:"error"`
+	}
+	testutil.Call(t, testHandler.CreateCommentSubIssue, withURLParam(newRequest(http.MethodPost,
+		"/api/comments/"+commentID+"/sub-issues", map[string]any{
+			"mode": "manual", "capture_token": preview.CaptureToken,
+			"issue": map[string]any{"title": " \x00 "},
+		}), "commentId", commentID)).Want(http.StatusBadRequest).JSON(&response)
+	if response.Error != "title is required" {
+		t.Fatalf("error = %q, want title is required", response.Error)
 	}
 }
 

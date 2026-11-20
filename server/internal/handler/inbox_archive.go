@@ -132,12 +132,38 @@ func (h *Handler) parseArchivedInboxFilters(w http.ResponseWriter, r *http.Reque
 
 // A cursor is tied to the recipient and filters, so it cannot accidentally
 // continue a different archive or a changed filter selection.
-func archivedInboxScope(p db.ArchivedInboxFacetsParams, groupID pgtype.UUID) string {
+func archivedInboxScope(p db.ArchivedInboxFacetsParams, groupID pgtype.UUID, notificationTypes []string) string {
 	encoded, _ := json.Marshal(struct {
-		Filters db.ArchivedInboxFacetsParams
-		Group   pgtype.UUID
-	}{p, groupID})
+		Filters           db.ArchivedInboxFacetsParams
+		Group             pgtype.UUID
+		NotificationTypes []string `json:",omitempty"`
+	}{p, groupID, notificationTypes})
 	return fmt.Sprintf("%x", sha256.Sum256(encoded))
+}
+
+// archivedInboxNotificationTypes reads the exact-type filter, which the CLI
+// sends because it filters on one type rather than a type group.
+func archivedInboxNotificationTypes(w http.ResponseWriter, r *http.Request) ([]string, bool) {
+	types := []string{}
+	raw := r.URL.Query().Get("notification_types")
+	if raw == "" {
+		return types, true
+	}
+	if len(raw) > 8192 {
+		writeError(w, http.StatusBadRequest, "filter is too long")
+		return nil, false
+	}
+	types = strings.Split(raw, ",")
+	if len(types) > 100 {
+		writeError(w, http.StatusBadRequest, "too many filter values")
+		return nil, false
+	}
+	if slices.Contains(types, "") {
+		writeError(w, http.StatusBadRequest, "empty filter value")
+		return nil, false
+	}
+	slices.Sort(types)
+	return slices.Compact(types), true
 }
 
 func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +180,10 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 		Assignees: filters.Assignees, Labels: filters.Labels, DueDates: filters.DueDates, Today: filters.Today,
 		UnreadOnly: filters.UnreadOnly,
 	}
+	p.NotificationTypes, ok = archivedInboxNotificationTypes(w, r)
+	if !ok {
+		return
+	}
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		var err error
@@ -169,7 +199,7 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	scope := archivedInboxScope(filters, p.GroupID)
+	scope := archivedInboxScope(filters, p.GroupID, p.NotificationTypes)
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		if len(raw) > 2048 {
 			writeError(w, http.StatusBadRequest, "invalid archive cursor")
@@ -212,8 +242,10 @@ func (h *Handler) ListArchivedInboxPage(w http.ResponseWriter, r *http.Request) 
 	if resp.HasMore {
 		rows = rows[:limit]
 	}
+	issuePrefix := h.getIssuePrefix(r.Context(), filters.WorkspaceID)
 	for _, row := range rows {
 		item := inboxToResponse(row.InboxItem)
+		item.IssueIdentifier = inboxIssueIdentifier(issuePrefix, row.IssueNumber)
 		item.Body = inboxListBody(row.InboxItem.Type, row.InboxItem.IssueID, row.InboxItem.Body)
 		item.IssueStatus, item.IssuePriority = textToPtr(row.IssueStatus), textToPtr(row.IssuePriority)
 		item.IssueProjectID, item.IssueDueDate = uuidToPtr(row.IssueProjectID), dateToPtr(row.IssueDueDate)

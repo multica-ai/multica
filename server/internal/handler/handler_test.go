@@ -1546,6 +1546,77 @@ func TestUpdateIssueAllowsExplicitUnassign(t *testing.T) {
 	}
 }
 
+func TestCreateIssueRejectsNULOnlyTitle(t *testing.T) {
+	var response struct {
+		Error string `json:"error"`
+	}
+	testutil.Call(t, testHandler.CreateIssue, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "\x00",
+	})).Want(http.StatusBadRequest).JSON(&response)
+	if response.Error != "title is required" {
+		t.Fatalf("error = %q, want title is required", response.Error)
+	}
+}
+
+// A NUL survives the JSON round trip but PostgreSQL TEXT rejects it, so an
+// agent filing tool output that carries one got a 500 and no issue.
+func TestIssueTextDropsNULBytes(t *testing.T) {
+	var issue IssueResponse
+	testutil.Call(t, testHandler.CreateIssue, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Build\x00 log", "description": "exit\x00 1",
+	})).Want(http.StatusCreated).JSON(&issue)
+	t.Cleanup(func() {
+		testHandler.DeleteIssue(httptest.NewRecorder(), withURLParam(newRequest("DELETE", "/api/issues/"+issue.ID, nil), "id", issue.ID))
+	})
+	if issue.Title != "Build log" || issue.Description == nil || *issue.Description != "exit 1" {
+		t.Fatalf("create must drop NUL bytes: title=%q description=%v", issue.Title, issue.Description)
+	}
+
+	// The bases are compared with the stored text, so they are cleaned too.
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"title": "Build\x00 log 2", "title_base": "Build\x00 log",
+		"description": "exit\x00 2", "description_base": "exit\x00 1",
+	}), "id", issue.ID)
+	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK).JSON(&issue)
+	if issue.Title != "Build log 2" || issue.Description == nil || *issue.Description != "exit 2" {
+		t.Fatalf("update must drop NUL bytes: title=%q description=%v", issue.Title, issue.Description)
+	}
+
+	// A batch write that fails is only logged, so the NUL made it a silent no-op.
+	var batch struct {
+		Updated int `json:"updated"`
+	}
+	testutil.Call(t, testHandler.BatchUpdateIssues, newRequest("PATCH", "/api/issues/batch?workspace_id="+testWorkspaceID, map[string]any{
+		"issue_ids": []string{issue.ID},
+		"updates":   map[string]any{"title": "Build\x00 log 3"},
+	})).Want(http.StatusOK).JSON(&batch)
+	testutil.Call(t, testHandler.GetIssue, withURLParam(newRequest("GET", "/api/issues/"+issue.ID, nil), "id", issue.ID)).Want(http.StatusOK).JSON(&issue)
+	if batch.Updated != 1 || issue.Title != "Build log 3" {
+		t.Fatalf("batch update must drop NUL bytes: updated=%d title=%q", batch.Updated, issue.Title)
+	}
+}
+
+func TestProjectTextDropsNULBytes(t *testing.T) {
+	var project ProjectResponse
+	testutil.Call(t, testHandler.CreateProject, newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Road\x00map", "description": "Q\x001",
+	})).Want(http.StatusCreated).JSON(&project)
+	t.Cleanup(func() {
+		testHandler.DeleteProject(httptest.NewRecorder(), withURLParam(newRequest("DELETE", "/api/projects/"+project.ID, nil), "id", project.ID))
+	})
+	if project.Title != "Roadmap" || project.Description == nil || *project.Description != "Q1" {
+		t.Fatalf("create must drop NUL bytes: title=%q description=%v", project.Title, project.Description)
+	}
+
+	req := withURLParam(newRequest("PUT", "/api/projects/"+project.ID, map[string]any{
+		"title": "Road\x00map 2", "description": "Q\x002",
+	}), "id", project.ID)
+	testutil.Call(t, testHandler.UpdateProject, req).Want(http.StatusOK).JSON(&project)
+	if project.Title != "Roadmap 2" || project.Description == nil || *project.Description != "Q2" {
+		t.Fatalf("update must drop NUL bytes: title=%q description=%v", project.Title, project.Description)
+	}
+}
+
 func TestCommentCRUD(t *testing.T) {
 	// Create an issue first
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{

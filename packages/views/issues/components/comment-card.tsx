@@ -33,6 +33,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useLocale, useTimeAgo } from "../../i18n";
+import { StorageLimitNotice } from "../../billing/storage-limit-notice";
 import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useComposerSubmit } from "../../editor";
 import { useCommentUploads } from "./use-comment-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -60,7 +61,7 @@ import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { InlineCommentRun, PlacedInlineCommentRun, useInlineCommentRunState, type InlineCommentRunState } from "./inline-comment-run";
-import { EMPTY_COMMENT_RUNS, isRunFailureNotice, orderThreadWithRuns, type CommentRun, type ThreadRunSlot } from "./comment-runs";
+import { EMPTY_COMMENT_RUNS, isRunFailureNotice, orderVisibleThreadRows, type CommentRun, type ThreadRunSlot } from "./comment-runs";
 import { descriptionPreview } from "./description-preview";
 import { useCommentAnnotations } from "./use-comment-annotations";
 import { useAttachmentVersions } from "./deliverables/attachment-versions";
@@ -387,7 +388,7 @@ function useEditAttachmentState(
   const draftKey = `edit:${issueId}:${entry.id}` as const;
   // `gate` widens the editor gate with coordinator-owned placeholders — see
   // CommentInput.
-  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate } =
+  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload, gate, storageRefusal, dismissStorageRefusal } =
     useCommentUploads(draftKey, { issueId }, uploadGate, editorRef);
   const [retainedStandaloneIds, setRetainedStandaloneIds] = useState<Set<string> | null>(null);
   const triggerPreview = useCommentTriggerPreview({
@@ -558,6 +559,8 @@ function useEditAttachmentState(
     handleUpload,
     uploads,
     removeUpload,
+    storageRefusal,
+    dismissStorageRefusal,
     isDragOver,
     dropZoneProps,
     triggerPreview,
@@ -958,6 +961,9 @@ function CommentRow({
               attachments={edit.editorAttachments}
             />
           </div>
+          {edit.storageRefusal && (
+            <StorageLimitNotice refusal={edit.storageRefusal} onDismiss={edit.dismissStorageRefusal} className="mt-2" />
+          )}
           {edit.revisionConflict ? (
             <CommentRevisionConflict
               serverContent={entry.content ?? ""}
@@ -1016,7 +1022,7 @@ function CommentRow({
         <>
           <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
-            data-comment-content={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
+            data-comment-content={entry.id} data-find-unit={entry.id} className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
@@ -1342,15 +1348,9 @@ function CommentCardImpl({
   const foldedReplies = replyResolutionId
     ? visibleReplies.filter((r) => r.id !== replyResolutionId)
     : visibleReplies;
-  const resolutionReply = replyResolutionId
-    ? allNestedReplies.find((r) => r.id === replyResolutionId) ?? null
-    : null;
   // Replies and run slots in the order they happened (MUL-7628). Folded, the
   // resolution stays visible along with any run that has not replied yet.
-  const threadRows = replyFolded
-    ? orderThreadWithRuns(entry, resolutionReply ? [resolutionReply] : [], runs.filter((run) => !run.hasReply
-      && (run.anchorCommentId === entry.id || run.anchorCommentId === replyResolutionId)))
-    : orderThreadWithRuns(entry, allNestedReplies, runs);
+  const threadRows = orderVisibleThreadRows(entry, allNestedReplies, runs, replyFolded ? replyResolutionId : null);
 
   // Long threads mount replies on demand: many rows, or few rows carrying a
   // lot of Markdown (MUL-9409). Short threads render inline, but through the
@@ -1574,6 +1574,9 @@ function CommentCardImpl({
                     attachments={edit.editorAttachments}
                   />
                 </div>
+                {edit.storageRefusal && (
+                  <StorageLimitNotice refusal={edit.storageRefusal} onDismiss={edit.dismissStorageRefusal} className="mt-2" />
+                )}
                 {edit.revisionConflict ? (
                   <CommentRevisionConflict
                     serverContent={entry.content ?? ""}
@@ -1632,7 +1635,7 @@ function CommentCardImpl({
               <>
                 <div tabIndex={currentUserId ? 0 : undefined} role="group"
             aria-label={t(($) => $.reply.annotations.source_label, { name: entry.actor_name || getActorName(entry.actor_type, entry.actor_id) })}
-            data-comment-content={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
+            data-comment-content={entry.id} data-find-unit={entry.id} className="pl-8 max-md:pl-0 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8 max-md:pl-0" />

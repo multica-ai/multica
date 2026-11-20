@@ -1,12 +1,12 @@
 ---
 title: Slack Bot
-description: 为智能体创建一个 Slack Bot，在私聊、频道以及 /issue、/new、/clear 命令中使用它。
+description: 为智能体创建一个 Slack Bot，在私聊、频道以及 @Multica /help、/issue、/new、/clear 命令中使用它。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 import { Step, Steps } from "fumadocs-ui/components/steps";
 
-Multica 使用你自己的 Slack app。连接后，团队成员可以私聊 Bot、在频道里 @ 它，也可以用 `/issue` 创建任务、`/new` 新建 Multica Chat、`/clear` 重置当前 Chat 的智能体上下文。
+Multica 使用你自己的 Slack app。连接后，团队成员可以私聊 Bot、在频道里 @ 它，也可以用 `@Multica /help` 查看命令、`/issue` 创建任务、`/new` 新建 Multica Chat、`/clear` 重置当前 Chat 的智能体上下文。
 
 一个 Slack app 对应一个 Multica 智能体。需要接入多个智能体时，为每个智能体分别创建 app。
 
@@ -75,7 +75,7 @@ settings:
   token_rotation_enabled: false
 ```
 
-创建前可以把两个 `Multica` 改成智能体的名字。不要删除 manifest 中的权限或事件，否则私聊、频道提及、回复、`/issue`、`/new` 或 `/clear` 可能无法工作。
+创建前可以把两个 `Multica` 改成智能体的名字。不要删除 manifest 中的权限或事件，否则私聊、频道提及、回复、`@Multica /help`、`/issue`、`/new` 或 `/clear` 可能无法工作。
 
 <Callout type="warning">
 Slack slash command 名称在整个 workspace 中共享。如果其他已安装 app 占用了 `/new` 或 `/clear`，Slack 会在创建或更新 app 时拒绝冲突命令。可以先解决名称冲突，也可以发送消息形式的 `@Multica /new [消息]` 或 `@Multica /clear [消息]`，绕过原生 slash command 拦截。
@@ -150,6 +150,12 @@ Bot 只会响应明确 @ 它的频道消息。执行时，它会在权限允许�
 
 这需要 `files:read` 权限；应用如果是在附件支持之前安装的，见第 1 步的提示。单个文件不超过 20 MiB，一条消息最多带 10 个。超出大小、仍在上传，或者存放在 Slack 之外（比如 Google Drive、Dropbox 链接）的文件会被跳过，消息文本仍然会交给智能体。
 
+### 用 `@Multica /help` 查看命令
+
+在私聊、频道或 thread 中发送 `@Multica /help`，即可查看 `@Multica /help`、`@Multica /new [消息]`、`@Multica /clear [消息]` 和 `@Multica /issue <标题>`（后续行作为描述）。Multica 会直接回复，不创建 Chat 或运行，也不改变当前 Chat。
+
+默认 manifest 仅注册 `/issue`、`/new` 和 `/clear` 三个原生 slash command。使用 `@Multica /help` 无需修改 manifest 或重新安装。原生 `/issue <描述>` 会让智能体根据描述创建任务。
+
 ### 用 `/issue` 创建任务
 
 在频道或私聊中输入：
@@ -204,6 +210,7 @@ openssl rand -base64 32
 - **无法验证 app**：确认 manifest 包含 `users:read`，更新权限后重新安装 app。
 - **私聊没有入口**：确认 `app_home.messages_tab_enabled` 为 `true`。
 - **频道里没有回复**：确认 Bot 已被邀请进频道，并在消息中 @ 了它。
+- **`/help` 没有到达 Multica**：请发送 `@Multica /help`；默认 manifest 不注册原生 `/help`。
 - **`/issue`、`/new` 或 `/clear` 不存在**：确认 manifest 包含这三个 slash command 和 `commands` scope，随后重新安装 app。如果 Slack 提示 `/new` 或 `/clear` 已被占用，请改用 `@Multica` 消息形式，或先解决 workspace 级命令冲突。
 - **文件没有送达智能体**：确认 manifest 里包含 `files:read`，并且在添加该权限后重新安装过应用，同时确认文件不超过 20 MiB。
 - **Bot 不执行**：检查智能体是否已归档，以及它使用的[运行时](/daemon-runtimes)是否在线。

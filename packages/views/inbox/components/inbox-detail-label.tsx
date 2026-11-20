@@ -27,6 +27,8 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     due_date_changed: t(($) => $.types.due_date_changed),
     new_comment: t(($) => $.types.new_comment),
     mentioned: t(($) => $.types.mentioned),
+    doc_comment: t(($) => $.types.doc_comment),
+    doc_mentioned: t(($) => $.types.doc_mentioned),
     review_requested: t(($) => $.types.review_requested),
     task_completed: t(($) => $.types.task_completed),
     task_failed: t(($) => $.types.task_failed),

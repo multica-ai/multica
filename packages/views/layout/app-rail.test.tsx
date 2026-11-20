@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { configStore } from "@multica/core/config";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import { useRailOrderStore } from "@multica/core/navigation";
 import {
   DEFAULT_SIDEBAR_INBOX_SETTINGS,
@@ -27,6 +29,10 @@ const state = vi.hoisted(() => ({
   markAllChatsRead: vi.fn(),
 }));
 
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("../navigation", () => ({
   AppLink: ({
     children,
@@ -148,6 +154,7 @@ beforeEach(() => {
   state.markAllInboxRead.mockReset();
   state.markAllChatsRead.mockReset();
   useRailOrderStore.setState({ order: null });
+  configStore.getState().setFeatureFlags({ [DOCS_V1_FLAG]: true });
   useSidebarTreeStore.setState({ inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS });
 });
 
@@ -165,14 +172,23 @@ describe("AppRail global actions", () => {
 describe("AppRail order", () => {
   it("lists the spaces in the default order", () => {
     renderRail();
-    expect(railOrder()).toEqual(["work", "team", "chat", "autopilots"]);
+    expect(railOrder()).toEqual(["work", "docs", "team", "chat", "autopilots"]);
   });
 
   it("follows the saved order", () => {
-    const order = ["chat", "work", "team", "autopilots"] as const;
+    const order = ["chat", "work", "docs", "team", "autopilots"] as const;
     useRailOrderStore.getState().setOrder(order);
     renderRail();
     expect(railOrder()).toEqual(order);
+  });
+
+  it("leaves Docs out while docs_v1 is off, keeping its saved place", () => {
+    const order = ["chat", "docs", "work", "team", "autopilots"] as const;
+    useRailOrderStore.getState().setOrder(order);
+    configStore.getState().setFeatureFlags({});
+    renderRail();
+    expect(railOrder()).toEqual(["chat", "work", "team", "autopilots"]);
+    expect(useRailOrderStore.getState().order).toEqual(order);
   });
 
   // dnd-kit stops the release's click at the document without cancelling

@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+If the CLI cannot verify the token, check the reported error before signing in again.
+
 Common causes include:
 
 - The CLI has not signed in, or the token stored on this machine has expired.
@@ -65,6 +67,8 @@ Self-hosted deployments should also request the API's `/health` from the **execu
 ```bash
 multica config show
 ```
+
+On macOS, if daemon logs say `connect: no route to host` while `curl -fsS <server-url>/health` succeeds from a terminal on the same Mac, collect both results from the same time window. Include how the daemon was launched (Desktop, login service, or terminal) and the macOS and daemon versions. The shell result only confirms connectivity for that shell process.
 
 </Accordion>
 <Accordion title={<><code>multica setup</code> reports the server is not reachable</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">

@@ -58,7 +58,13 @@ function summary(purchased: number, available: number): WorkspaceSubscriptionSum
       checkout: false,
       portal: true,
       purchaseSeats: true,
+      changePlan: false,
+      checkPlanChange: false,
+      purchaseAutopilotRuns: false,
     },
+    autopilotAddon: null,
+    planChange: null,
+    trial: null,
   };
 }
 

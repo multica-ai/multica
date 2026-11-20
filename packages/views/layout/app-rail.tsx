@@ -19,6 +19,8 @@ import { useChatStore } from "@multica/core/chat";
 import { useMarkAllChatSessionsRead } from "@multica/core/chat/mutations";
 import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
+import { useFeatureEnabled } from "@multica/core/config";
+import { DOCS_V1_FLAG } from "@multica/core/feature-flags";
 import {
   deduplicateInboxItems,
   inboxListOptions,
@@ -28,6 +30,7 @@ import { useMarkAllInboxRead } from "@multica/core/inbox/mutations";
 import { useInboxSnoozeWake } from "@multica/core/inbox/use-snooze-wake";
 import { useSidebarTreeStore } from "@multica/core/issues/stores/sidebar-tree-store";
 import { resolveRailOrder, useRailOrderStore } from "@multica/core/navigation";
+import { useIsGuest } from "@multica/core/permissions";
 import {
   RAIL_SPACES,
   useCurrentWorkspace,
@@ -72,8 +75,9 @@ type RailBadge =
  * what. A dot must be something the user can clear, so a failed autopilot run
  * is shown in the Autopilots panel only.
  */
-function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
+function useRailBadges(guest: boolean): Partial<Record<RailSpaceId, RailBadge>> {
   const wsId = useCurrentWorkspace()?.id;
+  const memberWsId = guest ? undefined : wsId;
   const p = useWorkspacePaths();
   const { pathname } = useNavigation();
   const inboxUnread = useInboxUnreadCount(wsId);
@@ -82,7 +86,7 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
 
   const { data: chatSessions = [] } = useQuery({
     ...chatSessionsOptions(wsId ?? ""),
-    enabled: !!wsId,
+    enabled: !!memberWsId,
   });
   // The session the user is reading right now must not count: its row shows 0
   // (auto mark-read is about to clear it) and a reply landing there would
@@ -102,7 +106,7 @@ function useRailBadges(): Partial<Record<RailSpaceId, RailBadge>> {
     [chatSessions, viewedChatSessionId],
   );
 
-  const { stuck } = useTeamAgentStatus(wsId);
+  const { stuck } = useTeamAgentStatus(memberWsId);
 
   const badges: Partial<Record<RailSpaceId, RailBadge>> = {};
   if (inboxBadge && inboxUnread > 0) badges.work = { kind: "count", value: inboxUnread, tone: "brand" };
@@ -358,14 +362,23 @@ export function AppRail({
   const { t } = useT("layout");
   const p = useWorkspacePaths();
   const shell = useAppShell();
-  const badges = useRailBadges();
-  const space = shell?.space ?? null;
   const wsId = useCurrentWorkspace()?.id;
+  // A guest (MUL-9420) has only the Work space and cannot create issues.
+  const guest = useIsGuest(wsId);
+  const badges = useRailBadges(guest);
+  const space = shell?.space ?? null;
   const workHref = useInboxReturnHref(shell?.spaceHref("work", p.issues()) ?? p.issues(), wsId);
   const settingsPeek = usePeekHandlers("settings", space === "settings");
   const savedOrder = useRailOrderStore((s) => s.order);
   const setOrder = useRailOrderStore((s) => s.setOrder);
   const order = useMemo(() => resolveRailOrder(savedOrder), [savedOrder]);
+  // Docs stays in the saved order while docs_v1 is off, so it comes back in
+  // place when the flag is turned on; it is only left out of what renders.
+  const docsEnabled = useFeatureEnabled(DOCS_V1_FLAG, false);
+  const visibleOrder = useMemo(
+    () => (docsEnabled ? order : order.filter((id) => id !== "docs")),
+    [docsEnabled, order],
+  );
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const { arm: armClickGuard, release: releaseClickGuard } = useDragClickGuard();
 
@@ -387,6 +400,12 @@ export function AppRail({
       icon: routeIconForPath(p.issues()),
       label: t(($) => $.rail.work),
       fullLabel: t(($) => $.spaces.work),
+    },
+    docs: {
+      href: p.docs(),
+      icon: routeIconForPath(p.docs()),
+      label: t(($) => $.rail.docs),
+      fullLabel: t(($) => $.nav.docs),
     },
     team: {
       href: p.agents(),
@@ -425,33 +444,35 @@ export function AppRail({
       {topSlot}
       <RailWorkspaces />
       <div className="my-2 flex flex-col items-center gap-1">
-        <NewIssueButton className={RAIL_ICON_BUTTON_CLASS} tooltipSide="right" />
+        {!guest && <NewIssueButton className={RAIL_ICON_BUTTON_CLASS} tooltipSide="right" />}
         <SearchButton className={RAIL_ICON_BUTTON_CLASS} tooltipSide="right" />
       </div>
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        modifiers={DRAG_MODIFIERS}
-        onDragStart={armClickGuard}
-        onDragEnd={onDragEnd}
-        onDragCancel={releaseClickGuard}
-      >
-        <SortableContext items={order} strategy={verticalListSortingStrategy}>
-          <ul className="flex flex-col items-center gap-0.5">
-            {order.map((id) => (
-              <SortableRailItem key={id} id={id}>
-                <RailSpaceLink
-                  space={id}
-                  {...items[id]}
-                  href={id === "work" ? workHref : (shell?.spaceHref(id, items[id].href) ?? items[id].href)}
-                  active={space === id}
-                  badge={badges[id]}
-                />
-              </SortableRailItem>
-            ))}
-          </ul>
-        </SortableContext>
-      </DndContext>
+      {!guest && (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={DRAG_MODIFIERS}
+          onDragStart={armClickGuard}
+          onDragEnd={onDragEnd}
+          onDragCancel={releaseClickGuard}
+        >
+          <SortableContext items={visibleOrder} strategy={verticalListSortingStrategy}>
+            <ul className="flex flex-col items-center gap-0.5">
+              {visibleOrder.map((id) => (
+                <SortableRailItem key={id} id={id}>
+                  <RailSpaceLink
+                    space={id}
+                    {...items[id]}
+                    href={id === "work" ? workHref : (shell?.spaceHref(id, items[id].href) ?? items[id].href)}
+                    active={space === id}
+                    badge={badges[id]}
+                  />
+                </SortableRailItem>
+              ))}
+            </ul>
+          </SortableContext>
+        </DndContext>
+      )}
       <div className="mt-auto flex flex-col items-center gap-1 pt-2">
         <HelpLauncher />
         <TooltipHint label={t(($) => $.nav.settings)} side="right">

@@ -11,6 +11,15 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteWorkspaceMemberSearchAccess = `-- name: DeleteWorkspaceMemberSearchAccess :exec
+DELETE FROM member_search_access WHERE workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceMemberSearchAccess(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceMemberSearchAccess, workspaceID)
+	return err
+}
+
 const deleteWorkspaceSearchIndexChanges = `-- name: DeleteWorkspaceSearchIndexChanges :exec
 DELETE FROM search_index_change WHERE workspace_id = $1
 `
@@ -37,7 +46,7 @@ WITH ws AS (SELECT $1::uuid AS id, $2::uuid[] AS hidden),
 visible_issue AS (
     SELECT i.id, i.title, i.description FROM issue i, ws
     WHERE i.workspace_id = ws.id
-      AND (ws.hidden IS NULL OR i.project_id IS NULL OR NOT (i.project_id = ANY(ws.hidden)))
+      AND (ws.hidden IS NULL OR NOT (COALESCE(i.project_id, '00000000-0000-0000-0000-000000000000'::uuid) = ANY(ws.hidden)))
 ),
 visible_comment AS (
     SELECT c.content FROM comment c
@@ -479,6 +488,27 @@ func (q *Queries) ListSearchIndexProjectsByIDs(ctx context.Context, arg ListSear
 	return items, nil
 }
 
+const markSearchAccessChanged = `-- name: MarkSearchAccessChanged :exec
+INSERT INTO member_search_access (workspace_id, user_id, changed_xid, changed_at)
+VALUES ($1, $2, pg_current_xact_id(), now())
+ON CONFLICT (workspace_id, user_id) DO UPDATE
+    SET changed_xid = EXCLUDED.changed_xid,
+        changed_at = EXCLUDED.changed_at
+`
+
+type MarkSearchAccessChangedParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Records that this transaction changed what the user can see in the
+// workspace without rewriting the content (MUL-9420), so local search copies
+// built before it are rebuilt.
+func (q *Queries) MarkSearchAccessChanged(ctx context.Context, arg MarkSearchAccessChangedParams) error {
+	_, err := q.db.Exec(ctx, markSearchAccessChanged, arg.WorkspaceID, arg.UserID)
+	return err
+}
+
 const pruneSearchIndexChanges = `-- name: PruneSearchIndexChanges :one
 WITH doomed AS (
     SELECT sic.entity_type, sic.entity_id
@@ -516,6 +546,30 @@ func (q *Queries) PruneSearchIndexChanges(ctx context.Context, arg PruneSearchIn
 	var deleted_count int64
 	err := row.Scan(&deleted_count)
 	return deleted_count, err
+}
+
+const searchAccessChangedAfter = `-- name: SearchAccessChangedAfter :one
+SELECT EXISTS (
+    SELECT 1 FROM member_search_access
+    WHERE workspace_id = $1
+      AND user_id = $2
+      AND NOT pg_visible_in_snapshot(changed_xid, ($3::text)::pg_snapshot)
+)::bool AS changed
+`
+
+type SearchAccessChangedAfterParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	UserID        pgtype.UUID `json:"user_id"`
+	SinceSnapshot string      `json:"since_snapshot"`
+}
+
+// Whether the user's access in the workspace was changed by a transaction the
+// since snapshot does not include.
+func (q *Queries) SearchAccessChangedAfter(ctx context.Context, arg SearchAccessChangedAfterParams) (bool, error) {
+	row := q.db.QueryRow(ctx, searchAccessChangedAfter, arg.WorkspaceID, arg.UserID, arg.SinceSnapshot)
+	var changed bool
+	err := row.Scan(&changed)
+	return changed, err
 }
 
 const searchIndexSinceIsPruned = `-- name: SearchIndexSinceIsPruned :one

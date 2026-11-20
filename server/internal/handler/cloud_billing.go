@@ -3,9 +3,11 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
@@ -49,19 +51,51 @@ const stripeSignatureHeader = "Stripe-Signature"
 const idempotencyKeyHeader = "Idempotency-Key"
 const maxCloudSubscriptionIdempotencyKeyLength = 255
 const maxCloudSubscriptionSeatPurchaseIdempotencyKeyLength = 200
+const maxCloudSubscriptionPlanChangeIdempotencyKeyLength = 200
+
+// isCloudSubscriptionPaidPlan reports whether plan names a plan a workspace can
+// check out or switch to. Free is never purchased: it is what a workspace falls
+// back to without an active subscription.
+func isCloudSubscriptionPaidPlan(plan string) bool {
+	return plan == "pro" || plan == "business"
+}
 
 type cloudSubscriptionCheckoutRequest struct {
+	Plan           string `json:"plan"`
 	Interval       string `json:"interval"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	// AdditionalSeats buys seats beyond the current members and pending
+	// invitations, so an invitation the Free member limit held back fits
+	// right after checkout (MUL-9488).
+	AdditionalSeats int `json:"additional_seats,omitempty"`
 }
+
+// maxCheckoutAdditionalSeats bounds the extra seats one checkout may add. The
+// invite dialog sends one invitation at a time; Cloud enforces its own total.
+const maxCheckoutAdditionalSeats = 100
 
 // This is an intentional allowlist: additive cloud fields are not forwarded
 // until the main repository explicitly reviews and adds them here.
 type cloudSubscriptionCheckoutUpstreamRequest struct {
-	WorkspaceID    string `json:"workspace_id"`
-	Interval       string `json:"interval"`
-	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	CustomerEmail  string `json:"customer_email,omitempty"`
+	WorkspaceID     string `json:"workspace_id"`
+	Plan            string `json:"plan"`
+	Interval        string `json:"interval"`
+	IdempotencyKey  string `json:"idempotency_key,omitempty"`
+	CustomerEmail   string `json:"customer_email,omitempty"`
+	AdditionalSeats int    `json:"additional_seats,omitempty"`
+}
+
+type cloudSubscriptionPlanChangePreviewRequest struct {
+	Plan string `json:"plan"`
+}
+
+type cloudSubscriptionPlanChangeRequest struct {
+	Plan                        string    `json:"plan"`
+	ExpectedSubscriptionVersion int64     `json:"expected_subscription_version"`
+	QuotedAt                    time.Time `json:"quoted_at"`
+	AcceptedProrationAmount     int64     `json:"accepted_proration_amount"`
+	Currency                    string    `json:"currency"`
+	IdempotencyKey              string    `json:"idempotency_key,omitempty"`
 }
 
 type cloudSubscriptionSeatPurchasePreviewRequest struct {
@@ -177,7 +211,7 @@ func (h *Handler) GetCloudWorkspaceSubscriptionSummary(w http.ResponseWriter, r 
 // GetCloudWorkspaceSubscriptionPrices forwards cloud's validated per-seat price
 // read so the client never hardcodes an amount that Stripe can change.
 //
-// Member-readable: seeing what Pro costs is not a privileged action, and cloud
+// Member-readable: seeing what a plan costs is not a privileged action, and cloud
 // scopes the read to a workspace this caller belongs to. Cloud returns only
 // currency, minor-unit amount and interval — Price and Product IDs stay server
 // side — and answers 503 when a configured Price cannot be validated, which the
@@ -208,8 +242,16 @@ func (h *Handler) CreateCloudWorkspaceSubscriptionCheckout(w http.ResponseWriter
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if !isCloudSubscriptionPaidPlan(in.Plan) {
+		writeError(w, http.StatusBadRequest, "plan must be pro or business")
+		return
+	}
 	if in.Interval != "month" && in.Interval != "year" {
 		writeError(w, http.StatusBadRequest, "interval must be month or year")
+		return
+	}
+	if in.AdditionalSeats < 0 || in.AdditionalSeats > maxCheckoutAdditionalSeats {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("additional_seats must be between 0 and %d", maxCheckoutAdditionalSeats))
 		return
 	}
 	idempotencyKey, ok := requireCloudSubscriptionIdempotencyKey(w, r, in.IdempotencyKey)
@@ -231,10 +273,12 @@ func (h *Handler) CreateCloudWorkspaceSubscriptionCheckout(w http.ResponseWriter
 		return
 	}
 	upstreamBody, err := json.Marshal(cloudSubscriptionCheckoutUpstreamRequest{
-		WorkspaceID:    workspaceID,
-		Interval:       in.Interval,
-		IdempotencyKey: idempotencyKey,
-		CustomerEmail:  customerEmail,
+		WorkspaceID:     workspaceID,
+		Plan:            in.Plan,
+		Interval:        in.Interval,
+		IdempotencyKey:  idempotencyKey,
+		CustomerEmail:   customerEmail,
+		AdditionalSeats: in.AdditionalSeats,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to build subscription request")
@@ -323,6 +367,79 @@ func (h *Handler) PurchaseCloudWorkspaceSubscriptionSeats(w http.ResponseWriter,
 	}
 	h.proxyCloudSubscription(w, r, http.MethodPost,
 		"/api/v1/subscriptions/"+workspaceID+"/seats/purchases", userID, upstreamBody,
+		http.Header{idempotencyKeyHeader: []string{key}})
+}
+
+// PreviewCloudWorkspaceSubscriptionPlanChange accepts only the target plan.
+// Cloud reads the current plan, interval and seats itself and returns Stripe's
+// proration for switching the subscription to the target plan's Price.
+func (h *Handler) PreviewCloudWorkspaceSubscriptionPlanChange(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r, "owner", "admin")
+	if !ok {
+		return
+	}
+	body, ok := readCloudRuntimeJSONBody(w, r)
+	if !ok {
+		return
+	}
+	var in cloudSubscriptionPlanChangePreviewRequest
+	if err := json.Unmarshal(body, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !isCloudSubscriptionPaidPlan(in.Plan) {
+		writeError(w, http.StatusBadRequest, "plan must be pro or business")
+		return
+	}
+	upstreamBody, err := json.Marshal(in)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build plan change preview")
+		return
+	}
+	h.proxyCloudSubscription(w, r, http.MethodPost,
+		"/api/v1/subscriptions/"+workspaceID+"/plan-changes/preview", userID, upstreamBody, nil)
+}
+
+// ChangeCloudWorkspaceSubscriptionPlan forwards a user-confirmed plan change
+// quote. A downgrade's proration is a credit, so the accepted amount may be
+// negative. Cloud repeats the quote and owns concurrency, idempotency, and the
+// Stripe write.
+func (h *Handler) ChangeCloudWorkspaceSubscriptionPlan(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r, "owner", "admin")
+	if !ok {
+		return
+	}
+	body, ok := readCloudRuntimeJSONBody(w, r)
+	if !ok {
+		return
+	}
+	var in cloudSubscriptionPlanChangeRequest
+	if err := json.Unmarshal(body, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !isCloudSubscriptionPaidPlan(in.Plan) || in.ExpectedSubscriptionVersion < 1 ||
+		in.QuotedAt.IsZero() || !isASCIICurrency(in.Currency) {
+		writeError(w, http.StatusBadRequest, "invalid plan change confirmation")
+		return
+	}
+	key, ok := requireCloudSubscriptionIdempotencyKey(w, r, in.IdempotencyKey)
+	if !ok {
+		return
+	}
+	if len(key) > maxCloudSubscriptionPlanChangeIdempotencyKeyLength {
+		writeError(w, http.StatusBadRequest, "plan change idempotency key must be at most 200 bytes")
+		return
+	}
+	in.Currency = strings.ToLower(in.Currency)
+	in.IdempotencyKey = key
+	upstreamBody, err := json.Marshal(in)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build plan change request")
+		return
+	}
+	h.proxyCloudSubscription(w, r, http.MethodPost,
+		"/api/v1/subscriptions/"+workspaceID+"/plan-changes", userID, upstreamBody,
 		http.Header{idempotencyKeyHeader: []string{key}})
 }
 

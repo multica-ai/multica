@@ -17,7 +17,7 @@ The client reads:
 
 - `schema_version`: only version 1 is accepted.
 - `policy_revision`: the effective-instruction generation, currently fixed at
-  `3` by Cloud and not deployment configuration. Cloud advances it when the
+  `7` by Cloud and not deployment configuration. Cloud advances it when the
   meaning or set of actionable instructions changes, including additive
   instructions; `schema_version` changes only for incompatible wire parsing.
 - `subscription_version`: the workspace's monotonic subscription revision. A
@@ -35,10 +35,19 @@ The client reads:
   limit and period parameters as `enforce`. Multica also downgrades an expired
   cached `enforce` instruction to `observe` locally (see below).
 - `gates.*.notifications`: an optional, additive delivery policy. The autopilot
-  quota consumer recognizes `first_rejection_per_period` and delivers one
-  workspace notice for the first rejected execution in the Cloud-defined quota
-  period. A malformed notification policy is ignored without invalidating an
-  otherwise valid enforcement gate.
+  quota consumer recognizes two values. `first_rejection_per_period` delivers
+  one notice for the first rejected execution in the Cloud-defined quota
+  period. `first_rejection_per_limit` (revision 6) delivers one notice for the
+  first rejection at each limit within the period, so a limit raised by an
+  add-on purchase re-arms the notice. Any other value, or a malformed
+  notification policy, disables notices without invalidating an otherwise
+  valid enforcement gate.
+- `features`: paid-feature restrictions, one `{"action": ...}` per feature
+  (revision 4). See [Paid features](#paid-features). Each feature is parsed on
+  its own, after the rest of the policy: a missing, unknown, or malformed
+  feature (including `features` of the wrong JSON type) falls back to `off`
+  for that feature only, with reason `feature_missing` or `feature_invalid`,
+  and never invalidates the gates.
 
 No deployment order is required for the optional notification policy. The
 consumer treats a missing policy as notices-disabled while continuing to
@@ -47,6 +56,23 @@ enforce the quota.
 Deploy this consumer before Cloud policy revision 3, which is the first to send
 `observe`. A consumer released before revision 3 rejects `observe` as an
 unknown action and fails the whole policy open to `off`.
+
+Revision 4 (`features`) is safe in either order: an older consumer ignores
+`features`, and this consumer treats a policy without it as every feature
+`off`.
+
+`gates.members` (revision 5) is optional and safe in either order too: an
+older consumer ignores the unknown gate, and this consumer reads a policy
+without it, or with a malformed one, as `members` `off` with reason
+`gate_missing` or `gate_invalid`. Only that gate falls back; `autopilot_runs`
+and the features keep their instructions. See [Member limit](#member-limit).
+`gates.storage_bytes` (revision 6) is optional the same way; see
+[Attachment storage limit](#attachment-storage-limit).
+
+Revision 7 adds the `agent_invocation_members`, `runtime_member_sharing` and
+`team_app_accounts` features. It is safe in either order: an older consumer
+ignores features it does not know, and this consumer reads a policy without
+one as that feature `off` with reason `feature_missing`.
 
 Responses tolerate unknown JSON fields and gates for additive compatibility.
 Unknown schema/action, malformed fields, a missing `autopilot_runs` gate, HTTP
@@ -110,3 +136,140 @@ structured localization; in-app quota views localize from `details`.
 
 Future consumers should depend on the small `Provider` interface. Tests can use
 `server/internal/entitlement/entitlementtest.Stub` without Cloud.
+
+## Refreshing before a refusal
+
+A consumer about to refuse an operation can call `Refresher.RefreshGate`
+instead of trusting the cache. It fetches the policy again unless the cached
+one arrived within the last five seconds, so a workspace that has just
+upgraded is not refused on a policy cached before the upgrade, and repeated
+refusals cost at most one Cloud request per workspace per five seconds. A
+failed fetch answers exactly like `Gate`. The Cloud client implements it;
+`entitlementtest.Stub` does too (`SetRefreshed`).
+
+`FreshRefresher.RefreshGateNow` fetches without the reuse window; concurrent
+callers for a workspace share one fetch. The autopilot quota calls it right
+before rejecting a run: the admission transaction sees the quota is full on
+the cached policy, leaves the transaction, fetches the current policy and runs
+the admission once more on it. A limit Cloud raised moments ago, such as an
+add-on Stripe's webhook confirmed before the payer returned to the app, admits
+the next run on every instance. Each rejection costs one Cloud request.
+
+## Member limit
+
+`members` caps the members of a workspace on a plan with a member limit
+(Free). It carries a `limit` and no period: it is a ceiling on headcount, not
+a budget that resets. Cloud sends it `off` for paid plans and trials, whose
+seats are governed by purchased seat capacity (`server/internal/seatcapacity`).
+
+The handler checks it wherever a member is added
+(`server/internal/handler/member_limit.go`):
+
+| Operation | Counted against the limit |
+| --- | --- |
+| Create an invitation (`POST /api/workspaces/{id}/members`) | members + live pending invitations + 1 |
+| Join by share link | the same, or members + 1 when the joiner holds a pending invitation |
+| Accept an invitation | members + 1: the invitation already holds its slot |
+
+Guests take no slot and are never checked. A refused invitation acceptance
+leaves the invitation pending. Each path counts once before its side effects
+(Cloud seat calls, rate-limit budgets), re-reading the policy with
+`RefreshGate` before refusing, and again inside the transaction that writes
+the member or invitation, under a per-workspace advisory lock taken before any
+row lock; the second count decides races for the last slot. `enforce` refuses
+with `403 member_limit_reached`. Attempts are recorded in
+`entitlement_limit_overage` under gate `members`, grouped by UTC calendar month
+since the gate has no period of its own.
+
+Clients read `GET /api/workspaces/{id}/member-limit` (member-readable), which
+returns `action` and, while a limit applies, `limit`, `members` and
+`pending_invitations`.
+
+## Attachment storage limit
+
+`storage_bytes` caps the attachment bytes a workspace holds, on every plan:
+Cloud sends Free's flat limit or the paid plan's per-seat limit. It carries a
+`limit` and no period. `service.StorageQuota`
+(`server/internal/service/storage_quota.go`) checks it.
+
+Usage is not stored: it is `SUM(size_bytes)` over the workspace's attachment
+rows (`SumWorkspaceAttachmentBytes`, an index-only scan on
+`idx_attachment_workspace_size`), so cascade deletes are reflected at once.
+Every attachment row counts; thumbnails are not rows. `off` reads nothing.
+The sum has its own timeout (`DefaultStorageSumTimeout`, 300 ms); a timeout or
+error admits the upload and is counted in `multica_storage_quota_sum_total`.
+
+| Path | Checked as |
+| --- | --- |
+| `POST /api/upload-file` with a workspace | used + file size, before the object is written |
+| Create a sub-issue from a comment (copies the source attachments) | used + copied bytes, before the sub-issue or any copy exists |
+| Files received through a messaging channel | recorded after they are stored, never refused |
+
+`enforce` refuses with `403 storage_limit_reached`, `used_bytes` and
+`limit_bytes`, after re-reading the policy with `RefreshGate`. `observe`
+admits and records. Reads, downloads, thumbnails and deletes are never
+checked. It is a soft limit: no lock is taken, so uploads in flight when a
+workspace crosses its limit all pass. Attempts are recorded in
+`entitlement_limit_overage` under gate `storage_bytes`, grouped by UTC
+calendar month.
+
+Clients read `GET /api/workspaces/{id}/storage-usage` (member-readable), which
+returns `action` and, while a limit applies, `used_bytes` and `limit_bytes`;
+`reached` is present only under `enforce`.
+
+## Paid features
+
+A paid feature is restricted for a workspace whose plan does not include it.
+Cloud decides which workspaces that is and sends one action per feature; this
+consumer never sees plan names. `FeatureProvider` is the only interface
+callers use, so a self-hosted license provider can replace the Cloud client
+without changing them. A nil provider (no `MULTICA_CLOUD_URL`) leaves every
+feature usable.
+
+The rule is the same for every feature:
+
+| Write | `off` | `observe` | `enforce` |
+| --- | --- | --- | --- |
+| Add to the configuration (create, add a person, widen) | allowed | allowed, recorded | rejected `403 feature_locked`, recorded |
+| Reduce or remove it (remove a person, make public, delete) | allowed | allowed | allowed |
+| Edit without changing it (rename, same-value write-back) | allowed | allowed | allowed |
+
+Reads never consult a feature. Existing configuration keeps working exactly as
+configured, including the access control it defines: a private project stays
+visible only to its members after a downgrade. Each feature classifies its own
+writes; the handler entry point is `requireFeatureAddition`
+(`server/internal/handler/paid_feature.go`), called after the ordinary
+permission checks, so a caller refused by those gets the ordinary error. A
+handler that can only tell whether its write adds while holding row locks
+reads the decision first (`paidFeature`) and decides on the locked state, so
+it never waits on Cloud under a lock.
+
+| Feature | Restricted additions | Always allowed |
+| --- | --- | --- |
+| `private_projects` | create a private project; make a project private; add someone who is not a member yet, directly or by making them the lead | remove members; make it workspace-visible; delete or archive; set the lead to an existing member, an agent or nobody; other fields; the owner's recovery join |
+| `guests` | invite a guest; make a member a guest; share another project with a guest | remove a guest; narrow a guest's projects; make a guest a member; accept an invitation sent while the plan included guests |
+| `agent_invocation_members` | create an agent that specific members may invoke (including duplicating one and the CLI `--public-to-member`); add someone to the list; switch from "only me" or "whole workspace" to specific members | remove someone; switch to "only me" or "whole workspace" (an emptied list is the whole workspace); re-save the same list; other fields; invoking the agent |
+| `runtime_member_sharing` | add someone to a private runtime's `shared_with`, including switching from "only me" or public to specific members (decided on the locked runtime row) | remove someone; make it public or "only me"; re-save the same list; using the runtime |
+| `team_app_accounts` | connect a team account for an app that has none, including after a disconnect (checked when the connect starts and again in the OAuth callback before the account is written); give an agent a team-account app or switch one from a personal account; raise an agent's level on a team account; set a team rule to a value that is neither its current value nor the default | reauthorize an app's existing team account; disconnect; remove an app from an agent; lower a level; restore default team rules (Allow all actions); personal accounts and rules; gateway calls, including existing `block` rules |
+
+A stale cached `enforce` is downgraded to `observe` with reason `stale` and
+`Downgraded` set, then to `off`, exactly like gates, so a Cloud outage admits additions rather than
+blocking them. Cloud failure before any policy was cached is `off`.
+
+Attempts are aggregated per workspace, feature, and UTC day in
+`entitlement_feature_attempt` (`service.EntitlementFeatureAttempts`):
+`observed_count` (admitted under a configured observe), `degraded_count`
+(admitted only because a stale enforce was downgraded), and `enforced_count`
+(rejected), with the latest operation, action, reason, policy and subscription
+revisions, and first/last attempt times. Admitted attempts are recorded after
+the write commits, rejections after authorization; recording is best-effort,
+bounded by its own one-second timeout so a contended row cannot hold the
+response, and never changes the result. A configured `observe` served from a
+stale cache still counts as observed; only a downgraded `enforce` counts as
+degraded. Attempts measure demand, not existing
+configuration: count existing private projects from the product tables.
+
+Clients read `GET /api/workspaces/{id}/features`, which returns only
+`available` (off or observe) or `locked` (enforce) per feature, and render
+read-only and upgrade states from it. The server enforces on every write
+regardless.

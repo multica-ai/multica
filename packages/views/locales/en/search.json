@@ -16,6 +16,7 @@
     "autopilots": "Autopilots",
     "chats": "Chats",
     "skills": "Skills",
+    "docs": "Docs",
     "cancelled": "Cancelled",
     "recent": "Recent",
     "workspaces": "Workspaces",
@@ -163,5 +164,6 @@
   },
   "trigger": {
     "label": "Search..."
-  }
+  },
+  "untitled_doc": "Untitled"
 }

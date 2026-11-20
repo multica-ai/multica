@@ -292,7 +292,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - The `--custom-env` flags exist only on `agent create`. Change variables later with `agent env set`, which replaces the whole set; keys whose value is `****` keep their existing value.
 - `agent update --mcp-config null` clears the MCP configuration.
 - `--custom-args` is a JSON array placed at the end of the launch arguments. Choose the model with `--model`; some tools reject `--model` inside custom arguments.
-- `--permission-mode` controls who can invoke the agent: `private` for the owner only, or `public_to` with `--public-to-workspace` or `--public-to-member <user-id>`. `--visibility private|workspace` is the older form and maps onto `--permission-mode`; when both are given, `--permission-mode` wins.
+- `--permission-mode` controls who can invoke the agent: `private` for the owner only, or `public_to` with `--public-to-workspace` or `--public-to-member <user-id>`. `--visibility private|workspace` is the older form and maps onto `--permission-mode`; when both are given, `--permission-mode` wins. On Multica Cloud, member lists are included in Business. On Free and Pro with the restriction enforced, `agent create` or `agent update` that gives an agent a member list or adds someone to it is refused with `feature_locked`; removing members, re-saving the same list, and switching to `private` or `--public-to-workspace` still work.
 
 ### Agent run history
 
@@ -419,7 +419,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | Create, update, assign, and search issues; manage comments, subscribers, labels, properties, wakeups, the timeline, and runs |
 | `project` | Manage projects, their resources, and the workflow they use |
-| `inbox` | Read your notifications without changing read status |
+| `inbox` | Read and manage your notifications: list, mark read, archive, snooze |
 | `workflow` | Manage issue workflows: statuses and who handles each one |
 | `issue-status` | Manage the workspace status catalog: statuses, their color, and their icon |
 | `label`, `property` | Manage workspace labels and custom properties |
@@ -548,7 +548,7 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `trigger <id>` | Trigger a run manually | |
 | | `runs <id>` | View run history | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | `trigger-add`: `--kind` (`schedule` or `webhook`), `--cron`, `--timezone` (default UTC), `--label` |
-| `workspace` | `list/get/create/update/switch` | Manage workspaces; `switch` sets the current profile's default workspace | `create`: `--name`, `--slug` (both required), `--issue-prefix`, `--description`, `--context` / `--context-stdin`; `update` changes the same fields except the slug |
+| `workspace` | `list/get/create/update/switch` | Manage workspaces; `switch` sets the current profile's default workspace; in an agent run, `list` shows only its own workspace | `create`: `--name`, `--slug` (both required), `--issue-prefix`, `--description`, `--context` / `--context-stdin`; `update` changes the same fields except the slug |
 | | `mcp list/add/update/remove` | Manage the workspace's MCP server library | Writes are owner/admin. A server added here is assigned to no agent — give it to one with `multica agent mcp add`. `list` shows names and transports only; the stored entry is write-only and never returned. `--server-config-file` / `--server-config-stdin` keep tokens out of shell history |
 | | `member list/invite <email>` | View members, send invites | `invite`: `--role` (member or admin, default member) |
 | `repo` | `list/add/remove/checkout` | Manage workspace repositories and check them out locally | `--url` (repeatable); `checkout`: `--ref` |
@@ -562,7 +562,14 @@ Migration from CSV parsing: replace `--attachment a,b` with `--attachment a --at
 | | `activity <issue-id> <outcome>` | Record a leader evaluation | |
 | `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | Manage follow-ups in the current chat run; see [Chat wakeups](#chat-wakeups) | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
-| `inbox` | `list` | [Read your active notifications](/inbox) without marking them read | `--project`, `--type`, `--output` (`table` or `json`); filters apply locally |
+| `inbox` | `list` | [List your notifications](/inbox) without marking them read; `--archived` or `--snoozed` lists those instead | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` or `json`); `--archived` reads every page |
+| | `count` | Unread count in this workspace and in each of your workspaces; an agent run sees only its own workspace | `--output` |
+| | `read [<id>...]` | Mark notifications read, the whole issue for each; or every notification on one issue, or all | `--issue`, `--all` (needs `--yes`) |
+| | `unread <id>...` | Mark notifications unread | |
+| | `archive [<id>...]` | Archive notifications, the whole issue for each; or in bulk | `--all`, `--read`, `--completed` (each needs `--yes`) |
+| | `unarchive <id>...` | Restore archived notifications | |
+| | `snooze <id>...` | Take each notification's issue out of the inbox until a time | `--until` (RFC 3339, `30m`, `3h`, `1d`, `1w`, `tomorrow`) |
+| | `unsnooze <id>...` | Bring snoozed issues back now | |
 
 ### Runtime
 

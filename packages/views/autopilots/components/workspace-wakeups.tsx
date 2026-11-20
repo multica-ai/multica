@@ -517,6 +517,8 @@ export function WorkspaceWakeups() {
   } else {
     body = (
       <CollectionList
+        // Shares the autopilots route with that page's own list.
+        scrollKey="wakeups"
         label={t(($) => $.wakeups.scopes[filters.scope])}
         columns={columns}
         rows={rows}

@@ -105,6 +105,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | `queued_expired` | 런타임이 재연결 유예를 넘겨 하트비트를 멈췄고, 실행 자체도 그만큼 큐에서 기다림 | 런타임이 온라인인지 확인한 뒤 재시도 |
 | `runtime_recovery` | 데몬 재시작 후 중단된 실행을 회수함 | 바로 재시도 |
 | `environment_prepare_failed` | 데몬이 이번 실행에 필요한 환경(작업 디렉터리, 그리고 거기에 기록되는 로컬 런타임 설정)을 준비하지 못함 | 원본 오류로 어느 단계가 실패했는지 확인한 뒤 해당 머신의 디스크 여유 공간, 권한, 디렉터리 사용 여부, AI 코딩 도구의 로컬 설정을 점검 |
+| `local_directory_missing` | 프로젝트에 연결된 로컬 폴더가 에이전트를 실행하는 컴퓨터에 더 이상 없음 — 연결한 뒤 삭제되거나 이동됨 | 폴더를 원래 경로로 복원한 뒤 재시도. 새 위치를 쓰려면 **리소스 → 로컬 폴더**에서 기존 폴더를 제거하고 해당 컴퓨터의 Desktop에서 새 위치를 연결(브라우저에서는 폴더를 선택할 수 없음). [프로젝트 리소스](/project-resources) 참고 |
 | `cancelled` | 수동으로 중지되었거나 보관 또는 삭제와 함께 취소됨 | 별도 처리 불필요 |
 | `timeout` | 데몬에 설정된 실행 시간 상한을 초과함 | 태스크 범위를 줄이거나 데몬의 `agent_timeout` 조정 |
 | `iteration_limit` | 실행 반복 횟수 상한에 도달함 | 태스크 범위 축소 |
@@ -120,8 +121,8 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 | 원인 | 의미 | 처리 방법 |
 | --- | --- | --- |
 | `provider_auth_or_access` | 모델 서비스 인증 실패 또는 접근 권한 없음(401/403) | 해당 AI 코딩 도구에 다시 로그인하거나 API key 확인 |
-| `provider_quota_limit` | 사용량 또는 잔액 소진(402) | 충전하거나 계정 변경 |
-| `provider_capacity_or_rate_limit` | rate limit 또는 용량 부족(429/529) | 나중에 재시도 |
+| `provider_quota_limit` | 사용량 또는 잔액 소진 | 충전하거나 계정 변경 |
+| `provider_capacity_or_rate_limit` | rate limit 또는 용량 부족 | 나중에 재시도 |
 | `provider_server_error` | 모델 서비스 오류(5xx) | 나중에 재시도 |
 | `provider_network` | 모델 서비스와의 네트워크 오류 | 자동 재시도됩니다. 계속 발생하면 실행 컴퓨터의 네트워크 확인 |
 | `model_not_found_or_unavailable` | 모델이 없거나 현재 사용할 수 없음 | 에이전트 설정에서 사용 가능한 모델 선택 |

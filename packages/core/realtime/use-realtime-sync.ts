@@ -1,4 +1,5 @@
 "use client";
+import { docKeys } from "../docs/queries";
 
 import { weixinKeys } from "../weixin/queries";
 
@@ -69,6 +70,7 @@ import {
   notificationPreferenceKeys,
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import { memberLimitKeys } from "../billing/member-limit";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
   showSystemNotification,
@@ -719,6 +721,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: issueWorkflowKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: issueViewKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: issueViewPrefKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: docKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -1365,10 +1368,9 @@ export function useRealtimeSync(
       if (wsId) {
         onIssuePropertiesChanged(qc, wsId, issue_id, properties ?? {}, issue_revision);
         scheduleProjectActivityRefresh(wsId);
-        // The catalog embeds per-definition usage counts; every value
-        // set/unset shifts them. The list is tiny, so a refetch beats
-        // trying to patch counts client-side.
-        qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+        // Value set/unset shifts usage counts only; the plain catalog is
+        // unchanged. Only the settings view observes the counted list.
+        qc.invalidateQueries({ queryKey: propertyKeys.withUsage(wsId) });
       }
     });
 
@@ -1421,6 +1423,19 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
     };
 
+    const docUnsubs = ([
+      "doc:created", "doc:updated", "doc:deleted",
+      "doc_folder:created", "doc_folder:updated", "doc_folder:deleted",
+    ] as const).map((event) => ws.on(event, () => {
+      const wsId = getCurrentWsId();
+      if (wsId) void qc.invalidateQueries({ queryKey: docKeys.all(wsId) });
+    }));
+    // A discussion changed on one doc: refetch that doc's comments only.
+    docUnsubs.push(ws.on("doc_comment:changed", (p) => {
+      const wsId = getCurrentWsId();
+      const docId = (p as { doc_id?: string } | undefined)?.doc_id;
+      if (wsId && docId) void qc.invalidateQueries({ queryKey: docKeys.comments(wsId, docId) });
+    }));
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment, issue_revision: issueRevision } = p as CommentCreatedPayload;
       if (!comment?.issue_id) return;
@@ -1661,6 +1676,8 @@ export function useRealtimeSync(
         const currentWsId = getCurrentWsId();
         if (currentWsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
+          // A declined invitation frees its member slot.
+          qc.invalidateQueries({ queryKey: memberLimitKeys.all(currentWsId) });
         }
         if (actorId === authStore.getState().user?.id) {
           qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
@@ -2008,11 +2025,17 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      qc.setQueryData<ChatPendingTask>(
-        chatKeys.pendingTask(payload.chat_session_id),
-        (old) => removePendingChatTask(old, payload.task_id),
+      const pendingKey = chatKeys.pendingTask(payload.chat_session_id);
+      // chat:done normally clears this turn and refreshes its reply. If the
+      // turn is still pending locally, recover the persisted outcome here.
+      if (qc.getQueryData<ChatPendingTask>(pendingKey)?.task_id === payload.task_id) {
+        invalidateChatMessageQueries(qc, payload.chat_session_id);
+        invalidateSessionLists();
+      }
+      qc.setQueryData<ChatPendingTask>(pendingKey, (old) =>
+        removePendingChatTask(old, payload.task_id),
       );
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      qc.invalidateQueries({ queryKey: pendingKey });
       refreshWakeupTurns(payload.chat_session_id);
       invalidatePendingAggregate();
     });
@@ -2109,6 +2132,7 @@ export function useRealtimeSync(
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());
       unsubInboxNew();
+      docUnsubs.forEach(unsub => unsub());
       unsubCommentCreated();
       unsubCommentUpdated();
       unsubCommentDeleted();

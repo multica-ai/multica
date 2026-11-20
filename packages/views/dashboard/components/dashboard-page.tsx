@@ -30,6 +30,7 @@ import { CollectionPageState } from "../../layout/collection-page";
 import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
 import { useNavigation } from "../../navigation";
+import { useRestoredScrollRef } from "../../platform/scroll-restoration";
 import {
   addDaysIso,
   aggregateByWeek,
@@ -154,6 +155,8 @@ export function DashboardPage() {
   const locales = i18n.resolvedLanguage ?? i18n.language;
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
+  // One scroller for both tabs: the offset restored is the shown tab's.
+  const restoreScrollRef = useRestoredScrollRef("dashboard");
 
   // The tab lives in the URL because the Errors view is the half of this page
   // people paste at each other ("this agent failed 54 times, see for
@@ -514,7 +517,11 @@ export function DashboardPage() {
         </div>
       </PageHeader>
 
-      <div className="flex-1 overflow-y-auto">
+      <div
+        ref={restoreScrollRef}
+        data-tab-scroll-root="dashboard"
+        className="flex-1 overflow-y-auto"
+      >
         <div className="mx-auto max-w-6xl p-6">
           <TabsContent value="usage" className="space-y-5">
             {usageLoading ? (

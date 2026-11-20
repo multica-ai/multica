@@ -292,7 +292,7 @@ multica agent update <agent-id> --mcp-config-file ./mcp.json
 - `--custom-env` 계열 플래그는 `agent create`에만 있습니다. 나중에 바꿀 때는 `agent env set`을 쓰며, 전체를 교체하고 값이 `****`인 키는 기존 값을 유지합니다.
 - `agent update --mcp-config null`은 MCP 설정을 지웁니다.
 - `--custom-args`는 JSON 배열이며 실행 인수의 맨 끝에 붙습니다. 모델은 `--model`로 고르세요. 사용자 지정 인수 안의 `--model`을 거부하는 도구도 있습니다.
-- 에이전트를 호출할 수 있는 사람은 `--permission-mode`로 정합니다. `private`은 소유자만, `public_to`는 `--public-to-workspace` 또는 `--public-to-member <user-id>`와 함께 씁니다. `--visibility private|workspace`는 예전 방식이며 `--permission-mode`로 변환됩니다. 둘 다 지정하면 `--permission-mode`가 우선합니다.
+- 에이전트를 호출할 수 있는 사람은 `--permission-mode`로 정합니다. `private`은 소유자만, `public_to`는 `--public-to-workspace` 또는 `--public-to-member <user-id>`와 함께 씁니다. `--visibility private|workspace`는 예전 방식이며 `--permission-mode`로 변환됩니다. 둘 다 지정하면 `--permission-mode`가 우선합니다. Multica Cloud에서 멤버 목록은 Business에 포함됩니다. Free와 Pro에서 제한이 적용되면 `agent create`나 `agent update`로 목록을 새로 설정하거나 멤버를 추가할 때 `feature_locked`로 거부됩니다. 멤버 제거, 같은 목록 다시 저장, `private` 또는 `--public-to-workspace`로의 변경은 계속 할 수 있습니다.
 
 ## 데몬과 런타임
 
@@ -404,7 +404,7 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --clear-event-filte
 | --- | --- |
 | `issue` | 태스크 생성, 업데이트, 할당, 검색. 댓글, 구독, 라벨, 속성, 깨우기, 타임라인, 실행 기록 관리 |
 | `project` | 프로젝트와 프로젝트 리소스 관리 |
-| `inbox` | 읽음 상태를 바꾸지 않고 내 알림 읽기 |
+| `inbox` | 내 알림 읽기와 관리: 목록, 읽음 표시, 보관, 다시 알림 |
 | `label`, `property` | 워크스페이스 라벨과 사용자 지정 속성 관리 |
 | `view` | 저장된 뷰를 읽고 뷰에 보이는 태스크 나열 |
 | `agent`, `skill`, `squad` | 에이전트, 스킬, 스쿼드 관리 |
@@ -513,7 +513,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `trigger <id>` | 수동으로 한 번 트리거 | |
 | | `runs <id>` | 실행 기록 확인 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 일정 및 webhook 트리거 관리 | `trigger-add`: `--kind`(`schedule` 또는 `webhook`), `--cron`, `--timezone`(기본값 UTC), `--label` |
-| `workspace` | `list/get/create/update/switch` | 워크스페이스 관리. `switch`는 현재 profile의 기본 워크스페이스 설정 | `create`: `--name`, `--slug`(모두 필수), `--issue-prefix`, `--description`, `--context` / `--context-stdin`. `update`는 slug를 제외한 같은 항목 변경 |
+| `workspace` | `list/get/create/update/switch` | 워크스페이스 관리. `switch`는 현재 profile의 기본 워크스페이스 설정. 에이전트 실행에서는 `list`에 해당 워크스페이스만 | `create`: `--name`, `--slug`(모두 필수), `--issue-prefix`, `--description`, `--context` / `--context-stdin`. `update`는 slug를 제외한 같은 항목 변경 |
 | | `mcp list/add/update/remove` | 워크스페이스의 MCP 서버 라이브러리를 관리 | 쓰기는 owner/admin 전용. 여기에 추가한 서버는 어떤 에이전트에도 할당되지 않으며 `multica agent mcp add`로 할당합니다. `list`는 이름과 transport만 표시하고, 저장된 항목은 쓰기 전용이라 어떤 역할에도 반환되지 않습니다. `--server-config-file` / `--server-config-stdin`은 토큰이 셸 기록에 남지 않게 합니다 |
 | | `member list/invite <email>` | 멤버 확인 및 초대 전송 | `invite`: `--role`(member 또는 admin, 기본 member) |
 | `repo` | `list/add/remove/checkout` | 워크스페이스 저장소 관리 및 로컬 checkout | `--url`(반복 가능). `checkout`: `--ref` |
@@ -527,7 +527,14 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `activity <issue-id> <outcome>` | 리더 평가 기록 | |
 | `chat` | `history`, `thread [id]` | 에이전트가 현재 처리 중인 외부 채팅 대화 읽기 | `--limit`, `--before` |
 | | `wakeup create/list/get/update/cancel/finish/checkin` | 현재 채팅 실행의 후속 작업 관리. [채팅 웨이크업](#chat-wakeups) 참고 | `--title`, `--instruction` / `--instruction-file`, `--until-*`, `--at` / `--after`, `--every`, `--expires-in` / `--expires-at`; `checkin`: `--note` |
-| `inbox` | `list` | 읽음으로 표시하지 않고 [현재 알림 읽기](/inbox) | `--project`, `--type`, `--output` (`table` 또는 `json`); 필터는 로컬에서 적용 |
+| `inbox` | `list` | 읽음으로 표시하지 않고 [알림 목록 보기](/inbox). `--archived` 또는 `--snoozed`는 해당 목록을 보여 줌 | `--unread`, `--issue`, `--since`, `--project`, `--type`, `--output` (`table` 또는 `json`); `--archived`는 모든 페이지를 읽음 |
+| | `count` | 이 워크스페이스와 소속된 각 워크스페이스의 읽지 않은 알림 수. 에이전트 실행에서는 해당 워크스페이스만 | `--output` |
+| | `read [<id>...]` | 알림을 읽음으로 표시(각 알림의 태스크 전체에 적용). 또는 한 태스크의 모든 알림, 또는 전체 | `--issue`, `--all` (`--yes` 필요) |
+| | `unread <id>...` | 알림을 읽지 않음으로 표시 | |
+| | `archive [<id>...]` | 알림 보관(각 알림의 태스크 전체에 적용). 또는 일괄 보관 | `--all`, `--read`, `--completed` (모두 `--yes` 필요) |
+| | `unarchive <id>...` | 보관한 알림 복원 | |
+| | `snooze <id>...` | 알림의 태스크를 지정한 시간까지 인박스에서 빼기 | `--until` (RFC 3339, `30m`, `3h`, `1d`, `1w`, `tomorrow`) |
+| | `unsnooze <id>...` | 다시 알림 중인 태스크를 지금 되돌리기 | |
 
 ### Runtime
 

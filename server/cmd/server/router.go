@@ -43,6 +43,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/weixin"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -480,8 +481,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		opts.BusinessMetrics.RecordEntitlementConfigError()
 	} else if entitlementClient.Enabled() {
 		h.Entitlements = entitlementClient
+		h.Features = entitlementClient
 		h.AutopilotService.Entitlements = entitlementClient
 		h.AutopilotService.QuotaMetrics = opts.BusinessMetrics
+		storageQuota := service.StorageQuota{
+			Sums:         queries,
+			Entitlements: entitlementClient,
+			Overages:     service.EntitlementOverages{Queries: queries},
+		}
+		if opts.BusinessMetrics != nil {
+			storageQuota.Metrics = opts.BusinessMetrics
+		}
+		engine.SetMediaStoredHook(func(ctx context.Context, workspaceID pgtype.UUID) {
+			storageQuota.RecordStored(ctx, workspaceID, service.StorageSourceChannel)
+		})
 	}
 	// Cloud Runtime and strict seat capacity are one managed deployment. Reuse
 	// the same base URL so Billing cannot be readable while invitation writes
@@ -1378,6 +1391,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						slog.Error("composio: service init failed; composio integration disabled", "error", serr)
 					} else {
 						h.Composio = svc
+						// Team Apps accounts are a paid feature (MUL-9491): the
+						// callback re-checks it right before writing an account.
+						svc.SetTeamConnectGate(h.TeamAppConnectGate)
 						// Connected Apps v2 (MUL-8516): runs reach their apps
 						// through the Multica gateway, which holds the Composio
 						// key and applies account rules and confirmations.
@@ -1819,6 +1835,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// because they are JSON-API consumers that always have
 		// workspace context.
 		r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
+		// Same access shape as /download, for grid tiles' native <img> src.
+		r.Get("/api/attachments/{id}/thumbnail", h.GetAttachmentThumbnail)
+		// The original of a thumbnailed image, for copying it from a tile.
+		r.Get("/api/attachments/{id}/original", h.GetAttachmentOriginal)
 		// Markdown links may point to an attachment in a different workspace.
 		// Resolve that workspace from the row and check membership before minting
 		// a fresh URL; the workspace-scoped metadata route stays unchanged.
@@ -1834,6 +1854,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetWorkspace)
 					r.Put("/pin", h.SetWorkspacePinned)
 					r.Get("/members", h.ListMembersWithUser)
+					// Paid-feature states for read-only and upgrade UI; the
+					// server enforces on every write regardless.
+					r.Get("/features", h.GetWorkspaceFeatures)
+					// The plan's member limit for upgrade UI; every admission
+					// is checked on the server regardless.
+					r.Get("/member-limit", h.GetMemberLimit)
+					r.Get("/storage-usage", h.GetStorageUsage)
 					r.Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 					// Listing GitHub installations is member-visible so the
@@ -1875,6 +1902,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
+						r.Put("/projects", h.SetMemberProjects)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 					// Curating the shared MCP library is an admin action.
@@ -2140,7 +2168,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/seats/purchase-preview", h.PreviewCloudWorkspaceSubscriptionSeatPurchase)
 				r.Post("/seats/purchases", h.PurchaseCloudWorkspaceSubscriptionSeats)
 				r.Post("/seats/reconcile", h.ReconcileCloudWorkspaceSubscriptionSeats)
+				r.Post("/plan-changes/preview", h.PreviewCloudWorkspaceSubscriptionPlanChange)
+				r.Post("/plan-changes", h.ChangeCloudWorkspaceSubscriptionPlan)
 				r.Post("/portal-sessions", h.CreateCloudWorkspaceSubscriptionPortal)
+				r.Post("/autopilot-addon/checkout-sessions", h.CreateCloudWorkspaceAutopilotAddonCheckout)
+				r.Get("/autopilot-addon/checkout-sessions/{sessionId}", h.GetCloudWorkspaceAutopilotAddonCheckout)
 			})
 		})
 
@@ -2318,6 +2350,42 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Commercial (server/ee) workspace routes; none in an open-source build.
 			extension.MountWorkspaceRoutes(r, h)
+
+			// Docs, behind the docs_v1 flag until launch.
+			r.Route("/api/docs", func(r chi.Router) {
+				r.Use(h.RequireDocsV1)
+				r.Get("/", h.ListDocTree)
+				r.Post("/", h.CreateDoc)
+				r.Get("/search", h.SearchDocs)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetDoc)
+					r.Patch("/", h.UpdateDoc)
+					r.With(handler.RequireHumanActor).Delete("/", h.DeleteDoc)
+					r.Post("/move", h.MoveDoc)
+					r.Get("/versions", h.ListDocVersions)
+					r.Get("/versions/{number}", h.GetDocVersion)
+					r.Route("/comments", func(r chi.Router) {
+						r.Get("/", h.ListDocComments)
+						// Writing in discussions is human-only until agents can take part.
+						r.Group(func(r chi.Router) {
+							r.Use(handler.RequireHumanActor)
+							r.Post("/", h.CreateDocComment)
+							r.Post("/{docCommentId}/resolve", h.ResolveDocComment)
+							r.Post("/{docCommentId}/reopen", h.ReopenDocComment)
+							r.Delete("/{docCommentId}", h.DeleteDocComment)
+						})
+					})
+				})
+			})
+			r.Route("/api/doc-folders", func(r chi.Router) {
+				r.Use(h.RequireDocsV1)
+				r.Post("/", h.CreateDocFolder)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Patch("/", h.UpdateDocFolder)
+					r.With(handler.RequireHumanActor).Delete("/", h.DeleteDocFolder)
+					r.Post("/move", h.MoveDocFolder)
+				})
+			})
 
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
@@ -2553,7 +2621,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/rate-limits", h.GetRuntimeRateLimits)
 					r.Get("/activity", h.GetRuntimeTaskActivity)
 					r.Post("/update", h.InitiateUpdate)
+					r.Get("/update", h.GetActiveUpdate)
 					r.Get("/update/{updateId}", h.GetUpdate)
+					r.Post("/update/{updateId}/cancel", h.CancelUpdate)
 					r.Post("/models", h.InitiateListModels)
 					r.Get("/models/{requestId}", h.GetModelListRequest)
 					r.Post("/local-skills", h.InitiateListLocalSkills)
@@ -2704,7 +2774,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/reject", h.RejectAppRequest)
 			})
 
-			// Inbox
+			// Inbox. Every handler here calls requireInboxOwnerAccess;
+			// TestEveryInboxRouteDeniesMachineCredentialsWithoutOwnerTrigger
+			// walks these routes and fails on one that skips it.
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				// Archived notifications, for the inbox's "Archived" sub-view.
@@ -2823,15 +2895,20 @@ type membershipChecker struct {
 	queries *db.Queries
 }
 
+// IsMember answers for realtime, which guests (MUL-9420) do not get: see
+// GetRealtimeMemberships.
 func (mc *membershipChecker) IsMember(ctx context.Context, userID, workspaceID string) (bool, error) {
-	_, err := mc.queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+	member, err := mc.queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      parseUUID(userID),
 		WorkspaceID: parseUUID(workspaceID),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return false, err
+	}
+	return !projectaccess.IsGuestRole(member.Role), nil
 }
 
 func (mc *membershipChecker) Members(ctx context.Context, identities []realtime.MembershipIdentity) (map[realtime.MembershipIdentity]bool, error) {

@@ -56,21 +56,37 @@ The issue page marks such a subscription **Key updates only**. Its menu offers *
 
 ## Agents and the inbox
 
-Inbox notifications belong to workspace members. For the active notification list used by `multica inbox list` and for archived notifications, an agent may read the runtime owner's notifications only when the server verifies that the owner is the upstream human who triggered the run. This identity follows agent delegation chains. Runs triggered by another person or without a verifiable human, and cloud-node credentials without a task binding, cannot read them. This guarantee covers only the active and archived lists; the snoozed list, unread counts and write endpoints retain their current permissions pending separate work.
+Inbox notifications belong to workspace members. An agent may read and change the runtime owner's notifications only when the server verifies that the owner is the upstream human who triggered the run. This identity follows agent delegation chains. The rule covers every inbox action: the active, archived and snoozed lists, unread counts, and every change. Runs triggered by another person or without a verifiable human, and cloud-node credentials without a task binding, are refused. An agent's unread counts cover only the workspace its run belongs to, never the owner's other workspaces. Only people can delete notifications. The server logs each change an agent makes, with the agent, the run and the person it acted for.
 
 @-mentioning an agent in a comment, assigning an issue to it, or triggering an autopilot creates a run directly; no notification is left for the agent. `@all` notifies members only.
 
-## Read from the CLI
+## Manage from the CLI
 
-Use your existing CLI login to list your active notifications without marking them read:
+Use your existing CLI login to read and handle your notifications. Listing never marks anything read:
 
 ```sh
-multica inbox list --project <project-id> --type mentioned --output json
+multica inbox count
+multica inbox list --unread --since 1d --output json
+multica inbox list --issue MUL-123
+multica inbox list --archived     # or --snoozed
 ```
 
-`--project` accepts a full UUID or a unique ID prefix, including the short ID from `multica project list`. Prefixes are resolved through the project list before reading the inbox; no match or an ambiguous prefix produces an error.
+Each row shows the notification ID, the issue key, the type, who it is from, the title and a short summary of the comment or change. `--unread`, `--issue` (an issue key or UUID), `--since` (an RFC 3339 time or a duration such as `2h`, `1d`, `1w`), `--project` and `--type` filter the list. `--archived` reads the whole archive page by page, so an issue archived long ago can still be found and restored. `--project` accepts a full UUID or a unique ID prefix, including the short ID from `multica project list`; no match or an ambiguous prefix produces an error. The table also keeps the issue, comment and project IDs and cuts the summary short; `--output json` has the full summary.
 
-Both filters are optional and apply locally after fetching the active inbox. JSON includes notification, issue, project and optional comment IDs, plus the type, title, read status and creation time. The default output is a table. An authorized agent run reads the runtime owner's notifications using its task credential; it never falls back to a person's login.
+Handle notifications by the IDs the list shows:
+
+```sh
+multica inbox read <id>...                      # unread <id>... reverses it
+multica inbox read --issue MUL-123              # every notification on one issue
+multica inbox archive <id>...                   # unarchive <id>... restores
+multica inbox snooze <id>... --until tomorrow   # RFC 3339, 30m, 3h, 1d, 1w; unsnooze <id>... ends it
+```
+
+As in the app, reading, archiving or snoozing a notification on an issue applies to the whole issue, while marking one unread changes only that notification. A failure on one ID doesn't stop the others; the command reports which failed and exits non-zero.
+
+The bulk actions match the inbox menu: `multica inbox read --all`, and `multica inbox archive` with `--all`, `--read` (issues whose newest notification is read) or `--completed` (issues in a `done` or `closed` status). They need `--yes`, or a typed confirmation when run by hand, and leave snoozed issues alone, except `--completed`: as in the app, it also archives a done or closed issue while it's snoozed, ending the snooze. Every change reports how many notifications it actually changed, whole issues included; one already in that state counts 0. `--output json` returns the same count, with the result for each ID. Notifications can't be deleted from the CLI.
+
+An authorized agent run uses its task credential for all of this; it never falls back to a person's login.
 
 ## Handle notifications
 
@@ -119,6 +135,7 @@ Reading a notification doesn't remove it. A row leaves the inbox only when:
 - you snooze its issue. This one is temporary: the issue comes back at the time you picked, or earlier when something needs you. See [Snooze an issue](#snooze-an-issue);
 - you move its issue to any status in the `done` or `closed` category yourself, while **Archive issues you complete** is on (it is by default). Only your own notifications on that issue are archived, read or not. When someone else or an agent completes an issue, its notifications stay in your inbox, so you still see the news;
 - it's a **Run failed** notification and its issue moves to a status that hands it back to a person: `in_review`, a custom status in the `started` category, or any status in the `done` or `closed` category. This archives everyone's Run failed notifications on the issue, whoever moved it, and doesn't depend on the setting above. `blocked` is the exception: it hands the issue over too, but the work is still stuck, so the earlier failures are still worth reading.
+- your inbox in the workspace goes past 2,000 notifications. It keeps the newest 2,000 and shortly afterwards archives the older ones, read or not. A notification that comes back from a snooze or that you restore from the archive counts from when it came back. Notifications on a snoozed issue don't count and are left alone.
 
 Open windows drop an archived row right away, except the one you have open. When its notification leaves the inbox some other way (you set the issue to `done` from its status, another window archived it, or an edit took it out of the section's filters), the row stays lit where it was and the issue header says what happened. **Undo** brings the notification back, and **Next** (or `E`) opens the next row. The row leaves once you move on.
 

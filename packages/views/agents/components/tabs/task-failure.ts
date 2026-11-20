@@ -53,6 +53,7 @@ export const FAILURE_REASON_I18N_KEYS = {
   codex_resume_oversized: "codex_resume_oversized",
   idle_watchdog: "idle_watchdog",
   local_directory_error: "local_directory_error",
+  local_directory_missing: "local_directory_missing",
   cancelled: "cancelled",
 
   // Pre-MUL-1949 coarse values, still present on historical rows.

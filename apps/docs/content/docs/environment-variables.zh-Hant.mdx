@@ -249,7 +249,7 @@ API key 與 base URL 都為空時，這一層關閉，不會發出任何上游�
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 沒有輸出且沒有工具執行時的靜默上限；`0` 表示整套 watchdog 關閉 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 單個工具呼叫持續靜默的上限；只有希望工具比模型有更多餘量時才單獨設定，`0` 表示工具執行期間永不強制停止。Cursor 的後臺 shell 在它啟動的程序退出前一直算作執行中；到達這個上限時，守護程序會停止這些程序，並給 Cursor 一段新的 watchdog 預算來產出終態結果。若程序歸屬或清理無法驗證，則回到普通的執行取消策略 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 專用靜默閾值 |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | Codex 語義靜默閾值。Codex 自己的計時器看不到工具是否在執行，因此跟隨 idle / tool 預算中較大的那個，而不再單獨保留一個更短的上限 |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | idle 與 tool 預算中較大的值；守護程序的 watchdog 關閉時為 `10m` | Codex 語義靜默閾值。Codex 的計時器無法判斷是否正在執行工具。`MULTICA_AGENT_IDLE_WATCHDOG` 為 `0` 且未設定此變數時，Codex 使用自己的預設值 `10m`。 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | 顯式覆蓋 Codex 首輪無進展上限；`0` 保持預設值。實際首輪等待仍受 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 和總執行超時限制——需將 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 設為嚴格大於此值（並留出餘量），否則等待會被截斷至該值，且會跳過模型目錄啟動重試。設為相等還不夠：語義計時器先啟動，兩者相等時仍可能丟失該重試 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 啟動握手上限；顯式設定後會統一覆蓋兩類預算 |
 | `MULTICA_CODEX_MEMORY` | 關閉 | 設為 `1`、`true`、`yes` 或 `on` 時，在守護程序管理的 Codex 執行中保留 Codex 原生記憶；預設按執行關閉，見 [Codex 原生記憶與子 AI 代理](/daemon-runtimes#codex-memory) |

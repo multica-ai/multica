@@ -56,21 +56,37 @@ La page de la tâche signale un tel abonnement par **Mises à jour clés**. Son 
 
 ## Les agents et la boîte de réception
 
-Les notifications appartiennent aux membres de l'espace de travail. Pour la liste des notifications actives utilisée par `multica inbox list` et pour les notifications archivées, un agent peut lire les notifications du propriétaire du runtime uniquement si le serveur vérifie que ce propriétaire est la personne à l'origine de l'exécution. Cette identité est transmise dans les chaînes de délégation entre agents. Les exécutions déclenchées par une autre personne ou sans personne vérifiable, ainsi que les identifiants de nœud cloud sans liaison à une exécution, ne peuvent pas les lire. Cette garantie couvre uniquement la liste active et les archives ; la liste reportée, les compteurs de non-lus et les interfaces d'écriture conservent leurs permissions actuelles en attendant un traitement séparé.
+Les notifications appartiennent aux membres de l'espace de travail. Un agent peut lire et traiter les notifications du propriétaire du runtime uniquement si le serveur vérifie que ce propriétaire est la personne à l'origine de l'exécution. Cette identité est transmise dans les chaînes de délégation entre agents. La règle couvre toutes les actions de la boîte de réception : la liste active, les archives, la liste reportée, les compteurs de non-lus et toutes les modifications. Les exécutions déclenchées par une autre personne ou sans personne vérifiable, ainsi que les identifiants de nœud cloud sans liaison à une exécution, sont refusés. Les compteurs de non-lus lus par un agent ne couvrent que l'espace de travail de son exécution, jamais les autres espaces du propriétaire. Seules les personnes peuvent supprimer des notifications. Le serveur journalise chaque modification faite par un agent, avec l'agent, l'exécution et la personne pour qui il agissait.
 
 @mentionner un agent dans un commentaire, lui assigner une tâche ou déclencher une automatisation crée directement une exécution ; aucune notification n'est laissée à l'agent. `@all` ne notifie que les membres.
 
-## Lire depuis le CLI
+## Gérer depuis le CLI
 
-Utilisez votre connexion CLI existante pour lister les notifications actives sans les marquer comme lues :
+Utilisez votre connexion CLI existante pour lire et traiter vos notifications. Lister ne marque rien comme lu :
 
 ```sh
-multica inbox list --project <project-id> --type mentioned --output json
+multica inbox count
+multica inbox list --unread --since 1d --output json
+multica inbox list --issue MUL-123
+multica inbox list --archived     # ou --snoozed
 ```
 
-`--project` accepte un UUID complet ou un préfixe d'ID unique, y compris l'ID court affiché par `multica project list`. Les préfixes sont résolus via la liste des projets avant de lire la boîte de réception ; un préfixe sans correspondance ou ambigu produit une erreur.
+Chaque ligne indique l'ID de la notification, la clé de la tâche, le type, son auteur, le titre et un court résumé du commentaire ou du changement. `--unread`, `--issue` (une clé de tâche ou un UUID), `--since` (une date RFC 3339 ou une durée comme `2h`, `1d`, `1w`), `--project` et `--type` filtrent la liste. `--archived` lit toute l'archive page par page : une tâche archivée il y a longtemps reste trouvable et restaurable. `--project` accepte un UUID complet ou un préfixe d'ID unique, y compris l'ID court affiché par `multica project list` ; un préfixe sans correspondance ou ambigu produit une erreur. Le tableau garde aussi les ID de tâche, de commentaire et de projet, et abrège le résumé ; `--output json` donne le résumé complet.
 
-Les deux filtres sont facultatifs et s'appliquent localement après récupération de la boîte de réception active. Le JSON contient les ID de notification, de tâche, de projet et, si disponible, de commentaire, ainsi que le type, le titre, l'état lu et la date de création. La sortie par défaut est un tableau. Une exécution d'agent autorisée utilise son identifiant d'exécution pour lire les notifications du propriétaire du runtime, sans revenir à la connexion d'une personne.
+Traitez les notifications avec les ID affichés par la liste :
+
+```sh
+multica inbox read <id>...                      # unread <id>... annule
+multica inbox read --issue MUL-123              # toutes les notifications d'une tâche
+multica inbox archive <id>...                   # unarchive <id>... restaure
+multica inbox snooze <id>... --until tomorrow   # RFC 3339, 30m, 3h, 1d, 1w ; unsnooze <id>... y met fin
+```
+
+Comme dans l'application, marquer comme lue, archiver ou reporter une notification de tâche s'applique à toute la tâche, tandis que marquer une notification comme non lue ne change qu'elle. L'échec d'un ID n'arrête pas les autres ; la commande indique lesquels ont échoué et se termine avec un code non nul.
+
+Les actions groupées correspondent au menu de la boîte de réception : `multica inbox read --all`, et `multica inbox archive` avec `--all`, `--read` (tâches dont la notification la plus récente est lue) ou `--completed` (tâches dans un statut `done` ou `closed`). Elles exigent `--yes`, ou une confirmation saisie lors d'une exécution manuelle, et laissent de côté les tâches reportées, sauf `--completed` : comme dans l'application, il archive aussi une tâche terminée ou fermée même reportée, ce qui met fin au report. Chaque modification affiche le nombre de notifications réellement modifiées, tâches entières comprises ; une notification déjà dans cet état compte pour 0. `--output json` renvoie ce même nombre, avec le résultat de chaque ID. Le CLI ne permet pas de supprimer des notifications.
+
+Une exécution d'agent autorisée utilise son identifiant d'exécution pour tout cela, sans revenir à la connexion d'une personne.
 
 ## Traiter les notifications
 
@@ -119,6 +135,7 @@ Lire une notification ne la retire pas. Une ligne quitte la boîte de réception
 - quand vous reportez sa tâche. C'est temporaire : la tâche revient à l'heure choisie, ou plus tôt si quelque chose a besoin de vous. Voir « Reporter une tâche » ci-dessus ;
 - quand vous passez vous-même sa tâche à n'importe quel statut des catégories `done` ou `closed`, tant que **Archiver les tâches que vous terminez** est activé (c'est le cas par défaut). Seules vos propres notifications sur cette tâche sont archivées, lues ou non. Quand quelqu'un d'autre ou un agent termine une tâche, ses notifications restent dans votre boîte de réception, pour que vous voyiez la nouvelle ;
 - quand c'est une notification **Exécution en échec** et que sa tâche passe à un statut qui la rend à une personne : `in_review`, un statut personnalisé de la catégorie `started`, ou n'importe quel statut des catégories `done` ou `closed`. Les notifications Exécution en échec de tout le monde sur cette tâche sont alors archivées, quelle que soit la personne qui a changé le statut, et indépendamment du réglage ci-dessus. `blocked` fait exception : il rend aussi la tâche, mais le travail reste bloqué, donc les échecs précédents méritent encore d'être lus.
+- quand votre boîte de réception dans l'espace de travail dépasse 2 000 notifications. Elle garde les 2 000 plus récentes et archive peu après les plus anciennes, lues ou non. Une notification revenue d'un report ou restaurée depuis l'archive compte à partir de son retour. Les notifications d'une tâche reportée ne comptent pas et restent en place.
 
 Les fenêtres ouvertes retirent aussitôt une ligne archivée, sauf celle que vous avez ouverte. Quand sa notification quitte la boîte de réception autrement (vous passez la tâche à `done` depuis son statut, une autre fenêtre l'archive, ou une modification la sort des filtres de la section), la ligne reste en surbrillance à sa place et l'en-tête de la tâche indique ce qui s'est passé. **Annuler** fait revenir la notification, et **Suivante** (ou `E`) ouvre la ligne suivante. La ligne disparaît dès que vous passez à autre chose.
 

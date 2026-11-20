@@ -18,6 +18,7 @@ Feishu/Lark, Slack, DingTalk, WeCom, Telegram et WeChat sont pris en charge. WeC
 | Messages directs à l'agent | Pris en charge | Pris en charge | Pris en charge | Pris en charge | Pris en charge | Uniquement le compte qui a scanné le QR code |
 | Groupes ou canaux | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot | Déclenché en @mentionnant le bot ou en lui répondant | Non pris en charge |
 | Créer des tâches | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande slash `/issue` ; l'agent rédige la description avant de créer la tâche | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle | Commande de message `/issue` ; crée la tâche à partir de votre saisie telle quelle |
+| Afficher les commandes | `/help` | `@Multica /help` | `/help` | `/help` | `/help` | `/help` |
 | Démarrer une nouvelle discussion | `/new [message]` | Message direct : `/new [message]` ; canal/fil : `@Multica /new [message]` | `/new [message]` | `/new [message]` | `/new [message]` | `/new [message]` |
 | Effacer le contexte de la discussion en cours | `/clear [message]` | Message direct : `/clear [message]` ; canal/fil : `@Multica /clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` |
 | Connexion | Connexion longue de la plateforme | Socket Mode | Mode Stream | Connexion longue de la plateforme | Long polling `getUpdates` | Long polling iLink |
@@ -55,6 +56,8 @@ Les messages de canal qui ne @mentionnent pas le bot ne déclenchent jamais l'ag
 <ChannelChatDemo />
 
 ## Contrôle des conversations
+
+Envoyez `/help` dans un message direct (sur Slack, utilisez `@Multica /help`), ou @mentionnez le bot avec `/help` dans un groupe ou un canal, pour afficher `/help`, `/new [message]`, `/clear [message]` et `/issue <titre>` (les lignes suivantes servent de description). WeCom et WeChat (messages directs uniquement) sont également pris en charge. Multica répond directement sans créer de discussion, de tâche ni d'exécution et sans changer la discussion active. Sur Slack, `@Multica /help` affiche les commandes de message. La commande native `/issue <description>` suit un flux distinct où l'agent crée une tâche à partir de votre description.
 
 `/new` crée une nouvelle discussion Multica et y achemine les messages suivants de cette conversation externe. `/new <message>` crée la discussion et utilise le message comme premier tour. La discussion précédente reste enregistrée et utilisable dans Multica.
 

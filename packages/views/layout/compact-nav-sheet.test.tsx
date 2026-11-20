@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithI18n } from "../test/i18n";
 import { CompactNavSheet } from "./compact-nav-sheet";
 
@@ -20,12 +20,22 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   }),
 }));
 vi.mock("./app-rail", () => ({ AppRail: () => <nav data-testid="rail" /> }));
-vi.mock("./space-panel", () => ({
-  SpacePanelContent: ({ space }: { space: string | null }) => <div data-testid={`panel-${space}`} />,
-}));
+vi.mock("./space-panel", async () => {
+  const { useContext } = await import("react");
+  const { PanelScrollFadeContext } = await import("./panel-nav");
+  return {
+    SpacePanelContent: ({ space }: { space: string | null }) => (
+      <div data-testid={`panel-${space}`} data-fade={String(useContext(PanelScrollFadeContext))} />
+    ),
+  };
+});
 vi.mock("./app-shell-context", () => ({
   useAppShell: () => ({ space: "work", hasPanel: true }),
 }));
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 beforeEach(() => {
   state.pathname = "/acme/issues";
@@ -68,5 +78,19 @@ describe("CompactNavSheet content", () => {
     state.openMobile = true;
     const { queryByTestId } = renderWithI18n(<CompactNavSheet />);
     expect(queryByTestId("rail")).toBeNull();
+  });
+
+  // Some Android WebViews paint the scroll-fade mask as a black block over
+  // the panel rows, so touch screens drop it inside the sheet.
+  it.each([
+    { pointer: "coarse", fade: "false" },
+    { pointer: "fine", fade: "true" },
+  ])("sets the panel scroll fade to $fade on a $pointer pointer", ({ pointer, fade }) => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === `(pointer: ${pointer})`,
+    }));
+    state.openMobile = true;
+    const { getByTestId } = renderWithI18n(<CompactNavSheet />);
+    expect(getByTestId("panel-work")).toHaveAttribute("data-fade", fade);
   });
 });

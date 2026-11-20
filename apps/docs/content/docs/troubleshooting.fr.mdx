@@ -45,6 +45,8 @@ multica daemon status --output json
 multica daemon logs --lines 100
 ```
 
+Si la CLI ne peut pas vérifier le jeton, examinez l’erreur signalée avant de vous reconnecter.
+
 Causes fréquentes :
 
 - Le CLI ne s'est pas connecté, ou le jeton stocké sur cette machine a expiré.
@@ -65,6 +67,8 @@ Les déploiements auto-hébergés doivent aussi interroger le `/health` de l'API
 ```bash
 multica config show
 ```
+
+Sous macOS, si les journaux du daemon indiquent `connect: no route to host` alors que `curl -fsS <server-url>/health` réussit dans un terminal sur le même Mac, recueillez les deux résultats au même moment. Précisez comment le daemon a été lancé (Desktop, service de connexion ou terminal) ainsi que les versions de macOS et du daemon. Le résultat du terminal confirme seulement la connectivité du processus shell.
 
 </Accordion>
 <Accordion title={<><code>multica setup</code> signale que le serveur est injoignable</>} id="multica-setup-reports-the-server-is-not-reachable" value="multica-setup-reports-the-server-is-not-reachable">
@@ -175,6 +179,17 @@ Pour rétablir l'accès :
 3. Redémarrez le daemon de la même façon que vous l'avez lancé : `multica daemon restart`, ou `launchctl kickstart -k gui/$(id -u)/<label>` pour un LaunchAgent.
 
 Répétez ces étapes après chaque mise à jour du CLI. La mise à jour automatique n'est activée par défaut que pour les daemons connectés à Multica Cloud ; démarrez le daemon avec `--no-auto-update` pour que les mises à jour n'aient lieu que lorsque vous les lancez. Le CLI intégré à [Multica Desktop](/desktop-app) est signé avec un Developer ID, ses autorisations survivent donc aux mises à jour.
+
+</Accordion>
+<Accordion title="Hermes réinstalle ses dépendances après l’utilisation de la CLI" id="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli" value="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli">
+
+Si vous alternez entre la CLI ou l’application de bureau Hermes et les exécutions Hermes dans Multica, chaque changement peut ajouter 30 à 60 secondes au démarrage. Hermes reconstruit alors son environnement Python partagé. Chaque reconstruction laisse une nouvelle génération de l’environnement sur le disque jusqu’à ce que Hermes la nettoie.
+
+Cela se produit lorsque `memory.provider` désigne dans votre répertoire Hermes un plugin qui a des dépendances Python. Chaque exécution Multica utilise son propre répertoire Hermes, partage les dépendances installées et désactive le fournisseur de mémoire externe pour éviter que les exécutions partagent leur mémoire. Hermes détermine les dépendances à partir des plugins du répertoire actif. Les deux répertoires ont des besoins différents et chacun considère l’installation de l’autre comme obsolète. Le problème est suivi dans [NousResearch/hermes-agent#137726](https://github.com/NousResearch/hermes-agent/issues/137726).
+
+Pour confirmer le diagnostic, cherchez `hermes is reinstalling its dependency environment before this task starts` dans le [journal du daemon](#emplacement-des-journaux). L’entrée suivante, `hermes dependency reinstall finished`, indique dans `startup_delay_ms` le temps écoulé entre le lancement et le moment où Hermes est prêt, réinstallation comprise.
+
+En attendant une correction dans Hermes, définissez `memory.provider: ""` dans votre fichier `config.yaml` Hermes pour éviter les reconstructions. Cette modification désactive aussi le plugin de mémoire pour la CLI. Si vous gardez le plugin actif, le démarrage peut prendre plus de temps après chaque changement.
 
 </Accordion>
 </Accordions>

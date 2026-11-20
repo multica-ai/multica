@@ -71,6 +71,7 @@
     "./inbox": "./inbox/index.ts",
     "./inbox/group": "./inbox/group.ts",
     "./inbox/queries": "./inbox/queries.ts",
+    "./inbox/retry": "./inbox/retry.ts",
     "./inbox/mutations": "./inbox/mutations.ts",
     "./inbox/filter-store": "./inbox/filter-store.ts",
     "./inbox/selection-store": "./inbox/selection-store.ts",
@@ -150,6 +151,7 @@
     "./issue-views/edit-store": "./issue-views/edit-store.ts",
     "./billing": "./billing/index.ts",
     "./billing/recovery": "./billing/recovery.ts",
+    "./billing/trial": "./billing/trial.ts",
     "./billing/queries": "./billing/queries.ts",
     "./billing/mutations": "./billing/mutations.ts",
     "./github": "./github/index.ts",
@@ -211,7 +213,8 @@
     "./skills/pack-archive": "./skills/pack-archive.ts",
     "./skills/stores": "./skills/stores/index.ts",
     "./autopilots/stores": "./autopilots/stores/index.ts",
-    "./runtimes/qoder": "./runtimes/qoder.ts"
+    "./runtimes/qoder": "./runtimes/qoder.ts",
+    "./docs": "./docs/index.ts"
   },
   "dependencies": {
     "@formatjs/intl-localematcher": "catalog:",

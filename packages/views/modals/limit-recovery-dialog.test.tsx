@@ -24,6 +24,14 @@ interface AvailableActions {
   checkout: boolean;
   portal: boolean;
   purchaseSeats: boolean;
+  changePlan?: boolean;
+  purchaseAutopilotRuns?: boolean;
+}
+
+interface SummaryFixture {
+  availableActions: AvailableActions;
+  entitlement?: { plan: string };
+  autopilotAddon?: { purchasedRuns: number } | null;
 }
 
 const mockPush = vi.hoisted(() => vi.fn());
@@ -33,9 +41,9 @@ const mockSummaryQuery = vi.hoisted(() => vi.fn());
 const featureState = vi.hoisted(() => ({ billingEnabled: true }));
 const workspaceState = vi.hoisted(() => ({ id: "ws-test" }));
 const summaryState = vi.hoisted(() => ({
-  value: null as null | { availableActions: AvailableActions },
+  value: null as null | SummaryFixture,
   error: null as Error | null,
-  pending: null as Promise<{ availableActions: AvailableActions } | null> | null,
+  pending: null as Promise<SummaryFixture | null> | null,
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -68,6 +76,11 @@ vi.mock("@multica/core/billing", () => ({
   useCreateWorkspaceSubscriptionPortal: () => ({
     mutateAsync: mockCreatePortal,
   }),
+}));
+
+vi.mock("../billing/autopilot-addon-dialog", () => ({
+  AutopilotAddonDialog: ({ open }: { open: boolean }) =>
+    open ? <div role="dialog" aria-label="Buy more automation runs" /> : null,
 }));
 
 import { LimitRecoveryDialog } from "./limit-recovery-dialog";
@@ -215,7 +228,9 @@ describe("LimitRecoveryDialog", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText("Upgrade to Pro to restore autopilot runs."),
+      await screen.findByText(
+        "Upgrade to Pro to raise the monthly limit and restore autopilot runs, or wait for the allowance to reset.",
+      ),
     ).toBeInTheDocument();
 
     act(() => useModalStore.getState().dismissLimitRecovery());
@@ -353,7 +368,7 @@ describe("LimitRecoveryDialog", () => {
 
     expect(
       await screen.findByText(
-        "Ask a workspace owner or admin to upgrade to Pro.",
+        "Ask a workspace owner or admin to upgrade the plan, or wait for the allowance to reset.",
       ),
     ).toBeInTheDocument();
     expect(
@@ -400,5 +415,83 @@ describe("LimitRecoveryDialog", () => {
       screen.queryByRole("button", { name: "View Billing" }),
     ).not.toBeInTheDocument();
     expect(mockSummaryQuery).not.toHaveBeenCalled();
+  });
+
+  it("offers Pro managers more runs first and Business as the alternative", async () => {
+    summaryState.value = {
+      availableActions: actions({
+        portal: true,
+        purchaseSeats: true,
+        changePlan: true,
+        purchaseAutopilotRuns: true,
+      }),
+      entitlement: { plan: "pro" },
+      autopilotAddon: { purchasedRuns: 0 },
+    };
+    renderPrompt();
+    const user = await openPrompt();
+
+    expect(
+      await screen.findByText(
+        "Buy more runs to restore autopilot runs this month, or wait for the allowance to reset.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open Billing Portal" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Upgrade to Business" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Buy more runs" }));
+    await waitFor(() => expect(queryRecoveryDialog()).not.toBeInTheDocument());
+    expect(
+      screen.getByRole("dialog", { name: "Buy more automation runs" }),
+    ).toBeInTheDocument();
+  });
+
+  it("offers Business managers more runs without another upgrade", async () => {
+    summaryState.value = {
+      availableActions: actions({
+        portal: true,
+        changePlan: true,
+        purchaseAutopilotRuns: true,
+      }),
+      entitlement: { plan: "business" },
+      autopilotAddon: { purchasedRuns: 1000 },
+    };
+    renderPrompt();
+    await openPrompt();
+
+    expect(
+      await screen.findByRole("button", { name: "Buy more runs" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Upgrade to Business" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "pro",
+      "Ask a workspace owner or admin to buy more runs or upgrade the plan, or wait for the allowance to reset.",
+    ],
+    [
+      "business",
+      "Ask a workspace owner or admin to buy more runs, or wait for the allowance to reset.",
+    ],
+  ])("tells a %s member what to ask an admin for, without a payment action", async (plan, text) => {
+    summaryState.value = {
+      availableActions: actions(),
+      entitlement: { plan },
+      autopilotAddon: { purchasedRuns: 0 },
+    };
+    renderPrompt();
+    await openPrompt();
+
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Buy|Upgrade|Billing/ }),
+    ).not.toBeInTheDocument();
   });
 });
