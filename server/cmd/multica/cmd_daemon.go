@@ -973,7 +973,10 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	// than server URL: an unreadable / missing config only means "no
 	// persisted overrides", not "cannot start".
 	fileCfg, _ := cli.LoadCLIConfigForProfile(profile)
-	logLevel := resolveDaemonStringOverride("", "LOG_LEVEL", fileCfg.LogLevel)
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = fileCfg.LogLevel
+	}
 	// Pick the log sink. A user who runs `daemon start --foreground` in a shell
 	// keeps live, colored logging on their terminal (a documented debugging
 	// path — see docs troubleshooting). A detached/background child, whose
