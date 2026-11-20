@@ -66,3 +66,33 @@ describe("api.listIssues requester compatibility", () => {
     if (!supported) expect(String(fetchMock.mock.calls[1]?.[0])).toContain("creator_id=me");
   });
 });
+
+describe("api.sendChatMessage steering", () => {
+  const accepted = {
+    message_id: "message-1",
+    task_id: "task-1",
+    created_at: "2026-11-16T00:00:00Z",
+  };
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  // The server decides whether a send can join the running reply; the client
+  // only states intent. Default sends ask to steer, the explicit queue does not.
+  it.each([
+    [undefined, true],
+    [{ attachmentIds: ["attachment-1"] }, true],
+    [{ queue: false }, true],
+    [{ queue: true }, false],
+  ])("with %j sends steer=%s", async (opts, steer) => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      Response.json(accepted, { status: 201 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.sendChatMessage("session-1", "use the new path", opts);
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.steer).toBe(steer);
+    expect(body.content).toBe("use the new path");
+  });
+});

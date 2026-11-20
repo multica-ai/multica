@@ -14,10 +14,20 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 
-export function useAttachmentHtmlText(attachmentId: string | null | undefined) {
+/**
+ * `workspaceId` is the workspace that owns the attachment, when it may differ
+ * from the current route's (a file linked from another workspace).
+ */
+export function useAttachmentHtmlText(
+  attachmentId: string | null | undefined,
+  workspaceId?: string | null,
+) {
   return useQuery({
     queryKey: ["attachment-content", attachmentId ?? ""] as const,
-    queryFn: () => api.getAttachmentTextContent(attachmentId as string),
+    queryFn: () =>
+      workspaceId
+        ? api.getAttachmentTextContent(attachmentId as string, { workspaceId })
+        : api.getAttachmentTextContent(attachmentId as string),
     enabled: !!attachmentId,
     // 413 / 415 won't become 200 on retry; a transport error is easier to
     // recover from by re-opening than waiting on background retries with

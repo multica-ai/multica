@@ -850,7 +850,7 @@
     },
     "others_issues": {
       "label": "Tareas de otras personas",
-      "description": "Tareas asignadas a otra persona o a su agente, que sigues solo porque las creaste, comentaste o te mencionaron. Las actualizaciones clave son las @menciones, las respuestas en hilos en los que participaste y los estados que necesitan a una persona, como en revisión, bloqueada o terminada.",
+      "description": "Tareas asignadas a otra persona o a su agente, que sigues solo porque las creaste, comentaste o te mencionaron. Las actualizaciones clave son las @menciones, las respuestas en hilos en los que participaste y, con Cambios de estado activado, los estados que necesitan a una persona, como en revisión, bloqueada o terminada.",
       "key_updates": "Solo actualizaciones clave",
       "all": "Toda la actividad"
     },
@@ -987,7 +987,7 @@
     "section_general": "Detalles del espacio de trabajo",
     "logo_label": "Logo del espacio de trabajo",
     "change_logo_aria": "Cambiar logo del espacio de trabajo",
-    "click_logo_hint": "Haz clic en el logo para subir una imagen nueva",
+    "click_logo_hint": "Haz clic en el logotipo para subir una imagen o crear un icono de texto",
     "toast_logo_failed": "Error al subir el logo del espacio de trabajo",
     "name_label": "Nombre",
     "description_label": "Descripción",
@@ -1051,7 +1051,7 @@
     "disconnect": "Desconectar",
     "disconnecting": "Desconectando…",
     "disconnect_confirm_title": "Desconectar la GitHub App",
-    "disconnect_confirm_description": "Multica dejará de recibir webhooks de esta instalación. Los mirrors de PR y los enlaces existentes se conservan; vuelve a conectar cuando quieras para reanudar las actualizaciones.",
+    "disconnect_confirm_description": "¿Desconectar {{login}} de este espacio de trabajo? Se detendrán las actualizaciones de esta cuenta. Se conservarán los PR y enlaces existentes; las demás conexiones no se verán afectadas.",
     "disconnect_confirm_cancel": "Cancelar",
     "disconnect_confirm_action": "Desconectar",
     "not_configured": "La integración con GitHub no está configurada en esta instalación. Los operadores deben definir",
@@ -1072,7 +1072,18 @@
     "feature_auto_link_description": "Enlaza un PR con la tarea cuyo ID, p. ej. {{example}}, aparece en su título o nombre de rama, o tras “Closes” en su descripción.",
     "pause": "Pausar funciones de GitHub",
     "resume": "Reanudar funciones de GitHub",
-    "status_paused": "En pausa"
+    "status_paused": "En pausa",
+    "add_account": "Añadir cuenta u organización",
+    "disconnect_account": "Desconectar {{login}}",
+    "errors": {
+      "missing_authorization": "GitHub no devolvió la autorización del usuario. Vuelve a conectar y completa la autorización. Si se repite con una instalación existente, contacta con tu operador de Multica.",
+      "installation_not_authorized": "Para una instalación personal, usa la cuenta de GitHub propietaria. Para una organización, usa una cuenta con permisos de administrador en todos los repositorios autorizados y selecciona al menos uno.",
+      "invalid_state": "Esta solicitud de conexión de GitHub ha caducado o no es válida. Reinicia la conexión desde Configuración → Código.",
+      "incomplete_callback": "GitHub devolvió una respuesta de conexión incompleta. Reinicia la conexión desde Configuración → Código.",
+      "bad_workspace": "No se encontró el espacio de trabajo de esta conexión. Abre el espacio deseado y reintenta desde Configuración → Código.",
+      "verification_failed": "No se pudo verificar tu acceso a la instalación de GitHub. Reintenta; si se repite, pide a tu operador de Multica que revise la configuración de la GitHub App.",
+      "persist_failed": "No se pudo guardar la conexión de GitHub. Reintenta desde Configuración → Código; si se repite, contacta con tu operador de Multica."
+    }
   },
   "vcs": {
     "section_title": "Proveedores de Git (self-hosted)",
@@ -1492,7 +1503,13 @@
       "up_to_date": "Tienes la última versión.",
       "downloading": "v{{version}} se está descargando en segundo plano: te avisaremos cuando esté lista para instalar.",
       "check_now": "Buscar ahora",
-      "checking": "Comprobando…"
+      "checking": "Comprobando…",
+      "check_unavailable": "No se pueden buscar actualizaciones ahora. Inténtalo más tarde.",
+      "check_network": "No se puede conectar con el servicio de actualizaciones. Revisa tu conexión e inténtalo de nuevo.",
+      "check_failed": "No se pudieron buscar actualizaciones. Inténtalo de nuevo.",
+      "download_failed": "La descarga falló. Puedes seguir usando la versión actual e intentarlo de nuevo.",
+      "download_ready": "v{{version}} está lista para instalar.",
+      "retry": "Reintentar"
     },
     "daemon": {
       "title": "Daemon",
@@ -1615,6 +1632,10 @@
       "member": {
         "label": "Miembro",
         "description": "Crea tareas y trabaja en ellas"
+      },
+      "guest": {
+        "label": "Invitado",
+        "description": "Ve y comenta los proyectos compartidos con él. No puede ejecutar agentes."
       }
     },
     "share_links_create_title": "Crear enlace de invitación",
@@ -1651,7 +1672,45 @@
     "seats_used": "{{used}} de {{purchased}} puestos usados",
     "share_links_description": "Cualquiera con el enlace puede unirse con el rol elegido hasta que caduque o lo revoques.",
     "share_links_label": "Enlaces de invitación",
-    "you": "Tú"
+    "you": "Tú",
+    "member_limit_full_title": "Este plan permite hasta {{limit}} miembros. El espacio de trabajo está lleno.",
+    "member_limit_full_description": "Pasa a Pro para tener miembros ilimitados. Cada miembro ocupa un puesto de pago, y la mejora incluye uno para esta invitación. O elimina antes a un miembro.",
+    "member_limit_full_description_pending": "Las invitaciones pendientes también ocupan un lugar ({{pending}} ahora). Pasa a Pro para tener miembros ilimitados (cada miembro ocupa un puesto de pago, y la mejora incluye uno para esta invitación), o revoca antes una invitación o elimina a un miembro.",
+    "member_limit_usage": "{{used}} / {{limit}} miembros",
+    "upgrade_and_invite": "Mejorar e invitar",
+    "toast_member_limit_reached": "El espacio de trabajo está lleno. Mejora el plan para invitar a más miembros.",
+    "member_limit_full_description_no_upgrade": "Revoca una invitación pendiente o elimina a un miembro para liberar un lugar.",
+    "toast_invalid_email": "Introduce una dirección de correo válida.",
+    "toast_already_member": "{{email}} ya es miembro de este espacio de trabajo.",
+    "toast_invitation_pending": "Ya hay una invitación pendiente para {{email}}.",
+    "toast_invite_check_unavailable": "No se pudieron comprobar los miembros y las invitaciones actuales. Inténtalo de nuevo en un momento.",
+    "member_limit_full_description_billing": "La suscripción del espacio de trabajo necesita atención. Restablécela en Facturación para añadir miembros, o elimina antes a un miembro.",
+    "open_billing": "Abrir Facturación",
+    "guest_free_tag": "Gratis · sin asiento",
+    "guest_projects_label": "Proyectos a los que puede acceder",
+    "guest_projects_add": "Añadir proyecto…",
+    "guest_projects_remove": "Quitar {{project}}",
+    "guest_projects_hint": "Los invitados no ven otros proyectos, agentes, automatizaciones ni ajustes.",
+    "invite_guest_button": "Invitar invitado",
+    "all_label": "Todos",
+    "guests_label": "Invitados",
+    "guest_count": "Invitados: {{count}}",
+    "list_separator": ", ",
+    "takes_seat": "Ocupa 1 asiento",
+    "frees_seat": "Libera un asiento",
+    "make_member": "Convertir en miembro",
+    "make_member_title": "¿Convertir a {{name}} en miembro?",
+    "make_member_description": "{{name}} verá todo el espacio de trabajo y podrá ejecutar agentes. Ocupa 1 asiento.",
+    "make_member_seat_description": "{{name}} verá todo el espacio de trabajo y podrá ejecutar agentes. Todos los asientos están ocupados, así que se compra 1 más.",
+    "purchase_seat_and_make_member": "Comprar asiento y convertir",
+    "making_member": "Convirtiendo…",
+    "make_guest_title": "Convertir a {{name}} en invitado",
+    "make_guest_description": "{{name}} solo verá los proyectos de abajo y liberará un asiento. Se retiran sus agentes, automatizaciones y acceso a runtimes.",
+    "make_guest_button": "Convertir en invitado",
+    "manage_projects": "Gestionar proyectos accesibles",
+    "manage_projects_title": "Proyectos a los que {{name}} puede acceder",
+    "save_projects": "Guardar",
+    "toast_projects_updated": "Proyectos actualizados"
   },
   "integrations": {
     "status_connected": "Conectado",
@@ -1731,6 +1790,30 @@
     "description": "Se aplica cuando todos los PR enlazados a una tarea se hayan fusionado, y solo a fusiones a partir de ahora.",
     "label": "Al fusionarse los PR, mover la tarea a",
     "none": "No cambiar"
+  },
+  "weixin": {
+    "section_title": "WeChat",
+    "page_description": "Mensajes privados con la cuenta que escanea el código QR de conexión.",
+    "loading": "Conectando…",
+    "empty": "Conecta WeChat desde la pestaña Integraciones de un agente.",
+    "close": "Cerrar",
+    "action_failed": "No se ha podido completar esta acción. Vuelve a intentarlo.",
+    "privacy_hint": "Los mensajes se ejecutarán con tu identidad en este espacio de trabajo. No compartas este código QR.",
+    "qr_label": "Código QR de conexión a WeChat",
+    "scan_hint": "Escanea con WeChat y confirma en tu teléfono.",
+    "scanned": "Código escaneado. Confirma la conexión en WeChat.",
+    "verify_hint": "WeChat requiere un código de verificación. Introduce el código que aparece en tu teléfono.",
+    "verify_label": "Código de verificación",
+    "verify": "Verificar",
+    "success": "Conectado. Envía un mensaje nuevo al bot en WeChat para empezar.",
+    "expired": "Este código QR ha caducado. Genera uno nuevo.",
+    "blocked": "WeChat ha bloqueado los intentos de verificación. Vuelve a intentarlo más tarde.",
+    "already_bound": "Este bot ya está vinculado en WeChat. Desconecta el cliente anterior y vuelve a intentarlo.",
+    "refresh": "Nuevo código QR",
+    "retry": "Reintentar",
+    "already_connected": "Esta cuenta de WeChat está conectada a {{agent}}. Desconéctala allí primero.",
+    "connected_elsewhere": "Esta cuenta de WeChat está conectada en otro lugar. Desconecta primero la conexión existente.",
+    "authorization_expired": "La autorización de WeChat ha caducado. Escanea de nuevo para reconectar."
   },
   "connected_apps": {
     "description": "Cuentas que usan tus agentes para acceder a aplicaciones externas. Las acciones permitidas se ejecutan de inmediato.",

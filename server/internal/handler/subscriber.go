@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -21,9 +23,12 @@ type SubscriberResponse struct {
 	Reason    string `json:"reason"`
 	CreatedAt string `json:"created_at"`
 	// ProjectCovered marks a direct row whose member also subscribes to the
-	// issue's project. The project path delivers every event regardless of the
-	// direct reason, so clients must not read that reason as a reduced tier.
+	// issue's project. Delivery already accounts for it; clients that predate
+	// Delivery still read it.
 	ProjectCovered bool `json:"project_covered,omitempty"`
+	// Delivery is how much of this issue the member actually receives, as the
+	// notification fanout decides it. Absent on agent rows, which get no inbox.
+	Delivery inbox.Delivery `json:"delivery,omitempty"`
 }
 
 func subscriberToResponse(s db.IssueSubscriber) SubscriberResponse {
@@ -64,6 +69,28 @@ func (h *Handler) ListIssueSubscribers(w http.ResponseWriter, r *http.Request) {
 		projectCovered[uuidToString(ps.UserID)] = true
 	}
 
+	var memberIDs []pgtype.UUID
+	for _, s := range subscribers {
+		if s.UserType == "member" {
+			memberIDs = append(memberIDs, s.UserID)
+		}
+	}
+	prefs := inbox.LoadPreferences(r.Context(), h.Queries, issue.WorkspaceID, memberIDs)
+	ownerLoaded := false
+	var owner inbox.IssueOwner
+	var ownerErr error
+	// Fails open like the fanout: an unreadable owner delivers every event.
+	isSomeoneElses := func(userID string) bool {
+		if !ownerLoaded {
+			ownerLoaded = true
+			owner, ownerErr = inbox.LoadIssueOwner(r.Context(), h.Queries, issue)
+			if ownerErr != nil {
+				slog.Warn("resolve issue owner for subscriber delivery", "issue_id", issueID, "error", ownerErr)
+			}
+		}
+		return ownerErr == nil && owner.IsSomeoneElses(userID)
+	}
+
 	resp := make([]SubscriberResponse, 0, len(subscribers)+len(projectSubscribers))
 	direct := make(map[string]bool, len(subscribers))
 	for _, s := range subscribers {
@@ -71,6 +98,15 @@ func (h *Handler) ListIssueSubscribers(w http.ResponseWriter, r *http.Request) {
 		if s.UserType == "member" {
 			direct[row.UserID] = true
 			row.ProjectCovered = projectCovered[row.UserID]
+			// The project fanout delivers every event to a project watcher on
+			// top of whatever the direct row narrows to.
+			if row.ProjectCovered {
+				row.Delivery = inbox.DeliveryAll
+			} else {
+				userID := row.UserID
+				row.Delivery = inbox.SubscriptionDelivery(s.Reason, prefs[userID],
+					func() bool { return isSomeoneElses(userID) })
+			}
 		}
 		resp = append(resp, row)
 	}
@@ -85,6 +121,7 @@ func (h *Handler) ListIssueSubscribers(w http.ResponseWriter, r *http.Request) {
 			UserID:    userID,
 			Reason:    subscriberReasonProject,
 			CreatedAt: timestampToString(ps.CreatedAt),
+			Delivery:  inbox.DeliveryAll,
 		})
 	}
 

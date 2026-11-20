@@ -101,7 +101,6 @@ import {
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
-import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 import { CopyParentFields } from "./copy-parent-fields";
 
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -258,7 +257,6 @@ export function ManualCreatePanel({
     : undefined;
   const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
   const sourceContextFailureMessage = useSourceContextFailureMessage();
-  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setManual = useIssueDraftStore((s) => s.setManual);
@@ -717,10 +715,6 @@ export function ManualCreatePanel({
       }
       if (anchorCommentId && sourceCode === "source_context_too_large") {
         toast.error(sourceContextFailureMessage(err) ?? tIssues(($) => $.source_context.error_too_large));
-        return false;
-      }
-      if (sourceCode === "issue_limit_reached") {
-        showIssueLimitUpgradePrompt();
         return false;
       }
       if (sourceCode === "invalid_issue_property" && err instanceof ApiError) {

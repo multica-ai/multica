@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@multica/core/api";
+import { createQueryClient } from "@multica/core/query-client";
 import {
   DEFAULT_SIDEBAR_INBOX_SETTINGS,
   useSidebarTreeStore,
@@ -14,12 +16,14 @@ import { agentListOptions } from "@multica/core/workspace/queries";
 import { snoozedInboxOptions } from "@multica/core/inbox/queries";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
+import { PanelBody } from "../panel-nav";
 import { InboxSection, useInboxSectionRows } from "./inbox-section";
 
 const state = vi.hoisted(() => ({
   unread: 0,
   compact: false,
   archive: vi.fn(),
+  unarchive: vi.fn(() => Promise.resolve()),
   unsubscribeArchive: vi.fn(),
   markAllRead: vi.fn(),
   archiveAll: vi.fn(),
@@ -31,6 +35,11 @@ const state = vi.hoisted(() => ({
   unsnooze: vi.fn(() => Promise.resolve()),
 }));
 
+const apiMock = vi.hoisted(() => ({ listInbox: vi.fn() }));
+vi.mock("@multica/core/api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/api")>()),
+  api: apiMock,
+}));
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
   return { ...actual, useWorkspacePaths: () => actual.paths.workspace("acme") };
@@ -40,11 +49,18 @@ vi.mock("@multica/core/inbox/queries", async (importOriginal) => ({
   useInboxUnreadCount: () => state.unread,
 }));
 vi.mock("@multica/core/inbox/mutations", () => ({
-  useArchiveInbox: () => ({ mutate: state.archive }),
+  useArchiveInbox: () => ({
+    mutate: state.archive,
+    mutateAsync: (id: string) => {
+      state.archive(id);
+      return Promise.resolve();
+    },
+  }),
+  useUnarchiveInbox: () => ({ mutateAsync: state.unarchive }),
   useMarkAllInboxRead: () => ({ mutate: state.markAllRead }),
-  useArchiveAllInbox: () => ({ mutate: state.archiveAll }),
-  useArchiveAllReadInbox: () => ({ mutate: state.archiveAllRead }),
-  useArchiveCompletedInbox: () => ({ mutate: state.archiveCompleted }),
+  useArchiveAllInbox: () => ({ mutateAsync: async () => (await state.archiveAll()) ?? { count: 1 } }),
+  useArchiveAllReadInbox: () => ({ mutateAsync: async () => (await state.archiveAllRead()) ?? { count: 1 } }),
+  useArchiveCompletedInbox: () => ({ mutateAsync: async () => (await state.archiveCompleted()) ?? { count: 1 } }),
   useMarkInboxRead: () => ({ mutate: state.markRead }),
   useMarkInboxUnread: () => ({ mutate: state.markUnread }),
   useUnsubscribeArchiveInbox: () => ({ mutate: state.unsubscribeArchive }),
@@ -135,7 +151,7 @@ function renderSection(
       </NavigationProvider>
     </QueryClientProvider>,
   );
-  return { ...result, nav };
+  return { ...result, nav, client };
 }
 
 const rows = () => Array.from(document.querySelectorAll<HTMLElement>("[data-inbox-row]"));
@@ -156,7 +172,7 @@ beforeEach(() => {
   }
   useSidebarTreeStore.setState({ inboxCollapsed: false, inboxSettings: DEFAULT_SIDEBAR_INBOX_SETTINGS });
   useInboxFilterStore.getState().clearFilters("ws-1");
-  useInboxSelectionStore.setState({ landing: null });
+  useInboxSelectionStore.setState({ landing: null, heldRows: {}, leftRowKeyByWorkspace: {} });
 });
 
 describe("InboxSection", () => {
@@ -249,7 +265,7 @@ describe("InboxSection", () => {
     fireEvent.click(screen.getByRole("link", { name: /^Commented/ }));
 
     expect(first?.issueId).toBe("issue-a");
-    expect(useInboxSelectionStore.getState().landing).toEqual({ issueId: "issue-a", token: first!.token + 1 });
+    expect(useInboxSelectionStore.getState().landing).toEqual({ issueId: "issue-a", token: first!.token + 1, landed: false });
   });
 
   it("lists under the Inbox filters, keeping the open row once reading it", () => {
@@ -396,6 +412,43 @@ describe("InboxSection", () => {
     expect(state.archive).toHaveBeenCalledWith("n1");
   });
 
+  it("opens the next row once the open one is archived from its row, and stays put for any other", () => {
+    const { nav } = renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Open one" }),
+        item({ id: "n2", issue_id: "issue-b", title: "Next one", created_at: "2026-11-09T08:00:00Z" }),
+        item({ id: "n3", issue_id: "issue-c", title: "Last one", created_at: "2026-11-08T08:00:00Z" }),
+      ],
+      "issue-a",
+    );
+    fireEvent.click(within(rows()[2]!).getByRole("button", { name: "Archive" }));
+    expect(state.archive).toHaveBeenCalledWith("n3");
+    expect(nav.push).not.toHaveBeenCalled();
+
+    fireEvent.click(within(rows()[0]!).getByRole("button", { name: "Archive" }));
+    expect(state.archive).toHaveBeenCalledWith("n1");
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-b");
+    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace["ws-1"]).toBe("issue-a");
+  });
+
+  it("says when the open row comes back once another window snoozed it, rather than that it was archived", async () => {
+    const open = item({ id: "n1", issue_id: "issue-a", title: "Open one" });
+    const other = item({ id: "n2", issue_id: "issue-b", title: "Other one", created_at: "2026-11-09T08:00:00Z" });
+    const { client } = renderSection([open, other], "issue-a");
+    const until = new Date(Date.now() + 26 * 60 * 60 * 1000).toISOString();
+    act(() => {
+      client.setQueryData(snoozedInboxOptions("ws-1").queryKey, [
+        { issue_id: "issue-a", item_id: "n1", snoozed_until: until, snoozed_at: new Date().toISOString(), updates: 0 },
+      ]);
+      client.setQueryData(["inbox", "ws-1", "list"], [other]);
+    });
+
+    const row = screen.getByRole("link", { name: /^Open one/ });
+    await waitFor(() => expect(row).toHaveTextContent(/Back .* · Leaves the Inbox when you move on/));
+    expect(row).toHaveAttribute("aria-current", "page");
+    expect(row).not.toHaveTextContent("Archived");
+  });
+
   it("caps the list at the chosen number of rows, with the rest behind Show more", () => {
     useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, limit: 5 } });
     renderSection(
@@ -492,6 +545,44 @@ describe("InboxSection", () => {
     expect(state.archiveAll).toHaveBeenCalledTimes(1);
   });
 
+  it("opens the next row a bulk archive leaves when it takes the open one", async () => {
+    const { nav } = renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Open one", read: true }),
+        item({ id: "n2", issue_id: "issue-b", title: "Read one", read: true, created_at: "2026-11-09T08:00:00Z" }),
+        item({ id: "n3", issue_id: "issue-c", title: "Unread one", created_at: "2026-11-08T08:00:00Z" }),
+      ],
+      "issue-a",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all read" }));
+    expect(state.archiveAllRead).toHaveBeenCalledTimes(1);
+    expect(nav.push).toHaveBeenCalledWith("/acme/issues/issue-c");
+  });
+
+  it("keeps the issue open with nothing lit once a bulk archive takes every row", async () => {
+    const { nav } = renderSection([item({ id: "n1", issue_id: "issue-a", title: "Open one" })], "issue-a");
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all" }));
+    expect(state.archiveAll).toHaveBeenCalledTimes(1);
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace["ws-1"]).toBe("issue-a");
+  });
+
+  it("keeps a bulk archive that spares the open row from moving it", async () => {
+    const { nav } = renderSection(
+      [
+        item({ id: "n1", issue_id: "issue-a", title: "Open one" }),
+        item({ id: "n2", issue_id: "issue-b", title: "Read one", read: true, created_at: "2026-11-09T08:00:00Z" }),
+      ],
+      "issue-a",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
+    fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "Archive all read" }));
+    expect(nav.push).not.toHaveBeenCalled();
+    expect(useInboxSelectionStore.getState().leftRowKeyByWorkspace["ws-1"]).toBeUndefined();
+  });
+
   it("says a row is back from a snooze, with what arrived meanwhile, until it is read", () => {
     const snooze = { snoozed_until: "2026-11-12T09:00:00Z", snoozed_at: "2026-11-10T09:00:00Z" };
     const items = [
@@ -536,5 +627,194 @@ describe("InboxSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Inbox actions" }));
     fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: "View archived" }));
     expect(nav.push).toHaveBeenCalledWith("/acme/inbox?view=archived");
+  });
+});
+
+describe("InboxSection with every row shown", () => {
+  const ROW_HEIGHT = 50;
+  const VIEWPORT_HEIGHT = 600;
+
+  /**
+   * jsdom has no layout: the virtualizer reads the panel's and each row's
+   * height from `offsetHeight`, and the list's offset from `getBoundingClientRect`.
+   */
+  function installLayout() {
+    const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight")!;
+    const offsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth")!;
+    const rect = Element.prototype.getBoundingClientRect;
+    Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.matches("[data-inbox-row]") ? ROW_HEIGHT : VIEWPORT_HEIGHT;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get: () => 280 });
+    Element.prototype.getBoundingClientRect = () =>
+      ({ width: 280, height: ROW_HEIGHT, top: 0, left: 0, right: 280, bottom: ROW_HEIGHT, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    return () => {
+      Object.defineProperty(HTMLElement.prototype, "offsetHeight", offsetHeight);
+      Object.defineProperty(HTMLElement.prototype, "offsetWidth", offsetWidth);
+      Element.prototype.getBoundingClientRect = rect;
+    };
+  }
+
+  function renderInPanel(count: number, activeIssueId: string | null = null) {
+    const items = Array.from({ length: count }, (_, i) =>
+      item({
+        id: `n${i}`,
+        issue_id: `issue-${i}`,
+        title: `Issue ${i}`,
+        created_at: new Date(Date.UTC(2026, 10, 10) - i * 60_000).toISOString(),
+      }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    client.setQueryData(["inbox", "ws-1", "list"], items);
+    client.setQueryData(snoozedInboxOptions("ws-1").queryKey, []);
+    client.setQueryData(agentListOptions("ws-1").queryKey, []);
+    client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
+    return renderWithI18n(
+      <QueryClientProvider client={client}>
+        <NavigationProvider value={adapter("/acme/issues")}>
+          <PanelBody>
+            <Harness activeIssueId={activeIssueId} pathname="/acme/issues" openKey={activeIssueId} />
+          </PanelBody>
+        </NavigationProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("mounts only the rows near the panel's viewport, and the rest as the panel scrolls", async () => {
+    const restore = installLayout();
+    try {
+      const { container } = renderInPanel(300, "issue-3");
+      fireEvent.click(screen.getByRole("button", { name: /^Show \d+ more/ }));
+
+      await waitFor(() => expect(rows().length).toBeGreaterThan(0));
+      expect(rows().length).toBeLessThan(40);
+      expect(screen.getByRole("link", { name: /^Issue 0/ })).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /^Issue 3/ })).toHaveAttribute("aria-current", "page");
+      expect(screen.queryByRole("link", { name: /^Issue 299/ })).toBeNull();
+      // The rows not mounted still take their room, so the panel scrolls as far.
+      const list = container.querySelector<HTMLElement>("[data-sidebar-list]")!;
+      expect(parseFloat(list.style.paddingBottom)).toBeGreaterThan((300 - 40) * ROW_HEIGHT);
+
+      const scroller = container.firstElementChild as HTMLElement;
+      act(() => {
+        // jsdom keeps scrollTop at 0 unless it is defined.
+        Object.defineProperty(scroller, "scrollTop", { configurable: true, value: 300 * (ROW_HEIGHT + 2) });
+        fireEvent.scroll(scroller);
+      });
+      await waitFor(() => expect(screen.getByRole("link", { name: /^Issue 299/ })).toBeInTheDocument());
+      expect(screen.queryByRole("link", { name: /^Issue 0/ })).toBeNull();
+      expect(rows().length).toBeLessThan(40);
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps a short list fully mounted", () => {
+    useSidebarTreeStore.setState({ inboxSettings: { ...DEFAULT_SIDEBAR_INBOX_SETTINGS, limit: 5 } });
+    renderInPanel(30);
+    fireEvent.click(screen.getByRole("button", { name: "Show 25 more…" }));
+    expect(rows()).toHaveLength(30);
+  });
+});
+
+describe("InboxSection while the Inbox loads", () => {
+  // The app's own client, so the inbox retry policy is the one under test.
+  function renderUnloaded() {
+    const client = createQueryClient();
+    client.setQueryData(snoozedInboxOptions("ws-1").queryKey, []);
+    client.setQueryData(agentListOptions("ws-1").queryKey, []);
+    client.setQueryData(agentTaskSnapshotOptions("ws-1").queryKey, []);
+    const nav = adapter("/acme/issues");
+    renderWithI18n(
+      <QueryClientProvider client={client}>
+        <NavigationProvider value={nav}>
+          <Harness activeIssueId={null} pathname={nav.pathname} openKey={null} />
+        </NavigationProvider>
+      </QueryClientProvider>,
+    );
+    return client;
+  }
+  const busy = () => new ApiError("inbox reads are busy", 503, "Service Unavailable", undefined, 1000);
+  const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    apiMock.listInbox.mockReset();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("shows the notifications once a busy server answers", async () => {
+    apiMock.listInbox
+      .mockRejectedValueOnce(busy())
+      .mockResolvedValue([item({ id: "n1", issue_id: "issue-a", title: "After the wait" })]);
+    renderUnloaded();
+    await advance(0);
+    // Waiting out Retry-After is not an empty Inbox.
+    expect(screen.queryByText("No notifications")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    await advance(2000);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(2);
+    expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining("After the wait")]);
+  });
+
+  it("says the Inbox could not load, with a retry, when the server stays busy", async () => {
+    apiMock.listInbox.mockRejectedValue(busy());
+    renderUnloaded();
+    await advance(30_000);
+
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(4);
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load notifications");
+    expect(screen.queryByText("No notifications")).toBeNull();
+
+    apiMock.listInbox.mockResolvedValue([item({ id: "n1", issue_id: "issue-a", title: "Back again" })]);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await advance(0);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining("Back again")]);
+  });
+
+  it("keeps saying it could not load while a retry waits on a busy server", async () => {
+    apiMock.listInbox.mockRejectedValue(busy());
+    renderUnloaded();
+    await advance(30_000);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(4);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await advance(0);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(5);
+    expect(screen.getByRole("alert")).toHaveTextContent("Failed to load notifications");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+
+    await advance(30_000);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(8);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+  });
+
+  it("says No notifications when the server answers with none", async () => {
+    apiMock.listInbox.mockResolvedValue([]);
+    renderUnloaded();
+    await advance(0);
+    expect(screen.getByText("No notifications")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps the rows it has when a refresh fails", async () => {
+    apiMock.listInbox.mockResolvedValueOnce([item({ id: "n1", issue_id: "issue-a", title: "Still here" })]);
+    const client = renderUnloaded();
+    await advance(0);
+    expect(rows()).toHaveLength(1);
+
+    apiMock.listInbox.mockRejectedValue(busy());
+    await act(async () => {
+      void client.invalidateQueries({ queryKey: ["inbox", "ws-1", "list"] });
+    });
+    await advance(30_000);
+    expect(apiMock.listInbox).toHaveBeenCalledTimes(5);
+    expect(rows().map((row) => row.textContent)).toEqual([expect.stringContaining("Still here")]);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

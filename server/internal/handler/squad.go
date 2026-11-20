@@ -1230,14 +1230,14 @@ func commentMentionsAnyone(content string) bool {
 // to a squad. Assign and backlog-promotion paths use this directly; comment
 // paths go through computeCommentAgentTriggers so preview and create share the
 // same trigger set.
-// It returns true only when a leader task was actually enqueued.
-func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, authorType, authorID, handoffNote string, workflowHandoff bool) bool {
+// It reports whether a leader task was enqueued and, if not, why.
+func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, authorType, authorID, handoffNote string, workflowHandoff bool) (DispatchStatus, DispatchReasonCode) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
-		return false
+		return DispatchBlocked, ReasonTargetUnavailable
 	}
 
 	// The gate must judge the SAME top-of-chain human the enqueue path will
@@ -1257,7 +1257,7 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, au
 		leaderOriginator = uuidToString(h.TaskService.OriginatorForIssueTask(ctx, issue, pgtype.UUID{}))
 	}
 	if !h.canEnqueueSquadLeader(ctx, squad.LeaderID, authorType, authorID, leaderOriginator, uuidToString(issue.WorkspaceID)) {
-		return false
+		return DispatchBlocked, ReasonInvocationNotAllowed
 	}
 
 	if !workflowHandoff {
@@ -1267,8 +1267,17 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, au
 			// Key dedup on the reviewed head (TEN-356).
 			HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, issue.ID),
 		})
-		if err != nil || hasPending {
-			return false
+		if err != nil {
+			slog.WarnContext(ctx, "issue write: squad leader pending lookup failed",
+				"issue_id", uuidToString(issue.ID),
+				"squad_id", uuidToString(squad.ID),
+				"leader_id", uuidToString(squad.LeaderID),
+				"error", err,
+			)
+			return DispatchBlocked, ReasonInternalError
+		}
+		if hasPending {
+			return DispatchCoalesced, ReasonCoalesced
 		}
 	}
 
@@ -1281,12 +1290,7 @@ func (h *Handler) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, au
 		_, err = h.TaskService.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, squad.LeaderID, squad.ID, handoffNote, memberActorUserID(authorType, authorID))
 	}
 	if err != nil {
-		slog.Warn("enqueue squad leader task failed",
-			"issue_id", uuidToString(issue.ID),
-			"squad_id", uuidToString(squad.ID),
-			"leader_id", uuidToString(squad.LeaderID),
-			"error", err)
-		return false
+		return issueEnqueueFailure(issue, squad.LeaderID, err)
 	}
-	return true
+	return DispatchQueued, ReasonQueued
 }

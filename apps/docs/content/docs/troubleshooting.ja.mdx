@@ -139,11 +139,11 @@ multica issue runs <issue-id>
 </Tab>
 <Tab value="waiting_local_directory">
 
-これは、進行中の別の実行が同じローカルディレクトリを使っていることを意味します。2 つのエージェントが同じファイルを同時に変更しないよう、Multica はディレクトリロックの解放を待ちます。
+起動前に、対象のローカルディレクトリかデーモンの空き実行スロットを待っている状態です。`held by task ...` はディレクトリの待機開始時に確認した保持者を示します。現在の保持者を追跡する表示ではありません。
 
-この待機はディレクトリの `in_place`（「直接」）モードにのみ存在します。ディレクトリが git リポジトリであれば、リソースを `worktree`（「並行」）に切り替えるとキューそのものがなくなります。各実行が自分のワークツリーを受け取り、成果をブランチとして返すため、どの実行も待ちません。[プロジェクトリソース](/project-resources#実行がディレクトリを共有する方法)を参照してください。
+直接（`in_place`）モードでは、同じディレクトリへの書き込みを直列化します。並行（`worktree`）モードは別々の作業コピーを使いますが、同じソースパスを直接モードの実行と共有している場合、ソースのスナップショット作成時に待つことがあります。[プロジェクトリソース](/project-resources#実行がディレクトリを共有する方法)を参照してください。
 
-そうでなければ、通常は前の実行が終わるのを待つだけで十分です。前の実行が固まっている場合は、その実行ログから停止するか、現在のエージェントに別のローカルディレクトリを選んでください。このディレクトリの排他はデーモンがメモリ内で管理しており、ディスクにロックファイルは書き込まれません。ロック状態が異常だと疑われる場合は `multica daemon restart` で解放されます。手動で削除すべきファイルはありません。
+表示された保持者を停止する前に、その実行がまだ動いているか確認してください。実際に停止している場合は実行ログから停止するか、別のローカルディレクトリを選択してください。ディレクトリが空いていてもデーモンが他の処理を実行中なら、実行スロットが空くのを待ちます。ディレクトリの排他はデーモンのメモリ内で管理されるため、削除するロックファイルはありません。メモリ内のロック状態が古いと確認できた場合は `multica daemon restart` を使ってください。
 
 </Tab>
 </Tabs>
@@ -175,6 +175,17 @@ Homebrew でインストールした `multica` CLI が `brew upgrade`、`multica
 3. デーモンを起動したときと同じ方法で再起動します。通常は `multica daemon restart`、LaunchAgent の場合は `launchctl kickstart -k gui/$(id -u)/<label>` です。
 
 CLI をアップグレードするたびにこの手順を繰り返してください。自動更新がデフォルトで有効なのは Multica Cloud に接続したデーモンだけです。`--no-auto-update` を付けてデーモンを起動すると、手動で実行したときだけアップグレードされます。[Multica Desktop](/desktop-app) に同梱の CLI は Developer ID で署名されているため、アップグレード後も許可が維持されます。
+
+</Accordion>
+<Accordion title="Hermes CLI を使った後に依存関係が再インストールされる" id="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli" value="hermes-runs-reinstall-dependencies-after-you-use-the-hermes-cli">
+
+Hermes CLI または Hermes デスクトップアプリと Multica の Hermes 実行を切り替えると、共有 Python 環境の再構築で起動に 30〜60 秒余分にかかることがあります。再構築するたびに新しい環境がディスクに作られ、Hermes がクリーンアップするまで残ります。
+
+この現象は、普段使う Hermes ホームの `memory.provider` に Python の依存関係を持つプラグインを指定している場合に起きます。Multica は実行ごとに独立した Hermes ホームを使い、インストール済みの依存関係を共有します。実行間でメモリを共有しないように、外部メモリプロバイダーは無効にします。Hermes はアクティブなホームのプラグインから必要な依存関係を判定するため、一方のホームで用意した環境を、もう一方では古い環境として扱います。[NousResearch/hermes-agent#137726](https://github.com/NousResearch/hermes-agent/issues/137726) でこの問題を追跡しています。
+
+確認するには、[デーモンのログ](#ログの場所)で `hermes is reinstalling its dependency environment before this task starts` を探します。続く `hermes dependency reinstall finished` の `startup_delay_ms` には、再インストールを含め、Hermes が起動して準備完了になるまでの時間が記録されます。
+
+Hermes 側で修正されるまでは、普段使う Hermes の `config.yaml` に `memory.provider: ""` を設定すると再構築を回避できます。この設定は CLI のメモリプラグインも無効にします。プラグインを有効にしたままにすると、切り替え後の最初の起動が遅くなることがあります。
 
 </Accordion>
 </Accordions>

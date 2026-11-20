@@ -40,6 +40,10 @@ func (h *Handler) ListPluginPackages(w http.ResponseWriter, r *http.Request) {
 // file it names. Validated in full before anything is stored, so a surface whose
 // entry is missing fails here rather than in a reader's browser weeks later.
 func (h *Handler) PublishPluginPackage(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	if !h.requirePluginsV1(w, r) {
 		return
 	}
@@ -109,6 +113,10 @@ type publishLocalPluginRequest struct {
 // live-reload path that would make "is this code frozen?" depend on how the
 // plugin was installed.
 func (h *Handler) PublishLocalPluginPackage(w http.ResponseWriter, r *http.Request) {
+	if isMachineCredentialActor(r) {
+		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
+		return
+	}
 	if !h.requirePluginsV1(w, r) {
 		return
 	}

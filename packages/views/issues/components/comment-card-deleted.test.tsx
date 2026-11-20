@@ -11,6 +11,10 @@ import { renderWithI18n } from "../../test/i18n";
 // tombstoned ROOT keeps a placeholder, since it heads the thread. The cache
 // rules live in packages/core/issues/comment-deletion.test.ts.
 
+vi.mock("@multica/core/permissions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/permissions")>()),
+  useIsGuest: () => false,
+}));
 vi.mock("@multica/core/api", () => ({
   api: { uploadFile: vi.fn() },
   dispatchReasonCode: () => undefined,

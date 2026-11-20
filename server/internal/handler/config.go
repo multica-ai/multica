@@ -93,6 +93,8 @@ type AppConfig struct {
 	// ignored the unknown JSON field and still returned success, so clients
 	// must fail closed when this declaration is absent.
 	AgentConversationStartersSupported bool `json:"agent_conversation_starters_supported"`
+	// Older builds acknowledge trigger writes while dropping conditions.
+	WebhookPayloadConditionsSupported bool `json:"webhook_payload_conditions_supported"`
 
 	// IssueCreatePropertiesSupported tells independently deployed clients that
 	// POST /api/issues validates and persists the optional properties bag.
@@ -131,6 +133,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		// running, the save gate is running with it.
 		LocalWorktreeSupported:             true,
 		AgentConversationStartersSupported: true,
+		WebhookPayloadConditionsSupported:  true,
 		IssueCreatePropertiesSupported:     true,
 		CommentDeleteKeepRepliesSupported:  true,
 		IssueBatchOpsSupported:             true,

@@ -1546,6 +1546,77 @@ func TestUpdateIssueAllowsExplicitUnassign(t *testing.T) {
 	}
 }
 
+func TestCreateIssueRejectsNULOnlyTitle(t *testing.T) {
+	var response struct {
+		Error string `json:"error"`
+	}
+	testutil.Call(t, testHandler.CreateIssue, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "\x00",
+	})).Want(http.StatusBadRequest).JSON(&response)
+	if response.Error != "title is required" {
+		t.Fatalf("error = %q, want title is required", response.Error)
+	}
+}
+
+// A NUL survives the JSON round trip but PostgreSQL TEXT rejects it, so an
+// agent filing tool output that carries one got a 500 and no issue.
+func TestIssueTextDropsNULBytes(t *testing.T) {
+	var issue IssueResponse
+	testutil.Call(t, testHandler.CreateIssue, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Build\x00 log", "description": "exit\x00 1",
+	})).Want(http.StatusCreated).JSON(&issue)
+	t.Cleanup(func() {
+		testHandler.DeleteIssue(httptest.NewRecorder(), withURLParam(newRequest("DELETE", "/api/issues/"+issue.ID, nil), "id", issue.ID))
+	})
+	if issue.Title != "Build log" || issue.Description == nil || *issue.Description != "exit 1" {
+		t.Fatalf("create must drop NUL bytes: title=%q description=%v", issue.Title, issue.Description)
+	}
+
+	// The bases are compared with the stored text, so they are cleaned too.
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"title": "Build\x00 log 2", "title_base": "Build\x00 log",
+		"description": "exit\x00 2", "description_base": "exit\x00 1",
+	}), "id", issue.ID)
+	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK).JSON(&issue)
+	if issue.Title != "Build log 2" || issue.Description == nil || *issue.Description != "exit 2" {
+		t.Fatalf("update must drop NUL bytes: title=%q description=%v", issue.Title, issue.Description)
+	}
+
+	// A batch write that fails is only logged, so the NUL made it a silent no-op.
+	var batch struct {
+		Updated int `json:"updated"`
+	}
+	testutil.Call(t, testHandler.BatchUpdateIssues, newRequest("PATCH", "/api/issues/batch?workspace_id="+testWorkspaceID, map[string]any{
+		"issue_ids": []string{issue.ID},
+		"updates":   map[string]any{"title": "Build\x00 log 3"},
+	})).Want(http.StatusOK).JSON(&batch)
+	testutil.Call(t, testHandler.GetIssue, withURLParam(newRequest("GET", "/api/issues/"+issue.ID, nil), "id", issue.ID)).Want(http.StatusOK).JSON(&issue)
+	if batch.Updated != 1 || issue.Title != "Build log 3" {
+		t.Fatalf("batch update must drop NUL bytes: updated=%d title=%q", batch.Updated, issue.Title)
+	}
+}
+
+func TestProjectTextDropsNULBytes(t *testing.T) {
+	var project ProjectResponse
+	testutil.Call(t, testHandler.CreateProject, newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Road\x00map", "description": "Q\x001",
+	})).Want(http.StatusCreated).JSON(&project)
+	t.Cleanup(func() {
+		testHandler.DeleteProject(httptest.NewRecorder(), withURLParam(newRequest("DELETE", "/api/projects/"+project.ID, nil), "id", project.ID))
+	})
+	if project.Title != "Roadmap" || project.Description == nil || *project.Description != "Q1" {
+		t.Fatalf("create must drop NUL bytes: title=%q description=%v", project.Title, project.Description)
+	}
+
+	req := withURLParam(newRequest("PUT", "/api/projects/"+project.ID, map[string]any{
+		"title": "Road\x00map 2", "description": "Q\x002",
+	}), "id", project.ID)
+	testutil.Call(t, testHandler.UpdateProject, req).Want(http.StatusOK).JSON(&project)
+	if project.Title != "Roadmap 2" || project.Description == nil || *project.Description != "Q2" {
+		t.Fatalf("update must drop NUL bytes: title=%q description=%v", project.Title, project.Description)
+	}
+}
+
 func TestCommentCRUD(t *testing.T) {
 	// Create an issue first
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
@@ -2886,6 +2957,52 @@ func TestBacklogToTodoByAgentSameAgentDifferentIssue(t *testing.T) {
 	).Scan(&step2Tasks)
 	if step2Tasks != 1 {
 		t.Fatalf("expected exactly 1 task enqueued on step2 for same-agent serial chain, got %d", step2Tasks)
+	}
+}
+
+// TestBacklogToTodoByAgentSameIssueOtherAssigneeEnqueues covers #10829: a
+// coordinator whose run is bound to issue I promotes I out of backlog while I
+// is assigned to a different agent. That is not a self-loop, so the assignee
+// must get a run.
+func TestBacklogToTodoByAgentSameIssueOtherAssigneeEnqueues(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	coordinator := createHandlerTestAgent(t, "Backlog Coordinator", nil)
+	worker := createHandlerTestAgent(t, "Backlog Worker", nil)
+
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "Coordinator-promoted backlog",
+		"status":        "backlog",
+		"assignee_type": "agent",
+		"assignee_id":   worker,
+	})
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	// The coordinator's run is bound to the same issue it promotes.
+	coordinatorTask := createHandlerTestTaskForAgentOnIssue(t, coordinator, created.ID)
+
+	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{"status": "todo"})
+	req = withURLParam(req, "id", created.ID)
+	req.Header.Set("X-Agent-ID", coordinator)
+	req.Header.Set("X-Task-ID", coordinatorTask)
+	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
+
+	var workerTasks int
+	dbfx.QueryRow(t,
+		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
+		created.ID, worker,
+	).Scan(&workerTasks)
+	if workerTasks != 1 {
+		t.Fatalf("expected 1 queued task for the assignee after a coordinator promoted the issue its run is bound to, got %d", workerTasks)
 	}
 }
 

@@ -83,6 +83,7 @@ import {
 } from "../../layout/collection-list";
 import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
+import { useRestoredScrollRef } from "../../platform/scroll-restoration";
 import { getMikaOnboarding, pickContentLang } from "../../onboarding/templates";
 import { qoderOptions } from "@multica/core/runtimes/qoder";
 import { QODER_RUNTIME_LOCATOR } from "./qoder-detail-page";
@@ -190,6 +191,7 @@ export function RuntimesPage({
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const restoreScrollRef = useRestoredScrollRef("runtimes");
 
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
     runtimeListOptions(wsId),
@@ -512,7 +514,11 @@ export function RuntimesPage({
           }
         />
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          ref={restoreScrollRef}
+          data-tab-scroll-root="runtimes"
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
           <CollectionList
             embedded
             pageShortcuts

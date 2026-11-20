@@ -52,6 +52,9 @@ type batchIssueResult struct {
 	Outcome    string `json:"outcome"`
 	Code       string `json:"code,omitempty"`
 	Message    string `json:"message,omitempty"`
+	// RunOutcome is set on an updated item whose write could have started a
+	// run; see IssueRunOutcome.
+	RunOutcome *IssueRunOutcome `json:"run_outcome,omitempty"`
 }
 
 // batchSkipError ends one issue's write with a reason the caller can act on,

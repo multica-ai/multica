@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/inbox"
 	"github.com/multica-ai/multica/server/internal/integrations/googlechat"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -72,7 +73,7 @@ func (h *Handler) GetNotificationPreferences(w http.ResponseWriter, r *http.Requ
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"workspace_id": workspaceID,
-		"preferences":  maskedNotificationPreferences(prefs),
+		"preferences":  inbox.WithDefaults(maskedNotificationPreferences(prefs)),
 	})
 }
 
@@ -80,6 +81,8 @@ type updateNotifPrefRequest struct {
 	Preferences map[string]string `json:"preferences"`
 }
 
+// decodeNotificationPreferenceRequest reads and validates the preferences in
+// a write request.
 func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request) (map[string]string, bool) {
 	var req updateNotifPrefRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -109,6 +112,18 @@ func decodeNotificationPreferenceRequest(w http.ResponseWriter, r *http.Request)
 	return req.Preferences, true
 }
 
+func marshalNotificationPreferences(w http.ResponseWriter, prefs map[string]string) ([]byte, bool) {
+	prefsJSON, err := json.Marshal(prefs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to marshal preferences")
+		return nil, false
+	}
+	return prefsJSON, true
+}
+
+// writeNotificationPreferenceResponse answers with the stored preferences plus
+// the groups muted by default (inbox.WithDefaults), so every client renders
+// those switches as off whichever defaults it was built with.
 func writeNotificationPreferenceResponse(
 	w http.ResponseWriter,
 	workspaceID string,
@@ -121,7 +136,7 @@ func writeNotificationPreferenceResponse(
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"workspace_id": workspaceID,
-		"preferences":  maskedNotificationPreferences(prefs),
+		"preferences":  inbox.WithDefaults(maskedNotificationPreferences(prefs)),
 	})
 }
 
@@ -164,7 +179,7 @@ func (h *Handler) prepareNotificationPreferenceUpdate(
 	workspaceID string,
 	userID string,
 	preserveWebhookOnOmission bool,
-) ([]byte, bool) {
+) (map[string]string, bool) {
 	current, err := h.loadNotificationPreferences(r, workspaceID, userID)
 	if err != nil {
 		slog.Warn("GetNotificationPreference before update failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -217,12 +232,7 @@ func (h *Handler) prepareNotificationPreferenceUpdate(
 		}
 	}
 
-	prefsJSON, err := json.Marshal(next)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to marshal preferences")
-		return nil, false
-	}
-	return prefsJSON, true
+	return next, true
 }
 
 // UpdateNotificationPreferences preserves the original replace-all PUT
@@ -233,7 +243,13 @@ func (h *Handler) UpdateNotificationPreferences(w http.ResponseWriter, r *http.R
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
-	prefsJSON, ok := h.prepareNotificationPreferenceUpdate(w, r, workspaceID, userID, true)
+	prefs, ok := h.prepareNotificationPreferenceUpdate(w, r, workspaceID, userID, true)
+	if !ok {
+		return
+	}
+	// Only clients built before PATCH existed send this full replacement, and
+	// they leave a group out to mean "on".
+	prefsJSON, ok := marshalNotificationPreferences(w, inbox.WithLegacyDefaults(prefs))
 	if !ok {
 		return
 	}
@@ -259,7 +275,11 @@ func (h *Handler) PatchNotificationPreferences(w http.ResponseWriter, r *http.Re
 		return
 	}
 	workspaceID := ctxWorkspaceID(r.Context())
-	prefsJSON, ok := h.prepareNotificationPreferenceUpdate(w, r, workspaceID, userID, false)
+	prefs, ok := h.prepareNotificationPreferenceUpdate(w, r, workspaceID, userID, false)
+	if !ok {
+		return
+	}
+	prefsJSON, ok := marshalNotificationPreferences(w, prefs)
 	if !ok {
 		return
 	}

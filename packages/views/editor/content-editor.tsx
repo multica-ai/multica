@@ -66,12 +66,14 @@ import {
 import { configStore } from "@multica/core/config";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { repairEmptyListItems } from "./utils/repair-list-items";
-import { resolveClickIntent, useAppOrigin } from "../navigation";
+import { resolveClickIntent, useAppOrigin, useOptionalNavigation } from "../navigation";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
+import { BlockHandle } from "./block-handle";
 import { posFromAnchor, type TextAnchor } from "./text-anchor";
 import { insertDictation } from "./utils/insert-dictation";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
+import { useOpenAttachmentLink } from "./use-open-attachment-link";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
@@ -203,14 +205,21 @@ interface ContentEditorBaseProps {
   enableSlashCommands?: boolean;
   /**
    * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
-   * lists the active agent's skills (chat); "command" shows the fixed built-in
-   * command menu (issue comments), e.g. /note.
+   * lists the active agent's skills (chat); "command" merges Issue quick
+   * actions, skills matching a nonempty query, and built-ins such as /note;
+   * "blocks" inserts document blocks (Docs).
    */
-  slashCommandMode?: "skill" | "command";
+  slashCommandMode?: "skill" | "command" | "blocks";
   /**
-   * Quick actions to offer in the "command" `/` menu, plus the resolver that
-   * turns a pick into the text it would post (MUL-5465). Read through
-   * functions so a newly created action appears without remounting the editor.
+   * Show a hover handle beside each block: "+" opens the block menu on a new
+   * line below, and the grip drags the block or opens turn-into, duplicate and
+   * delete. For long-form documents; pair it with `slashCommandMode="blocks"`.
+   */
+  showBlockHandles?: boolean;
+  /**
+   * Quick actions and Issue target-agent skills for the "command" `/` menu,
+   * plus the resolver that turns a quick-action pick into draft text. Read
+   * through functions so cached updates appear without remounting the editor.
    */
   quickActionMenu?: BuiltinCommandSuggestionOptions;
   /**
@@ -396,6 +405,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionContextItems,
       enableSlashCommands = false,
       slashCommandMode = "skill",
+      showBlockHandles = false,
       quickActionMenu,
       attachments,
       flushPendingOnUnmount = false,
@@ -520,6 +530,18 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const appOriginRef = useRef(appOrigin);
     appOriginRef.current = appOrigin;
 
+    // A link to one of this deployment's attachments opens in the viewer
+    // rather than as a raw storage URL in the browser. This component renders
+    // the AttachmentDownloadProvider itself, so its records are passed in.
+    const attachmentLink = useOpenAttachmentLink(providerAttachments);
+    const openAttachmentLinkRef = useRef(attachmentLink.open);
+    openAttachmentLinkRef.current = attachmentLink.open;
+    // `openInNewTab` present means Desktop, which has no browser tab to give a
+    // modified or middle click; on web those still open the link in one.
+    const desktopTabs = !!useOptionalNavigation()?.openInNewTab;
+    const desktopTabsRef = useRef(desktopTabs);
+    desktopTabsRef.current = desktopTabs;
+
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
@@ -639,6 +661,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         slashCommandMode,
         quickActionMenu: {
           getQuickActions: () => quickActionMenuRef.current?.getQuickActions?.() ?? [],
+          getSkills: (editor) => quickActionMenuRef.current?.getSkills?.(editor) ?? [],
           subscribeQuickActions: (refresh) => {
             quickActionMenuListeners.current.add(refresh);
             return () => { quickActionMenuListeners.current.delete(refresh); };
@@ -684,6 +707,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             if (!href || isMentionHref(href)) return false;
 
             event.preventDefault();
+            const modified = event.metaKey || event.ctrlKey || event.shiftKey;
+            if (
+              (desktopTabsRef.current || !modified) &&
+              openAttachmentLinkRef.current(href)
+            ) {
+              return true;
+            }
             openLink(
               href,
               workspaceSlugRef.current,
@@ -702,6 +732,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             const href = target.closest("a")?.getAttribute("href");
             if (!href || isMentionHref(href)) return false;
             event.preventDefault();
+            if (desktopTabsRef.current && openAttachmentLinkRef.current(href)) return true;
             openLink(
               href,
               workspaceSlugRef.current,
@@ -1034,6 +1065,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       if (!editor) return;
 
       const target = event.target as HTMLElement;
+      // React events bubble through portals: a press inside an overlay (the
+      // attachment viewer) is not a press on the editor's empty area.
+      if (!event.currentTarget.contains(target)) return;
       if (target.closest(".ProseMirror")) return;
       if (target.closest("a, button, input, textarea, [role='button'], [data-node-view-wrapper]")) return;
 
@@ -1051,10 +1085,14 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           onMouseDown={handleContainerMouseDown}
         >
           <EditorContent className="flex flex-1 flex-col" editor={editor} />
+          {showBlockHandles && editor && (
+            <BlockHandle editor={editor} containerRef={wrapperRef} />
+          )}
           {showBubbleMenu && (
             <EditorBubbleMenu editor={editor} currentIssueId={currentIssueId} selectionAction={selectionAction} />
           )}
           <LinkHoverCard {...hover} />
+          {attachmentLink.modal}
         </div>
       </AttachmentDownloadProvider>
     );

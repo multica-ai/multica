@@ -278,7 +278,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 					resultErrorText = codebuddyResultError(msg)
 				}
 				sessionID = msg.SessionID
-				if resultUsage := codebuddyResultUsage(msg, opts.Model); len(resultUsage) > 0 {
+				if resultUsage := codebuddyResultUsage(msg, opts.Model, opts.ResumeSessionID != ""); len(resultUsage) > 0 {
 					usage = resultUsage
 				}
 				closeStdin()
@@ -696,7 +696,7 @@ type codebuddyControlRequestPayload struct {
 	Input    json.RawMessage `json:"input,omitempty"`
 }
 
-func codebuddyResultUsage(msg codebuddySDKMessage, fallbackModel string) map[string]TokenUsage {
+func codebuddyResultUsage(msg codebuddySDKMessage, fallbackModel string, isResume bool) map[string]TokenUsage {
 	if len(msg.ModelUsage) > 0 {
 		usage := make(map[string]TokenUsage, len(msg.ModelUsage))
 		for model, u := range msg.ModelUsage {
@@ -713,6 +713,13 @@ func codebuddyResultUsage(msg codebuddySDKMessage, fallbackModel string) map[str
 		if len(usage) > 0 {
 			return usage
 		}
+	}
+
+	// CodeBuddy's modelUsage is per execution, but usage includes earlier
+	// executions in a resumed session. Without modelUsage, retain this run's
+	// assistant-event accounting rather than replacing it with session totals.
+	if isResume {
+		return nil
 	}
 
 	model := msg.Model

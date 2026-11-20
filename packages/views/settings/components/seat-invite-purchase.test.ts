@@ -33,7 +33,6 @@ function summary(purchased: number, available: number): WorkspaceSubscriptionSum
       status: "active",
       seats: purchased,
       limits: {
-        issueCount: { mode: "unlimited", limit: null },
         autopilotRuns: { mode: "unlimited", limit: null },
       },
       currentPeriodEnd: null,
@@ -59,7 +58,11 @@ function summary(purchased: number, available: number): WorkspaceSubscriptionSum
       checkout: false,
       portal: true,
       purchaseSeats: true,
+      changePlan: false,
+      checkPlanChange: false,
     },
+    planChange: null,
+    trial: null,
   };
 }
 

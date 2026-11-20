@@ -35,6 +35,20 @@ const (
 	// makes those endpoints answer 404, so clients stop syncing and search
 	// through the server again without a client release.
 	LocalSearchIndex = "local_search_index"
+	// DocsV1 gates workspace Docs (MUL-8370) while it is still being tested:
+	// the /api/docs and /api/doc-folders APIs, the Web/Desktop entry points,
+	// and the doc lines in the agent brief. Off by default so a release can
+	// ship the code without launching the feature; FF_DOCS_V1=true turns it on
+	// for a deployment. It is a GLOBAL switch. Turning it off leaves existing
+	// doc rows untouched — they simply become unreachable until it is back on.
+	DocsV1 = "docs_v1"
+	// WorkspaceGuests gates inviting guests and turning members into guests
+	// (MUL-9420). On by default, so self-hosted servers have guests. A server
+	// that predates guests treats a guest row as a full member, so a rolling
+	// deploy should run with FF_WORKSPACE_GUESTS=off until every replica
+	// serves this version. Existing guests keep their narrowed access either
+	// way.
+	WorkspaceGuests = "workspace_guests"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -59,6 +73,7 @@ var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
+	DocsV1,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -81,11 +96,20 @@ func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bo
 	return flags.IsEnabled(ctx, LocalSearchIndex, true)
 }
 
+func DocsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, DocsV1, false)
+}
+
+func WorkspaceGuestsEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, WorkspaceGuests, true)
+}
+
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
-	out := make(map[string]bool, len(frontendPublicFlags)+4)
+	out := make(map[string]bool, len(frontendPublicFlags)+5)
 	for _, key := range frontendPublicFlags {
 		out[key] = flags.IsEnabled(ctx, key, false)
 	}
+	out[WorkspaceGuests] = WorkspaceGuestsEnabled(ctx, flags)
 	out[agentBuilderCompat] = true
 	out[agentSkillTogglesCompat] = true
 	out[resourceLabelsCompat] = true

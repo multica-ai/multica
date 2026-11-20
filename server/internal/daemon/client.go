@@ -204,6 +204,7 @@ func daemonHTTPClientCapabilities() string {
 
 func daemonCommonCapabilities() []string {
 	return []string{
+		protocol.DaemonCapabilityForceRecheckV1,
 		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
@@ -277,11 +278,24 @@ const batchClaimRequestTimeout = protocol.DaemonBatchClaimRequestTimeout
 // daemons advertising claim-poll-hints-v1. A zero-value result is deliberately
 // conservative: it makes the poller retain PollInterval, which protects new
 // daemons talking to old servers and claims whose WS outcome was uncertain.
+//
+// ForceRecheckedRuntimeIDs is the server's force_rechecked_runtime_ids
+// acknowledgement (#7452): the forced runtimes the server observed genuinely
+// idle this cycle (a zero-candidate scan, cache re-armed). It is a POINTER so absence is distinguishable from emptiness:
+// a non-nil empty slice means an upgraded server acknowledged nothing, so the
+// caller keeps every drained runtime forced; nil means the server omitted the
+// field (it predates #7452, or the legacy per-runtime fallback ran), so the
+// caller drops the drained hints as before #7452 and the empty-claim TTL stays
+// the outer bound. The WS transport also synthesizes values: the cooldown
+// branch returns present-but-empty (nothing was sent) and the uncertain-after-
+// send branch acknowledges the whole drained set (a frame went out, so
+// replaying the hint could double-claim).
 type claimTasksResult struct {
-	Tasks                       []*Task `json:"tasks"`
-	ClaimPollHintSupported      bool    `json:"claim_poll_hint_supported,omitempty"`
-	NextDeferredTaskAfterMillis int64   `json:"next_deferred_task_after_ms,omitempty"`
-	ClaimedOverWS               bool    `json:"-"`
+	Tasks                       []*Task   `json:"tasks"`
+	ClaimPollHintSupported      bool      `json:"claim_poll_hint_supported,omitempty"`
+	NextDeferredTaskAfterMillis int64     `json:"next_deferred_task_after_ms,omitempty"`
+	ForceRecheckedRuntimeIDs    *[]string `json:"force_rechecked_runtime_ids,omitempty"`
+	ClaimedOverWS               bool      `json:"-"`
 }
 
 // ClaimTasks is the machine-level (MUL-4257) batch counterpart of ClaimTask:
@@ -299,18 +313,36 @@ func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []s
 	return result.Tasks, err
 }
 
-func (c *Client) claimTasksWithHints(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) (claimTasksResult, error) {
+// claimTasksWithHints issues the HTTP batch claim and returns the full
+// claimTasksResult, including any scheduling hints and the #7452
+// force_rechecked_runtime_ids acknowledgement. forceRecheckIDs are the runtimes
+// woken since the last claim; they ride along in the request body so the server
+// bypasses their cached "empty" verdict for exactly this claim.
+func (c *Client) claimTasksWithHints(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int, forceRecheckIDs ...string) (claimTasksResult, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, batchClaimRequestTimeout)
 	defer cancel()
 	var resp claimTasksResult
-	if err := c.postJSON(reqCtx, "/api/daemon/tasks/claim", map[string]any{
-		"daemon_id":   daemonID,
-		"runtime_ids": runtimeIDs,
-		"max_tasks":   maxTasks,
-	}, &resp); err != nil {
+	if err := c.postJSON(reqCtx, "/api/daemon/tasks/claim", claimTasksBody(daemonID, runtimeIDs, maxTasks, forceRecheckIDs...), &resp); err != nil {
 		return claimTasksResult{}, err
 	}
 	return resp, nil
+}
+
+// claimTasksBody builds the batch-claim request body shared by the HTTP and
+// WS-first transports so both stay byte-identical. force_recheck_runtime_ids
+// (#7452) is an optional, additive field: it is omitted when no runtime was
+// woken so a steady-state poll is exactly the pre-#7452 request, and an older
+// server that does not know the field simply ignores it.
+func claimTasksBody(daemonID string, runtimeIDs []string, maxTasks int, forceRecheckIDs ...string) map[string]any {
+	body := map[string]any{
+		"daemon_id":   daemonID,
+		"runtime_ids": runtimeIDs,
+		"max_tasks":   maxTasks,
+	}
+	if len(forceRecheckIDs) > 0 {
+		body["force_recheck_runtime_ids"] = forceRecheckIDs
+	}
+	return body
 }
 
 // isBatchClaimUnsupported reports whether err is a 404 from the batch claim
@@ -725,6 +757,15 @@ func (c *Client) ReportTaskEnvironmentConfigs(ctx context.Context, taskID string
 func (c *Client) ReportTaskContextReceipt(ctx context.Context, taskID string, receipt ContextReceipt) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/context-receipt", taskID), map[string]any{
 		"receipt": receipt,
+	}, nil)
+}
+
+// ReportTaskRateLimits posts the subscription rate-limit snapshot the agent
+// CLI reported while running the task; the server keeps the newest one as the
+// state of the task's runtime.
+func (c *Client) ReportTaskRateLimits(ctx context.Context, taskID string, snapshot agent.RateLimitSnapshot) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/rate-limits", taskID), map[string]any{
+		"rate_limits": snapshot,
 	}, nil)
 }
 
@@ -1158,10 +1199,9 @@ const RuntimeOfflineCodeNotExecutable = "not_executable"
 // queued forever. The exception is an install the daemon is running right now,
 // which Installing states explicitly.
 //
-// Only an ABSENT profile reaches this code. A profile that is present but
-// answers with a protocol this daemon does not drive never takes a live runtime
-// offline at all: the daemon can be the stale side of that skew, so it reports
-// the incompatibility and leaves the runtime alone.
+// Missing profiles and confirmed manual-repair configurations reach this code.
+// A profile that answers with a protocol this daemon does not drive remains
+// non-demotable: the daemon can be the stale side of that separate skew.
 const RuntimeOfflineCodeDshProfile = "dsh_profile"
 
 // RuntimeOfflineReason is why a runtime went offline, in the form clients can
@@ -1234,6 +1274,7 @@ func (c *Client) GetWorkspaceRepos(ctx context.Context, workspaceID string) (*Wo
 type RuntimeProfile struct {
 	ID             string   `json:"id"`
 	WorkspaceID    string   `json:"workspace_id"`
+	DaemonID       *string  `json:"daemon_id"`
 	DisplayName    string   `json:"display_name"`
 	ProtocolFamily string   `json:"protocol_family"`
 	RuntimeType    string   `json:"runtime_type"`
@@ -1256,9 +1297,9 @@ type RuntimeProfilesResponse struct {
 // Mirrors GetWorkspaceRepos. Callers must treat this as best-effort: an older
 // server with no profiles route returns 404, which the daemon swallows and
 // continues with built-in runtimes only.
-func (c *Client) GetRuntimeProfiles(ctx context.Context, workspaceID string) (*RuntimeProfilesResponse, error) {
+func (c *Client) GetRuntimeProfiles(ctx context.Context, workspaceID, daemonID string) (*RuntimeProfilesResponse, error) {
 	var resp RuntimeProfilesResponse
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/runtime-profiles", workspaceID), &resp); err != nil {
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/workspaces/%s/runtime-profiles?daemon_id=%s", workspaceID, url.QueryEscape(daemonID)), &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

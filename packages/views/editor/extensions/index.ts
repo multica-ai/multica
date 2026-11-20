@@ -46,6 +46,7 @@ import {
 import { SlashCommandExtension } from "./slash-command-extension";
 import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
 import type { BuiltinCommandSuggestionOptions } from "./slash-command-suggestion";
+import { createBlockInsertSuggestion } from "./block-insert-suggestion";
 import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
 import { CodeBlockView } from "./code-block-view";
 import { TableView } from "./table-view";
@@ -174,14 +175,14 @@ export interface EditorExtensionsOptions {
   /**
    * Which `/` menu to attach when enableSlashCommands is true:
    * - "skill" (default) — the chat picker listing the active agent's skills.
-   * - "command" — the fixed built-in command menu (issue comments), e.g. /note.
+   * - "command" — Issue quick actions, skills matching a nonempty query, and /note.
+   * - "blocks" — the document block menu: headings, lists, code, tables, uploads.
    */
-  slashCommandMode?: "skill" | "command";
+  slashCommandMode?: "skill" | "command" | "blocks";
   /**
-   * Quick actions offered in the "command" `/` menu, plus the resolver that
-   * turns a pick into the text it would post (MUL-5465). Both are functions so
-   * the editor is created once while still reading live data; the setup layer
-   * owns React Query access. Omit on composers with no issue context.
+   * Quick actions and Issue target-agent skills offered in the "command" `/`
+   * menu, plus the resolver that turns a quick-action pick into draft text.
+   * Functions keep the editor mounted while reading live React Query data.
    */
   quickActionMenu?: BuiltinCommandSuggestionOptions;
   /**
@@ -296,11 +297,13 @@ export function createEditorExtensions(
       HTMLAttributes: { class: "slash-command" },
       suggestion: !options.enableSlashCommands
         ? { char: "/", allow: () => false }
-        : options.slashCommandMode === "command"
-          ? createBuiltinCommandSuggestion(options.quickActionMenu)
-          : options.queryClient
-            ? createSlashCommandSuggestion(options.queryClient)
-            : { char: "/", allow: () => false },
+        : options.slashCommandMode === "blocks"
+          ? createBlockInsertSuggestion(options.onUploadFileRef)
+          : options.slashCommandMode === "command"
+            ? createBuiltinCommandSuggestion(options.quickActionMenu)
+            : options.queryClient
+              ? createSlashCommandSuggestion(options.queryClient)
+              : { char: "/", allow: () => false },
     }),
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),

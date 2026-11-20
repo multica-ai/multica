@@ -1285,6 +1285,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		notificationProtocol:     "unknown",
 		acceptNotification:       turnNotificationGate.accept,
 		guardianRateLimitCircuit: &codexGuardianRateLimitCircuit{},
+		rateLimits:               newRateLimitTracker(opts.OnRateLimits),
 		onGuardianRateLimit: func() {
 			guardianRateLimitTripped.Store(true)
 			b.cfg.Logger.Warn("codex Guardian approval rate-limit circuit opened",
@@ -1617,9 +1618,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// Whether that notice asks the agent to tell the USER is the caller's
 		// call, not ours: it depends on whether this surface's conversation is
 		// still readable, which this package cannot see (MUL-5722).
+		turnPrompt := b.skillTurnPrompt(runCtx, c, prompt, opts)
 		turnParams := map[string]any{
 			"threadId": threadID,
-			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice),
+			"input":    codexTurnInput(turnPrompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice),
 		}
 		// Per-turn reasoning override. Mirrors the per-thread injection in
 		// startOrResumeThread; keeping both in sync is enforced by the
@@ -2438,6 +2440,9 @@ type codexClient struct {
 	onTurnDone               func(aborted bool)
 	guardianRateLimitCircuit *codexGuardianRateLimitCircuit
 	onGuardianRateLimit      func()
+	// rateLimits merges account/rateLimits/updated notifications; nil when
+	// the caller does not collect rate limits.
+	rateLimits *rateLimitTracker
 	// onFinalAnswer fires only for an agent message the app-server itself
 	// labelled `phase: "final_answer"` — the turn's deliverable, as opposed to
 	// the intermediate agent messages that narrate work between tool calls.
@@ -3040,6 +3045,14 @@ func (c *codexClient) handleNotification(raw map[string]json.RawMessage) {
 	var params map[string]any
 	if p, ok := raw["params"]; ok {
 		_ = json.Unmarshal(p, &params)
+	}
+	// Rate limits belong to the account, not to a thread or turn, so they are
+	// read before the thread filter and the current-turn gate. The
+	// notification then continues down the usual path unchanged.
+	if method == "account/rateLimits/updated" {
+		if update, ok := parseCodexRateLimitsUpdated(params); ok {
+			c.rateLimits.apply(update)
+		}
 	}
 	// Filter multiplexed subagent threads before the current-turn gate. The
 	// gate mutates started/turnID on turn/started; letting another thread reach

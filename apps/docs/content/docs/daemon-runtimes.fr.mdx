@@ -91,7 +91,7 @@ Lorsqu'un runtime est hors ligne :
 - Les exécutions déjà en file d'attente attendent que le runtime revienne ; elles ne passent pas sur un autre ordinateur. Elles n'échouent qu'une fois que le runtime a cessé d'envoyer des signaux de présence pendant plus longtemps que le délai de grâce de reconnexion **et** que l'exécution elle-même est en file d'attente depuis aussi longtemps. Un runtime simplement occupé conserve sa file, et le travail assigné à un runtime déjà hors ligne bénéficie tout de même d'un délai de grâce complet.
 - Les exécutions en cours n'échouent pas tout de suite. Elles échouent avec `runtime_offline` seulement lorsque le signal de présence du runtime manque depuis plus longtemps que le délai de grâce de reconnexion (`MULTICA_RUNTIME_RECONNECT_GRACE`, 3 heures par défaut) ; les exécutions de tâche ou de discussion éligibles peuvent être relancées automatiquement.
 - Au redémarrage, le daemon réenregistre ses runtimes et récupère les exécutions qui ne se sont pas terminées proprement la dernière fois.
-- Un runtime hors ligne depuis plus de 7 jours et auquel aucun agent n'est lié (y compris les agents archivés) est supprimé automatiquement.
+- Un runtime hors ligne depuis plus de 7 jours, sans agent utilisateur actif ni tâche inachevée, est supprimé automatiquement ; les agents archivés et l’historique des tâches sont conservés. Pour les anciens profils personnalisés sans machine assignée, seules les instances sur les machines du créateur du profil sont conservées jusqu’à ce qu’un administrateur choisisse la machine.
 
 Dans la démo ci-dessous, une exécution assignée pendant que l'ordinateur est hors ligne attend dans la file et n'est prise en charge qu'une fois l'ordinateur de nouveau en ligne.
 
@@ -103,9 +103,13 @@ Les états détaillés et les règles de relance figurent dans [Exécutions](/ta
 
 Par défaut, un daemon traite au maximum 20 exécutions simultanées, et chaque agent au maximum 6. Le parallélisme effectif correspond à la plus petite de ces deux valeurs.
 
+Les exécutions qui attendent un répertoire local en mode Direct n'occupent pas de slot d'exécution du daemon. Elles en reprennent un avant de démarrer et restent comptées comme du travail détenu par le daemon pour la sécurité de l'arrêt et des mises à jour.
+
 Une fois une limite atteinte, les nouvelles exécutions restent en file d'attente. Le parallélisme d'un agent se règle dans ses paramètres, le plafond global de la machine avec `MULTICA_DAEMON_MAX_CONCURRENT_TASKS`. Les exécutions en parallèle se disputent en même temps la capacité de la machine, le quota du compte de l'outil et le même répertoire de travail.
 
 La consommation de tokens, les coûts et les échecs des exécutions sont regroupés par espace de travail sur la page [Statistiques](/analytics) ; `multica runtime usage <runtime-id>` affiche la consommation de tokens d'un seul runtime.
+
+Pour les runtimes Claude Code et Codex, la page du runtime affiche aussi les **Limites** : la part déjà utilisée des fenêtres de 5 heures et hebdomadaire du forfait du compte de la CLI, leur prochaine réinitialisation, et si la consommation va plus vite que le temps écoulé. La CLI les signale pendant l'exécution des tâches : les valeurs datent donc de la dernière exécution du runtime. Les comptes à clé API n'ont pas de limites de forfait.
 
 ## Configuration MCP locale [#local-mcp]
 
@@ -129,6 +133,30 @@ Dès qu'un agent a une configuration MCP (même vide), Multica génère une conf
 CodeBuddy, Kimi CLI et Pi chargent eux-mêmes leur configuration de niveau utilisateur au démarrage et la combinent avec ce que Multica envoie ; le daemon ne fusionne donc pas à l'avance pour eux, sinon le même serveur démarrerait deux fois. En cas de nom en double, CodeBuddy garde l'entrée de Multica. Les autres outils absents du tableau ne reçoivent que la configuration de l'agent.
 
 La fusion a lieu sur la machine du runtime : les commandes, URL, en-têtes et variables d'environnement des serveurs locaux ne sont jamais envoyés. La liste « Hérité du runtime » de l'onglet **MCP** de l'agent n'affiche que le nom, le transport, la source et l'état activé de chaque serveur ; un serveur masqué par un serveur de l'agent du même nom porte la mention « Remplacé par Multica ». Si un fichier de configuration local ne peut pas être analysé, le daemon consigne un avertissement et l'exécution n'utilise que la configuration de l'agent.
+
+### Connexions MCP de Cursor [#cursor-mcp-login]
+
+Cursor enregistre les connexions OAuth MCP par répertoire de projet, et chaque exécution a son propre répertoire. Le daemon conserve donc un fichier de connexion par agent Cursor sur l'ordinateur du runtime, `cursor-mcp-auth/<agent-id>/mcp-auth.json` dans le répertoire de configuration Multica, et y relie chaque exécution. Connectez-vous une fois à un serveur comme Mobbin et les exécutions suivantes de l'agent sur cet ordinateur utilisent cette connexion. Elle est distincte des connexions de vos propres projets Cursor : une exécution ne vous y déconnecte jamais. Toutes les exécutions de l'agent sur cet ordinateur l'utilisent, y compris celles lancées par d'autres membres.
+
+Lorsque l'agent a une configuration MCP, chaque exécution reçoit son propre répertoire de données Cursor, et le `mcp-auth.json` de l'exécution qui s'y trouve constitue le lien. Lorsqu'il n'en a pas, l'exécution utilise votre propre répertoire de données Cursor (`~/.cursor`, ou le `CURSOR_DATA_DIR` du daemon) et les serveurs MCP qui y sont configurés ; le daemon relie seulement au fichier de l'agent le `mcp-auth.json` que Cursor conserve sous `projects/` pour le répertoire de l'exécution. Ce lien est supprimé lors du nettoyage du répertoire de l'exécution.
+
+Sans configuration MCP, deux sortes d'exécutions ne sont pas reliées, car leur projet Cursor est aussi le vôtre et le relier remplacerait votre propre connexion : les exécutions qui travaillent sur place dans le répertoire local d'un projet, et celles dont le répertoire se trouve dans un dépôt git qui l'englobe de l'extérieur, comme un dépôt de dotfiles dans votre dossier personnel, que Cursor traite alors comme le projet. Ces exécutions utilisent la connexion que Cursor détient déjà pour ce répertoire, et leur transcription ne donne pas de commande de connexion ; connectez-vous en lançant vous-même `cursor-agent mcp login <server>` dans ce répertoire.
+
+Si un serveur demande encore une connexion, la transcription de l'exécution indique lequel et donne la commande à lancer sur l'ordinateur du runtime. Pour un agent avec une configuration MCP, par exemple :
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/login/workdir && CURSOR_DATA_DIR=~/.multica/cursor-mcp-auth/<agent-id>/login/cursor-data cursor-agent mcp login mobbin
+```
+
+Pour un agent sans configuration MCP, la commande utilise votre propre répertoire de données Cursor :
+
+```bash
+cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~/.cursor cursor-agent mcp login mobbin
+```
+
+Les deux commandes s'exécutent dans un dossier de connexion conservé à côté du fichier de connexion de l'agent ; elles fonctionnent donc même après le nettoyage du répertoire de l'exécution.
+
+La connexion s'applique à partir de l'exécution suivante de l'agent ; l'exécution en cours ne la prend pas en compte. Pour utiliser votre propre fichier de connexion, définissez `CURSOR_MCP_AUTH_SOURCE` dans les variables d'environnement de l'agent avec le chemin absolu d'un `mcp-auth.json` ou du répertoire de projet Cursor qui le contient ; il est prioritaire sur le fichier par agent. Deux exécutions d'un même agent qui rafraîchissent le même jeton au même moment peuvent encore se déconnecter l'une l'autre ; reconnectez-vous si cela arrive.
 
 ## Nettoyage et conservation [#cleanup]
 
@@ -155,6 +183,8 @@ Le daemon ne supprime jamais le répertoire local du projet. Le répertoire de s
 
 Le daemon garde un cache de dépôt nu par dépôt de l'espace de travail, sous `.repos/<id-espace-de-travail>/` dans la racine des espaces de travail. Les exécutions du même espace de travail sur cette machine le partagent : chaque checkout crée un git worktree à partir du cache et ne récupère que les nouveaux commits, sans recloner. Les exécutions Codex sous Linux et Windows font exception et reçoivent un clone autonome avec `.git` dans le répertoire de travail, car le bac à sable workspace-write de Codex laisse en lecture seule les métadonnées Git situées hors du répertoire de travail.
 
+Les nouveaux noms de répertoire de cache utilisent jusqu'à 16 caractères ASCII du nom du dépôt et un hachage de 12 caractères, pour qu'une longue URL distante n'allonge pas les chemins des métadonnées Git sous Windows. Lors d'une synchronisation ou d'un checkout, un cache existant passe au nom court si aucun worktree enregistré ne reste après nettoyage des entrées obsolètes et si la destination n'existe pas. Son contenu est conservé sans nouveau clonage. Les caches avec des worktrees enregistrés gardent leur chemin d'origine afin de préserver les checkouts liés. Si la migration échoue, le daemon enregistre un avertissement et continue d'utiliser le cache existant ; une opération ultérieure pourra réessayer.
+
 Un cache n'est supprimé que si les trois conditions sont réunies : aucun espace de travail ni projet ne référence plus le dépôt, aucun worktree ne subsiste, et aucune exécution n'en a fait de checkout depuis 30 jours. Il est recloné au besoin. Après avoir supprimé les branches d'agent périmées, le daemon exécute `git reflog expire --expire=30.days --all` et `git gc --prune=30.days` sur le cache quand aucune exécution n'est en cours.
 
 ### Sessions, mémoire et répertoires temporaires
@@ -164,6 +194,7 @@ Un cache n'est supprimé que si les trois conditions sont réunies : aucun espac
 | Historiques de session Codex (un par agent et par tâche) | `multica-sessions/` dans le répertoire Codex (par défaut `~/.codex`) | Supprimés après 14 jours sans usage ; les exécutions suivantes sur cette tâche ne peuvent plus reprendre l'ancienne session Codex |
 | Historiques de session Hermes | `hermes-sessions/` dans le répertoire de configuration Multica (par défaut `~/.multica` ; `~/.multica/profiles/<name>` pour un profil nommé) | Supprimés après 14 jours sans usage |
 | Mémoire Hermes (une par agent) | `hermes-state/` dans le même répertoire | Supprimée après 90 jours sans usage |
+| Connexions MCP de Cursor (une par agent) | `cursor-mcp-auth/` dans le même répertoire | Conservées |
 | Répertoire temporaire privé de chaque exécution (`TMPDIR`) | `multica-task-*` dans le répertoire temporaire du système | Supprimé à la fin de l'exécution ; si le daemon a été tué, un nettoyage ultérieur s'en charge |
 
 Les exécutions Hermes liées à une tâche ou à un chat utilisent le répertoire persistant de leur conversation comme `HERMES_HOME` isolé, avec un fichier `state.db` ordinaire et ses journaux SQLite à l’intérieur. Cette disposition fonctionne aussi bien avec l’ACP exécuté dans le processus qu’avec l’ACP passant par la Gateway. Les historiques existants sont réutilisés et les historiques locaux sont migrés avant l’exécution suivante.
@@ -230,7 +261,9 @@ Seuls les propriétaires et administrateurs de l'espace de travail peuvent crée
 3. Choisissez la famille de protocoles avec laquelle la commande est réellement compatible.
 4. Renseignez le nom, la commande et les arguments fixes, puis enregistrez.
 
-Le profil est partagé dans tout l'espace de travail. Chaque ordinateur connecté recherche la commande de son côté ; seuls les ordinateurs capables de la résoudre dans le `PATH` enregistrent le runtime correspondant. Créer un profil n'installe pas la commande et ne connecte pas les autres membres à l'outil.
+Un nouveau profil appartient uniquement à l’ordinateur sélectionné lors de sa création. Seul son daemon le télécharge et l’enregistre ; les autres ordinateurs ne sont pas concernés, même si la même commande y est installée. Si la commande est introuvable, l’erreur apparaît uniquement sur l’ordinateur sélectionné. La création du profil n’installe pas la commande et ne connecte pas l’outil.
+
+Pour les anciens profils, **Machine (facultatif)** dans **Modifier le runtime personnalisé** est facultatif : laissez **Conserver les machines actuelles** pour modifier uniquement le nom, la commande ou les autres paramètres. Sélectionner une machine supprime les copies inutilisées sur les autres machines ; les agents actifs ou les tâches inachevées y bloquent cette affectation. Les agents archivés et l’historique des tâches sont conservés. Tant que le profil n’est pas lié, seules les instances sur les machines de son créateur sont conservées pour permettre au daemon de se reconnecter. Les copies inutilisées des autres membres suivent le nettoyage habituel après sept jours hors ligne.
 
 Le champ de commande accepte un exécutable et des arguments, pas un script shell. Les arguments simples, les guillemets et les échappements par barre oblique inverse fonctionnent ; les tubes, les redirections, `&&`, `;`, les accents graves (backticks) et l'expansion de variables d'environnement ne fonctionnent pas. Si vous avez besoin de ces comportements, placez-les dans un script d'encapsulation et utilisez ce script comme commande.
 

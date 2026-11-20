@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -220,6 +221,27 @@ func TestClaim_NonLeaderTask_NoBriefing(t *testing.T) {
 	}
 	if isLeader {
 		t.Fatalf("non-leader task must not report is_leader_task=true: %s", raw)
+	}
+}
+
+// TestClaim_DocsEnabledFollowsFlag pins docs_enabled on the claim: the daemon
+// writes `multica doc` into the agent brief only when the server says so.
+func TestClaim_DocsEnabledFollowsFlag(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("docs_v1=%v", enabled), func(t *testing.T) {
+			withFeatureFlag(t, testHandler, featureflags.DocsV1, enabled)
+			ctx := context.Background()
+			fx := newSquadBriefingClaimFixture(t, ctx, fmt.Sprintf("Docs flag %v", enabled))
+			enqueueClaimTask(t, ctx, fx, false /*isLeader*/, true /*withSquadID*/)
+
+			_, _, _, raw := claimAgentInstructionsForTest(t, fx.RuntimeID)
+			if got := strings.Contains(raw, `"docs_enabled":true`); got != enabled {
+				t.Fatalf("docs_enabled in claim = %v, want %v: %s", got, enabled, raw)
+			}
+		})
 	}
 }
 

@@ -6,8 +6,17 @@ const actions = (
     checkout: boolean;
     portal: boolean;
     purchaseSeats: boolean;
+    changePlan: boolean;
+    checkPlanChange: boolean;
   }> = {},
-) => ({ checkout: false, portal: false, purchaseSeats: false, ...overrides });
+) => ({
+  checkout: false,
+  portal: false,
+  purchaseSeats: false,
+  changePlan: false,
+  checkPlanChange: false,
+  ...overrides,
+});
 
 describe("resolveBillingRecovery", () => {
   it("fails closed when workspace billing is disabled", () => {
