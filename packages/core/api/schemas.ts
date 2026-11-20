@@ -1852,6 +1852,8 @@ export const ProjectSchema = z.object({
   archived_at: z.string().nullable().default(null).catch(null),
   archived_by_type: z.enum(["member", "agent"]).nullable().default(null).catch(null),
   archived_by_id: z.string().nullable().default(null).catch(null),
+  max_runs_per_issue: z.number().int().positive().nullable().default(null).catch(null),
+  max_runs_per_agent_per_issue: z.number().int().positive().nullable().default(null).catch(null),
 }).loose();
 
 export const ArchiveProjectResponseSchema = ProjectSchema.extend({

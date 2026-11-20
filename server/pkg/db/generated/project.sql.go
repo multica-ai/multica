@@ -607,28 +607,34 @@ UPDATE project SET
     lead_id = CASE WHEN $11::boolean THEN $12 ELSE lead_id END,
     start_date = CASE WHEN $13::boolean THEN $14 ELSE start_date END,
     due_date = CASE WHEN $15::boolean THEN $16 ELSE due_date END,
+    max_runs_per_issue = CASE WHEN $17::boolean THEN $18 ELSE max_runs_per_issue END,
+    max_runs_per_agent_per_issue = CASE WHEN $19::boolean THEN $20 ELSE max_runs_per_agent_per_issue END,
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, workflow_id, creator_type, creator_id, visibility, archived_at, archived_by_type, archived_by_id, folder_id, max_runs_per_issue, max_runs_per_agent_per_issue
 `
 
 type UpdateProjectParams struct {
-	ID             pgtype.UUID `json:"id"`
-	Title          pgtype.Text `json:"title"`
-	DescriptionSet bool        `json:"description_set"`
-	Description    pgtype.Text `json:"description"`
-	IconSet        bool        `json:"icon_set"`
-	Icon           pgtype.Text `json:"icon"`
-	Status         pgtype.Text `json:"status"`
-	Priority       pgtype.Text `json:"priority"`
-	LeadTypeSet    bool        `json:"lead_type_set"`
-	LeadType       pgtype.Text `json:"lead_type"`
-	LeadIDSet      bool        `json:"lead_id_set"`
-	LeadID         pgtype.UUID `json:"lead_id"`
-	StartDateSet   bool        `json:"start_date_set"`
-	StartDate      pgtype.Date `json:"start_date"`
-	DueDateSet     bool        `json:"due_date_set"`
-	DueDate        pgtype.Date `json:"due_date"`
+	ID                         pgtype.UUID `json:"id"`
+	Title                      pgtype.Text `json:"title"`
+	DescriptionSet             bool        `json:"description_set"`
+	Description                pgtype.Text `json:"description"`
+	IconSet                    bool        `json:"icon_set"`
+	Icon                       pgtype.Text `json:"icon"`
+	Status                     pgtype.Text `json:"status"`
+	Priority                   pgtype.Text `json:"priority"`
+	LeadTypeSet                bool        `json:"lead_type_set"`
+	LeadType                   pgtype.Text `json:"lead_type"`
+	LeadIDSet                  bool        `json:"lead_id_set"`
+	LeadID                     pgtype.UUID `json:"lead_id"`
+	StartDateSet               bool        `json:"start_date_set"`
+	StartDate                  pgtype.Date `json:"start_date"`
+	DueDateSet                 bool        `json:"due_date_set"`
+	DueDate                    pgtype.Date `json:"due_date"`
+	MaxRunsPerIssueSet         bool        `json:"max_runs_per_issue_set"`
+	MaxRunsPerIssue            pgtype.Int4 `json:"max_runs_per_issue"`
+	MaxRunsPerAgentPerIssueSet bool        `json:"max_runs_per_agent_per_issue_set"`
+	MaxRunsPerAgentPerIssue    pgtype.Int4 `json:"max_runs_per_agent_per_issue"`
 }
 
 func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (Project, error) {
@@ -649,6 +655,10 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		arg.StartDate,
 		arg.DueDateSet,
 		arg.DueDate,
+		arg.MaxRunsPerIssueSet,
+		arg.MaxRunsPerIssue,
+		arg.MaxRunsPerAgentPerIssueSet,
+		arg.MaxRunsPerAgentPerIssue,
 	)
 	var i Project
 	err := row.Scan(

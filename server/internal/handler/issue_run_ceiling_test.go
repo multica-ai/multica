@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -67,5 +68,27 @@ func TestIssueRunCeilingsAtEnqueue(t *testing.T) {
 				dbfx.Exec(t, "UPDATE agent_task_queue SET status = 'completed', started_at = now(), completed_at = now() WHERE id = $1", task.ID)
 			}
 		})
+	}
+}
+
+func TestProjectIssueRunCeilingsUpdate(t *testing.T) {
+	projectID := dbfx.Project(t, "Run ceiling settings", nil)
+	url := "/api/projects/" + projectID
+	update := func(body map[string]any) *testutil.Response {
+		req := withURLParam(newRequest(http.MethodPut, url, body), "id", projectID)
+		return testutil.Call(t, testHandler.UpdateProject, req)
+	}
+	var project ProjectResponse
+	update(map[string]any{"max_runs_per_issue": 5, "max_runs_per_agent_per_issue": 3}).Want(http.StatusOK).JSON(&project)
+	if project.MaxRunsPerIssue == nil || *project.MaxRunsPerIssue != 5 ||
+		project.MaxRunsPerAgentPerIssue == nil || *project.MaxRunsPerAgentPerIssue != 3 {
+		t.Fatalf("configured run limits = %+v", project)
+	}
+	update(map[string]any{"max_runs_per_issue": 0}).Want(http.StatusBadRequest)
+	update(map[string]any{"max_runs_per_agent_per_issue": nil}).Want(http.StatusOK)
+	req := withURLParam(newRequest(http.MethodGet, url, nil), "id", projectID)
+	testutil.Call(t, testHandler.GetProject, req).Want(http.StatusOK).JSON(&project)
+	if project.MaxRunsPerIssue == nil || *project.MaxRunsPerIssue != 5 || project.MaxRunsPerAgentPerIssue != nil {
+		t.Fatalf("persisted run limits after clear = %+v", project)
 	}
 }
