@@ -17,8 +17,6 @@ export interface AgentEntry {
   agent: Agent;
   /** Whether the viewer may hand this agent work right now. */
   assignable: boolean;
-  /** Why not, when the permission rule says no; runtime problems are `runtimeBound`. */
-  deniedReason: string | null;
   runtimeBound: boolean;
   availability: AgentAvailability | null;
   runtimeLabel: string | null;
@@ -59,7 +57,6 @@ export function useActorDirectory(enabled: boolean) {
         return {
           agent,
           assignable: decision.allowed && runtimeBound,
-          deniedReason: decision.allowed ? null : decision.message ?? null,
           runtimeBound,
           availability: byAgent.get(agent.id)?.availability ?? null,
           runtimeLabel: runtime ? runtimeDisplayLabel(runtime) : null,

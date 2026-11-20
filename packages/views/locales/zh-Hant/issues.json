@@ -1078,9 +1078,7 @@
       "recent_group": "最近",
       "members_group": "成員",
       "agents_group": "AI 代理",
-      "squads_group": "小隊",
-      "agent_runtime_required": "請先為該 AI 代理繫結執行時，再分配工作",
-      "squad_runtime_required": "請先為該小隊的負責人繫結執行時，再分配工作"
+      "squads_group": "小隊"
     },
     "start_date": {
       "trigger_label": "開始日期",

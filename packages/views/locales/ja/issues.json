@@ -1078,9 +1078,7 @@
       "recent_group": "最近",
       "members_group": "メンバー",
       "agents_group": "エージェント",
-      "squads_group": "スクワッド",
-      "agent_runtime_required": "作業を割り当てる前に、このエージェントにランタイムをバインドしてください",
-      "squad_runtime_required": "作業を割り当てる前に、このスクワッドのリーダーにランタイムをバインドしてください"
+      "squads_group": "スクワッド"
     },
     "start_date": {
       "trigger_label": "開始日",
