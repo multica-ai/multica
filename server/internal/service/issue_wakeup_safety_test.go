@@ -11,6 +11,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -274,5 +275,40 @@ func TestWakeNowReportsIssueRunLimitAndSettlesReceipt(t *testing.T) {
 	}
 	if n := wakeRuns(t, f, w.ID); n != 0 {
 		t.Fatalf("refused wake now started %d runs", n)
+	}
+}
+
+func TestChildDoneWakeupPausesAtProjectRunLimit(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	ctx := t.Context()
+	project := f.Project(t, "Capped parent project", testutil.Cols{"max_runs_per_issue": 1})
+	f.Exec(t, "UPDATE issue SET project_id=$1,status='in_progress',assignee_type='agent',assignee_id=$2 WHERE id=$3", project, agent, issue)
+	f.Task(t, agent, testutil.Cols{
+		"issue_id": issue, "status": "completed",
+		"runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')"),
+	})
+	child := f.Issue(t, "Child at project run limit", testutil.Cols{"parent_issue_id": issue, "status": "in_progress"})
+	f.Cleanup(t, "DELETE FROM issue_child_event WHERE parent_id=$1", issue)
+	if err := s.ProcessChildEvents(ctx, issue); err != nil {
+		t.Fatal(err)
+	}
+	f.Exec(t, "UPDATE issue SET status='done' WHERE id=$1", child)
+	for range 2 {
+		if err := s.ProcessChildEvents(ctx, issue); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w, err := f.q.GetSystemWakeup(ctx, db.GetSystemWakeupParams{IssueID: issue, SystemRule: systemRuleText(SystemRuleChildDone)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Enabled || w.PausedReason.String != string(dispatch.ReasonIssueRunLimit) {
+		t.Fatalf("system wakeup: enabled=%t paused_reason=%q", w.Enabled, w.PausedReason.String)
+	}
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("system wakeup started %d runs at the project limit", n)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM activity_log WHERE issue_id=$1 AND action='wakeup_paused' AND details->>'reason'='issue_run_limit'", issue); n != 1 {
+		t.Fatalf("pause timeline entries = %d, want 1", n)
 	}
 }
