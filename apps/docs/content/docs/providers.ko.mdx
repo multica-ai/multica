@@ -53,6 +53,8 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 | ZeroClaw | `zeroclaw` | ✓ | — | — | — |
 | ZCode | `zcode` / ZCode Desktop | ✓ | ✓ | ✓ | `.zcode/skills/` |
 
+Claude Code에서 데몬 환경 변수 `CLAUDE_CONFIG_DIR`에 절대 경로를 지정하면 Multica는 해당 위치에서 사용자 및 플러그인 스킬을 조회하고 가져옵니다. 시작 래퍼 내부에서만 설정한 경로는 스캐너에 반영되지 않습니다.
+
 Amp의 모델 필드는 기반 모델 ID가 아니라 `high` 같은 Amp **모드**를 선택합니다. 비워 두면 Amp의 기본값을 사용합니다.
 
 Amp는 데몬 또는 에이전트 환경에 `AMP_API_KEY`도 필요하며, 저장된 대화형 로그인만으로는 실행할 수 없습니다.
