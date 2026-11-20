@@ -5310,7 +5310,10 @@ func (d *Daemon) tryBeginServerUpdate(ctx context.Context) serverUpdateAcquireRe
 func (d *Daemon) runUpdate(targetVersion string) (string, error) {
 	if cli.IsBrewInstall() {
 		d.logger.Info("updating CLI via Homebrew...")
-		out, err := cli.UpdateViaBrew()
+		// Bounded so the server's install lease is a guarantee: after it, no
+		// installer for that request is still running. The download path is
+		// already bounded by its HTTP timeouts.
+		out, err := cli.UpdateViaBrewWithTimeout(protocol.RuntimeUpdateInstallTimeout)
 		if err != nil {
 			return out, fmt.Errorf("brew upgrade failed: %w", err)
 		}

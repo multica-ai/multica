@@ -349,8 +349,26 @@ func GetBrewPrefix() string {
 // UpdateViaBrew runs `brew upgrade multica-ai/tap/multica`.
 // Returns the combined output and any error.
 func UpdateViaBrew() (string, error) {
-	cmd := exec.Command("brew", "upgrade", "multica-ai/tap/multica")
+	return UpdateViaBrewWithTimeout(0)
+}
+
+// UpdateViaBrewWithTimeout is UpdateViaBrew that kills brew once timeout
+// passes (no limit when timeout <= 0), so the caller knows the upgrade can no
+// longer be running after it returns.
+func UpdateViaBrewWithTimeout(timeout time.Duration) (string, error) {
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	cmd := exec.CommandContext(ctx, "brew", "upgrade", "multica-ai/tap/multica")
+	// Do not wait on pipes a killed brew's children may still hold open.
+	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return string(out), fmt.Errorf("brew upgrade did not finish within %s and was stopped", timeout)
+	}
 	if err != nil {
 		return string(out), fmt.Errorf("brew upgrade failed: %w", err)
 	}

@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
 	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
@@ -516,6 +519,13 @@ type DaemonHeartbeatPendingUpdate struct {
 	TargetVersion string `json:"target_version"`
 	Deferrable    bool   `json:"deferrable,omitempty"`
 }
+
+// RuntimeUpdateInstallTimeout bounds how long a daemon lets a server-triggered
+// install run before killing the installer. The server keeps the machine
+// closed to other updates for a lease that outlasts it (handler
+// updateInstallLease), so once that lease passes, no installer started for the
+// earlier request can still be running.
+const RuntimeUpdateInstallTimeout = 20 * time.Minute
 
 // RuntimeUpdateBusyError is the failure a daemon reports when it cannot start
 // a non-deferrable update because agent work is active. Released daemons send
