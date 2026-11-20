@@ -1398,15 +1398,21 @@ func TestKimiBackendPropagatesACPPromptUsage(t *testing.T) {
 // with its real token split, keyed by the model the wire log names.
 func TestKimiBackendReportsUsageFromWireLog(t *testing.T) {
 	t.Parallel()
-	assertKimiBackendReportsWireUsage(t, map[string]string{"KIMI_CODE_HOME": t.TempDir()})
+	assertKimiBackendReportsWireUsage(t, map[string]string{"KIMI_CODE_HOME": t.TempDir()}, "")
+}
+
+func TestKimiBackendReportsWireUsageFromRelativeHome(t *testing.T) {
+	t.Parallel()
+	assertKimiBackendReportsWireUsage(t, map[string]string{"KIMI_CODE_HOME": "runtime-data"}, t.TempDir())
 }
 
 func TestKimiBackendReportsWireUsageFromTaskHome(t *testing.T) {
+	// Exercise the backend's HOME fallback. The daemon rejects HOME in custom agent environments.
 	t.Setenv("KIMI_CODE_HOME", "")
-	assertKimiBackendReportsWireUsage(t, map[string]string{"HOME": t.TempDir()})
+	assertKimiBackendReportsWireUsage(t, map[string]string{"HOME": t.TempDir()}, "")
 }
 
-func assertKimiBackendReportsWireUsage(t *testing.T, env map[string]string) {
+func assertKimiBackendReportsWireUsage(t *testing.T, env map[string]string, cwd string) {
 	t.Helper()
 	fakePath := filepath.Join(t.TempDir(), "kimi")
 	writeTestExecutable(t, fakePath, []byte(fakeKimiACPNoUsageScript()))
@@ -1425,7 +1431,7 @@ func assertKimiBackendReportsWireUsage(t *testing.T, env map[string]string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: 20 * time.Second})
+	session, err := backend.Execute(ctx, "task", ExecOptions{Cwd: cwd, Timeout: 20 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1810,14 +1816,13 @@ done
 func TestKimiBackendWireTurnFailureFailsCompletedRun(t *testing.T) {
 	t.Parallel()
 
-	home := t.TempDir()
 	fakePath := filepath.Join(t.TempDir(), "kimi")
 	writeTestExecutable(t, fakePath, []byte(fakeKimiWireTurnFailureScript("ses_wirefail")))
 
 	backend, err := New("kimi", Config{
 		ExecutablePath: fakePath,
 		Logger:         slog.Default(),
-		Env:            map[string]string{"KIMI_CODE_HOME": home},
+		Env:            map[string]string{"KIMI_CODE_HOME": "runtime-data"},
 	})
 	if err != nil {
 		t.Fatalf("new kimi backend: %v", err)
@@ -1826,7 +1831,7 @@ func TestKimiBackendWireTurnFailureFailsCompletedRun(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: t.TempDir(), Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
