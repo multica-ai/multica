@@ -306,24 +306,31 @@ export function ChatInput({
 
   // Pending placeholders do not serialize into markdown. Only an id actually
   // shown and then removed from this document establishes deletion. Defer the
-  // store prune until settle or unmount so undo can restore the placeholder.
+  // store prune until settlement or leaving the draft so undo can restore it.
+  const pruneDeletedPendingUploads = useCallback((key: string) => {
+    const placeholders = uploadPlaceholdersRef.current.get(key);
+    if (!placeholders) return;
+    const { seen, present } = placeholders;
+    const uploads = useChatStore.getState().inputDraftAttachments[key] ?? EMPTY_UPLOADS;
+    for (const upload of uploads) {
+      if (
+        upload.status === "uploading" &&
+        seen.has(upload.clientUploadId) &&
+        !present.has(upload.clientUploadId)
+      ) {
+        useChatStore.getState().removeInputDraftUpload(key, upload.clientUploadId);
+      }
+    }
+  }, []);
+
   useLayoutEffect(() => {
     const placeholders = uploadPlaceholdersRef.current;
     return () => {
-      for (const [key, { seen, present }] of placeholders) {
-        const uploads = useChatStore.getState().inputDraftAttachments[key] ?? EMPTY_UPLOADS;
-        for (const upload of uploads) {
-          if (
-            upload.status === "uploading" &&
-            seen.has(upload.clientUploadId) &&
-            !present.has(upload.clientUploadId)
-          ) {
-            useChatStore.getState().removeInputDraftUpload(key, upload.clientUploadId);
-          }
-        }
+      for (const key of placeholders.keys()) {
+        pruneDeletedPendingUploads(key);
       }
     };
-  }, []);
+  }, [pruneDeletedPendingUploads]);
 
   // Write a document into a draft slot: text, plus a prune of the attachments
   // its body no longer references (deleting an image's markdown drops the
@@ -341,7 +348,7 @@ export function ChatInput({
       // Prune only COMPLETED uploads the body no longer references — deleting
       // an image's markdown drops the staged upload with it. Placeholders
       // (uploading / failed / interrupted) have no body reference yet. Pending
-      // deletions are reconciled from the live document at unmount instead.
+      // deletions are reconciled from the live document when leaving the draft.
       const referenced = uploads.filter(
         (u) => u.status !== "uploaded" || isAttachmentReferenced(markdown, u.attachment),
       );
@@ -444,6 +451,8 @@ export function ChatInput({
       logger.debug("input.draft flush on key change", { from: loadedKey, to: draftKey });
       commitDraft(loadedKey, pending);
     }
+    pruneDeletedPendingUploads(loadedKey);
+    uploadPlaceholdersRef.current.delete(loadedKey);
     editorDraftKeyRef.current = draftKey;
     setLoadedDraftKey(draftKey);
     if (!deferredAdoptRef.current) return;
@@ -452,7 +461,7 @@ export function ChatInput({
     logger.debug("input.draft adopting after upload settled", { key: draftKey });
     editorRef.current?.adoptContent(incoming);
     setIsEmpty(!incoming.trim());
-  }, [draftKey, uploadGate.uploading, commitDraft]);
+  }, [draftKey, uploadGate.uploading, commitDraft, pruneDeletedPendingUploads]);
 
   // Grab keyboard focus when the owner bumps `focusRequest` (a new chat was
   // started) so the user can type immediately. The editor's `focus()` latches

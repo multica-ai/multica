@@ -129,6 +129,32 @@ describe("ChatInput pending upload deletion across unmount", () => {
     expect(useChatStore.getState().inputDraftAttachments.session?.[0]?.status).toBe("uploaded");
   });
 
+  it("keeps a rebuilt placeholder deleted when switching drafts without unmounting", async () => {
+    const view = mountComposer();
+    await pickFile(view);
+    view.unmount();
+
+    const reopened = mountComposer();
+    await waitFor(() => expect(reopened.container.querySelector(".tiptap")).toHaveTextContent("synthetic.txt"));
+    const editor = reopened.container.querySelector(".tiptap");
+    await deleteFile(reopened);
+
+    act(() => {
+      useChatStore.getState().setInputDraft("other-session", "Other draft");
+      useChatStore.setState({ activeSessionId: "other-session" });
+    });
+    await waitFor(() => expect(editor).toHaveTextContent("Other draft"));
+    expect(reopened.container.querySelector(".tiptap")).toBe(editor);
+
+    await settle();
+    expect(useChatStore.getState().inputDrafts.session ?? "").toBe("");
+    expect(useChatStore.getState().inputDraftAttachments.session ?? []).toEqual([]);
+    expect(useChatStore.getState().inputDrafts["other-session"]).toBe("Other draft");
+
+    act(() => { useChatStore.setState({ activeSessionId: "session" }); });
+    await waitFor(() => expect(editor?.textContent).toBe(""));
+  });
+
   it("settles a rebuilt placeholder restored by undo before the response", async () => {
     const view = mountComposer();
     await pickFile(view);
