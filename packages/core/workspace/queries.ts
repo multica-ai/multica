@@ -229,6 +229,10 @@ export function assigneeFrequencyOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.assigneeFrequency(wsId),
     queryFn: () => api.getAssigneeFrequency(),
+    // Warmed on idle and read by every picker open; keep it past the default
+    // gcTime so the Recent group never waits on a refetch. Reassignments
+    // invalidate it, and a stale copy still renders while it revalidates.
+    gcTime: Infinity,
   });
 }
 
