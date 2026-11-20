@@ -1391,6 +1391,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						slog.Error("composio: service init failed; composio integration disabled", "error", serr)
 					} else {
 						h.Composio = svc
+						// Team Apps accounts are a paid feature (MUL-9491): the
+						// callback re-checks it right before writing an account.
+						svc.SetTeamConnectGate(h.TeamAppConnectGate)
 						// Connected Apps v2 (MUL-8516): runs reach their apps
 						// through the Multica gateway, which holds the Composio
 						// key and applies account rules and confirmations.

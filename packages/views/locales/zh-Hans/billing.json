@@ -248,7 +248,8 @@
     "read_only": "只读，升级后可编辑",
     "unavailable": "当前工作区的套餐不包含此功能。",
     "view_plans": "查看套餐",
-    "locked_error": "当前工作区的套餐不包含此功能。已有设置继续生效，升级后可以新增。"
+    "locked_error": "当前工作区的套餐不包含此功能。已有设置继续生效，升级后可以新增。",
+    "upgrade_to_add": "升级套餐"
   },
   "trial": {
     "status": {

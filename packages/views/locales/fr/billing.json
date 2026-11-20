@@ -254,7 +254,8 @@
     "read_only": "Lecture seule. Passez à un forfait supérieur pour modifier.",
     "unavailable": "Non inclus dans le forfait de cet espace de travail.",
     "view_plans": "Voir les forfaits",
-    "locked_error": "Non inclus dans le forfait de l'espace de travail. Les réglages existants restent actifs ; changez de forfait pour en ajouter."
+    "locked_error": "Non inclus dans le forfait de l'espace de travail. Les réglages existants restent actifs ; changez de forfait pour en ajouter.",
+    "upgrade_to_add": "Changer de forfait"
   },
   "trial": {
     "status": {

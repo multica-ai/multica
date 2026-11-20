@@ -17,6 +17,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { refreshFeaturesOnLockedError, usePaidFeatureAccess } from "@multica/core/billing";
 import {
   appCatalogOptions,
   appsOverviewOptions,
@@ -52,6 +53,11 @@ export function AppsSettings() {
   const overview = useQuery(appsOverviewOptions(wsId));
   const catalog = useQuery(appCatalogOptions(wsId));
   const restore = useRestoreAppAccess();
+  // Without the paid feature existing team accounts keep working and can be
+  // reauthorized or disconnected; only a team account for a new app is refused.
+  const teamAccess = usePaidFeatureAccess(wsId, "team_app_accounts", {
+    hasExistingConfig: (overview.data?.team ?? []).some((c) => c.status !== "revoked"),
+  });
 
   const [addingScope, setAddingScope] = useState<AppAccountScope | null>(null);
   const [detail, setDetail] = useState<AccountTarget | null>(null);
@@ -199,6 +205,8 @@ export function AppsSettings() {
           catalog={catalog.data?.apps ?? []}
           catalogLoading={catalog.isLoading}
           catalogError={catalog.isError}
+          teamAccess={teamAccess}
+          onConnectError={(error) => refreshFeaturesOnLockedError(qc, wsId, error)}
         />
       )}
       {detail && (

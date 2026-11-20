@@ -140,6 +140,9 @@ type Service struct {
 	// connects for the same new app do not register two configs.
 	authCreateMu sync.Mutex
 	tools        toolCache
+	// teamConnectGate decides whether a completed team handshake may write
+	// its account; see SetTeamConnectGate.
+	teamConnectGate TeamConnectGate
 }
 
 // NewService validates its inputs and returns a ready Service. It errors when a

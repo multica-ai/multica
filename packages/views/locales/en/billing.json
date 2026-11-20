@@ -254,7 +254,8 @@
     "read_only": "Read-only. Upgrade to edit.",
     "unavailable": "Not included in this workspace's plan.",
     "view_plans": "View plans",
-    "locked_error": "This isn't included in the workspace's plan. Existing settings keep working; upgrade to add more."
+    "locked_error": "This isn't included in the workspace's plan. Existing settings keep working; upgrade to add more.",
+    "upgrade_to_add": "Upgrade to add"
   },
   "trial": {
     "status": {

@@ -248,7 +248,8 @@
     "read_only": "唯讀，升級後可編輯",
     "unavailable": "目前工作區的套餐不包含此功能。",
     "view_plans": "查看套餐",
-    "locked_error": "目前工作區的套餐不包含此功能。既有設定繼續生效，升級後可以新增。"
+    "locked_error": "目前工作區的套餐不包含此功能。既有設定繼續生效，升級後可以新增。",
+    "upgrade_to_add": "升級套餐"
   },
   "trial": {
     "status": {

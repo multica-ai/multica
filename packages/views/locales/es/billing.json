@@ -254,7 +254,8 @@
     "read_only": "Solo lectura. Mejora el plan para editar.",
     "unavailable": "No está incluido en el plan de este espacio de trabajo.",
     "view_plans": "Ver planes",
-    "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más."
+    "locked_error": "No está incluido en el plan del espacio de trabajo. La configuración existente sigue funcionando; mejora el plan para añadir más.",
+    "upgrade_to_add": "Mejorar el plan"
   },
   "trial": {
     "status": {
