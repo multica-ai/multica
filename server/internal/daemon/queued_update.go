@@ -24,6 +24,10 @@ type queuedServerUpdate struct {
 	targetVersion string
 	// reportedTasks is the task count last reported as "scheduled", or -1.
 	reportedTasks int64
+	// installing is set once the server accepted "running". The update stays
+	// held while it installs, so a re-offer that was already in flight is
+	// recognised as the same update rather than refused as a second one.
+	installing bool
 }
 
 const errAnotherUpdateQueued = "another runtime update is already queued or in progress on this machine"
@@ -33,6 +37,16 @@ func (d *Daemon) handleQueuedUpdate(ctx context.Context, runtimeID string, updat
 	defer d.queuedUpdateMu.Unlock()
 
 	held := d.queuedUpdate
+	if held != nil && held.installing {
+		// A re-offer of the installing update is ignored, not refused.
+		if held.id != update.ID {
+			d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+				"status": "failed",
+				"error":  errAnotherUpdateQueued,
+			})
+		}
+		return
+	}
 	if held != nil && held.id != update.ID {
 		// The held update may have been cancelled or expired since; a
 		// refused "scheduled" report says so and frees the slot.
@@ -77,7 +91,7 @@ func (d *Daemon) finishActiveTask() {
 
 func (d *Daemon) tryQueuedUpdateLocked(ctx context.Context) {
 	held := d.queuedUpdate
-	if held == nil {
+	if held == nil || held.installing {
 		return
 	}
 
@@ -110,9 +124,17 @@ func (d *Daemon) tryQueuedUpdateLocked(ctx context.Context) {
 		}
 		return
 	}
-	d.queuedUpdate = nil
+	held.installing = true
 	d.logger.Info("CLI update requested", "runtime_id", held.runtimeID, "update_id", held.id, "target_version", held.targetVersion)
-	go d.runAcquiredServerUpdate(ctx, held.runtimeID, held.id, held.targetVersion)
+	go func() {
+		d.runAcquiredServerUpdate(ctx, held.runtimeID, held.id, held.targetVersion)
+		// Reached on failure; a successful install restarts the daemon.
+		d.queuedUpdateMu.Lock()
+		if d.queuedUpdate == held {
+			d.queuedUpdate = nil
+		}
+		d.queuedUpdateMu.Unlock()
+	}()
 }
 
 func (d *Daemon) reportQueuedUpdateWaiting(ctx context.Context, held *queuedServerUpdate) error {

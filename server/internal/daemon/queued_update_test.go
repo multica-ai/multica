@@ -175,3 +175,36 @@ func TestQueuedUpdate_RefusedWhileInstalling(t *testing.T) {
 		t.Fatal("nothing should be held while another update installs")
 	}
 }
+
+// A re-offer computed before the server accepted "running" can arrive while
+// the update installs; it must not be reported as a failure of itself.
+func TestQueuedUpdate_ReofferWhileInstallingIsIgnored(t *testing.T) {
+	d, reports := queuedUpdateDaemon(t, nil)
+	release := make(chan struct{})
+	installed := make(chan struct{})
+	d.runUpdateFn = func(string) (string, error) {
+		close(installed)
+		<-release
+		return "", errors.New("stop before restart")
+	}
+
+	d.handleUpdate(context.Background(), "runtime-1", deferrable("update-1"))
+	<-installed
+	d.handleUpdate(context.Background(), "runtime-1", deferrable("update-1"))
+	d.handleUpdate(context.Background(), "runtime-2", deferrable("update-2"))
+	close(release)
+
+	waitFor(t, func() bool { return len(reports()) == 3 }, "install result reported")
+	got := statuses(reports())
+	want := []string{"update-1:running", "update-2:failed", "update-1:failed"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("reports = %v, want %v", got, want)
+		}
+	}
+	waitFor(t, func() bool {
+		d.queuedUpdateMu.Lock()
+		defer d.queuedUpdateMu.Unlock()
+		return d.queuedUpdate == nil
+	}, "failed install releases the slot")
+}
