@@ -14,6 +14,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // CLI update request store
@@ -99,11 +100,13 @@ const (
 	// earlier through applyUpdateTimeout.
 	updateActiveRetention = updateScheduledTimeout + updateStoreRetention
 	// updateInstallLease is how long after it started an install may still be
-	// running although the server stopped waiting for its result (the installer
-	// has no time limit of its own). Until the daemon reports how it ended, or
-	// this passes, the machine takes no other update: a second one would be
-	// installed right after the first, possibly to another version.
-	updateInstallLease = time.Hour
+	// running although the server stopped waiting for its result. Until the
+	// daemon reports how it ended, or this passes, the machine takes no other
+	// update: a second one would be installed right after the first, possibly
+	// to another version. Daemons stop their installer after
+	// protocol.RuntimeUpdateInstallTimeout, so once this passes the earlier
+	// install has ended one way or the other.
+	updateInstallLease = 3 * protocol.RuntimeUpdateInstallTimeout
 )
 
 // updateReofferInterval is how often an unfinished queued request is offered
@@ -778,11 +781,14 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	case "running", "scheduled":
-		var transitionErr error
+		var (
+			moved         *UpdateRequest
+			transitionErr error
+		)
 		if req.Status == "running" {
-			_, transitionErr = h.UpdateStore.MarkRunning(r.Context(), updateID)
+			moved, transitionErr = h.UpdateStore.MarkRunning(r.Context(), updateID)
 		} else {
-			_, transitionErr = h.UpdateStore.Schedule(r.Context(), updateID, req.ActiveTasks)
+			moved, transitionErr = h.UpdateStore.Schedule(r.Context(), updateID, req.ActiveTasks)
 		}
 		if errors.Is(transitionErr, errUpdateNotRunnable) {
 			// The daemon must drop the request: it was cancelled, expired or
@@ -795,6 +801,12 @@ func (h *Handler) ReportUpdateResult(w http.ResponseWriter, r *http.Request) {
 		if transitionErr != nil {
 			slog.Error("UpdateStore transition failed", "error", transitionErr, "update_id", updateID, "status", req.Status)
 			writeError(w, http.StatusInternalServerError, "failed to persist update status")
+			return
+		}
+		if moved == nil {
+			// The record vanished after the read above (dropped during a
+			// switch-over, or past retention). Never accept a start for it.
+			writeError(w, http.StatusNotFound, "update not found")
 			return
 		}
 		// A daemon holding a queued request installs only on this explicit

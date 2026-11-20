@@ -705,3 +705,45 @@ func TestOneMachineDispatchesOneUpdateAtATime(t *testing.T) {
 		}
 	}
 }
+
+// vanishingUpdateStore loses the record between the handler's read and the
+// transition, as when a switch-over drops the update records.
+type vanishingUpdateStore struct {
+	*InMemoryUpdateStore
+}
+
+func (s vanishingUpdateStore) MarkRunning(context.Context, string) (*UpdateRequest, error) {
+	return nil, nil
+}
+
+func (s vanishingUpdateStore) Schedule(context.Context, string, *int) (*UpdateRequest, error) {
+	return nil, nil
+}
+
+// A start (or hold) report for a record that is gone must not come back as an
+// acceptance: the daemon installs on accepted=running.
+func TestReportUpdateResult_VanishedRecordIsNotAccepted(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	mem := NewInMemoryUpdateStore()
+	orig := testHandler.UpdateStore
+	testHandler.UpdateStore = vanishingUpdateStore{mem}
+	t.Cleanup(func() { testHandler.UpdateStore = orig })
+	req := mustCreateUpdate(t, mem, testRuntimeID)
+
+	for _, status := range []string{"running", "scheduled"} {
+		w := reportUpdate(t, req.ID, map[string]any{"status": status})
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("%s report for a vanished record = %d %s, want 404", status, w.Code, w.Body.String())
+		}
+	}
+}
+
+// The install lease is only a guarantee while it outlasts the daemon's own
+// limit on the installer, with room for the result report's retries.
+func TestUpdateInstallLeaseOutlastsTheInstaller(t *testing.T) {
+	if updateInstallLease < 2*protocol.RuntimeUpdateInstallTimeout {
+		t.Fatalf("install lease %s does not clearly outlast the installer limit %s", updateInstallLease, protocol.RuntimeUpdateInstallTimeout)
+	}
+}
