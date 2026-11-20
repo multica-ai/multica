@@ -91,7 +91,11 @@ export interface UploadDraftBinding {
 // The editor currently showing each registry key. Lets a settle handler whose
 // own mount is gone (the upload outlived the composer) hand the finished link
 // to the editor a REOPENED composer mounted for the same target.
-const liveEditors = new Map<string, RefObject<ContentEditorRef | null>>();
+interface LiveEditor {
+  editorRef: RefObject<ContentEditorRef | null>;
+  isUploadPlaceholderDeleted: (clientUploadId: string) => boolean;
+}
+const liveEditors = new Map<string, LiveEditor>();
 
 /** Test-only: registry keys currently registered. Lets timing tests assert
  *  registration is part of the COMMIT (layout), not a passive task later. */
@@ -144,11 +148,17 @@ function deliverFinishedUpload(
   // A composer showing this target rebuilt the placeholder on mount, so the
   // finished attachment REPLACES it where the user last saw it instead of
   // being appended a second time at the end.
-  if (live?.current?.settleUploadPlaceholder(clientUploadId, toUploadResult(attachment)) === true) {
+  if (live?.editorRef.current?.settleUploadPlaceholder(clientUploadId, toUploadResult(attachment)) === true) {
     binding.appendToBody(md);
     return;
   }
-  if (live?.current?.insertMarkdownAtEnd(md) === true) {
+  // A rebuilt placeholder removed from the receiving document is a deletion.
+  // Check after the swap so its own removal of uploading attrs is successful.
+  if (live?.isUploadPlaceholderDeleted(clientUploadId)) {
+    binding.removeUpload(clientUploadId);
+    return;
+  }
+  if (live?.editorRef.current?.insertMarkdownAtEnd(md) === true) {
     binding.appendToBody(md);
     return;
   }
@@ -197,7 +207,7 @@ function deliverPastedTextBack(
   // Same insurance as deliverFinishedUpload: a landed editor insert can still
   // lose its debounced emit to a quick unmount, and both writes converge on
   // identical content.
-  liveEditors.get(binding.registryKey)?.current?.insertMarkdownAtEnd(text);
+  liveEditors.get(binding.registryKey)?.editorRef.current?.insertMarkdownAtEnd(text);
   binding.appendToBody(text);
 }
 
@@ -269,6 +279,8 @@ export function useCoordinatedUploads(
      * draft, so composers with a pinnable editor register the LOADED key.
      */
     liveRegistryKey?: string;
+    /** Whether this mount's loaded document drew and then deleted the placeholder. */
+    isUploadPlaceholderDeleted?: (clientUploadId: string) => boolean;
   },
 ): CoordinatedUploads {
   const { t } = useT("editor");
@@ -277,6 +289,8 @@ export function useCoordinatedUploads(
   // Latest-value ref: handleUpload snapshots the target at invocation time.
   const resolveUploadTargetRef = useRef(opts?.resolveUploadTarget);
   resolveUploadTargetRef.current = opts?.resolveUploadTarget;
+  const isUploadPlaceholderDeletedRef = useRef(opts?.isUploadPlaceholderDeleted);
+  isUploadPlaceholderDeletedRef.current = opts?.isUploadPlaceholderDeleted;
 
   // Liveness of THIS mount, read by settle closures it created: while true,
   // the editor that started the upload will do the inline swap itself; once
@@ -301,9 +315,13 @@ export function useCoordinatedUploads(
   // old key still maps to an editor now holding another draft's document.
   useLayoutEffect(() => {
     if (!registryKey) return;
-    liveEditors.set(registryKey, editorRef);
+    const live: LiveEditor = {
+      editorRef,
+      isUploadPlaceholderDeleted: (id) => isUploadPlaceholderDeletedRef.current?.(id) ?? false,
+    };
+    liveEditors.set(registryKey, live);
     return () => {
-      if (liveEditors.get(registryKey) === editorRef) liveEditors.delete(registryKey);
+      if (liveEditors.get(registryKey) === live) liveEditors.delete(registryKey);
     };
   }, [registryKey, editorRef]);
 

@@ -306,7 +306,7 @@ export function ChatInput({
 
   // Pending placeholders do not serialize into markdown. Only an id actually
   // shown and then removed from this document establishes deletion. Defer the
-  // store prune until unmount so undo can restore the in-flight placeholder.
+  // store prune until settle or unmount so undo can restore the placeholder.
   useLayoutEffect(() => {
     const placeholders = uploadPlaceholdersRef.current;
     return () => {
@@ -397,6 +397,10 @@ export function ChatInput({
   } = useCoordinatedUploads(uploadBinding, storeUploads, {}, uploadGate, editorRef, {
     resolveUploadTarget: () => makeUploadBinding(editorDraftKeyRef.current),
     liveRegistryKey: `chat:${loadedDraftKey}`,
+    isUploadPlaceholderDeleted: (id) => {
+      const placeholders = uploadPlaceholdersRef.current.get(editorDraftKeyRef.current);
+      return placeholders?.seen.has(id) === true && !placeholders.present.has(id);
+    },
   });
 
   // Move the editor from the draft it holds to the draft that is selected.
