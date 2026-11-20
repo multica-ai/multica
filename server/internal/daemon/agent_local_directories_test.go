@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 const directoryTestAgentID = "12ab5678-1234-4567-890a-123456789abc"
@@ -186,10 +188,18 @@ func TestAgentDefaultDirectoryUsesExistingPathLockAndChatExemption(t *testing.T)
 func TestAgentDefaultDirectoryMissingPathFailsBeforeExecution(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "missing")
-	failures := make(chan string, 1)
+	type failReport struct {
+		Error         string `json:"error"`
+		FailureReason string `json:"failure_reason"`
+	}
+	failures := make(chan failReport, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/fail") {
-			failures <- r.URL.Path
+			var body failReport
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode failure report: %v", err)
+			}
+			failures <- body
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -203,7 +213,13 @@ func TestAgentDefaultDirectoryMissingPathFailsBeforeExecution(t *testing.T) {
 		t.Fatal("missing configured directory silently fell back to managed execution")
 	}
 	select {
-	case <-failures:
+	case body := <-failures:
+		if got := taskfailure.NormalizeDaemonReason(body.FailureReason, body.Error); got != "local_directory_error" {
+			t.Fatalf("failure reason = %q, want local_directory_error", got)
+		}
+		if !strings.Contains(body.Error, agentLocalDirectoriesEnv) {
+			t.Fatalf("missing agent-default directory diagnostic: %q", body.Error)
+		}
 	default:
 		t.Fatal("missing configured directory was not reported as a run failure")
 	}

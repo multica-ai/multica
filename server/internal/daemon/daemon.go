@@ -6491,13 +6491,18 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	if err := validateLocalPath(assignment.AbsPath); err != nil {
 		taskLog.Error("local_directory: path validation failed", "error", err)
 		failureReason := "local_directory_error"
+		message := err.Error()
 		if errors.Is(err, errLocalDirectoryMissing) {
-			failureReason = taskfailure.ReasonLocalDirectoryMissing.String()
+			if assignment.AgentDefault {
+				message = "The agent's default directory no longer exists. Update " + agentLocalDirectoriesEnv + " on this machine and restart the daemon."
+			} else {
+				failureReason = taskfailure.ReasonLocalDirectoryMissing.String()
+			}
 		}
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
-			errorMessage:  err.Error(),
+			errorMessage:  message,
 			failureReason: failureReason,
 		}); failErr != nil {
 			taskLog.Error("fail task after local_directory validation error", "error", failErr)

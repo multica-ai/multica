@@ -44,9 +44,10 @@ type localDirectoryRef struct {
 // absolute path; the path mutex keys on it so two different routes to the
 // same directory are serialised.
 type localDirectoryAssignment struct {
-	Ref      localDirectoryRef
-	AbsPath  string // user-provided path, cleaned but not symlink-resolved
-	RealPath string // canonical key for the path mutex
+	Ref          localDirectoryRef
+	AbsPath      string // user-provided path, cleaned but not symlink-resolved
+	RealPath     string // canonical key for the path mutex
+	AgentDefault bool
 }
 
 // UsesWorktree reports whether this assignment runs each task in its own git
@@ -136,9 +137,14 @@ func localDirectoryAssignmentForTask(task Task, daemonID string, defaults map[st
 	if !configured || daemonID == "" {
 		return nil, nil
 	}
-	return resolveLocalDirectoryRef(localDirectoryRef{
+	assignment, err = resolveLocalDirectoryRef(localDirectoryRef{
 		LocalPath: path, DaemonID: daemonID, ExecutionMode: localDirectoryModeInPlace,
 	})
+	if err != nil {
+		return nil, err
+	}
+	assignment.AgentDefault = true
+	return assignment, nil
 }
 
 // localDirectoryLockExempt reports whether a task may run inside an in_place
