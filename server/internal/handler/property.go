@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issueproperty"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/projectaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -408,7 +409,13 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 	// Anything else keeps the counts, which is what older clients expect.
 	var usage map[string]int64
 	if r.URL.Query().Get("include_usage") != "false" {
-		if usage, err = h.countPropertyUsage(r.Context(), wsUUID, listed); err != nil {
+		// Issues in private projects the caller cannot see are not counted
+		// (MUL-8472), as in label usage counts.
+		hidden, ok := h.requestHiddenProjects(w, r, workspaceID)
+		if !ok {
+			return
+		}
+		if usage, err = h.countPropertyUsage(r.Context(), wsUUID, hidden, listed); err != nil {
 			slog.Warn("count property usage failed", append(logger.RequestAttrs(r), "error", err)...)
 			writeError(w, http.StatusInternalServerError, "failed to list properties")
 			return
@@ -426,12 +433,13 @@ func (h *Handler) ListProperties(w http.ResponseWriter, r *http.Request) {
 const propertyUsageKeysPerScan = 1000
 
 // countPropertyUsage returns, keyed by property id, how many of the
-// workspace's issues carry a value for each of the given definitions.
-func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUID, props []db.IssueProperty) (map[string]int64, error) {
+// workspace's issues outside hidden projects carry a value for each of the
+// given definitions.
+func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUID, hidden projectaccess.Hidden, props []db.IssueProperty) (map[string]int64, error) {
 	usage := make(map[string]int64, len(props))
 	for start := 0; start < len(props); start += propertyUsageKeysPerScan {
 		chunk := props[start:min(start+propertyUsageKeysPerScan, len(props))]
-		query, args := propertyUsageQuery(workspaceID, chunk)
+		query, args := propertyUsageQuery(workspaceID, hidden, chunk)
 		counts := make([]int64, len(chunk))
 		dest := make([]any, len(chunk))
 		for i := range counts {
@@ -458,8 +466,9 @@ func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUI
 //   - No row per (issue, key), as jsonb_object_keys or an unnest join would
 //     produce: when most issues carry the counted keys, building and grouping
 //     those rows costs more than the per-definition scans did.
-//   - The scan filters on workspace_id alone, inside an OFFSET 0 subquery,
-//     and every JSON check runs above it. A JSON condition in the same scan
+//   - The scan filters on workspace_id (and, for a caller with hidden
+//     projects, project_id) inside an OFFSET 0 subquery, and every JSON
+//     check runs above it. A JSON condition in the same scan
 //     can be checked before workspace_id (PostgreSQL appends the equality it
 //     derives for workspace_id after the other filters). A sequential scan
 //     then reads every other workspace's bags too, which costs most when
@@ -468,18 +477,24 @@ func (h *Handler) countPropertyUsage(ctx context.Context, workspaceID pgtype.UUI
 //     Bags past the TOAST threshold would otherwise be fetched and
 //     decompressed again for every `?`. A single definition skips it: its
 //     one `?` reads the bag once already.
-func propertyUsageQuery(workspaceID pgtype.UUID, props []db.IssueProperty) (string, []any) {
+func propertyUsageQuery(workspaceID pgtype.UUID, hidden projectaccess.Hidden, props []db.IssueProperty) (string, []any) {
+	args := make([]any, 0, len(props)+2)
+	args = append(args, workspaceID)
+	scope := "i.workspace_id = $1::uuid"
+	if ids := hidden.Param(); ids != nil {
+		args = append(args, ids)
+		scope += " AND " + hiddenProjectPredicate("i.project_id", fmt.Sprintf("$%d", len(args)))
+	}
 	if len(props) == 1 {
-		return `SELECT COUNT(*) FILTER (WHERE s.properties ? $2::text)
+		args = append(args, uuidToString(props[0].ID))
+		return fmt.Sprintf(`SELECT COUNT(*) FILTER (WHERE s.properties ? $%d::text)
 FROM (
 	SELECT i.properties
 	FROM issue i
-	WHERE i.workspace_id = $1::uuid
+	WHERE %s
 	OFFSET 0
-) s`, []any{workspaceID, uuidToString(props[0].ID)}
+) s`, len(args), scope), args
 	}
-	args := make([]any, 0, len(props)+1)
-	args = append(args, workspaceID)
 	columns := make([]string, len(props))
 	for i, p := range props {
 		args = append(args, uuidToString(p.ID))
@@ -489,10 +504,10 @@ FROM (
 FROM (
 	SELECT i.properties || '{}'::jsonb AS properties
 	FROM issue i
-	WHERE i.workspace_id = $1::uuid
+	WHERE %s
 	OFFSET 0
 ) s
-WHERE s.properties <> '{}'::jsonb`, strings.Join(columns, ", ")), args
+WHERE s.properties <> '{}'::jsonb`, strings.Join(columns, ", "), scope), args
 }
 
 func (h *Handler) GetProperty(w http.ResponseWriter, r *http.Request) {
