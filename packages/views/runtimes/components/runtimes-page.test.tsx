@@ -307,6 +307,44 @@ describe("RuntimesPage", () => {
     expect(screen.getByText("build-server")).toBeInTheDocument();
   });
 
+  it("searches machines and cloud services by name", async () => {
+    const user = userEvent.setup();
+    renderPage({
+      runtimes: [
+        makeRuntime(),
+        makeRuntime({
+          id: "rt-codex",
+          daemon_id: "daemon-2",
+          name: "Codex (build-server)",
+          provider: "codex",
+          device_info: "build-server · codex 0.5.0",
+        }),
+      ],
+      connection: qoder({ configured: true, enabled: true, status: "online" }),
+    });
+
+    await user.click(screen.getByRole("button", { name: "Search runtimes" }));
+    await user.type(screen.getByRole("textbox", { name: "Search runtimes" }), "build");
+    expect(screen.getByText("build-server")).toBeInTheDocument();
+    expect(screen.queryByText("dev-machine.local")).not.toBeInTheDocument();
+    expect(screen.queryByText("Qoder Cloud Agents")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cursor Cloud Agents")).not.toBeInTheDocument();
+
+    const field = screen.getByRole("textbox", { name: "Search runtimes" });
+    await user.clear(field);
+    await user.type(field, "cursor");
+    expect(screen.getByText("Cursor Cloud Agents")).toBeInTheDocument();
+    expect(screen.queryByText("build-server")).not.toBeInTheDocument();
+
+    await user.clear(field);
+    await user.type(field, "nothing-here");
+    const clearButtons = screen.getAllByRole("button", { name: "Clear search" });
+    expect(screen.getByText('No runtimes match "nothing-here".')).toBeInTheDocument();
+    await user.click(clearButtons[clearButtons.length - 1]!);
+    expect(screen.getByText("dev-machine.local")).toBeInTheDocument();
+    expect(screen.getByText("build-server")).toBeInTheDocument();
+  });
+
   it("never lists the Qoder runtime as a machine", async () => {
     const user = userEvent.setup();
     const qoderRuntime = makeRuntime({

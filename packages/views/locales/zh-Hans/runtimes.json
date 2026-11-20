@@ -1,6 +1,7 @@
 {
   "page": {
     "title": "运行时",
+    "search": "搜索运行时",
     "connect_remote": "添加机器",
     "scope_mine": "我的",
     "scope_all": "全部",

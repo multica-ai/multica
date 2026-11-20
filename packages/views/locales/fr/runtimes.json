@@ -1,6 +1,7 @@
 {
   "page": {
     "title": "Runtimes",
+    "search": "Rechercher des runtimes",
     "connect_remote": "Ajouter une machine",
     "scope_mine": "Les miens",
     "scope_all": "Tous",

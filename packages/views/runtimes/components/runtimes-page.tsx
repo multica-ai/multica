@@ -72,6 +72,7 @@ import {
   CollectionNoMatches,
   CollectionPageHeader,
   CollectionScopeItems,
+  CollectionSearch,
 } from "../../layout/collection-page";
 import {
   CollectionEmptyValue,
@@ -94,7 +95,11 @@ import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import { RuntimesIntro } from "./runtimes-intro";
 import { pendingRuntimeFromProfile } from "./pending-runtime";
-import { buildRuntimeMachines, type RuntimeMachine } from "./runtime-machines";
+import {
+  buildRuntimeMachines,
+  filterRuntimeMachines,
+  type RuntimeMachine,
+} from "./runtime-machines";
 import {
   HealthIcon,
   ProviderIconStack,
@@ -118,6 +123,11 @@ export interface RuntimesPageProps {
 
 type StatusFilter = "all" | "online" | "offline";
 const STATUS_FILTERS: StatusFilter[] = ["all", "online", "offline"];
+
+function matchesSearch(query: string, ...texts: string[]): boolean {
+  const q = query.trim().toLowerCase();
+  return !q || texts.some((text) => text.toLowerCase().includes(q));
+}
 
 const COMING_SOON_SERVICES = [
   { provider: "cursor", name: "Cursor Cloud Agents", vendor: "Cursor" },
@@ -191,6 +201,7 @@ export function RuntimesPage({
   const [showConnectDialog, setShowConnectDialog] = useState(false);
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [search, setSearch] = useState("");
   const restoreScrollRef = useRestoredScrollRef("runtimes");
 
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
@@ -287,31 +298,40 @@ export function RuntimesPage({
   const localMachine = machineList.find((machine) => machine.isCurrent);
 
   const filtering = statusFilter !== "all";
+  const searching = search.trim() !== "";
+  const narrowed = filtering || searching;
   const matchesStatus = (online: boolean) =>
     statusFilter === "all" || (statusFilter === "online") === online;
 
-  const visibleMachines = machineList.filter((machine) =>
-    matchesStatus(machine.health === "online"),
+  const visibleMachines = filterRuntimeMachines(machineList, search, "all").filter(
+    (machine) => matchesStatus(machine.health === "online"),
   );
   const qoderConfigured = qoder?.configured === true;
+  const qoderTitle = t(($) => $.qoder.cloud_title);
   const showQoderRow =
     qoder !== null &&
     (statusFilter === "all" ||
-      (qoderConfigured && matchesStatus(qoderIsOnline(qoder))));
-  const visibleComingSoon = statusFilter === "all" ? COMING_SOON_SERVICES : [];
+      (qoderConfigured && matchesStatus(qoderIsOnline(qoder)))) &&
+    matchesSearch(search, qoderTitle, "Qoder");
+  const visibleComingSoon =
+    statusFilter === "all"
+      ? COMING_SOON_SERVICES.filter((service) =>
+          matchesSearch(search, service.name, service.vendor),
+        )
+      : [];
   const showThisComputerRow =
-    !filtering && !isDesktop && machineList.length === 0;
-  const showAddMachineRow = !filtering && machineList.length === 0;
+    !narrowed && !isDesktop && machineList.length === 0;
+  const showAddMachineRow = !narrowed && machineList.length === 0;
   const showIntro =
     !listLoading &&
     !qoderLoading &&
-    !filtering &&
+    !narrowed &&
     !isDesktop &&
     machineList.length === 0 &&
     !qoderConfigured &&
     orphanProfileRuntimes.length === 0;
   const nothingMatches =
-    filtering &&
+    narrowed &&
     visibleMachines.length === 0 &&
     !showQoderRow &&
     visibleComingSoon.length === 0;
@@ -494,6 +514,13 @@ export function RuntimesPage({
             }))}
           />
         }
+        tools={
+          <CollectionSearch
+            value={search}
+            onChange={setSearch}
+            label={t(($) => $.page.search)}
+          />
+        }
         actions={<AddRuntimeMenu {...addMenuProps} />}
       />
 
@@ -532,14 +559,28 @@ export function RuntimesPage({
               row.kind === "machine"
                 ? row.machine.title
                 : row.kind === "qoder"
-                  ? t(($) => $.qoder.cloud_title)
+                  ? qoderTitle
                   : undefined
             }
             empty={
               <CollectionNoMatches
                 title={t(($) => $.page.rows.no_matches)}
-                onReset={() => setStatusFilter("all")}
+                description={
+                  searching
+                    ? t(($) => $.page.no_matches.with_query, {
+                        query: search.trim(),
+                        filterSuffix: filtering
+                          ? t(($) => $.page.no_matches.with_query_filter_suffix)
+                          : "",
+                      })
+                    : undefined
+                }
+                onReset={() => {
+                  setStatusFilter("all");
+                  setSearch("");
+                }}
                 hasFilters={filtering}
+                hasSearch={searching}
               />
             }
           />
