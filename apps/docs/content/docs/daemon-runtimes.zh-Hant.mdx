@@ -163,6 +163,8 @@ cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~
 
 守護程序啟動約 30 秒後清理一次，之後每 2 小時一次。正在執行的執行用到的目錄不會被清理。`multica daemon disk-usage` 可以按工作區或按執行檢視佔用。下文的時長都是預設值，對應的 `MULTICA_GC_*` 變數見[環境變數](/environment-variables#gc)。
 
+逐次執行表的 `MODE` 欄用 `in place` 標記直接執行。如果執行中繼資料記錄了這個模式，JSON 輸出會在對應的項目中包含 `local_directory: true`。
+
 ### 執行目錄
 
 每次執行在工作目錄根目錄（預設 `~/multica_workspaces`）下有一個目錄，放檢出的程式碼、輸出和日誌；同一任務的後續執行會續用它。

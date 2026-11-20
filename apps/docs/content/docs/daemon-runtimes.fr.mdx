@@ -162,6 +162,8 @@ La connexion s'applique à partir de l'exécution suivante de l'agent ; l'exécu
 
 Le daemon fait un premier nettoyage environ 30 secondes après son démarrage, puis toutes les 2 heures. Les répertoires utilisés par une exécution en cours ne sont jamais nettoyés. `multica daemon disk-usage` affiche l'occupation par espace de travail ou par exécution. Les durées ci-dessous sont les valeurs par défaut ; les variables `MULTICA_GC_*` correspondantes figurent dans [Variables d'environnement](/environment-variables#gc).
 
+La colonne `MODE` du tableau par exécution indique les exécutions sur place avec `in place`. Dans la sortie JSON, les lignes correspondantes portent `local_directory: true` lorsque les métadonnées indiquent ce mode.
+
 ### Répertoires des exécutions
 
 Chaque exécution a un répertoire sous la racine des espaces de travail (par défaut `~/multica_workspaces`) contenant le code récupéré, les sorties et les journaux ; les exécutions suivantes sur la même tâche le réutilisent.

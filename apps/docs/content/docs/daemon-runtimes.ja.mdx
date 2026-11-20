@@ -162,6 +162,8 @@ cd ~/.multica/cursor-mcp-auth/<agent-id>/user-login/workdir && CURSOR_DATA_DIR=~
 
 デーモンは起動の約 30 秒後に最初のクリーンアップを行い、その後は 2 時間ごとに行います。実行中の実行が使っているディレクトリは削除されません。`multica daemon disk-usage` でワークスペースごと、実行ごとの使用量を確認できます。以下の期間はデフォルト値で、対応する `MULTICA_GC_*` 変数は[環境変数](/environment-variables#gc)にあります。
 
+実行ごとの表では、直接実行を `MODE` 列に `in place` と表示します。メタデータでこのモードを確認できる行には、JSON 出力に `local_directory: true` が含まれます。
+
 ### 実行ディレクトリ
 
 実行ごとに作業ディレクトリのルート（既定は `~/multica_workspaces`）の下にディレクトリが作られ、チェックアウトしたコード、出力、ログが入ります。同じタスクの後続の実行はこれを引き続き使います。
