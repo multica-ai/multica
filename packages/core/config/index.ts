@@ -3,6 +3,14 @@ import { useStore } from "zustand";
 import type { DaemonConfigStatus, DaemonSetupTarget } from "../runtimes/commands";
 
 interface ConfigState {
+  cliInstallCommandUnix: string;
+  cliInstallCommandWindows: string;
+  cliLatestVersion: string | null;
+  setCliReleaseConfig: (config: {
+    installCommandUnix?: string;
+    installCommandWindows?: string;
+    latestVersion?: string | null;
+  }) => void;
   cdnDomain: string;
   attachmentPublicUrl: string;
   // True when cdnDomain serves private content via time-bounded signed URLs
@@ -77,6 +85,18 @@ interface ConfigState {
 }
 
 export const configStore = createStore<ConfigState>((set) => ({
+  cliInstallCommandUnix: "",
+  cliInstallCommandWindows: "",
+  cliLatestVersion: "",
+  setCliReleaseConfig: ({
+    installCommandUnix = "",
+    installCommandWindows = "",
+    latestVersion = "",
+  }) => set({
+    cliInstallCommandUnix: installCommandUnix,
+    cliInstallCommandWindows: installCommandWindows,
+    cliLatestVersion: latestVersion,
+  }),
   cdnDomain: "",
   attachmentPublicUrl: "",
   cdnSigned: false,

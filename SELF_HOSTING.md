@@ -533,6 +533,76 @@ docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
+## Internal CLI release mirrors
+
+An internal file store can serve CLI releases without a GitHub-compatible API.
+Use installer scripts and CLI binaries with file-mirror support; changing server
+configuration does not upgrade an older daemon. Upgrade those daemons with the
+mirrored installer first.
+Mirror each required release under its tag, keeping the original filenames and
+`checksums.txt` from the release:
+
+```text
+https://mirror.example/multica/v0.6.3/checksums.txt
+https://mirror.example/multica/v0.6.3/multica-cli-0.6.3-linux-amd64.tar.gz
+https://mirror.example/multica/v0.6.3/multica-cli-0.6.3-windows-amd64.zip
+```
+
+Include the archives for every OS and architecture you use. Serve the installer
+scripts from your internal infrastructure too; setting the release base does not
+change where an operator downloads the scripts themselves.
+
+For Unix, run a local copy of `scripts/install.sh`:
+
+```bash
+MULTICA_CLI_VERSION=v0.6.3 \
+MULTICA_RELEASE_DOWNLOAD_BASE_URL=https://mirror.example/multica \
+bash ./install.sh
+```
+
+For Windows, run a local copy of `scripts/install.ps1`:
+
+```powershell
+$env:MULTICA_CLI_VERSION = "v0.6.3"
+$env:MULTICA_RELEASE_DOWNLOAD_BASE_URL = "https://mirror.example/multica"
+.\install.ps1
+```
+
+A pinned install bypasses Homebrew and checks the full version reported by the
+active `multica` command. If another installation shadows the downloaded binary,
+it fails with the active and installed paths so you can correct `PATH`. A CLI pin
+does not select the server checkout; use `MULTICA_SELFHOST_REF` to pin that
+separately. With a release mirror, both installers verify
+SHA-256 against the mirrored manifest before replacing the CLI. Missing or
+mismatched checksums fail the install. With no overrides, installation keeps its
+existing release source and behavior.
+
+Set `MULTICA_RELEASE_DOWNLOAD_BASE_URL` in the daemon's environment as well,
+including its service-manager environment if it runs as a service. An installer
+invocation does not change an existing background service. Mirror updates discover
+the platform archive from `checksums.txt` and verify it before replacing the
+executable; they do not call a Releases API. Set `MULTICA_CLI_VERSION` there to pin
+automatic update checks and `multica update`. A mirror without this pin fails the
+latest-version lookup locally rather than contacting GitHub. An app-requested
+update already carries its target version and needs no latest-version lookup.
+
+To configure the app's install instructions and runtime update offer, set these
+variables on the **API server**:
+
+- `MULTICA_CLI_INSTALL_COMMAND_UNIX`: your complete Unix installation command.
+- `MULTICA_CLI_INSTALL_COMMAND_WINDOWS`: your complete PowerShell installation command.
+- `MULTICA_CLI_LATEST_VERSION`: the release available in the mirror, such as `v0.6.3`.
+
+These values are returned by the public `/api/config` endpoint. Use public
+installation commands without credentials. Onboarding and **Connect a computer**
+show the configured commands. The runtime page uses the configured version and
+makes no browser request to GitHub for its release check. Keep the API pin and the
+daemon mirror's contents in sync. Unconfigured deployments keep the default
+commands and release check.
+
+This configures CLI installation and updates, not the Git clone or container
+images required to provision an entire self-hosted server.
+
 ## Manual CLI Configuration
 
 If you prefer configuring the CLI step by step instead of `multica setup`:

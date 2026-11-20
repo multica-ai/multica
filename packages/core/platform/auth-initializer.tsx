@@ -58,9 +58,15 @@ export function AuthInitializer({
     if (configRequestRef.current) return configRequestRef.current;
 
     configStore.getState().setDaemonConfigStatus("loading");
+    configStore.getState().setCliReleaseConfig({});
     const request = getApi()
       .getConfig()
       .then((cfg) => {
+        configStore.getState().setCliReleaseConfig({
+          installCommandUnix: cfg.cli_install_command_unix,
+          installCommandWindows: cfg.cli_install_command_windows,
+          latestVersion: cfg.cli_latest_version,
+        });
         configStore.getState().setAttachmentPublicUrl(cfg.attachment_public_url);
         if (cfg.cdn_domain) {
           configStore.getState().setCdnConfig({
