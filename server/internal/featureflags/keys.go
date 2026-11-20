@@ -50,11 +50,12 @@ const (
 	// way.
 	WorkspaceGuests = "workspace_guests"
 	// DashboardHistory365d offers the 365-day range on the workspace dashboard
-	// (MUL-9490). Off by default: the two dashboard series that scan
-	// agent_task_queue directly take seconds over a year of history in a large
-	// workspace, so the range waits until those queries are measured or
-	// optimized at production scale. It only hides the range in the client;
-	// the plan's history limit is enforced on the server either way.
+	// (MUL-9490). On by default; FF_DASHBOARD_HISTORY_365D=off hides the range
+	// again if the year-long dashboard queries turn out too slow for a
+	// deployment. It only hides the range in the client; the plan's history
+	// limit is enforced on the server either way. Clients treat a missing key
+	// as off, so a newer client never offers 365 days to a server that would
+	// read days=371 as the default 30.
 	DashboardHistory365d = "dashboard_history_365d"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
@@ -81,7 +82,6 @@ var frontendPublicFlags = []string{
 	ComposioMCPApps,
 	PluginsV1,
 	DocsV1,
-	DashboardHistory365d,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -108,16 +108,21 @@ func DocsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, DocsV1, false)
 }
 
+func DashboardHistory365dEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, DashboardHistory365d, true)
+}
+
 func WorkspaceGuestsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, WorkspaceGuests, true)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
-	out := make(map[string]bool, len(frontendPublicFlags)+5)
+	out := make(map[string]bool, len(frontendPublicFlags)+6)
 	for _, key := range frontendPublicFlags {
 		out[key] = flags.IsEnabled(ctx, key, false)
 	}
 	out[WorkspaceGuests] = WorkspaceGuestsEnabled(ctx, flags)
+	out[DashboardHistory365d] = DashboardHistory365dEnabled(ctx, flags)
 	out[agentBuilderCompat] = true
 	out[agentSkillTogglesCompat] = true
 	out[resourceLabelsCompat] = true

@@ -482,8 +482,8 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if cfg.FeatureFlags["plugins_v1"] {
 		t.Fatalf("plugins_v1: want false by default, got true")
 	}
-	if enabled, published := cfg.FeatureFlags["dashboard_history_365d"]; !published || enabled {
-		t.Fatalf("dashboard_history_365d: want published and false by default, got published=%v enabled=%v", published, enabled)
+	if !cfg.FeatureFlags["dashboard_history_365d"] {
+		t.Fatal("dashboard_history_365d: want true by default")
 	}
 	for _, retired := range []string{"private_plugins_v1", "remote_mcp_plugins_v1"} {
 		if _, published := cfg.FeatureFlags[retired]; published {
@@ -712,16 +712,16 @@ func TestGetConfigReportsTheThemeStore(t *testing.T) {
 	}
 }
 
-func TestGetConfigExposesEnabledDashboardHistory365dFlag(t *testing.T) {
+func TestGetConfigDashboardHistory365dFlagCanBeTurnedOff(t *testing.T) {
 	h := &Handler{}
-	withFeatureFlag(t, h, featureflags.DashboardHistory365d, true)
+	withFeatureFlag(t, h, featureflags.DashboardHistory365d, false)
 	w := httptest.NewRecorder()
 	h.GetConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
 	var cfg AppConfig
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("decode config: %v", err)
 	}
-	if !cfg.FeatureFlags["dashboard_history_365d"] {
-		t.Fatal("dashboard_history_365d: want true with the flag enabled")
+	if enabled, published := cfg.FeatureFlags["dashboard_history_365d"]; !published || enabled {
+		t.Fatalf("dashboard_history_365d: want published false when turned off, got published=%v enabled=%v", published, enabled)
 	}
 }

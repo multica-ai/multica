@@ -27,9 +27,9 @@ export type TimeRange = (typeof TIME_RANGES)[number]["days"];
 export type TimeRangeOption = (typeof TIME_RANGES)[number];
 
 /**
- * The ranges the dashboard offers. 365d sits behind the
- * dashboard_history_365d flag until its year-long queries are cleared for
- * production scale (MUL-9490).
+ * The ranges the dashboard offers. 365d follows the dashboard_history_365d
+ * flag: on by default on servers that support it, and a kill switch should
+ * the year-long queries be too slow for a deployment (MUL-9490).
  */
 export function dashboardTimeRanges(allowYear: boolean): readonly TimeRangeOption[] {
   return allowYear ? TIME_RANGES : TIME_RANGES.filter((r) => r.days !== 365);

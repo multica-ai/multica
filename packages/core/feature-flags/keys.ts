@@ -5,5 +5,7 @@ export const BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG =
   "billing_workspace_subscriptions";
 // Guests (MUL-9420): free, seatless members limited to shared projects.
 export const WORKSPACE_GUESTS_FLAG = "workspace_guests";
-// The 365-day range on the workspace dashboard (MUL-9490); off by default.
+// The 365-day range on the workspace dashboard (MUL-9490). Servers that
+// support it publish it on by default; a missing key reads as off, so the
+// range is never offered to a server that predates it.
 export const DASHBOARD_HISTORY_365D_FLAG = "dashboard_history_365d";

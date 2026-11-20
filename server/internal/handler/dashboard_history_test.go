@@ -188,36 +188,6 @@ func TestDashboardEndpointsStopAtTheHistoryLimit(t *testing.T) {
 	}
 	ctx := context.Background()
 	now := pinDayWindowClock(t, time.Now().UTC())
-	// Noon on the oldest day inside a 30-day range, and on the day before it.
-	inside := startOfDayBefore(now, time.UTC, 29).Add(12 * time.Hour)
-	outside := startOfDayBefore(now, time.UTC, 30).Add(12 * time.Hour)
-
-	runtimeID := dbfx.Runtime(t, "history limit runtime")
-	agentID := dbfx.Agent(t, "history limit agent", runtimeID)
-	projectID := dbfx.Project(t, "history limit project")
-	issueID := dbfx.Issue(t, "history limit issue", testutil.Cols{"project_id": projectID})
-	const model = "history-limit-model"
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE runtime_id = $1`, runtimeID)
-	})
-	for _, at := range []time.Time{inside, outside} {
-		dbfx.Task(t, agentID, testutil.Cols{
-			"issue_id":       issueID,
-			"runtime_id":     runtimeID,
-			"status":         "failed",
-			"failure_reason": "timeout",
-			"started_at":     at.Add(-10 * time.Minute),
-			"completed_at":   at,
-			"created_at":     at.Add(-10 * time.Minute),
-		})
-		dbfx.Exec(t, `
-			INSERT INTO task_usage_hourly (
-				bucket_hour, workspace_id, runtime_id, agent_id, project_id,
-				provider, model,
-				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
-			) VALUES ($1, $2, $3, $4, $5, 'history-limit', $6, 100, 0, 0, 0, 1)
-		`, at.Truncate(time.Hour), testWorkspaceID, runtimeID, agentID, projectID, model)
-	}
 
 	type endpoint struct {
 		path    string
@@ -243,79 +213,112 @@ func TestDashboardEndpointsStopAtTheHistoryLimit(t *testing.T) {
 			return n
 		}
 	}
+	// task_usage_hourly's task_count comes from event_count only after a
+	// rollup; the two usage endpoints are read by tokens instead.
 	endpoints := []endpoint{
-		{"/api/dashboard/usage/daily", testHandler.GetDashboardUsageDaily, countRows("task_count"), true},
-		{"/api/dashboard/usage/by-agent", testHandler.GetDashboardUsageByAgent, countRows("task_count"), false},
+		{"/api/dashboard/usage/daily", testHandler.GetDashboardUsageDaily, countTokens, true},
+		{"/api/dashboard/usage/by-agent", testHandler.GetDashboardUsageByAgent, countTokens, false},
 		{"/api/dashboard/agent-runtime", testHandler.GetDashboardAgentRunTime, countRows("task_count"), false},
 		{"/api/dashboard/runtime/daily", testHandler.GetDashboardRunTimeDaily, countRows("task_count"), true},
 		{"/api/dashboard/failures/daily", testHandler.GetDashboardFailuresDaily, countRows("task_count"), true},
 		{"/api/dashboard/failures/by-agent", testHandler.GetDashboardFailuresByAgent, countRows("task_count"), false},
 	}
-	// task_usage_hourly's task_count comes from event_count only after a
-	// rollup; read tokens instead for the two usage endpoints.
-	endpoints[0].count = countTokens
-	endpoints[1].count = countTokens
 
-	call := func(t *testing.T, ep endpoint, days int) *httptest.ResponseRecorder {
-		t.Helper()
-		rec := httptest.NewRecorder()
-		ep.handler(rec, newRequest(http.MethodGet, fmt.Sprintf("%s?days=%d&tz=UTC&project_id=%s", ep.path, days, projectID), nil))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s: status %d: %s", ep.path, rec.Code, rec.Body.String())
-		}
-		return rec
-	}
-
-	for _, tc := range []struct {
-		name      string
-		decision  entitlement.Decision
-		want      int
-		wantLimit string
+	// Each plan's limit with the request its weekly chart sends. Fixtures sit
+	// at noon on the plan's oldest day and on the day before it.
+	for _, plan := range []struct {
+		name             string
+		limit, requested int
 	}{
-		{"enforce 30", historyDecision(entitlement.ActionEnforce, 30), 1, "30"},
-		{"observe 30", historyDecision(entitlement.ActionObserve, 30), 2, ""},
-		{"enforce 90", historyDecision(entitlement.ActionEnforce, 90), 2, "90"},
+		{"free", 30, 35},
+		{"pro", 90, 91},
+		{"business", 365, 371},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			useDashboardHistoryLimit(t, tc.decision)
-			for _, ep := range endpoints {
-				rec := call(t, ep, 35)
-				if got := ep.count(t, rec.Body.Bytes()); got != tc.want {
-					t.Errorf("%s: %d fixture runs, want %d", ep.path, got, tc.want)
+		t.Run(plan.name, func(t *testing.T) {
+			inside := startOfDayBefore(now, time.UTC, plan.limit-1).Add(12 * time.Hour)
+			outside := startOfDayBefore(now, time.UTC, plan.limit).Add(12 * time.Hour)
+			runtimeID := dbfx.Runtime(t, "history limit runtime "+plan.name)
+			agentID := dbfx.Agent(t, "history limit agent "+plan.name, runtimeID)
+			projectID := dbfx.Project(t, "history limit project "+plan.name)
+			issueID := dbfx.Issue(t, "history limit issue", testutil.Cols{"project_id": projectID})
+			t.Cleanup(func() {
+				testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE runtime_id = $1`, runtimeID)
+			})
+			for _, at := range []time.Time{inside, outside} {
+				dbfx.Task(t, agentID, testutil.Cols{
+					"issue_id":       issueID,
+					"runtime_id":     runtimeID,
+					"status":         "failed",
+					"failure_reason": "timeout",
+					"started_at":     at.Add(-10 * time.Minute),
+					"completed_at":   at,
+					"created_at":     at.Add(-10 * time.Minute),
+				})
+				dbfx.Exec(t, `
+					INSERT INTO task_usage_hourly (
+						bucket_hour, workspace_id, runtime_id, agent_id, project_id,
+						provider, model,
+						input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
+					) VALUES ($1, $2, $3, $4, $5, 'history-limit', 'history-limit-model', 100, 0, 0, 0, 1)
+				`, at.Truncate(time.Hour), testWorkspaceID, runtimeID, agentID, projectID)
+			}
+			call := func(t *testing.T, ep endpoint) *httptest.ResponseRecorder {
+				t.Helper()
+				rec := httptest.NewRecorder()
+				ep.handler(rec, newRequest(http.MethodGet,
+					fmt.Sprintf("%s?days=%d&tz=UTC&project_id=%s", ep.path, plan.requested, projectID), nil))
+				if rec.Code != http.StatusOK {
+					t.Fatalf("%s: status %d: %s", ep.path, rec.Code, rec.Body.String())
 				}
-				if got := rec.Header().Get(HeaderDashboardHistoryLimit); got != tc.wantLimit {
-					t.Errorf("%s: limit header %q, want %q", ep.path, got, tc.wantLimit)
-				}
-				if ep.dated && tc.want == 1 {
-					var rows []struct {
-						Date string `json:"date"`
+				return rec
+			}
+
+			for _, tc := range []struct {
+				name      string
+				decision  *entitlement.Decision
+				want      int
+				wantLimit string
+			}{
+				{"enforce", ptrTo(historyDecision(entitlement.ActionEnforce, plan.limit)), 1, strconv.Itoa(plan.limit)},
+				{"observe", ptrTo(historyDecision(entitlement.ActionObserve, plan.limit)), 2, ""},
+				{"self-host", nil, 2, ""},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					if tc.decision != nil {
+						useDashboardHistoryLimit(t, *tc.decision)
+					} else {
+						prior := testHandler.Entitlements
+						testHandler.Entitlements = nil
+						t.Cleanup(func() { testHandler.Entitlements = prior })
 					}
-					_ = json.Unmarshal(rec.Body.Bytes(), &rows)
-					for _, row := range rows {
-						if row.Date < inside.Format("2006-01-02") {
-							t.Errorf("%s: row dated %s is before the plan's first day %s", ep.path, row.Date, inside.Format("2006-01-02"))
+					for _, ep := range endpoints {
+						rec := call(t, ep)
+						if got := ep.count(t, rec.Body.Bytes()); got != tc.want {
+							t.Errorf("%s: %d fixture runs, want %d", ep.path, got, tc.want)
+						}
+						if got := rec.Header().Get(HeaderDashboardHistoryLimit); got != tc.wantLimit {
+							t.Errorf("%s: limit header %q, want %q", ep.path, got, tc.wantLimit)
+						}
+						if !ep.dated || tc.want != 1 {
+							continue
+						}
+						var rows []struct {
+							Date string `json:"date"`
+						}
+						_ = json.Unmarshal(rec.Body.Bytes(), &rows)
+						for _, row := range rows {
+							if row.Date < inside.Format("2006-01-02") {
+								t.Errorf("%s: row dated %s is before the plan's first day %s", ep.path, row.Date, inside.Format("2006-01-02"))
+							}
 						}
 					}
-				}
+				})
 			}
 		})
 	}
-
-	t.Run("self-host is unlimited", func(t *testing.T) {
-		prior := testHandler.Entitlements
-		testHandler.Entitlements = nil
-		t.Cleanup(func() { testHandler.Entitlements = prior })
-		for _, ep := range endpoints {
-			rec := call(t, ep, 35)
-			if got := ep.count(t, rec.Body.Bytes()); got != 2 {
-				t.Errorf("%s: %d fixture runs, want 2", ep.path, got)
-			}
-			if got := rec.Header().Get(HeaderDashboardHistoryLimit); got != "" {
-				t.Errorf("%s: limit header %q on self-host", ep.path, got)
-			}
-		}
-	})
 }
+
+func ptrTo[T any](v T) *T { return &v }
 
 func countTokens(t *testing.T, body []byte) int {
 	t.Helper()

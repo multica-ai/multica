@@ -239,9 +239,10 @@ chart fetches to fill its leftmost week, and send the limit in
 stale `enforce`, marked `Downgraded` on the `Decision`) and self-hosted
 deployments read up to the request maximum of 371 days with no header. The
 runtime usage endpoints keep their own 365-day maximum and no plan limit.
-The dashboard's `365d` range is offered only while the frontend flag
-`dashboard_history_365d` is on (off by default): the two series that scan
-`agent_task_queue` take seconds over a year of history in a large workspace.
+The dashboard's `365d` range follows the frontend flag
+`dashboard_history_365d`: published on by default, and
+`FF_DASHBOARD_HISTORY_365D=off` hides the range should the year-long queries
+be too slow for a deployment.
 
 `GET /api/workspaces/{id}/features` reports `limits.dashboard_history_days`
 only under `enforce`, so an observed rollout is invisible to users.
