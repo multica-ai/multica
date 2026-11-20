@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -251,5 +252,27 @@ func TestWakeupPausesWhenTheIssueRunLimitIsReached(t *testing.T) {
 	}
 	if n := f.Count(t, "SELECT count(*) FROM activity_log WHERE issue_id=$1 AND action='wakeup_paused' AND details->>'reason'='issue_run_limit'", issue); n != 1 {
 		t.Fatalf("pause timeline entries = %d, want 1", n)
+	}
+}
+
+func TestWakeNowReportsIssueRunLimitAndSettlesReceipt(t *testing.T) {
+	f, s, issue, agent := conditionFixture(t)
+	project := f.Project(t, "Capped wake now project", testutil.Cols{"max_runs_per_agent_per_issue": 1})
+	f.Exec(t, "UPDATE issue SET project_id=$1 WHERE id=$2", project, issue)
+	f.Task(t, agent, testutil.Cols{
+		"issue_id": issue, "status": "completed",
+		"runtime_id": testutil.Raw("(SELECT runtime_id FROM agent WHERE id='" + agent + "')"),
+	})
+	w := wakeCreate(t, f, s, issue, WakeupInput{AgentID: agent, Kind: "event", Mode: "continuous",
+		EventTypes: []string{"comment.created"}, Instruction: "Answer new comments"})
+	err := s.Trigger(t.Context(), issue, w.ID, parseTestUUID(t, f.UserID))
+	if reason := dispatch.IssueRunLimitReason(err); reason != dispatch.ReasonIssueAgentRunLimit {
+		t.Fatalf("wake now returned %v, want %s", err, dispatch.ReasonIssueAgentRunLimit)
+	}
+	if n := f.Count(t, "SELECT count(*) FROM issue_wakeup_receipt WHERE wakeup_id=$1 AND processed_at IS NULL", w.ID); n != 0 {
+		t.Fatalf("refused wake now retained %d pending receipts", n)
+	}
+	if n := wakeRuns(t, f, w.ID); n != 0 {
+		t.Fatalf("refused wake now started %d runs", n)
 	}
 }

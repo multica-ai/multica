@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -366,6 +367,10 @@ func (h *Handler) TriggerIssueWakeup(w http.ResponseWriter, r *http.Request) {
 	}
 	svc := service.IssueWakeupService{Tasks: h.TaskService}
 	if err := svc.Trigger(r.Context(), issue.ID, id, member); err != nil {
+		if reason := dispatch.IssueRunLimitReason(err); reason != "" {
+			h.writeDispatchBlocked(w, http.StatusConflict, reason)
+			return
+		}
 		wakeupError(w, err)
 		return
 	}
