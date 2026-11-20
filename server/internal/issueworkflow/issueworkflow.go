@@ -762,6 +762,7 @@ type BriefInput struct {
 func Brief(in BriefInput) string {
 	step, _ := in.Workflow.Step(in.StatusKey)
 	stepMoved := in.BoundStep != "" && in.BoundStep != in.StatusKey
+	terminal := in.StatusKey == issuestatus.Done || in.StatusKey == issuestatus.Cancelled
 	name := func(key string) string {
 		if in.StatusName == nil {
 			return key
@@ -817,6 +818,9 @@ func Brief(in BriefInput) string {
 		}
 		fmt.Fprintf(&b, "%s is at the %q step and %s. You are not its assignee: leave the status to them unless you are explicitly asked to change it.\n",
 			in.IssueIdentifier, name(in.StatusKey), assignee)
+	} else if terminal {
+		fmt.Fprintf(&b, "%s has reached the terminal status %s. Leave the issue at this status.\n",
+			in.IssueIdentifier, statusLabel(name(in.StatusKey), in.StatusKey))
 	} else if span.ok {
 		// A step without a handler is a progress marker, not a stage: naming
 		// it "the step you handle" made agents split one task across columns
@@ -860,6 +864,9 @@ func Brief(in BriefInput) string {
 	}
 	if in.Observer {
 		b.WriteString("\nMoving the issue into a step that hands off reassigns it to that step's handler and starts their run.\n")
+		return b.String()
+	}
+	if terminal {
 		return b.String()
 	}
 	b.WriteString("\nYour moves:\n")
