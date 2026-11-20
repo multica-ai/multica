@@ -148,3 +148,35 @@ func TestProjectIssueRunCeilingSerializesAgents(t *testing.T) {
 		t.Fatalf("inserted %d runs, want 1", count)
 	}
 }
+
+func TestIssueRunCeilingRerunKeepsPendingTask(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := t.Context()
+	agentID, _, _ := createRuntimeGuardAgent(t, ctx)
+	projectID := dbfx.Project(t, "Single run project", testutil.Cols{"max_runs_per_issue": 1})
+	issueID := parseUUID(dbfx.Issue(t, "Keep the pending run", testutil.Cols{
+		"assignee_type": "agent", "assignee_id": agentID, "project_id": projectID,
+	}))
+	t.Cleanup(func() {
+		dbfx.Exec(t, "DELETE FROM agent_task_queue WHERE issue_id = $1", issueID)
+	})
+	issue, err := testHandler.Queries.GetIssue(ctx, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, issue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = testHandler.TaskService.RerunIssue(ctx, issueID, task.ID, task.TriggerCommentID, issue.CreatorID, false, nil)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.ConstraintName != "issue_run_limit" {
+		t.Fatalf("rerun: got %v, want issue_run_limit", err)
+	}
+	stored, err := testHandler.Queries.GetAgentTask(ctx, task.ID)
+	if err != nil || stored.Status != "queued" {
+		t.Fatalf("original queued task was changed: status=%q err=%v", stored.Status, err)
+	}
+}
