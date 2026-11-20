@@ -12,12 +12,15 @@ import {
   type AgentPermissionScope,
 } from "@multica/core/agents";
 import { useConfigStore } from "@multica/core/config";
+import { usePaidFeatureAccess } from "@multica/core/billing";
+import { useWorkspaceId } from "@multica/core/hooks";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PaidFeatureNotice } from "../../billing";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useT } from "../../i18n";
 import {
@@ -90,6 +93,14 @@ export function AgentConfigurationPanel({
     (member) => member.user_id !== currentUserId,
   );
   const runtimeLocked = runtimeSwitchPending || runtimeSwitchInFlight;
+  // The agent does not exist yet, so a plan without member access makes the
+  // option unavailable. A draft that already picked people (restored, or
+  // seeded before the plan changed) can still drop them or switch away.
+  const wsId = useWorkspaceId();
+  const invocationMembers = usePaidFeatureAccess(wsId, "agent_invocation_members", {
+    hasExistingConfig: false,
+  });
+  const canAddMembers = invocationMembers.canAdd;
   // The Qoder bridge refuses tasks from agents with skills or per-agent
   // config, so the fields that would produce them are not offered.
   const qoderRuntime = selectedRuntime?.provider === "qoder_cloud";
@@ -297,10 +308,16 @@ export function AgentConfigurationPanel({
                 type="button"
                 role="radio"
                 aria-checked={draft.permissionScope === scope}
+                disabled={
+                  scope === "members" &&
+                  !canAddMembers &&
+                  draft.permissionScope !== "members"
+                }
                 onClick={() => set("permissionScope", scope)}
                 className={cn(
                   "flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors",
                   "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent",
                   draft.permissionScope === scope && "bg-muted",
                 )}
               >
@@ -326,6 +343,9 @@ export function AgentConfigurationPanel({
               </button>
             ))}
           </div>
+          {invocationMembers.state === "unavailable" ? (
+            <PaidFeatureNotice state="unavailable" className="px-5 pb-3" />
+          ) : null}
           {draft.permissionScope === "members" ? (
             <div className="max-h-48 overflow-y-auto p-2">
               {otherMembers.map((member) => {
@@ -337,6 +357,7 @@ export function AgentConfigurationPanel({
                   >
                     <Checkbox
                       checked={checked}
+                      disabled={!checked && !canAddMembers}
                       onCheckedChange={(value) => {
                         const next = new Set(draft.memberIds);
                         if (value === true) next.add(member.user_id);

@@ -6,6 +6,11 @@ import { toast } from "sonner";
 import type { MemberWithUser } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import {
+  isFeatureLockedError,
+  refreshFeaturesOnLockedError,
+  usePaidFeatureAccess,
+} from "@multica/core/billing";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -18,6 +23,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Archive, ArchiveRestore, Loader2 } from "@multica/ui/icons";
 import { useT } from "../../i18n";
+import { usePaidFeatureErrorMessage } from "../../billing";
 import { CollectionBatchBar } from "../../layout/collection-list";
 import { AccessPicker, type AccessChange } from "./inspector/access-picker";
 import type { AgentListRow } from "./agents-page";
@@ -50,6 +56,12 @@ export function AgentBatchToolbar({
   const [confirmAccess, setConfirmAccess] = useState(false);
   const [accessChange, setAccessChange] = useState<AccessChange | null>(null);
   const [busy, setBusy] = useState(false);
+  const paidFeatureError = usePaidFeatureErrorMessage();
+  // A bulk member list is new configuration for every agent it lands on, so a
+  // locked plan disables it outright rather than per agent.
+  const membersAccess = usePaidFeatureAccess(wsId, "agent_invocation_members", {
+    hasExistingConfig: false,
+  });
 
   // Must be stable: AccessPicker lists this in the effect that notifies us, so
   // an inline callback would re-notify on every render we cause by storing the
@@ -119,12 +131,17 @@ export function AgentBatchToolbar({
     onClear();
     setBusy(false);
     if (failed > 0) {
-      const first = settled.find((s) => s.status === "rejected") as
-        | PromiseRejectedResult
-        | undefined;
-      if (first) {
-        toast.error(first.reason instanceof Error ? first.reason.message : String(first.reason));
-      }
+      const reasons = settled.flatMap((s) =>
+        s.status === "rejected" ? [s.reason as unknown] : [],
+      );
+      // A plan refusal explains the failure better than whichever error came
+      // first, and means this client's view of the plan is stale.
+      const locked = reasons.find(isFeatureLockedError);
+      if (locked) refreshFeaturesOnLockedError(qc, wsId, locked);
+      const first = locked ?? reasons[0];
+      toast.error(
+        paidFeatureError(first, first instanceof Error ? first.message : String(first)),
+      );
     }
     return { succeeded, failed };
   };
@@ -252,6 +269,7 @@ export function AgentBatchToolbar({
             ownerId={currentUserId}
             canEdit
             hideFooter
+            membersAccess={membersAccess}
             onReadyChange={handleAccessReadyChange}
           />
           <DialogFooter>

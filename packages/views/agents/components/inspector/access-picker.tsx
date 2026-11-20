@@ -10,9 +10,11 @@ import type {
   MemberWithUser,
 } from "@multica/core/types";
 import { effectiveAccessScope } from "@multica/core/agents";
+import type { PaidFeatureAccess } from "@multica/core/billing";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { ActorAvatar } from "../../../common/actor-avatar";
+import { PaidFeatureNotice } from "../../../billing";
 import { useT } from "../../../i18n";
 
 export type AccessChange = {
@@ -51,6 +53,7 @@ export function AccessPicker({
   onReadyChange,
   onChange,
   hideFooter = false,
+  membersAccess,
 }: {
   permissionMode: AgentPermissionMode;
   invocationTargets: AgentInvocationTarget[] | undefined;
@@ -69,6 +72,9 @@ export function AccessPicker({
   /** When true, suppress the bottom Save footer — the parent dialog owns
    *  the apply trigger (e.g. the bulk "Set access scope" dialog). */
   hideFooter?: boolean;
+  /** The plan's `agent_invocation_members` access for this agent (or, in
+   *  bulk, for agents that do not use it yet). Omitted means available. */
+  membersAccess?: Pick<PaidFeatureAccess, "canAdd" | "state">;
 }) {
   const { t } = useT("agents");
   const { t: tc } = useT("common");
@@ -127,9 +133,16 @@ export function AccessPicker({
     }
   }, [persistedScope, persistedMembers]);
 
-  const editableMembers = ownerId
+  // Without the paid feature an agent keeps the people it already has: they
+  // can be unchecked, but nobody new can be picked, and an agent without a
+  // member list cannot get one.
+  const canAddMembers = membersAccess?.canAdd ?? true;
+  const membersChoiceDisabled = !canAddMembers && persistedScope !== "members";
+  const editableMembers = (ownerId
     ? members.filter((member) => member.user_id !== ownerId)
-    : members;
+    : members
+  ).filter((member) => canAddMembers || persistedMembers.includes(member.user_id));
+  const paidState = membersAccess?.state;
 
   const sameMembers =
     draftMembers.length === persistedMembers.length &&
@@ -262,9 +275,16 @@ export function AccessPicker({
           title={t(($) => $.access.members_title)}
           description={t(($) => $.access.members_desc)}
           selected={draftScope === "members"}
+          disabled={membersChoiceDisabled}
           onSelect={() => selectDraftScope("members")}
         />
       </div>
+
+      {paidState === "read_only" || paidState === "unavailable" ? (
+        <div className="border-t border-surface-border px-4 py-3 sm:px-6">
+          <PaidFeatureNotice state={paidState} />
+        </div>
+      ) : null}
 
       {draftScope === "members" ? (
         <div className="border-t border-surface-border bg-muted/20 px-4 py-5 sm:px-6">
@@ -355,6 +375,7 @@ function AccessChoice({
   title,
   description,
   selected,
+  disabled = false,
   onSelect,
 }: {
   name: string;
@@ -363,15 +384,17 @@ function AccessChoice({
   title: string;
   description: string;
   selected: boolean;
+  disabled?: boolean;
   onSelect: () => void;
 }) {
   return (
-    <label className="flex min-h-16 cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors hover:bg-surface-hover">
+    <label className="flex min-h-16 cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors hover:bg-surface-hover has-disabled:cursor-default has-disabled:opacity-60 has-disabled:hover:bg-transparent">
       <input
         type="radio"
         name={name}
         value={value}
         checked={selected}
+        disabled={disabled}
         onChange={onSelect}
         className="mt-2 size-4 shrink-0 accent-foreground"
       />
