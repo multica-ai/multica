@@ -441,3 +441,6 @@ foreach ($case in $composeCases) {
 
 Remove-Item $runnerScript -Force -ErrorAction SilentlyContinue
 Write-Host "install.ps1 tests passed" -ForegroundColor Green
+# The expected-failure cases leave the last child's exit code in $LASTEXITCODE,
+# which `powershell -command` would report as the script's own result.
+exit 0
