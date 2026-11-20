@@ -118,6 +118,15 @@ describe("recordAssigneeUsage", () => {
       recordAssigneeUsage("me", "ws-a", { type: "member", id: "u1" }),
     ).not.toThrow();
     expect(ranked("me", "ws-a")).toEqual(["member:u1:1"]);
+
+    // Later picks keep counting from memory while saving keeps failing …
+    recordAssigneeUsage("me", "ws-a", { type: "member", id: "u1" });
+    expect(ranked("me", "ws-a")).toEqual(["member:u1:2"]);
+
+    // … and the first save that succeeds writes the full count.
+    storage.adapter.failWrites = false;
+    recordAssigneeUsage("me", "ws-a", { type: "member", id: "u1" });
+    expect(stored("me")["ws-a"][0].count).toBe(3);
   });
 
   it("ignores malformed stored data", () => {

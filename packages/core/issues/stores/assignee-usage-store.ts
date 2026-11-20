@@ -89,6 +89,9 @@ function parse(raw: string | null): UsageByWorkspace {
 // userId → that user's buckets as last read from (or written to) storage.
 const cache = new Map<string, UsageByWorkspace>();
 const listeners = new Set<() => void>();
+// Users whose last save failed: storage is behind memory for them, so the
+// next change builds on memory instead of the stale stored copy.
+const unsaved = new Set<string>();
 let storageAdapter: StorageAdapter = defaultStorage;
 
 function emit() {
@@ -122,7 +125,7 @@ function getBuckets(userId: string): UsageByWorkspace {
  * a Recent section that does not persist must never block an assignment.
  */
 function mutate(userId: string, update: (current: UsageByWorkspace) => UsageByWorkspace | null) {
-  const current = readStored(userId) ?? getBuckets(userId);
+  const current = (!unsaved.has(userId) && readStored(userId)) || getBuckets(userId);
   const next = update(current);
   if (!next) {
     // Nothing to change. Still adopt what storage holds now so this tab
@@ -137,8 +140,10 @@ function mutate(userId: string, update: (current: UsageByWorkspace) => UsageByWo
   emit();
   try {
     storageAdapter.setItem(assigneeUsageStorageKey(userId), JSON.stringify(next));
+    unsaved.delete(userId);
   } catch {
     // Quota exceeded, storage disabled, etc. Keep the in-memory count only.
+    unsaved.add(userId);
   }
 }
 
@@ -255,5 +260,6 @@ export function resetAssigneeUsageForTests(adapter: StorageAdapter = defaultStor
   }
   storageAdapter = adapter;
   cache.clear();
+  unsaved.clear();
   emit();
 }
