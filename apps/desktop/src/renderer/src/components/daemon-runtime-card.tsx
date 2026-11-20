@@ -151,6 +151,10 @@ export function DaemonRuntimeActions() {
 
   return (
     <>
+
+      {status.connectionError && <p role="alert" className="text-caption text-destructive">{t(($) => $.desktop.daemon.service_unavailable)}</p>}
+      {status.sharedService && <p role="status" className="text-caption text-muted-foreground">{t(($) => $.desktop.daemon.shared_service)}</p>}
+      {status.accountConflict && <p role="alert" className="text-caption text-destructive">{t(($) => $.desktop.daemon.account_conflict)}</p>}
       <div className="flex flex-wrap items-center justify-end gap-1.5">
         {isRunning && (
           <>

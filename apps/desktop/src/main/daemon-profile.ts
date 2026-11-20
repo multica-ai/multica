@@ -5,14 +5,10 @@ import { join } from "path";
 export const DEFAULT_HEALTH_PORT = 19514;
 
 /**
- * Desktop owns only `~/.multica/profiles/desktop-<host>/`. The default profile
- * at `~/.multica/` — config, daemon log, and health port 19514 — belongs to the
- * user's terminal CLI and must never be read, written, probed, or passed to the
- * bundled CLI.
- *
- * Callers signal "target API URL not known yet" with `null`, never with an
- * empty name, so there is no value that can quietly resolve to the default
- * profile. This guard is the backstop for that. See #6399.
+ * Desktop owns its authentication profile only. Never fall back to the
+ * default CLI config when the target URL is unresolved. Shared execution
+ * discovery uses the backend's public connection record; an explicitly
+ * confirmed lifecycle operation may target its observed execution profile.
  */
 export function assertResolvedProfile(profile: string): void {
   if (!profile) {
@@ -69,8 +65,8 @@ export function profilePortPath(profile: string): string {
 }
 
 // Sidecar file that records which Multica user the cached PAT in config.json
-// was minted for. The Go CLI/daemon never read or write this file, so it
-// survives Go-side config rewrites. Used to detect user switches and mint a
+// was minted for. Ordinary Go config rewrites leave it alone; the explicit
+// Desktop credential handoff updates it under the transition lock. Detects switches and mints a
 // fresh PAT instead of reusing a token that belongs to a previous user.
 export function profileUserIdPath(profile: string): string {
   return join(profileDir(profile), ".desktop-user-id");
