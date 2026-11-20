@@ -36,6 +36,20 @@ end
 return 0
 `)
 
+// createUpdateScript claims the machine slot and writes the request and its
+// pending-queue entry in one step, so a slot never points at a request that
+// is still being written. Lua rather than MULTI: some managed Redis
+// deployments deny MULTI.
+var createUpdateScript = redis.NewScript(`
+if not redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', tonumber(ARGV[3])) then
+    return 0
+end
+redis.call('SET', KEYS[2], ARGV[2], 'EX', tonumber(ARGV[3]))
+redis.call('ZADD', KEYS[3], ARGV[4], ARGV[1])
+redis.call('EXPIRE', KEYS[3], tonumber(ARGV[3]))
+return 1
+`)
+
 // compareAndSetScript replaces KEYS[1] only if it still holds the bytes the
 // caller read. Every state change of an update record goes through it, so a
 // cancel and a start racing on one request cannot both win.
@@ -76,62 +90,39 @@ func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, machineKey, ta
 		return nil, err
 	}
 
-	if err := s.reserveMachine(ctx, machineKey, req.ID); err != nil {
-		return nil, err
-	}
-
-	// The machine reservation above provides the concurrency guarantee this
-	// write needs. Use a plain pipeline so managed Redis deployments that allow
-	// SET/ZADD but deny MULTI can still create update requests. Exec failures
-	// remain safe because the compensation below removes every partially
-	// written key and releases the reservation.
-	pipe := s.rdb.Pipeline()
-	pipe.Set(ctx, updateKey(req.ID), data, updateWaitingRetention)
-	pipe.ZAdd(ctx, updatePendingKey(runtimeID), redis.Z{
-		Score:  float64(now.UnixNano()),
-		Member: req.ID,
-	})
-	pipe.Expire(ctx, updatePendingKey(runtimeID), updateWaitingRetention)
-	if _, err := pipe.Exec(ctx); err != nil {
-		_ = s.clearActiveIfMatches(ctx, machineKey, req.ID)
-		_ = s.rdb.Del(ctx, updateKey(req.ID)).Err()
-		_ = s.rdb.ZRem(ctx, updatePendingKey(runtimeID), req.ID).Err()
-		return nil, fmt.Errorf("persist update request: %w", err)
-	}
-	return req, nil
-}
-
-// reserveMachine claims the machine slot for id. A slot whose request has
-// already finished (or vanished) is stale and is taken over.
-func (s *RedisUpdateStore) reserveMachine(ctx context.Context, machineKey, id string) error {
 	activeKey := updateActiveKey(machineKey)
 	for attempt := 0; attempt < 2; attempt++ {
-		ok, err := s.rdb.SetNX(ctx, activeKey, id, updateWaitingRetention).Result()
+		created, err := createUpdateScript.Run(ctx, s.rdb,
+			[]string{activeKey, updateKey(req.ID), updatePendingKey(runtimeID)},
+			req.ID, data, int(updateWaitingRetention.Seconds()), now.UnixNano(),
+		).Int64()
 		if err != nil {
-			return fmt.Errorf("reserve active update: %w", err)
+			return nil, fmt.Errorf("persist update request: %w", err)
 		}
-		if ok {
-			return nil
+		if created == 1 {
+			return req, nil
 		}
+		// Creation is atomic, so a slot whose request is finished or gone is
+		// stale (e.g. a lost slot release) and can be taken over.
 		holder, err := s.rdb.Get(ctx, activeKey).Result()
 		if errors.Is(err, redis.Nil) {
 			continue
 		}
 		if err != nil {
-			return fmt.Errorf("reserve active update: %w", err)
+			return nil, fmt.Errorf("reserve active update: %w", err)
 		}
 		existing, err := s.Get(ctx, holder)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if existing != nil && !updateRequestTerminal(existing.Status) {
-			return errUpdateInProgress
+			return nil, errUpdateInProgress
 		}
 		if err := s.clearActiveIfMatches(ctx, machineKey, holder); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return errUpdateInProgress
+	return nil, errUpdateInProgress
 }
 
 // Get loads a request, persisting a timeout transition if one is due.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -148,6 +149,36 @@ func TestUpdateQueue_OneUnfinishedUpdatePerMachine(t *testing.T) {
 			t.Fatalf("active after cancel = %+v, want none", active)
 		}
 		mustCreateUpdate(t, store, "rt-codex", "machine-1", true)
+	})
+}
+
+func TestUpdateQueue_ConcurrentCreatesOnOneMachine(t *testing.T) {
+	forEachUpdateStore(t, func(t *testing.T, store UpdateStore, _ func(string, time.Duration)) {
+		const n = 16
+		var wg sync.WaitGroup
+		errs := make(chan error, n)
+		for i := 0; i < n; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				_, err := store.Create(context.Background(), fmt.Sprintf("rt-%d", i), "machine-1", "v0.12.0", "user-1", true)
+				errs <- err
+			}(i)
+		}
+		wg.Wait()
+		close(errs)
+		created := 0
+		for err := range errs {
+			switch {
+			case err == nil:
+				created++
+			case !errors.Is(err, errUpdateInProgress):
+				t.Fatalf("create: %v", err)
+			}
+		}
+		if created != 1 {
+			t.Fatalf("created %d requests on one machine, want 1", created)
+		}
 	})
 }
 
