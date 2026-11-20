@@ -61,6 +61,22 @@ Au démarrage, le daemon détecte les outils de codage IA pris en charge présen
 
 Pour démarrer, le daemon a besoin de détecter au moins un outil de codage IA intégré pris en charge. Les méthodes d'installation et les noms des exécutables figurent dans [Installer les outils de codage IA](/install-agent-runtime).
 
+### Exécuter dans un conteneur Linux [#linux-container]
+
+Installez le CLI Multica et au moins un outil de développement pris en charge dans l’image. Exécutez le conteneur avec un utilisateur non root. Définissez `MULTICA_SERVER_URL` sur l’URL de l’API accessible depuis le conteneur. Montez un jeton d’accès personnel comme secret et transmettez-le à la commande de connexion par l’entrée standard. Remplacez `my-workspace` par le slug de votre espace de travail.
+
+```bash
+multica --profile container login --token < /run/secrets/multica-pat
+multica --profile container workspace switch my-workspace
+exec multica --profile container daemon start --foreground --no-auto-update
+```
+
+Connectez-vous et sélectionnez l’espace de travail lors de l’initialisation du profil. Pour conserver le même runtime dans la durée, montez le répertoire `~/.multica` de l’utilisateur du conteneur sur un stockage persistant accessible en écriture. Ce répertoire contient le jeton d’accès du profil et l’identifiant du daemon. Si le répertoire est perdu lors du remplacement du conteneur, vous devrez vous reconnecter et le daemon enregistrera un nouveau runtime. Les agents affectés au runtime d’origine ne pourront pas récupérer de tâches dans le nouveau conteneur.
+
+Pour conserver les répertoires d’exécution et le cache `.repos` après le remplacement du conteneur, montez la racine des répertoires de travail sur un stockage persistant accessible en écriture. Avec `--profile container`, la racine par défaut est `~/multica_workspaces_container`.
+
+Configurez séparément l’authentification de l’outil de développement. Laissez le gestionnaire du conteneur redémarrer le daemon au premier plan et remplacez l’image pour mettre à jour le CLI.
+
 ### Démarrage à l'ouverture de session [#autostart]
 
 Un daemon lancé depuis la CLI ne revient pas de lui-même après un redémarrage. Pour qu'il démarre automatiquement, enregistrez le profil courant :

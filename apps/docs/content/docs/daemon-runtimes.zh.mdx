@@ -61,6 +61,22 @@ multica daemon start
 
 守护进程至少需要检测到一款内置支持的 AI 编程工具才能启动。安装方法和可执行文件名见[安装 AI 编程工具](/install-agent-runtime)。
 
+### 在 Linux 容器中运行 [#linux-container]
+
+在镜像中安装 Multica CLI 和至少一种受支持的编程工具。以非 root 用户运行容器。将 `MULTICA_SERVER_URL` 设置为容器内可访问的 API 地址。将个人访问令牌作为密钥挂载，并通过标准输入传给登录命令。将 `my-workspace` 替换为你的工作区 slug。
+
+```bash
+multica --profile container login --token < /run/secrets/multica-pat
+multica --profile container workspace switch my-workspace
+exec multica --profile container daemon start --foreground --no-auto-update
+```
+
+初始化 profile 时执行登录和工作区选择。要在替换容器后继续使用同一个运行时，必须将容器用户的 `~/.multica` 挂载到可写的持久存储上。此目录保存 profile 的访问令牌和守护进程 ID。如果替换容器时丢失此目录，你需要重新登录，守护进程也会注册一个新的运行时。分配到原运行时的智能体无法在新容器中领取任务。
+
+将工作目录根路径挂载到可写的持久存储上，即可在替换容器后保留运行目录和 `.repos` 缓存。使用 `--profile container` 时，默认的工作目录根路径是 `~/multica_workspaces_container`。
+
+单独配置编程工具的认证。由容器管理器重启前台守护程序，并通过替换镜像升级 CLI。
+
 ### 开机自启 [#autostart]
 
 用 CLI 启动的守护进程默认不会随电脑重启自动恢复。需要的话，为当前 profile 登记开机自启：

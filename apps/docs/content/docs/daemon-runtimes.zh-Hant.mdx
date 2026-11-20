@@ -61,6 +61,22 @@ multica daemon start
 
 守護程序至少需要檢測到一款內建支援的 AI 程式設計工具才能啟動。安裝方法和可執行檔名見[安裝 AI 程式設計工具](/install-agent-runtime)。
 
+### 在 Linux 容器中執行 [#linux-container]
+
+在映像檔中安裝 Multica CLI 和至少一種支援的程式開發工具。以非 root 使用者執行容器。將 `MULTICA_SERVER_URL` 設為容器內可存取的 API 網址。將個人存取權杖以密鑰掛載，並透過標準輸入傳給登入指令。將 `my-workspace` 換成你的工作區 slug。
+
+```bash
+multica --profile container login --token < /run/secrets/multica-pat
+multica --profile container workspace switch my-workspace
+exec multica --profile container daemon start --foreground --no-auto-update
+```
+
+初始化 profile 時執行登入及工作區選擇。若要在更換容器後繼續使用同一個執行時，必須將容器使用者的 `~/.multica` 掛載到可寫入的持久儲存空間。此目錄儲存 profile 的存取權杖及守護程序 ID。若更換容器時遺失此目錄，你需要重新登入，守護程序也會註冊新的執行時。指派給原執行時的 AI 代理無法在新容器中領取任務。
+
+將工作目錄根路徑掛載到可寫入的持久儲存空間，即可在更換容器後保留執行目錄及 `.repos` 快取。使用 `--profile container` 時，預設的工作目錄根路徑是 `~/multica_workspaces_container`。
+
+另行設定程式開發工具的驗證。由容器管理器重新啟動前景守護程序，並透過更換映像檔升級 CLI。
+
 ### 開機自啟 [#autostart]
 
 用 CLI 啟動的守護程序預設不會隨電腦重啟自動恢復。需要的話，為當前 profile 登記開機自啟：
