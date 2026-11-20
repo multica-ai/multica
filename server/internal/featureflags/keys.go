@@ -42,13 +42,6 @@ const (
 	// for a deployment. It is a GLOBAL switch. Turning it off leaves existing
 	// doc rows untouched — they simply become unreachable until it is back on.
 	DocsV1 = "docs_v1"
-	// WorkspaceGuests gates inviting guests and turning members into guests
-	// (MUL-9420). On by default, so self-hosted servers have guests. A server
-	// that predates guests treats a guest row as a full member, so a rolling
-	// deploy should run with FF_WORKSPACE_GUESTS=off until every replica
-	// serves this version. Existing guests keep their narrowed access either
-	// way.
-	WorkspaceGuests = "workspace_guests"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -100,16 +93,11 @@ func DocsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, DocsV1, false)
 }
 
-func WorkspaceGuestsEnabled(ctx context.Context, flags *featureflag.Service) bool {
-	return flags.IsEnabled(ctx, WorkspaceGuests, true)
-}
-
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
 	out := make(map[string]bool, len(frontendPublicFlags)+5)
 	for _, key := range frontendPublicFlags {
 		out[key] = flags.IsEnabled(ctx, key, false)
 	}
-	out[WorkspaceGuests] = WorkspaceGuestsEnabled(ctx, flags)
 	out[agentBuilderCompat] = true
 	out[agentSkillTogglesCompat] = true
 	out[resourceLabelsCompat] = true

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -27,9 +28,34 @@ import (
 // is better served as a member.
 const maxGuestProjects = 100
 
-// guestsEnabled writes a 403 when new guests are switched off.
+// WorkspaceGuestsConfigKey is the client config key that tells Web, Desktop
+// and mobile whether this deployment offers adding guests (guestsReleased).
+// It is derived, not a flag of its own.
+const WorkspaceGuestsConfigKey = "workspace_guests"
+
+// guestsReleased reports whether this deployment offers adding guests. The
+// deployment mode comes from configuration, not from whether the Cloud plan
+// client came up:
+//
+//   - No Cloud URL (self-host): always. There are no Cloud plans.
+//   - A Cloud URL: guests are part of the commercial launch. They are offered
+//     once billing_workspace_subscriptions is on, and the workspace's plan
+//     then decides through the guests paid feature (requireGuestAddition).
+//     When the plan client is unavailable (a malformed Cloud URL), nothing
+//     could apply the plan, so adding guests is refused rather than allowed.
+func (h *Handler) guestsReleased(ctx context.Context) bool {
+	if strings.TrimSpace(h.cfg.CloudURL) == "" {
+		return true
+	}
+	if h.Features == nil {
+		return false
+	}
+	return featureflags.BillingWorkspaceSubscriptionsEnabled(ctx, h.FeatureFlags)
+}
+
+// guestsEnabled writes a 403 when this deployment does not offer guests yet.
 func (h *Handler) guestsEnabled(w http.ResponseWriter, r *http.Request) bool {
-	if featureflags.WorkspaceGuestsEnabled(r.Context(), h.FeatureFlags) {
+	if h.guestsReleased(r.Context()) {
 		return true
 	}
 	writeFeatureDisabled(w, "workspace_guests_disabled", "guests are not enabled")
@@ -37,10 +63,10 @@ func (h *Handler) guestsEnabled(w http.ResponseWriter, r *http.Request) bool {
 }
 
 // requireGuestAddition admits a write that adds a guest or widens one:
-// guests must be switched on for this deployment (the rollout flag) and
-// included in the workspace's plan (the guests paid feature). Removing a
-// guest, narrowing its projects and promoting it are never restricted, and
-// existing guests keep their access after a downgrade.
+// guests must be released on this deployment (guestsReleased) and included in
+// the workspace's plan (the guests paid feature). Removing a guest, narrowing
+// its projects and promoting it are never restricted, and existing guests
+// keep their access after a downgrade or while guests are not released.
 func (h *Handler) requireGuestAddition(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, operation string) (featureAdmission, bool) {
 	if !h.guestsEnabled(w, r) {
 		return featureAdmission{}, false
