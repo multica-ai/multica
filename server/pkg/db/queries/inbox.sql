@@ -147,8 +147,11 @@ LEFT JOIN LATERAL (
     ORDER BY s.snoozed_until DESC
     LIMIT 1
 ) AS snoozed ON true
+-- A role this build does not know is no membership (see
+-- GetMemberByUserAndWorkspace), so it is sent nothing.
 WHERE (($2::text = 'member' AND EXISTS (
     SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
+      AND role IN ('owner', 'admin', 'member', 'guest')
 )) OR ($2::text = 'agent' AND EXISTS (
     SELECT 1 FROM agent WHERE workspace_id = $1 AND id = $3
 )))
@@ -281,14 +284,15 @@ WHERE i.workspace_id = sqlc.arg('workspace_id')
 -- the switcher dot for a workspace whose inbox the user sees as empty
 -- (MUL-3695). Items without an issue group on their own id. The
 -- member join keeps counts scoped to workspaces the user still belongs to,
--- so a stale item left behind in a workspace the user has since left cannot
--- light the dot.
+-- so a stale item left behind in a workspace the user has since left, or holds
+-- a role this build does not know in, cannot light the dot.
 SELECT newest.workspace_id, count(*) AS count
 FROM (
     SELECT DISTINCT ON (i.workspace_id, COALESCE(i.issue_id, i.id))
         i.workspace_id, i.read
     FROM inbox_item i
     JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+        AND m.role IN ('owner', 'admin', 'member', 'guest')
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false

@@ -2,12 +2,15 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/entitlement"
@@ -313,6 +316,38 @@ func TestUnknownMemberRoleGrantsNothing(t *testing.T) {
 	if len(rows) != 0 {
 		t.Error("realtime admits a member with an unknown role")
 	}
+
+	// Nor does it get workspace data through the account-level reads: the
+	// daemon's workspace list, notifications, and the unread summary, which
+	// still lists the workspace where the person is a member.
+	other := dbfx.Workspace(t, "Future role other "+uuid.NewString()[:8], "future-role-"+uuid.NewString()[:8])
+	dbfx.Cleanup(t, `DELETE FROM member WHERE workspace_id = $1`, other)
+	dbfx.Member(t, other, user, "member")
+	daemonWorkspaces, err := testHandler.Queries.ListDaemonWorkspaces(ctx, parseUUID(user))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(daemonWorkspaces) != 1 || uuidToString(daemonWorkspaces[0].ID) != other {
+		t.Errorf("daemon workspaces = %v, want only the workspace where the role is known", daemonWorkspaces)
+	}
+	if _, err := testHandler.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		ID: parseUUID(uuid.NewString()), WorkspaceID: parseUUID(testWorkspaceID), RecipientType: "member",
+		RecipientID: parseUUID(user), Type: "mentioned", Severity: "info", Title: "future role",
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Errorf("deliver to a member with an unknown role: err = %v, want no row written", err)
+	}
+	for _, ws := range []string{testWorkspaceID, other} {
+		dbfx.Insert(t, "inbox_item", testutil.Cols{
+			"workspace_id": ws, "recipient_type": "member", "recipient_id": user,
+			"type": "mentioned", "severity": "info", "title": "unread",
+		})
+	}
+	var summary []InboxWorkspaceUnreadResponse
+	testutil.Call(t, testHandler.UnreadInboxSummary, asUser(newRequest(http.MethodGet, "/api/inbox/unread-summary", nil), user)).
+		Want(http.StatusOK).JSON(&summary)
+	if len(summary) != 1 || summary[0].WorkspaceID != other {
+		t.Errorf("unread summary = %+v, want only the workspace where the role is known", summary)
+	}
 }
 
 // A pending guest invitation reserves no member slot, so a joiner holding one
@@ -332,4 +367,66 @@ func TestJoinShareLinkWithGuestInvitationTakesANewSlot(t *testing.T) {
 	if n := dbfx.Count(t, `SELECT count(*) FROM member WHERE workspace_id = $1 AND user_id = $2`, workspaceID, userID); n != 0 {
 		t.Fatalf("refused join created %d members", n)
 	}
+}
+
+// The daemon routes hand out the same repositories and settings. A guest's
+// PAT/JWT is refused by the guest allowlist, and the membership cache, which
+// holds no role, never lists a guest; the reads that return the
+// configuration also check the current role of the person behind the
+// credential, which covers a daemon token whose owner has become a guest.
+func TestGuestCannotReadWorkspaceConfigThroughDaemonRoutes(t *testing.T) {
+	setHandlerTestWorkspaceRepos(t, []map[string]string{{"url": "git@example.com:acme/private.git"}})
+	marker := fmt.Sprintf("daemon-guest-%d", time.Now().UnixNano())
+	guest := createPlainMember(t, marker+"@multica.test")
+	dbfx.Exec(t, `UPDATE member SET role = 'guest' WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, guest)
+	member := createPlainMember(t, marker+"-member@multica.test")
+	path := "/api/daemon/workspaces/" + testWorkspaceID + "/repos"
+
+	readRepos := func(req *http.Request) *testutil.Response {
+		t.Helper()
+		return testutil.Call(t, testHandler.GetDaemonWorkspaceRepos, withURLParam(req, "workspaceId", testWorkspaceID))
+	}
+	guestToken := func(method, path string, body any) *http.Request {
+		req := newDaemonTokenRequest(method, path, body, testWorkspaceID, marker)
+		return req.WithContext(middleware.WithDaemonTokenOwnerID(req.Context(), guest))
+	}
+	guestPAT := func() *http.Request { return asUser(newRequest(http.MethodGet, path, nil), guest) }
+
+	readRepos(guestPAT()).Want(http.StatusForbidden)
+	readRepos(guestToken(http.MethodGet, path, nil)).Want(http.StatusNotFound)
+	readRepos(asUser(newRequest(http.MethodGet, path, nil), member)).Want(http.StatusOK)
+	readRepos(newDaemonTokenRequest(http.MethodGet, path, nil, testWorkspaceID, "owner-daemon")).Want(http.StatusOK)
+	if testHandler.verifyDaemonWorkspaceAccess(guestPAT(), testWorkspaceID) {
+		t.Error("the batch daemon check admits a guest")
+	}
+
+	// A daemon token whose owner is now a guest still registers its runtimes
+	// but gets none of the workspace's repositories or settings.
+	dbfx.Cleanup(t, `DELETE FROM agent_runtime WHERE daemon_id = $1`, marker)
+	var registered map[string]any
+	rec := testutil.Call(t, testHandler.DaemonRegister, guestToken(http.MethodPost, "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    marker,
+		"device_name":  "guest-device",
+		"runtimes":     []map[string]any{{"name": "guest-runtime", "type": "claude", "version": "1.0.0", "status": "online"}},
+	})).Want(http.StatusOK)
+	if err := json.NewDecoder(rec.Body).Decode(&registered); err != nil {
+		t.Fatal(err)
+	}
+	if repos, _ := registered["repos"].([]any); len(repos) != 0 || registered["settings"] != nil {
+		t.Errorf("guest-owned registration returned repos=%v settings=%v, want none", registered["repos"], registered["settings"])
+	}
+
+	t.Run("membership cache", func(t *testing.T) {
+		installFreshMembershipCache(t)
+		ctx := context.Background()
+		testHandler.verifyDaemonWorkspaceAccess(guestPAT(), testWorkspaceID)
+		if testHandler.MembershipCache.Get(ctx, guest, testWorkspaceID) {
+			t.Error("a guest was cached as a member")
+		}
+		// An entry written before this rule, or by a missed path, still
+		// does not open the configuration.
+		testHandler.MembershipCache.Set(ctx, guest, testWorkspaceID)
+		readRepos(guestPAT()).Want(http.StatusNotFound)
+	})
 }

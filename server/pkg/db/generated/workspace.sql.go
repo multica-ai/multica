@@ -356,6 +356,7 @@ SELECT w.id, w.name
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
+  AND m.role IN ('owner', 'admin', 'member', 'guest')
 ORDER BY w.id ASC
 `
 
@@ -367,7 +368,8 @@ type ListDaemonWorkspacesRow struct {
 // Daemons only need the membership set and display name to discover which
 // workspaces should have local runtimes. Keep this projection intentionally
 // narrow so the periodic consistency check never reads UI-only JSON/text
-// columns such as settings, repos, or context.
+// columns such as settings, repos, or context. A role this build does not
+// know is no membership (see GetMemberByUserAndWorkspace).
 func (q *Queries) ListDaemonWorkspaces(ctx context.Context, userID pgtype.UUID) ([]ListDaemonWorkspacesRow, error) {
 	rows, err := q.db.Query(ctx, listDaemonWorkspaces, userID)
 	if err != nil {

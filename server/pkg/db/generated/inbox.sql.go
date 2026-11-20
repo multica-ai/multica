@@ -360,6 +360,7 @@ FROM (
         i.workspace_id, i.read
     FROM inbox_item i
     JOIN member m ON m.workspace_id = i.workspace_id AND m.user_id = i.recipient_id
+        AND m.role IN ('owner', 'admin', 'member', 'guest')
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
@@ -404,8 +405,8 @@ type CountUnreadInboxByWorkspaceRow struct {
 // the switcher dot for a workspace whose inbox the user sees as empty
 // (MUL-3695). Items without an issue group on their own id. The
 // member join keeps counts scoped to workspaces the user still belongs to,
-// so a stale item left behind in a workspace the user has since left cannot
-// light the dot.
+// so a stale item left behind in a workspace the user has since left, or holds
+// a role this build does not know in, cannot light the dot.
 func (q *Queries) CountUnreadInboxByWorkspace(ctx context.Context, recipientID pgtype.UUID) ([]CountUnreadInboxByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, countUnreadInboxByWorkspace, recipientID)
 	if err != nil {
@@ -446,6 +447,7 @@ LEFT JOIN LATERAL (
 ) AS snoozed ON true
 WHERE (($2::text = 'member' AND EXISTS (
     SELECT 1 FROM member WHERE workspace_id = $1 AND user_id = $3
+      AND role IN ('owner', 'admin', 'member', 'guest')
 )) OR ($2::text = 'agent' AND EXISTS (
     SELECT 1 FROM agent WHERE workspace_id = $1 AND id = $3
 )))
@@ -486,6 +488,8 @@ type CreateInboxItemParams struct {
 // wakes it. A joining row is the issue's newest, so it carries the issue's
 // return rank (returned_at, the snooze end); inbox.Deliver clears it from the
 // row that held it (HandInboxReturnToRow).
+// A role this build does not know is no membership (see
+// GetMemberByUserAndWorkspace), so it is sent nothing.
 // MUL-8472: a member outside a private project gets no notification about its
 // issues, whatever their workspace role. Only project members do.
 func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams) (InboxItem, error) {

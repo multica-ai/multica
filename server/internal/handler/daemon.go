@@ -89,9 +89,9 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	_, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
 	if ok && userID != "" {
-		h.MembershipCache.Set(r.Context(), userID, workspaceID)
+		h.cacheMembership(r.Context(), member)
 	}
 	return ok
 }
@@ -317,11 +317,13 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
 		return true
 	}
-	_, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
-	if err != nil {
+	// The same rule as requireWorkspaceMember: a guest reaches only the
+	// routes on its allowlist, which no daemon route is.
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	if err != nil || (projectaccess.IsGuestRole(member.Role) && !middleware.GuestMayRequest(r)) {
 		return false
 	}
-	h.MembershipCache.Set(r.Context(), userID, workspaceID)
+	h.cacheMembership(r.Context(), member)
 	return true
 }
 
@@ -1121,6 +1123,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	})
 
 	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings, h.cfg.GitExtraCACerts)
+	if !h.daemonCredentialSeesWorkspaceConfig(r, req.WorkspaceID) {
+		repoResp = workspaceReposResponse(req.WorkspaceID, nil, nil, h.cfg.GitExtraCACerts)
+	}
 
 	body := map[string]any{
 		"runtimes":      resp,
@@ -1332,6 +1337,10 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
 		return
 	}
+	if !h.daemonCredentialSeesWorkspaceConfig(r, workspaceID) {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
 
 	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
 	if err != nil {
@@ -1340,6 +1349,25 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings, h.cfg.GitExtraCACerts))
+}
+
+// daemonCredentialSeesWorkspaceConfig reports whether a daemon request may
+// read the workspace's repositories and settings. They configure the
+// workspace, which a guest is not shown (MUL-9420), so the person the
+// credential acts for (a PAT or JWT user, or the owner a daemon token is bound
+// to) must hold a non-guest role now. The membership cache cannot answer this:
+// it holds no role. Qoder-managed and pre-owner daemon tokens act for no
+// person and keep their access.
+func (h *Handler) daemonCredentialSeesWorkspaceConfig(r *http.Request, workspaceID string) bool {
+	userID := requestUserID(r)
+	if middleware.DaemonWorkspaceIDFromContext(r.Context()) != "" {
+		userID = middleware.DaemonTokenOwnerIDFromContext(r.Context())
+		if userID == "" {
+			return true
+		}
+	}
+	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
+	return err == nil && !projectaccess.IsGuestRole(member.Role)
 }
 
 // setRuntimeOffline flips a runtime offline, recording the daemon's reason when
