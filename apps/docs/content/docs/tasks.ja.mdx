@@ -120,7 +120,7 @@ import { RunLifecycleDemo } from "@/components/demos/run-lifecycle-demo";
 
 | 原因 | 意味 | 対処 |
 | --- | --- | --- |
-| `provider_auth_or_access` | モデルプロバイダーの認証に失敗したか、アクセス権がない（401/403） | その AI コーディングツールで再ログインするか、API キーを確認する |
+| `provider_auth_or_access` | モデルプロバイダーの認証に失敗したか、アクセス権がない | モデルアカウントのログイン状態、API キー、対象リソースへのアクセス権を確認する |
 | `provider_quota_limit` | クォータまたは残高を使い切った | チャージするか、アカウントを切り替える |
 | `provider_capacity_or_rate_limit` | レート制限または容量不足 | 時間をおいてリトライ |
 | `provider_server_error` | モデルプロバイダー側のサーバーエラー（5xx） | 時間をおいてリトライ |

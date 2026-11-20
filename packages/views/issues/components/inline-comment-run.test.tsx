@@ -433,7 +433,7 @@ describe("InlineCommentRun", () => {
   it("keeps the raw error in view when recovery needs a configuration change", () => {
     setup(task({ status: "failed", failure_reason: "agent_error.provider_auth_or_access",
       error: "Invalid API key · Please run /login", completed_at: "2026-09-07T00:00:06Z" }));
-    expect(screen.getByText("Provider auth failed")).toBeInTheDocument();
+    expect(screen.getByText("Provider authentication or access failed")).toBeInTheDocument();
     expect(screen.getByText("Invalid API key · Please run /login")).toBeInTheDocument();
   });
 

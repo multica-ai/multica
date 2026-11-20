@@ -122,7 +122,7 @@
     "runtime_access_denied": "无法访问该智能体的私有运行时，暂时无法回复。请将该运行时设为公开，或将智能体绑定到可用的运行时。",
     "runtime_access_revoked": "运行时访问权限已被撤销。再次运行前，请为智能体绑定可用的运行时。",
     "invalid_task_identity": "运行身份不匹配",
-    "agent_error_provider_auth_or_access": "提供方认证失败",
+    "agent_error_provider_auth_or_access": "提供方认证或访问失败。请检查账号登录状态和资源权限。",
     "agent_error_provider_quota_limit": "提供方额度已用尽",
     "agent_error_provider_capacity_or_rate_limit": "受到提供方速率限制",
     "agent_error_provider_server_error": "提供方服务端出错",

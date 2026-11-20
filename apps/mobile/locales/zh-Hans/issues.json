@@ -292,7 +292,7 @@
       "environment_prepare_failed": "环境准备失败",
       "runtime_access_denied": "无运行时权限",
       "local_directory_missing": "文件夹不存在",
-      "agent_error_provider_auth_or_access": "认证失败",
+      "agent_error_provider_auth_or_access": "认证或访问失败",
       "agent_error_provider_quota_limit": "配额已用尽",
       "agent_error_provider_capacity_or_rate_limit": "触发限流",
       "agent_error_provider_server_error": "提供商出错",

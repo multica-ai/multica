@@ -1020,7 +1020,7 @@
       "environment_prepare_failed": "No se ha podido preparar el entorno de ejecución",
       "runtime_access_denied": "Este agente no puede ejecutarse en su runtime privado, así que no pudo responder. Haz el runtime público, o reenlaza/copia el agente a un runtime que su propietario pueda usar.",
       "invalid_task_identity": "Discrepancia de identidad de la ejecución",
-      "agent_error_provider_auth_or_access": "Falló la autenticación con el proveedor",
+      "agent_error_provider_auth_or_access": "Error de autenticación o de acceso al proveedor",
       "agent_error_provider_quota_limit": "Cuota del proveedor agotada",
       "agent_error_provider_capacity_or_rate_limit": "Limitado por el proveedor (rate limit)",
       "agent_error_provider_server_error": "Error de servidor del proveedor",
