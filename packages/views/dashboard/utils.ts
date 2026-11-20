@@ -380,7 +380,10 @@ interface WeekShell {
 //
 // `earliestDay` is the first day the plan lets the page read (MUL-9490). The
 // leftmost week it cuts into is partial like the current week: it covers only
-// the days from `earliestDay` on, and the tooltip says how many.
+// the days from `earliestDay` on, and the tooltip says how many. The weekly
+// aggregators also drop rows dated before it: a replica still on the old
+// policy can answer the over-fetched weekly request with days the plan no
+// longer covers.
 function buildWeekShells(
   tz: string,
   weekCount: number,
@@ -439,6 +442,7 @@ export function aggregateWeeklyTime(
   const totals = new Map<string, number>();
   for (const shell of shells) totals.set(shell.weekStart, 0);
   for (const r of rows) {
+    if (earliestDay && r.date < earliestDay) continue;
     const wkStart = weekStartIso(r.date);
     if (!totals.has(wkStart)) continue;
     totals.set(wkStart, (totals.get(wkStart) ?? 0) + r.total_seconds);
@@ -460,6 +464,7 @@ export function aggregateWeeklyTasks(
   for (const shell of shells)
     buckets.set(shell.weekStart, { completed: 0, failed: 0, cancelled: 0 });
   for (const r of rows) {
+    if (earliestDay && r.date < earliestDay) continue;
     const wkStart = weekStartIso(r.date);
     const bucket = buckets.get(wkStart);
     if (!bucket) continue;
@@ -612,6 +617,7 @@ export function aggregateWeeklyErrors(
     buckets.set(shell.weekStart, { ...emptyClassCounts(), failed: 0, total: 0 });
   }
   for (const r of rows) {
+    if (earliestDay && r.date < earliestDay) continue;
     const bucket = buckets.get(weekStartIso(r.date));
     if (!bucket) continue;
     foldFailureRow(bucket, r.failure_reason, r.task_count);

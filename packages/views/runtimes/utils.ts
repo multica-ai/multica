@@ -1364,6 +1364,9 @@ export function aggregateByWeek(
   }
 
   for (const u of usage) {
+    // Days before the plan's range never count, even when a response from a
+    // replica still on the old policy includes them.
+    if (earliestDay && u.date < earliestDay) continue;
     const wkStart = weekStartIso(u.date);
     if (wkStart < firstWeekStart || wkStart > currentWeekStart) continue;
     const tokens = tokenMap.get(wkStart);
