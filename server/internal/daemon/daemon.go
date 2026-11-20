@@ -10487,6 +10487,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}
 
 		var sessionPinned atomic.Bool
+		contextReporter := &contextUsageReporter{}
 		for {
 			select {
 			case msg, ok := <-session.Messages:
@@ -10635,6 +10636,33 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					})
 					mu.Unlock()
 					flushFirstVisible()
+				case agent.MessageContext:
+					if msg.Context == nil {
+						break
+					}
+					info := *msg.Context
+					if !contextReporter.shouldReport(info) {
+						break
+					}
+					mu.Lock()
+					sealPendingLocked()
+					s := msgSeq.Add(1)
+					batch = append(batch, TaskMessageData{
+						Seq:  int(s),
+						Type: "context",
+						// Content carries the same figures as prose so a
+						// surface that knows nothing of this type — an older
+						// client, a copied transcript — still reads what
+						// happened instead of showing an empty row.
+						Content:   formatContextEvent(info),
+						Input:     contextEventInput(info),
+						CreatedAt: observedAt,
+					})
+					mu.Unlock()
+					// Deliberately not flushFirstVisible: an occupancy figure
+					// is not the run's first visible output, and treating it
+					// as such would spend the one early flush on a row that
+					// says nothing about progress.
 				}
 			case <-drainCtx.Done():
 				goto drainDone

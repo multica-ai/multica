@@ -613,3 +613,10 @@ describe("traceToolArgSummary / traceEventHasDetail — Codex changes[]", () => 
     );
   });
 });
+
+describe("context events", () => {
+  it("keep their own kind and label", () => {
+    expect(traceEventKind({ type: "context" })).toBe("context");
+    expect(traceEventLabel({ type: "context" })).toBe("Context");
+  });
+});

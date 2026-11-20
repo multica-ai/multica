@@ -27,6 +27,8 @@ import {
   Info,
   Coins,
   GitBranch,
+  Gauge,
+  Minimize2,
 } from "@multica/ui/icons";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -81,6 +83,12 @@ import {
 import { buildRunOutcome } from "./run-outcome";
 import { RunTimeline } from "./run-timeline";
 import { ContextReceiptButton } from "./context-receipt";
+import {
+  contextUsagePercent,
+  latestContextUsage,
+  readContextEvent,
+  type ContextUsage,
+} from "./context-usage";
 import {
   base64ByteLength,
   readImageResult,
@@ -209,6 +217,7 @@ function StepIcon({ step, className }: { step: TraceStep; className?: string }) 
   if (!isCallStep(step)) {
     if (step.kind === "thinking") return <Brain className={className} />;
     if (step.kind === "error") return <CircleAlert className={className} />;
+    if (step.kind === "context") return <Minimize2 className={className} />;
     return <Bot className={className} />;
   }
 
@@ -478,6 +487,11 @@ export function AgentTranscriptDialog({
   // One step per tool call, with its result folded in — see build-steps.ts for
   // why the pairing is positional.
   const steps = useMemo(() => buildSteps(items), [items]);
+
+  // How full the window is right now. A snapshot, so it is read off the newest
+  // observation rather than accumulated — and absent entirely for a runtime
+  // that reports none, where the chip does not render at all.
+  const contextUsage = useMemo(() => latestContextUsage(items), [items]);
 
   // A facet reads as what its rows look like: the glyph the rows carry, and the
   // name the rows print. The first step of a kind stands in for the glyph. The
@@ -929,6 +943,11 @@ export function AgentTranscriptDialog({
                 so "why was this one expensive" is answerable without going
                 back to the list. The split lives one click away in the ⓘ
                 popover. */}
+            {/* How much of the model's context window this run occupies —
+                the figure that explains a compaction, and the one a reader
+                checks before asking for more work in the same session. */}
+            {contextUsage && <ContextUsageChip usage={contextUsage} />}
+
             {usage && (
               <span
                 className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-micro tabular-nums"
@@ -1423,6 +1442,33 @@ interface TranscriptRowProps {
   onSelect: (seq: number) => void;
 }
 
+/**
+ * Context occupancy, as one chip.
+ *
+ * The percentage is the figure people act on, so it leads; the absolute pair
+ * behind it is what makes the percentage checkable. Without a known window
+ * there is no percentage at all — a share of a guessed window would read as a
+ * measurement.
+ */
+function ContextUsageChip({ usage }: { usage: ContextUsage }) {
+  const { t } = useT("agents");
+  const percent = contextUsagePercent(usage);
+  return (
+    <span
+      className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-micro tabular-nums"
+      title={t(($) => $.transcript.context_chip_title)}
+    >
+      <Gauge aria-hidden="true" className="h-3 w-3 text-muted-foreground" />
+      {percent !== undefined && <span className="font-medium">{percent}%</span>}
+      <span className="text-muted-foreground">
+        {usage.limitTokens !== undefined
+          ? `${formatTokens(usage.usedTokens)}/${formatTokens(usage.limitTokens)}`
+          : formatTokens(usage.usedTokens)}
+      </span>
+    </span>
+  );
+}
+
 function TranscriptRow(props: TranscriptRowProps) {
   const { row } = props;
   if (isGroupRow(row)) return <GroupRow {...props} row={row} />;
@@ -1540,14 +1586,26 @@ function StepRow({
   );
 
   const call = isCallStep(row) ? row : null;
+  // A compaction row reads from its own payload: the daemon's prose is the
+  // fallback for surfaces that cannot localize, not what this one shows.
+  const contextEvent =
+    !isCallStep(row) && row.kind === "context" ? readContextEvent(row.item) : null;
   const label = call
     ? call.tool || t(($) => $.transcript.kind_tool)
     : row.kind === "thinking"
       ? t(($) => $.transcript.kind_thinking)
-      : t(($) => $.transcript.kind_error);
+      : row.kind === "context"
+        ? t(($) => $.transcript.kind_context)
+        : t(($) => $.transcript.kind_error);
   const summary = call
     ? callSummary(call, summaryLabels)
-    : firstLineOf((row as TraceMessageStep).item.content);
+    : contextEvent?.kind === "compaction"
+      ? contextEvent.preTokens !== undefined
+        ? t(($) => $.transcript.context_compacted_before, {
+            tokens: formatTokens(contextEvent.preTokens),
+          })
+        : t(($) => $.transcript.context_compacted)
+      : firstLineOf((row as TraceMessageStep).item.content);
   const pending = call !== null && isLive && !call.result;
   const selected = selectedSeq === row.seq;
 
@@ -1750,7 +1808,9 @@ function StepInspector({
         ? t(($) => $.transcript.kind_thinking)
         : step.kind === "text"
           ? t(($) => $.transcript.kind_text)
-          : t(($) => $.transcript.kind_error);
+          : step.kind === "context"
+            ? t(($) => $.transcript.kind_context)
+            : t(($) => $.transcript.kind_error);
 
   return (
     // Full width below md: on a phone the dialog is narrower than this pane, and

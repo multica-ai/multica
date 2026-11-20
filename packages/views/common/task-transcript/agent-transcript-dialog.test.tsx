@@ -1193,3 +1193,37 @@ describe("tool output completeness", () => {
     expect(screen.queryByText(/cannot be confirmed|completeness/i)).not.toBeInTheDocument();
   });
 });
+
+describe("context window", () => {
+  const withContext: TimelineItem[] = [
+    { seq: 1, type: "context", input: { used_tokens: 10_000, limit_tokens: 200_000 } },
+    { seq: 2, type: "tool_use", tool: "terminal", input: { command: "pnpm test" } },
+    { seq: 3, type: "context", input: { used_tokens: 180_000, limit_tokens: 200_000 } },
+    { seq: 4, type: "context", input: { phase: "compacted", pre_tokens: 180_000, trigger: "auto" } },
+  ];
+
+  it("shows the newest occupancy in the header and the compaction as a step", async () => {
+    renderDialog(withContext);
+
+    // The header reads the newest snapshot (180K of 200K), not the first one
+    // and not their sum.
+    expect(await screen.findByText("90%")).toBeInTheDocument();
+    expect(screen.getByText("180K/200K")).toBeInTheDocument();
+
+    // The compaction happened at a point in the run, so it stays a row; the
+    // snapshots that produced the header figure do not.
+    expect(screen.getAllByText("Context").length).toBeGreaterThan(0);
+    expect(screen.getByText("Compacted the context window (180K before)")).toBeInTheDocument();
+  });
+
+  it("renders no chip for a run whose runtime reported no occupancy", () => {
+    renderDialog(items);
+    expect(screen.queryByText(/\/200K/)).not.toBeInTheDocument();
+  });
+
+  it("omits the percentage when the window is unknown", async () => {
+    renderDialog([{ seq: 1, type: "context", input: { used_tokens: 12_300 } }]);
+    expect(await screen.findByText("12.3K")).toBeInTheDocument();
+    expect(screen.queryByText(/%$/)).not.toBeInTheDocument();
+  });
+});

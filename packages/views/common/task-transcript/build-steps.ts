@@ -1,4 +1,5 @@
 import type { TimelineItem } from "./build-timeline";
+import { isContextUsageItem } from "./context-usage";
 
 /**
  * A run's steps, derived from the flat event stream.
@@ -32,9 +33,10 @@ export interface TraceCallStep {
   durationMs?: number;
 }
 
-/** Agent prose, model thinking, or an error: one message, nothing to pair. */
+/** Agent prose, model thinking, a context event, or an error: one message,
+ *  nothing to pair. */
 export interface TraceMessageStep {
-  kind: "text" | "thinking" | "error";
+  kind: "text" | "thinking" | "error" | "context";
   seq: number;
   item: TimelineItem;
   startedAt?: string;
@@ -94,11 +96,16 @@ function durationBetween(start?: string, end?: string): number | undefined {
 /** Fold `tool_use` / `tool_result` pairs into single steps, in stream order. */
 export function buildSteps(items: TimelineItem[]): TraceStep[] {
   const steps: TraceStep[] = [];
+  // An occupancy snapshot is state, not an event: the run reports it every few
+  // turns and only the newest one is true, so the header reads it
+  // (`latestContextUsage`) and the step list never shows it. A compaction DID
+  // happen at its point in the run, so it stays.
+  const events = items.filter((item) => !isContextUsageItem(item));
   // Separate ID and tool-name keys so a missing/unmatched ID never consumes
   // an identified call through the legacy fallback (or vice versa).
   const open = new Map<string, TraceCallStep[]>();
 
-  for (const item of items) {
+  for (const item of events) {
     const pairingKey = item.callId ? `id:${item.callId}` : `tool:${item.tool ?? ""}`;
     if (item.type === "tool_use") {
       const tool = item.tool ?? "";
@@ -209,7 +216,12 @@ export function isCallStep(row: TraceRow): row is TraceCallStep {
 }
 
 export function isMessageStep(row: TraceRow): row is TraceMessageStep {
-  return row.kind === "text" || row.kind === "thinking" || row.kind === "error";
+  return (
+    row.kind === "text" ||
+    row.kind === "thinking" ||
+    row.kind === "error" ||
+    row.kind === "context"
+  );
 }
 
 /** Every call inside a row, so a group and a lone call read the same way. */

@@ -31,6 +31,7 @@ export type TraceEventKind =
   | "tool_use"
   | "tool_result"
   | "error"
+  | "context"
   | "generic";
 
 export function traceEventKind(event: TraceEvent): TraceEventKind {
@@ -45,6 +46,8 @@ export function traceEventKind(event: TraceEvent): TraceEventKind {
       return "tool_result";
     case "error":
       return "error";
+    case "context":
+      return "context";
     default:
       return "generic";
   }
@@ -67,6 +70,8 @@ export function traceEventLabel(event: TraceEvent): string {
       return event.tool && event.tool.length > 0 ? event.tool : "Result";
     case "error":
       return "Error";
+    case "context":
+      return "Context";
     default:
       return event.type && event.type.length > 0 ? event.type : "Event";
   }
